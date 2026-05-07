@@ -415,3 +415,194 @@ async def test_streaming_decimation_default_matches_legacy_behavior(
         reader = pyarrow.ipc.open_stream(io.BytesIO(frame))
         batch = reader.read_next_batch()
         assert batch.num_rows == 1
+
+
+# ---- resume / reconnect ----------------------------------------------------
+
+
+@pytest.mark.acceptance
+async def test_streaming_run_id_in_stream_start_metadata(
+    live_server: tuple[str, int, str],
+) -> None:
+    """The ``stream_start`` text frame carries the server-generated
+    ``run_id`` so the client can use it for a later ``resume`` request."""
+    token, port, base = live_server
+    sid = await _create_session_and_load(token, base)
+
+    ws_url = f"ws://127.0.0.1:{port}/ws/{sid}"
+    async with websockets.connect(ws_url) as ws:
+        await ws.send(json.dumps({"type": "auth", "token": token}))
+        json.loads(await ws.recv())  # ready
+        await ws.send(json.dumps({"type": "start_tds", "tf": 1.0, "h": 1 / 120}))
+
+        first = json.loads(await ws.recv())
+        assert first["type"] == "stream_start"
+        assert isinstance(first.get("run_id"), str) and len(first["run_id"]) == 32
+
+        # Drain remaining frames cleanly so the run completes.
+        while True:
+            msg = await ws.recv()
+            if isinstance(msg, str):
+                parsed = json.loads(msg)
+                if parsed.get("type") == "done":
+                    assert parsed.get("run_id") == first["run_id"]
+                    break
+
+
+@pytest.mark.acceptance
+async def test_streaming_resume_after_disconnect(
+    live_server: tuple[str, int, str],
+) -> None:
+    """The full resume contract: start a TDS, drop the WS mid-run, reconnect
+    with ``{"type":"resume","run_id":...,"last_seq":N}``, receive remaining
+    frames + the final ``done`` envelope. The run must continue running on
+    the server while the client is disconnected."""
+    token, port, base = live_server
+    sid = await _create_session_and_load(token, base)
+
+    ws_url = f"ws://127.0.0.1:{port}/ws/{sid}"
+
+    # ---- Phase 1: start the run, capture some frames, drop the WS ----
+    run_id: str | None = None
+    last_captured_seq = 0
+    captured_frames_count = 0
+    target_capture = 5
+
+    async with websockets.connect(ws_url) as ws:
+        await ws.send(json.dumps({"type": "auth", "token": token}))
+        json.loads(await ws.recv())  # ready
+        await ws.send(json.dumps({"type": "start_tds", "tf": 2.0, "h": 1 / 120}))
+
+        meta = json.loads(await ws.recv())
+        assert meta["type"] == "stream_start"
+        run_id = meta["run_id"]
+
+        # Receive a few binary frames, then bail out
+        while captured_frames_count < target_capture:
+            msg = await ws.recv()
+            if isinstance(msg, bytes):
+                captured_frames_count += 1
+                # The frame's seq matches the server's monotonic counter; we
+                # don't decode the binary payload here — we just count.
+                last_captured_seq = captured_frames_count
+
+    # The WS is now closed (context manager exited). The run continues in
+    # the background buffer.
+
+    # ---- Phase 2: reconnect, send resume, receive remaining + done ----
+    async with websockets.connect(ws_url) as ws:
+        await ws.send(json.dumps({"type": "auth", "token": token}))
+        json.loads(await ws.recv())  # ready
+        await ws.send(
+            json.dumps(
+                {"type": "resume", "run_id": run_id, "last_seq": last_captured_seq}
+            )
+        )
+
+        # Server replays metadata first (so client decoder can rebuild)
+        meta2 = json.loads(await ws.recv())
+        assert meta2["type"] == "stream_start"
+        assert meta2["run_id"] == run_id
+
+        # Then receive remaining frames + done. We don't know the exact frame
+        # count but it should be > 0 and the final done message should arrive.
+        post_resume_frames = 0
+        done = None
+        while True:
+            msg = await ws.recv()
+            if isinstance(msg, bytes):
+                post_resume_frames += 1
+            elif isinstance(msg, str):
+                parsed = json.loads(msg)
+                if parsed.get("type") == "done":
+                    done = parsed
+                    break
+
+    assert done is not None
+    assert done["run_id"] == run_id
+    assert done["final_t"] >= 1.99
+    assert post_resume_frames > 0, "resume should yield at least some new frames"
+
+
+@pytest.mark.acceptance
+async def test_streaming_resume_unknown_run_id_closes_4404(
+    live_server: tuple[str, int, str],
+) -> None:
+    """``resume`` with a run_id the server doesn't know closes WS with 4404."""
+    token, port, base = live_server
+    sid = await _create_session_and_load(token, base)
+
+    ws_url = f"ws://127.0.0.1:{port}/ws/{sid}"
+    async with websockets.connect(ws_url) as ws:
+        await ws.send(json.dumps({"type": "auth", "token": token}))
+        json.loads(await ws.recv())  # ready
+        await ws.send(
+            json.dumps({"type": "resume", "run_id": "deadbeef" * 4, "last_seq": 0})
+        )
+        try:
+            while True:
+                msg = await ws.recv()
+                if isinstance(msg, str):
+                    err = json.loads(msg)
+                    assert err.get("code") == 4404
+        except websockets.exceptions.ConnectionClosed as exc:
+            assert exc.code == 4404, f"expected 4404, got {exc.code}"
+
+
+@pytest.mark.acceptance
+async def test_streaming_resume_after_run_completed_replays_full_run(
+    live_server: tuple[str, int, str],
+) -> None:
+    """If the run completed while the client was disconnected, a resume with
+    ``last_seq=0`` replays the full set of buffered frames + the done event.
+
+    Buffer retention is 30 seconds, so a fresh resume right after completion
+    sees the whole run."""
+    token, port, base = live_server
+    sid = await _create_session_and_load(token, base)
+
+    ws_url = f"ws://127.0.0.1:{port}/ws/{sid}"
+
+    # ---- Phase 1: complete a short run, capturing run_id but not frames ----
+    run_id: str | None = None
+    async with websockets.connect(ws_url) as ws:
+        await ws.send(json.dumps({"type": "auth", "token": token}))
+        json.loads(await ws.recv())
+        await ws.send(json.dumps({"type": "start_tds", "tf": 1.0, "h": 1 / 120}))
+        meta = json.loads(await ws.recv())
+        run_id = meta["run_id"]
+        # Drain to completion
+        while True:
+            msg = await ws.recv()
+            if isinstance(msg, str):
+                parsed = json.loads(msg)
+                if parsed.get("type") == "done":
+                    break
+
+    # ---- Phase 2: reconnect post-completion, resume from seq 0 ----
+    async with websockets.connect(ws_url) as ws:
+        await ws.send(json.dumps({"type": "auth", "token": token}))
+        json.loads(await ws.recv())
+        await ws.send(
+            json.dumps({"type": "resume", "run_id": run_id, "last_seq": 0})
+        )
+        meta2 = json.loads(await ws.recv())
+        assert meta2["type"] == "stream_start"
+        assert meta2["run_id"] == run_id
+
+        # Should receive buffered frames + done immediately (all from buffer).
+        frames_replayed = 0
+        done = None
+        while True:
+            msg = await ws.recv()
+            if isinstance(msg, bytes):
+                frames_replayed += 1
+            elif isinstance(msg, str):
+                parsed = json.loads(msg)
+                if parsed.get("type") == "done":
+                    done = parsed
+                    break
+
+    assert done is not None
+    assert done["final_t"] >= 0.99
+    assert frames_replayed > 0, "completed-run replay yielded no frames"
