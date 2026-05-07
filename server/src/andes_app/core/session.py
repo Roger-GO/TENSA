@@ -256,6 +256,89 @@ class SessionManager:
             )
         return response.get("payload")
 
+    async def invoke_streaming(
+        self,
+        session_id: str,
+        op: str,
+        args: dict[str, Any] | None = None,
+        *,
+        on_metadata: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        on_frame: Callable[[bytes], Awaitable[None]] | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        """Like ``invoke``, but the worker may emit ``stream_start`` and
+        ``stream_frame`` messages before the final ``result``. The caller
+        supplies async callbacks to forward each frame to a downstream
+        consumer (typically a WebSocket sender task).
+
+        Returns the final result payload (the same shape ``invoke`` would
+        return). Raises ``WorkerError`` on a structured error response,
+        ``SessionExpiredError`` if the session was reaped, or
+        ``asyncio.TimeoutError`` on overall timeout.
+        """
+        with self._registry_lock:
+            sess = self._sessions.get(session_id)
+        if sess is None or sess.closed:
+            raise SessionExpiredError(f"session {session_id!r} is not active")
+
+        loop = asyncio.get_running_loop()
+
+        # Send the request from the executor (Pipe.send is sync); then loop
+        # on Pipe.recv (also sync) on the executor for each frame, dispatching
+        # callbacks back on the running loop.
+        with sess.lock:
+            sess.seq += 1
+            sess.last_active = time.monotonic()
+            seq = sess.seq
+            await loop.run_in_executor(
+                None,
+                lambda: sess.ctrl.send({"op": op, "args": args or {}, "seq": seq}),
+            )
+
+            async def _read_one() -> dict[str, Any]:
+                msg = await loop.run_in_executor(None, sess.data.recv)
+                sess.last_active = time.monotonic()
+                if not isinstance(msg, dict):
+                    raise WorkerError("malformed", f"non-dict response: {msg!r}")
+                return msg
+
+            deadline = (
+                None if timeout is None else asyncio.get_event_loop().time() + timeout
+            )
+            while True:
+                if deadline is not None:
+                    remaining = deadline - asyncio.get_event_loop().time()
+                    if remaining <= 0:
+                        raise TimeoutError(
+                            f"streaming invoke timed out after {timeout}s"
+                        )
+                    msg = await asyncio.wait_for(_read_one(), timeout=remaining)
+                else:
+                    msg = await _read_one()
+
+                msg_type = msg.get("type")
+                if msg_type == "stream_start":
+                    if on_metadata is not None:
+                        metadata = msg.get("metadata") or {}
+                        await on_metadata(metadata)
+                    continue
+                if msg_type == "stream_frame":
+                    if on_frame is not None:
+                        payload = msg.get("payload")
+                        if isinstance(payload, (bytes, bytearray)):
+                            await on_frame(bytes(payload))
+                    continue
+                if msg_type == "result":
+                    return msg.get("payload")
+                if msg_type == "error":
+                    raise WorkerError(
+                        category=msg.get("category", "unknown"),
+                        detail=msg.get("detail", ""),
+                    )
+                # Unknown — ignore but log via raising a structured error so
+                # the test suite catches it.
+                raise WorkerError("malformed", f"unexpected message type: {msg_type!r}")
+
     async def signal_abort(self, session_id: str) -> None:
         """Set the worker's abort event. Cooperatively terminates an active
         ``run_tds`` invocation. No-op if no TDS is running."""

@@ -62,6 +62,12 @@ from andes_app.core.errors import (
     DisturbanceCommitError,
     NoCaseLoadedError,
 )
+from andes_app.core.stream import (
+    bus_idx_values_from_system,
+    collect_bus_voltages,
+    encode_self_contained_batch,
+    make_bus_voltage_schema,
+)
 from andes_app.core.wrapper import Wrapper
 
 
@@ -214,16 +220,23 @@ def _handle_run_tds(
     wrapper: Wrapper,
     args: dict[str, Any],
     abort_event: EventType,
+    data_pipe: Connection | None = None,
+    seq: int | None = None,
 ) -> Any:
+    """Run TDS in batch or streaming mode.
+
+    Streaming mode is selected by ``args["stream"] == True``. When streaming,
+    each per-step state snapshot is encoded as an Arrow IPC batch and sent on
+    the data Pipe as ``{"type": "stream_frame", "seq": <run_seq>, "payload":
+    <bytes>}``. The first frame of a run is preceded by a JSON-text-shaped
+    ``{"type": "stream_start", ...}`` message carrying the schema metadata.
+    The final ``{"type": "result", ...}`` message lands as usual at end of run.
+    """
     abort_flag = threading.Event()
     if abort_event.is_set():
-        # Honor any pending abort even before run starts
         abort_flag.set()
 
     def _bridge() -> None:
-        # Bridges the multiprocessing Event to the threading Event so the
-        # wrapper's per-step abort poll is fast (threading.Event check is
-        # cheap; checking a multiprocessing.Event each step would be slower).
         while not abort_flag.is_set():
             if abort_event.wait(timeout=0.1):
                 abort_flag.set()
@@ -231,16 +244,82 @@ def _handle_run_tds(
 
     bridge_thread = threading.Thread(target=_bridge, name="abort-bridge", daemon=True)
     bridge_thread.start()
+
+    stream = bool(args.get("stream"))
+    on_step: Callable[[float, Any], None] | None = None
+
+    if stream:
+        if data_pipe is None or seq is None:
+            raise AndesAppError(
+                "streaming mode requires data_pipe + seq context (worker bug)"
+            )
+
+        # Resolve the System ONCE (after load); we need its Bus model to build
+        # the schema. If the wrapper has no System loaded the run will fail
+        # later — surface the same error path as before.
+        ss = wrapper._require_loaded()  # noqa: SLF001 — internal access by design
+        # Ensure setup so Bus.v exists; the wrapper would do this anyway when
+        # run_tds runs PF first.
+        wrapper._ensure_setup()  # noqa: SLF001
+        if not bool(getattr(ss.PFlow, "converged", False)):
+            ss.PFlow.run()
+
+        bus_idx_values = bus_idx_values_from_system(ss)
+        schema = make_bus_voltage_schema(bus_idx_values)
+        var_columns = [f"Bus_{idx}_v" for idx in bus_idx_values]
+
+        # Send the stream-start metadata BEFORE the run begins so the WS
+        # sender can forward it as a text frame ahead of any binary frames.
+        data_pipe.send(
+            {
+                "type": "stream_start",
+                "seq": seq,
+                "metadata": {
+                    "schema_version": "1.0",
+                    "decimation": {
+                        "algorithm": "none",
+                        "source_rate_hz": None,
+                        "output_rate_hz": None,
+                    },
+                    "var_columns": var_columns,
+                    "bus_idx_values": [str(idx) for idx in bus_idx_values],
+                },
+            }
+        )
+
+        frame_seq = 0
+
+        def _emit(t: float, system: Any) -> None:
+            nonlocal frame_seq
+            frame_seq += 1
+            values = collect_bus_voltages(system)
+            payload = encode_self_contained_batch(schema, t, values)
+            try:
+                data_pipe.send(
+                    {
+                        "type": "stream_frame",
+                        "seq": seq,
+                        "frame_seq": frame_seq,
+                        "payload": payload,
+                    }
+                )
+            except (BrokenPipeError, OSError):
+                # Parent has gone away — let the run terminate via the
+                # next abort_flag check.
+                abort_flag.set()
+
+        on_step = _emit
+
     try:
         result = wrapper.run_tds(
             tf=args["tf"],
             h=args.get("h"),
+            on_step=on_step,
             abort_flag=abort_flag,
         )
     finally:
-        # Force the bridge thread to exit cleanly
         abort_flag.set()
-    abort_event.clear()  # ready for the next run
+    abort_event.clear()
     return _serialize_dataclass(result)
 
 
@@ -296,7 +375,7 @@ def worker_main(
 
         try:
             if op == "run_tds":
-                payload = _handle_run_tds(wrapper, args, abort_event)
+                payload = _handle_run_tds(wrapper, args, abort_event, data, seq)
             else:
                 handler = HANDLERS.get(op)
                 if handler is None:
