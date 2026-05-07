@@ -1,0 +1,119 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "andes-app"
+version = "0.1.0.dev0"
+description = "Web-based GUI substrate for the ANDES power-system simulator"
+readme = "README.md"
+license = { file = "../LICENSE" }
+requires-python = ">=3.12"
+authors = [
+    { name = "Roger Gracia", email = "rollerg97@gmail.com" },
+]
+keywords = ["power-systems", "andes", "simulation", "fastapi", "websocket"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Framework :: FastAPI",
+]
+
+# Runtime dependencies. Pin ranges per AGENTS.md and ANDES_VERSIONS.md.
+# ANDES upgrades are deliberate; never accept an automatic minor bump
+# without re-running the curl walkthrough in CI.
+dependencies = [
+    "fastapi>=0.119,<0.120",
+    "uvicorn[standard]>=0.30",
+    "pyarrow>=17",
+    "pydantic>=2,<3",
+    "andes>=2.0,<3.0",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "websockets>=13",
+]
+
+[project.scripts]
+andes-app = "andes_app.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/rollerg97/ANDES_App"
+Documentation = "https://github.com/rollerg97/ANDES_App"
+Issues = "https://github.com/rollerg97/ANDES_App/issues"
+
+# Hatchling build target — src layout
+[tool.hatch.build.targets.wheel]
+packages = ["src/andes_app"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/andes_app",
+    "README.md",
+    "ANDES_VERSIONS.md",
+]
+
+# ============================================================================
+# Tooling
+# ============================================================================
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "C4",  # flake8-comprehensions
+]
+ignore = [
+    "E501",  # line length — handled by formatter
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+files = ["src"]
+
+[[tool.mypy.overrides]]
+# ANDES has no type stubs; allow untyped imports
+module = ["andes", "andes.*", "kvxopt", "kvxopt.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "acceptance: end-to-end acceptance tests (require running server + ANDES)",
+    "integration: tests that spawn subprocesses or hit ANDES",
+    "unit: pure-unit tests with no I/O",
+]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
