@@ -77,3 +77,137 @@ class SessionList(BaseModel):
     sessions: list[SessionDescriptor] = Field(
         ..., description="Snapshot of currently-active sessions for this token."
     )
+
+
+# ---- case + topology --------------------------------------------------------
+
+
+class LoadCaseRequest(BaseModel):
+    """Request body for ``POST /sessions/{id}/case``. All paths are
+    workspace-relative; the substrate canonicalizes them with O_NOFOLLOW
+    before passing to ANDES."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    primary_path: str = Field(
+        ...,
+        description=(
+            "Workspace-relative path to the primary case file. Supported "
+            "formats: xlsx, raw, dyr, json, m. The substrate routes through "
+            "ANDES's native readers; format is detected from the extension."
+        ),
+        min_length=1,
+    )
+    addfiles: list[str] | None = Field(
+        None,
+        description=(
+            "Optional list of workspace-relative addfile paths. PSS/E .raw "
+            "(steady-state) and .dyr (dynamics) are paired via this "
+            "mechanism; pass [.dyr path] when loading a .raw."
+        ),
+    )
+
+
+class TopologyEntry(BaseModel):
+    """One element in a topology summary."""
+
+    idx: int | str = Field(
+        ...,
+        description=(
+            "ANDES idx of the element (its public identifier in ANDES). "
+            "Used as the stable handle in subsequent operations (e.g., "
+            "Fault.bus references this idx)."
+        ),
+    )
+    name: str = Field(..., description="Human-readable name of the element.")
+    kind: str = Field(
+        ...,
+        description=(
+            "ANDES model class name (e.g., ``Bus``, ``Line``, ``GENROU``, "
+            "``PV``, ``Slack``, ``PQ``)."
+        ),
+    )
+
+
+class TopologySummary(BaseModel):
+    """Substrate's structural view of the loaded case.
+
+    ``state`` reflects whether ``ss.setup()`` has been committed. Some
+    fields on individual elements are only populated after setup.
+    """
+
+    state: Literal["pre-setup", "committed"] = Field(
+        ...,
+        description=(
+            "``pre-setup`` if disturbances can still be added; ``committed`` "
+            "after PF or TDS has triggered ``ss.setup()``. Once committed, "
+            "callers must POST /sessions/{id}/reload to add more disturbances."
+        ),
+    )
+    buses: list[TopologyEntry] = Field(..., description="Bus elements.")
+    lines: list[TopologyEntry] = Field(..., description="Line elements.")
+    transformers: list[TopologyEntry] = Field(
+        ...,
+        description=(
+            "Transformer elements (currently empty for v0.1; ANDES models "
+            "transformers within the Line model)."
+        ),
+    )
+    generators: list[TopologyEntry] = Field(
+        ...,
+        description="Generator elements (PV, Slack, GENROU, GENCLS, etc.).",
+    )
+    loads: list[TopologyEntry] = Field(..., description="Load elements (PQ).")
+
+
+# ---- power flow -------------------------------------------------------------
+
+
+class PflowResult(BaseModel):
+    """Power-flow run result. Bus voltages and angles are keyed by ANDES idx."""
+
+    run_id: str = Field(
+        ...,
+        description=(
+            "Server-generated identifier for this PF run. Use it with "
+            "GET /sessions/{id}/pflow/{run_id} to fetch the result later."
+        ),
+    )
+    converged: bool = Field(
+        ...,
+        description=(
+            "``true`` if PF converged within the iteration limit. Non-"
+            "convergence is NOT a server error; it is a valid power-system "
+            "outcome the caller must handle."
+        ),
+    )
+    iterations: int = Field(
+        ..., description="Number of Newton-Raphson iterations executed."
+    )
+    mismatch: float = Field(
+        ...,
+        description=(
+            "Final mismatch (max element of the residual vector) at the "
+            "converged solution. For non-converged runs this is the last "
+            "iteration's mismatch."
+        ),
+    )
+    bus_voltages: dict[str, float] = Field(
+        ...,
+        description=(
+            "Bus voltage magnitudes (pu) keyed by ANDES idx (stringified). "
+            "JSON object keys must be strings; the ANDES idx is "
+            "converted at the boundary."
+        ),
+    )
+    bus_angles: dict[str, float] = Field(
+        ...,
+        description="Bus voltage angles (radians) keyed by ANDES idx (stringified).",
+    )
+
+
+class PflowRunRequest(BaseModel):
+    """Request body for ``POST /sessions/{id}/pflow``. Empty for v0.1; PF
+    parameters are taken from the loaded case's defaults."""
+
+    model_config = ConfigDict(extra="forbid")
