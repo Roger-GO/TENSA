@@ -25,8 +25,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from andes_app import __version__
 from andes_app.api.routes.cases import router as cases_router
+from andes_app.api.routes.disturbances import router as disturbances_router
 from andes_app.api.routes.pflow import router as pflow_router
 from andes_app.api.routes.sessions import router as sessions_router
+from andes_app.api.routes.tds import router as tds_router
 from andes_app.core.session import SessionManager
 from andes_app.security.middleware import (
     make_host_origin_middleware,
@@ -121,6 +123,8 @@ def make_app(
     app.include_router(sessions_router, tags=["sessions"])
     app.include_router(cases_router, tags=["cases"])
     app.include_router(pflow_router, tags=["pflow"])
+    app.include_router(disturbances_router, tags=["disturbances"])
+    app.include_router(tds_router, tags=["tds"])
 
     return app
 

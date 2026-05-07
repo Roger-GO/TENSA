@@ -211,3 +211,120 @@ class PflowRunRequest(BaseModel):
     parameters are taken from the loaded case's defaults."""
 
     model_config = ConfigDict(extra="forbid")
+
+
+# ---- disturbances -----------------------------------------------------------
+
+
+# Re-export the wrapper-level discriminated-union types for use in API
+# schemas. They are Pydantic v2 models already, so they slot into FastAPI
+# request bodies directly.
+from andes_app.core.disturbance import (  # noqa: E402
+    AlterSpec,
+    FaultSpec,
+    ToggleSpec,
+)
+
+
+class AddDisturbancesRequest(BaseModel):
+    """Request body for ``POST /sessions/{id}/disturbances``.
+
+    Accepts a list so a caller can register multiple disturbances in one
+    request — useful for the v0.2 timeline editor that wants to commit a
+    full study scenario at once. ANDES rejects all post-setup ``add()`` calls,
+    so this endpoint is gated on pre-setup state (returns 409 otherwise with
+    a hint to call ``/reload``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    disturbances: list[FaultSpec | ToggleSpec | AlterSpec] = Field(
+        ...,
+        description=(
+            "List of disturbance specifications. Discriminated by the "
+            "``kind`` field (``fault``, ``toggle``, ``alter``)."
+        ),
+        min_length=1,
+    )
+
+
+class DisturbanceAck(BaseModel):
+    """One entry in the response to ``POST /sessions/{id}/disturbances``."""
+
+    kind: Literal["fault", "toggle", "alter"] = Field(
+        ..., description="Discriminator from the original spec."
+    )
+    idx: int | str = Field(
+        ...,
+        description=(
+            "ANDES idx assigned to the created disturbance device. Use this "
+            "to reference the disturbance in subsequent operations."
+        ),
+    )
+
+
+class AddDisturbancesResponse(BaseModel):
+    """Response body for ``POST /sessions/{id}/disturbances``."""
+
+    accepted: list[DisturbanceAck] = Field(
+        ..., description="One ack entry per accepted disturbance, in input order."
+    )
+
+
+# ---- TDS --------------------------------------------------------------------
+
+
+class TdsRunRequest(BaseModel):
+    """Request body for ``POST /sessions/{id}/tds`` (batch mode).
+
+    Streaming mode lands in Unit 6 and uses a separate ``?stream=ws`` query
+    parameter; this schema is the batch-only surface for v0.1.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tf: float = Field(
+        ...,
+        description="Final simulation time, in seconds. Must be > 0.",
+        gt=0.0,
+    )
+    h: float | None = Field(
+        None,
+        description=(
+            "Initial integration step size, in seconds. ``None`` lets ANDES "
+            "use its case-default step size (typically 1/120 s)."
+        ),
+        gt=0.0,
+    )
+
+
+class TdsBatchResult(BaseModel):
+    """Result of a batch TDS run (post-completion delivery).
+
+    Streaming TDS uses a different code path (Unit 6) that emits Arrow IPC
+    frames per integration step. Batch mode blocks until completion and
+    returns a summary; the per-step state values are NOT returned in batch
+    mode (use streaming mode if you need them).
+    """
+
+    run_id: str = Field(
+        ..., description="Server-generated identifier for this TDS run."
+    )
+    converged: bool = Field(
+        ...,
+        description=(
+            "``true`` if TDS completed without becoming ``busted``. "
+            "Numerical instability (e.g., a fault that doesn't clear) "
+            "surfaces as ``converged: false`` with ``final_t`` < ``tf``."
+        ),
+    )
+    final_t: float = Field(
+        ..., description="Last simulation time reached, in seconds."
+    )
+    callpert_count: int = Field(
+        ...,
+        description=(
+            "Number of times the per-step ``TDS.callpert`` hook fired during "
+            "the run. Useful as a sanity check that streaming is wired."
+        ),
+    )
