@@ -5,21 +5,34 @@ chunks):
 
   client → server (text)  {"type":"auth","token":"..."}            within 2 s
   server → client (text)  {"type":"ready"}                          on auth ok
+
+  --- new run ---
   client → server (text)  {"type":"start_tds","tf":1.0,"h":0.0083}  start the run
-  server → client (text)  {"type":"stream_start","metadata":{...}}  schema preamble
-  server → client (binary) <Arrow IPC stream chunk>                 once per step
-  server → client (binary) <Arrow IPC stream chunk>
+  server → client (text)  {"type":"stream_start","run_id":"...",    schema preamble +
+                            "metadata":{...}}                       run identifier
+  server → client (binary) <Arrow IPC stream chunk with frame_seq=N>
                                        ...
   server → client (text)  {"type":"done","converged":true,"final_t":1.0,...}
 
-Auth failures close with code 4401. Unknown session id closes with 4404.
-Worker / wrapper errors close with code 4500 + a JSON ``{"type":"error",...}``
-text frame just before close.
+  --- resume an existing run after WS drop ---
+  client → server (text)  {"type":"resume","run_id":"...","last_seq":N}
+  server → client (text)  {"type":"stream_start","run_id":"...",    re-emitted so the
+                            "metadata":{...}}                       client decoder
+                                                                    can rebuild
+  server → client (binary) <Arrow IPC stream chunk for seq N+1>
+                                       ...                          buffered + live
+  server → client (text)  {"type":"done",...}
 
-Single-message-state-machine on the client: open, send auth, send start_tds,
-read frames until done. The server side is built on
-``SessionManager.invoke_streaming`` which loops over the worker's data Pipe
-and forwards each ``stream_start`` / ``stream_frame`` to the WS sender.
+Frames carry a monotonic ``frame_seq`` (matching the server-side ``seq``)
+so the client can resume from the last frame it processed. The server's
+ring buffer holds ~30 seconds of frames at the configured output rate;
+reconnect attempts past that window receive ``{"type":"resync",...}`` and
+must re-fetch via the batch endpoint.
+
+Auth failures close with code 4401. Unknown session id closes with 4404.
+Unknown run_id on resume closes with 4404. Worker / wrapper errors close
+with code 4500 + a JSON ``{"type":"error",...}`` text frame just before
+close.
 """
 
 from __future__ import annotations
@@ -36,7 +49,6 @@ from starlette.websockets import WebSocketDisconnect, WebSocketState
 from andes_app.core.session import (
     SessionExpiredError,
     SessionManager,
-    WorkerError,
 )
 from andes_app.security.token import constant_time_eq
 
@@ -115,7 +127,7 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
 
     await websocket.send_text(json.dumps({"type": "ready"}))
 
-    # ---- START_TDS ----
+    # ---- START_TDS or RESUME ----
     try:
         cfg_text = await websocket.receive_text()
     except WebSocketDisconnect:
@@ -126,13 +138,24 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         await _close_with_error(websocket, WS_CLOSE_INTERNAL_ERROR, "bad start message")
         return
 
-    if cfg.get("type") != "start_tds":
+    cfg_type = cfg.get("type")
+    if cfg_type == "resume":
+        await _handle_resume(websocket, mgr, session_id, cfg)
+        return
+    if cfg_type != "start_tds":
         await _close_with_error(
-            websocket, WS_CLOSE_INTERNAL_ERROR, f"expected start_tds, got {cfg.get('type')!r}"
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            f"expected start_tds or resume, got {cfg_type!r}",
         )
         return
 
-    tf = float(cfg["tf"])
+    # New run path.
+    try:
+        tf = float(cfg["tf"])
+    except (KeyError, TypeError, ValueError):
+        await _close_with_error(websocket, WS_CLOSE_INTERNAL_ERROR, "missing or invalid 'tf'")
+        return
     h_raw = cfg.get("h")
     h = float(h_raw) if h_raw is not None else None
 
@@ -159,16 +182,10 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         )
         return
 
-    # ---- STREAM ----
-    async def _on_metadata(metadata: dict[str, Any]) -> None:
-        msg = {"type": "stream_start", "metadata": metadata}
-        await websocket.send_text(json.dumps(msg))
-
-    async def _on_frame(payload: bytes) -> None:
-        await websocket.send_bytes(payload)
-
+    # Start the streaming run as a background task; the run survives WS
+    # disconnect and can be resumed via {"type":"resume",...}.
     try:
-        result = await mgr.invoke_streaming(
+        run_id = await mgr.start_streaming_run(
             session_id,
             "run_tds",
             {
@@ -178,39 +195,127 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
                 "decimation": decimation_raw,
                 "max_rate_hz": max_rate_hz,
             },
-            on_metadata=_on_metadata,
-            on_frame=_on_frame,
-            timeout=300.0,
         )
     except SessionExpiredError as exc:
+        await _close_with_error(websocket, WS_CLOSE_SESSION_NOT_FOUND, str(exc))
+        return
+
+    await _stream_run_to_websocket(
+        websocket, mgr, session_id, run_id, last_seq=0, include_run_id_in_metadata=True
+    )
+
+
+async def _handle_resume(
+    websocket: WebSocket,
+    mgr: SessionManager,
+    session_id: str,
+    cfg: dict[str, Any],
+) -> None:
+    """Validate a resume request and stream the rest of the run to the WS."""
+    run_id_raw = cfg.get("run_id")
+    last_seq_raw = cfg.get("last_seq", 0)
+    if not isinstance(run_id_raw, str) or not run_id_raw:
         await _close_with_error(
-            websocket, WS_CLOSE_SESSION_NOT_FOUND, str(exc)
+            websocket, WS_CLOSE_INTERNAL_ERROR, "resume requires a 'run_id'"
         )
         return
-    except WorkerError as exc:
+    try:
+        last_seq = int(last_seq_raw)
+    except (TypeError, ValueError):
         await _close_with_error(
-            websocket,
-            WS_CLOSE_WORKER_ERROR,
-            f"{exc.category}: {exc.detail}",
+            websocket, WS_CLOSE_INTERNAL_ERROR, "resume 'last_seq' must be an integer"
         )
+        return
+    if last_seq < 0:
+        await _close_with_error(
+            websocket, WS_CLOSE_INTERNAL_ERROR, "resume 'last_seq' must be >= 0"
+        )
+        return
+
+    await _stream_run_to_websocket(
+        websocket,
+        mgr,
+        session_id,
+        run_id_raw,
+        last_seq=last_seq,
+        include_run_id_in_metadata=True,
+    )
+
+
+async def _stream_run_to_websocket(
+    websocket: WebSocket,
+    mgr: SessionManager,
+    session_id: str,
+    run_id: str,
+    *,
+    last_seq: int,
+    include_run_id_in_metadata: bool,
+) -> None:
+    """Pump events from ``mgr.attach_to_run`` to the WebSocket. Translates
+    each event to the appropriate JSON text or binary frame, then closes."""
+    try:
+        async for event in mgr.attach_to_run(session_id, run_id, last_seq):
+            event_type = event.get("type")
+            if event_type == "not_found":
+                await _close_with_error(
+                    websocket,
+                    WS_CLOSE_SESSION_NOT_FOUND,
+                    f"run {run_id!r} not found for this session",
+                )
+                return
+            if event_type == "resync":
+                msg = {
+                    "type": "resync",
+                    "run_id": run_id,
+                    "current_seq": int(event.get("current_seq", 0)),
+                    "reason": (
+                        "frame fell out of the resume buffer; "
+                        "re-fetch via the batch endpoint"
+                    ),
+                }
+                if websocket.client_state == WebSocketState.CONNECTED:
+                    await websocket.send_text(json.dumps(msg))
+                    await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+                return
+            if event_type == "metadata":
+                msg = {"type": "stream_start", "metadata": event.get("data", {})}
+                if include_run_id_in_metadata:
+                    msg["run_id"] = run_id
+                await websocket.send_text(json.dumps(msg))
+            elif event_type == "frame":
+                await websocket.send_bytes(event["payload"])
+            elif event_type == "done":
+                result = event.get("result") or {}
+                done_msg = {
+                    "type": "done",
+                    "run_id": run_id,
+                    "converged": bool(result.get("converged", False)),
+                    "final_t": float(result.get("final_t", 0.0)),
+                    "callpert_count": int(result.get("callpert_count", 0)),
+                }
+                if websocket.client_state == WebSocketState.CONNECTED:
+                    await websocket.send_text(json.dumps(done_msg))
+                    await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+                return
+            elif event_type == "error":
+                category = str(event.get("category", "unknown"))
+                detail = str(event.get("detail", ""))
+                await _close_with_error(
+                    websocket,
+                    WS_CLOSE_WORKER_ERROR,
+                    f"{category}: {detail}",
+                )
+                return
+    except WebSocketDisconnect:
+        # Client went away mid-stream. The run continues running in the
+        # background buffer; client can reconnect with {"type":"resume",...}.
         return
     except Exception as exc:  # noqa: BLE001
-        log.exception("internal error during streaming TDS")
+        log.exception("internal error while streaming run %s", run_id)
         await _close_with_error(
             websocket, WS_CLOSE_INTERNAL_ERROR, f"internal error: {exc!s}"
         )
         return
-
-    # Final result envelope
-    done_msg = {
-        "type": "done",
-        "converged": bool(result.get("converged", False)),
-        "final_t": float(result.get("final_t", 0.0)),
-        "callpert_count": int(result.get("callpert_count", 0)),
-    }
-    if websocket.client_state == WebSocketState.CONNECTED:
-        await websocket.send_text(json.dumps(done_msg))
-        await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
 
 
 async def _close_with_error(
