@@ -59,6 +59,7 @@ def make_app(
         mgr = SessionManager(
             max_sessions=max_sessions,
             idle_timeout=idle_timeout_seconds,
+            workspace=str(workspace),
         )
         await mgr.start()
         app.state.session_manager = mgr
