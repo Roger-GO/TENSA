@@ -102,6 +102,58 @@ def _spawn_orphan_detector() -> None:
     t.start()
 
 
+def _install_strict_fs_audit_hook(workspace: str | None) -> None:
+    """Install a Python ``sys.audit`` hook (PEP 578, Python 3.8+) that logs
+    file opens occurring outside the configured workspace.
+
+    Best-effort only — the hook fires for ``open()`` events that travel
+    through the Python interpreter. Reads from C extensions
+    (numpy/openpyxl/pandas/SymEngine) bypass the hook and are NOT caught.
+    The trust-model docstring documents this gap. For an actual workspace
+    boundary, kernel-level enforcement (Linux seccomp, Landlock) is
+    required and is deferred to the SaaS phase.
+    """
+    if workspace is None:
+        return
+    import logging
+
+    log = logging.getLogger("andes-app.worker.audit")
+    workspace_str = os.path.realpath(workspace)
+
+    def _hook(event: str, args: tuple[Any, ...]) -> None:
+        if event != "open":
+            return
+        # PEP 578 'open' event args: (path, mode, flags). path may be a
+        # str, bytes, int (fd), or PathLike. We only care about string-like
+        # paths for the workspace boundary check.
+        if not args:
+            return
+        path = args[0]
+        if not isinstance(path, (str, bytes, os.PathLike)):
+            return
+        try:
+            real = os.path.realpath(os.fsdecode(path))
+        except (OSError, ValueError):
+            return
+        # Allow opens inside the workspace and ANDES's own install tree
+        if real.startswith(workspace_str):
+            return
+        # Allow Python stdlib + site-packages (the ANDES code itself reads many
+        # files from its own install tree). We only want to *log* opens from
+        # case-file-driven secondary reads, not every stdlib import.
+        # Heuristic: ignore .py / .pyc / .so / .pyd / .pth / .json (in
+        # site-packages) opens.
+        if any(
+            real.endswith(ext) for ext in (".py", ".pyc", ".so", ".pyd", ".pth")
+        ):
+            return
+        if "site-packages" in real or real.startswith("/usr/lib/python"):
+            return
+        log.warning("strict-fs: out-of-workspace open: %s", real)
+
+    sys.addaudithook(_hook)
+
+
 def _serialize_dataclass(obj: Any) -> Any:
     """Convert a dataclass (or list/dict thereof) to a plain Python object
     that can be pickled across the Pipe and re-built on the parent side.
@@ -209,14 +261,20 @@ def worker_main(
     ctrl: Connection,
     data: Connection,
     abort_event: EventType,
+    workspace: str | None = None,
 ) -> int:
     """Subprocess entry. Runs until a ``shutdown`` command arrives, the parent
     dies, or an unrecoverable error occurs.
+
+    ``workspace``, when provided, enables the best-effort ``sys.audit`` hook
+    that warns on out-of-workspace file opens (see
+    ``_install_strict_fs_audit_hook`` for caveats).
 
     Returns the process exit code (0 = clean shutdown).
     """
     _set_parent_death_signal()
     _spawn_orphan_detector()
+    _install_strict_fs_audit_hook(workspace)
 
     wrapper = Wrapper()
 

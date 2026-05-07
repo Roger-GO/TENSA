@@ -88,9 +88,11 @@ class SessionManager:
         max_sessions: int = 4,
         idle_timeout: float = 180.0,
         spawn_method: str = "spawn",
+        workspace: str | None = None,
     ) -> None:
         self._max_sessions = max_sessions
         self._idle_timeout = idle_timeout
+        self._workspace = workspace  # for the worker's strict-fs audit hook
         self._sessions: dict[str, _Session] = {}
         self._registry_lock = threading.Lock()
         self._reaper_task: asyncio.Task[None] | None = None
@@ -152,7 +154,7 @@ class SessionManager:
 
         process = self._spawn_ctx.Process(
             target=worker_main,
-            args=(child_ctrl, child_data, abort_event),
+            args=(child_ctrl, child_data, abort_event, self._workspace),
             name=f"andes-worker-{session_id[:8]}",
             daemon=False,
         )
