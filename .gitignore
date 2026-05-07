@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+wheels/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Runtime artifacts (never commit)
+server/src/andes_app/workspace/
+~/.andes-app/
+*.token
+
+# Distribution
+*.whl
+
+# ANDES code-generation cache (built by hook; we ship curated subset only)
+# See server/build_hooks/prepare_cache.py
+.andes/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Type stubs (generated)
+*.pyi
