@@ -27,7 +27,10 @@ class FaultSpec(BaseModel):
     scope (per Phase A plan).
     """
 
-    kind: Literal["fault"] = "fault"
+    kind: Literal["fault"] = Field(
+        "fault",
+        description="Discriminator: this spec creates an ANDES Fault device.",
+    )
     bus_idx: int | str = Field(
         ..., description="ANDES idx of the bus where the fault is applied."
     )
@@ -47,7 +50,10 @@ class ToggleSpec(BaseModel):
     open→closed).
     """
 
-    kind: Literal["toggle"] = "toggle"
+    kind: Literal["toggle"] = Field(
+        "toggle",
+        description="Discriminator: this spec creates an ANDES Toggle device.",
+    )
     model: str = Field(
         ...,
         description=(
@@ -68,7 +74,10 @@ class AlterSpec(BaseModel):
     Maps to ``ss.add('Alter', model=..., dev=..., src=..., t=..., value=...)``.
     """
 
-    kind: Literal["alter"] = "alter"
+    kind: Literal["alter"] = Field(
+        "alter",
+        description="Discriminator: this spec creates an ANDES Alter device.",
+    )
     model: str = Field(
         ..., description="ANDES model class name containing the parameter."
     )

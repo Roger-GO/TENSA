@@ -28,6 +28,13 @@ app = typer.Typer(
 )
 
 
+@app.callback()
+def _root() -> None:
+    """No-op callback. Forces Typer into subcommand mode so ``serve`` is
+    required as an explicit argument (rather than being collapsed into the
+    default-command form when there's only one command)."""
+
+
 @app.command()
 def serve(
     bind: str = typer.Option(
