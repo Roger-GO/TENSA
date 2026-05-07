@@ -19,7 +19,12 @@ source ~/andes-project/.venv/bin/activate     # or wherever you installed andes
 # 2. Install andes-app in editable mode
 pip install -e ./server
 
-# 3. Run the substrate
+# 3. Warm the ANDES cache (one-time, ~30 s on first run)
+#    Generates ~/.andes/pycode/ so subsequent andes.load calls skip the
+#    multi-minute cold-start prep. Run again after upgrading ANDES.
+andes-app warm-cache
+
+# 4. Run the substrate
 andes-app serve --workspace ./tmp
 
 # Reads token file path from stderr; e.g.:

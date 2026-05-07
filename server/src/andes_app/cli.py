@@ -6,6 +6,11 @@ Subcommands:
   writes it to a mode-``0600`` file, prints the path to stderr, then runs
   uvicorn. uvicorn's default access log is disabled; the substrate emits
   its own structured stderr lines via ``logging``.
+- ``warm-cache`` — run ANDES's symbolic-equation code generation
+  (``andes.prepare()``) so the cache is populated. Recommended once after
+  install: subsequent ``andes.load`` calls skip the multi-minute cold-start
+  prep. The cache lives at ``~/.andes/pycode/`` (~1.5 MB) and is shared
+  across all ANDES cases.
 """
 
 from __future__ import annotations
@@ -125,6 +130,80 @@ def serve(
         log_level="info",
         access_log=False,
     )
+
+
+@app.command(name="warm-cache")
+def warm_cache(
+    quick: bool = typer.Option(
+        False,
+        "--quick",
+        help=(
+            "Run the faster, less-thorough code-generation pass. Useful in "
+            "CI / quick smoke checks; the default is the full prep."
+        ),
+    ),
+    incremental: bool = typer.Option(
+        False,
+        "--incremental",
+        help=(
+            "Only regenerate models whose source changed since the last "
+            "prep. Faster on top of an already-warm cache."
+        ),
+    ),
+) -> None:
+    """Warm the ANDES symbolic-equation cache.
+
+    Runs ``andes.prepare()`` against the installed ANDES version. The
+    generated Python files land at ``~/.andes/pycode/`` (~1.5 MB total)
+    and are shared across all ANDES cases; subsequent ``andes.load``
+    calls skip the cold-start prep.
+
+    The brainstorm's 5-minute first-result success criterion assumes this
+    has been run; without it, the first PF after a fresh install pays the
+    multi-minute prep cost. We recommend running this once during install:
+
+        pip install andes-app
+        andes-app warm-cache
+        andes-app serve
+
+    The cache is rebuilt automatically when ANDES is upgraded — but only
+    on the next ``andes.load``. Run ``warm-cache`` again after upgrading
+    to keep the first-result latency low.
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        stream=sys.stderr,
+    )
+    log = logging.getLogger("andes-app.warm-cache")
+
+    import time as _time
+
+    import andes
+
+    log.info("ANDES version: %s", andes.__version__)
+    log.info("warming cache (quick=%s, incremental=%s)…", quick, incremental)
+    started = _time.monotonic()
+    andes.prepare(quick=quick, incremental=incremental)
+    elapsed = _time.monotonic() - started
+
+    cache_dir = Path.home() / ".andes" / "pycode"
+    if cache_dir.exists():
+        n_files = sum(1 for _ in cache_dir.iterdir() if _.is_file())
+        size_bytes = sum(p.stat().st_size for p in cache_dir.iterdir() if p.is_file())
+        log.info(
+            "cache ready: %d files, %.1f MB at %s (%.1fs)",
+            n_files,
+            size_bytes / 1024 / 1024,
+            cache_dir,
+            elapsed,
+        )
+    else:
+        log.warning(
+            "andes.prepare() returned but %s does not exist; ANDES may use "
+            "a different cache location in this environment",
+            cache_dir,
+        )
 
 
 if __name__ == "__main__":
