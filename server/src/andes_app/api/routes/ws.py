@@ -136,6 +136,29 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
     h_raw = cfg.get("h")
     h = float(h_raw) if h_raw is not None else None
 
+    # Optional decimation controls. Defaults match the v0.1 baseline: every
+    # callpert step is one row in its own one-row Arrow batch (algorithm
+    # "none"). ``decimation="mean"`` requires ``max_rate_hz``; the worker
+    # raises if the combination is invalid and the WS surface translates
+    # that to a structured error.
+    decimation_raw = cfg.get("decimation", "none")
+    if decimation_raw not in ("none", "mean"):
+        await _close_with_error(
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            f"unknown decimation mode {decimation_raw!r}; expected 'none' or 'mean'",
+        )
+        return
+    max_rate_hz_raw = cfg.get("max_rate_hz")
+    max_rate_hz = float(max_rate_hz_raw) if max_rate_hz_raw is not None else None
+    if decimation_raw == "mean" and max_rate_hz is None:
+        await _close_with_error(
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            "decimation='mean' requires max_rate_hz to be set",
+        )
+        return
+
     # ---- STREAM ----
     async def _on_metadata(metadata: dict[str, Any]) -> None:
         msg = {"type": "stream_start", "metadata": metadata}
@@ -148,7 +171,13 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         result = await mgr.invoke_streaming(
             session_id,
             "run_tds",
-            {"tf": tf, "h": h, "stream": True},
+            {
+                "tf": tf,
+                "h": h,
+                "stream": True,
+                "decimation": decimation_raw,
+                "max_rate_hz": max_rate_hz,
+            },
             on_metadata=_on_metadata,
             on_frame=_on_frame,
             timeout=300.0,

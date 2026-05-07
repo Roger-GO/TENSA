@@ -63,9 +63,10 @@ from andes_app.core.errors import (
     NoCaseLoadedError,
 )
 from andes_app.core.stream import (
+    StreamAggregator,
     bus_idx_values_from_system,
     collect_bus_voltages,
-    encode_self_contained_batch,
+    encode_batch,
     make_bus_voltage_schema,
 )
 from andes_app.core.wrapper import Wrapper
@@ -247,12 +248,23 @@ def _handle_run_tds(
 
     stream = bool(args.get("stream"))
     on_step: Callable[[float, Any], None] | None = None
+    aggregator: StreamAggregator | None = None
 
     if stream:
         if data_pipe is None or seq is None:
             raise AndesAppError(
                 "streaming mode requires data_pipe + seq context (worker bug)"
             )
+
+        # Decimation config (validated at the WS layer; defaults match the
+        # current behavior of "every step is its own one-row batch").
+        decimation_raw = args.get("decimation") or "none"
+        if decimation_raw not in ("none", "mean"):
+            raise AndesAppError(
+                f"unknown decimation mode: {decimation_raw!r}; expected 'none' or 'mean'"
+            )
+        max_rate_hz_raw = args.get("max_rate_hz")
+        max_rate_hz = float(max_rate_hz_raw) if max_rate_hz_raw is not None else None
 
         # Resolve the System ONCE (after load); we need its Bus model to build
         # the schema. If the wrapper has no System loaded the run will fail
@@ -263,6 +275,19 @@ def _handle_run_tds(
         wrapper._ensure_setup()  # noqa: SLF001
         if not bool(getattr(ss.PFlow, "converged", False)):
             ss.PFlow.run()
+
+        # Read the integrator config so the algorithm label can be honest:
+        # boxcar mean over adaptive-step samples is best-effort.
+        fixed_step = bool(getattr(ss.TDS.config, "fixt", False))
+
+        try:
+            aggregator = StreamAggregator(
+                decimation=decimation_raw,  # type: ignore[arg-type]
+                max_rate_hz=max_rate_hz,
+                fixed_step=fixed_step,
+            )
+        except ValueError as exc:
+            raise AndesAppError(str(exc)) from exc
 
         bus_idx_values = bus_idx_values_from_system(ss)
         schema = make_bus_voltage_schema(bus_idx_values)
@@ -277,9 +302,11 @@ def _handle_run_tds(
                 "metadata": {
                     "schema_version": "1.0",
                     "decimation": {
-                        "algorithm": "none",
+                        "algorithm": aggregator.algorithm,
+                        "mode": aggregator.decimation,
                         "source_rate_hz": None,
-                        "output_rate_hz": None,
+                        "output_rate_hz": aggregator.output_rate_hz,
+                        "fixed_step": fixed_step,
                     },
                     "var_columns": var_columns,
                     "bus_idx_values": [str(idx) for idx in bus_idx_values],
@@ -287,26 +314,36 @@ def _handle_run_tds(
             }
         )
 
-        frame_seq = 0
+        # Single-element list to allow mutation from inside the closure without
+        # stacking ``nonlocal`` declarations across both _emit_rows and the
+        # post-run tail-flush below.
+        frame_seq_holder = [0]
+
+        def _emit_rows(
+            rows: list[tuple[float, list[float]]], *, tail: bool = False
+        ) -> None:
+            frame_seq_holder[0] += 1
+            payload = encode_batch(schema, rows)
+            envelope: dict[str, Any] = {
+                "type": "stream_frame",
+                "seq": seq,
+                "frame_seq": frame_seq_holder[0],
+                "row_count": len(rows),
+                "payload": payload,
+            }
+            if tail:
+                envelope["tail"] = True
+            try:
+                data_pipe.send(envelope)
+            except (BrokenPipeError, OSError):
+                abort_flag.set()
 
         def _emit(t: float, system: Any) -> None:
-            nonlocal frame_seq
-            frame_seq += 1
+            assert aggregator is not None
             values = collect_bus_voltages(system)
-            payload = encode_self_contained_batch(schema, t, values)
-            try:
-                data_pipe.send(
-                    {
-                        "type": "stream_frame",
-                        "seq": seq,
-                        "frame_seq": frame_seq,
-                        "payload": payload,
-                    }
-                )
-            except (BrokenPipeError, OSError):
-                # Parent has gone away — let the run terminate via the
-                # next abort_flag check.
-                abort_flag.set()
+            rows = aggregator.push(t, values)
+            if rows:
+                _emit_rows(rows)
 
         on_step = _emit
 
@@ -319,6 +356,13 @@ def _handle_run_tds(
         )
     finally:
         abort_flag.set()
+
+    # Drain any buffered rows that didn't reach an emit boundary before run end.
+    if stream and aggregator is not None:
+        tail_rows = aggregator.flush()
+        if tail_rows:
+            _emit_rows(tail_rows, tail=True)
+
     abort_event.clear()
     return _serialize_dataclass(result)
 
