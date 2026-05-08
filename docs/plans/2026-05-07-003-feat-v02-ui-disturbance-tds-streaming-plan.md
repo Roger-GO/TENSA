@@ -1,7 +1,7 @@
 ---
 title: "feat: v0.2 UI — disturbance timeline + TDS streaming + animated SLD"
 type: feat
-status: active
+status: in-progress
 date: 2026-05-07
 origin: docs/brainstorms/2026-05-07-accessible-andes-power-systems-app-requirements.md
 ---
