@@ -775,6 +775,21 @@ class SidecarLayout(BaseModel):
             "missing from this dict fall back to the renderer's auto-layout."
         ),
     )
+    non_bus_coordinates: dict[str, dict[str, BusCoord]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-non-bus-element coordinates, two-level dict keyed by "
+            "ANDES model class (e.g., ``PV``, ``GENROU``, ``PQ``, ``Shunt``) "
+            "OR by UI category (``generator``, ``load``, ``shunt``), then by "
+            "element idx (stringified). The writer emits BOTH the model-"
+            "class-keyed entry and the UI-category-keyed entry for every "
+            "dragged non-bus element so kind-edits (e.g., ``PV`` → "
+            "``GENROU``) survive: the model-class entry becomes orphaned "
+            "but the UI-category entry still resolves on read. Optional + "
+            "additive — old sidecars without this field read as ``{}`` and "
+            "the renderer falls back to kind-default offsets."
+        ),
+    )
     last_modified: str = Field(
         ...,
         description=(

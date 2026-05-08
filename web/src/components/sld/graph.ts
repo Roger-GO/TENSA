@@ -196,11 +196,7 @@ export function computeHandleAssignments(
     const fromCoord = coords[t.from];
     const toCoord = coords[t.to];
     if (!fromCoord || !toCoord) return;
-    if (
-      !warnedDegenerate &&
-      fromCoord.x === toCoord.x &&
-      fromCoord.y === toCoord.y
-    ) {
+    if (!warnedDegenerate && fromCoord.x === toCoord.x && fromCoord.y === toCoord.y) {
       console.warn(
         `SLD: bus ${t.from} and ${t.to} share the same coordinate; falling back to default handles`,
       );
@@ -357,10 +353,13 @@ export interface BuildGraphOptions {
  * post-Unit-13c device-node shrink. Exported so tests can assert
  * deterministic overlap math without re-deriving the constants.
  */
-export const NODE_FOOTPRINT: Record<'bus' | 'generator' | 'load' | 'shunt', {
-  width: number;
-  height: number;
-}> = {
+export const NODE_FOOTPRINT: Record<
+  'bus' | 'generator' | 'load' | 'shunt',
+  {
+    width: number;
+    height: number;
+  }
+> = {
   bus: { width: 90, height: 56 },
   generator: { width: 50, height: 46 },
   load: { width: 50, height: 46 },
@@ -507,7 +506,10 @@ function shiftAwayFrom(
   // to the perpendicular axis (lateral) using the side that points
   // AWAY from `a`'s center. This is the documented "exception: fall
   // back to LEFT or RIGHT" behavior.
-  if (bound !== null && (nx < bound.minX || nx > bound.maxX || ny < bound.minY || ny > bound.maxY)) {
+  if (
+    bound !== null &&
+    (nx < bound.minX || nx > bound.maxX || ny < bound.minY || ny > bound.maxY)
+  ) {
     // Restore start point and choose the perpendicular axis.
     nx = b.x;
     ny = b.y;
@@ -687,10 +689,7 @@ export function buildGraph(
   const nonBusCoords = opts.nonBusCoords ?? new Map<string, BusCoord>();
   const edges: Edge[] = [];
   const seen = new Set<string>();
-  const pushBranchEdge = (
-    entry: TopologyEntry,
-    kindLabel: 'line' | 'transformer',
-  ) => {
+  const pushBranchEdge = (entry: TopologyEntry, kindLabel: 'line' | 'transformer') => {
     const t = entryTerminals(entry);
     if (!t) return;
     const id = `${kindLabel}-${String(entry.idx)}`;
@@ -764,9 +763,7 @@ export function buildGraph(
       if (parentIdx === null) {
         // Defensive: an orphan element with no parent bus shouldn't
         // happen with a valid topology. Skip + warn.
-        console.warn(
-          `SLD: ${bucket.kind} ${String(entry.idx)} has no parent bus; skipping`,
-        );
+        console.warn(`SLD: ${bucket.kind} ${String(entry.idx)} has no parent bus; skipping`);
         continue;
       }
       const parentCoord = coords[parentIdx];
@@ -796,14 +793,15 @@ export function buildGraph(
       // colSigned the stagger is irrelevant; we only stagger col=0.
       const rowParity = Math.round(parentCoord.y / 100) % 2 === 0 ? 1 : -1;
       const rowStagger = colSigned === 0 ? rowParity * ROW_STAGGER_PIXELS : 0;
-      const sidecarKey = `${entry.kind}|${String(entry.idx)}`;
-      const sidecar = nonBusCoords.get(sidecarKey);
-      const x =
-        sidecar?.x ??
-        parentCoord.x + offset.x + offset.stackDx * colSigned + rowStagger;
-      const y =
-        sidecar?.y ??
-        parentCoord.y + offset.y + offset.stackDy * row;
+      // Prefer the exact model-class match (`PV|1`); fall back to the
+      // UI-category key (`generator|1`) so a sidecar that was saved
+      // before a kind-edit still resolves the dragged coord. The dual-
+      // key shape is documented in `sidecar.ts.buildNonBusCoordinates`.
+      const modelKey = `${entry.kind}|${String(entry.idx)}`;
+      const categoryKey = `${bucket.kind}|${String(entry.idx)}`;
+      const sidecar = nonBusCoords.get(modelKey) ?? nonBusCoords.get(categoryKey);
+      const x = sidecar?.x ?? parentCoord.x + offset.x + offset.stackDx * colSigned + rowStagger;
+      const y = sidecar?.y ?? parentCoord.y + offset.y + offset.stackDy * row;
       const nodeId = `${bucket.kind}-${String(entry.idx)}`;
       nodes.push({
         id: nodeId,
@@ -861,7 +859,7 @@ export function buildGraph(
       const footprint = NODE_FOOTPRINT[kind];
       const parentBusId =
         n.type !== 'bus' && typeof (n.data as { parentBus?: unknown })?.parentBus === 'string'
-          ? ((n.data as { parentBus: string }).parentBus)
+          ? (n.data as { parentBus: string }).parentBus
           : null;
       return {
         id: n.id,

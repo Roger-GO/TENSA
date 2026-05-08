@@ -12,7 +12,11 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { ProblemDetailsError } from '@/api/client';
 import { parseWorkspacePath, type SidecarLayout } from '@/api/types';
-import { SIDECAR_SCHEMA_VERSION } from '@/components/sld/sidecar';
+import {
+  SIDECAR_SCHEMA_VERSION,
+  buildNonBusCoordinates,
+  type NonBusOverride,
+} from '@/components/sld/sidecar';
 import { cn } from '@/lib/cn';
 
 /**
@@ -63,32 +67,78 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
   const enabled = sessionId !== null && topology !== null;
 
   const writeSidecarAlongside = (caseFilename: string) => {
-    // Build a sidecar carrying the current bus coords from drag
-    // overrides. Non-bus nodes are skipped (the substrate sidecar
-    // schema doesn't carry non_bus_coordinates yet — deferred to a
-    // later pass).
+    // Build a sidecar carrying the current drag positions. Bus
+    // entries land under `coordinates`; generator/load/shunt entries
+    // land under `non_bus_coordinates` with the dual-key shape
+    // (model_class + ui_category) so a kind-edit between sessions
+    // still resolves the dragged coord on read (Unit 4, v0.1.y).
     const coordinates: Record<string, { x: number; y: number }> = {};
+    const nonBusOverrides: NonBusOverride[] = [];
+    // Build a quick lookup from `${uiCategory}-${idx}` → model class
+    // by scanning the live topology buckets. Drag overrides for
+    // elements that no longer exist (deleted between drag + save)
+    // get a `null` model class and only land under the UI-category
+    // layer; that's still a valid (if orphaned) entry which the next
+    // load will resolve via fallback.
+    const modelByCategoryIdx = new Map<string, string>();
+    if (topology) {
+      for (const e of topology.generators ?? []) {
+        modelByCategoryIdx.set(`generator-${String(e.idx)}`, e.kind);
+      }
+      for (const e of topology.loads ?? []) {
+        modelByCategoryIdx.set(`load-${String(e.idx)}`, e.kind);
+      }
+      for (const e of topology.shunts ?? []) {
+        modelByCategoryIdx.set(`shunt-${String(e.idx)}`, e.kind);
+      }
+    }
     for (const [nodeId, coord] of Object.entries(dragOverrides)) {
       // Bus nodes use the bus idx as React Flow node id (no kind
-      // prefix); non-bus nodes are `${kind}-${idx}`. Filter to buses.
-      if (
-        nodeId.startsWith('generator-') ||
-        nodeId.startsWith('load-') ||
-        nodeId.startsWith('shunt-')
-      ) {
+      // prefix); non-bus nodes are `${kind}-${idx}`. Partition by
+      // prefix and route accordingly.
+      if (nodeId.startsWith('generator-')) {
+        const idx = nodeId.slice('generator-'.length);
+        nonBusOverrides.push({
+          uiCategory: 'generator',
+          idx,
+          modelClass: modelByCategoryIdx.get(nodeId) ?? null,
+          coord,
+        });
+        continue;
+      }
+      if (nodeId.startsWith('load-')) {
+        const idx = nodeId.slice('load-'.length);
+        nonBusOverrides.push({
+          uiCategory: 'load',
+          idx,
+          modelClass: modelByCategoryIdx.get(nodeId) ?? null,
+          coord,
+        });
+        continue;
+      }
+      if (nodeId.startsWith('shunt-')) {
+        const idx = nodeId.slice('shunt-'.length);
+        nonBusOverrides.push({
+          uiCategory: 'shunt',
+          idx,
+          modelClass: modelByCategoryIdx.get(nodeId) ?? null,
+          coord,
+        });
         continue;
       }
       coordinates[nodeId] = coord;
     }
-    if (Object.keys(coordinates).length === 0) {
+    if (Object.keys(coordinates).length === 0 && nonBusOverrides.length === 0) {
       // Nothing to persist — buses fell back to defaults / curated /
-      // auto-layout coords. Skip silently.
+      // auto-layout coords AND no non-bus drags happened. Skip
+      // silently.
       return;
     }
     const sidecar: SidecarLayout = {
       schema_version: SIDECAR_SCHEMA_VERSION,
       andes_version: 'unknown',
       coordinates,
+      non_bus_coordinates: buildNonBusCoordinates(nonBusOverrides),
       last_modified: new Date().toISOString(),
     };
     try {
@@ -128,9 +178,7 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
         onError: (err) => {
           if (err instanceof ProblemDetailsError) {
             if (err.status === 409 && !overwrite) {
-              setError(
-                'A file by that name already exists. Tick "Overwrite" to replace it.',
-              );
+              setError('A file by that name already exists. Tick "Overwrite" to replace it.');
               return;
             }
             setError(err.detail ?? err.title ?? 'Save failed');
@@ -168,9 +216,8 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
         <DialogContent>
           <DialogTitle>Save system</DialogTitle>
           <DialogDescription className="mt-2">
-            Write the current topology to the workspace as a file you can
-            re-load later. The current layout (drag positions) saves
-            automatically alongside the case file as
+            Write the current topology to the workspace as a file you can re-load later. The current
+            layout (drag positions) saves automatically alongside the case file as
             <code> &lt;filename&gt;.layout.json</code>.
           </DialogDescription>
           <div className="mt-4 flex flex-col gap-3">

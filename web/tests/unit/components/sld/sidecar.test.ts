@@ -8,10 +8,13 @@ import {
   parseSidecar,
   mergeWithDrift,
   buildSidecarLayout,
+  buildNonBusCoordinates,
+  nonBusCoordsAsMap,
   debouncedPutSidecar,
   cancelPendingSidecarPut,
   __clearAllPendingForTests,
   SIDECAR_SCHEMA_VERSION,
+  type NonBusOverride,
 } from '@/components/sld/sidecar';
 import type { SidecarLayout, TopologySummary, TopologyEntry } from '@/api/types';
 
@@ -31,14 +34,37 @@ function makeTopology(buses: TopologyEntry[]): TopologySummary {
 }
 
 describe('parseSidecar', () => {
-  it('accepts a valid sidecar payload', () => {
-    const valid: SidecarLayout = {
+  it('accepts a valid sidecar payload (no non_bus_coordinates)', () => {
+    const valid = {
       schema_version: '1',
       andes_version: '2.0.x',
       last_modified: '2026-05-07T00:00:00Z',
       coordinates: { '1': { x: 100, y: 200 } },
     };
-    expect(parseSidecar(valid)).toEqual(valid);
+    // Old sidecars without `non_bus_coordinates` MUST round-trip — the
+    // field is additive and reads as an empty object.
+    expect(parseSidecar(valid)).toEqual({
+      ...valid,
+      non_bus_coordinates: {},
+    });
+  });
+
+  it('accepts a sidecar with the dual-key non_bus_coordinates shape', () => {
+    const valid = {
+      schema_version: '1',
+      andes_version: '2.0.x',
+      last_modified: '2026-05-07T00:00:00Z',
+      coordinates: { '1': { x: 100, y: 200 } },
+      non_bus_coordinates: {
+        PV: { '1': { x: 50, y: 60 } },
+        generator: { '1': { x: 50, y: 60 } },
+      },
+    };
+    const parsed = parseSidecar(valid);
+    expect(parsed.non_bus_coordinates).toEqual({
+      PV: { '1': { x: 50, y: 60 } },
+      generator: { '1': { x: 50, y: 60 } },
+    });
   });
 
   it.each([
@@ -63,8 +89,144 @@ describe('parseSidecar', () => {
         coordinates: { '1': { x: '0', y: 0 } },
       },
     ],
+    [
+      'non-finite non-bus coord',
+      {
+        schema_version: '1',
+        andes_version: 'x',
+        last_modified: 'x',
+        coordinates: {},
+        non_bus_coordinates: {
+          PV: { '1': { x: 0, y: Number.POSITIVE_INFINITY } },
+        },
+      },
+    ],
+    [
+      'NaN non-bus coord',
+      {
+        schema_version: '1',
+        andes_version: 'x',
+        last_modified: 'x',
+        coordinates: {},
+        non_bus_coordinates: {
+          generator: { '1': { x: Number.NaN, y: 0 } },
+        },
+      },
+    ],
+    [
+      'non-bus inner not-an-object',
+      {
+        schema_version: '1',
+        andes_version: 'x',
+        last_modified: 'x',
+        coordinates: {},
+        non_bus_coordinates: { PV: 'oops' },
+      },
+    ],
+    [
+      'non-bus outer not-an-object',
+      {
+        schema_version: '1',
+        andes_version: 'x',
+        last_modified: 'x',
+        coordinates: {},
+        non_bus_coordinates: ['array'],
+      },
+    ],
   ])('rejects malformed sidecar: %s', (_label, payload) => {
     expect(() => parseSidecar(payload)).toThrow(TypeError);
+  });
+});
+
+describe('buildNonBusCoordinates', () => {
+  it('emits both model-class and UI-category layers for a known model', () => {
+    const overrides: NonBusOverride[] = [
+      {
+        uiCategory: 'generator',
+        idx: '1',
+        modelClass: 'PV',
+        coord: { x: 100, y: 200 },
+      },
+    ];
+    expect(buildNonBusCoordinates(overrides)).toEqual({
+      PV: { '1': { x: 100, y: 200 } },
+      generator: { '1': { x: 100, y: 200 } },
+    });
+  });
+
+  it('emits only the UI-category layer when modelClass is null', () => {
+    const overrides: NonBusOverride[] = [
+      {
+        uiCategory: 'load',
+        idx: '7',
+        modelClass: null,
+        coord: { x: 1, y: 2 },
+      },
+    ];
+    expect(buildNonBusCoordinates(overrides)).toEqual({
+      load: { '7': { x: 1, y: 2 } },
+    });
+  });
+
+  it('groups multiple overrides under the right outer keys', () => {
+    const overrides: NonBusOverride[] = [
+      { uiCategory: 'generator', idx: '1', modelClass: 'PV', coord: { x: 1, y: 1 } },
+      { uiCategory: 'generator', idx: '2', modelClass: 'GENROU', coord: { x: 2, y: 2 } },
+      { uiCategory: 'load', idx: '1', modelClass: 'PQ', coord: { x: 3, y: 3 } },
+      { uiCategory: 'shunt', idx: '1', modelClass: 'Shunt', coord: { x: 4, y: 4 } },
+    ];
+    expect(buildNonBusCoordinates(overrides)).toEqual({
+      PV: { '1': { x: 1, y: 1 } },
+      GENROU: { '2': { x: 2, y: 2 } },
+      PQ: { '1': { x: 3, y: 3 } },
+      Shunt: { '1': { x: 4, y: 4 } },
+      generator: {
+        '1': { x: 1, y: 1 },
+        '2': { x: 2, y: 2 },
+      },
+      load: { '1': { x: 3, y: 3 } },
+      shunt: { '1': { x: 4, y: 4 } },
+    });
+  });
+
+  it('returns an empty object for an empty input list', () => {
+    expect(buildNonBusCoordinates([])).toEqual({});
+  });
+});
+
+describe('nonBusCoordsAsMap', () => {
+  it('returns an empty map when input is undefined or empty', () => {
+    expect(nonBusCoordsAsMap(undefined).size).toBe(0);
+    expect(nonBusCoordsAsMap({}).size).toBe(0);
+  });
+
+  it('emits both model-class and UI-category keys when present', () => {
+    const map = nonBusCoordsAsMap({
+      PV: { '1': { x: 10, y: 20 } },
+      generator: { '1': { x: 10, y: 20 } },
+    });
+    expect(map.get('PV|1')).toEqual({ x: 10, y: 20 });
+    expect(map.get('generator|1')).toEqual({ x: 10, y: 20 });
+  });
+
+  it('still resolves the UI-category key when only that layer is present', () => {
+    // This is the kind-edit fallback path: an old sidecar saved under a
+    // model that no longer matches the topology should still resolve.
+    const map = nonBusCoordsAsMap({
+      generator: { '1': { x: 50, y: 60 } },
+    });
+    expect(map.get('generator|1')).toEqual({ x: 50, y: 60 });
+    // No model-class layer — model-class lookup misses by design.
+    expect(map.get('PV|1')).toBeUndefined();
+    expect(map.get('GENROU|1')).toBeUndefined();
+  });
+
+  it('resolves the model-class key when only that layer is present', () => {
+    const map = nonBusCoordsAsMap({
+      PV: { '1': { x: 5, y: 5 } },
+    });
+    expect(map.get('PV|1')).toEqual({ x: 5, y: 5 });
+    expect(map.get('generator|1')).toBeUndefined();
   });
 });
 
@@ -145,6 +307,46 @@ describe('buildSidecarLayout', () => {
     expect(layout.andes_version).toBe('2.0.0');
     expect(layout.coordinates).toEqual({ '1': { x: 5, y: 5 } });
     expect(typeof layout.last_modified).toBe('string');
+    // Default non_bus_coordinates is an empty dict (additive, no
+    // surprise data on the wire when no non-bus drags happened).
+    expect(layout.non_bus_coordinates).toEqual({});
+  });
+
+  it('forwards the supplied non_bus_coordinates dict verbatim', () => {
+    const layout = buildSidecarLayout(
+      { '1': { x: 5, y: 5 } },
+      {
+        nonBusCoords: {
+          PV: { '1': { x: 100, y: 200 } },
+          generator: { '1': { x: 100, y: 200 } },
+        },
+      },
+    );
+    expect(layout.non_bus_coordinates).toEqual({
+      PV: { '1': { x: 100, y: 200 } },
+      generator: { '1': { x: 100, y: 200 } },
+    });
+  });
+
+  it('round-trips through parseSidecar with both layers populated', () => {
+    const layout = buildSidecarLayout(
+      { '1': { x: 5, y: 5 } },
+      {
+        andesVersion: '2.0.0',
+        nonBusCoords: buildNonBusCoordinates([
+          { uiCategory: 'generator', idx: '1', modelClass: 'PV', coord: { x: 9, y: 9 } },
+          { uiCategory: 'load', idx: '2', modelClass: 'PQ', coord: { x: 7, y: 7 } },
+        ]),
+      },
+    );
+    const reparsed = parseSidecar(layout);
+    expect(reparsed.coordinates).toEqual({ '1': { x: 5, y: 5 } });
+    expect(reparsed.non_bus_coordinates).toEqual({
+      PV: { '1': { x: 9, y: 9 } },
+      generator: { '1': { x: 9, y: 9 } },
+      PQ: { '2': { x: 7, y: 7 } },
+      load: { '2': { x: 7, y: 7 } },
+    });
   });
 });
 

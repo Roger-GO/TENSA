@@ -291,3 +291,92 @@ async def test_put_layout_rejects_traversal(
         json=_layout_body(),
     )
     assert resp.status_code == 400, resp.text
+
+
+# ---- non_bus_coordinates (Unit 4, v0.1.y) ----------------------------------
+
+
+@pytest.mark.integration
+async def test_put_then_get_layout_with_non_bus_coordinates(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """Round-trip: PUT a sidecar with the dual-key non_bus_coordinates
+    shape and GET it back. Both layers (model class + UI category)
+    survive intact so kind-edits between sessions can fall back to the
+    UI-category key."""
+    client, _ws = client_workspace
+    body = _layout_body()
+    body["non_bus_coordinates"] = {
+        "PV": {"1": {"x": 100.0, "y": 200.0}},
+        "generator": {"1": {"x": 100.0, "y": 200.0}},
+        "PQ": {"3": {"x": 50.0, "y": 60.0}},
+        "load": {"3": {"x": 50.0, "y": 60.0}},
+    }
+    put = await client.put(
+        "/api/workspace/layout",
+        params={"case_path": "ieee14.raw"},
+        headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
+        json=body,
+    )
+    assert put.status_code == 204, put.text
+    get = await client.get(
+        "/api/workspace/layout",
+        params={"case_path": "ieee14.raw"},
+        headers={"X-Andes-Token": VALID_TOKEN},
+    )
+    assert get.status_code == 200, get.text
+    parsed = get.json()
+    assert parsed["non_bus_coordinates"] == {
+        "PV": {"1": {"x": 100.0, "y": 200.0}},
+        "generator": {"1": {"x": 100.0, "y": 200.0}},
+        "PQ": {"3": {"x": 50.0, "y": 60.0}},
+        "load": {"3": {"x": 50.0, "y": 60.0}},
+    }
+
+
+@pytest.mark.integration
+async def test_put_layout_without_non_bus_coordinates_reads_as_empty(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """Backward-compat: an old sidecar with only ``coordinates`` reads
+    back with ``non_bus_coordinates`` defaulting to an empty dict."""
+    client, _ws = client_workspace
+    body = _layout_body()
+    assert "non_bus_coordinates" not in body
+    put = await client.put(
+        "/api/workspace/layout",
+        params={"case_path": "ieee14.raw"},
+        headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
+        json=body,
+    )
+    assert put.status_code == 204, put.text
+    get = await client.get(
+        "/api/workspace/layout",
+        params={"case_path": "ieee14.raw"},
+        headers={"X-Andes-Token": VALID_TOKEN},
+    )
+    assert get.status_code == 200, get.text
+    parsed = get.json()
+    assert parsed["non_bus_coordinates"] == {}
+
+
+@pytest.mark.integration
+async def test_put_layout_non_bus_coordinates_nan_rejected(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """NaN/Inf in a non_bus_coordinates entry must be rejected by the
+    same finite-coord validator that already covers ``coordinates``."""
+    client, _ws = client_workspace
+    raw = (
+        '{"schema_version":"1.0","andes_version":"2.0.0",'
+        '"coordinates":{},'
+        '"non_bus_coordinates":{"PV":{"1":{"x":0.0,"y":1e400}}},'
+        '"last_modified":"2026-05-07T12:00:00+00:00"}'
+    )
+    resp = await client.put(
+        "/api/workspace/layout",
+        params={"case_path": "ieee14.raw"},
+        headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
+        content=raw,
+    )
+    assert resp.status_code == 422, resp.text

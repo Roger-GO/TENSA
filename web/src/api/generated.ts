@@ -836,6 +836,15 @@ export interface components {
                 [key: string]: components["schemas"]["BusCoord"];
             };
             /**
+             * Non Bus Coordinates
+             * @description Per-non-bus-element coordinates, two-level dict keyed by ANDES model class (e.g., ``PV``, ``GENROU``, ``PQ``, ``Shunt``) OR by UI category (``generator``, ``load``, ``shunt``), then by element idx (stringified). The writer emits BOTH the model-class-keyed entry and the UI-category-keyed entry for every dragged non-bus element so kind-edits (e.g., ``PV`` → ``GENROU``) survive: the model-class entry becomes orphaned but the UI-category entry still resolves on read. Optional + additive — old sidecars without this field read as ``{}`` and the renderer falls back to kind-default offsets.
+             */
+            non_bus_coordinates?: {
+                [key: string]: {
+                    [key: string]: components["schemas"]["BusCoord"];
+                };
+            };
+            /**
              * Last Modified
              * @description ISO 8601 timestamp recorded by the client at save time. The server does NOT regenerate this on write; it stores the value the client sent so collaborative-edit conflict detection (a future feature) has a single source of truth.
              */
