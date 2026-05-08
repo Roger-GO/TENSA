@@ -1,7 +1,7 @@
 ---
 title: "feat: v0.2 readiness bridge — finalize v0.1.y polish + verify gate"
 type: feat
-status: active
+status: completed
 date: 2026-05-08
 origin: docs/plans/2026-05-08-002-feat-v01y-deletion-layout-prerequisites-plan.md
 ---
