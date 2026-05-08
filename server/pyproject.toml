@@ -56,6 +56,12 @@ Issues = "https://github.com/rollerg97/ANDES_App/issues"
 # Hatchling build target — src layout
 [tool.hatch.build.targets.wheel]
 packages = ["src/andes_app"]
+# Bundle the built SPA into the wheel under ``andes_app/static/``. The
+# wheel-build step expects ``../web/dist`` to exist; CI runs ``pnpm build``
+# in ``web/`` before ``python -m build`` to populate it. If the directory
+# is missing at build time, hatch fails loudly — that's the intended
+# behavior so we never ship a wheel without the UI bundle.
+force-include = { "../web/dist" = "andes_app/static" }
 
 [tool.hatch.build.targets.sdist]
 include = [

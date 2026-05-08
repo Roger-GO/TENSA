@@ -103,10 +103,10 @@ async def _create_session_and_load(
 ) -> str:
     """Helper: create a session over HTTP and load IEEE 14. Returns session_id."""
     async with httpx.AsyncClient(base_url=base_url) as client:
-        resp = await client.post("/sessions", headers={"X-Andes-Token": token})
+        resp = await client.post("/api/sessions", headers={"X-Andes-Token": token})
         sid = str(resp.json()["session_id"])
         await client.post(
-            f"/sessions/{sid}/case",
+            f"/api/sessions/{sid}/case",
             headers={"X-Andes-Token": token},
             json={"primary_path": primary, "addfiles": [addfile]},
         )
@@ -121,7 +121,7 @@ async def test_streaming_tds_end_to_end(live_server: tuple[str, int, str]) -> No
     token, port, base_url = live_server
     sid = await _create_session_and_load(token, base_url)
 
-    ws_url = f"ws://127.0.0.1:{port}/ws/{sid}"
+    ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
     async with websockets.connect(ws_url) as ws:
         # Auth
         await ws.send(json.dumps({"type": "auth", "token": token}))
@@ -181,7 +181,7 @@ async def test_streaming_tds_bad_token_closes_4401(
 ) -> None:
     """First message with the wrong token causes server to close with 4401."""
     _token, port, _base = live_server
-    ws_url = f"ws://127.0.0.1:{port}/ws/some-session-id"
+    ws_url = f"ws://127.0.0.1:{port}/api/ws/some-session-id"
     async with websockets.connect(ws_url) as ws:
         await ws.send(json.dumps({"type": "auth", "token": "wrong"}))
         # Server should send an error text frame, then close with 4401
@@ -207,7 +207,7 @@ async def test_streaming_tds_auth_timeout_closes_4401(
 ) -> None:
     """Open WS, never send auth — server closes with 4401 within ~2s."""
     _token, port, _base = live_server
-    ws_url = f"ws://127.0.0.1:{port}/ws/some-session-id"
+    ws_url = f"ws://127.0.0.1:{port}/api/ws/some-session-id"
     start = time.monotonic()
     async with websockets.connect(ws_url) as ws:
         # Don't send anything; wait for the server to close
@@ -230,7 +230,7 @@ async def test_streaming_tds_unknown_session_closes_4404(
 ) -> None:
     """After successful auth, an unknown session_id closes with 4404."""
     token, port, _base = live_server
-    ws_url = f"ws://127.0.0.1:{port}/ws/no-such-session"
+    ws_url = f"ws://127.0.0.1:{port}/api/ws/no-such-session"
     async with websockets.connect(ws_url) as ws:
         await ws.send(json.dumps({"type": "auth", "token": token}))
         # Expect close 4404 (possibly preceded by an error text frame)
@@ -259,7 +259,7 @@ async def _drive_streaming_run(
 ) -> tuple[dict[str, object], list[bytes], dict[str, object]]:
     """Helper: open WS, auth, send start_tds with optional decimation params,
     return (stream_start_metadata, list_of_binary_frames, done_message)."""
-    ws_url = f"ws://127.0.0.1:{port}/ws/{sid}"
+    ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
     cfg: dict[str, object] = {"type": "start_tds", "tf": tf}
     if h is not None:
         cfg["h"] = h
@@ -374,7 +374,7 @@ async def test_streaming_decimation_mean_without_rate_closes_with_error(
     layer rejects it before any TDS run starts."""
     token, port, base = live_server
     sid = await _create_session_and_load(token, base)
-    ws_url = f"ws://127.0.0.1:{port}/ws/{sid}"
+    ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
 
     async with websockets.connect(ws_url) as ws:
         await ws.send(json.dumps({"type": "auth", "token": token}))
@@ -429,7 +429,7 @@ async def test_streaming_run_id_in_stream_start_metadata(
     token, port, base = live_server
     sid = await _create_session_and_load(token, base)
 
-    ws_url = f"ws://127.0.0.1:{port}/ws/{sid}"
+    ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
     async with websockets.connect(ws_url) as ws:
         await ws.send(json.dumps({"type": "auth", "token": token}))
         json.loads(await ws.recv())  # ready
@@ -460,7 +460,7 @@ async def test_streaming_resume_after_disconnect(
     token, port, base = live_server
     sid = await _create_session_and_load(token, base)
 
-    ws_url = f"ws://127.0.0.1:{port}/ws/{sid}"
+    ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
 
     # ---- Phase 1: start the run, capture some frames, drop the WS ----
     run_id: str | None = None
@@ -532,7 +532,7 @@ async def test_streaming_resume_unknown_run_id_closes_4404(
     token, port, base = live_server
     sid = await _create_session_and_load(token, base)
 
-    ws_url = f"ws://127.0.0.1:{port}/ws/{sid}"
+    ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
     async with websockets.connect(ws_url) as ws:
         await ws.send(json.dumps({"type": "auth", "token": token}))
         json.loads(await ws.recv())  # ready
@@ -561,7 +561,7 @@ async def test_streaming_resume_after_run_completed_replays_full_run(
     token, port, base = live_server
     sid = await _create_session_and_load(token, base)
 
-    ws_url = f"ws://127.0.0.1:{port}/ws/{sid}"
+    ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
 
     # ---- Phase 1: complete a short run, capturing run_id but not frames ----
     run_id: str | None = None

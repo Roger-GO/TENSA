@@ -60,7 +60,7 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
 async def test_create_session_with_valid_token_returns_201(
     client: httpx.AsyncClient,
 ) -> None:
-    resp = await client.post("/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["state"] == "live"
@@ -73,7 +73,7 @@ async def test_create_session_with_valid_token_returns_201(
 async def test_create_session_without_token_returns_401(
     client: httpx.AsyncClient,
 ) -> None:
-    resp = await client.post("/sessions")
+    resp = await client.post("/api/sessions")
     assert resp.status_code == 401, resp.text
 
 
@@ -81,7 +81,7 @@ async def test_create_session_without_token_returns_401(
 async def test_create_session_with_invalid_token_returns_401(
     client: httpx.AsyncClient,
 ) -> None:
-    resp = await client.post("/sessions", headers={"X-Andes-Token": "invalid"})
+    resp = await client.post("/api/sessions", headers={"X-Andes-Token": "invalid"})
     assert resp.status_code == 401, resp.text
 
 
@@ -90,7 +90,7 @@ async def test_create_session_rejects_client_supplied_session_id(
     client: httpx.AsyncClient,
 ) -> None:
     resp = await client.post(
-        "/sessions",
+        "/api/sessions",
         headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
         json={"session_id": "attacker-controlled"},
     )
@@ -100,9 +100,9 @@ async def test_create_session_rejects_client_supplied_session_id(
 @pytest.mark.integration
 async def test_max_sessions_cap_returns_429(client: httpx.AsyncClient) -> None:
     # Cap is 2 (set in fixture)
-    resp1 = await client.post("/sessions", headers={"X-Andes-Token": VALID_TOKEN})
-    resp2 = await client.post("/sessions", headers={"X-Andes-Token": VALID_TOKEN})
-    resp3 = await client.post("/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp1 = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp2 = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp3 = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
     assert resp1.status_code == 201
     assert resp2.status_code == 201
     assert resp3.status_code == 429
@@ -110,18 +110,18 @@ async def test_max_sessions_cap_returns_429(client: httpx.AsyncClient) -> None:
     # Closing one frees the slot
     sid_to_close = resp1.json()["session_id"]
     del_resp = await client.delete(
-        f"/sessions/{sid_to_close}", headers={"X-Andes-Token": VALID_TOKEN}
+        f"/api/sessions/{sid_to_close}", headers={"X-Andes-Token": VALID_TOKEN}
     )
     assert del_resp.status_code == 204
-    resp4 = await client.post("/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp4 = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
     assert resp4.status_code == 201
 
 
 @pytest.mark.integration
 async def test_list_sessions_returns_active(client: httpx.AsyncClient) -> None:
-    resp = await client.post("/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
     sid = resp.json()["session_id"]
-    list_resp = await client.get("/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    list_resp = await client.get("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
     assert list_resp.status_code == 200
     body = list_resp.json()
     ids = {s["session_id"] for s in body["sessions"]}
@@ -131,20 +131,20 @@ async def test_list_sessions_returns_active(client: httpx.AsyncClient) -> None:
 @pytest.mark.integration
 async def test_get_unknown_session_returns_404(client: httpx.AsyncClient) -> None:
     resp = await client.get(
-        "/sessions/does-not-exist", headers={"X-Andes-Token": VALID_TOKEN}
+        "/api/sessions/does-not-exist", headers={"X-Andes-Token": VALID_TOKEN}
     )
     assert resp.status_code == 404
 
 
 @pytest.mark.integration
 async def test_delete_session_is_idempotent(client: httpx.AsyncClient) -> None:
-    resp = await client.post("/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
     sid = resp.json()["session_id"]
     first = await client.delete(
-        f"/sessions/{sid}", headers={"X-Andes-Token": VALID_TOKEN}
+        f"/api/sessions/{sid}", headers={"X-Andes-Token": VALID_TOKEN}
     )
     second = await client.delete(
-        f"/sessions/{sid}", headers={"X-Andes-Token": VALID_TOKEN}
+        f"/api/sessions/{sid}", headers={"X-Andes-Token": VALID_TOKEN}
     )
     assert first.status_code == 204
     assert second.status_code == 204
@@ -153,7 +153,7 @@ async def test_delete_session_is_idempotent(client: httpx.AsyncClient) -> None:
 @pytest.mark.integration
 async def test_bad_host_header_returns_400(client: httpx.AsyncClient) -> None:
     resp = await client.post(
-        "/sessions",
+        "/api/sessions",
         headers={"X-Andes-Token": VALID_TOKEN, "Host": "evil.example.com"},
     )
     assert resp.status_code == 400, resp.text
@@ -162,7 +162,7 @@ async def test_bad_host_header_returns_400(client: httpx.AsyncClient) -> None:
 @pytest.mark.integration
 async def test_bad_origin_header_returns_400(client: httpx.AsyncClient) -> None:
     resp = await client.post(
-        "/sessions",
+        "/api/sessions",
         headers={
             "X-Andes-Token": VALID_TOKEN,
             "Origin": "http://evil.example.com",

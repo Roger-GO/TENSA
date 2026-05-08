@@ -68,7 +68,7 @@ async def test_list_files_happy_path(
     (ws / "ieee14.dyr").write_text("dummy")
     (ws / "case.xlsx").write_text("dummy")
     resp = await client.get(
-        "/workspace/files",
+        "/api/workspace/files",
         headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
@@ -96,7 +96,7 @@ async def test_list_files_excludes_hidden_and_unknown_extensions(
     (ws / "doc.txt").write_text("not-a-case")
     (ws / "valid.raw").write_text("ok")
     resp = await client.get(
-        "/workspace/files",
+        "/api/workspace/files",
         headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
@@ -109,7 +109,7 @@ async def test_list_files_requires_auth(
     client_workspace: tuple[httpx.AsyncClient, Path],
 ) -> None:
     client, _ws = client_workspace
-    resp = await client.get("/workspace/files")
+    resp = await client.get("/api/workspace/files")
     assert resp.status_code == 401, resp.text
 
 
@@ -122,7 +122,7 @@ async def test_get_layout_returns_404_when_absent(
 ) -> None:
     client, _ws = client_workspace
     resp = await client.get(
-        "/workspace/layout",
+        "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
         headers={"X-Andes-Token": VALID_TOKEN},
     )
@@ -135,7 +135,7 @@ async def test_get_layout_requires_auth(
 ) -> None:
     client, _ws = client_workspace
     resp = await client.get(
-        "/workspace/layout", params={"case_path": "ieee14.raw"}
+        "/api/workspace/layout", params={"case_path": "ieee14.raw"}
     )
     assert resp.status_code == 401, resp.text
 
@@ -146,7 +146,7 @@ async def test_get_layout_rejects_traversal(
 ) -> None:
     client, _ws = client_workspace
     resp = await client.get(
-        "/workspace/layout",
+        "/api/workspace/layout",
         params={"case_path": "../etc/passwd"},
         headers={"X-Andes-Token": VALID_TOKEN},
     )
@@ -163,7 +163,7 @@ async def test_put_then_get_roundtrip(
     client, ws = client_workspace
     body = _layout_body()
     put = await client.put(
-        "/workspace/layout",
+        "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
         headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
         json=body,
@@ -180,7 +180,7 @@ async def test_put_then_get_roundtrip(
         assert stat.S_IMODE(sidecar.stat().st_mode) == 0o600
 
     get = await client.get(
-        "/workspace/layout",
+        "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
         headers={"X-Andes-Token": VALID_TOKEN},
     )
@@ -203,7 +203,7 @@ async def test_put_layout_too_large_returns_413(
     serialized = json.dumps(body)
     assert len(serialized) > 256 * 1024
     resp = await client.put(
-        "/workspace/layout",
+        "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
         headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
         content=serialized,
@@ -217,7 +217,7 @@ async def test_put_layout_invalid_json_returns_422(
 ) -> None:
     client, _ws = client_workspace
     resp = await client.put(
-        "/workspace/layout",
+        "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
         headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
         content="{not valid json}",
@@ -233,7 +233,7 @@ async def test_put_layout_extra_fields_rejected(
     body = _layout_body()
     body["evil_field"] = "smuggled"
     resp = await client.put(
-        "/workspace/layout",
+        "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
         headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
         json=body,
@@ -257,7 +257,7 @@ async def test_put_layout_nan_coordinate_rejected(
         '"last_modified":"2026-05-07T12:00:00+00:00"}'
     )
     resp = await client.put(
-        "/workspace/layout",
+        "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
         headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
         content=raw,
@@ -271,7 +271,7 @@ async def test_put_layout_requires_auth(
 ) -> None:
     client, _ws = client_workspace
     resp = await client.put(
-        "/workspace/layout",
+        "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
         headers={"Content-Type": "application/json"},
         json=_layout_body(),
@@ -285,7 +285,7 @@ async def test_put_layout_rejects_traversal(
 ) -> None:
     client, _ws = client_workspace
     resp = await client.put(
-        "/workspace/layout",
+        "/api/workspace/layout",
         params={"case_path": "../escape.raw"},
         headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
         json=_layout_body(),

@@ -71,7 +71,7 @@ def _map_worker_error(exc: WorkerError) -> HTTPException:
         return HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
-                f"{exc.detail} — call POST /sessions/{{id}}/reload to recover."
+                f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
             ),
         )
     return HTTPException(
