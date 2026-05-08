@@ -21,11 +21,13 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 
 from andes_app.api.auth import RequireToken
 from andes_app.api.schemas import (
     AddElementRequest,
     BlankSystemResponse,
+    DeleteBlockedResponse,
     EditElementRequest,
     ElementCreated,
     ProblemDetails,
@@ -125,6 +127,7 @@ def _map_worker_error(exc: WorkerError) -> HTTPException:
         "ElementValidationError",
         "DisturbanceValidationError",
         "CaseLoadError",
+        "ElementHasDependentsError",
     }:
         return HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -461,5 +464,83 @@ async def undo_last_edit(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
+        raise _map_worker_error(exc) from exc
+    return TopologySummary(**payload)
+
+
+# ---- delete (Unit 1, v0.1.y) -----------------------------------------------
+
+
+@router.delete(
+    "/sessions/{session_id}/elements/{model}/{idx}",
+    operation_id="deleteElement",
+    summary="Delete a previously-added pre-setup element.",
+    response_model=TopologySummary,
+    responses={
+        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
+        404: {
+            "model": ProblemDetails,
+            "description": (
+                "Session not found, or no element of the given model+idx "
+                "exists in the loaded System."
+            ),
+        },
+        409: {
+            "model": ProblemDetails,
+            "description": (
+                "Session has already been committed (PF or TDS has run); "
+                "call POST /api/sessions/{id}/reload to return to pre-setup."
+            ),
+        },
+        422: {
+            "model": DeleteBlockedResponse,
+            "description": (
+                "Deletion is blocked. Three sub-cases share this status: "
+                "(a) cascade dependents exist (body matches "
+                "``DeleteBlockedResponse``); (b) the element came from "
+                "the loaded case file, not from ``add_element`` (body "
+                "matches ``ProblemDetails`` with the 'reload to revert' "
+                "message); (c) unknown model name (body matches "
+                "``ProblemDetails``)."
+            ),
+        },
+    },
+)
+async def delete_element(
+    session_id: str,
+    model: str,
+    idx: str,
+    request: Request,
+    _: RequireToken,
+) -> TopologySummary | JSONResponse:
+    _enforce_body_size(request)
+    mgr = _manager(request)
+    try:
+        payload: Any = await mgr.invoke(
+            session_id,
+            "delete_element",
+            {"model": model, "idx": idx},
+        )
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except WorkerError as exc:
+        # Cascade-dependents case: surface the typed ``DeleteBlockedResponse``
+        # body instead of the generic ``ProblemDetails`` envelope. The
+        # extra payload (dependents + total) crosses the worker Pipe via
+        # ``WorkerError.extra`` (set by the worker's
+        # ``ElementHasDependentsError`` handler).
+        if exc.category == "ElementHasDependentsError":
+            extra = exc.extra
+            dependents_raw = extra.get("dependents", [])
+            total = int(extra.get("total", len(dependents_raw)))
+            dependents = [TopologyEntry(**d) for d in dependents_raw]
+            body = DeleteBlockedResponse(dependents=dependents, total=total)
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                content=body.model_dump(),
+            )
         raise _map_worker_error(exc) from exc
     return TopologySummary(**payload)
