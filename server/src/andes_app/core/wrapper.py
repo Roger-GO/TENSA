@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,8 +40,11 @@ from andes_app.core.errors import (
     CaseLoadError,
     DisturbanceCommitError,
     DisturbanceValidationError,
+    ElementNotFoundError,
+    ElementValidationError,
     NoCaseLoadedError,
     SetupFailedError,
+    SystemAlreadyLoadedError,
 )
 
 # JSON-friendly scalar union surfaced through topology / line-flow APIs.
@@ -69,6 +73,11 @@ class TopologySnapshot:
     "committed". Some computed fields on each element are only populated
     after setup — the schema in the API surface (Unit 4) declares which
     fields are pre-setup-stable vs post-setup-required.
+
+    Lines vs transformers split (Unit 2): ANDES models 2-winding transformers
+    within the ``Line`` model class with a non-default ``tap`` or ``phi``.
+    The substrate splits them into two buckets at the boundary so the SLD
+    can render the transformer-2w icon at the line midpoint.
     """
 
     state: Literal["pre-setup", "committed"]
@@ -77,6 +86,7 @@ class TopologySnapshot:
     transformers: list[TopologyEntry]
     generators: list[TopologyEntry]
     loads: list[TopologyEntry]
+    shunts: list[TopologyEntry] = field(default_factory=list)
 
 
 @dataclass
@@ -133,6 +143,13 @@ class Wrapper:
         self._case_path: Path | None = None
         self._addfiles: list[Path] | None = None
         self._setup_failed: bool = False  # marks "requires reload"
+        # ``replay_buffer`` records every successful pre-setup add so a
+        # blank session (no underlying case file) can recover its topology
+        # via ``reload_case`` — the v0.1.x workaround for ANDES's missing
+        # pre-setup ``delete()`` API. Capped at REPLAY_BUFFER_MAX entries
+        # with oldest-eviction; older entries are dropped silently with a
+        # logged warning.
+        self._replay_buffer: list[tuple[str, dict[str, Any]]] = []
 
     # ----- lifecycle -----
 
@@ -176,6 +193,10 @@ class Wrapper:
         self._case_path = case_path
         self._addfiles = resolved_addfiles
         self._setup_failed = False
+        # Loading from a real case file invalidates any blank-session replay
+        # history — that buffer is only meaningful for sessions whose entire
+        # state was built up via ``add_element``.
+        self._replay_buffer = []
         return self._topology_snapshot_locked()
 
     def reload_case(self) -> TopologySnapshot:
@@ -185,13 +206,50 @@ class Wrapper:
         re-parse. ANDES has no public mechanism to skip the parse and only
         revert ``is_setup``; ``System.reset()`` always re-calls setup, and
         ``System.reload()`` always re-parses.
+
+        Blank-session reload (no underlying case file): re-create
+        ``andes.System()`` and replay every entry recorded in
+        ``self._replay_buffer``. Failed replays leave the wrapper in a
+        partial state and raise ``ElementValidationError`` — caller can
+        retry ``create_blank()`` to start over.
         """
         if self._case_path is None:
-            raise NoCaseLoadedError("no case has been loaded; call load_case() first")
+            if not self._replay_buffer:
+                raise NoCaseLoadedError(
+                    "no case has been loaded; call load_case() or create_blank() first"
+                )
+            return self._reload_blank_locked()
         return self.load_case(
             self._case_path,
             addfiles=[str(a) for a in self._addfiles] if self._addfiles else None,
         )
+
+    def _reload_blank_locked(self) -> TopologySnapshot:
+        """Re-create the blank System and replay every recorded add."""
+        import andes  # heavy import — kept lazy
+
+        log = logging.getLogger("andes-app.wrapper.replay")
+        ss = andes.System()
+        replay = list(self._replay_buffer)  # snapshot — replays may mutate
+        self._ss = ss
+        self._setup_failed = False
+        self._replay_buffer = []
+        for model_name, params in replay:
+            # Pass a fresh copy each iteration — ANDES mutates the dict.
+            try:
+                ss.add(model_name, dict(params))
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "replay rejected by ANDES on model=%r: %s",
+                    model_name,
+                    _sanitize_message(str(exc)),
+                )
+                raise ElementValidationError(
+                    f"replay failed at model {model_name!r}: "
+                    f"{_sanitize_message(str(exc))}"
+                ) from exc
+            self._replay_buffer.append((model_name, dict(params)))
+        return self._topology_snapshot_locked()
 
     # ----- introspection -----
 
@@ -203,21 +261,32 @@ class Wrapper:
         return self._topology_snapshot_locked()
 
     def _topology_snapshot_locked(self) -> TopologySnapshot:
+        """Build the topology snapshot from the loaded System.
+
+        Lines and transformers are both backed by ANDES's ``Line`` model;
+        the substrate splits them at the boundary using the ANDES-default
+        heuristic ``tap != 1.0 OR phi != 0.0``. Pure transmission lines stay
+        in ``lines``; off-nominal-tap or phase-shifting branches move to
+        ``transformers``.
+        """
         assert self._ss is not None
         ss = self._ss
         state: Literal["pre-setup", "committed"] = (
             "committed" if ss.is_setup else "pre-setup"
         )
+        all_lines = _collect_models(ss, ["Line"])
+        lines, transformers = _split_lines_transformers(all_lines)
         return TopologySnapshot(
             state=state,
             buses=_collect_models(ss, ["Bus"]),
-            lines=_collect_models(ss, ["Line"]),
-            transformers=[],  # ANDES models transformers within Line; revisit if a Transformer model surfaces
+            lines=lines,
+            transformers=transformers,
             generators=_collect_models(
                 ss,
                 ["PV", "Slack", "GENROU", "GENCLS"],
             ),
-            loads=_collect_models(ss, ["PQ"]),
+            loads=_collect_models(ss, ["PQ", "ZIP"]),
+            shunts=_collect_models(ss, ["Shunt"]),
         )
 
     # ----- disturbance management -----
@@ -268,9 +337,229 @@ class Wrapper:
             idx: int | str = self._ss.add(model_name, kwargs)
         except Exception as exc:  # noqa: BLE001
             raise DisturbanceValidationError(
-                f"ANDES rejected {model_name} spec: {exc}"
+                f"ANDES rejected {model_name} spec: {_sanitize_message(str(exc))}"
             ) from exc
         return idx
+
+    # ----- topology mutation (Unit 2) -----
+
+    def add_element(
+        self, model: str, params: dict[str, Any]
+    ) -> TopologyEntry:
+        """Add a topology element (Bus, Line, generator, load, shunt) to the
+        pre-setup System.
+
+        Mirrors ``add_disturbance``'s pre-setup gate. Whitelists every key in
+        ``params`` against ``_PARAMS_BY_MODEL[model]`` BEFORE invoking
+        ``ss.add(...)`` so unknown keys never reach ANDES. On success,
+        records the call in ``self._replay_buffer`` so a blank session can
+        recover via ``reload_case()``.
+
+        Returns a freshly-built ``TopologyEntry`` for the new element.
+        """
+        ss = self._require_loaded()
+        if self._setup_failed:
+            raise SetupFailedError(
+                "previous setup() failed; the System is in an inconsistent state"
+            )
+        if ss.is_setup:
+            raise DisturbanceCommitError()
+
+        allowed = allowed_param_names(model)
+        if not allowed:
+            raise ElementValidationError(
+                f"unknown model {model!r}; supported models: "
+                f"{sorted(_PARAMS_BY_MODEL.keys())}"
+            )
+        unknown = sorted(set(params.keys()) - set(allowed))
+        if unknown:
+            raise ElementValidationError(
+                f"unknown param keys for {model}: {unknown}; "
+                f"allowed keys: {list(allowed)}"
+            )
+
+        # Snapshot the params for replay BEFORE ANDES gets a chance to
+        # mutate the dict in-place — ``ss.add`` pops ``idx`` (and possibly
+        # other identifier fields) out of the input dict during model
+        # registration. Without the pre-call copy, replay would call
+        # ``ss.add`` without the idx, and ANDES would auto-prefix the new
+        # device's idx (``Bus_1`` instead of ``1``), breaking idempotent
+        # reload.
+        replay_snapshot = dict(params)
+        try:
+            idx = ss.add(model, params)
+        except Exception as exc:  # noqa: BLE001
+            raise ElementValidationError(
+                f"ANDES rejected add({model!r}, ...): {_sanitize_message(str(exc))}"
+            ) from exc
+
+        # Cap the replay buffer at REPLAY_BUFFER_MAX with oldest-eviction.
+        if len(self._replay_buffer) >= REPLAY_BUFFER_MAX:
+            dropped, _ = self._replay_buffer.pop(0)
+            logging.getLogger("andes-app.wrapper.replay").warning(
+                "replay buffer at cap (%d); dropping oldest entry (model=%r)",
+                REPLAY_BUFFER_MAX, dropped,
+            )
+        self._replay_buffer.append((model, replay_snapshot))
+
+        # Build the TopologyEntry from the just-added device.
+        entry = self._lookup_topology_entry(model, idx)
+        if entry is None:
+            # Defensive — ss.add reported success but the device isn't
+            # surfaced via the standard introspection path. This indicates
+            # a model whose ANDES introspection differs (e.g., a model
+            # we haven't tested). Surface a clear error rather than
+            # returning a garbage entry.
+            raise ElementValidationError(
+                f"ANDES accepted add({model!r}) but no device with idx={idx!r} "
+                "was found on read-back"
+            )
+        return entry
+
+    def edit_element(
+        self, model: str, idx: int | str, params: dict[str, Any]
+    ) -> TopologyEntry:
+        """Edit parameters on an existing topology element.
+
+        Same pre-setup gate as ``add_element``. Whitelists keys against
+        ``_PARAMS_BY_MODEL[model]``. For each ``(param, value)`` pair, sets
+        ``getattr(getattr(ss, model), param).v[i] = value`` where ``i`` is
+        the index of ``idx`` in ``ss.<model>.idx.v``.
+
+        Returns the updated ``TopologyEntry``.
+        """
+        ss = self._require_loaded()
+        if self._setup_failed:
+            raise SetupFailedError(
+                "previous setup() failed; the System is in an inconsistent state"
+            )
+        if ss.is_setup:
+            raise DisturbanceCommitError()
+
+        allowed = allowed_param_names(model)
+        if not allowed:
+            raise ElementValidationError(
+                f"unknown model {model!r}; supported models: "
+                f"{sorted(_PARAMS_BY_MODEL.keys())}"
+            )
+        unknown = sorted(set(params.keys()) - set(allowed))
+        if unknown:
+            raise ElementValidationError(
+                f"unknown param keys for {model}: {unknown}; "
+                f"allowed keys: {list(allowed)}"
+            )
+
+        model_obj = getattr(ss, model, None)
+        if model_obj is None:
+            raise ElementValidationError(
+                f"model {model!r} not present on the loaded System"
+            )
+        idx_var = getattr(model_obj, "idx", None)
+        idx_values = list(getattr(idx_var, "v", []) if idx_var is not None else [])
+        # Look up the device by string-equality on idx, since idx values can
+        # be ints (from PSS/E .raw) or strings (from .xlsx) and the API
+        # surface always passes them as strings.
+        idx_str = str(idx)
+        try:
+            i = next(
+                pos for pos, value in enumerate(idx_values) if str(value) == idx_str
+            )
+        except StopIteration as exc:
+            raise ElementNotFoundError(
+                f"no {model} with idx={idx!r}"
+            ) from exc
+
+        for pname, value in params.items():
+            if pname in ("idx", "name"):
+                # idx / name updates are not safe at the array-write level —
+                # they would desync internal indexes. Reject explicitly.
+                raise ElementValidationError(
+                    f"editing {pname!r} is not supported; create a new "
+                    f"element instead"
+                )
+            param = getattr(model_obj, pname, None)
+            param_v = getattr(param, "v", None) if param is not None else None
+            if param_v is None:
+                raise ElementValidationError(
+                    f"param {pname!r} not editable on {model}"
+                )
+            try:
+                # ANDES service params expose .v as a numpy array — direct
+                # element write is the documented way to alter a single
+                # device's parameter.
+                param_v[i] = value
+            except Exception as exc:  # noqa: BLE001
+                raise ElementValidationError(
+                    f"ANDES rejected {model}.{pname}={value!r}: "
+                    f"{_sanitize_message(str(exc))}"
+                ) from exc
+
+        entry = self._lookup_topology_entry(model, idx_values[i])
+        if entry is None:  # pragma: no cover — should never happen post-write
+            raise ElementValidationError(
+                f"could not read back {model} idx={idx!r} after edit"
+            )
+        return entry
+
+    def create_blank(self) -> TopologySnapshot:
+        """Create a brand-new empty ``andes.System()`` for this session.
+
+        409s if a System is already loaded — the caller should reload or
+        open a fresh session. The replay buffer is reset so the new blank
+        session starts from zero.
+        """
+        if self._ss is not None:
+            raise SystemAlreadyLoadedError(
+                "a System is already loaded; call reload_case() or open a "
+                "fresh session"
+            )
+        import andes  # heavy import — kept lazy
+
+        self._ss = andes.System()
+        self._case_path = None
+        self._addfiles = None
+        self._setup_failed = False
+        self._replay_buffer = []
+        return self._topology_snapshot_locked()
+
+    def _lookup_topology_entry(
+        self, model: str, idx: int | str
+    ) -> TopologyEntry | None:
+        """Build a single ``TopologyEntry`` for a given model/idx pair.
+
+        Returns ``None`` if the device isn't present on the System (e.g.,
+        ``ss.add`` failed silently, or the model class isn't surfaced).
+        """
+        ss = self._ss
+        if ss is None:
+            return None
+        model_obj = getattr(ss, model, None)
+        if model_obj is None:
+            return None
+        idx_var = getattr(model_obj, "idx", None)
+        idx_values = list(getattr(idx_var, "v", []) if idx_var is not None else [])
+        idx_str = str(idx)
+        try:
+            i = next(
+                pos for pos, value in enumerate(idx_values) if str(value) == idx_str
+            )
+        except StopIteration:
+            return None
+        name_var = getattr(model_obj, "name", None)
+        name_values = list(
+            getattr(name_var, "v", []) if name_var is not None else []
+        )
+        name = (
+            str(name_values[i])
+            if i < len(name_values)
+            else str(idx_values[i])
+        )
+        params_metas = _PARAMS_BY_MODEL.get(model, ())
+        all_params = _extract_params(model_obj, params_metas) if params_metas else []
+        params = all_params[i] if i < len(all_params) else {}
+        return TopologyEntry(
+            idx=idx_values[i], name=name, kind=model, params=params
+        )
 
     # ----- runs -----
 
@@ -408,19 +697,175 @@ class Wrapper:
             raise SetupFailedError("setup() returned False")
 
 
-# Per-model param subsets surfaced through the topology API. The Inspector
-# Properties tab shows these; absent params (None or wrong length) are
-# silently skipped per the defensive contract in ``_extract_params``.
-_PARAMS_BY_MODEL: dict[str, tuple[str, ...]] = {
-    "Bus": ("Vn", "vmax", "vmin", "area", "zone"),
-    "Line": ("r", "x", "b", "g", "tap", "phi", "bus1", "bus2"),
-    "PV": ("Sn", "Vn", "bus", "p0", "v0", "pmax", "pmin", "qmax", "qmin"),
-    "Slack": ("Sn", "Vn", "bus", "p0", "v0", "a0", "pmax", "pmin", "qmax", "qmin"),
-    "GENROU": ("Sn", "Vn", "bus", "H", "D", "M", "ra", "xl", "xd", "xq", "xd1", "xq1"),
-    "GENCLS": ("Sn", "Vn", "bus", "H", "D", "M", "ra", "xl"),
-    "PQ": ("p0", "q0", "bus", "Vn"),
-    "Shunt": ("g", "b", "bus", "Vn"),
+# Cap on the per-session replay buffer (Unit 2). Beyond this many adds the
+# buffer drops the oldest entries with a logged warning. 1000 is well above
+# any realistic interactive build session and well below memory concerns.
+REPLAY_BUFFER_MAX = 1000
+
+
+# Per-model parameter metadata. Drives three things:
+#
+# 1. The Inspector Properties tab read-back (legacy path; idx + name are
+#    handled separately in ``_collect_models`` and skipped during extract).
+# 2. The Add / Edit form schema published to the web client at
+#    ``GET /api/topology/schema`` — consumed by Unit 6's polymorphic form
+#    generator. ``kind``, ``required``, and ``unit`` flow through to form
+#    rendering (input type, required asterisk, inline unit suffix).
+# 3. The whitelist check in ``add_element`` / ``edit_element`` — any param
+#    key absent from this table for a given model is rejected with 422
+#    ``ElementValidationError`` BEFORE any ANDES call.
+#
+# Required vs. optional reflects ANDES's own contract: parameters without
+# a sensible default (e.g., the bus a generator attaches to) are required.
+# Defaulted params (limits, area / zone, etc.) are optional.
+#
+# Trafo (2W) note: ANDES 2.0 has no separate ``Trafo`` model class —
+# transformers live in the ``Line`` model with non-default ``tap`` (and
+# optionally ``phi``). The Add panel's "Transformer 2W" form maps to
+# ``model='Line'`` with ``tap`` required; downstream ``_topology_snapshot``
+# splits them via the ``tap != 1.0 OR phi != 0.0`` heuristic.
+ParamKind = Literal["string", "number", "bus_idx", "bool"]
+
+
+@dataclass(frozen=True)
+class ParamMeta:
+    """One parameter row in ``_PARAMS_BY_MODEL`` — name + form metadata."""
+
+    name: str
+    kind: ParamKind
+    required: bool = False
+    unit: str | None = None
+
+
+_PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
+    "Bus": (
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("Vn", "number", required=True, unit="kV"),
+        ParamMeta("vmax", "number", unit="pu"),
+        ParamMeta("vmin", "number", unit="pu"),
+        ParamMeta("area", "number"),
+        ParamMeta("zone", "number"),
+    ),
+    "Line": (
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("bus1", "bus_idx", required=True),
+        ParamMeta("bus2", "bus_idx", required=True),
+        ParamMeta("r", "number", required=True, unit="pu"),
+        ParamMeta("x", "number", required=True, unit="pu"),
+        ParamMeta("b", "number", unit="pu"),
+        ParamMeta("g", "number", unit="pu"),
+        ParamMeta("tap", "number"),
+        ParamMeta("phi", "number", unit="rad"),
+    ),
+    "PV": (
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("bus", "bus_idx", required=True),
+        ParamMeta("Sn", "number", required=True, unit="MVA"),
+        ParamMeta("Vn", "number", required=True, unit="kV"),
+        ParamMeta("p0", "number", required=True, unit="pu"),
+        ParamMeta("v0", "number", required=True, unit="pu"),
+        ParamMeta("pmax", "number", unit="pu"),
+        ParamMeta("pmin", "number", unit="pu"),
+        ParamMeta("qmax", "number", unit="pu"),
+        ParamMeta("qmin", "number", unit="pu"),
+    ),
+    "Slack": (
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("bus", "bus_idx", required=True),
+        ParamMeta("Sn", "number", required=True, unit="MVA"),
+        ParamMeta("Vn", "number", required=True, unit="kV"),
+        ParamMeta("p0", "number", unit="pu"),
+        ParamMeta("v0", "number", required=True, unit="pu"),
+        ParamMeta("a0", "number", unit="rad"),
+        ParamMeta("pmax", "number", unit="pu"),
+        ParamMeta("pmin", "number", unit="pu"),
+        ParamMeta("qmax", "number", unit="pu"),
+        ParamMeta("qmin", "number", unit="pu"),
+    ),
+    "GENROU": (
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("bus", "bus_idx", required=True),
+        ParamMeta("Sn", "number", required=True, unit="MVA"),
+        ParamMeta("Vn", "number", required=True, unit="kV"),
+        ParamMeta("H", "number", required=True, unit="MWs/MVA"),
+        ParamMeta("D", "number", unit="pu"),
+        ParamMeta("M", "number", unit="MWs/MVA"),
+        ParamMeta("ra", "number", unit="pu"),
+        ParamMeta("xl", "number", unit="pu"),
+        ParamMeta("xd", "number", unit="pu"),
+        ParamMeta("xq", "number", unit="pu"),
+        ParamMeta("xd1", "number", unit="pu"),
+        ParamMeta("xq1", "number", unit="pu"),
+    ),
+    "GENCLS": (
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("bus", "bus_idx", required=True),
+        ParamMeta("Sn", "number", required=True, unit="MVA"),
+        ParamMeta("Vn", "number", required=True, unit="kV"),
+        ParamMeta("H", "number", required=True, unit="MWs/MVA"),
+        ParamMeta("D", "number", unit="pu"),
+        ParamMeta("M", "number"),
+        ParamMeta("ra", "number", unit="pu"),
+        ParamMeta("xl", "number", unit="pu"),
+    ),
+    "PQ": (
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("bus", "bus_idx", required=True),
+        ParamMeta("Vn", "number", required=True, unit="kV"),
+        ParamMeta("p0", "number", required=True, unit="pu"),
+        ParamMeta("q0", "number", required=True, unit="pu"),
+    ),
+    "ZIP": (
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("bus", "bus_idx", required=True),
+        ParamMeta("Vn", "number", required=True, unit="kV"),
+        ParamMeta("p0", "number", required=True, unit="pu"),
+        ParamMeta("q0", "number", required=True, unit="pu"),
+        ParamMeta("u", "number"),
+        ParamMeta("gammapz", "number"),
+        ParamMeta("gammaiz", "number"),
+        ParamMeta("gammapi", "number"),
+        ParamMeta("gammaii", "number"),
+        ParamMeta("gammapv", "number"),
+        ParamMeta("gammaqv", "number"),
+    ),
+    "Shunt": (
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("bus", "bus_idx", required=True),
+        ParamMeta("Vn", "number", required=True, unit="kV"),
+        ParamMeta("g", "number", unit="pu"),
+        ParamMeta("b", "number", unit="pu"),
+    ),
 }
+
+
+def allowed_param_names(model: str) -> tuple[str, ...]:
+    """Return the param names allowed for a given ANDES model class.
+
+    Used by the wrapper-side whitelist check before any ANDES call. Returns
+    an empty tuple for unknown models — callers should treat that as
+    'unknown model' and reject the request.
+    """
+    return tuple(p.name for p in _PARAMS_BY_MODEL.get(model, ()))
+
+
+def param_metadata_for_form(model: str) -> tuple[ParamMeta, ...]:
+    """Return the form-renderable param metadata for an ANDES model.
+
+    Includes idx + name (the form's identifier inputs). Used by the
+    ``GET /api/topology/schema`` endpoint that drives the web client's
+    polymorphic form generator (Unit 6).
+    """
+    return _PARAMS_BY_MODEL.get(model, ())
 
 
 def _coerce_scalar(value: Any) -> ParamValue | None:
@@ -452,19 +897,26 @@ def _coerce_scalar(value: Any) -> ParamValue | None:
     return None
 
 
-def _extract_params(model: Any, param_names: tuple[str, ...]) -> list[dict[str, ParamValue]]:
+def _extract_params(
+    model: Any, param_metas: tuple[ParamMeta, ...]
+) -> list[dict[str, ParamValue]]:
     """For each device in ``model``, return a dict of the requested params.
 
     Defensive: missing params, zero-length arrays, and length mismatches are
     skipped silently. Returns one dict per device, in the same order as
     ``model.idx.v``.
+
+    ``idx`` and ``name`` are skipped — those are surfaced at the
+    ``TopologyEntry`` level by ``_collect_models``.
     """
     n = int(getattr(model, "n", 0))
     if n <= 0:
         return []
     per_device: list[dict[str, ParamValue]] = [{} for _ in range(n)]
-    for pname in param_names:
-        param = getattr(model, pname, None)
+    for meta in param_metas:
+        if meta.name in ("idx", "name"):
+            continue
+        param = getattr(model, meta.name, None)
         if param is None:
             continue
         values = getattr(param, "v", None)
@@ -480,7 +932,7 @@ def _extract_params(model: Any, param_names: tuple[str, ...]) -> list[dict[str, 
             coerced = _coerce_scalar(raw)
             if coerced is None:
                 continue
-            per_device[i][pname] = coerced
+            per_device[i][meta.name] = coerced
     return per_device
 
 
@@ -509,9 +961,9 @@ def _collect_models(ss: System, model_names: list[str]) -> list[TopologyEntry]:
             name_values = [str(v) for v in name_var.v]
         else:
             name_values = [str(idx) for idx in idx_values]
-        param_subset = _PARAMS_BY_MODEL.get(model_name, ())
+        param_metas = _PARAMS_BY_MODEL.get(model_name, ())
         per_device_params = (
-            _extract_params(model, param_subset) if param_subset else [{} for _ in idx_values]
+            _extract_params(model, param_metas) if param_metas else [{} for _ in idx_values]
         )
         for i, (idx, name) in enumerate(zip(idx_values, name_values, strict=True)):
             params = per_device_params[i] if i < len(per_device_params) else {}
@@ -519,6 +971,56 @@ def _collect_models(ss: System, model_names: list[str]) -> list[TopologyEntry]:
                 TopologyEntry(idx=idx, name=name, kind=model_name, params=params)
             )
     return entries
+
+
+def _split_lines_transformers(
+    line_entries: list[TopologyEntry],
+) -> tuple[list[TopologyEntry], list[TopologyEntry]]:
+    """Partition ANDES Line entries into pure lines vs. transformers.
+
+    Heuristic: a Line is a transformer if its tap is non-default
+    (|tap - 1.0| > 1e-9) or its phase shift is non-zero (|phi| > 1e-9).
+    Tolerant of float drift from PSS/E .raw imports where tap is stored as
+    1.0 + epsilon.
+
+    Devices without a readable ``tap``/``phi`` (older ANDES models, custom
+    extensions) default to the ``lines`` bucket.
+    """
+    lines: list[TopologyEntry] = []
+    transformers: list[TopologyEntry] = []
+    for entry in line_entries:
+        tap = entry.params.get("tap")
+        phi = entry.params.get("phi")
+        try:
+            tap_offset = abs(float(tap) - 1.0) if tap is not None else 0.0
+        except (TypeError, ValueError):
+            tap_offset = 0.0
+        try:
+            phi_abs = abs(float(phi)) if phi is not None else 0.0
+        except (TypeError, ValueError):
+            phi_abs = 0.0
+        if tap_offset > 1e-9 or phi_abs > 1e-9:
+            transformers.append(entry)
+        else:
+            lines.append(entry)
+    return lines, transformers
+
+
+# Filesystem path patterns to strip from ANDES exception messages before
+# they reach the API surface. Workspace paths leak per-user directory
+# structure; the andes install path leaks the wheel layout. Both add noise
+# without giving the client actionable detail.
+_PATH_PATTERN = re.compile(r"/[\w./\-_]+(?:\.py|\.raw|\.dyr|\.xlsx|\.json|\.m)\b")
+
+
+def _sanitize_message(message: str) -> str:
+    """Strip filesystem paths from an ANDES exception message.
+
+    Best-effort regex sweep — leaves the structural message intact while
+    removing absolute paths that would otherwise leak workspace and
+    install-tree details. Replaces matches with ``<path>``.
+    """
+    return _PATH_PATTERN.sub("<path>", message)
 
 
 def _extract_line_flows(ss: System) -> dict[str, LineFlow]:

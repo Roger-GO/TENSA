@@ -59,3 +59,24 @@ class SetupFailedError(AndesAppError):
 class DisturbanceValidationError(AndesAppError):
     """Raised when a disturbance specification fails validation against the
     ANDES model (e.g., bus idx not present in the loaded case)."""
+
+
+class ElementValidationError(AndesAppError):
+    """Raised when an add/edit-element request fails the wrapper-side
+    whitelist check or ANDES rejects the underlying ``ss.add()`` /
+    parameter-array assignment.
+
+    Surfaced as HTTP 422 ProblemDetails. The wrapper sanitizes embedded
+    filesystem paths from the message before re-raising so workspace and
+    install-tree paths never leak to the client.
+    """
+
+
+class ElementNotFoundError(AndesAppError):
+    """Raised when ``edit_element(model, idx, ...)`` references an idx that
+    does not exist in the loaded System. Surfaced as HTTP 404."""
+
+
+class SystemAlreadyLoadedError(AndesAppError):
+    """Raised when ``create_blank()`` is called on a session that already has
+    a loaded System. The caller must reload or open a fresh session."""

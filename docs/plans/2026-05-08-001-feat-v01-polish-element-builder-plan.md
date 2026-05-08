@@ -422,7 +422,7 @@ This spike's output is a paragraph-level note added to Unit 1 (or its replacemen
 
 ---
 
-- [ ] **Unit 2: Substrate mutation API + topology shape extension**
+- [x] **Unit 2: Substrate mutation API + topology shape extension** — landed 2026-05-08. Three new endpoints (POST /elements, PUT /elements/{model}/{idx}, POST /blank) + GET /topology/schema for the form metadata. Wrapper gains `add_element`, `edit_element`, `create_blank`, `replay_buffer` (1000-cap, oldest-eviction). TopologySnapshot adds `shunts`; lines split from transformers via the tap/phi heuristic. `_PARAMS_BY_MODEL` reshaped to `ParamMeta` records carrying `kind`/`required`/`unit`; ZIP + Trafo (via Line) added. ANDES exception messages sanitized. 64 KB body cap with 413 on overflow. Tests: 20 new (151 total). Lint + typecheck + mypy --strict clean. Web `generated.ts` regenerated with new operations + schemas.
 
 **Goal:** Land the server endpoints, wrapper methods, and `TopologySnapshot` shape changes that the Phase 1 element rendering (Unit 3) and Phase 2/3 mutation UIs build on. The shape changes (new `shunts` bucket; Line→Transformer split heuristic) are sequenced before Unit 3 because Unit 3's promise to "render generators/loads/shunts/transformers" depends on the substrate actually emitting non-empty `shunts` and `transformers` buckets — which today it does not.
 
