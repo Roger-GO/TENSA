@@ -23,7 +23,7 @@ export const GeneratorNode = memo(function GeneratorNode({ data, selected }: Nod
       data-kind="generator"
       data-idx={d.idx}
       className={cn(
-        'flex flex-col items-center gap-1 px-2 py-1',
+        'flex flex-col items-center gap-0.5 px-1.5 py-0.5',
         'bg-background text-foreground',
         'rounded-[var(--radius-md)] border',
         selected ? 'border-[var(--color-ring)] ring-2 ring-[var(--color-ring)]' : 'border-border',
@@ -41,10 +41,10 @@ export const GeneratorNode = memo(function GeneratorNode({ data, selected }: Nod
         src={iconForModel(d.kind)}
         alt=""
         aria-hidden="true"
-        className="h-8 w-8 object-contain"
+        className="h-6 w-6 object-contain"
         draggable={false}
       />
-      <span className="text-foreground font-mono text-[10px] leading-none">{d.name || d.idx}</span>
+      <span className="text-foreground font-mono text-[9px] leading-none">{d.name || d.idx}</span>
     </div>
   );
 });
