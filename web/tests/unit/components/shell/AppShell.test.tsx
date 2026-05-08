@@ -1,8 +1,29 @@
-import { render, screen, within } from '@testing-library/react';
+import {
+  render as rtlRender,
+  screen,
+  within,
+  type RenderOptions,
+  type RenderResult,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactElement } from 'react';
 import { AppShell } from '@/components/shell/AppShell';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+
+/**
+ * Unit 7 mounts `CaseNav` as the LeftRail's default content; CaseNav
+ * uses TanStack Query hooks which require a QueryClient in context.
+ * Tests render the shell behind a fresh QueryClient so the CaseNav
+ * mounts cleanly without exercising the queries it never fires here.
+ */
+function render(ui: ReactElement, options?: RenderOptions): RenderResult {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return rtlRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>, options);
+}
 
 /**
  * AppShell tests cover the shell's structural contract: regions render,
