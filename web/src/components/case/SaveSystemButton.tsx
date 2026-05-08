@@ -31,11 +31,12 @@ export interface SaveSystemButtonProps {
   className?: string;
 }
 
-type Format = 'xlsx' | 'json';
+type Format = 'xlsx' | 'json' | 'raw';
 
 const EXT_BY_FORMAT: Record<Format, string> = {
   xlsx: '.xlsx',
   json: '.json',
+  raw: '.raw',
 };
 
 function ensureExtension(filename: string, format: Format): string {
@@ -168,8 +169,9 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
           <DialogTitle>Save system</DialogTitle>
           <DialogDescription className="mt-2">
             Write the current topology to the workspace as a file you can
-            re-load later. PSS/E <code>.raw</code> write is not supported
-            by ANDES 2.0; pick xlsx or json.
+            re-load later. The current layout (drag positions) saves
+            automatically alongside the case file as
+            <code> &lt;filename&gt;.layout.json</code>.
           </DialogDescription>
           <div className="mt-4 flex flex-col gap-3">
             <label className="flex flex-col gap-1">
@@ -200,6 +202,18 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
                 />
                 <span>
                   <strong>xlsx</strong> — ANDES native, opens in Excel
+                </span>
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="save-format"
+                  checked={format === 'raw'}
+                  onChange={() => setFormat('raw')}
+                  disabled={saveMutation.isPending}
+                />
+                <span>
+                  <strong>raw</strong> — PSS/E v33 (round-trips through ANDES's reader)
                 </span>
               </label>
               <label className="flex items-center gap-2 text-sm">

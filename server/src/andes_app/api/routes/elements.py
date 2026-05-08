@@ -334,7 +334,7 @@ async def create_blank(
 def _validate_save_filename(workspace: Path, filename: str, format: str) -> Path:
     """Reject paths that escape the workspace; verify extension matches
     the chosen format. Returns the canonical absolute target path."""
-    expected_ext = {"xlsx": ".xlsx", "json": ".json"}[format]
+    expected_ext = {"xlsx": ".xlsx", "json": ".json", "raw": ".raw"}[format]
     if not filename.endswith(expected_ext):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

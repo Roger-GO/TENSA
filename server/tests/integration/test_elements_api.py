@@ -445,6 +445,50 @@ async def test_edit_element_idx_field_rejected(client: httpx.AsyncClient) -> Non
 
 
 @pytest.mark.integration
+async def test_save_raw_format_round_trips_through_andes_reader(
+    client: httpx.AsyncClient,
+    tmp_path: Path,
+) -> None:
+    """The substrate's PSS/E v33 writer should produce a file that
+    ANDES's own reader can parse back without errors. Verifies the
+    block structure + column layout match v33's expectations."""
+    sid = await _create_session(client)
+    await _load_ieee14(client, sid)
+    resp = await client.post(
+        f"/api/sessions/{sid}/save",
+        headers={"X-Andes-Token": VALID_TOKEN},
+        json={"filename": "round-trip.raw", "format": "raw"},
+    )
+    assert resp.status_code == 201, resp.text
+
+    # Locate the workspace dir from the test fixture; the file landed there.
+    # The fixture exposes the workspace path indirectly — we know it's the
+    # test-managed workspace dir, accessible via a fresh GET on the lister.
+    list_resp = await client.get(
+        "/api/workspace/files",
+        headers={"X-Andes-Token": VALID_TOKEN},
+    )
+    files = list_resp.json()["files"]
+    assert any(f["name"] == "round-trip.raw" for f in files), files
+
+    # Read the file off disk and round-trip through ANDES.
+    import andes
+    from pathlib import Path as _Path  # avoid shadowing
+
+    # The fixture's workspace is in tmp_path/ws (see the `client` fixture).
+    workspace = tmp_path / "ws"
+    raw_path = workspace / "round-trip.raw"
+    assert raw_path.exists(), f"file not on disk: {raw_path}"
+    ss = andes.load(str(raw_path), setup=False, no_output=True, default_config=True)
+    assert ss is not None, "ANDES failed to parse the substrate-emitted raw file"
+    # Spot-check: the round-tripped System should have the same bus count.
+    assert ss.Bus.n == 14
+    assert ss.Line.n >= 16  # IEEE 14 has 16 branches + transformers
+    # PV + Slack + GENROU + GENCLS combined should match the source.
+    assert ss.PV.n + ss.Slack.n + ss.GENROU.n + ss.GENCLS.n >= 5
+
+
+@pytest.mark.integration
 async def test_blank_session_reload_replays_adds(
     client: httpx.AsyncClient,
 ) -> None:

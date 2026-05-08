@@ -519,18 +519,21 @@ class SaveCaseRequest(BaseModel):
         ...,
         description=(
             "Workspace-relative output filename. Extension must match "
-            "``format`` (``.xlsx`` for xlsx, ``.json`` for json)."
+            "``format`` (``.xlsx`` for xlsx, ``.json`` for json, "
+            "``.raw`` for raw)."
         ),
         min_length=1,
     )
-    format: Literal["xlsx", "json"] = Field(
+    format: Literal["xlsx", "json", "raw"] = Field(
         ...,
         description=(
-            "Output format. ``xlsx`` is the ANDES-native Excel layout "
-            "(round-trips through ``andes.io.xlsx.write``). ``json`` is "
-            "the ANDES JSON serialization (cleanest round-trip but "
-            "less familiar to power-systems tooling). PSS/E ``raw`` "
-            "WRITE is NOT supported by the ANDES library."
+            "Output format. ``xlsx`` is the ANDES-native Excel layout. "
+            "``json`` is the ANDES JSON serialization. ``raw`` is "
+            "PSS/E v33 emitted by the substrate's hand-rolled writer; "
+            "it covers Bus, PQ/ZIP loads, Shunt, PV/Slack/GENROU/"
+            "GENCLS generators, Line, and 2W transformers. 3W "
+            "transformers and other PSS/E sections are emitted as "
+            "empty terminators."
         ),
     )
     overwrite: bool = Field(
