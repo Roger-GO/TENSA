@@ -66,16 +66,23 @@ function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: Summar
       aria-describedby={pflowRunning ? 'change-case-disabled-reason' : undefined}
       className="text-muted-foreground hover:text-foreground -ml-2 self-start text-xs"
     >
-      Change case
+      {selection.blank ? 'Discard system' : 'Change case'}
     </Button>
   );
 
+  const isBlank = selection.blank === true;
   return (
     <div className={cn('flex flex-col gap-3 p-3')}>
       <div className="flex flex-col gap-2">
-        <p className="text-muted-foreground text-xs font-medium">Loaded case</p>
+        <p className="text-muted-foreground text-xs font-medium">
+          {isBlank ? 'New system' : 'Loaded case'}
+        </p>
         <p className="text-foreground truncate font-mono text-sm">
-          {basename(selection.primaryPath)}
+          {isBlank
+            ? '— blank —'
+            : selection.primaryPath
+              ? basename(selection.primaryPath)
+              : ''}
         </p>
         {selection.addfiles.length > 0 ? (
           <div className="flex flex-col gap-0.5">
