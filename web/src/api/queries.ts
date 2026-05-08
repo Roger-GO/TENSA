@@ -27,11 +27,18 @@ import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import { andesClient, ProblemDetailsError, TIMEOUTS } from './client';
 import { parseSessionId, parseRunId } from './types';
 import type {
+  AddElementRequest,
+  BlankSystemResponse,
+  EditElementRequest,
+  ElementCreated,
   LoadCaseRequest,
+  ParamValue,
   PflowResult,
   SessionDescriptor,
   SidecarLayout,
   SessionId,
+  TopologyEntry,
+  TopologySchema,
   TopologySummary,
   WorkspaceFileList,
   WorkspacePath,
@@ -49,6 +56,7 @@ export const queryKeys = {
   topology: (id: SessionId) => ['topology', id] as const,
   workspaceFiles: ['workspace-files'] as const,
   sidecar: (casePath: WorkspacePath) => ['sidecar', casePath] as const,
+  topologySchema: ['topology-schema'] as const,
 } as const;
 
 // ---- QueryClient factory --------------------------------------------------
@@ -336,6 +344,102 @@ export function usePutSidecar(): UseMutationResult<void, Error, PutSidecarVars> 
     onSuccess: (_data, { casePath, layout }) => {
       queryClient.setQueryData(queryKeys.sidecar(casePath), layout);
       useCaseStore.getState().setLayoutSidecar(layout);
+    },
+  });
+}
+
+// ---- topology mutations (Unit 2 endpoints, consumed by Units 5/6/7) ------
+
+/**
+ * `GET /topology/schema`. Per-model parameter metadata. Driven by the
+ * server-side `_PARAMS_BY_MODEL` table; rarely changes — long stale time.
+ */
+export function useTopologySchema(): UseQueryResult<TopologySchema, Error> {
+  const tokenPresent = useAuthStore((s) => s.token !== null);
+  return useQuery({
+    queryKey: queryKeys.topologySchema,
+    enabled: tokenPresent,
+    staleTime: 24 * 60 * 60 * 1000,
+    queryFn: async () => {
+      return await andesClient.get<TopologySchema>('/topology/schema', {
+        timeoutMs: TIMEOUTS.workspace,
+      });
+    },
+  });
+}
+
+export interface AddElementVars {
+  sessionId: SessionId;
+  body: AddElementRequest;
+}
+
+/**
+ * `POST /sessions/{id}/elements`. Adds a new topology element. On 201,
+ * invalidates the topology query so the SLD picks up the new device on
+ * the next render. The optimistic-update story for `BusIdxSelect` lives
+ * in Unit 6 alongside the AddElementPanel.
+ */
+export function useAddElement(): UseMutationResult<ElementCreated, Error, AddElementVars> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, body }: AddElementVars) => {
+      return await andesClient.post<ElementCreated>(
+        `/sessions/${encodeURIComponent(sessionId)}/elements`,
+        { body, timeoutMs: TIMEOUTS.workspace },
+      );
+    },
+    onSuccess: (_data, { sessionId }) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
+    },
+  });
+}
+
+export interface EditElementVars {
+  sessionId: SessionId;
+  model: string;
+  idx: string;
+  params: Record<string, ParamValue>;
+}
+
+/**
+ * `PUT /sessions/{id}/elements/{model}/{idx}`. Edits one or more
+ * parameters on an existing pre-setup element. Returns the updated
+ * `TopologyEntry`; invalidates topology so the SLD label updates.
+ */
+export function useEditElement(): UseMutationResult<TopologyEntry, Error, EditElementVars> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, model, idx, params }: EditElementVars) => {
+      const body: EditElementRequest = { params };
+      return await andesClient.put<TopologyEntry>(
+        `/sessions/${encodeURIComponent(sessionId)}/elements/${encodeURIComponent(model)}/${encodeURIComponent(idx)}`,
+        { body, timeoutMs: TIMEOUTS.workspace },
+      );
+    },
+    onSuccess: (_data, { sessionId }) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
+    },
+  });
+}
+
+/**
+ * `POST /sessions/{id}/blank`. Creates a brand-new empty `andes.System()`
+ * for the session. Caller seeds the topology query cache with the
+ * returned blank summary so the canvas renders the empty-state prompt
+ * without an extra round-trip.
+ */
+export function useBlankSystem(): UseMutationResult<BlankSystemResponse, Error, SessionId> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sessionId: SessionId) => {
+      return await andesClient.post<BlankSystemResponse>(
+        `/sessions/${encodeURIComponent(sessionId)}/blank`,
+        { body: {}, timeoutMs: TIMEOUTS.workspace },
+      );
+    },
+    onSuccess: (data, sessionId) => {
+      queryClient.setQueryData(queryKeys.topology(sessionId), data.topology);
+      useCaseStore.getState().setTopology(data.topology);
     },
   });
 }

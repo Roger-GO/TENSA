@@ -13,10 +13,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { parseRunId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary, PflowResult } from '@/api/types';
+
+function withQueryClient(ui: ReactNode) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return <QueryClientProvider client={client}>{ui}</QueryClientProvider>;
+}
 
 // The production `ElementInspector` reads topology via the
 // `useCurrentTopology()` hook from `@/api/queries`, which forwards to a
@@ -118,20 +127,20 @@ describe('<ElementInspector />', () => {
   });
 
   it('shows the no-case empty state when no case is loaded', () => {
-    render(<ElementInspector />);
+    render(withQueryClient(<ElementInspector />));
     expect(screen.getByText(/load a case to inspect elements/i)).toBeInTheDocument();
   });
 
   it('shows the no-element-selected empty state when case is loaded but nothing is selected', () => {
     seedLoadedCase();
-    render(<ElementInspector />);
+    render(withQueryClient(<ElementInspector />));
     expect(screen.getByText(/click an element on the diagram/i)).toBeInTheDocument();
   });
 
   it('shows Properties for a selected bus + the Run-PF empty state on the Results tab', async () => {
     seedLoadedCase();
     useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '1' } });
-    render(<ElementInspector />);
+    render(withQueryClient(<ElementInspector />));
 
     // Header shows "bus 1".
     expect(screen.getByText(/bus 1/i)).toBeInTheDocument();
@@ -150,7 +159,7 @@ describe('<ElementInspector />', () => {
     seedLoadedCase();
     useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '1' } });
     usePflowStore.setState({ lastRun: makePflowResult(), isRunning: false, error: null });
-    render(<ElementInspector />);
+    render(withQueryClient(<ElementInspector />));
 
     // Default tab post-PF is Results.
     expect(screen.getByTestId('inspector-results')).toBeInTheDocument();
@@ -163,7 +172,7 @@ describe('<ElementInspector />', () => {
     seedLoadedCase();
     useCaseStore.setState({ selectedElement: { kind: 'line', idx: 'L1' } });
     usePflowStore.setState({ lastRun: makePflowResult(), isRunning: false, error: null });
-    render(<ElementInspector />);
+    render(withQueryClient(<ElementInspector />));
 
     expect(screen.getByText('156.90 MW')).toBeInTheDocument();
     expect(screen.getByText('-20.40 MVAr')).toBeInTheDocument();
@@ -173,7 +182,7 @@ describe('<ElementInspector />', () => {
     seedLoadedCase();
     useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '1' } });
     usePflowStore.setState({ lastRun: makePflowResult(), isRunning: false, error: null });
-    render(<ElementInspector />);
+    render(withQueryClient(<ElementInspector />));
 
     // Default is Results post-PF; click Properties.
     await userEvent.click(screen.getByRole('tab', { name: /properties/i }));
@@ -189,7 +198,7 @@ describe('<ElementInspector />', () => {
       isRunning: false,
       error: null,
     });
-    render(<ElementInspector />);
+    render(withQueryClient(<ElementInspector />));
 
     // Pre-PF default tab: Properties (because lastRun is non-converged).
     // We need to switch to Results to see the message.
@@ -200,7 +209,7 @@ describe('<ElementInspector />', () => {
     seedLoadedCase();
     useCaseStore.setState({ selectedElement: { kind: 'generator', idx: 'G1' } });
     usePflowStore.setState({ lastRun: makePflowResult(), isRunning: false, error: null });
-    render(<ElementInspector />);
+    render(withQueryClient(<ElementInspector />));
 
     expect(screen.getByText(/per-element pf results/i)).toBeInTheDocument();
   });

@@ -607,7 +607,7 @@ Server unit (wrapper):
 
 ### Phase 2 — Editor (modify what exists)
 
-- [ ] **Unit 5: Inspector → editor (editable Properties tab when pre-setup)**
+- [x] **Unit 5: Inspector → editor (editable Properties tab when pre-setup)** — landed 2026-05-08. EditElementButton (pencil → input → save / cancel cycle) per editable param row; bus_idx and idx/name fields stay read-only (deferred). Reset banner appears when state is committed with a one-click "Reset run" CTA. New hooks: useEditElement, useAddElement, useBlankSystem, useTopologySchema. R29 satisfied. 5 new tests; 224 web tests pass.
 
 **Goal:** When the loaded case is in pre-setup state and an element is selected, the user can edit each parameter in the Properties tab inline. Submitting a change calls `PUT /elements/.../...` and the SLD updates.
 
