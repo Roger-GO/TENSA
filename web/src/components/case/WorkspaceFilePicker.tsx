@@ -12,6 +12,7 @@ import { ParseErrorBanner } from './ParseErrorBanner';
 import { useListWorkspaceFiles, useLoadCase, useCreateSession } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
+import { useAuthStore } from '@/store/auth';
 import { ServerError } from '@/api/client';
 import { parseWorkspacePath } from '@/api/types';
 import type { SessionId, WorkspaceFile, WorkspaceFileList } from '@/api/types';
@@ -98,8 +99,15 @@ function useEnsureSession(): {
   createError: Error | null;
 } {
   const sessionId = useSessionStore((s) => s.sessionId);
+  const tokenPresent = useAuthStore((s) => s.token !== null);
   const createSession = useCreateSession();
-  const shouldCreate = sessionId === null && !createSession.isPending && !createSession.isError;
+  // Don't fire create-session before auth is established. A pre-auth
+  // POST /api/sessions returns 401, which would race the URL-fragment
+  // fast-path's setToken and wipe out the token via the global 401
+  // handler. The picker is rendered behind the auth modal but its
+  // hooks still run; gate the mutate() call explicitly.
+  const shouldCreate =
+    tokenPresent && sessionId === null && !createSession.isPending && !createSession.isError;
 
   useEffect(() => {
     if (shouldCreate) {
@@ -107,7 +115,7 @@ function useEnsureSession(): {
     }
     // We deliberately omit `createSession` from deps — TanStack Query
     // mutation objects are not referentially stable across renders, but
-    // we only want to fire on the (sessionId === null && idle) edge.
+    // we only want to fire on the (token + sessionId-null + idle) edge.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shouldCreate]);
 

@@ -88,7 +88,15 @@ export function makeQueryClient(): QueryClient {
 export function wireGlobal401Handler(client: QueryClient): void {
   const handle = (err: unknown): void => {
     if (err instanceof ProblemDetailsError && err.status === 401) {
-      useAuthStore.getState().clearToken();
+      // Only clear if the user thought they were authed. A 401 returned
+      // for a request that fired before auth was established (e.g., a
+      // query that mounted on first paint, before the URL-fragment
+      // fast-path persisted the token) would otherwise wipe out the
+      // token the fast-path just set. Idempotent: when the store is
+      // already null, the cascade has already run.
+      if (useAuthStore.getState().token !== null) {
+        useAuthStore.getState().clearToken();
+      }
     }
   };
   client.getQueryCache().subscribe((event) => {
@@ -181,6 +189,22 @@ export function useTopology(sessionId: SessionId | null): UseQueryResult<Topolog
   });
 }
 
+/**
+ * Convenience: subscribe to the current session's topology directly from
+ * any component. Reads `sessionId` from the session store and forwards
+ * to `useTopology`. Returns `null` when no session is active or the
+ * query hasn't resolved yet — components should branch on `null` and
+ * render their loading/empty state.
+ *
+ * The Zustand `case.topology` slot is intentionally NOT populated by
+ * the load mutation; the TanStack Query cache is the canonical source
+ * of truth so cache invalidation (PF run, reload) flows naturally.
+ */
+export function useCurrentTopology(): TopologySummary | null {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  return useTopology(sessionId).data ?? null;
+}
+
 // ---- power flow -----------------------------------------------------------
 
 /**
@@ -243,10 +267,16 @@ export function useReloadCase(): UseMutationResult<TopologySummary, Error, Sessi
 
 // ---- workspace lister -----------------------------------------------------
 
-/** `GET /workspace/files`. Stable across the tab; modest stale time. */
+/** `GET /workspace/files`. Stable across the tab; modest stale time.
+ * Gated on `auth.token !== null` so the query doesn't fire on first
+ * paint before the URL-fragment fast-path has had a chance to land
+ * (which would 401, race the fast-path, and wipe the token via the
+ * global 401 handler). */
 export function useListWorkspaceFiles(): UseQueryResult<WorkspaceFileList, Error> {
+  const tokenPresent = useAuthStore((s) => s.token !== null);
   return useQuery({
     queryKey: queryKeys.workspaceFiles,
+    enabled: tokenPresent,
     queryFn: async () => {
       return await andesClient.get<WorkspaceFileList>('/workspace/files', {
         timeoutMs: TIMEOUTS.workspace,

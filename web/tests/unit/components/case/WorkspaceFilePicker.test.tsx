@@ -23,6 +23,7 @@ import type { ReactNode } from 'react';
 import { WorkspaceFilePicker } from '@/components/case/WorkspaceFilePicker';
 import { makeQueryClient } from '@/api/queries';
 import { setTokenGetter } from '@/api/client';
+import { useAuthStore } from '@/store/auth';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { parseSessionId } from '@/api/types';
@@ -85,6 +86,12 @@ describe('<WorkspaceFilePicker />', () => {
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
       typeof vi.spyOn
     >;
+    // Seed an auth token so `useListWorkspaceFiles` and
+    // `useEnsureSession` (both now gated on `auth.token !== null`)
+    // actually fire. The exact value doesn't matter — the fetch spy
+    // stubs the response and the client reads the X-Andes-Token header
+    // via `setTokenGetter` above.
+    useAuthStore.setState({ token: 'a'.repeat(64), persistFailed: false });
     useSessionStore.setState({ sessionId: null });
     useCaseStore.setState({ selection: null, topology: null, layoutSidecar: null });
   });
@@ -92,6 +99,7 @@ describe('<WorkspaceFilePicker />', () => {
   afterEach(() => {
     fetchSpy.mockRestore();
     setTokenGetter(() => null);
+    useAuthStore.setState({ token: null, persistFailed: false });
   });
 
   it('renders skeleton while workspace files are loading', () => {

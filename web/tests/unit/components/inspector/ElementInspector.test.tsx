@@ -10,14 +10,28 @@
  * Each test seeds the case + pflow stores; UI is rendered via the
  * standard testing-library helpers.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ElementInspector } from '@/components/inspector/ElementInspector';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { parseRunId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary, PflowResult } from '@/api/types';
+
+// The production `ElementInspector` reads topology via the
+// `useCurrentTopology()` hook from `@/api/queries`, which forwards to a
+// TanStack Query call. Stub the hook to read from a module-level
+// mutable variable so the test can drive the topology directly,
+// matching the previous `useCaseStore.setState({ topology })` pattern.
+let mockTopology: TopologySummary | null = null;
+vi.mock('@/api/queries', async () => {
+  const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
+  return { ...actual, useCurrentTopology: () => mockTopology };
+});
+
+// Import after the mock is registered so the component picks up the
+// stubbed hook.
+import { ElementInspector } from '@/components/inspector/ElementInspector';
 
 const TOPOLOGY: TopologySummary = {
   state: 'pre-setup',
@@ -61,10 +75,10 @@ function seedLoadedCase() {
       primaryPath: parseWorkspacePath('ieee14.raw'),
       addfiles: [],
     },
-    topology: TOPOLOGY,
     layoutSidecar: null,
     selectedElement: null,
   });
+  mockTopology = TOPOLOGY;
 }
 
 function makePflowResult(overrides: Partial<PflowResult> = {}): PflowResult {
@@ -82,6 +96,7 @@ function makePflowResult(overrides: Partial<PflowResult> = {}): PflowResult {
 
 describe('<ElementInspector />', () => {
   beforeEach(() => {
+    mockTopology = null;
     useCaseStore.setState({
       selection: null,
       topology: null,
@@ -92,6 +107,7 @@ describe('<ElementInspector />', () => {
   });
 
   afterEach(() => {
+    mockTopology = null;
     useCaseStore.setState({
       selection: null,
       topology: null,

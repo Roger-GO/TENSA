@@ -3,6 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EmptyState } from '@/components/shell/EmptyState';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
+import { useCurrentTopology } from '@/api/queries';
 import type { TopologyEntry, TopologySummary, PflowResult } from '@/api/types';
 import type { SelectedElement } from '@/store/case';
 import { cn } from '@/lib/cn';
@@ -199,7 +200,7 @@ export interface ElementInspectorProps {
 
 export function ElementInspector({ className }: ElementInspectorProps) {
   const selection = useCaseStore((s) => s.selection);
-  const topology = useCaseStore((s) => s.topology);
+  const topology = useCurrentTopology();
   const selectedElement = useCaseStore((s) => s.selectedElement);
   const pflowResult = usePflowStore((s) => s.lastRun);
 

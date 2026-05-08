@@ -20,7 +20,7 @@ import type {
 import '@xyflow/react/dist/style.css';
 
 import { useCaseStore } from '@/store/case';
-import { useGetSidecar, usePutSidecar } from '@/api/queries';
+import { useGetSidecar, usePutSidecar, useCurrentTopology } from '@/api/queries';
 import type { TopologySummary, SidecarLayout } from '@/api/types';
 
 import { BusNode } from './nodes/BusNode';
@@ -302,7 +302,10 @@ function applyPositionChanges(nodes: Node[], changes: NodeChange[]): Node[] {
  */
 export function SldCanvas() {
   const selection = useCaseStore((s) => s.selection);
-  const topology = useCaseStore((s) => s.topology);
+  // Read topology from the TanStack Query cache (the canonical source of
+  // truth — `useLoadCase.onSuccess` seeds it). The Zustand `case.topology`
+  // slot is a holdover from an earlier design and stays null in v0.1.
+  const topology = useCurrentTopology();
   const primaryPath = selection?.primaryPath ?? null;
   const sidecarQuery = useGetSidecar(primaryPath);
   const putSidecarMutation = usePutSidecar();
@@ -320,10 +323,11 @@ export function SldCanvas() {
     [primaryPath, putSidecarMutate],
   );
 
-  if (selection === null || topology === null) return null;
-  // Sidecar query is loading: show skeleton (the GET is fast, but we
-  // shouldn't compose a layout against undefined).
-  if (sidecarQuery.isLoading) return <SldLayoutSkeleton />;
+  if (selection === null) return null;
+  // Topology fetch in flight or sidecar GET in flight → skeleton.
+  if (topology === null || sidecarQuery.isLoading) {
+    return <SldLayoutSkeleton />;
+  }
 
   return (
     <ReactFlowProvider>
