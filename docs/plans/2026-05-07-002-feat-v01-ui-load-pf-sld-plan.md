@@ -1,8 +1,9 @@
 ---
 title: "feat: v0.1 UI — load case + auto-SLD + run PF + results overlay"
 type: feat
-status: active
+status: completed
 date: 2026-05-07
+completed: 2026-05-07
 origin: docs/brainstorms/2026-05-07-accessible-andes-power-systems-app-requirements.md
 ---
 
