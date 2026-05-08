@@ -6,6 +6,8 @@ import { EmptyState } from './EmptyState';
 import { LeftRail } from './LeftRail';
 import { RightDock } from './RightDock';
 import { TopBar } from './TopBar';
+import { SldCanvas } from '@/components/sld/SldCanvas';
+import { useCaseStore } from '@/store/case';
 
 /**
  * AppShell. Top-level split-pane layout per R18.
@@ -86,6 +88,23 @@ export function AppShell({
   // by dragging the resize handle once they widen the window.
   const [viewportTooSmall, setViewportTooSmall] = useState<boolean>(() => getViewportTooSmall());
 
+  // Default `main` slot content depends on whether a case is loaded:
+  // - no case → EmptyState ("No case loaded") — directs the user to the
+  //   left rail.
+  // - case loaded → SldCanvas (which itself shows the layout-skeleton
+  //   while ELK runs and the canvas once positions are known).
+  // Callers that pass `main` explicitly retain full override control.
+  const caseSelection = useCaseStore((s) => s.selection);
+  const defaultMain =
+    caseSelection !== null ? (
+      <SldCanvas />
+    ) : (
+      <EmptyState
+        title="No case loaded"
+        description="Pick a case file from the left rail to begin."
+      />
+    );
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const onResize = () => setViewportTooSmall(getViewportTooSmall());
@@ -135,12 +154,7 @@ export function AppShell({
               aria-label="Single-line diagram"
               className="bg-background flex h-full min-h-0 flex-1 flex-col"
             >
-              {main ?? (
-                <EmptyState
-                  title="No case loaded"
-                  description="Pick a case file from the left rail to begin."
-                />
-              )}
+              {main ?? defaultMain}
             </main>
           </Panel>
 

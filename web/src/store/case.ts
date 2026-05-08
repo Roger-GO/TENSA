@@ -18,6 +18,20 @@ export interface CaseSelection {
   addfiles: WorkspacePath[];
 }
 
+/**
+ * A handle to one element on the SLD canvas. Written by `SldCanvas`
+ * (Unit 8) on node click; read by `ElementInspector` (Unit 9) to drive
+ * the right-dock inspector.
+ *
+ * `kind` mirrors the topology bucket name (`bus`, `line`, `transformer`,
+ * `generator`, `load`, `shunt`); `idx` is the ANDES idx as a string so
+ * the same shape works for both numeric and string-named idx values.
+ */
+export interface SelectedElement {
+  kind: 'bus' | 'line' | 'transformer' | 'generator' | 'load' | 'shunt';
+  idx: string;
+}
+
 export interface CaseState {
   /** The currently-selected case + addfiles, or null if none loaded. */
   selection: CaseSelection | null;
@@ -29,9 +43,16 @@ export interface CaseState {
   topology: TopologySummary | null;
   /** Last sidecar layout read, if any. `null` if no sidecar exists yet. */
   layoutSidecar: SidecarLayout | null;
+  /**
+   * The element currently being inspected on the SLD canvas, or null if
+   * nothing is selected. Single source of truth for "what's clicked"
+   * — Unit 8 writes; Unit 9 reads.
+   */
+  selectedElement: SelectedElement | null;
   setCase: (selection: CaseSelection) => void;
   setTopology: (topology: TopologySummary | null) => void;
   setLayoutSidecar: (sidecar: SidecarLayout | null) => void;
+  setSelectedElement: (element: SelectedElement | null) => void;
   clearCase: () => void;
 }
 
@@ -39,11 +60,14 @@ export const useCaseStore = create<CaseState>((set) => ({
   selection: null,
   topology: null,
   layoutSidecar: null,
+  selectedElement: null,
   setCase: (selection: CaseSelection) =>
-    // A new case wipes the old topology + sidecar so consumers don't see
-    // stale data while the new fetches are in flight.
-    set({ selection, topology: null, layoutSidecar: null }),
+    // A new case wipes the old topology + sidecar + selection so
+    // consumers don't see stale data while the new fetches are in flight.
+    set({ selection, topology: null, layoutSidecar: null, selectedElement: null }),
   setTopology: (topology: TopologySummary | null) => set({ topology }),
   setLayoutSidecar: (sidecar: SidecarLayout | null) => set({ layoutSidecar: sidecar }),
-  clearCase: () => set({ selection: null, topology: null, layoutSidecar: null }),
+  setSelectedElement: (element: SelectedElement | null) => set({ selectedElement: element }),
+  clearCase: () =>
+    set({ selection: null, topology: null, layoutSidecar: null, selectedElement: null }),
 }));
