@@ -62,6 +62,11 @@ from andes_app.core.errors import (
     DisturbanceCommitError,
     NoCaseLoadedError,
 )
+
+# AndesAppError catches the new ElementValidationError /
+# ElementNotFoundError / SystemAlreadyLoadedError subclasses and forwards
+# them with their class name as ``category``; the routes layer maps each
+# to the right HTTP status (see api/routes/elements.py:_map_worker_error).
 from andes_app.core.stream import (
     StreamAggregator,
     bus_idx_values_from_system,
@@ -211,6 +216,22 @@ def _handle_topology(wrapper: Wrapper, args: dict[str, Any]) -> Any:
 def _handle_add_disturbance(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     spec = _disturbance_from_dict(args["spec"])
     return wrapper.add_disturbance(spec)
+
+
+def _handle_add_element(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    return _serialize_dataclass(
+        wrapper.add_element(args["model"], args["params"])
+    )
+
+
+def _handle_edit_element(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    return _serialize_dataclass(
+        wrapper.edit_element(args["model"], args["idx"], args["params"])
+    )
+
+
+def _handle_create_blank(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    return _serialize_dataclass(wrapper.create_blank())
 
 
 def _handle_run_pflow(wrapper: Wrapper, args: dict[str, Any]) -> Any:
@@ -372,6 +393,9 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "reload_case": _handle_reload_case,
     "topology": _handle_topology,
     "add_disturbance": _handle_add_disturbance,
+    "add_element": _handle_add_element,
+    "edit_element": _handle_edit_element,
+    "create_blank": _handle_create_blank,
     "run_pflow": _handle_run_pflow,
     # run_tds is special-cased — it needs the abort_event. Dispatched separately.
 }

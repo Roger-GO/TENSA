@@ -164,15 +164,28 @@ class TopologySummary(BaseModel):
     transformers: list[TopologyEntry] = Field(
         ...,
         description=(
-            "Transformer elements (currently empty for v0.1; ANDES models "
-            "transformers within the Line model)."
+            "Transformer elements split out from the ANDES ``Line`` bucket "
+            "via the ``tap != 1.0 OR phi != 0.0`` heuristic. Pure "
+            "transmission lines remain in ``lines``; off-nominal-tap and "
+            "phase-shifting branches move here."
         ),
     )
     generators: list[TopologyEntry] = Field(
         ...,
         description="Generator elements (PV, Slack, GENROU, GENCLS, etc.).",
     )
-    loads: list[TopologyEntry] = Field(..., description="Load elements (PQ).")
+    loads: list[TopologyEntry] = Field(
+        ...,
+        description="Load elements — both static (PQ) and dynamic (ZIP).",
+    )
+    shunts: list[TopologyEntry] = Field(
+        default_factory=list,
+        description=(
+            "Shunt elements (capacitors and reactors). Modeled as ANDES "
+            "``Shunt`` devices; rendered with the IEC 60617 shunt-cap or "
+            "shunt-reactor icon depending on the sign of ``b``."
+        ),
+    )
 
 
 # ---- power flow -------------------------------------------------------------
@@ -328,6 +341,143 @@ class AddDisturbancesResponse(BaseModel):
 
     accepted: list[DisturbanceAck] = Field(
         ..., description="One ack entry per accepted disturbance, in input order."
+    )
+
+
+# ---- topology mutations (Unit 2) -------------------------------------------
+
+
+class AddElementRequest(BaseModel):
+    """Request body for ``POST /sessions/{id}/elements``.
+
+    Adds a single topology element (Bus, Line, generator, load, shunt) to a
+    pre-setup System. The wrapper validates the model name + param keys
+    against an internal whitelist BEFORE invoking ANDES; unknown keys
+    surface as 422 ``ProblemDetails`` listing both the rejected and the
+    allowed sets.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = Field(
+        ...,
+        description=(
+            "ANDES model class name. Supported in v0.1.x: ``Bus``, ``Line``, "
+            "``PV``, ``Slack``, ``GENROU``, ``GENCLS``, ``PQ``, ``ZIP``, "
+            "``Shunt``. Unknown models are rejected with 422."
+        ),
+        min_length=1,
+    )
+    params: dict[str, ParamValue] = Field(
+        ...,
+        description=(
+            "Flat dict of model parameters. Keys are validated against the "
+            "per-model whitelist; values pass through to ``ss.add()``. "
+            "Required keys vary per model — query "
+            "``GET /api/topology/schema`` for the live form metadata."
+        ),
+    )
+
+
+class EditElementRequest(BaseModel):
+    """Request body for ``PUT /sessions/{id}/elements/{model}/{idx}``.
+
+    Updates one or more parameters on an existing element. The same
+    pre-setup gate + whitelist as ``AddElementRequest`` apply. ``idx`` and
+    ``name`` cannot be edited (they would desync ANDES's internal indexes);
+    create a new element if you need to reassign topology references.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    params: dict[str, ParamValue] = Field(
+        ...,
+        description=(
+            "Subset of model parameters to overwrite. Each key must be in "
+            "the per-model whitelist; ``idx`` / ``name`` are explicitly "
+            "rejected (create a new element instead)."
+        ),
+    )
+
+
+class ElementCreated(BaseModel):
+    """Response body for ``POST /sessions/{id}/elements`` (201).
+
+    Carries the newly-built ``TopologyEntry`` so the client can update its
+    cache without re-fetching the full topology. Web-side mutation hooks
+    use this to optimistically update bus dropdowns before the topology
+    re-fetch resolves.
+    """
+
+    element: TopologyEntry = Field(
+        ...,
+        description=(
+            "The element that was just added, with its assigned idx + the "
+            "parameters as ANDES read them back."
+        ),
+    )
+
+
+class BlankSystemResponse(BaseModel):
+    """Response body for ``POST /sessions/{id}/blank`` (201).
+
+    Returns the empty topology so the client immediately switches to the
+    blank-system rendering path (centered ``Add your first bus`` prompt).
+    """
+
+    topology: TopologySummary = Field(
+        ...,
+        description=(
+            "Empty topology snapshot for the freshly-created blank System. "
+            "All buckets are empty; ``state`` is ``pre-setup``."
+        ),
+    )
+
+
+class TopologyParamMeta(BaseModel):
+    """One parameter row in a model's add/edit form schema."""
+
+    name: str = Field(..., description="ANDES parameter name (e.g., ``Vn``).")
+    kind: Literal["string", "number", "bus_idx", "bool"] = Field(
+        ...,
+        description=(
+            "Form-input kind. ``string`` and ``number`` map to text/number "
+            "inputs; ``bus_idx`` renders as a dropdown of existing buses; "
+            "``bool`` is a checkbox."
+        ),
+    )
+    required: bool = Field(
+        False,
+        description=(
+            "Whether the field is required when adding a new element. "
+            "Optional fields collapse under the form's ``Show advanced`` "
+            "disclosure."
+        ),
+    )
+    unit: str | None = Field(
+        None,
+        description=(
+            "Display unit suffix (``kV``, ``pu``, ``MVA``, ``MWs/MVA``, "
+            "``rad``). Rendered inline next to numerical inputs."
+        ),
+    )
+
+
+class TopologySchema(BaseModel):
+    """Per-model parameter metadata, used by the web client's polymorphic
+    form generator (Unit 6).
+
+    Returned from ``GET /api/topology/schema``. Mirrors the wrapper-side
+    ``_PARAMS_BY_MODEL`` table — adding a new model on the server
+    automatically expands the form picker.
+    """
+
+    models: dict[str, list[TopologyParamMeta]] = Field(
+        ...,
+        description=(
+            "Mapping from ANDES model class name to ordered parameter "
+            "metadata. Order is the rendering order in the form."
+        ),
     )
 
 

@@ -33,6 +33,7 @@ from starlette.types import Scope
 from andes_app import __version__
 from andes_app.api.routes.cases import router as cases_router
 from andes_app.api.routes.disturbances import router as disturbances_router
+from andes_app.api.routes.elements import router as elements_router
 from andes_app.api.routes.pflow import router as pflow_router
 from andes_app.api.routes.sessions import router as sessions_router
 from andes_app.api.routes.tds import router as tds_router
@@ -227,6 +228,7 @@ def make_app(
     app.include_router(cases_router, prefix="/api", tags=["cases"])
     app.include_router(pflow_router, prefix="/api", tags=["pflow"])
     app.include_router(disturbances_router, prefix="/api", tags=["disturbances"])
+    app.include_router(elements_router, prefix="/api", tags=["elements"])
     app.include_router(tds_router, prefix="/api", tags=["tds"])
     app.include_router(workspace_router, prefix="/api", tags=["workspace"])
     app.include_router(ws_router, prefix="/api", tags=["streaming"])

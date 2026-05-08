@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-    "/sessions": {
+    "/api/sessions": {
         parameters: {
             query?: never;
             header?: never;
@@ -22,7 +22,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/sessions/{session_id}": {
+    "/api/sessions/{session_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -40,7 +40,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/sessions/{session_id}/case": {
+    "/api/sessions/{session_id}/case": {
         parameters: {
             query?: never;
             header?: never;
@@ -57,7 +57,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/sessions/{session_id}/topology": {
+    "/api/sessions/{session_id}/topology": {
         parameters: {
             query?: never;
             header?: never;
@@ -74,7 +74,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/sessions/{session_id}/reload": {
+    "/api/sessions/{session_id}/reload": {
         parameters: {
             query?: never;
             header?: never;
@@ -96,7 +96,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/sessions/{session_id}/pflow": {
+    "/api/sessions/{session_id}/pflow": {
         parameters: {
             query?: never;
             header?: never;
@@ -113,7 +113,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/sessions/{session_id}/disturbances": {
+    "/api/sessions/{session_id}/disturbances": {
         parameters: {
             query?: never;
             header?: never;
@@ -130,7 +130,79 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/sessions/{session_id}/tds": {
+    "/api/topology/schema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Per-model parameter metadata for the add/edit forms.
+         * @description Static endpoint — the schema mirrors a compile-time table on the
+         *     wrapper. Auth-gated only because the rest of the substrate is.
+         */
+        get: operations["getTopologySchema"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/elements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a topology element to a pre-setup session. */
+        post: operations["addElement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/elements/{model}/{idx}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Edit parameters on an existing pre-setup element. */
+        put: operations["editElement"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/blank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create an empty andes.System() for a session. */
+        post: operations["createBlankSystem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/tds": {
         parameters: {
             query?: never;
             header?: never;
@@ -147,7 +219,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workspace/files": {
+    "/api/workspace/files": {
         parameters: {
             query?: never;
             header?: never;
@@ -169,7 +241,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workspace/layout": {
+    "/api/workspace/layout": {
         parameters: {
             query?: never;
             header?: never;
@@ -220,6 +292,30 @@ export interface components {
             accepted: components["schemas"]["DisturbanceAck"][];
         };
         /**
+         * AddElementRequest
+         * @description Request body for ``POST /sessions/{id}/elements``.
+         *
+         *     Adds a single topology element (Bus, Line, generator, load, shunt) to a
+         *     pre-setup System. The wrapper validates the model name + param keys
+         *     against an internal whitelist BEFORE invoking ANDES; unknown keys
+         *     surface as 422 ``ProblemDetails`` listing both the rejected and the
+         *     allowed sets.
+         */
+        AddElementRequest: {
+            /**
+             * Model
+             * @description ANDES model class name. Supported in v0.1.x: ``Bus``, ``Line``, ``PV``, ``Slack``, ``GENROU``, ``GENCLS``, ``PQ``, ``ZIP``, ``Shunt``. Unknown models are rejected with 422.
+             */
+            model: string;
+            /**
+             * Params
+             * @description Flat dict of model parameters. Keys are validated against the per-model whitelist; values pass through to ``ss.add()``. Required keys vary per model — query ``GET /api/topology/schema`` for the live form metadata.
+             */
+            params: {
+                [key: string]: number | string | boolean;
+            };
+        };
+        /**
          * AlterSpec
          * @description Parameter alteration at a scheduled time — used for load steps,
          *     parameter ramps, set-point changes, etc.
@@ -261,6 +357,17 @@ export interface components {
             value: number;
         };
         /**
+         * BlankSystemResponse
+         * @description Response body for ``POST /sessions/{id}/blank`` (201).
+         *
+         *     Returns the empty topology so the client immediately switches to the
+         *     blank-system rendering path (centered ``Add your first bus`` prompt).
+         */
+        BlankSystemResponse: {
+            /** @description Empty topology snapshot for the freshly-created blank System. All buckets are empty; ``state`` is ``pre-setup``. */
+            topology: components["schemas"]["TopologySummary"];
+        };
+        /**
          * BusCoord
          * @description One bus's 2D coordinate in the layout sidecar.
          *
@@ -295,6 +402,37 @@ export interface components {
              * @description ANDES idx assigned to the created disturbance device. Use this to reference the disturbance in subsequent operations.
              */
             idx: number | string;
+        };
+        /**
+         * EditElementRequest
+         * @description Request body for ``PUT /sessions/{id}/elements/{model}/{idx}``.
+         *
+         *     Updates one or more parameters on an existing element. The same
+         *     pre-setup gate + whitelist as ``AddElementRequest`` apply. ``idx`` and
+         *     ``name`` cannot be edited (they would desync ANDES's internal indexes);
+         *     create a new element if you need to reassign topology references.
+         */
+        EditElementRequest: {
+            /**
+             * Params
+             * @description Subset of model parameters to overwrite. Each key must be in the per-model whitelist; ``idx`` / ``name`` are explicitly rejected (create a new element instead).
+             */
+            params: {
+                [key: string]: number | string | boolean;
+            };
+        };
+        /**
+         * ElementCreated
+         * @description Response body for ``POST /sessions/{id}/elements`` (201).
+         *
+         *     Carries the newly-built ``TopologyEntry`` so the client can update its
+         *     cache without re-fetching the full topology. Web-side mutation hooks
+         *     use this to optimistically update bus dropdowns before the topology
+         *     re-fetch resolves.
+         */
+        ElementCreated: {
+            /** @description The element that was just added, with its assigned idx + the parameters as ANDES read them back. */
+            element: components["schemas"]["TopologyEntry"];
         };
         /**
          * FaultSpec
@@ -653,6 +791,52 @@ export interface components {
             };
         };
         /**
+         * TopologyParamMeta
+         * @description One parameter row in a model's add/edit form schema.
+         */
+        TopologyParamMeta: {
+            /**
+             * Name
+             * @description ANDES parameter name (e.g., ``Vn``).
+             */
+            name: string;
+            /**
+             * Kind
+             * @description Form-input kind. ``string`` and ``number`` map to text/number inputs; ``bus_idx`` renders as a dropdown of existing buses; ``bool`` is a checkbox.
+             * @enum {string}
+             */
+            kind: "string" | "number" | "bus_idx" | "bool";
+            /**
+             * Required
+             * @description Whether the field is required when adding a new element. Optional fields collapse under the form's ``Show advanced`` disclosure.
+             * @default false
+             */
+            required: boolean;
+            /**
+             * Unit
+             * @description Display unit suffix (``kV``, ``pu``, ``MVA``, ``MWs/MVA``, ``rad``). Rendered inline next to numerical inputs.
+             */
+            unit?: string | null;
+        };
+        /**
+         * TopologySchema
+         * @description Per-model parameter metadata, used by the web client's polymorphic
+         *     form generator (Unit 6).
+         *
+         *     Returned from ``GET /api/topology/schema``. Mirrors the wrapper-side
+         *     ``_PARAMS_BY_MODEL`` table — adding a new model on the server
+         *     automatically expands the form picker.
+         */
+        TopologySchema: {
+            /**
+             * Models
+             * @description Mapping from ANDES model class name to ordered parameter metadata. Order is the rendering order in the form.
+             */
+            models: {
+                [key: string]: components["schemas"]["TopologyParamMeta"][];
+            };
+        };
+        /**
          * TopologySummary
          * @description Substrate's structural view of the loaded case.
          *
@@ -678,7 +862,7 @@ export interface components {
             lines: components["schemas"]["TopologyEntry"][];
             /**
              * Transformers
-             * @description Transformer elements (currently empty for v0.1; ANDES models transformers within the Line model).
+             * @description Transformer elements split out from the ANDES ``Line`` bucket via the ``tap != 1.0 OR phi != 0.0`` heuristic. Pure transmission lines remain in ``lines``; off-nominal-tap and phase-shifting branches move here.
              */
             transformers: components["schemas"]["TopologyEntry"][];
             /**
@@ -688,9 +872,14 @@ export interface components {
             generators: components["schemas"]["TopologyEntry"][];
             /**
              * Loads
-             * @description Load elements (PQ).
+             * @description Load elements — both static (PQ) and dynamic (ZIP).
              */
             loads: components["schemas"]["TopologyEntry"][];
+            /**
+             * Shunts
+             * @description Shunt elements (capacitors and reactors). Modeled as ANDES ``Shunt`` devices; rendered with the IEC 60617 shunt-cap or shunt-reactor icon depending on the sign of ``b``.
+             */
+            shunts?: components["schemas"]["TopologyEntry"][];
         };
         /** ValidationError */
         ValidationError: {
@@ -1193,7 +1382,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Session has already been committed (PF or TDS has run); call POST /sessions/{id}/reload to return to pre-setup. */
+            /** @description Session has already been committed (PF or TDS has run); call POST /api/sessions/{id}/reload to return to pre-setup. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -1209,6 +1398,237 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    getTopologySchema: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopologySchema"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    addElement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddElementRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ElementCreated"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session has already been committed (PF or TDS has run); call POST /api/sessions/{id}/reload to return to pre-setup. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Request body exceeded the 65536-byte cap on topology mutation endpoints. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description ANDES rejected the add() call (unknown model, missing required param, invalid bus reference, etc.) or the wrapper-side whitelist found unknown param keys. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    editElement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                model: string;
+                idx: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditElementRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopologyEntry"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found, or no element of the given model+idx exists in the loaded System. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session has already been committed; call POST /api/sessions/{id}/reload to return to pre-setup. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Request body exceeded the 65536-byte cap on topology mutation endpoints. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description ANDES rejected the parameter write (e.g., unknown param key, wrong type, attempt to edit idx/name). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    createBlankSystem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlankSystemResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A System is already loaded on this session; reload or open a fresh session first. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -1373,7 +1793,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SidecarLayout"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {
