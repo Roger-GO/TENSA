@@ -424,6 +424,66 @@ export function useEditElement(): UseMutationResult<TopologyEntry, Error, EditEl
   });
 }
 
+export interface DeleteElementVars {
+  sessionId: SessionId;
+  model: string;
+  idx: string;
+}
+
+/**
+ * ``DELETE /sessions/{id}/elements/{model}/{idx}``. Removes a previously-
+ * added pre-setup element via the substrate's reload-and-replay path.
+ * Returns the post-delete ``TopologySummary`` so the SLD updates without
+ * an extra GET round-trip.
+ *
+ * The 422 ``DeleteBlockedResponse`` (cascade dependents) and 422
+ * ``ProblemDetails`` (case-file-originated, unknown model) come back as
+ * thrown ``ProblemDetailsError``s — the caller (``DeleteElementButton``)
+ * narrows on ``status === 422`` and reads the typed body off
+ * ``error.rawBody``.
+ *
+ * On success: seed the topology cache with the new summary AND clear
+ * ``case.selectedElement`` if the deleted element was the one being
+ * inspected (otherwise the inspector's findEntry would silently render
+ * a stale snapshot until the next click).
+ */
+export function useDeleteElement(): UseMutationResult<TopologySummary, Error, DeleteElementVars> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, model, idx }: DeleteElementVars) => {
+      return await andesClient.delete<TopologySummary>(
+        `/sessions/${encodeURIComponent(sessionId)}/elements/${encodeURIComponent(model)}/${encodeURIComponent(idx)}`,
+        { timeoutMs: TIMEOUTS.workspace },
+      );
+    },
+    onSuccess: (data, { sessionId, model, idx }) => {
+      queryClient.setQueryData(queryKeys.topology(sessionId), data);
+      useCaseStore.getState().setTopology(data);
+      // If the deleted element was the one being inspected, fall back to
+      // the "no element selected" empty state. Match by lower-cased kind
+      // because SelectedElement carries the inspector taxonomy
+      // ("bus"/"line"/...) while the API uses the ANDES model class
+      // ("Bus"/"Line"/"PV"/...). Compare structurally on idx + a kind
+      // family prefix.
+      const selected = useCaseStore.getState().selectedElement;
+      if (selected !== null && selected.idx === String(idx)) {
+        const modelLower = model.toLowerCase();
+        const kindMatchesModel =
+          modelLower === selected.kind ||
+          modelLower.startsWith(selected.kind) ||
+          selected.kind.startsWith(modelLower);
+        if (kindMatchesModel) {
+          useCaseStore.getState().setSelectedElement(null);
+        }
+      }
+      // Clear pending dependents — the cascade chain may have changed,
+      // and the next 422 (if any) will repopulate the list with the
+      // current truth.
+      useCaseStore.getState().clearPendingDependents();
+    },
+  });
+}
+
 /**
  * `POST /sessions/{id}/blank`. Creates a brand-new empty `andes.System()`
  * for the session. Caller seeds the topology query cache with the

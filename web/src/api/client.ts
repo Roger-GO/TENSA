@@ -35,8 +35,16 @@ export class ProblemDetailsError extends Error {
   readonly detail: string | undefined;
   readonly instance: string | undefined;
   readonly raw: ProblemDetails;
+  /**
+   * The unparsed JSON body of the response, preserved verbatim. Some
+   * non-2xx endpoints (notably ``DELETE /api/sessions/{id}/elements/...``)
+   * ship a typed body shape (``DeleteBlockedResponse``) that does NOT
+   * conform to RFC 7807 ProblemDetails; callers that need the typed
+   * fields read them off ``rawBody`` and narrow with a runtime guard.
+   */
+  readonly rawBody: unknown;
 
-  constructor(problem: ProblemDetails) {
+  constructor(problem: ProblemDetails, rawBody?: unknown) {
     // Title + detail compose the message. Either may be missing; fall back
     // sensibly so logs / DevTools at least surface the status.
     const message = problem.detail
@@ -50,6 +58,7 @@ export class ProblemDetailsError extends Error {
     this.detail = problem.detail ?? undefined;
     this.instance = problem.instance ?? undefined;
     this.raw = problem;
+    this.rawBody = rawBody ?? problem;
   }
 }
 
@@ -60,8 +69,8 @@ export class ProblemDetailsError extends Error {
 export class RateLimitedError extends ProblemDetailsError {
   readonly retryAfterSeconds: number | undefined;
 
-  constructor(problem: ProblemDetails, retryAfterSeconds: number | undefined) {
-    super(problem);
+  constructor(problem: ProblemDetails, retryAfterSeconds: number | undefined, rawBody?: unknown) {
+    super(problem, rawBody);
     this.name = 'RateLimitedError';
     this.retryAfterSeconds = retryAfterSeconds;
   }
@@ -69,8 +78,8 @@ export class RateLimitedError extends ProblemDetailsError {
 
 /** A 5xx response. Routed by the UI to the runtime-crash modal (R8). */
 export class ServerError extends ProblemDetailsError {
-  constructor(problem: ProblemDetails) {
-    super(problem);
+  constructor(problem: ProblemDetails, rawBody?: unknown) {
+    super(problem, rawBody);
     this.name = 'ServerError';
   }
 }
@@ -261,12 +270,16 @@ async function request<T>(
   const problem = coerceProblemDetails(response.status, parsed);
 
   if (response.status === 429) {
-    throw new RateLimitedError(problem, parseRetryAfter(response.headers.get('Retry-After')));
+    throw new RateLimitedError(
+      problem,
+      parseRetryAfter(response.headers.get('Retry-After')),
+      parsed,
+    );
   }
   if (response.status >= 500) {
-    throw new ServerError(problem);
+    throw new ServerError(problem, parsed);
   }
-  throw new ProblemDetailsError(problem);
+  throw new ProblemDetailsError(problem, parsed);
 }
 
 /** Public client surface — verb-named methods returning typed bodies. */

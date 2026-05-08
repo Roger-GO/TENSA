@@ -39,6 +39,19 @@ export type AddElementRequest = components['schemas']['AddElementRequest'];
 export type EditElementRequest = components['schemas']['EditElementRequest'];
 export type ElementCreated = components['schemas']['ElementCreated'];
 export type BlankSystemResponse = components['schemas']['BlankSystemResponse'];
+/**
+ * Successful body of ``DELETE /sessions/{id}/elements/{model}/{idx}``.
+ * Transparent alias for ``TopologySummary`` — the substrate returns the
+ * post-delete topology snapshot so the client can refresh without an
+ * extra GET round-trip. Aliased here for self-documenting call sites.
+ */
+export type DeleteElementResponse = TopologySummary;
+/**
+ * 422 body of ``DELETE /sessions/{id}/elements/{model}/{idx}`` when the
+ * deletion is blocked by cascade dependents. ``dependents`` is capped at
+ * 25 entries; ``total`` reports the full count for the truncation footer.
+ */
+export type DeleteBlockedResponse = components['schemas']['DeleteBlockedResponse'];
 export type TopologySchema = components['schemas']['TopologySchema'];
 export type TopologyParamMeta = components['schemas']['TopologyParamMeta'];
 export type SaveCaseRequest = components['schemas']['SaveCaseRequest'];

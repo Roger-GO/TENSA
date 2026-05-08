@@ -179,7 +179,8 @@ export interface paths {
         /** Edit parameters on an existing pre-setup element. */
         put: operations["editElement"];
         post?: never;
-        delete?: never;
+        /** Delete a previously-added pre-setup element. */
+        delete: operations["deleteElement"];
         options?: never;
         head?: never;
         patch?: never;
@@ -419,6 +420,26 @@ export interface components {
              * @description Bus Y coordinate, finite (no NaN/Inf).
              */
             y: number;
+        };
+        /**
+         * DeleteBlockedResponse
+         * @description Response body for ``DELETE /sessions/{id}/elements/{model}/{idx}``
+         *     when the deletion is blocked by cascade dependents (HTTP 422).
+         *
+         *     The list is capped at 25 entries; ``total`` reports the full count so
+         *     the UI can render a "Showing 25 of N dependents" footer when truncated.
+         */
+        DeleteBlockedResponse: {
+            /**
+             * Dependents
+             * @description Up to 25 dependent topology entries that reference the target element (e.g., Lines and generators attached to a Bus the caller tried to delete). The UI surfaces these as clickable rows the user must clear before re-issuing the delete.
+             */
+            dependents: components["schemas"]["TopologyEntry"][];
+            /**
+             * Total
+             * @description Full count of dependent elements. Equals ``len(dependents)`` when ``total <= 25``; greater when the list was truncated.
+             */
+            total: number;
         };
         /**
          * DisturbanceAck
@@ -1711,6 +1732,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    deleteElement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                model: string;
+                idx: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopologySummary"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found, or no element of the given model+idx exists in the loaded System. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session has already been committed (PF or TDS has run); call POST /api/sessions/{id}/reload to return to pre-setup. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Deletion is blocked. Three sub-cases share this status: (a) cascade dependents exist (body matches ``DeleteBlockedResponse``); (b) the element came from the loaded case file, not from ``add_element`` (body matches ``ProblemDetails`` with the 'reload to revert' message); (c) unknown model name (body matches ``ProblemDetails``). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteBlockedResponse"];
                 };
             };
         };

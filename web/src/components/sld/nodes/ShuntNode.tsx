@@ -3,6 +3,7 @@ import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { iconForModel } from '@/icons/iec60617/manifest';
 import { cn } from '@/lib/cn';
+import { useIsPendingDependent } from '@/store/pendingDependents';
 import type { SldNodeData } from './BusNode';
 
 /**
@@ -16,16 +17,19 @@ import type { SldNodeData } from './BusNode';
  */
 export const ShuntNode = memo(function ShuntNode({ data, selected }: NodeProps) {
   const d = data as SldNodeData;
+  const isPendingDependent = useIsPendingDependent(d.kind, d.idx);
   return (
     <div
       data-testid={`shunt-node-${d.idx}`}
       data-kind="shunt"
       data-idx={d.idx}
+      data-pending-dependent={isPendingDependent ? 'true' : undefined}
       className={cn(
         'flex flex-col items-center gap-0.5 px-1.5 py-0.5',
         'bg-background text-foreground',
         'rounded-[var(--radius-md)] border',
         selected ? 'border-[var(--color-ring)] ring-2 ring-[var(--color-ring)]' : 'border-border',
+        isPendingDependent ? 'ring-warning/60 ring-2' : '',
         'transition-colors duration-[var(--duration-fast)]',
         'cursor-pointer select-none',
       )}
@@ -34,7 +38,7 @@ export const ShuntNode = memo(function ShuntNode({ data, selected }: NodeProps) 
         type="source"
         position={Position.Right}
         id="bus-anchor"
-        className="!h-0 !w-0 !min-h-0 !min-w-0 !border-0 !bg-transparent"
+        className="!h-0 !min-h-0 !w-0 !min-w-0 !border-0 !bg-transparent"
       />
       <img
         src={iconForModel(d.kind)}
