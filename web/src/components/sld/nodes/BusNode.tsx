@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { Fragment, memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { iconForModel } from '@/icons/iec60617/manifest';
@@ -6,6 +6,7 @@ import { cn } from '@/lib/cn';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
 import { getBusOverlayState } from '../overlay';
+import { SOURCE_HANDLE, TARGET_HANDLE, type Side } from '../graph';
 
 /**
  * Shape of `data` for an IEC 60617 SLD node. Shared across BusNode +
@@ -24,12 +25,24 @@ export interface SldNodeData extends Record<string, unknown> {
   angle?: number;
 }
 
+const SIDES: Array<{ side: Side; position: Position }> = [
+  { side: 'north', position: Position.Top },
+  { side: 'east', position: Position.Right },
+  { side: 'south', position: Position.Bottom },
+  { side: 'west', position: Position.Left },
+];
+
 /**
  * Bus node. Renders the IEC 60617 bus icon (a horizontal stroke) above
  * a small idx + name label. Bus is the connection target for every
- * branch edge; React Flow `<Handle>` exposes the connection points on
- * the top + bottom + left + right so ELK's orthogonal routing has
- * something to anchor to from any direction.
+ * branch edge.
+ *
+ * Unit 1 exposes 4 cardinal Handle pairs (source + target) so each
+ * line can pick a unique cardinal corner. Edges set `sourceHandle`
+ * and `targetHandle` to one of `<side>-source` / `<side>-target` (see
+ * `graph.ts`'s `SOURCE_HANDLE` / `TARGET_HANDLE` maps). When an edge
+ * leaves no handle pick, React Flow falls back to the first source-
+ * type handle on the node, which is the v0.1 behaviour.
  *
  * Unit 9: subscribes to `pflow.lastRun` + `ui.hideLabels` and consumes
  * `getBusOverlayState` to apply a limit-violation border color + a
@@ -57,10 +70,22 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
         'cursor-pointer select-none',
       )}
     >
-      <Handle type="target" position={Position.Top} className="!bg-foreground/40" />
-      <Handle type="source" position={Position.Bottom} className="!bg-foreground/40" />
-      <Handle type="target" position={Position.Left} id="left" className="!bg-foreground/40" />
-      <Handle type="source" position={Position.Right} id="right" className="!bg-foreground/40" />
+      {SIDES.map(({ side, position }) => (
+        <Fragment key={side}>
+          <Handle
+            type="target"
+            position={position}
+            id={TARGET_HANDLE[side]}
+            className="!bg-foreground/40"
+          />
+          <Handle
+            type="source"
+            position={position}
+            id={SOURCE_HANDLE[side]}
+            className="!bg-foreground/40"
+          />
+        </Fragment>
+      ))}
       <img
         src={iconForModel(d.kind)}
         alt=""

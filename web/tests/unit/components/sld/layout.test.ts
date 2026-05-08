@@ -32,11 +32,21 @@ describe('autoLayout', () => {
       [bus(1, 'b1'), bus(2, 'b2'), bus(3, 'b3'), bus(4, 'b4'), bus(5, 'b5')],
       [line(1, 1, 2), line(2, 2, 3), line(3, 3, 4), line(4, 4, 5)],
     );
-    const coords = await autoLayout(topology);
+    const { coords, bendPoints } = await autoLayout(topology);
     expect(Object.keys(coords).sort()).toEqual(['1', '2', '3', '4', '5']);
     for (const v of Object.values(coords)) {
       expect(Number.isFinite(v.x)).toBe(true);
       expect(Number.isFinite(v.y)).toBe(true);
+    }
+    // Pass 2 should produce per-edge polylines for every line.
+    expect(bendPoints.size).toBe(4);
+    for (const polyline of bendPoints.values()) {
+      // start + (>=0 bends) + end = at least 2 points.
+      expect(polyline.length).toBeGreaterThanOrEqual(2);
+      for (const [x, y] of polyline) {
+        expect(Number.isFinite(x)).toBe(true);
+        expect(Number.isFinite(y)).toBe(true);
+      }
     }
   });
 
@@ -61,7 +71,7 @@ describe('autoLayout', () => {
         line(14, 13, 14),
       ],
     );
-    const coords = await autoLayout(topology);
+    const { coords } = await autoLayout(topology);
     const seen = new Map<string, string>();
     for (const [id, c] of Object.entries(coords)) {
       const key = `${c.x},${c.y}`;
@@ -71,13 +81,14 @@ describe('autoLayout', () => {
     }
   });
 
-  it('returns an empty map for an empty topology', async () => {
+  it('returns an empty layout for an empty topology', async () => {
     const topology = makeTopology([], []);
-    const coords = await autoLayout(topology);
+    const { coords, bendPoints } = await autoLayout(topology);
     expect(coords).toEqual({});
+    expect(bendPoints.size).toBe(0);
   });
 
-  it('falls back to a grid layout when ELK throws', async () => {
+  it('falls back to a grid layout when ELK throws on pass 1', async () => {
     const topology = makeTopology(
       [bus(1, 'b1'), bus(2, 'b2'), bus(3, 'b3')],
       [line(1, 1, 2), line(2, 2, 3)],
@@ -88,17 +99,53 @@ describe('autoLayout', () => {
     // Run once to instantiate, then break it for the second call.
     await autoLayout(topology);
     const elkBundle = await import('elkjs/lib/elk.bundled.js');
-    // The autoLayout module's lazy singleton is internal; instead we
-    // mock at the prototype level so the second call surfaces the
-    // fallback path.
     const proto = elkBundle.default.prototype as unknown as {
       layout: (g: unknown) => Promise<unknown>;
     };
+    // Reject pass 1 on the next call. autoLayout will fall back to
+    // grid layout and skip pass 2 entirely.
     const spy = vi.spyOn(proto, 'layout').mockRejectedValueOnce(new Error('boom'));
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const coords = await autoLayout(topology);
+      const { coords, bendPoints } = await autoLayout(topology);
       expect(Object.keys(coords).sort()).toEqual(['1', '2', '3']);
+      expect(bendPoints.size).toBe(0);
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('returns pass-1 coords without bend points when ELK throws on pass 2', async () => {
+    const topology = makeTopology(
+      [bus(1, 'b1'), bus(2, 'b2'), bus(3, 'b3')],
+      [line(1, 1, 2), line(2, 2, 3)],
+    );
+    await autoLayout(topology);
+    const elkBundle = await import('elkjs/lib/elk.bundled.js');
+    const proto = elkBundle.default.prototype as unknown as {
+      layout: (g: unknown) => Promise<unknown>;
+    };
+    // Let pass 1 succeed (real call), then reject pass 2. The spy
+    // distinguishes by checking whether the graph has port constraints
+    // declared; pass 2 always passes a `layoutOptions.elk.portConstraints`
+    // on at least one child.
+    const realLayout = proto.layout;
+    const spy = vi.spyOn(proto, 'layout').mockImplementation(async function (
+      this: unknown,
+      graph: unknown,
+    ) {
+      const g = graph as { children?: Array<{ ports?: unknown[] }> };
+      const isPass2 = (g.children ?? []).some((c) => Array.isArray(c.ports) && c.ports.length > 0);
+      if (isPass2) throw new Error('pass-2 boom');
+      return realLayout.call(this, graph);
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { coords, bendPoints } = await autoLayout(topology);
+      expect(Object.keys(coords).sort()).toEqual(['1', '2', '3']);
+      expect(bendPoints.size).toBe(0);
       expect(warnSpy).toHaveBeenCalled();
     } finally {
       spy.mockRestore();
@@ -112,8 +159,11 @@ describe('autoLayout', () => {
       // Reference to bus 99 should not crash auto-layout.
       [line(1, 1, 2), line(99, 1, 99)],
     );
-    const coords = await autoLayout(topology);
+    const { coords, bendPoints } = await autoLayout(topology);
     expect(Object.keys(coords).sort()).toEqual(['1', '2']);
+    // Only the valid line gets a polyline.
+    expect(bendPoints.size).toBe(1);
+    expect(bendPoints.has('line-1')).toBe(true);
   });
 });
 

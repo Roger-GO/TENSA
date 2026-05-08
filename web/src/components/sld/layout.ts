@@ -7,6 +7,14 @@
  * result is a `{busIdx → {x, y}}` map the canvas applies to its
  * React Flow node positions.
  *
+ * Unit 1 (Phase 0 spike-confirmed): two passes. Pass 1 uses no port
+ * constraints to derive bus coords. Pass 2 declares 4 cardinal ports
+ * per bus with `'elk.portConstraints': 'FIXED_SIDE'` and points each
+ * edge at a specific port chosen via `assignHandles(fromCoord,
+ * toCoord)`; ELK's ORTHOGONAL routing then produces per-edge bend
+ * points exiting the declared cardinal sides. The bend points feed the
+ * `RoutedEdge` component so each line traces a unique corridor.
+ *
  * Design choices:
  *
  * - `elk.layered` + `BRANDES_KOEPF` node placement gives the cleanest
@@ -20,15 +28,16 @@
  *   =80` gives buses room to render their IEC 60617 icons + name
  *   labels without overlap, while still fitting IEEE 39 in a single
  *   viewport at default zoom.
- * - Fallback: if ELK throws (rare; bundle problem or pathological
- *   graph), fall back to a plain sqrt(n)-wide grid + warn. The canvas
- *   still renders — just less prettily — so the user is never left
- *   staring at a blank pane.
+ * - Fallback: if ELK throws on either pass (rare; bundle problem or
+ *   pathological graph), fall back to a plain sqrt(n)-wide grid + warn
+ *   and skip bend points. The canvas still renders — just less
+ *   prettily — so the user is never left staring at a blank pane.
  */
 import ELK from 'elkjs/lib/elk.bundled.js';
 import type { ElkNode, LayoutOptions } from 'elkjs/lib/elk-api';
 import type { TopologySummary } from '@/api/types';
 import type { CoordsByIdx } from './sidecar';
+import { assignHandles, type Side } from './graph';
 
 /** Lazy ELK instance — `elkjs` reads `Worker` on construction in some bundles. */
 let elkInstance: InstanceType<typeof ELK> | null = null;
@@ -62,6 +71,24 @@ const NODE_HEIGHT = 40;
 const GRID_CELL_WIDTH = 120;
 const GRID_CELL_HEIGHT = 100;
 
+/** Result of an auto-layout pass: bus coords + per-edge bend-point polylines. */
+export interface LayoutResult {
+  coords: CoordsByIdx;
+  /**
+   * Per-edge polyline (start point + bend points + end point, in
+   * order). Edge ids match the `<bucket>-<idx>` pattern used by
+   * `graph.ts/buildGraph`. Empty when ELK falls back to grid layout.
+   */
+  bendPoints: Map<string, [number, number][]>;
+}
+
+const SIDE_TO_ELK: Record<Side, 'NORTH' | 'EAST' | 'SOUTH' | 'WEST'> = {
+  north: 'NORTH',
+  east: 'EAST',
+  south: 'SOUTH',
+  west: 'WEST',
+};
+
 /**
  * Pull the bus1/bus2 idx values out of a Line / Transformer entry.
  * Both live inside the `params` dict per the Unit 5b extension.
@@ -82,47 +109,80 @@ function extractTerminals(
   return { from: String(bus1), to: String(bus2) };
 }
 
+interface CollectedBranch {
+  /** `<bucket>-<idx>` — matches buildGraph's edge id convention. */
+  id: string;
+  from: string;
+  to: string;
+}
+
+function collectBranches(topology: TopologySummary): CollectedBranch[] {
+  const branches: CollectedBranch[] = [];
+  for (const line of topology.lines) {
+    const t = extractTerminals(line);
+    if (t) branches.push({ id: `line-${String(line.idx)}`, ...t });
+  }
+  for (const trafo of topology.transformers) {
+    const t = extractTerminals(trafo);
+    if (t) branches.push({ id: `transformer-${String(trafo.idx)}`, ...t });
+  }
+  return branches;
+}
+
+interface ElkLayoutResult {
+  children?: Array<{
+    id: string;
+    x?: number;
+    y?: number;
+    ports?: Array<{ id: string; x?: number; y?: number }>;
+    edges?: ElkResultEdge[];
+  }>;
+  edges?: ElkResultEdge[];
+}
+
+interface ElkResultEdge {
+  id: string;
+  sections?: Array<{
+    startPoint?: { x: number; y: number };
+    endPoint?: { x: number; y: number };
+    bendPoints?: Array<{ x: number; y: number }>;
+  }>;
+}
+
 /**
- * Run ELK on the topology and return per-bus coordinates.
+ * Run ELK on the topology and return per-bus coordinates + per-edge
+ * bend-point polylines.
  *
- * The function is async — ELK's bundled.js path runs synchronously
- * under the hood for small graphs but exposes a Promise API. Callers
- * should `await` and render `<SldLayoutSkeleton />` while pending.
+ * Two passes:
+ *
+ * 1. Layered + ORTHOGONAL with no port constraints — gives final
+ *    bus coords. Same shape as the v0.1 single-pass call.
+ * 2. Same algorithm + 4 cardinal `FIXED_SIDE` ports per bus + edges
+ *    targeted at port-suffixed shape ids derived from `assignHandles`
+ *    on pass-1 coords. Bend points come back on `result.edges[].
+ *    sections[0].{startPoint, bendPoints, endPoint}`.
+ *
+ * Pass 2 is skipped if `topology.buses.length < 2` (a single bus has
+ * no edges; routing is moot).
+ *
+ * Callers should `await` and render `<SldLayoutSkeleton />` while
+ * pending.
  */
 export async function autoLayout(
   topology: TopologySummary,
   options: LayoutOptions = DEFAULT_LAYOUT_OPTIONS,
-): Promise<CoordsByIdx> {
+): Promise<LayoutResult> {
   const buses = topology.buses;
   if (buses.length === 0) {
-    return {};
+    return { coords: {}, bendPoints: new Map() };
   }
 
-  // Collect every "edge" between two buses — both Line entries and
-  // Transformer entries (per the topology shape; the substrate emits
-  // transformers as a separate bucket even though ANDES models them
-  // within the Line class).
-  const branches: { id: string; from: string; to: string }[] = [];
-  for (const line of topology.lines) {
-    const terminals = extractTerminals(line);
-    if (terminals) {
-      branches.push({ id: `line-${String(line.idx)}`, ...terminals });
-    }
-  }
-  for (const trafo of topology.transformers) {
-    const terminals = extractTerminals(trafo);
-    if (terminals) {
-      branches.push({ id: `trafo-${String(trafo.idx)}`, ...terminals });
-    }
-  }
-
-  // Filter out edges that reference a bus not in the topology — ELK
-  // would throw otherwise. Defensive; should not happen with a
-  // well-formed substrate response, but the cost is one Set lookup.
+  const branches = collectBranches(topology);
   const busIdSet = new Set(buses.map((b) => String(b.idx)));
   const validBranches = branches.filter((b) => busIdSet.has(b.from) && busIdSet.has(b.to));
 
-  const elkGraph: ElkNode = {
+  // ---- pass 1: get coords ----
+  const pass1Graph: ElkNode = {
     id: 'root',
     layoutOptions: options,
     children: buses.map((b) => ({
@@ -137,17 +197,95 @@ export async function autoLayout(
     })),
   };
 
+  let coords: CoordsByIdx;
   try {
-    const result = await getElk().layout(elkGraph);
-    const coords: CoordsByIdx = {};
+    const result = (await getElk().layout(pass1Graph)) as ElkLayoutResult;
+    coords = {};
     for (const child of result.children ?? []) {
       coords[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
     }
-    return coords;
   } catch (err) {
-    console.warn('SLD auto-layout: ELK failed, using grid fallback', err);
-    return gridLayout(buses.map((b) => String(b.idx)));
+    console.warn('SLD auto-layout: ELK pass 1 failed, using grid fallback', err);
+    return {
+      coords: gridLayout(buses.map((b) => String(b.idx))),
+      bendPoints: new Map(),
+    };
   }
+
+  if (validBranches.length === 0) {
+    return { coords, bendPoints: new Map() };
+  }
+
+  // ---- pass 2: bend points via FIXED_SIDE ports ----
+  const portTargets = new Map<string, { source: string; target: string }>();
+  for (const branch of validBranches) {
+    const fromCoord = coords[branch.from];
+    const toCoord = coords[branch.to];
+    if (!fromCoord || !toCoord) continue;
+    const { sourceSide, targetSide } = assignHandles(fromCoord, toCoord);
+    portTargets.set(branch.id, {
+      source: `${branch.from}.${sourceSide}`,
+      target: `${branch.to}.${targetSide}`,
+    });
+  }
+
+  const pass2Graph: ElkNode = {
+    id: 'root',
+    layoutOptions: options,
+    children: buses.map((b) => ({
+      id: String(b.idx),
+      width: NODE_WIDTH,
+      height: NODE_HEIGHT,
+      layoutOptions: { 'elk.portConstraints': 'FIXED_SIDE' },
+      ports: (['north', 'east', 'south', 'west'] as Side[]).map((side) => ({
+        id: `${String(b.idx)}.${side}`,
+        layoutOptions: { 'elk.port.side': SIDE_TO_ELK[side] },
+      })),
+    })),
+    edges: validBranches.map((b) => {
+      const ports = portTargets.get(b.id);
+      return {
+        id: b.id,
+        sources: [ports?.source ?? b.from],
+        targets: [ports?.target ?? b.to],
+      };
+    }),
+  };
+
+  const bendPoints = new Map<string, [number, number][]>();
+  let pass2Coords: CoordsByIdx | null = null;
+  try {
+    const result = (await getElk().layout(pass2Graph)) as ElkLayoutResult;
+    pass2Coords = {};
+    for (const child of result.children ?? []) {
+      pass2Coords[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
+    }
+    // Edges may sit on root or on the deepest common parent's children.
+    const allEdges: ElkResultEdge[] = [
+      ...(result.edges ?? []),
+      ...(result.children ?? []).flatMap((c) => c.edges ?? []),
+    ];
+    for (const edge of allEdges) {
+      const section = edge.sections?.[0];
+      if (!section || !section.startPoint || !section.endPoint) continue;
+      const polyline: [number, number][] = [];
+      polyline.push([section.startPoint.x, section.startPoint.y]);
+      for (const bp of section.bendPoints ?? []) {
+        polyline.push([bp.x, bp.y]);
+      }
+      polyline.push([section.endPoint.x, section.endPoint.y]);
+      bendPoints.set(edge.id, polyline);
+    }
+  } catch (err) {
+    console.warn('SLD auto-layout: ELK pass 2 failed, using pass-1 coords without bend points', err);
+    return { coords, bendPoints: new Map() };
+  }
+
+  // Pass 2 produces the final coords (same algorithm; ports nudge node
+  // sizes by zero so coords match pass 1 in practice, but using pass 2
+  // keeps the bend-point polylines self-consistent with the bus
+  // positions React Flow renders).
+  return { coords: pass2Coords ?? coords, bendPoints };
 }
 
 /**
