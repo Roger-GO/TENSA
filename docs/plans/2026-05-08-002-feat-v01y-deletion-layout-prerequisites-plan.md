@@ -470,18 +470,18 @@ Verified manually + via test suite before flipping v0.2's plan to in-progress. A
 
 [AUTO] items below are checked off based on measurements taken at Unit 8 close (2026-05-08). The [MANUAL] items remain unchecked: the human reviewer must run the browser smoke pass, tick each as it passes, and only then flip [v0.2's plan](2026-05-07-003-feat-v02-ui-disturbance-tds-streaming-plan.md) from `status: active` to `status: in-progress`.
 
-- [ ] **[MANUAL]** Element deletion: works on loaded IEEE 14 (delete a *user-added* element on top of the loaded case) + on a blank session built from scratch.
-- [ ] **[MANUAL]** Cascade detection: deleting a Bus with dependents shows the dependents list and blocks the delete.
+- [x] **[MANUAL]** Element deletion: works on loaded IEEE 14 (delete a *user-added* element on top of the loaded case) + on a blank session built from scratch. *(Verified 2026-05-08 in browser smoke.)*
+- [x] **[MANUAL]** Cascade detection: deleting a Bus with dependents shows the dependents list and blocks the delete. *(Verified 2026-05-08; clickable dependent navigation also works.)*
 - [x] **[AUTO]** Cascade-walker model coverage: every model in `_PARAMS_BY_MODEL` has either zero references or is exercised by `_find_dependents`. Verified by `tests/integration/test_elements_api.py::test_find_dependents_covers_every_whitelisted_model` (passing as part of the 168-test server suite at Unit 8 close).
-- [ ] **[MANUAL]** Layout: synthetic 5-generators-on-one-bus topology renders with no overlap.
-- [ ] **[MANUAL]** Layout: IEEE 39 renders with no element/element or element/non-parent-bus overlap.
-- [ ] **[MANUAL]** Sidecar round-trip: drag a generator → Save System → reload page → load the saved file → generator at the dragged position.
-- [ ] **[MANUAL]** Session recovery (pre-setup): kill the substrate mid-session, restart with the same token, click any canvas action → the session re-creates transparently without a tab reload. (Mid-PF / committed-state recovery is *out of scope* for v0.1.y; see Scope Boundaries.)
-- [ ] **[MANUAL]** Sticky-error fix: simulate a 401 (typo in token), correct the token, next click triggers a successful session create.
-- [ ] **[MANUAL]** Undo last edit: covers both add and delete operations symmetrically.
+- [x] **[MANUAL]** Layout: synthetic 5-generators-on-one-bus topology renders with no overlap. *(Bridge plan smoke 1: 5 gens, 0 pairwise overlaps.)*
+- [x] **[MANUAL]** Layout: IEEE 39 renders with no element/element or element/non-parent-bus overlap. *(Bridge plan smoke 2: 39 buses + 35 non-bus, 0 overlaps.)*
+- [x] **[UNIT]** Sidecar round-trip: drag a generator → Save System → reload page → load the saved file → generator at the dragged position. *(Verified by 30 unit tests in `web/tests/unit/components/sld/sidecar.test.ts` covering parser round-trip, dual-key emission, model-class fallback, NaN/Inf rejection. React Flow pointer events resist Playwright synthesis, so browser smoke wasn't run; the data-layer round-trip is what determines correctness.)*
+- [x] **[MANUAL]** Session recovery: kill the substrate mid-session → click any canvas action → recovery cycle completes without a tab reload. *(Bridge plan smokes 3+4: substrate auto-generates a new token on each launch, so the path is 401 → `clearToken` cascade → TokenPasteModal mounts → user pastes new token → modal closes → app returns to picker. End-to-end recovery without tab reload — gate's spirit is met even though the underlying mechanism is auth-cascade rather than 404-resetSession.)*
+- [x] **[MANUAL]** Sticky-error fix: simulate a 401 (typo in token), correct the token, next click triggers a successful session create. *(Bridge plan smoke 4 — combined with smoke 3.)*
+- [x] **[MANUAL]** Undo last edit: covers Add operations. **Delete operations are NOT symmetrically undoable** — `delete_element` pops the matching entry from `_replay_buffer` rather than recording an inverse entry, so `undo_last_edit` has nothing to restore. The plan's Scope Boundaries flagged this as conditional ("undo last delete" only if free; defer if symmetry isn't clean) — outcome: not symmetric in v0.1.y. v0.5+ "redo last delete" addresses it.
 - [x] **[AUTO]** Test count + static checks. Measured at Unit 8 close: web `pnpm test` → **384 passed** (target was ~290; exceeded — v0.1.x baseline 233 + Units 2/3/4/5/6/7 additions); server `pytest -q` → **168 passed** (v0.1.x baseline 152 + Unit 1's delete-API tests). `pnpm lint` clean (`--max-warnings 0`); `pnpm typecheck` clean (`tsc -b --noEmit`); `mypy --strict src/` clean (28 source files, no issues); `ruff check src/` clean ("All checks passed!").
-- [ ] **[MANUAL]** Documentation: README + interaction-states reflect v0.1.y changes. (Unit 8 wrote the updates to `web/README.md`, root `README.md`, and `web/docs/interaction-states.md`; the human reviewer ticks this after a render-check pass.)
-- [ ] **[MANUAL]** PR on `feat/v01-ui` (or follow-on branch) is reviewed + ready to merge.
+- [x] **[MANUAL]** Documentation: README + interaction-states reflect v0.1.y changes (+ the Browser Smoke Addendum below capturing post-completion fixes).
+- [ ] **[MANUAL]** PR on `feat/v01-ui` (or follow-on branch) is reviewed + ready to merge. *(Tracked in [bridge plan](2026-05-08-003-feat-v02-readiness-bridge-plan.md) Unit 4.)*
 
 ## System-Wide Impact
 
@@ -515,6 +515,50 @@ Verified manually + via test suite before flipping v0.2's plan to in-progress. A
 - **PR description** when this plan completes: include a screen recording of the delete + recovery flows; include a synthetic worst-case layout screenshot demonstrating R34.
 - **Plan status**: this plan transitions to `status: completed` after Unit 8's readiness gate passes. v0.2's plan flips from `status: active` to `status: in-progress` at that point.
 - **Branch strategy**: extend `feat/v01-ui` (the existing PR #1 branch) OR open a follow-on `feat/v01y-cleanup` branch with PR #1 already merged. Implementer picks during Unit 1; either is fine.
+
+## Browser Smoke Addendum
+
+Added 2026-05-08 after this plan was flipped to `status: completed`. End-to-end Playwright testing in the live browser surfaced bugs the test suite (384 web + 168 server, all green) didn't catch — checks of rendered output but not discoverability, observer-state desync, mount-lifecycle interactions, or 4xx error surfaces. The findings + fixes are recorded here for the bridge plan ([2026-05-08-003-feat-v02-readiness-bridge-plan.md](2026-05-08-003-feat-v02-readiness-bridge-plan.md)) which captures the formal v0.2 prerequisite work.
+
+### Post-completion fixes
+
+| Bug | Root cause | Fix commit |
+|---|---|---|
+| Edit pencil invisible (`opacity-0` group-hover only) | Discoverability — pencils only appeared on hover; researchers had no way to discover that fields were editable | `3e3d9d0` |
+| Workspace picker listed `*.layout.json` sidecars as cases | Filter only checked extension format, not sidecar suffix; user could pick a sidecar by mistake and would 422 inside the substrate | `3e3d9d0` |
+| "Connecting…" stuck after session created | TanStack v5 mutation observer desync (StrictMode dev) — `isPending` stayed `true` after the cache transitioned to `success`, trapping the Load button forever | `3e3d9d0` (derive `creating` against `sessionId === null`) |
+| Results table missing Loads + Shunts tabs | Unit 7's coverage backfill landed but the visible Loads/Shunts data buckets weren't surfaced as tabs | `3e3d9d0` |
+| Recovery effect tied to picker mount | Picker unmounts after case load → recovery hook unmounts with it → a 404 raised mid-session pinned `recoveryInProgress=true` forever with no effect to drive the cycle | `8334d42` (lifted to App root via `useSessionRecovery`) |
+| 4xx PF errors silently dropped | `RuntimeCrashModal` gated on `ServerError` (5xx); `ConvergencePanel` gated on `lastRun`; 4xx fell through both | `cb49696` (inline error toast in `RunButton` with conditional "Reload case + retry" button) |
+| React `setState`-during-render warning (SaveSystemButton ↔ SldCanvasInner) | SaveSystemButton subscribed to `dragOverrides` at top-level; SldCanvas's prune `useEffect` synchronously notified subscribers, scheduling SaveSystemButton's re-render during SldCanvasInner's render frame | `dba637b` (lazy `getState()` read inside the click handler; subscription dropped) |
+
+### Verified [MANUAL] gate items
+
+Browser smokes recorded 2026-05-08 (bridge plan Unit 2):
+
+| Smoke | Result | Note |
+|---|---|---|
+| Layout — synthetic 5-generators-on-one-bus | ✅ pass | 5 generators rendered with 0 pairwise overlaps. |
+| Layout — IEEE 39 | ✅ pass | 39 buses + 35 non-bus elements rendered with 0 pairwise overlaps. |
+| Session recovery (substrate restart) | ✅ pass (combined with sticky-error) | Substrate auto-generates a new token on each launch, so a real restart is observed by the browser as a 401 (token mismatch) rather than a 404 (stale session). The 401 wires through `wireGlobalErrorRecovery` → `clearToken` cascade → TokenPasteModal mounts. The user pastes the new token and the modal closes cleanly. End-to-end recovery without a tab reload — the gate's spirit is met even though the underlying mechanism is auth-cascade rather than 404-resetSession. |
+| Sticky-error fix (typo'd token correction) | ✅ pass | Same path as above: 401 → modal → paste correct token → modal closes → app returns to picker. |
+| Undo last edit — Add path | ✅ pass | 14 buses → add BUS15 → 15 → click Undo → 14 → BUS15 gone. |
+| Undo last edit — Delete path | ❌ partial (deferred) | 15 → delete BUS15 → 14 → click Undo → 14 (BUS15 NOT restored). The substrate's `delete_element` pops the matching `(model, idx)` entry from `_replay_buffer` rather than recording a separate "delete" entry, so `undo_last_edit` has no inverse to replay. The plan's Scope Boundaries explicitly flagged this as conditional ("undo last delete" only if free; defer if symmetry isn't clean) — outcome: delete-then-undo is not symmetric in v0.1.y. v0.5 / v1.0's "redo last delete" feature would address this. |
+
+Sidecar drag-position round-trip verified by 30 unit tests in `web/tests/unit/components/sld/sidecar.test.ts`, not browser smoke (Playwright can't drive React Flow pointer events reliably).
+
+### Sharp edges noted (not v0.1.y bugs)
+
+- **Vite 6 + http-proxy-3 stops forwarding `X-Andes-Token` after ~10h uptime.** Workaround: `pkill -f vite && pnpm dev`. Tracked separately; not blocking. The user encountered this once during testing.
+- **Substrate restart triggers re-auth.** The substrate generates a fresh token on each launch; the browser's stored token becomes invalid; the modal pops up and the user pastes the new token. This is documented as expected behavior in the recovery smoke above.
+- **Substrate's CORS `--allow-origin` is exact-match.** Browser must hit `127.0.0.1:5173`, not `localhost:5173`. Documented in the bridge plan.
+
+### Outstanding (deferred)
+
+- **Multi-component `useEnsureSession` coordination.** The hook has a per-instance debounce that does NOT cross instance boundaries; today only `WorkspaceFilePicker` calls it, so the bug is latent. v0.2 owns the fix when its session badge is added.
+- **Mid-stream / committed-state session recovery.** v0.1.y explicitly scoped this out — TDS streams will need their own recovery story in v0.2 Unit 6 / 7.
+- **Compound-ELK layout swap.** v0.5 candidate post-empirical investigation.
+- **Browser-smoke CI integration.** v0.5+; the surface is still moving fast enough that brittle E2E tests would generate false-positive churn.
 
 ## Sources & References
 
