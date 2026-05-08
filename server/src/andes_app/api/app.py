@@ -29,6 +29,7 @@ from andes_app.api.routes.disturbances import router as disturbances_router
 from andes_app.api.routes.pflow import router as pflow_router
 from andes_app.api.routes.sessions import router as sessions_router
 from andes_app.api.routes.tds import router as tds_router
+from andes_app.api.routes.workspace import router as workspace_router
 from andes_app.api.routes.ws import router as ws_router
 from andes_app.core.session import SessionManager
 from andes_app.security.middleware import (
@@ -103,7 +104,7 @@ def make_app(
         CORSMiddleware,
         allow_origins=sorted(allowed_origins),
         allow_credentials=False,  # token is in a header, not a cookie
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["X-Andes-Token", "Content-Type"],
     )
 
@@ -127,6 +128,7 @@ def make_app(
     app.include_router(pflow_router, tags=["pflow"])
     app.include_router(disturbances_router, tags=["disturbances"])
     app.include_router(tds_router, tags=["tds"])
+    app.include_router(workspace_router, tags=["workspace"])
     app.include_router(ws_router, tags=["streaming"])
 
     return app

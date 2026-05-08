@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 
 from andes_app.api.auth import RequireToken
-from andes_app.api.schemas import PflowResult, PflowRunRequest, ProblemDetails
+from andes_app.api.schemas import LineFlow, PflowResult, PflowRunRequest, ProblemDetails
 from andes_app.core.session import (
     SessionExpiredError,
     SessionManager,
@@ -40,6 +40,15 @@ def _result_from_payload(payload: dict[str, Any], run_id: str) -> PflowResult:
     PflowResult dict. The wrapper sends bus_voltages / bus_angles keyed by
     Python idx values (which can be int or str on the wire); JSON object keys
     must be strings, so we stringify them at the boundary."""
+    raw_flows = payload.get("line_flows") or {}
+    line_flows: dict[str, LineFlow] = {}
+    for line_idx, flow in raw_flows.items():
+        line_flows[str(line_idx)] = LineFlow(
+            p=float(flow["p"]),
+            q=float(flow["q"]),
+            from_idx=flow["from_idx"],
+            to_idx=flow["to_idx"],
+        )
     return PflowResult(
         run_id=run_id,
         converged=bool(payload["converged"]),
@@ -47,6 +56,7 @@ def _result_from_payload(payload: dict[str, Any], run_id: str) -> PflowResult:
         mismatch=float(payload["mismatch"]),
         bus_voltages={str(k): float(v) for k, v in payload["bus_voltages"].items()},
         bus_angles={str(k): float(v) for k, v in payload["bus_angles"].items()},
+        line_flows=line_flows,
     )
 
 
