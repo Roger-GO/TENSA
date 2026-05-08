@@ -30,6 +30,7 @@ import { GeneratorNode } from './nodes/GeneratorNode';
 import { LoadNode } from './nodes/LoadNode';
 import { ShuntNode } from './nodes/ShuntNode';
 import { TopologyEdge } from './edges/TopologyEdge';
+import { RoutedEdge } from './edges/RoutedEdge';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
 import { autoLayout } from './layout';
 import {
@@ -40,7 +41,7 @@ import {
   type CoordsByIdx,
 } from './sidecar';
 import { curatedLayoutFor } from './curated';
-import { buildGraph } from './graph';
+import { buildGraph, computeHandleAssignments } from './graph';
 import { cn } from '@/lib/cn';
 
 const NODE_TYPES: NodeTypes = {
@@ -54,6 +55,7 @@ const NODE_TYPES: NodeTypes = {
 
 const EDGE_TYPES: EdgeTypes = {
   topology: TopologyEdge,
+  routed: RoutedEdge,
 };
 
 /** Buses-count threshold for the >30 banner (per the plan). */
@@ -114,6 +116,9 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   const setSelectedElement = useCaseStore((s) => s.setSelectedElement);
   const selectedElement = useCaseStore((s) => s.selectedElement);
   const [autoCoords, setAutoCoords] = useState<CoordsByIdx | null>(null);
+  const [autoBendPoints, setAutoBendPoints] = useState<Map<string, [number, number][]> | null>(
+    null,
+  );
   const [coords, setCoords] = useState<CoordsByIdx | null>(null);
   const [showLargeBanner, setShowLargeBanner] = useState<boolean>(false);
   const [showDriftBanner, setShowDriftBanner] = useState<boolean>(false);
@@ -132,10 +137,12 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   useEffect(() => {
     let cancelled = false;
     setAutoCoords(null);
+    setAutoBendPoints(null);
     void autoLayout(topology).then((computed) => {
       if (cancelled) return;
       if (topologyRef.current !== topology) return;
-      setAutoCoords(computed);
+      setAutoCoords(computed.coords);
+      setAutoBendPoints(computed.bendPoints);
     });
     return () => {
       cancelled = true;
@@ -160,10 +167,20 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
 
   // React Flow's controlled state. Maintained in `nodes`/`edges` so we
   // can mutate node positions on drag without losing other props.
-  const baseGraph = useMemo(
-    () => (coords ? buildGraph(topology, coords) : null),
-    [topology, coords],
-  );
+  //
+  // Unit 1: only feed ELK bend points to buildGraph when the canvas is
+  // running on auto-layout (no curated, no sidecar) — otherwise the
+  // bend points reference pass-2 ELK coords that diverge from the
+  // curated/sidecar coords React Flow renders, and the polyline would
+  // hang in mid-air. The handle assignments still flow through both
+  // paths so co-handle stride works for curated cases too.
+  const usingAutoLayout = curated === null && storedSidecar === null;
+  const baseGraph = useMemo(() => {
+    if (!coords) return null;
+    const handleAssignments = computeHandleAssignments(topology, coords);
+    const bendPoints = usingAutoLayout && autoBendPoints ? autoBendPoints : undefined;
+    return buildGraph(topology, coords, { handleAssignments, bendPoints });
+  }, [topology, coords, autoBendPoints, usingAutoLayout]);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
 

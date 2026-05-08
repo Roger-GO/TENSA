@@ -3,11 +3,18 @@ import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
+import type { Side } from '../graph';
 import { getLineOverlayState } from '../overlay';
 
 /**
  * Topology edge. Connects two bus nodes via a polyline (orthogonal
  * smooth-step path — NOT bezier).
+ *
+ * Unit 1: when the edge carries a `data.stride > 0`, lateral-offset the
+ * source endpoint along the perpendicular to the source side. This
+ * separates edges that share a single bus's cardinal handle into
+ * distinct corridors, eliminating the visual merge the polish loop
+ * surfaced on IEEE 14.
  *
  * Unit 9: when post-PF + the edge's bucket is `line`, render a
  * directional arrow + a magnitude label at the midpoint. Color encoding
@@ -20,6 +27,29 @@ interface EdgeData {
   name?: string;
   kind?: string;
   bucket?: 'line' | 'transformer';
+  sourceSide?: Side;
+  targetSide?: Side;
+  stride?: number;
+}
+
+/** Pixels per stride step. Increase if visual review reads stripes as parallel lines. */
+const STRIDE_PIXELS = 8;
+
+/**
+ * Compute a perpendicular offset (in canvas units) for the given side.
+ * stride 0 leaves the endpoint untouched; stride n shifts the endpoint
+ * `n * STRIDE_PIXELS` along the side's perpendicular axis. The shift
+ * direction (positive vs. negative) alternates per stride so multiple
+ * edges fan symmetrically rather than drifting one-sided.
+ */
+function strideShift(side: Side | undefined, stride: number): { dx: number; dy: number } {
+  if (!side || stride === 0) return { dx: 0, dy: 0 };
+  // Symmetric fan: stride 1 → +1, stride 2 → -1, stride 3 → +2, ...
+  const sign = stride % 2 === 1 ? 1 : -1;
+  const magnitude = Math.ceil(stride / 2);
+  const offset = sign * magnitude * STRIDE_PIXELS;
+  if (side === 'north' || side === 'south') return { dx: offset, dy: 0 };
+  return { dx: 0, dy: offset };
 }
 
 export const TopologyEdge = memo(function TopologyEdge({
@@ -35,16 +65,19 @@ export const TopologyEdge = memo(function TopologyEdge({
 }: EdgeProps) {
   const pflowResult = usePflowStore((s) => s.lastRun);
   const hideLabels = useUiStore((s) => s.hideLabels);
+  const edgeData = (data ?? {}) as EdgeData;
+  const stride = edgeData.stride ?? 0;
+  const sourceShift = strideShift(edgeData.sourceSide, stride);
+  const targetShift = strideShift(edgeData.targetSide, stride);
   const [edgePath, labelX, labelY] = getSmoothStepPath({
-    sourceX,
-    sourceY,
+    sourceX: sourceX + sourceShift.dx,
+    sourceY: sourceY + sourceShift.dy,
     sourcePosition,
-    targetX,
-    targetY,
+    targetX: targetX + targetShift.dx,
+    targetY: targetY + targetShift.dy,
     targetPosition,
     borderRadius: 4,
   });
-  const edgeData = (data ?? {}) as EdgeData;
   const isLine = edgeData.bucket === 'line';
   const lineIdx = edgeData.idx;
   const overlay = isLine && lineIdx ? getLineOverlayState(lineIdx, pflowResult, hideLabels) : null;

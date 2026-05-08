@@ -357,7 +357,7 @@ flowchart LR
 
 ### Phase 0 — Prerequisite spike
 
-- [ ] **Spike: ELK port-constraints in elkjs 0.9 (~30 min)**
+- [x] **Spike: ELK port-constraints in elkjs 0.9 (~30 min)** — passed 2026-05-08; Unit 1 uses ELK as the auto-layout source of truth without a snap-to-handle fallback. See `web/tests/unit/components/sld/spike-elk-ports.test.ts` for the verification harness. Findings: (a) elkjs 0.9 honors `'elk.portConstraints': 'FIXED_SIDE'` with per-port `'elk.port.side': 'NORTH|EAST|SOUTH|WEST'`; (b) edges land on `result.edges[]` at root level with `sections[0].{startPoint, endPoint, bendPoints?, incomingShape, outgoingShape}` — bend points are absent for straight edges and present otherwise; (c) port absolute coords are computed by adding `child.x + port.x`, `child.y + port.y`. Unit 1's `autoLayout` reads from `result.edges` (NOT `result.children[].edges`).
 
 **Goal:** De-risk Unit 1 before committing to the "ELK respects per-bus cardinal handles" path. Write a minimal elkjs `layout()` call that uses `'elk.portConstraints': 'FIXED_SIDE'` with a per-bus ports array (4 cardinal sides) and `'elk.edgeRouting': 'ORTHOGONAL'` on a 5-node test graph, and visually verify the bend points respect the per-port sides.
 
@@ -377,7 +377,7 @@ This spike's output is a paragraph-level note added to Unit 1 (or its replacemen
 
 ### Phase 1 — Polish (load-and-read becomes legible)
 
-- [ ] **Unit 1: Edge routing — handle anchors + ELK bend points**
+- [x] **Unit 1: Edge routing — handle anchors + ELK bend points** — landed 2026-05-08. Verification: 14 new handle tests + 8 layout tests pass; visual smoke on IEEE 14 (curated path, handles + stride) and synth14 (auto-layout path, ELK pass-2 bend points) both show distinct corridors per edge. R27 satisfied.
 
 **Goal:** Eliminate edge corridor merging on the SLD. Each line between buses traces a visually distinct path, regardless of layout source.
 
