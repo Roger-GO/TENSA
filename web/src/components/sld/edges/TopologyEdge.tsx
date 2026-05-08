@@ -88,9 +88,23 @@ export const TopologyEdge = memo(function TopologyEdge({
   const stroke = overlay?.has_data ? 'var(--color-foreground)' : 'var(--color-border)';
   const strokeWidth = overlay?.has_data ? 1.8 : 1.5;
 
+  // Endpoint dots — explicit visual marker at each bus boundary so the
+  // reader can tell which edges actually connect to a bus vs. ones
+  // that pass behind it. Drawn after BaseEdge so they sit on top of
+  // the path. Coords use the post-stride source/target points (the
+  // edge's actual visual entry into the bus). Color is the foreground
+  // tone — darker than the line stroke — so the dot reads as a
+  // deliberate connection node, not part of the line itself.
+  const dotRadius = 3.5;
+  const dotFill = 'var(--color-foreground)';
+  const sourcePoint = { x: sourceX + sourceShift.dx, y: sourceY + sourceShift.dy };
+  const targetPoint = { x: targetX + targetShift.dx, y: targetY + targetShift.dy };
+
   return (
     <>
       <BaseEdge path={edgePath} markerEnd={markerEnd} style={{ stroke, strokeWidth }} />
+      <circle cx={sourcePoint.x} cy={sourcePoint.y} r={dotRadius} fill={dotFill} />
+      <circle cx={targetPoint.x} cy={targetPoint.y} r={dotRadius} fill={dotFill} />
       {overlay && overlay.has_data && (overlay.p_label !== null || overlay.q_label !== null) ? (
         <EdgeLabelRenderer>
           <div
