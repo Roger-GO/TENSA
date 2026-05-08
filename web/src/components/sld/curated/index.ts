@@ -16,27 +16,41 @@
 import ieee14 from './ieee14.layout.json';
 import ieee39 from './ieee39.layout.json';
 import type { SidecarLayout } from '@/api/types';
+import { parseSidecar } from '../sidecar';
 
 /**
  * `source_case` is an optional informational field on curated layouts;
  * the substrate's `SidecarLayout` schema doesn't define it but JSON
  * additionalProperties are tolerated. Strip it before returning to the
  * runtime so the type stays canonical.
+ *
+ * Validation: delegates to `parseSidecar`, the same validator used on the
+ * GET sidecar response. If a curated JSON ever drifts (e.g., a NaN
+ * coordinate slips in), we log a warning and return `null` so the canvas
+ * falls back to ELK auto-layout instead of rendering with NaN positions.
  */
-function toSidecarLayout(raw: unknown): SidecarLayout {
-  const r = raw as Record<string, unknown>;
-  return {
-    schema_version: String(r.schema_version),
-    andes_version: String(r.andes_version),
-    last_modified: String(r.last_modified),
-    coordinates: r.coordinates as SidecarLayout['coordinates'],
-  };
+function toSidecarLayout(raw: unknown, name: string): SidecarLayout | null {
+  try {
+    return parseSidecar(raw);
+  } catch (err) {
+    console.warn(`curated layout ${name} failed validation; ignoring`, err);
+    return null;
+  }
 }
 
-const CURATED: Readonly<Record<string, SidecarLayout>> = Object.freeze({
-  ieee14: toSidecarLayout(ieee14),
-  ieee39: toSidecarLayout(ieee39),
-});
+const CURATED: Readonly<Record<string, SidecarLayout>> = Object.freeze(
+  Object.fromEntries(
+    (
+      [
+        ['ieee14', ieee14],
+        ['ieee39', ieee39],
+      ] as const
+    ).flatMap(([name, raw]) => {
+      const layout = toSidecarLayout(raw, name);
+      return layout ? [[name, layout] as const] : [];
+    }),
+  ),
+);
 
 /** Strip the directory + extension off a workspace path. */
 export function basenameWithoutExt(path: string): string {

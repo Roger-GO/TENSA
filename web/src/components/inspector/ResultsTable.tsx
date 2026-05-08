@@ -6,6 +6,7 @@ import { usePflowStore } from '@/store/pflow';
 import type { PflowResult, TopologyEntry, TopologySummary } from '@/api/types';
 import type { SelectedElement } from '@/store/case';
 import { cn } from '@/lib/cn';
+import { classifyVoltage } from '../sld/overlay';
 
 /**
  * ResultsTable. Right-dock bottom region; tabbed (Buses / Lines /
@@ -102,11 +103,11 @@ const GEN_COLUMNS: ColumnDef[] = [
   { key: 'v_setpoint', label: 'V_set (pu)', defaultDirection: 'asc' },
 ];
 
-/** Voltage band classification — matches `overlay.ts` constants. */
+/** Voltage band classification — delegates to `overlay.ts` for thresholds. */
 function classifyBusVoltage(v: number | undefined): 'danger' | 'warning' | null {
   if (v === undefined || !Number.isFinite(v)) return null;
-  if (v < 0.95 || v > 1.05) return 'danger';
-  if (v < 0.97 || v > 1.03) return 'warning';
+  const band = classifyVoltage(v);
+  if (band === 'danger' || band === 'warning') return band;
   return null;
 }
 

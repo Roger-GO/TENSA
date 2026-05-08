@@ -21,11 +21,13 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 from starlette.types import Scope
 
 from andes_app import __version__
@@ -36,6 +38,7 @@ from andes_app.api.routes.sessions import router as sessions_router
 from andes_app.api.routes.tds import router as tds_router
 from andes_app.api.routes.workspace import router as workspace_router
 from andes_app.api.routes.ws import router as ws_router
+from andes_app.api.schemas import ProblemDetails
 from andes_app.core.session import SessionManager
 from andes_app.security.middleware import (
     make_host_origin_middleware,
@@ -73,6 +76,17 @@ class _SpaStaticFiles(StaticFiles):
             if path.startswith("api/") or path == "api":
                 raise
             return await super().get_response("index.html", scope)
+        except (FileNotFoundError, PermissionError) as exc:
+            # If the SPA bundle directory disappears post-mount (or its
+            # permissions change to deny read), Starlette can leak a bare
+            # OSError instead of an HTTPException. Re-raise as a 404 so the
+            # surrounding fallback logic handles it like any other miss.
+            if path.startswith("api/") or path == "api":
+                raise StarletteHTTPException(status_code=404) from exc
+            try:
+                return await super().get_response("index.html", scope)
+            except (FileNotFoundError, PermissionError) as inner:
+                raise StarletteHTTPException(status_code=404) from inner
 
 
 def _find_spa_dir() -> Path | None:
@@ -153,12 +167,25 @@ def make_app(
         lifespan=_lifespan,
     )
 
+    # ProblemDetails error envelope (RFC 7807). Wrap any HTTPException raised
+    # by routes/dependencies into the schema declared in ``schemas.py`` so the
+    # OpenAPI ``responses`` declarations match the wire shape. Registered
+    # before the routers so the handler is in place before any route fires.
+    app.add_exception_handler(HTTPException, _problem_details_handler)
+    app.add_exception_handler(
+        RequestValidationError, _request_validation_to_problem_details
+    )
+
+    # Spec-driven agents discover the per-launch token via this securityScheme.
+    app.openapi = _custom_openapi_factory(app)  # type: ignore[method-assign]
+
     # Build the allow-lists. Hosts are checked against the request's Host
     # header (which is "127.0.0.1:port" or "localhost:port" by default).
     # Origins are checked against the Origin header on cross-origin browser
     # requests.
-    bind_hosts = {f"{bind_host}:{bind_port}", "127.0.0.1", "localhost"}
+    bind_hosts: set[str] = {"127.0.0.1", "localhost"}
     if bind_port:
+        bind_hosts.add(f"{bind_host}:{bind_port}")
         bind_hosts.add(f"127.0.0.1:{bind_port}")
         bind_hosts.add(f"localhost:{bind_port}")
     allowed_hosts = frozenset(bind_hosts | extra_allowed_hosts)
@@ -224,6 +251,126 @@ def make_app(
         )
 
     return app
+
+
+def _problem_details_handler(_request: Request, exc: Exception) -> JSONResponse:
+    """Wrap ``HTTPException`` into a ``ProblemDetails`` JSON envelope.
+
+    Maps:
+
+    - ``exc.status_code`` → ``status``
+    - ``exc.detail`` (str)  → ``detail``
+    - ``exc.detail`` (dict) → spread into the body, with ``detail`` and
+      ``instance`` fields preserved if present.
+
+    The ``type`` URI defaults to ``about:blank`` per RFC 7807 §4.2.
+    """
+    if not isinstance(exc, HTTPException):  # pragma: no cover — defensive
+        raise exc
+    status_code = int(exc.status_code)
+    title = _http_reason_phrase(status_code)
+    detail_value = exc.detail
+    instance: str | None = None
+    extra: dict[str, object] = {}
+    if isinstance(detail_value, dict):
+        # Preserve `instance` if the route author embedded one; spread any
+        # other fields into the response so callers don't lose context.
+        instance = detail_value.get("instance") if isinstance(
+            detail_value.get("instance"), str
+        ) else None
+        if "title" in detail_value and isinstance(detail_value["title"], str):
+            title = detail_value["title"]
+        detail_str = (
+            detail_value["detail"]
+            if isinstance(detail_value.get("detail"), str)
+            else None
+        )
+        for k, v in detail_value.items():
+            if k in {"detail", "instance", "title"}:
+                continue
+            extra[k] = v
+    elif isinstance(detail_value, str):
+        detail_str = detail_value
+    elif detail_value is None:
+        detail_str = None
+    else:
+        detail_str = str(detail_value)
+    body = ProblemDetails(
+        type="about:blank",
+        title=title,
+        status=status_code,
+        detail=detail_str,
+        instance=instance,
+    ).model_dump(mode="json")
+    body.update(extra)
+    headers = getattr(exc, "headers", None)
+    return JSONResponse(status_code=status_code, content=body, headers=headers)
+
+
+def _request_validation_to_problem_details(
+    _request: Request, exc: Exception
+) -> JSONResponse:
+    """Wrap FastAPI's ``RequestValidationError`` into ``ProblemDetails``.
+
+    The default FastAPI handler emits ``{"detail": [errors]}`` and, on inputs
+    containing non-finite floats (e.g., a JSON ``Infinity`` literal), the
+    JSON encoder raises ``ValueError``. We render the error list as a string
+    so the response is always JSON-serializable.
+    """
+    if not isinstance(exc, RequestValidationError):  # pragma: no cover
+        raise exc
+    body = ProblemDetails(
+        type="about:blank",
+        title="Unprocessable Content",
+        status=422,
+        detail=f"request body failed validation: {exc.errors()!r}",
+        instance=None,
+    ).model_dump(mode="json")
+    return JSONResponse(status_code=422, content=body)
+
+
+def _http_reason_phrase(status_code: int) -> str:
+    """Return the canonical reason phrase for an HTTP status code."""
+    try:
+        from http import HTTPStatus
+
+        return HTTPStatus(status_code).phrase
+    except ValueError:
+        return "Error"
+
+
+def _custom_openapi_factory(app: FastAPI):  # type: ignore[no-untyped-def]
+    """Return a closure that lazily builds the OpenAPI schema with a
+    ``securitySchemes`` declaration for the ``X-Andes-Token`` header so
+    spec-driven agent tooling discovers the auth contract.
+    """
+
+    def custom_openapi() -> dict:  # type: ignore[type-arg]
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+        components = schema.setdefault("components", {})
+        components["securitySchemes"] = {
+            "AndesToken": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "X-Andes-Token",
+                "description": (
+                    "Per-launch token. Read from the file path printed to "
+                    "stderr at startup (default ~/.andes-app/run-<pid>.token)."
+                ),
+            }
+        }
+        schema["security"] = [{"AndesToken": []}]
+        app.openapi_schema = schema
+        return schema
+
+    return custom_openapi
 
 
 class _PureASGIWrapper:

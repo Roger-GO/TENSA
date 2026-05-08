@@ -208,14 +208,15 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
       const data = node.data as { idx?: string; kind?: string };
       const idx = data.idx ?? node.id;
       // Map the React Flow nodeType back to the inspector's element-kind
-      // taxonomy. `node.type` is the nodeTypes key we set in buildGraph.
-      const kind = (node.type ?? 'bus') as
-        | 'bus'
-        | 'line'
-        | 'transformer'
-        | 'generator'
-        | 'load'
-        | 'shunt';
+      // taxonomy. Validate against the registered NODE_TYPES keys before
+      // narrowing — an unknown `node.type` would otherwise silently route
+      // to the wrong inspector bucket.
+      const rawKind = node.type ?? 'bus';
+      if (!Object.prototype.hasOwnProperty.call(NODE_TYPES, rawKind)) {
+        console.warn(`SldCanvas: ignoring click on node with unknown type ${String(rawKind)}`);
+        return;
+      }
+      const kind = rawKind as 'bus' | 'line' | 'transformer' | 'generator' | 'load' | 'shunt';
       setSelectedElement({ kind, idx: String(idx) });
     },
     [setSelectedElement],
@@ -306,13 +307,17 @@ export function SldCanvas() {
   const sidecarQuery = useGetSidecar(primaryPath);
   const putSidecarMutation = usePutSidecar();
 
+  // TanStack Query v5 recreates the mutation result object every render but
+  // guarantees `.mutate` is referentially stable; depend on it directly so
+  // this callback isn't recreated on each render.
+  const putSidecarMutate = putSidecarMutation.mutate;
   const putSidecar = useCallback(
     (layout: SidecarLayout) => {
       if (!primaryPath) return;
       // primaryPath is already a branded WorkspacePath.
-      putSidecarMutation.mutate({ casePath: primaryPath, layout });
+      putSidecarMutate({ casePath: primaryPath, layout });
     },
-    [primaryPath, putSidecarMutation],
+    [primaryPath, putSidecarMutate],
   );
 
   if (selection === null || topology === null) return null;

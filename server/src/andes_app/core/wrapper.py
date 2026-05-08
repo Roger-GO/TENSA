@@ -26,6 +26,8 @@ separate worker-side thread that owns the control Pipe (see ``worker.py``).
 
 from __future__ import annotations
 
+import logging
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,6 +42,10 @@ from andes_app.core.errors import (
     NoCaseLoadedError,
     SetupFailedError,
 )
+
+# JSON-friendly scalar union surfaced through topology / line-flow APIs.
+# Mirrored on the API layer (``schemas.TopologyEntry.params``); see schemas.py.
+ParamValue = float | int | str | bool
 
 if TYPE_CHECKING:
     from andes.system import System
@@ -417,7 +423,7 @@ _PARAMS_BY_MODEL: dict[str, tuple[str, ...]] = {
 }
 
 
-def _coerce_scalar(value: Any) -> float | int | str | bool | None:
+def _coerce_scalar(value: Any) -> ParamValue | None:
     """Coerce a numpy / Python scalar to a JSON-friendly primitive.
 
     Returns None if the value is None, an array of length != 1, or a type the
@@ -431,11 +437,8 @@ def _coerce_scalar(value: Any) -> float | int | str | bool | None:
     if isinstance(value, int | float):
         # Reject non-finite floats — the schema doesn't allow NaN / Inf in
         # JSON-serialized topology params.
-        if isinstance(value, float):
-            import math
-
-            if not math.isfinite(value):
-                return None
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
         return value
     if isinstance(value, str):
         return value
@@ -449,7 +452,7 @@ def _coerce_scalar(value: Any) -> float | int | str | bool | None:
     return None
 
 
-def _extract_params(model: Any, param_names: tuple[str, ...]) -> list[dict[str, float | int | str | bool]]:
+def _extract_params(model: Any, param_names: tuple[str, ...]) -> list[dict[str, ParamValue]]:
     """For each device in ``model``, return a dict of the requested params.
 
     Defensive: missing params, zero-length arrays, and length mismatches are
@@ -459,7 +462,7 @@ def _extract_params(model: Any, param_names: tuple[str, ...]) -> list[dict[str, 
     n = int(getattr(model, "n", 0))
     if n <= 0:
         return []
-    per_device: list[dict[str, float | int | str | bool]] = [{} for _ in range(n)]
+    per_device: list[dict[str, ParamValue]] = [{} for _ in range(n)]
     for pname in param_names:
         param = getattr(model, pname, None)
         if param is None:
@@ -544,9 +547,6 @@ def _extract_line_flows(ss: System) -> dict[str, LineFlow]:
     a warning. The PF run itself is not affected — line flows are
     best-effort.
     """
-    import logging
-    import math as _math
-
     log = logging.getLogger("andes-app.wrapper.line_flows")
 
     line = getattr(ss, "Line", None)
@@ -610,8 +610,8 @@ def _extract_line_flows(ss: System) -> dict[str, LineFlow]:
             itap = float(arrays["itap"][i])
             itap2 = float(arrays["itap2"][i])
             d = a1 - a2 - phi
-            cos_d = _math.cos(d)
-            sin_d = _math.sin(d)
+            cos_d = math.cos(d)
+            sin_d = math.sin(d)
             p_pu = ue * (
                 v1 * v1 * (gh + ghk) * itap2
                 - v1 * v2 * (ghk * cos_d + bhk * sin_d) * itap
@@ -620,7 +620,7 @@ def _extract_line_flows(ss: System) -> dict[str, LineFlow]:
                 -v1 * v1 * (bh + bhk) * itap2
                 - v1 * v2 * (ghk * sin_d - bhk * cos_d) * itap
             )
-            if not (_math.isfinite(p_pu) and _math.isfinite(q_pu)):
+            if not (math.isfinite(p_pu) and math.isfinite(q_pu)):
                 continue
             from_idx = arrays["bus1"][i]
             to_idx = arrays["bus2"][i]

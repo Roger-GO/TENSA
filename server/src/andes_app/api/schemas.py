@@ -12,6 +12,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from andes_app.core.wrapper import ParamValue
+
 # ---- error envelope ---------------------------------------------------------
 
 
@@ -128,7 +130,7 @@ class TopologyEntry(BaseModel):
             "``PV``, ``Slack``, ``PQ``)."
         ),
     )
-    params: dict[str, float | int | str | bool] = Field(
+    params: dict[str, ParamValue] = Field(
         default_factory=dict,
         description=(
             "Flat dict of model-input parameters for this element (e.g., for "
