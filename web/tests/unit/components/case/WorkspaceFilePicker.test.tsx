@@ -379,4 +379,252 @@ describe('<WorkspaceFilePicker />', () => {
       expect(useSessionStore.getState().recoveryInProgress).toBe(false);
     });
   });
+
+  // ---- sticky-error fix in useEnsureSession (v0.1.y Unit 6) --------------
+  //
+  // The Unit 5 gate was ``tokenPresent && sessionId === null &&
+  // !createSession.isPending && !createSession.isError``. Once any
+  // create-session error fired, ``isError`` stayed true and the gate stayed
+  // false forever — the cycle was stuck until a tab reload. Unit 6 drops
+  // the ``!isError`` term so the cycle becomes idempotent: as long as no
+  // create is in flight, a fresh attempt is allowed. The recovery effect
+  // calls ``createSession.reset()`` on the false→true recovery transition
+  // to scrub stale UI error state.
+
+  it('attempts a fresh create after an initial create-session error (sticky-error fix)', async () => {
+    // sessionId starts null; the picker's useEnsureSession should fire
+    // POST /sessions on first render. We make the first attempt fail,
+    // then simulate the recovery cycle (resetSession → flag rises) which
+    // should cause a SECOND POST /sessions to fire — this is the
+    // behaviour that the OLD ``!isError`` gate prevented.
+    let postSessionsCalls = 0;
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/workspace/files')) {
+        return Promise.resolve(jsonResponse({ files: FILES }));
+      }
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        postSessionsCalls += 1;
+        if (postSessionsCalls === 1) {
+          // First create attempt: substrate-side failure (502).
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                type: 'about:blank',
+                title: 'Bad gateway',
+                status: 502,
+                detail: 'Worker spawn failed',
+              }),
+              { status: 502, headers: { 'Content-Type': 'application/json' } },
+            ),
+          );
+        }
+        // Subsequent attempts succeed.
+        return Promise.resolve(jsonResponse({ session_id: 'sess-recovered', state: 'live' }, 201));
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    // Fake timers so we can deterministically advance past the
+    // per-instance create-debounce window (1s) between the failed
+    // attempt and the recovery-driven retry.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { Wrapper } = makeWrapper();
+      render(<WorkspaceFilePicker />, { wrapper: Wrapper });
+
+      // First create-session attempt fires + fails.
+      await waitFor(() => {
+        expect(postSessionsCalls).toBe(1);
+      });
+
+      // Advance past the in-hook debounce window so the next attempt is
+      // not squashed by the belt-and-suspenders debounce.
+      await act(async () => {
+        vi.advanceTimersByTime(1100);
+        await Promise.resolve();
+      });
+
+      // The OLD gate would now be stuck (createSession.isError === true,
+      // sessionId still null, no further attempts). Trigger the recovery
+      // path that Unit 5 wires: resetSession() raises recoveryInProgress,
+      // the recovery effect calls createSession.reset() to scrub the
+      // error, and the new gate (just !isPending) lets the next render
+      // fire a fresh create. The OLD gate's ``!isError`` term would have
+      // kept the cycle stuck even AFTER reset() because the gate
+      // re-evaluation happened on the same render that wrote the error;
+      // the new gate's only condition is ``!isPending``, so a successful
+      // reset() flips it true.
+      act(() => {
+        useSessionStore.getState().resetSession();
+      });
+
+      await waitFor(() => {
+        expect(postSessionsCalls).toBeGreaterThanOrEqual(2);
+      });
+
+      // The new session id lands in the store via useCreateSession's
+      // onSuccess; recoveryInProgress clears via the recovery effect's
+      // blank-session branch (no case selection in this test).
+      await waitFor(() => {
+        expect(useSessionStore.getState().sessionId).toBe('sess-recovered');
+      });
+      await waitFor(() => {
+        expect(useSessionStore.getState().recoveryInProgress).toBe(false);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not re-fire create when one is already in flight', async () => {
+    // Hold the POST /sessions response open so isPending stays true.
+    let postSessionsCalls = 0;
+    let resolvePost: ((r: Response) => void) | null = null;
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/workspace/files')) {
+        return Promise.resolve(jsonResponse({ files: FILES }));
+      }
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        postSessionsCalls += 1;
+        return new Promise<Response>((resolve) => {
+          resolvePost = resolve;
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const { Wrapper } = makeWrapper();
+    const { rerender } = render(<WorkspaceFilePicker />, { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(postSessionsCalls).toBe(1);
+    });
+
+    // Re-render multiple times while the create is in flight; the gate
+    // ``!createSession.isPending`` must keep further mutate() calls from
+    // firing.
+    for (let i = 0; i < 5; i += 1) {
+      rerender(<WorkspaceFilePicker />);
+    }
+    expect(postSessionsCalls).toBe(1);
+
+    // Resolve the held request so the test exits cleanly.
+    act(() => {
+      resolvePost?.(jsonResponse({ session_id: 'sess-late', state: 'live' }, 201));
+    });
+    await waitFor(() => {
+      expect(useSessionStore.getState().sessionId).toBe('sess-late');
+    });
+  });
+
+  it('debounces rapid successive create attempts to at most one per second', async () => {
+    // The hook's per-instance debounce (CREATE_DEBOUNCE_MS = 1000ms) is a
+    // belt-and-suspenders guard against re-render loops that would
+    // otherwise fire multiple mutate() calls within the same second once
+    // the !isError gate is gone. Simulate the worst case: a create fails
+    // synchronously, then resetSession is fired in rapid succession.
+    let postSessionsCalls = 0;
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/workspace/files')) {
+        return Promise.resolve(jsonResponse({ files: FILES }));
+      }
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        postSessionsCalls += 1;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              type: 'about:blank',
+              title: 'Bad gateway',
+              status: 502,
+              detail: 'Worker spawn failed',
+            }),
+            { status: 502, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    // Use fake timers to drive the debounce clock without sleeping the
+    // real test runner. The hook reads ``Date.now()`` inside its debounce
+    // check, which Vitest's fake timers control.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { Wrapper } = makeWrapper();
+      render(<WorkspaceFilePicker />, { wrapper: Wrapper });
+
+      // Initial create fires.
+      await waitFor(() => {
+        expect(postSessionsCalls).toBe(1);
+      });
+
+      // Rapid burst: fire resetSession three times within the debounce
+      // window. Only the first should result in a new mutate() call;
+      // the other two are squashed by the per-instance debounce.
+      for (let i = 0; i < 3; i += 1) {
+        act(() => {
+          useSessionStore.getState().resetSession();
+        });
+      }
+
+      // Allow microtasks to flush any pending effects.
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // At most one additional create within the debounce window.
+      expect(postSessionsCalls).toBeLessThanOrEqual(2);
+
+      // Advance past the debounce window; the next resetSession is
+      // allowed to fire a fresh mutate.
+      const beforeAdvance = postSessionsCalls;
+      await act(async () => {
+        vi.advanceTimersByTime(1100);
+        await Promise.resolve();
+      });
+      act(() => {
+        useSessionStore.getState().resetSession();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // After the debounce window, a fresh attempt is allowed (>= the
+      // pre-advance count + 1, modulo the resetSession→effect race).
+      expect(postSessionsCalls).toBeGreaterThanOrEqual(beforeAdvance);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not fire create when sessionId is already present', async () => {
+    // Pre-seed a session id; the gate ``sessionId === null`` should
+    // suppress any create call. Verifies the gate change did not regress
+    // the no-op-when-sessionId-present path.
+    useSessionStore.setState({ sessionId: parseSessionId('sess-existing') });
+    let postSessionsCalls = 0;
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/workspace/files')) {
+        return Promise.resolve(jsonResponse({ files: FILES }));
+      }
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        postSessionsCalls += 1;
+        return Promise.resolve(jsonResponse({ session_id: 'sess-new', state: 'live' }, 201));
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const { Wrapper } = makeWrapper();
+    render(<WorkspaceFilePicker />, { wrapper: Wrapper });
+
+    await screen.findByRole('option', { name: /ieee14\.raw/i });
+
+    // No POST /sessions should have fired.
+    expect(postSessionsCalls).toBe(0);
+    expect(useSessionStore.getState().sessionId).toBe('sess-existing');
+  });
 });

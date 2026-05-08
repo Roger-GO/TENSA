@@ -116,22 +116,55 @@ function useEnsureSession(): {
   // handler. The picker is rendered behind the auth modal but its
   // hooks still run; gate the mutate() call explicitly.
   //
-  // NOTE: the ``!createSession.isError`` gate is intentional for v0.1.y
-  // Unit 5 — Unit 6 will simplify the gate to ``!createSession.isPending``
-  // alone, relying on the recovery effect below to clear ``isError`` via
-  // ``mutation.reset()`` so the gate re-evaluates true on the next render.
+  // v0.1.y Unit 6 — sticky-error fix. The previous gate also tested
+  // ``!createSession.isError``, which trapped the cycle once any
+  // 401/404/timeout fired (the error stayed pinned and the gate stayed
+  // false forever). The fix drops the ``!isError`` term: the cycle is
+  // now idempotent — as long as no create is in flight, a fresh attempt
+  // is allowed. The recovery effect below calls ``createSession.reset()``
+  // when the recovery flag flips ``false → true`` to clear any prior
+  // error before the gate re-evaluates.
+  //
+  // Multi-component coordination caveat: today only WorkspaceFilePicker
+  // calls useEnsureSession. If a future component (e.g., a v0.2 session
+  // badge) also calls it, two hook instances racing the create cycle
+  // could double-fire ``POST /sessions``. Mitigation deferred — v0.1.y
+  // has only one caller; the per-instance debounce below is a
+  // belt-and-suspenders guard but does NOT cross instance boundaries. A
+  // v0.2 implementer adding a second consumer should hoist the cycle to
+  // a singleton bridge or a shared zustand action.
   const shouldCreate =
-    tokenPresent && sessionId === null && !createSession.isPending && !createSession.isError;
+    tokenPresent && sessionId === null && !createSession.isPending;
+
+  // Per-instance debounce: prevent rapid-fire create attempts from
+  // re-render loops. Allows at most one mutate() call per second.
+  // The recovery handler in queries.ts has its own module-level debounce
+  // for the 404→reset path; this ref guards the create-cycle re-entry
+  // inside this hook.
+  const lastCreateAttemptRef = useRef<number>(0);
+  const CREATE_DEBOUNCE_MS = 1_000;
+
+  // Capture mutation status flags as primitive deps so the effect re-runs
+  // on the meaningful transitions without depending on the (non-stable)
+  // mutation object itself.
+  const createIsError = createSession.isError;
 
   useEffect(() => {
-    if (shouldCreate) {
-      createSession.mutate();
-    }
-    // We deliberately omit `createSession` from deps — TanStack Query
-    // mutation objects are not referentially stable across renders, but
-    // we only want to fire on the (token + sessionId-null + idle) edge.
+    if (!shouldCreate) return;
+    const now = Date.now();
+    if (now - lastCreateAttemptRef.current < CREATE_DEBOUNCE_MS) return;
+    lastCreateAttemptRef.current = now;
+    createSession.mutate();
+    // ``createIsError`` is intentional: with the Unit 6 gate change, the
+    // false→true transition (error fires) re-runs this effect (debounce
+    // blocks the mutate); the true→false transition (recovery effect's
+    // ``reset()``) re-runs it again so a fresh attempt can fire once the
+    // debounce window passes. This is the sticky-error fix — the old
+    // ``!isError`` gate would have permanently blocked the second branch.
+    // ``createSession`` itself is excluded from deps because TanStack
+    // mutation objects are not referentially stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shouldCreate]);
+  }, [shouldCreate, createIsError]);
 
   // ---- recovery effect (v0.1.y Unit 5) -----------------------------------
   // When the global error-recovery handler (``wireGlobalErrorRecovery`` in
@@ -140,9 +173,11 @@ function useEnsureSession(): {
   // raises ``recoveryInProgress``. Below:
   //
   // 1. On the false→true transition we reset any prior ``createSession``
-  //    error state so the gate above can re-evaluate (Unit 6 will drop
-  //    the ``!isError`` term, but for v0.1.y Unit 5 we keep it and use
-  //    ``reset()`` to clear it).
+  //    error state. (Unit 6 dropped the ``!isError`` gate term, so a
+  //    stale error no longer pins the cycle on its own; we still call
+  //    ``reset()`` here to scrub the mutation's exposed ``error`` /
+  //    ``isError`` so consumer UI — e.g., the createError banner below —
+  //    doesn't keep showing a stale error across the recovery boundary.)
   // 2. Once the new session id is written by ``useCreateSession``'s
   //    success path, we re-issue ``loadCase`` against the previously
   //    loaded ``primaryPath`` (if any) so the new session has the case
