@@ -6,7 +6,7 @@
  * `react-refresh` constant-export rule happy.
  */
 import type { Edge, Node } from '@xyflow/react';
-import type { TopologyEntry, TopologySummary } from '@/api/types';
+import type { BusCoord, TopologyEntry, TopologySummary } from '@/api/types';
 import type { CoordsByIdx } from './sidecar';
 
 /** Cardinal handle sides exposed by every Bus node. */
@@ -260,6 +260,60 @@ export interface BuildGraphOptions {
    * (curated/sidecar smooth-step path).
    */
   bendPoints?: Map<string, [number, number][]>;
+  /**
+   * Optional per-(model, idx) coordinate overrides for non-bus elements
+   * (generators, loads, shunts). Keys are `${model}|${idx}` matching the
+   * sidecar `non_bus_coordinates` schema. Entries absent from this map
+   * fall back to kind-based offsets from the parent bus.
+   */
+  nonBusCoords?: Map<string, BusCoord>;
+}
+
+/**
+ * Default offsets for non-bus elements relative to their parent bus.
+ * Stack indices grow vertically per kind so multiple generators on one
+ * bus don't overlap. Tunable; the user can drag to override and the
+ * sidecar persists the result.
+ */
+export const NON_BUS_OFFSETS = {
+  generator: { x: 0, y: -90, stackDx: 0, stackDy: -55 },
+  load: { x: 0, y: 90, stackDx: 0, stackDy: 55 },
+  shunt: { x: -100, y: 60, stackDx: -55, stackDy: 0 },
+} as const satisfies Record<
+  'generator' | 'load' | 'shunt',
+  { x: number; y: number; stackDx: number; stackDy: number }
+>;
+
+/** React Flow node-type strings for the non-bus kinds. Mirrors `NODE_TYPES`. */
+const NON_BUS_NODE_TYPE = {
+  generator: 'generator',
+  load: 'load',
+  shunt: 'shunt',
+} as const;
+
+/** Stub-edge handle picks: every non-bus node has a single `bus-anchor` handle. */
+const NON_BUS_HANDLE_ID = 'bus-anchor';
+
+/** Bus-side handle each non-bus kind connects to. */
+const BUS_SIDE_FOR_KIND: Record<'generator' | 'load' | 'shunt', Side> = {
+  generator: 'north',
+  load: 'south',
+  shunt: 'west',
+};
+
+interface NonBusBucket {
+  entries: readonly TopologyEntry[];
+  /** Resolves the parent-bus idx for an entry; returns `null` if missing. */
+  parentBus: (entry: TopologyEntry) => string | null;
+  kind: 'generator' | 'load' | 'shunt';
+}
+
+function _busFromParam(entry: TopologyEntry, key: string): string | null {
+  const params = entry.params;
+  if (!params) return null;
+  const value = params[key];
+  if (value === undefined || typeof value === 'boolean') return null;
+  return String(value);
 }
 
 /**
@@ -289,9 +343,13 @@ export function buildGraph(
 
   const handles = opts.handleAssignments ?? new Map<string, HandleAssignment>();
   const bends = opts.bendPoints ?? new Map<string, [number, number][]>();
+  const nonBusCoords = opts.nonBusCoords ?? new Map<string, BusCoord>();
   const edges: Edge[] = [];
   const seen = new Set<string>();
-  const pushEdge = (entry: TopologyEntry, kindLabel: 'line' | 'transformer') => {
+  const pushBranchEdge = (
+    entry: TopologyEntry,
+    kindLabel: 'line' | 'transformer',
+  ) => {
     const t = entryTerminals(entry);
     if (!t) return;
     const id = `${kindLabel}-${String(entry.idx)}`;
@@ -299,13 +357,22 @@ export function buildGraph(
     seen.add(id);
     const handleAssignment = handles.get(id);
     const polyline = bends.get(id);
+    // Transformers always render via TransformerEdge (which carries the
+    // 2W/3W icon at the midpoint); routed-or-smooth-step is decided
+    // inside that component based on whether bend points are present.
+    let edgeType: 'topology' | 'routed' | 'transformer';
+    if (kindLabel === 'transformer') {
+      edgeType = 'transformer';
+    } else {
+      edgeType = polyline ? 'routed' : 'topology';
+    }
     edges.push({
       id,
       source: t.from,
       target: t.to,
       sourceHandle: handleAssignment ? SOURCE_HANDLE[handleAssignment.sourceSide] : undefined,
       targetHandle: handleAssignment ? TARGET_HANDLE[handleAssignment.targetSide] : undefined,
-      type: polyline ? 'routed' : 'topology',
+      type: edgeType,
       data: {
         idx: String(entry.idx),
         name: entry.name,
@@ -316,11 +383,109 @@ export function buildGraph(
         sourceStride: handleAssignment?.sourceStride ?? 0,
         targetStride: handleAssignment?.targetStride ?? 0,
         bendPoints: polyline,
+        // Transformer-specific: 3-winding fallback gets a "3w" badge
+        // overlaid on the 2-winding glyph (per Scope Boundaries).
+        winding: detectWinding(entry),
       },
     });
   };
-  for (const line of topology.lines) pushEdge(line, 'line');
-  for (const trafo of topology.transformers) pushEdge(trafo, 'transformer');
+  for (const line of topology.lines) pushBranchEdge(line, 'line');
+  for (const trafo of topology.transformers) pushBranchEdge(trafo, 'transformer');
+
+  // Non-bus nodes (generators, loads, shunts). Anchor each to its parent
+  // bus's coordinate plus a kind-specific offset; multiple devices on
+  // one bus stack along the offset axis.
+  const nonBusBuckets: NonBusBucket[] = [
+    {
+      entries: topology.generators ?? [],
+      parentBus: (e) => _busFromParam(e, 'bus'),
+      kind: 'generator',
+    },
+    {
+      entries: topology.loads ?? [],
+      parentBus: (e) => _busFromParam(e, 'bus'),
+      kind: 'load',
+    },
+    {
+      entries: topology.shunts ?? [],
+      parentBus: (e) => _busFromParam(e, 'bus'),
+      kind: 'shunt',
+    },
+  ];
+
+  // Per-(parentBus, kind) stack counter so two generators on the same bus
+  // don't render at the same coord.
+  const stackCounts = new Map<string, number>();
+  for (const bucket of nonBusBuckets) {
+    const offset = NON_BUS_OFFSETS[bucket.kind];
+    for (const entry of bucket.entries) {
+      const parentIdx = bucket.parentBus(entry);
+      if (parentIdx === null) {
+        // Defensive: an orphan element with no parent bus shouldn't
+        // happen with a valid topology. Skip + warn.
+        console.warn(
+          `SLD: ${bucket.kind} ${String(entry.idx)} has no parent bus; skipping`,
+        );
+        continue;
+      }
+      const parentCoord = coords[parentIdx];
+      if (!parentCoord) {
+        console.warn(
+          `SLD: ${bucket.kind} ${String(entry.idx)} references missing bus ${parentIdx}; skipping`,
+        );
+        continue;
+      }
+      const stackKey = `${parentIdx}|${bucket.kind}`;
+      const stackIndex = stackCounts.get(stackKey) ?? 0;
+      stackCounts.set(stackKey, stackIndex + 1);
+      // Sidecar override (when present) takes precedence over the
+      // computed offset; falling back to the default keeps the canvas
+      // sensible without any persisted layout.
+      const sidecarKey = `${entry.kind}|${String(entry.idx)}`;
+      const sidecar = nonBusCoords.get(sidecarKey);
+      const x =
+        sidecar?.x ??
+        parentCoord.x + offset.x + offset.stackDx * stackIndex;
+      const y =
+        sidecar?.y ??
+        parentCoord.y + offset.y + offset.stackDy * stackIndex;
+      const nodeId = `${bucket.kind}-${String(entry.idx)}`;
+      nodes.push({
+        id: nodeId,
+        type: NON_BUS_NODE_TYPE[bucket.kind],
+        position: { x, y },
+        data: {
+          idx: String(entry.idx),
+          name: entry.name,
+          kind: entry.kind,
+          parentBus: parentIdx,
+        },
+      } satisfies Node);
+      // Stub edge from the non-bus node to the bus's appropriate side.
+      edges.push({
+        id: `stub-${nodeId}`,
+        source: nodeId,
+        sourceHandle: NON_BUS_HANDLE_ID,
+        target: parentIdx,
+        targetHandle: TARGET_HANDLE[BUS_SIDE_FOR_KIND[bucket.kind]],
+        type: 'stub',
+        data: {
+          kind: entry.kind,
+          bucket: bucket.kind,
+        },
+      });
+    }
+  }
 
   return { nodes, edges };
+}
+
+/** Returns "3w" when an entry references a 3-winding transformer, else "2w". */
+function detectWinding(entry: TopologyEntry): '2w' | '3w' {
+  // ANDES models 3-winding transformers either via the `Trafo3` model
+  // (a separate kind) or via three coupled Line entries. The substrate's
+  // current Line→Transformer split puts both 2W and 3W into the same
+  // bucket; we differentiate on the entry's `kind` field.
+  if (entry.kind === 'Trafo3' || entry.kind === 'Transformer3W') return '3w';
+  return '2w';
 }

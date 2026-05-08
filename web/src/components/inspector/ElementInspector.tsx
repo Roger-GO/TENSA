@@ -52,11 +52,7 @@ function bucketFor(
     case 'load':
       return topology.loads;
     case 'shunt':
-      // The substrate's TopologySummary doesn't currently expose a
-      // separate shunts bucket; v0.1 shunts are surfaced via the loads
-      // / generators buckets depending on model. Return an empty bucket
-      // so the inspector falls back to "no parameters" without crashing.
-      return [];
+      return topology.shunts ?? [];
     default:
       return null;
   }

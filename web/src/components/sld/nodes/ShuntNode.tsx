@@ -8,10 +8,11 @@ import type { SldNodeData } from './BusNode';
 /**
  * Shunt node. Capacitive vs. inductive distinction is encoded in the
  * icon manifest (`Shunt`/`ShuntCap` → `shunt-cap.svg`; `ShuntL`/
- * `ShuntReactor` → `shunt-reactor.svg`). The substrate's TopologySummary
- * does not currently emit a `shunts` bucket in v0.1; this node exists
- * for future-compat with extended topologies and for cases where a
- * shunt is exposed via the `loads` bucket.
+ * `ShuntReactor` → `shunt-reactor.svg`).
+ *
+ * Anchored south-west of its parent bus per the kind-based offsets;
+ * the stub edge connects the east handle (id `bus-anchor`) toward the
+ * bus's `west-target` handle.
  */
 export const ShuntNode = memo(function ShuntNode({ data, selected }: NodeProps) {
   const d = data as SldNodeData;
@@ -29,7 +30,12 @@ export const ShuntNode = memo(function ShuntNode({ data, selected }: NodeProps) 
         'cursor-pointer select-none',
       )}
     >
-      <Handle type="target" position={Position.Top} className="!bg-foreground/40" />
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="bus-anchor"
+        className="!h-0 !w-0 !min-h-0 !min-w-0 !border-0 !bg-transparent"
+      />
       <img
         src={iconForModel(d.kind)}
         alt=""

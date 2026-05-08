@@ -13,6 +13,7 @@ import type {
   NodeTypes,
   EdgeTypes,
   NodeMouseHandler,
+  EdgeMouseHandler,
   OnNodesChange,
   NodeChange,
   NodePositionChange,
@@ -25,12 +26,13 @@ import type { TopologySummary, SidecarLayout } from '@/api/types';
 
 import { BusNode } from './nodes/BusNode';
 import { LineNode } from './nodes/LineNode';
-import { TransformerNode } from './nodes/TransformerNode';
 import { GeneratorNode } from './nodes/GeneratorNode';
 import { LoadNode } from './nodes/LoadNode';
 import { ShuntNode } from './nodes/ShuntNode';
 import { TopologyEdge } from './edges/TopologyEdge';
 import { RoutedEdge } from './edges/RoutedEdge';
+import { TransformerEdge } from './edges/TransformerEdge';
+import { StubEdge } from './edges/StubEdge';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
 import { autoLayout } from './layout';
 import {
@@ -47,7 +49,6 @@ import { cn } from '@/lib/cn';
 const NODE_TYPES: NodeTypes = {
   bus: BusNode,
   line: LineNode,
-  transformer: TransformerNode,
   generator: GeneratorNode,
   load: LoadNode,
   shunt: ShuntNode,
@@ -56,6 +57,8 @@ const NODE_TYPES: NodeTypes = {
 const EDGE_TYPES: EdgeTypes = {
   topology: TopologyEdge,
   routed: RoutedEdge,
+  transformer: TransformerEdge,
+  stub: StubEdge,
 };
 
 /** Buses-count threshold for the >30 banner (per the plan). */
@@ -233,7 +236,23 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
         console.warn(`SldCanvas: ignoring click on node with unknown type ${String(rawKind)}`);
         return;
       }
-      const kind = rawKind as 'bus' | 'line' | 'transformer' | 'generator' | 'load' | 'shunt';
+      const kind = rawKind as 'bus' | 'line' | 'generator' | 'load' | 'shunt';
+      setSelectedElement({ kind, idx: String(idx) });
+    },
+    [setSelectedElement],
+  );
+
+  const onEdgeClick: EdgeMouseHandler = useCallback(
+    (_e, edge) => {
+      const data = edge.data as { idx?: string; bucket?: string } | undefined;
+      const idx = data?.idx;
+      if (!idx) return;
+      // Stub edges (non-bus → bus connectors) aren't independently
+      // selectable — clicking one routes to the bus side, but in
+      // practice the user clicks the device or bus node instead.
+      const edgeType = edge.type ?? 'topology';
+      if (edgeType === 'stub') return;
+      const kind: 'line' | 'transformer' = edgeType === 'transformer' ? 'transformer' : 'line';
       setSelectedElement({ kind, idx: String(idx) });
     },
     [setSelectedElement],
@@ -282,6 +301,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
           nodeTypes={NODE_TYPES}
           edgeTypes={EDGE_TYPES}
           onNodeClick={onNodeClick}
+          onEdgeClick={onEdgeClick}
           fitView
           nodesDraggable
           selectionMode={SelectionMode.Partial}
