@@ -157,11 +157,23 @@ def serve(
                 f"--allow-origin scheme must be http or https, got {parsed.scheme!r}",
                 param_hint="--allow-origin",
             )
+        if parsed.username is not None:
+            raise typer.BadParameter(
+                "--allow-origin must not contain userinfo (user@host)",
+                param_hint="--allow-origin",
+            )
+        # Reconstruct the host portion without any userinfo so the host
+        # allow-list isn't polluted with credentials-like strings.
+        host_only = (
+            f"{parsed.hostname}:{parsed.port}"
+            if parsed.port
+            else (parsed.hostname or "")
+        )
         # Strip any trailing path/slash; CORS origins are scheme://host[:port].
-        origin = f"{parsed.scheme}://{parsed.netloc}"
+        origin = f"{parsed.scheme}://{host_only}"
         extra_origins.add(origin)
-        extra_hosts.add(parsed.netloc)
-        log.info("CORS allow-origin: %s (host: %s)", origin, parsed.netloc)
+        extra_hosts.add(host_only)
+        log.info("CORS allow-origin: %s (host: %s)", origin, host_only)
 
     fastapi_app = make_app(
         expected_token=token.value,
@@ -181,7 +193,6 @@ def serve(
     # clears the fragment via ``history.replaceState`` on boot.
     if open_browser:
         _spawn_open_browser_watcher(
-            fastapi_app=fastapi_app,
             requested_host=bind,
             requested_port=port,
             token_value=token.value,
@@ -201,7 +212,6 @@ def serve(
 
 def _spawn_open_browser_watcher(
     *,
-    fastapi_app: object,
     requested_host: str,
     requested_port: int,
     token_value: str,

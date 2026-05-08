@@ -23,7 +23,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from pydantic import ValidationError
 
 from andes_app.api.auth import RequireToken
@@ -35,6 +35,8 @@ from andes_app.api.schemas import (
 )
 from andes_app.security.paths import (
     WorkspacePathError,
+    _check_within_workspace,
+    _reject_unsafe_input,
     list_workspace_files,
     open_workspace_file_for_write,
 )
@@ -56,7 +58,11 @@ def _workspace(request: Request) -> Path:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="workspace is not configured",
         )
-    assert isinstance(workspace, Path)
+    if not isinstance(workspace, Path):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="workspace is misconfigured",
+        )
     return workspace
 
 
@@ -76,12 +82,7 @@ def _layout_sidecar_path(workspace: Path, case_path: str) -> Path:
     sidecar to exist (e.g., the user may save a layout before pasting in the
     case data).
     """
-    if "\x00" in case_path:
-        raise WorkspacePathError("path contains a NUL byte")
-    if Path(case_path).is_absolute():
-        raise WorkspacePathError(
-            f"absolute paths are not accepted from clients: {case_path!r}"
-        )
+    _reject_unsafe_input(case_path)
     candidate = (workspace / case_path).expanduser()
     sidecar_name = candidate.name + ".layout.json"
     parent = candidate.parent
@@ -89,14 +90,12 @@ def _layout_sidecar_path(workspace: Path, case_path: str) -> Path:
         raise WorkspacePathError(
             f"parent directory does not exist: {case_path!r}"
         )
-    canonical_parent = parent.resolve(strict=True)
-    workspace = workspace.resolve(strict=True)
-    try:
-        canonical_parent.relative_to(workspace)
-    except ValueError as exc:
+    if parent.is_symlink():
         raise WorkspacePathError(
-            f"path resolves outside the workspace: {canonical_parent!s}"
-        ) from exc
+            f"refusing to read under a symlinked parent directory: {case_path!r}"
+        )
+    canonical_parent = parent.resolve(strict=True)
+    _check_within_workspace(workspace, canonical_parent)
     return canonical_parent / sidecar_name
 
 
@@ -204,6 +203,28 @@ async def get_layout(
         ) from exc
 
 
+def _enforce_layout_content_length(request: Request) -> None:
+    """Reject oversized PUT bodies via the ``Content-Length`` header before
+    FastAPI parses the body. Runs as a route dependency so a 413 short-circuits
+    Pydantic body parsing.
+    """
+    cl_header = request.headers.get("content-length")
+    if cl_header is None:
+        return
+    try:
+        content_length = int(cl_header)
+    except ValueError:
+        content_length = -1
+    if content_length > _MAX_LAYOUT_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"layout body exceeds {_MAX_LAYOUT_BYTES} bytes "
+                f"(got Content-Length={content_length})"
+            ),
+        )
+
+
 @router.put(
     "/workspace/layout",
     operation_id="putWorkspaceLayout",
@@ -228,6 +249,13 @@ async def get_layout(
 async def put_layout(
     request: Request,
     _: RequireToken,
+    layout: SidecarLayout = Body(
+        ...,
+        description=(
+            "SLD layout sidecar payload. Validated against ``SidecarLayout``; "
+            "extra fields are rejected (``extra='forbid'``)."
+        ),
+    ),
     case_path: str = Query(
         ...,
         description=(
@@ -235,41 +263,8 @@ async def put_layout(
             "with. The sidecar is written to ``<case_path>.layout.json``."
         ),
     ),
+    _len: None = Depends(_enforce_layout_content_length),
 ) -> Response:
-    # Cap by Content-Length first (cheap pre-check).
-    cl_header = request.headers.get("content-length")
-    if cl_header is not None:
-        try:
-            content_length = int(cl_header)
-        except ValueError:
-            content_length = -1
-        if content_length > _MAX_LAYOUT_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=(
-                    f"layout body exceeds {_MAX_LAYOUT_BYTES} bytes "
-                    f"(got Content-Length={content_length})"
-                ),
-            )
-
-    raw = await request.body()
-    if len(raw) > _MAX_LAYOUT_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=(
-                f"layout body exceeds {_MAX_LAYOUT_BYTES} bytes "
-                f"(got {len(raw)} bytes)"
-            ),
-        )
-
-    try:
-        layout = SidecarLayout.model_validate_json(raw)
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"invalid layout body: {exc.errors()}",
-        ) from exc
-
     workspace = _workspace(request)
     sidecar_rel = case_path + ".layout.json"
     try:
