@@ -14,7 +14,14 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 
 from andes_app.api.auth import RequireToken
-from andes_app.api.schemas import LineFlow, PflowResult, PflowRunRequest, ProblemDetails
+from andes_app.api.schemas import (
+    GeneratorOutput,
+    LineFlow,
+    LoadConsumption,
+    PflowResult,
+    PflowRunRequest,
+    ProblemDetails,
+)
 from andes_app.core.session import (
     SessionExpiredError,
     SessionManager,
@@ -49,6 +56,23 @@ def _result_from_payload(payload: dict[str, Any], run_id: str) -> PflowResult:
             from_idx=flow["from_idx"],
             to_idx=flow["to_idx"],
         )
+    raw_gen = payload.get("generator_outputs") or {}
+    generator_outputs: dict[str, GeneratorOutput] = {}
+    for gen_idx, gen in raw_gen.items():
+        generator_outputs[str(gen_idx)] = GeneratorOutput(
+            p=float(gen["p"]),
+            q=float(gen["q"]),
+            v=float(gen["v"]),
+            bus=gen["bus"],
+        )
+    raw_load = payload.get("load_consumption") or {}
+    load_consumption: dict[str, LoadConsumption] = {}
+    for load_idx, load in raw_load.items():
+        load_consumption[str(load_idx)] = LoadConsumption(
+            p=float(load["p"]),
+            q=float(load["q"]),
+            bus=load["bus"],
+        )
     return PflowResult(
         run_id=run_id,
         converged=bool(payload["converged"]),
@@ -57,6 +81,8 @@ def _result_from_payload(payload: dict[str, Any], run_id: str) -> PflowResult:
         bus_voltages={str(k): float(v) for k, v in payload["bus_voltages"].items()},
         bus_angles={str(k): float(v) for k, v in payload["bus_angles"].items()},
         line_flows=line_flows,
+        generator_outputs=generator_outputs,
+        load_consumption=load_consumption,
     )
 
 

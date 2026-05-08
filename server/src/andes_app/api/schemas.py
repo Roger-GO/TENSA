@@ -224,6 +224,31 @@ class LineFlow(BaseModel):
     )
 
 
+class GeneratorOutput(BaseModel):
+    """Per-generator PF output. Active + reactive injection at the
+    generator's terminal bus, plus the terminal voltage (pu).
+    """
+
+    p: float = Field(
+        ..., description="Active power generated at the terminal bus, in MW."
+    )
+    q: float = Field(
+        ..., description="Reactive power generated at the terminal bus, in MVAr."
+    )
+    v: float = Field(
+        ..., description="Terminal bus voltage magnitude (pu)."
+    )
+    bus: int | str = Field(..., description="Terminal bus idx.")
+
+
+class LoadConsumption(BaseModel):
+    """Per-load PF consumption at the converged voltage."""
+
+    p: float = Field(..., description="Active power drawn, in MW.")
+    q: float = Field(..., description="Reactive power drawn, in MVAr.")
+    bus: int | str = Field(..., description="Terminal bus idx.")
+
+
 class PflowResult(BaseModel):
     """Power-flow run result. Bus voltages and angles are keyed by ANDES idx."""
 
@@ -275,6 +300,22 @@ class PflowResult(BaseModel):
             "injection at ``bus1`` from the converged ``v1``/``a1``/``v2``/"
             "``a2`` algebraic variables and the line's series + shunt "
             "admittances."
+        ),
+    )
+    generator_outputs: dict[str, GeneratorOutput] = Field(
+        default_factory=dict,
+        description=(
+            "Per-generator P / Q output and terminal voltage, keyed by "
+            "generator idx (stringified). Covers PV, Slack, GENROU, and "
+            "GENCLS. Empty when PF did not converge."
+        ),
+    )
+    load_consumption: dict[str, LoadConsumption] = Field(
+        default_factory=dict,
+        description=(
+            "Per-load P / Q consumption at the converged voltage, keyed "
+            "by load idx (stringified). Covers PQ and ZIP. Empty when PF "
+            "did not converge."
         ),
     )
 
