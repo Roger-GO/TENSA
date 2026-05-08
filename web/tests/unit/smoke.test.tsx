@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { App } from '@/App';
 
 describe('App scaffold', () => {
-  it('renders the placeholder heading', () => {
+  it('mounts the AppShell with the top bar landmark', () => {
     render(<App />);
-    expect(screen.getByRole('heading', { name: /ANDES App/i })).toBeInTheDocument();
+    // The shell exposes its top bar as a banner landmark; presence of
+    // this landmark confirms the AppShell mounted end-to-end.
+    expect(screen.getByRole('banner', { name: /top bar/i })).toBeInTheDocument();
   });
 });

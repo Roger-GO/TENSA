@@ -1,16 +1,19 @@
-// v0.1 placeholder shell. Real shell (TopBar / LeftRail / RightDock /
-// SldCanvas) lands in Units 4 + 7 + 8 + 9. Unit 1 only verifies the
-// scaffold compiles + serves a non-empty page.
+import { AppShell } from '@/components/shell/AppShell';
+
+/**
+ * Root component. Mounts the AppShell with empty slots — Phase 2 units
+ * fill them in:
+ *
+ * - Unit 5: wraps with `QueryClientProvider`; mounts TokenPasteModal in
+ *   the `modal` slot.
+ * - Unit 7: supplies the case nav (`leftRail`), workspace file picker,
+ *   and run controls (`topBarRight`).
+ * - Unit 8: supplies the SLD canvas (`main`).
+ * - Unit 9: supplies the inspector + results table.
+ *
+ * The shell is intentionally state-free; cross-cutting providers wrap
+ * around it (not inside it) to keep the layout component pure.
+ */
 export function App() {
-  return (
-    <main className="flex min-h-screen items-center justify-center p-8">
-      <div className="max-w-md text-center">
-        <h1 className="text-2xl font-semibold tracking-tight">ANDES App</h1>
-        <p className="text-muted-foreground mt-2 text-sm">
-          Web UI scaffold (Unit 1). Layout shell, design system, and SLD canvas land in subsequent
-          units.
-        </p>
-      </div>
-    </main>
-  );
+  return <AppShell />;
 }
