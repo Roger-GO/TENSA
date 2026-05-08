@@ -105,6 +105,32 @@ class LineFlow:
 
 
 @dataclass
+class GeneratorOutput:
+    """Per-generator PF output: active + reactive power injection at the
+    generator's terminal bus, plus the terminal voltage (pu).
+
+    For PV/Slack (static) generators these come straight from ANDES's
+    own ``p`` / ``q`` / ``v`` algebraic variables. For dynamic models
+    (GENROU/GENCLS) the same fields exist post-PF (the dynamic state
+    initialization runs after PF converges).
+    """
+
+    p: float  # MW (scaled by ss.config.mva)
+    q: float  # MVAr
+    v: float  # terminal voltage (pu)
+    bus: int | str
+
+
+@dataclass
+class LoadConsumption:
+    """Per-load PF consumption: P + Q draw at the load's terminal bus."""
+
+    p: float  # MW
+    q: float  # MVAr
+    bus: int | str
+
+
+@dataclass
 class PflowResult:
     """Power-flow run result. Keyed by ANDES idx."""
 
@@ -114,6 +140,8 @@ class PflowResult:
     bus_voltages: dict[int | str, float]
     bus_angles: dict[int | str, float]
     line_flows: dict[str, LineFlow] = field(default_factory=dict)
+    generator_outputs: dict[str, GeneratorOutput] = field(default_factory=dict)
+    load_consumption: dict[str, LoadConsumption] = field(default_factory=dict)
 
 
 @dataclass
@@ -589,6 +617,8 @@ class Wrapper:
                 bus_angles[idx] = float(ss.Bus.a.v[i])
 
         line_flows = _extract_line_flows(ss) if converged else {}
+        generator_outputs = _extract_generator_outputs(ss) if converged else {}
+        load_consumption = _extract_load_consumption(ss) if converged else {}
 
         return PflowResult(
             converged=converged,
@@ -597,6 +627,8 @@ class Wrapper:
             bus_voltages=bus_voltages,
             bus_angles=bus_angles,
             line_flows=line_flows,
+            generator_outputs=generator_outputs,
+            load_consumption=load_consumption,
         )
 
     def run_tds(
@@ -1021,6 +1053,131 @@ def _sanitize_message(message: str) -> str:
     install-tree details. Replaces matches with ``<path>``.
     """
     return _PATH_PATTERN.sub("<path>", message)
+
+
+def _extract_generator_outputs(ss: System) -> dict[str, GeneratorOutput]:
+    """Walk PV, Slack, GENROU, GENCLS devices and read each one's
+    converged P / Q output + terminal voltage.
+
+    For PV/Slack: ANDES stores these directly on the model (``p``,
+    ``q``, ``v`` algebraic variables). For dynamic generators
+    (GENROU/GENCLS): the same fields exist after PF init.
+
+    All values are in pu; we scale P/Q by ``ss.config.mva`` to MW/MVAr.
+    Best-effort: defaults to 0.0 / 0.0 / 1.0 on any missing attribute.
+    Returns dict keyed by stringified idx.
+    """
+    log = logging.getLogger("andes-app.wrapper.gen_outputs")
+    out: dict[str, GeneratorOutput] = {}
+    try:
+        mva_base = float(getattr(ss.config, "mva", 100.0))
+    except (TypeError, ValueError):
+        mva_base = 100.0
+    for model_name in ("PV", "Slack", "GENROU", "GENCLS"):
+        model = getattr(ss, model_name, None)
+        if model is None:
+            continue
+        idx_var = getattr(model, "idx", None)
+        idx_values = list(getattr(idx_var, "v", []) if idx_var is not None else [])
+        if not idx_values:
+            continue
+        bus_var = getattr(model, "bus", None)
+        bus_values = list(getattr(bus_var, "v", []) if bus_var is not None else [])
+        p_arr = _safe_list(getattr(model, "p", None))
+        q_arr = _safe_list(getattr(model, "q", None))
+        v_arr = _safe_list(getattr(model, "v", None))
+        for i, idx in enumerate(idx_values):
+            try:
+                p_pu = float(p_arr[i]) if i < len(p_arr) else 0.0
+                q_pu = float(q_arr[i]) if i < len(q_arr) else 0.0
+                v_pu = float(v_arr[i]) if i < len(v_arr) else 1.0
+            except (TypeError, ValueError) as exc:
+                log.warning(
+                    "%s output extraction failed for idx=%r: %s",
+                    model_name, idx, exc,
+                )
+                continue
+            if not (math.isfinite(p_pu) and math.isfinite(q_pu) and math.isfinite(v_pu)):
+                continue
+            bus = bus_values[i] if i < len(bus_values) else ""
+            bus_coerced = _coerce_scalar(bus)
+            bus_final: int | str = bus_coerced if isinstance(bus_coerced, int | str) and not isinstance(bus_coerced, bool) else str(bus)
+            out[str(idx)] = GeneratorOutput(
+                p=p_pu * mva_base,
+                q=q_pu * mva_base,
+                v=v_pu,
+                bus=bus_final,
+            )
+    return out
+
+
+def _extract_load_consumption(ss: System) -> dict[str, LoadConsumption]:
+    """Per-load P/Q draw from the converged PF.
+
+    PQ loads expose ``Ppf`` and ``Qpf`` (the post-PF active/reactive
+    consumption, in pu). ZIP loads expose the same; the ZIP composition
+    is rolled into the same Ppf/Qpf at the converged voltage.
+
+    Best-effort — falls back to ``p0`` / ``q0`` (the input setpoint) if
+    ``Ppf`` / ``Qpf`` are unavailable. Always converts to MW / MVAr.
+    """
+    log = logging.getLogger("andes-app.wrapper.load_consumption")
+    out: dict[str, LoadConsumption] = {}
+    try:
+        mva_base = float(getattr(ss.config, "mva", 100.0))
+    except (TypeError, ValueError):
+        mva_base = 100.0
+    for model_name in ("PQ", "ZIP"):
+        model = getattr(ss, model_name, None)
+        if model is None:
+            continue
+        idx_var = getattr(model, "idx", None)
+        idx_values = list(getattr(idx_var, "v", []) if idx_var is not None else [])
+        if not idx_values:
+            continue
+        bus_var = getattr(model, "bus", None)
+        bus_values = list(getattr(bus_var, "v", []) if bus_var is not None else [])
+        # Try Ppf/Qpf first; fall back to p0/q0.
+        p_arr = _safe_list(
+            getattr(model, "Ppf", None) or getattr(model, "p0", None)
+        )
+        q_arr = _safe_list(
+            getattr(model, "Qpf", None) or getattr(model, "q0", None)
+        )
+        for i, idx in enumerate(idx_values):
+            try:
+                p_pu = float(p_arr[i]) if i < len(p_arr) else 0.0
+                q_pu = float(q_arr[i]) if i < len(q_arr) else 0.0
+            except (TypeError, ValueError) as exc:
+                log.warning(
+                    "%s consumption extraction failed for idx=%r: %s",
+                    model_name, idx, exc,
+                )
+                continue
+            if not (math.isfinite(p_pu) and math.isfinite(q_pu)):
+                continue
+            bus = bus_values[i] if i < len(bus_values) else ""
+            bus_coerced = _coerce_scalar(bus)
+            bus_final: int | str = bus_coerced if isinstance(bus_coerced, int | str) and not isinstance(bus_coerced, bool) else str(bus)
+            out[str(idx)] = LoadConsumption(
+                p=p_pu * mva_base,
+                q=q_pu * mva_base,
+                bus=bus_final,
+            )
+    return out
+
+
+def _safe_list(param: Any) -> list[Any]:
+    """Defensive ``.v`` reader. Returns [] for None / non-iterable."""
+    if param is None:
+        return []
+    values = getattr(param, "v", None)
+    if values is None:
+        return []
+    try:
+        return list(values)
+    except TypeError:
+        return []
 
 
 def _extract_line_flows(ss: System) -> dict[str, LineFlow]:

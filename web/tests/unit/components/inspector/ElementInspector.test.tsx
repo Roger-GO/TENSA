@@ -205,9 +205,28 @@ describe('<ElementInspector />', () => {
     expect(screen.getByText(/inspecting/i)).toBeInTheDocument();
   });
 
-  it('shows fallback text for kinds without per-element PF results (generators)', () => {
+  it('shows generator P / Q / V_term when generator output is in the PF result', () => {
     seedLoadedCase();
     useCaseStore.setState({ selectedElement: { kind: 'generator', idx: 'G1' } });
+    usePflowStore.setState({
+      lastRun: makePflowResult({
+        generator_outputs: {
+          G1: { p: 232.4, q: -16.9, v: 1.06, bus: 1 },
+        },
+      }),
+      isRunning: false,
+      error: null,
+    });
+    render(withQueryClient(<ElementInspector />));
+
+    expect(screen.getByText('232.40 MW')).toBeInTheDocument();
+    expect(screen.getByText('-16.90 MVAr')).toBeInTheDocument();
+    expect(screen.getByText('1.0600 pu')).toBeInTheDocument();
+  });
+
+  it('shows shunt fallback hint (no per-shunt PF results)', () => {
+    seedLoadedCase();
+    useCaseStore.setState({ selectedElement: { kind: 'shunt', idx: 'SH1' } });
     usePflowStore.setState({ lastRun: makePflowResult(), isRunning: false, error: null });
     render(withQueryClient(<ElementInspector />));
 

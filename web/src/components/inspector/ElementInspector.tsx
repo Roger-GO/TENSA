@@ -252,13 +252,83 @@ function ResultsTab({ selected, pflowResult }: ResultsTabProps) {
       </dl>
     );
   }
-  // Generators / loads / transformers / shunts: v0.1 substrate doesn't
-  // surface PF outputs for these per-element directly. The Results tab
-  // falls back to a hint pointing at the related bus.
+  if (selected.kind === 'generator') {
+    const gen = pflowResult.generator_outputs?.[selected.idx];
+    if (!gen) {
+      return (
+        <p className="text-muted-foreground text-xs">
+          No PF output for generator {selected.idx}.
+        </p>
+      );
+    }
+    return (
+      <dl
+        data-testid="inspector-results"
+        className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm"
+      >
+        <dt className="text-muted-foreground font-mono text-xs">P</dt>
+        <dd className="text-foreground font-mono text-xs">{gen.p.toFixed(2)} MW</dd>
+        <dt className="text-muted-foreground font-mono text-xs">Q</dt>
+        <dd className="text-foreground font-mono text-xs">{gen.q.toFixed(2)} MVAr</dd>
+        <dt className="text-muted-foreground font-mono text-xs">V_term</dt>
+        <dd className="text-foreground font-mono text-xs">{gen.v.toFixed(4)} pu</dd>
+        <dt className="text-muted-foreground font-mono text-xs">bus</dt>
+        <dd className="text-foreground font-mono text-xs">{String(gen.bus)}</dd>
+      </dl>
+    );
+  }
+  if (selected.kind === 'load') {
+    const ld = pflowResult.load_consumption?.[selected.idx];
+    if (!ld) {
+      return (
+        <p className="text-muted-foreground text-xs">
+          No PF result for load {selected.idx}.
+        </p>
+      );
+    }
+    return (
+      <dl
+        data-testid="inspector-results"
+        className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm"
+      >
+        <dt className="text-muted-foreground font-mono text-xs">P</dt>
+        <dd className="text-foreground font-mono text-xs">{ld.p.toFixed(2)} MW</dd>
+        <dt className="text-muted-foreground font-mono text-xs">Q</dt>
+        <dd className="text-foreground font-mono text-xs">{ld.q.toFixed(2)} MVAr</dd>
+        <dt className="text-muted-foreground font-mono text-xs">bus</dt>
+        <dd className="text-foreground font-mono text-xs">{String(ld.bus)}</dd>
+      </dl>
+    );
+  }
+  if (selected.kind === 'transformer') {
+    // Transformers are Lines on the substrate side — read the line_flows
+    // dict by idx.
+    const flow = pflowResult.line_flows?.[selected.idx];
+    if (!flow) {
+      return (
+        <p className="text-muted-foreground text-xs">
+          No PF result for transformer {selected.idx}.
+        </p>
+      );
+    }
+    return (
+      <dl
+        data-testid="inspector-results"
+        className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm"
+      >
+        <dt className="text-muted-foreground font-mono text-xs">p_flow</dt>
+        <dd className="text-foreground font-mono text-xs">{flow.p.toFixed(2)} MW</dd>
+        <dt className="text-muted-foreground font-mono text-xs">q_flow</dt>
+        <dd className="text-foreground font-mono text-xs">{flow.q.toFixed(2)} MVAr</dd>
+      </dl>
+    );
+  }
+  // Shunts: ANDES doesn't expose per-shunt PF outputs directly. Hint
+  // toward the connected bus.
   return (
     <p className="text-muted-foreground text-xs">
-      Per-element PF results for {selected.kind} not surfaced in v0.1; check the connected bus in
-      the Results table.
+      Per-element PF results for {selected.kind} not surfaced; check the
+      connected bus in the Results table.
     </p>
   );
 }

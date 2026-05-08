@@ -478,6 +478,33 @@ export interface components {
              */
             rf: number;
         };
+        /**
+         * GeneratorOutput
+         * @description Per-generator PF output. Active + reactive injection at the
+         *     generator's terminal bus, plus the terminal voltage (pu).
+         */
+        GeneratorOutput: {
+            /**
+             * P
+             * @description Active power generated at the terminal bus, in MW.
+             */
+            p: number;
+            /**
+             * Q
+             * @description Reactive power generated at the terminal bus, in MVAr.
+             */
+            q: number;
+            /**
+             * V
+             * @description Terminal bus voltage magnitude (pu).
+             */
+            v: number;
+            /**
+             * Bus
+             * @description Terminal bus idx.
+             */
+            bus: number | string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -534,6 +561,27 @@ export interface components {
             addfiles?: string[] | null;
         };
         /**
+         * LoadConsumption
+         * @description Per-load PF consumption at the converged voltage.
+         */
+        LoadConsumption: {
+            /**
+             * P
+             * @description Active power drawn, in MW.
+             */
+            p: number;
+            /**
+             * Q
+             * @description Reactive power drawn, in MVAr.
+             */
+            q: number;
+            /**
+             * Bus
+             * @description Terminal bus idx.
+             */
+            bus: number | string;
+        };
+        /**
          * PflowResult
          * @description Power-flow run result. Bus voltages and angles are keyed by ANDES idx.
          */
@@ -578,6 +626,20 @@ export interface components {
              */
             line_flows?: {
                 [key: string]: components["schemas"]["LineFlow"];
+            };
+            /**
+             * Generator Outputs
+             * @description Per-generator P / Q output and terminal voltage, keyed by generator idx (stringified). Covers PV, Slack, GENROU, and GENCLS. Empty when PF did not converge.
+             */
+            generator_outputs?: {
+                [key: string]: components["schemas"]["GeneratorOutput"];
+            };
+            /**
+             * Load Consumption
+             * @description Per-load P / Q consumption at the converged voltage, keyed by load idx (stringified). Covers PQ and ZIP. Empty when PF did not converge.
+             */
+            load_consumption?: {
+                [key: string]: components["schemas"]["LoadConsumption"];
             };
         };
         /**
