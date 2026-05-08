@@ -214,13 +214,16 @@ describe('SldCanvas', () => {
     render(withQueryClient(<SldCanvas />));
     // Skeleton shows synchronously on first render (autoCoords=null).
     expect(screen.getByTestId('sld-layout-skeleton')).toBeInTheDocument();
+    // Bus nodes appear after the ELK promise resolves and the layout
+    // effect commits. Wrap all three assertions in a single waitFor so
+    // we don't race the React commit between the skeleton-gone check
+    // and the bus-node check.
     await waitFor(() => {
       expect(screen.queryByTestId('sld-layout-skeleton')).not.toBeInTheDocument();
+      expect(screen.getByTestId('bus-node-1')).toBeInTheDocument();
+      expect(screen.getByTestId('bus-node-2')).toBeInTheDocument();
+      expect(screen.getByTestId('edge-line-1')).toBeInTheDocument();
     });
-    // Bus nodes are rendered.
-    expect(screen.getByTestId('bus-node-1')).toBeInTheDocument();
-    expect(screen.getByTestId('bus-node-2')).toBeInTheDocument();
-    expect(screen.getByTestId('edge-line-1')).toBeInTheDocument();
   });
 
   it('writes selectedElement to the case store on node click', async () => {

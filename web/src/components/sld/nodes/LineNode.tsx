@@ -3,6 +3,9 @@ import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { iconForModel } from '@/icons/iec60617/manifest';
 import { cn } from '@/lib/cn';
+import { usePflowStore } from '@/store/pflow';
+import { useUiStore } from '@/store/ui';
+import { getLineOverlayState } from '../overlay';
 import type { SldNodeData } from './BusNode';
 
 /**
@@ -15,11 +18,15 @@ import type { SldNodeData } from './BusNode';
  */
 export const LineNode = memo(function LineNode({ data, selected }: NodeProps) {
   const d = data as SldNodeData;
+  const pflowResult = usePflowStore((s) => s.lastRun);
+  const hideLabels = useUiStore((s) => s.hideLabels);
+  const overlay = getLineOverlayState(d.idx, pflowResult, hideLabels);
   return (
     <div
       data-testid={`line-node-${d.idx}`}
       data-kind="line"
       data-idx={d.idx}
+      data-direction={overlay.direction}
       className={cn(
         'flex flex-col items-center gap-1 px-2 py-1',
         'bg-background text-foreground',
@@ -39,6 +46,15 @@ export const LineNode = memo(function LineNode({ data, selected }: NodeProps) {
         draggable={false}
       />
       <span className="text-foreground font-mono text-[10px] leading-none">{d.name || d.idx}</span>
+      {overlay.p_label !== null ? (
+        <span
+          data-testid={`line-flow-${d.idx}`}
+          className="text-foreground font-mono text-[10px] leading-tight"
+        >
+          {overlay.direction === 'forward' ? '→' : overlay.direction === 'reverse' ? '←' : ''}{' '}
+          {overlay.p_label}
+        </span>
+      ) : null}
     </div>
   );
 });

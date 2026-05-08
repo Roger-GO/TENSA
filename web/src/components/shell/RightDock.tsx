@@ -43,7 +43,7 @@ export const RightDock = forwardRef<HTMLElement, RightDockProps>(function RightD
       {...props}
     >
       {overlay ? (
-        <div role="region" aria-label="Dock overlay" className="border-border border-b">
+        <div role="region" aria-label="Dock overlay">
           {overlay}
         </div>
       ) : null}
