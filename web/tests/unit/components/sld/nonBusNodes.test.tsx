@@ -77,7 +77,10 @@ describe('buildGraph — non-bus nodes', () => {
     const genNode = nodes.find((n) => n.type === 'generator');
     expect(genNode).toBeDefined();
     expect(genNode?.id).toBe('generator-GEN_1');
-    expect(genNode?.position.x).toBe(0); // same x as bus
+    // x is roughly the bus's x — tiny row-parity stagger (Unit 13c)
+    // shifts solo devices a few px to one side so vertical-neighbor
+    // buses' children don't overlap. Width ±35 px from the bus.
+    expect(Math.abs(genNode?.position.x ?? 999)).toBeLessThan(40);
     expect(genNode?.position.y).toBeLessThan(100); // north of bus
     const stub = edges.find((e) => e.id === 'stub-generator-GEN_1');
     expect(stub).toBeDefined();
