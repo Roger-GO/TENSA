@@ -1,10 +1,19 @@
 import { useMemo, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/shell/EmptyState';
+import { EditElementButton } from '@/components/elements/EditElementButton';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
-import { useCurrentTopology } from '@/api/queries';
-import type { TopologyEntry, TopologySummary, PflowResult } from '@/api/types';
+import { useSessionStore } from '@/store/session';
+import { useCurrentTopology, useReloadCase, useTopologySchema } from '@/api/queries';
+import type {
+  ParamValue,
+  PflowResult,
+  TopologyEntry,
+  TopologyParamMeta,
+  TopologySummary,
+} from '@/api/types';
 import type { SelectedElement } from '@/store/case';
 import { cn } from '@/lib/cn';
 
@@ -78,9 +87,17 @@ function formatValue(v: number | string | boolean): string {
 interface PropertiesTabProps {
   entry: TopologyEntry | null;
   selected: SelectedElement;
+  /** Whether per-field edit affordances should render. */
+  editable: boolean;
+  /** Per-field metadata from the topology schema; falls back to read-only when missing. */
+  paramMetas: Map<string, TopologyParamMeta>;
 }
 
-function PropertiesTab({ entry, selected }: PropertiesTabProps) {
+function PropertiesTab({ entry, selected, editable, paramMetas }: PropertiesTabProps) {
+  // Local optimistic mirror so an edited value is reflected immediately
+  // without waiting for the topology re-fetch round-trip.
+  const [overrides, setOverrides] = useState<Record<string, ParamValue>>({});
+
   if (!entry) {
     return (
       <p className="text-muted-foreground text-xs">
@@ -88,7 +105,7 @@ function PropertiesTab({ entry, selected }: PropertiesTabProps) {
       </p>
     );
   }
-  const params = entry.params ?? {};
+  const params = { ...(entry.params ?? {}), ...overrides };
   const entries = Object.entries(params);
   return (
     <dl
@@ -106,14 +123,70 @@ function PropertiesTab({ entry, selected }: PropertiesTabProps) {
           No additional parameters reported by ANDES.
         </p>
       ) : (
-        entries.map(([key, value]) => (
-          <div key={key} className="contents">
-            <dt className="text-muted-foreground font-mono text-xs">{key}</dt>
-            <dd className="text-foreground font-mono text-xs">{formatValue(value)}</dd>
-          </div>
-        ))
+        entries.map(([key, value]) => {
+          const meta = paramMetas.get(key);
+          // bus_idx fields aren't editable in v0.1.x (structural-link
+          // edits are deferred); render read-only.
+          const canEditThisField =
+            editable && meta !== undefined && meta.kind !== 'bus_idx' && key !== 'idx' && key !== 'name';
+          return (
+            <div key={key} className="contents">
+              <dt className="text-muted-foreground font-mono text-xs">{key}</dt>
+              <dd className="text-foreground font-mono text-xs">
+                {canEditThisField && meta ? (
+                  <EditElementButton
+                    model={entry.kind}
+                    idx={String(entry.idx)}
+                    meta={meta}
+                    value={value}
+                    enabled
+                    onUpdated={(next) => setOverrides((curr) => ({ ...curr, [key]: next }))}
+                  />
+                ) : (
+                  <>
+                    {formatValue(value)}
+                    {meta?.unit ? (
+                      <span className="text-muted-foreground ml-1 text-[10px]">{meta.unit}</span>
+                    ) : null}
+                  </>
+                )}
+              </dd>
+            </div>
+          );
+        })
       )}
     </dl>
+  );
+}
+
+interface ResetBannerProps {
+  onReset: () => void;
+  resetting: boolean;
+}
+
+function ResetBanner({ onReset, resetting }: ResetBannerProps) {
+  return (
+    <div
+      role="status"
+      data-testid="inspector-reset-banner"
+      className={cn(
+        'border-warning/30 bg-warning/10 text-foreground',
+        'flex items-center justify-between gap-2 rounded-[var(--radius-sm)] border px-2 py-1.5',
+        'text-xs',
+      )}
+    >
+      <span>Run has committed setup. Reset to edit.</span>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={resetting}
+        onClick={onReset}
+        className="text-xs"
+      >
+        {resetting ? 'Resetting…' : 'Reset run'}
+      </Button>
+    </div>
   );
 }
 
@@ -199,6 +272,10 @@ export function ElementInspector({ className }: ElementInspectorProps) {
   const topology = useCurrentTopology();
   const selectedElement = useCaseStore((s) => s.selectedElement);
   const pflowResult = usePflowStore((s) => s.lastRun);
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const isPflowRunning = usePflowStore((s) => s.isRunning);
+  const reloadCase = useReloadCase();
+  const schema = useTopologySchema();
 
   // Tab default selection follows the interaction-states matrix: pre-PF
   // Properties, post-PF Results. We track via local state so the user
@@ -210,6 +287,27 @@ export function ElementInspector({ className }: ElementInspectorProps) {
     if (!topology || !selectedElement) return null;
     return findEntry(topology, selectedElement);
   }, [topology, selectedElement]);
+
+  // Per-field metadata for the selected element's ANDES model — drives
+  // the edit affordances when state is pre-setup.
+  const paramMetas = useMemo(() => {
+    const map = new Map<string, TopologyParamMeta>();
+    if (!entry || !schema.data) return map;
+    const list = schema.data.models[entry.kind] ?? [];
+    for (const meta of list) map.set(meta.name, meta);
+    return map;
+  }, [entry, schema.data]);
+
+  const isPreSetup = topology?.state === 'pre-setup';
+  const isCommitted = topology?.state === 'committed';
+  // Edit affordances disabled mid-PF so the user can't fire a write
+  // while the substrate is mid-commit.
+  const editable = isPreSetup && !isPflowRunning;
+
+  const onResetRun = () => {
+    if (!sessionId) return;
+    reloadCase.mutate(sessionId);
+  };
 
   // ---- empty branches --------------------------------------------------
   if (selection === null) {
@@ -251,8 +349,19 @@ export function ElementInspector({ className }: ElementInspectorProps) {
           <TabsTrigger value="properties">Properties</TabsTrigger>
           <TabsTrigger value="results">Results</TabsTrigger>
         </TabsList>
-        <TabsContent value="properties" className="min-h-0 flex-1 overflow-auto">
-          <PropertiesTab entry={entry} selected={selectedElement} />
+        <TabsContent
+          value="properties"
+          className="min-h-0 flex-1 space-y-2 overflow-auto"
+        >
+          {isCommitted ? (
+            <ResetBanner onReset={onResetRun} resetting={reloadCase.isPending} />
+          ) : null}
+          <PropertiesTab
+            entry={entry}
+            selected={selectedElement}
+            editable={editable}
+            paramMetas={paramMetas}
+          />
         </TabsContent>
         <TabsContent value="results" className="min-h-0 flex-1 overflow-auto">
           <ResultsTab selected={selectedElement} pflowResult={pflowResult} />

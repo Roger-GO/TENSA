@@ -35,6 +35,15 @@ export type WorkspaceFileList = components['schemas']['WorkspaceFileList'];
 export type SidecarLayout = components['schemas']['SidecarLayout'];
 export type BusCoord = components['schemas']['BusCoord'];
 
+export type AddElementRequest = components['schemas']['AddElementRequest'];
+export type EditElementRequest = components['schemas']['EditElementRequest'];
+export type ElementCreated = components['schemas']['ElementCreated'];
+export type BlankSystemResponse = components['schemas']['BlankSystemResponse'];
+export type TopologySchema = components['schemas']['TopologySchema'];
+export type TopologyParamMeta = components['schemas']['TopologyParamMeta'];
+/** ANDES param value types in API request/response payloads. */
+export type ParamValue = number | string | boolean;
+
 // ---- branded types ---------------------------------------------------------
 
 /**
