@@ -107,7 +107,7 @@ describe('assignHandles', () => {
 });
 
 describe('computeHandleAssignments', () => {
-  it('returns a stride of 0 for each edge when no two share a source handle', () => {
+  it('returns a stride of 0 for each edge when no two share a handle', () => {
     const topology = makeTopology(
       [bus(1), bus(2), bus(3), bus(4), bus(5)],
       [line(10, 1, 2), line(11, 1, 3), line(12, 1, 4), line(13, 1, 5)],
@@ -120,20 +120,24 @@ describe('computeHandleAssignments', () => {
       '5': { x: 0, y: -100 }, // north of 1
     };
     const handles = computeHandleAssignments(topology, coords);
-    const eachStride = Array.from(handles.values()).map((h) => h.stride);
-    expect(eachStride).toEqual([0, 0, 0, 0]);
-    // Verify each edge picks a unique side on bus 1.
+    for (const h of handles.values()) {
+      expect(h.sourceStride).toBe(0);
+      expect(h.targetStride).toBe(0);
+    }
     const sourceSides = Array.from(handles.values()).map((h) => h.sourceSide);
     expect(new Set(sourceSides).size).toBe(4);
   });
 
-  it('increments stride for edges sharing the same source handle', () => {
+  it('reassigns to the alternate axis when the primary side already hosts an edge', () => {
+    // Three edges all naturally want to leave BUS1 on the east side.
+    // The first takes east; the next two get split across east and
+    // south as the picker prefers the less-loaded axis.
     const topology = makeTopology(
       [bus(1), bus(2), bus(3), bus(4)],
       [
-        line(10, 1, 2), // bus 2 east of 1 → source 'east'
-        line(11, 1, 3), // bus 3 east of 1 → source 'east' too
-        line(12, 1, 4), // bus 4 east of 1 → source 'east' again
+        line(10, 1, 2),
+        line(11, 1, 3),
+        line(12, 1, 4),
       ],
     );
     const coords = {
@@ -143,9 +147,50 @@ describe('computeHandleAssignments', () => {
       '4': { x: 300, y: 60 },
     };
     const handles = computeHandleAssignments(topology, coords);
-    expect(handles.get('line-10')).toEqual({ sourceSide: 'east', targetSide: 'west', stride: 0 });
-    expect(handles.get('line-11')).toEqual({ sourceSide: 'east', targetSide: 'west', stride: 1 });
-    expect(handles.get('line-12')).toEqual({ sourceSide: 'east', targetSide: 'west', stride: 2 });
+    expect(handles.get('line-10')).toMatchObject({ sourceSide: 'east', sourceStride: 0 });
+    // line-11 takes the alternate axis (south-north) because primary
+    // east is already loaded by line-10.
+    expect(handles.get('line-11')).toMatchObject({ sourceSide: 'south', sourceStride: 0 });
+    // line-12: both BUS1.east and BUS1.south now carry one edge each
+    // — equal load. The picker prefers the alternate axis on ties so
+    // the third edge stays paired with the second on the south face,
+    // separated by stride.
+    expect(handles.get('line-12')).toMatchObject({ sourceSide: 'south', sourceStride: 1 });
+  });
+
+  it('reassigns hub-bus through-edges to the perpendicular axis', () => {
+    // The IEEE 14 hub case: bus 2 receives an edge on its west face
+    // (1 → 2) AND naturally wants to emit an edge from its west face
+    // toward the south-west neighbour (2 → 5). Conflict avoidance
+    // routes the second edge through south/north instead — clean
+    // visual separation, no shared corridor at the bus 2 west handle.
+    const topology = makeTopology(
+      [bus(1), bus(2), bus(5)],
+      [
+        line(10, 1, 2),
+        line(11, 2, 5),
+      ],
+    );
+    const coords = {
+      '1': { x: 200, y: 100 },
+      '2': { x: 400, y: 100 },
+      '5': { x: 200, y: 250 },
+    };
+    const handles = computeHandleAssignments(topology, coords);
+    // line-10: enters bus 2 on its west face — primary, no conflict.
+    expect(handles.get('line-10')).toMatchObject({
+      sourceSide: 'east',
+      targetSide: 'west',
+      targetStride: 0,
+    });
+    // line-11: would naturally leave bus 2 on west, but bus 2.west is
+    // already taken by line-10 — reassign to the perpendicular axis
+    // (south of bus 2 → north of bus 5).
+    expect(handles.get('line-11')).toMatchObject({
+      sourceSide: 'south',
+      targetSide: 'north',
+      sourceStride: 0,
+    });
   });
 
   it('skips edges with missing terminals or missing coords', () => {
@@ -188,14 +233,15 @@ describe('computeHandleAssignments', () => {
     }
   });
 
-  it('counts strides per source bus + side independently', () => {
+  it('produces unique (busId, side, stride) triples for every endpoint', () => {
+    // Smoke test: regardless of which axis each edge ends up on, no
+    // two edges should produce overlapping (bus, side, stride) on
+    // either endpoint. That's the visual property the user demanded —
+    // every line traceable end-to-end without being mistaken for a
+    // continuation of another line.
     const topology = makeTopology(
       [bus(1), bus(2), bus(3), bus(4)],
-      [
-        line(10, 1, 2), // 1.east stride 0
-        line(11, 1, 3), // 1.east stride 1
-        line(12, 4, 2), // 4.east stride 0 (different source bus)
-      ],
+      [line(10, 1, 2), line(11, 1, 3), line(12, 4, 2)],
     );
     const coords = {
       '1': { x: 0, y: 0 },
@@ -204,9 +250,18 @@ describe('computeHandleAssignments', () => {
       '4': { x: 50, y: 50 },
     };
     const handles = computeHandleAssignments(topology, coords);
-    expect(handles.get('line-10')?.stride).toBe(0);
-    expect(handles.get('line-11')?.stride).toBe(1);
-    expect(handles.get('line-12')?.stride).toBe(0);
+    const triples = new Set<string>();
+    for (const [edgeId, h] of handles.entries()) {
+      const entry = topology.lines.find((l) => `line-${String(l.idx)}` === edgeId);
+      const sourceBus = String(entry?.params?.bus1 ?? '?');
+      const targetBus = String(entry?.params?.bus2 ?? '?');
+      const sourceTriple = `${sourceBus}|${h.sourceSide}|${h.sourceStride}`;
+      const targetTriple = `${targetBus}|${h.targetSide}|${h.targetStride}`;
+      expect(triples.has(sourceTriple), `duplicate source corridor at ${sourceTriple}`).toBe(false);
+      expect(triples.has(targetTriple), `duplicate target corridor at ${targetTriple}`).toBe(false);
+      triples.add(sourceTriple);
+      triples.add(targetTriple);
+    }
   });
 });
 
@@ -252,7 +307,7 @@ describe('computeHandleAssignments — unique corridor coverage on synthetic IEE
       // Need source bus id — derive from topology lookup.
       const entry = topology.lines.find((l) => `line-${String(l.idx)}` === edgeId);
       const fromBus = String(entry?.params?.bus1 ?? fromBusId);
-      const triple = `${fromBus}|${h.sourceSide}|${h.stride}`;
+      const triple = `${fromBus}|${h.sourceSide}|${h.sourceStride}`;
       expect(triples.has(triple), `duplicate corridor at ${triple}`).toBe(false);
       triples.add(triple);
     }

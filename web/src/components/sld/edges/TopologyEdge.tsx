@@ -29,11 +29,12 @@ interface EdgeData {
   bucket?: 'line' | 'transformer';
   sourceSide?: Side;
   targetSide?: Side;
-  stride?: number;
+  sourceStride?: number;
+  targetStride?: number;
 }
 
-/** Pixels per stride step. Increase if visual review reads stripes as parallel lines. */
-const STRIDE_PIXELS = 8;
+/** Pixels per stride step. Tuned to be clearly perceptible at default zoom. */
+const STRIDE_PIXELS = 14;
 
 /**
  * Compute a perpendicular offset (in canvas units) for the given side.
@@ -66,9 +67,8 @@ export const TopologyEdge = memo(function TopologyEdge({
   const pflowResult = usePflowStore((s) => s.lastRun);
   const hideLabels = useUiStore((s) => s.hideLabels);
   const edgeData = (data ?? {}) as EdgeData;
-  const stride = edgeData.stride ?? 0;
-  const sourceShift = strideShift(edgeData.sourceSide, stride);
-  const targetShift = strideShift(edgeData.targetSide, stride);
+  const sourceShift = strideShift(edgeData.sourceSide, edgeData.sourceStride ?? 0);
+  const targetShift = strideShift(edgeData.targetSide, edgeData.targetStride ?? 0);
   const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX: sourceX + sourceShift.dx,
     sourceY: sourceY + sourceShift.dy,

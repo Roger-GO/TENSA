@@ -37,7 +37,7 @@ import ELK from 'elkjs/lib/elk.bundled.js';
 import type { ElkNode, LayoutOptions } from 'elkjs/lib/elk-api';
 import type { TopologySummary } from '@/api/types';
 import type { CoordsByIdx } from './sidecar';
-import { assignHandles, type Side } from './graph';
+import { computeHandleAssignments, type Side } from './graph';
 
 /** Lazy ELK instance — `elkjs` reads `Worker` on construction in some bundles. */
 let elkInstance: InstanceType<typeof ELK> | null = null;
@@ -217,15 +217,19 @@ export async function autoLayout(
   }
 
   // ---- pass 2: bend points via FIXED_SIDE ports ----
+  // Reuse the canvas-side handle assignments so ELK's chosen ports
+  // match the React Flow handle ids the buildGraph step will set.
+  // computeHandleAssignments runs greedy conflict-avoidance (primary
+  // → alternate axis on hub buses), so this stays in sync without
+  // duplicating the logic.
+  const handleAssignments = computeHandleAssignments(topology, coords);
   const portTargets = new Map<string, { source: string; target: string }>();
   for (const branch of validBranches) {
-    const fromCoord = coords[branch.from];
-    const toCoord = coords[branch.to];
-    if (!fromCoord || !toCoord) continue;
-    const { sourceSide, targetSide } = assignHandles(fromCoord, toCoord);
+    const ha = handleAssignments.get(branch.id);
+    if (!ha) continue;
     portTargets.set(branch.id, {
-      source: `${branch.from}.${sourceSide}`,
-      target: `${branch.to}.${targetSide}`,
+      source: `${branch.from}.${ha.sourceSide}`,
+      target: `${branch.to}.${ha.targetSide}`,
     });
   }
 
