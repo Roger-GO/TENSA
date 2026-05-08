@@ -16,7 +16,7 @@
  * store or stubs the create-session response.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -26,7 +26,7 @@ import { setTokenGetter } from '@/api/client';
 import { useAuthStore } from '@/store/auth';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
-import { parseSessionId } from '@/api/types';
+import { parseSessionId, parseWorkspacePath } from '@/api/types';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -277,5 +277,106 @@ describe('<WorkspaceFilePicker />', () => {
     // The "view raw error" disclosure exposes the raw ProblemDetails.
     await userEvent.click(screen.getByRole('button', { name: /view raw error/i }));
     expect(banner).toHaveTextContent(/"status": 422/);
+  });
+
+  // ---- session-recovery effect (v0.1.y Unit 5) ---------------------------
+
+  it('clears recoveryInProgress immediately for a blank session (no re-load)', async () => {
+    // Pre-seed a session id so useEnsureSession does not fire a fresh
+    // create. Selection is null → blank session path.
+    useSessionStore.setState({
+      sessionId: parseSessionId('sess-pre'),
+      recoveryInProgress: false,
+      recoveryFailed: false,
+      recoveryAttempts: [],
+    });
+    useCaseStore.setState({ selection: null, topology: null, layoutSidecar: null });
+    stubInitialFetches(fetchSpy);
+    const { Wrapper } = makeWrapper();
+    render(<WorkspaceFilePicker />, { wrapper: Wrapper });
+
+    // Wait for the initial workspace fetch to settle so the picker is mounted.
+    await screen.findByRole('option', { name: /ieee14\.raw/i });
+
+    // Simulate a recovery cycle: resetSession (clears id + raises flag),
+    // then a fresh setSessionId once createSession would have completed.
+    act(() => {
+      useSessionStore.getState().resetSession();
+    });
+    expect(useSessionStore.getState().recoveryInProgress).toBe(true);
+
+    act(() => {
+      useSessionStore.getState().setSessionId(parseSessionId('sess-new'));
+    });
+
+    // The recovery effect should clear the flag (blank-session path —
+    // nothing to re-load).
+    await waitFor(() => {
+      expect(useSessionStore.getState().recoveryInProgress).toBe(false);
+    });
+  });
+
+  it('re-issues loadCase against the new session id when a case was loaded pre-recovery', async () => {
+    useSessionStore.setState({
+      sessionId: parseSessionId('sess-pre'),
+      recoveryInProgress: false,
+      recoveryFailed: false,
+      recoveryAttempts: [],
+    });
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
+      topology: null,
+      layoutSidecar: null,
+    });
+    stubInitialFetches(fetchSpy);
+    const { Wrapper } = makeWrapper();
+    render(<WorkspaceFilePicker />, { wrapper: Wrapper });
+
+    await screen.findByRole('option', { name: /ieee14\.raw/i });
+
+    // Stub the load-case re-issue response (the recovery effect fires it
+    // against the NEW session id).
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/sessions/sess-new/case')) {
+        return Promise.resolve(
+          jsonResponse({
+            state: 'pre-setup',
+            buses: [],
+            lines: [],
+            transformers: [],
+            generators: [],
+            loads: [],
+          }),
+        );
+      }
+      if (url.endsWith('/api/workspace/files')) {
+        return Promise.resolve(jsonResponse({ files: FILES }));
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    act(() => {
+      useSessionStore.getState().resetSession();
+    });
+    act(() => {
+      useSessionStore.getState().setSessionId(parseSessionId('sess-new'));
+    });
+
+    await waitFor(() => {
+      const call = fetchSpy.mock.calls.find(([url]) => {
+        const u = typeof url === 'string' ? url : ((url as Request).url ?? String(url));
+        return u.endsWith('/api/sessions/sess-new/case');
+      });
+      expect(call).toBeDefined();
+      const init = call?.[1] as RequestInit | undefined;
+      expect(init?.method).toBe('POST');
+      const body = init?.body as string;
+      expect(JSON.parse(body)).toEqual({ primary_path: 'ieee14.raw', addfiles: null });
+    });
+
+    await waitFor(() => {
+      expect(useSessionStore.getState().recoveryInProgress).toBe(false);
+    });
   });
 });
