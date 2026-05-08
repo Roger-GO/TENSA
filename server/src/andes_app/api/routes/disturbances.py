@@ -43,7 +43,7 @@ def _map_worker_error(exc: WorkerError) -> HTTPException:
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"{exc.detail} — call POST /sessions/{{id}}/reload to return "
+                f"{exc.detail} — call POST /api/sessions/{{id}}/reload to return "
                 "to pre-setup state."
             ),
         )
@@ -75,7 +75,7 @@ def _map_worker_error(exc: WorkerError) -> HTTPException:
             "model": ProblemDetails,
             "description": (
                 "Session has already been committed (PF or TDS has run); "
-                "call POST /sessions/{id}/reload to return to pre-setup."
+                "call POST /api/sessions/{id}/reload to return to pre-setup."
             ),
         },
         422: {

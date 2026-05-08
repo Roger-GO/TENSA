@@ -21,15 +21,15 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      // Forward API calls to the substrate. The substrate's routes are
-      // mounted under `/api/*` (Unit 10 wheel-bundling adds the prefix).
-      // For now, the substrate routes are at root paths; the rewrite below
-      // strips `/api` so dev clients can use `/api/*` without backend changes.
+      // Forward API calls to the substrate. The substrate mounts every
+      // router under ``/api/*`` (Unit 10), so we forward the prefix as-is
+      // — no rewrite. ``/ws`` is the WebSocket entry point for TDS
+      // streaming (v0.2); the substrate exposes it at ``/api/ws`` after
+      // the prefix change.
       '/api': {
         target: ANDES_TARGET,
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path.replace(/^\/api/, ''),
       },
       '/ws': {
         target: ANDES_TARGET,

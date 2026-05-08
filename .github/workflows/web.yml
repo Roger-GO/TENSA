@@ -48,3 +48,12 @@ jobs:
 
       - name: pnpm build
         run: pnpm build
+
+# NOTE (Unit 10): the eventual wheel-publish workflow (lands when the
+# project moves to PyPI publish) MUST run, in order:
+#   1. ``pnpm install --frozen-lockfile && pnpm build`` in ``web/`` to
+#      populate ``web/dist/`` (hatch ``force-include`` requires it).
+#   2. ``python -m build`` in ``server/`` to produce the wheel.
+# Skipping step 1 makes ``python -m build`` fail loudly because hatch
+# can't find ``../web/dist`` at packaging time. That's the intended
+# behavior so we never ship a wheel without the SPA bundle.
