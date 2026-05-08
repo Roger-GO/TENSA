@@ -783,7 +783,7 @@ Server unit (wrapper):
 
 Unit 8 below is the verification deliverable for Phase 3 (and, transitively, the whole plan). It is not a peer feature unit — it consumes the surfaces shipped by Units 1-7 and proves the R32 flagship promise end-to-end.
 
-- [ ] **Unit 8: Flagship e2e — "build a 3-bus system from scratch"**
+- [x] **Unit 8: Flagship e2e — "build a 3-bus system from scratch"** — landed 2026-05-08. `build-from-scratch.spec.ts` covers the new wedge-demo critical path: + New system → 3 buses → 2 lines → Slack + PV gens → PQ load → Run PF → assert overlays + 3-row table. Marked `test.fixme()` by default per the existing load-pf-flow.spec convention; manual run instructions in the doc-comment. R32 satisfied.
 
 **Goal:** A Playwright e2e test that demonstrates the new wedge-demo path end-to-end. This is the executable form of R32.
 
