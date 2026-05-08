@@ -10,6 +10,9 @@ build/
 dist/
 wheels/
 .pytest_cache/
+
+# Per-run artifacts from compound-engineering skills (ce-code-review etc.)
+.context/
 .mypy_cache/
 .ruff_cache/
 .coverage
