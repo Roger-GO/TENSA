@@ -7,9 +7,10 @@ response is shaped as ``ProblemDetails`` per RFC 7807.
 
 from __future__ import annotations
 
+import math
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ---- error envelope ---------------------------------------------------------
 
@@ -127,6 +128,18 @@ class TopologyEntry(BaseModel):
             "``PV``, ``Slack``, ``PQ``)."
         ),
     )
+    params: dict[str, float | int | str | bool] = Field(
+        default_factory=dict,
+        description=(
+            "Flat dict of model-input parameters for this element (e.g., for "
+            "a Bus: ``Vn`` rated voltage in kV, ``vmax``/``vmin`` voltage "
+            "limits, ``area``, ``zone``; for a Line: ``r``, ``x``, ``b``, "
+            "``g``, ``tap``, ``phi``; for a generator: ``Sn`` rated MVA, "
+            "``Vn``, ``bus``, plus model-specific params). The Inspector "
+            "Properties tab in the v0.1 UI consumes this dict; absent params "
+            "(None or unavailable on a given model) are omitted."
+        ),
+    )
 
 
 class TopologySummary(BaseModel):
@@ -161,6 +174,39 @@ class TopologySummary(BaseModel):
 
 
 # ---- power flow -------------------------------------------------------------
+
+
+class LineFlow(BaseModel):
+    """Per-line active and reactive power flow, measured at terminal 1
+    (``bus1``) flowing into the line toward terminal 2 (``bus2``).
+
+    Sign convention: positive ``p`` means real power flowing FROM ``bus1``
+    INTO the line; positive ``q`` means reactive power flowing FROM ``bus1``
+    INTO the line. The v0.1 SLD overlay uses the sign of ``p`` to render
+    directional arrows along each branch.
+    """
+
+    p: float = Field(
+        ...,
+        description=(
+            "Active power leaving ``bus1`` into the line, in MW (i.e., "
+            "computed in pu and multiplied by the system base MVA)."
+        ),
+    )
+    q: float = Field(
+        ...,
+        description=(
+            "Reactive power leaving ``bus1`` into the line, in MVAr."
+        ),
+    )
+    from_idx: int | str = Field(
+        ...,
+        description="ANDES idx of the ``bus1`` terminal (the from-side bus).",
+    )
+    to_idx: int | str = Field(
+        ...,
+        description="ANDES idx of the ``bus2`` terminal (the to-side bus).",
+    )
 
 
 class PflowResult(BaseModel):
@@ -203,6 +249,18 @@ class PflowResult(BaseModel):
     bus_angles: dict[str, float] = Field(
         ...,
         description="Bus voltage angles (radians) keyed by ANDES idx (stringified).",
+    )
+    line_flows: dict[str, LineFlow] = Field(
+        default_factory=dict,
+        description=(
+            "Per-line P/Q flow at terminal 1, keyed by line idx (stringified). "
+            "Empty if the wrapper could not extract line flows from the post-"
+            "PF System (e.g., on an unexpected ANDES API change). "
+            "Populated by computing the standard pi-equivalent line "
+            "injection at ``bus1`` from the converged ``v1``/``a1``/``v2``/"
+            "``a2`` algebraic variables and the line's series + shunt "
+            "admittances."
+        ),
     )
 
 
@@ -327,4 +385,117 @@ class TdsBatchResult(BaseModel):
             "Number of times the per-step ``TDS.callpert`` hook fired during "
             "the run. Useful as a sanity check that streaming is wired."
         ),
+    )
+
+
+# ---- workspace lister + layout sidecar -------------------------------------
+
+
+class WorkspaceFile(BaseModel):
+    """One entry in the workspace file lister response."""
+
+    name: str = Field(
+        ...,
+        description=(
+            "File name relative to the workspace root (no directory "
+            "components in v0.1; the lister does not recurse)."
+        ),
+    )
+    size_bytes: int = Field(
+        ...,
+        description="File size in bytes as reported by ``os.stat``.",
+        ge=0,
+    )
+    modified_iso: str = Field(
+        ...,
+        description=(
+            "Last-modified time in ISO 8601 format with timezone (UTC). "
+            "Computed from ``stat.st_mtime`` at list time."
+        ),
+    )
+    format: Literal["xlsx", "raw", "dyr", "json", "m"] = Field(
+        ...,
+        description=(
+            "Detected file format from the extension. Matches one of the "
+            "ANDES-supported formats; non-matching files are excluded by the "
+            "lister."
+        ),
+    )
+
+
+class WorkspaceFileList(BaseModel):
+    """Response shape for ``GET /workspace/files``."""
+
+    files: list[WorkspaceFile] = Field(
+        ...,
+        description=(
+            "Workspace files matching the supported extensions, sorted "
+            "alphabetically by ``name``. Hidden files (dotfiles) and "
+            "symlinks are excluded; subdirectories are not recursed in v0.1."
+        ),
+    )
+
+
+class BusCoord(BaseModel):
+    """One bus's 2D coordinate in the layout sidecar.
+
+    Coordinates are in arbitrary canvas units; the UI rescales them at render
+    time. Infinity / NaN are rejected at validation time.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    x: float = Field(..., description="Bus X coordinate, finite (no NaN/Inf).")
+    y: float = Field(..., description="Bus Y coordinate, finite (no NaN/Inf).")
+
+    @field_validator("x", "y")
+    @classmethod
+    def _finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("coordinate must be finite (no NaN/Inf)")
+        return value
+
+
+class SidecarLayout(BaseModel):
+    """Persisted SLD layout sidecar (one file per case).
+
+    Stored on disk as ``<case_path>.layout.json`` adjacent to the case file.
+    The PUT endpoint validates this body, then writes atomically with mode
+    0600.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: str = Field(
+        ...,
+        description=(
+            "Sidecar schema version (e.g., ``\"1.0\"``). Bumped on any "
+            "incompatible shape change so the UI can fall back to defaults."
+        ),
+        min_length=1,
+    )
+    andes_version: str = Field(
+        ...,
+        description=(
+            "ANDES version the layout was saved against (e.g., ``\"2.0.0\"``). "
+            "Recorded for diagnosis; not validated on read."
+        ),
+        min_length=1,
+    )
+    coordinates: dict[str, BusCoord] = Field(
+        ...,
+        description=(
+            "Per-bus coordinates, keyed by bus idx (stringified). Buses "
+            "missing from this dict fall back to the renderer's auto-layout."
+        ),
+    )
+    last_modified: str = Field(
+        ...,
+        description=(
+            "ISO 8601 timestamp recorded by the client at save time. The "
+            "server does NOT regenerate this on write; it stores the value "
+            "the client sent so collaborative-edit conflict detection (a "
+            "future feature) has a single source of truth."
+        ),
+        min_length=1,
     )
