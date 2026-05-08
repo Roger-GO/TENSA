@@ -1,7 +1,7 @@
 ---
 title: "feat: v0.1.y — element deletion + layout overhaul + v0.2 prerequisites"
 type: feat
-status: active
+status: completed
 date: 2026-05-08
 origin: docs/brainstorms/2026-05-07-accessible-andes-power-systems-app-requirements.md
 ---
@@ -149,7 +149,7 @@ These are settled now. Reversing any of them changes scope, sequencing, or risk 
 
 ### Phase 1 — Element deletion (R33; v0.5 pull-forward)
 
-- [ ] **Unit 1: Substrate delete API + wrapper method**
+- [x] **Unit 1: Substrate delete API + wrapper method**
 
 **Goal:** Land `DELETE /api/sessions/{id}/elements/{model}/{idx}` with cascade-detection + reload-and-replay semantics. Parity with the existing `add_element` / `edit_element` pre-setup gate + sanitization.
 
@@ -196,7 +196,7 @@ These are settled now. Reversing any of them changes scope, sequencing, or risk 
 
 ---
 
-- [ ] **Unit 2: UI delete affordance**
+- [x] **Unit 2: UI delete affordance**
 
 **Goal:** Trash-icon `DeleteElementButton` renders in the Properties tab when state is `pre-setup`. Confirm dialog flags the destructive action; on dependents-422 the dialog flips to a list view explaining what to delete first.
 
@@ -240,7 +240,7 @@ These are settled now. Reversing any of them changes scope, sequencing, or risk 
 
 ### Phase 2 — Layout overhaul (R34, sidecar non-bus coords)
 
-- [ ] **Unit 3: Collision push-out post-process**
+- [x] **Unit 3: Collision push-out post-process**
 
 **Goal:** No non-bus element overlaps another non-bus element or a non-parent bus, regardless of input topology + coords. The single-pass kind-based offset computation in `buildGraph` runs as today; a new `pushOutCollisions` step then walks the result and shifts colliding nodes until clean.
 
@@ -280,7 +280,7 @@ These are settled now. Reversing any of them changes scope, sequencing, or risk 
 
 ---
 
-- [ ] **Unit 4: Sidecar non_bus_coordinates wired through the writer**
+- [x] **Unit 4: Sidecar non_bus_coordinates wired through the writer**
 
 **Goal:** Drag positions of generators / loads / shunts persist to disk via the same sidecar JSON that holds bus coords. Reload of a saved system restores the exact layout.
 
@@ -318,7 +318,7 @@ These are settled now. Reversing any of them changes scope, sequencing, or risk 
 
 ### Phase 3 — Session resilience (R35)
 
-- [ ] **Unit 5: Session-recovery on 404**
+- [x] **Unit 5: Session-recovery on 404**
 
 **Goal:** A stale session id surfaces no error UI; the global error handler triggers automatic recreation, the failing query retries once with the new id, and the topology + sidecar refetch transparently. The "Reconnecting..." brief badge is the only signal the user sees.
 
@@ -361,7 +361,7 @@ These are settled now. Reversing any of them changes scope, sequencing, or risk 
 
 ---
 
-- [ ] **Unit 6: Sticky-error fix in `useEnsureSession`**
+- [x] **Unit 6: Sticky-error fix in `useEnsureSession`**
 
 **Goal:** `useEnsureSession` no longer gets stuck after the first error. The cycle is idempotent: as long as no create is in-flight, a fresh attempt is allowed.
 
@@ -394,7 +394,7 @@ These are settled now. Reversing any of them changes scope, sequencing, or risk 
 
 ### Phase 4 — Polish + v0.2 readiness gate (R36)
 
-- [ ] **Unit 7: Component test coverage gaps**
+- [x] **Unit 7: Component test coverage gaps**
 
 **Goal:** Bring the v0.1.x components without dedicated tests up to the same coverage bar as `EditElementButton`. Each test covers render-when-applicable + render-when-disabled + happy-path interaction + error-path interaction.
 
@@ -434,7 +434,7 @@ These are settled now. Reversing any of them changes scope, sequencing, or risk 
 
 ---
 
-- [ ] **Unit 8: README + interaction-states refresh + v0.2 readiness gate**
+- [x] **Unit 8: README + interaction-states refresh + v0.2 readiness gate**
 
 **Goal:** The repo's README accurately describes what v0.1.y ships. The interaction-states matrix has rows for the new delete affordance, recovery badge, and dependents-error path. A v0.2 readiness checklist at the bottom of this plan is checked off before v0.2 starts.
 
@@ -468,17 +468,19 @@ Verified manually + via test suite before flipping v0.2's plan to in-progress. A
 
 **Legend:** `[AUTO]` = verified by the test suite; `[MANUAL]` = requires interactive verification.
 
+[AUTO] items below are checked off based on measurements taken at Unit 8 close (2026-05-08). The [MANUAL] items remain unchecked: the human reviewer must run the browser smoke pass, tick each as it passes, and only then flip [v0.2's plan](2026-05-07-003-feat-v02-ui-disturbance-tds-streaming-plan.md) from `status: active` to `status: in-progress`.
+
 - [ ] **[MANUAL]** Element deletion: works on loaded IEEE 14 (delete a *user-added* element on top of the loaded case) + on a blank session built from scratch.
 - [ ] **[MANUAL]** Cascade detection: deleting a Bus with dependents shows the dependents list and blocks the delete.
-- [ ] **[AUTO]** Cascade-walker model coverage: every model in `_PARAMS_BY_MODEL` has either zero references or is exercised by `_find_dependents` (test asserts the invariant — see Unit 1 Risks mitigation).
+- [x] **[AUTO]** Cascade-walker model coverage: every model in `_PARAMS_BY_MODEL` has either zero references or is exercised by `_find_dependents`. Verified by `tests/integration/test_elements_api.py::test_find_dependents_covers_every_whitelisted_model` (passing as part of the 168-test server suite at Unit 8 close).
 - [ ] **[MANUAL]** Layout: synthetic 5-generators-on-one-bus topology renders with no overlap.
 - [ ] **[MANUAL]** Layout: IEEE 39 renders with no element/element or element/non-parent-bus overlap.
 - [ ] **[MANUAL]** Sidecar round-trip: drag a generator → Save System → reload page → load the saved file → generator at the dragged position.
 - [ ] **[MANUAL]** Session recovery (pre-setup): kill the substrate mid-session, restart with the same token, click any canvas action → the session re-creates transparently without a tab reload. (Mid-PF / committed-state recovery is *out of scope* for v0.1.y; see Scope Boundaries.)
 - [ ] **[MANUAL]** Sticky-error fix: simulate a 401 (typo in token), correct the token, next click triggers a successful session create.
 - [ ] **[MANUAL]** Undo last edit: covers both add and delete operations symmetrically.
-- [ ] **[AUTO]** Test count: 233 → ~290; all lint + typecheck + mypy --strict clean.
-- [ ] **[MANUAL]** Documentation: README + interaction-states reflect v0.1.y changes.
+- [x] **[AUTO]** Test count + static checks. Measured at Unit 8 close: web `pnpm test` → **384 passed** (target was ~290; exceeded — v0.1.x baseline 233 + Units 2/3/4/5/6/7 additions); server `pytest -q` → **168 passed** (v0.1.x baseline 152 + Unit 1's delete-API tests). `pnpm lint` clean (`--max-warnings 0`); `pnpm typecheck` clean (`tsc -b --noEmit`); `mypy --strict src/` clean (28 source files, no issues); `ruff check src/` clean ("All checks passed!").
+- [ ] **[MANUAL]** Documentation: README + interaction-states reflect v0.1.y changes. (Unit 8 wrote the updates to `web/README.md`, root `README.md`, and `web/docs/interaction-states.md`; the human reviewer ticks this after a render-check pass.)
 - [ ] **[MANUAL]** PR on `feat/v01-ui` (or follow-on branch) is reviewed + ready to merge.
 
 ## System-Wide Impact
