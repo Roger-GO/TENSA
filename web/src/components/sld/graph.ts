@@ -328,6 +328,264 @@ export interface BuildGraphOptions {
    * fall back to kind-based offsets from the parent bus.
    */
   nonBusCoords?: Map<string, BusCoord>;
+  /**
+   * Per-React-Flow-node-id coordinate overrides captured from user drags
+   * (the in-memory `dragOverrides` map). Drag overrides PRE-EMPT the
+   * collision push-out: a node with a drag override is treated as
+   * stationary so push-out can shift collisions around it without
+   * snapping the user's chosen position.
+   *
+   * Keys here are React Flow ids (`${kind}-${idx}`, or the bus idx for
+   * a bus). Entries that don't match any built node are ignored —
+   * stale drag overrides for deleted elements get pruned by the canvas
+   * effect on the next render.
+   */
+  dragOverrides?: Record<string, { x: number; y: number }>;
+  /**
+   * When true, the post-emission collision push-out pass runs after
+   * non-bus nodes are placed (Unit 3). Default: true. Tests that want
+   * to assert on the raw kind-default offsets pass `false` to skip it.
+   */
+  applyPushOut?: boolean;
+}
+
+/**
+ * Bounding-box footprint per kind. Width × height in canvas pixels.
+ *
+ * Buses use a slightly wider box because the bus glyph is the longest
+ * stroke + label. Non-bus elements share a 50×46 footprint matching the
+ * post-Unit-13c device-node shrink. Exported so tests can assert
+ * deterministic overlap math without re-deriving the constants.
+ */
+export const NODE_FOOTPRINT: Record<'bus' | 'generator' | 'load' | 'shunt', {
+  width: number;
+  height: number;
+}> = {
+  bus: { width: 90, height: 56 },
+  generator: { width: 50, height: 46 },
+  load: { width: 50, height: 46 },
+  shunt: { width: 50, height: 46 },
+};
+
+/** Pixels of clear space the push-out pass keeps between nodes after a shift. */
+export const PUSH_OUT_SAFETY_GAP = 8;
+
+/**
+ * Maximum push-out passes before the algorithm bails. Each pass runs to
+ * "no more pair-overlaps" before exiting; in pathological inputs a
+ * single pass can cause new overlaps to surface (push A out of B's box
+ * directly into C's). 4 passes is empirically sufficient for the v0.2
+ * demo set + the synthetic worst-case scenarios in `R34`.
+ */
+export const PUSH_OUT_MAX_PASSES = 4;
+
+/**
+ * Push-direction unit vector per kind. Drives where a colliding non-bus
+ * node travels first; if the chosen direction would put the node
+ * outside the canvas-bound (the convex hull of all bus positions
+ * extended by 200 px), the pass falls back to the perpendicular
+ * (lateral) axis. Generators push UP (north); loads push DOWN (south);
+ * shunts push down-and-left (south-west). Buses are not push-out
+ * candidates — they anchor everything else.
+ */
+interface PushDirSpec {
+  /** Primary axis: 'x' or 'y'. */
+  axis: 'x' | 'y';
+  /** Sign on the primary axis (+1 = right/down, -1 = left/up). */
+  sign: 1 | -1;
+  /**
+   * Secondary axis nudge — applied alongside the primary push to fan
+   * the node away from the colliding box's center. For shunts this is
+   * what gives them the south-west diagonal preferred by the plan.
+   */
+  secondarySign: 0 | 1 | -1;
+}
+
+const PUSH_DIR_FOR_KIND: Record<'generator' | 'load' | 'shunt', PushDirSpec> = {
+  generator: { axis: 'y', sign: -1, secondarySign: 0 },
+  load: { axis: 'y', sign: 1, secondarySign: 0 },
+  shunt: { axis: 'x', sign: -1, secondarySign: 1 },
+};
+
+/**
+ * Push-out input shape. Exported so unit tests can construct fixtures
+ * directly and assert on the algorithm without round-tripping through
+ * `buildGraph`.
+ */
+export interface PushOutNode {
+  id: string;
+  kind: 'bus' | 'generator' | 'load' | 'shunt';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** True when the user explicitly dragged this node — never push it. */
+  locked: boolean;
+  /** Bus parent id (only set on non-bus nodes); a non-bus node never collides with its parent. */
+  parentBusId: string | null;
+}
+
+/** Reasonable canvas bound (convex hull of buses + 200 px margin). Exported for tests. */
+export interface CanvasBound {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+/** Compute the canvas bound from the bus positions (extended by 200 px on every side). */
+function computeCanvasBound(buses: PushOutNode[]): CanvasBound | null {
+  if (buses.length === 0) return null;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const b of buses) {
+    if (b.x < minX) minX = b.x;
+    if (b.x > maxX) maxX = b.x;
+    if (b.y < minY) minY = b.y;
+    if (b.y > maxY) maxY = b.y;
+  }
+  return {
+    minX: minX - 200,
+    maxX: maxX + 200,
+    minY: minY - 200,
+    maxY: maxY + 200,
+  };
+}
+
+/** Axis-aligned bounding-box overlap. Returns 0 when the boxes don't overlap. */
+function overlapAmount(a: PushOutNode, b: PushOutNode): { dx: number; dy: number } {
+  const aLeft = a.x - a.width / 2;
+  const aRight = a.x + a.width / 2;
+  const aTop = a.y - a.height / 2;
+  const aBottom = a.y + a.height / 2;
+  const bLeft = b.x - b.width / 2;
+  const bRight = b.x + b.width / 2;
+  const bTop = b.y - b.height / 2;
+  const bBottom = b.y + b.height / 2;
+  // Negative or zero gap = no overlap on that axis.
+  const overlapX = Math.min(aRight, bRight) - Math.max(aLeft, bLeft);
+  const overlapY = Math.min(aBottom, bBottom) - Math.max(aTop, bTop);
+  if (overlapX <= 0 || overlapY <= 0) return { dx: 0, dy: 0 };
+  return { dx: overlapX, dy: overlapY };
+}
+
+/**
+ * Push `b` away from `a` along `b`'s preferred axis. If the resulting
+ * position would leave `bound`, fall back to the perpendicular axis.
+ *
+ * Returns the new position (immutable); the caller is responsible for
+ * writing it back into the node array.
+ */
+function shiftAwayFrom(
+  a: PushOutNode,
+  b: PushOutNode,
+  overlap: { dx: number; dy: number },
+  bound: CanvasBound | null,
+): { x: number; y: number } {
+  if (b.kind === 'bus') return { x: b.x, y: b.y }; // Defensive — never push buses.
+  const dir = PUSH_DIR_FOR_KIND[b.kind];
+  // Distance to clear the overlap on each axis, including the safety
+  // gap. We always shift by enough so the bounding boxes break apart
+  // with PUSH_OUT_SAFETY_GAP of clearance between them.
+  const shiftPrimary = (dir.axis === 'y' ? overlap.dy : overlap.dx) + PUSH_OUT_SAFETY_GAP;
+  let nx = b.x;
+  let ny = b.y;
+  if (dir.axis === 'y') {
+    ny = b.y + dir.sign * shiftPrimary;
+    if (dir.secondarySign !== 0) {
+      nx = b.x + dir.secondarySign * (overlap.dx + PUSH_OUT_SAFETY_GAP);
+    }
+  } else {
+    nx = b.x + dir.sign * shiftPrimary;
+    if (dir.secondarySign !== 0) {
+      ny = b.y + dir.secondarySign * (overlap.dy + PUSH_OUT_SAFETY_GAP);
+    }
+  }
+  // Canvas-bound check: if the primary push leaves the bound, fall back
+  // to the perpendicular axis (lateral) using the side that points
+  // AWAY from `a`'s center. This is the documented "exception: fall
+  // back to LEFT or RIGHT" behavior.
+  if (bound !== null && (nx < bound.minX || nx > bound.maxX || ny < bound.minY || ny > bound.maxY)) {
+    // Restore start point and choose the perpendicular axis.
+    nx = b.x;
+    ny = b.y;
+    if (dir.axis === 'y') {
+      // Perpendicular is X — push laterally away from a.x.
+      const lateralSign = b.x >= a.x ? 1 : -1;
+      nx = b.x + lateralSign * (overlap.dx + PUSH_OUT_SAFETY_GAP);
+    } else {
+      const lateralSign = b.y >= a.y ? 1 : -1;
+      ny = b.y + lateralSign * (overlap.dy + PUSH_OUT_SAFETY_GAP);
+    }
+  }
+  return { x: nx, y: ny };
+}
+
+/**
+ * Collision push-out post-process. Walks every pair `(A, B)` where
+ * either is a non-bus node and their bounding boxes overlap; shifts
+ * `B` (the lower-priority element of the pair) along its kind's
+ * preferred push direction by `(overlap + safety_gap)` until clear.
+ *
+ * Idempotent: running twice on the same input produces the same
+ * output. Locked nodes (those with a drag override) are NEVER moved —
+ * other nodes are pushed out of THEIR way instead.
+ *
+ * Iteration order is fixed (`generator → load → shunt` within the
+ * existing buildGraph emission order) so the output is deterministic.
+ *
+ * Pure function: input nodes array is not mutated; a new array of
+ * `{ id, position }` results is returned. Bus positions are passed
+ * through unchanged — only non-bus positions can change.
+ *
+ * R34 scope: collision-free on the v0.2 demo topology set + a synthetic
+ * worst-case input (5 generators on one bus; vertically-stacked buses
+ * 80 px apart). Universal-input collision-freedom is explicitly out of
+ * scope; v0.5's compound-ELK swap is the proper fix.
+ */
+export function pushOutCollisions(
+  inputs: ReadonlyArray<PushOutNode>,
+  options: { maxPasses?: number; bound?: CanvasBound | null } = {},
+): Map<string, { x: number; y: number }> {
+  const maxPasses = options.maxPasses ?? PUSH_OUT_MAX_PASSES;
+  // Working copy — mutated during the pass. Index by id for fast
+  // lookup when the caller queries the final position.
+  const work: PushOutNode[] = inputs.map((n) => ({ ...n }));
+  const buses = work.filter((n) => n.kind === 'bus');
+  const bound = options.bound ?? computeCanvasBound(buses);
+  // Non-bus nodes are the only candidates that move. We iterate every
+  // pair (A, B) where B is non-bus and !locked; if (A, B) overlaps and
+  // they're not (parent, child), shift B.
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    let movedAny = false;
+    for (let bi = 0; bi < work.length; bi += 1) {
+      const b = work[bi]!;
+      if (b.kind === 'bus' || b.locked) continue;
+      for (let ai = 0; ai < work.length; ai += 1) {
+        if (ai === bi) continue;
+        const a = work[ai]!;
+        // Skip the parent-bus pair: a generator IS connected to its
+        // parent, the stub edge crosses the bus boundary by design.
+        if (a.kind === 'bus' && b.parentBusId === a.id) continue;
+        const overlap = overlapAmount(a, b);
+        if (overlap.dx === 0 || overlap.dy === 0) continue;
+        const next = shiftAwayFrom(a, b, overlap, bound);
+        if (next.x !== b.x || next.y !== b.y) {
+          b.x = next.x;
+          b.y = next.y;
+          movedAny = true;
+        }
+      }
+    }
+    if (!movedAny) break;
+  }
+  const result = new Map<string, { x: number; y: number }>();
+  for (const n of work) {
+    result.set(n.id, { x: n.x, y: n.y });
+  }
+  return result;
 }
 
 /**
@@ -578,6 +836,61 @@ export function buildGraph(
           targetStride: stubAssignment?.stride ?? 0,
         },
       });
+    }
+  }
+
+  // Collision push-out (Unit 3, v0.1.y). Runs after the kind-based
+  // fan-stack emission and any sidecar overrides have placed every
+  // non-bus node. Pre-applies drag overrides so the user's chosen
+  // position is treated as stationary; other nodes shift around them.
+  const applyPushOut = opts.applyPushOut ?? true;
+  if (applyPushOut) {
+    const dragOverrides = opts.dragOverrides ?? {};
+    const lockedIds = new Set(Object.keys(dragOverrides));
+    // Build the push-out input. Each non-bus node carries its parent
+    // bus id so the push-out skips the parent collision (a generator
+    // touching the north face of its bus is the design, not a bug).
+    const pushInputs = nodes.map((n) => {
+      const override = dragOverrides[n.id];
+      const x = override?.x ?? n.position.x;
+      const y = override?.y ?? n.position.y;
+      const kind: 'bus' | 'generator' | 'load' | 'shunt' =
+        n.type === 'bus' || n.type === 'generator' || n.type === 'load' || n.type === 'shunt'
+          ? n.type
+          : 'bus';
+      const footprint = NODE_FOOTPRINT[kind];
+      const parentBusId =
+        n.type !== 'bus' && typeof (n.data as { parentBus?: unknown })?.parentBus === 'string'
+          ? ((n.data as { parentBus: string }).parentBus)
+          : null;
+      return {
+        id: n.id,
+        kind,
+        x,
+        y,
+        width: footprint.width,
+        height: footprint.height,
+        // Buses are also locked (they anchor the layout). Drag-overridden
+        // non-bus nodes are locked too.
+        locked: kind === 'bus' || lockedIds.has(n.id),
+        parentBusId,
+      };
+    });
+    const resolved = pushOutCollisions(pushInputs);
+    // Stamp the resolved positions back onto the node array. Drag
+    // overrides take precedence — push-out's locked-node guarantee
+    // already keeps overridden ids stationary, so the resolved map
+    // returns the override coord verbatim. SldCanvas tracks the
+    // prior render's positions in a `useRef` and applies a
+    // `transition: transform` style to nodes that moved (Unit 3
+    // animation requirement); buildGraph itself doesn't carry that
+    // signal — the canvas owns the prior-render comparison.
+    for (let i = 0; i < nodes.length; i += 1) {
+      const n = nodes[i]!;
+      const next = resolved.get(n.id);
+      if (!next) continue;
+      if (next.x === n.position.x && next.y === n.position.y) continue;
+      nodes[i] = { ...n, position: { x: next.x, y: next.y } };
     }
   }
 

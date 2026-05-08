@@ -210,6 +210,19 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   // alongside the case file.
   const dragOverrides = useCaseStore((s) => s.dragOverrides);
   const setDragOverrides = useCaseStore((s) => s.setDragOverrides);
+  // Animation bookkeeping for collision push-out (Unit 3, v0.1.y).
+  //
+  // - `priorPositionsRef` snapshots each node's last-rendered position.
+  //   On the next render we diff against it to detect push-out moves.
+  // - `relocatedIdsRef` is a sticky set of node ids that have ever
+  //   been relocated by push-out. Once a node is in this set we keep
+  //   `transition: transform` on its style for ALL future renders so
+  //   the browser doesn't interrupt the in-flight CSS transition when
+  //   React reconciles the next render (CSS spec: removing the
+  //   `transition` property aborts any active transition). Cleared
+  //   when the user explicitly drag-overrides the node.
+  const priorPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const relocatedIdsRef = useRef<Set<string>>(new Set());
   const baseGraph = useMemo(() => {
     if (!coords) return null;
     const { branches, stubs } = computeHandleAssignments(topology, coords);
@@ -218,16 +231,71 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
       handleAssignments: branches,
       stubAssignments: stubs,
       bendPoints,
+      // Drag overrides flow into buildGraph so the push-out pass
+      // treats user-placed nodes as stationary obstacles. The override
+      // is also re-applied below as a defensive cosmetic — the
+      // pushOutCollisions locked-id guarantee already keeps overridden
+      // ids at their override coord.
+      dragOverrides,
     });
     // Apply drag overrides on top of the freshly-derived positions.
-    if (Object.keys(dragOverrides).length === 0) return built;
-    return {
-      nodes: built.nodes.map((n) => {
+    // (push-out's locked path keeps overridden ids stationary; this
+    // is belt-and-braces for nodes that aren't push-out candidates.)
+    let nextNodes = built.nodes;
+    if (Object.keys(dragOverrides).length > 0) {
+      nextNodes = built.nodes.map((n) => {
         const override = dragOverrides[n.id];
         return override !== undefined ? { ...n, position: override } : n;
-      }),
-      edges: built.edges,
-    };
+      });
+    }
+    // Animation gating: detect which nodes moved since the prior
+    // render and add them to the sticky `relocatedIdsRef` set. Drag
+    // overrides clear the sticky bit so subsequent drags don't carry
+    // the lingering transition style. Bus nodes never participate in
+    // push-out so we don't tag them either.
+    const prior = priorPositionsRef.current;
+    const relocated = relocatedIdsRef.current;
+    const ANIMATION_THRESHOLD_PX = 0.5;
+    for (const n of nextNodes) {
+      if (n.type === 'bus') continue;
+      const previousPosition = prior.get(n.id);
+      if (dragOverrides[n.id] !== undefined) {
+        // User dragged it — the new position came from the user, not
+        // from push-out. Clear the sticky bit so future renders don't
+        // animate user-driven moves.
+        relocated.delete(n.id);
+        continue;
+      }
+      if (!previousPosition) continue; // newly-emitted, no animation
+      const movedX = Math.abs(previousPosition.x - n.position.x);
+      const movedY = Math.abs(previousPosition.y - n.position.y);
+      if (movedX >= ANIMATION_THRESHOLD_PX || movedY >= ANIMATION_THRESHOLD_PX) {
+        relocated.add(n.id);
+      }
+    }
+    const animatedNodes = nextNodes.map((n) => {
+      if (!relocated.has(n.id)) return n;
+      return {
+        ...n,
+        style: {
+          ...(n.style ?? {}),
+          // React Flow renders `transform: translate(...)` on the node
+          // wrapper; transitioning it animates the move. The
+          // duration-base token (200ms) matches the rest of the app's
+          // motion language. The style stays applied for all future
+          // renders of this node so the browser-side CSS animation
+          // isn't interrupted by React removing the property.
+          transition: 'transform var(--duration-base, 200ms) ease-out',
+        },
+      };
+    });
+    // Snapshot the latest positions for the next render's diff.
+    const nextPrior = new Map<string, { x: number; y: number }>();
+    for (const n of animatedNodes) {
+      nextPrior.set(n.id, { x: n.position.x, y: n.position.y });
+    }
+    priorPositionsRef.current = nextPrior;
+    return { nodes: animatedNodes, edges: built.edges };
   }, [topology, coords, autoBendPoints, usingAutoLayout, dragOverrides]);
 
   // Prune drag overrides for nodes that no longer exist (user reloaded,
