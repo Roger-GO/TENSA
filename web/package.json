@@ -27,7 +27,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "regen-api-types": "openapi-typescript ../server/openapi.json -o src/api/generated.ts || echo 'set ANDES_OPENAPI_URL or run andes-app serve, then: openapi-typescript $ANDES_OPENAPI_URL -o src/api/generated.ts'"
+    "regen-api-types": "openapi-typescript ../server/openapi.json -o src/api/generated.ts || echo 'set ANDES_OPENAPI_URL or run andes-app serve, then: openapi-typescript $ANDES_OPENAPI_URL -o src/api/generated.ts'",
+    "regen-api-types:live": "bash scripts/regenerate-api-types.sh"
   },
   "dependencies": {
     "@radix-ui/react-context-menu": "^2.2.2",
