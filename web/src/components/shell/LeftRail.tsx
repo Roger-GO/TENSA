@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useState } from 'react';
 import type { HTMLAttributes, ReactNode } from 'react';
 import { cn } from '@/lib/cn';
-import { EmptyState } from './EmptyState';
+import { CaseNav } from '@/components/case/CaseNav';
 
 /**
  * LeftRail. Collapsible left rail (240px expanded, 48px icon-only) that
@@ -13,10 +13,10 @@ import { EmptyState } from './EmptyState';
  * reloads. We read the persisted value lazily inside the initializer so
  * SSR/jsdom environments without `localStorage` still mount safely.
  *
- * For Unit 4 the rail's content is empty — Unit 7 fills the populated
- * region with the workspace file picker + case nav. When `children` is
- * omitted the rail renders an `EmptyState` so the empty layout reads
- * deliberately.
+ * Unit 7 mounts `CaseNav` as the rail's default content — the picker /
+ * loaded-case summary card live there. When `children` is supplied
+ * explicitly the caller's content takes precedence, which keeps the rail
+ * embeddable in tests / Storybook without dragging in the case slice.
  */
 const STORAGE_KEY = 'andes-app:layout:left-rail-collapsed';
 
@@ -132,10 +132,8 @@ export const LeftRail = forwardRef<HTMLElement, LeftRailProps>(function LeftRail
         ) : children ? (
           children
         ) : (
-          <EmptyState
-            title="Workspace"
-            description="Case files appear here once a workspace is loaded."
-          />
+          // Unit 7 default: case nav (file picker + loaded-case summary).
+          <CaseNav />
         )}
       </div>
     </aside>
