@@ -84,7 +84,12 @@ export function __resetCascadeForTests(): void {
   cascadeWired = false;
   useAuthStore.setState({ token: null, persistFailed: false });
   useSessionStore.setState({ sessionId: null });
-  useCaseStore.setState({ selection: null, topology: null, layoutSidecar: null });
+  useCaseStore.setState({
+    selection: null,
+    topology: null,
+    layoutSidecar: null,
+    selectedElement: null,
+  });
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
 }
 

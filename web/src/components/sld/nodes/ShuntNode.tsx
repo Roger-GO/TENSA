@@ -1,0 +1,43 @@
+import { memo } from 'react';
+import { Handle, Position } from '@xyflow/react';
+import type { NodeProps } from '@xyflow/react';
+import { iconForModel } from '@/icons/iec60617/manifest';
+import { cn } from '@/lib/cn';
+import type { SldNodeData } from './BusNode';
+
+/**
+ * Shunt node. Capacitive vs. inductive distinction is encoded in the
+ * icon manifest (`Shunt`/`ShuntCap` → `shunt-cap.svg`; `ShuntL`/
+ * `ShuntReactor` → `shunt-reactor.svg`). The substrate's TopologySummary
+ * does not currently emit a `shunts` bucket in v0.1; this node exists
+ * for future-compat with extended topologies and for cases where a
+ * shunt is exposed via the `loads` bucket.
+ */
+export const ShuntNode = memo(function ShuntNode({ data, selected }: NodeProps) {
+  const d = data as SldNodeData;
+  return (
+    <div
+      data-testid={`shunt-node-${d.idx}`}
+      data-kind="shunt"
+      data-idx={d.idx}
+      className={cn(
+        'flex flex-col items-center gap-1 px-2 py-1',
+        'bg-background text-foreground',
+        'rounded-[var(--radius-md)] border',
+        selected ? 'border-[var(--color-ring)] ring-2 ring-[var(--color-ring)]' : 'border-border',
+        'transition-colors duration-[var(--duration-fast)]',
+        'cursor-pointer select-none',
+      )}
+    >
+      <Handle type="target" position={Position.Top} className="!bg-foreground/40" />
+      <img
+        src={iconForModel(d.kind)}
+        alt=""
+        aria-hidden="true"
+        className="h-8 w-8 object-contain"
+        draggable={false}
+      />
+      <span className="text-foreground font-mono text-[10px] leading-none">{d.name || d.idx}</span>
+    </div>
+  );
+});
