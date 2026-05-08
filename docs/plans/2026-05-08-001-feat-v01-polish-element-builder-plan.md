@@ -522,7 +522,7 @@ Server unit (wrapper):
 
 ---
 
-- [ ] **Unit 3: Element SLD nodes — generators, loads, shunts, transformers**
+- [x] **Unit 3: Element SLD nodes — generators, loads, shunts, transformers** — landed 2026-05-08. Generators north of bus, loads south, shunts west, transformers as edges with midpoint 2w/3w icon. Stub edges (dashed lines) connect non-bus nodes to their parent bus's cardinal handle. R7 + R28 satisfied. Visual smoke on IEEE 14: 5 generators + 11 loads + 2 shunts + 4 transformer edges all render with correct anchoring. 9 new graph tests; 219 web tests pass.
 
 **Goal:** Render every non-bus topology element on the SLD with its IEC 60617 icon, anchored to its parent bus via a stub edge (or, for transformers, as a midpoint icon on a bus-to-bus edge).
 

@@ -6,8 +6,10 @@ import { cn } from '@/lib/cn';
 import type { SldNodeData } from './BusNode';
 
 /**
- * Load node. Renders the IEC 60617 load glyph (downward-pointing
- * arrow); covers both PQ and ZIP load models per the icon manifest.
+ * Load node. Renders the IEC 60617 load glyph; covers PQ and ZIP load
+ * models per the icon manifest. Anchored south of its parent bus; the
+ * stub edge connects the north handle (id `bus-anchor`) up to the bus's
+ * `south-target` handle.
  */
 export const LoadNode = memo(function LoadNode({ data, selected }: NodeProps) {
   const d = data as SldNodeData;
@@ -25,7 +27,12 @@ export const LoadNode = memo(function LoadNode({ data, selected }: NodeProps) {
         'cursor-pointer select-none',
       )}
     >
-      <Handle type="source" position={Position.Top} className="!bg-foreground/40" />
+      <Handle
+        type="source"
+        position={Position.Top}
+        id="bus-anchor"
+        className="!h-0 !w-0 !min-h-0 !min-w-0 !border-0 !bg-transparent"
+      />
       <img
         src={iconForModel(d.kind)}
         alt=""

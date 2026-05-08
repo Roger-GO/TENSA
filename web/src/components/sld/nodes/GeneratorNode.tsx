@@ -11,9 +11,9 @@ import type { SldNodeData } from './BusNode';
  * the icon manifest (`PV`/`Slack` → `generator.svg`; `GENROU`/`GENCLS`
  * → `generator-syngen.svg`).
  *
- * Anchored to its bus via React Flow's `parentId` mechanism (set by
- * `SldCanvas` when constructing nodes). The handle on top connects up
- * to the bus.
+ * Anchored to its parent bus via a stub edge from the south handle
+ * (id `bus-anchor`); the stub's other end terminates at the bus's
+ * `north-target` handle. Click to inspect.
  */
 export const GeneratorNode = memo(function GeneratorNode({ data, selected }: NodeProps) {
   const d = data as SldNodeData;
@@ -31,7 +31,12 @@ export const GeneratorNode = memo(function GeneratorNode({ data, selected }: Nod
         'cursor-pointer select-none',
       )}
     >
-      <Handle type="target" position={Position.Top} className="!bg-foreground/40" />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="bus-anchor"
+        className="!h-0 !w-0 !min-h-0 !min-w-0 !border-0 !bg-transparent"
+      />
       <img
         src={iconForModel(d.kind)}
         alt=""
