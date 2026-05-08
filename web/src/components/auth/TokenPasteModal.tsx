@@ -94,6 +94,16 @@ export function TokenPasteModal(): React.ReactElement | null {
   const fragmentAttemptedRef = useRef(false);
 
   // ---- URL-fragment fast path on first mount -----------------------------
+  // We deliberately do NOT abort the in-flight smoke check on unmount.
+  // React StrictMode double-mounts every effect in dev: mount1 fires the
+  // fetch, cleanup1 aborts it, mount2 sees fragmentAttemptedRef.current
+  // === true and returns early, leaving local state stuck at 'checking'
+  // and the token never persisted. The smoke check is idempotent (a
+  // single GET); on success we write to the global Zustand auth store,
+  // which survives a parent unmount cleanly. The `isMounted` flag below
+  // guards only the LOCAL pending-state writes, not the global store
+  // write or the fragment cleanup, both of which are one-shot side
+  // effects we want to land regardless.
   useEffect(() => {
     if (fragmentAttemptedRef.current) return;
     fragmentAttemptedRef.current = true;
@@ -103,11 +113,13 @@ export function TokenPasteModal(): React.ReactElement | null {
     if (!match || !match[1]) return;
     const candidate = match[1];
 
+    // Never-aborted controller — smokeCheck() requires a signal, but we
+    // intentionally don't expose `abort()` to the cleanup function.
     const controller = new AbortController();
+    let isMounted = true;
     setPending({ kind: 'checking', token: candidate });
     void (async () => {
       const outcome = await smokeCheck(candidate, controller.signal);
-      if (controller.signal.aborted) return;
       // Always clear the fragment from history first so the token does
       // not linger regardless of outcome — a rejected token in the URL
       // is no less of a leak than an accepted one.
@@ -119,16 +131,19 @@ export function TokenPasteModal(): React.ReactElement | null {
       }
       if (outcome === 'ok') {
         setToken(candidate);
-        setPending({ kind: 'idle' });
+        if (isMounted) setPending({ kind: 'idle' });
         return;
       }
+      if (!isMounted) return;
       if (outcome === 'rejected') {
         setPending({ kind: 'rejected' });
         return;
       }
       setPending({ kind: 'network-error', debugDetail: outcome.debugDetail });
     })();
-    return () => controller.abort();
+    return () => {
+      isMounted = false;
+    };
   }, [setToken]);
 
   // ---- manual submit handler --------------------------------------------

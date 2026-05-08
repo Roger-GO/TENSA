@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EmptyState } from '@/components/shell/EmptyState';
 import { useCaseStore } from '@/store/case';
+import { useCurrentTopology } from '@/api/queries';
 import { usePflowStore } from '@/store/pflow';
 import type { PflowResult, TopologyEntry, TopologySummary } from '@/api/types';
 import type { SelectedElement } from '@/store/case';
@@ -400,7 +401,7 @@ export interface ResultsTableProps {
 }
 
 export function ResultsTable({ className }: ResultsTableProps) {
-  const topology = useCaseStore((s) => s.topology);
+  const topology = useCurrentTopology();
   const pflowResult = usePflowStore((s) => s.lastRun);
   const selectedElement = useCaseStore((s) => s.selectedElement);
   const setSelectedElement = useCaseStore((s) => s.setSelectedElement);

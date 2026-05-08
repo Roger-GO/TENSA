@@ -143,7 +143,11 @@ function withQueryClient(ui: ReactNode) {
 }
 
 // Stub the sidecar query/mutation hooks so the canvas does not try to
-// hit the real client.
+// hit the real client. Also stub `useCurrentTopology` so tests can
+// drive the canvas's topology via a module-level mutable variable
+// (matching the previous `useCaseStore.setState({ topology })` pattern
+// before topology moved to a TanStack Query hook).
+let mockTopology: TopologySummary | null = null;
 vi.mock('@/api/queries', async () => {
   const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
   return {
@@ -155,6 +159,7 @@ vi.mock('@/api/queries', async () => {
       error: null,
     }),
     usePutSidecar: () => ({ mutate: vi.fn() }),
+    useCurrentTopology: () => mockTopology,
   };
 });
 
@@ -187,10 +192,12 @@ describe('buildGraph', () => {
 
 describe('SldCanvas', () => {
   beforeEach(() => {
+    mockTopology = null;
     __resetCascadeForTests();
     wireStoreCascade();
   });
   afterEach(() => {
+    mockTopology = null;
     cleanup();
     __resetCascadeForTests();
   });
@@ -202,13 +209,13 @@ describe('SldCanvas', () => {
 
   it('renders the layout-skeleton while ELK is in flight, then the canvas', async () => {
     const topology = makeTopology([bus(1), bus(2)], [line(1, 1, 2)]);
+    mockTopology = topology;
     act(() => {
       useCaseStore.setState({
         selection: {
           primaryPath: parseWorkspacePath('synthetic.raw'),
           addfiles: [],
         },
-        topology,
       });
     });
     render(withQueryClient(<SldCanvas />));
@@ -229,13 +236,13 @@ describe('SldCanvas', () => {
   it('writes selectedElement to the case store on node click', async () => {
     const user = userEvent.setup();
     const topology = makeTopology([bus(4)]);
+    mockTopology = topology;
     act(() => {
       useCaseStore.setState({
         selection: {
           primaryPath: parseWorkspacePath('synthetic.raw'),
           addfiles: [],
         },
-        topology,
         selectedElement: null,
       });
     });
@@ -253,13 +260,13 @@ describe('SldCanvas', () => {
 
   it('shows the >30-buses banner with no curated layout + no sidecar', async () => {
     const buses = Array.from({ length: 35 }, (_, i) => bus(i + 1));
+    mockTopology = makeTopology(buses);
     act(() => {
       useCaseStore.setState({
         selection: {
           primaryPath: parseWorkspacePath('big-synthetic.raw'),
           addfiles: [],
         },
-        topology: makeTopology(buses),
       });
     });
     render(withQueryClient(<SldCanvas />));
@@ -277,13 +284,13 @@ describe('SldCanvas', () => {
 
   it('does NOT show the >30-buses banner for a curated case', async () => {
     const buses = Array.from({ length: 39 }, (_, i) => bus(i + 1));
+    mockTopology = makeTopology(buses);
     act(() => {
       useCaseStore.setState({
         selection: {
           primaryPath: parseWorkspacePath('ieee39.raw'),
           addfiles: [],
         },
-        topology: makeTopology(buses),
       });
     });
     render(withQueryClient(<SldCanvas />));
