@@ -85,9 +85,19 @@ export const RoutedEdge = memo(function RoutedEdge({
   const overlay = isLine && lineIdx ? getLineOverlayState(lineIdx, pflowResult, hideLabels) : null;
   const stroke = overlay?.has_data ? 'var(--color-foreground)' : 'var(--color-border)';
   const strokeWidth = overlay?.has_data ? 1.8 : 1.5;
+  // Endpoint dots — explicit markers at the polyline's start and end
+  // so the reader can tell which lines actually connect to a bus vs.
+  // ones that pass behind it. Match the conventions from TopologyEdge.
+  const start = polyline[0] ?? [sourceX, sourceY];
+  const end = polyline[polyline.length - 1] ?? [targetX, targetY];
+  const dotRadius = 3.5;
+  const dotFill = 'var(--color-foreground)';
+
   return (
     <>
       <BaseEdge path={path} markerEnd={markerEnd} style={{ stroke, strokeWidth }} />
+      <circle cx={start[0]} cy={start[1]} r={dotRadius} fill={dotFill} />
+      <circle cx={end[0]} cy={end[1]} r={dotRadius} fill={dotFill} />
       {overlay && overlay.has_data && (overlay.p_label !== null || overlay.q_label !== null) ? (
         <EdgeLabelRenderer>
           <div

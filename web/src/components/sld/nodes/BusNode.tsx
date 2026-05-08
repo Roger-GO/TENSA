@@ -76,13 +76,13 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
             type="target"
             position={position}
             id={TARGET_HANDLE[side]}
-            className="!bg-foreground/40"
+            className="!h-0 !w-0 !min-h-0 !min-w-0 !border-0 !bg-transparent"
           />
           <Handle
             type="source"
             position={position}
             id={SOURCE_HANDLE[side]}
-            className="!bg-foreground/40"
+            className="!h-0 !w-0 !min-h-0 !min-w-0 !border-0 !bg-transparent"
           />
         </Fragment>
       ))}
