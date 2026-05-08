@@ -13,22 +13,35 @@ body,
 
 body {
   margin: 0;
-  font-family:
-    'Inter',
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    'Helvetica Neue',
-    Arial,
-    sans-serif;
+  font-family: var(--font-sans);
   font-feature-settings:
     'cv11' 1,
     'ss01' 1;
 }
 
+/* Numeric font utility: opt-in via the `font-numeric` class for
+ * results-table cells, iteration-log values, and any other place where
+ * tabular alignment + monospace digits matter. */
+.font-numeric {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 :focus-visible {
-  outline: 2px solid var(--color-foreground);
+  outline: 2px solid var(--color-ring);
   outline-offset: 2px;
+}
+
+/* Reduced-motion compliance: collapse durations + disable transforms for
+ * users who have set prefers-reduced-motion: reduce. Per the
+ * interaction-states.md cross-cutting behaviors section. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
 }
