@@ -42,13 +42,13 @@ function SuccessToast({ message, onDismiss }: ToastProps) {
       role="status"
       data-testid="pflow-success-toast"
       className={cn(
-        'fixed top-14 right-4 z-50',
+        'fixed top-14 right-4 z-50 max-w-xs',
         'border-success/30 bg-success/10 text-foreground',
         'rounded-[var(--radius-md)] border px-3 py-2 shadow-md',
         'flex items-center gap-3 text-sm',
       )}
     >
-      <span>{message}</span>
+      <span className="truncate">{message}</span>
       <button
         type="button"
         onClick={onDismiss}

@@ -64,6 +64,25 @@ const EDGE_TYPES: EdgeTypes = {
 /** Buses-count threshold for the >30 banner (per the plan). */
 const LARGE_TOPOLOGY_THRESHOLD = 30;
 
+/**
+ * Per-kind color hint for the React Flow MiniMap. Uses semantic CSS
+ * tokens directly so dark-mode tracks the rest of the app.
+ */
+function miniMapNodeColor(node: Node): string {
+  switch (node.type) {
+    case 'bus':
+      return 'var(--color-foreground)';
+    case 'generator':
+      return 'var(--color-success)';
+    case 'load':
+      return 'var(--color-muted-foreground)';
+    case 'shunt':
+      return 'var(--color-warning)';
+    default:
+      return 'var(--color-border)';
+  }
+}
+
 interface BannerProps {
   message: string;
   onDismiss: () => void;
@@ -309,7 +328,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
         >
           <Background />
           <Controls />
-          <MiniMap pannable zoomable />
+          <MiniMap pannable zoomable nodeColor={miniMapNodeColor} />
         </ReactFlow>
       </div>
     </div>
