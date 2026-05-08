@@ -34,11 +34,20 @@ export interface HandleAssignment {
   sourceSide: Side;
   targetSide: Side;
   /**
-   * Index within the cluster of edges that share the same
-   * `(sourceBus, sourceSide)` group. Drives the lateral offset
-   * applied by `TopologyEdge` so co-handle edges don't share a corridor.
+   * Lateral-offset index within the `(sourceBus, sourceSide)` cluster.
+   * Counts BOTH outgoing edges (this bus is the source) AND incoming
+   * edges (this bus is the target arriving on this side) — otherwise
+   * an edge entering bus B on its west face shares the y-row near the
+   * handle with another edge leaving bus B on its west face, and the
+   * corridor reads visually as a single continuous line.
    */
-  stride: number;
+  sourceStride: number;
+  /**
+   * Lateral-offset index within the `(targetBus, targetSide)` cluster.
+   * Same dual-counting rule as `sourceStride` — applied at the target
+   * endpoint by `TopologyEdge`.
+   */
+  targetStride: number;
 }
 
 /** Pull bus1/bus2 idxs (as strings) off a Line/Transformer entry. */
@@ -86,12 +95,61 @@ export function assignHandles(
 }
 
 /**
- * For every edge in `topology`, compute the handle assignment + the
- * stride index within its source-side cluster. Edges sharing the same
- * `(sourceBus, sourceSide)` get incrementing stride values starting at
- * 0 — TopologyEdge uses the stride to lateral-offset the path.
+ * Like `assignHandles` but on the OTHER axis — when the natural pick
+ * conflicts with another edge already using that handle, the alternate
+ * pick routes the edge through the perpendicular cardinal sides
+ * instead. Used by `computeHandleAssignments` to disambiguate hub
+ * buses (e.g., bus 2 with both 1→2 entering on west and 2→5 leaving on
+ * west) by routing one of them through south/north instead.
  *
- * The result key is the edge id used by `buildGraph` (`<bucket>-<idx>`).
+ * For a perfectly axis-aligned pair (only one axis has movement), the
+ * alternate isn't well-defined — we fall back to the natural pick,
+ * caller relies on stride to separate the corridor.
+ */
+export function assignHandlesAlternate(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): { sourceSide: Side; targetSide: Side } {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (dx === 0 && dy === 0) {
+    return { sourceSide: 'east', targetSide: 'east' };
+  }
+  // Pick the NON-dominant axis. Falls back to the dominant pick when
+  // one axis has zero movement.
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    if (dy === 0) {
+      return dx > 0
+        ? { sourceSide: 'east', targetSide: 'west' }
+        : { sourceSide: 'west', targetSide: 'east' };
+    }
+    return dy > 0
+      ? { sourceSide: 'south', targetSide: 'north' }
+      : { sourceSide: 'north', targetSide: 'south' };
+  }
+  if (dx === 0) {
+    return dy > 0
+      ? { sourceSide: 'south', targetSide: 'north' }
+      : { sourceSide: 'north', targetSide: 'south' };
+  }
+  return dx > 0
+    ? { sourceSide: 'east', targetSide: 'west' }
+    : { sourceSide: 'west', targetSide: 'east' };
+}
+
+/**
+ * For every edge in `topology`, compute the handle assignment + the
+ * stride indices for both endpoints.
+ *
+ * Stride accounting groups every edge that touches `(busId, side)` —
+ * regardless of whether this bus is the source or the target on that
+ * side. Two edges meeting at the same handle (one entering, one
+ * leaving) would otherwise overlap in the y-row (or x-column) right
+ * next to that handle, so the eye reads them as a single continuous
+ * line. Bidirectional stride teases the two paths apart along the
+ * perpendicular axis.
+ *
+ * The edge ids match `buildGraph`'s `<bucket>-<idx>` convention.
  *
  * Defensive against missing terminals or missing coords: skips with no
  * entry in the resulting map. Caller treats absence as "fall back to
@@ -101,17 +159,27 @@ export function computeHandleAssignments(
   topology: TopologySummary,
   coords: CoordsByIdx,
 ): Map<string, HandleAssignment> {
-  const out = new Map<string, HandleAssignment>();
-  const sourceCounts = new Map<string, number>(); // key = `${busId}|${side}`
   let warnedDegenerate = false;
 
-  const handle = (entry: TopologyEntry, bucket: 'line' | 'transformer') => {
+  // First pass: each edge gets a primary side pick (dominant axis) and
+  // an alternate (perpendicular axis). When the primary causes a hub
+  // conflict (both directions through the same handle), the second
+  // pass reassigns to the alternate so the corridors visually
+  // disambiguate.
+  interface Candidate {
+    edgeId: string;
+    sourceBus: string;
+    targetBus: string;
+    primary: { sourceSide: Side; targetSide: Side };
+    alternate: { sourceSide: Side; targetSide: Side };
+  }
+  const candidates: Candidate[] = [];
+  const collect = (entry: TopologyEntry, bucket: 'line' | 'transformer') => {
     const t = entryTerminals(entry);
     if (!t) return;
     const fromCoord = coords[t.from];
     const toCoord = coords[t.to];
     if (!fromCoord || !toCoord) return;
-    const sides = assignHandles(fromCoord, toCoord);
     if (
       !warnedDegenerate &&
       fromCoord.x === toCoord.x &&
@@ -122,14 +190,57 @@ export function computeHandleAssignments(
       );
       warnedDegenerate = true;
     }
-    const sourceClusterKey = `${t.from}|${sides.sourceSide}`;
-    const stride = sourceCounts.get(sourceClusterKey) ?? 0;
-    sourceCounts.set(sourceClusterKey, stride + 1);
-    out.set(`${bucket}-${String(entry.idx)}`, { ...sides, stride });
+    candidates.push({
+      edgeId: `${bucket}-${String(entry.idx)}`,
+      sourceBus: t.from,
+      targetBus: t.to,
+      primary: assignHandles(fromCoord, toCoord),
+      alternate: assignHandlesAlternate(fromCoord, toCoord),
+    });
   };
+  for (const line of topology.lines) collect(line, 'line');
+  for (const trafo of topology.transformers) collect(trafo, 'transformer');
 
-  for (const line of topology.lines) handle(line, 'line');
-  for (const trafo of topology.transformers) handle(trafo, 'transformer');
+  // Second pass: greedy assignment with primary→alternate fallback.
+  // The picker prefers any unused cluster, then falls back to whichever
+  // axis has the smaller existing cluster. This guarantees an edge
+  // never shares a corridor with another edge it could have avoided
+  // through axis swap — the visual property the polish loop demanded.
+  //
+  // Iteration order is the topology iteration order — deterministic.
+  const counts = new Map<string, number>();
+  const out = new Map<string, HandleAssignment>();
+  const clusterSize = (busId: string, side: Side) => counts.get(`${busId}|${side}`) ?? 0;
+  for (const c of candidates) {
+    const primaryLoad =
+      clusterSize(c.sourceBus, c.primary.sourceSide) +
+      clusterSize(c.targetBus, c.primary.targetSide);
+    const alt = c.alternate;
+    const altDifferent =
+      alt.sourceSide !== c.primary.sourceSide || alt.targetSide !== c.primary.targetSide;
+    let chosen = c.primary;
+    if (altDifferent && primaryLoad > 0) {
+      const altLoad =
+        clusterSize(c.sourceBus, alt.sourceSide) + clusterSize(c.targetBus, alt.targetSide);
+      // Prefer the alternate axis whenever it carries equal-or-less
+      // load — equal-load ties pick the alternate so the second edge
+      // through a hub bus splits onto a new axis instead of stacking
+      // up stride alongside the first.
+      if (altLoad <= primaryLoad) chosen = alt;
+    }
+    const sourceKey = `${c.sourceBus}|${chosen.sourceSide}`;
+    const targetKey = `${c.targetBus}|${chosen.targetSide}`;
+    const sourceStride = counts.get(sourceKey) ?? 0;
+    counts.set(sourceKey, sourceStride + 1);
+    const targetStride = counts.get(targetKey) ?? 0;
+    counts.set(targetKey, targetStride + 1);
+    out.set(c.edgeId, {
+      sourceSide: chosen.sourceSide,
+      targetSide: chosen.targetSide,
+      sourceStride,
+      targetStride,
+    });
+  }
   return out;
 }
 
@@ -202,7 +313,8 @@ export function buildGraph(
         bucket: kindLabel,
         sourceSide: handleAssignment?.sourceSide,
         targetSide: handleAssignment?.targetSide,
-        stride: handleAssignment?.stride ?? 0,
+        sourceStride: handleAssignment?.sourceStride ?? 0,
+        targetStride: handleAssignment?.targetStride ?? 0,
         bendPoints: polyline,
       },
     });
