@@ -7,6 +7,8 @@ specific HTTP status + rfc7807 ``ProblemDetails`` body in Unit 7.
 
 from __future__ import annotations
 
+from typing import Any
+
 
 class AndesAppError(Exception):
     """Base class for all wrapper-level exceptions."""
@@ -80,3 +82,35 @@ class ElementNotFoundError(AndesAppError):
 class SystemAlreadyLoadedError(AndesAppError):
     """Raised when ``create_blank()`` is called on a session that already has
     a loaded System. The caller must reload or open a fresh session."""
+
+
+class ElementHasDependentsError(AndesAppError):
+    """Raised when ``delete_element(model, idx)`` would orphan references on
+    other devices (e.g., deleting a Bus that has a Line attached).
+
+    Surfaced as HTTP 422 ``DeleteBlockedResponse``. Carries the list of
+    dependent topology entries (capped at 25 by the wrapper at construction
+    time) plus the full count so the UI can render a "Showing N of M"
+    truncation footer.
+
+    The ``dependents`` list is a list of plain dicts (already serialized
+    from ``TopologyEntry`` dataclasses) so the value can cross the worker
+    Pipe without re-importing the wrapper module on the parent side.
+    """
+
+    def __init__(
+        self,
+        model: str,
+        idx: int | str,
+        dependents: list[dict[str, Any]],
+        total: int,
+    ) -> None:
+        super().__init__(
+            f"cannot delete {model} idx={idx!r}: {total} dependent "
+            f"element(s) reference it. Delete those first."
+        )
+        self.model = model
+        self.idx = idx
+        # Dependents capped at 25; ``total`` is the full count.
+        self.dependents = dependents
+        self.total = total

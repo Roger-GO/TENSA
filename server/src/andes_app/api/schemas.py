@@ -558,6 +558,45 @@ class SaveCaseResponse(BaseModel):
     )
 
 
+class DeleteBlockedResponse(BaseModel):
+    """Response body for ``DELETE /sessions/{id}/elements/{model}/{idx}``
+    when the deletion is blocked by cascade dependents (HTTP 422).
+
+    The list is capped at 25 entries; ``total`` reports the full count so
+    the UI can render a "Showing 25 of N dependents" footer when truncated.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    dependents: list[TopologyEntry] = Field(
+        ...,
+        description=(
+            "Up to 25 dependent topology entries that reference the "
+            "target element (e.g., Lines and generators attached to a "
+            "Bus the caller tried to delete). The UI surfaces these as "
+            "clickable rows the user must clear before re-issuing the "
+            "delete."
+        ),
+        max_length=25,
+    )
+    total: int = Field(
+        ...,
+        description=(
+            "Full count of dependent elements. Equals "
+            "``len(dependents)`` when ``total <= 25``; greater when "
+            "the list was truncated."
+        ),
+        ge=0,
+    )
+
+
+# ``DeleteElementResponse`` is a transparent alias for ``TopologySummary``:
+# a successful delete returns the post-delete topology snapshot. The alias
+# documents the relationship at the OpenAPI surface and gives the generated
+# TypeScript client a dedicated symbol for the success path.
+DeleteElementResponse = TopologySummary
+
+
 class TopologySchema(BaseModel):
     """Per-model parameter metadata, used by the web client's polymorphic
     form generator (Unit 6).

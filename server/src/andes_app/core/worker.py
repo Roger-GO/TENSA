@@ -60,6 +60,7 @@ from andes_app.core.disturbance import AlterSpec, FaultSpec, ToggleSpec
 from andes_app.core.errors import (
     AndesAppError,
     DisturbanceCommitError,
+    ElementHasDependentsError,
     NoCaseLoadedError,
 )
 
@@ -243,6 +244,12 @@ def _handle_undo_last_edit(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.undo_last_edit())
 
 
+def _handle_delete_element(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    return _serialize_dataclass(
+        wrapper.delete_element(args["model"], args["idx"])
+    )
+
+
 def _handle_run_pflow(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.run_pflow())
 
@@ -407,6 +414,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "create_blank": _handle_create_blank,
     "save_case": _handle_save_case,
     "undo_last_edit": _handle_undo_last_edit,
+    "delete_element": _handle_delete_element,
     "run_pflow": _handle_run_pflow,
     # run_tds is special-cased — it needs the abort_event. Dispatched separately.
 }
@@ -477,6 +485,24 @@ def worker_main(
                     "seq": seq,
                     "category": "no-case-loaded",
                     "detail": str(exc),
+                }
+            )
+        except ElementHasDependentsError as exc:
+            # Carry the (capped) dependents list + total count over the
+            # Pipe so the routes layer can build a typed
+            # ``DeleteBlockedResponse`` body. ``extra`` is the worker
+            # side's structured-extra escape hatch; the parent's
+            # ``WorkerError`` exposes it via ``exc.extra``.
+            data.send(
+                {
+                    "type": "error",
+                    "seq": seq,
+                    "category": exc.__class__.__name__,
+                    "detail": str(exc),
+                    "extra": {
+                        "dependents": exc.dependents,
+                        "total": exc.total,
+                    },
                 }
             )
         except AndesAppError as exc:

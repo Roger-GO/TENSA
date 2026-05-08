@@ -52,12 +52,25 @@ class SessionExpiredError(AndesAppError):
 class WorkerError(AndesAppError):
     """Raised when the worker reports a structured error response. The
     ``category`` field maps onto specific HTTP status codes at the API layer
-    (Unit 4 / Unit 5)."""
+    (Unit 4 / Unit 5).
 
-    def __init__(self, category: str, detail: str) -> None:
+    ``extra`` carries an optional structured payload (e.g., the dependents
+    list for ``ElementHasDependentsError``). Routes that need the extra
+    fields (currently only the DELETE elements endpoint) read them off
+    this attribute; everyone else can ignore it.
+    """
+
+    def __init__(
+        self,
+        category: str,
+        detail: str,
+        *,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(f"{category}: {detail}")
         self.category = category
         self.detail = detail
+        self.extra = extra or {}
 
 
 @dataclass
@@ -306,6 +319,7 @@ class SessionManager:
             raise WorkerError(
                 category=response.get("category", "unknown"),
                 detail=response.get("detail", ""),
+                extra=response.get("extra"),
             )
         return response.get("payload")
 
@@ -387,6 +401,7 @@ class SessionManager:
                     raise WorkerError(
                         category=msg.get("category", "unknown"),
                         detail=msg.get("detail", ""),
+                        extra=msg.get("extra"),
                     )
                 # Unknown — ignore but log via raising a structured error so
                 # the test suite catches it.

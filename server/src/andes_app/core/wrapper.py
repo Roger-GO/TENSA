@@ -40,6 +40,7 @@ from andes_app.core.errors import (
     CaseLoadError,
     DisturbanceCommitError,
     DisturbanceValidationError,
+    ElementHasDependentsError,
     ElementNotFoundError,
     ElementValidationError,
     NoCaseLoadedError,
@@ -563,6 +564,213 @@ class Wrapper:
         self._replay_buffer = kept
         return self._reload_blank_locked()
 
+    def delete_element(self, model: str, idx: int | str) -> TopologySnapshot:
+        """Delete a previously-added topology element by ``(model, idx)``.
+
+        Order of operations:
+
+        1. Whitelist check: ``model`` must be a known ANDES model class
+           (i.e., a key of ``_PARAMS_BY_MODEL``). Unknown models are
+           rejected with ``ElementValidationError`` BEFORE any further
+           work — this guarantees the dependents walker only sees
+           supported model classes.
+        2. Replay-buffer check: ``(model, idx)`` must correspond to a
+           successful ``add_element`` call recorded in
+           ``self._replay_buffer``. Case-file-originated elements are
+           NOT deletable in v0.1.y; the caller is directed to the
+           Reload button. The check is the ground truth for "did the
+           user add this element in this session?".
+        3. Cascade detection: walk the loaded System for elements that
+           reference the target via ``bus``/``bus1``/``bus2``. If any
+           dependents exist, raise ``ElementHasDependentsError`` with
+           the (capped) list and total count.
+        4. Atomic reload-and-replay: snapshot the current ``self._ss``
+           reference and ``_replay_buffer`` list. Pop the matching
+           ``(model, idx)`` from the buffer, then rebuild the System
+           from the kept entries via the same code path
+           ``undo_last_edit`` uses. On any rebuild failure, restore
+           the snapshots — leaving the wrapper in its pre-delete
+           state — and re-raise.
+
+        Notes:
+
+        - Disturbances (``add_disturbance``) are NOT recorded in
+          ``self._replay_buffer``; if the session has any pending
+          disturbances they are silently dropped by the rebuild. This
+          is documented as a known limitation in the v0.1.y plan; the
+          v0.2 disturbance-timeline UI will need to either record
+          disturbances in the replay buffer or refuse delete while
+          disturbances are pending.
+
+        Returns the post-delete topology snapshot.
+        """
+        ss = self._require_loaded()
+        if self._setup_failed:
+            raise SetupFailedError(
+                "previous setup() failed; the System is in an inconsistent state"
+            )
+        if ss.is_setup:
+            raise DisturbanceCommitError()
+
+        # 1. Whitelist check — keep this before everything so the dependents
+        # walker only ever sees a known model class string.
+        if model not in _PARAMS_BY_MODEL:
+            raise ElementValidationError(
+                f"unknown model {model!r}; supported models: "
+                f"{sorted(_PARAMS_BY_MODEL.keys())}"
+            )
+
+        # 2. Replay-buffer check. The buffer stores the params dict ANDES
+        # was passed; ``idx`` lives at ``params['idx']`` (we pre-snapshot
+        # before ANDES mutates the dict in ``add_element``).
+        idx_str = str(idx)
+        match_index: int | None = None
+        for i, (m_name, params) in enumerate(self._replay_buffer):
+            if m_name != model:
+                continue
+            entry_idx = params.get("idx")
+            if entry_idx is None:
+                continue
+            if str(entry_idx) == idx_str:
+                match_index = i
+                break
+        if match_index is None:
+            # Verify the element exists at all so we can return a clear 404
+            # vs the "case-file-originated" 422 distinction.
+            existing = self._lookup_topology_entry(model, idx)
+            if existing is None:
+                raise ElementNotFoundError(
+                    f"no {model} with idx={idx!r}"
+                )
+            raise ElementValidationError(
+                "This element came from the loaded case file. "
+                "Use the Reload button in the workflow toolbar to "
+                "reset to the original case."
+            )
+
+        # 3. Cascade detection. The walker returns ``TopologyEntry`` items
+        # for every device that references ``(model, idx)``.
+        dependents_full = self._find_dependents(model, idx)
+        if dependents_full:
+            total = len(dependents_full)
+            capped = dependents_full[:DELETE_DEPENDENTS_CAP]
+            # Serialize to plain dicts so the error can cross the worker
+            # Pipe without dataclass import on the parent side.
+            payload = [
+                {
+                    "idx": e.idx,
+                    "name": e.name,
+                    "kind": e.kind,
+                    "params": dict(e.params),
+                }
+                for e in capped
+            ]
+            raise ElementHasDependentsError(
+                model=model, idx=idx, dependents=payload, total=total
+            )
+
+        # 4. Atomic reload-and-replay. Snapshot first so a rebuild failure
+        # leaves the wrapper exactly as the caller saw it pre-delete.
+        ss_snapshot = self._ss
+        buffer_snapshot = list(self._replay_buffer)
+        kept = [
+            entry
+            for i, entry in enumerate(self._replay_buffer)
+            if i != match_index
+        ]
+        try:
+            if self._case_path is not None:
+                # Loaded session: re-load from file (clears the buffer),
+                # then re-apply the kept entries on top.
+                self.reload_case()
+                ss_after = self._require_loaded()
+                for model_name, params in kept:
+                    try:
+                        ss_after.add(model_name, dict(params))
+                    except Exception as exc:  # noqa: BLE001
+                        raise ElementValidationError(
+                            f"delete failed at replay of model "
+                            f"{model_name!r}: "
+                            f"{_sanitize_message(str(exc))}"
+                        ) from exc
+                    self._replay_buffer.append((model_name, dict(params)))
+            else:
+                # Blank session: replay-from-scratch with the kept buffer.
+                # ``_reload_blank_locked`` reads ``self._replay_buffer``
+                # and re-creates the System from it.
+                self._replay_buffer = kept
+                self._reload_blank_locked()
+        except Exception:
+            # Rollback to the pre-delete state. We restore ss reference and
+            # buffer; ``_setup_failed`` is implicitly cleared by the snapshot
+            # ss reference being pre-failure.
+            self._ss = ss_snapshot
+            self._replay_buffer = buffer_snapshot
+            self._setup_failed = False
+            raise
+        return self._topology_snapshot_locked()
+
+    def _find_dependents(
+        self, model: str, idx: int | str
+    ) -> list[TopologyEntry]:
+        """Walk the loaded System for elements that reference the target.
+
+        Reference attributes per the ANDES 2.0 model surface enumerated
+        in ``_PARAMS_BY_MODEL``:
+
+        - ``Line``: ``bus1`` and ``bus2`` (terminal buses)
+        - ``PV``, ``Slack``, ``GENROU``, ``GENCLS``: ``bus`` (terminal)
+        - ``PQ``, ``ZIP``: ``bus`` (terminal)
+        - ``Shunt``: ``bus`` (terminal)
+        - ``Bus``: no outgoing references
+
+        Therefore only ``Bus`` deletions trigger a non-empty dependents
+        walk; deleting a Line / generator / load / shunt always returns
+        an empty list (nothing else in ``_PARAMS_BY_MODEL`` references
+        them).
+
+        Returns a list of ``TopologyEntry`` items. The list is uncapped;
+        callers (``delete_element``) are responsible for applying the
+        ``DELETE_DEPENDENTS_CAP`` truncation.
+        """
+        # Bus is the only model with downstream references; everything
+        # else trivially has no dependents.
+        if model != "Bus":
+            return []
+
+        ss = self._require_loaded()
+        idx_str = str(idx)
+        dependents: list[TopologyEntry] = []
+        # ``_REFERENCE_ATTRS`` enumerates the reference attribute(s) on
+        # each model that, when matched, indicate a dependency on the
+        # target Bus. Add new ANDES model classes here as the
+        # ``_PARAMS_BY_MODEL`` whitelist grows.
+        for ref_model, ref_attrs in _REFERENCE_ATTRS.items():
+            model_obj = getattr(ss, ref_model, None)
+            if model_obj is None:
+                continue
+            idx_var = getattr(model_obj, "idx", None)
+            idx_values = list(
+                getattr(idx_var, "v", []) if idx_var is not None else []
+            )
+            if not idx_values:
+                continue
+            for attr in ref_attrs:
+                ref_var = getattr(model_obj, attr, None)
+                ref_values = list(
+                    getattr(ref_var, "v", []) if ref_var is not None else []
+                )
+                for i, ref_v in enumerate(ref_values):
+                    if i >= len(idx_values):
+                        break
+                    if str(ref_v) == idx_str:
+                        entry = self._lookup_topology_entry(
+                            ref_model, idx_values[i]
+                        )
+                        if entry is not None:
+                            dependents.append(entry)
+        return dependents
+
     def save_case(
         self, format: Literal["xlsx", "json", "raw"], filename: str
     ) -> Path:
@@ -806,6 +1014,33 @@ class Wrapper:
 # buffer drops the oldest entries with a logged warning. 1000 is well above
 # any realistic interactive build session and well below memory concerns.
 REPLAY_BUFFER_MAX = 1000
+
+
+# Maximum number of dependents returned in the 422 ``DeleteBlockedResponse``
+# body. The full count is reported separately as ``total`` so the UI can
+# render a "Showing 25 of N dependents" footer when truncated. 25 is enough
+# to identify the structural problem on any realistic case; deleting the
+# first 25 dependents and re-trying is the recovery path.
+DELETE_DEPENDENTS_CAP = 25
+
+
+# Per-model reference attributes for the cascade walker. Each (model_class,
+# attribute_name) pair indicates a downstream reference to a Bus idx. The
+# walker uses this table when ``delete_element`` targets a Bus.
+#
+# Coverage invariant: every model in ``_PARAMS_BY_MODEL`` whose schema
+# carries ``bus``/``bus1``/``bus2`` reference fields must appear here. A
+# coverage assertion in the test suite enforces this.
+_REFERENCE_ATTRS: dict[str, tuple[str, ...]] = {
+    "Line": ("bus1", "bus2"),
+    "PV": ("bus",),
+    "Slack": ("bus",),
+    "GENROU": ("bus",),
+    "GENCLS": ("bus",),
+    "PQ": ("bus",),
+    "ZIP": ("bus",),
+    "Shunt": ("bus",),
+}
 
 
 # Per-model parameter metadata. Drives three things:
