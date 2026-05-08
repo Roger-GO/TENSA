@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/select';
 import { EmptyState } from '@/components/shell/EmptyState';
 import { ParseErrorBanner } from './ParseErrorBanner';
+import { NewSystemButton } from './NewSystemButton';
 import { useListWorkspaceFiles, useLoadCase, useCreateSession } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
@@ -255,6 +256,16 @@ export function WorkspaceFilePicker({ className }: WorkspaceFilePickerProps) {
       ) : null}
 
       {createError ? <ParseErrorBanner error={createError} onDismiss={() => {}} /> : null}
+
+      <NewSystemButton />
+      <div
+        className="text-muted-foreground -mt-1 mb-1 flex items-center gap-2 text-[10px]"
+        aria-hidden="true"
+      >
+        <span className="bg-border h-px flex-1" />
+        <span>or pick a file</span>
+        <span className="bg-border h-px flex-1" />
+      </div>
 
       {!hasFiles ? (
         <EmptyState

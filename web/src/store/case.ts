@@ -14,8 +14,19 @@ import { create } from 'zustand';
 import type { TopologySummary, SidecarLayout, WorkspacePath } from '@/api/types';
 
 export interface CaseSelection {
-  primaryPath: WorkspacePath;
+  /**
+   * Workspace-relative path to the loaded case file, or `null` for a
+   * blank session (Unit 7) where the topology was created via
+   * `POST /api/sessions/{id}/blank` and has no underlying file.
+   */
+  primaryPath: WorkspacePath | null;
   addfiles: WorkspacePath[];
+  /**
+   * `true` when the session was started blank rather than loaded from
+   * a file. The CaseNav summary card uses this to label "New system"
+   * instead of a filename and reword "Change case" to "Discard system".
+   */
+  blank?: boolean;
 }
 
 /**

@@ -739,7 +739,7 @@ Server unit (wrapper):
 
 ---
 
-- [ ] **Unit 7: New-system flow + empty-state SLD**
+- [x] **Unit 7: New-system flow + empty-state SLD** — landed 2026-05-08. NewSystemButton on workspace picker (with destructive-confirm modal when a case is already loaded). CaseSelection.primaryPath is now nullable + `blank?: boolean`; CaseNav swaps to "New system" / "Discard system" labels for blank sessions. SldEmptySystem replaces the canvas when topology.buses is empty, offering an "Add a Bus" CTA that opens the AddElementPanel pre-filled. R31 satisfied.
 
 **Goal:** A "New system" button starts a blank pre-setup workspace. The SLD shows an "Add your first bus" centered prompt that links into the Add-element panel.
 

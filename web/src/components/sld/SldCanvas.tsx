@@ -34,6 +34,7 @@ import { RoutedEdge } from './edges/RoutedEdge';
 import { TransformerEdge } from './edges/TransformerEdge';
 import { StubEdge } from './edges/StubEdge';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
+import { SldEmptySystem } from './SldEmptySystem';
 import { autoLayout } from './layout';
 import {
   buildSidecarLayout,
@@ -120,7 +121,8 @@ function CanvasBanner({ message, onDismiss, testId }: BannerProps) {
 
 interface InnerProps {
   topology: TopologySummary;
-  primaryPath: string;
+  /** Workspace path for sidecar I/O. `null` for blank sessions. */
+  primaryPath: string | null;
   storedSidecar: SidecarLayout | null;
   putSidecar: (layout: SidecarLayout) => void;
 }
@@ -151,7 +153,11 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
 
   // Curated layout takes precedence over auto-layout. Computed once
   // per primaryPath; the result is folded into mergeWithDrift below.
-  const curated = useMemo(() => curatedLayoutFor(primaryPath), [primaryPath]);
+  // Blank sessions (no primaryPath) get no curated match.
+  const curated = useMemo(
+    () => (primaryPath ? curatedLayoutFor(primaryPath) : null),
+    [primaryPath],
+  );
 
   // Run ELK on mount + topology change. Curated layouts skip the ELK
   // fallback when ALL buses are covered, but we still run ELK so any
@@ -223,7 +229,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
           (c): c is NodePositionChange =>
             c.type === 'position' && c.dragging === false && c.position !== undefined,
         );
-        if (dragEnded) {
+        if (dragEnded && primaryPath) {
           const updatedCoords: CoordsByIdx = {};
           for (const n of next) {
             updatedCoords[n.id] = { x: n.position.x, y: n.position.y };
@@ -239,7 +245,9 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
 
   // Cleanup pending PUT on unmount.
   useEffect(() => {
-    return () => cancelPendingSidecarPut(primaryPath);
+    if (!primaryPath) return;
+    const path = primaryPath;
+    return () => cancelPendingSidecarPut(path);
   }, [primaryPath]);
 
   const onNodeClick: NodeMouseHandler = useCallback(
@@ -383,6 +391,11 @@ export function SldCanvas() {
   // Topology fetch in flight or sidecar GET in flight → skeleton.
   if (topology === null || sidecarQuery.isLoading) {
     return <SldLayoutSkeleton />;
+  }
+  // No buses yet (blank session, or a case loaded from a file with no
+  // buses — rare but possible on a malformed case) → empty-state CTA.
+  if (topology.buses.length === 0) {
+    return <SldEmptySystem />;
   }
 
   return (
