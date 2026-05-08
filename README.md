@@ -8,6 +8,12 @@ This repo contains **Phase A**: the substrate (Python wrapper around ANDES + Fas
 
 Pre-1.0. Phase A in active development. See `docs/plans/2026-05-07-001-feat-andes-app-phase-a-substrate-plan.md` for the implementation plan.
 
+The web UI is on v0.1.y: case load + power-flow + SLD render + element add/edit/delete
+with collision-free placement, persistent non-bus drag positions, and self-healing
+sessions on substrate restart. See
+[`docs/plans/2026-05-08-002-feat-v01y-deletion-layout-prerequisites-plan.md`](docs/plans/2026-05-08-002-feat-v01y-deletion-layout-prerequisites-plan.md)
+for the v0.1.y feature delta.
+
 ## Quick Start
 
 You will need Python 3.12+ and ANDES 2.0.x installed.

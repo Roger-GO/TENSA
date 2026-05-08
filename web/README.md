@@ -3,6 +3,37 @@
 Vite 6 + React 19 + TypeScript + Tailwind v4 + Radix Primitives. Talks to the
 `andes-app` substrate over HTTP (`/api/*`) and WebSocket (`/ws/*`).
 
+## What's in v0.1.y
+
+The v0.1.y intermezzo (extending v0.1.x on `feat/v01-ui`) closes the structural
+gaps the v0.1.x plan deferred and lays the foundation v0.2 needs:
+
+- **Element deletion** — trash-icon `DeleteElementButton` on the Properties tab
+  removes user-added elements pre-setup. Cascade detection blocks Bus deletes
+  with attached Lines / Generators / Loads / Shunts and surfaces the dependents
+  list. Case-file-originated elements reject with a "use Reload" message.
+- **Layout overhaul** — collision push-out post-process eliminates element
+  overlap on user-built systems and stress topologies (5 generators on one
+  bus, IEEE 39, IEEE 300). Push-out is deterministic + idempotent; drag
+  overrides take precedence.
+- **Sidecar non-bus coordinates** — `SidecarLayout.non_bus_coordinates`
+  persists generator / load / shunt drag positions across reload + Save System,
+  not just bus drags. Old sidecars without the field read cleanly as `{}`.
+- **Session resilience** — a stale session id self-heals: a 404 on
+  `/api/sessions/{id}/*` triggers automatic recreation, the failing query
+  retries against the new id, and the user sees a brief "Reconnecting…" badge
+  instead of a sticky error. The sticky-error gate in `useEnsureSession` is
+  removed; create attempts are now idempotent. Pre-setup recovery only — mid-PF
+  is v0.2 territory.
+- **Sidecar improvements + test coverage backfill** — every v0.1.x component
+  with public behavioural surface (SaveSystemButton, NewSystemButton,
+  WorkflowToolbar, BusIdxSelect, CancelConfirmDialog, ElementForm, StubEdge,
+  TransformerEdge) now has dedicated unit tests at the EditElementButton
+  coverage bar.
+
+Full scope and rationale:
+[`docs/plans/2026-05-08-002-feat-v01y-deletion-layout-prerequisites-plan.md`](../docs/plans/2026-05-08-002-feat-v01y-deletion-layout-prerequisites-plan.md).
+
 ## Prerequisites
 
 - Node 22 LTS (or newer; this scaffold works on Node 25). Install via
