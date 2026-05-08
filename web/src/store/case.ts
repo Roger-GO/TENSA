@@ -49,10 +49,20 @@ export interface CaseState {
    * — Unit 8 writes; Unit 9 reads.
    */
   selectedElement: SelectedElement | null;
+  /** Add-element panel open state (Unit 6). */
+  addPanelOpen: boolean;
+  /** Currently-selected kind in the AddElementPanel kind picker. */
+  addPanelKind: string | null;
+  /** True when any field in the AddElementPanel form has been touched. */
+  addPanelDirty: boolean;
   setCase: (selection: CaseSelection) => void;
   setTopology: (topology: TopologySummary | null) => void;
   setLayoutSidecar: (sidecar: SidecarLayout | null) => void;
   setSelectedElement: (element: SelectedElement | null) => void;
+  openAddPanel: (kind: string | null) => void;
+  closeAddPanel: () => void;
+  setAddPanelKind: (kind: string | null) => void;
+  setAddPanelDirty: (dirty: boolean) => void;
   clearCase: () => void;
 }
 
@@ -61,13 +71,39 @@ export const useCaseStore = create<CaseState>((set) => ({
   topology: null,
   layoutSidecar: null,
   selectedElement: null,
+  addPanelOpen: false,
+  addPanelKind: null,
+  addPanelDirty: false,
   setCase: (selection: CaseSelection) =>
     // A new case wipes the old topology + sidecar + selection so
     // consumers don't see stale data while the new fetches are in flight.
-    set({ selection, topology: null, layoutSidecar: null, selectedElement: null }),
+    set({
+      selection,
+      topology: null,
+      layoutSidecar: null,
+      selectedElement: null,
+      addPanelOpen: false,
+      addPanelKind: null,
+      addPanelDirty: false,
+    }),
   setTopology: (topology: TopologySummary | null) => set({ topology }),
   setLayoutSidecar: (sidecar: SidecarLayout | null) => set({ layoutSidecar: sidecar }),
   setSelectedElement: (element: SelectedElement | null) => set({ selectedElement: element }),
+  openAddPanel: (kind: string | null) =>
+    set({ addPanelOpen: true, addPanelKind: kind, addPanelDirty: false }),
+  closeAddPanel: () =>
+    set({ addPanelOpen: false, addPanelKind: null, addPanelDirty: false }),
+  setAddPanelKind: (kind: string | null) =>
+    set({ addPanelKind: kind, addPanelDirty: false }),
+  setAddPanelDirty: (dirty: boolean) => set({ addPanelDirty: dirty }),
   clearCase: () =>
-    set({ selection: null, topology: null, layoutSidecar: null, selectedElement: null }),
+    set({
+      selection: null,
+      topology: null,
+      layoutSidecar: null,
+      selectedElement: null,
+      addPanelOpen: false,
+      addPanelKind: null,
+      addPanelDirty: false,
+    }),
 }));

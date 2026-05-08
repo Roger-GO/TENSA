@@ -9,6 +9,8 @@ import { RunButton } from '@/components/pflow/RunButton';
 import { HideLabelsToggle } from '@/components/pflow/HideLabelsToggle';
 import { ConvergenceErrorPanel } from '@/components/pflow/ConvergenceErrorPanel';
 import { RuntimeCrashModal } from '@/components/pflow/RuntimeCrashModal';
+import { AddElementButton } from '@/components/elements/AddElementButton';
+import { AddElementPanel } from '@/components/elements/AddElementPanel';
 import { makeQueryClient, wireGlobal401Handler } from '@/api/queries';
 import { setTokenGetter } from '@/api/client';
 import { getAuthToken } from '@/store';
@@ -47,12 +49,18 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AppShell
+        topBarLeft={<AddElementButton />}
         topBarCenter={<RunButton />}
         topBarRight={<HideLabelsToggle />}
         leftRail={<CaseNav />}
         inspector={<ElementInspector />}
         results={<ResultsTable />}
-        dockOverlay={<ConvergenceErrorPanel />}
+        dockOverlay={
+          <>
+            <AddElementPanel />
+            <ConvergenceErrorPanel />
+          </>
+        }
         modal={
           <>
             <TokenPasteModal />

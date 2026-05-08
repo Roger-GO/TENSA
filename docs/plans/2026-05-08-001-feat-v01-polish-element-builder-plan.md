@@ -673,7 +673,7 @@ Server unit (wrapper):
 
 ### Phase 3 — Builder (add new elements + start blank)
 
-- [ ] **Unit 6: Add-element side panel**
+- [x] **Unit 6: Add-element side panel** — landed 2026-05-08. Slide-over from right edge of right dock (~70% width). Kind picker grouped Network / Generators / Loads / Shunts. ElementForm polymorphically generated from `_PARAMS_BY_MODEL` (Required group + "Show advanced" disclosure). BusIdxSelect renders existing buses with `<idx> — <name>` format (or "Add a Bus first" empty state). CancelConfirmDialog on dirty cancel. Top-bar "+ Add element" button with disabled-state tooltips. R30 satisfied. 8 new tests; 232 web tests pass.
 
 **Goal:** A "+ Add element" affordance that opens a slide-over panel from the right edge of the right dock with a kind picker + per-kind form. Submitting calls `POST /elements`; the SLD updates.
 
