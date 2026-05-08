@@ -14,6 +14,7 @@ import { AddElementPanel } from '@/components/elements/AddElementPanel';
 import { SaveSystemButton } from '@/components/case/SaveSystemButton';
 import { WorkflowToolbar } from '@/components/case/WorkflowToolbar';
 import { makeQueryClient, wireGlobalErrorRecovery } from '@/api/queries';
+import { useSessionRecovery } from '@/api/useSessionRecovery';
 import { RecoveryBadge } from '@/components/shell/RecoveryBadge';
 import { setTokenGetter } from '@/api/client';
 import { getAuthToken } from '@/store';
@@ -39,6 +40,16 @@ setTokenGetter(getAuthToken);
  * - Runtime crash (5xx) → RuntimeCrashModal as the one allowed
  *   non-destructive modal.
  */
+function AppInner({ children }: { children: React.ReactNode }) {
+  // Top-level recovery driver — must live INSIDE QueryClientProvider so
+  // ``useCreateSession`` / ``useLoadCase`` can subscribe to the cache.
+  // Mounted once for the lifetime of the tab; survives the picker
+  // unmount that would otherwise kill the recovery cycle once a case is
+  // loaded (v0.1.y Unit 5 bug fix).
+  useSessionRecovery();
+  return <>{children}</>;
+}
+
 export function App() {
   // The QueryClient is created once per mount via `useState`'s lazy
   // initializer — re-renders preserve the instance, but unmount/remount
@@ -51,6 +62,7 @@ export function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <AppInner>
       <AppShell
         topBarLeft={
           <>
@@ -82,6 +94,7 @@ export function App() {
           </>
         }
       />
+      </AppInner>
     </QueryClientProvider>
   );
 }
