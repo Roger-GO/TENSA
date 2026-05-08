@@ -43,6 +43,15 @@ export interface SelectedElement {
   idx: string;
 }
 
+/**
+ * Per-node coordinate overrides captured from user drags on the SLD
+ * canvas. Lives in the case store (rather than a `useState` inside
+ * SldCanvasInner) so the SaveSystemButton can snapshot the current
+ * layout into the auto-saved sidecar without prop-drilling. Cleared on
+ * case change.
+ */
+export type DragOverrides = Record<string, { x: number; y: number }>;
+
 export interface CaseState {
   /** The currently-selected case + addfiles, or null if none loaded. */
   selection: CaseSelection | null;
@@ -66,7 +75,11 @@ export interface CaseState {
   addPanelKind: string | null;
   /** True when any field in the AddElementPanel form has been touched. */
   addPanelDirty: boolean;
+  /** Per-node coord overrides captured from user drags (Unit 13a). */
+  dragOverrides: DragOverrides;
   setCase: (selection: CaseSelection) => void;
+  setDragOverrides: (next: DragOverrides) => void;
+  clearDragOverrides: () => void;
   setTopology: (topology: TopologySummary | null) => void;
   setLayoutSidecar: (sidecar: SidecarLayout | null) => void;
   setSelectedElement: (element: SelectedElement | null) => void;
@@ -85,6 +98,7 @@ export const useCaseStore = create<CaseState>((set) => ({
   addPanelOpen: false,
   addPanelKind: null,
   addPanelDirty: false,
+  dragOverrides: {},
   setCase: (selection: CaseSelection) =>
     // A new case wipes the old topology + sidecar + selection so
     // consumers don't see stale data while the new fetches are in flight.
@@ -96,7 +110,10 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelOpen: false,
       addPanelKind: null,
       addPanelDirty: false,
+      dragOverrides: {},
     }),
+  setDragOverrides: (next: DragOverrides) => set({ dragOverrides: next }),
+  clearDragOverrides: () => set({ dragOverrides: {} }),
   setTopology: (topology: TopologySummary | null) => set({ topology }),
   setLayoutSidecar: (sidecar: SidecarLayout | null) => set({ layoutSidecar: sidecar }),
   setSelectedElement: (element: SelectedElement | null) => set({ selectedElement: element }),
@@ -116,5 +133,6 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelOpen: false,
       addPanelKind: null,
       addPanelDirty: false,
+      dragOverrides: {},
     }),
 }));

@@ -222,7 +222,7 @@ export async function autoLayout(
   // computeHandleAssignments runs greedy conflict-avoidance (primary
   // → alternate axis on hub buses), so this stays in sync without
   // duplicating the logic.
-  const handleAssignments = computeHandleAssignments(topology, coords);
+  const { branches: handleAssignments } = computeHandleAssignments(topology, coords);
   const portTargets = new Map<string, { source: string; target: string }>();
   for (const branch of validBranches) {
     const ha = handleAssignments.get(branch.id);

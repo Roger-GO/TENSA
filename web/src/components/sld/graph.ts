@@ -138,16 +138,29 @@ export function assignHandlesAlternate(
 }
 
 /**
+ * Stub-edge stride record. Stubs (non-bus → bus connectors) participate
+ * in the same `(busId, side)` cluster as branch edges so a stub doesn't
+ * connect at the SAME point on the bus boundary as a line entering on
+ * the same cardinal side — the user couldn't tell which was which.
+ */
+export interface StubAssignment {
+  /** Bus side the stub connects to (matches BUS_SIDE_FOR_KIND). */
+  busSide: Side;
+  /** Stride within the (busId, busSide) cluster (counted alongside branches). */
+  stride: number;
+}
+
+/**
  * For every edge in `topology`, compute the handle assignment + the
  * stride indices for both endpoints.
  *
  * Stride accounting groups every edge that touches `(busId, side)` —
  * regardless of whether this bus is the source or the target on that
- * side. Two edges meeting at the same handle (one entering, one
- * leaving) would otherwise overlap in the y-row (or x-column) right
- * next to that handle, so the eye reads them as a single continuous
- * line. Bidirectional stride teases the two paths apart along the
- * perpendicular axis.
+ * side, AND including non-bus stub edges (generator/load/shunt → bus).
+ * Without this, two devices with stubs landing on the same cardinal
+ * side as a real branch all share the bus's connection dot, making the
+ * topology unreadable. Bidirectional stride teases each connection
+ * onto its own offset along the perpendicular axis.
  *
  * The edge ids match `buildGraph`'s `<bucket>-<idx>` convention.
  *
@@ -158,7 +171,10 @@ export function assignHandlesAlternate(
 export function computeHandleAssignments(
   topology: TopologySummary,
   coords: CoordsByIdx,
-): Map<string, HandleAssignment> {
+): {
+  branches: Map<string, HandleAssignment>;
+  stubs: Map<string, StubAssignment>;
+} {
   let warnedDegenerate = false;
 
   // First pass: each edge gets a primary side pick (dominant axis) and
@@ -209,7 +225,8 @@ export function computeHandleAssignments(
   //
   // Iteration order is the topology iteration order — deterministic.
   const counts = new Map<string, number>();
-  const out = new Map<string, HandleAssignment>();
+  const branches = new Map<string, HandleAssignment>();
+  const stubs = new Map<string, StubAssignment>();
   const clusterSize = (busId: string, side: Side) => counts.get(`${busId}|${side}`) ?? 0;
   for (const c of candidates) {
     const primaryLoad =
@@ -234,14 +251,57 @@ export function computeHandleAssignments(
     counts.set(sourceKey, sourceStride + 1);
     const targetStride = counts.get(targetKey) ?? 0;
     counts.set(targetKey, targetStride + 1);
-    out.set(c.edgeId, {
+    branches.set(c.edgeId, {
       sourceSide: chosen.sourceSide,
       targetSide: chosen.targetSide,
       sourceStride,
       targetStride,
     });
   }
-  return out;
+
+  // Third pass: register stub edges into the same cluster counters.
+  // Each non-bus device gets one stub touching `(parentBus, kindSide)`
+  // — the side is fixed by the kind (generator → north, load → south,
+  // shunt → west). Stubs share the cluster with branches, so the stub
+  // gets a stride that DOES NOT collide with branch endpoints already
+  // counted in pass 2.
+  const nonBusBucketsForStub: Array<{
+    entries: readonly TopologyEntry[];
+    parentKey: string;
+    kindSide: Side;
+    kind: 'generator' | 'load' | 'shunt';
+  }> = [
+    {
+      entries: topology.generators ?? [],
+      parentKey: 'bus',
+      kindSide: 'north',
+      kind: 'generator',
+    },
+    {
+      entries: topology.loads ?? [],
+      parentKey: 'bus',
+      kindSide: 'south',
+      kind: 'load',
+    },
+    {
+      entries: topology.shunts ?? [],
+      parentKey: 'bus',
+      kindSide: 'west',
+      kind: 'shunt',
+    },
+  ];
+  for (const bucket of nonBusBucketsForStub) {
+    for (const entry of bucket.entries) {
+      const parentIdx = _busFromParam(entry, bucket.parentKey);
+      if (parentIdx === null || !coords[parentIdx]) continue;
+      const stubId = `stub-${bucket.kind}-${String(entry.idx)}`;
+      const clusterKey = `${parentIdx}|${bucket.kindSide}`;
+      const stride = counts.get(clusterKey) ?? 0;
+      counts.set(clusterKey, stride + 1);
+      stubs.set(stubId, { busSide: bucket.kindSide, stride });
+    }
+  }
+  return { branches, stubs };
 }
 
 /**
@@ -253,6 +313,7 @@ export function computeHandleAssignments(
  */
 export interface BuildGraphOptions {
   handleAssignments?: Map<string, HandleAssignment>;
+  stubAssignments?: Map<string, StubAssignment>;
   /**
    * Per-edge polyline coords from ELK (auto-layout case). Includes the
    * start and end points; the edge component renders `M start L bend1
@@ -350,6 +411,7 @@ export function buildGraph(
   });
 
   const handles = opts.handleAssignments ?? new Map<string, HandleAssignment>();
+  const stubAssignments = opts.stubAssignments ?? new Map<string, StubAssignment>();
   const bends = opts.bendPoints ?? new Map<string, [number, number][]>();
   const nonBusCoords = opts.nonBusCoords ?? new Map<string, BusCoord>();
   const edges: Edge[] = [];
@@ -478,8 +540,13 @@ export function buildGraph(
         },
       } satisfies Node);
       // Stub edge from the non-bus node to the bus's appropriate side.
+      // Pull the stride for this stub so StubEdge can lateral-offset
+      // the bus-end endpoint and avoid sharing a connection point with
+      // any branch entering on the same cardinal side.
+      const stubId = `stub-${nodeId}`;
+      const stubAssignment = stubAssignments.get(stubId);
       edges.push({
-        id: `stub-${nodeId}`,
+        id: stubId,
         source: nodeId,
         sourceHandle: NON_BUS_HANDLE_ID,
         target: parentIdx,
@@ -488,6 +555,8 @@ export function buildGraph(
         data: {
           kind: entry.kind,
           bucket: bucket.kind,
+          busSide: stubAssignment?.busSide ?? BUS_SIDE_FOR_KIND[bucket.kind],
+          targetStride: stubAssignment?.stride ?? 0,
         },
       });
     }

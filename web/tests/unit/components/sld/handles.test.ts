@@ -119,7 +119,7 @@ describe('computeHandleAssignments', () => {
       '4': { x: 0, y: 100 }, // south of 1
       '5': { x: 0, y: -100 }, // north of 1
     };
-    const handles = computeHandleAssignments(topology, coords);
+    const { branches: handles } = computeHandleAssignments(topology, coords);
     for (const h of handles.values()) {
       expect(h.sourceStride).toBe(0);
       expect(h.targetStride).toBe(0);
@@ -146,7 +146,7 @@ describe('computeHandleAssignments', () => {
       '3': { x: 200, y: 30 },
       '4': { x: 300, y: 60 },
     };
-    const handles = computeHandleAssignments(topology, coords);
+    const { branches: handles } = computeHandleAssignments(topology, coords);
     expect(handles.get('line-10')).toMatchObject({ sourceSide: 'east', sourceStride: 0 });
     // line-11 takes the alternate axis (south-north) because primary
     // east is already loaded by line-10.
@@ -176,7 +176,7 @@ describe('computeHandleAssignments', () => {
       '2': { x: 400, y: 100 },
       '5': { x: 200, y: 250 },
     };
-    const handles = computeHandleAssignments(topology, coords);
+    const { branches: handles } = computeHandleAssignments(topology, coords);
     // line-10: enters bus 2 on its west face — primary, no conflict.
     expect(handles.get('line-10')).toMatchObject({
       sourceSide: 'east',
@@ -203,7 +203,7 @@ describe('computeHandleAssignments', () => {
       ],
     );
     const coords = { '1': { x: 0, y: 0 }, '2': { x: 100, y: 0 } };
-    const handles = computeHandleAssignments(topology, coords);
+    const { branches: handles } = computeHandleAssignments(topology, coords);
     expect(handles.size).toBe(1);
     expect(handles.has('line-10')).toBe(true);
     expect(handles.has('line-11')).toBe(false);
@@ -225,7 +225,7 @@ describe('computeHandleAssignments', () => {
     };
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const handles = computeHandleAssignments(topology, coords);
+      const { branches: handles } = computeHandleAssignments(topology, coords);
       expect(handles.size).toBe(2);
       expect(warn).toHaveBeenCalledTimes(1); // single warning, not per-edge
     } finally {
@@ -249,7 +249,7 @@ describe('computeHandleAssignments', () => {
       '3': { x: 100, y: 30 },
       '4': { x: 50, y: 50 },
     };
-    const handles = computeHandleAssignments(topology, coords);
+    const { branches: handles } = computeHandleAssignments(topology, coords);
     const triples = new Set<string>();
     for (const [edgeId, h] of handles.entries()) {
       const entry = topology.lines.find((l) => `line-${String(l.idx)}` === edgeId);
@@ -300,7 +300,7 @@ describe('computeHandleAssignments — unique corridor coverage on synthetic IEE
       '6': { x: 60, y: 320 },
       '7': { x: 180, y: 320 },
     };
-    const handles = computeHandleAssignments(topology, coords);
+    const { branches: handles } = computeHandleAssignments(topology, coords);
     const triples = new Set<string>();
     for (const [edgeId, h] of handles.entries()) {
       const fromBusId = edgeId.replace('line-', '').slice(0); // edgeId already encodes idx; we reconstruct via topology entry
