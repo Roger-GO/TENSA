@@ -1,8 +1,9 @@
 ---
 title: "feat: v0.1 edge routing + element visualization + case builder"
 type: feat
-status: active
+status: completed
 date: 2026-05-08
+completed: 2026-05-08
 origin: docs/brainstorms/2026-05-07-accessible-andes-power-systems-app-requirements.md
 ---
 
