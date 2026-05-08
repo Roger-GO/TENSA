@@ -54,7 +54,16 @@ function ensureExtension(filename: string, format: Format): string {
 export function SaveSystemButton({ className }: SaveSystemButtonProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
   const topology = useCurrentTopology();
-  const dragOverrides = useCaseStore((s) => s.dragOverrides);
+  // Drag overrides are read lazily inside ``writeSidecarAlongside`` (Save
+  // click handler) via ``useCaseStore.getState().dragOverrides``. We do
+  // NOT subscribe to ``dragOverrides`` at the top of the component
+  // because doing so caused a setState-during-render warning under
+  // StrictMode dev: SldCanvas's prune-effect calls ``setDragOverrides``
+  // synchronously inside its useEffect, and the notification chain
+  // would schedule a SaveSystemButton re-render in the same tick that
+  // SldCanvasInner was still rendering. Dropping the subscription
+  // breaks the chain — SaveSystemButton only needs the override map at
+  // click time, not on every render.
   const saveMutation = useSaveCase();
   const sidecarMutation = usePutSidecar();
   const [modalOpen, setModalOpen] = useState(false);
@@ -92,6 +101,7 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
         modelByCategoryIdx.set(`shunt-${String(e.idx)}`, e.kind);
       }
     }
+    const dragOverrides = useCaseStore.getState().dragOverrides;
     for (const [nodeId, coord] of Object.entries(dragOverrides)) {
       // Bus nodes use the bus idx as React Flow node id (no kind
       // prefix); non-bus nodes are `${kind}-${idx}`. Partition by
