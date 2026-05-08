@@ -1,0 +1,50 @@
+name: web (v0.1+ UI)
+
+on:
+  push:
+    branches: [main, "feat/**"]
+    paths:
+      - "web/**"
+      - ".github/workflows/web.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - ".github/workflows/web.yml"
+
+jobs:
+  check:
+    name: typecheck + lint + test + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: pnpm typecheck
+        run: pnpm typecheck
+
+      - name: pnpm lint
+        run: pnpm lint
+
+      - name: pnpm format:check
+        run: pnpm format:check
+
+      - name: pnpm test
+        run: pnpm test
+
+      - name: pnpm build
+        run: pnpm build
