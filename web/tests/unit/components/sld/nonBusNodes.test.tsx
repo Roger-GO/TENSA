@@ -87,7 +87,7 @@ describe('buildGraph — non-bus nodes', () => {
     expect(stub?.targetHandle).toBe('north-target');
   });
 
-  it('stacks two generators on the same bus vertically', () => {
+  it('stacks two generators on the same bus into a fan', () => {
     const topology = makeTopology({
       buses: [bus(1)],
       generators: [gen('G1', 1), gen('G2', 1, 'GENROU')],
@@ -95,8 +95,9 @@ describe('buildGraph — non-bus nodes', () => {
     const { nodes } = buildGraph(topology, { '1': { x: 100, y: 100 } });
     const gens = nodes.filter((n) => n.type === 'generator');
     expect(gens).toHaveLength(2);
-    // Stack along y axis (offset.stackDy is non-zero); positions differ.
-    expect(gens[0]!.position.y).not.toBe(gens[1]!.position.y);
+    // Devices fan along the bus face (Unit 9 layout): the two
+    // generators share the same y row but differ on x.
+    expect(gens[0]!.position.x).not.toBe(gens[1]!.position.x);
   });
 
   it('emits a load node south of the bus + stub to south handle', () => {

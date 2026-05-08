@@ -203,12 +203,45 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   // hang in mid-air. The handle assignments still flow through both
   // paths so co-handle stride works for curated cases too.
   const usingAutoLayout = curated === null && storedSidecar === null;
+  // Drag overrides — per-node coordinate overrides applied AFTER
+  // buildGraph so user drags persist across topology re-fetches (Unit 9
+  // fix). Without this, every successful add() would invalidate the
+  // topology query, re-derive coords, and snap dragged elements back
+  // to their kind-based default positions. Holds bus + non-bus nodes
+  // alike, keyed by React Flow node id.
+  const [dragOverrides, setDragOverrides] = useState<Record<string, { x: number; y: number }>>({});
   const baseGraph = useMemo(() => {
     if (!coords) return null;
     const handleAssignments = computeHandleAssignments(topology, coords);
     const bendPoints = usingAutoLayout && autoBendPoints ? autoBendPoints : undefined;
-    return buildGraph(topology, coords, { handleAssignments, bendPoints });
-  }, [topology, coords, autoBendPoints, usingAutoLayout]);
+    const built = buildGraph(topology, coords, { handleAssignments, bendPoints });
+    // Apply drag overrides on top of the freshly-derived positions.
+    if (Object.keys(dragOverrides).length === 0) return built;
+    return {
+      nodes: built.nodes.map((n) => {
+        const override = dragOverrides[n.id];
+        return override !== undefined ? { ...n, position: override } : n;
+      }),
+      edges: built.edges,
+    };
+  }, [topology, coords, autoBendPoints, usingAutoLayout, dragOverrides]);
+
+  // Prune drag overrides for nodes that no longer exist (user reloaded,
+  // or removed an element via a future delete API). Keeps the override
+  // map from growing unbounded.
+  useEffect(() => {
+    if (!baseGraph) return;
+    const liveIds = new Set(baseGraph.nodes.map((n) => n.id));
+    setDragOverrides((curr) => {
+      const next: Record<string, { x: number; y: number }> = {};
+      let changed = false;
+      for (const [id, coord] of Object.entries(curr)) {
+        if (liveIds.has(id)) next[id] = coord;
+        else changed = true;
+      }
+      return changed ? next : curr;
+    });
+  }, [baseGraph]);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
 
@@ -218,24 +251,48 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
     setEdges(baseGraph.edges);
   }, [baseGraph]);
 
-  // On drag stop, persist the updated coords via debounced PUT.
+  // On drag stop, persist the updated coords. Two channels:
+  //
+  // - In-memory `dragOverrides`: applied to the next baseGraph derivation
+  //   so the override survives topology re-fetches (the bug Unit 9
+  //   fixes — previously every successful add() snapped dragged nodes
+  //   back to their kind-default positions).
+  // - Disk sidecar (only for sessions with a primaryPath): persists
+  //   bus coordinates across page reloads. Non-bus coordinates are
+  //   client-only in v0.1.x; substrate sidecar schema doesn't carry
+  //   `non_bus_coordinates` on the wire yet (deferred).
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
       setNodes((curr) => {
         const next = applyPositionChanges(curr, changes);
-        // Only persist on the final position-with-dragging:false event so
-        // intermediate positions don't trigger a PUT each frame.
         const dragEnded = changes.some(
           (c): c is NodePositionChange =>
             c.type === 'position' && c.dragging === false && c.position !== undefined,
         );
-        if (dragEnded && primaryPath) {
-          const updatedCoords: CoordsByIdx = {};
+        if (dragEnded) {
+          // Capture every node's current position into the override map.
+          // The map keys by React Flow node id (bus idx for buses,
+          // `${kind}-${idx}` for non-bus nodes).
+          const overrides: Record<string, { x: number; y: number }> = {};
           for (const n of next) {
-            updatedCoords[n.id] = { x: n.position.x, y: n.position.y };
+            overrides[n.id] = { x: n.position.x, y: n.position.y };
           }
-          const layout = buildSidecarLayout(updatedCoords);
-          debouncedPutSidecar(primaryPath, layout, putSidecar);
+          setDragOverrides(overrides);
+
+          // Only the bus subset goes to the disk sidecar (its schema
+          // tracks coordinates by bus idx). Loaded sessions only.
+          if (primaryPath) {
+            const busCoords: CoordsByIdx = {};
+            for (const n of next) {
+              if (n.type === 'bus') {
+                busCoords[n.id] = { x: n.position.x, y: n.position.y };
+              }
+            }
+            if (Object.keys(busCoords).length > 0) {
+              const layout = buildSidecarLayout(busCoords);
+              debouncedPutSidecar(primaryPath, layout, putSidecar);
+            }
+          }
         }
         return next;
       });
