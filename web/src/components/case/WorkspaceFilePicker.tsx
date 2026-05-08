@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -100,13 +100,26 @@ function useEnsureSession(): {
   createError: Error | null;
 } {
   const sessionId = useSessionStore((s) => s.sessionId);
+  const recoveryInProgress = useSessionStore((s) => s.recoveryInProgress);
+  const clearRecoveryInProgress = useSessionStore((s) => s.clearRecoveryInProgress);
   const tokenPresent = useAuthStore((s) => s.token !== null);
   const createSession = useCreateSession();
+  const loadCase = useLoadCase();
+  // Capture the case selection once so the recovery effect can re-issue
+  // ``loadCase`` against the new session id without re-rendering on every
+  // selection change. A loaded session pre-recovery should land on the
+  // same case post-recovery; a blank session stays blank.
+  const caseSelection = useCaseStore((s) => s.selection);
   // Don't fire create-session before auth is established. A pre-auth
   // POST /api/sessions returns 401, which would race the URL-fragment
   // fast-path's setToken and wipe out the token via the global 401
   // handler. The picker is rendered behind the auth modal but its
   // hooks still run; gate the mutate() call explicitly.
+  //
+  // NOTE: the ``!createSession.isError`` gate is intentional for v0.1.y
+  // Unit 5 — Unit 6 will simplify the gate to ``!createSession.isPending``
+  // alone, relying on the recovery effect below to clear ``isError`` via
+  // ``mutation.reset()`` so the gate re-evaluates true on the next render.
   const shouldCreate =
     tokenPresent && sessionId === null && !createSession.isPending && !createSession.isError;
 
@@ -119,6 +132,82 @@ function useEnsureSession(): {
     // we only want to fire on the (token + sessionId-null + idle) edge.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shouldCreate]);
+
+  // ---- recovery effect (v0.1.y Unit 5) -----------------------------------
+  // When the global error-recovery handler (``wireGlobalErrorRecovery`` in
+  // queries.ts) detects a 404 on a session-scoped path, it calls
+  // ``useSessionStore.resetSession()``. That clears the session id AND
+  // raises ``recoveryInProgress``. Below:
+  //
+  // 1. On the false→true transition we reset any prior ``createSession``
+  //    error state so the gate above can re-evaluate (Unit 6 will drop
+  //    the ``!isError`` term, but for v0.1.y Unit 5 we keep it and use
+  //    ``reset()`` to clear it).
+  // 2. Once the new session id is written by ``useCreateSession``'s
+  //    success path, we re-issue ``loadCase`` against the previously
+  //    loaded ``primaryPath`` (if any) so the new session has the case
+  //    re-applied; blank sessions stay blank.
+  // 3. After the re-load completes (or immediately on a blank session),
+  //    we clear ``recoveryInProgress`` which auto-hides the badge.
+  //
+  // The effect runs entirely inside this hook instance because a global
+  // QueryClient subscriber cannot directly call a hook-bound mutation
+  // method like ``createSession.reset()`` — the recovery handler raises
+  // a flag in the Zustand store and this effect bridges the gap.
+  const recoveryReloadFiredRef = useRef(false);
+  useEffect(() => {
+    if (recoveryInProgress) {
+      // Bridge step (1): clear any prior createSession error so the
+      // shouldCreate gate above can re-evaluate true on the next render.
+      // Idempotent — reset() is a no-op when already idle.
+      createSession.reset();
+      recoveryReloadFiredRef.current = false;
+    }
+    // Intentionally omit createSession from the dep list (mutation
+    // objects are not referentially stable across renders, and we only
+    // want to react to the recoveryInProgress edge).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recoveryInProgress]);
+
+  useEffect(() => {
+    // Bridge steps (2) + (3): runs on every render where recovery is in
+    // progress AND a fresh session id has just been written. Branches:
+    //
+    // - Loaded session (primaryPath !== null): fire loadCase once; on
+    //   success clear recoveryInProgress.
+    // - Blank session (primaryPath === null OR no selection): nothing
+    //   to re-load; clear immediately.
+    if (!recoveryInProgress) return;
+    if (sessionId === null) return;
+    if (recoveryReloadFiredRef.current) return;
+
+    if (caseSelection === null || caseSelection.primaryPath === null) {
+      // Blank session or no case loaded pre-recovery; just clear the flag.
+      recoveryReloadFiredRef.current = true;
+      clearRecoveryInProgress();
+      return;
+    }
+
+    recoveryReloadFiredRef.current = true;
+    loadCase.mutate(
+      {
+        sessionId,
+        request: {
+          primary_path: caseSelection.primaryPath,
+          addfiles: caseSelection.addfiles.length > 0 ? caseSelection.addfiles : null,
+        },
+      },
+      {
+        onSettled: () => {
+          // Settled rather than onSuccess so a 404/422 on the re-load
+          // still drops out of the recovery state — the user sees the
+          // load error surface normally rather than a stuck spinner.
+          clearRecoveryInProgress();
+        },
+      },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recoveryInProgress, sessionId]);
 
   return {
     sessionId,

@@ -54,13 +54,18 @@ export function wireStoreCascade(): void {
   });
 
   // session clear → case + pflow clear.
-  // Subscribe to `sessionId`; when it transitions to null, cascade.
+  // Subscribe to `sessionId`; when it transitions to null, cascade —
+  // EXCEPT when the transition is part of an in-progress recovery (Unit 5),
+  // in which case we want to preserve the case selection so the recovery
+  // effect can re-issue ``loadCase`` against the new session id.
   let prevSessionId = useSessionStore.getState().sessionId;
   useSessionStore.subscribe((state) => {
     const next = state.sessionId;
     if (prevSessionId !== null && next === null) {
-      useCaseStore.getState().clearCase();
-      usePflowStore.getState().clearPflow();
+      if (!state.recoveryInProgress) {
+        useCaseStore.getState().clearCase();
+        usePflowStore.getState().clearPflow();
+      }
     }
     prevSessionId = next;
   });
@@ -83,7 +88,12 @@ export function wireStoreCascade(): void {
 export function __resetCascadeForTests(): void {
   cascadeWired = false;
   useAuthStore.setState({ token: null, persistFailed: false });
-  useSessionStore.setState({ sessionId: null });
+  useSessionStore.setState({
+    sessionId: null,
+    recoveryInProgress: false,
+    recoveryFailed: false,
+    recoveryAttempts: [],
+  });
   useCaseStore.setState({
     selection: null,
     topology: null,

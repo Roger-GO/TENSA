@@ -43,8 +43,16 @@ export class ProblemDetailsError extends Error {
    * fields read them off ``rawBody`` and narrow with a runtime guard.
    */
   readonly rawBody: unknown;
+  /**
+   * The full request URL the error was thrown for (e.g.,
+   * ``/api/sessions/sess-123/topology``). Used by the global error
+   * recovery handler (Unit 5) to detect 404s on session-scoped paths
+   * versus genuine "missing resource" 404s on workspace paths. May be
+   * undefined if a non-client code path constructs the error directly.
+   */
+  readonly requestPath: string | undefined;
 
-  constructor(problem: ProblemDetails, rawBody?: unknown) {
+  constructor(problem: ProblemDetails, rawBody?: unknown, requestPath?: string) {
     // Title + detail compose the message. Either may be missing; fall back
     // sensibly so logs / DevTools at least surface the status.
     const message = problem.detail
@@ -59,6 +67,7 @@ export class ProblemDetailsError extends Error {
     this.instance = problem.instance ?? undefined;
     this.raw = problem;
     this.rawBody = rawBody ?? problem;
+    this.requestPath = requestPath;
   }
 }
 
@@ -69,8 +78,13 @@ export class ProblemDetailsError extends Error {
 export class RateLimitedError extends ProblemDetailsError {
   readonly retryAfterSeconds: number | undefined;
 
-  constructor(problem: ProblemDetails, retryAfterSeconds: number | undefined, rawBody?: unknown) {
-    super(problem, rawBody);
+  constructor(
+    problem: ProblemDetails,
+    retryAfterSeconds: number | undefined,
+    rawBody?: unknown,
+    requestPath?: string,
+  ) {
+    super(problem, rawBody, requestPath);
     this.name = 'RateLimitedError';
     this.retryAfterSeconds = retryAfterSeconds;
   }
@@ -78,8 +92,8 @@ export class RateLimitedError extends ProblemDetailsError {
 
 /** A 5xx response. Routed by the UI to the runtime-crash modal (R8). */
 export class ServerError extends ProblemDetailsError {
-  constructor(problem: ProblemDetails, rawBody?: unknown) {
-    super(problem, rawBody);
+  constructor(problem: ProblemDetails, rawBody?: unknown, requestPath?: string) {
+    super(problem, rawBody, requestPath);
     this.name = 'ServerError';
   }
 }
@@ -274,12 +288,13 @@ async function request<T>(
       problem,
       parseRetryAfter(response.headers.get('Retry-After')),
       parsed,
+      url,
     );
   }
   if (response.status >= 500) {
-    throw new ServerError(problem, parsed);
+    throw new ServerError(problem, parsed, url);
   }
-  throw new ProblemDetailsError(problem, parsed);
+  throw new ProblemDetailsError(problem, parsed, url);
 }
 
 /** Public client surface — verb-named methods returning typed bodies. */

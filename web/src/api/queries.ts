@@ -88,38 +88,142 @@ export function makeQueryClient(): QueryClient {
 }
 
 /**
- * Wire global 401 handling on the QueryClient's caches. On any
- * `ProblemDetailsError` with status 401, clear the auth store. The auth
- * store's clear cascade then unwinds session / case / pflow.
+ * Regex matching session-scoped API paths. A 404 on any of these is
+ * interpreted as "the substrate doesn't know our session id any more"
+ * (typical after a substrate restart, idle-timeout, or a blip that
+ * reaped the worker process) and triggers the auto-recovery path. The
+ * pattern intentionally allows the trailing segment to be missing so a
+ * 404 on ``/api/sessions/{id}`` itself (a session-describe call) also
+ * recovers.
+ *
+ * Non-session 404s (``/api/workspace/file/missing.raw``,
+ * ``/api/topology/schema``, etc.) skip recovery and surface their error
+ * normally — those are real "the resource doesn't exist" 404s, not
+ * stale-session 404s.
+ */
+const SESSION_SCOPED_PATH_RE = /\/api\/sessions\/[^/]+(?:\/.*)?$/;
+
+/**
+ * Per-second debounce on session-recovery firings. A burst of 404s from
+ * concurrent queries (e.g., topology + sidecar both fire and both 404 on a
+ * stale session) should trigger only one recovery — the rest piggyback on
+ * the same recovery flag and refetch against the new session id once it
+ * lands. The timestamp lives at module scope (not inside the QueryClient)
+ * so multiple QueryClient instances in tests don't bypass the debounce.
+ */
+const RECOVERY_DEBOUNCE_MS = 1000;
+let lastRecoveryAttemptTs = 0;
+
+/** Test-only helper: reset the debounce timestamp between cases. */
+export function __resetRecoveryDebounceForTests(): void {
+  lastRecoveryAttemptTs = 0;
+}
+
+function isSessionScopedPath(path: string | undefined): boolean {
+  if (!path) return false;
+  return SESSION_SCOPED_PATH_RE.test(path);
+}
+
+/**
+ * Wire global error recovery on the QueryClient's caches. Two distinct
+ * paths are handled here:
+ *
+ * 1. **401** — clear the auth store, which cascades into a full logout
+ *    (session / case / pflow all cleared). The TokenPasteModal re-mounts.
+ *    Idempotent against the auth-fast-path race: only clears if the user
+ *    thought they were authed.
+ *
+ * 2. **404 on ``/api/sessions/{id}/...``** — the substrate has forgotten
+ *    our session (worker restart, idle-timeout). Fire
+ *    ``useSessionStore.resetSession()`` which clears the id AND raises
+ *    the ``recoveryInProgress`` flag. ``useEnsureSession`` (in
+ *    ``WorkspaceFilePicker``) watches the flag, calls ``mutation.reset()``
+ *    locally, and the gate re-fires ``useCreateSession.mutate()`` against
+ *    the new session id. Topology + sidecar queries are gated on
+ *    ``sessionId !== null`` so they auto-pause during the recovery window
+ *    and resume against the new id once it lands. Per-second debounced so
+ *    a burst of 404s only fires recovery once.
+ *
+ * **Forward-compat caveat (security):** v0.1.y's recovery is safe under
+ * the current "no session-revocation policy" trust model. A future SaaS
+ * phase that adds server-side session revocation must inspect a
+ * revocation-reason header before auto-recreating; otherwise auto-recovery
+ * would defeat revocation. Not a blocker for the current local-trusted-user
+ * model — see Risks in the v0.1.y plan.
  *
  * Called once from `App.tsx` after `makeQueryClient`. Tests can opt out
  * by skipping the call.
  */
-export function wireGlobal401Handler(client: QueryClient): void {
-  const handle = (err: unknown): void => {
-    if (err instanceof ProblemDetailsError && err.status === 401) {
-      // Only clear if the user thought they were authed. A 401 returned
-      // for a request that fired before auth was established (e.g., a
-      // query that mounted on first paint, before the URL-fragment
-      // fast-path persisted the token) would otherwise wipe out the
-      // token the fast-path just set. Idempotent: when the store is
-      // already null, the cascade has already run.
-      if (useAuthStore.getState().token !== null) {
-        useAuthStore.getState().clearToken();
-      }
+/**
+ * Pure handler invoked by both cache subscribers (and exported for unit
+ * tests). Inspects an unknown error; if it's a recognized
+ * ``ProblemDetailsError`` shape, mutates the auth or session store as
+ * described above. Returns the action it took (or ``'noop'``) for
+ * test assertions.
+ */
+export function handleGlobalRecoveryError(
+  err: unknown,
+): 'auth-cleared' | 'session-recovery' | 'noop' {
+  if (!(err instanceof ProblemDetailsError)) return 'noop';
+
+  if (err.status === 401) {
+    // Only clear if the user thought they were authed. A 401 returned
+    // for a request that fired before auth was established (e.g., a
+    // query that mounted on first paint, before the URL-fragment
+    // fast-path persisted the token) would otherwise wipe out the
+    // token the fast-path just set. Idempotent: when the store is
+    // already null, the cascade has already run.
+    if (useAuthStore.getState().token !== null) {
+      useAuthStore.getState().clearToken();
+      return 'auth-cleared';
     }
-  };
+    return 'noop';
+  }
+
+  if (err.status === 404 && isSessionScopedPath(err.requestPath)) {
+    const now = Date.now();
+    // Debounce: skip if we already fired a recovery within the past
+    // second. The first 404 in a burst raises ``recoveryInProgress``;
+    // subsequent ones are no-ops because the flag is already up.
+    if (now - lastRecoveryAttemptTs < RECOVERY_DEBOUNCE_MS) return 'noop';
+    const sessionState = useSessionStore.getState();
+    // Don't fire recovery if we never had a session id and recovery is
+    // already in flight (no point double-firing).
+    if (sessionState.sessionId === null && sessionState.recoveryInProgress) return 'noop';
+    // Don't loop: once recovery has failed (>3 attempts in 30s), stay
+    // pinned in the failed state until tab reload.
+    if (sessionState.recoveryFailed) return 'noop';
+    lastRecoveryAttemptTs = now;
+    sessionState.resetSession();
+    return 'session-recovery';
+  }
+
+  return 'noop';
+}
+
+export function wireGlobalErrorRecovery(client: QueryClient): void {
   client.getQueryCache().subscribe((event) => {
     if (event.type === 'updated' && event.action.type === 'error') {
-      handle(event.action.error);
+      handleGlobalRecoveryError(event.action.error);
     }
   });
   client.getMutationCache().subscribe((event) => {
     if (event.type === 'updated' && event.action.type === 'error') {
-      handle(event.action.error);
+      handleGlobalRecoveryError(event.action.error);
     }
   });
 }
+
+/**
+ * Backwards-compatible alias for the renamed handler. The function was
+ * named ``wireGlobal401Handler`` in v0.1.x; v0.1.y renames to
+ * ``wireGlobalErrorRecovery`` because it now also handles 404 stale-session
+ * recovery. Kept as a re-export so any out-of-tree consumers don't break;
+ * the in-tree call site in ``App.tsx`` uses the new name.
+ *
+ * @deprecated Use ``wireGlobalErrorRecovery``.
+ */
+export const wireGlobal401Handler = wireGlobalErrorRecovery;
 
 // ---- session lifecycle -----------------------------------------------------
 

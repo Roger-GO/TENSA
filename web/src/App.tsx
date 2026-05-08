@@ -13,7 +13,8 @@ import { AddElementButton } from '@/components/elements/AddElementButton';
 import { AddElementPanel } from '@/components/elements/AddElementPanel';
 import { SaveSystemButton } from '@/components/case/SaveSystemButton';
 import { WorkflowToolbar } from '@/components/case/WorkflowToolbar';
-import { makeQueryClient, wireGlobal401Handler } from '@/api/queries';
+import { makeQueryClient, wireGlobalErrorRecovery } from '@/api/queries';
+import { RecoveryBadge } from '@/components/shell/RecoveryBadge';
 import { setTokenGetter } from '@/api/client';
 import { getAuthToken } from '@/store';
 
@@ -44,7 +45,7 @@ export function App() {
   // (e.g., HMR or test isolation) gets a fresh client.
   const [queryClient] = useState(() => {
     const client = makeQueryClient();
-    wireGlobal401Handler(client);
+    wireGlobalErrorRecovery(client);
     return client;
   });
 
@@ -59,7 +60,12 @@ export function App() {
           </>
         }
         topBarCenter={<RunButton />}
-        topBarRight={<HideLabelsToggle />}
+        topBarRight={
+          <>
+            <RecoveryBadge />
+            <HideLabelsToggle />
+          </>
+        }
         leftRail={<CaseNav />}
         inspector={<ElementInspector />}
         results={<ResultsTable />}
