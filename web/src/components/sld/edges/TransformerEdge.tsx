@@ -117,9 +117,12 @@ export const TransformerEdge = memo(function TransformerEdge({
     mid = { x: labelX, y: labelY };
   }
 
-  const isLine = edgeData.bucket === 'line';
-  const lineIdx = edgeData.idx;
-  const overlay = isLine && lineIdx ? getLineOverlayState(lineIdx, pflowResult, hideLabels) : null;
+  // Transformers ARE lines on the substrate side; the line-flow
+  // computation runs over every Line device regardless of which bucket
+  // (lines vs transformers) the substrate routes the entry into. So
+  // we read the overlay for both bucket values.
+  const branchIdx = edgeData.idx;
+  const overlay = branchIdx ? getLineOverlayState(branchIdx, pflowResult, hideLabels) : null;
   const stroke = overlay?.has_data ? 'var(--color-foreground)' : 'var(--color-border)';
   const strokeWidth = overlay?.has_data ? 1.8 : 1.5;
   const dotRadius = 3.5;

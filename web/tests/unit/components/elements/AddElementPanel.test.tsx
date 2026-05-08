@@ -121,7 +121,11 @@ describe('<AddElementPanel />', () => {
     useCaseStore.setState({ addPanelOpen: true, addPanelKind: 'Bus' });
     render(withQueryClient(<AddElementPanel />));
     await waitFor(() => screen.getByTestId('element-form-Bus'));
-    await user.type(screen.getByTestId('field-idx').querySelector('input')!, '1');
+    // idx is prefilled to "1" since the topology has no buses; clear
+    // before typing so we don't end up with "11".
+    const idxInput = screen.getByTestId('field-idx').querySelector('input')!;
+    await user.clear(idxInput);
+    await user.type(idxInput, '1');
     await user.type(screen.getByTestId('field-name').querySelector('input')!, 'BUS1');
     await user.type(screen.getByTestId('field-Vn').querySelector('input')!, '110');
     await user.click(screen.getByRole('button', { name: /add bus/i }));

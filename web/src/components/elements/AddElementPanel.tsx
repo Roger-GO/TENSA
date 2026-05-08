@@ -29,20 +29,40 @@ import { CancelConfirmDialog } from './CancelConfirmDialog';
  *     409 → close + caller surfaces reset banner
  */
 
-const SUPPORTED_KINDS = [
-  // Network
-  { value: 'Bus', label: 'Bus', group: 'Network' },
-  { value: 'Line', label: 'Line', group: 'Network' },
-  // Generators
-  { value: 'PV', label: 'PV generator', group: 'Generators' },
-  { value: 'Slack', label: 'Slack generator', group: 'Generators' },
-  { value: 'GENROU', label: 'GENROU (synchronous)', group: 'Generators' },
-  { value: 'GENCLS', label: 'GENCLS (classic)', group: 'Generators' },
-  // Loads
-  { value: 'PQ', label: 'PQ load', group: 'Loads' },
-  { value: 'ZIP', label: 'ZIP load', group: 'Loads' },
-  // Shunts
-  { value: 'Shunt', label: 'Shunt', group: 'Shunts' },
+/**
+ * Kind picker entries. ``value`` is the picker's UI handle (e.g.,
+ * "Transformer2W"); ``submitModel`` is what the substrate's
+ * ``add_element`` endpoint expects (e.g., "Line" — ANDES models 2W
+ * transformers as Lines with a non-default ``tap``).
+ *
+ * ``defaultParams`` pre-fills the form on kind selection so transformer
+ * adds default to ``tap=1.05`` (off-nominal — required for the
+ * Line→Transformer split heuristic to route the new device into the
+ * transformers bucket).
+ */
+const SUPPORTED_KINDS: ReadonlyArray<{
+  value: string;
+  label: string;
+  group: 'Network' | 'Transformers' | 'Generators' | 'Loads' | 'Shunts';
+  submitModel: string;
+  defaultParams?: Record<string, string | number | boolean>;
+}> = [
+  { value: 'Bus', label: 'Bus', group: 'Network', submitModel: 'Bus' },
+  { value: 'Line', label: 'Line', group: 'Network', submitModel: 'Line' },
+  {
+    value: 'Transformer2W',
+    label: 'Transformer (2W)',
+    group: 'Transformers',
+    submitModel: 'Line',
+    defaultParams: { tap: 1.05 },
+  },
+  { value: 'PV', label: 'PV generator', group: 'Generators', submitModel: 'PV' },
+  { value: 'Slack', label: 'Slack generator', group: 'Generators', submitModel: 'Slack' },
+  { value: 'GENROU', label: 'GENROU (synchronous)', group: 'Generators', submitModel: 'GENROU' },
+  { value: 'GENCLS', label: 'GENCLS (classic)', group: 'Generators', submitModel: 'GENCLS' },
+  { value: 'PQ', label: 'PQ load', group: 'Loads', submitModel: 'PQ' },
+  { value: 'ZIP', label: 'ZIP load', group: 'Loads', submitModel: 'ZIP' },
+  { value: 'Shunt', label: 'Shunt', group: 'Shunts', submitModel: 'Shunt' },
 ];
 
 export interface AddElementPanelProps {
@@ -73,11 +93,19 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
     setServerError(null);
   };
 
+  const kindEntry = SUPPORTED_KINDS.find((k) => k.value === kind);
+  const submitModel = kindEntry?.submitModel ?? kind ?? '';
+  const formModel = submitModel; // ElementForm renders fields from this model's schema.
+  const defaultParams = kindEntry?.defaultParams;
+
   const handleSubmit = (params: Record<string, ParamValue>) => {
-    if (!sessionId || !kind) return;
+    if (!sessionId || !submitModel) return;
     setServerError(null);
+    // Merge in default params (e.g., Transformer (2W) auto-sets tap=1.05).
+    // The user can override by editing the field on the form.
+    const finalParams = defaultParams ? { ...defaultParams, ...params } : params;
     addMutation.mutate(
-      { sessionId, body: { model: kind, params } },
+      { sessionId, body: { model: submitModel, params: finalParams } },
       {
         onSuccess: () => {
           // Wait for the topology re-fetch the mutation triggered;
@@ -105,7 +133,8 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
     );
   };
 
-  const groupedKinds = SUPPORTED_KINDS.reduce<Record<string, typeof SUPPORTED_KINDS>>((acc, k) => {
+  type KindEntry = (typeof SUPPORTED_KINDS)[number];
+  const groupedKinds = SUPPORTED_KINDS.reduce<Record<string, KindEntry[]>>((acc, k) => {
     (acc[k.group] ??= []).push(k);
     return acc;
   }, {});
@@ -170,9 +199,11 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
           </select>
         </div>
 
-        {kind && schema.data ? (
+        {kind && schema.data && formModel ? (
           <ElementForm
-            model={kind}
+            model={formModel}
+            kindHint={kind}
+            defaultParams={defaultParams}
             saving={addMutation.isPending}
             serverError={serverError}
             onSubmit={handleSubmit}

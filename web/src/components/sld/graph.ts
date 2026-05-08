@@ -271,18 +271,26 @@ export interface BuildGraphOptions {
 
 /**
  * Default offsets for non-bus elements relative to their parent bus.
- * Stack indices grow vertically per kind so multiple generators on one
- * bus don't overlap. Tunable; the user can drag to override and the
- * sidecar persists the result.
+ * Stack indices grow on a mix of axes per kind so multiple devices on
+ * one bus don't overlap each other or the line going to/from a sibling
+ * bus. Tunable; the user can drag to override (Unit 9).
+ *
+ * Generators and loads stack horizontally first (sliding along the bus
+ * face) then jump to a second row to avoid colliding with sibling
+ * branches that exit on the same cardinal side. Shunts use a diagonal
+ * cluster to the south-west of the bus.
  */
 export const NON_BUS_OFFSETS = {
-  generator: { x: 0, y: -90, stackDx: 0, stackDy: -55 },
-  load: { x: 0, y: 90, stackDx: 0, stackDy: 55 },
-  shunt: { x: -100, y: 60, stackDx: -55, stackDy: 0 },
+  generator: { x: 0, y: -110, stackDx: 60, stackDy: -55 },
+  load: { x: 0, y: 110, stackDx: 60, stackDy: 55 },
+  shunt: { x: -110, y: 70, stackDx: -55, stackDy: 35 },
 } as const satisfies Record<
   'generator' | 'load' | 'shunt',
   { x: number; y: number; stackDx: number; stackDy: number }
 >;
+
+/** Stack-row width: 4 devices per row before wrapping vertically. */
+const STACK_ROW_LIMIT = 4;
 
 /** React Flow node-type strings for the non-bus kinds. Mirrors `NODE_TYPES`. */
 const NON_BUS_NODE_TYPE = {
@@ -438,17 +446,25 @@ export function buildGraph(
       const stackKey = `${parentIdx}|${bucket.kind}`;
       const stackIndex = stackCounts.get(stackKey) ?? 0;
       stackCounts.set(stackKey, stackIndex + 1);
-      // Sidecar override (when present) takes precedence over the
-      // computed offset; falling back to the default keeps the canvas
-      // sensible without any persisted layout.
+      // Stacks wrap onto a new row every STACK_ROW_LIMIT devices: the
+      // first 4 fan horizontally on one row, devices 5+ jump to a
+      // second row. Centering on the bus uses an alternating sign so
+      // the cluster stays visually balanced without a pre-pass to
+      // count total devices on the parent.
+      const col = stackIndex % STACK_ROW_LIMIT;
+      const row = Math.floor(stackIndex / STACK_ROW_LIMIT);
+      // Alternate left/right around the bus center: indices 0,1,2,3
+      // map to columns 0, 1, -1, 2 → roughly centered fan.
+      const COL_SCHEDULE = [0, 1, -1, 2, -2, 3, -3];
+      const colSigned = COL_SCHEDULE[col] ?? col;
       const sidecarKey = `${entry.kind}|${String(entry.idx)}`;
       const sidecar = nonBusCoords.get(sidecarKey);
       const x =
         sidecar?.x ??
-        parentCoord.x + offset.x + offset.stackDx * stackIndex;
+        parentCoord.x + offset.x + offset.stackDx * colSigned;
       const y =
         sidecar?.y ??
-        parentCoord.y + offset.y + offset.stackDy * stackIndex;
+        parentCoord.y + offset.y + offset.stackDy * row;
       const nodeId = `${bucket.kind}-${String(entry.idx)}`;
       nodes.push({
         id: nodeId,
