@@ -51,7 +51,14 @@ type PrimaryFormat = 'xlsx' | 'raw' | 'json' | 'm';
 const PRIMARY_FORMATS: ReadonlySet<PrimaryFormat> = new Set(['xlsx', 'raw', 'json', 'm']);
 
 function isPrimaryCase(file: WorkspaceFile): file is WorkspaceFile & { format: PrimaryFormat } {
-  return PRIMARY_FORMATS.has(file.format as PrimaryFormat);
+  if (!PRIMARY_FORMATS.has(file.format as PrimaryFormat)) return false;
+  // Exclude sidecar layout files. The auto-write companion to a saved
+  // case is named ``<case>.layout.json`` and reports format=json; it is
+  // not a loadable case. Without this filter the picker double-lists
+  // every saved case + its sidecar, and the user can pick the sidecar
+  // by mistake (which would 422 inside the substrate).
+  if (file.name.endsWith('.layout.json')) return false;
+  return true;
 }
 
 function isDyr(file: WorkspaceFile): boolean {
@@ -244,9 +251,15 @@ function useEnsureSession(): {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recoveryInProgress, sessionId]);
 
+  // Derive ``creating`` against the sessionId-is-null invariant so a stale
+  // ``createSession.isPending`` (TanStack v5 observer desync seen in
+  // StrictMode dev — the MutationCache transitions to ``success`` but the
+  // hook observer can stay ``pending``) can't trap the button. Once
+  // ``setSessionId`` has run on the success path, ``sessionId !== null``
+  // and we are no longer ``creating`` regardless of what the observer says.
   return {
     sessionId,
-    creating: createSession.isPending,
+    creating: createSession.isPending && sessionId === null,
     createError: createSession.error,
   };
 }
