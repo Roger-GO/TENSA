@@ -139,7 +139,7 @@ export function EditElementButton({
           className={cn(
             'text-muted-foreground hover:text-foreground',
             'inline-flex h-4 w-4 items-center justify-center rounded',
-            'opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100',
+            'opacity-60 transition-opacity hover:opacity-100 group-hover:opacity-100 focus-visible:opacity-100',
             'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
           )}
         >

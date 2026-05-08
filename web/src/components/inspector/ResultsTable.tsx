@@ -26,7 +26,7 @@ import { classifyVoltage } from '../sld/overlay';
  * are omitted." We render an em-dash to keep the column shape stable.
  */
 
-type TabKey = 'buses' | 'lines' | 'generators';
+type TabKey = 'buses' | 'lines' | 'generators' | 'loads' | 'shunts';
 
 interface SortState {
   column: string;
@@ -104,6 +104,24 @@ const GEN_COLUMNS: ColumnDef[] = [
   { key: 'v_setpoint', label: 'V_set (pu)', defaultDirection: 'asc' },
 ];
 
+const LOAD_COLUMNS: ColumnDef[] = [
+  { key: 'idx', label: 'idx', defaultDirection: 'asc' },
+  { key: 'name', label: 'name', defaultDirection: 'asc' },
+  { key: 'bus_idx', label: 'bus', defaultDirection: 'asc' },
+  { key: 'p0', label: 'P (MW)', defaultDirection: 'desc' },
+  { key: 'q0', label: 'Q (MVAr)', defaultDirection: 'desc' },
+  { key: 'Vn', label: 'Vn (kV)', defaultDirection: 'desc' },
+];
+
+const SHUNT_COLUMNS: ColumnDef[] = [
+  { key: 'idx', label: 'idx', defaultDirection: 'asc' },
+  { key: 'name', label: 'name', defaultDirection: 'asc' },
+  { key: 'bus_idx', label: 'bus', defaultDirection: 'asc' },
+  { key: 'g', label: 'G (pu)', defaultDirection: 'desc' },
+  { key: 'b', label: 'B (pu)', defaultDirection: 'desc' },
+  { key: 'Vn', label: 'Vn (kV)', defaultDirection: 'desc' },
+];
+
 /** Voltage band classification — delegates to `overlay.ts` for thresholds. */
 function classifyBusVoltage(v: number | undefined): 'danger' | 'warning' | null {
   if (v === undefined || !Number.isFinite(v)) return null;
@@ -172,6 +190,51 @@ function buildLineRows(topology: TopologySummary, pflow: PflowResult | null): Ro
         numCell(flow?.q, 2),
         // loading_pct: needs line rating; not exposed by v0.1 substrate.
         numCell(undefined, 1),
+      ],
+    };
+  });
+}
+
+function buildLoadRows(topology: TopologySummary): Row[] {
+  return topology.loads.map((load) => {
+    const idx = String(load.idx);
+    const busIdx = paramString(load, 'bus');
+    const p = paramNumber(load, 'p0');
+    const q = paramNumber(load, 'q0');
+    const vn = paramNumber(load, 'Vn');
+    return {
+      key: `load-${idx}`,
+      selected: { kind: 'load', idx },
+      cells: [
+        strCell(idx),
+        strCell(load.name),
+        strCell(busIdx),
+        numCell(p, 4),
+        numCell(q, 4),
+        numCell(vn, 1),
+      ],
+    };
+  });
+}
+
+function buildShuntRows(topology: TopologySummary): Row[] {
+  const shunts = topology.shunts ?? [];
+  return shunts.map((shunt) => {
+    const idx = String(shunt.idx);
+    const busIdx = paramString(shunt, 'bus');
+    const g = paramNumber(shunt, 'g');
+    const b = paramNumber(shunt, 'b');
+    const vn = paramNumber(shunt, 'Vn');
+    return {
+      key: `shunt-${idx}`,
+      selected: { kind: 'shunt', idx },
+      cells: [
+        strCell(idx),
+        strCell(shunt.name),
+        strCell(busIdx),
+        numCell(g, 4),
+        numCell(b, 4),
+        numCell(vn, 1),
       ],
     };
   });
@@ -417,6 +480,8 @@ export function ResultsTable({ className }: ResultsTableProps) {
     [topology, pflowResult],
   );
   const genRows = useMemo(() => (topology ? buildGenRows(topology) : []), [topology]);
+  const loadRows = useMemo(() => (topology ? buildLoadRows(topology) : []), [topology]);
+  const shuntRows = useMemo(() => (topology ? buildShuntRows(topology) : []), [topology]);
 
   if (!topology) {
     return (
@@ -447,6 +512,8 @@ export function ResultsTable({ className }: ResultsTableProps) {
           <TabsTrigger value="buses">Buses ({busRows.length})</TabsTrigger>
           <TabsTrigger value="lines">Lines ({lineRows.length})</TabsTrigger>
           <TabsTrigger value="generators">Generators ({genRows.length})</TabsTrigger>
+          <TabsTrigger value="loads">Loads ({loadRows.length})</TabsTrigger>
+          <TabsTrigger value="shunts">Shunts ({shuntRows.length})</TabsTrigger>
         </TabsList>
         <TabsContent value="buses" className="flex min-h-0 flex-1 flex-col">
           <ResultTable
@@ -479,6 +546,28 @@ export function ResultsTable({ className }: ResultsTableProps) {
             selectedElement={selectedElement}
             onRowClick={onRowClick}
             testId="results-table-generators"
+          />
+        </TabsContent>
+        <TabsContent value="loads" className="flex min-h-0 flex-1 flex-col">
+          <ResultTable
+            columns={LOAD_COLUMNS}
+            rows={loadRows}
+            emptyTabLabel="No loads in this case."
+            prePflowLabel={null}
+            selectedElement={selectedElement}
+            onRowClick={onRowClick}
+            testId="results-table-loads"
+          />
+        </TabsContent>
+        <TabsContent value="shunts" className="flex min-h-0 flex-1 flex-col">
+          <ResultTable
+            columns={SHUNT_COLUMNS}
+            rows={shuntRows}
+            emptyTabLabel="No shunts in this case."
+            prePflowLabel={null}
+            selectedElement={selectedElement}
+            onRowClick={onRowClick}
+            testId="results-table-shunts"
           />
         </TabsContent>
       </Tabs>
