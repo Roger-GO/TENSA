@@ -7,9 +7,12 @@ import {
   DialogFooter,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useCurrentTopology, useSaveCase } from '@/api/queries';
+import { useCurrentTopology, usePutSidecar, useSaveCase } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
+import { useCaseStore } from '@/store/case';
 import { ProblemDetailsError } from '@/api/client';
+import { parseWorkspacePath, type SidecarLayout } from '@/api/types';
+import { SIDECAR_SCHEMA_VERSION } from '@/components/sld/sidecar';
 import { cn } from '@/lib/cn';
 
 /**
@@ -46,7 +49,9 @@ function ensureExtension(filename: string, format: Format): string {
 export function SaveSystemButton({ className }: SaveSystemButtonProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
   const topology = useCurrentTopology();
+  const dragOverrides = useCaseStore((s) => s.dragOverrides);
   const saveMutation = useSaveCase();
+  const sidecarMutation = usePutSidecar();
   const [modalOpen, setModalOpen] = useState(false);
   const [filename, setFilename] = useState('my-system');
   const [format, setFormat] = useState<Format>('xlsx');
@@ -55,6 +60,47 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
   const [success, setSuccess] = useState<string | null>(null);
 
   const enabled = sessionId !== null && topology !== null;
+
+  const writeSidecarAlongside = (caseFilename: string) => {
+    // Build a sidecar carrying the current bus coords from drag
+    // overrides. Non-bus nodes are skipped (the substrate sidecar
+    // schema doesn't carry non_bus_coordinates yet — deferred to a
+    // later pass).
+    const coordinates: Record<string, { x: number; y: number }> = {};
+    for (const [nodeId, coord] of Object.entries(dragOverrides)) {
+      // Bus nodes use the bus idx as React Flow node id (no kind
+      // prefix); non-bus nodes are `${kind}-${idx}`. Filter to buses.
+      if (
+        nodeId.startsWith('generator-') ||
+        nodeId.startsWith('load-') ||
+        nodeId.startsWith('shunt-')
+      ) {
+        continue;
+      }
+      coordinates[nodeId] = coord;
+    }
+    if (Object.keys(coordinates).length === 0) {
+      // Nothing to persist — buses fell back to defaults / curated /
+      // auto-layout coords. Skip silently.
+      return;
+    }
+    const sidecar: SidecarLayout = {
+      schema_version: SIDECAR_SCHEMA_VERSION,
+      andes_version: 'unknown',
+      coordinates,
+      last_modified: new Date().toISOString(),
+    };
+    try {
+      sidecarMutation.mutate({
+        casePath: parseWorkspacePath(caseFilename),
+        layout: sidecar,
+      });
+    } catch {
+      // Workspace-path parse error — only happens if filename has
+      // traversal segments, which the substrate already rejected.
+      // Silent because the case file itself wrote successfully.
+    }
+  };
 
   const submit = () => {
     if (!sessionId) return;
@@ -72,8 +118,10 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
       },
       {
         onSuccess: (resp) => {
+          // Auto-save the layout sidecar alongside the case file so
+          // reload preserves the user's drag positions (Unit 13a).
+          writeSidecarAlongside(resp.filename);
           setSuccess(`Wrote ${resp.bytes_written} bytes to ${resp.filename}`);
-          // Auto-dismiss after 3s.
           setTimeout(() => setModalOpen(false), 1200);
         },
         onError: (err) => {

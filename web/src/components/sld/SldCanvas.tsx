@@ -205,16 +205,20 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   const usingAutoLayout = curated === null && storedSidecar === null;
   // Drag overrides — per-node coordinate overrides applied AFTER
   // buildGraph so user drags persist across topology re-fetches (Unit 9
-  // fix). Without this, every successful add() would invalidate the
-  // topology query, re-derive coords, and snap dragged elements back
-  // to their kind-based default positions. Holds bus + non-bus nodes
-  // alike, keyed by React Flow node id.
-  const [dragOverrides, setDragOverrides] = useState<Record<string, { x: number; y: number }>>({});
+  // fix). Lives on the case store (Unit 13a) so the SaveSystemButton
+  // can snapshot the current layout into the auto-saved sidecar
+  // alongside the case file.
+  const dragOverrides = useCaseStore((s) => s.dragOverrides);
+  const setDragOverrides = useCaseStore((s) => s.setDragOverrides);
   const baseGraph = useMemo(() => {
     if (!coords) return null;
-    const handleAssignments = computeHandleAssignments(topology, coords);
+    const { branches, stubs } = computeHandleAssignments(topology, coords);
     const bendPoints = usingAutoLayout && autoBendPoints ? autoBendPoints : undefined;
-    const built = buildGraph(topology, coords, { handleAssignments, bendPoints });
+    const built = buildGraph(topology, coords, {
+      handleAssignments: branches,
+      stubAssignments: stubs,
+      bendPoints,
+    });
     // Apply drag overrides on top of the freshly-derived positions.
     if (Object.keys(dragOverrides).length === 0) return built;
     return {
@@ -232,16 +236,15 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   useEffect(() => {
     if (!baseGraph) return;
     const liveIds = new Set(baseGraph.nodes.map((n) => n.id));
-    setDragOverrides((curr) => {
-      const next: Record<string, { x: number; y: number }> = {};
-      let changed = false;
-      for (const [id, coord] of Object.entries(curr)) {
-        if (liveIds.has(id)) next[id] = coord;
-        else changed = true;
-      }
-      return changed ? next : curr;
-    });
-  }, [baseGraph]);
+    const curr = useCaseStore.getState().dragOverrides;
+    const next: Record<string, { x: number; y: number }> = {};
+    let changed = false;
+    for (const [id, coord] of Object.entries(curr)) {
+      if (liveIds.has(id)) next[id] = coord;
+      else changed = true;
+    }
+    if (changed) setDragOverrides(next);
+  }, [baseGraph, setDragOverrides]);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
 
@@ -297,7 +300,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
         return next;
       });
     },
-    [primaryPath, putSidecar],
+    [primaryPath, putSidecar, setDragOverrides],
   );
 
   // Cleanup pending PUT on unmount.
