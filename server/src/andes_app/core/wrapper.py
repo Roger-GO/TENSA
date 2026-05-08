@@ -564,17 +564,23 @@ class Wrapper:
         return self._reload_blank_locked()
 
     def save_case(
-        self, format: Literal["xlsx", "json"], filename: str
+        self, format: Literal["xlsx", "json", "raw"], filename: str
     ) -> Path:
         """Write the current System to a workspace file.
 
-        ANDES 2.0 supports two writable formats — xlsx and json. PSS/E
-        ``.raw`` write is NOT supported by the ANDES library; the
-        substrate surfaces only the formats it can faithfully round-
-        trip. Returns the absolute path of the written file.
+        Three formats:
 
-        Caller (the route handler) is responsible for canonicalizing
-        ``filename`` against the workspace and rejecting traversal.
+        - ``xlsx`` — ANDES native, via ``andes.io.xlsx.write``.
+        - ``json`` — ANDES JSON, via ``andes.io.json.write``.
+        - ``raw`` — PSS/E v33, via the substrate's hand-rolled writer
+          (``andes_app.core.psse_writer.write_raw``). ANDES 2.0 has no
+          built-in PSS/E writer; the substrate ships one for the model
+          classes it can emit (Bus, PQ/ZIP, Shunt, PV/Slack/GENROU/
+          GENCLS, Line, 2W transformer).
+
+        Returns the absolute path of the written file. Caller (the
+        route handler) is responsible for canonicalizing ``filename``
+        against the workspace and rejecting traversal.
         """
         ss = self._require_loaded()
         target = Path(filename)
@@ -586,9 +592,13 @@ class Wrapper:
             from andes.io import json as andes_json
 
             andes_json.write(ss, str(target))
+        elif format == "raw":
+            from andes_app.core.psse_writer import write_raw
+
+            write_raw(ss, str(target))
         else:  # pragma: no cover — Literal narrows the type
             raise ElementValidationError(
-                f"unsupported save format {format!r}; supported: xlsx, json"
+                f"unsupported save format {format!r}; supported: xlsx, json, raw"
             )
         return target
 

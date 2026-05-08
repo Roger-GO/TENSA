@@ -219,6 +219,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/undo-last-edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Drop the last add() and rebuild the System. */
+        post: operations["undoLastEdit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/tds": {
         parameters: {
             query?: never;
@@ -711,15 +728,15 @@ export interface components {
         SaveCaseRequest: {
             /**
              * Filename
-             * @description Workspace-relative output filename. Extension must match ``format`` (``.xlsx`` for xlsx, ``.json`` for json).
+             * @description Workspace-relative output filename. Extension must match ``format`` (``.xlsx`` for xlsx, ``.json`` for json, ``.raw`` for raw).
              */
             filename: string;
             /**
              * Format
-             * @description Output format. ``xlsx`` is the ANDES-native Excel layout (round-trips through ``andes.io.xlsx.write``). ``json`` is the ANDES JSON serialization (cleanest round-trip but less familiar to power-systems tooling). PSS/E ``raw`` WRITE is NOT supported by the ANDES library.
+             * @description Output format. ``xlsx`` is the ANDES-native Excel layout. ``json`` is the ANDES JSON serialization. ``raw`` is PSS/E v33 emitted by the substrate's hand-rolled writer; it covers Bus, PQ/ZIP loads, Shunt, PV/Slack/GENROU/GENCLS generators, Line, and 2W transformers. 3W transformers and other PSS/E sections are emitted as empty terminators.
              * @enum {string}
              */
-            format: "xlsx" | "json";
+            format: "xlsx" | "json" | "raw";
             /**
              * Overwrite
              * @description When ``true``, overwrites an existing file at the same path. Default ``false`` returns 409 if the file exists.
@@ -1817,6 +1834,64 @@ export interface operations {
                 };
             };
             /** @description Filename failed validation (path traversal, mismatched extension, or unwriteable target). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    undoLastEdit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopologySummary"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session has been committed (PF / TDS already ran); reset the run before undoing. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No edits to undo on this session. */
             422: {
                 headers: {
                     [name: string]: unknown;
