@@ -504,6 +504,57 @@ class TopologyParamMeta(BaseModel):
     )
 
 
+class SaveCaseRequest(BaseModel):
+    """Request body for ``POST /sessions/{id}/save``.
+
+    ``filename`` is workspace-relative; the substrate canonicalizes it
+    through the workspace path validator (rejects traversal). ``format``
+    decides which writer ANDES uses — only xlsx and json are supported
+    in v0.1.x because ANDES 2.0 has no PSS/E ``.raw`` writer.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str = Field(
+        ...,
+        description=(
+            "Workspace-relative output filename. Extension must match "
+            "``format`` (``.xlsx`` for xlsx, ``.json`` for json)."
+        ),
+        min_length=1,
+    )
+    format: Literal["xlsx", "json"] = Field(
+        ...,
+        description=(
+            "Output format. ``xlsx`` is the ANDES-native Excel layout "
+            "(round-trips through ``andes.io.xlsx.write``). ``json`` is "
+            "the ANDES JSON serialization (cleanest round-trip but "
+            "less familiar to power-systems tooling). PSS/E ``raw`` "
+            "WRITE is NOT supported by the ANDES library."
+        ),
+    )
+    overwrite: bool = Field(
+        False,
+        description=(
+            "When ``true``, overwrites an existing file at the same "
+            "path. Default ``false`` returns 409 if the file exists."
+        ),
+    )
+
+
+class SaveCaseResponse(BaseModel):
+    """Response body for ``POST /sessions/{id}/save`` (201)."""
+
+    filename: str = Field(
+        ..., description="Workspace-relative path of the file just written."
+    )
+    bytes_written: int = Field(
+        ...,
+        description="Size in bytes of the file just written, as reported by ``os.stat``.",
+        ge=0,
+    )
+
+
 class TopologySchema(BaseModel):
     """Per-model parameter metadata, used by the web client's polymorphic
     form generator (Unit 6).

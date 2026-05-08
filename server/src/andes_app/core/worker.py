@@ -234,6 +234,11 @@ def _handle_create_blank(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.create_blank())
 
 
+def _handle_save_case(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    path = wrapper.save_case(args["format"], args["filename"])
+    return str(path)
+
+
 def _handle_run_pflow(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.run_pflow())
 
@@ -396,6 +401,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "add_element": _handle_add_element,
     "edit_element": _handle_edit_element,
     "create_blank": _handle_create_blank,
+    "save_case": _handle_save_case,
     "run_pflow": _handle_run_pflow,
     # run_tds is special-cased — it needs the abort_event. Dispatched separately.
 }

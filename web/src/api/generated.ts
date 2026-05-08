@@ -202,6 +202,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Write the current System to the workspace as xlsx or json. */
+        post: operations["saveCase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/tds": {
         parameters: {
             query?: never;
@@ -681,6 +698,50 @@ export interface components {
             instance?: string | null;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * SaveCaseRequest
+         * @description Request body for ``POST /sessions/{id}/save``.
+         *
+         *     ``filename`` is workspace-relative; the substrate canonicalizes it
+         *     through the workspace path validator (rejects traversal). ``format``
+         *     decides which writer ANDES uses — only xlsx and json are supported
+         *     in v0.1.x because ANDES 2.0 has no PSS/E ``.raw`` writer.
+         */
+        SaveCaseRequest: {
+            /**
+             * Filename
+             * @description Workspace-relative output filename. Extension must match ``format`` (``.xlsx`` for xlsx, ``.json`` for json).
+             */
+            filename: string;
+            /**
+             * Format
+             * @description Output format. ``xlsx`` is the ANDES-native Excel layout (round-trips through ``andes.io.xlsx.write``). ``json`` is the ANDES JSON serialization (cleanest round-trip but less familiar to power-systems tooling). PSS/E ``raw`` WRITE is NOT supported by the ANDES library.
+             * @enum {string}
+             */
+            format: "xlsx" | "json";
+            /**
+             * Overwrite
+             * @description When ``true``, overwrites an existing file at the same path. Default ``false`` returns 409 if the file exists.
+             * @default false
+             */
+            overwrite: boolean;
+        };
+        /**
+         * SaveCaseResponse
+         * @description Response body for ``POST /sessions/{id}/save`` (201).
+         */
+        SaveCaseResponse: {
+            /**
+             * Filename
+             * @description Workspace-relative path of the file just written.
+             */
+            filename: string;
+            /**
+             * Bytes Written
+             * @description Size in bytes of the file just written, as reported by ``os.stat``.
+             */
+            bytes_written: number;
         };
         /**
          * SessionDescriptor
@@ -1691,6 +1752,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    saveCase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveCaseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaveCaseResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or no case loaded. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A file at the given filename exists and ``overwrite`` was not set, OR no case is loaded on this session. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Body exceeded the 64 KB cap. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Filename failed validation (path traversal, mismatched extension, or unwriteable target). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
         };

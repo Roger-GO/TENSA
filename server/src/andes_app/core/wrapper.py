@@ -529,6 +529,35 @@ class Wrapper:
             )
         return entry
 
+    def save_case(
+        self, format: Literal["xlsx", "json"], filename: str
+    ) -> Path:
+        """Write the current System to a workspace file.
+
+        ANDES 2.0 supports two writable formats — xlsx and json. PSS/E
+        ``.raw`` write is NOT supported by the ANDES library; the
+        substrate surfaces only the formats it can faithfully round-
+        trip. Returns the absolute path of the written file.
+
+        Caller (the route handler) is responsible for canonicalizing
+        ``filename`` against the workspace and rejecting traversal.
+        """
+        ss = self._require_loaded()
+        target = Path(filename)
+        if format == "xlsx":
+            from andes.io import xlsx
+
+            xlsx.write(ss, str(target))
+        elif format == "json":
+            from andes.io import json as andes_json
+
+            andes_json.write(ss, str(target))
+        else:  # pragma: no cover — Literal narrows the type
+            raise ElementValidationError(
+                f"unsupported save format {format!r}; supported: xlsx, json"
+            )
+        return target
+
     def create_blank(self) -> TopologySnapshot:
         """Create a brand-new empty ``andes.System()`` for this session.
 

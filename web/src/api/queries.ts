@@ -34,6 +34,8 @@ import type {
   LoadCaseRequest,
   ParamValue,
   PflowResult,
+  SaveCaseRequest,
+  SaveCaseResponse,
   SessionDescriptor,
   SidecarLayout,
   SessionId,
@@ -440,6 +442,32 @@ export function useBlankSystem(): UseMutationResult<BlankSystemResponse, Error, 
     onSuccess: (data, sessionId) => {
       queryClient.setQueryData(queryKeys.topology(sessionId), data.topology);
       useCaseStore.getState().setTopology(data.topology);
+    },
+  });
+}
+
+export interface SaveCaseVars {
+  sessionId: SessionId;
+  body: SaveCaseRequest;
+}
+
+/**
+ * `POST /sessions/{id}/save`. Writes the current System to the workspace
+ * as xlsx or json. ANDES 2.0 has no PSS/E .raw writer — that format is
+ * read-only on this substrate. On success the workspace lister query is
+ * invalidated so the new file shows up immediately in the picker.
+ */
+export function useSaveCase(): UseMutationResult<SaveCaseResponse, Error, SaveCaseVars> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, body }: SaveCaseVars) => {
+      return await andesClient.post<SaveCaseResponse>(
+        `/sessions/${encodeURIComponent(sessionId)}/save`,
+        { body, timeoutMs: TIMEOUTS.workspace },
+      );
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workspaceFiles });
     },
   });
 }

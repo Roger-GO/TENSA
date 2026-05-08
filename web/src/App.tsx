@@ -11,6 +11,7 @@ import { ConvergenceErrorPanel } from '@/components/pflow/ConvergenceErrorPanel'
 import { RuntimeCrashModal } from '@/components/pflow/RuntimeCrashModal';
 import { AddElementButton } from '@/components/elements/AddElementButton';
 import { AddElementPanel } from '@/components/elements/AddElementPanel';
+import { SaveSystemButton } from '@/components/case/SaveSystemButton';
 import { makeQueryClient, wireGlobal401Handler } from '@/api/queries';
 import { setTokenGetter } from '@/api/client';
 import { getAuthToken } from '@/store';
@@ -49,7 +50,12 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AppShell
-        topBarLeft={<AddElementButton />}
+        topBarLeft={
+          <>
+            <AddElementButton />
+            <SaveSystemButton />
+          </>
+        }
         topBarCenter={<RunButton />}
         topBarRight={<HideLabelsToggle />}
         leftRail={<CaseNav />}
