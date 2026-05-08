@@ -570,7 +570,7 @@ Server unit (wrapper):
 
 ---
 
-- [ ] **Unit 4: Visual polish — top bar density, mini-map, label spacing, badge styling**
+- [x] **Unit 4: Visual polish — top bar density, mini-map, label spacing, badge styling** — landed 2026-05-08. PF success toast gets max-w-xs + truncate to prevent viewport overflow on narrow widths. MiniMap nodeColor switches per kind (bus = foreground, generator = success, load = muted, shunt = warning). BusNode label spacing tightens (gap-0.5, py-1.5). "Change case" becomes a compact ghost button so the loaded-case card breathes. Favicon = IEC 60617 bus glyph. R17 carry-forward.
 
 **Goal:** Resolve the smaller polish items the polish loop surfaced beyond the three big bugs. Cumulative effect: the wedge-demo screenshot looks intentional, not "dev-build."
 

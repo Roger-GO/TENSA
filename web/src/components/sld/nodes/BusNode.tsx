@@ -60,7 +60,7 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
       data-idx={d.idx}
       data-band={overlay.band}
       className={cn(
-        'group flex flex-col items-center gap-1 px-2 py-1',
+        'group flex flex-col items-center gap-0.5 px-2.5 py-1.5',
         'bg-background text-foreground',
         'rounded-[var(--radius-md)] border-2',
         selected

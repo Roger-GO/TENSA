@@ -54,15 +54,17 @@ function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: Summar
       ? 'bg-success/15 text-foreground border-success/30'
       : 'bg-muted text-muted-foreground border-border';
 
+  // Compact ghost button — the loaded-case card is information-dense; a
+  // full-width primary-style button overweights the secondary action.
   const changeCaseButton = (
     <Button
       type="button"
-      variant="outline"
+      variant="ghost"
       size="sm"
       disabled={pflowRunning}
       onClick={onChangeCase}
       aria-describedby={pflowRunning ? 'change-case-disabled-reason' : undefined}
-      className="w-full"
+      className="text-muted-foreground hover:text-foreground -ml-2 self-start text-xs"
     >
       Change case
     </Button>
