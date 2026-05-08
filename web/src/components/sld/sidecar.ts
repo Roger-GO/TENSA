@@ -25,6 +25,22 @@ export const SIDECAR_SCHEMA_VERSION = '1';
 export type CoordsByIdx = Record<string, BusCoord>;
 
 /**
+ * Two-level non-bus coordinate map mirroring the on-disk
+ * `non_bus_coordinates` shape: outer key is the ANDES model class
+ * (e.g. `PV`, `GENROU`, `PQ`, `Shunt`) OR the UI category (`generator`,
+ * `load`, `shunt`); inner key is the element idx as a string.
+ *
+ * The dual-key strategy (the writer emits both layers; the reader prefers
+ * model-class with UI-category fallback) makes kind-edits resilient: when
+ * a `PV` is edited to a `GENROU`, the `PV|<idx>` entry becomes orphaned
+ * but the `generator|<idx>` entry still resolves at the saved coord.
+ */
+export type NonBusCoordsByModel = Record<string, Record<string, BusCoord>>;
+
+/** UI categories the canvas tags non-bus React Flow nodes with. */
+const UI_CATEGORIES: ReadonlySet<string> = new Set(['generator', 'load', 'shunt']);
+
+/**
  * Outcome of merging stored sidecar coords with the current topology.
  *
  * - `coords`: the merged coordinate map (matched buses use stored coords;
@@ -78,11 +94,49 @@ export function parseSidecar(input: unknown): SidecarLayout {
     }
     coords[key] = { x: c.x, y: c.y };
   }
+  // `non_bus_coordinates` is optional — old sidecars without the field
+  // (incl. every curated layout shipped before v0.1.y) read as `{}`.
+  const nonBusCoords: NonBusCoordsByModel = {};
+  if (obj.non_bus_coordinates !== undefined) {
+    if (
+      !obj.non_bus_coordinates ||
+      typeof obj.non_bus_coordinates !== 'object' ||
+      Array.isArray(obj.non_bus_coordinates)
+    ) {
+      throw new TypeError('sidecar.non_bus_coordinates: expected object');
+    }
+    const rawNonBus = obj.non_bus_coordinates as Record<string, unknown>;
+    for (const [outer, inner] of Object.entries(rawNonBus)) {
+      if (!inner || typeof inner !== 'object' || Array.isArray(inner)) {
+        throw new TypeError(`sidecar.non_bus_coordinates[${outer}]: expected object`);
+      }
+      const innerEntries: Record<string, BusCoord> = {};
+      for (const [idx, raw] of Object.entries(inner as Record<string, unknown>)) {
+        if (!raw || typeof raw !== 'object') {
+          throw new TypeError(`sidecar.non_bus_coordinates[${outer}][${idx}]: expected object`);
+        }
+        const c = raw as Record<string, unknown>;
+        if (typeof c.x !== 'number' || !Number.isFinite(c.x)) {
+          throw new TypeError(
+            `sidecar.non_bus_coordinates[${outer}][${idx}].x: expected finite number`,
+          );
+        }
+        if (typeof c.y !== 'number' || !Number.isFinite(c.y)) {
+          throw new TypeError(
+            `sidecar.non_bus_coordinates[${outer}][${idx}].y: expected finite number`,
+          );
+        }
+        innerEntries[idx] = { x: c.x, y: c.y };
+      }
+      nonBusCoords[outer] = innerEntries;
+    }
+  }
   return {
     schema_version: obj.schema_version,
     andes_version: obj.andes_version,
     last_modified: obj.last_modified,
     coordinates: coords,
+    non_bus_coordinates: nonBusCoords,
   };
 }
 
@@ -143,18 +197,125 @@ export function mergeWithDrift(
 }
 
 /**
+ * One non-bus drag override the writer needs to persist. The drag
+ * override map keyed by React Flow node id (`${uiCategory}-${idx}`) does
+ * NOT carry the ANDES model class on its own — the caller (e.g.,
+ * `SaveSystemButton.writeSidecarAlongside`) resolves the model class from
+ * the topology before passing the entries here. Entries with a `null`
+ * `modelClass` get written ONLY under the UI-category layer (the
+ * model-class fallback is omitted).
+ */
+export interface NonBusOverride {
+  /** UI category React Flow tagged the node with. */
+  uiCategory: 'generator' | 'load' | 'shunt';
+  /** Element idx (stringified). */
+  idx: string;
+  /** ANDES model class name (e.g., `PV`, `GENROU`, `PQ`). `null` if unknown. */
+  modelClass: string | null;
+  /** The dragged coordinate. */
+  coord: BusCoord;
+}
+
+/**
+ * Walk a list of non-bus drag overrides and emit the dual-key
+ * `non_bus_coordinates` map per the resolved policy:
+ *
+ * - One entry under `<modelClass>` (when known) so a future load with
+ *   the same model class hits the precise coord.
+ * - One entry under `<uiCategory>` so a kind-edit that swaps the model
+ *   class out (e.g. `PV` → `GENROU`) still resolves on the fallback.
+ *
+ * Both layers are merged side-by-side in the same outer dict (the
+ * server schema accepts arbitrary string keys at the top level). When
+ * two drag overrides target the same `(layer, idx)` pair, the later
+ * entry wins — the input order is the caller's responsibility.
+ *
+ * Pure function — no side effects, no cloning of inputs other than the
+ * output dicts.
+ */
+export function buildNonBusCoordinates(
+  overrides: ReadonlyArray<NonBusOverride>,
+): NonBusCoordsByModel {
+  const out: NonBusCoordsByModel = {};
+  const ensureLayer = (key: string): Record<string, BusCoord> => {
+    let layer = out[key];
+    if (!layer) {
+      layer = {};
+      out[key] = layer;
+    }
+    return layer;
+  };
+  for (const o of overrides) {
+    if (o.modelClass) {
+      ensureLayer(o.modelClass)[o.idx] = { x: o.coord.x, y: o.coord.y };
+    }
+    ensureLayer(o.uiCategory)[o.idx] = { x: o.coord.x, y: o.coord.y };
+  }
+  return out;
+}
+
+/**
+ * Resolve a sidecar's `non_bus_coordinates` into the per-(model|idx)
+ * Map the graph builder consumes. Builds two views simultaneously:
+ *
+ * - exact `${modelClass}|${idx}` keys for entries the sidecar saved
+ *   under the precise model-class layer.
+ * - fallback `${uiCategory}|${idx}` keys (computed from the entry's
+ *   outer key when it matches a known UI category).
+ *
+ * The graph builder reads model-class first (`PV|1`) and the writer
+ * already wrote that key on save, so the precise hit lands in the same
+ * Map. When the model class changed since save (kind-edit case), the
+ * graph builder won't find `GENROU|1` directly — it should fall back to
+ * the UI-category key (`generator|1`) to recover the dragged position.
+ *
+ * The returned Map carries BOTH key shapes side by side. Conflicts
+ * (same key written twice from different layers) prefer the
+ * model-class layer because it iterates first.
+ */
+export function nonBusCoordsAsMap(nonBus: NonBusCoordsByModel | undefined): Map<string, BusCoord> {
+  const out = new Map<string, BusCoord>();
+  if (!nonBus) return out;
+  // Pass 1: UI-category layers — fold into `${uiCategory}|${idx}`. We
+  // walk these first so the model-class pass overrides on conflict.
+  for (const [outer, inner] of Object.entries(nonBus)) {
+    if (!UI_CATEGORIES.has(outer)) continue;
+    for (const [idx, coord] of Object.entries(inner)) {
+      out.set(`${outer}|${idx}`, coord);
+    }
+  }
+  // Pass 2: model-class layers — fold into `${modelClass}|${idx}`. The
+  // graph builder's primary lookup hits these on the no-edit path.
+  for (const [outer, inner] of Object.entries(nonBus)) {
+    if (UI_CATEGORIES.has(outer)) continue;
+    for (const [idx, coord] of Object.entries(inner)) {
+      out.set(`${outer}|${idx}`, coord);
+    }
+  }
+  return out;
+}
+
+/**
  * Build a fresh sidecar payload from the current coordinate map. Used by
  * `debouncedPutSidecar` and by curated-layout-export tooling.
+ *
+ * Pass `nonBusCoords` to persist generator/load/shunt drag positions
+ * alongside the bus coords. Defaults to an empty object when omitted —
+ * old call sites that only persist bus coords keep working unchanged.
  */
 export function buildSidecarLayout(
   coords: CoordsByIdx,
-  options: { andesVersion?: string } = {},
+  options: {
+    andesVersion?: string;
+    nonBusCoords?: NonBusCoordsByModel;
+  } = {},
 ): SidecarLayout {
   return {
     schema_version: SIDECAR_SCHEMA_VERSION,
     andes_version: options.andesVersion ?? 'unknown',
     last_modified: new Date().toISOString(),
     coordinates: coords,
+    non_bus_coordinates: options.nonBusCoords ?? {},
   };
 }
 

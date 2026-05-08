@@ -38,10 +38,13 @@ import { SldEmptySystem } from './SldEmptySystem';
 import { autoLayout } from './layout';
 import {
   buildSidecarLayout,
+  buildNonBusCoordinates,
   cancelPendingSidecarPut,
   debouncedPutSidecar,
   mergeWithDrift,
+  nonBusCoordsAsMap,
   type CoordsByIdx,
+  type NonBusOverride,
 } from './sidecar';
 import { curatedLayoutFor } from './curated';
 import { buildGraph, computeHandleAssignments } from './graph';
@@ -223,6 +226,14 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   //   when the user explicitly drag-overrides the node.
   const priorPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const relocatedIdsRef = useRef<Set<string>>(new Set());
+  // Merge the sidecar's `non_bus_coordinates` (curated layout OR
+  // user-saved on disk) into the graph builder's `nonBusCoords` opt.
+  // The merge prefers model-class keys but folds UI-category keys
+  // alongside, so a kind-edited element resolves via the fallback.
+  const nonBusCoordsMap = useMemo(
+    () => nonBusCoordsAsMap(storedSidecar?.non_bus_coordinates),
+    [storedSidecar],
+  );
   const baseGraph = useMemo(() => {
     if (!coords) return null;
     const { branches, stubs } = computeHandleAssignments(topology, coords);
@@ -231,6 +242,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
       handleAssignments: branches,
       stubAssignments: stubs,
       bendPoints,
+      nonBusCoords: nonBusCoordsMap,
       // Drag overrides flow into buildGraph so the push-out pass
       // treats user-placed nodes as stationary obstacles. The override
       // is also re-applied below as a defensive cosmetic — the
@@ -296,7 +308,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
     }
     priorPositionsRef.current = nextPrior;
     return { nodes: animatedNodes, edges: built.edges };
-  }, [topology, coords, autoBendPoints, usingAutoLayout, dragOverrides]);
+  }, [topology, coords, autoBendPoints, usingAutoLayout, dragOverrides, nonBusCoordsMap]);
 
   // Prune drag overrides for nodes that no longer exist (user reloaded,
   // or removed an element via a future delete API). Keeps the override
@@ -329,9 +341,26 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   //   fixes — previously every successful add() snapped dragged nodes
   //   back to their kind-default positions).
   // - Disk sidecar (only for sessions with a primaryPath): persists
-  //   bus coordinates across page reloads. Non-bus coordinates are
-  //   client-only in v0.1.x; substrate sidecar schema doesn't carry
-  //   `non_bus_coordinates` on the wire yet (deferred).
+  //   bus coordinates AND non-bus coordinates across page reloads. The
+  //   non-bus entries are written under the dual-key shape (model
+  //   class + UI category) per the sidecar schema (Unit 4, v0.1.y).
+  //
+  // Look up the model class per non-bus idx by walking the topology
+  // buckets. The map is rebuilt on every render to track topology
+  // edits (kind-changes, idx remappings); the work is O(non-bus
+  // count) so the cost is negligible.
+  const nonBusModelByCategoryIdx = useMemo(() => {
+    const map = new Map<string, string>();
+    const fold = (entries: ReadonlyArray<{ idx: number | string; kind: string }>, cat: string) => {
+      for (const e of entries) {
+        map.set(`${cat}-${String(e.idx)}`, e.kind);
+      }
+    };
+    fold(topology.generators ?? [], 'generator');
+    fold(topology.loads ?? [], 'load');
+    fold(topology.shunts ?? [], 'shunt');
+    return map;
+  }, [topology]);
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
       setNodes((curr) => {
@@ -350,17 +379,31 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
           }
           setDragOverrides(overrides);
 
-          // Only the bus subset goes to the disk sidecar (its schema
-          // tracks coordinates by bus idx). Loaded sessions only.
+          // Persist to the disk sidecar. Loaded sessions only.
           if (primaryPath) {
             const busCoords: CoordsByIdx = {};
+            const nonBusOverrides: NonBusOverride[] = [];
             for (const n of next) {
               if (n.type === 'bus') {
                 busCoords[n.id] = { x: n.position.x, y: n.position.y };
+                continue;
+              }
+              if (n.type === 'generator' || n.type === 'load' || n.type === 'shunt') {
+                const data = n.data as { idx?: string };
+                const idx = data.idx ?? n.id.replace(/^(generator|load|shunt)-/, '');
+                const modelClass = nonBusModelByCategoryIdx.get(n.id) ?? null;
+                nonBusOverrides.push({
+                  uiCategory: n.type,
+                  idx: String(idx),
+                  modelClass,
+                  coord: { x: n.position.x, y: n.position.y },
+                });
               }
             }
-            if (Object.keys(busCoords).length > 0) {
-              const layout = buildSidecarLayout(busCoords);
+            if (Object.keys(busCoords).length > 0 || nonBusOverrides.length > 0) {
+              const layout = buildSidecarLayout(busCoords, {
+                nonBusCoords: buildNonBusCoordinates(nonBusOverrides),
+              });
               debouncedPutSidecar(primaryPath, layout, putSidecar);
             }
           }
@@ -368,7 +411,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
         return next;
       });
     },
-    [primaryPath, putSidecar, setDragOverrides],
+    [primaryPath, putSidecar, setDragOverrides, nonBusModelByCategoryIdx],
   );
 
   // Cleanup pending PUT on unmount.
