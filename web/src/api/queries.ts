@@ -471,3 +471,25 @@ export function useSaveCase(): UseMutationResult<SaveCaseResponse, Error, SaveCa
     },
   });
 }
+
+/**
+ * `POST /sessions/{id}/undo-last-edit`. Drops the last add() and
+ * rebuilds the System from the remaining replay-buffer history. Returns
+ * the post-undo topology snapshot, which we seed into the topology
+ * cache so the SLD updates without a re-fetch round-trip.
+ */
+export function useUndoLastEdit(): UseMutationResult<TopologySummary, Error, SessionId> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sessionId: SessionId) => {
+      return await andesClient.post<TopologySummary>(
+        `/sessions/${encodeURIComponent(sessionId)}/undo-last-edit`,
+        { body: {}, timeoutMs: TIMEOUTS.workspace },
+      );
+    },
+    onSuccess: (data, sessionId) => {
+      queryClient.setQueryData(queryKeys.topology(sessionId), data);
+      useCaseStore.getState().setTopology(data);
+    },
+  });
+}

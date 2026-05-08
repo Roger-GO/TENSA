@@ -36,6 +36,9 @@ from andes_app.api.schemas import (
     TopologySchema,
     TopologySummary,
 )
+
+# UndoLastEditResponse aliased to TopologySummary — the substrate just
+# returns the post-undo topology snapshot.
 from andes_app.core.session import (
     SessionExpiredError,
     SessionManager,
@@ -417,3 +420,46 @@ async def save_case(
         raise _map_worker_error(exc) from exc
     bytes_written = canonical.stat().st_size if canonical.exists() else 0
     return SaveCaseResponse(filename=body.filename, bytes_written=bytes_written)
+
+
+# ---- undo (Unit 12) -------------------------------------------------------
+
+
+@router.post(
+    "/sessions/{session_id}/undo-last-edit",
+    operation_id="undoLastEdit",
+    summary="Drop the last add() and rebuild the System.",
+    response_model=TopologySummary,
+    responses={
+        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
+        404: {"model": ProblemDetails, "description": "Session not found or already closed."},
+        409: {
+            "model": ProblemDetails,
+            "description": (
+                "Session has been committed (PF / TDS already ran); reset "
+                "the run before undoing."
+            ),
+        },
+        422: {
+            "model": ProblemDetails,
+            "description": "No edits to undo on this session.",
+        },
+    },
+)
+async def undo_last_edit(
+    session_id: str,
+    request: Request,
+    _: RequireToken,
+) -> TopologySummary:
+    _enforce_body_size(request)
+    mgr = _manager(request)
+    try:
+        payload: Any = await mgr.invoke(session_id, "undo_last_edit", {})
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except WorkerError as exc:
+        raise _map_worker_error(exc) from exc
+    return TopologySummary(**payload)

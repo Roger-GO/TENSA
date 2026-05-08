@@ -239,6 +239,10 @@ def _handle_save_case(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return str(path)
 
 
+def _handle_undo_last_edit(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    return _serialize_dataclass(wrapper.undo_last_edit())
+
+
 def _handle_run_pflow(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.run_pflow())
 
@@ -402,6 +406,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "edit_element": _handle_edit_element,
     "create_blank": _handle_create_blank,
     "save_case": _handle_save_case,
+    "undo_last_edit": _handle_undo_last_edit,
     "run_pflow": _handle_run_pflow,
     # run_tds is special-cased — it needs the abort_event. Dispatched separately.
 }

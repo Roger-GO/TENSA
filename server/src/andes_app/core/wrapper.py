@@ -529,6 +529,40 @@ class Wrapper:
             )
         return entry
 
+    def undo_last_edit(self) -> TopologySnapshot:
+        """Drop the most recent add() from the replay buffer and rebuild
+        the System from the remaining history.
+
+        For blank sessions: re-creates ``andes.System()`` and replays the
+        buffer minus the popped entry.
+
+        For loaded sessions: reloads from the case file (which clears
+        the buffer) and re-applies all remaining buffer entries.
+
+        Raises ``ElementValidationError`` when there's nothing to undo.
+        """
+        if not self._replay_buffer:
+            raise ElementValidationError("no edits to undo")
+        kept = list(self._replay_buffer[:-1])
+        if self._case_path is not None:
+            # Loaded session: reload from file, then re-add the kept
+            # entries on top.
+            self.reload_case()
+            ss = self._require_loaded()
+            for model_name, params in kept:
+                try:
+                    ss.add(model_name, dict(params))
+                except Exception as exc:  # noqa: BLE001
+                    raise ElementValidationError(
+                        f"undo failed at replay of model {model_name!r}: "
+                        f"{_sanitize_message(str(exc))}"
+                    ) from exc
+                self._replay_buffer.append((model_name, dict(params)))
+            return self._topology_snapshot_locked()
+        # Blank session: replay-from-scratch with the truncated buffer.
+        self._replay_buffer = kept
+        return self._reload_blank_locked()
+
     def save_case(
         self, format: Literal["xlsx", "json"], filename: str
     ) -> Path:
