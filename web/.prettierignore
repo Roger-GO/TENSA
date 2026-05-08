@@ -1,0 +1,5 @@
+dist
+node_modules
+coverage
+src/api/generated.ts
+pnpm-lock.yaml

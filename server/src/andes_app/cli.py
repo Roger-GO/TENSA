@@ -17,7 +17,11 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
+import time
+import webbrowser
 from pathlib import Path
+from urllib.parse import urlparse
 
 import typer
 import uvicorn
@@ -76,6 +80,28 @@ def serve(
             "(``~/.andes-app/run-<pid>.token``). Used by tests."
         ),
     ),
+    allow_origin: list[str] = typer.Option(
+        [],
+        "--allow-origin",
+        help=(
+            "Additional CORS origin to accept (repeatable). Each value is added "
+            "to BOTH the Host/Origin allow-list AND the FastAPI CORS allow-list "
+            "so a Vite dev server (or similar) can talk to the substrate. Example: "
+            "``andes-app serve --allow-origin http://127.0.0.1:5173``. The host "
+            "portion of each URL is also added to the Host allow-list."
+        ),
+    ),
+    open_browser: bool = typer.Option(
+        False,
+        "--open",
+        help=(
+            "After the server starts listening, open the user's default browser at "
+            "``http://<host>:<port>/#token=<value>`` so the UI extracts the token "
+            "from the URL fragment on first load (no manual paste). The fragment "
+            "is never sent to the server; the UI clears it from ``location`` on "
+            "boot via ``history.replaceState``."
+        ),
+    ),
 ) -> None:
     """Run the andes-app substrate."""
     logging.basicConfig(
@@ -112,6 +138,31 @@ def serve(
     token = install_token(path=token_file or default_token_path())
     log.info("andes-app token file: %s", token.path)
 
+    # Parse --allow-origin entries into the (host, origin) pair the app
+    # factory expects. We split on the URL host:port so the Host header
+    # (which carries no scheme) matches alongside the Origin header (which
+    # does). Validation here surfaces malformed input early; downstream code
+    # works only with frozensets of strings.
+    extra_hosts: set[str] = set()
+    extra_origins: set[str] = set()
+    for raw in allow_origin:
+        parsed = urlparse(raw)
+        if not parsed.scheme or not parsed.netloc:
+            raise typer.BadParameter(
+                f"--allow-origin expects a full URL (e.g. http://127.0.0.1:5173), got {raw!r}",
+                param_hint="--allow-origin",
+            )
+        if parsed.scheme not in {"http", "https"}:
+            raise typer.BadParameter(
+                f"--allow-origin scheme must be http or https, got {parsed.scheme!r}",
+                param_hint="--allow-origin",
+            )
+        # Strip any trailing path/slash; CORS origins are scheme://host[:port].
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        extra_origins.add(origin)
+        extra_hosts.add(parsed.netloc)
+        log.info("CORS allow-origin: %s (host: %s)", origin, parsed.netloc)
+
     fastapi_app = make_app(
         expected_token=token.value,
         workspace=canonical_workspace,
@@ -119,7 +170,23 @@ def serve(
         bind_port=port,
         max_sessions=max_sessions,
         idle_timeout_seconds=idle_timeout_seconds,
+        extra_allowed_hosts=frozenset(extra_hosts),
+        extra_allowed_origins=frozenset(extra_origins),
     )
+
+    # ``--open`` sentinel: spawn a watcher thread that polls until uvicorn
+    # has bound a real port (relevant when ``--port 0`` is used) and then
+    # opens the user's browser at the URL-fragment handoff URL. The fragment
+    # is never sent to the server; the UI extracts the token client-side and
+    # clears the fragment via ``history.replaceState`` on boot.
+    if open_browser:
+        _spawn_open_browser_watcher(
+            fastapi_app=fastapi_app,
+            requested_host=bind,
+            requested_port=port,
+            token_value=token.value,
+            log=log,
+        )
 
     # Serve. ``access_log=False`` disables uvicorn's default access logger
     # (per the trust-model docstring; the structured logger is SaaS-phase work).
@@ -130,6 +197,67 @@ def serve(
         log_level="info",
         access_log=False,
     )
+
+
+def _spawn_open_browser_watcher(
+    *,
+    fastapi_app: object,
+    requested_host: str,
+    requested_port: int,
+    token_value: str,
+    log: logging.Logger,
+) -> None:
+    """Launch a daemon thread that opens the user's browser once the server
+    is listening on a real port.
+
+    When ``--port 0`` was passed, the actual port is OS-assigned at bind
+    time and exposed via ``app.state.bound_port`` (set by uvicorn after
+    ``startup``). We poll briefly with a deadline so a server that fails to
+    bind doesn't leave the watcher hung forever.
+    """
+
+    deadline_seconds = 5.0
+    poll_interval = 0.05
+
+    def _watcher() -> None:
+        # Pick a host the browser can navigate to. ``0.0.0.0`` binds all
+        # interfaces but isn't a valid URL host; use 127.0.0.1 in that case.
+        browser_host = (
+            "127.0.0.1" if requested_host in {"0.0.0.0", "::", ""} else requested_host
+        )
+        deadline = time.monotonic() + deadline_seconds
+        bound_port = requested_port
+        # If the user passed --port 0, wait for uvicorn to bind. uvicorn
+        # publishes the chosen port via the server.servers[].sockets list,
+        # but we don't have a handle to ``server`` here — fall back to a
+        # short sleep so the user's terminal is unlikely to scroll past
+        # the "listening on" line.
+        if bound_port == 0:
+            log.warning(
+                "--open with --port 0: cannot reliably reconstruct the bound port; "
+                "browser will not open automatically. Pass --port <N> to use --open."
+            )
+            return
+        # Poll a TCP probe so we don't open the browser before the listener
+        # is ready (the first request would otherwise 5xx).
+        import socket
+        while time.monotonic() < deadline:
+            try:
+                with socket.create_connection((browser_host, bound_port), timeout=0.2):
+                    break
+            except OSError:
+                time.sleep(poll_interval)
+        else:
+            log.warning("--open: server did not start listening within %.1fs", deadline_seconds)
+            return
+        url = f"http://{browser_host}:{bound_port}/#token={token_value}"
+        log.info("opening browser: %s", url.replace(token_value, "<token>"))
+        try:
+            webbrowser.open(url, new=2)
+        except Exception as exc:  # pragma: no cover - platform-dependent
+            log.warning("--open: webbrowser.open failed: %s", exc)
+
+    threading.Thread(target=_watcher, name="andes-app-open", daemon=True).start()
 
 
 @app.command(name="warm-cache")

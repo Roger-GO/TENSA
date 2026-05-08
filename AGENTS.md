@@ -4,7 +4,7 @@ This file is for any agent (human or AI) working in this repo. Read it before to
 
 ## Project shape
 
-- **Layout**: `server/` is the Python substrate package (PEP 621 + src layout, hatchling build backend). v0.1+ adds `web/` for the React UI; not in Phase A.
+- **Layout**: `server/` is the Python substrate package (PEP 621 + src layout, hatchling build backend). `web/` is the v0.1+ React UI (Vite 6 + React 19 + TS + Tailwind v4 + Radix; pnpm). The two are independent packages with their own CI workflows.
 - **All file paths in commits, plans, and reviews are repo-relative.** Never use absolute paths in code, docs, or commit messages.
 
 ## Pinned versions
@@ -43,10 +43,25 @@ The trust model lives in the top-level docstring of `server/src/andes_app/__init
 
 - **Patterns to follow** are listed per implementation unit in the plan. Read them before coding the unit.
 - **Test-first signal** — when a plan unit carries an `Execution note: Start with a failing integration test...` line, honor it.
-- **Tests live alongside the package**: `server/tests/{unit,integration,acceptance}/`. Acceptance tests run only with `pytest -m acceptance`.
-- **Style**: `ruff check` (lint) and `mypy --strict` (types) on `server/src/`. Both must pass before commit.
+- **Tests live alongside the package**:
+  - `server/tests/{unit,integration,acceptance}/` — Python; acceptance tests run only with `pytest -m acceptance`.
+  - `web/tests/{unit,e2e}/` — TypeScript; `pnpm test` (Vitest) for unit, `pnpm test:e2e` (Playwright) for e2e. The e2e suite spawns its own dev server but expects the substrate to be running.
+- **Style**:
+  - Python: `ruff check` (lint) and `mypy --strict` (types) on `server/src/`. Both must pass before commit.
+  - TypeScript: `pnpm lint` (ESLint, `--max-warnings 0`) and `pnpm typecheck` (TS strict + `noUncheckedIndexedAccess`) on `web/`. `pnpm format:check` (Prettier) must pass.
 - **Commits are conventional** (`feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `test:`). Scope is the implementation unit name when applicable: `feat(unit-3): FastAPI app skeleton + auth`.
 - **Never use `git add .`** in this repo. Stage files explicitly per logical unit.
+
+## web/ conventions
+
+- **Package manager**: pnpm 11+. Install with `npm install -g pnpm` or `corepack enable`. The lockfile is checked in; `pnpm install --frozen-lockfile` runs in CI.
+- **Node**: 22 LTS minimum (newer versions also work).
+- **Component conventions**: 2-space indent, single quotes, trailing commas (Prettier-enforced). Named exports only — no default exports for components. Components in `src/components/<scope>/<Name>.tsx`; tests at `tests/unit/components/<scope>/<Name>.test.tsx`.
+- **Styling**: Tailwind v4 utility classes only. Color/type/spacing/motion tokens live in `web/src/styles/tokens.css` (Unit 2 fills it in) and resolve via Tailwind's `@theme`. Never hardcode colors / spacing values in components — always go through tokens.
+- **Radix wrappers** (`web/src/components/ui/*`) forward Radix's behavior unchanged and apply project tokens via Tailwind. Never re-implement Radix logic. Falsification gate (Unit 2): if the project-built component library doesn't out-look stock shadcn-with-tokens, downgrade.
+- **API client**: types are codegen'd from the substrate's `/openapi.json` via `pnpm regen-api-types` into `src/api/generated.ts` (committed). Hand-authored brands (`SessionId`, `RunId`) live in `src/api/types.ts`.
+- **Auth**: per-launch token from the substrate, persisted in `sessionStorage` only (NOT localStorage; persists across same-tab reloads, clears on tab close). Never log token values.
+- **`/api/*` prefix**: the Vite dev proxy strips `/api` and forwards to the substrate's root paths. Production (Unit 10) prefixes the substrate's routers with `/api` so the same client URL works in both modes.
 
 ## What goes where
 

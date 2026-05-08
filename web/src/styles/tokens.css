@@ -1,0 +1,28 @@
+/*
+ * Design tokens placeholder for Unit 1 (web project scaffolding).
+ *
+ * Unit 2 owns the full token system: OKLCH colors (light + dark), type scale,
+ * spacing scale, motion tokens, plus the Tailwind v4 @theme directive that
+ * wires them through.
+ *
+ * This file exists in Unit 1 only so main.tsx can import it without a
+ * resolution error. The minimal @theme block below registers the bare
+ * Tailwind defaults so utility classes like `bg-background` and
+ * `text-foreground` resolve at build time.
+ */
+
+@import 'tailwindcss';
+
+@theme {
+  --color-background: oklch(0.99 0 0);
+  --color-foreground: oklch(0.15 0.01 270);
+  --color-muted-foreground: oklch(0.55 0.01 270);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background: oklch(0.13 0.01 270);
+    --color-foreground: oklch(0.97 0 0);
+    --color-muted-foreground: oklch(0.65 0.01 270);
+  }
+}
