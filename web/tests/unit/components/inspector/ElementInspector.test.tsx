@@ -232,4 +232,29 @@ describe('<ElementInspector />', () => {
 
     expect(screen.getByText(/per-element pf results/i)).toBeInTheDocument();
   });
+
+  // ---- Unit 2 (v0.1.y): DeleteElementButton placement guards -------------
+
+  it('renders the DeleteElementButton in the inspector header when state=pre-setup and PF is idle', () => {
+    seedLoadedCase();
+    useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '1' } });
+    render(withQueryClient(<ElementInspector />));
+    expect(screen.getByTestId('delete-element-button')).toBeInTheDocument();
+  });
+
+  it('hides the DeleteElementButton when state is committed', () => {
+    seedLoadedCase();
+    mockTopology = { ...TOPOLOGY, state: 'committed' };
+    useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '1' } });
+    render(withQueryClient(<ElementInspector />));
+    expect(screen.queryByTestId('delete-element-button')).toBeNull();
+  });
+
+  it('hides the DeleteElementButton while PF is running', () => {
+    seedLoadedCase();
+    useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '1' } });
+    usePflowStore.setState({ lastRun: null, isRunning: true, error: null });
+    render(withQueryClient(<ElementInspector />));
+    expect(screen.queryByTestId('delete-element-button')).toBeNull();
+  });
 });

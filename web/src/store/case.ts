@@ -11,7 +11,7 @@
  * — the slice is a pointer, the cache is the data.
  */
 import { create } from 'zustand';
-import type { TopologySummary, SidecarLayout, WorkspacePath } from '@/api/types';
+import type { TopologyEntry, TopologySummary, SidecarLayout, WorkspacePath } from '@/api/types';
 
 export interface CaseSelection {
   /**
@@ -77,12 +77,25 @@ export interface CaseState {
   addPanelDirty: boolean;
   /** Per-node coord overrides captured from user drags (Unit 13a). */
   dragOverrides: DragOverrides;
+  /**
+   * Topology entries flagged as dependents of an in-flight delete attempt
+   * (v0.1.y Unit 2). Populated when a ``DELETE`` returns 422 with the
+   * ``DeleteBlockedResponse`` body and the user clicks one of the
+   * dependent entries to navigate to it; the SLD canvas reads this list
+   * and applies a warning ring to the matching nodes so the user can see
+   * what's left to clear before re-issuing the delete. Cleared when the
+   * blocking delete eventually succeeds (the topology refetch resolves
+   * with no dependents) or when the user explicitly clears it.
+   */
+  pendingDependents: TopologyEntry[];
   setCase: (selection: CaseSelection) => void;
   setDragOverrides: (next: DragOverrides) => void;
   clearDragOverrides: () => void;
   setTopology: (topology: TopologySummary | null) => void;
   setLayoutSidecar: (sidecar: SidecarLayout | null) => void;
   setSelectedElement: (element: SelectedElement | null) => void;
+  setPendingDependents: (entries: TopologyEntry[]) => void;
+  clearPendingDependents: () => void;
   openAddPanel: (kind: string | null) => void;
   closeAddPanel: () => void;
   setAddPanelKind: (kind: string | null) => void;
@@ -99,6 +112,7 @@ export const useCaseStore = create<CaseState>((set) => ({
   addPanelKind: null,
   addPanelDirty: false,
   dragOverrides: {},
+  pendingDependents: [],
   setCase: (selection: CaseSelection) =>
     // A new case wipes the old topology + sidecar + selection so
     // consumers don't see stale data while the new fetches are in flight.
@@ -111,18 +125,19 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelKind: null,
       addPanelDirty: false,
       dragOverrides: {},
+      pendingDependents: [],
     }),
   setDragOverrides: (next: DragOverrides) => set({ dragOverrides: next }),
   clearDragOverrides: () => set({ dragOverrides: {} }),
   setTopology: (topology: TopologySummary | null) => set({ topology }),
   setLayoutSidecar: (sidecar: SidecarLayout | null) => set({ layoutSidecar: sidecar }),
   setSelectedElement: (element: SelectedElement | null) => set({ selectedElement: element }),
+  setPendingDependents: (entries: TopologyEntry[]) => set({ pendingDependents: entries }),
+  clearPendingDependents: () => set({ pendingDependents: [] }),
   openAddPanel: (kind: string | null) =>
     set({ addPanelOpen: true, addPanelKind: kind, addPanelDirty: false }),
-  closeAddPanel: () =>
-    set({ addPanelOpen: false, addPanelKind: null, addPanelDirty: false }),
-  setAddPanelKind: (kind: string | null) =>
-    set({ addPanelKind: kind, addPanelDirty: false }),
+  closeAddPanel: () => set({ addPanelOpen: false, addPanelKind: null, addPanelDirty: false }),
+  setAddPanelKind: (kind: string | null) => set({ addPanelKind: kind, addPanelDirty: false }),
   setAddPanelDirty: (dirty: boolean) => set({ addPanelDirty: dirty }),
   clearCase: () =>
     set({
@@ -134,5 +149,6 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelKind: null,
       addPanelDirty: false,
       dragOverrides: {},
+      pendingDependents: [],
     }),
 }));

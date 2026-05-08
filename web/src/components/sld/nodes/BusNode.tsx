@@ -5,6 +5,7 @@ import { iconForModel } from '@/icons/iec60617/manifest';
 import { cn } from '@/lib/cn';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
+import { useIsPendingDependent } from '@/store/pendingDependents';
 import { getBusOverlayState } from '../overlay';
 import { SOURCE_HANDLE, TARGET_HANDLE, type Side } from '../graph';
 
@@ -53,12 +54,14 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
   const pflowResult = usePflowStore((s) => s.lastRun);
   const hideLabels = useUiStore((s) => s.hideLabels);
   const overlay = getBusOverlayState(d.idx, pflowResult, hideLabels);
+  const isPendingDependent = useIsPendingDependent(d.kind, d.idx);
   return (
     <div
       data-testid={`bus-node-${d.idx}`}
       data-kind="bus"
       data-idx={d.idx}
       data-band={overlay.band}
+      data-pending-dependent={isPendingDependent ? 'true' : undefined}
       className={cn(
         'group flex flex-col items-center gap-0.5 px-2.5 py-1.5',
         'bg-background text-foreground',
@@ -66,6 +69,7 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
         selected
           ? 'border-[var(--color-ring)] ring-2 ring-[var(--color-ring)]'
           : overlay.color_class,
+        isPendingDependent ? 'ring-warning/60 ring-2' : '',
         'transition-colors duration-[var(--duration-fast)]',
         'cursor-pointer select-none',
       )}
@@ -76,13 +80,13 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
             type="target"
             position={position}
             id={TARGET_HANDLE[side]}
-            className="!h-0 !w-0 !min-h-0 !min-w-0 !border-0 !bg-transparent"
+            className="!h-0 !min-h-0 !w-0 !min-w-0 !border-0 !bg-transparent"
           />
           <Handle
             type="source"
             position={position}
             id={SOURCE_HANDLE[side]}
-            className="!h-0 !w-0 !min-h-0 !min-w-0 !border-0 !bg-transparent"
+            className="!h-0 !min-h-0 !w-0 !min-w-0 !border-0 !bg-transparent"
           />
         </Fragment>
       ))}

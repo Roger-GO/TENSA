@@ -3,6 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/shell/EmptyState';
 import { EditElementButton } from '@/components/elements/EditElementButton';
+import { DeleteElementButton } from '@/components/elements/DeleteElementButton';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useSessionStore } from '@/store/session';
@@ -128,7 +129,11 @@ function PropertiesTab({ entry, selected, editable, paramMetas }: PropertiesTabP
           // bus_idx fields aren't editable in v0.1.x (structural-link
           // edits are deferred); render read-only.
           const canEditThisField =
-            editable && meta !== undefined && meta.kind !== 'bus_idx' && key !== 'idx' && key !== 'name';
+            editable &&
+            meta !== undefined &&
+            meta.kind !== 'bus_idx' &&
+            key !== 'idx' &&
+            key !== 'name';
           return (
             <div key={key} className="contents">
               <dt className="text-muted-foreground font-mono text-xs">{key}</dt>
@@ -256,9 +261,7 @@ function ResultsTab({ selected, pflowResult }: ResultsTabProps) {
     const gen = pflowResult.generator_outputs?.[selected.idx];
     if (!gen) {
       return (
-        <p className="text-muted-foreground text-xs">
-          No PF output for generator {selected.idx}.
-        </p>
+        <p className="text-muted-foreground text-xs">No PF output for generator {selected.idx}.</p>
       );
     }
     return (
@@ -280,11 +283,7 @@ function ResultsTab({ selected, pflowResult }: ResultsTabProps) {
   if (selected.kind === 'load') {
     const ld = pflowResult.load_consumption?.[selected.idx];
     if (!ld) {
-      return (
-        <p className="text-muted-foreground text-xs">
-          No PF result for load {selected.idx}.
-        </p>
-      );
+      return <p className="text-muted-foreground text-xs">No PF result for load {selected.idx}.</p>;
     }
     return (
       <dl
@@ -327,8 +326,8 @@ function ResultsTab({ selected, pflowResult }: ResultsTabProps) {
   // toward the connected bus.
   return (
     <p className="text-muted-foreground text-xs">
-      Per-element PF results for {selected.kind} not surfaced; check the
-      connected bus in the Results table.
+      Per-element PF results for {selected.kind} not surfaced; check the connected bus in the
+      Results table.
     </p>
   );
 }
@@ -403,11 +402,20 @@ export function ElementInspector({ className }: ElementInspectorProps) {
       data-testid="element-inspector"
       className={cn('flex h-full min-h-0 flex-col gap-2 p-3', className)}
     >
-      <header className="flex flex-col gap-0.5">
-        <p className="text-muted-foreground text-xs font-medium">Inspecting</p>
-        <p className="text-foreground truncate font-mono text-sm">
-          {selectedElement.kind} {selectedElement.idx}
-        </p>
+      <header className="flex items-start gap-2">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <p className="text-muted-foreground text-xs font-medium">Inspecting</p>
+          <p className="text-foreground truncate font-mono text-sm">
+            {selectedElement.kind} {selectedElement.idx}
+          </p>
+        </div>
+        {editable && entry ? (
+          <DeleteElementButton
+            model={entry.kind}
+            idx={String(entry.idx)}
+            kind={selectedElement.kind}
+          />
+        ) : null}
       </header>
 
       <Tabs
@@ -419,10 +427,7 @@ export function ElementInspector({ className }: ElementInspectorProps) {
           <TabsTrigger value="properties">Properties</TabsTrigger>
           <TabsTrigger value="results">Results</TabsTrigger>
         </TabsList>
-        <TabsContent
-          value="properties"
-          className="min-h-0 flex-1 space-y-2 overflow-auto"
-        >
+        <TabsContent value="properties" className="min-h-0 flex-1 space-y-2 overflow-auto">
           {isCommitted ? (
             <ResetBanner onReset={onResetRun} resetting={reloadCase.isPending} />
           ) : null}
