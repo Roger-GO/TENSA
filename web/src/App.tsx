@@ -2,6 +2,13 @@ import { useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from '@/components/shell/AppShell';
 import { TokenPasteModal } from '@/components/auth/TokenPasteModal';
+import { CaseNav } from '@/components/case/CaseNav';
+import { ElementInspector } from '@/components/inspector/ElementInspector';
+import { ResultsTable } from '@/components/inspector/ResultsTable';
+import { RunButton } from '@/components/pflow/RunButton';
+import { HideLabelsToggle } from '@/components/pflow/HideLabelsToggle';
+import { ConvergenceErrorPanel } from '@/components/pflow/ConvergenceErrorPanel';
+import { RuntimeCrashModal } from '@/components/pflow/RuntimeCrashModal';
 import { makeQueryClient, wireGlobal401Handler } from '@/api/queries';
 import { setTokenGetter } from '@/api/client';
 import { getAuthToken } from '@/store';
@@ -14,16 +21,18 @@ setTokenGetter(getAuthToken);
 
 /**
  * Root component. Wraps the AppShell with the cross-cutting providers
- * (QueryClientProvider + global 401 cascade) and mounts the
- * TokenPasteModal in the shell's `modal` slot — the modal renders only
- * when `auth.token === null`, so for an authenticated tab the slot is
- * effectively empty.
+ * (QueryClientProvider + global 401 cascade) and assembles the unit-9
+ * shell composition: top bar with the run-PF + label-toggle controls,
+ * left rail with case nav, right dock with inspector + results +
+ * convergence-error overlay, and modals (TokenPasteModal +
+ * RuntimeCrashModal).
  *
- * Subsequent Phase 2 units fill in the rest of the shell:
+ * Error-surface routing (R8 → R18):
  *
- * - Unit 7: case nav (`leftRail`), workspace file picker, run controls (`topBarRight`).
- * - Unit 8: SLD canvas (`main`).
- * - Unit 9: inspector + results table (`inspector` + `results`).
+ * - Parse error (load failed) → ParseErrorBanner inside CaseNav.
+ * - Solver non-convergence → ConvergenceErrorPanel as dock overlay.
+ * - Runtime crash (5xx) → RuntimeCrashModal as the one allowed
+ *   non-destructive modal.
  */
 export function App() {
   // The QueryClient is created once per mount via `useState`'s lazy
@@ -37,7 +46,20 @@ export function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AppShell modal={<TokenPasteModal />} />
+      <AppShell
+        topBarCenter={<RunButton />}
+        topBarRight={<HideLabelsToggle />}
+        leftRail={<CaseNav />}
+        inspector={<ElementInspector />}
+        results={<ResultsTable />}
+        dockOverlay={<ConvergenceErrorPanel />}
+        modal={
+          <>
+            <TokenPasteModal />
+            <RuntimeCrashModal />
+          </>
+        }
+      />
     </QueryClientProvider>
   );
 }
