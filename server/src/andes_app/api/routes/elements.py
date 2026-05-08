@@ -17,6 +17,7 @@ via a Content-Length pre-check. Oversize requests return 413.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -28,6 +29,8 @@ from andes_app.api.schemas import (
     EditElementRequest,
     ElementCreated,
     ProblemDetails,
+    SaveCaseRequest,
+    SaveCaseResponse,
     TopologyEntry,
     TopologyParamMeta,
     TopologySchema,
@@ -39,6 +42,10 @@ from andes_app.core.session import (
     WorkerError,
 )
 from andes_app.core.wrapper import _PARAMS_BY_MODEL
+from andes_app.security.paths import (
+    WorkspacePathError,
+    open_workspace_file_for_write,
+)
 
 router = APIRouter()
 
@@ -316,3 +323,97 @@ async def create_blank(
     except WorkerError as exc:
         raise _map_worker_error(exc) from exc
     return BlankSystemResponse(topology=TopologySummary(**payload))
+
+
+# ---- save (Unit 11) --------------------------------------------------------
+
+
+def _validate_save_filename(workspace: Path, filename: str, format: str) -> Path:
+    """Reject paths that escape the workspace; verify extension matches
+    the chosen format. Returns the canonical absolute target path."""
+    expected_ext = {"xlsx": ".xlsx", "json": ".json"}[format]
+    if not filename.endswith(expected_ext):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"filename {filename!r} does not match format {format!r}; "
+                f"expected extension {expected_ext}"
+            ),
+        )
+    try:
+        with open_workspace_file_for_write(workspace, filename) as canonical:
+            return canonical
+    except WorkspacePathError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/save",
+    operation_id="saveCase",
+    summary="Write the current System to the workspace as xlsx or json.",
+    response_model=SaveCaseResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
+        404: {"model": ProblemDetails, "description": "Session not found or no case loaded."},
+        409: {
+            "model": ProblemDetails,
+            "description": (
+                "A file at the given filename exists and ``overwrite`` was "
+                "not set, OR no case is loaded on this session."
+            ),
+        },
+        413: {
+            "model": ProblemDetails,
+            "description": "Body exceeded the 64 KB cap.",
+        },
+        422: {
+            "model": ProblemDetails,
+            "description": (
+                "Filename failed validation (path traversal, mismatched "
+                "extension, or unwriteable target)."
+            ),
+        },
+    },
+)
+async def save_case(
+    session_id: str,
+    body: SaveCaseRequest,
+    request: Request,
+    _: RequireToken,
+) -> SaveCaseResponse:
+    _enforce_body_size(request)
+    mgr = _manager(request)
+    workspace = getattr(request.app.state, "workspace", None)
+    if workspace is None or not isinstance(workspace, Path):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="workspace is not configured",
+        )
+    canonical = _validate_save_filename(workspace, body.filename, body.format)
+    if canonical.exists() and not body.overwrite:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"file {body.filename!r} already exists; pass overwrite=true "
+                "to replace it."
+            ),
+        )
+    try:
+        await mgr.invoke(
+            session_id,
+            "save_case",
+            {"format": body.format, "filename": str(canonical)},
+        )
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except WorkerError as exc:
+        raise _map_worker_error(exc) from exc
+    bytes_written = canonical.stat().st_size if canonical.exists() else 0
+    return SaveCaseResponse(filename=body.filename, bytes_written=bytes_written)

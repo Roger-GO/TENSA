@@ -41,6 +41,10 @@ export type ElementCreated = components['schemas']['ElementCreated'];
 export type BlankSystemResponse = components['schemas']['BlankSystemResponse'];
 export type TopologySchema = components['schemas']['TopologySchema'];
 export type TopologyParamMeta = components['schemas']['TopologyParamMeta'];
+export type SaveCaseRequest = components['schemas']['SaveCaseRequest'];
+export type SaveCaseResponse = components['schemas']['SaveCaseResponse'];
+export type GeneratorOutput = components['schemas']['GeneratorOutput'];
+export type LoadConsumption = components['schemas']['LoadConsumption'];
 /** ANDES param value types in API request/response payloads. */
 export type ParamValue = number | string | boolean;
 
