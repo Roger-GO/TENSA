@@ -139,7 +139,13 @@ export function ToggleSpecForm({
           id="toggle-dev-idx"
           data-testid="toggle-dev-idx"
           value={String(spec.dev_idx ?? '')}
-          onChange={(e) => onChange({ ...spec, dev_idx: e.target.value })}
+          onChange={(e) => {
+            const v = e.target.value;
+            // Coerce numeric idxes back to int — ANDES exact-type-matches
+            // dev_idx against the model's idx values, which are integers
+            // for Bus, Line, generators, etc.
+            onChange({ ...spec, dev_idx: /^-?\d+$/.test(v) ? Number(v) : v });
+          }}
           className={cn(
             'bg-background border-border h-7 rounded border px-2 font-mono text-xs',
             errors.dev_idx ? 'border-destructive' : '',
