@@ -10,9 +10,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
 
-const { constructSpy, setDataSpy, FakeUPlot } = vi.hoisted(() => {
+const { constructSpy, setDataSpy, setCursorSpy, valToPosSpy, FakeUPlot } = vi.hoisted(() => {
   const constructSpy = vi.fn();
   const setDataSpy = vi.fn();
+  const setCursorSpy = vi.fn();
+  const valToPosSpy = vi.fn();
   class FakeUPlot {
     root: HTMLElement;
     constructor(opts: unknown, data: unknown, target: HTMLElement) {
@@ -23,12 +25,23 @@ const { constructSpy, setDataSpy, FakeUPlot } = vi.hoisted(() => {
     setData(data: unknown) {
       setDataSpy(data);
     }
+    setCursor(opts: unknown, fireHook?: boolean) {
+      setCursorSpy(opts, fireHook);
+    }
+    valToPos(val: number, scaleKey: string): number {
+      valToPosSpy(val, scaleKey);
+      // Stub a deterministic mapping: 1 px per simulation second.
+      // (The wrapper only consumes the value as a left coordinate; the
+      // exact mapping doesn't matter for the assertion that setCursor
+      // was called with the right idx-derived t.)
+      return val * 100;
+    }
     setSize() {}
     destroy() {
       this.root.remove();
     }
   }
-  return { constructSpy, setDataSpy, FakeUPlot };
+  return { constructSpy, setDataSpy, setCursorSpy, valToPosSpy, FakeUPlot };
 });
 
 vi.mock('uplot', () => ({
@@ -57,8 +70,16 @@ describe('TimeSeriesPlot', () => {
   beforeEach(() => {
     constructSpy.mockClear();
     setDataSpy.mockClear();
+    setCursorSpy.mockClear();
+    valToPosSpy.mockClear();
     useRunsStore.setState({ runs: {}, activeRunId: null });
-    usePlotStore.setState({ selectedByRun: {}, filterByRun: {}, expandedByRun: {} });
+    usePlotStore.setState({
+      selectedByRun: {},
+      filterByRun: {},
+      expandedByRun: {},
+      scrubByRun: {},
+      playingByRun: {},
+    });
   });
 
   afterEach(() => {
@@ -141,5 +162,41 @@ describe('TimeSeriesPlot', () => {
     usePlotStore.getState().setSelection('other-run', new Set(['Bus_2_v']));
     const { getByTestId } = render(<TimeSeriesPlot runId="other-run" />);
     expect(getByTestId('time-series-plot')).toHaveAttribute('data-run-id', 'other-run');
+  });
+
+  it('drives uPlot.setCursor when scrubT is set, with the closest-frame index', () => {
+    // Plan example: frames at t=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+    // scrubT = 0.5 → idx 5 (the closest-prior frame). The wrapper
+    // calls valToPos(t[idx], 'x') and forwards as the cursor's left.
+    seedRun('r1', ['Bus_1_v']);
+    appendRows('r1', [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6], {
+      Bus_1_v: [1, 1, 1, 1, 1, 1, 1],
+    });
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v']));
+    usePlotStore.getState().setScrubT('r1', 0.5);
+    render(<TimeSeriesPlot />);
+    expect(setCursorSpy).toHaveBeenCalled();
+    expect(valToPosSpy).toHaveBeenCalledWith(0.5, 'x');
+    const lastCursor = setCursorSpy.mock.calls.at(-1)?.[0] as { left?: number; top?: number };
+    // valToPos stub returned 0.5 * 100 = 50.
+    expect(lastCursor?.left).toBe(50);
+  });
+
+  it('does not call setCursor while in live mode (scrubT === null)', () => {
+    seedRun('r1', ['Bus_1_v']);
+    appendRows('r1', [0, 0.1, 0.2], { Bus_1_v: [1, 1, 1] });
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v']));
+    // scrubT remains null (default) → live mode.
+    render(<TimeSeriesPlot />);
+    expect(setCursorSpy).not.toHaveBeenCalled();
+  });
+
+  it('exposes scrubT as a data attribute on the plot wrapper for SLD overlay subscription', () => {
+    seedRun('r1', ['Bus_1_v']);
+    appendRows('r1', [0, 1, 2], { Bus_1_v: [1, 1, 1] });
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v']));
+    usePlotStore.getState().setScrubT('r1', 1.5);
+    const { getByTestId } = render(<TimeSeriesPlot />);
+    expect(getByTestId('time-series-plot')).toHaveAttribute('data-scrub-t', '1.5');
   });
 });
