@@ -1,15 +1,25 @@
 /**
  * Tests for the ``runs`` slice — typed-array growth, cap eviction, and
  * lifecycle transitions.
+ *
+ * Unit 9 (v2.0) extends this with retention-policy + overlay-set tests.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { __internal, DEFAULT_MEMORY_BUDGET_BYTES, useRunsStore } from '@/store/runs';
+import {
+  __internal,
+  DEFAULT_MEMORY_BUDGET_BYTES,
+  DEFAULT_RETENTION_LIMIT,
+  MAX_RETENTION_LIMIT,
+  useRunsStore,
+} from '@/store/runs';
 
 function reset(): void {
   useRunsStore.setState({
     runs: {},
     activeRunId: null,
     memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
+    overlayRunIds: new Set<string>(),
+    retentionLimit: DEFAULT_RETENTION_LIMIT,
   });
 }
 
@@ -154,32 +164,169 @@ describe('runs store — done / error / aborted / connection', () => {
     expect(useRunsStore.getState().activeRunId).toBeNull();
   });
 
-  it('clearRuns drops every run', () => {
+  it('clearRuns drops every run and clears the overlay set', () => {
     useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
     useRunsStore.getState().startRun({ runId: 'r2', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().addOverlayRun('r2');
     useRunsStore.getState().clearRuns();
     expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(0);
     expect(useRunsStore.getState().activeRunId).toBeNull();
+    expect(useRunsStore.getState().overlayRunIds.size).toBe(0);
   });
 });
 
-describe('runs store — eviction policy', () => {
+describe('runs store — retention policy (Unit 9 v2.0)', () => {
   beforeEach(reset);
   afterEach(reset);
 
-  it('startRun trims to comparison limit (1 prior + 1 new)', () => {
-    // Even though only "1 active + 1 completed" is the production cap,
-    // the in-place ``trimToComparisonLimit`` enforces the simpler "max
-    // 1 retained when starting a third" rule by dropping the oldest.
+  it('default retention keeps up to 5 completed runs + the active one', () => {
+    // Start + complete 5 runs, then start a 6th.
+    for (let i = 1; i <= 5; i += 1) {
+      useRunsStore.getState().startRun({ runId: `r${i}`, tf: 1.0, columnNames: [] });
+      useRunsStore.getState().markRunDone(`r${i}`, 1.0);
+    }
+    // After 5 completed, all 5 still retained.
+    expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(5);
+    // Start a 6th run. Retention applies on startRun (the just-completed
+    // 5 are eligible; the new active one is shielded).
+    useRunsStore.getState().startRun({ runId: 'r6', tf: 1.0, columnNames: [] });
+    const ids = Object.keys(useRunsStore.getState().runs);
+    // Oldest completed (r1) evicted; r2..r5 (4 completed) + r6 (active) = 5.
+    expect(ids).toEqual(['r2', 'r3', 'r4', 'r5', 'r6']);
+  });
+
+  it('6th run starting triggers eviction of the oldest completed', () => {
+    for (let i = 1; i <= 5; i += 1) {
+      useRunsStore.getState().startRun({ runId: `r${i}`, tf: 1.0, columnNames: [] });
+      useRunsStore.getState().markRunDone(`r${i}`, 1.0);
+    }
+    useRunsStore.getState().startRun({ runId: 'r6', tf: 1.0, columnNames: [] });
+    expect(useRunsStore.getState().runs.r1).toBeUndefined();
+    expect(useRunsStore.getState().runs.r6).toBeDefined();
+  });
+
+  it('still-streaming runs are NEVER evicted by retention', () => {
+    // Start 5 runs but DO NOT complete them; they stay in 'starting' state.
+    for (let i = 1; i <= 5; i += 1) {
+      useRunsStore.getState().startRun({ runId: `r${i}`, tf: 1.0, columnNames: [] });
+    }
+    // Start a 6th. The first 5 are 'starting' (not 'done') so the
+    // retention policy treats them as non-evictable.
+    useRunsStore.getState().startRun({ runId: 'r6', tf: 1.0, columnNames: [] });
+    expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(6);
+  });
+
+  it('setRetentionLimit(3) when 5 are retained evicts the 2 oldest completed', () => {
+    for (let i = 1; i <= 5; i += 1) {
+      useRunsStore.getState().startRun({ runId: `r${i}`, tf: 1.0, columnNames: [] });
+      useRunsStore.getState().markRunDone(`r${i}`, 1.0);
+    }
+    expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(5);
+    // Active run is r5. Total cap = 3. dropTarget = 5 - 3 = 2.
+    // Eligible (completed, non-active) = {r1, r2, r3, r4}. Drop oldest
+    // 2 → r1, r2. Remaining = {r3, r4, r5}.
+    useRunsStore.getState().setRetentionLimit(3);
+    const ids = Object.keys(useRunsStore.getState().runs);
+    expect(ids).toEqual(['r3', 'r4', 'r5']);
+  });
+
+  it('setRetentionLimit clamps to [1, MAX_RETENTION_LIMIT]', () => {
+    useRunsStore.getState().setRetentionLimit(0);
+    expect(useRunsStore.getState().retentionLimit).toBe(1);
+    useRunsStore.getState().setRetentionLimit(99);
+    expect(useRunsStore.getState().retentionLimit).toBe(MAX_RETENTION_LIMIT);
+    useRunsStore.getState().setRetentionLimit(7);
+    expect(useRunsStore.getState().retentionLimit).toBe(7);
+  });
+
+  it('setRetentionLimit is no-op when value is unchanged', () => {
+    const before = useRunsStore.getState().runs;
+    useRunsStore.getState().setRetentionLimit(DEFAULT_RETENTION_LIMIT);
+    // Reference equality: no copy happened.
+    expect(useRunsStore.getState().runs).toBe(before);
+  });
+
+  it('error/aborted runs count toward the retention cap', () => {
+    useRunsStore.getState().setRetentionLimit(2);
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().markRunError('r1', 'oops');
+    // r1 error, then r2 starts; r1 becomes completed-non-active. After
+    // r2 inserted, total=2 = retention. No eviction.
+    useRunsStore.getState().startRun({ runId: 'r2', tf: 1.0, columnNames: [] });
+    expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(2);
+    useRunsStore.getState().markRunAborted('r2');
+    // r2 still active (active flag is independent of state). No eviction.
+    expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(2);
+    // Start r3. Total = 3, retention=2, dropTarget=1; eligible = {r1, r2}
+    // (both non-active settled). Drop oldest = r1.
+    useRunsStore.getState().startRun({ runId: 'r3', tf: 1.0, columnNames: [] });
+    expect(useRunsStore.getState().runs.r1).toBeUndefined();
+    expect(useRunsStore.getState().runs.r2).toBeDefined();
+    expect(useRunsStore.getState().runs.r3).toBeDefined();
+  });
+});
+
+describe('runs store — overlay set (Unit 9 v2.0)', () => {
+  beforeEach(reset);
+  afterEach(reset);
+
+  it('addOverlayRun adds an existing run id to the set', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().addOverlayRun('r1');
+    expect(useRunsStore.getState().overlayRunIds.has('r1')).toBe(true);
+  });
+
+  it('addOverlayRun is a no-op for unknown run ids (defensive against stale ids)', () => {
+    useRunsStore.getState().addOverlayRun('does-not-exist');
+    expect(useRunsStore.getState().overlayRunIds.size).toBe(0);
+  });
+
+  it('removeOverlayRun drops a run from the set; idempotent for absent ids', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().addOverlayRun('r1');
+    useRunsStore.getState().removeOverlayRun('r1');
+    expect(useRunsStore.getState().overlayRunIds.has('r1')).toBe(false);
+    // Idempotent: removing again doesn't throw.
+    useRunsStore.getState().removeOverlayRun('r1');
+    expect(useRunsStore.getState().overlayRunIds.size).toBe(0);
+  });
+
+  it('setOverlayRuns replaces the set wholesale, filtering unknown ids', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().startRun({ runId: 'r2', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2', 'ghost']);
+    const set = useRunsStore.getState().overlayRunIds;
+    expect(set.has('r1')).toBe(true);
+    expect(set.has('r2')).toBe(true);
+    expect(set.has('ghost')).toBe(false);
+    expect(set.size).toBe(2);
+  });
+
+  it('resetRun also unpins the run from the overlay set', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().addOverlayRun('r1');
+    useRunsStore.getState().resetRun('r1');
+    expect(useRunsStore.getState().overlayRunIds.has('r1')).toBe(false);
+  });
+
+  it('retention eviction removes the run from the overlay set too', () => {
+    useRunsStore.getState().setRetentionLimit(1);
     useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
     useRunsStore.getState().markRunDone('r1', 1.0);
+    useRunsStore.getState().addOverlayRun('r1');
+    expect(useRunsStore.getState().overlayRunIds.has('r1')).toBe(true);
+    // Start r2; r1 is the oldest completed-non-active; retention 1
+    // means we evict everything except r2 (active). r1 should be
+    // dropped from both the runs map and the overlay set.
     useRunsStore.getState().startRun({ runId: 'r2', tf: 1.0, columnNames: [] });
-    useRunsStore.getState().markRunDone('r2', 1.0);
-    useRunsStore.getState().startRun({ runId: 'r3', tf: 1.0, columnNames: [] });
-    // r1 dropped; r2 (completed) + r3 (active) remain.
-    const ids = Object.keys(useRunsStore.getState().runs);
-    expect(ids).toEqual(['r2', 'r3']);
+    expect(useRunsStore.getState().runs.r1).toBeUndefined();
+    expect(useRunsStore.getState().overlayRunIds.has('r1')).toBe(false);
   });
+});
+
+describe('runs store — eviction policy (memory budget)', () => {
+  beforeEach(reset);
+  afterEach(reset);
 
   it('cap eviction drops completed runs first when the budget is exceeded', () => {
     // Set a tight budget that one run worth of data overflows.
@@ -247,5 +394,13 @@ describe('runs store — internals', () => {
       errorReason: null,
     };
     expect(__internal.runBytes(fakeRun)).toBe(256 * 8 * 2);
+  });
+
+  it('isCompletedState classifies run-state correctly', () => {
+    expect(__internal.isCompletedState('starting')).toBe(false);
+    expect(__internal.isCompletedState('streaming')).toBe(false);
+    expect(__internal.isCompletedState('done')).toBe(true);
+    expect(__internal.isCompletedState('error')).toBe(true);
+    expect(__internal.isCompletedState('aborted')).toBe(true);
   });
 });
