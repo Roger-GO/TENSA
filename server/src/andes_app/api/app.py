@@ -234,7 +234,11 @@ def make_app(
     app.include_router(elements_router, prefix="/api", tags=["elements"])
     app.include_router(tds_router, prefix="/api", tags=["tds"])
     app.include_router(workspace_router, prefix="/api", tags=["workspace"])
-    app.include_router(snapshot_router, prefix="/api", tags=["bundle"])
+    # Houses both the Unit-3 bundle-export endpoint AND the Unit-7
+    # snapshot save / restore / list / delete endpoints. The OpenAPI tag
+    # is "snapshot" since that's the broader concept; the bundle export
+    # is conceptually a snapshot of session state for sharing.
+    app.include_router(snapshot_router, prefix="/api", tags=["snapshot"])
     app.include_router(reports_router, prefix="/api", tags=["reports"])
     app.include_router(eig_router, prefix="/api", tags=["eig"])
     app.include_router(ws_router, prefix="/api", tags=["streaming"])

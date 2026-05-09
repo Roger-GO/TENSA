@@ -26,11 +26,14 @@ separate worker-side thread that owns the control Pipe (see ``worker.py``).
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import logging
 import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING, Any, Literal
@@ -171,11 +174,20 @@ class Wrapper:
     invocations.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, workspace: str | Path | None = None) -> None:
         self._ss: System | None = None
         self._case_path: Path | None = None
         self._addfiles: list[Path] | None = None
         self._setup_failed: bool = False  # marks "requires reload"
+        # ``_workspace`` is the per-launch workspace directory (the same one
+        # the CLI hands the FastAPI app). Snapshot files (Unit 7) live under
+        # ``<workspace>/snapshots/<case_basename>/``. ``None`` is honoured
+        # by the snapshot routes — they 409 with an actionable message —
+        # so the wrapper itself stays usable in pure unit tests that
+        # don't touch the snapshot surface.
+        self._workspace: Path | None = (
+            Path(workspace) if workspace is not None else None
+        )
         # ``replay_buffer`` records every successful pre-setup add so a
         # blank session (no underlying case file) can recover its topology
         # via ``reload_case`` — the v0.1.x workaround for ANDES's missing
@@ -1290,6 +1302,342 @@ class Wrapper:
                 f"savemat failed for EIG.As: {exc}"
             ) from exc
         return buf.getvalue()
+
+    # ----- snapshot (Unit 7) -----
+
+    def save_snapshot(
+        self, name: str, *, force: bool = False
+    ) -> dict[str, Any]:
+        """Save the current System state as a snapshot — Unit 7.
+
+        Composes two artefacts on disk:
+
+        - ``<name>.dill`` — ANDES's ``andes.utils.snapshot.save_ss`` blob.
+          Carries the complete System state (DAE arrays, PF / TDS state).
+          Version-locked to the current ANDES install.
+        - ``<name>.json`` — sidecar metadata: ANDES + andes_app versions,
+          case filename + sha256, recorded ``_disturbance_log``,
+          ``has_pflow`` / ``has_tds`` flags. The disturbance log is the
+          always-works restore path's source of truth (Unit 6.5).
+
+        ``force=False`` (default) refuses to overwrite an existing
+        snapshot under the same name, raising
+        :class:`SnapshotCollisionError` (mapped to HTTP 409 by the route
+        layer). ``force=True`` overwrites silently.
+        """
+        from andes_app import __version__ as andes_app_version
+        from andes_app.core.snapshot import (
+            SnapshotCollisionError,
+            SnapshotMetadata,
+            snapshot_dir,
+            snapshot_paths,
+            validate_snapshot_name,
+            write_snapshot_files,
+        )
+
+        ss = self._require_loaded()
+        if self._workspace is None:
+            raise NoCaseLoadedError(
+                "snapshot save requires a workspace; the substrate "
+                "was launched without one"
+            )
+        validated = validate_snapshot_name(name)
+
+        case_filename = (
+            self._case_path.name if self._case_path is not None else None
+        )
+        # Ensure the directory exists before the dill writer touches it.
+        snapshot_dir(self._workspace, case_filename)
+        dill_path, json_path = snapshot_paths(
+            self._workspace, case_filename, validated
+        )
+        if not force and (dill_path.exists() or json_path.exists()):
+            raise SnapshotCollisionError(
+                f"snapshot {validated!r} already exists; pass force=true "
+                "to overwrite or pick a different name"
+            )
+
+        # Compute case sha256 for the metadata's integrity audit.
+        case_sha256: str | None = None
+        if self._case_path is not None and self._case_path.exists():
+            try:
+                case_sha256 = hashlib.sha256(
+                    self._case_path.read_bytes()
+                ).hexdigest()
+            except OSError:
+                # Best-effort — a missing-but-was-loaded case can still be
+                # snapshotted from the in-memory System; the integrity
+                # audit just won't have a hash to compare against.
+                case_sha256 = None
+
+        # Capture state flags BEFORE save_ss runs so we record the System's
+        # current truth, not whatever side effect the save touches.
+        has_pflow = bool(getattr(ss.PFlow, "converged", False))
+        tds = getattr(ss, "TDS", None)
+        has_tds = bool(getattr(tds, "initialized", False))
+
+        # ANDES's save_ss is dill-based; lazy-import keeps the wrapper's
+        # own import cost paid only by callers that hit the snapshot path.
+        import andes
+        from andes.utils.snapshot import save_ss
+
+        andes_version = str(getattr(andes, "__version__", "unknown"))
+
+        try:
+            saved_at = datetime.now(UTC).isoformat()
+            metadata = SnapshotMetadata(
+                andes_version=andes_version,
+                andes_app_version=str(andes_app_version),
+                case_filename=case_filename,
+                case_sha256=case_sha256,
+                disturbance_log=[
+                    spec.model_dump() for spec in self._disturbance_log
+                ],
+                saved_at=saved_at,
+                has_pflow=has_pflow,
+                has_tds=has_tds,
+            )
+
+            def _writer(path: str) -> None:
+                save_ss(path, ss)
+
+            dill_bytes, json_bytes = write_snapshot_files(
+                dill_path=dill_path,
+                json_path=json_path,
+                dill_writer=_writer,
+                metadata=metadata,
+            )
+        except SnapshotCollisionError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            # Best-effort cleanup so a half-written snapshot doesn't get
+            # surfaced by the listing endpoint.
+            for p in (dill_path, json_path):
+                with contextlib.suppress(OSError):
+                    if p.exists():
+                        p.unlink()
+            raise SetupFailedError(
+                f"snapshot save failed: {_sanitize_message(str(exc))}"
+            ) from exc
+
+        return {
+            "name": validated,
+            "metadata": metadata.to_dict(),
+            "dill_bytes": dill_bytes,
+            "metadata_bytes": json_bytes,
+        }
+
+    def restore_snapshot(
+        self, name: str, *, use_dill_optimization: bool = True
+    ) -> dict[str, Any]:
+        """Restore a previously-saved snapshot — Unit 7.
+
+        Two-tier restore:
+
+        1. Read the sidecar JSON; validate the version stamp. If the
+           ANDES major.minor differs from the current install, the dill
+           optimisation is forcibly disabled and ``fallback_reason`` is
+           recorded for the response.
+        2. Always-works path: ``reload_case`` (drops ``is_setup`` and
+           clears the in-memory ``_disturbance_log``) →
+           ``replay_disturbances()`` from the JSON's recorded log.
+        3. Fast path (dill optimisation enabled and version OK):
+           ``andes.utils.snapshot.load_ss`` substitutes a fresh System
+           with the captured PF / TDS state. ``_ensure_setup`` +
+           ``run_pflow`` are skipped.
+        4. Slow path (otherwise): ``_ensure_setup`` + ``run_pflow`` to
+           re-converge to the same operating point.
+
+        Raises :class:`SnapshotNotFoundError` (404) when the named
+        snapshot does not exist; :class:`SnapshotMetadataError` (422)
+        on a corrupted sidecar; :class:`SnapshotVersionMismatchError`
+        (422) if the caller forced ``use_dill_optimization=True``
+        explicitly AND the dill version-check failed.
+        """
+        from andes_app.core.snapshot import (
+            DISTURBANCE_LOG_CAP,
+            RestoreSnapshotResult,
+            SnapshotMetadataError,
+            SnapshotNotFoundError,
+            read_snapshot_metadata,
+            snapshot_paths,
+            validate_snapshot_name,
+            versions_compatible,
+        )
+
+        if self._workspace is None:
+            raise NoCaseLoadedError(
+                "snapshot restore requires a workspace; the substrate "
+                "was launched without one"
+            )
+        validated = validate_snapshot_name(name)
+        if self._ss is None and self._case_path is None:
+            raise NoCaseLoadedError(
+                "snapshot restore requires a loaded case to scope the "
+                "snapshot directory; load a case first"
+            )
+
+        case_filename = (
+            self._case_path.name if self._case_path is not None else None
+        )
+        dill_path, json_path = snapshot_paths(
+            self._workspace, case_filename, validated
+        )
+        metadata = read_snapshot_metadata(json_path)
+        if len(metadata.disturbance_log) > DISTURBANCE_LOG_CAP:
+            raise SnapshotMetadataError(
+                f"snapshot {validated!r} has "
+                f"{len(metadata.disturbance_log)} disturbances; cap is "
+                f"{DISTURBANCE_LOG_CAP}"
+            )
+
+        import andes
+
+        current_version = str(getattr(andes, "__version__", "unknown"))
+        version_ok = versions_compatible(metadata.andes_version, current_version)
+        dill_available = dill_path.exists()
+
+        used_dill = False
+        fallback_reason: str | None = None
+
+        if use_dill_optimization and not dill_available:
+            fallback_reason = (
+                f"dill blob {dill_path.name} not found alongside the "
+                "metadata; falling back to replay+PF"
+            )
+        elif use_dill_optimization and not version_ok:
+            fallback_reason = (
+                f"snapshot was written against ANDES "
+                f"{metadata.andes_version}; current install is "
+                f"{current_version} — dill format is version-locked, "
+                "falling back to replay+PF"
+            )
+
+        # Disturbance specs come back as plain dicts; rebuild via the
+        # discriminated union so wrapper.add_disturbance accepts them.
+        from andes_app.core.disturbance import (
+            AlterSpec,
+            DisturbanceSpec,
+            FaultSpec,
+            ToggleSpec,
+        )
+
+        def _spec_from_dict(d: dict[str, Any]) -> DisturbanceSpec:
+            kind = d.get("kind")
+            if kind == "fault":
+                return FaultSpec(**d)
+            if kind == "toggle":
+                return ToggleSpec(**d)
+            if kind == "alter":
+                return AlterSpec(**d)
+            raise SnapshotMetadataError(
+                f"snapshot disturbance has unknown kind: {kind!r}"
+            )
+
+        # Reload (clears ``_disturbance_log`` + ``is_setup``); replay the
+        # snapshot's disturbances onto the fresh pre-setup System.
+        self.reload_case()
+        replayed = 0
+        for raw_spec in metadata.disturbance_log:
+            spec = _spec_from_dict(raw_spec)
+            self.add_disturbance(spec)
+            replayed += 1
+
+        if use_dill_optimization and version_ok and dill_available:
+            # Fast path: load_ss replaces the System entirely. After this
+            # the wrapper's ``_ss`` reference must point at the dill-loaded
+            # System; the just-replayed disturbances on the previous
+            # pre-setup System are dropped on the floor (the dill blob
+            # carries the equivalent in its serialised state).
+            from andes.utils.snapshot import load_ss
+
+            try:
+                ss_loaded = load_ss(str(dill_path))
+            except Exception as exc:  # noqa: BLE001
+                # Defensive: a corrupted dill should fall back, not crash.
+                fallback_reason = (
+                    "dill load failed "
+                    f"({type(exc).__name__}); falling back to replay+PF"
+                )
+                ss_loaded = None
+                logging.getLogger("andes-app.wrapper.snapshot").warning(
+                    "snapshot %r dill load failed: %s; "
+                    "falling back to slow path",
+                    validated,
+                    _sanitize_message(str(exc)),
+                )
+
+            if ss_loaded is not None:
+                self._ss = ss_loaded  # type: ignore[assignment]
+                used_dill = True
+
+        if not used_dill:
+            # Slow path: setup + PF on the post-replay System. PF is
+            # idempotent; if the user only wanted the disturbance list back
+            # (snapshot was saved pre-setup) the meta's has_pflow=False
+            # tells us to stop here.
+            if metadata.has_pflow:
+                self._ensure_setup()
+                ss = self._require_loaded()
+                ss.PFlow.run()
+
+        return RestoreSnapshotResult(
+            used_dill=used_dill,
+            metadata=metadata,
+            fallback_reason=fallback_reason,
+            disturbances_replayed=replayed,
+        ).__dict__ | {"metadata": metadata.to_dict()}
+
+    def list_snapshots(self) -> list[dict[str, Any]]:
+        """Return the listing of snapshots for the current case.
+
+        Empty list (NOT an error) when no snapshots have been saved
+        against this case yet, when no case has been loaded, or when
+        the substrate has no workspace configured. The route layer
+        ships an empty array in those cases so the UI's "Load
+        snapshot…" menu can render its empty state without a
+        round-trip dance.
+        """
+        from andes_app.core.snapshot import list_snapshots_on_disk
+
+        if self._workspace is None:
+            return []
+        case_filename = (
+            self._case_path.name if self._case_path is not None else None
+        )
+        # When no case is loaded AND no blank session has been built,
+        # there's nothing meaningful to list — return empty.
+        if self._ss is None and self._case_path is None:
+            return []
+        entries = list_snapshots_on_disk(self._workspace, case_filename)
+        return [
+            {
+                "name": e.name,
+                "saved_at": e.saved_at,
+                "has_pflow": e.has_pflow,
+                "has_tds": e.has_tds,
+                "has_dill": e.has_dill,
+                "andes_version": e.andes_version,
+                "disturbance_count": e.disturbance_count,
+            }
+            for e in entries
+        ]
+
+    def delete_snapshot(self, name: str) -> None:
+        """Delete a snapshot by name. No-op-safe — re-deleting a
+        previously-deleted snapshot raises :class:`SnapshotNotFoundError`.
+        """
+        from andes_app.core.snapshot import delete_snapshot_files
+
+        if self._workspace is None:
+            raise NoCaseLoadedError(
+                "snapshot delete requires a workspace; the substrate "
+                "was launched without one"
+            )
+        case_filename = (
+            self._case_path.name if self._case_path is not None else None
+        )
+        delete_snapshot_files(self._workspace, case_filename, name)
 
     # ----- internals -----
 
