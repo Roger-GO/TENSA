@@ -102,6 +102,30 @@ class EigComputationError(AndesAppError):
     exception inside the routine body)."""
 
 
+class CpfPrerequisiteError(AndesAppError):
+    """Raised when ``Wrapper.run_cpf`` / ``Wrapper.run_cpf_qv`` is invoked
+    without a converged PFlow.
+
+    ANDES's ``CPF.init`` (``andes/routines/cpf.py:191``) only logs a warning
+    when ``system.PFlow.converged`` is False (verified in Unit 1a spike). The
+    substrate gates the call independently for a clean 409 with an
+    actionable "Run PFlow first" message. Mirrors the EIG gating pattern
+    (see :class:`EigPrerequisiteError`).
+    """
+
+
+class CpfDivergedError(AndesAppError):
+    """Raised when ``ss.CPF.run()`` / ``ss.CPF.run_qv()`` itself raises an
+    exception (e.g., singular Jacobian, KLU segfault, internal LinAlg
+    failure).
+
+    A clean ``False`` return with a populated ``done_msg`` (e.g.,
+    ``"Reached max steps"``) is *not* a divergence — that path returns a
+    truncated :class:`CpfResult` rather than raising. This error covers
+    only the "ANDES blew up mid-routine" case.
+    """
+
+
 class EigDirtyDaeError(AndesAppError):
     """Raised when ``Wrapper.run_pflow`` is invoked while
     ``ss.TDS.initialized is True`` — the documented EIG side-effect
