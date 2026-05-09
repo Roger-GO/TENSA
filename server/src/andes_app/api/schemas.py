@@ -186,6 +186,18 @@ class TopologySummary(BaseModel):
             "shunt-reactor icon depending on the sign of ``b``."
         ),
     )
+    controllers: list[TopologyEntry] = Field(
+        default_factory=list,
+        description=(
+            "Dynamic controller devices: exciters (``IEEEX1``, ``ESDC2A``, "
+            "``SEXS``), governors (``IEEEG1``, ``TGOV1``), the ``IEEEST`` "
+            "PSS, and the ``REGCA1`` renewable-converter model. Surfaces "
+            "the seven Unit-8 whitelist additions so the disturbance editor "
+            "can populate device pickers when the case includes them. Empty "
+            "for cases that carry no dynamics addfile (stock IEEE 14 .raw "
+            "alone)."
+        ),
+    )
 
 
 # ---- power flow -------------------------------------------------------------

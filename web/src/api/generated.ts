@@ -74,6 +74,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/topology/models/{model}/alterable_params": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List parameter names ANDES will accept as ``src`` for an Alter disturbance on a given model.
+         * @description Best-effort introspection of the model's ``params`` ordered dict on
+         *     the loaded ``System``. Filters to ``NumParam`` instances that are not
+         *     ``ExtParam`` — ANDES's own definition of "alterable" for the
+         *     ``alter()`` / ``set()`` contract.
+         *
+         *     The response order matches ANDES's internal declaration order on the
+         *     model class, which is also the order the UI's parameter dropdown
+         *     renders. Empty list when the model has no alterable params (no
+         *     ``NumParam`` declarations or all are ``ExtParam``); the route is a 200
+         *     in that case.
+         */
+        get: operations["getAlterableParams"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/reload": {
         parameters: {
             query?: never;
@@ -120,7 +149,19 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List the disturbance specs currently recorded on the session.
+         * @description Return the wrapper's ``_disturbance_log`` for client sync.
+         *
+         *     Use case: after the client calls ``POST /sessions/{id}/reload``, the
+         *     substrate's disturbance log is wiped (the new System has no
+         *     disturbances). The client can then call ``GET`` (now empty) to confirm,
+         *     re-POST the originals, and re-GET to verify they were re-accepted.
+         *
+         *     No 409 path — even on a freshly-created session with no case loaded the
+         *     answer is well-defined (empty list).
+         */
+        get: operations["listDisturbances"];
         put?: never;
         /** Register one or more disturbances on a pre-setup session. */
         post: operations["addDisturbances"];
@@ -254,6 +295,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/abort": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Signal a cooperative abort of the active TDS run on a session.
+         * @description Set the session's abort event. Cooperatively terminates an active
+         *     streaming or batch ``run_tds`` invocation at the next ``callpert``
+         *     tick. Returns 200 immediately — the actual TDS exit is asynchronous
+         *     on the worker.
+         *
+         *     Session-scoped (not run-scoped): v0.2 has at most one active run per
+         *     session, mirroring ``SessionManager.signal_abort``'s API. Calling
+         *     abort while no TDS is running is a 200 no-op (the event is set but
+         *     never consumed; subsequent runs will see and clear it).
+         */
+        post: operations["abortRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspace/files": {
         parameters: {
             query?: never;
@@ -294,10 +363,254 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/bundle/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export a reproducibility bundle (.zip) for the current session.
+         * @description Assemble a reproducibility-bundle ``.zip`` and return it as a stream.
+         *
+         *     The substrate gathers the case file (verbatim or canonical xlsx),
+         *     builds the manifest, and zips the lot together with the
+         *     request-body-supplied disturbances / sim_params / results.csv. The
+         *     response is the raw zip bytes with ``Content-Type: application/zip``
+         *     and a ``Content-Disposition`` header that suggests a sensible
+         *     filename.
+         *
+         *     Snapshots (dill payloads) are explicitly NOT in the bundle per
+         *     KTD-4 + KTD-5 — they're version-locked and undermine portability.
+         */
+        post: operations["exportBundle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save the current operating point as a named snapshot.
+         * @description Save snapshot endpoint — Unit 7.
+         *
+         *     Composes ANDES's ``andes.utils.snapshot.save_ss`` (dill blob) plus
+         *     sidecar JSON metadata under
+         *     ``<workspace>/snapshots/<case_basename>/<name>.{dill,json}``.
+         */
+        post: operations["saveSnapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/snapshot/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore a previously-saved snapshot onto the session.
+         * @description Restore snapshot endpoint — Unit 7.
+         *
+         *     Always replays the snapshot's ``disturbance_log`` from the sidecar
+         *     JSON; either substitutes the dill-loaded System (fast path, when the
+         *     ANDES version matches) or re-runs ``setup`` + ``PFlow.run`` (slow
+         *     path, the always-works fallback).
+         */
+        post: operations["restoreSnapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List snapshots saved against the current case.
+         * @description List snapshots for the current case.
+         *
+         *     Empty list (200, ``{"snapshots": []}``) when no case is loaded, no
+         *     snapshots have been saved, or the workspace lacks a snapshots
+         *     directory. The route does NOT 404 on "no case loaded" — the UI's
+         *     "Load snapshot…" menu wants to render an empty state cleanly.
+         */
+        get: operations["listSnapshots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/snapshot/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a snapshot by name.
+         * @description Delete snapshot endpoint — Unit 7.
+         */
+        delete: operations["deleteSnapshot"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Render a human-readable report from PFlow or TDS results.
+         * @description Produce a routine report and return ``{plain_text, structured}``.
+         *
+         *     Routines: ``pflow``, ``tds``, ``eig`` (Unit 6 widened the enum).
+         */
+        get: operations["getReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/eig": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run eigenvalue analysis (small-signal stability) on the session.
+         * @description Synchronously run ``ss.EIG.run()`` and return the result.
+         *
+         *     Side-effect note: ANDES mutates ``dae.t`` to 0 and sets
+         *     ``TDS.initialized=True`` as part of EIG's pre-check. The response's
+         *     ``tds_initialized`` field surfaces this so the UI can render an
+         *     info banner ("Running EIG initialised the dynamic state...").
+         */
+        post: operations["runEig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/eig/modes/{mode_idx}/participation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Per-mode participation factor row for the given mode index.
+         * @description Slice ``EIG.pfactors[mode_idx]`` and return the per-state row.
+         *
+         *     Substrate-side slice — there is no per-mode lazy API in ANDES (per
+         *     Unit 1a spike). The full ``pfactors`` matrix is held in memory
+         *     after EIG.run.
+         */
+        get: operations["getEigParticipation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/eig/state-matrix.mat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download EIG.As + EIG.mu as a .mat file.
+         * @description Return ``EIG.As`` (and ``EIG.mu``) as a ``.mat`` blob.
+         *
+         *     Format is MATLAB v5 (compressed). The full matrix is shipped as a
+         *     download because for non-trivial cases (NPCC 140 → 334×334) inline
+         *     JSON would balloon the response unnecessarily.
+         */
+        get: operations["getEigStateMatrix"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AbortResponse
+         * @description Response body for ``POST /sessions/{id}/abort``.
+         *
+         *     The endpoint is fire-and-forget at the wire level — it sets the session's
+         *     abort event and returns immediately. The actual TDS exit happens
+         *     cooperatively at the next ``callpert`` tick on the worker (typically
+         *     within a few milliseconds for IEEE 14, longer for larger cases). The
+         *     streaming WebSocket emits the terminal ``done`` message with
+         *     ``final_t < tf`` once the integration loop exits.
+         *
+         *     There is no ``aborted`` flag on the WS ``done`` payload — the UI infers
+         *     user-initiated abort from local state (it set the abort itself) vs.
+         *     numerical instability (a ``done`` with ``final_t < tf`` arrived without
+         *     a local abort).
+         */
+        AbortResponse: {
+            /**
+             * Aborted
+             * @description Always ``true`` on a successful response. The signal has been delivered to the worker; the actual TDS exit is cooperative and lands on the next per-step ``callpert`` tick. No-op when no TDS is currently running on the session (the abort event is set but never consumed).
+             * @default true
+             * @constant
+             */
+            aborted: true;
+        };
         /**
          * AddDisturbancesRequest
          * @description Request body for ``POST /sessions/{id}/disturbances``.
@@ -392,6 +705,33 @@ export interface components {
             value: number;
         };
         /**
+         * AlterableParamsResponse
+         * @description Response body for ``GET /sessions/{id}/topology/models/{model}/alterable_params``.
+         *
+         *     Returns the ordered list of parameter names that ANDES will accept as
+         *     ``src`` for the ``Alter`` disturbance on the given model. The UI uses
+         *     this to populate the AlterSpec form's parameter dropdown.
+         *
+         *     The introspection rule (mirrors ANDES's own ``alter()`` contract):
+         *     a parameter is alterable iff it is a ``NumParam`` and not an
+         *     ``ExtParam`` (which is a derived/external param read off another
+         *     model). This excludes topology refs (``IdxParam``: ``bus``, ``bus1``,
+         *     ``bus2``, ``area``, ``zone``, ``owner``, ``coi``, etc.) and string
+         *     identifiers (``DataParam``: ``idx``, ``name``).
+         */
+        AlterableParamsResponse: {
+            /**
+             * Model
+             * @description ANDES model class name the params belong to (echoed back from the path). Example: ``Bus``, ``PQ``, ``GENROU``.
+             */
+            model: string;
+            /**
+             * Params
+             * @description Ordered list of parameter names that ``ss.<model>.alter(src=...)`` will accept. Order matches ANDES's internal declaration order on the model class. Empty when the model has no alterable params.
+             */
+            params: string[];
+        };
+        /**
          * BlankSystemResponse
          * @description Response body for ``POST /sessions/{id}/blank`` (201).
          *
@@ -401,6 +741,72 @@ export interface components {
         BlankSystemResponse: {
             /** @description Empty topology snapshot for the freshly-created blank System. All buckets are empty; ``state`` is ``pre-setup``. */
             topology: components["schemas"]["TopologySummary"];
+        };
+        /**
+         * BundleExportRequest
+         * @description Request body for ``POST /sessions/{id}/bundle/export``.
+         *
+         *     All fields are optional — the substrate happily exports a minimal
+         *     bundle (case + manifest only) when none are present. The substrate
+         *     contributes the case file, the ANDES + ``andes_app`` versions, and
+         *     the manifest; this body carries the substrate-external state that
+         *     lives in the frontend's runs / disturbance / ui slices today.
+         */
+        BundleExportRequest: {
+            /**
+             * Disturbances
+             * @description Disturbance specs (the discriminated union) the user composed in the timeline editor. Empty list when no disturbances were registered; ``disturbances.json`` is omitted from the bundle in that case.
+             */
+            disturbances?: (components["schemas"]["FaultSpec"] | components["schemas"]["ToggleSpec"] | components["schemas"]["AlterSpec"])[];
+            /** @description Last TDS run's sim params. ``null`` when no run has fired yet; ``sim_params.json`` is omitted from the bundle in that case. */
+            sim_params?: components["schemas"]["BundleSimParams"] | null;
+            /**
+             * Results Csv
+             * @description Last TDS run's results as a long-form CSV body. ``null`` when no run has fired yet OR the caller chose not to ship the body. When omitted, ``results.csv`` is absent from the bundle but the run is still reproducible from case + disturbances + sim_params.
+             */
+            results_csv?: string | null;
+            /**
+             * Run Id
+             * @description Run id of the most recent TDS run. Surfaced in the manifest for cross-referencing with run-history exports.
+             */
+            run_id?: string | null;
+        };
+        /**
+         * BundleSimParams
+         * @description Sim-params subset embedded in ``sim_params.json`` of the bundle.
+         *
+         *     Mirrors the fields the ``RunStream`` start-tds message ships. All
+         *     fields are optional so a partially-populated client (e.g., a
+         *     pre-Unit-7 session) can still produce a bundle.
+         */
+        BundleSimParams: {
+            /**
+             * Tf
+             * @description Final sim time of the last TDS run, in seconds.
+             */
+            tf?: number | null;
+            /**
+             * H
+             * @description Fixed integration step of the last TDS run, in seconds. ``null`` when the substrate's adaptive integrator was used.
+             */
+            h?: number | null;
+            /**
+             * Vars
+             * @description Variable groups streamed during the last run (e.g., ``["bus_v", "gen_state"]``).
+             */
+            vars?: string[] | null;
+            /**
+             * Decimation
+             * @description Decimation mode used during streaming (``none`` or ``mean``).
+             */
+            decimation?: string | null;
+            /**
+             * Max Rate Hz
+             * @description Output-rate clamp (Hz) the UI applied to the stream.
+             */
+            max_rate_hz?: number | null;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * BusCoord
@@ -420,6 +826,22 @@ export interface components {
              * @description Bus Y coordinate, finite (no NaN/Inf).
              */
             y: number;
+        };
+        /**
+         * ComplexNumberModel
+         * @description JSON-friendly complex number ``{real, imag}``.
+         */
+        ComplexNumberModel: {
+            /**
+             * Real
+             * @description Real part of the eigenvalue.
+             */
+            real: number;
+            /**
+             * Imag
+             * @description Imaginary part of the eigenvalue.
+             */
+            imag: number;
         };
         /**
          * DeleteBlockedResponse
@@ -476,6 +898,77 @@ export interface components {
                 [key: string]: number | string | boolean;
             };
         };
+        /**
+         * EigParticipationResponse
+         * @description Wire shape of ``GET /sessions/{id}/eig/modes/{mode_idx}/participation``.
+         */
+        EigParticipationResponse: {
+            /**
+             * Mode Idx
+             * @description Echo of the requested mode index.
+             */
+            mode_idx: number;
+            /**
+             * Participation
+             * @description Per-state participation factor row for the requested mode. Length equals the EIG result's ``state_count``.
+             */
+            participation: components["schemas"]["ParticipationFactorModel"][];
+        };
+        /**
+         * EigResultResponse
+         * @description Wire shape of ``POST /sessions/{id}/eig``.
+         *
+         *     The state matrix itself (``As``) is intentionally omitted from this
+         *     response — for NPCC 140-bus it would be ~110k entries. The UI
+         *     fetches the matrix on demand via ``GET /eig/state-matrix.mat``.
+         */
+        EigResultResponse: {
+            /**
+             * Eigenvalues
+             * @description Eigenvalues of ``EIG.As`` (the system's reduced state matrix). Length equals ``mode_count``. Each entry is ``{real, imag}`` so the JSON payload doesn't carry an out-of-band complex encoding.
+             */
+            eigenvalues: components["schemas"]["ComplexNumberModel"][];
+            /**
+             * Damping Ratios
+             * @description Per-mode damping ratio ``-Re(z) / |z|``. Index-aligned with ``eigenvalues``. NaN-collapsed to 0.0 so the wire payload never carries non-finite floats.
+             */
+            damping_ratios: number[];
+            /**
+             * Frequencies Hz
+             * @description Per-mode oscillation frequency ``|Im(z)| / (2*pi)`` in Hz. 0 for purely-real eigenvalues.
+             */
+            frequencies_hz: number[];
+            /**
+             * Mode Count
+             * @description Number of eigenvalues == ``len(EIG.mu)`` (the *reduced* state count post fold/elimination). Stock IEEE 14 (no dyn models) → 0; full IEEE 14 + dyr → 62; kundur_full → 52.
+             */
+            mode_count: number;
+            /**
+             * State Count
+             * @description Same value as ``mode_count`` — surfaced as a separate field for clarity in the UI (the state matrix shape is ``[state_count, state_count]``).
+             */
+            state_count: number;
+            /**
+             * State Names
+             * @description Reduced-state names indexed identically to participation factor rows. Falls back to ``state_<i>`` labels when the reduced count differs from ``ss.dae.x_name``.
+             */
+            state_names: string[];
+            /**
+             * Tds Initialized
+             * @description Always ``true`` after a successful EIG.run. ANDES's ``EIG._pre_check`` calls ``TDS.init()`` + ``TDS.itm_step()`` if not already initialised — the substrate surfaces this so the UI can warn that subsequent TDS / re-run PF will start from this initialised dae.
+             */
+            tds_initialized: boolean;
+        };
+        /**
+         * EigRunRequest
+         * @description Request body for ``POST /sessions/{id}/eig``.
+         *
+         *     Empty body — ANDES's ``EIG.run()`` takes no public arguments. Kept
+         *     as a model (rather than ``None``) so the route can declare a
+         *     ``model_config`` ``extra="forbid"`` and reject typos in the
+         *     forward-compatible way.
+         */
+        EigRunRequest: Record<string, never>;
         /**
          * ElementCreated
          * @description Response body for ``POST /sessions/{id}/elements`` (201).
@@ -598,6 +1091,29 @@ export interface components {
             to_idx: number | string;
         };
         /**
+         * ListDisturbancesResponse
+         * @description Wire shape of ``GET /sessions/{id}/disturbances``.
+         *
+         *     Mirrors the substrate's ``Wrapper.list_disturbances()`` — the
+         *     discriminated union over Fault / Toggle / Alter, in the order the
+         *     specs were accepted. Empty list when no disturbances are pending.
+         */
+        ListDisturbancesResponse: {
+            /**
+             * Disturbances
+             * @description Currently-recorded disturbance specs. Same shape as the ``POST /sessions/{id}/disturbances`` request body's ``disturbances`` field.
+             */
+            disturbances: (components["schemas"]["FaultSpec"] | components["schemas"]["ToggleSpec"] | components["schemas"]["AlterSpec"])[];
+        };
+        /**
+         * ListSnapshotsResponse
+         * @description Response body for ``GET /sessions/{id}/snapshots``.
+         */
+        ListSnapshotsResponse: {
+            /** Snapshots */
+            snapshots?: components["schemas"]["SnapshotListEntry"][];
+        };
+        /**
          * LoadCaseRequest
          * @description Request body for ``POST /sessions/{id}/case``. All paths are
          *     workspace-relative; the substrate canonicalizes them with O_NOFOLLOW
@@ -635,6 +1151,22 @@ export interface components {
              * @description Terminal bus idx.
              */
             bus: number | string;
+        };
+        /**
+         * ParticipationFactorModel
+         * @description One per-state participation factor row entry.
+         */
+        ParticipationFactorModel: {
+            /**
+             * State Name
+             * @description Reduced-state label.
+             */
+            state_name: string;
+            /**
+             * Factor
+             * @description Participation factor magnitude. By ANDES convention (``calc_pfactor`` in routines/eig.py) these are real-valued.
+             */
+            factor: number;
         };
         /**
          * PflowResult
@@ -738,6 +1270,107 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * ReportResponse
+         * @description Wire shape of ``GET /sessions/{id}/report``.
+         */
+        ReportResponse: {
+            /** @description Echo of the requested routine. */
+            routine: components["schemas"]["ReportRoutineEnum"];
+            /**
+             * Plain Text
+             * @description Verbatim report text — for ``pflow``, the file ANDES would have written to ``<case>_out.txt``; for ``tds``, ``TDS.summary()``'s log output augmented with run statistics.
+             */
+            plain_text: string;
+            /** @description Structured tabular blocks parsed out of ``plain_text``. */
+            structured: components["schemas"]["ReportStructured"];
+        };
+        /**
+         * ReportRoutineEnum
+         * @description Routines that can be reported. ``eig`` was added in Unit 6 once
+         *     the EIG analysis routine itself shipped — earlier Phase 1 builds
+         *     accepted ``eig`` at the wire layer but rejected with 422; that stub
+         *     is gone now.
+         * @enum {string}
+         */
+        ReportRoutineEnum: "pflow" | "tds" | "eig";
+        /**
+         * ReportStructured
+         * @description Structured-table envelope. Empty ``tables`` is valid — the frontend
+         *     falls back to the plain-text view.
+         */
+        ReportStructured: {
+            /**
+             * Tables
+             * @description Best-effort parse of the plain-text report into tabular blocks. Empty when the parser couldn't recognise any sections; the ``plain_text`` body remains the source of truth.
+             */
+            tables?: components["schemas"]["ReportTableModel"][];
+        };
+        /**
+         * ReportTableModel
+         * @description One tabular block of a routine's report.
+         *
+         *     Matches :class:`andes_app.core.report.ReportTable` 1:1. Each row's
+         *     length always matches ``headers`` — the wrapper-side parser pads /
+         *     truncates so the frontend's renderer doesn't have to think about
+         *     ragged rows.
+         */
+        ReportTableModel: {
+            /**
+             * Title
+             * @description Section title (e.g., ``BUS DATA``).
+             */
+            title: string;
+            /**
+             * Headers
+             * @description Column names, in order.
+             */
+            headers: string[];
+            /**
+             * Rows
+             * @description Rows of stringified cell values. Numeric columns are pre-formatted by the wrapper so the frontend can render verbatim without locale issues.
+             */
+            rows: string[][];
+        };
+        /**
+         * RestoreSnapshotRequest
+         * @description Request body for ``POST /sessions/{id}/snapshot/restore``.
+         */
+        RestoreSnapshotRequest: {
+            /**
+             * Name
+             * @description Snapshot name to restore.
+             */
+            name: string;
+            /**
+             * Use Dill Optimization
+             * @description When True (default), attempt to skip the PF re-solve by loading the dill blob via ``andes.utils.snapshot.load_ss``. Falls back to the always-works replay+PF path on ANDES version mismatch or a missing dill blob; the response's ``fallback_reason`` carries the explanation.
+             * @default true
+             */
+            use_dill_optimization: boolean;
+        };
+        /**
+         * RestoreSnapshotResponse
+         * @description Response body for ``POST /sessions/{id}/snapshot/restore``.
+         */
+        RestoreSnapshotResponse: {
+            /**
+             * Used Dill
+             * @description True when the dill optimisation succeeded. False means the always-works replay+PF path was taken; ``fallback_reason`` is non-null.
+             */
+            used_dill: boolean;
+            /**
+             * Fallback Reason
+             * @description Human-readable explanation when ``used_dill=False`` despite ``use_dill_optimization=True``. Surfaced inline in the load dialog so the user understands why a fallback fired.
+             */
+            fallback_reason?: string | null;
+            /**
+             * Disturbances Replayed
+             * @description Count of disturbance specs re-applied from the snapshot metadata onto the new System.
+             */
+            disturbances_replayed: number;
+            metadata: components["schemas"]["SnapshotMetadataModel"];
+        };
+        /**
          * SaveCaseRequest
          * @description Request body for ``POST /sessions/{id}/save``.
          *
@@ -780,6 +1413,42 @@ export interface components {
              * @description Size in bytes of the file just written, as reported by ``os.stat``.
              */
             bytes_written: number;
+        };
+        /**
+         * SaveSnapshotRequest
+         * @description Request body for ``POST /sessions/{id}/snapshot``.
+         */
+        SaveSnapshotRequest: {
+            /**
+             * Name
+             * @description Snapshot name. 1-64 chars of [A-Za-z0-9._-] starting with an alphanumeric. Names are unique per case; collisions return 409 unless ``force=true``.
+             */
+            name: string;
+            /**
+             * Force
+             * @description When True, overwrite any existing snapshot under the same name. Default False rejects collisions with 409 so the UI can prompt the user.
+             * @default false
+             */
+            force: boolean;
+        };
+        /**
+         * SaveSnapshotResponse
+         * @description Response body for ``POST /sessions/{id}/snapshot``.
+         */
+        SaveSnapshotResponse: {
+            /** Name */
+            name: string;
+            metadata: components["schemas"]["SnapshotMetadataModel"];
+            /**
+             * Dill Bytes
+             * @description Size of the dill blob on disk, in bytes.
+             */
+            dill_bytes: number;
+            /**
+             * Metadata Bytes
+             * @description Size of the sidecar JSON on disk, in bytes.
+             */
+            metadata_bytes: number;
         };
         /**
          * SessionDescriptor
@@ -851,6 +1520,55 @@ export interface components {
             last_modified: string;
         };
         /**
+         * SnapshotListEntry
+         * @description One entry in the ``GET /sessions/{id}/snapshots`` response.
+         */
+        SnapshotListEntry: {
+            /** Name */
+            name: string;
+            /** Saved At */
+            saved_at: string;
+            /** Has Pflow */
+            has_pflow: boolean;
+            /** Has Tds */
+            has_tds: boolean;
+            /**
+             * Has Dill
+             * @description Whether the dill blob is present on disk. False when only the sidecar JSON survives (e.g., manual half-delete) — the snapshot is still restorable via the slow replay path.
+             */
+            has_dill: boolean;
+            /** Andes Version */
+            andes_version: string;
+            /** Disturbance Count */
+            disturbance_count: number;
+        };
+        /**
+         * SnapshotMetadataModel
+         * @description Sidecar JSON metadata shape echoed in save/restore/list responses.
+         */
+        SnapshotMetadataModel: {
+            /** Andes Version */
+            andes_version: string;
+            /** Andes App Version */
+            andes_app_version: string;
+            /** Case Filename */
+            case_filename: string | null;
+            /** Case Sha256 */
+            case_sha256: string | null;
+            /** Disturbance Log */
+            disturbance_log?: {
+                [key: string]: unknown;
+            }[];
+            /** Saved At */
+            saved_at: string;
+            /** Has Pflow */
+            has_pflow: boolean;
+            /** Has Tds */
+            has_tds: boolean;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * TdsBatchResult
          * @description Result of a batch TDS run (post-completion delivery).
          *
@@ -899,6 +1617,11 @@ export interface components {
              * @description Initial integration step size, in seconds. ``None`` lets ANDES use its case-default step size (typically 1/120 s).
              */
             h?: number | null;
+            /**
+             * Vars
+             * @description Optional selector for which variable groups appear as columns in each per-step Arrow record batch on the streaming path. ``bus_v`` covers bus voltage magnitudes (the v0.1 default); ``gen_state`` adds generator rotor angle ``delta`` and per-unit speed ``omega`` for every member of the ANDES ``SynGen`` group (GENROU / GENCLS / PLBVFU1); ``line_flow`` adds active power ``Line_<idx>_p`` (MW) at each line's bus1 terminal. Unknown values are rejected with 422; an empty list is rejected with 422. The batch path (``POST /tds``) ignores this field at runtime — the streamed-only state values are not surfaced in batch responses — but it is accepted on the OpenAPI surface for symmetry with the WebSocket ``start_tds`` config so generated clients can share one request shape. Defaults to ``["bus_v"]`` when omitted.
+             */
+            vars?: ("bus_v" | "gen_state" | "line_flow")[] | null;
         };
         /**
          * ToggleSpec
@@ -1050,6 +1773,11 @@ export interface components {
              * @description Shunt elements (capacitors and reactors). Modeled as ANDES ``Shunt`` devices; rendered with the IEC 60617 shunt-cap or shunt-reactor icon depending on the sign of ``b``.
              */
             shunts?: components["schemas"]["TopologyEntry"][];
+            /**
+             * Controllers
+             * @description Dynamic controller devices: exciters (``IEEEX1``, ``ESDC2A``, ``SEXS``), governors (``IEEEG1``, ``TGOV1``), the ``IEEEST`` PSS, and the ``REGCA1`` renewable-converter model. Surfaces the seven Unit-8 whitelist additions so the disturbance editor can populate device pickers when the case includes them. Empty for cases that carry no dynamics addfile (stock IEEE 14 .raw alone).
+             */
+            controllers?: components["schemas"]["TopologyEntry"][];
         };
         /** ValidationError */
         ValidationError: {
@@ -1390,6 +2118,65 @@ export interface operations {
             };
         };
     };
+    getAlterableParams: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                model: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlterableParamsResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed, OR the requested model name is not present on the loaded ``System``. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case has been loaded into this session yet. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     reloadCase: {
         parameters: {
             query?: never;
@@ -1499,13 +2286,62 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description ANDES setup() failed; call /reload to recover. */
+            /** @description ANDES setup() failed, OR a previous EIG run mutated dae state (``TDS.initialized=True``). Either case requires POST /reload to recover. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    listDisturbances: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListDisturbancesResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2054,6 +2890,55 @@ export interface operations {
             };
         };
     };
+    abortRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AbortResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listWorkspaceFiles: {
         parameters: {
             query?: never;
@@ -2199,6 +3084,547 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    exportBundle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BundleExportRequest"];
+            };
+        };
+        responses: {
+            /** @description Bundle stream. Body is a ``.zip`` containing case + disturbances.json + sim_params.json + results.csv + manifest.json (each optional except case + manifest). Per KTD-5; snapshots are NOT included. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": unknown;
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case has been loaded into this session yet. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The substrate could not produce a canonical xlsx export for the dirty case (elements ANDES can't roundtrip). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    saveSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveSnapshotRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaveSnapshotResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Snapshot name collision (re-issue with ``force=true``) OR no case loaded yet. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Invalid snapshot name or save-time failure inside ANDES. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    restoreSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestoreSnapshotRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreSnapshotResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session or snapshot not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case loaded — restore needs a case to scope the snapshot directory. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Invalid snapshot name OR corrupt metadata OR version mismatch on forced dill restore. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    listSnapshots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListSnapshotsResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deleteSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session or snapshot not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case loaded — delete needs a case to scope the snapshot directory. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Invalid snapshot name. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    getReport: {
+        parameters: {
+            query: {
+                /** @description Which routine to report on. ``pflow`` requires a converged power-flow result; ``tds`` requires a completed TDS run; ``eig`` requires ``EIG.run()`` to have populated the eigenvalue vector (Unit 6). */
+                routine: components["schemas"]["ReportRoutineEnum"];
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The routine pre-condition is not met — for ``pflow``, no converged PFlow result; for ``tds``, no completed TDS run; for ``eig``, EIG has not been run yet on this session. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The requested routine is outside the schema enum. Validation-layer rejection. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description ANDES's report writer failed. The detail carries the underlying ANDES error verbatim. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    runEig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EigRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EigResultResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case loaded OR the session has no converged PFlow result. Run /pflow first; ``EIG._pre_check`` only warns and would otherwise crash with a non-actionable TypeError. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description ANDES eigenvalue routine raised (e.g., singular Jacobian after regularization). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    getEigParticipation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                mode_idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EigParticipationResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found, OR ``mode_idx`` is out of range for the current EIG result. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description EIG has not been run on this session — POST /eig first. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getEigStateMatrix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description MATLAB v5 ``.mat`` file containing ``As`` (state matrix) and ``mu`` (eigenvalue vector). Consumed by the UI's MAT exporter (Unit 2). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description EIG has not been run on this session — POST /eig first. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
