@@ -61,6 +61,38 @@ export type LoadConsumption = components['schemas']['LoadConsumption'];
 /** ANDES param value types in API request/response payloads. */
 export type ParamValue = number | string | boolean;
 
+// ---- TDS run lifecycle (Unit 7 — abort + disturbance commit + reset) -----
+
+/**
+ * Request body for ``POST /sessions/{id}/disturbances``. Re-export of the
+ * codegen type under a stable alias so Unit 7 call sites don't have to
+ * dig into the generated tree.
+ */
+export type AddDisturbancesRequest = components['schemas']['AddDisturbancesRequest'];
+/** Response body for ``POST /sessions/{id}/disturbances``. */
+export type AddDisturbancesResponse = components['schemas']['AddDisturbancesResponse'];
+/** One ack entry returned by the disturbance commit endpoint. */
+export type DisturbanceAck = components['schemas']['DisturbanceAck'];
+
+/**
+ * Response body for ``POST /sessions/{id}/abort`` (Unit 1b endpoint).
+ *
+ * The substrate-side ``AbortResponse`` schema is defined in
+ * ``server/src/andes_app/api/schemas.py`` but the web ``generated.ts`` was
+ * regenerated before Unit 7 landed. Hand-authored here so Unit 7 doesn't
+ * block on a codegen sweep; the field shape is identical and a one-to-one
+ * alias substitution will work when codegen is re-run.
+ */
+export interface AbortResponse {
+  /**
+   * Always ``true`` on a successful response. The actual TDS exit happens
+   * cooperatively at the next ``callpert`` tick on the worker — the WS
+   * stream emits the terminal ``done`` message with ``final_t < tf`` once
+   * the integration loop exits.
+   */
+  aborted: true;
+}
+
 // ---- disturbance specs (Unit 6 — mirrors substrate's discriminated union) --
 
 /**

@@ -23,19 +23,24 @@ export default defineConfig({
     proxy: {
       // Forward API calls to the substrate. The substrate mounts every
       // router under ``/api/*`` (Unit 10), so we forward the prefix as-is
-      // — no rewrite. ``/ws`` is the WebSocket entry point for TDS
-      // streaming (v0.2); the substrate exposes it at ``/api/ws`` after
-      // the prefix change.
+      // — no rewrite.
       '/api': {
         target: ANDES_TARGET,
         changeOrigin: true,
         secure: false,
       },
+      // WebSocket proxy for TDS streaming (v0.2). The substrate mounts the
+      // WS router at ``/api/ws/{session_id}``, but the browser opens the
+      // socket at the page-origin path ``/ws/{id}`` — we rewrite to add
+      // the ``/api`` prefix so RunStream can use the same relative-URL
+      // convention as the HTTP client (where ``/api`` is baked into
+      // ``API_PREFIX`` in ``client.ts``).
       '/ws': {
         target: ANDES_TARGET,
         changeOrigin: true,
         ws: true,
         secure: false,
+        rewrite: (p: string) => `/api${p}`,
       },
     },
   },
