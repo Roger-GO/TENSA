@@ -421,6 +421,52 @@ def _handle_run_se(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.run_se())
 
 
+def _handle_add_pmu(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.add_pmu`` for Unit 14.
+
+    Args: ``{"bus_idx": <int|str>, "Ta": float?, "Tv": float?}``.
+    Returns the serialized ``TopologyEntry`` for the newly-added PMU.
+    """
+    bus_idx = args.get("bus_idx")
+    if bus_idx is None:
+        raise AndesAppError("'bus_idx' is required for add_pmu")
+    Ta_raw = args.get("Ta")
+    Tv_raw = args.get("Tv")
+    Ta = float(Ta_raw) if Ta_raw is not None else 0.05
+    Tv = float(Tv_raw) if Tv_raw is not None else 0.05
+    return _serialize_dataclass(
+        wrapper.add_pmu(bus_idx, Ta=Ta, Tv=Tv)
+    )
+
+
+def _handle_list_pmus(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.list_pmus`` for Unit 14.
+
+    Returns a list of serialized ``TopologyEntry`` dicts (one per PMU);
+    empty list when no PMUs have been placed yet.
+    """
+    return _serialize_dataclass(wrapper.list_pmus())
+
+
+def _handle_delete_pmu(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.delete_pmu`` for Unit 14. Returns ``None``."""
+    idx = args.get("idx")
+    if idx is None:
+        raise AndesAppError("'idx' is required for delete_pmu")
+    wrapper.delete_pmu(idx)
+    return None
+
+
+def _handle_export_pmu_csv(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.export_pmu_csv`` for Unit 14.
+
+    Returns the CSV text body verbatim (UTF-8 string). The route layer
+    sets ``Content-Type: text/csv`` and a ``Content-Disposition``
+    suggesting ``andes-pmu-<run_id>.csv``.
+    """
+    return wrapper.export_pmu_csv()
+
+
 def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     """Assemble a reproducibility-bundle ``.zip`` (Unit 3 of the v2.0 plan).
 
@@ -855,6 +901,11 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     # Unit 13 — SE (state estimation): two-step (generate measurements, run SE).
     "generate_measurements_from_pflow": _handle_generate_measurements_from_pflow,
     "run_se": _handle_run_se,
+    # Unit 14 — PMU placement + post-run CSV export.
+    "add_pmu": _handle_add_pmu,
+    "list_pmus": _handle_list_pmus,
+    "delete_pmu": _handle_delete_pmu,
+    "export_pmu_csv": _handle_export_pmu_csv,
     # Unit 17 — connectivity / island detection (post-run only; no per-frame
     # streaming integration per the plan's auto-fix).
     "compute_connectivity": _handle_compute_connectivity,

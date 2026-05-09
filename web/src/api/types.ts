@@ -272,6 +272,22 @@ export interface SeMeasurementsGeneratedResponse {
   count: number;
 }
 
+// ---- PMU placement (Unit 14) ----------------------------------------------
+
+/**
+ * Request body for ``POST /sessions/{id}/pmu``. ``Ta`` / ``Tv``
+ * default to 0.05 s when omitted (the substrate's recommended sweet
+ * spot).
+ */
+export type AddPmuRequest = components['schemas']['AddPmuRequest'];
+
+/**
+ * Wire shape of ``GET /sessions/{id}/pmu`` — the PMU bucket of the
+ * session's topology surfaced as a dedicated endpoint so the placement
+ * dialog doesn't pull the entire snapshot.
+ */
+export type ListPmusResponse = components['schemas']['ListPmusResponse'];
+
 // ---- Connectivity (Unit 17 — island detection) ----------------------------
 
 /**
