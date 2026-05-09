@@ -37,6 +37,7 @@ from andes_app.api.routes.disturbances import router as disturbances_router
 from andes_app.api.routes.eig import router as eig_router
 from andes_app.api.routes.elements import router as elements_router
 from andes_app.api.routes.pflow import router as pflow_router
+from andes_app.api.routes.pmu import router as pmu_router
 from andes_app.api.routes.reports import router as reports_router
 from andes_app.api.routes.se import router as se_router
 from andes_app.api.routes.sessions import router as sessions_router
@@ -245,6 +246,8 @@ def make_app(
     app.include_router(eig_router, prefix="/api", tags=["eig"])
     app.include_router(cpf_router, prefix="/api", tags=["cpf"])
     app.include_router(se_router, prefix="/api", tags=["se"])
+    # Unit 14 — PMU placement (pre-setup add/list/delete) + post-run CSV export.
+    app.include_router(pmu_router, prefix="/api", tags=["pmu"])
     app.include_router(ws_router, prefix="/api", tags=["streaming"])
 
     # SPA mount goes LAST so the ``/api/*`` routers and ``/openapi.json``

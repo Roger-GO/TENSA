@@ -125,6 +125,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/connectivity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compute connected-component island count + per-island bus membership.
+         * @description Run :meth:`ss.connectivity` on the loaded System and return the
+         *     island summary — Unit 17.
+         *
+         *     Per the v2.0 plan's Unit 17 auto-fix, this is **post-run only**.
+         *     The substrate does not extend the streaming pipeline's
+         *     ``VAR_GROUPS`` schema with per-frame island metadata; the UI calls
+         *     this endpoint manually (e.g., after a TDS run completes) via the
+         *     "Recompute connectivity" button on the SLD overlay.
+         *
+         *     The route requires a loaded case; ``ss.setup()`` is auto-called by
+         *     the wrapper if it hasn't already been (matching ``run_pflow`` /
+         *     ``run_eig`` behaviour). A ``SetupFailedError`` from the wrapper
+         *     surfaces as 422 with the standard reload-recovery hint.
+         */
+        get: operations["getConnectivity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/pflow": {
         parameters: {
             query?: never;
@@ -686,6 +718,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/pmu": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List currently-placed PMU instances on the session.
+         * @description Return every PMU currently registered on the session's System.
+         *
+         *     Empty list when none have been placed (the common case for a
+         *     freshly-loaded stock case — ANDES's bundled cases ship with zero
+         *     PMUs).
+         */
+        get: operations["listPmus"];
+        put?: never;
+        /**
+         * Place a PMU at the given bus on a pre-setup session.
+         * @description Add a PMU instance to the session pre-setup.
+         *
+         *     Returns the freshly-built ``TopologyEntry`` with the auto-assigned
+         *     ANDES idx (``PMU_<n>``). The placement dialog seeds its local list
+         *     from the response so the new PMU shows up without an extra GET.
+         */
+        post: operations["addPmu"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/pmu/{pmu_idx}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a PMU from the pre-setup session.
+         * @description Delete a PMU previously added via ``POST /pmu``.
+         *
+         *     Returns 204 on success. 404 when the idx isn't a known PMU. 409
+         *     when the session is post-setup (call /reload first).
+         */
+        delete: operations["deletePmu"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/pmu/{run_id}/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download the PMU am/vm trajectories from the most recent TDS run.
+         * @description Stream the PMU CSV for the session's most recent TDS run.
+         *
+         *     The ``run_id`` segment is informational on the substrate side (the
+         *     substrate keeps only the latest ``ss.dae.ts``); the client uses it
+         *     so the downloaded file can be stably named per-run.
+         */
+        get: operations["exportPmuCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -766,6 +877,38 @@ export interface components {
             params: {
                 [key: string]: number | string | boolean;
             };
+        };
+        /**
+         * AddPmuRequest
+         * @description Request body for ``POST /sessions/{id}/pmu``.
+         *
+         *     ``bus_idx`` accepts a string (which the substrate forwards as-is to
+         *     ANDES — ``ss.add('PMU', dict(bus=...))``). Bus idx values can be
+         *     integers (PSS/E .raw cases) or strings (.xlsx cases); the substrate
+         *     coerces both via string-equality so the API surface stays uniform.
+         *
+         *     ``Ta`` / ``Tv`` (optional) are the angle / voltage low-pass filter
+         *     time constants in seconds. Defaults match the Unit 14 spike's
+         *     empirical sweet spot (0.05 s) — small enough to track a 60 Hz
+         *     swing, large enough to suppress integration noise on stiff cases.
+         *     ANDES's own defaults are 0.1 s.
+         */
+        AddPmuRequest: {
+            /**
+             * Bus Idx
+             * @description Bus idx the PMU attaches to. Must reference a Bus that exists on the loaded System. Integer-typed bus idxes (from PSS/E .raw cases) are accepted as their string representation.
+             */
+            bus_idx: string;
+            /**
+             * Ta
+             * @description Angle filter time constant in seconds. Defaults to 0.05 s when omitted (the substrate's recommended sweet spot).
+             */
+            Ta?: number | null;
+            /**
+             * Tv
+             * @description Voltage filter time constant in seconds. Defaults to 0.05 s when omitted.
+             */
+            Tv?: number | null;
         };
         /**
          * AlterSpec
@@ -946,6 +1089,32 @@ export interface components {
              * @description Imaginary part of the eigenvalue.
              */
             imag: number;
+        };
+        /**
+         * ConnectivityResponse
+         * @description Wire shape of ``GET /sessions/{id}/connectivity`` (Unit 17).
+         *
+         *     Mirrors :class:`andes_app.core.connectivity_result.ConnectivityResult`
+         *     1:1. Bus idxes are stringified for stable JSON keying — case-file
+         *     formats may carry int or str idx values, but the SLD always stringifies
+         *     when keying nodes, so the wire payload normalises here.
+         */
+        ConnectivityResponse: {
+            /**
+             * Island Count
+             * @description Total number of islands, including singleton 'islands' of one degree-zero bus. Equals ``len(Bus.islands)``. A fully-interconnected case yields 1; tripping a critical line yields >= 2.
+             */
+            island_count: number;
+            /**
+             * Islands
+             * @description List of lists of bus idx values. Each inner list is one island's bus membership. Index-aligned with ``Bus.islands`` so the first entries are singleton islands for any degree-zero buses; the larger connected components follow.
+             */
+            islands: string[][];
+            /**
+             * Islanded Bus Idxes
+             * @description Convenience: just the degree-zero (lone) bus idxes. Each appears as its own singleton in ``islands`` too. The SLD uses this for the primary 'grey out' trigger.
+             */
+            islanded_bus_idxes: string[];
         };
         /**
          * CpfQvRunRequest
@@ -1302,6 +1471,22 @@ export interface components {
              * @description Currently-recorded disturbance specs. Same shape as the ``POST /sessions/{id}/disturbances`` request body's ``disturbances`` field.
              */
             disturbances: (components["schemas"]["FaultSpec"] | components["schemas"]["ToggleSpec"] | components["schemas"]["AlterSpec"])[];
+        };
+        /**
+         * ListPmusResponse
+         * @description Wire shape of ``GET /sessions/{id}/pmu``.
+         *
+         *     Mirrors a slice of ``TopologySummary.controllers`` filtered to the
+         *     PMU model class — surfaced as a dedicated route so the placement
+         *     dialog doesn't have to load the full topology snapshot just to read
+         *     the PMU list.
+         */
+        ListPmusResponse: {
+            /**
+             * Pmus
+             * @description Currently-placed PMU instances. Each entry's ``params`` carries ``bus`` / ``Ta`` / ``Tv``. Empty list when no PMUs have been placed.
+             */
+            pmus: components["schemas"]["TopologyEntry"][];
         };
         /**
          * ListSnapshotsResponse
@@ -2518,6 +2703,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getConnectivity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectivityResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case has been loaded into this session yet. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description ANDES setup() failed before the connectivity check could run; call POST /api/sessions/{id}/reload to recover. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
@@ -4160,6 +4403,242 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    listPmus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListPmusResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case has been loaded into this session yet. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    addPmu: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddPmuRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopologyEntry"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session has already been committed (PF or TDS has run); call POST /api/sessions/{id}/reload to return to pre-setup. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Bus idx does not exist on the loaded System OR ANDES rejected the underlying ``ss.add('PMU', ...)`` call. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    deletePmu: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                pmu_idx: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found OR no PMU with that idx. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session has already been committed; call POST /api/sessions/{id}/reload to return to pre-setup. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description PMU originated from the loaded case file (not removable via this endpoint — reload to reset). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    exportPmuCsv: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description CSV body. Header is ``t,<idx1>_am,<idx1>_vm,...``; one row per integration step at full TDS rate (no decimation). Empty body (header only) when no PMUs are placed or no TDS step has fired. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": unknown;
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case has been loaded OR the session has not yet committed setup() (i.e., no PF or TDS run has fired). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

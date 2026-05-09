@@ -24,6 +24,7 @@ import { usePflowStore } from './pflow';
 import { useRunsStore } from './runs';
 import { useAnimationStore } from './animation';
 import { useConnectivityStore } from './connectivity';
+import { usePmuStore } from './pmu';
 
 // Re-export slices so consumers have one import surface.
 export { useAuthStore } from './auth';
@@ -51,7 +52,7 @@ export function wireStoreCascade(): void {
   if (cascadeWired) return;
   cascadeWired = true;
 
-  // auth clear → session + case + pflow + runs + animation + connectivity clear.
+  // auth clear → session + case + pflow + runs + animation + connectivity + pmu clear.
   registerAuthClearCascade(() => {
     useSessionStore.getState().clearSession();
     useCaseStore.getState().clearCase();
@@ -59,6 +60,7 @@ export function wireStoreCascade(): void {
     useRunsStore.getState().clearRuns();
     useAnimationStore.getState().clearAll();
     useConnectivityStore.getState().clear();
+    usePmuStore.getState().clear();
   });
 
   // session clear → case + pflow + runs clear.
@@ -76,6 +78,7 @@ export function wireStoreCascade(): void {
       useRunsStore.getState().clearRuns();
       useAnimationStore.getState().clearAll();
       useConnectivityStore.getState().clear();
+      usePmuStore.getState().clear();
       if (!state.recoveryInProgress) {
         useCaseStore.getState().clearCase();
         usePflowStore.getState().clearPflow();
@@ -84,15 +87,17 @@ export function wireStoreCascade(): void {
     prevSessionId = next;
   });
 
-  // case change → pflow + connectivity clear. Triggered on selection
+  // case change → pflow + connectivity + pmu clear. Triggered on selection
   // change OR clear. Connectivity is bus-idx keyed and a new case has
-  // a new bus set, so a stale snapshot would grey out the wrong nodes.
+  // a new bus set, so a stale snapshot would grey out the wrong nodes;
+  // PMU placements are bus-idx keyed for the same reason.
   let prevSelection = useCaseStore.getState().selection;
   useCaseStore.subscribe((state) => {
     const next = state.selection;
     if (prevSelection !== next) {
       usePflowStore.getState().clearPflow();
       useConnectivityStore.getState().clear();
+      usePmuStore.getState().clear();
     }
     prevSelection = next;
   });
@@ -124,6 +129,7 @@ export function __resetCascadeForTests(): void {
     result: null,
     energisedBusIdxes: new Set<string>(),
   });
+  usePmuStore.setState({ pmus: [] });
 }
 
 // Side-effect: defensive auto-wire on first import. `wireStoreCascade` is
