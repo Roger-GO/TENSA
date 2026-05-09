@@ -365,15 +365,15 @@ stateDiagram-v2
 
 > **Phase 1 ships: Units 1a/1b/1c, 2, 3, 4, 6.** Unit 5 (xf default sanity) was relocated to Phase 2 to preserve Phase 1 schedule for EIG. Unit 6 (EIG) was relocated from Phase 2 to Phase 1 so the JOSS paper has a substantive scholarly contribution at submission time.
 
-- [ ] **Unit 1a: ANDES routine API spike**
+- [x] **Unit 1a: ANDES routine API spike** *(complete: docs/spikes/2026-05-09-andes-routine-surface-spike.md)*
 
 **Goal:** Verify the actual ANDES API surface for `EIG`, `CPF`, `SE`, `snapshot`, `Measurements`, `timeseries`, `PMU` before committing routine wiring. **This is the technical prerequisite for Units 6, 7, 12, 13, 14, 15.**
 
-- [ ] **Unit 1b: CURENT outreach kickoff**
+- [x] **Unit 1b: CURENT outreach kickoff** *(draft ready: docs/outreach/2026-05-09-curent-cui-outreach.md — user sends manually)*
 
 **Goal:** Initiate the CURENT relationship at Wk 1; track responses through the Wk 4 branch decision per KTD-3.
 
-- [ ] **Unit 1c: Community-track scaffolding**
+- [x] **Unit 1c: Community-track scaffolding** *(complete: docs/community/community-track.md)*
 
 **Goal:** Stand up the community-engagement doc with Wk 1–24 commitments. Identify 3–5 candidate design-partner labs.
 
