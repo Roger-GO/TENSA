@@ -100,6 +100,16 @@ def _map_worker_error(exc: WorkerError) -> HTTPException:
                 f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
             ),
         )
+    if category == "EigDirtyDaeError":
+        # Phase 1 smoke Issue 1: PF after EIG. The wrapper detects
+        # ``ss.TDS.initialized == True`` and refuses rather than
+        # surfacing NaN values / 5xx. The detail already carries the
+        # actionable "reload" hint that ``RunButton.tsx`` keys off
+        # to render a Reload-and-retry affordance.
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=exc.detail,
+        )
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=f"{category}: {exc.detail}",
@@ -120,7 +130,11 @@ def _map_worker_error(exc: WorkerError) -> HTTPException:
         },
         422: {
             "model": ProblemDetails,
-            "description": "ANDES setup() failed; call /reload to recover.",
+            "description": (
+                "ANDES setup() failed, OR a previous EIG run mutated dae "
+                "state (``TDS.initialized=True``). Either case requires "
+                "POST /reload to recover."
+            ),
         },
     },
 )

@@ -102,6 +102,24 @@ class EigComputationError(AndesAppError):
     exception inside the routine body)."""
 
 
+class EigDirtyDaeError(AndesAppError):
+    """Raised when ``Wrapper.run_pflow`` is invoked while
+    ``ss.TDS.initialized is True`` — the documented EIG side-effect
+    (``EIG._pre_check`` calls ``TDS.init()`` + ``TDS.itm_step()``;
+    see Unit 1a spike). Re-running PF over the TDS-extended dae has
+    been observed to populate ``Bus.v.v`` with NaN values on
+    ``kundur_full``, which then either crashes the extraction
+    helpers or surfaces as a JSON-encoder failure (5xx).
+
+    The wrapper rejects with this typed error instead so the routes
+    layer can return an actionable 422. Recovery: call
+    ``POST /api/sessions/{id}/reload`` to return to a fresh pre-setup
+    state (full re-parse — this is the only clean escape per Unit 1a;
+    ``System.reset(force=True)`` raises ``NotImplementedError: Does
+    not know how to shrink arrays`` after EIG-induced TDS init).
+    """
+
+
 class ElementHasDependentsError(AndesAppError):
     """Raised when ``delete_element(model, idx)`` would orphan references on
     other devices (e.g., deleting a Bus that has a Line attached).

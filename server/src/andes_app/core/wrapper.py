@@ -42,6 +42,7 @@ from andes_app.core.errors import (
     DisturbanceCommitError,
     DisturbanceValidationError,
     EigComputationError,
+    EigDirtyDaeError,
     EigPrerequisiteError,
     ElementHasDependentsError,
     ElementNotFoundError,
@@ -921,8 +922,32 @@ class Wrapper:
     def run_pflow(self) -> PflowResult:
         """Run power flow. Calls ``ss.setup()`` first if not yet committed
         (verified: ``PFlow.run`` does not auto-call setup).
+
+        Substrate-side gate (Phase 1 smoke Issue 1): if ``ss.TDS.initialized``
+        is True, refuse with :class:`EigDirtyDaeError`. Background:
+
+        - Running ``ss.EIG.run()`` calls ``TDS.init()`` + ``TDS.itm_step()``
+          via ``EIG._pre_check`` (Unit 1a spike), advancing ``dae.t`` to 0
+          and extending the dae arrays for the full TDS state set.
+        - A subsequent ``ss.PFlow.run()`` then completes (returns
+          ``converged=True`` in 1 iteration) but populates ``Bus.v.v``
+          with NaN entries on cases like ``kundur_full``. Extraction +
+          JSON encoding then either crashes or emits non-finite floats.
+        - ``ss.reset(force=True)`` is **not** a viable recovery path —
+          it re-calls ``setup()`` which then raises
+          ``NotImplementedError: Does not know how to shrink arrays``
+          inside ``DAE.alloc_or_extend_names``. Verified empirically.
+
+        Recovery is therefore ``reload_case()`` — full re-parse of the
+        original case file. The error message points the caller there.
         """
         ss = self._require_loaded()
+        if bool(getattr(getattr(ss, "TDS", None), "initialized", False)):
+            raise EigDirtyDaeError(
+                "EIG mutated dae state; reload case "
+                "(POST /api/sessions/{id}/reload) to restore pre-EIG PF "
+                "behavior, or use Run TDS instead."
+            )
         self._ensure_setup()
         ss.PFlow.run()
         converged = bool(getattr(ss.PFlow, "converged", False))
