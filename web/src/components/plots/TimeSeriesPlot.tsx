@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type uPlot from 'uplot';
 import { useRunsStore } from '@/store/runs';
 import {
@@ -11,6 +11,10 @@ import {
 import type { VarGroup } from '@/store/plot';
 import type { RunRecord } from '@/store/runs';
 import { UPlot } from './UPlot';
+import { ExportMenu } from '@/components/export/ExportMenu';
+import { timeSeriesToCsv } from '@/components/export/exportToCsv';
+import { elementToPng } from '@/components/export/exportToPng';
+import { useCaseStore } from '@/store/case';
 import { cn } from '@/lib/cn';
 
 /**
@@ -217,6 +221,8 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
   const scrubT = usePlotStore((s) =>
     effectiveRunId ? (s.scrubByRun[effectiveRunId] ?? null) : null,
   );
+  const primaryPath = useCaseStore((s) => s.selection?.primaryPath ?? null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Group the selected series by VarGroup using the column-name parser.
   // Order within each group follows the run's ``columnNames`` (stable
@@ -238,6 +244,51 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
 
   const syncKey = effectiveRunId ? `tds-run-${effectiveRunId}` : 'tds-run-empty';
 
+  // CSV export builds a long-form `(time, variable, value)` table over
+  // the currently-selected series. Slices the run's typed-array columns
+  // to the logical seqCount before serialising. When the run is in
+  // `connection: "lagged"` state the runs slice has already evicted
+  // some early rows; we surface a generic warning header (the runs
+  // slice does not currently track the dropped count — Unit 2
+  // plan-divergence: per-run dropped-row tracking deferred).
+  const onExportCsv = useCallback(() => {
+    if (!run || !selected || selected.size === 0) return null;
+    const len = run.seqCount;
+    if (len === 0) return null;
+    const tSlice = run.t.subarray(0, len);
+    const orderedNames: string[] = [];
+    for (const name of run.columnNames) {
+      if (selected.has(name)) orderedNames.push(name);
+    }
+    const cols: Record<string, ArrayLike<number>> = {};
+    for (const name of orderedNames) {
+      const col = run.columns[name];
+      if (!col) continue;
+      cols[name] = col.subarray(0, len);
+    }
+    // Lagged-run signal: the runs slice flips `connection` to `"lagged"`
+    // when active-run eviction kicks in, but doesn't expose the row
+    // count. Pass `1` so the warning header is emitted; downstream
+    // tooling can detect truncation even without an exact count.
+    const droppedRowCount = run.connection === 'lagged' ? 1 : undefined;
+    return timeSeriesToCsv({
+      t: tSlice,
+      columns: cols,
+      droppedRowCount,
+    });
+  }, [run, selected]);
+
+  // PNG export rasterises the chart container (uPlot canvas + axis
+  // labels + legend) via html-to-image. Returns null when the chart
+  // hasn't laid out yet so the menu surfaces "No data to export".
+  const onExportPng = useCallback(async () => {
+    const el = containerRef.current;
+    if (!el) return null;
+    return await elementToPng(el);
+  }, []);
+
+  const caseName = primaryPath ? deriveCaseName(primaryPath) : 'case';
+
   // Build per-group chart props. ``useMemo`` keys on the run + selection
   // so the construction effect inside <UPlot /> only re-fires when
   // the series-set actually changes; data updates flow through the
@@ -257,6 +308,9 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
   if (!effectiveRunId || !run) {
     return (
       <div className={cn('h-full w-full', className)}>
+        <div className="flex justify-end">
+          <ExportMenu formats={['csv', 'png']} disabled panel="time-series" />
+        </div>
         <EmptyState message="Run a TDS to see results" />
       </div>
     );
@@ -265,6 +319,9 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
   if (charts.length === 0) {
     return (
       <div className={cn('h-full w-full', className)}>
+        <div className="flex justify-end">
+          <ExportMenu formats={['csv', 'png']} disabled panel="time-series" />
+        </div>
         <EmptyState message="Select variables to plot" />
       </div>
     );
@@ -272,11 +329,22 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
 
   return (
     <div
+      ref={containerRef}
       data-testid="time-series-plot"
       data-run-id={effectiveRunId}
       data-scrub-t={scrubT === null ? '' : String(scrubT)}
       className={cn('flex h-full w-full flex-col gap-2', className)}
     >
+      <div className="flex justify-end">
+        <ExportMenu
+          formats={['csv', 'png']}
+          panel="time-series"
+          caseName={caseName}
+          runId={effectiveRunId}
+          onExportCsv={onExportCsv}
+          onExportPng={onExportPng}
+        />
+      </div>
       {charts.map(({ group, options, data }) => (
         <GroupChart
           key={group}
@@ -289,4 +357,14 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
       ))}
     </div>
   );
+}
+
+/**
+ * Derive a short case name from a workspace path. Strips directory
+ * prefix + extension. `ieee14.raw` → `ieee14`.
+ */
+function deriveCaseName(path: string): string {
+  const base = path.split(/[\\/]/).pop() ?? path;
+  const dot = base.lastIndexOf('.');
+  return dot > 0 ? base.slice(0, dot) : base;
 }

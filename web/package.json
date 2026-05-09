@@ -45,6 +45,7 @@
     "@xyflow/react": "^12.3.6",
     "apache-arrow": "^21.1.0",
     "elkjs": "^0.9.3",
+    "html-to-image": "^1.11.13",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-resizable-panels": "^2.1.7",

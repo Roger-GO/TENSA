@@ -52,7 +52,10 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useRunsStore } from '@/store/runs';
 import { usePlotStore } from '@/store/plot';
+import { useCaseStore } from '@/store/case';
 import { Button } from '@/components/ui/button';
+import { ExportMenu } from '@/components/export/ExportMenu';
+import { timeSeriesToCsv } from '@/components/export/exportToCsv';
 import { cn } from '@/lib/cn';
 
 export interface ScrubControlProps {
@@ -89,6 +92,7 @@ export function ScrubControl({ runId, className, playbackRate = 1.0 }: ScrubCont
   const activeRunId = useRunsStore((s) => s.activeRunId);
   const effectiveRunId = runId ?? activeRunId;
   const run = useRunsStore((s) => (effectiveRunId ? s.runs[effectiveRunId] : undefined));
+  const primaryPath = useCaseStore((s) => s.selection?.primaryPath ?? null);
 
   const scrubT = usePlotStore((s) =>
     effectiveRunId ? (s.scrubByRun[effectiveRunId] ?? null) : null,
@@ -260,16 +264,39 @@ export function ScrubControl({ runId, className, playbackRate = 1.0 }: ScrubCont
 
   // ---- render -------------------------------------------------------------
 
+  // CSV export over the entire run buffer (not just the scrubbed
+  // window) — the scrub control's role is timeline replay, but a CSV
+  // dump of the underlying data is the natural "give me the data
+  // behind this control" affordance. PNG isn't meaningful for the
+  // timeline strip itself.
+  const onExportCsv = useCallback(() => {
+    if (!run) return null;
+    const len = run.seqCount;
+    if (len === 0) return null;
+    const tSlice = run.t.subarray(0, len);
+    const cols: Record<string, ArrayLike<number>> = {};
+    for (const name of run.columnNames) {
+      const col = run.columns[name];
+      if (!col) continue;
+      cols[name] = col.subarray(0, len);
+    }
+    const droppedRowCount = run.connection === 'lagged' ? 1 : undefined;
+    return timeSeriesToCsv({ t: tSlice, columns: cols, droppedRowCount });
+  }, [run]);
+
+  const caseName = primaryPath ? deriveCaseName(primaryPath) : 'case';
+
   if (!effectiveRunId || !run) {
     return (
       <div
         data-testid="scrub-control-empty"
         className={cn(
-          'border-border text-muted-foreground flex h-12 w-full items-center justify-center rounded border text-xs',
+          'border-border text-muted-foreground flex h-12 w-full items-center justify-center gap-2 rounded border text-xs',
           className,
         )}
       >
-        No active run
+        <span>No active run</span>
+        <ExportMenu formats={['csv']} disabled panel="scrub" />
       </div>
     );
   }
@@ -365,10 +392,25 @@ export function ScrubControl({ runId, className, playbackRate = 1.0 }: ScrubCont
           Live
         </Button>
       )}
+      <ExportMenu
+        formats={['csv']}
+        disabled={isEmptyRange}
+        panel="scrub"
+        caseName={caseName}
+        runId={effectiveRunId}
+        onExportCsv={onExportCsv}
+      />
       {/* Frame-count debug attribute (testing convenience). */}
       <span data-testid="scrub-control-seq" className="sr-only">
         {seqCount}
       </span>
     </div>
   );
+}
+
+/** Strip directory + extension from a workspace path. */
+function deriveCaseName(path: string): string {
+  const base = path.split(/[\\/]/).pop() ?? path;
+  const dot = base.lastIndexOf('.');
+  return dot > 0 ? base.slice(0, dot) : base;
 }

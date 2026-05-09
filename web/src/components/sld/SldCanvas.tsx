@@ -23,6 +23,8 @@ import '@xyflow/react/dist/style.css';
 import { useCaseStore } from '@/store/case';
 import { useGetSidecar, usePutSidecar, useCurrentTopology } from '@/api/queries';
 import type { TopologySummary, SidecarLayout } from '@/api/types';
+import { ExportMenu } from '@/components/export/ExportMenu';
+import { elementToPng } from '@/components/export/exportToPng';
 
 import { BusNode } from './nodes/BusNode';
 import { LineNode } from './nodes/LineNode';
@@ -142,6 +144,7 @@ interface InnerProps {
 function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: InnerProps) {
   const setSelectedElement = useCaseStore((s) => s.setSelectedElement);
   const selectedElement = useCaseStore((s) => s.selectedElement);
+  const canvasRef = useRef<HTMLDivElement>(null);
   const [autoCoords, setAutoCoords] = useState<CoordsByIdx | null>(null);
   const [autoBendPoints, setAutoBendPoints] = useState<Map<string, [number, number][]> | null>(
     null,
@@ -471,12 +474,36 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
     [nodes, selectedElement],
   );
 
+  // PNG export rasterises the entire canvas container (the ReactFlow
+  // root + its embedded SVG). The SLD is rendered as a mix of HTML
+  // overlays (banners, MiniMap controls) and SVG (edges) so we use
+  // the html-to-image path rather than a pure SVG → canvas pipeline.
+  // ExportMenu calls this through onExportPng on the menu trigger.
+  const onExportPng = useCallback(async () => {
+    const el = canvasRef.current;
+    if (!el) return null;
+    return await elementToPng(el, { backgroundColor: '#ffffff' });
+  }, []);
+
+  // Derive a stable case-name slug from the primary path, mirroring
+  // the helper used in the plot panels. Blank sessions fall back to
+  // "case" so the file still has a sensible name.
+  const caseName = (() => {
+    if (!primaryPath) return 'case';
+    const base = primaryPath.split(/[\\/]/).pop() ?? primaryPath;
+    const dot = base.lastIndexOf('.');
+    return dot > 0 ? base.slice(0, dot) : base;
+  })();
+
   if (coords === null) {
     return <SldLayoutSkeleton />;
   }
 
   return (
     <div className="flex h-full w-full flex-col" data-testid="sld-canvas">
+      <div className="flex justify-end px-2 py-1">
+        <ExportMenu formats={['png']} panel="sld" caseName={caseName} onExportPng={onExportPng} />
+      </div>
       {showLargeBanner ? (
         <CanvasBanner
           testId="sld-large-banner"
@@ -491,7 +518,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
           onDismiss={() => setShowDriftBanner(false)}
         />
       ) : null}
-      <div className="min-h-0 flex-1">
+      <div ref={canvasRef} className="min-h-0 flex-1" data-testid="sld-canvas-surface">
         <ReactFlow
           nodes={nodesWithSelection}
           edges={edges}
