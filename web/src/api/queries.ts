@@ -58,6 +58,18 @@ import { usePflowStore } from '@/store/pflow';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { useRunsStore } from '@/store/runs';
 
+/**
+ * Routine name accepted by ``GET /sessions/{id}/report``. Phase 1
+ * (Unit 4) ships ``pflow`` + ``tds``; the substrate accepts ``eig``
+ * at the schema level but rejects with 422 until Unit 6 lands. The
+ * frontend type widens here so the dialog tab strip can ship the EIG
+ * tab in disabled form pre-Unit-6 if the design ever wants it.
+ *
+ * Declared at module top so the ``queryKeys`` block (below) can
+ * reference it for the ``report`` key factory.
+ */
+export type ReportRoutine = 'pflow' | 'tds' | 'eig';
+
 // ---- query keys -----------------------------------------------------------
 
 export const queryKeys = {
@@ -69,6 +81,9 @@ export const queryKeys = {
   topologySchema: ['topology-schema'] as const,
   /** Alterable-params lookup, scoped per (session, model). */
   alterableParams: (id: SessionId, model: string) => ['alterable-params', id, model] as const,
+  /** Report payload, scoped per (session, routine). Phase 1 (Unit 4) ships
+   *  ``pflow`` + ``tds``; ``eig`` widens in Unit 6. */
+  report: (id: SessionId, routine: ReportRoutine) => ['report', id, routine] as const,
 } as const;
 
 // ---- QueryClient factory --------------------------------------------------
@@ -898,6 +913,63 @@ export function useExportBundle(): UseMutationResult<Blob, Error, ExportBundleVa
       }
 
       return await response.blob();
+    },
+  });
+}
+
+// ---- reports (Unit 4) -----------------------------------------------------
+
+/** One tabular block in a routine's structured report. */
+export interface ReportTable {
+  title: string;
+  headers: readonly string[];
+  rows: readonly (readonly string[])[];
+}
+
+/** Response shape of ``GET /api/sessions/{id}/report``. */
+export interface ReportResponse {
+  routine: ReportRoutine;
+  plain_text: string;
+  structured: { tables: readonly ReportTable[] };
+}
+
+/**
+ * ``GET /api/sessions/{id}/report?routine=...`` — fetches a routine's
+ * report payload.
+ *
+ * Gating: enabled only when (a) a session is active AND (b) the
+ * relevant routine has produced a result on the current session. The
+ * caller passes the precomputed ``hasRunResult`` flag so this hook
+ * doesn't need to subscribe to two stores; the dialog component owns
+ * the gating logic.
+ *
+ * On 409 (no PF/TDS run yet), the error surfaces as a
+ * ``ProblemDetailsError`` whose ``status`` the dialog inspects to
+ * render the empty-state instead of the error banner.
+ *
+ * The ``staleTime`` is short (10 s) so a fresh PF/TDS run invalidates
+ * naturally as the user re-opens the dialog. Components can also call
+ * ``queryClient.invalidateQueries({ queryKey: ['report', id, routine] })``
+ * after the run mutation lands to force a refetch.
+ */
+export function useReport(
+  routine: ReportRoutine,
+  hasRunResult: boolean,
+): UseQueryResult<ReportResponse, Error> {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const enabled = sessionId !== null && hasRunResult;
+  return useQuery({
+    queryKey: enabled ? queryKeys.report(sessionId, routine) : ['report', 'noop', routine],
+    enabled,
+    staleTime: 10_000,
+    queryFn: async () => {
+      if (!sessionId) {
+        throw new Error('useReport enabled without a session id');
+      }
+      return await andesClient.get<ReportResponse>(
+        `/sessions/${encodeURIComponent(sessionId)}/report`,
+        { query: { routine }, timeoutMs: TIMEOUTS.workspace },
+      );
     },
   });
 }
