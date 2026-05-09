@@ -18,10 +18,12 @@ import type { ReactNode } from 'react';
 import {
   makeQueryClient,
   queryKeys,
+  useAlterableParams,
   useCreateSession,
   useLoadCase,
   useRunPflow,
 } from '@/api/queries';
+import { parseSessionId } from '@/api/types';
 import { setTokenGetter } from '@/api/client';
 import { useSessionStore } from '@/store/session';
 import type { SessionId } from '@/api/types';
@@ -95,6 +97,33 @@ describe('queries hooks', () => {
       expect(result.current.isSuccess).toBe(true);
     });
     expect(client.getQueryData(queryKeys.topology(sessionId))).toEqual(topology);
+  });
+
+  it('useAlterableParams hits the substrate path scoped to (session, model)', async () => {
+    const sessionId = parseSessionId('sess-alter');
+    useSessionStore.setState({ sessionId });
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ model: 'PQ', params: ['p0', 'q0'] }));
+
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useAlterableParams('PQ'), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
+    expect(result.current.data?.params).toEqual(['p0', 'q0']);
+    // The fetch went to the alterable_params path scoped to the session.
+    const url = String(fetchSpy.mock.calls[0]?.[0] ?? '');
+    expect(url).toContain('/sessions/sess-alter/topology/models/PQ/alterable_params');
+  });
+
+  it('useAlterableParams stays disabled until session + model are present', () => {
+    useSessionStore.setState({ sessionId: null });
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useAlterableParams('PQ'), { wrapper: Wrapper });
+    // Without a session, the hook never fires; status sits at "pending"
+    // with fetchStatus "idle".
+    expect(result.current.fetchStatus).toBe('idle');
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('useRunPflow invalidates the topology cache', async () => {

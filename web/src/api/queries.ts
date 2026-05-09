@@ -28,6 +28,7 @@ import { andesClient, ProblemDetailsError, TIMEOUTS } from './client';
 import { parseSessionId, parseRunId } from './types';
 import type {
   AddElementRequest,
+  AlterableParamsResponse,
   BlankSystemResponse,
   EditElementRequest,
   ElementCreated,
@@ -59,6 +60,9 @@ export const queryKeys = {
   workspaceFiles: ['workspace-files'] as const,
   sidecar: (casePath: WorkspacePath) => ['sidecar', casePath] as const,
   topologySchema: ['topology-schema'] as const,
+  /** Alterable-params lookup, scoped per (session, model). */
+  alterableParams: (id: SessionId, model: string) =>
+    ['alterable-params', id, model] as const,
 } as const;
 
 // ---- QueryClient factory --------------------------------------------------
@@ -317,6 +321,45 @@ export function useTopology(sessionId: SessionId | null): UseQueryResult<Topolog
 export function useCurrentTopology(): TopologySummary | null {
   const sessionId = useSessionStore((s) => s.sessionId);
   return useTopology(sessionId).data ?? null;
+}
+
+// ---- alterable params (Unit 1b endpoint, consumed by Unit 6 AlterSpecForm) -
+
+/**
+ * `GET /sessions/{id}/topology/models/{model}/alterable_params`. Returns
+ * the ordered list of parameter names that ANDES will accept as ``src``
+ * for the ``Alter`` disturbance on the given model.
+ *
+ * The hook is gated on a session id AND a non-empty model name; the
+ * Unit 6 ``AlterSpecForm`` only fires it after the user has picked a
+ * model from the dropdown, so an unmounted-while-empty render path stays
+ * disabled and doesn't 404 the substrate. Long stale time — the
+ * alterable-params set is a function of the model class, not the case
+ * data, so it's stable across the session.
+ */
+export function useAlterableParams(
+  model: string | null,
+): UseQueryResult<AlterableParamsResponse, Error> {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const enabled = sessionId !== null && model !== null && model.length > 0;
+  return useQuery({
+    queryKey: enabled
+      ? queryKeys.alterableParams(sessionId, model)
+      : ['alterable-params', 'noop'],
+    enabled,
+    // The list is purely a function of the ANDES model class; it doesn't
+    // change while the session is alive. Cache it for the session lifetime.
+    staleTime: Number.POSITIVE_INFINITY,
+    queryFn: async () => {
+      if (!sessionId || !model) {
+        throw new Error('useAlterableParams enabled without session or model');
+      }
+      return await andesClient.get<AlterableParamsResponse>(
+        `/sessions/${encodeURIComponent(sessionId)}/topology/models/${encodeURIComponent(model)}/alterable_params`,
+        { timeoutMs: TIMEOUTS.topology },
+      );
+    },
+  });
 }
 
 // ---- power flow -----------------------------------------------------------
