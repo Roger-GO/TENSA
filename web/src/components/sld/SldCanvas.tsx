@@ -21,7 +21,14 @@ import type {
 import '@xyflow/react/dist/style.css';
 
 import { useCaseStore } from '@/store/case';
-import { useGetSidecar, usePutSidecar, useCurrentTopology } from '@/api/queries';
+import { useSessionStore } from '@/store/session';
+import { useConnectivityStore } from '@/store/connectivity';
+import {
+  useGetSidecar,
+  usePutSidecar,
+  useCurrentTopology,
+  useConnectivity,
+} from '@/api/queries';
 import type { TopologySummary, SidecarLayout } from '@/api/types';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { elementToPng } from '@/components/export/exportToPng';
@@ -459,19 +466,59 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
     [setSelectedElement],
   );
 
+  // Connectivity / island-detection overlay (Unit 17). Subscribes to
+  // the connectivity slice; when a result is present we flag every
+  // bus that is NOT in a non-trivial island as "de-energised" so the
+  // canvas can grey it out. Subscribing to `result` (rather than
+  // `energisedBusIdxes` directly) keeps the membership check
+  // referentially stable while the user navigates around the canvas.
+  const connectivityResult = useConnectivityStore((s) => s.result);
+  const energisedBusIdxes = useConnectivityStore((s) => s.energisedBusIdxes);
+
   // Sync React Flow's `selected` state with the case store so a
   // selection driven from the results table (Unit 9) reflects on the
-  // canvas without needing a callback round-trip.
+  // canvas without needing a callback round-trip. Also threads the
+  // Unit 17 connectivity overlay: bus nodes whose idx is NOT in the
+  // current energised-set get a `de-energised` class on the React
+  // Flow node wrapper. The class is consumed by Tailwind below
+  // (opacity + grayscale) so the visual greying is a single CSS
+  // change, not a per-node prop drill into BusNode.
   const nodesWithSelection = useMemo(
     () =>
-      nodes.map((n) => ({
-        ...n,
-        selected:
+      nodes.map((n) => {
+        const selected =
           selectedElement !== null &&
           selectedElement.idx === n.id &&
-          selectedElement.kind === (n.type ?? 'bus'),
-      })),
-    [nodes, selectedElement],
+          selectedElement.kind === (n.type ?? 'bus');
+        // Greying only applies to bus nodes — non-bus device nodes are
+        // children of buses for the purposes of energisation, but
+        // their own grey-out cascade is handled by the connectivity
+        // result's bus membership. (Future: extend to PV/PQ devices
+        // anchored to greyed buses; deferred to v2.5.)
+        const isBus = (n.type ?? 'bus') === 'bus';
+        const isDeEnergised =
+          isBus &&
+          connectivityResult !== null &&
+          !energisedBusIdxes.has(n.id);
+        const baseClassName = (n as { className?: string }).className ?? '';
+        const className = isDeEnergised
+          ? `${baseClassName} sld-bus-de-energised opacity-40 grayscale`.trim()
+          : baseClassName || undefined;
+        return {
+          ...n,
+          selected,
+          className,
+          data: {
+            ...(n.data as Record<string, unknown>),
+            // Attribute echoed onto BusNode's wrapper via the spread
+            // pattern in the React Flow node mapping; tests assert on
+            // this exact attribute rather than the className so the
+            // assertion survives any future visual-styling tweak.
+            energised: isDeEnergised ? false : true,
+          },
+        };
+      }),
+    [nodes, selectedElement, connectivityResult, energisedBusIdxes],
   );
 
   // PNG export rasterises the entire canvas container (the ReactFlow
@@ -501,7 +548,8 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
 
   return (
     <div className="flex h-full w-full flex-col" data-testid="sld-canvas">
-      <div className="flex justify-end px-2 py-1">
+      <div className="flex items-center justify-end gap-2 px-2 py-1">
+        <ConnectivityRecomputeButton />
         <ExportMenu formats={['png']} panel="sld" caseName={caseName} onExportPng={onExportPng} />
       </div>
       {showLargeBanner ? (
@@ -538,6 +586,62 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
         </ReactFlow>
       </div>
     </div>
+  );
+}
+
+/**
+ * Unit 17 — connectivity / island-detection recompute button.
+ *
+ * Per the v2.0 plan's Unit 17 auto-fix this is the **manual trigger**
+ * for the connectivity overlay (no per-streaming-frame recomputation).
+ * The button calls ``query.refetch()`` on the ``useConnectivity`` hook;
+ * the hook's ``queryFn`` writes through to the connectivity Zustand
+ * slice, which drives the bus-greying logic in ``nodesWithSelection``.
+ *
+ * Disabled when no session exists (the user has not loaded a case
+ * yet); the route would 409 otherwise. The "running" / "error" inline
+ * states are surfaced via ``data-status`` so styling and tests can
+ * branch deterministically without waiting on toast plumbing.
+ */
+function ConnectivityRecomputeButton() {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const connectivityQuery = useConnectivity();
+  const islandCount = useConnectivityStore((s) => s.result?.island_count ?? null);
+  const onClick = useCallback(() => {
+    if (sessionId === null) return;
+    void connectivityQuery.refetch();
+  }, [sessionId, connectivityQuery]);
+  const isFetching = connectivityQuery.isFetching;
+  const isError = connectivityQuery.isError;
+  const status: 'idle' | 'fetching' | 'error' | 'success' = isFetching
+    ? 'fetching'
+    : isError
+      ? 'error'
+      : islandCount !== null
+        ? 'success'
+        : 'idle';
+  return (
+    <button
+      type="button"
+      data-testid="sld-recompute-connectivity"
+      data-status={status}
+      data-island-count={islandCount ?? undefined}
+      onClick={onClick}
+      disabled={sessionId === null || isFetching}
+      className={cn(
+        'rounded border px-2 py-0.5 text-xs',
+        'border-border bg-background text-foreground',
+        'hover:bg-muted/40',
+        'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+        'disabled:cursor-not-allowed disabled:opacity-50',
+      )}
+    >
+      {isFetching
+        ? 'Computing connectivity…'
+        : islandCount !== null
+          ? `Recompute connectivity (${islandCount} island${islandCount === 1 ? '' : 's'})`
+          : 'Recompute connectivity'}
+    </button>
   );
 }
 
