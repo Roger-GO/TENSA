@@ -61,6 +61,43 @@ export type LoadConsumption = components['schemas']['LoadConsumption'];
 /** ANDES param value types in API request/response payloads. */
 export type ParamValue = number | string | boolean;
 
+// ---- disturbance specs (Unit 6 — mirrors substrate's discriminated union) --
+
+/**
+ * Substrate's ``FaultSpec`` (``server/src/andes_app/core/disturbance.py``).
+ * Re-exported under a stable name so consumers don't have to dig into the
+ * generated tree. The generated type is the canonical shape; this is a
+ * named alias only.
+ */
+export type FaultSpec = components['schemas']['FaultSpec'];
+export type ToggleSpec = components['schemas']['ToggleSpec'];
+export type AlterSpec = components['schemas']['AlterSpec'];
+/** Discriminated union over the three disturbance variants — mirrors the substrate. */
+export type DisturbanceSpec = FaultSpec | ToggleSpec | AlterSpec;
+
+/**
+ * Response body for ``GET /sessions/{id}/topology/models/{model}/alterable_params``
+ * (Unit 1b endpoint).
+ *
+ * The OpenAPI spec on the substrate side already defines this (see
+ * ``server/src/andes_app/api/schemas.py:AlterableParamsResponse``), but the
+ * web ``generated.ts`` is regenerated out-of-band. Defined here as a
+ * hand-authored type so Unit 6 can land before the next codegen sweep
+ * without blocking on the regen step. When ``generated.ts`` is regenerated
+ * the codegen-shaped type can replace this alias one-to-one
+ * (the field shape is identical).
+ */
+export interface AlterableParamsResponse {
+  /** ANDES model class name the params belong to (echoed back from the path). */
+  model: string;
+  /**
+   * Ordered list of parameter names that ``ss.<model>.alter(src=...)`` will
+   * accept. Order matches ANDES's internal declaration order. Empty when
+   * the model has no alterable params.
+   */
+  params: string[];
+}
+
 // ---- branded types ---------------------------------------------------------
 
 /**
