@@ -76,7 +76,11 @@ export function PanelPickerTabs({ className }: PanelPickerTabsProps) {
         disabledReason: disturbanceDisabled,
       },
       { id: 'plot', label: 'Plot', hint: 'Streaming time-series + scrub' },
-      { id: 'tds-config', label: 'TDS config', hint: 'tf, h, vars, max_rate_hz' },
+      {
+        id: 'analyze',
+        label: 'Analyze',
+        hint: 'PF / TDS / EIG sub-modes + result views',
+      },
     ];
   }, [isRunning, disturbanceCount]);
 

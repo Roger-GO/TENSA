@@ -56,11 +56,13 @@ describe('useUiStore — panel picker (v0.2 Unit 8)', () => {
   });
 
   it('exposes RIGHT_DOCK_TOP_PANELS as the canonical ordered list', () => {
+    // Unit 6 (KTD-6) replaced ``tds-config`` with ``analyze``; the
+    // TDS config form lives inside Analyze's TDS sub-mode now.
     expect(RIGHT_DOCK_TOP_PANELS).toEqual([
       'inspector',
       'disturbance',
       'plot',
-      'tds-config',
+      'analyze',
     ]);
   });
 

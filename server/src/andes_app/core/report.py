@@ -39,10 +39,11 @@ from typing import Literal
 
 from andes_app.core.errors import AndesAppError, NoCaseLoadedError
 
-# Public Routine type — Phase 1 ships ``pflow`` + ``tds``. Unit 6 widens
-# this to include ``eig``. Routes layer enforces this with a 422 for
-# unknown routines so an early-call client gets a polite rejection.
-ReportRoutine = Literal["pflow", "tds"]
+# Public Routine type — Phase 1 (Unit 4) shipped ``pflow`` + ``tds``;
+# Unit 6 widens to include ``eig`` (the EIG report variant). Routes
+# layer enforces this with a 422 for unknown routines so an early-call
+# client gets a polite rejection.
+ReportRoutine = Literal["pflow", "tds", "eig"]
 
 # Maximum characters of plain text we'll buffer in memory. ANDES reports
 # for typical academic cases (IEEE 14, 39, kundur) are <50 KB; this cap
@@ -100,6 +101,8 @@ def generate_report(ss, routine: ReportRoutine) -> ReportPayload:  # type: ignor
         return _generate_pflow_report(ss)
     if routine == "tds":
         return _generate_tds_report(ss)
+    if routine == "eig":
+        return _generate_eig_report(ss)
     # The routes layer constrains the literal upstream; this is
     # belt-and-braces.
     raise AndesAppError(f"unknown report routine: {routine!r}")
@@ -236,6 +239,67 @@ def _generate_tds_report(ss) -> ReportPayload:  # type: ignore[no-untyped-def]
     )
 
 
+def _generate_eig_report(ss) -> ReportPayload:  # type: ignore[no-untyped-def]
+    """Capture ``ss.EIG.report()`` output (Unit 6).
+
+    Pre-condition: ``EIG.run()`` must have populated ``EIG.mu`` (i.e.,
+    EIG has been run on this session). The check is on ``EIG.mu``
+    rather than a boolean flag because ANDES does not advertise an
+    ``EIG.initialized`` field — the routine just mutates ``As`` /
+    ``mu`` / ``pfactors`` on success.
+
+    Capture path mirrors the PFlow report but targets ``files.eig``
+    (the ``.eig.txt``-style path EIG.report writes to via
+    :func:`andes.io.txt.dump_data`). We re-target a tempfile, run the
+    report, read the file back, restore the original setting.
+    """
+    mu = getattr(ss.EIG, "mu", None)
+    if mu is None:
+        raise EigReportPrerequisiteError(
+            "no EIG result on this session — run EIG first"
+        )
+
+    files = ss.files
+    saved_no_output = files.no_output
+    # ANDES does not always populate ``files.eig`` pre-routine; we
+    # capture whatever is there (``None`` when freshly loaded) so the
+    # restore step always runs in the finally branch — never leak our
+    # tempdir path back into the System.
+    saved_eig = getattr(files, "eig", None)
+    with tempfile.TemporaryDirectory(prefix="andes-report-eig-") as td:
+        target = Path(td) / "report.eig.txt"
+        files.no_output = False
+        files.eig = str(target)
+        try:
+            try:
+                ss.EIG.report()
+            except Exception as exc:  # noqa: BLE001
+                raise ReportGenerationError(
+                    f"EIG.report() raised: {exc}"
+                ) from exc
+            try:
+                raw = target.read_bytes()
+            except FileNotFoundError as exc:
+                raise ReportGenerationError(
+                    "EIG.report() did not write the expected report file"
+                ) from exc
+        finally:
+            files.no_output = saved_no_output
+            files.eig = saved_eig
+
+    if len(raw) > MAX_PLAIN_TEXT_BYTES:
+        raise ReportGenerationError(
+            f"EIG report exceeded {MAX_PLAIN_TEXT_BYTES} bytes; refusing to ship"
+        )
+    plain_text = raw.decode("utf-8", errors="replace")
+    tables = parse_eig_tables(ss, plain_text)
+    return ReportPayload(
+        routine="eig",
+        plain_text=plain_text,
+        tables=tuple(tables),
+    )
+
+
 # ---- error taxonomy --------------------------------------------------------
 
 
@@ -263,6 +327,16 @@ class ReportGenerationError(AndesAppError):
 
     The routes layer maps this to HTTP 500 so the failure surfaces
     with the actual ANDES error preserved in the detail.
+    """
+
+
+class EigReportPrerequisiteError(AndesAppError):
+    """Raised when an EIG report is requested but no EIG run has fired.
+
+    The routes layer maps this to HTTP 409 alongside
+    :class:`PflowNotConvergedError` and :class:`TdsNotRunError` so the
+    UI's empty state can render a single recovery copy ("Run EIG
+    first") verbatim.
     """
 
 
@@ -321,6 +395,19 @@ def parse_pflow_tables(plain_text: str) -> list[ReportTable]:
         current_block.append(line)
     _flush()
     return tables
+
+
+def parse_eig_tables(ss, plain_text: str) -> list[ReportTable]:  # type: ignore[no-untyped-def]
+    """Best-effort parse of the EIG report into structured tables.
+
+    ``EIG.report()`` writes a fixed-width text file with section headers
+    similar to the PFlow report (``EIGENVALUE ANALYSIS REPORT:``,
+    ``PARTICIPATION FACTORS:``, etc.). We re-use the PFlow parser's
+    section-split + ``_block_to_table`` logic — same structure, same
+    quirks. When the parser can't recognise a section the frontend
+    falls back to the verbatim plain-text view.
+    """
+    return parse_pflow_tables(plain_text)
 
 
 def parse_tds_tables(ss, plain_text: str) -> list[ReportTable]:  # type: ignore[no-untyped-def]
@@ -450,6 +537,7 @@ def _tds_state_table(ss) -> ReportTable | None:  # type: ignore[no-untyped-def]
 
 __all__ = [
     "MAX_PLAIN_TEXT_BYTES",
+    "EigReportPrerequisiteError",
     "PflowNotConvergedError",
     "ReportGenerationError",
     "ReportPayload",
@@ -457,6 +545,7 @@ __all__ = [
     "ReportTable",
     "TdsNotRunError",
     "generate_report",
+    "parse_eig_tables",
     "parse_pflow_tables",
     "parse_tds_tables",
 ]

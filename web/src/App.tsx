@@ -13,7 +13,7 @@ import { ResultsTable } from '@/components/inspector/ResultsTable';
 import { RunButton } from '@/components/tds/RunButton';
 import { RunStatusBadge } from '@/components/tds/RunStatusBadge';
 import { NumericalErrorBanner } from '@/components/tds/NumericalErrorBanner';
-import { TdsConfigPanel } from '@/components/tds/TdsConfigPanel';
+import { AnalyzePanel } from '@/components/analyze/AnalyzePanel';
 import { DisturbancePanel } from '@/components/disturbance/DisturbancePanel';
 import { TimeSeriesPlot } from '@/components/plots/TimeSeriesPlot';
 import { ScrubControl } from '@/components/plots/ScrubControl';
@@ -132,7 +132,7 @@ function RightDockTopPanel() {
         {active === 'inspector' ? <ElementInspector /> : null}
         {active === 'disturbance' ? <DisturbancePanel /> : null}
         {active === 'plot' ? <PlotPanelContent /> : null}
-        {active === 'tds-config' ? <TdsConfigPanel /> : null}
+        {active === 'analyze' ? <AnalyzePanel /> : null}
       </div>
     </div>
   );

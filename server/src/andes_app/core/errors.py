@@ -84,6 +84,24 @@ class SystemAlreadyLoadedError(AndesAppError):
     a loaded System. The caller must reload or open a fresh session."""
 
 
+class EigPrerequisiteError(AndesAppError):
+    """Raised when ``Wrapper.run_eig`` is invoked without a converged PFlow.
+
+    ANDES's ``EIG._pre_check`` (``andes/routines/eig.py:768-788``) only logs
+    a warning when ``system.PFlow.converged`` is False — it then falls
+    through to ``TDS.init()`` and crashes with a non-actionable
+    ``TypeError: object of type 'NoneType' has no len()`` (verified in
+    Unit 1a spike). The substrate gates the call independently and
+    raises this error so the routes layer can surface a clean 409.
+    """
+
+
+class EigComputationError(AndesAppError):
+    """Raised when ``ss.EIG.run()`` itself raises (e.g., singular Jacobian
+    after regularization, LinAlg failure, or any other ANDES-side
+    exception inside the routine body)."""
+
+
 class ElementHasDependentsError(AndesAppError):
     """Raised when ``delete_element(model, idx)`` would orphan references on
     other devices (e.g., deleting a Bus that has a Line attached).

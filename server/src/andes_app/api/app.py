@@ -33,6 +33,7 @@ from starlette.types import Scope
 from andes_app import __version__
 from andes_app.api.routes.cases import router as cases_router
 from andes_app.api.routes.disturbances import router as disturbances_router
+from andes_app.api.routes.eig import router as eig_router
 from andes_app.api.routes.elements import router as elements_router
 from andes_app.api.routes.pflow import router as pflow_router
 from andes_app.api.routes.reports import router as reports_router
@@ -235,6 +236,7 @@ def make_app(
     app.include_router(workspace_router, prefix="/api", tags=["workspace"])
     app.include_router(snapshot_router, prefix="/api", tags=["bundle"])
     app.include_router(reports_router, prefix="/api", tags=["reports"])
+    app.include_router(eig_router, prefix="/api", tags=["eig"])
     app.include_router(ws_router, prefix="/api", tags=["streaming"])
 
     # SPA mount goes LAST so the ``/api/*`` routers and ``/openapi.json``

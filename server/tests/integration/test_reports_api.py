@@ -243,14 +243,15 @@ async def test_report_no_case_loaded_returns_409(
 
 
 @pytest.mark.integration
-async def test_report_eig_returns_422_until_unit_6_lands(
+async def test_report_eig_without_run_returns_409(
     client: httpx.AsyncClient,
 ) -> None:
-    """Phase 1 constraint: ``routine=eig`` is accepted by the schema (so
-    the frontend's enum can ship widened today) but immediately
-    rejected with 422 until Unit 6 ships the EIG implementation. The
-    detail message points at the Unit-6 follow-up so callers know
-    when to retry."""
+    """Unit 6 widened the report enum to include ``eig``. The 422 stub
+    is gone; instead the route gates on ``EIG.run()`` having populated
+    ``EIG.mu`` and 409s when it hasn't (mirrors the PFlow / TDS
+    pre-condition pattern). The detail copy points at the recovery
+    action ("run EIG first") so the UI's empty state can render it
+    verbatim."""
     sid = await _create_session_and_load(client, "ieee14.raw")
     await client.post(
         f"/api/sessions/{sid}/pflow",
@@ -262,9 +263,9 @@ async def test_report_eig_returns_422_until_unit_6_lands(
         headers={"X-Andes-Token": VALID_TOKEN},
         params={"routine": "eig"},
     )
-    assert resp.status_code == 422, resp.text
+    assert resp.status_code == 409, resp.text
     body = resp.json()
-    assert "Unit 6" in (body.get("detail") or "")
+    assert "EIG" in (body.get("detail") or "")
 
 
 @pytest.mark.integration

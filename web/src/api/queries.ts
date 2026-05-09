@@ -36,6 +36,8 @@ import type {
   BlankSystemResponse,
   DisturbanceSpec,
   EditElementRequest,
+  EigParticipationResponse,
+  EigResult,
   ElementCreated,
   LoadCaseRequest,
   ParamValue,
@@ -57,6 +59,7 @@ import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { useRunsStore } from '@/store/runs';
+import { useAnalyzeStore } from '@/store/analyze';
 
 /**
  * Routine name accepted by ``GET /sessions/{id}/report``. Phase 1
@@ -84,6 +87,11 @@ export const queryKeys = {
   /** Report payload, scoped per (session, routine). Phase 1 (Unit 4) ships
    *  ``pflow`` + ``tds``; ``eig`` widens in Unit 6. */
   report: (id: SessionId, routine: ReportRoutine) => ['report', id, routine] as const,
+  /** EIG result, scoped per session (Unit 6). */
+  eig: (id: SessionId) => ['eig', id] as const,
+  /** Per-mode participation factor row (Unit 6). */
+  eigParticipation: (id: SessionId, modeIdx: number) =>
+    ['eig-participation', id, modeIdx] as const,
 } as const;
 
 // ---- QueryClient factory --------------------------------------------------
@@ -969,6 +977,77 @@ export function useReport(
       return await andesClient.get<ReportResponse>(
         `/sessions/${encodeURIComponent(sessionId)}/report`,
         { query: { routine }, timeoutMs: TIMEOUTS.workspace },
+      );
+    },
+  });
+}
+
+// ---- EIG (Unit 6) ---------------------------------------------------------
+
+/**
+ * ``POST /api/sessions/{id}/eig`` — runs eigenvalue analysis.
+ *
+ * On success: writes through to ``useAnalyzeStore.setEigResult`` so
+ * EIGScatter / EIGParticipationTable / EIGDampingChart can read
+ * synchronously, and seeds the TanStack Query cache so hooks reading
+ * via ``queryKeys.eig`` see the same value.
+ *
+ * Errors:
+ *
+ * - 409 ``EigPrerequisiteError`` — substrate gates on
+ *   ``ss.PFlow.converged`` independently (see Unit 1a spike). The
+ *   AnalyzePanel catches this and shows a "Run PFlow first" empty
+ *   state.
+ * - 422 ``EigComputationError`` — ANDES routine raised (singular
+ *   Jacobian after regularization, etc.); surfaced as a banner.
+ */
+export function useEigRun(): UseMutationResult<EigResult, Error, SessionId> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sessionId: SessionId) => {
+      return await andesClient.post<EigResult>(
+        `/sessions/${encodeURIComponent(sessionId)}/eig`,
+        { body: {}, timeoutMs: TIMEOUTS.pflowRun },
+      );
+    },
+    onSuccess: (data, sessionId) => {
+      useAnalyzeStore.getState().setEigResult(data);
+      queryClient.setQueryData(queryKeys.eig(sessionId), data);
+    },
+  });
+}
+
+/**
+ * ``GET /api/sessions/{id}/eig/modes/{modeIdx}/participation`` —
+ * per-mode participation factor row.
+ *
+ * Gating: enabled only when (a) a session is active AND (b) the
+ * caller has selected a non-null mode. The store's ``selectedModeId``
+ * provides the trigger; consumers pass it through.
+ *
+ * Cache key includes ``modeIdx`` so switching modes triggers a fresh
+ * fetch; the result is cached per-mode so re-clicking the same
+ * eigenvalue is instant.
+ */
+export function useEigParticipation(
+  modeIdx: number | null,
+): UseQueryResult<EigParticipationResponse, Error> {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const enabled = sessionId !== null && modeIdx !== null;
+  return useQuery({
+    queryKey:
+      enabled && sessionId !== null && modeIdx !== null
+        ? queryKeys.eigParticipation(sessionId, modeIdx)
+        : ['eig-participation', 'noop'],
+    enabled,
+    staleTime: 60_000,
+    queryFn: async () => {
+      if (!sessionId || modeIdx === null) {
+        throw new Error('useEigParticipation enabled without session/mode');
+      }
+      return await andesClient.get<EigParticipationResponse>(
+        `/sessions/${encodeURIComponent(sessionId)}/eig/modes/${modeIdx}/participation`,
+        { timeoutMs: TIMEOUTS.workspace },
       );
     },
   });
