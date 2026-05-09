@@ -387,6 +387,30 @@ def _handle_run_cpf_qv(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     )
 
 
+def _handle_generate_measurements_from_pflow(
+    wrapper: Wrapper, args: dict[str, Any]
+) -> Any:
+    """Wire ``Wrapper.generate_measurements_from_pflow`` for Unit 13.
+
+    Forwards ``noise_seed`` from the request body. Returns a serialized
+    :class:`MeasurementsGenerated` dict (``{count: int}``).
+    """
+    seed_raw = args.get("noise_seed")
+    seed = int(seed_raw) if seed_raw is not None else None
+    return _serialize_dataclass(
+        wrapper.generate_measurements_from_pflow(noise_seed=seed)
+    )
+
+
+def _handle_run_se(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.run_se`` for Unit 13.
+
+    Returns the serialized :class:`SeResult` dict (converged, iterations,
+    mismatch, residuals, measurement_count, flagged_indices).
+    """
+    return _serialize_dataclass(wrapper.run_se())
+
+
 def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     """Assemble a reproducibility-bundle ``.zip`` (Unit 3 of the v2.0 plan).
 
@@ -782,6 +806,9 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     # Unit 12 — CPF (continuation power flow): full PV-curve sweep + per-bus QV.
     "run_cpf": _handle_run_cpf,
     "run_cpf_qv": _handle_run_cpf_qv,
+    # Unit 13 — SE (state estimation): two-step (generate measurements, run SE).
+    "generate_measurements_from_pflow": _handle_generate_measurements_from_pflow,
+    "run_se": _handle_run_se,
     # Unit 7 — snapshot save / restore / list / delete.
     "save_snapshot": _handle_save_snapshot,
     "restore_snapshot": _handle_restore_snapshot,

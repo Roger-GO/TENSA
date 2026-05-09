@@ -1,13 +1,13 @@
 /**
  * Analyze panel slice (Unit 6 — Analyze panel + EIG sub-mode;
- * Unit 12 — CPF sub-mode).
+ * Unit 12 — CPF sub-mode; Unit 13 — SE sub-mode).
  *
  * Tracks:
  *
  * - ``subMode`` — which routine the Analyze panel is showing
- *   (``pflow`` / ``tds`` / ``eig`` / ``cpf``). Per KTD-6 the picker
- *   replaces the v0.1 ``RunMode = 'pf' | 'tds'`` toggle inside the new
- *   Analyze panel. CPF arrived in Unit 12; SE follows in Unit 13.
+ *   (``pflow`` / ``tds`` / ``eig`` / ``cpf`` / ``se``). Per KTD-6 the
+ *   picker replaces the v0.1 ``RunMode = 'pf' | 'tds'`` toggle inside
+ *   the new Analyze panel. CPF arrived in Unit 12; SE in Unit 13.
  * - ``eigResult`` — most recent EIG result for the active session.
  *   Mirrored from the TanStack Query cache so EIGScatter /
  *   EIGParticipationTable / EIGDampingChart can read synchronously.
@@ -24,22 +24,29 @@
  * - ``cpfResult`` — most recent CPF result (PV-curve or QV-curve) for
  *   the active session. Cleared on case change and when PFlow is
  *   cleared (mirrors the EIG result lifecycle).
+ * - ``seResult`` — most recent SE (state-estimation) result.
+ *   Cleared on case change and when PFlow is cleared.
+ * - ``seMeasurementsCount`` — measurement count returned by the
+ *   ``/se/measurements/generate`` endpoint. ``null`` until the user
+ *   clicks "Generate Measurements"; once populated, the "Run SE"
+ *   button is enabled. Cleared with ``seResult``.
  *
- * Lifecycle: not persisted across tabs. EIG / CPF results are cleared
- * on case change OR (for EIG) when ``selectedModeId`` would point past
- * ``mode_count``.
+ * Lifecycle: not persisted across tabs. EIG / CPF / SE results are
+ * cleared on case change OR (for EIG) when ``selectedModeId`` would
+ * point past ``mode_count``.
  */
 import { create } from 'zustand';
-import type { CpfResult, EigResult } from '@/api/types';
+import type { CpfResult, EigResult, SeResult } from '@/api/types';
 
 /** Sub-mode picker values for the Analyze panel. */
-export type AnalyzeSubMode = 'pflow' | 'tds' | 'eig' | 'cpf';
+export type AnalyzeSubMode = 'pflow' | 'tds' | 'eig' | 'cpf' | 'se';
 
 export const ANALYZE_SUB_MODES: readonly AnalyzeSubMode[] = [
   'pflow',
   'tds',
   'eig',
   'cpf',
+  'se',
 ] as const;
 
 /**
@@ -83,6 +90,25 @@ export interface AnalyzeState {
   cpfResult: CpfResult | null;
   setCpfResult: (result: CpfResult | null) => void;
   clearCpfResult: () => void;
+
+  /**
+   * Most recent SE result (Unit 13). ``null`` means "no SE run yet on
+   * this session"; consumers branch on null and render the empty
+   * state. Set by ``useSeRun`` mutation ``onSuccess``; cleared on
+   * case change via the cross-slice cascade.
+   */
+  seResult: SeResult | null;
+  setSeResult: (result: SeResult | null) => void;
+  clearSeResult: () => void;
+
+  /**
+   * Measurement count from the most recent
+   * ``/se/measurements/generate`` call (Unit 13). ``null`` until the
+   * user clicks "Generate Measurements"; once populated, the "Run SE"
+   * button is enabled. Cleared alongside ``seResult``.
+   */
+  seMeasurementsCount: number | null;
+  setSeMeasurementsCount: (count: number | null) => void;
 }
 
 export const useAnalyzeStore = create<AnalyzeState>((set) => ({
@@ -119,6 +145,14 @@ export const useAnalyzeStore = create<AnalyzeState>((set) => ({
   cpfResult: null,
   setCpfResult: (result) => set({ cpfResult: result }),
   clearCpfResult: () => set({ cpfResult: null }),
+
+  seResult: null,
+  setSeResult: (result) => set({ seResult: result }),
+  clearSeResult: () =>
+    set({ seResult: null, seMeasurementsCount: null }),
+
+  seMeasurementsCount: null,
+  setSeMeasurementsCount: (count) => set({ seMeasurementsCount: count }),
 }));
 
 /**

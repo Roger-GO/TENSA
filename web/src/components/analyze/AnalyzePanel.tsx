@@ -7,8 +7,14 @@ import { CPFCurveChart } from './CPFCurveChart';
 import { EIGScatter } from './EIGScatter';
 import { EIGParticipationTable } from './EIGParticipationTable';
 import { EIGDampingChart } from './EIGDampingChart';
+import { SEResidualChart } from './SEResidualChart';
 import { useAnalyzeStore } from '@/store/analyze';
-import { useCpfRun, useEigRun } from '@/api/queries';
+import {
+  useCpfRun,
+  useEigRun,
+  useSeGenerateMeasurements,
+  useSeRun,
+} from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
 import { ProblemDetailsError } from '@/api/client';
@@ -63,6 +69,7 @@ export function AnalyzePanel({ className }: AnalyzePanelProps) {
         {subMode === 'tds' ? <TdsConfigPanel /> : null}
         {subMode === 'eig' ? <AnalyzeEigSubMode /> : null}
         {subMode === 'cpf' ? <AnalyzeCpfSubMode /> : null}
+        {subMode === 'se' ? <AnalyzeSeSubMode /> : null}
       </div>
     </section>
   );
@@ -275,6 +282,150 @@ function AnalyzeCpfSubMode() {
       ) : null}
 
       <CPFCurveChart className="min-h-[300px] flex-shrink-0" />
+    </div>
+  );
+}
+
+/**
+ * AnalyzeSeSubMode — two-step SE workflow (Unit 13):
+ *
+ * 1. **Generate Measurements** button — calls
+ *    ``POST /se/measurements/generate`` to build the default measurement
+ *    set from the converged PF solution. On success, the measurement
+ *    count is shown and the "Run SE" button becomes enabled.
+ * 2. **Run SE** button — calls ``POST /se`` to run WLS Gauss-Newton
+ *    against the cached measurement set. On success the residual
+ *    histogram renders.
+ *
+ * The two-step split surfaces the measurement count to the user before
+ * committing to the SE iteration cost (and lets them re-run SE without
+ * regenerating noise — useful when comparing algorithms in a follow-up
+ * unit). Both buttons are disabled until PFlow has converged; if
+ * either call returns 409 the user is shown a CTA back to the PF view.
+ *
+ * Cleanup: when the case changes (PF cleared by the cross-slice
+ * cascade), drop any stale SE result + measurement count so the empty
+ * state shows on first paint.
+ */
+function AnalyzeSeSubMode() {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const lastPf = usePflowStore((s) => s.lastRun);
+  const seResult = useAnalyzeStore((s) => s.seResult);
+  const seMeasurementsCount = useAnalyzeStore((s) => s.seMeasurementsCount);
+  const setSubMode = useAnalyzeStore((s) => s.setSubMode);
+  const seGenerate = useSeGenerateMeasurements();
+  const seRun = useSeRun();
+
+  // Cross-slice cascade cleanup — same shape as the EIG / CPF panels.
+  useEffect(() => {
+    if (
+      lastPf === null &&
+      (seResult !== null || seMeasurementsCount !== null)
+    ) {
+      useAnalyzeStore.getState().clearSeResult();
+    }
+  }, [lastPf, seResult, seMeasurementsCount]);
+
+  const onGenerate = () => {
+    if (!sessionId) return;
+    seGenerate.mutate({ sessionId });
+  };
+  const onRun = () => {
+    if (!sessionId) return;
+    seRun.mutate(sessionId);
+  };
+
+  // The currently-active error (generate has priority — if it failed,
+  // the run button is disabled and the error came from generate).
+  const activeError = seGenerate.error ?? seRun.error;
+  const isPrerequisite =
+    activeError instanceof ProblemDetailsError && activeError.status === 409;
+
+  const canGenerate = sessionId !== null && !seGenerate.isPending;
+  const canRun =
+    sessionId !== null &&
+    seMeasurementsCount !== null &&
+    seMeasurementsCount > 0 &&
+    !seRun.isPending;
+
+  return (
+    <div className="flex flex-col gap-3 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={!canGenerate}
+          onClick={onGenerate}
+          data-testid="analyze-se-generate-measurements"
+        >
+          {seGenerate.isPending
+            ? 'Generating…'
+            : seMeasurementsCount !== null
+              ? 'Re-generate Measurements'
+              : 'Generate Measurements'}
+        </Button>
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          disabled={!canRun}
+          onClick={onRun}
+          data-testid="analyze-se-run"
+        >
+          {seRun.isPending ? 'Running SE…' : 'Run SE'}
+        </Button>
+        {seMeasurementsCount !== null ? (
+          <span
+            data-testid="se-measurements-count"
+            className="text-muted-foreground text-[10px]"
+          >
+            {seMeasurementsCount} measurements ready
+          </span>
+        ) : null}
+      </div>
+
+      {isPrerequisite ? (
+        <div
+          role="alert"
+          data-testid="se-prerequisite-error"
+          className={cn(
+            'border-warning/40 bg-warning/10 text-foreground',
+            'flex flex-col gap-2 rounded border p-3 text-xs',
+          )}
+        >
+          <span>
+            {activeError instanceof ProblemDetailsError
+              ? (activeError.detail ?? 'Run PFlow first.')
+              : 'Run PFlow first.'}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="se-prerequisite-cta"
+            onClick={() => setSubMode('pflow')}
+          >
+            Open PF view
+          </Button>
+        </div>
+      ) : null}
+
+      {activeError !== null && !isPrerequisite ? (
+        <div
+          role="alert"
+          className={cn(
+            'border-destructive/40 bg-destructive/10 text-destructive',
+            'rounded border p-3 text-xs',
+          )}
+        >
+          {activeError instanceof ProblemDetailsError
+            ? (activeError.detail ?? activeError.title)
+            : activeError.message}
+        </div>
+      ) : null}
+
+      <SEResidualChart className="min-h-[260px] flex-shrink-0" />
     </div>
   );
 }

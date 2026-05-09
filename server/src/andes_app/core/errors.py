@@ -126,6 +126,49 @@ class CpfDivergedError(AndesAppError):
     """
 
 
+class SePrerequisiteError(AndesAppError):
+    """Raised when ``Wrapper.run_se`` / ``Wrapper.generate_measurements_from_pflow``
+    is invoked without a converged PFlow.
+
+    ANDES's ``SE.init`` (``andes/routines/se.py:99``) only logs an error
+    when ``system.PFlow.converged`` is False before returning False
+    (verified in Unit 1a spike). The substrate gates the call
+    independently for a clean 409 with an actionable "Run PFlow first"
+    message. Mirrors the EIG / CPF gating pattern.
+
+    Also raised when ``Wrapper.run_se`` is invoked before
+    ``generate_measurements_from_pflow`` has populated the substrate's
+    in-memory ``Measurements`` object — the route layer maps to 409 with
+    "Generate measurements first".
+    """
+
+
+class SeNonConvergentError(AndesAppError):
+    """Raised when ``ss.SE.run()`` returned False after running to
+    completion (max_iter reached without satisfying ``config.tol``).
+
+    A clean ``False`` return with a populated ``result['n_iter']`` is
+    the WLS Gauss-Newton failing to converge — distinct from the
+    under-determined / singular gain matrix case (which is mapped to
+    :class:`SeUnderDeterminedError`).
+
+    Also raised when ``ss.SE.run()`` itself raises an exception (e.g.,
+    LinAlg failure outside the singular-gain path).
+    """
+
+
+class SeUnderDeterminedError(AndesAppError):
+    """Raised when the measurement set has insufficient redundancy to
+    observe the system state.
+
+    Detected via the chi-squared ``dof = nm - 2*nb <= 0`` condition
+    (``andes/routines/se.py:241``) OR via a singular gain matrix at
+    iteration 0 (``andes/se/algorithms.py:71-78``). Both cases surface
+    as 422 from the route layer with an actionable "add more
+    measurements" message.
+    """
+
+
 class EigDirtyDaeError(AndesAppError):
     """Raised when ``Wrapper.run_pflow`` is invoked while
     ``ss.TDS.initialized is True`` — the documented EIG side-effect

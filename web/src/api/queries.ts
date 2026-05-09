@@ -45,6 +45,8 @@ import type {
   PflowResult,
   SaveCaseRequest,
   SaveCaseResponse,
+  SeMeasurementsGeneratedResponse,
+  SeResult,
   SessionDescriptor,
   SidecarLayout,
   SessionId,
@@ -95,6 +97,10 @@ export const queryKeys = {
     ['eig-participation', id, modeIdx] as const,
   /** CPF result, scoped per session (Unit 12). */
   cpf: (id: SessionId) => ['cpf', id] as const,
+  /** SE result, scoped per session (Unit 13). */
+  se: (id: SessionId) => ['se', id] as const,
+  /** SE measurements-generated count, scoped per session (Unit 13). */
+  seMeasurements: (id: SessionId) => ['se-measurements', id] as const,
 } as const;
 
 // ---- QueryClient factory --------------------------------------------------
@@ -1342,6 +1348,95 @@ export function useCpfQvRun(): UseMutationResult<CpfResult, Error, CpfQvRunVars>
     onSuccess: (data, { sessionId }) => {
       useAnalyzeStore.getState().setCpfResult(data);
       queryClient.setQueryData(queryKeys.cpf(sessionId), data);
+    },
+  });
+}
+
+// ---- SE (Unit 13 — state estimation) -------------------------------------
+
+/** Request body shape for ``POST /api/sessions/{id}/se/measurements/generate``. */
+export interface SeGenerateMeasurementsVars {
+  sessionId: SessionId;
+  /** Optional integer seed for the Gaussian noise draw. */
+  noiseSeed?: number;
+}
+
+/**
+ * ``POST /api/sessions/{id}/se/measurements/generate`` — builds the
+ * default measurement set (bus voltages + bus injections) from the
+ * converged PF solution and caches it on the substrate worker.
+ *
+ * On success: writes the count through to
+ * ``useAnalyzeStore.setSeMeasurementsCount`` so the AnalyzePanel can
+ * enable the "Run SE" button and show the headline count; seeds the
+ * TanStack Query cache so consumers reading via ``queryKeys.seMeasurements``
+ * see the same value.
+ *
+ * Errors:
+ *
+ * - 409 ``SePrerequisiteError`` — substrate gates on
+ *   ``ss.PFlow.converged`` independently (per Unit 1a spike). The
+ *   AnalyzePanel catches this and shows a "Run PFlow first" empty
+ *   state with a CTA back to the PF view.
+ * - 422 — measurement-generation failure (rare; usually a model
+ *   lookup raised inside ``add_bus_injection``).
+ */
+export function useSeGenerateMeasurements(): UseMutationResult<
+  SeMeasurementsGeneratedResponse,
+  Error,
+  SeGenerateMeasurementsVars
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, noiseSeed }: SeGenerateMeasurementsVars) => {
+      const body: Record<string, unknown> = {};
+      if (noiseSeed !== undefined) body.noise_seed = noiseSeed;
+      return await andesClient.post<SeMeasurementsGeneratedResponse>(
+        `/sessions/${encodeURIComponent(sessionId)}/se/measurements/generate`,
+        { body, timeoutMs: TIMEOUTS.pflowRun },
+      );
+    },
+    onSuccess: (data, { sessionId }) => {
+      useAnalyzeStore.getState().setSeMeasurementsCount(data.count);
+      // Generating fresh measurements invalidates any prior SE result —
+      // the residuals would be measured against the old z values.
+      useAnalyzeStore.getState().setSeResult(null);
+      queryClient.setQueryData(queryKeys.seMeasurements(sessionId), data);
+    },
+  });
+}
+
+/**
+ * ``POST /api/sessions/{id}/se`` — runs static state estimation
+ * against the substrate's cached measurement set.
+ *
+ * On success: writes through to ``useAnalyzeStore.setSeResult`` so
+ * ``SEResidualChart`` can read synchronously; seeds the TanStack
+ * Query cache so consumers reading via ``queryKeys.se`` see the same
+ * value.
+ *
+ * Errors:
+ *
+ * - 409 ``SePrerequisiteError`` — either no converged PF or no cached
+ *   measurement set yet. The AnalyzePanel catches both and shows the
+ *   appropriate empty-state CTA.
+ * - 422 ``SeUnderDeterminedError`` — measurement set has insufficient
+ *   redundancy (gain matrix singular).
+ * - 422 ``SeNonConvergentError`` — WLS Gauss-Newton hit max_iter.
+ */
+export function useSeRun(): UseMutationResult<SeResult, Error, SessionId> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sessionId: SessionId) => {
+      return await andesClient.post<SeResult>(
+        `/sessions/${encodeURIComponent(sessionId)}/se`,
+        // SE iteration cost is comparable to PF; reuse the PF-run timeout.
+        { body: {}, timeoutMs: TIMEOUTS.pflowRun },
+      );
+    },
+    onSuccess: (data, sessionId) => {
+      useAnalyzeStore.getState().setSeResult(data);
+      queryClient.setQueryData(queryKeys.se(sessionId), data);
     },
   });
 }
