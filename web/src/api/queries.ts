@@ -34,6 +34,7 @@ import type {
   AddElementRequest,
   AlterableParamsResponse,
   BlankSystemResponse,
+  CpfResult,
   DisturbanceSpec,
   EditElementRequest,
   EigParticipationResponse,
@@ -92,6 +93,8 @@ export const queryKeys = {
   /** Per-mode participation factor row (Unit 6). */
   eigParticipation: (id: SessionId, modeIdx: number) =>
     ['eig-participation', id, modeIdx] as const,
+  /** CPF result, scoped per session (Unit 12). */
+  cpf: (id: SessionId) => ['cpf', id] as const,
 } as const;
 
 // ---- QueryClient factory --------------------------------------------------
@@ -1242,6 +1245,103 @@ export function useEigParticipation(
         `/sessions/${encodeURIComponent(sessionId)}/eig/modes/${modeIdx}/participation`,
         { timeoutMs: TIMEOUTS.workspace },
       );
+    },
+  });
+}
+
+// ---- CPF (Unit 12 — continuation power flow) -----------------------------
+
+/** Request body shape for ``POST /api/sessions/{id}/cpf``. */
+export interface CpfRunVars {
+  sessionId: SessionId;
+  /** ``'load'`` (default) scales loads up; ``'gen'`` scales generation up. */
+  direction?: 'load' | 'gen';
+  /** Optional initial continuation step size (passes to ``CPF.config.step``). */
+  step?: number;
+  /**
+   * Optional cap on the number of continuation steps. Maps onto
+   * ANDES's ``CPF.config.max_steps`` (which controls truncation; the
+   * ANDES ``max_iter`` config is corrector iterations per step, not
+   * total steps).
+   */
+  maxIter?: number;
+}
+
+/** Request body shape for ``POST /api/sessions/{id}/cpf/qv``. */
+export interface CpfQvRunVars {
+  sessionId: SessionId;
+  /** Bus idx to draw the QV-curve at (must have a PQ device). */
+  busIdx: string;
+  /** Optional reactive-power range; ANDES default is 5.0. */
+  qRange?: number;
+}
+
+/**
+ * ``POST /api/sessions/{id}/cpf`` — runs continuation power flow
+ * (PV-curve / nose-curve) on the session.
+ *
+ * On success: writes through to ``useAnalyzeStore.setCpfResult`` so
+ * ``CPFCurveChart`` can read synchronously; seeds the TanStack Query
+ * cache so hooks reading via ``queryKeys.cpf`` see the same value.
+ *
+ * Errors:
+ *
+ * - 409 ``CpfPrerequisiteError`` — substrate gates on
+ *   ``ss.PFlow.converged`` independently (per Unit 1a spike). The
+ *   AnalyzePanel catches this and shows a "Run PFlow first" empty
+ *   state with a CTA back to the PF view.
+ * - 422 ``CpfDivergedError`` — ANDES routine raised; surfaced as a
+ *   banner.
+ *
+ * Note: a clean ``False`` return from ``ss.CPF.run`` (e.g., hit
+ * ``max_steps`` before nose) does NOT raise — the response carries
+ * ``truncated=true`` and ``nose_idx=-1`` so the UI can render the
+ * truncation note inline rather than as an error.
+ */
+export function useCpfRun(): UseMutationResult<CpfResult, Error, CpfRunVars> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, direction, step, maxIter }: CpfRunVars) => {
+      const body: Record<string, unknown> = {
+        direction: direction ?? 'load',
+      };
+      if (step !== undefined) body.step = step;
+      if (maxIter !== undefined) body.max_iter = maxIter;
+      return await andesClient.post<CpfResult>(
+        `/sessions/${encodeURIComponent(sessionId)}/cpf`,
+        // CPF can take longer than PF (multi-step continuation); reuse
+        // the case-load timeout (60s) which sits comfortably above the
+        // ~3 s observed for IEEE 14 with default config.
+        { body, timeoutMs: TIMEOUTS.caseLoad },
+      );
+    },
+    onSuccess: (data, { sessionId }) => {
+      useAnalyzeStore.getState().setCpfResult(data);
+      queryClient.setQueryData(queryKeys.cpf(sessionId), data);
+    },
+  });
+}
+
+/**
+ * ``POST /api/sessions/{id}/cpf/qv`` — runs a single-bus QV-curve
+ * continuation. Same wire-shape response as ``useCpfRun``; the
+ * ``mode`` discriminator on the result is ``"qv"`` so the chart
+ * labels the X-axis "Q (pu)" instead of "lambda".
+ */
+export function useCpfQvRun(): UseMutationResult<CpfResult, Error, CpfQvRunVars> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, busIdx, qRange }: CpfQvRunVars) => {
+      const body: Record<string, unknown> = { bus_idx: busIdx };
+      if (qRange !== undefined) body.q_range = qRange;
+      return await andesClient.post<CpfResult>(
+        `/sessions/${encodeURIComponent(sessionId)}/cpf/qv`,
+        { body, timeoutMs: TIMEOUTS.caseLoad },
+      );
+    },
+    onSuccess: (data, { sessionId }) => {
+      useAnalyzeStore.getState().setCpfResult(data);
+      queryClient.setQueryData(queryKeys.cpf(sessionId), data);
     },
   });
 }

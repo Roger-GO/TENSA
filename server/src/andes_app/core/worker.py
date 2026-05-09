@@ -355,6 +355,38 @@ def _handle_eig_state_matrix(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return wrapper.get_eig_state_matrix()
 
 
+def _handle_run_cpf(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.run_cpf`` for Unit 12.
+
+    Forwards ``direction`` / ``step`` / ``max_iter`` from the request
+    body. Returns a serialized :class:`CpfResult` dict
+    (``lambdas``, ``voltages_per_bus``, ``bus_idxes``, ``nose_idx``,
+    ``max_lam``, ``truncated``, ``done_msg``, ``mode``).
+    """
+    direction = str(args.get("direction", "load"))
+    step_raw = args.get("step")
+    step = float(step_raw) if step_raw is not None else None
+    max_iter_raw = args.get("max_iter")
+    max_iter = int(max_iter_raw) if max_iter_raw is not None else None
+    return _serialize_dataclass(
+        wrapper.run_cpf(direction=direction, step=step, max_iter=max_iter)
+    )
+
+
+def _handle_run_cpf_qv(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.run_cpf_qv`` for Unit 12.
+
+    The bus_idx is required; ``q_range`` is optional (default 5.0
+    matches ANDES's own default).
+    """
+    bus_idx = str(args["bus_idx"])
+    q_range_raw = args.get("q_range")
+    q_range = float(q_range_raw) if q_range_raw is not None else 5.0
+    return _serialize_dataclass(
+        wrapper.run_cpf_qv(bus_idx=bus_idx, q_range=q_range)
+    )
+
+
 def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     """Assemble a reproducibility-bundle ``.zip`` (Unit 3 of the v2.0 plan).
 
@@ -747,6 +779,9 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "run_eig": _handle_run_eig,
     "eig_participation": _handle_eig_participation,
     "eig_state_matrix": _handle_eig_state_matrix,
+    # Unit 12 — CPF (continuation power flow): full PV-curve sweep + per-bus QV.
+    "run_cpf": _handle_run_cpf,
+    "run_cpf_qv": _handle_run_cpf_qv,
     # Unit 7 — snapshot save / restore / list / delete.
     "save_snapshot": _handle_save_snapshot,
     "restore_snapshot": _handle_restore_snapshot,

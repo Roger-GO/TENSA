@@ -188,6 +188,47 @@ export interface EigParticipationResponse {
   participation: ParticipationFactor[];
 }
 
+// ---- CPF result (Unit 12 — continuation power flow) ----------------------
+
+/**
+ * CPF (continuation power flow) result returned by
+ * ``POST /sessions/{id}/cpf`` and ``POST /sessions/{id}/cpf/qv``.
+ *
+ * Mirrors :class:`andes_app.core.cpf_result.CpfResult` 1:1.
+ *
+ * Field semantics (per Unit 1a spike):
+ *
+ * - ``lambdas`` — per-step continuation parameter values. For PV-curve
+ *   runs (``mode === 'pv'``) this is ``CPF.lam`` (lambda); for QV-curve
+ *   runs (``mode === 'qv'``) it's ``CPF.qv_q`` (reactive injection).
+ *   The chart's X-axis label switches based on ``mode``.
+ * - ``voltages_per_bus`` — mapping ``bus_idx -> [V0, V1, ...]``,
+ *   index-aligned with ``lambdas``. PV runs include all buses; QV runs
+ *   include only the requested bus.
+ * - ``bus_idxes`` — ordered list of bus idxes (stringified) matching
+ *   the canonical render order. Surfaced separately so the UI doesn't
+ *   rely on dict-key iteration order.
+ * - ``nose_idx`` — index into ``lambdas`` where lambda is maximised
+ *   (the nose / voltage-collapse margin). ``-1`` when truncated.
+ * - ``max_lam`` — peak lambda value reached. Always populated.
+ * - ``truncated`` — ``true`` when the run terminated without finding a
+ *   nose point. UI surfaces the truncation note from ``done_msg``.
+ * - ``done_msg`` — ANDES's terminal status string (e.g.,
+ *   ``"Nose point at lambda=3.258046"``,
+ *   ``"Reached max steps (5)"``).
+ * - ``mode`` — ``"pv"`` for the full sweep, ``"qv"`` for single-bus.
+ */
+export interface CpfResult {
+  lambdas: number[];
+  voltages_per_bus: Record<string, number[]>;
+  bus_idxes: string[];
+  nose_idx: number;
+  max_lam: number;
+  truncated: boolean;
+  done_msg: string;
+  mode: 'pv' | 'qv';
+}
+
 // ---- branded types ---------------------------------------------------------
 
 /**

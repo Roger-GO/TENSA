@@ -15,7 +15,7 @@ import {
   applyEigFilter,
   useAnalyzeStore,
 } from '@/store/analyze';
-import type { EigResult } from '@/api/types';
+import type { CpfResult, EigResult } from '@/api/types';
 
 function resetAnalyzeStore() {
   useAnalyzeStore.setState({
@@ -23,6 +23,7 @@ function resetAnalyzeStore() {
     eigResult: null,
     selectedModeId: null,
     filter: { ...DEFAULT_EIG_FILTER },
+    cpfResult: null,
   });
 }
 
@@ -47,7 +48,7 @@ describe('useAnalyzeStore — subMode (Unit 6 KTD-6)', () => {
   });
 
   it('exposes ANALYZE_SUB_MODES in canonical order', () => {
-    expect(ANALYZE_SUB_MODES).toEqual(['pflow', 'tds', 'eig']);
+    expect(ANALYZE_SUB_MODES).toEqual(['pflow', 'tds', 'eig', 'cpf']);
   });
 
   it('defaults to pflow', () => {
@@ -156,6 +157,62 @@ describe('useAnalyzeStore — filter (KTD-7 defaults)', () => {
     useAnalyzeStore.getState().setFilter({ dampingMax: 0.5, realAbsMax: 100 });
     useAnalyzeStore.getState().resetFilter();
     expect(useAnalyzeStore.getState().filter).toEqual(DEFAULT_EIG_FILTER);
+  });
+});
+
+describe('useAnalyzeStore — cpfResult (Unit 12)', () => {
+  afterEach(() => {
+    resetAnalyzeStore();
+  });
+
+  const SAMPLE_CPF: CpfResult = {
+    lambdas: [0.0, 0.5, 1.0, 1.5, 2.0],
+    voltages_per_bus: { '1': [1.06, 1.03, 1.0, 0.97, 0.93] },
+    bus_idxes: ['1'],
+    nose_idx: 4,
+    max_lam: 2.0,
+    truncated: false,
+    done_msg: 'Nose point at lambda=2.0',
+    mode: 'pv',
+  };
+
+  it('starts null', () => {
+    expect(useAnalyzeStore.getState().cpfResult).toBeNull();
+  });
+
+  it('setCpfResult stores the result', () => {
+    useAnalyzeStore.getState().setCpfResult(SAMPLE_CPF);
+    expect(useAnalyzeStore.getState().cpfResult).toEqual(SAMPLE_CPF);
+  });
+
+  it('setCpfResult(null) clears it', () => {
+    useAnalyzeStore.getState().setCpfResult(SAMPLE_CPF);
+    useAnalyzeStore.getState().setCpfResult(null);
+    expect(useAnalyzeStore.getState().cpfResult).toBeNull();
+  });
+
+  it('clearCpfResult drops the result', () => {
+    useAnalyzeStore.getState().setCpfResult(SAMPLE_CPF);
+    useAnalyzeStore.getState().clearCpfResult();
+    expect(useAnalyzeStore.getState().cpfResult).toBeNull();
+  });
+
+  it('CPF and EIG results coexist independently', () => {
+    const eig: EigResult = {
+      eigenvalues: [{ real: -0.1, imag: 1.0 }],
+      damping_ratios: [0.1],
+      frequencies_hz: [0.159],
+      mode_count: 1,
+      state_count: 1,
+      state_names: ['delta_1'],
+      tds_initialized: true,
+    };
+    useAnalyzeStore.getState().setEigResult(eig);
+    useAnalyzeStore.getState().setCpfResult(SAMPLE_CPF);
+    expect(useAnalyzeStore.getState().eigResult).toEqual(eig);
+    expect(useAnalyzeStore.getState().cpfResult).toEqual(SAMPLE_CPF);
+    useAnalyzeStore.getState().clearEigResult();
+    expect(useAnalyzeStore.getState().cpfResult).toEqual(SAMPLE_CPF);
   });
 });
 

@@ -34,6 +34,7 @@ function resetStores() {
     eigResult: null,
     selectedModeId: null,
     filter: { ...DEFAULT_EIG_FILTER },
+    cpfResult: null,
   });
   useUiStore.setState({
     hideLabels: false,

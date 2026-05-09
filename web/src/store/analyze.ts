@@ -1,12 +1,13 @@
 /**
- * Analyze panel slice (Unit 6 — Analyze panel + EIG sub-mode).
+ * Analyze panel slice (Unit 6 — Analyze panel + EIG sub-mode;
+ * Unit 12 — CPF sub-mode).
  *
  * Tracks:
  *
  * - ``subMode`` — which routine the Analyze panel is showing
- *   (``pflow`` / ``tds`` / ``eig``). Per KTD-6 the picker replaces
- *   the v0.1 ``RunMode = 'pf' | 'tds'`` toggle inside the new Analyze
- *   panel. CPF and SE arrive in Phase 3.
+ *   (``pflow`` / ``tds`` / ``eig`` / ``cpf``). Per KTD-6 the picker
+ *   replaces the v0.1 ``RunMode = 'pf' | 'tds'`` toggle inside the new
+ *   Analyze panel. CPF arrived in Unit 12; SE follows in Unit 13.
  * - ``eigResult`` — most recent EIG result for the active session.
  *   Mirrored from the TanStack Query cache so EIGScatter /
  *   EIGParticipationTable / EIGDampingChart can read synchronously.
@@ -20,21 +21,25 @@
  *   widen via the filter UI (knobs land in a follow-up unit; the
  *   store carries the values today so the scatter applies them on
  *   first render).
+ * - ``cpfResult`` — most recent CPF result (PV-curve or QV-curve) for
+ *   the active session. Cleared on case change and when PFlow is
+ *   cleared (mirrors the EIG result lifecycle).
  *
- * Lifecycle: not persisted across tabs. EIG results cleared on case
- * change OR when ``selectedModeId`` would point past ``mode_count``
- * (set automatically by ``setEigResult``).
+ * Lifecycle: not persisted across tabs. EIG / CPF results are cleared
+ * on case change OR (for EIG) when ``selectedModeId`` would point past
+ * ``mode_count``.
  */
 import { create } from 'zustand';
-import type { EigResult } from '@/api/types';
+import type { CpfResult, EigResult } from '@/api/types';
 
 /** Sub-mode picker values for the Analyze panel. */
-export type AnalyzeSubMode = 'pflow' | 'tds' | 'eig';
+export type AnalyzeSubMode = 'pflow' | 'tds' | 'eig' | 'cpf';
 
 export const ANALYZE_SUB_MODES: readonly AnalyzeSubMode[] = [
   'pflow',
   'tds',
   'eig',
+  'cpf',
 ] as const;
 
 /**
@@ -68,6 +73,16 @@ export interface AnalyzeState {
   filter: EigFilter;
   setFilter: (next: Partial<EigFilter>) => void;
   resetFilter: () => void;
+
+  /**
+   * Most recent CPF result (Unit 12). ``null`` means "no run yet on
+   * this session"; consumers branch on null and render the empty
+   * state. Set by ``useCpfRun`` / ``useCpfQvRun`` mutation
+   * ``onSuccess``; cleared on case change via the cross-slice cascade.
+   */
+  cpfResult: CpfResult | null;
+  setCpfResult: (result: CpfResult | null) => void;
+  clearCpfResult: () => void;
 }
 
 export const useAnalyzeStore = create<AnalyzeState>((set) => ({
@@ -100,6 +115,10 @@ export const useAnalyzeStore = create<AnalyzeState>((set) => ({
   setFilter: (next) =>
     set((s) => ({ filter: { ...s.filter, ...next } })),
   resetFilter: () => set({ filter: { ...DEFAULT_EIG_FILTER } }),
+
+  cpfResult: null,
+  setCpfResult: (result) => set({ cpfResult: result }),
+  clearCpfResult: () => set({ cpfResult: null }),
 }));
 
 /**

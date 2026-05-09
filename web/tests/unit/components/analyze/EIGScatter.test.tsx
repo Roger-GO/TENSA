@@ -24,6 +24,7 @@ function resetAnalyzeStore() {
     eigResult: null,
     selectedModeId: null,
     filter: { ...DEFAULT_EIG_FILTER },
+    cpfResult: null,
   });
 }
 

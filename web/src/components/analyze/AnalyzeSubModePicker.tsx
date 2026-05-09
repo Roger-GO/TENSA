@@ -4,19 +4,21 @@ import type { AnalyzeSubMode } from '@/store/analyze';
 
 /**
  * AnalyzeSubModePicker — segmented control that swaps the routine
- * sub-view inside the Analyze panel (Unit 6 of the v2.0 plan).
+ * sub-view inside the Analyze panel (Unit 6 of the v2.0 plan, extended
+ * by Unit 12 with CPF).
  *
- * Per KTD-6: this picker (PF / TDS / EIG) replaces the v0.1
- * ``RunMode = 'pf' | 'tds'`` toggle inside the Analyze panel. CPF and
- * SE arrive in Phase 3.
+ * Per KTD-6: this picker (PF / TDS / EIG / CPF) replaces the v0.1
+ * ``RunMode = 'pf' | 'tds'`` toggle inside the Analyze panel. SE arrives
+ * in Unit 13.
  *
  * Behaviour:
  *
  * - Click swaps ``useAnalyzeStore.subMode``. Default is ``pflow`` so a
  *   first-time visitor lands on a familiar surface.
  * - The picker itself does NOT trigger a routine run — that's the
- *   RunButton's job. EIG runs are gated behind an explicit "Run EIG"
- *   click so the user opts-in to the dae-state mutation side-effect.
+ *   RunButton's job. EIG / CPF runs are gated behind an explicit "Run"
+ *   click so the user opts-in to the side effect (EIG mutates dae;
+ *   CPF is non-mutating but still synchronous-blocking).
  *
  * Visually mirrors the existing ``RunButton`` segmented control so
  * the two affordances feel consistent.
@@ -26,12 +28,14 @@ const LABELS: Record<AnalyzeSubMode, string> = {
   pflow: 'PF',
   tds: 'TDS',
   eig: 'EIG',
+  cpf: 'CPF',
 };
 
 const HINTS: Record<AnalyzeSubMode, string> = {
   pflow: 'Power flow result',
   tds: 'Time-domain simulation config + result',
   eig: 'Eigenvalue analysis (small-signal stability)',
+  cpf: 'Continuation power flow (voltage stability nose curve)',
 };
 
 export interface AnalyzeSubModePickerProps {

@@ -38,10 +38,13 @@ from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING, Any, Literal
 
+from andes_app.core.cpf_result import CpfResult
 from andes_app.core.disturbance import AlterSpec, DisturbanceSpec, FaultSpec, ToggleSpec
 from andes_app.core.eig_result import ComplexNumber, EigResult
 from andes_app.core.errors import (
     CaseLoadError,
+    CpfDivergedError,
+    CpfPrerequisiteError,
     DisturbanceCommitError,
     DisturbanceValidationError,
     EigComputationError,
@@ -1326,6 +1329,152 @@ class Wrapper:
             ) from exc
         return buf.getvalue()
 
+    # ----- CPF (Unit 12) -----
+
+    def run_cpf(
+        self,
+        *,
+        direction: str = "load",
+        step: float | None = None,
+        max_iter: int | None = None,
+    ) -> CpfResult:
+        """Run continuation power flow — Unit 12.
+
+        Args:
+            direction: ``"load"`` (default) scales loads up via
+                ``ss.CPF.run(load_scale=2.0)``. ``"gen"`` scales
+                generation up via ``pg_target=2.0``. Any other value
+                raises ``ValueError``.
+            step: optional initial continuation step size. Pushed onto
+                ``ss.CPF.config.step`` before the run when not None.
+            max_iter: optional cap on the number of continuation steps.
+                Pushed onto ``ss.CPF.config.max_steps`` before the run
+                when not None. ANDES's own ``max_iter`` config is the
+                Newton corrector iterations per step, *not* the total
+                continuation count — we map the user-facing parameter
+                name (which the plan inherits from natural-language
+                terminology) onto the ANDES ``max_steps`` field where
+                it actually controls truncation.
+
+        Substrate-side gate (per Unit 1a spike): ``CPF.init`` only logs
+        a warning when ``system.PFlow.converged`` is False. We MUST gate
+        on ``ss.PFlow.converged is True`` ourselves and raise
+        :class:`CpfPrerequisiteError` otherwise — same discipline as
+        :meth:`run_eig`.
+
+        Side effects: ``CPF._snapshot_base`` (cpf.py:462) snapshots the
+        base case (PQ.vcmp, dae.x/y, p0/q0/pg) before the run and
+        ``_restore_base`` (cpf.py:524) restores it on both success and
+        failure (try/finally at cpf.py:255-259). The substrate does not
+        have to clean up after a CPF run.
+
+        A clean ``False`` return (``ok=False``) does NOT raise — it
+        means the run completed but did not reach a nose point (e.g.,
+        hit ``max_steps``, or branch-switched). The result is returned
+        with ``truncated=True`` and ``nose_idx=-1`` so the UI can
+        surface the truncation note.
+
+        An unexpected exception inside ``ss.CPF.run()`` raises
+        :class:`CpfDivergedError` so the routes layer can return 422
+        with the ANDES detail.
+        """
+        ss = self._require_loaded()
+        self._ensure_setup()
+        # Independent PF gate — ANDES's own check is unsafe (only warns).
+        if not bool(getattr(ss.PFlow, "converged", False)):
+            raise CpfPrerequisiteError(
+                "Run PFlow first; CPF.init warns but does not "
+                "short-circuit on non-converged PFlow"
+            )
+
+        if direction not in ("load", "gen"):
+            raise ValueError(
+                f"direction must be 'load' or 'gen', got {direction!r}"
+            )
+
+        # Push optional config knobs. ANDES exposes ``step`` /
+        # ``max_steps`` as config attrs, not run() kwargs.
+        if step is not None:
+            try:
+                ss.CPF.config.step = float(step)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"invalid CPF step: {exc}") from exc
+        if max_iter is not None:
+            try:
+                ss.CPF.config.max_steps = int(max_iter)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"invalid CPF max_iter: {exc}") from exc
+
+        # Default scaling factor for both directions: 2.0 (load doubled
+        # / generation doubled). The plan's body does not specify the
+        # scaling magnitude; this matches the Unit 1a spike's empirical
+        # baseline.
+        kwargs: dict[str, Any] = {}
+        if direction == "load":
+            kwargs["load_scale"] = 2.0
+        else:  # direction == "gen"
+            kwargs["pg_target"] = 2.0
+
+        try:
+            ok = bool(ss.CPF.run(**kwargs))
+        except CpfPrerequisiteError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise CpfDivergedError(
+                f"Continuation power flow failed: {exc}"
+            ) from exc
+
+        return _build_cpf_result(ss, mode="pv", ok=ok)
+
+    def run_cpf_qv(self, *, bus_idx: str, q_range: float = 5.0) -> CpfResult:
+        """Run a single-bus QV-curve continuation — Unit 12.
+
+        Args:
+            bus_idx: ANDES bus idx (string-coerced; ANDES accepts both
+                ``int`` and ``str`` here depending on case file format).
+            q_range: passed through to ``CPF.run_qv(q_range=...)``.
+                Default 5.0 matches ANDES's own default
+                (``cpf.py:273``).
+
+        Same prerequisite gate as :meth:`run_cpf`. ``CPF.run_qv``
+        requires at least one PQ device at ``bus_idx``; ANDES raises a
+        ``ValueError`` on missing PQ — the substrate forwards as
+        :class:`CpfDivergedError` (mapped to 422).
+
+        Returns a :class:`CpfResult` with ``mode="qv"`` and a single
+        bus key in ``voltages_per_bus`` keyed off ``bus_idx``.
+        ``lambdas`` carries the ``qv_q`` array (reactive-power axis);
+        the UI labels the X-axis "Q (pu)" instead of "lambda" based on
+        ``mode``.
+        """
+        ss = self._require_loaded()
+        self._ensure_setup()
+        if not bool(getattr(ss.PFlow, "converged", False)):
+            raise CpfPrerequisiteError(
+                "Run PFlow first; CPF.init warns but does not "
+                "short-circuit on non-converged PFlow"
+            )
+
+        # ANDES accepts both int and str bus idxes. Try numeric coercion
+        # first (most case files use int idxes for buses), falling back
+        # to the raw string. The error path forwards to CpfDivergedError.
+        coerced_idx: int | str
+        try:
+            coerced_idx = int(bus_idx)
+        except (TypeError, ValueError):
+            coerced_idx = str(bus_idx)
+
+        try:
+            ss.CPF.run_qv(coerced_idx, q_range=float(q_range))
+        except CpfPrerequisiteError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise CpfDivergedError(
+                f"QV-curve run failed for bus {bus_idx!r}: {exc}"
+            ) from exc
+
+        return _build_cpf_result(ss, mode="qv", ok=True, qv_bus=str(bus_idx))
+
     # ----- snapshot (Unit 7) -----
 
     def save_snapshot(
@@ -2546,3 +2695,141 @@ def _eig_state_names(ss: System, mode_count: int) -> list[str]:
             if len(names) == mode_count:
                 return names
     return [f"state_{i}" for i in range(mode_count)]
+
+
+# ---- CPF helpers (Unit 12) ------------------------------------------------
+
+
+def _build_cpf_result(
+    ss: System, *, mode: str, ok: bool, qv_bus: str | None = None
+) -> CpfResult:
+    """Build a :class:`CpfResult` from the post-run ``ss.CPF`` state.
+
+    Handles both PV-curve (``mode="pv"``, full multi-bus sweep) and
+    QV-curve (``mode="qv"``, single-bus reactive-injection sweep)
+    payloads. The two share the same wire shape so the UI can use one
+    chart component for both.
+
+    Per Unit 1a spike:
+
+    - PV: ``CPF.lam`` (1-D length nsteps), ``CPF.V`` (nbus, nsteps).
+    - QV: ``CPF.qv_q`` (1-D), ``CPF.qv_v`` (1-D, single bus).
+
+    Truncation detection: a successful nose-finding run carries a
+    ``NOSE`` event in ``CPF.events``. When ``ok=False`` OR no NOSE event
+    is present, ``nose_idx=-1`` and ``truncated=True`` so the UI can
+    surface the "did not reach nose" note.
+    """
+    cpf = ss.CPF
+    done_msg = str(getattr(cpf, "done_msg", "") or "")
+    events = list(getattr(cpf, "events", None) or [])
+
+    if mode == "qv":
+        q_arr = getattr(cpf, "qv_q", None)
+        v_arr = getattr(cpf, "qv_v", None)
+        try:
+            lambdas = [float(x) for x in (q_arr if q_arr is not None else [])]
+        except (TypeError, ValueError):
+            lambdas = []
+        try:
+            voltages = [float(x) for x in (v_arr if v_arr is not None else [])]
+        except (TypeError, ValueError):
+            voltages = []
+        bus_label = qv_bus if qv_bus is not None else str(
+            getattr(cpf, "qv_bus", "")
+        )
+        bus_idxes = [bus_label] if bus_label else []
+        voltages_per_bus = (
+            {bus_label: voltages} if bus_label else {}
+        )
+        # Nose detection: argmax over the lambda axis. For QV the
+        # "nose" is the maximum reactive injection before voltage
+        # collapse — treat the same way.
+        nose_idx = -1
+        max_lam = float(getattr(cpf, "max_lam", 0.0) or 0.0)
+        if lambdas and ok:
+            nose_idx = int(_argmax(lambdas))
+        truncated = (not ok) or nose_idx < 0
+        if not max_lam and lambdas:
+            max_lam = max(lambdas)
+        return CpfResult(
+            lambdas=lambdas,
+            voltages_per_bus=voltages_per_bus,
+            bus_idxes=bus_idxes,
+            nose_idx=nose_idx,
+            max_lam=max_lam,
+            truncated=truncated,
+            done_msg=done_msg,
+            mode="qv",
+        )
+
+    # PV-curve path.
+    lam = getattr(cpf, "lam", None)
+    v_matrix = getattr(cpf, "V", None)
+    try:
+        lambdas = [float(x) for x in (lam if lam is not None else [])]
+    except (TypeError, ValueError):
+        lambdas = []
+
+    bus_idxes_raw: list[Any] = []
+    try:
+        bus_idxes_raw = list(ss.Bus.idx.v)
+    except (AttributeError, TypeError):
+        bus_idxes_raw = []
+    bus_idxes = [str(b) for b in bus_idxes_raw]
+
+    voltages_per_bus: dict[str, list[float]] = {}
+    if v_matrix is not None and bus_idxes:
+        try:
+            n_rows = int(v_matrix.shape[0])
+        except (AttributeError, IndexError, TypeError):
+            n_rows = 0
+        # Defensive: use the smaller of n_rows and len(bus_idxes) so a
+        # mismatch (which the spike never observed but guards against
+        # future ANDES bus-elimination edge cases) doesn't index out
+        # of range.
+        for i in range(min(n_rows, len(bus_idxes))):
+            try:
+                row = [float(x) for x in v_matrix[i]]
+            except (TypeError, ValueError):
+                row = []
+            voltages_per_bus[bus_idxes[i]] = row
+
+    # Nose detection: a NOSE event in CPF.events tells us the run hit
+    # the maximum-loadability point. argmax over the lambda series
+    # mirrors what ANDES reports as ``max_lam``.
+    has_nose_event = any(
+        isinstance(ev, dict) and ev.get("type") == "NOSE" for ev in events
+    )
+    nose_idx = -1
+    if lambdas and ok and has_nose_event:
+        nose_idx = int(_argmax(lambdas))
+    truncated = (not ok) or (not has_nose_event)
+
+    max_lam = float(getattr(cpf, "max_lam", 0.0) or 0.0)
+    if not max_lam and lambdas:
+        max_lam = max(lambdas)
+
+    return CpfResult(
+        lambdas=lambdas,
+        voltages_per_bus=voltages_per_bus,
+        bus_idxes=bus_idxes,
+        nose_idx=nose_idx,
+        max_lam=max_lam,
+        truncated=truncated,
+        done_msg=done_msg,
+        mode="pv",
+    )
+
+
+def _argmax(values: list[float]) -> int:
+    """Return the index of the maximum value. Empty input returns 0."""
+    if not values:
+        return 0
+    best_i = 0
+    best_v = values[0]
+    for i in range(1, len(values)):
+        if values[i] > best_v:
+            best_v = values[i]
+            best_i = i
+    return best_i

@@ -3,11 +3,12 @@ import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import { TdsConfigPanel } from '@/components/tds/TdsConfigPanel';
 import { AnalyzeSubModePicker } from './AnalyzeSubModePicker';
+import { CPFCurveChart } from './CPFCurveChart';
 import { EIGScatter } from './EIGScatter';
 import { EIGParticipationTable } from './EIGParticipationTable';
 import { EIGDampingChart } from './EIGDampingChart';
 import { useAnalyzeStore } from '@/store/analyze';
-import { useEigRun } from '@/api/queries';
+import { useCpfRun, useEigRun } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
 import { ProblemDetailsError } from '@/api/client';
@@ -61,6 +62,7 @@ export function AnalyzePanel({ className }: AnalyzePanelProps) {
         {subMode === 'pflow' ? <AnalyzePflowSubMode /> : null}
         {subMode === 'tds' ? <TdsConfigPanel /> : null}
         {subMode === 'eig' ? <AnalyzeEigSubMode /> : null}
+        {subMode === 'cpf' ? <AnalyzeCpfSubMode /> : null}
       </div>
     </section>
   );
@@ -182,6 +184,97 @@ function AnalyzeEigSubMode() {
       <EIGScatter className="min-h-[260px] flex-shrink-0" />
       <EIGParticipationTable className="min-h-[140px] flex-shrink-0" />
       <EIGDampingChart className="min-h-[140px] flex-shrink-0" />
+    </div>
+  );
+}
+
+function AnalyzeCpfSubMode() {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const lastPf = usePflowStore((s) => s.lastRun);
+  const cpfResult = useAnalyzeStore((s) => s.cpfResult);
+  const setSubMode = useAnalyzeStore((s) => s.setSubMode);
+  const cpfRun = useCpfRun();
+
+  // When PF clears (case change cascade), drop the stale CPF result so
+  // the empty-state shows.
+  useEffect(() => {
+    if (lastPf === null && cpfResult !== null) {
+      useAnalyzeStore.getState().clearCpfResult();
+    }
+  }, [lastPf, cpfResult]);
+
+  const onRun = () => {
+    if (!sessionId) return;
+    cpfRun.mutate({ sessionId, direction: 'load' });
+  };
+
+  const cpfError = cpfRun.error;
+  const isPrerequisite =
+    cpfError instanceof ProblemDetailsError && cpfError.status === 409;
+
+  return (
+    <div className="flex flex-col gap-3 p-3">
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          disabled={!sessionId || cpfRun.isPending}
+          onClick={onRun}
+          data-testid="analyze-run-cpf"
+        >
+          {cpfRun.isPending ? 'Running CPF…' : 'Run CPF'}
+        </Button>
+        {cpfResult !== null ? (
+          <span
+            data-testid="cpf-summary"
+            className="text-muted-foreground text-[10px]"
+          >
+            {cpfResult.mode === 'qv' ? 'QV-curve' : 'PV-curve'} —{' '}
+            {cpfResult.lambdas.length} steps; max{' '}
+            {cpfResult.mode === 'qv' ? 'Q' : 'lambda'} ={' '}
+            {cpfResult.max_lam.toFixed(4)}
+          </span>
+        ) : null}
+      </div>
+
+      {isPrerequisite ? (
+        <div
+          role="alert"
+          data-testid="cpf-prerequisite-error"
+          className={cn(
+            'border-warning/40 bg-warning/10 text-foreground',
+            'flex flex-col gap-2 rounded border p-3 text-xs',
+          )}
+        >
+          <span>{cpfError.detail ?? 'Run PFlow first.'}</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="cpf-prerequisite-cta"
+            onClick={() => setSubMode('pflow')}
+          >
+            Open PF view
+          </Button>
+        </div>
+      ) : null}
+
+      {cpfError !== null && !isPrerequisite ? (
+        <div
+          role="alert"
+          className={cn(
+            'border-destructive/40 bg-destructive/10 text-destructive',
+            'rounded border p-3 text-xs',
+          )}
+        >
+          {cpfError instanceof ProblemDetailsError
+            ? (cpfError.detail ?? cpfError.title)
+            : cpfError.message}
+        </div>
+      ) : null}
+
+      <CPFCurveChart className="min-h-[300px] flex-shrink-0" />
     </div>
   );
 }
