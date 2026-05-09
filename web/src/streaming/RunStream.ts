@@ -54,6 +54,9 @@ const log = console;
 /** Variable group selector forwarded to ``start_tds``. */
 export type VarGroup = 'bus_v' | 'gen_state' | 'line_flow';
 
+/** Wire-side integrator value forwarded to the substrate. */
+export type TdsIntegratorWire = 'trapezoidal' | 'qndf';
+
 /** Args for the ``start_tds`` message; the UI clamps ``max_rate_hz`` to 30. */
 export interface TdsArgs {
   /** Final sim time in seconds. Required. */
@@ -62,6 +65,23 @@ export interface TdsArgs {
   h?: number;
   /** Variable groups to stream. Defaults to ``["bus_v"]``. */
   vars?: readonly VarGroup[];
+  /**
+   * Unit 16 integrator selection. Optional — defaults to ``trapezoidal``
+   * on the substrate. ``qndf`` enables the variable-step NDF method
+   * (``ss.TDS.config.method = "qndf"``).
+   */
+  integrator?: TdsIntegratorWire;
+  /**
+   * Unit 16 adaptive tolerance / max-step overrides. Forwarded as
+   * ``tds_config_overrides`` on the wire. Keys are the wrapper-canonical
+   * ``rtol`` / ``atol`` / ``max_step``; the substrate maps them to
+   * ANDES's ``reltol`` / ``abstol`` / ``dtmax``.
+   */
+  tdsConfigOverrides?: {
+    rtol?: number;
+    atol?: number;
+    max_step?: number;
+  };
 }
 
 /** Connection-status events surfaced to the UI status badge. */
@@ -410,7 +430,7 @@ export class RunStream {
       }
       this.send({ type: 'resume', run_id: this.runId, last_seq: this.rowCount });
     } else {
-      const { tf, h, vars } = this.opts.tdsArgs;
+      const { tf, h, vars, integrator, tdsConfigOverrides } = this.opts.tdsArgs;
       const payload: Record<string, unknown> = {
         type: 'start_tds',
         tf,
@@ -419,6 +439,13 @@ export class RunStream {
       };
       if (h !== undefined) payload.h = h;
       if (vars !== undefined) payload.vars = vars;
+      // Unit 16: integrator + adaptive overrides. Both are optional;
+      // omit when undefined so the wire stays minimal for the default
+      // trapezoidal-fixed-step path.
+      if (integrator !== undefined) payload.integrator = integrator;
+      if (tdsConfigOverrides !== undefined) {
+        payload.tds_config_overrides = tdsConfigOverrides;
+      }
       this.send(payload);
     }
     this.phase = 'awaiting-stream-start';

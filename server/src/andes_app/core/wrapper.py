@@ -1123,6 +1123,8 @@ class Wrapper:
         h: float | None = None,
         on_step: Callable[[float, System], None] | None = None,
         abort_flag: Event | None = None,
+        integrator: Literal["trapezoidal", "qndf"] = "trapezoidal",
+        tds_config_overrides: dict[str, float] | None = None,
     ) -> TdsBatchResult:
         """Run a time-domain simulation up to ``tf`` seconds.
 
@@ -1130,6 +1132,25 @@ class Wrapper:
         ``TDS.callpert`` hook. ``abort_flag``, when set, causes the wrapper
         to set ``ss.TDS.busted = True`` on the next callpert invocation,
         cleanly terminating the integration loop within ~2 steps.
+
+        ``integrator`` selects the DAE solution method:
+        - ``"trapezoidal"`` (default) — fixed-step Implicit Trapezoidal
+          Method. Maps to ANDES ``ss.TDS.config.method = "trapezoid"``.
+          v1.0 default (no behavior change for existing callers).
+        - ``"qndf"`` — variable-order, variable-step QNDF (NDF) method.
+          Maps to ANDES ``ss.TDS.config.method = "qndf"``. Requires
+          ``ss.TDS.config.fixt = 0`` (which the wrapper sets explicitly).
+
+        ``tds_config_overrides`` (optional) is a dict of ANDES TDS config
+        field names → values. The supported keys for adaptive runs are:
+        - ``rtol`` → ``ss.TDS.config.reltol`` (relative tolerance).
+        - ``atol`` → ``ss.TDS.config.abstol`` (absolute tolerance).
+        - ``max_step`` → ``ss.TDS.config.dtmax`` (maximum step size; the
+          ANDES field is ``dtmax``, NOT ``h_max``).
+
+        Unknown override keys raise ``SetupFailedError``. The Auto preset
+        (``rtol=1e-3, atol=1e-6, max_step=0.05``) is the caller's
+        responsibility to set; this method does NOT inject defaults.
         """
         ss = self._require_loaded()
         self._ensure_setup()
@@ -1148,6 +1169,38 @@ class Wrapper:
         ss.TDS.config.tf = tf
         if h is not None:
             ss.TDS.config.h = h
+
+        # Integrator selection. ANDES ``method`` strings: ``"trapezoid"``
+        # (fixed-step ITM) and ``"qndf"`` (variable-step NDF). The QNDF
+        # path also needs ``fixt = 0`` so ANDES enables LTE-driven step
+        # control (verified at andes/routines/tds.py:1278).
+        if integrator == "qndf":
+            ss.TDS.config.method = "qndf"
+            ss.TDS.config.fixt = 0
+        elif integrator == "trapezoidal":
+            ss.TDS.config.method = "trapezoid"
+        else:  # pragma: no cover — guarded by Literal type
+            raise SetupFailedError(
+                f"unknown integrator {integrator!r}; expected 'trapezoidal' or 'qndf'"
+            )
+
+        # Tolerance / max-step overrides. Keys are wrapper-canonical
+        # (``rtol`` / ``atol`` / ``max_step``); the ANDES field names are
+        # ``reltol`` / ``abstol`` / ``dtmax``.
+        if tds_config_overrides:
+            _OVERRIDE_MAP = {
+                "rtol": "reltol",
+                "atol": "abstol",
+                "max_step": "dtmax",
+            }
+            for key, value in tds_config_overrides.items():
+                andes_field = _OVERRIDE_MAP.get(key)
+                if andes_field is None:
+                    raise SetupFailedError(
+                        f"unknown TDS override key {key!r}; expected one of "
+                        f"{list(_OVERRIDE_MAP)!r}"
+                    )
+                setattr(ss.TDS.config, andes_field, value)
 
         callpert_count = 0
 

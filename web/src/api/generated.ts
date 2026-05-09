@@ -582,6 +582,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/cpf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run continuation power flow (PV-curve / nose-curve) on the session.
+         * @description Synchronously run ``ss.CPF.run()`` and return the trajectory.
+         *
+         *     Truncation (``ok=False`` on the wrapper side) does NOT raise — the
+         *     response carries ``truncated=True`` and ``nose_idx=-1`` so the UI
+         *     can show the "did not reach nose" note inline rather than as an
+         *     error banner.
+         */
+        post: operations["runCpf"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/cpf/qv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a single-bus QV-curve continuation on the session.
+         * @description Synchronously run ``ss.CPF.run_qv(bus_idx)`` and return the trace.
+         */
+        post: operations["runCpfQv"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/se/measurements/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate the default SE measurement set from the converged PF solution.
+         * @description Build the default measurement set and cache it on the worker.
+         *
+         *     Default set mirrors ANDES's own ``SE._default_measurements``:
+         *     ``add_bus_voltage(sigma=0.01)`` + ``add_bus_injection(sigma_p=0.02,
+         *     sigma_q=0.03)``. The substrate caches the populated ``Measurements``
+         *     object so a subsequent ``/se`` call doesn't have to regenerate
+         *     noise (lets the user re-run SE against a stable measurement set).
+         */
+        post: operations["generateSeMeasurements"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/se": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run static state estimation against the cached measurement set.
+         * @description Synchronously run ``ss.SE.run()`` against the cached measurement
+         *     set and return the result.
+         *
+         *     Pre-conditions enforced by the substrate (mapped to 409):
+         *
+         *     - ``ss.PFlow.converged is True`` — independent gate (ANDES warns
+         *       but doesn't short-circuit).
+         *     - The substrate has a cached ``Measurements`` object from a prior
+         *       call to ``/se/measurements/generate``.
+         *
+         *     Failure modes mapped to 422:
+         *
+         *     - Under-determined measurement set (gain matrix singular).
+         *     - WLS non-convergent within ``config.max_iter``.
+         */
+        post: operations["runSe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -842,6 +946,100 @@ export interface components {
              * @description Imaginary part of the eigenvalue.
              */
             imag: number;
+        };
+        /**
+         * CpfQvRunRequest
+         * @description Request body for ``POST /sessions/{id}/cpf/qv``.
+         */
+        CpfQvRunRequest: {
+            /**
+             * Bus Idx
+             * @description Bus idx to draw the QV-curve at. Must match an entry in the loaded case's ``Bus.idx``; ANDES requires at least one PQ device at this bus (raises ``ValueError`` otherwise, surfaced as 422 here).
+             */
+            bus_idx: string;
+            /**
+             * Q Range
+             * @description Reactive-power range for the QV continuation. Default matches ANDES's own ``q_range=5.0``.
+             */
+            q_range?: number | null;
+        };
+        /**
+         * CpfResultResponse
+         * @description Wire shape of ``POST /sessions/{id}/cpf`` and
+         *     ``POST /sessions/{id}/cpf/qv``.
+         *
+         *     Field semantics mirror :class:`andes_app.core.cpf_result.CpfResult`
+         *     1:1; see that class for prose.
+         */
+        CpfResultResponse: {
+            /**
+             * Lambdas
+             * @description Per-step continuation parameter values. For PV-curve runs this is ``CPF.lam`` (lambda); for QV-curve runs it is ``CPF.qv_q`` (reactive injection). The ``mode`` field tells the UI which axis label to use.
+             */
+            lambdas: number[];
+            /**
+             * Voltages Per Bus
+             * @description Per-bus voltage trace, index-aligned with ``lambdas``. PV runs include every bus in the loaded case; QV runs include only the requested ``bus_idx``.
+             */
+            voltages_per_bus: {
+                [key: string]: number[];
+            };
+            /**
+             * Bus Idxes
+             * @description Ordered list of bus idxes (stringified) matching the row order of ``CPF.V``. Surfaced separately so the UI can render in canonical order without dict-key iteration ambiguity.
+             */
+            bus_idxes: string[];
+            /**
+             * Nose Idx
+             * @description Index into ``lambdas`` where lambda is maximised (the nose point / voltage-collapse margin). ``-1`` when the run was truncated before reaching the nose.
+             */
+            nose_idx: number;
+            /**
+             * Max Lam
+             * @description Peak lambda value reached. Echo of ``CPF.max_lam``. Always populated, even on truncation.
+             */
+            max_lam: number;
+            /**
+             * Truncated
+             * @description ``True`` when the run terminated without finding a nose point (e.g. hit ``max_steps`` or did not branch-switch to a NOSE event). When ``True``, ``nose_idx == -1`` and the UI shows the truncation note from ``done_msg``.
+             */
+            truncated: boolean;
+            /**
+             * Done Msg
+             * @description ANDES's terminal status string (e.g., ``"Nose point at lambda=3.258046"``, ``"Reached max steps (5)"``). Used by the UI to label the truncation banner.
+             */
+            done_msg: string;
+            /**
+             * Mode
+             * @description Discriminator: ``"pv"`` for the full PV-curve sweep (``CPF.run``) or ``"qv"`` for a single-bus QV-curve (``CPF.run_qv``). The wire shape is the same; the UI uses ``mode`` to label the X-axis (lambda vs Q).
+             */
+            mode: string;
+        };
+        /**
+         * CpfRunRequest
+         * @description Request body for ``POST /sessions/{id}/cpf``.
+         *
+         *     All fields are optional. ``direction`` toggles between scaling
+         *     loads vs generation up; ``step`` and ``max_iter`` push the
+         *     corresponding ``ss.CPF.config`` values before the run.
+         */
+        CpfRunRequest: {
+            /**
+             * Direction
+             * @description Continuation direction. ``'load'`` (default) scales loads via ``CPF.run(load_scale=2.0)``. ``'gen'`` scales generation via ``pg_target=2.0``.
+             * @default load
+             */
+            direction: string;
+            /**
+             * Step
+             * @description Optional initial continuation step size for lambda (pushed onto ``ss.CPF.config.step``). Default uses ANDES's own default (0.1).
+             */
+            step?: number | null;
+            /**
+             * Max Iter
+             * @description Optional cap on the number of continuation steps (pushed onto ``ss.CPF.config.max_steps``). This maps the user-facing parameter name onto ANDES's ``max_steps`` field, which actually controls truncation; ANDES's own ``max_iter`` config is the Newton corrector iterations per step. Default uses ANDES's own default (500).
+             */
+            max_iter?: number | null;
         };
         /**
          * DeleteBlockedResponse
@@ -1451,6 +1649,81 @@ export interface components {
             metadata_bytes: number;
         };
         /**
+         * SeGenerateMeasurementsRequest
+         * @description Request body for ``POST /sessions/{id}/se/measurements/generate``.
+         *
+         *     Only optional knob is the noise seed — pinning the seed makes runs
+         *     reproducible across browser refreshes (useful for the UI's
+         *     "Generate measurements" button).
+         */
+        SeGenerateMeasurementsRequest: {
+            /**
+             * Noise Seed
+             * @description Optional integer seed for the Gaussian-noise draw inside ``Measurements.generate_from_pflow``. ``None`` (default) uses an unseeded ``np.random.default_rng``; pinning the seed lets the UI re-generate the same measurement set across page refreshes.
+             */
+            noise_seed?: number | null;
+        };
+        /**
+         * SeMeasurementsGeneratedResponse
+         * @description Wire shape of ``POST /sessions/{id}/se/measurements/generate``.
+         */
+        SeMeasurementsGeneratedResponse: {
+            /**
+             * Count
+             * @description Number of scalar measurements in the substrate's ``Measurements`` object. For IEEE 14: 14 bus voltage measurements + 28 bus injection (P+Q for each bus) = 42. Note: ``SE.init`` adds an angle-reference pseudo-measurement at the slack bus on the first ``run_se`` call, so the eventual ``SeResult.residuals`` length will be one greater per island.
+             */
+            count: number;
+        };
+        /**
+         * SeResultResponse
+         * @description Wire shape of ``POST /sessions/{id}/se``.
+         *
+         *     Field semantics mirror :class:`andes_app.core.se_result.SeResult`
+         *     1:1; see that class for prose.
+         */
+        SeResultResponse: {
+            /**
+             * Converged
+             * @description ``True`` when ANDES's ``SE.run`` returned True (Gauss-Newton residual fell below ``config.tol`` within ``config.max_iter``). ``False`` cases are surfaced as 422 errors rather than ``converged=false`` payloads — the UI always sees a converged result on a 200.
+             */
+            converged: boolean;
+            /**
+             * Iterations
+             * @description Number of WLS Gauss-Newton iterations to convergence. ANDES's ``result['n_iter']`` is 1-indexed; echoed verbatim.
+             */
+            iterations: number;
+            /**
+             * Mismatch
+             * @description Final WLS objective ``J = sum(w * r^2)``. Smaller is better; the chi-squared test on ``J`` (not surfaced yet — Unit 14+) flags whether the measurement set fits the model at a given confidence level.
+             */
+            mismatch: number;
+            /**
+             * Residuals
+             * @description Per-measurement residuals ``z - h(x_est)``. Length equals ``measurement_count``. The UI bins these into a histogram.
+             */
+            residuals: number[];
+            /**
+             * Measurement Count
+             * @description Total measurements (including the angle-reference pseudo-measurement that ``SE.init`` injects). Equal to ``len(residuals)``. Surfaced as a separate field so the UI's histogram doesn't have to derive it from the array length.
+             */
+            measurement_count: number;
+            /**
+             * Flagged Indices
+             * @description Indices into ``residuals`` whose normalised residual ``|r_i| / sigma_i`` exceeds 3-sigma. These are candidate bad-data measurements; the UI highlights the corresponding histogram bars in red.
+             */
+            flagged_indices: number[];
+        };
+        /**
+         * SeRunRequest
+         * @description Request body for ``POST /sessions/{id}/se``.
+         *
+         *     Empty body — the substrate's ``Wrapper.run_se`` reads the cached
+         *     measurement set from the prior generate call. Kept as a model so
+         *     the route can declare ``extra="forbid"`` and reject typos forward-
+         *     compatibly.
+         */
+        SeRunRequest: Record<string, never>;
+        /**
          * SessionDescriptor
          * @description Response shape for session create / read.
          */
@@ -1622,6 +1895,20 @@ export interface components {
              * @description Optional selector for which variable groups appear as columns in each per-step Arrow record batch on the streaming path. ``bus_v`` covers bus voltage magnitudes (the v0.1 default); ``gen_state`` adds generator rotor angle ``delta`` and per-unit speed ``omega`` for every member of the ANDES ``SynGen`` group (GENROU / GENCLS / PLBVFU1); ``line_flow`` adds active power ``Line_<idx>_p`` (MW) at each line's bus1 terminal. Unknown values are rejected with 422; an empty list is rejected with 422. The batch path (``POST /tds``) ignores this field at runtime — the streamed-only state values are not surfaced in batch responses — but it is accepted on the OpenAPI surface for symmetry with the WebSocket ``start_tds`` config so generated clients can share one request shape. Defaults to ``["bus_v"]`` when omitted.
              */
             vars?: ("bus_v" | "gen_state" | "line_flow")[] | null;
+            /**
+             * Integrator
+             * @description DAE integrator (Unit 16). ``"trapezoidal"`` (default) maps to ANDES's fixed-step Implicit Trapezoidal Method (``ss.TDS.config.method = "trapezoid"``). ``"qndf"`` selects the variable-order, variable-step QNDF (NDF) method and forces ``fixt = 0`` so ANDES enables LTE-driven step control. Combine ``integrator="qndf"`` with the Auto preset (``rtol=1e-3, atol=1e-6, max_step=0.05``) by passing the values via ``tds_config_overrides``.
+             * @default trapezoidal
+             * @enum {string}
+             */
+            integrator: "trapezoidal" | "qndf";
+            /**
+             * Tds Config Overrides
+             * @description Optional adaptive-integrator tolerance overrides (Unit 16). Supported keys are ``rtol`` (→ ``ss.TDS.config.reltol``), ``atol`` (→ ``ss.TDS.config.abstol``) and ``max_step`` (→ ``ss.TDS.config.dtmax``). Unknown keys are rejected with 500 ``SetupFailedError`` from the wrapper. Has no effect when ``integrator="trapezoidal"`` (the fixed-step path ignores ``reltol/abstol`` and uses ``h`` for stepping).
+             */
+            tds_config_overrides?: {
+                [key: string]: number;
+            } | null;
         };
         /**
          * ToggleSpec
@@ -3625,6 +3912,254 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    runCpf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CpfRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CpfResultResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case loaded OR the session has no converged PFlow result. Run /pflow first; ``CPF.init`` only warns and would otherwise fall through to a non-actionable internal error. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description ANDES CPF routine raised (e.g., singular Jacobian, KLU segfault, internal LinAlg failure). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    runCpfQv: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CpfQvRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CpfResultResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case loaded OR the session has no converged PFlow result. Run /pflow first. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description ANDES CPF.run_qv raised — typically because no PQ device is attached to ``bus_idx`` or the case is too stiff for the QV continuation. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    generateSeMeasurements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeGenerateMeasurementsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeMeasurementsGeneratedResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case loaded OR the session has no converged PFlow result. Run /pflow first; ``SE.init`` only logs an error and would otherwise return False with no actionable detail. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Measurement generation failed (e.g., a model lookup raised inside ``add_bus_injection``). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    runSe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeResultResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case loaded OR the session has no converged PFlow result OR the substrate has no cached measurement set yet (call /se/measurements/generate first). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Either: (a) the measurement set is under-determined (insufficient redundancy; gain matrix singular), or (b) the WLS Gauss-Newton did not converge within ``config.max_iter``. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
