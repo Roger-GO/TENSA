@@ -11,29 +11,35 @@ import {
 import type { VarGroup } from '@/store/plot';
 import type { RunRecord } from '@/store/runs';
 import { UPlot } from './UPlot';
+import { RunLegendChip } from './RunLegendChip';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { timeSeriesToCsv } from '@/components/export/exportToCsv';
 import { elementToPng } from '@/components/export/exportToPng';
 import { useCaseStore } from '@/store/case';
+import { runIdToStrokeStyle } from '@/lib/runIdToColor';
 import { cn } from '@/lib/cn';
 
 /**
  * Stacked uPlot instances — one per non-empty variable group — sharing
  * a sync key so the cursor moves in lockstep across all stacks.
  *
- * Reads from ``useRunsStore`` (active run) and ``usePlotStore``
- * (selected series + group expand state). When no run is active OR
- * no series selected, renders the empty-state copy.
+ * Reads from ``useRunsStore`` (active run + overlay set) and
+ * ``usePlotStore`` (selected series + group expand state). When no run
+ * is active OR no series selected, renders the empty-state copy.
  *
- * Data flow:
- *  1. Subscribe to the active run; resolve its column metadata.
- *  2. Group the selected series by ``VarGroup`` (parse column names).
- *  3. For each group with at least one selected series, build an
- *     ``AlignedData`` of ``[t.subarray(0, seqCount), ...selected
- *     columns subarray]``. Typed-array subarrays are zero-copy.
- *  4. Pass each group's data + options into a ``<UPlot>``. All
- *     instances share ``cursor.sync.key = "tds-run-<runId>"`` so
- *     hovering one moves the cursor on the others.
+ * **Multi-run overlay (Unit 9, v2.0):** when ``overlayRunIds.size > 1``
+ * the plot renders one series family per overlay run, each coloured by
+ * a runId-stable hash (see ``runIdToStrokeStyle``). All overlay runs
+ * share the variable selection (the picker shows a per-run filter
+ * row above the tree when overlay > 1 — see ``VariableTreePicker``).
+ * When ``overlayRunIds`` is empty, the plot falls back to the active
+ * run only.
+ *
+ * Mismatched timelines: each run keeps its own t-column, so a run
+ * with ``tf=5`` simply ends at t=5 in the stacked plot's shared
+ * x-axis (uPlot's ``AlignedData`` accepts NaN gaps; we instead use
+ * one ``Series`` per (run, var) pair so the absent rows are simply
+ * not plotted past their end).
  *
  * Re-render strategy: this component re-renders on runs-store changes
  * (new frames append) and on plot-store changes (selection toggle).
@@ -48,12 +54,21 @@ export interface TimeSeriesPlotProps {
    * Optional override for the run id rendered. Defaults to the active
    * run from the runs store. Tests pass an explicit value to bypass
    * the store coupling.
+   *
+   * When set, this overrides the multi-run overlay set — the plot
+   * renders the explicit run only. This preserves the legacy
+   * single-run test surface.
    */
   runId?: string;
   className?: string;
 }
 
-/** Distinguishable color palette (10 colors) — picked for WCAG AA contrast. */
+/**
+ * Single-run-mode (legacy) palette: distinguishable colors for variables
+ * within one run. When the plot is in multi-run mode we instead colour
+ * by the runId-hash; vars within one run share the run's colour and
+ * differ only by uPlot's built-in series legend ordering.
+ */
 const PALETTE: readonly string[] = [
   'oklch(0.55 0.20 28)', // red-orange
   'oklch(0.65 0.18 75)', // amber
@@ -76,7 +91,10 @@ function colorFor(name: string): string {
   return PALETTE[h % PALETTE.length]!;
 }
 
-/** Build the uPlot options + data for one variable group. */
+/**
+ * Build the uPlot options + data for one variable group, single-run mode.
+ * Each series gets a unique colour from the variable-name palette.
+ */
 function buildGroupChart(
   run: RunRecord,
   group: VarGroup,
@@ -100,6 +118,101 @@ function buildGroupChart(
       width: 1.5,
       points: { show: false },
     });
+  }
+
+  const options: uPlot.Options = {
+    width: 600,
+    height: 200,
+    series,
+    scales: {
+      x: { time: false },
+    },
+    axes: [{ label: 't (s)' }, { label: groupAxisLabel(group) }],
+    cursor: {
+      sync: { key: syncKey, setSeries: false },
+      drag: { x: true, y: false, uni: 50 },
+    },
+    legend: { show: true },
+  };
+
+  return { options, data: dataCols };
+}
+
+/**
+ * Build the uPlot options + data for one variable group, multi-run mode.
+ *
+ * uPlot's ``AlignedData`` requires every series to share a single x
+ * (time) column. Since overlay runs may have mismatched timelines, we
+ * build the **union of all timestamps** (sorted ascending, dedup'd),
+ * then resample each (run, var) onto that shared axis using NaN for
+ * the timestamps before the run's first sample and after its last.
+ * uPlot renders NaN as a gap, so a run with ``tf=5`` simply has no
+ * line past t=5 in the shared plot.
+ *
+ * For runs with O(1k) frames each and 5 overlay runs this is O(N log N)
+ * once per render — fast enough at the v2.0 scale (the underlying
+ * single-run path is still the hot path; multi-run is a deliberate
+ * sub-30 Hz operation when the user pins extra runs).
+ */
+function buildMultiRunGroupChart(
+  runs: readonly RunRecord[],
+  group: VarGroup,
+  selectedNames: readonly string[],
+  syncKey: string,
+): { options: uPlot.Options; data: uPlot.AlignedData } {
+  // Collect the union of timestamps. Use a Set for dedup; sort once at
+  // the end. Each run's t-array is already sorted, so a merge would be
+  // O(N) total — but for v2.0 sizes the Set+sort is simpler and
+  // benchmarks fine.
+  const tSet = new Set<number>();
+  for (const run of runs) {
+    const len = run.seqCount;
+    for (let i = 0; i < len; i += 1) tSet.add(run.t[i]!);
+  }
+  const tUnion = new Float64Array(tSet.size);
+  let i = 0;
+  for (const t of tSet) tUnion[i++] = t;
+  // ``Float64Array.sort`` compares numerically (unlike Array.prototype.sort
+  // which compares lexicographically by default).
+  tUnion.sort();
+
+  // Build a map from t-value → row index for lookup during resampling.
+  const tIndex = new Map<number, number>();
+  for (let j = 0; j < tUnion.length; j += 1) tIndex.set(tUnion[j]!, j);
+
+  const dataCols: uPlot.AlignedData = [tUnion];
+  const series: uPlot.Series[] = [{ label: 't' }];
+
+  for (const run of runs) {
+    const style = runIdToStrokeStyle(run.runId);
+    const len = run.seqCount;
+    for (const name of selectedNames) {
+      const col = run.columns[name];
+      if (!col) continue;
+      // Resample: copy known values, leave NaN elsewhere.
+      const resampled = new Float64Array(tUnion.length).fill(NaN);
+      for (let k = 0; k < len; k += 1) {
+        const idx = tIndex.get(run.t[k]!);
+        if (idx === undefined) continue;
+        resampled[idx] = col[k]!;
+      }
+      dataCols.push(resampled);
+      // Series label encodes the run prefix + var name so the legend
+      // distinguishes the same var across runs.
+      const runPrefix = run.runId.length > 8 ? run.runId.slice(0, 8) : run.runId;
+      const seriesProps: uPlot.Series = {
+        label: `${runPrefix}·${name}`,
+        stroke: style.color,
+        width: 1.5,
+        points: { show: false },
+      };
+      // uPlot's Series.dash is typed as number[] — only set when non-empty
+      // so the default solid behaviour kicks in.
+      if (style.dash.length > 0) {
+        seriesProps.dash = [...style.dash];
+      }
+      series.push(seriesProps);
+    }
   }
 
   const options: uPlot.Options = {
@@ -213,8 +326,37 @@ function GroupChart({
 
 export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
   const activeRunId = useRunsStore((s) => s.activeRunId);
+  const overlayRunIds = useRunsStore((s) => s.overlayRunIds);
+  const allRuns = useRunsStore((s) => s.runs);
   const effectiveRunId = runId ?? activeRunId;
-  const run = useRunsStore((s) => (effectiveRunId ? s.runs[effectiveRunId] : undefined));
+
+  // Resolve the set of runs to render. Priority:
+  //   1. Explicit ``runId`` prop  → render that run only.
+  //   2. Non-empty ``overlayRunIds`` → render those.
+  //   3. Active run                → render it only (legacy single-run mode).
+  // The intersection of the picker selection (in plot store) is shared
+  // across all overlay runs.
+  const overlayRuns = useMemo<readonly RunRecord[]>(() => {
+    if (runId) {
+      const r = allRuns[runId];
+      return r ? [r] : [];
+    }
+    if (overlayRunIds.size > 0) {
+      const out: RunRecord[] = [];
+      // Iterate in runs-map insertion order (chronological) for stable
+      // legend layout.
+      for (const id of Object.keys(allRuns)) {
+        if (overlayRunIds.has(id)) out.push(allRuns[id]!);
+      }
+      return out;
+    }
+    if (activeRunId && allRuns[activeRunId]) return [allRuns[activeRunId]!];
+    return [];
+  }, [runId, overlayRunIds, allRuns, activeRunId]);
+
+  const isMultiRun = overlayRuns.length > 1;
+  const primaryRun = overlayRuns[0];
+
   const selected = usePlotStore((s) =>
     effectiveRunId ? s.selectedByRun[effectiveRunId] : undefined,
   );
@@ -225,13 +367,22 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Group the selected series by VarGroup using the column-name parser.
-  // Order within each group follows the run's ``columnNames`` (stable
-  // insertion order from stream-start metadata) so the legend reads
-  // naturally — Bus 1, Bus 2, ... rather than hash order.
+  // In single-run mode we use the run's columnNames for stable order;
+  // in multi-run mode we use the union of column names across overlay
+  // runs (still ordered by primary run first, then any extras).
   const groupedSelections = useMemo(() => {
-    if (!run || !selected) return new Map<VarGroup, string[]>();
+    if (overlayRuns.length === 0 || !selected) return new Map<VarGroup, string[]>();
     const groups = new Map<VarGroup, string[]>();
-    for (const name of run.columnNames) {
+    const seen = new Set<string>();
+    const orderedNames: string[] = [];
+    for (const run of overlayRuns) {
+      for (const name of run.columnNames) {
+        if (seen.has(name)) continue;
+        seen.add(name);
+        orderedNames.push(name);
+      }
+    }
+    for (const name of orderedNames) {
       if (!selected.has(name)) continue;
       const parsed = parseColumnName(name);
       if (!parsed) continue;
@@ -240,7 +391,7 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
       else groups.set(parsed.group, [name]);
     }
     return groups;
-  }, [run, selected]);
+  }, [overlayRuns, selected]);
 
   const syncKey = effectiveRunId ? `tds-run-${effectiveRunId}` : 'tds-run-empty';
 
@@ -251,7 +402,12 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
   // some early rows; we surface a generic warning header (the runs
   // slice does not currently track the dropped count — Unit 2
   // plan-divergence: per-run dropped-row tracking deferred).
+  //
+  // CSV export is single-run only — it exports the primary (first
+  // overlay) run. Multi-run CSV would need to combine timelines and
+  // is deferred to Unit 18.
   const onExportCsv = useCallback(() => {
+    const run = primaryRun;
     if (!run || !selected || selected.size === 0) return null;
     const len = run.seqCount;
     if (len === 0) return null;
@@ -276,7 +432,7 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
       columns: cols,
       droppedRowCount,
     });
-  }, [run, selected]);
+  }, [primaryRun, selected]);
 
   // PNG export rasterises the chart container (uPlot canvas + axis
   // labels + legend) via html-to-image. Returns null when the chart
@@ -289,23 +445,28 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
 
   const caseName = primaryPath ? deriveCaseName(primaryPath) : 'case';
 
-  // Build per-group chart props. ``useMemo`` keys on the run + selection
+  // Build per-group chart props. ``useMemo`` keys on the runs + selection
   // so the construction effect inside <UPlot /> only re-fires when
   // the series-set actually changes; data updates flow through the
   // data prop and trigger uPlot.setData inside the wrapper.
   const charts = useMemo(() => {
-    if (!run) return [];
+    if (overlayRuns.length === 0) return [];
     const out: Array<{ group: VarGroup; options: uPlot.Options; data: uPlot.AlignedData }> = [];
     for (const [group, names] of groupedSelections) {
-      out.push({ group, ...buildGroupChart(run, group, names, syncKey) });
+      if (isMultiRun) {
+        out.push({ group, ...buildMultiRunGroupChart(overlayRuns, group, names, syncKey) });
+      } else {
+        out.push({ group, ...buildGroupChart(primaryRun!, group, names, syncKey) });
+      }
     }
     return out;
-    // ``run`` reference changes every frame append (Zustand returns a
-    // new object), so this memo recomputes each frame — that's the
-    // intended hot path; the memo's role here is just structuring.
-  }, [run, groupedSelections, syncKey]);
+    // ``overlayRuns`` reference changes every frame append (Zustand
+    // returns a new object), so this memo recomputes each frame —
+    // that's the intended hot path; the memo's role here is just
+    // structuring.
+  }, [overlayRuns, isMultiRun, primaryRun, groupedSelections, syncKey]);
 
-  if (!effectiveRunId || !run) {
+  if (!effectiveRunId || overlayRuns.length === 0) {
     return (
       <div className={cn('h-full w-full', className)}>
         <div className="flex justify-end">
@@ -332,10 +493,23 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
       ref={containerRef}
       data-testid="time-series-plot"
       data-run-id={effectiveRunId}
+      data-overlay-count={overlayRuns.length}
       data-scrub-t={scrubT === null ? '' : String(scrubT)}
       className={cn('flex h-full w-full flex-col gap-2', className)}
     >
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {isMultiRun ? (
+          <div
+            data-testid="time-series-plot-legend"
+            className="flex flex-wrap items-center gap-1"
+          >
+            {overlayRuns.map((r) => (
+              <RunLegendChip key={r.runId} runId={r.runId} pinned />
+            ))}
+          </div>
+        ) : (
+          <span />
+        )}
         <ExportMenu
           formats={['csv', 'png']}
           panel="time-series"
@@ -351,7 +525,7 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
           group={group}
           options={options}
           data={data}
-          run={run}
+          run={primaryRun!}
           scrubT={scrubT}
         />
       ))}

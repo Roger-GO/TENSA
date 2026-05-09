@@ -9,6 +9,7 @@ import {
 } from '@/store/ui';
 import type { TdsConfig, TdsVarGroup } from '@/store/ui';
 import { Button } from '@/components/ui/button';
+import { useRunsStore, MAX_RETENTION_LIMIT } from '@/store/runs';
 
 /**
  * TdsConfigPanel — compact form for the TDS run parameters.
@@ -52,6 +53,8 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
   const tdsConfig = useUiStore((s) => s.tdsConfig);
   const setTdsConfig = useUiStore((s) => s.setTdsConfig);
   const resetTdsConfig = useUiStore((s) => s.resetTdsConfig);
+  const retentionLimit = useRunsStore((s) => s.retentionLimit);
+  const setRetentionLimit = useRunsStore((s) => s.setRetentionLimit);
 
   // Raw text inputs so users can clear + re-type without clobbering.
   // We intentionally do NOT re-sync from the store on every render — if
@@ -206,6 +209,36 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
         error={errors.maxRateHz}
         hint="Power-user override. Higher values raise memory + redraw cost."
       />
+
+      <FieldRow
+        id="tds-config-retention"
+        label={`Retention — completed runs to keep (max ${MAX_RETENTION_LIMIT})`}
+        hint={`The active run is always kept on top. Per-run memory budget shrinks as you raise this; default ${5}.`}
+      >
+        <div className="flex items-center gap-2">
+          <input
+            id="tds-config-retention"
+            data-testid="field-tds-config-retention"
+            type="range"
+            min={1}
+            max={MAX_RETENTION_LIMIT}
+            step={1}
+            value={retentionLimit}
+            onChange={(e) => setRetentionLimit(Number(e.target.value))}
+            aria-label="Retention limit"
+            aria-valuemin={1}
+            aria-valuemax={MAX_RETENTION_LIMIT}
+            aria-valuenow={retentionLimit}
+            className="flex-1"
+          />
+          <span
+            data-testid="tds-config-retention-value"
+            className="text-foreground w-8 text-right font-mono text-xs"
+          >
+            {retentionLimit}
+          </span>
+        </div>
+      </FieldRow>
     </section>
   );
 }

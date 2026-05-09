@@ -24,12 +24,29 @@
  *    frames + emit a ``connectionStatus: "lagged"`` event so the UI can
  *    surface a non-modal toast.
  *
- * Comparison-runs eviction policy: keep at most 1 completed + 1 active
- * run. (No comparison overlay in v0.2 → no need for more.)
+ * **Retention policy** (Unit 9, v2.0): keep at most ``retentionLimit``
+ * total runs retained (default 5, max 20) — the active run counts in
+ * the cap. The active run is never *evicted* by the retention policy
+ * (it always survives), so when ``retention=N`` and the user is mid-run,
+ * we keep up to ``N - 1`` completed runs + 1 active. Still-streaming
+ * runs (state=='starting'/'streaming') are also shielded from eviction
+ * — the cap is enforced over completed (done/error/aborted) runs only,
+ * and the cap is ``retention - <count of active+streaming>``.
+ *
+ * Per-run memory budget = total budget / retentionLimit (default
+ * 200 MB / 5 = 40 MB per run). The per-run budget is informational
+ * — the cap-eviction loop above operates on the total budget; the
+ * retention policy provides the count cap.
  *
  * On ``resetRun``: evict the run's buffers fully.
- * On a fresh ``startRun`` while a previous run is still in store: evict
- * the oldest.
+ * On a fresh ``startRun`` while the retention limit would be exceeded:
+ * evict the oldest completed run.
+ *
+ * **Overlay state** (Unit 9, v2.0): ``overlayRunIds`` tracks which runs
+ * the user has pinned for multi-run plot overlay. The active run is the
+ * "anchor" for SLD animation (``activeRunId``), independent of the
+ * overlay set. The overlay set is purely a plot-side concern; selectors
+ * elsewhere keep using ``activeRunId``.
  *
  * Lifecycle: cleared on auth clear (cross-slice cascade in
  * ``store/index.ts``). Cleared on session change. Run frames are NOT
@@ -91,6 +108,15 @@ const INITIAL_CAPACITY = 256;
 export const DEFAULT_MEMORY_BUDGET_BYTES = 200 * 1024 * 1024;
 
 /**
+ * Default count of completed runs to retain (v2.0 multi-run overlay,
+ * KTD-8). The active/streaming run is always counted on top of this.
+ */
+export const DEFAULT_RETENTION_LIMIT = 5;
+
+/** Hard cap on user-configurable retention. Caps memory-pressure surface. */
+export const MAX_RETENTION_LIMIT = 20;
+
+/**
  * Drop-fraction applied to the active run when no completed runs are
  * available for eviction. 10% per the v0.2 plan.
  */
@@ -121,15 +147,35 @@ export interface RunsState {
   memoryBudgetBytes: number;
   /**
    * Active run id (the one currently streaming or most recently created).
-   * UI components subscribe to ``runs[activeRunId]`` for plot + overlay.
+   * UI components subscribe to ``runs[activeRunId]`` for plot + SLD
+   * overlay anchor.
    */
   activeRunId: string | null;
+  /**
+   * Set of runIds the user has pinned for multi-run plot overlay. The
+   * TimeSeriesPlot renders one series family per id in this set. The
+   * SLD animation overlay is NOT driven by this set (it always tracks
+   * ``activeRunId`` per KTD-8).
+   *
+   * Empty set + non-null ``activeRunId`` = "implicit single-run mode";
+   * the plot defaults to rendering the active run only (the empty set
+   * is interpreted as "no explicit overlay; plot the active run"). When
+   * the user pins one or more runs, the active run is no longer
+   * implicit — only ids actually in the set are rendered.
+   */
+  overlayRunIds: ReadonlySet<string>;
+  /**
+   * Maximum number of completed runs to retain. Active/streaming runs
+   * are always retained on top of this. User-configurable via
+   * ``setRetentionLimit`` (clamped to ``[1, MAX_RETENTION_LIMIT]``).
+   */
+  retentionLimit: number;
 
   /**
    * Register a new run on receipt of ``stream_start``. Pre-allocates typed
-   * arrays sized to :data:`INITIAL_CAPACITY` per column. If a previous run
-   * is in the store and the comparison-runs limit (1 active + 1 completed)
-   * would be exceeded, evicts the oldest.
+   * arrays sized to :data:`INITIAL_CAPACITY` per column. Applies the
+   * retention policy first so the new run isn't itself a candidate for
+   * eviction.
    */
   startRun: (payload: StartRunPayload) => void;
 
@@ -153,12 +199,38 @@ export interface RunsState {
 
   /**
    * Drop a run completely (frame buffers freed). Used by the UI's "Reset
-   * run" button after an aborted/failed run.
+   * run" button after an aborted/failed run. Also clears the run from
+   * ``overlayRunIds`` if pinned.
    */
   resetRun: (runId: string) => void;
 
   /** Clear every run (called by the auth-clear cascade in store/index.ts). */
   clearRuns: () => void;
+
+  /**
+   * Replace the overlay set wholesale. Caller may pass any iterable of
+   * run ids; the store dedups + filters down to ids actually present in
+   * the runs map (so a stale id from the History drawer can't pin a
+   * vanished run).
+   */
+  setOverlayRuns: (ids: Iterable<string>) => void;
+
+  /**
+   * Add a single run to the overlay set. No-op when the run isn't in
+   * the runs map (defensive: prevents stale ids from leaking into the
+   * overlay).
+   */
+  addOverlayRun: (runId: string) => void;
+
+  /** Remove a single run from the overlay set. Idempotent. */
+  removeOverlayRun: (runId: string) => void;
+
+  /**
+   * Set the retention limit (clamped to ``[1, MAX_RETENTION_LIMIT]``).
+   * Re-applies the retention policy immediately so a tightening of the
+   * limit evicts excess completed runs.
+   */
+  setRetentionLimit: (n: number) => void;
 }
 
 // ---- internal helpers -----------------------------------------------------
@@ -259,20 +331,75 @@ function applyCapEviction(
 }
 
 /**
- * Comparison-runs cap: keep at most 1 active + 1 completed run. Called
- * before inserting a new run in :func:`startRun`.
+ * Predicate: a run is "completed" for retention-policy purposes when
+ * its lifecycle state has settled. ``starting`` / ``streaming`` runs
+ * are still active and are NEVER evicted by the retention policy.
  */
-function trimToComparisonLimit(runs: Record<string, RunRecord>): Record<string, RunRecord> {
+function isCompletedState(state: RunState): boolean {
+  return state === 'done' || state === 'error' || state === 'aborted';
+}
+
+/**
+ * Apply the retention policy: drop the oldest completed runs until the
+ * total retained count is ``<= retention``. The active run + any
+ * starting/streaming runs are NEVER candidates for eviction; they
+ * count toward the cap but can't be removed. So the eligible-for-
+ * eviction pool is "completed AND not active" — we evict from this
+ * pool (oldest first, by insertion order) until total <= retention.
+ *
+ * Insertion order = chronological order (preserved for string keys in
+ * JS objects). Returns a NEW runs map; mutates nothing on the input.
+ */
+function applyRetentionPolicy(
+  runs: Record<string, RunRecord>,
+  retention: number,
+  activeRunId: string | null,
+): Record<string, RunRecord> {
   const ids = Object.keys(runs);
-  if (ids.length <= 1) return runs;
-  // Drop the oldest until at most 1 remains. The new run will be added
-  // afterwards by the caller, leaving 1-active-from-the-new-call + 1
-  // completed-from-the-prior-call at most.
-  const next = { ...runs };
-  while (Object.keys(next).length > 1) {
-    const oldest = Object.keys(next)[0]!;
-    delete next[oldest];
+  if (ids.length <= retention) return runs;
+  // Walk in insertion order; collect completed runs (excluding the
+  // active id even if it has settled — the active flag shields it).
+  const completedIds: string[] = [];
+  for (const id of ids) {
+    const r = runs[id]!;
+    if (id === activeRunId) continue;
+    if (!isCompletedState(r.state)) continue;
+    completedIds.push(id);
   }
+  // We need to drop ``ids.length - retention`` runs total, but only
+  // completed-non-active runs are eligible. If there aren't enough
+  // eligible runs to bring the total down to the cap, evict as many
+  // as we can — the remainder is unavoidable (e.g., 6 still-streaming
+  // runs with retention=5 would all stay).
+  const dropTarget = ids.length - retention;
+  const dropCount = Math.min(dropTarget, completedIds.length);
+  if (dropCount === 0) return runs;
+  const next = { ...runs };
+  for (let i = 0; i < dropCount; i += 1) {
+    delete next[completedIds[i]!];
+  }
+  return next;
+}
+
+/**
+ * Filter the overlay set down to ids that actually exist in the runs
+ * map. Returns the same set instance when no filtering occurred (so
+ * downstream ``React.useMemo`` doesn't churn).
+ */
+function reconcileOverlay(
+  overlay: ReadonlySet<string>,
+  runs: Record<string, RunRecord>,
+): ReadonlySet<string> {
+  let stale: string[] | null = null;
+  for (const id of overlay) {
+    if (!runs[id]) {
+      if (stale === null) stale = [];
+      stale.push(id);
+    }
+  }
+  if (stale === null) return overlay;
+  const next = new Set(overlay);
+  for (const id of stale) next.delete(id);
   return next;
 }
 
@@ -282,9 +409,10 @@ export const useRunsStore = create<RunsState>((set, get) => ({
   runs: {},
   memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
   activeRunId: null,
+  overlayRunIds: new Set<string>(),
+  retentionLimit: DEFAULT_RETENTION_LIMIT,
 
   startRun: ({ runId, tf, columnNames }) => {
-    const trimmed = trimToComparisonLimit(get().runs);
     const columns: Record<string, Float64Array> = {};
     for (const name of columnNames) columns[name] = new Float64Array(0);
     const record: RunRecord = {
@@ -301,7 +429,19 @@ export const useRunsStore = create<RunsState>((set, get) => ({
       abortedLocally: false,
       errorReason: null,
     };
-    set({ runs: { ...trimmed, [runId]: record }, activeRunId: runId });
+    // Apply retention AFTER inserting the new run + flipping the active
+    // id so the previously-active run (which has just settled into the
+    // "completed-non-active" pool) is correctly counted toward the
+    // retention cap. The new run is shielded from eviction by passing
+    // its id as ``activeRunId``. Still-streaming runs are never evicted
+    // by retention regardless.
+    const inserted = { ...get().runs, [runId]: record };
+    const nextRuns = applyRetentionPolicy(inserted, get().retentionLimit, runId);
+    set({
+      runs: nextRuns,
+      activeRunId: runId,
+      overlayRunIds: reconcileOverlay(get().overlayRunIds, nextRuns),
+    });
   },
 
   appendFrame: (runId, { t, columns }) => {
@@ -355,39 +495,63 @@ export const useRunsStore = create<RunsState>((set, get) => ({
       get().memoryBudgetBytes,
       runId,
     );
-    set({ runs: nextRuns });
+    set({
+      runs: nextRuns,
+      overlayRunIds: reconcileOverlay(get().overlayRunIds, nextRuns),
+    });
   },
 
   markRunDone: (runId, finalT) => {
     const cur = get().runs[runId];
     if (!cur) return;
-    set({
-      runs: {
+    // Apply retention policy on completion: the just-completed run now
+    // counts toward the completed cap. Pass ``activeRunId`` so the
+    // active run (which may be this same id) is shielded from eviction.
+    const nextRuns = applyRetentionPolicy(
+      {
         ...get().runs,
         [runId]: { ...cur, state: 'done', tCurrent: Math.max(cur.tCurrent, finalT) },
       },
+      get().retentionLimit,
+      get().activeRunId,
+    );
+    set({
+      runs: nextRuns,
+      overlayRunIds: reconcileOverlay(get().overlayRunIds, nextRuns),
     });
   },
 
   markRunError: (runId, reason) => {
     const cur = get().runs[runId];
     if (!cur) return;
-    set({
-      runs: {
+    const nextRuns = applyRetentionPolicy(
+      {
         ...get().runs,
         [runId]: { ...cur, state: 'error', errorReason: reason },
       },
+      get().retentionLimit,
+      get().activeRunId,
+    );
+    set({
+      runs: nextRuns,
+      overlayRunIds: reconcileOverlay(get().overlayRunIds, nextRuns),
     });
   },
 
   markRunAborted: (runId) => {
     const cur = get().runs[runId];
     if (!cur) return;
-    set({
-      runs: {
+    const nextRuns = applyRetentionPolicy(
+      {
         ...get().runs,
         [runId]: { ...cur, state: 'aborted' },
       },
+      get().retentionLimit,
+      get().activeRunId,
+    );
+    set({
+      runs: nextRuns,
+      overlayRunIds: reconcileOverlay(get().overlayRunIds, nextRuns),
     });
   },
 
@@ -417,10 +581,49 @@ export const useRunsStore = create<RunsState>((set, get) => ({
     const next = { ...get().runs };
     delete next[runId];
     const nextActive = get().activeRunId === runId ? null : get().activeRunId;
-    set({ runs: next, activeRunId: nextActive });
+    set({
+      runs: next,
+      activeRunId: nextActive,
+      overlayRunIds: reconcileOverlay(get().overlayRunIds, next),
+    });
   },
 
-  clearRuns: () => set({ runs: {}, activeRunId: null }),
+  clearRuns: () =>
+    set({ runs: {}, activeRunId: null, overlayRunIds: new Set<string>() }),
+
+  setOverlayRuns: (ids) => {
+    const runs = get().runs;
+    const next = new Set<string>();
+    for (const id of ids) {
+      if (runs[id]) next.add(id);
+    }
+    set({ overlayRunIds: next });
+  },
+
+  addOverlayRun: (runId) => {
+    if (!get().runs[runId]) return;
+    const next = new Set(get().overlayRunIds);
+    next.add(runId);
+    set({ overlayRunIds: next });
+  },
+
+  removeOverlayRun: (runId) => {
+    if (!get().overlayRunIds.has(runId)) return;
+    const next = new Set(get().overlayRunIds);
+    next.delete(runId);
+    set({ overlayRunIds: next });
+  },
+
+  setRetentionLimit: (n) => {
+    const clamped = Math.max(1, Math.min(MAX_RETENTION_LIMIT, Math.floor(n)));
+    if (clamped === get().retentionLimit) return;
+    const nextRuns = applyRetentionPolicy(get().runs, clamped, get().activeRunId);
+    set({
+      retentionLimit: clamped,
+      runs: nextRuns,
+      overlayRunIds: reconcileOverlay(get().overlayRunIds, nextRuns),
+    });
+  },
 }));
 
 // Test-only: re-export internal helpers for the runs.test.ts assertions on
@@ -431,7 +634,9 @@ export const __internal = {
   totalBytes,
   evictHead,
   applyCapEviction,
-  trimToComparisonLimit,
+  applyRetentionPolicy,
+  reconcileOverlay,
+  isCompletedState,
   INITIAL_CAPACITY,
   ACTIVE_RUN_EVICT_FRACTION,
 };

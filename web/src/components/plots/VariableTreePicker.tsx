@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
 import { useRunsStore } from '@/store/runs';
+import type { RunRecord } from '@/store/runs';
 import { usePlotStore, parseColumnName, groupLabel } from '@/store/plot';
 import type { ParsedSeries, VarGroup } from '@/store/plot';
+import { RunLegendChip } from './RunLegendChip';
 import { cn } from '@/lib/cn';
 
 /**
@@ -58,6 +60,39 @@ function compareElementIdx(a: string, b: string): number {
   const nb = Number(b);
   if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
   return a.localeCompare(b);
+}
+
+/**
+ * Build the tree from a list of runs, taking the **union** of their
+ * column names. The per-run availability is tracked in
+ * ``availability``: ``Map<columnName, Set<runId>>`` so the per-run
+ * filter row can grey out columns absent from a given run.
+ *
+ * In single-run mode (one run in the list), this collapses to the
+ * legacy behaviour: ``buildTree(run.columnNames, filter)``.
+ */
+function buildUnionTree(
+  runs: readonly RunRecord[],
+  filter: string,
+): { tree: GroupBucket[]; availability: ReadonlyMap<string, ReadonlySet<string>> } {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  const availability = new Map<string, Set<string>>();
+  for (const run of runs) {
+    for (const name of run.columnNames) {
+      if (!seen.has(name)) {
+        seen.add(name);
+        ordered.push(name);
+      }
+      let set = availability.get(name);
+      if (!set) {
+        set = new Set<string>();
+        availability.set(name, set);
+      }
+      set.add(run.runId);
+    }
+  }
+  return { tree: buildTree(ordered, filter), availability };
 }
 
 /**
@@ -134,8 +169,26 @@ function TriCheckbox({
 
 export function VariableTreePicker({ runId, className }: VariableTreePickerProps) {
   const activeRunId = useRunsStore((s) => s.activeRunId);
+  const overlayRunIds = useRunsStore((s) => s.overlayRunIds);
+  const allRuns = useRunsStore((s) => s.runs);
   const effectiveRunId = runId ?? activeRunId;
-  const run = useRunsStore((s) => (effectiveRunId ? s.runs[effectiveRunId] : undefined));
+  const run = effectiveRunId ? allRuns[effectiveRunId] : undefined;
+
+  // Resolve the runs the picker reflects. Mirrors TimeSeriesPlot's
+  // priority: explicit prop > overlay set > active run.
+  const overlayRuns = useMemo<readonly RunRecord[]>(() => {
+    if (runId) return run ? [run] : [];
+    if (overlayRunIds.size > 0) {
+      const out: RunRecord[] = [];
+      for (const id of Object.keys(allRuns)) {
+        if (overlayRunIds.has(id)) out.push(allRuns[id]!);
+      }
+      return out;
+    }
+    return run ? [run] : [];
+  }, [runId, overlayRunIds, allRuns, run]);
+
+  const isMultiRun = overlayRuns.length > 1;
 
   const selected = usePlotStore((s) =>
     effectiveRunId ? s.selectedByRun[effectiveRunId] : undefined,
@@ -149,10 +202,12 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
   const setFilter = usePlotStore((s) => s.setFilter);
   const toggleExpanded = usePlotStore((s) => s.toggleExpanded);
 
-  const tree = useMemo(() => {
-    if (!run) return [];
-    return buildTree(run.columnNames, filter);
-  }, [run, filter]);
+  const { tree, availability } = useMemo(() => {
+    if (overlayRuns.length === 0) {
+      return { tree: [], availability: new Map<string, Set<string>>() };
+    }
+    return buildUnionTree(overlayRuns, filter);
+  }, [overlayRuns, filter]);
 
   const selectionSet = selected ?? new Set<string>();
   const expandedSet = expanded ?? new Set<string>();
@@ -228,6 +283,7 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
   return (
     <div
       data-testid="variable-tree-picker"
+      data-multi-run={isMultiRun ? 'true' : 'false'}
       className={cn('flex h-full w-full flex-col gap-2 p-2 text-sm', className)}
     >
       <div className="flex items-center justify-between gap-2">
@@ -236,6 +292,17 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
           {selectedCount} selected
         </span>
       </div>
+      {isMultiRun ? (
+        <div
+          data-testid="variable-tree-picker-runs-row"
+          className="border-border flex flex-wrap items-center gap-1 rounded border px-1.5 py-1"
+        >
+          <span className="text-muted-foreground pr-1 text-[10px] uppercase">Overlay</span>
+          {overlayRuns.map((r) => (
+            <RunLegendChip key={r.runId} runId={r.runId} pinned />
+          ))}
+        </div>
+      ) : null}
       <input
         type="search"
         value={filter}
@@ -315,10 +382,24 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
                           <div className="ml-4 flex flex-col gap-0.5">
                             {el.series.map((s) => {
                               const isOn = selectionSet.has(s.name);
+                              const availSet = availability.get(s.name);
+                              // In multi-run mode, surface a run count
+                              // (e.g. ``2/3``) so the user can tell if a
+                              // var is missing from one of their overlay
+                              // runs. The picker still lets them tick
+                              // the box (the plot just renders only the
+                              // runs that have the column).
+                              const missingFromAny =
+                                isMultiRun &&
+                                availSet !== undefined &&
+                                availSet.size < overlayRuns.length;
                               return (
                                 <label
                                   key={s.name}
-                                  className="hover:bg-muted/50 flex cursor-pointer items-center gap-1 rounded px-1 py-0.5"
+                                  className={cn(
+                                    'hover:bg-muted/50 flex cursor-pointer items-center gap-1 rounded px-1 py-0.5',
+                                    missingFromAny ? 'opacity-70' : '',
+                                  )}
                                 >
                                   <input
                                     type="checkbox"
@@ -334,6 +415,22 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
                                   <span className="text-foreground font-mono text-xs">
                                     {s.name}
                                   </span>
+                                  {isMultiRun && availSet !== undefined ? (
+                                    <span
+                                      data-testid={`variable-tree-picker-leaf-availability-${s.name}`}
+                                      className={cn(
+                                        'text-muted-foreground ml-auto text-[10px] font-mono',
+                                        missingFromAny ? 'text-destructive/80' : '',
+                                      )}
+                                      title={
+                                        missingFromAny
+                                          ? `Available in ${availSet.size} of ${overlayRuns.length} overlay runs`
+                                          : `Available in all ${overlayRuns.length} overlay runs`
+                                      }
+                                    >
+                                      {availSet.size}/{overlayRuns.length}
+                                    </span>
+                                  ) : null}
                                 </label>
                               );
                             })}

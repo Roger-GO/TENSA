@@ -4,6 +4,7 @@ import { cn } from '@/lib/cn';
 import { BundleExportButton, BundleExportDialog } from '@/components/bundle/BundleExportDialog';
 import { ReportDialog, ReportDialogButton } from '@/components/reports/ReportDialog';
 import { SnapshotMenu } from '@/components/snapshot/SnapshotMenu';
+import { HistoryDrawer, HistoryDrawerToggle } from '@/components/history/HistoryDrawer';
 
 /**
  * TopBar. Fixed-height (~44px) bar with three slots — left, center, right —
@@ -68,9 +69,11 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
         <SnapshotMenu />
         <ReportDialogButton />
         <BundleExportButton />
+        <HistoryDrawerToggle />
       </div>
       <BundleExportDialog />
       <ReportDialog />
+      <HistoryDrawer />
     </header>
   );
 });
