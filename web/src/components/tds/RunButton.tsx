@@ -20,6 +20,7 @@ import { useAuthStore } from '@/store/auth';
 import { usePflowStore } from '@/store/pflow';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { useRunsStore } from '@/store/runs';
+import { useUiStore } from '@/store/ui';
 import { RunStream } from '@/streaming/RunStream';
 import type { RunStreamError, VarGroup } from '@/streaming/RunStream';
 import { buildRunStreamWsUrl } from '@/streaming/wsUrl';
@@ -85,15 +86,19 @@ export type RunMode = 'pf' | 'tds';
 export interface RunButtonProps {
   className?: string;
   /**
-   * Override the default ``vars`` set forwarded to ``start_tds``. Defaults
-   * to ``["bus_v"]`` per Unit 8's TdsConfigPanel default; surfaced as a
-   * prop so Unit 8 (or tests) can override without going through the
-   * config-panel store.
+   * Override the default ``vars`` set forwarded to ``start_tds``. When
+   * unset, the value comes from ``useUiStore.tdsConfig.vars`` (the
+   * TdsConfigPanel form — Unit 8). Tests pass an explicit value to
+   * bypass the store coupling.
    */
   defaultVars?: readonly VarGroup[];
-  /** Override the default final sim time. Defaults to ``5`` seconds. */
+  /** Override the default final sim time. When unset, uses TdsConfigPanel's value. */
   defaultTf?: number;
-  /** Override the default fixed step (seconds). Defaults to ``1/120``. */
+  /**
+   * Override the default fixed step (seconds). When unset, uses
+   * TdsConfigPanel's value (which itself defaults to ``null`` →
+   * substrate-adaptive).
+   */
   defaultH?: number;
 }
 
@@ -143,15 +148,18 @@ function CloseIcon() {
 
 export function RunButton({
   className,
-  defaultVars = ['bus_v'],
-  defaultTf = 5,
-  defaultH = 1 / 120,
+  defaultVars,
+  defaultTf,
+  defaultH,
 }: RunButtonProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
   const selection = useCaseStore((s) => s.selection);
   const token = useAuthStore((s) => s.token);
   const isPfRunning = usePflowStore((s) => s.isRunning);
   const disturbances = useDisturbanceStore((s) => s.disturbances);
+  // TDS args are owned by ``TdsConfigPanel`` (Unit 8) and live in
+  // ``useUiStore``. Props remain as test-only overrides.
+  const tdsConfig = useUiStore((s) => s.tdsConfig);
 
   // Active-run handle (if any) — drives the Reset / Abort label switch.
   const activeRunId = useRunsStore((s) => s.activeRunId);
@@ -285,11 +293,20 @@ export function RunButton({
     streamRef.current?.dispose();
     streamRef.current = null;
 
+    const tf = defaultTf ?? tdsConfig.tf;
+    const vars = defaultVars ?? tdsConfig.vars;
+    // ``h`` is special: ``null`` from the store means "let substrate
+    // pick adaptively" → omit from the wire payload entirely. The
+    // ``defaultH`` prop overrides only when explicitly set.
+    const h = defaultH !== undefined ? defaultH : tdsConfig.h ?? undefined;
+    const tdsArgs = h === undefined ? { tf, vars } : { tf, h, vars };
+
     const stream = new RunStream({
       sessionId,
       token,
       wsUrl: buildRunStreamWsUrl(),
-      tdsArgs: { tf: defaultTf, h: defaultH, vars: defaultVars },
+      tdsArgs,
+      maxRateHz: tdsConfig.maxRateHz,
       onStart: () => {
         // ``RunStream`` already populated the runs slice via
         // ``startRun`` — no extra work here. Kept as a hook so a future
