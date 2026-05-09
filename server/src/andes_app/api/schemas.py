@@ -694,6 +694,73 @@ class TdsBatchResult(BaseModel):
     )
 
 
+# ---- abort + alterable-params (Unit 1b of v0.2) ----------------------------
+
+
+class AbortResponse(BaseModel):
+    """Response body for ``POST /sessions/{id}/abort``.
+
+    The endpoint is fire-and-forget at the wire level — it sets the session's
+    abort event and returns immediately. The actual TDS exit happens
+    cooperatively at the next ``callpert`` tick on the worker (typically
+    within a few milliseconds for IEEE 14, longer for larger cases). The
+    streaming WebSocket emits the terminal ``done`` message with
+    ``final_t < tf`` once the integration loop exits.
+
+    There is no ``aborted`` flag on the WS ``done`` payload — the UI infers
+    user-initiated abort from local state (it set the abort itself) vs.
+    numerical instability (a ``done`` with ``final_t < tf`` arrived without
+    a local abort).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    aborted: Literal[True] = Field(
+        True,
+        description=(
+            "Always ``true`` on a successful response. The signal has been "
+            "delivered to the worker; the actual TDS exit is cooperative "
+            "and lands on the next per-step ``callpert`` tick. No-op when "
+            "no TDS is currently running on the session (the abort event "
+            "is set but never consumed)."
+        ),
+    )
+
+
+class AlterableParamsResponse(BaseModel):
+    """Response body for ``GET /sessions/{id}/topology/models/{model}/alterable_params``.
+
+    Returns the ordered list of parameter names that ANDES will accept as
+    ``src`` for the ``Alter`` disturbance on the given model. The UI uses
+    this to populate the AlterSpec form's parameter dropdown.
+
+    The introspection rule (mirrors ANDES's own ``alter()`` contract):
+    a parameter is alterable iff it is a ``NumParam`` and not an
+    ``ExtParam`` (which is a derived/external param read off another
+    model). This excludes topology refs (``IdxParam``: ``bus``, ``bus1``,
+    ``bus2``, ``area``, ``zone``, ``owner``, ``coi``, etc.) and string
+    identifiers (``DataParam``: ``idx``, ``name``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = Field(
+        ...,
+        description=(
+            "ANDES model class name the params belong to (echoed back from "
+            "the path). Example: ``Bus``, ``PQ``, ``GENROU``."
+        ),
+    )
+    params: list[str] = Field(
+        ...,
+        description=(
+            "Ordered list of parameter names that ``ss.<model>.alter(src=...)`` "
+            "will accept. Order matches ANDES's internal declaration order on "
+            "the model class. Empty when the model has no alterable params."
+        ),
+    )
+
+
 # ---- workspace lister + layout sidecar -------------------------------------
 
 

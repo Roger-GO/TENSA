@@ -31,6 +31,7 @@ Wire protocol on the control Pipe (parent → worker):
     {"op": "run_tds", "args": {"tf": ..., "h": ...}, "seq": N}
     {"op": "reload_case", "args": {}, "seq": N}
     {"op": "topology", "args": {}, "seq": N}
+    {"op": "alterable_params", "args": {"model": "Bus"}, "seq": N}
     {"op": "shutdown", "args": {}, "seq": N}
 
 Wire protocol on the data Pipe (worker → parent):
@@ -255,6 +256,10 @@ def _handle_delete_element(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     )
 
 
+def _handle_alterable_params(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    return list(wrapper.alterable_params(args["model"]))
+
+
 def _handle_run_pflow(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.run_pflow())
 
@@ -467,6 +472,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "undo_last_edit": _handle_undo_last_edit,
     "delete_element": _handle_delete_element,
     "run_pflow": _handle_run_pflow,
+    "alterable_params": _handle_alterable_params,
     # run_tds is special-cased — it needs the abort_event. Dispatched separately.
 }
 
