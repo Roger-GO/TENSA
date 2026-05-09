@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { FaultSpec } from '@/api/types';
 import { BusIdxSelect } from '@/components/elements/BusIdxSelect';
+import { BoltedFaultWarning } from '@/components/disturbance/BoltedFaultWarning';
 import { cn } from '@/lib/cn';
 
 /**
@@ -12,7 +13,10 @@ import { cn } from '@/lib/cn';
  * - ``tf``: fault-applied time (seconds).
  * - ``tc``: fault-cleared time (seconds). Must be > tf.
  * - ``xf``: fault reactance (pu, optional in the form sense — defaults
- *   to 0.0001).
+ *   to 0.05; see ``docs/spikes/2026-05-09-xf-default-empirical.md`` for the
+ *   empirical justification of that default). When the user pushes ``xf``
+ *   below 0.01 the ``BoltedFaultWarning`` advisory is rendered under the
+ *   field — submit is still allowed (warn, don't block).
  * - ``rf``: fault resistance (pu, optional in the form sense — defaults
  *   to 0).
  *
@@ -156,6 +160,7 @@ export function FaultSpecForm({
         onChange={(t) => setNumber('xf', t)}
         error={errors.xf}
       />
+      <BoltedFaultWarning xf={spec.xf} />
       <NumberField
         id="fault-rf"
         label="rf — fault resistance (pu)"

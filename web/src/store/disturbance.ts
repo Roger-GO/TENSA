@@ -60,14 +60,24 @@ export interface DisturbanceLocal {
   spec: DisturbanceSpec;
 }
 
-/** Default values for a freshly-created Fault row. */
+/** Default values for a freshly-created Fault row.
+ *
+ * ``xf`` default is 0.05 — empirically validated by the Unit 5 sweep (see
+ * ``docs/spikes/2026-05-09-xf-default-empirical.md``). The prior 0.0001
+ * (essentially a bolted fault) diverges under fixed-step Trapezoidal on
+ * stiffer scenarios (IEEE 39 gen-bus, kundur_full gen-bus, REGCP1 inverter
+ * case). 0.05 is the smallest value that converges across IEEE 14, IEEE 39,
+ * and kundur_full under both gentle and gen-bus stress, *and* sits above the
+ * ``BoltedFaultWarning`` threshold (0.01) so the default UX is warning-free.
+ * Inverter-rich systems may need ``xf >= 0.1`` — those users get the warning.
+ */
 export function blankFaultSpec(): FaultSpec {
   return {
     kind: 'fault',
     bus_idx: '',
     tf: 1.0,
     tc: 1.1,
-    xf: 0.0001,
+    xf: 0.05,
     rf: 0.0,
   };
 }
