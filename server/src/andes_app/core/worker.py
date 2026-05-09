@@ -225,6 +225,32 @@ def _handle_add_disturbance(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return wrapper.add_disturbance(spec)
 
 
+def _handle_list_disturbances(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Return the current ``_disturbance_log`` as JSON-serialisable dicts.
+
+    Each entry is a Pydantic ``DisturbanceSpec`` (FaultSpec / ToggleSpec /
+    AlterSpec); ``model_dump()`` round-trips through the discriminator so
+    the parent side can re-build them via ``_disturbance_from_dict`` when
+    needed (Unit 7 snapshot replay).
+    """
+    return [spec.model_dump() for spec in wrapper.list_disturbances()]
+
+
+def _handle_replay_disturbances(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Replay the recorded disturbance log onto the current pre-setup System.
+
+    Returns the count of specs replayed. No-op when the System is post-setup
+    (logs a warning wrapper-side and returns 0).
+    """
+    return int(wrapper.replay_disturbances())
+
+
+def _handle_clear_disturbances(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Clear the disturbance replay log without touching the System."""
+    wrapper.clear_disturbances()
+    return None
+
+
 def _handle_add_element(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(
         wrapper.add_element(args["model"], args["params"])
@@ -660,6 +686,9 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "reload_case": _handle_reload_case,
     "topology": _handle_topology,
     "add_disturbance": _handle_add_disturbance,
+    "list_disturbances": _handle_list_disturbances,
+    "replay_disturbances": _handle_replay_disturbances,
+    "clear_disturbances": _handle_clear_disturbances,
     "add_element": _handle_add_element,
     "edit_element": _handle_edit_element,
     "create_blank": _handle_create_blank,

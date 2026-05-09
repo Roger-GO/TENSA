@@ -183,6 +183,16 @@ class Wrapper:
         # with oldest-eviction; older entries are dropped silently with a
         # logged warning.
         self._replay_buffer: list[tuple[str, dict[str, Any]]] = []
+        # ``_disturbance_log`` records every successfully-added disturbance
+        # spec so callers can replay them after ``reload_case()`` —
+        # the only escape hatch from the post-setup ``add()`` rejection
+        # ANDES enforces. The replay step is explicit (``replay_disturbances``)
+        # rather than wired into ``reload_case`` itself, because Unit 7
+        # (snapshot save/load) needs the JSON-serialisable spec list as
+        # snapshot metadata before any new System exists. Cleared by
+        # ``load_case`` (and therefore by ``reload_case`` which delegates
+        # to ``load_case``); explicit reset via ``clear_disturbances``.
+        self._disturbance_log: list[DisturbanceSpec] = []
 
     # ----- lifecycle -----
 
@@ -230,6 +240,11 @@ class Wrapper:
         # history — that buffer is only meaningful for sessions whose entire
         # state was built up via ``add_element``.
         self._replay_buffer = []
+        # Disturbances added against the prior System reference are gone —
+        # the new System has none. Callers that need to keep them across a
+        # reload must capture them via ``list_disturbances()`` BEFORE
+        # ``reload_case`` and then ``replay_disturbances()`` AFTER.
+        self._disturbance_log = []
         return self._topology_snapshot_locked()
 
     def reload_case(self) -> TopologySnapshot:
@@ -328,6 +343,12 @@ class Wrapper:
         """Add a disturbance to the pre-setup System. Returns the assigned
         ANDES idx of the created device.
 
+        On success the spec is appended to ``self._disturbance_log`` so that
+        ``replay_disturbances()`` can replay them after a future
+        ``reload_case()`` (the only escape from the post-setup ``add()``
+        rejection ANDES enforces). Failures (``ANDES rejected …``) leave the
+        log untouched — atomic from the caller's perspective.
+
         Raises ``DisturbanceCommitError`` if setup has been committed; the
         caller must call ``reload_case()`` to add more.
         """
@@ -369,10 +390,68 @@ class Wrapper:
         try:
             idx: int | str = self._ss.add(model_name, kwargs)
         except Exception as exc:  # noqa: BLE001
+            # Don't pollute the replay log on rejection — the caller saw
+            # an exception, ``list_disturbances`` must reflect that.
             raise DisturbanceValidationError(
                 f"ANDES rejected {model_name} spec: {_sanitize_message(str(exc))}"
             ) from exc
+        self._disturbance_log.append(spec)
         return idx
+
+    def list_disturbances(self) -> list[DisturbanceSpec]:
+        """Return a defensive copy of the currently-recorded disturbance specs.
+
+        The list reflects every spec that was successfully accepted by
+        ``add_disturbance`` since the most recent ``load_case`` /
+        ``reload_case`` / ``clear_disturbances`` call. The route layer
+        consumes this for the ``GET /sessions/{id}/disturbances`` sync
+        endpoint.
+        """
+        return list(self._disturbance_log)
+
+    def clear_disturbances(self) -> None:
+        """Clear the disturbance log without touching the loaded System.
+
+        Does NOT remove the actual ``Fault`` / ``Toggle`` / ``Alter`` devices
+        that were already added to ``self._ss`` — only the replay log. The
+        Wrapper has no public delete-disturbance API on the System (ANDES
+        ``ss.add`` rejects post-setup; pre-setup it offers no removal hook
+        either). To fully purge, callers must ``reload_case()`` and
+        re-replay only what they want to keep.
+        """
+        self._disturbance_log = []
+
+    def replay_disturbances(self) -> int:
+        """Re-add every spec in ``self._disturbance_log`` to the current System.
+
+        Intended use: ``reload_case()`` (which clears the log because
+        it ``load_case``s a fresh System) → ``replay_disturbances()``
+        (re-adds them on the new pre-setup System). Returns the number
+        of specs replayed.
+
+        No-op (returns 0, logs a warning) if the System is post-setup —
+        ANDES rejects ``add()`` calls then. No-op if the log is empty.
+        On individual replay failure raises ``DisturbanceValidationError``;
+        already-replayed specs remain on the System and the log is rebuilt
+        only for those entries that succeeded BEFORE the failure.
+        """
+        log = logging.getLogger("andes-app.wrapper.disturbance-replay")
+        if self._ss is None:
+            raise NoCaseLoadedError("no case has been loaded")
+        if self._ss.is_setup:
+            log.warning(
+                "replay_disturbances called post-setup; no-op. "
+                "Call reload_case() first to return to pre-setup."
+            )
+            return 0
+        # Snapshot before reset — re-calling ``add_disturbance`` re-appends to
+        # ``self._disturbance_log``; without the snapshot the iteration would
+        # double-count and grow without bound.
+        pending = list(self._disturbance_log)
+        self._disturbance_log = []
+        for spec in pending:
+            self.add_disturbance(spec)
+        return len(pending)
 
     # ----- topology mutation (Unit 2) -----
 
