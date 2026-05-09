@@ -69,11 +69,16 @@ from andes_app.core.errors import (
 # them with their class name as ``category``; the routes layer maps each
 # to the right HTTP status (see api/routes/elements.py:_map_worker_error).
 from andes_app.core.stream import (
+    DEFAULT_VARS,
+    VAR_GROUPS,
     StreamAggregator,
+    VarGroup,
     bus_idx_values_from_system,
-    collect_bus_voltages,
+    collect_combined_values,
     encode_batch,
-    make_bus_voltage_schema,
+    line_idx_values_from_system,
+    make_combined_schema,
+    syngen_idx_values_from_system,
 )
 from andes_app.core.wrapper import Wrapper
 
@@ -303,6 +308,40 @@ def _handle_run_tds(
         max_rate_hz_raw = args.get("max_rate_hz")
         max_rate_hz = float(max_rate_hz_raw) if max_rate_hz_raw is not None else None
 
+        # ``vars`` selects which variable groups appear in each Arrow batch.
+        # The WS layer validates the literal set and rejects empty lists; the
+        # worker still defends against missing/empty input (other code paths
+        # may invoke streaming without the WS layer in tests).
+        vars_raw = args.get("vars")
+        if vars_raw is None:
+            var_groups: list[VarGroup] = list(DEFAULT_VARS)
+        elif isinstance(vars_raw, list) and all(
+            isinstance(v, str) for v in vars_raw
+        ):
+            unknown = [v for v in vars_raw if v not in VAR_GROUPS]
+            if unknown:
+                raise AndesAppError(
+                    f"unknown var group(s): {unknown!r}; expected one of "
+                    f"{list(VAR_GROUPS)!r}"
+                )
+            if not vars_raw:
+                raise AndesAppError(
+                    "'vars' must be a non-empty list when provided"
+                )
+            # Dedupe while preserving canonical ordering (the schema
+            # composer also iterates VAR_GROUPS canonically, but normalize
+            # here so the metadata's ``vars`` list is stable too).
+            seen: set[str] = set()
+            var_groups = []
+            for g in VAR_GROUPS:
+                if g in vars_raw and g not in seen:
+                    var_groups.append(g)
+                    seen.add(g)
+        else:
+            raise AndesAppError(
+                "'vars' must be a list of variable-group names"
+            )
+
         # Resolve the System ONCE (after load); we need its Bus model to build
         # the schema. If the wrapper has no System loaded the run will fail
         # later — surface the same error path as before.
@@ -326,9 +365,13 @@ def _handle_run_tds(
         except ValueError as exc:
             raise AndesAppError(str(exc)) from exc
 
+        # Snapshot the topology indices ONCE per run so each callpert tick
+        # only does the (cheap) value reads. The schema mirrors the same
+        # snapshot, so column order and value order line up.
         bus_idx_values = bus_idx_values_from_system(ss)
-        schema = make_bus_voltage_schema(bus_idx_values)
-        var_columns = [f"Bus_{idx}_v" for idx in bus_idx_values]
+        syngen_idx_values = syngen_idx_values_from_system(ss)
+        line_idx_values = line_idx_values_from_system(ss)
+        schema, var_columns = make_combined_schema(var_groups, ss)
 
         # Send the stream-start metadata BEFORE the run begins so the WS
         # sender can forward it as a text frame ahead of any binary frames.
@@ -345,8 +388,11 @@ def _handle_run_tds(
                         "output_rate_hz": aggregator.output_rate_hz,
                         "fixed_step": fixed_step,
                     },
+                    "vars": list(var_groups),
                     "var_columns": var_columns,
                     "bus_idx_values": [str(idx) for idx in bus_idx_values],
+                    "syngen_idx_values": [str(idx) for idx in syngen_idx_values],
+                    "line_idx_values": [str(idx) for idx in line_idx_values],
                 },
             }
         )
@@ -377,7 +423,12 @@ def _handle_run_tds(
 
         def _emit(t: float, system: Any) -> None:
             assert aggregator is not None
-            values = collect_bus_voltages(system)
+            values = collect_combined_values(
+                system,
+                var_groups,
+                syngen_idx_values=syngen_idx_values,
+                line_idx_values=line_idx_values,
+            )
             rows = aggregator.push(t, values)
             if rows:
                 _emit_rows(rows)
