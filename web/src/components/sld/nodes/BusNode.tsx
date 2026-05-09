@@ -6,7 +6,9 @@ import { cn } from '@/lib/cn';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
 import { useIsPendingDependent } from '@/store/pendingDependents';
-import { getBusOverlayState } from '../overlay';
+import { useRunsStore } from '@/store/runs';
+import { useFrameBusOverlay } from '@/store/animation';
+import { colorClassForBand, getBusOverlayState } from '../overlay';
 import { SOURCE_HANDLE, TARGET_HANDLE, type Side } from '../graph';
 
 /**
@@ -53,14 +55,41 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
   const d = data as SldNodeData;
   const pflowResult = usePflowStore((s) => s.lastRun);
   const hideLabels = useUiStore((s) => s.hideLabels);
-  const overlay = getBusOverlayState(d.idx, pflowResult, hideLabels);
+  const pflowOverlay = getBusOverlayState(d.idx, pflowResult, hideLabels);
   const isPendingDependent = useIsPendingDependent(d.kind, d.idx);
+
+  // v0.2 Unit 5: streaming-overlay layer.
+  //
+  // When a TDS run is active (or a finished run is being scrubbed), the
+  // animation slice carries this bus's per-frame band, written by the
+  // single rAF loop in :func:`useSldFrameOverlay`. We layer that on top
+  // of the v0.1 PF-result overlay:
+  //
+  // - Streaming overlay present → use its band + color, but keep the
+  //   v0.1 voltage/angle labels (they show the steady-state PF reading;
+  //   the streaming reading lives in the plot. Numeric SLD labels
+  //   during streaming are deferred — they'd require their own slower
+  //   write cadence to avoid visual noise).
+  // - Streaming overlay absent → fall back to ``pflowOverlay`` exactly
+  //   as v0.1 behaved.
+  //
+  // The selector returns a stable null reference when no run is active,
+  // so the component doesn't re-render on every animation tick of an
+  // OTHER bus — Zustand's default reference equality on a returned
+  // ``null`` is no-op.
+  const activeRunId = useRunsStore((s) => s.activeRunId);
+  const frameOverlay = useFrameBusOverlay(activeRunId, d.idx);
+  const effectiveBand = frameOverlay !== null ? frameOverlay.band : pflowOverlay.band;
+  const effectiveColorClass =
+    frameOverlay !== null ? colorClassForBand(frameOverlay.band) : pflowOverlay.color_class;
+
   return (
     <div
       data-testid={`bus-node-${d.idx}`}
       data-kind="bus"
       data-idx={d.idx}
-      data-band={overlay.band}
+      data-band={effectiveBand}
+      data-streaming={frameOverlay !== null ? 'true' : undefined}
       data-pending-dependent={isPendingDependent ? 'true' : undefined}
       className={cn(
         'group flex flex-col items-center gap-0.5 px-2.5 py-1.5',
@@ -68,7 +97,7 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
         'rounded-[var(--radius-md)] border-2',
         selected
           ? 'border-[var(--color-ring)] ring-2 ring-[var(--color-ring)]'
-          : overlay.color_class,
+          : effectiveColorClass,
         isPendingDependent ? 'ring-warning/60 ring-2' : '',
         'transition-colors duration-[var(--duration-fast)]',
         'cursor-pointer select-none',
@@ -98,20 +127,20 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
         draggable={false}
       />
       <span className="text-foreground font-mono text-[10px] leading-none">{d.name || d.idx}</span>
-      {overlay.voltage_label !== null ? (
+      {pflowOverlay.voltage_label !== null ? (
         <span
           data-testid={`bus-voltage-${d.idx}`}
           className="text-foreground font-mono text-[10px] leading-tight"
         >
-          {overlay.voltage_label}
+          {pflowOverlay.voltage_label}
         </span>
       ) : null}
-      {overlay.angle_label !== null ? (
+      {pflowOverlay.angle_label !== null ? (
         <span
           data-testid={`bus-angle-${d.idx}`}
           className="text-muted-foreground font-mono text-[9px] leading-tight"
         >
-          {overlay.angle_label}
+          {pflowOverlay.angle_label}
         </span>
       ) : null}
     </div>
