@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EmptyState } from '@/components/shell/EmptyState';
 import { useCaseStore } from '@/store/case';
@@ -6,6 +6,8 @@ import { useCurrentTopology } from '@/api/queries';
 import { usePflowStore } from '@/store/pflow';
 import type { PflowResult, TopologyEntry, TopologySummary } from '@/api/types';
 import type { SelectedElement } from '@/store/case';
+import { ExportMenu } from '@/components/export/ExportMenu';
+import { tableToCsv } from '@/components/export/exportToCsv';
 import { cn } from '@/lib/cn';
 import { classifyVoltage } from '../sld/overlay';
 
@@ -313,6 +315,13 @@ interface TableProps {
   selectedElement: SelectedElement | null;
   onRowClick: (selected: SelectedElement) => void;
   testId: string;
+  /**
+   * Slug used as the `panel` arg to the ExportMenu so the auto-named
+   * CSV file embeds the active tab (`results-table-buses`, etc.).
+   */
+  panelSlug: string;
+  /** Case name passed to the ExportMenu for filename composition. */
+  caseName: string;
 }
 
 function ResultTable({
@@ -323,6 +332,8 @@ function ResultTable({
   selectedElement,
   onRowClick,
   testId,
+  panelSlug,
+  caseName,
 }: TableProps) {
   const [sort, setSort] = useState<SortState>({
     column: columns[0]?.key ?? 'idx',
@@ -347,31 +358,63 @@ function ResultTable({
     });
   };
 
+  // CSV export mirrors the table's current visible state — same
+  // filter, same sort, same column order. Long-form
+  // `(row_label, column, value)` matches the plan's spec; the row
+  // label is the row's `idx` (the first column) so cross-references
+  // back to ANDES are unambiguous. The active filter query is
+  // embedded as a `# `-prefix comment so a re-run can reproduce it.
+  const onExportCsv = useCallback(() => {
+    if (visibleRows.length === 0) return null;
+    return tableToCsv({
+      columns: columns.map((c) => c.label),
+      rows: visibleRows.map((r) => ({
+        // Row label is the value of the leftmost cell (typically idx).
+        label: r.cells[0]?.label ?? r.key,
+        cells: r.cells.map((c) => c.label),
+      })),
+      comments: query.trim() ? [`filter=${query.trim()}`] : undefined,
+    });
+  }, [visibleRows, columns, query]);
+
   if (rows.length === 0) {
     return (
-      <EmptyState
-        title="No results"
-        description={prePflowLabel ?? emptyTabLabel}
-        className="py-6"
-      />
+      <div className="flex min-h-0 flex-1 flex-col gap-2" data-testid={testId}>
+        <div className="flex justify-end">
+          <ExportMenu formats={['csv']} disabled panel={panelSlug} caseName={caseName} />
+        </div>
+        <EmptyState
+          title="No results"
+          description={prePflowLabel ?? emptyTabLabel}
+          className="py-6"
+        />
+      </div>
     );
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2" data-testid={testId}>
-      <input
-        type="search"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Filter by idx or name…"
-        aria-label="Filter results"
-        className={cn(
-          'border-border bg-background text-foreground',
-          'h-7 rounded-[var(--radius-sm)] border px-2',
-          'font-mono text-xs',
-          'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
-        )}
-      />
+      <div className="flex items-center gap-2">
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filter by idx or name…"
+          aria-label="Filter results"
+          className={cn(
+            'border-border bg-background text-foreground',
+            'h-7 flex-1 rounded-[var(--radius-sm)] border px-2',
+            'font-mono text-xs',
+            'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+          )}
+        />
+        <ExportMenu
+          formats={['csv']}
+          panel={panelSlug}
+          caseName={caseName}
+          onExportCsv={onExportCsv}
+        />
+      </div>
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full border-collapse text-xs">
           <thead className="bg-muted/50 sticky top-0 z-10">
@@ -498,6 +541,17 @@ export function ResultsTable({ className }: ResultsTableProps) {
 
   const onRowClick = (selected: SelectedElement) => setSelectedElement(selected);
 
+  // Derive a slug-friendly case name from the loaded primary file path.
+  // The case store carries the full WorkspacePath; the export filename
+  // only needs the basename, no extension.
+  const caseName = (() => {
+    const path = useCaseStore.getState().selection?.primaryPath ?? null;
+    if (!path) return 'case';
+    const base = path.split(/[\\/]/).pop() ?? path;
+    const dot = base.lastIndexOf('.');
+    return dot > 0 ? base.slice(0, dot) : base;
+  })();
+
   return (
     <div
       data-testid="results-table"
@@ -524,6 +578,8 @@ export function ResultsTable({ className }: ResultsTableProps) {
             selectedElement={selectedElement}
             onRowClick={onRowClick}
             testId="results-table-buses"
+            panelSlug="results-buses"
+            caseName={caseName}
           />
         </TabsContent>
         <TabsContent value="lines" className="flex min-h-0 flex-1 flex-col">
@@ -535,6 +591,8 @@ export function ResultsTable({ className }: ResultsTableProps) {
             selectedElement={selectedElement}
             onRowClick={onRowClick}
             testId="results-table-lines"
+            panelSlug="results-lines"
+            caseName={caseName}
           />
         </TabsContent>
         <TabsContent value="generators" className="flex min-h-0 flex-1 flex-col">
@@ -546,6 +604,8 @@ export function ResultsTable({ className }: ResultsTableProps) {
             selectedElement={selectedElement}
             onRowClick={onRowClick}
             testId="results-table-generators"
+            panelSlug="results-generators"
+            caseName={caseName}
           />
         </TabsContent>
         <TabsContent value="loads" className="flex min-h-0 flex-1 flex-col">
@@ -557,6 +617,8 @@ export function ResultsTable({ className }: ResultsTableProps) {
             selectedElement={selectedElement}
             onRowClick={onRowClick}
             testId="results-table-loads"
+            panelSlug="results-loads"
+            caseName={caseName}
           />
         </TabsContent>
         <TabsContent value="shunts" className="flex min-h-0 flex-1 flex-col">
@@ -568,6 +630,8 @@ export function ResultsTable({ className }: ResultsTableProps) {
             selectedElement={selectedElement}
             onRowClick={onRowClick}
             testId="results-table-shunts"
+            panelSlug="results-shunts"
+            caseName={caseName}
           />
         </TabsContent>
       </Tabs>
