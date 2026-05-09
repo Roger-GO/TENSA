@@ -48,7 +48,7 @@ describe('useAnalyzeStore — subMode (Unit 6 KTD-6)', () => {
   });
 
   it('exposes ANALYZE_SUB_MODES in canonical order', () => {
-    expect(ANALYZE_SUB_MODES).toEqual(['pflow', 'tds', 'eig', 'cpf']);
+    expect(ANALYZE_SUB_MODES).toEqual(['pflow', 'tds', 'eig', 'cpf', 'se']);
   });
 
   it('defaults to pflow', () => {

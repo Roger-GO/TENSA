@@ -229,6 +229,49 @@ export interface CpfResult {
   mode: 'pv' | 'qv';
 }
 
+// ---- SE result (Unit 13 — state estimation) ------------------------------
+
+/**
+ * SE (state estimation) result returned by ``POST /sessions/{id}/se``.
+ *
+ * Mirrors :class:`andes_app.core.se_result.SeResult` 1:1.
+ *
+ * Field semantics (per Unit 1a spike + ANDES SE.run output):
+ *
+ * - ``converged`` — ``true`` when ANDES's ``SE.run`` returned True.
+ *   ``false`` cases surface as 422 errors rather than ``converged=false``
+ *   payloads, so the UI always sees a converged result on a 200.
+ * - ``iterations`` — WLS Gauss-Newton iterations to convergence.
+ * - ``mismatch`` — final WLS objective ``J = sum(w * r^2)``. Smaller
+ *   is better; UI surfaces it as the headline "mismatch" stat.
+ * - ``residuals`` — per-measurement residuals ``z - h(x_est)``. The UI
+ *   bins these into a histogram.
+ * - ``measurement_count`` — ``len(residuals)``. Includes the angle-
+ *   reference pseudo-measurement that ``SE.init`` injects per island.
+ * - ``flagged_indices`` — indices into ``residuals`` whose normalised
+ *   residual ``|r_i| / sigma_i`` exceeds 3-sigma. UI highlights the
+ *   corresponding histogram bars in red.
+ */
+export interface SeResult {
+  converged: boolean;
+  iterations: number;
+  mismatch: number;
+  residuals: number[];
+  measurement_count: number;
+  flagged_indices: number[];
+}
+
+/**
+ * Wire shape of ``POST /sessions/{id}/se/measurements/generate``.
+ *
+ * ``count`` is the number of scalar measurements before SE.init's
+ * angle-reference injection; the eventual ``SeResult.measurement_count``
+ * will be larger by 1 per island.
+ */
+export interface SeMeasurementsGeneratedResponse {
+  count: number;
+}
+
 // ---- branded types ---------------------------------------------------------
 
 /**

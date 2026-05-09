@@ -5,20 +5,19 @@ import type { AnalyzeSubMode } from '@/store/analyze';
 /**
  * AnalyzeSubModePicker — segmented control that swaps the routine
  * sub-view inside the Analyze panel (Unit 6 of the v2.0 plan, extended
- * by Unit 12 with CPF).
+ * by Units 12 / 13 with CPF and SE).
  *
- * Per KTD-6: this picker (PF / TDS / EIG / CPF) replaces the v0.1
- * ``RunMode = 'pf' | 'tds'`` toggle inside the Analyze panel. SE arrives
- * in Unit 13.
+ * Per KTD-6: this picker (PF / TDS / EIG / CPF / SE) replaces the v0.1
+ * ``RunMode = 'pf' | 'tds'`` toggle inside the Analyze panel.
  *
  * Behaviour:
  *
  * - Click swaps ``useAnalyzeStore.subMode``. Default is ``pflow`` so a
  *   first-time visitor lands on a familiar surface.
  * - The picker itself does NOT trigger a routine run — that's the
- *   RunButton's job. EIG / CPF runs are gated behind an explicit "Run"
- *   click so the user opts-in to the side effect (EIG mutates dae;
- *   CPF is non-mutating but still synchronous-blocking).
+ *   RunButton's job. EIG / CPF / SE runs are gated behind an explicit
+ *   "Run" click so the user opts-in to the side effect (EIG mutates dae;
+ *   CPF and SE are non-mutating but still synchronous-blocking).
  *
  * Visually mirrors the existing ``RunButton`` segmented control so
  * the two affordances feel consistent.
@@ -29,6 +28,7 @@ const LABELS: Record<AnalyzeSubMode, string> = {
   tds: 'TDS',
   eig: 'EIG',
   cpf: 'CPF',
+  se: 'SE',
 };
 
 const HINTS: Record<AnalyzeSubMode, string> = {
@@ -36,6 +36,7 @@ const HINTS: Record<AnalyzeSubMode, string> = {
   tds: 'Time-domain simulation config + result',
   eig: 'Eigenvalue analysis (small-signal stability)',
   cpf: 'Continuation power flow (voltage stability nose curve)',
+  se: 'State estimation (residual histogram)',
 };
 
 export interface AnalyzeSubModePickerProps {
