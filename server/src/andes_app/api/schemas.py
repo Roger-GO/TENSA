@@ -672,6 +672,31 @@ class TdsRunRequest(BaseModel):
         ),
         min_length=1,
     )
+    integrator: Literal["trapezoidal", "qndf"] = Field(
+        "trapezoidal",
+        description=(
+            "DAE integrator (Unit 16). ``\"trapezoidal\"`` (default) maps "
+            "to ANDES's fixed-step Implicit Trapezoidal Method "
+            "(``ss.TDS.config.method = \"trapezoid\"``). ``\"qndf\"`` "
+            "selects the variable-order, variable-step QNDF (NDF) method "
+            "and forces ``fixt = 0`` so ANDES enables LTE-driven step "
+            "control. Combine ``integrator=\"qndf\"`` with the Auto "
+            "preset (``rtol=1e-3, atol=1e-6, max_step=0.05``) by passing "
+            "the values via ``tds_config_overrides``."
+        ),
+    )
+    tds_config_overrides: dict[str, float] | None = Field(
+        None,
+        description=(
+            "Optional adaptive-integrator tolerance overrides (Unit 16). "
+            "Supported keys are ``rtol`` (→ ``ss.TDS.config.reltol``), "
+            "``atol`` (→ ``ss.TDS.config.abstol``) and ``max_step`` (→ "
+            "``ss.TDS.config.dtmax``). Unknown keys are rejected with "
+            "500 ``SetupFailedError`` from the wrapper. Has no effect "
+            "when ``integrator=\"trapezoidal\"`` (the fixed-step path "
+            "ignores ``reltol/abstol`` and uses ``h`` for stepping)."
+        ),
+    )
 
 
 class TdsBatchResult(BaseModel):

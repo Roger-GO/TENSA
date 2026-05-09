@@ -4,11 +4,17 @@
  * slice with the panel-picker state per dock region and the
  * ``TdsConfigPanel`` form values (tf, h override, vars, max_rate_hz).
  *
- * Lifecycle: not persisted across sessions. Resets on tab close. Picker
- * defaults match v0.1 behavior (Inspector active in the right-dock top
- * region) so a fresh load reads the same as before v0.2.
+ * Lifecycle:
+ * - Display prefs (``hideLabels``, ``activeRightDockTopPanel``) reset on
+ *   tab close.
+ * - The TDS-integrator pick (``tdsIntegrator`` + ``tdsToleranceOverrides``)
+ *   is persisted to ``sessionStorage`` so a refresh during a study
+ *   doesn't reset to "trapezoidal" — Unit 16 KTD per-tab persistence.
+ *   The rest of ``tdsConfig`` (tf/h/vars/maxRateHz) intentionally stays
+ *   in memory only; those are run-by-run choices.
  */
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
 /** Identifier for a panel that can mount in the right-dock top region.
  *
@@ -64,6 +70,43 @@ export const DEFAULT_TDS_CONFIG: TdsConfig = {
   maxRateHz: 30,
 };
 
+/**
+ * Integrator preset (Unit 16). The substrate accepts the wire values
+ * ``"trapezoidal"`` and ``"qndf"``; the ``-auto`` / ``-manual`` suffix is
+ * a UI distinction so the form knows whether to expose the tolerance
+ * inputs. The Auto preset injects ``rtol=1e-3, atol=1e-6, max_step=0.05``
+ * (per the plan's KTD-16); Manual surfaces the same fields as
+ * user-editable.
+ */
+export type TdsIntegrator = 'trapezoidal' | 'qndf-auto' | 'qndf-manual';
+
+export const TDS_INTEGRATORS: readonly TdsIntegrator[] = [
+  'trapezoidal',
+  'qndf-auto',
+  'qndf-manual',
+] as const;
+
+/**
+ * QNDF tolerance / max-step overrides forwarded to the substrate as
+ * ``tds_config_overrides`` on the wire. ``rtol`` / ``atol`` map to
+ * ANDES's ``reltol`` / ``abstol``; ``maxStep`` maps to ``dtmax`` (the
+ * ANDES field name is ``dtmax``, NOT ``h_max``).
+ */
+export interface TdsToleranceOverrides {
+  rtol: number;
+  atol: number;
+  maxStep: number;
+}
+
+/** Auto-preset values per the plan's KTD-16. */
+export const DEFAULT_TDS_TOLERANCE_OVERRIDES: TdsToleranceOverrides = {
+  rtol: 1e-3,
+  atol: 1e-6,
+  maxStep: 0.05,
+};
+
+export const DEFAULT_TDS_INTEGRATOR: TdsIntegrator = 'trapezoidal';
+
 export interface UiState {
   /**
    * When true, voltage / angle / flow magnitude labels are suppressed on
@@ -86,22 +129,69 @@ export interface UiState {
   tdsConfig: TdsConfig;
   setTdsConfig: (next: Partial<TdsConfig>) => void;
   resetTdsConfig: () => void;
+
+  /**
+   * Unit 16 integrator preset. Persisted to sessionStorage so the
+   * choice survives a refresh mid-study.
+   */
+  tdsIntegrator: TdsIntegrator;
+  setTdsIntegrator: (next: TdsIntegrator) => void;
+
+  /**
+   * Unit 16 tolerance overrides. Used in both Auto (read-only) and
+   * Manual (editable) modes so switching back-and-forth preserves the
+   * user's last-edited values rather than snapping to the defaults.
+   */
+  tdsToleranceOverrides: TdsToleranceOverrides;
+  setTdsToleranceOverrides: (next: Partial<TdsToleranceOverrides>) => void;
+  resetTdsToleranceOverrides: () => void;
 }
 
-export const useUiStore = create<UiState>((set) => ({
-  hideLabels: false,
-  setHideLabels: (hide: boolean) => set({ hideLabels: hide }),
-  toggleHideLabels: () => set((s) => ({ hideLabels: !s.hideLabels })),
+/**
+ * The unpersisted slice (display prefs, run-by-run TdsConfig). Wrapped
+ * in ``persist`` below so only the integrator + overrides land in
+ * sessionStorage — the rest stays in memory.
+ */
+export const useUiStore = create<UiState>()(
+  persist(
+    (set) => ({
+      hideLabels: false,
+      setHideLabels: (hide: boolean) => set({ hideLabels: hide }),
+      toggleHideLabels: () => set((s) => ({ hideLabels: !s.hideLabels })),
 
-  activeRightDockTopPanel: 'inspector',
-  setActiveRightDockTopPanel: (panel) =>
-    set({ activeRightDockTopPanel: panel }),
+      activeRightDockTopPanel: 'inspector',
+      setActiveRightDockTopPanel: (panel) =>
+        set({ activeRightDockTopPanel: panel }),
 
-  tdsConfig: { ...DEFAULT_TDS_CONFIG },
-  setTdsConfig: (next) =>
-    set((s) => ({ tdsConfig: { ...s.tdsConfig, ...next } })),
-  resetTdsConfig: () => set({ tdsConfig: { ...DEFAULT_TDS_CONFIG } }),
-}));
+      tdsConfig: { ...DEFAULT_TDS_CONFIG },
+      setTdsConfig: (next) =>
+        set((s) => ({ tdsConfig: { ...s.tdsConfig, ...next } })),
+      resetTdsConfig: () => set({ tdsConfig: { ...DEFAULT_TDS_CONFIG } }),
+
+      tdsIntegrator: DEFAULT_TDS_INTEGRATOR,
+      setTdsIntegrator: (next) => set({ tdsIntegrator: next }),
+
+      tdsToleranceOverrides: { ...DEFAULT_TDS_TOLERANCE_OVERRIDES },
+      setTdsToleranceOverrides: (next) =>
+        set((s) => ({
+          tdsToleranceOverrides: { ...s.tdsToleranceOverrides, ...next },
+        })),
+      resetTdsToleranceOverrides: () =>
+        set({ tdsToleranceOverrides: { ...DEFAULT_TDS_TOLERANCE_OVERRIDES } }),
+    }),
+    {
+      name: 'andes-ui-tds-integrator',
+      storage: createJSONStorage(() => sessionStorage),
+      // Persist ONLY the integrator pick + tolerance overrides per Unit
+      // 16 KTD — the rest of the UI slice stays in-memory so display
+      // prefs don't accidentally leak across tabs/reloads.
+      partialize: (state) => ({
+        tdsIntegrator: state.tdsIntegrator,
+        tdsToleranceOverrides: state.tdsToleranceOverrides,
+      }),
+    },
+  ),
+);
 
 /**
  * Validate a candidate TdsConfig draft. Returns a record of field-keyed
@@ -129,6 +219,35 @@ export function validateTdsConfig(draft: TdsConfig): Record<string, string> {
     out.maxRateHz = 'Enter a finite number';
   } else if (draft.maxRateHz <= 0) {
     out.maxRateHz = 'Must be > 0';
+  }
+  return out;
+}
+
+/**
+ * Validate the QNDF tolerance / max-step overrides (Unit 16, Manual
+ * preset only). Returns a record of field-keyed error messages; empty
+ * record means valid. The Auto preset is hidden behind the radio choice
+ * and never exposes these inputs, so this validator is only consulted
+ * for Manual mode.
+ */
+export function validateTdsToleranceOverrides(
+  draft: TdsToleranceOverrides,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!Number.isFinite(draft.rtol)) {
+    out.rtol = 'Enter a finite number';
+  } else if (draft.rtol <= 0) {
+    out.rtol = 'Must be > 0';
+  }
+  if (!Number.isFinite(draft.atol)) {
+    out.atol = 'Enter a finite number';
+  } else if (draft.atol <= 0) {
+    out.atol = 'Must be > 0';
+  }
+  if (!Number.isFinite(draft.maxStep)) {
+    out.maxStep = 'Enter a finite number';
+  } else if (draft.maxStep <= 0) {
+    out.maxStep = 'Must be > 0';
   }
   return out;
 }

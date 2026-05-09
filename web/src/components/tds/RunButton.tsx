@@ -160,6 +160,12 @@ export function RunButton({
   // TDS args are owned by ``TdsConfigPanel`` (Unit 8) and live in
   // ``useUiStore``. Props remain as test-only overrides.
   const tdsConfig = useUiStore((s) => s.tdsConfig);
+  // Unit 16: integrator preset + adaptive tolerance overrides. The
+  // ``-auto`` / ``-manual`` suffix is a UI-side distinction; both wire
+  // up to ``integrator: "qndf"`` and forward the overrides. Manual mode
+  // exposes the inputs in TdsConfigPanel; Auto uses the same defaults.
+  const tdsIntegrator = useUiStore((s) => s.tdsIntegrator);
+  const tdsToleranceOverrides = useUiStore((s) => s.tdsToleranceOverrides);
 
   // Active-run handle (if any) — drives the Reset / Abort label switch.
   const activeRunId = useRunsStore((s) => s.activeRunId);
@@ -299,7 +305,27 @@ export function RunButton({
     // pick adaptively" → omit from the wire payload entirely. The
     // ``defaultH`` prop overrides only when explicitly set.
     const h = defaultH !== undefined ? defaultH : tdsConfig.h ?? undefined;
-    const tdsArgs = h === undefined ? { tf, vars } : { tf, h, vars };
+    // Unit 16: derive wire-side integrator + override payload from the
+    // UI-side preset. ``trapezoidal`` ships only the integrator key;
+    // both QNDF presets (Auto / Manual) ship the overrides too — the
+    // user's last-edited Manual values are preserved in the store and
+    // re-used in Auto mode (the inputs are hidden but the values stick).
+    const wireIntegrator = tdsIntegrator === 'trapezoidal' ? 'trapezoidal' : 'qndf';
+    const tdsConfigOverrides =
+      tdsIntegrator === 'trapezoidal'
+        ? undefined
+        : {
+            rtol: tdsToleranceOverrides.rtol,
+            atol: tdsToleranceOverrides.atol,
+            max_step: tdsToleranceOverrides.maxStep,
+          };
+    const tdsArgs = {
+      tf,
+      vars,
+      ...(h === undefined ? {} : { h }),
+      integrator: wireIntegrator,
+      ...(tdsConfigOverrides === undefined ? {} : { tdsConfigOverrides }),
+    };
 
     const stream = new RunStream({
       sessionId,

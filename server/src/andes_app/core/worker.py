@@ -762,12 +762,48 @@ def _handle_run_tds(
 
         on_step = _emit
 
+    # Unit 16: integrator selection + adaptive-tolerance overrides.
+    # ``integrator`` defaults to ``"trapezoidal"`` so existing callers
+    # (and the streaming WS path which doesn't yet pipe these args)
+    # see no behaviour change. Validation of the literal value lives in
+    # the wrapper; we only normalise the wire shape here.
+    integrator_raw = args.get("integrator", "trapezoidal")
+    if integrator_raw not in ("trapezoidal", "qndf"):
+        raise AndesAppError(
+            f"unknown integrator {integrator_raw!r}; "
+            "expected 'trapezoidal' or 'qndf'"
+        )
+
+    overrides_raw = args.get("tds_config_overrides")
+    tds_config_overrides: dict[str, float] | None = None
+    if overrides_raw is not None:
+        if not isinstance(overrides_raw, dict):
+            raise AndesAppError(
+                "'tds_config_overrides' must be a dict of "
+                "{rtol, atol, max_step} → float"
+            )
+        coerced: dict[str, float] = {}
+        for key, value in overrides_raw.items():
+            if not isinstance(key, str):
+                raise AndesAppError(
+                    f"'tds_config_overrides' keys must be strings, got {type(key).__name__}"
+                )
+            try:
+                coerced[key] = float(value)
+            except (TypeError, ValueError) as exc:
+                raise AndesAppError(
+                    f"'tds_config_overrides[{key!r}]' must be a float-coercible value"
+                ) from exc
+        tds_config_overrides = coerced
+
     try:
         result = wrapper.run_tds(
             tf=args["tf"],
             h=args.get("h"),
             on_step=on_step,
             abort_flag=abort_flag,
+            integrator=integrator_raw,
+            tds_config_overrides=tds_config_overrides,
         )
     finally:
         abort_flag.set()

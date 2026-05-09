@@ -12,6 +12,7 @@ with ``callpert`` wired to count steps and check the abort flag.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 
@@ -86,7 +87,18 @@ async def run_tds(
     _: RequireToken,
 ) -> TdsBatchResult:
     mgr = _manager(request)
-    args: dict[str, float | None] = {"tf": body.tf, "h": body.h}
+    # Unit 16: forward integrator + tolerance overrides. The wrapper
+    # validates ``integrator`` (Literal-bounded by Pydantic) and the
+    # override keys (rtol/atol/max_step). ``tds_config_overrides`` is
+    # only forwarded when non-None so the wire shape stays minimal for
+    # the default trapezoidal path.
+    args: dict[str, Any] = {
+        "tf": body.tf,
+        "h": body.h,
+        "integrator": body.integrator,
+    }
+    if body.tds_config_overrides is not None:
+        args["tds_config_overrides"] = body.tds_config_overrides
     # Generous timeout: TDS for IEEE 14 / 1-second sim is sub-second; for
     # larger cases or longer horizons it can take minutes. The watchdog in
     # SessionManager handles wedged sessions; this timeout is a backstop.
