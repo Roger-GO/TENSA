@@ -15,6 +15,7 @@ import { SaveSystemButton } from '@/components/case/SaveSystemButton';
 import { WorkflowToolbar } from '@/components/case/WorkflowToolbar';
 import { makeQueryClient, wireGlobalErrorRecovery } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
+import { useSldFrameOverlay } from '@/components/sld/overlay';
 import { RecoveryBadge } from '@/components/shell/RecoveryBadge';
 import { setTokenGetter } from '@/api/client';
 import { getAuthToken } from '@/store';
@@ -47,6 +48,11 @@ function AppInner({ children }: { children: React.ReactNode }) {
   // unmount that would otherwise kill the recovery cycle once a case is
   // loaded (v0.1.y Unit 5 bug fix).
   useSessionRecovery();
+  // v0.2 Unit 5: SINGLE rAF loop driving the SLD streaming overlay.
+  // Mounted once at the App root so all BusNodes share one tick source
+  // (avoids N-rAF-loops-for-N-buses at NPCC scale). The hook is a
+  // no-op when no run is active.
+  useSldFrameOverlay();
   return <>{children}</>;
 }
 
@@ -63,37 +69,37 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AppInner>
-      <AppShell
-        topBarLeft={
-          <>
-            <AddElementButton />
-            <SaveSystemButton />
-            <WorkflowToolbar />
-          </>
-        }
-        topBarCenter={<RunButton />}
-        topBarRight={
-          <>
-            <RecoveryBadge />
-            <HideLabelsToggle />
-          </>
-        }
-        leftRail={<CaseNav />}
-        inspector={<ElementInspector />}
-        results={<ResultsTable />}
-        dockOverlay={
-          <>
-            <AddElementPanel />
-            <ConvergenceErrorPanel />
-          </>
-        }
-        modal={
-          <>
-            <TokenPasteModal />
-            <RuntimeCrashModal />
-          </>
-        }
-      />
+        <AppShell
+          topBarLeft={
+            <>
+              <AddElementButton />
+              <SaveSystemButton />
+              <WorkflowToolbar />
+            </>
+          }
+          topBarCenter={<RunButton />}
+          topBarRight={
+            <>
+              <RecoveryBadge />
+              <HideLabelsToggle />
+            </>
+          }
+          leftRail={<CaseNav />}
+          inspector={<ElementInspector />}
+          results={<ResultsTable />}
+          dockOverlay={
+            <>
+              <AddElementPanel />
+              <ConvergenceErrorPanel />
+            </>
+          }
+          modal={
+            <>
+              <TokenPasteModal />
+              <RuntimeCrashModal />
+            </>
+          }
+        />
       </AppInner>
     </QueryClientProvider>
   );

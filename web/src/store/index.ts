@@ -22,6 +22,7 @@ import { useCaseStore } from './case';
 import { useSessionStore } from './session';
 import { usePflowStore } from './pflow';
 import { useRunsStore } from './runs';
+import { useAnimationStore } from './animation';
 
 // Re-export slices so consumers have one import surface.
 export { useAuthStore } from './auth';
@@ -49,12 +50,13 @@ export function wireStoreCascade(): void {
   if (cascadeWired) return;
   cascadeWired = true;
 
-  // auth clear → session + case + pflow + runs clear.
+  // auth clear → session + case + pflow + runs + animation clear.
   registerAuthClearCascade(() => {
     useSessionStore.getState().clearSession();
     useCaseStore.getState().clearCase();
     usePflowStore.getState().clearPflow();
     useRunsStore.getState().clearRuns();
+    useAnimationStore.getState().clearAll();
   });
 
   // session clear → case + pflow + runs clear.
@@ -70,6 +72,7 @@ export function wireStoreCascade(): void {
     const next = state.sessionId;
     if (prevSessionId !== null && next === null) {
       useRunsStore.getState().clearRuns();
+      useAnimationStore.getState().clearAll();
       if (!state.recoveryInProgress) {
         useCaseStore.getState().clearCase();
         usePflowStore.getState().clearPflow();
@@ -110,6 +113,7 @@ export function __resetCascadeForTests(): void {
   });
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
   useRunsStore.setState({ runs: {}, activeRunId: null });
+  useAnimationStore.setState({ busOverlayByRun: {} });
 }
 
 // Side-effect: defensive auto-wire on first import. `wireStoreCascade` is
