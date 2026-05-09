@@ -21,17 +21,20 @@ import { useAuthStore, registerAuthClearCascade } from './auth';
 import { useCaseStore } from './case';
 import { useSessionStore } from './session';
 import { usePflowStore } from './pflow';
+import { useRunsStore } from './runs';
 
 // Re-export slices so consumers have one import surface.
 export { useAuthStore } from './auth';
 export { useSessionStore } from './session';
 export { useCaseStore } from './case';
 export { usePflowStore } from './pflow';
+export { useRunsStore } from './runs';
 export { registerAuthClearCascade, getAuthToken } from './auth';
 export type { AuthState } from './auth';
 export type { SessionState } from './session';
 export type { CaseState, CaseSelection } from './case';
 export type { PflowState } from './pflow';
+export type { RunsState, RunRecord, RunState, RunConnectionStatus } from './runs';
 
 // ---- cascade wiring -------------------------------------------------------
 
@@ -46,22 +49,27 @@ export function wireStoreCascade(): void {
   if (cascadeWired) return;
   cascadeWired = true;
 
-  // auth clear → session + case + pflow clear.
+  // auth clear → session + case + pflow + runs clear.
   registerAuthClearCascade(() => {
     useSessionStore.getState().clearSession();
     useCaseStore.getState().clearCase();
     usePflowStore.getState().clearPflow();
+    useRunsStore.getState().clearRuns();
   });
 
-  // session clear → case + pflow clear.
+  // session clear → case + pflow + runs clear.
   // Subscribe to `sessionId`; when it transitions to null, cascade —
   // EXCEPT when the transition is part of an in-progress recovery (Unit 5),
   // in which case we want to preserve the case selection so the recovery
-  // effect can re-issue ``loadCase`` against the new session id.
+  // effect can re-issue ``loadCase`` against the new session id. Runs are
+  // session-scoped (a run's frames only make sense against the worker that
+  // produced them), so they always clear on session change — recovery or
+  // not.
   let prevSessionId = useSessionStore.getState().sessionId;
   useSessionStore.subscribe((state) => {
     const next = state.sessionId;
     if (prevSessionId !== null && next === null) {
+      useRunsStore.getState().clearRuns();
       if (!state.recoveryInProgress) {
         useCaseStore.getState().clearCase();
         usePflowStore.getState().clearPflow();
@@ -101,6 +109,7 @@ export function __resetCascadeForTests(): void {
     selectedElement: null,
   });
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  useRunsStore.setState({ runs: {}, activeRunId: null });
 }
 
 // Side-effect: defensive auto-wire on first import. `wireStoreCascade` is
