@@ -272,6 +272,35 @@ export interface SeMeasurementsGeneratedResponse {
   count: number;
 }
 
+// ---- Connectivity (Unit 17 — island detection) ----------------------------
+
+/**
+ * Connectivity / island-detection result returned by
+ * ``GET /sessions/{id}/connectivity``.
+ *
+ * Mirrors :class:`andes_app.core.connectivity_result.ConnectivityResult`
+ * 1:1.
+ *
+ * Field semantics (per Unit 17 — see ``andes/core/connman.py`` for ANDES
+ * source):
+ *
+ * - ``island_count`` — total number of islands, including singleton
+ *   "islands" of one degree-zero bus. Equals ``len(Bus.islands)``. A
+ *   fully-interconnected case yields 1; tripping a critical line
+ *   yields >= 2.
+ * - ``islands`` — list of lists of bus *idx* values (case-file
+ *   identifiers, stringified). Each inner list is one island's bus
+ *   membership. Singletons-first order: any degree-zero buses appear
+ *   as singleton islands before the larger connected components.
+ * - ``islanded_bus_idxes`` — convenience: just the degree-zero (lone)
+ *   buses. Each appears as its own singleton in ``islands`` too.
+ */
+export interface ConnectivityResult {
+  island_count: number;
+  islands: string[][];
+  islanded_bus_idxes: string[];
+}
+
 // ---- branded types ---------------------------------------------------------
 
 /**

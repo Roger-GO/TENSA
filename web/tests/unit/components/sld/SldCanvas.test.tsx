@@ -30,7 +30,12 @@ import type { ReactNode } from 'react';
 vi.mock('@xyflow/react', async () => {
   const React = await import('react');
   type ReactFlowProps = {
-    nodes: { id: string; type: string; data: Record<string, unknown> }[];
+    nodes: {
+      id: string;
+      type: string;
+      data: Record<string, unknown>;
+      className?: string;
+    }[];
     edges: { id: string; source: string; target: string }[];
     nodeTypes: Record<string, React.ComponentType<unknown>>;
     edgeTypes?: Record<string, React.ComponentType<unknown>>;
@@ -48,13 +53,21 @@ vi.mock('@xyflow/react', async () => {
         nodes.map((n) => {
           const NodeComp = nodeTypes[n.type];
           if (!NodeComp) return null;
+          // Mirror React Flow's behaviour: ``node.className`` and the
+          // node-data ``energised`` attribute land on the node wrapper
+          // (Unit 17 connectivity overlay needs both for the grey-out
+          // assertion in the SldCanvas test).
+          const wrapperProps: Record<string, unknown> = {
+            key: n.id,
+            'data-rf-node-id': n.id,
+            'data-energised':
+              (n.data as { energised?: boolean }).energised === false ? 'false' : 'true',
+            onClick: (e: React.MouseEvent) => onNodeClick?.(e, n),
+          };
+          if (n.className) wrapperProps.className = n.className;
           return React.createElement(
             'div',
-            {
-              key: n.id,
-              'data-rf-node-id': n.id,
-              onClick: (e: React.MouseEvent) => onNodeClick?.(e, n),
-            },
+            wrapperProps,
             React.createElement(NodeComp, {
               data: n.data,
               selected: false,
@@ -113,8 +126,10 @@ vi.mock('elkjs/lib/elk.bundled.js', () => {
 import { SldCanvas } from '@/components/sld/SldCanvas';
 import { buildGraph } from '@/components/sld/graph';
 import { useCaseStore } from '@/store/case';
+import { useSessionStore } from '@/store/session';
+import { useConnectivityStore } from '@/store/connectivity';
 import { __resetCascadeForTests, wireStoreCascade } from '@/store';
-import { parseWorkspacePath } from '@/api/types';
+import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary, TopologyEntry } from '@/api/types';
 
 function bus(idx: number | string, name = `b${idx}`): TopologyEntry {
@@ -148,6 +163,12 @@ function withQueryClient(ui: ReactNode) {
 // (matching the previous `useCaseStore.setState({ topology })` pattern
 // before topology moved to a TanStack Query hook).
 let mockTopology: TopologySummary | null = null;
+// Spy on ``useConnectivity``'s ``refetch`` so the recompute-button test
+// can assert it fired without spinning up a real fetch. Each test
+// overrides ``mockConnectivityRefetch`` for its scenario.
+let mockConnectivityRefetch = vi.fn(() => Promise.resolve({ data: null }));
+let mockConnectivityIsFetching = false;
+let mockConnectivityIsError = false;
 vi.mock('@/api/queries', async () => {
   const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
   return {
@@ -160,6 +181,14 @@ vi.mock('@/api/queries', async () => {
     }),
     usePutSidecar: () => ({ mutate: vi.fn() }),
     useCurrentTopology: () => mockTopology,
+    useConnectivity: () => ({
+      data: null,
+      isLoading: false,
+      isFetching: mockConnectivityIsFetching,
+      isError: mockConnectivityIsError,
+      error: null,
+      refetch: mockConnectivityRefetch,
+    }),
   };
 });
 
@@ -193,13 +222,27 @@ describe('buildGraph', () => {
 describe('SldCanvas', () => {
   beforeEach(() => {
     mockTopology = null;
+    mockConnectivityIsFetching = false;
+    mockConnectivityIsError = false;
+    mockConnectivityRefetch = vi.fn(() => Promise.resolve({ data: null }));
     __resetCascadeForTests();
     wireStoreCascade();
+    // Connectivity slice carries across tests because the store is a
+    // module-level singleton; reset it explicitly here so the SldCanvas
+    // tests that don't exercise connectivity see a clean baseline.
+    useConnectivityStore.setState({
+      result: null,
+      energisedBusIdxes: new Set<string>(),
+    });
   });
   afterEach(() => {
     mockTopology = null;
     cleanup();
     __resetCascadeForTests();
+    useConnectivityStore.setState({
+      result: null,
+      energisedBusIdxes: new Set<string>(),
+    });
   });
 
   it('renders nothing when no case is loaded', () => {
@@ -298,5 +341,149 @@ describe('SldCanvas', () => {
       expect(screen.getByTestId('bus-node-1')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('sld-large-banner')).not.toBeInTheDocument();
+  });
+
+  // ---- Unit 17 — connectivity overlay -------------------------------------
+
+  it('greys out de-energised buses when connectivity reports a singleton island', async () => {
+    // Toy topology: 3 buses, one isolated. The connectivity store is
+    // pre-seeded with a 2-island result mirroring the real
+    // ``ConnectivityResult`` shape ANDES emits after a critical line
+    // trip (singletons-first ordering per ``_post_process_islands``).
+    mockTopology = makeTopology(
+      [bus(1), bus(2), bus(3)],
+      [line(10, 1, 2)],
+    );
+    act(() => {
+      useCaseStore.setState({
+        selection: {
+          primaryPath: parseWorkspacePath('synthetic.raw'),
+          addfiles: [],
+        },
+      });
+      useConnectivityStore.getState().setResult({
+        island_count: 2,
+        islands: [['3'], ['1', '2']],
+        islanded_bus_idxes: ['3'],
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('bus-node-3')).toBeInTheDocument();
+    });
+    // The de-energised bus's React Flow wrapper carries
+    // ``data-energised="false"`` and the ``sld-bus-de-energised``
+    // class; the energised buses do not.
+    const wrapper3 = screen.getByTestId('bus-node-3').closest('[data-rf-node-id]');
+    expect(wrapper3).not.toBeNull();
+    expect(wrapper3?.getAttribute('data-energised')).toBe('false');
+    expect(wrapper3?.className).toContain('sld-bus-de-energised');
+
+    const wrapper1 = screen.getByTestId('bus-node-1').closest('[data-rf-node-id]');
+    expect(wrapper1?.getAttribute('data-energised')).toBe('true');
+    expect(wrapper1?.className ?? '').not.toContain('sld-bus-de-energised');
+  });
+
+  it('does not grey any bus when no connectivity result is present', async () => {
+    mockTopology = makeTopology([bus(1), bus(2)], [line(10, 1, 2)]);
+    act(() => {
+      useCaseStore.setState({
+        selection: {
+          primaryPath: parseWorkspacePath('synthetic.raw'),
+          addfiles: [],
+        },
+      });
+      // Explicit clear — the beforeEach already does this, but make
+      // the test's intent self-evident.
+      useConnectivityStore.getState().clear();
+    });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('bus-node-1')).toBeInTheDocument();
+    });
+    const wrapper1 = screen.getByTestId('bus-node-1').closest('[data-rf-node-id]');
+    expect(wrapper1?.getAttribute('data-energised')).toBe('true');
+    expect(wrapper1?.className ?? '').not.toContain('sld-bus-de-energised');
+  });
+
+  it('renders the Recompute connectivity button and disables it when no session', async () => {
+    mockTopology = makeTopology([bus(1)]);
+    act(() => {
+      useSessionStore.setState({
+        sessionId: null,
+        recoveryInProgress: false,
+        recoveryFailed: false,
+        recoveryAttempts: [],
+      });
+      useCaseStore.setState({
+        selection: {
+          primaryPath: parseWorkspacePath('synthetic.raw'),
+          addfiles: [],
+        },
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('sld-recompute-connectivity')).toBeInTheDocument();
+    });
+    const btn = screen.getByTestId('sld-recompute-connectivity') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+  });
+
+  it('Recompute connectivity button calls refetch when clicked', async () => {
+    const user = userEvent.setup();
+    mockTopology = makeTopology([bus(1), bus(2)], [line(10, 1, 2)]);
+    act(() => {
+      useSessionStore.setState({
+        sessionId: parseSessionId('test-session'),
+        recoveryInProgress: false,
+        recoveryFailed: false,
+        recoveryAttempts: [],
+      });
+      useCaseStore.setState({
+        selection: {
+          primaryPath: parseWorkspacePath('synthetic.raw'),
+          addfiles: [],
+        },
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('sld-recompute-connectivity')).toBeInTheDocument();
+    });
+    const btn = screen.getByTestId('sld-recompute-connectivity') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    await user.click(btn);
+    expect(mockConnectivityRefetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('Recompute connectivity button reflects the latest island_count from the store', async () => {
+    mockTopology = makeTopology([bus(1), bus(2), bus(3)], [line(10, 1, 2)]);
+    act(() => {
+      useSessionStore.setState({
+        sessionId: parseSessionId('test-session'),
+        recoveryInProgress: false,
+        recoveryFailed: false,
+        recoveryAttempts: [],
+      });
+      useCaseStore.setState({
+        selection: {
+          primaryPath: parseWorkspacePath('synthetic.raw'),
+          addfiles: [],
+        },
+      });
+      useConnectivityStore.getState().setResult({
+        island_count: 2,
+        islands: [['3'], ['1', '2']],
+        islanded_bus_idxes: ['3'],
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('sld-recompute-connectivity')).toBeInTheDocument();
+    });
+    const btn = screen.getByTestId('sld-recompute-connectivity');
+    expect(btn.getAttribute('data-island-count')).toBe('2');
+    expect(btn.textContent).toContain('2 islands');
   });
 });

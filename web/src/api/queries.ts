@@ -34,6 +34,7 @@ import type {
   AddElementRequest,
   AlterableParamsResponse,
   BlankSystemResponse,
+  ConnectivityResult,
   CpfResult,
   DisturbanceSpec,
   EditElementRequest,
@@ -63,6 +64,7 @@ import { usePflowStore } from '@/store/pflow';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { useRunsStore } from '@/store/runs';
 import { useAnalyzeStore } from '@/store/analyze';
+import { useConnectivityStore } from '@/store/connectivity';
 
 /**
  * Routine name accepted by ``GET /sessions/{id}/report``. Phase 1
@@ -101,6 +103,8 @@ export const queryKeys = {
   se: (id: SessionId) => ['se', id] as const,
   /** SE measurements-generated count, scoped per session (Unit 13). */
   seMeasurements: (id: SessionId) => ['se-measurements', id] as const,
+  /** Connectivity / island-detection result, scoped per session (Unit 17). */
+  connectivity: (id: SessionId) => ['connectivity', id] as const,
 } as const;
 
 // ---- QueryClient factory --------------------------------------------------
@@ -1437,6 +1441,64 @@ export function useSeRun(): UseMutationResult<SeResult, Error, SessionId> {
     onSuccess: (data, sessionId) => {
       useAnalyzeStore.getState().setSeResult(data);
       queryClient.setQueryData(queryKeys.se(sessionId), data);
+    },
+  });
+}
+
+// ---- Connectivity (Unit 17 — island detection) ---------------------------
+
+/**
+ * ``GET /api/sessions/{id}/connectivity`` — runs ANDES's
+ * ``ss.connectivity()`` and returns the per-island bus membership.
+ *
+ * **Manual trigger only.** Per the v2.0 plan's Unit 17 auto-fix, this
+ * is post-run only — no auto-refetch on TDS frame, no streaming
+ * integration. The user clicks "Recompute connectivity" on the SLD
+ * overlay to fire the underlying ``refetch``; in between fires the
+ * cached result drives the SLD's grey-out overlay.
+ *
+ * Gating: ``enabled: false`` so the query never auto-fires; consumers
+ * call ``query.refetch()`` from a button click. Gated additionally on
+ * ``sessionId !== null`` so an unauthenticated client never even
+ * carries a real query key.
+ *
+ * On success: writes through to ``useConnectivityStore.setResult``
+ * (which derives the energised-bus set in one update so BusNode reads
+ * stay O(1)). The TanStack Query cache also seeds ``queryKeys.connectivity``
+ * for any other consumer that wants the raw payload.
+ *
+ * Errors:
+ *
+ * - 409 — no case loaded yet on the session. The SLD overlay catches
+ *   this and disables the button before the click; the response is a
+ *   defence-in-depth fallback.
+ * - 422 — ``SetupFailedError`` from the wrapper; the recovery hint
+ *   ("call POST /reload") is in the response body.
+ */
+export function useConnectivity(): UseQueryResult<ConnectivityResult, Error> {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: sessionId
+      ? queryKeys.connectivity(sessionId)
+      : ['connectivity', 'noop'],
+    // Manual-trigger only: never auto-fire. The SLD's "Recompute
+    // connectivity" button calls ``query.refetch()``.
+    enabled: false,
+    queryFn: async () => {
+      if (!sessionId) {
+        throw new Error('useConnectivity refetched without a session');
+      }
+      const data = await andesClient.get<ConnectivityResult>(
+        `/sessions/${encodeURIComponent(sessionId)}/connectivity`,
+        { timeoutMs: TIMEOUTS.workspace },
+      );
+      // Mirror into the Zustand store (the SLD reads from here for
+      // O(1) per-bus checks; the query cache stays the source of
+      // truth for re-fetches and any downstream consumer).
+      useConnectivityStore.getState().setResult(data);
+      queryClient.setQueryData(queryKeys.connectivity(sessionId), data);
+      return data;
     },
   });
 }

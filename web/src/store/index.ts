@@ -23,6 +23,7 @@ import { useSessionStore } from './session';
 import { usePflowStore } from './pflow';
 import { useRunsStore } from './runs';
 import { useAnimationStore } from './animation';
+import { useConnectivityStore } from './connectivity';
 
 // Re-export slices so consumers have one import surface.
 export { useAuthStore } from './auth';
@@ -50,13 +51,14 @@ export function wireStoreCascade(): void {
   if (cascadeWired) return;
   cascadeWired = true;
 
-  // auth clear → session + case + pflow + runs + animation clear.
+  // auth clear → session + case + pflow + runs + animation + connectivity clear.
   registerAuthClearCascade(() => {
     useSessionStore.getState().clearSession();
     useCaseStore.getState().clearCase();
     usePflowStore.getState().clearPflow();
     useRunsStore.getState().clearRuns();
     useAnimationStore.getState().clearAll();
+    useConnectivityStore.getState().clear();
   });
 
   // session clear → case + pflow + runs clear.
@@ -73,6 +75,7 @@ export function wireStoreCascade(): void {
     if (prevSessionId !== null && next === null) {
       useRunsStore.getState().clearRuns();
       useAnimationStore.getState().clearAll();
+      useConnectivityStore.getState().clear();
       if (!state.recoveryInProgress) {
         useCaseStore.getState().clearCase();
         usePflowStore.getState().clearPflow();
@@ -81,12 +84,15 @@ export function wireStoreCascade(): void {
     prevSessionId = next;
   });
 
-  // case change → pflow clear. Triggered on selection change OR clear.
+  // case change → pflow + connectivity clear. Triggered on selection
+  // change OR clear. Connectivity is bus-idx keyed and a new case has
+  // a new bus set, so a stale snapshot would grey out the wrong nodes.
   let prevSelection = useCaseStore.getState().selection;
   useCaseStore.subscribe((state) => {
     const next = state.selection;
     if (prevSelection !== next) {
       usePflowStore.getState().clearPflow();
+      useConnectivityStore.getState().clear();
     }
     prevSelection = next;
   });
@@ -114,6 +120,10 @@ export function __resetCascadeForTests(): void {
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
   useRunsStore.setState({ runs: {}, activeRunId: null });
   useAnimationStore.setState({ busOverlayByRun: {} });
+  useConnectivityStore.setState({
+    result: null,
+    energisedBusIdxes: new Set<string>(),
+  });
 }
 
 // Side-effect: defensive auto-wire on first import. `wireStoreCascade` is

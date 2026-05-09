@@ -12,6 +12,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from andes_app.api.auth import RequireToken
 from andes_app.api.schemas import (
     AlterableParamsResponse,
@@ -31,6 +33,45 @@ from andes_app.security.paths import (
 )
 
 router = APIRouter()
+
+
+class ConnectivityResponse(BaseModel):
+    """Wire shape of ``GET /sessions/{id}/connectivity`` (Unit 17).
+
+    Mirrors :class:`andes_app.core.connectivity_result.ConnectivityResult`
+    1:1. Bus idxes are stringified for stable JSON keying — case-file
+    formats may carry int or str idx values, but the SLD always stringifies
+    when keying nodes, so the wire payload normalises here.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    island_count: int = Field(
+        ...,
+        description=(
+            "Total number of islands, including singleton 'islands' of "
+            "one degree-zero bus. Equals ``len(Bus.islands)``. A fully-"
+            "interconnected case yields 1; tripping a critical line "
+            "yields >= 2."
+        ),
+    )
+    islands: list[list[str]] = Field(
+        ...,
+        description=(
+            "List of lists of bus idx values. Each inner list is one "
+            "island's bus membership. Index-aligned with ``Bus.islands`` "
+            "so the first entries are singleton islands for any "
+            "degree-zero buses; the larger connected components follow."
+        ),
+    )
+    islanded_bus_idxes: list[str] = Field(
+        ...,
+        description=(
+            "Convenience: just the degree-zero (lone) bus idxes. Each "
+            "appears as its own singleton in ``islands`` too. The SLD "
+            "uses this for the primary 'grey out' trigger."
+        ),
+    )
 
 
 def _manager(request: Request) -> SessionManager:
@@ -280,3 +321,84 @@ async def reload_case(
     except WorkerError as exc:
         raise _map_worker_error(exc) from exc
     return _topology_from_payload(payload)
+
+
+@router.get(
+    "/sessions/{session_id}/connectivity",
+    operation_id="getConnectivity",
+    summary="Compute connected-component island count + per-island bus membership.",
+    response_model=ConnectivityResponse,
+    responses={
+        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
+        404: {"model": ProblemDetails, "description": "Session not found or already closed."},
+        409: {
+            "model": ProblemDetails,
+            "description": "No case has been loaded into this session yet.",
+        },
+        422: {
+            "model": ProblemDetails,
+            "description": (
+                "ANDES setup() failed before the connectivity check could run; "
+                "call POST /api/sessions/{id}/reload to recover."
+            ),
+        },
+    },
+)
+async def get_connectivity(
+    session_id: str,
+    request: Request,
+    _: RequireToken,
+) -> ConnectivityResponse:
+    """Run :meth:`ss.connectivity` on the loaded System and return the
+    island summary — Unit 17.
+
+    Per the v2.0 plan's Unit 17 auto-fix, this is **post-run only**.
+    The substrate does not extend the streaming pipeline's
+    ``VAR_GROUPS`` schema with per-frame island metadata; the UI calls
+    this endpoint manually (e.g., after a TDS run completes) via the
+    "Recompute connectivity" button on the SLD overlay.
+
+    The route requires a loaded case; ``ss.setup()`` is auto-called by
+    the wrapper if it hasn't already been (matching ``run_pflow`` /
+    ``run_eig`` behaviour). A ``SetupFailedError`` from the wrapper
+    surfaces as 422 with the standard reload-recovery hint.
+    """
+    mgr = _manager(request)
+    try:
+        payload = await mgr.invoke(session_id, "compute_connectivity", {})
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except WorkerError as exc:
+        # SetupFailedError → 422 with the reload hint; everything else
+        # falls through to ``_map_worker_error``'s standard mapping
+        # (no-case-loaded → 409, fallback → 500).
+        if exc.category == "SetupFailedError":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
+                ),
+            ) from exc
+        raise _map_worker_error(exc) from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "worker returned a non-dict payload for compute_connectivity: "
+                f"{type(payload).__name__}"
+            ),
+        )
+    return ConnectivityResponse(
+        island_count=int(payload.get("island_count", 0)),
+        islands=[
+            [str(idx) for idx in island]
+            for island in payload.get("islands") or []
+        ],
+        islanded_bus_idxes=[
+            str(idx) for idx in payload.get("islanded_bus_idxes") or []
+        ],
+    )

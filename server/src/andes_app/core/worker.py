@@ -387,6 +387,16 @@ def _handle_run_cpf_qv(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     )
 
 
+def _handle_compute_connectivity(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.compute_connectivity`` for Unit 17.
+
+    Returns a serialized :class:`ConnectivityResult` dict
+    (``island_count``, ``islands``, ``islanded_bus_idxes``). Empty
+    ``args`` — the routine takes no parameters.
+    """
+    return _serialize_dataclass(wrapper.compute_connectivity())
+
+
 def _handle_generate_measurements_from_pflow(
     wrapper: Wrapper, args: dict[str, Any]
 ) -> Any:
@@ -845,6 +855,9 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     # Unit 13 — SE (state estimation): two-step (generate measurements, run SE).
     "generate_measurements_from_pflow": _handle_generate_measurements_from_pflow,
     "run_se": _handle_run_se,
+    # Unit 17 — connectivity / island detection (post-run only; no per-frame
+    # streaming integration per the plan's auto-fix).
+    "compute_connectivity": _handle_compute_connectivity,
     # Unit 7 — snapshot save / restore / list / delete.
     "save_snapshot": _handle_save_snapshot,
     "restore_snapshot": _handle_restore_snapshot,
