@@ -10,18 +10,25 @@
  */
 import { create } from 'zustand';
 
-/** Identifier for a panel that can mount in the right-dock top region. */
+/** Identifier for a panel that can mount in the right-dock top region.
+ *
+ * Per Unit 6's KTD-6: ``tds-config`` was folded into the new ``analyze``
+ * panel as its TDS sub-mode. The Analyze panel hosts the routine
+ * sub-mode picker (PF / TDS / EIG) plus the per-routine result views
+ * (eigenvalue scatter, participation table, damping bar chart for
+ * EIG; the existing TdsConfigPanel for TDS; PFlow result placeholder).
+ */
 export type RightDockTopPanel =
   | 'inspector'
   | 'disturbance'
   | 'plot'
-  | 'tds-config';
+  | 'analyze';
 
 export const RIGHT_DOCK_TOP_PANELS: readonly RightDockTopPanel[] = [
   'inspector',
   'disturbance',
   'plot',
-  'tds-config',
+  'analyze',
 ] as const;
 
 /** Variable group selector forwarded by ``RunStream`` to ``start_tds``. */

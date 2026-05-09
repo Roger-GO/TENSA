@@ -68,7 +68,8 @@ describe('<PanelPickerTabs />', () => {
     expect(screen.getByTestId('panel-picker-tab-inspector')).toBeInTheDocument();
     expect(screen.getByTestId('panel-picker-tab-disturbance')).toBeInTheDocument();
     expect(screen.getByTestId('panel-picker-tab-plot')).toBeInTheDocument();
-    expect(screen.getByTestId('panel-picker-tab-tds-config')).toBeInTheDocument();
+    // Unit 6 (KTD-6) renamed ``tds-config`` → ``analyze``.
+    expect(screen.getByTestId('panel-picker-tab-analyze')).toBeInTheDocument();
   });
 
   it('Inspector is selected by default (matches v0.1)', () => {
@@ -97,7 +98,7 @@ describe('<PanelPickerTabs />', () => {
   it('cycles through all four panels', async () => {
     const user = userEvent.setup();
     render(<PanelPickerTabs />);
-    for (const id of ['disturbance', 'plot', 'tds-config', 'inspector'] as const) {
+    for (const id of ['disturbance', 'plot', 'analyze', 'inspector'] as const) {
       await user.click(screen.getByTestId(`panel-picker-tab-${id}`));
       expect(useUiStore.getState().activeRightDockTopPanel).toBe(id);
     }

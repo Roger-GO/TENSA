@@ -265,15 +265,15 @@ def _handle_run_pflow(wrapper: Wrapper, args: dict[str, Any]) -> Any:
 
 
 def _handle_generate_report(wrapper: Wrapper, args: dict[str, Any]) -> Any:
-    """Generate a routine report (Unit 4 of the v2.0 plan).
+    """Generate a routine report (Unit 4 of the v2.0 plan; Unit 6 added EIG).
 
-    Phase 1 routines: ``pflow``, ``tds``. Unit 6 widens this to
-    include ``eig`` once the EIG endpoint ships. The handler reaches
-    into the wrapper's loaded System (private accessor) — the report
+    Routines: ``pflow``, ``tds``, ``eig``. The handler reaches into
+    the wrapper's loaded System (private accessor) — the report
     generator does not mutate state, only reads + tempfile-roundtrips
-    the ``ss.PFlow.report()`` output.
+    the ``ss.PFlow.report()`` / ``ss.EIG.report()`` output.
     """
     from andes_app.core.report import (
+        EigReportPrerequisiteError,
         PflowNotConvergedError,
         ReportGenerationError,
         ReportRoutine,
@@ -282,9 +282,9 @@ def _handle_generate_report(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     )
 
     routine_raw = args.get("routine")
-    if routine_raw not in ("pflow", "tds"):
+    if routine_raw not in ("pflow", "tds", "eig"):
         raise AndesAppError(
-            f"unknown report routine: {routine_raw!r}; expected 'pflow' or 'tds'"
+            f"unknown report routine: {routine_raw!r}; expected 'pflow', 'tds', or 'eig'"
         )
     routine: ReportRoutine = routine_raw  # type: ignore[assignment]
 
@@ -292,12 +292,41 @@ def _handle_generate_report(wrapper: Wrapper, args: dict[str, Any]) -> Any:
 
     try:
         payload = generate_report(ss, routine)
-    except (PflowNotConvergedError, TdsNotRunError, ReportGenerationError):
+    except (
+        PflowNotConvergedError,
+        TdsNotRunError,
+        EigReportPrerequisiteError,
+        ReportGenerationError,
+    ):
         # Re-raise so AndesAppError handling at the worker boundary
         # forwards the subclass name as ``category`` for the routes
         # layer to map to the right HTTP status.
         raise
     return _serialize_dataclass(payload)
+
+
+def _handle_run_eig(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.run_eig`` for Unit 6.
+
+    Returns the serialized :class:`EigResult` dict (eigenvalues split
+    into ``{real, imag}`` pairs, damping ratios, frequencies, mode
+    count, state names, ``tds_initialized`` flag).
+    """
+    return _serialize_dataclass(wrapper.run_eig())
+
+
+def _handle_eig_participation(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Slice ``EIG.pfactors[mode_idx]`` and return per-state participation.
+
+    Returns ``{mode_idx, participation: [{state_name, factor}, ...]}``.
+    """
+    mode_idx = int(args["mode_idx"])
+    return wrapper.eig_participation(mode_idx)
+
+
+def _handle_eig_state_matrix(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Return ``EIG.As`` (and ``EIG.mu``) packed as a ``.mat`` blob."""
+    return wrapper.get_eig_state_matrix()
 
 
 def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
@@ -641,6 +670,9 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "alterable_params": _handle_alterable_params,
     "export_bundle": _handle_export_bundle,
     "generate_report": _handle_generate_report,
+    "run_eig": _handle_run_eig,
+    "eig_participation": _handle_eig_participation,
+    "eig_state_matrix": _handle_eig_state_matrix,
     # run_tds is special-cased — it needs the abort_event. Dispatched separately.
 }
 

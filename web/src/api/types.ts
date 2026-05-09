@@ -130,6 +130,64 @@ export interface AlterableParamsResponse {
   params: string[];
 }
 
+// ---- EIG result (Unit 6 — eigenvalue analysis) ---------------------------
+
+/**
+ * JSON-friendly complex number ``{real, imag}``. Mirrors the substrate's
+ * :class:`andes_app.core.eig_result.ComplexNumber` 1:1. Each ANDES
+ * eigenvalue (``EIG.mu[i]``) is split this way for transport so the
+ * JSON payload doesn't need an out-of-band complex encoding.
+ */
+export interface ComplexNumber {
+  real: number;
+  imag: number;
+}
+
+/**
+ * One per-state participation factor row entry, returned by
+ * ``GET /sessions/{id}/eig/modes/{mode_idx}/participation``.
+ *
+ * ``factor`` is a real-valued participation magnitude by ANDES
+ * convention (see ``calc_pfactor`` in ``routines/eig.py``).
+ */
+export interface ParticipationFactor {
+  state_name: string;
+  factor: number;
+}
+
+/**
+ * EIG (eigenvalue analysis) result returned by ``POST /sessions/{id}/eig``.
+ *
+ * The state matrix itself (``As``) is intentionally omitted — for NPCC
+ * 140-bus it would be ~110k entries. UI fetches it on demand via
+ * ``GET /eig/state-matrix.mat``.
+ *
+ * Per Unit 1a spike: ``mode_count`` is the *reduced* state count
+ * (post fold/elimination), not ``dae.n``. Stock IEEE 14 → 0; full
+ * IEEE 14 + dyr → 62; kundur_full → 52.
+ *
+ * ``tds_initialized`` is always ``true`` after a successful EIG.run —
+ * the UI surfaces an info banner per Unit 6's Approach addendum so
+ * users know the dynamic state has been initialised as a side effect.
+ */
+export interface EigResult {
+  eigenvalues: ComplexNumber[];
+  damping_ratios: number[];
+  frequencies_hz: number[];
+  mode_count: number;
+  state_count: number;
+  state_names: string[];
+  tds_initialized: boolean;
+}
+
+/**
+ * Wire shape of ``GET /sessions/{id}/eig/modes/{mode_idx}/participation``.
+ */
+export interface EigParticipationResponse {
+  mode_idx: number;
+  participation: ParticipationFactor[];
+}
+
 // ---- branded types ---------------------------------------------------------
 
 /**

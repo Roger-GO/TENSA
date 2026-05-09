@@ -1,13 +1,15 @@
-"""Report endpoints (Unit 4 of the v2.0 plan).
+"""Report endpoints (Unit 4 of the v2.0 plan; Unit 6 widened to ``eig``).
 
-Hosts ``GET /sessions/{id}/report?routine={pflow|tds}`` which renders a
-human-readable plain-text report plus a structured table list ready for
-LaTeX serialisation on the frontend.
+Hosts ``GET /sessions/{id}/report?routine={pflow|tds|eig}`` which
+renders a human-readable plain-text report plus a structured table
+list ready for LaTeX serialisation on the frontend.
 
-Phase 1 endpoint scope: ``pflow|tds`` only. The route's enum widens to
-include ``eig`` in Unit 6 (alongside the EIG analysis routine itself);
-until then a request with ``routine=eig`` returns 422 with a polite
-"ships in Unit 6" message so an early-call agent gets a clear signal.
+Routines:
+
+- ``pflow`` — requires a converged power-flow result (409 otherwise).
+- ``tds`` — requires a completed TDS run (409 otherwise).
+- ``eig`` — requires ``EIG.run()`` to have populated ``EIG.mu`` /
+  ``EIG.As`` (409 otherwise). Added in Unit 6.
 
 The structured table parser is best-effort — for any section the
 parser can't recognise the frontend falls back to the verbatim plain
@@ -38,10 +40,10 @@ router = APIRouter()
 
 
 class ReportRoutineEnum(str, Enum):
-    """Routines that can be reported. Phase 1 (Unit 4) only honours
-    ``pflow`` and ``tds``; ``eig`` is accepted at the wire layer but
-    immediately rejected with 422 so Unit 6 can land without breaking
-    any caller already passing it."""
+    """Routines that can be reported. ``eig`` was added in Unit 6 once
+    the EIG analysis routine itself shipped — earlier Phase 1 builds
+    accepted ``eig`` at the wire layer but rejected with 422; that stub
+    is gone now."""
 
     PFLOW = "pflow"
     TDS = "tds"
@@ -139,7 +141,11 @@ def _map_worker_error(exc: WorkerError) -> HTTPException:
             status_code=status.HTTP_409_CONFLICT,
             detail=exc.detail,
         )
-    if exc.category in {"PflowNotConvergedError", "TdsNotRunError"}:
+    if exc.category in {
+        "PflowNotConvergedError",
+        "TdsNotRunError",
+        "EigReportPrerequisiteError",
+    }:
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=exc.detail,
@@ -170,14 +176,15 @@ def _map_worker_error(exc: WorkerError) -> HTTPException:
             "model": ProblemDetails,
             "description": (
                 "The routine pre-condition is not met — for ``pflow``, no "
-                "converged PFlow result; for ``tds``, no completed TDS run."
+                "converged PFlow result; for ``tds``, no completed TDS run; "
+                "for ``eig``, EIG has not been run yet on this session."
             ),
         },
         422: {
             "model": ProblemDetails,
             "description": (
-                "The requested routine is not yet supported in Phase 1. "
-                "``eig`` ships in Unit 6 of the v2.0 plan."
+                "The requested routine is outside the schema enum. "
+                "Validation-layer rejection."
             ),
         },
         500: {
@@ -197,28 +204,16 @@ async def get_report(
         ...,
         description=(
             "Which routine to report on. ``pflow`` requires a converged "
-            "power-flow result; ``tds`` requires a completed TDS run. "
-            "``eig`` is accepted at the schema level but rejected with "
-            "422 until Unit 6 ships."
+            "power-flow result; ``tds`` requires a completed TDS run; "
+            "``eig`` requires ``EIG.run()`` to have populated the "
+            "eigenvalue vector (Unit 6)."
         ),
     ),
 ) -> ReportResponse:
     """Produce a routine report and return ``{plain_text, structured}``.
 
-    Phase 1 (Unit 4) handles ``pflow`` and ``tds`` only. ``eig`` is
-    deliberately accepted by the schema (so the frontend's enum doesn't
-    have to widen in lockstep with Unit 6) but immediately rejected
-    with 422 + a forward-looking message.
+    Routines: ``pflow``, ``tds``, ``eig`` (Unit 6 widened the enum).
     """
-    if routine == ReportRoutineEnum.EIG:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "EIG report variant ships in Unit 6 of the v2.0 plan; "
-                "use ``pflow`` or ``tds`` until then."
-            ),
-        )
-
     mgr = _manager(request)
     args: dict[str, Any] = {"routine": routine.value}
     try:

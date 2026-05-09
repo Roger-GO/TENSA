@@ -67,8 +67,10 @@ test.fixme(
     await dialog.getByTestId('add-event-save').click();
     await expect(dialog).not.toBeVisible();
 
-    // Switch to TdsConfigPanel, set tf=2, enable gen_state.
-    await page.getByTestId('panel-picker-tab-tds-config').click();
+    // Switch to Analyze panel → TDS sub-mode (TDS config form moved
+    // here in Unit 6 per KTD-6), set tf=2, enable gen_state.
+    await page.getByTestId('panel-picker-tab-analyze').click();
+    await page.getByTestId('analyze-sub-mode-tds').click();
     await expect(page.getByTestId('tds-config-panel')).toBeVisible();
     const tfField = page.getByTestId('field-tds-config-tf');
     await tfField.fill('2');
