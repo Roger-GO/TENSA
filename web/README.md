@@ -1,7 +1,43 @@
-# andes-app web (v0.1)
+# andes-app web (v0.2)
 
 Vite 6 + React 19 + TypeScript + Tailwind v4 + Radix Primitives. Talks to the
 `andes-app` substrate over HTTP (`/api/*`) and WebSocket (`/ws/*`).
+
+## What's in v0.2
+
+The v0.2 release builds on v0.1.y with the transient-simulation wedge: define
+disturbances on a timeline, run TDS, watch frames stream into a plot in real
+time, and scrub backward/forward through the result.
+
+- **TDS streaming pipeline** — WebSocket transport + Apache Arrow IPC decode,
+  geometric typed-array storage in the runs slice, UI-clamped 30 Hz output
+  rate, automatic reconnect with `last_seq` resume, terminal-state taxonomy
+  for buffer-evicted / run-not-found / auth-failed paths.
+- **Disturbance editor** — `DisturbancePanel` + `DisturbanceTimeline` with
+  draggable Fault / Toggle / Alter markers. Form validation per-row;
+  per-disturbance error badges; commit only when all rows valid. Empty
+  disturbances list runs a free-evolution simulation (no spurious 422).
+- **Animated SLD overlay** — bus voltage band colors update at the substrate's
+  clamped 30 Hz rate; selective redraw for only changed buses; single shared
+  `requestAnimationFrame` loop driven from the App root.
+- **Plot library** — stacked uPlot instances per variable group with shared
+  cursor sync; `VariableTreePicker` checkbox tree for column selection;
+  `ScrubControl` for time-axis scrubbing across plot + SLD in lockstep.
+- **Run lifecycle controls** — `RunButton` extends from PF-only to PF-or-TDS
+  with auto-mode based on disturbance presence + manual override; abort flow
+  via `POST /sessions/{id}/abort`; `RunStatusBadge` reflects connection +
+  run state.
+- **Numerical-error surfaces** — non-modal `NumericalErrorBanner` above the
+  right dock + slide-out `NumericalErrorDetails` (last 5 frames + worst
+  mismatch column). Inspector + scrub remain accessible.
+- **Panel picker tab strip** — right-dock top region cycles between Inspector,
+  Disturbances, Plot, and TDS config panels. Auto-switches to Plot on run
+  start; locks the Disturbances tab while a run is in flight.
+- **TDS config panel** — `tf`, `h` (override or substrate-adaptive), variable
+  groups (`bus_v` / `gen_state` / `line_flow`), `max_rate_hz` UI clamp.
+
+Full scope and rationale:
+[`docs/plans/2026-05-07-003-feat-v02-ui-disturbance-tds-streaming-plan.md`](../docs/plans/2026-05-07-003-feat-v02-ui-disturbance-tds-streaming-plan.md).
 
 ## What's in v0.1.y
 

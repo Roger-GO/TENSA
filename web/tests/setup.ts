@@ -17,6 +17,24 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
     ResizeObserverStub;
 }
 
+// jsdom does not implement window.matchMedia. uPlot calls it at module
+// load to detect device-pixel-ratio changes; merely importing it under
+// jsdom would throw without this stub. The plot tests vi.mock uPlot
+// outright; this polyfill exists so non-plot tests that transitively
+// import it (e.g., the App smoke test) don't crash on module load.
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
+  window.matchMedia = (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  });
+}
+
 // jsdom also lacks DOMRect / pointer-capture helpers some Radix components
 // reach for. The polyfills below are scoped to what the Slider + Select
 // content positioning code actually invokes.

@@ -14,6 +14,12 @@ sessions on substrate restart. See
 [`docs/plans/2026-05-08-002-feat-v01y-deletion-layout-prerequisites-plan.md`](docs/plans/2026-05-08-002-feat-v01y-deletion-layout-prerequisites-plan.md)
 for the v0.1.y feature delta.
 
+The web UI's v0.2 release adds TDS streaming, a disturbance editor with timeline
+markers, an animated SLD overlay, a uPlot-based plot library with scrub control,
+and a per-region panel picker. See
+[`docs/plans/2026-05-07-003-feat-v02-ui-disturbance-tds-streaming-plan.md`](docs/plans/2026-05-07-003-feat-v02-ui-disturbance-tds-streaming-plan.md)
+for the full v0.2 scope.
+
 ## Quick Start
 
 You will need Python 3.12+ and ANDES 2.0.x installed.
