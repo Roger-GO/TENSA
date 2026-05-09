@@ -1354,6 +1354,22 @@ _REFERENCE_ATTRS: dict[str, tuple[str, ...]] = {
     "PQ": ("bus",),
     "ZIP": ("bus",),
     "Shunt": ("bus",),
+    # REGCA1 attaches directly to a Bus via its mandatory ``bus`` IdxParam
+    # (regca1.py:22).
+    "REGCA1": ("bus",),
+    # The remaining Unit 8 dynamic models reference SynGen (``syn``),
+    # Exciter (``avr``), or other non-Bus models — not a Bus directly. The
+    # cascade walker only triggers on Bus deletion, so these entries carry
+    # an empty tuple: present to satisfy the
+    # _find_dependents-coverage invariant (see
+    # ``test_find_dependents_covers_every_whitelisted_model``), but
+    # contributing no Bus-deletion fan-out.
+    "IEEEX1": (),
+    "ESDC2A": (),
+    "SEXS": (),
+    "IEEEG1": (),
+    "TGOV1": (),
+    "IEEEST": (),
 }
 
 
@@ -1498,6 +1514,185 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         ParamMeta("Vn", "number", required=True, unit="kV"),
         ParamMeta("g", "number", unit="pu"),
         ParamMeta("b", "number", unit="pu"),
+    ),
+    # ----- Dynamic models (Unit 8) -----
+    # These extend the topology-edit surface to the 7 highest-priority dynamic
+    # device classes researchers attach to synchronous machines: two type-1
+    # exciters (IEEEX1, ESDC2A), the simplified SEXS exciter, two governors
+    # (IEEEG1 multi-stage steam, TGOV1 single-lag), the IEEEST PSS, and the
+    # REGCA1 grid-following converter for renewables. Each entry mirrors the
+    # NumParam declarations on the corresponding ANDES model class (excluding
+    # ExtParam, which is sourced from a referenced model and not editable).
+    #
+    # IdxParam refs to non-Bus models (syn → SynGen, syn2 → SynGen optional,
+    # avr → Exciter, gen → StaticGen, busr → Bus optional remote, busf →
+    # BusFreq optional) carry kind="string" because the substrate has no
+    # picker for these device classes today; the form falls back to a plain
+    # text input. The mandatory `bus` ref on REGCA1 reuses kind="bus_idx" so
+    # the existing Bus picker drives it.
+    "IEEEX1": (
+        # idx + name from ModelData; syn from ExcBaseData (excbase.py:23,
+        # mandatory=True). NumParams from EXDC2Data (exdc2.py:16-93).
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("syn", "string", required=True),
+        ParamMeta("TR", "number", unit="s"),
+        ParamMeta("TA", "number", unit="s"),
+        ParamMeta("TC", "number", unit="s"),
+        ParamMeta("TB", "number", unit="s"),
+        ParamMeta("TE", "number", unit="s"),
+        ParamMeta("TF1", "number", unit="s"),
+        ParamMeta("KF1", "number", unit="pu"),
+        ParamMeta("KA", "number", unit="pu"),
+        ParamMeta("KE", "number", unit="pu"),
+        ParamMeta("VRMAX", "number", unit="pu"),
+        ParamMeta("VRMIN", "number", unit="pu"),
+        ParamMeta("E1", "number", unit="pu"),
+        ParamMeta("SE1", "number", unit="pu"),
+        ParamMeta("E2", "number", unit="pu"),
+        ParamMeta("SE2", "number", unit="pu"),
+    ),
+    "ESDC2A": (
+        # idx + name from ModelData; syn from ExcBaseData (excbase.py:23).
+        # NumParams from ESDC2AData (esdc2a.py:14-92). `Switch` is a numeric
+        # mode flag that PSS/E doesn't implement but ANDES exposes.
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("syn", "string", required=True),
+        ParamMeta("TR", "number", unit="s"),
+        ParamMeta("KA", "number", unit="pu"),
+        ParamMeta("TA", "number", unit="s"),
+        ParamMeta("TB", "number", unit="s"),
+        ParamMeta("TC", "number", unit="s"),
+        ParamMeta("VRMAX", "number", unit="pu"),
+        ParamMeta("VRMIN", "number", unit="pu"),
+        ParamMeta("KE", "number", unit="pu"),
+        ParamMeta("TE", "number", unit="s"),
+        ParamMeta("KF", "number", unit="pu"),
+        ParamMeta("TF1", "number", unit="s"),
+        ParamMeta("Switch", "number"),
+        ParamMeta("E1", "number", unit="pu"),
+        ParamMeta("SE1", "number", unit="pu"),
+        ParamMeta("E2", "number", unit="pu"),
+        ParamMeta("SE2", "number", unit="pu"),
+    ),
+    "SEXS": (
+        # idx + name from ModelData; syn from ExcBaseData (excbase.py:23).
+        # NumParams from SEXSData (sexs.py:13-43).
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("syn", "string", required=True),
+        ParamMeta("TATB", "number"),
+        ParamMeta("TB", "number", unit="s"),
+        ParamMeta("K", "number", unit="pu"),
+        ParamMeta("TE", "number", unit="s"),
+        ParamMeta("EMIN", "number", unit="pu"),
+        ParamMeta("EMAX", "number", unit="pu"),
+    ),
+    "IEEEG1": (
+        # idx + name from ModelData; syn (mandatory) + Tn + wref0 from
+        # TGBaseData (tgbase.py:17-32). syn2 (optional) plus the K, T*, U*,
+        # PMAX/PMIN, K1-K8 NumParams from IEEEG1Data (ieeeg1.py:16-104).
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("syn", "string", required=True),
+        ParamMeta("syn2", "string"),
+        ParamMeta("Tn", "number", unit="MVA"),
+        ParamMeta("wref0", "number", unit="pu"),
+        ParamMeta("K", "number", unit="pu"),
+        ParamMeta("T1", "number", unit="s"),
+        ParamMeta("T2", "number", unit="s"),
+        ParamMeta("T3", "number", unit="s"),
+        ParamMeta("UO", "number", unit="pu/s"),
+        ParamMeta("UC", "number", unit="pu/s"),
+        ParamMeta("PMAX", "number", unit="pu"),
+        ParamMeta("PMIN", "number", unit="pu"),
+        ParamMeta("T4", "number", unit="s"),
+        ParamMeta("K1", "number", unit="pu"),
+        ParamMeta("K2", "number", unit="pu"),
+        ParamMeta("T5", "number", unit="s"),
+        ParamMeta("K3", "number", unit="pu"),
+        ParamMeta("K4", "number", unit="pu"),
+        ParamMeta("T6", "number", unit="s"),
+        ParamMeta("K5", "number", unit="pu"),
+        ParamMeta("K6", "number", unit="pu"),
+        ParamMeta("T7", "number", unit="s"),
+        ParamMeta("K7", "number", unit="pu"),
+        ParamMeta("K8", "number", unit="pu"),
+    ),
+    "TGOV1": (
+        # idx + name from ModelData; syn + Tn + wref0 from TGBaseData
+        # (tgbase.py:17-32). NumParams from TGOV1Data (tgov1.py:10-42).
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("syn", "string", required=True),
+        ParamMeta("Tn", "number", unit="MVA"),
+        ParamMeta("wref0", "number", unit="pu"),
+        ParamMeta("R", "number", unit="pu"),
+        ParamMeta("VMAX", "number", unit="pu"),
+        ParamMeta("VMIN", "number", unit="pu"),
+        ParamMeta("T1", "number", unit="s"),
+        ParamMeta("T2", "number", unit="s"),
+        ParamMeta("T3", "number", unit="s"),
+        ParamMeta("Dt", "number", unit="pu"),
+    ),
+    "IEEEST": (
+        # idx + name from ModelData; avr (mandatory) from PSSBaseData
+        # (pssbase.py:19-20). MODE (mandatory), busr/busf (optional refs),
+        # and A1-A6, T1-T6, KS, LSMAX/LSMIN, VCU/VCL from IEEESTData
+        # (ieeest.py:15-41).
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("avr", "string", required=True),
+        ParamMeta("MODE", "number", required=True),
+        ParamMeta("busr", "string"),
+        ParamMeta("busf", "string"),
+        ParamMeta("A1", "number", unit="s"),
+        ParamMeta("A2", "number", unit="s"),
+        ParamMeta("A3", "number", unit="s"),
+        ParamMeta("A4", "number", unit="s"),
+        ParamMeta("A5", "number", unit="s"),
+        ParamMeta("A6", "number", unit="s"),
+        ParamMeta("T1", "number", unit="s"),
+        ParamMeta("T2", "number", unit="s"),
+        ParamMeta("T3", "number", unit="s"),
+        ParamMeta("T4", "number", unit="s"),
+        ParamMeta("T5", "number", unit="s"),
+        ParamMeta("T6", "number", unit="s"),
+        ParamMeta("KS", "number", unit="pu"),
+        ParamMeta("LSMAX", "number", unit="pu"),
+        ParamMeta("LSMIN", "number", unit="pu"),
+        ParamMeta("VCU", "number", unit="pu"),
+        ParamMeta("VCL", "number", unit="pu"),
+    ),
+    "REGCA1": (
+        # idx + name from ModelData; bus (mandatory ACNode → Bus) and gen
+        # (mandatory StaticGen) from REGCA1Data (regca1.py:22-31). NumParams
+        # Sn, Tg, Rrpwr, Brkpt, Zerox, Lvplsw, Lvpl1, Volim, Lvpnt0/1,
+        # Iolim, Tfltr, Khv, Iqrmax/min, Accel, gammap, gammaq from
+        # REGCA1Data (regca1.py:32-108).
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("bus", "bus_idx", required=True),
+        ParamMeta("gen", "string", required=True),
+        ParamMeta("Sn", "number", unit="MVA"),
+        ParamMeta("Tg", "number", unit="s"),
+        ParamMeta("Rrpwr", "number", unit="pu"),
+        ParamMeta("Brkpt", "number", unit="pu"),
+        ParamMeta("Zerox", "number", unit="pu"),
+        ParamMeta("Lvplsw", "number"),
+        ParamMeta("Lvpl1", "number", unit="pu"),
+        ParamMeta("Volim", "number", unit="pu"),
+        ParamMeta("Lvpnt1", "number", unit="pu"),
+        ParamMeta("Lvpnt0", "number", unit="pu"),
+        ParamMeta("Iolim", "number", unit="pu"),
+        ParamMeta("Tfltr", "number", unit="s"),
+        ParamMeta("Khv", "number", unit="pu"),
+        ParamMeta("Iqrmax", "number", unit="pu"),
+        ParamMeta("Iqrmin", "number", unit="pu"),
+        ParamMeta("Accel", "number"),
+        ParamMeta("gammap", "number"),
+        ParamMeta("gammaq", "number"),
     ),
 }
 

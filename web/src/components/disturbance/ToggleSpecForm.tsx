@@ -27,6 +27,17 @@ const TOGGLEABLE_MODELS: ReadonlyArray<{ value: string; label: string }> = [
   { value: 'PQ', label: 'PQ load' },
   { value: 'ZIP', label: 'ZIP load' },
   { value: 'Shunt', label: 'Shunt' },
+  // Unit 8 dynamic-model whitelist additions. Toggle (in-service flag) is
+  // a generic ANDES capability — these will read as "no devices in
+  // topology" until a follow-up unit surfaces a dynamic-device bucket on
+  // the topology snapshot.
+  { value: 'IEEEX1', label: 'IEEEX1 (DC type-1 exciter)' },
+  { value: 'ESDC2A', label: 'ESDC2A (PSS/E exciter)' },
+  { value: 'SEXS', label: 'SEXS (simplified exciter)' },
+  { value: 'IEEEG1', label: 'IEEEG1 (steam governor)' },
+  { value: 'TGOV1', label: 'TGOV1 (single-lag governor)' },
+  { value: 'IEEEST', label: 'IEEEST (PSS)' },
+  { value: 'REGCA1', label: 'REGCA1 (renewable converter)' },
 ];
 
 export interface ToggleSpecFormProps {

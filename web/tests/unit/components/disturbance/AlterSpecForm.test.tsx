@@ -117,6 +117,44 @@ describe('<AlterSpecForm />', () => {
     expect(src.querySelector('option')?.textContent).toMatch(/Loading/);
   });
 
+  it('exposes Unit 8 dynamic models (IEEEX1, ESDC2A, IEEEG1, TGOV1, IEEEST, SEXS, REGCA1) in the model picker', () => {
+    render(
+      withQueryClient(
+        <AlterSpecForm
+          spec={{ ...blankAlterSpec(), model: 'PQ' }}
+          onChange={() => {}}
+        />,
+      ),
+    );
+    const select = screen.getByTestId('alter-model') as HTMLSelectElement;
+    const values = Array.from(select.querySelectorAll('option')).map((o) => o.value);
+    for (const m of ['IEEEX1', 'ESDC2A', 'IEEEG1', 'TGOV1', 'IEEEST', 'SEXS', 'REGCA1']) {
+      expect(values).toContain(m);
+    }
+  });
+
+  it('selecting a dynamic model with no devices in topology disables the device picker with explanation', async () => {
+    const user = userEvent.setup();
+    let current: AlterSpec = { ...blankAlterSpec(), model: 'PQ', dev_idx: 'L1' };
+    const onChange = vi.fn((next: AlterSpec) => {
+      current = next;
+    });
+    const { rerender } = render(
+      withQueryClient(<AlterSpecForm spec={current} onChange={onChange} />),
+    );
+    await user.selectOptions(screen.getByTestId('alter-model'), 'IEEEX1');
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'IEEEX1', dev_idx: '', src: '' }),
+    );
+    // Re-render with the updated spec; topology mock has no IEEEX1 bucket so
+    // devicesForModel returns []; the device picker should disable with an
+    // empty-state placeholder.
+    rerender(withQueryClient(<AlterSpecForm spec={current} onChange={onChange} />));
+    const dev = screen.getByTestId('alter-dev-idx') as HTMLSelectElement;
+    expect(dev).toBeDisabled();
+    expect(dev.querySelector('option')?.textContent).toMatch(/No IEEEX1s in topology/);
+  });
+
   it('flags missing src as required', async () => {
     let validity: Record<string, string> = {};
     render(
