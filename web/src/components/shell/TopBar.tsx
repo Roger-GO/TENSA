@@ -2,6 +2,7 @@ import { forwardRef } from 'react';
 import type { HTMLAttributes, ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 import { BundleExportButton, BundleExportDialog } from '@/components/bundle/BundleExportDialog';
+import { ReportDialog, ReportDialogButton } from '@/components/reports/ReportDialog';
 
 /**
  * TopBar. Fixed-height (~44px) bar with three slots — left, center, right —
@@ -63,9 +64,11 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
       </div>
       <div data-slot="right" className="flex min-w-0 flex-1 items-center justify-end gap-2">
         {right}
+        <ReportDialogButton />
         <BundleExportButton />
       </div>
       <BundleExportDialog />
+      <ReportDialog />
     </header>
   );
 });

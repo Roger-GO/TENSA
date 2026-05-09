@@ -264,6 +264,42 @@ def _handle_run_pflow(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.run_pflow())
 
 
+def _handle_generate_report(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Generate a routine report (Unit 4 of the v2.0 plan).
+
+    Phase 1 routines: ``pflow``, ``tds``. Unit 6 widens this to
+    include ``eig`` once the EIG endpoint ships. The handler reaches
+    into the wrapper's loaded System (private accessor) — the report
+    generator does not mutate state, only reads + tempfile-roundtrips
+    the ``ss.PFlow.report()`` output.
+    """
+    from andes_app.core.report import (
+        PflowNotConvergedError,
+        ReportGenerationError,
+        ReportRoutine,
+        TdsNotRunError,
+        generate_report,
+    )
+
+    routine_raw = args.get("routine")
+    if routine_raw not in ("pflow", "tds"):
+        raise AndesAppError(
+            f"unknown report routine: {routine_raw!r}; expected 'pflow' or 'tds'"
+        )
+    routine: ReportRoutine = routine_raw  # type: ignore[assignment]
+
+    ss = wrapper._require_loaded()  # noqa: SLF001 — internal access by design
+
+    try:
+        payload = generate_report(ss, routine)
+    except (PflowNotConvergedError, TdsNotRunError, ReportGenerationError):
+        # Re-raise so AndesAppError handling at the worker boundary
+        # forwards the subclass name as ``category`` for the routes
+        # layer to map to the right HTTP status.
+        raise
+    return _serialize_dataclass(payload)
+
+
 def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     """Assemble a reproducibility-bundle ``.zip`` (Unit 3 of the v2.0 plan).
 
@@ -604,6 +640,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "run_pflow": _handle_run_pflow,
     "alterable_params": _handle_alterable_params,
     "export_bundle": _handle_export_bundle,
+    "generate_report": _handle_generate_report,
     # run_tds is special-cased — it needs the abort_event. Dispatched separately.
 }
 
