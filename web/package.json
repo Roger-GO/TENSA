@@ -48,6 +48,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-resizable-panels": "^2.1.7",
+    "uplot": "^1.6.32",
     "uuid": "^14.0.0",
     "zustand": "^5.0.2"
   },
