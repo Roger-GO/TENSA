@@ -27,9 +27,13 @@ import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import { andesClient, ProblemDetailsError, TIMEOUTS } from './client';
 import { parseSessionId, parseRunId } from './types';
 import type {
+  AbortResponse,
+  AddDisturbancesRequest,
+  AddDisturbancesResponse,
   AddElementRequest,
   AlterableParamsResponse,
   BlankSystemResponse,
+  DisturbanceSpec,
   EditElementRequest,
   ElementCreated,
   LoadCaseRequest,
@@ -50,6 +54,8 @@ import { useAuthStore } from '@/store/auth';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
+import { useDisturbanceStore } from '@/store/disturbance';
+import { useRunsStore } from '@/store/runs';
 
 // ---- query keys -----------------------------------------------------------
 
@@ -697,6 +703,115 @@ export function useUndoLastEdit(): UseMutationResult<TopologySummary, Error, Ses
     onSuccess: (data, sessionId) => {
       queryClient.setQueryData(queryKeys.topology(sessionId), data);
       useCaseStore.getState().setTopology(data);
+    },
+  });
+}
+
+// ---- TDS run lifecycle (Unit 7) -------------------------------------------
+
+export interface CommitDisturbancesVars {
+  sessionId: SessionId;
+  /** Local disturbance specs to commit. Caller MUST ensure ``length >= 1`` —
+   *  the substrate's ``AddDisturbancesRequest`` has ``min_length=1`` and
+   *  rejects an empty list with 422. The Unit 7 RunButton path skips this
+   *  call entirely when the local list is empty. */
+  disturbances: readonly DisturbanceSpec[];
+}
+
+/**
+ * ``POST /sessions/{id}/disturbances``. Commits the local disturbance
+ * editor list to the substrate ahead of a TDS run. On 201, the
+ * disturbance slice's ``markCommitted`` flag is flipped so the UI
+ * reflects "in sync". 422 surfaces as a thrown ``ProblemDetailsError`` —
+ * the caller (Unit 7's RunButton) inspects the error and shows it on the
+ * failing disturbance row rather than as a global toast.
+ */
+export function useCommitDisturbances(): UseMutationResult<
+  AddDisturbancesResponse,
+  Error,
+  CommitDisturbancesVars
+> {
+  return useMutation({
+    mutationFn: async ({ sessionId, disturbances }: CommitDisturbancesVars) => {
+      const body: AddDisturbancesRequest = {
+        // Spread to convert ``readonly`` into a mutable array shape so the
+        // generated type's mutable ``disturbances`` field accepts it.
+        disturbances: [...disturbances],
+      };
+      return await andesClient.post<AddDisturbancesResponse>(
+        `/sessions/${encodeURIComponent(sessionId)}/disturbances`,
+        { body, timeoutMs: TIMEOUTS.workspace },
+      );
+    },
+    onSuccess: () => {
+      useDisturbanceStore.getState().markCommitted();
+    },
+  });
+}
+
+/**
+ * ``POST /sessions/{id}/abort`` (Unit 1b endpoint). Signals the worker to
+ * cooperatively halt the active TDS run at the next ``callpert`` tick.
+ * The actual stream end is asynchronous — the WS emits the terminal
+ * ``done`` message with ``final_t < tf`` once the integration loop exits.
+ *
+ * On a successful HTTP response, the active run's ``abortedLocally`` flag
+ * is set to true so the runs slice can distinguish user-initiated abort
+ * from numerical instability when the eventual ``done`` arrives (see Unit
+ * 7's state-inference rules).
+ */
+export function useAbortRun(): UseMutationResult<AbortResponse, Error, SessionId> {
+  return useMutation({
+    mutationFn: async (sessionId: SessionId) => {
+      return await andesClient.post<AbortResponse>(
+        `/sessions/${encodeURIComponent(sessionId)}/abort`,
+        { body: {}, timeoutMs: TIMEOUTS.sessionLifecycle },
+      );
+    },
+    onSuccess: () => {
+      const activeRunId = useRunsStore.getState().activeRunId;
+      if (activeRunId !== null) {
+        useRunsStore.getState().setAbortedLocally(activeRunId, true);
+      }
+    },
+  });
+}
+
+/**
+ * ``POST /sessions/{id}/reload`` wrapped for the v0.2 "Reset run" affordance.
+ * Same wire endpoint as ``useReloadCase`` but with different post-success
+ * cleanup tailored to the TDS run lifecycle:
+ *
+ * - Drop the active run's frame buffer (``runs.resetRun(activeRunId)``).
+ * - Clear the disturbance commit flag (the substrate's reload threw away
+ *   the committed disturbance list; the timeline editor's local list is
+ *   preserved per the v0.2 plan's Open Questions decision so the user can
+ *   retry without redefining everything).
+ * - Invalidate topology + clear PF cache (mirrors ``useReloadCase`` because
+ *   the underlying endpoint is the same).
+ */
+export function useResetRun(): UseMutationResult<TopologySummary, Error, SessionId> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sessionId: SessionId) => {
+      return await andesClient.post<TopologySummary>(
+        `/sessions/${encodeURIComponent(sessionId)}/reload`,
+        { body: {}, timeoutMs: TIMEOUTS.caseLoad },
+      );
+    },
+    onSuccess: (data, sessionId) => {
+      queryClient.setQueryData(queryKeys.topology(sessionId), data);
+      useCaseStore.getState().setTopology(data);
+      usePflowStore.getState().clearPflow();
+      const activeRunId = useRunsStore.getState().activeRunId;
+      if (activeRunId !== null) {
+        useRunsStore.getState().resetRun(activeRunId);
+      }
+      // Disturbance timeline list is preserved (per the plan's Open
+      // Questions decision); only the "committed against substrate" flag
+      // is reset so the next Run TDS re-commits the (possibly-edited)
+      // local list.
+      useDisturbanceStore.setState({ committed: false, dirty: true });
     },
   });
 }

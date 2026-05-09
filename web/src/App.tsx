@@ -5,7 +5,14 @@ import { TokenPasteModal } from '@/components/auth/TokenPasteModal';
 import { CaseNav } from '@/components/case/CaseNav';
 import { ElementInspector } from '@/components/inspector/ElementInspector';
 import { ResultsTable } from '@/components/inspector/ResultsTable';
-import { RunButton } from '@/components/pflow/RunButton';
+// v0.2 RunButton replaces the v0.1 PF-only one — handles BOTH PF and TDS,
+// branches on a UI mode toggle that defaults to TDS when the disturbance
+// editor has any disturbances. The v0.1 RunButton file is kept untouched
+// so its tests + paths still pass; this top-level mount just doesn't
+// reference it any more.
+import { RunButton } from '@/components/tds/RunButton';
+import { RunStatusBadge } from '@/components/tds/RunStatusBadge';
+import { NumericalErrorBanner } from '@/components/tds/NumericalErrorBanner';
 import { HideLabelsToggle } from '@/components/pflow/HideLabelsToggle';
 import { ConvergenceErrorPanel } from '@/components/pflow/ConvergenceErrorPanel';
 import { RuntimeCrashModal } from '@/components/pflow/RuntimeCrashModal';
@@ -77,7 +84,12 @@ export function App() {
               <WorkflowToolbar />
             </>
           }
-          topBarCenter={<RunButton />}
+          topBarCenter={
+            <div className="flex items-center gap-3">
+              <RunButton />
+              <RunStatusBadge />
+            </div>
+          }
           topBarRight={
             <>
               <RecoveryBadge />
@@ -91,6 +103,7 @@ export function App() {
             <>
               <AddElementPanel />
               <ConvergenceErrorPanel />
+              <NumericalErrorBanner />
             </>
           }
           modal={
