@@ -485,6 +485,51 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return assemble_bundle(inputs)
 
 
+def _handle_save_snapshot(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.save_snapshot`` for Unit 7.
+
+    Args: ``{"name": str, "force": bool}``. Returns the metadata dict +
+    file sizes so the route layer can echo them in the success response.
+    """
+    name = args.get("name")
+    if not isinstance(name, str):
+        raise AndesAppError("'name' must be a string")
+    force = bool(args.get("force", False))
+    return wrapper.save_snapshot(name, force=force)
+
+
+def _handle_restore_snapshot(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.restore_snapshot`` for Unit 7.
+
+    Args: ``{"name": str, "use_dill_optimization": bool}``. Returns the
+    restore-result dict (``used_dill``, ``fallback_reason``,
+    ``disturbances_replayed``, ``metadata``).
+    """
+    name = args.get("name")
+    if not isinstance(name, str):
+        raise AndesAppError("'name' must be a string")
+    use_dill = bool(args.get("use_dill_optimization", True))
+    return wrapper.restore_snapshot(name, use_dill_optimization=use_dill)
+
+
+def _handle_list_snapshots(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.list_snapshots`` for Unit 7.
+
+    Returns a list of snapshot-entry dicts; empty list when no
+    snapshots have been saved against the current case.
+    """
+    return wrapper.list_snapshots()
+
+
+def _handle_delete_snapshot(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.delete_snapshot`` for Unit 7."""
+    name = args.get("name")
+    if not isinstance(name, str):
+        raise AndesAppError("'name' must be a string")
+    wrapper.delete_snapshot(name)
+    return None
+
+
 def _handle_run_tds(
     wrapper: Wrapper,
     args: dict[str, Any],
@@ -702,6 +747,11 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "run_eig": _handle_run_eig,
     "eig_participation": _handle_eig_participation,
     "eig_state_matrix": _handle_eig_state_matrix,
+    # Unit 7 — snapshot save / restore / list / delete.
+    "save_snapshot": _handle_save_snapshot,
+    "restore_snapshot": _handle_restore_snapshot,
+    "list_snapshots": _handle_list_snapshots,
+    "delete_snapshot": _handle_delete_snapshot,
     # run_tds is special-cased — it needs the abort_event. Dispatched separately.
 }
 
@@ -728,7 +778,11 @@ def worker_main(
     _spawn_orphan_detector()
     _install_strict_fs_audit_hook(workspace)
 
-    wrapper = Wrapper()
+    # ``workspace`` is forwarded so the wrapper's snapshot methods
+    # (Unit 7) can resolve ``<workspace>/snapshots/<case>/<name>.{dill,json}``
+    # without re-deriving the directory from the FastAPI app state (which
+    # the worker subprocess can't read).
+    wrapper = Wrapper(workspace=workspace)
 
     while True:
         try:
