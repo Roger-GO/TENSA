@@ -550,7 +550,7 @@ The original Unit 1 (combined) is preserved below — implementers should treat 
 
 ---
 
-- [ ] **Unit 5: Default-parameter sanity (xf empirical sweep + change)** *(PHASE 2 — physically documented here for narrative continuity, but ships in Phase 2 per KTD-2 P0 fix)*
+- [x] **Unit 5: Default-parameter sanity (xf empirical sweep + change)** *(complete: commit 04642f1; xf=0.05; +9 web tests; sweep script + empirical report committed)*
 
 **Goal:** Replace the divergence-prone `xf=0.0001` default with the smallest empirically-validated value that converges cleanly on IEEE 14 + IEEE 39 + kundur **AND a representative inverter-dominant case (REGCA1-based)** with default `tf` / `h` / fixed-step. Add a pre-run check that warns on bolted faults with a stiff system.
 
@@ -597,7 +597,7 @@ The original Unit 1 (combined) is preserved below — implementers should treat 
 
 > **Phase 2 ships: Units 5, 6.5, 7, 8, 9, 11.** Unit 6 (EIG) was relocated to Phase 1. **Unit 6.5 is new** — a disturbance-replay buffer infrastructure prerequisite for snapshot/restore (Unit 7) that was hidden in Unit 7's approach in the prior plan version. Unit 10 (bundle import) was relocated to Phase 3 entry to preserve Phase 2 slack. Unit 5 (xf default) was relocated here from Phase 1 (1-day script + 1-line default change).
 
-- [ ] **Unit 6.5: Disturbance-replay buffer infrastructure** *(NEW — extracted from Unit 7's hidden requirement)*
+- [x] **Unit 6.5: Disturbance-replay buffer infrastructure** *(complete: commit 5bf530c; +18 server tests; GET /sessions/{id}/disturbances + replay/clear/list methods)*
 
 **Goal:** Add substrate-side `_disturbance_log: list[DisturbanceSpec]` field to `Wrapper` so committed disturbances can be replayed after `reload_case`. This is the missing infrastructure that Unit 7 (snapshot), Unit 14 (PMU), Unit 15 (TimeSeries profiles), and Unit 18 (sweep) all silently depend on.
 
@@ -703,7 +703,7 @@ This unit's content (full Goal/Requirements/Files/Approach/Test scenarios/Verifi
 
 ---
 
-- [ ] **Unit 7: Snapshot save / load with disturbance metadata**
+- [x] **Unit 7: Snapshot save / load with disturbance metadata** *(complete: commit eabd0bb; +59 server + 30 web tests; ANDES load_ss .dyr-bug discovered + auto-fallback handled)*
 
 **Goal:** Snapshot the converged operating point (PF state) plus the substrate-side disturbance list as composable metadata. Restore reloads case → replays disturbances (via Unit 6.5's `replay_disturbances()`) → restores PF state.
 
@@ -746,7 +746,7 @@ This unit's content (full Goal/Requirements/Files/Approach/Test scenarios/Verifi
 
 ---
 
-- [ ] **Unit 8: Full model whitelist (curated additions)**
+- [x] **Unit 8: Full model whitelist (curated additions)** *(complete: commit eaa51ae; +8 server + 2 web tests; 7 models added; KNOWN GAP — TopologySummary needs controllers bucket; Unit 8.1 follow-up)*
 
 **Goal:** Extend the `_PARAMS_BY_MODEL` whitelist in `wrapper.py` with the 7 highest-priority dynamic models so real research cases (IEEE 39 dynamic, kundur, etc.) can be edited and altered through the UI.
 
@@ -783,7 +783,7 @@ This unit's content (full Goal/Requirements/Files/Approach/Test scenarios/Verifi
 
 ---
 
-- [ ] **Unit 9: Multi-run overlay (cap lift + overlay state + UI)**
+- [x] **Unit 9: Multi-run overlay (cap lift + overlay state + UI)** *(complete: commit 3c1fb22; +50 web tests; HistoryDrawer + RunLegendChip + 8h×4d color/dash hash for ≤32 runs)*
 
 **Goal:** Lift the `trimToComparisonLimit` 1+1 cap to a configurable retention (default 5, max 20). Add `overlayRunIds` selection set. Plot panel renders multiple runs with stable color hash. Legend toggles per run.
 
