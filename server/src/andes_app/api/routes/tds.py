@@ -16,7 +16,12 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request, status
 
 from andes_app.api.auth import RequireToken
-from andes_app.api.schemas import ProblemDetails, TdsBatchResult, TdsRunRequest
+from andes_app.api.schemas import (
+    AbortResponse,
+    ProblemDetails,
+    TdsBatchResult,
+    TdsRunRequest,
+)
 from andes_app.core.session import (
     SessionExpiredError,
     SessionManager,
@@ -106,3 +111,39 @@ async def run_tds(
         final_t=float(payload["final_t"]),
         callpert_count=int(payload["callpert_count"]),
     )
+
+
+@router.post(
+    "/sessions/{session_id}/abort",
+    operation_id="abortRun",
+    summary="Signal a cooperative abort of the active TDS run on a session.",
+    response_model=AbortResponse,
+    responses={
+        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
+        404: {"model": ProblemDetails, "description": "Session not found or already closed."},
+    },
+)
+async def abort_run(
+    session_id: str,
+    request: Request,
+    _: RequireToken,
+) -> AbortResponse:
+    """Set the session's abort event. Cooperatively terminates an active
+    streaming or batch ``run_tds`` invocation at the next ``callpert``
+    tick. Returns 200 immediately — the actual TDS exit is asynchronous
+    on the worker.
+
+    Session-scoped (not run-scoped): v0.2 has at most one active run per
+    session, mirroring ``SessionManager.signal_abort``'s API. Calling
+    abort while no TDS is running is a 200 no-op (the event is set but
+    never consumed; subsequent runs will see and clear it).
+    """
+    mgr = _manager(request)
+    try:
+        await mgr.signal_abort(session_id)
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    return AbortResponse(aborted=True)

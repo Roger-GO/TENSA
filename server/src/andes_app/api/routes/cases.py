@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 
 from andes_app.api.auth import RequireToken
 from andes_app.api.schemas import (
+    AlterableParamsResponse,
     LoadCaseRequest,
     ProblemDetails,
     TopologyEntry,
@@ -174,6 +175,75 @@ async def get_topology(
     except WorkerError as exc:
         raise _map_worker_error(exc) from exc
     return _topology_from_payload(payload)
+
+
+@router.get(
+    "/sessions/{session_id}/topology/models/{model}/alterable_params",
+    operation_id="getAlterableParams",
+    summary=(
+        "List parameter names ANDES will accept as ``src`` for an Alter "
+        "disturbance on a given model."
+    ),
+    response_model=AlterableParamsResponse,
+    responses={
+        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
+        404: {
+            "model": ProblemDetails,
+            "description": (
+                "Session not found or already closed, OR the requested "
+                "model name is not present on the loaded ``System``."
+            ),
+        },
+        409: {
+            "model": ProblemDetails,
+            "description": "No case has been loaded into this session yet.",
+        },
+    },
+)
+async def get_alterable_params(
+    session_id: str,
+    model: str,
+    request: Request,
+    _: RequireToken,
+) -> AlterableParamsResponse:
+    """Best-effort introspection of the model's ``params`` ordered dict on
+    the loaded ``System``. Filters to ``NumParam`` instances that are not
+    ``ExtParam`` — ANDES's own definition of "alterable" for the
+    ``alter()`` / ``set()`` contract.
+
+    The response order matches ANDES's internal declaration order on the
+    model class, which is also the order the UI's parameter dropdown
+    renders. Empty list when the model has no alterable params (no
+    ``NumParam`` declarations or all are ``ExtParam``); the route is a 200
+    in that case.
+    """
+    mgr = _manager(request)
+    try:
+        payload = await mgr.invoke(
+            session_id,
+            "alterable_params",
+            {"model": model},
+        )
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except WorkerError as exc:
+        # Unknown model name on a loaded System — surface as 404 so the
+        # UI can distinguish "no such model" from "no case loaded" (409).
+        if exc.category == "ElementValidationError":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=exc.detail,
+            ) from exc
+        raise _map_worker_error(exc) from exc
+    if not isinstance(payload, list):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"unexpected worker payload shape: {type(payload).__name__}",
+        )
+    return AlterableParamsResponse(model=model, params=[str(p) for p in payload])
 
 
 @router.post(

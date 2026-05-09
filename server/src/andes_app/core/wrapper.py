@@ -870,6 +870,49 @@ class Wrapper:
             idx=idx_values[i], name=name, kind=model, params=params
         )
 
+    # ----- introspection (Unit 1b of v0.2) -----
+
+    def alterable_params(self, model: str) -> list[str]:
+        """Return the ordered list of parameter names that ANDES will accept
+        as ``src`` for an ``Alter`` disturbance on the given model.
+
+        The rule mirrors ANDES's ``alter()`` contract: a parameter is
+        alterable iff it is a ``NumParam`` instance AND not an ``ExtParam``
+        (which is a derived/external value sourced off another model).
+        Topology refs (``IdxParam``: ``bus``, ``bus1``, ``area``, etc.) and
+        string identifiers (``DataParam``: ``idx``, ``name``) are excluded.
+
+        Raises ``NoCaseLoadedError`` if no case is loaded on the session.
+        Raises ``ElementValidationError`` if the model name is not a known
+        attribute on the loaded ``System`` (404 at the API layer).
+
+        Works pre- or post-setup — ``model.params`` is populated at parse
+        time.
+        """
+        from andes.core.param import ExtParam, NumParam
+
+        ss = self._require_loaded()
+        model_obj = getattr(ss, model, None)
+        # ANDES populates a ``params`` OrderedDict on every Model instance at
+        # ``__init__``. Reject not-a-model attributes like ``ss.config`` or
+        # ``ss.dae`` (which exist on the System but aren't ANDES models) by
+        # checking that ``params`` exists and is dict-shaped.
+        params_dict: Any = (
+            getattr(model_obj, "params", None) if model_obj is not None else None
+        )
+        if not isinstance(params_dict, dict):
+            raise ElementValidationError(
+                f"unknown model {model!r} on the loaded System"
+            )
+        out: list[str] = []
+        for name, param in params_dict.items():
+            if not isinstance(param, NumParam):
+                continue
+            if isinstance(param, ExtParam):
+                continue
+            out.append(str(name))
+        return out
+
     # ----- runs -----
 
     def run_pflow(self) -> PflowResult:
