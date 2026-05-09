@@ -406,7 +406,7 @@ The original Unit 1 (combined) is preserved below — implementers should treat 
 
 ---
 
-- [ ] **Unit 2: CSV / PNG / MAT export end-to-end**
+- [x] **Unit 2: CSV / PNG / MAT export end-to-end** *(complete: commit 2062532; 679 tests pass)*
 
 **Goal:** Every chart, table, and result panel in the app exposes an Export menu that produces (a) long-form CSV for data, (b) PNG for figures, (c) `.mat` for the EIG state matrix specifically.
 
@@ -455,7 +455,7 @@ The original Unit 1 (combined) is preserved below — implementers should treat 
 
 ---
 
-- [ ] **Unit 3: Reproducibility bundle export**
+- [x] **Unit 3: Reproducibility bundle export** *(complete: commit eba0a4c; +13 server unit + 9 server integration + 18 web tests)*
 
 **Goal:** Export a `.zip` bundle containing case + disturbance specs + sim params + results (CSV) + manifest with ANDES + app version. Bundle round-trips deterministically across sessions on the same ANDES version.
 
@@ -506,7 +506,7 @@ The original Unit 1 (combined) is preserved below — implementers should treat 
 
 ---
 
-- [ ] **Unit 4: Reports endpoints (PFlow / TDS) + LaTeX copy**
+- [x] **Unit 4: Reports endpoints (PFlow / TDS) + LaTeX copy** *(complete: commit ff1888a; +28 server unit + 11 integration + 30 web tests; EIG enum forward-compat staged for Unit 6)*
 
 **Goal:** A Reports modal renders human-readable reports from `PFlow.report()` and `TDS.summary()`; a "Copy as LaTeX" action writes a `tabular` block to the clipboard ready to paste into a paper.
 
@@ -640,7 +640,7 @@ This unit's content (full Goal/Requirements/Files/Approach/Test scenarios/Verifi
 
 ---
 
-- [ ] **Unit 6: EIG routine + Analyze panel** *(PHASE 1 — physically documented here for narrative continuity, but ships in Phase 1 per KTD-2 P0 fix to give the JOSS paper a substantive scholarly contribution)*
+- [x] **Unit 6: EIG routine + Analyze panel** *(complete: commit 8281742; +17 server tests + 36 web tests; SVG scatter; Run-EIG inside AnalyzePanel)*
 
 **Goal:** Wire `ss.EIG.run()` end-to-end. Substrate exposes `POST /sessions/{id}/eig` returning eigenvalues, damping ratios, mode metadata; UI Analyze panel renders eigenvalue scatter, participation table per selected mode, damping bar chart.
 
