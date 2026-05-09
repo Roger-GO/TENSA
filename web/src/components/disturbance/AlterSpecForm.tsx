@@ -29,6 +29,19 @@ const ALTERABLE_MODELS: ReadonlyArray<{ value: string; label: string }> = [
   { value: 'GENROU', label: 'GENROU (synchronous)' },
   { value: 'GENCLS', label: 'GENCLS (classic)' },
   { value: 'Shunt', label: 'Shunt' },
+  // Unit 8 dynamic-model whitelist additions. Until the topology endpoint
+  // surfaces controller buckets, the device picker for these will read as
+  // empty even on cases that contain instances; the parameter picker
+  // (driven by useAlterableParams) populates correctly once a device is
+  // selected by other means (idx pasted in via API, or follow-up unit
+  // exposes a dynamic-device bucket).
+  { value: 'IEEEX1', label: 'IEEEX1 (DC type-1 exciter)' },
+  { value: 'ESDC2A', label: 'ESDC2A (PSS/E exciter)' },
+  { value: 'SEXS', label: 'SEXS (simplified exciter)' },
+  { value: 'IEEEG1', label: 'IEEEG1 (steam governor)' },
+  { value: 'TGOV1', label: 'TGOV1 (single-lag governor)' },
+  { value: 'IEEEST', label: 'IEEEST (PSS)' },
+  { value: 'REGCA1', label: 'REGCA1 (renewable converter)' },
 ];
 
 function devicesForModel(
