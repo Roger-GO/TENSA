@@ -24,7 +24,8 @@
  */
 import { useMutation, useQuery, useQueryClient, QueryClient } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import { andesClient, ProblemDetailsError, TIMEOUTS } from './client';
+import { andesClient, NetworkError, ProblemDetailsError, TIMEOUTS } from './client';
+import { getAuthToken } from '@/store/auth';
 import { parseSessionId, parseRunId } from './types';
 import type {
   AbortResponse,
@@ -67,8 +68,7 @@ export const queryKeys = {
   sidecar: (casePath: WorkspacePath) => ['sidecar', casePath] as const,
   topologySchema: ['topology-schema'] as const,
   /** Alterable-params lookup, scoped per (session, model). */
-  alterableParams: (id: SessionId, model: string) =>
-    ['alterable-params', id, model] as const,
+  alterableParams: (id: SessionId, model: string) => ['alterable-params', id, model] as const,
 } as const;
 
 // ---- QueryClient factory --------------------------------------------------
@@ -349,9 +349,7 @@ export function useAlterableParams(
   const sessionId = useSessionStore((s) => s.sessionId);
   const enabled = sessionId !== null && model !== null && model.length > 0;
   return useQuery({
-    queryKey: enabled
-      ? queryKeys.alterableParams(sessionId, model)
-      : ['alterable-params', 'noop'],
+    queryKey: enabled ? queryKeys.alterableParams(sessionId, model) : ['alterable-params', 'noop'],
     enabled,
     // The list is purely a function of the ANDES model class; it doesn't
     // change while the session is alive. Cache it for the session lifetime.
@@ -812,6 +810,94 @@ export function useResetRun(): UseMutationResult<TopologySummary, Error, Session
       // is reset so the next Run TDS re-commits the (possibly-edited)
       // local list.
       useDisturbanceStore.setState({ committed: false, dirty: true });
+    },
+  });
+}
+
+// ---- bundle export (Unit 3) -----------------------------------------------
+
+export interface ExportBundleVars {
+  sessionId: SessionId;
+  /**
+   * Request body forwarded to ``POST /api/sessions/{id}/bundle/export``.
+   * The substrate accepts an empty body (``{}``) and produces a minimal
+   * bundle (case + manifest only); callers typically populate
+   * ``disturbances`` / ``sim_params`` / ``results_csv`` from their local
+   * state so the bundle is reproducibility-grade.
+   */
+  body: {
+    disturbances?: readonly { kind: string }[];
+    sim_params?: Record<string, unknown> | null;
+    results_csv?: string | null;
+    run_id?: string | null;
+  };
+}
+
+/**
+ * ``POST /api/sessions/{id}/bundle/export``.
+ *
+ * Returns a ``Blob`` of the assembled ``.zip`` body — the caller is
+ * responsible for triggering the browser download (typically via the
+ * ``downloadBlob`` helper from ``components/export/downloadBlob.ts``).
+ *
+ * The default ``andesClient.post`` parses the response as JSON; the
+ * bundle endpoint returns ``application/zip``, so we bypass the
+ * client and call ``fetch`` directly. We still honor the project's
+ * auth header + ``ProblemDetailsError`` taxonomy so the global 401
+ * cascade and the in-dialog error inline path work the same way as
+ * every other mutation.
+ */
+export function useExportBundle(): UseMutationResult<Blob, Error, ExportBundleVars> {
+  return useMutation({
+    mutationFn: async ({ sessionId, body }: ExportBundleVars) => {
+      const url = `/api/sessions/${encodeURIComponent(sessionId)}/bundle/export`;
+      const headers = new Headers();
+      const token = getAuthToken();
+      if (token) headers.set('X-Andes-Token', token);
+      headers.set('Content-Type', 'application/json');
+
+      // 60s timeout matches `caseLoad` — bundle assembly does at most one
+      // canonical xlsx export, which is the same order of magnitude as a
+      // case load.
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.caseLoad);
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+      } catch (err) {
+        clearTimeout(timeoutId);
+        throw new NetworkError(`Network error on POST ${url}`, err);
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (!response.ok) {
+        // Error body is JSON ProblemDetails — read it through the same
+        // path the regular client uses so the global 401 / 404 cascade
+        // recognises the shape.
+        let parsed: unknown = undefined;
+        try {
+          parsed = await response.json();
+        } catch {
+          // ignore
+        }
+        const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>;
+        const problem = {
+          type: typeof obj.type === 'string' ? obj.type : 'about:blank',
+          title: typeof obj.title === 'string' ? obj.title : `HTTP ${response.status}`,
+          status: typeof obj.status === 'number' ? obj.status : response.status,
+          detail: typeof obj.detail === 'string' ? obj.detail : null,
+          instance: typeof obj.instance === 'string' ? obj.instance : null,
+        };
+        throw new ProblemDetailsError(problem, parsed, url);
+      }
+
+      return await response.blob();
     },
   });
 }

@@ -1,6 +1,7 @@
 import { forwardRef } from 'react';
 import type { HTMLAttributes, ReactNode } from 'react';
 import { cn } from '@/lib/cn';
+import { BundleExportButton, BundleExportDialog } from '@/components/bundle/BundleExportDialog';
 
 /**
  * TopBar. Fixed-height (~44px) bar with three slots — left, center, right —
@@ -20,6 +21,13 @@ import { cn } from '@/lib/cn';
  * (left), title or breadcrumbs (center), and run controls + view toggles
  * (right). All three slots are optional; an empty top bar still renders so
  * that the shell layout collapses predictably.
+ *
+ * The reproducibility-bundle export button (Unit 3 of the v2.0 plan) is
+ * mounted inside the right slot region so it sits next to the existing
+ * view-toggles and recovery badge. The dialog itself is portaled by Radix
+ * and only mounts its hook-using inner body when the user opens it, so
+ * test renderings of ``<TopBar />`` without a ``QueryClientProvider``
+ * stay green.
  */
 export interface TopBarProps extends Omit<HTMLAttributes<HTMLElement>, 'children'> {
   left?: ReactNode;
@@ -55,7 +63,9 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
       </div>
       <div data-slot="right" className="flex min-w-0 flex-1 items-center justify-end gap-2">
         {right}
+        <BundleExportButton />
       </div>
+      <BundleExportDialog />
     </header>
   );
 });

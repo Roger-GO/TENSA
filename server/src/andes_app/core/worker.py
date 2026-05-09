@@ -264,6 +264,136 @@ def _handle_run_pflow(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.run_pflow())
 
 
+def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Assemble a reproducibility-bundle ``.zip`` (Unit 3 of the v2.0 plan).
+
+    The args carry the substrate-side knowledge that lives on the frontend
+    today (per Unit 1a's finding that disturbance / sim-params / results
+    state lives in the runs slice on the web side, not the substrate):
+
+    - ``disturbances``: list of disturbance-spec dicts as the frontend
+      committed them. Empty list when no disturbances were registered.
+    - ``sim_params``: optional dict (``tf``, ``h``, ``vars``,
+      ``decimation``, ``max_rate_hz``). ``None`` skips the file.
+    - ``results_csv``: optional long-form CSV body (UTF-8 string).
+      ``None`` skips the file.
+    - ``run_id``: optional last run id, surfaced in the manifest.
+
+    The substrate contributes:
+
+    - The case file(s), read verbatim from the workspace when the
+      wrapper's ``_replay_buffer`` is empty (no edits since load), or
+      written via ``Wrapper.save_case('xlsx', ...)`` when the case is
+      dirty. ``case_canonical_export`` in the manifest reflects which
+      path was taken.
+    - The ANDES + ``andes_app`` version strings.
+
+    Returns the zip bytes (under a few MB for typical sessions —
+    well within Pipe-send-tolerance).
+    """
+    import tempfile
+    from pathlib import Path
+
+    # ANDES version is the only ANDES-side fact we need; lazy-import keeps
+    # the worker startup cost paid by other handlers.
+    import andes
+
+    from andes_app import __version__ as andes_app_version
+    from andes_app.core.bundle import (
+        BundleInputs,
+        assemble_bundle,
+        case_files_from_workspace,
+    )
+
+    # _replay_buffer is the only substrate-side signal of "case has been
+    # edited since load". Length > 0 with a non-None case path means the
+    # user added elements on top of the loaded case — the bundle must
+    # ship the canonical export, not the original file.
+    replay_buffer = wrapper._replay_buffer  # noqa: SLF001 — internal access by design
+    case_path = wrapper._case_path  # noqa: SLF001
+    addfiles = wrapper._addfiles  # noqa: SLF001
+
+    if case_path is None and not replay_buffer:
+        raise NoCaseLoadedError(
+            "no case loaded — load a case (or create a blank one) before exporting a bundle"
+        )
+
+    case_canonical_export = False
+    case_files: tuple[tuple[str, bytes], ...]
+    if case_path is None:
+        # Blank session: write a canonical xlsx into a tempfile and read
+        # it back. Keeps the bundle assembler ignorant of filesystem
+        # plumbing.
+        case_canonical_export = True
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "blank-system.xlsx"
+            wrapper.save_case("xlsx", str(target))
+            case_files = ((target.name, target.read_bytes()),)
+    elif replay_buffer:
+        # Edited session: canonicalize via xlsx export. The original case
+        # file is intentionally NOT included — the manifest's
+        # ``case_canonical_export=True`` flag tells the consumer to expect
+        # the xlsx.
+        case_canonical_export = True
+        with tempfile.TemporaryDirectory() as td:
+            stem = case_path.stem
+            target = Path(td) / f"{stem}.xlsx"
+            wrapper.save_case("xlsx", str(target))
+            case_files = ((target.name, target.read_bytes()),)
+    else:
+        # Pristine session: ship the original case file (and any addfiles)
+        # verbatim. ``case_canonical_export=False`` in the manifest.
+        case_files = case_files_from_workspace(case_path, addfiles)
+
+    raw_disturbances = args.get("disturbances") or []
+    if not isinstance(raw_disturbances, list):
+        raise AndesAppError(
+            "'disturbances' must be a list of disturbance-spec dicts"
+        )
+    disturbances: tuple[dict[str, Any], ...] = tuple(
+        d for d in raw_disturbances if isinstance(d, dict)
+    )
+
+    sim_params_raw = args.get("sim_params")
+    sim_params: dict[str, Any] | None
+    if sim_params_raw is None:
+        sim_params = None
+    elif isinstance(sim_params_raw, dict):
+        sim_params = sim_params_raw
+    else:
+        raise AndesAppError("'sim_params' must be a dict or null")
+
+    results_csv_raw = args.get("results_csv")
+    results_csv: str | None
+    if results_csv_raw is None:
+        results_csv = None
+    elif isinstance(results_csv_raw, str):
+        results_csv = results_csv_raw
+    else:
+        raise AndesAppError("'results_csv' must be a string or null")
+
+    run_id_raw = args.get("run_id")
+    run_id: str | None
+    if run_id_raw is None:
+        run_id = None
+    elif isinstance(run_id_raw, str):
+        run_id = run_id_raw
+    else:
+        raise AndesAppError("'run_id' must be a string or null")
+
+    inputs = BundleInputs(
+        case_files=case_files,
+        case_canonical_export=case_canonical_export,
+        disturbances=disturbances,
+        sim_params=sim_params,
+        results_csv=results_csv,
+        run_id=run_id,
+        andes_version=str(getattr(andes, "__version__", "unknown")),
+        andes_app_version=str(andes_app_version),
+    )
+    return assemble_bundle(inputs)
+
+
 def _handle_run_tds(
     wrapper: Wrapper,
     args: dict[str, Any],
@@ -473,6 +603,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "delete_element": _handle_delete_element,
     "run_pflow": _handle_run_pflow,
     "alterable_params": _handle_alterable_params,
+    "export_bundle": _handle_export_bundle,
     # run_tds is special-cased — it needs the abort_event. Dispatched separately.
 }
 

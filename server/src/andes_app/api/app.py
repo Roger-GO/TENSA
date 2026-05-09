@@ -36,6 +36,7 @@ from andes_app.api.routes.disturbances import router as disturbances_router
 from andes_app.api.routes.elements import router as elements_router
 from andes_app.api.routes.pflow import router as pflow_router
 from andes_app.api.routes.sessions import router as sessions_router
+from andes_app.api.routes.snapshot import router as snapshot_router
 from andes_app.api.routes.tds import router as tds_router
 from andes_app.api.routes.workspace import router as workspace_router
 from andes_app.api.routes.ws import router as ws_router
@@ -231,6 +232,7 @@ def make_app(
     app.include_router(elements_router, prefix="/api", tags=["elements"])
     app.include_router(tds_router, prefix="/api", tags=["tds"])
     app.include_router(workspace_router, prefix="/api", tags=["workspace"])
+    app.include_router(snapshot_router, prefix="/api", tags=["bundle"])
     app.include_router(ws_router, prefix="/api", tags=["streaming"])
 
     # SPA mount goes LAST so the ``/api/*`` routers and ``/openapi.json``
