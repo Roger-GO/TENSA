@@ -27,10 +27,8 @@ const TOGGLEABLE_MODELS: ReadonlyArray<{ value: string; label: string }> = [
   { value: 'PQ', label: 'PQ load' },
   { value: 'ZIP', label: 'ZIP load' },
   { value: 'Shunt', label: 'Shunt' },
-  // Unit 8 dynamic-model whitelist additions. Toggle (in-service flag) is
-  // a generic ANDES capability — these will read as "no devices in
-  // topology" until a follow-up unit surfaces a dynamic-device bucket on
-  // the topology snapshot.
+  // Unit 8 dynamic-model whitelist additions. Devices populate from the
+  // ``controllers`` topology bucket added in Unit 8.1.
   { value: 'IEEEX1', label: 'IEEEX1 (DC type-1 exciter)' },
   { value: 'ESDC2A', label: 'ESDC2A (PSS/E exciter)' },
   { value: 'SEXS', label: 'SEXS (simplified exciter)' },
@@ -39,6 +37,16 @@ const TOGGLEABLE_MODELS: ReadonlyArray<{ value: string; label: string }> = [
   { value: 'IEEEST', label: 'IEEEST (PSS)' },
   { value: 'REGCA1', label: 'REGCA1 (renewable converter)' },
 ];
+
+const CONTROLLER_MODELS: ReadonlySet<string> = new Set([
+  'IEEEX1',
+  'ESDC2A',
+  'SEXS',
+  'IEEEG1',
+  'TGOV1',
+  'IEEEST',
+  'REGCA1',
+]);
 
 export interface ToggleSpecFormProps {
   spec: ToggleSpec;
@@ -66,6 +74,8 @@ function devicesForModel(
     bucket = topology.loads.filter((l) => l.kind === model);
   } else if (model === 'Shunt') {
     bucket = topology.shunts ?? [];
+  } else if (CONTROLLER_MODELS.has(model)) {
+    bucket = (topology.controllers ?? []).filter((c) => c.kind === model);
   }
   return bucket.map((e) => ({ idx: String(e.idx), name: e.name }));
 }

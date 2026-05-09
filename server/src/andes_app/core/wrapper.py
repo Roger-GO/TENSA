@@ -59,6 +59,23 @@ from andes_app.core.errors import (
 # Mirrored on the API layer (``schemas.TopologyEntry.params``); see schemas.py.
 ParamValue = float | int | str | bool
 
+# Unit-8 dynamic-model class names surfaced as a separate ``controllers``
+# bucket on the topology snapshot (Unit 8.1). Order is the canonical
+# rendering order: exciters → governors → PSS → renewable-interface.
+# Each name must match the ANDES System attribute name 1:1
+# (``ss.IEEEX1``, ``ss.IEEEG1``, etc.). Models with no instances on a given
+# case are simply absent from the bucket — ``_collect_models`` skips empty
+# / missing model attrs.
+_CONTROLLER_MODEL_NAMES: tuple[str, ...] = (
+    "IEEEX1",
+    "ESDC2A",
+    "SEXS",
+    "IEEEG1",
+    "TGOV1",
+    "IEEEST",
+    "REGCA1",
+)
+
 if TYPE_CHECKING:
     from andes.system import System
 
@@ -95,6 +112,11 @@ class TopologySnapshot:
     generators: list[TopologyEntry]
     loads: list[TopologyEntry]
     shunts: list[TopologyEntry] = field(default_factory=list)
+    # Unit 8.1: dynamic controllers (exciters, governors, PSS, renewable
+    # converters) surfaced by the Unit-8 whitelist additions. Empty when the
+    # case carries no entries for any of the seven Unit-8 model classes —
+    # e.g., a stock IEEE 14 .raw without the .dyr addfile.
+    controllers: list[TopologyEntry] = field(default_factory=list)
 
 
 @dataclass
@@ -347,6 +369,7 @@ class Wrapper:
             ),
             loads=_collect_models(ss, ["PQ", "ZIP"]),
             shunts=_collect_models(ss, ["Shunt"]),
+            controllers=_collect_models(ss, list(_CONTROLLER_MODEL_NAMES)),
         )
 
     # ----- disturbance management -----

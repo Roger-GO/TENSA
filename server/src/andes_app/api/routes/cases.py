@@ -54,6 +54,7 @@ def _topology_from_payload(payload: dict[str, Any]) -> TopologySummary:
         generators=[TopologyEntry(**e) for e in payload.get("generators", [])],
         loads=[TopologyEntry(**e) for e in payload.get("loads", [])],
         shunts=[TopologyEntry(**e) for e in payload.get("shunts", [])],
+        controllers=[TopologyEntry(**e) for e in payload.get("controllers", [])],
     )
 
 

@@ -155,6 +155,56 @@ describe('<AlterSpecForm />', () => {
     expect(dev.querySelector('option')?.textContent).toMatch(/No IEEEX1s in topology/);
   });
 
+  it('Unit 8.1: populates device picker from topology.controllers for dynamic models', () => {
+    // Seed the controllers bucket with two IEEEG1 entries + an unrelated
+    // TGOV1; the IEEEG1 selection must pull only its kind.
+    MOCK_TOPOLOGY = {
+      ...(MOCK_TOPOLOGY as TopologySummary),
+      controllers: [
+        { idx: 'GOV_1', name: 'IEEEG1_1', kind: 'IEEEG1', params: {} },
+        { idx: 'GOV_2', name: 'IEEEG1_2', kind: 'IEEEG1', params: {} },
+        { idx: 'GOV_T', name: 'TGOV1_1', kind: 'TGOV1', params: {} },
+      ],
+    };
+    render(
+      withQueryClient(
+        <AlterSpecForm
+          spec={{ ...blankAlterSpec(), model: 'IEEEG1' }}
+          onChange={() => {}}
+        />,
+      ),
+    );
+    const dev = screen.getByTestId('alter-dev-idx') as HTMLSelectElement;
+    expect(dev).not.toBeDisabled();
+    const options = Array.from(dev.querySelectorAll('option'))
+      .map((o) => o.value)
+      .filter((v) => v.length > 0);
+    expect(options).toEqual(['GOV_1', 'GOV_2']);
+  });
+
+  it('Unit 8.1: REGCA1 device picker pulls REGCA1 entries from the controllers bucket', () => {
+    MOCK_TOPOLOGY = {
+      ...(MOCK_TOPOLOGY as TopologySummary),
+      controllers: [
+        { idx: 'REGCA_1', name: 'REGCA1_1', kind: 'REGCA1', params: {} },
+      ],
+    };
+    render(
+      withQueryClient(
+        <AlterSpecForm
+          spec={{ ...blankAlterSpec(), model: 'REGCA1' }}
+          onChange={() => {}}
+        />,
+      ),
+    );
+    const dev = screen.getByTestId('alter-dev-idx') as HTMLSelectElement;
+    expect(dev).not.toBeDisabled();
+    const options = Array.from(dev.querySelectorAll('option'))
+      .map((o) => o.value)
+      .filter((v) => v.length > 0);
+    expect(options).toEqual(['REGCA_1']);
+  });
+
   it('flags missing src as required', async () => {
     let validity: Record<string, string> = {};
     render(
