@@ -36,6 +36,26 @@ export interface PlotState {
    * each group expanded only if the user has expanded it.
    */
   expandedByRun: Record<string, ReadonlySet<string>>;
+  /**
+   * Per-run scrub time. ``null`` (or absent) means **live mode** — the
+   * plot cursor + SLD overlay follow incoming frames at ``run.tCurrent``.
+   * A number means **scrub mode** — the cursor is pinned at that t and
+   * the SLD overlay reflects the closest-frame state.
+   *
+   * Lives in the plot slice (not the runs slice) because it's a UI
+   * concern: the runs slice already exposes ``tCurrent`` (the latest
+   * frame's t); ``scrubT`` is purely about where the user has parked
+   * the cursor. Keeping it here also means scrub state survives a
+   * frame append (which mutates the runs slice but not the plot slice).
+   */
+  scrubByRun: Record<string, number | null>;
+  /**
+   * Per-run playback flag. ``true`` while the ScrubControl's rAF loop
+   * is advancing ``scrubT`` over wall-clock time; ``false`` when paused.
+   * Defaults to ``false`` (paused). The ScrubControl owns the loop and
+   * just reads/writes this flag — the store has no opinion about timing.
+   */
+  playingByRun: Record<string, boolean>;
 
   /** Toggle a single series. Idempotent — adds if absent, removes if present. */
   toggleSeries: (runId: string, name: string) => void;
@@ -45,6 +65,17 @@ export interface PlotState {
   setFilter: (runId: string, filter: string) => void;
   /** Toggle expanded state of a group (e.g., ``"bus_v"``) for a run. */
   toggleExpanded: (runId: string, groupKey: string) => void;
+  /**
+   * Set the scrub time for a run. Pass ``null`` to return to live mode.
+   * Numeric values are stored as-is (clamping to ``[0, tCurrent]`` is
+   * the caller's responsibility — the store has no view of run buffers).
+   */
+  setScrubT: (runId: string, t: number | null) => void;
+  /**
+   * Set the playback flag for a run. Setting ``false`` does not clear
+   * ``scrubT`` — pausing leaves the cursor where it is.
+   */
+  setPlaying: (runId: string, value: boolean) => void;
   /** Drop a run's plot state entirely (called when a run is reset). */
   resetRun: (runId: string) => void;
   /** Clear every run's plot state (auth/session cascade). */
@@ -55,6 +86,8 @@ export const usePlotStore = create<PlotState>((set, get) => ({
   selectedByRun: {},
   filterByRun: {},
   expandedByRun: {},
+  scrubByRun: {},
+  playingByRun: {},
 
   toggleSeries: (runId, name) => {
     const current = get().selectedByRun[runId] ?? new Set<string>();
@@ -80,18 +113,72 @@ export const usePlotStore = create<PlotState>((set, get) => ({
     set({ expandedByRun: { ...get().expandedByRun, [runId]: next } });
   },
 
+  setScrubT: (runId, t) => {
+    set({ scrubByRun: { ...get().scrubByRun, [runId]: t } });
+  },
+
+  setPlaying: (runId, value) => {
+    set({ playingByRun: { ...get().playingByRun, [runId]: value } });
+  },
+
   resetRun: (runId) => {
     const sel = { ...get().selectedByRun };
     const flt = { ...get().filterByRun };
     const exp = { ...get().expandedByRun };
+    const scrub = { ...get().scrubByRun };
+    const playing = { ...get().playingByRun };
     delete sel[runId];
     delete flt[runId];
     delete exp[runId];
-    set({ selectedByRun: sel, filterByRun: flt, expandedByRun: exp });
+    delete scrub[runId];
+    delete playing[runId];
+    set({
+      selectedByRun: sel,
+      filterByRun: flt,
+      expandedByRun: exp,
+      scrubByRun: scrub,
+      playingByRun: playing,
+    });
   },
 
-  clearAll: () => set({ selectedByRun: {}, filterByRun: {}, expandedByRun: {} }),
+  clearAll: () =>
+    set({
+      selectedByRun: {},
+      filterByRun: {},
+      expandedByRun: {},
+      scrubByRun: {},
+      playingByRun: {},
+    }),
 }));
+
+// ---- helpers --------------------------------------------------------------
+
+/**
+ * Binary search for the largest index ``i`` where ``t[i] <= target``.
+ * Returns ``-1`` when ``target < t[0]`` or ``length === 0``. Used by the
+ * ScrubControl + TimeSeriesPlot to translate a scrub time into a frame
+ * index for ``uPlot.setCursor({ idx })`` and the SLD overlay lookup.
+ *
+ * Operates on the **logical prefix** of a Float64Array (the runs slice
+ * over-allocates for geometric growth), so callers MUST pass the actual
+ * row count via ``length`` rather than ``arr.length``.
+ *
+ * Assumes ``t`` is monotonically non-decreasing (a guarantee from
+ * ANDES TDS streams). Behavior is undefined otherwise.
+ */
+export function findClosestFrameIdx(t: Float64Array, length: number, target: number): number {
+  if (length <= 0) return -1;
+  if (target < t[0]!) return -1;
+  if (target >= t[length - 1]!) return length - 1;
+  let lo = 0;
+  let hi = length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >>> 1;
+    if (t[mid]! <= target) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
 
 // ---- column-name parsing --------------------------------------------------
 
