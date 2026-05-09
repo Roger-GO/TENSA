@@ -256,6 +256,7 @@ async def _drive_streaming_run(
     h: float | None = 1 / 120,
     decimation: str | None = None,
     max_rate_hz: float | None = None,
+    vars_: list[str] | None = None,
 ) -> tuple[dict[str, object], list[bytes], dict[str, object]]:
     """Helper: open WS, auth, send start_tds with optional decimation params,
     return (stream_start_metadata, list_of_binary_frames, done_message)."""
@@ -267,6 +268,8 @@ async def _drive_streaming_run(
         cfg["decimation"] = decimation
     if max_rate_hz is not None:
         cfg["max_rate_hz"] = max_rate_hz
+    if vars_ is not None:
+        cfg["vars"] = vars_
 
     async with websockets.connect(ws_url) as ws:
         await ws.send(json.dumps({"type": "auth", "token": token}))
@@ -606,3 +609,208 @@ async def test_streaming_resume_after_run_completed_replays_full_run(
     assert done is not None
     assert done["final_t"] >= 0.99
     assert frames_replayed > 0, "completed-run replay yielded no frames"
+
+
+# ---- v0.2 vars selector ----------------------------------------------------
+
+
+@pytest.mark.acceptance
+async def test_streaming_vars_default_omitted_matches_v01_wire_format(
+    live_server: tuple[str, int, str],
+) -> None:
+    """v0.2 backward compat: omitting ``vars`` is identical to the v0.1
+    bus-voltage-only wire format. The schema has ``t`` + 14 ``Bus_<idx>_v``
+    columns and nothing else; the metadata advertises only those columns."""
+    token, port, base = live_server
+    sid = await _create_session_and_load(token, base)
+
+    metadata, binary_frames, _done = await _drive_streaming_run(
+        token, port, sid, tf=0.5, h=1 / 120
+    )
+    meta = metadata["metadata"]
+    # v0.2 metadata adds ``vars`` (defaulted to ["bus_v"]) but column set
+    # is unchanged.
+    assert meta.get("vars") == ["bus_v"]
+    assert len(meta["var_columns"]) == 14
+    assert all(name.startswith("Bus_") and name.endswith("_v") for name in meta["var_columns"])
+
+    reader = pyarrow.ipc.open_stream(io.BytesIO(binary_frames[0]))
+    schema = reader.schema
+    assert schema.names == ["t"] + list(meta["var_columns"])
+
+
+@pytest.mark.acceptance
+async def test_streaming_vars_bus_v_and_gen_state_includes_both_groups(
+    live_server: tuple[str, int, str],
+) -> None:
+    """``vars: ["bus_v","gen_state"]`` produces frames whose Arrow schema
+    has both bus voltage + generator delta/omega columns. IEEE 14 + the
+    .dyr addfile gives 14 buses + 5 GENROU SynGen members → 14 + 10 = 24
+    state columns plus ``t``."""
+    token, port, base = live_server
+    sid = await _create_session_and_load(token, base)
+
+    metadata, binary_frames, _done = await _drive_streaming_run(
+        token, port, sid, tf=0.5, h=1 / 120, vars_=["bus_v", "gen_state"]
+    )
+    meta = metadata["metadata"]
+    assert meta["vars"] == ["bus_v", "gen_state"]
+
+    var_cols = list(meta["var_columns"])
+    bus_cols = [c for c in var_cols if c.startswith("Bus_")]
+    delta_cols = [c for c in var_cols if c.startswith("Gen_") and c.endswith("_delta")]
+    omega_cols = [c for c in var_cols if c.startswith("Gen_") and c.endswith("_omega")]
+    assert len(bus_cols) == 14
+    assert len(delta_cols) == 5
+    assert len(omega_cols) == 5
+    # Layout is canonical: bus_v block then gen_state block.
+    bus_end = var_cols.index(bus_cols[-1])
+    gen_start = var_cols.index(delta_cols[0])
+    assert gen_start == bus_end + 1
+
+    reader = pyarrow.ipc.open_stream(io.BytesIO(binary_frames[0]))
+    schema = reader.schema
+    assert schema.names == ["t"] + var_cols
+    batch = reader.read_next_batch()
+    assert batch.num_columns == 1 + 14 + 10
+    # All omega values at t=0 are 1.0 pu (synchronous reference); spot-check.
+    for col in omega_cols:
+        values = batch.column(col).to_pylist()
+        for v in values:
+            assert 0.5 < v < 1.5, f"omega {col}={v} out of physical range"
+
+
+@pytest.mark.acceptance
+async def test_streaming_vars_metadata_enumerates_all_columns(
+    live_server: tuple[str, int, str],
+) -> None:
+    """The stream-start metadata enumerates every column for the chosen
+    ``vars`` set — bus + gen + line — so the client picker tree can be
+    populated without re-introspecting the topology."""
+    token, port, base = live_server
+    sid = await _create_session_and_load(token, base)
+
+    metadata, _frames, _done = await _drive_streaming_run(
+        token,
+        port,
+        sid,
+        tf=0.5,
+        h=1 / 120,
+        vars_=["bus_v", "gen_state", "line_flow"],
+    )
+    meta = metadata["metadata"]
+    assert meta["vars"] == ["bus_v", "gen_state", "line_flow"]
+    var_cols = list(meta["var_columns"])
+    n_buses = len(meta["bus_idx_values"])
+    n_gens = len(meta["syngen_idx_values"])
+    n_lines = len(meta["line_idx_values"])
+    # IEEE 14 + dyr: 14 buses, 5 GENROU, 20 lines.
+    assert n_buses == 14
+    assert n_gens == 5
+    assert n_lines == 20
+    # Each gen contributes two columns (delta + omega); each line
+    # contributes one (P).
+    assert len(var_cols) == n_buses + 2 * n_gens + n_lines
+
+
+@pytest.mark.acceptance
+async def test_streaming_vars_empty_list_closes_with_error(
+    live_server: tuple[str, int, str],
+) -> None:
+    """``vars=[]`` is rejected with a structured WS error (close 4500 +
+    ``{type: "error", code, reason}`` text frame). The server never
+    starts the run."""
+    token, port, base = live_server
+    sid = await _create_session_and_load(token, base)
+    ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
+
+    async with websockets.connect(ws_url) as ws:
+        await ws.send(json.dumps({"type": "auth", "token": token}))
+        ready = json.loads(await ws.recv())
+        assert ready["type"] == "ready"
+        await ws.send(
+            json.dumps(
+                {"type": "start_tds", "tf": 1.0, "h": 1 / 120, "vars": []}
+            )
+        )
+        try:
+            while True:
+                msg = await ws.recv()
+                if isinstance(msg, str):
+                    err = json.loads(msg)
+                    if err.get("type") == "error":
+                        assert err.get("code") == 4500
+                        assert "vars" in err.get("reason", "").lower()
+        except websockets.exceptions.ConnectionClosed as exc:
+            assert exc.code == 4500, f"expected 4500, got {exc.code}"
+
+
+@pytest.mark.acceptance
+async def test_streaming_vars_unknown_group_closes_with_error(
+    live_server: tuple[str, int, str],
+) -> None:
+    """An unknown variable-group name closes the WS with 4500 before any
+    run starts."""
+    token, port, base = live_server
+    sid = await _create_session_and_load(token, base)
+    ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
+
+    async with websockets.connect(ws_url) as ws:
+        await ws.send(json.dumps({"type": "auth", "token": token}))
+        json.loads(await ws.recv())
+        await ws.send(
+            json.dumps(
+                {
+                    "type": "start_tds",
+                    "tf": 1.0,
+                    "h": 1 / 120,
+                    "vars": ["bus_v", "no_such_group"],
+                }
+            )
+        )
+        try:
+            while True:
+                msg = await ws.recv()
+                if isinstance(msg, str):
+                    err = json.loads(msg)
+                    if err.get("type") == "error":
+                        assert err.get("code") == 4500
+                        assert "no_such_group" in err.get("reason", "")
+        except websockets.exceptions.ConnectionClosed as exc:
+            assert exc.code == 4500
+
+
+@pytest.mark.acceptance
+async def test_streaming_vars_works_with_decimation_mean(
+    live_server: tuple[str, int, str],
+) -> None:
+    """Aggregation modes (``decimation="mean"``) work with the extended
+    schema — the mean is computed across every column in the multi-
+    column rows. Each frame contains exactly one row whose values are
+    the per-column window mean."""
+    token, port, base = live_server
+    sid = await _create_session_and_load(token, base)
+
+    metadata, binary_frames, done = await _drive_streaming_run(
+        token,
+        port,
+        sid,
+        tf=0.5,
+        h=1 / 120,
+        decimation="mean",
+        max_rate_hz=10.0,
+        vars_=["bus_v", "gen_state"],
+    )
+    meta = metadata["metadata"]
+    assert meta["decimation"]["mode"] == "mean"
+    assert meta["vars"] == ["bus_v", "gen_state"]
+
+    # Every batch is one row × (1 + 14 + 10) columns.
+    expected_cols = 1 + 14 + 2 * 5
+    for frame in binary_frames:
+        reader = pyarrow.ipc.open_stream(io.BytesIO(frame))
+        batch = reader.read_next_batch()
+        assert batch.num_rows == 1
+        assert batch.num_columns == expected_cols
+
+    assert done["final_t"] >= 0.49

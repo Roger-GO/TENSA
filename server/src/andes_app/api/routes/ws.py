@@ -50,6 +50,7 @@ from andes_app.core.session import (
     SessionExpiredError,
     SessionManager,
 )
+from andes_app.core.stream import DEFAULT_VARS, VAR_GROUPS
 from andes_app.security.token import constant_time_eq
 
 router = APIRouter()
@@ -182,6 +183,36 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         )
         return
 
+    # Optional ``vars`` selector — picks which variable groups (bus_v,
+    # gen_state, line_flow) appear as columns in each Arrow record batch.
+    # Validation lives here (not just in the schemas/Pydantic layer) because
+    # the WS path doesn't go through FastAPI request-body machinery.
+    vars_raw = cfg.get("vars", list(DEFAULT_VARS))
+    if not isinstance(vars_raw, list) or not all(
+        isinstance(v, str) for v in vars_raw
+    ):
+        await _close_with_error(
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            "'vars' must be a list of variable-group strings",
+        )
+        return
+    if not vars_raw:
+        await _close_with_error(
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            "'vars' must be a non-empty list when provided",
+        )
+        return
+    unknown = [v for v in vars_raw if v not in VAR_GROUPS]
+    if unknown:
+        await _close_with_error(
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            f"unknown var group(s) {unknown!r}; expected one of {list(VAR_GROUPS)!r}",
+        )
+        return
+
     # Start the streaming run as a background task; the run survives WS
     # disconnect and can be resumed via {"type":"resume",...}.
     try:
@@ -194,6 +225,7 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
                 "stream": True,
                 "decimation": decimation_raw,
                 "max_rate_hz": max_rate_hz,
+                "vars": vars_raw,
             },
         )
     except SessionExpiredError as exc:

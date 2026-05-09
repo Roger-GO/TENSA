@@ -640,6 +640,26 @@ class TdsRunRequest(BaseModel):
         ),
         gt=0.0,
     )
+    vars: list[Literal["bus_v", "gen_state", "line_flow"]] | None = Field(
+        None,
+        description=(
+            "Optional selector for which variable groups appear as columns "
+            "in each per-step Arrow record batch on the streaming path. "
+            "``bus_v`` covers bus voltage magnitudes (the v0.1 default); "
+            "``gen_state`` adds generator rotor angle ``delta`` and per-"
+            "unit speed ``omega`` for every member of the ANDES ``SynGen`` "
+            "group (GENROU / GENCLS / PLBVFU1); ``line_flow`` adds active "
+            "power ``Line_<idx>_p`` (MW) at each line's bus1 terminal. "
+            "Unknown values are rejected with 422; an empty list is "
+            "rejected with 422. The batch path (``POST /tds``) ignores "
+            "this field at runtime — the streamed-only state values are "
+            "not surfaced in batch responses — but it is accepted on the "
+            "OpenAPI surface for symmetry with the WebSocket "
+            "``start_tds`` config so generated clients can share one "
+            "request shape. Defaults to ``[\"bus_v\"]`` when omitted."
+        ),
+        min_length=1,
+    )
 
 
 class TdsBatchResult(BaseModel):
