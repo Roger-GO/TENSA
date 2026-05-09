@@ -121,7 +121,18 @@ export function FaultSpecForm({
           id="fault-bus-idx"
           value={String(spec.bus_idx ?? '')}
           required
-          onChange={(value) => onChange({ ...spec, bus_idx: value })}
+          onChange={(value) =>
+            onChange({
+              ...spec,
+              // Coerce numeric bus idxes back to int so ANDES's setup() can
+              // match against integer Bus.idx values. Most cases (IEEE 14,
+              // IEEE 39, etc.) use integer idxes; sending the raw string
+              // "16" makes setup() fail with "not exist with idx=16."
+              // because ANDES does an exact-type compare. Non-numeric idxes
+              // (e.g., user-named "BUS_X") pass through as strings.
+              bus_idx: /^-?\d+$/.test(value) ? Number(value) : value,
+            })
+          }
         />
       </FieldRow>
       <NumberField

@@ -150,7 +150,10 @@ export function AlterSpecForm({
           id="alter-dev-idx"
           data-testid="alter-dev-idx"
           value={String(spec.dev_idx ?? '')}
-          onChange={(e) => onChange({ ...spec, dev_idx: e.target.value })}
+          onChange={(e) => {
+            const v = e.target.value;
+            onChange({ ...spec, dev_idx: /^-?\d+$/.test(v) ? Number(v) : v });
+          }}
           className={cn(
             'bg-background border-border h-7 rounded border px-2 font-mono text-xs',
             errors.dev_idx ? 'border-destructive' : '',

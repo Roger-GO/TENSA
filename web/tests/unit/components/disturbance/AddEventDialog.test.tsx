@@ -95,7 +95,9 @@ describe('<AddEventDialog />', () => {
     expect(onSave).toHaveBeenCalled();
     const arg = (onSave.mock.calls[0]?.[0] ?? null) as DisturbanceSpec | null;
     expect(arg?.kind).toBe('fault');
-    expect((arg as FaultSpec).bus_idx).toBe('5');
+    // Numeric bus idxes are coerced to int so ANDES exact-type-match works
+    // at setup time. Most cases (IEEE 14, IEEE 39, etc.) use integer Bus.idx.
+    expect((arg as FaultSpec).bus_idx).toBe(5);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
