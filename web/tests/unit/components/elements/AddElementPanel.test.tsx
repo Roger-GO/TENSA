@@ -86,6 +86,7 @@ beforeEach(() => {
     addPanelOpen: false,
     addPanelKind: null,
     addPanelDirty: false,
+    addPanelDropCoord: null,
   });
   useSessionStore.setState({ sessionId: parseSessionId('test-session-id') });
 });
@@ -166,6 +167,48 @@ describe('<AddElementPanel />', () => {
     await user.click(screen.getByRole('button', { name: /^cancel$/i }));
     expect(useCaseStore.getState().addPanelOpen).toBe(false);
     expect(screen.queryByTestId('add-element-cancel-confirm')).toBeNull();
+  });
+
+  // ---- v3 Unit 5 — dropCoord seed ---------------------------------------
+
+  it('renders the drop-position hint when kind=Bus AND addPanelDropCoord is set', async () => {
+    useCaseStore.setState({
+      addPanelOpen: true,
+      addPanelKind: 'Bus',
+      addPanelDropCoord: { x: 123, y: 456 },
+    });
+    render(withQueryClient(<AddElementPanel />));
+    await waitFor(() => screen.getByTestId('element-form-Bus'));
+    const hint = screen.getByTestId('add-element-drop-coord');
+    expect(hint).toBeInTheDocument();
+    expect(hint.textContent).toMatch(/x=123/);
+    expect(hint.textContent).toMatch(/y=456/);
+  });
+
+  it('omits the drop-position hint when kind=Bus but no dropCoord (non-DnD open)', async () => {
+    useCaseStore.setState({
+      addPanelOpen: true,
+      addPanelKind: 'Bus',
+      addPanelDropCoord: null,
+    });
+    render(withQueryClient(<AddElementPanel />));
+    await waitFor(() => screen.getByTestId('element-form-Bus'));
+    expect(screen.queryByTestId('add-element-drop-coord')).toBeNull();
+  });
+
+  it('omits the drop-position hint for non-Bus kinds even with a dropCoord set', async () => {
+    // Generator drop should NOT render the Bus-only position hint —
+    // non-Bus elements anchor to a parent bus, so a free coordinate
+    // doesn't apply. The panel must not crash and must not surface
+    // the hint.
+    useCaseStore.setState({
+      addPanelOpen: true,
+      addPanelKind: 'PV',
+      addPanelDropCoord: { x: 7, y: 8 },
+    });
+    render(withQueryClient(<AddElementPanel />));
+    expect(screen.getByTestId('add-element-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('add-element-drop-coord')).toBeNull();
   });
 
   it('cancel on a dirty form opens the confirm dialog; Discard closes', async () => {
