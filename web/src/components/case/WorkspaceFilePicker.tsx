@@ -7,7 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { EmptyState } from '@/components/shell/EmptyState';
+import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
 import { ParseErrorBanner } from './ParseErrorBanner';
 import { NewSystemButton } from './NewSystemButton';
 import { BundleImportButton } from '@/components/bundle/BundleImportDialog';
@@ -301,8 +301,10 @@ export function WorkspaceFilePicker({ className }: WorkspaceFilePickerProps) {
 
       {!hasFiles ? (
         <EmptyState
+          icon={<FolderIcon />}
           title="No supported case files"
           description="Place a .raw / .xlsx / .json / .m file in the workspace dir."
+          emptyStateKey="workspace-files-empty"
         />
       ) : (
         <>

@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/Input';
-import { EmptyState } from '@/components/shell/EmptyState';
+import { ChartLineIcon, EmptyState, FolderIcon } from '@/components/ui/EmptyState';
+import { useRunModeStore } from '@/store/runMode';
 import { useCaseStore } from '@/store/case';
 import { useSldStore } from '@/store/sld';
 import { useCurrentTopology } from '@/api/queries';
@@ -337,6 +338,7 @@ function ResultTable({
   panelSlug,
   caseName,
 }: TableProps) {
+  const setActiveRoutine = useRunModeStore((s) => s.setActiveRoutine);
   const [sort, setSort] = useState<SortState>({
     column: columns[0]?.key ?? 'idx',
     direction: 'asc',
@@ -380,14 +382,24 @@ function ResultTable({
   }, [visibleRows, columns, query]);
 
   if (rows.length === 0) {
+    // Pre-PF empty branch surfaces a "Run PF" CTA that flips the
+    // top-bar Run button into PF mode. When the empty state is just
+    // an empty bucket (e.g. a case with no shunts), the CTA is
+    // omitted because running PF wouldn't change anything.
+    const isPrePflow = prePflowLabel !== null;
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-2" data-testid={testId}>
         <div className="flex justify-end">
           <ExportMenu formats={['csv']} disabled panel={panelSlug} caseName={caseName} />
         </div>
         <EmptyState
+          icon={isPrePflow ? <ChartLineIcon /> : undefined}
           title="No results"
           description={prePflowLabel ?? emptyTabLabel}
+          action={
+            isPrePflow ? { label: 'Run PF', onClick: () => setActiveRoutine('pflow') } : undefined
+          }
+          emptyStateKey={`results-table-${panelSlug}`}
           className="py-6"
         />
       </div>
@@ -532,7 +544,12 @@ export function ResultsTable({ className }: ResultsTableProps) {
   if (!topology) {
     return (
       <div className={cn('flex h-full flex-col', className)}>
-        <EmptyState title="No case loaded" description="Load a case to see its elements." />
+        <EmptyState
+          icon={<FolderIcon />}
+          title="No case loaded"
+          description="Load a case to see its elements."
+          emptyStateKey="results-table-no-case"
+        />
       </div>
     );
   }

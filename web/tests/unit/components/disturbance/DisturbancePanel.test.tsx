@@ -64,8 +64,9 @@ describe('<DisturbancePanel />', () => {
   it('renders the empty state when no disturbances are scheduled', () => {
     render(withQueryClient(<DisturbancePanel />));
     expect(screen.getByTestId('disturbance-empty-state')).toBeInTheDocument();
+    expect(screen.getByText(/No disturbances scheduled/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/No disturbances scheduled\./i),
+      screen.getByText(/Add one to define a fault, line trip, or parameter change/i),
     ).toBeInTheDocument();
     expect(screen.queryByTestId('disturbance-list')).toBeNull();
   });

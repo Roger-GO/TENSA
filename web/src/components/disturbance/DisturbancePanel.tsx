@@ -1,10 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import {
-  disturbanceSummary,
-  sortedDisturbances,
-  useDisturbanceStore,
-} from '@/store/disturbance';
+import { BoltIcon, EmptyState } from '@/components/ui/EmptyState';
+import { disturbanceSummary, sortedDisturbances, useDisturbanceStore } from '@/store/disturbance';
 import type { DisturbanceLocal } from '@/store/disturbance';
 import type { DisturbanceSpec } from '@/api/types';
 import { cn } from '@/lib/cn';
@@ -50,8 +47,7 @@ export function DisturbancePanel({ className }: DisturbancePanelProps) {
   const sorted = sortedDisturbances(disturbances);
 
   const openAdd = () => setDialog({ mode: 'add' });
-  const openEdit = (d: DisturbanceLocal) =>
-    setDialog({ mode: 'edit', id: d.id, spec: d.spec });
+  const openEdit = (d: DisturbanceLocal) => setDialog({ mode: 'edit', id: d.id, spec: d.spec });
   const closeDialog = (next: boolean) => {
     if (!next) setDialog({ mode: 'closed' });
   };
@@ -91,23 +87,22 @@ export function DisturbancePanel({ className }: DisturbancePanelProps) {
       />
 
       {disturbances.length === 0 ? (
-        <p
-          data-testid="disturbance-empty-state"
-          className="text-muted-foreground text-xs"
-        >
-          No disturbances scheduled. Add one to define a fault, line trip, or
-          parameter change.
-        </p>
+        <div data-testid="disturbance-empty-state">
+          <EmptyState
+            icon={<BoltIcon />}
+            title="No disturbances scheduled"
+            description="Add one to define a fault, line trip, or parameter change."
+            action={{ label: 'Add disturbance', onClick: openAdd }}
+            emptyStateKey="disturbance-panel"
+          />
+        </div>
       ) : (
-        <ul
-          data-testid="disturbance-list"
-          className="flex flex-col gap-1 overflow-auto"
-        >
+        <ul data-testid="disturbance-list" className="flex flex-col gap-1 overflow-auto">
           {sorted.map((d) => (
             <li
               key={d.id}
               data-testid={`disturbance-row-${d.id}`}
-              className="border-border flex items-center justify-between gap-2 rounded border bg-background px-2 py-1"
+              className="border-border bg-background flex items-center justify-between gap-2 rounded border px-2 py-1"
             >
               <button
                 type="button"

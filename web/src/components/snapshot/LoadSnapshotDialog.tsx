@@ -25,6 +25,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { EmptyState, SnapshotIcon } from '@/components/ui/EmptyState';
 import { useDeleteSnapshot, useListSnapshots, useRestoreSnapshot } from '@/api/queries';
 import type { SnapshotListEntry } from '@/api/queries';
 import { useSnapshotStore } from '@/store/snapshot';
@@ -144,6 +145,7 @@ function LoadSnapshotDialogInner() {
   };
 
   const snapshots: readonly SnapshotListEntry[] = listQuery.data?.snapshots ?? [];
+  const openSaveDialog = useSnapshotStore((s) => s.openSaveDialog);
 
   return (
     <DialogContent data-testid="load-snapshot-dialog" className="max-w-2xl">
@@ -159,9 +161,21 @@ function LoadSnapshotDialogInner() {
             Loading snapshots…
           </p>
         ) : snapshots.length === 0 ? (
-          <p data-testid="load-snapshot-empty" className="text-muted-foreground text-xs">
-            No snapshots saved against this case yet.
-          </p>
+          <div data-testid="load-snapshot-empty">
+            <EmptyState
+              icon={<SnapshotIcon />}
+              title="No snapshots yet"
+              description="Save the current operating point to restore it later."
+              action={{
+                label: 'Save snapshot',
+                onClick: () => {
+                  closeDialogs();
+                  openSaveDialog();
+                },
+              }}
+              emptyStateKey="load-snapshot-empty"
+            />
+          </div>
         ) : (
           <ul
             data-testid="load-snapshot-list"
