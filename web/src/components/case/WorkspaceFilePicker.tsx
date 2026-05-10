@@ -10,6 +10,7 @@ import {
 import { EmptyState } from '@/components/shell/EmptyState';
 import { ParseErrorBanner } from './ParseErrorBanner';
 import { NewSystemButton } from './NewSystemButton';
+import { BundleImportButton } from '@/components/bundle/BundleImportDialog';
 import { useListWorkspaceFiles, useLoadCase, useCreateSession } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
@@ -140,8 +141,7 @@ function useEnsureSession(): {
   // belt-and-suspenders guard but does NOT cross instance boundaries. A
   // v0.2 implementer adding a second consumer should hoist the cycle to
   // a singleton bridge or a shared zustand action.
-  const shouldCreate =
-    tokenPresent && sessionId === null && !createSession.isPending;
+  const shouldCreate = tokenPresent && sessionId === null && !createSession.isPending;
 
   // Per-instance debounce: prevent rapid-fire create attempts from
   // re-render loops. Allows at most one mutate() call per second.
@@ -394,7 +394,16 @@ export function WorkspaceFilePicker({ className }: WorkspaceFilePickerProps) {
 
       {createError ? <ParseErrorBanner error={createError} onDismiss={() => {}} /> : null}
 
-      <NewSystemButton />
+      <div className="flex flex-col gap-1.5">
+        <NewSystemButton />
+        {/* Unit 10 — Import bundle is the third top-level entry point
+            alongside "New system" and "Pick a file". A bundle is a
+            full session restore (case + disturbances), so it lives
+            here rather than buried in a sub-menu. Disabled when there
+            is no session yet (the substrate's import endpoint is
+            session-scoped). */}
+        <BundleImportButton className="w-full" />
+      </div>
       <div
         className="text-muted-foreground -mt-1 mb-1 flex items-center gap-2 text-[10px]"
         aria-hidden="true"

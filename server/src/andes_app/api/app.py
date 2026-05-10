@@ -31,6 +31,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import Scope
 
 from andes_app import __version__
+from andes_app.api.routes.bundle import router as bundle_import_router
 from andes_app.api.routes.cases import router as cases_router
 from andes_app.api.routes.cpf import router as cpf_router
 from andes_app.api.routes.disturbances import router as disturbances_router
@@ -243,6 +244,11 @@ def make_app(
     # is "snapshot" since that's the broader concept; the bundle export
     # is conceptually a snapshot of session state for sharing.
     app.include_router(snapshot_router, prefix="/api", tags=["snapshot"])
+    # Unit 10 — bundle import endpoint (counterpart to the Unit-3
+    # export above; lives in its own module since the conflict-
+    # resolution surface is substantively different from the export
+    # side).
+    app.include_router(bundle_import_router, prefix="/api", tags=["bundle"])
     app.include_router(reports_router, prefix="/api", tags=["reports"])
     app.include_router(eig_router, prefix="/api", tags=["eig"])
     app.include_router(cpf_router, prefix="/api", tags=["cpf"])
