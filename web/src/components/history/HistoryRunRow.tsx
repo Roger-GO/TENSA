@@ -75,7 +75,10 @@ export function HistoryRunRow({
   const removeOverlayRun = useRunsStore((s) => s.removeOverlayRun);
   const resetRun = useRunsStore((s) => s.resetRun);
 
-  const style = runIdToStrokeStyle(run.runId);
+  // Pick up Unit 20's per-run colour override so the history row swatch
+  // matches the legend chip + plot stroke when the researcher has
+  // customised the run's colour.
+  const style = runIdToStrokeStyle(run.runId, run.colorOverride);
 
   const handleTogglePin = () => {
     const willBePinned = !isOverlayPinned;

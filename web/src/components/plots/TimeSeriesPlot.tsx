@@ -238,11 +238,13 @@ function buildMultiRunGroupChart(
 
   for (let runIdx = 0; runIdx < runs.length; runIdx += 1) {
     const run = runs[runIdx]!;
-    const style = runIdToStrokeStyle(run.runId);
-    const gradientColor =
-      colorMode === 'gradient'
-        ? gradientColorFor(runIdx, runs.length)
-        : null;
+    // Per-run colour override (Unit 20): if the researcher picked a
+    // custom swatch in the legend, ``run.colorOverride`` is set and
+    // wins over the hash-derived hue. The dash pattern still comes
+    // from the runId hash so two custom-coloured runs that happened
+    // to land on the same dash family stay visually distinct.
+    const style = runIdToStrokeStyle(run.runId, run.colorOverride);
+    const gradientColor = colorMode === 'gradient' ? gradientColorFor(runIdx, runs.length) : null;
     const stroke = gradientColor ?? style.color;
     const len = run.seqCount;
     for (const name of selectedNames) {
@@ -565,10 +567,7 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         {isMultiRun ? (
-          <div
-            data-testid="time-series-plot-legend"
-            className="flex flex-wrap items-center gap-1"
-          >
+          <div data-testid="time-series-plot-legend" className="flex flex-wrap items-center gap-1">
             {overlayRuns.map((r) => (
               <RunLegendChip key={r.runId} runId={r.runId} pinned />
             ))}
