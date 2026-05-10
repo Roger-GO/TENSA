@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from andes_app.core.se_result import MeasurementsGenerated, SeResult
@@ -18,7 +20,7 @@ def test_measurements_generated_dataclass_is_frozen() -> None:
     """Frozen so the wire payload cannot mutate after construction
     (matches CpfResult / EigResult convention)."""
     payload = MeasurementsGenerated(count=42)
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         payload.count = 99  # type: ignore[misc]
 
 
@@ -70,7 +72,7 @@ def test_se_result_dataclass_is_frozen() -> None:
         measurement_count=0,
         flagged_indices=[],
     )
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         result.iterations = 5  # type: ignore[misc]
 
 

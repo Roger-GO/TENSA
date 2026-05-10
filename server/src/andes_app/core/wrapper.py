@@ -1388,7 +1388,7 @@ class Wrapper:
         try:
             from io import BytesIO
 
-            from scipy.io import savemat
+            from scipy.io import savemat  # type: ignore[import-untyped]
         except ImportError as exc:  # pragma: no cover — scipy is an ANDES dep
             raise EigComputationError(
                 f"scipy.io.savemat unavailable: {exc}"
@@ -2631,18 +2631,17 @@ class Wrapper:
                 )
 
             if ss_loaded is not None:
-                self._ss = ss_loaded  # type: ignore[assignment]
+                self._ss = ss_loaded
                 used_dill = True
 
-        if not used_dill:
-            # Slow path: setup + PF on the post-replay System. PF is
-            # idempotent; if the user only wanted the disturbance list back
-            # (snapshot was saved pre-setup) the meta's has_pflow=False
-            # tells us to stop here.
-            if metadata.has_pflow:
-                self._ensure_setup()
-                ss = self._require_loaded()
-                ss.PFlow.run()
+        # Slow path: setup + PF on the post-replay System. PF is
+        # idempotent; if the user only wanted the disturbance list back
+        # (snapshot was saved pre-setup) the meta's has_pflow=False
+        # tells us to stop here.
+        if not used_dill and metadata.has_pflow:
+            self._ensure_setup()
+            ss = self._require_loaded()
+            ss.PFlow.run()
 
         return RestoreSnapshotResult(
             used_dill=used_dill,
@@ -4047,7 +4046,7 @@ def _build_cpf_result(
         bus_idxes_raw = []
     bus_idxes = [str(b) for b in bus_idxes_raw]
 
-    voltages_per_bus: dict[str, list[float]] = {}
+    voltages_per_bus = {}
     if v_matrix is not None and bus_idxes:
         try:
             n_rows = int(v_matrix.shape[0])

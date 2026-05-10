@@ -19,7 +19,7 @@ completeness, the verbatim text is the source of truth.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -39,7 +39,7 @@ router = APIRouter()
 # ---- request / response schemas -------------------------------------------
 
 
-class ReportRoutineEnum(str, Enum):
+class ReportRoutineEnum(StrEnum):
     """Routines that can be reported. ``eig`` was added in Unit 6 once
     the EIG analysis routine itself shipped — earlier Phase 1 builds
     accepted ``eig`` at the wire layer but rejected with 422; that stub

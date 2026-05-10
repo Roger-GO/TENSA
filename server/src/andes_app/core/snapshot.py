@@ -44,12 +44,10 @@ fire when needed.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import re
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -163,9 +161,7 @@ class SnapshotMetadata:
             ),
             disturbance_log=disturbance_log,
             saved_at=(
-                data.get("saved_at")
-                if isinstance(data.get("saved_at"), str)
-                else ""
+                _saved_at if isinstance(_saved_at := data.get("saved_at"), str) else ""
             ),
             has_pflow=bool(data.get("has_pflow", False)),
             has_tds=bool(data.get("has_tds", False)),

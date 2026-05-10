@@ -248,9 +248,10 @@ async def test_put_layout_nan_coordinate_rejected(
     client, _ws = client_workspace
     # JSON spec doesn't allow NaN, so use a string and let pydantic try to
     # coerce — should fail validation. Use Infinity-as-string also.
-    body = _layout_body()
     # Use raw text including NaN literal that python's json.loads accepts but
-    # the BusCoord finite-validator should reject.
+    # the BusCoord finite-validator should reject. (We don't use _layout_body()
+    # here because pydantic rejects NaN at the model boundary; we need the raw
+    # JSON to reach the route.)
     raw = (
         '{"schema_version":"1.0","andes_version":"2.0.0",'
         '"coordinates":{"1":{"x":0.0,"y":1e400}},'

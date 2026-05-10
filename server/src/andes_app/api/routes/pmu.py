@@ -193,12 +193,13 @@ def _entry_from_payload(payload: object) -> TopologyEntry:
     if not isinstance(raw_params, dict):
         raw_params = {}
     # ``params`` values are JSON-friendly primitives (the substrate's
-    # ``ParamValue`` union: float | int | str | bool | None). Cast to
+    # ``ParamValue`` union: float | int | str | bool | None). Drop None
+    # values — TopologyEntry.params doesn't carry them — and cast to
     # the schema-side type so Pydantic's strict-mode validation passes.
-    coerced: dict[str, ParamValue | None] = {}
+    coerced: dict[str, ParamValue] = {}
     for k, v in raw_params.items():
-        if v is None or isinstance(v, (bool, int, float, str)):
-            coerced[str(k)] = v  # type: ignore[assignment]
+        if isinstance(v, (bool, int, float, str)):
+            coerced[str(k)] = v
     return TopologyEntry(
         idx=str(payload.get("idx", "")),
         name=str(payload.get("name", "")),

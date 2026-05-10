@@ -941,7 +941,7 @@ class SessionManager:
                 sweep_buf.truncated = bool(result.get("truncated", False))
             sweep_buf.error = error
             sweep_buf.finished_at = time.monotonic()
-            event = {"type": "finished", "state": state}
+            event: dict[str, Any] = {"type": "finished", "state": state}
             if error is not None:
                 event["error"] = {"category": error[0], "detail": error[1]}
             for q in sweep_buf.consumers:

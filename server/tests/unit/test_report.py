@@ -11,13 +11,14 @@ cost. Integration coverage of the actual ANDES round-trip lives in
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from andes_app.core.errors import NoCaseLoadedError
+from andes_app.core.errors import AndesAppError, NoCaseLoadedError
 from andes_app.core.report import (
     PflowNotConvergedError,
     ReportGenerationError,
@@ -31,7 +32,6 @@ from andes_app.core.report import (
     generate_report,
     parse_pflow_tables,
 )
-
 
 # ---- _split_columns -------------------------------------------------------
 
@@ -293,12 +293,12 @@ def test_generate_report_tds_raises_when_no_steps_have_run() -> None:
 @pytest.mark.unit
 def test_generate_report_unknown_routine_raises_andes_app_error() -> None:
     fake_ss = SimpleNamespace(PFlow=SimpleNamespace(converged=True))
-    with pytest.raises(Exception) as exc_info:
-        generate_report(fake_ss, "eig")  # type: ignore[arg-type]
+    with pytest.raises(AndesAppError) as exc_info:
+        generate_report(fake_ss, "bogus")  # type: ignore[arg-type]
     # AndesAppError or any subclass — the routes layer maps the
     # specific class name to a status, but for the unit test we just
     # care that the unknown-routine path is rejected.
-    assert "eig" in str(exc_info.value).lower() or "unknown" in str(exc_info.value).lower()
+    assert "bogus" in str(exc_info.value).lower() or "unknown" in str(exc_info.value).lower()
 
 
 # ---- generate_report — PFlow tempfile-roundtrip --------------------------
@@ -448,5 +448,5 @@ def test_generate_report_tds_restores_logger_level() -> None:
 @pytest.mark.unit
 def test_report_table_dataclass_is_frozen() -> None:
     table = ReportTable(title="t", headers=("a",), rows=(("1",),))
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         table.title = "other"  # type: ignore[misc]

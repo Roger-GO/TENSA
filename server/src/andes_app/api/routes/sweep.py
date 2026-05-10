@@ -52,7 +52,6 @@ from andes_app.core.session import (
     SessionExpiredError,
     SessionManager,
     SweepInProgressError,
-    WorkerError,
 )
 from andes_app.core.sweep import (
     SweepRequest,
@@ -216,7 +215,7 @@ async def ws_sweep_progress(
             websocket, WS_CLOSE_INTERNAL_ERROR, "server not configured"
         )
         return
-    mgr: SessionManager = mgr_obj  # type: ignore[assignment]
+    mgr: SessionManager = mgr_obj
 
     # ---- AUTH ----
     try:

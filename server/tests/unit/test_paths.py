@@ -272,23 +272,25 @@ def test_open_workspace_file_for_write_atomic_rollback(tmp_path: Path) -> None:
     class WriterBoom(RuntimeError):
         pass
 
-    with pytest.raises(WriterBoom):  # noqa: PT012 — multi-statement intentional
-        with open_workspace_file_for_write(workspace, target_rel) as target:
-            tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115
-                mode="w",
-                encoding="utf-8",
-                dir=target.parent,
-                delete=False,
-            )
-            tmp_path_obj = Path(tmp.name)
-            try:
-                tmp.write("{half-written")
-                # Simulate a failure mid-stream BEFORE os.replace.
-                raise WriterBoom("simulated")
-            finally:
-                tmp.close()
-                if tmp_path_obj.exists():
-                    os.unlink(tmp_path_obj)
+    with (  # noqa: PT012 — multi-statement intentional
+        pytest.raises(WriterBoom),
+        open_workspace_file_for_write(workspace, target_rel) as target,
+    ):
+        tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115
+            mode="w",
+            encoding="utf-8",
+            dir=target.parent,
+            delete=False,
+        )
+        tmp_path_obj = Path(tmp.name)
+        try:
+            tmp.write("{half-written")
+            # Simulate a failure mid-stream BEFORE os.replace.
+            raise WriterBoom("simulated")
+        finally:
+            tmp.close()
+            if tmp_path_obj.exists():
+                os.unlink(tmp_path_obj)
 
     # Pre-existing file is unchanged because os.replace never ran.
     assert pre_existing.read_text() == '{"old": true}'

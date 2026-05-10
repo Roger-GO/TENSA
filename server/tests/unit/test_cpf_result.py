@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from andes_app.core.cpf_result import CpfResult
@@ -78,7 +80,7 @@ def test_cpf_result_dataclass_is_frozen() -> None:
         done_msg="",
         mode="pv",
     )
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         result.nose_idx = 5  # type: ignore[misc]
 
 

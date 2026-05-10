@@ -37,7 +37,7 @@ class ComplexNumber:
     imag: float
 
     @classmethod
-    def from_complex(cls, z: complex) -> "ComplexNumber":
+    def from_complex(cls, z: complex) -> ComplexNumber:
         return cls(real=float(z.real), imag=float(z.imag))
 
 
