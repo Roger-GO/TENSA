@@ -832,7 +832,7 @@ This unit's content (full Goal/Requirements/Files/Approach/Test scenarios/Verifi
 
 ---
 
-- [ ] **Unit 10: Bundle import flow + conflict resolution** *(PHASE 3 — relocated from Phase 2 per P0 fix to give Phase 2 schedule slack; ships as the first unit of Phase 3)*
+- [x] **Unit 10: Bundle import flow + conflict resolution** *(complete: commit f5b4e4d; +12 server + 14 web tests; manifest validation + version mismatch + sha-mismatch metadata diff + addfile blocker; 64 MiB cap)*
 
 **Goal:** Import a previously-exported reproducibility bundle. Conflict resolution for ANDES version mismatch, missing addfile, edited case.
 
@@ -909,7 +909,7 @@ This unit's content (full Goal/Requirements/Files/Approach/Test scenarios/Verifi
 
 ### Phase 3 — Tier 2 (Wk 12–22)
 
-- [ ] **Unit 12: CPF + PV / QV curves**
+- [x] **Unit 12: CPF + PV / QV curves**
 
 **Goal:** Wire `ss.CPF.run()` and `CPF.run_qv(bus)`. UI Analyze sub-mode CPF renders the nose curve and identifies the voltage-collapse margin.
 
@@ -950,7 +950,7 @@ This unit's content (full Goal/Requirements/Files/Approach/Test scenarios/Verifi
 
 ---
 
-- [ ] **Unit 13: State estimation + measurement generator**
+- [x] **Unit 13: State estimation + measurement generator**
 
 **Goal:** Wire `ss.SE.run()` with auto-generated measurement set from PF solution. UI shows residual histogram.
 
@@ -986,7 +986,7 @@ This unit's content (full Goal/Requirements/Files/Approach/Test scenarios/Verifi
 
 ---
 
-- [ ] **Unit 14: PMU placement + synthetic measurement export**
+- [x] **Unit 14: PMU placement + synthetic measurement export**
 
 **Goal:** Place PMU model instances at user-selected buses. Auto-add at TDS time. Export PMU output as CSV at full TDS rate.
 
@@ -1025,7 +1025,7 @@ This unit's content (full Goal/Requirements/Files/Approach/Test scenarios/Verifi
 
 ---
 
-- [ ] **Unit 15: Time-series load / generation profiles**
+- [x] **Unit 15: Time-series load / generation profiles**
 
 **Goal:** Import a CSV/XLSX hourly profile, assign to a load or generator, run TDS through the schedule.
 
@@ -1067,7 +1067,7 @@ This unit's content (full Goal/Requirements/Files/Approach/Test scenarios/Verifi
 
 ---
 
-- [ ] **Unit 16: Adaptive TDS (QNDF integrator) — preset + manual**
+- [x] **Unit 16: Adaptive TDS (QNDF integrator) — preset + manual**
 
 **Goal:** Add QNDF / variable-step integrator option to TDS config. Two presets: Auto (sensible defaults, hidden) and Manual (exposes rtol/atol/max_step).
 
@@ -1097,7 +1097,7 @@ This unit's content (full Goal/Requirements/Files/Approach/Test scenarios/Verifi
 
 ---
 
-- [ ] **Unit 17: Connectivity / island detection**
+- [x] **Unit 17: Connectivity / island detection**
 
 **Goal:** Endpoint that returns connected-component island count + bus membership. SLD greys out de-energised buses post-disturbance.
 
@@ -1127,7 +1127,7 @@ This unit's content (full Goal/Requirements/Files/Approach/Test scenarios/Verifi
 
 ---
 
-- [ ] **Unit 18: Sensitivity sweep harness**
+- [x] **Unit 18: Sensitivity sweep harness**
 
 **Goal:** Sweep dialog picks parameter + range + steps. Sequential execution via existing per-session worker (one TDS at a time, per KTD-9). Sweep result viewer reuses multi-run overlay (Unit 9) with parameter-axis colour gradient.
 
