@@ -186,6 +186,18 @@ describe('AppShell', () => {
     await user.tab();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Top action' }));
 
+    // Unit 8 added two auto-mounted right-slot anchors after the
+    // caller-supplied content: the dark-mode placeholder (always
+    // enabled) + the history drawer toggle (disabled when no session
+    // is loaded — this AppShell test renders no providers, so the
+    // toggle is skipped in tab order). The dark-mode placeholder is
+    // therefore the only auto-mounted stop between the caller's "Top
+    // action" and the rail collapse chevron.
+    await user.tab();
+    expect(document.activeElement?.getAttribute('data-testid')).toBe(
+      'dark-mode-toggle-placeholder',
+    );
+
     await user.tab();
     // Next focus stop is the rail collapse chevron.
     expect(document.activeElement?.getAttribute('aria-label')).toMatch(/collapse left rail/i);
