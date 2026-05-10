@@ -2079,3 +2079,73 @@ export function useDeleteProfile(): UseMutationResult<void, Error, DeleteProfile
     },
   });
 }
+
+// ---- sweep (Unit 18) ------------------------------------------------------
+
+/** Allowed sweep parameter kinds (mirrors substrate ``SweepParamKind``). */
+export type SweepParamKind =
+  | 'disturbance.fault.tc'
+  | 'disturbance.fault.tf'
+  | 'disturbance.fault.xf'
+  | 'disturbance.fault.rf'
+  | 'disturbance.toggle.t'
+  | 'disturbance.alter.t'
+  | 'disturbance.alter.value';
+
+export interface StartSweepVars {
+  sessionId: SessionId;
+  parameterKind: SweepParamKind;
+  parameterTarget: number;
+  rangeStart: number;
+  rangeEnd: number;
+  rangeSteps: number;
+  tf: number;
+  h?: number | null;
+  vars?: readonly string[] | null;
+  snapshotName: string;
+}
+
+export interface StartSweepResponse {
+  sweep_id: string;
+  total: number;
+}
+
+/**
+ * ``POST /api/sessions/{id}/sweep`` — start a sensitivity sweep — Unit 18.
+ *
+ * Returns immediately with a ``sweep_id`` that the UI uses to subscribe
+ * via the WS progress channel (``/api/ws/{session_id}/sweep/{sweep_id}``).
+ * The sweep runs as one long invoke on the per-session worker that
+ * holds the session lock until done — every other session-scoped
+ * route will return 503 in the meantime.
+ *
+ * 409 from the substrate means a sweep is already running on this
+ * session; the dialog surfaces this inline.
+ */
+export function useStartSweep(): UseMutationResult<StartSweepResponse, Error, StartSweepVars> {
+  return useMutation({
+    mutationFn: async (vars: StartSweepVars) => {
+      const body = {
+        parameter: {
+          kind: vars.parameterKind,
+          target: vars.parameterTarget,
+          range: {
+            start: vars.rangeStart,
+            end: vars.rangeEnd,
+            steps: vars.rangeSteps,
+          },
+        },
+        sim: {
+          tf: vars.tf,
+          h: vars.h ?? null,
+          vars: vars.vars ?? null,
+        },
+        snapshot_name: vars.snapshotName,
+      };
+      return await andesClient.post<StartSweepResponse>(
+        `/sessions/${encodeURIComponent(vars.sessionId)}/sweep`,
+        { body, timeoutMs: TIMEOUTS.sessionLifecycle },
+      );
+    },
+  });
+}

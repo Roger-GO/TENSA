@@ -2702,6 +2702,193 @@ class Wrapper:
         )
         delete_snapshot_files(self._workspace, case_filename, name)
 
+    # ----- sensitivity sweep (Unit 18) -----
+
+    def run_sweep(
+        self,
+        *,
+        snapshot_name: str,
+        parameter_kind: str,
+        parameter_target: int,
+        values: list[float],
+        tf: float,
+        h: float | None = None,
+        on_iteration: Callable[[int, float, dict[str, Any]], None] | None = None,
+        abort_flag: Event | None = None,
+    ) -> dict[str, Any]:
+        """Run a sensitivity sweep — Unit 18.
+
+        For each value in ``values``:
+
+        1. Restore the named snapshot via the always-works replay+PF
+           path (``use_dill_optimization=False``). This sidesteps the
+           ANDES post-iteration cleanup gap by always returning to a
+           pre-setup System with the snapshot's recorded
+           ``disturbance_log``.
+        2. Override the target disturbance spec's field with the
+           current iteration's value (the disturbance log was just
+           re-built inside the wrapper by ``restore_snapshot``; we
+           re-replay with the override).
+        3. Run TDS with the requested ``tf`` / ``h``.
+        4. Record the iteration result.
+
+        Diverging or otherwise-failing iterations are recorded with
+        ``error`` set and the sweep continues. Aborts (via
+        ``abort_flag``) cause the loop to exit at the next iteration
+        boundary; iterations completed so far are returned with
+        ``truncated=True``.
+
+        ``on_iteration`` is invoked AFTER each iteration with
+        ``(iter_idx, parameter_value, result_dict)``. The worker uses
+        this to ship per-iteration progress over the data_pipe.
+
+        Returns a dict with ``iterations`` (list of per-iteration
+        result dicts) and ``truncated`` (bool). The route layer is
+        responsible for adding the sweep_id.
+        """
+        # Lazy import keeps the module-level import graph free of the
+        # sweep types (which import from this module's siblings).
+        from andes_app.core.sweep import (
+            SweepValidationError,
+            parse_sweep_target,
+        )
+
+        if self._workspace is None:
+            raise NoCaseLoadedError(
+                "sweep requires a workspace; the substrate "
+                "was launched without one"
+            )
+
+        expected_kind, spec_field = parse_sweep_target(parameter_kind)
+
+        log = logging.getLogger("andes-app.wrapper.sweep")
+
+        iterations_out: list[dict[str, Any]] = []
+        truncated = False
+
+        for idx, value in enumerate(values):
+            # Honor abort BEFORE starting an expensive iteration. The
+            # abort flag is also wired into ``run_tds`` via the
+            # ``abort_flag`` parameter so a mid-iteration abort fires
+            # at the next callpert tick.
+            if abort_flag is not None and abort_flag.is_set():
+                truncated = True
+                break
+
+            iter_error: str | None = None
+            converged = False
+            final_t = 0.0
+            callpert_count = 0
+
+            try:
+                # 1. Restore snapshot via the always-works slow path so
+                #    every iteration starts from an identical pre-setup
+                #    System with the recorded disturbance log replayed.
+                #    After this: ``self._disturbance_log`` is populated
+                #    from the snapshot's sidecar JSON; the System is
+                #    post-setup (when has_pflow=True at save time).
+                self.restore_snapshot(
+                    snapshot_name, use_dill_optimization=False
+                )
+
+                # 2. Capture the snapshot's disturbance log BEFORE we
+                #    reload_case (which clears the log). The capture is
+                #    the source of truth for what the sweep iterates
+                #    over.
+                snap_log = list(self._disturbance_log)  # noqa: SLF001
+                if parameter_target >= len(snap_log):
+                    raise SweepValidationError(
+                        f"sweep target index {parameter_target} out of range; "
+                        f"snapshot recorded {len(snap_log)} disturbance(s)"
+                    )
+                target_spec = snap_log[parameter_target]
+                # 3. reload_case() returns to a clean pre-setup System
+                #    + clears the wrapper's log so we can re-add the
+                #    mutated spec via ``add_disturbance`` (ANDES rejects
+                #    post-setup add() — the only escape is reload).
+                self.reload_case()
+                snap_log_after = snap_log
+                # Validate the kind matches what the snapshot has.
+                if target_spec.kind != expected_kind:
+                    raise SweepValidationError(
+                        f"sweep kind {parameter_kind!r} expects "
+                        f"{expected_kind!r} disturbance at target "
+                        f"{parameter_target}, found {target_spec.kind!r}"
+                    )
+                # Build a new spec with the override applied via
+                # Pydantic's ``model_copy`` — preserves the discriminator
+                # and any unrelated fields, only the target field is
+                # replaced. ``model_copy(update={...})`` is Pydantic v2's
+                # immutable update API.
+                mutated = target_spec.model_copy(update={spec_field: float(value)})
+                # Replace the entry in our reload's log + re-add to the
+                # System. We rebuild the wrapper's log from scratch so
+                # the in-memory state matches what we're about to
+                # commit.
+                self._disturbance_log = []
+                for j, spec in enumerate(snap_log_after):
+                    out_spec = mutated if j == parameter_target else spec
+                    self.add_disturbance(out_spec)
+
+                # 3. Run TDS. The wrapper's ``run_tds`` invokes
+                #    ``_ensure_setup`` + ``ss.PFlow.run`` itself. The
+                #    abort_flag is forwarded so an in-flight iteration
+                #    can be terminated.
+                tds_result = self.run_tds(
+                    tf=tf,
+                    h=h,
+                    abort_flag=abort_flag,
+                )
+                converged = bool(tds_result.converged)
+                final_t = float(tds_result.final_t)
+                callpert_count = int(tds_result.callpert_count)
+            except Exception as exc:  # noqa: BLE001
+                # Per-iteration failures are recorded but do NOT abort
+                # the sweep — researchers want to see WHICH parameter
+                # values diverged, not just "sweep died at iter N".
+                iter_error = (
+                    f"{type(exc).__name__}: {_sanitize_message(str(exc))}"
+                )
+                log.warning(
+                    "sweep iteration %d (value=%g) failed: %s",
+                    idx,
+                    value,
+                    iter_error,
+                )
+
+            iter_dict: dict[str, Any] = {
+                "iteration": idx,
+                "parameter_value": float(value),
+                "converged": converged,
+                "final_t": final_t,
+                "callpert_count": callpert_count,
+                "error": iter_error,
+            }
+            iterations_out.append(iter_dict)
+
+            if on_iteration is not None:
+                try:
+                    on_iteration(idx, float(value), iter_dict)
+                except Exception:  # noqa: BLE001
+                    # Progress callback failures must never crash the
+                    # sweep; the data_pipe forwarding may have hit a
+                    # broken pipe, in which case we just continue.
+                    log.exception("sweep on_iteration callback raised")
+
+            # Final post-iteration abort check — the run_tds may have
+            # honoured the abort flag mid-integration (busted=True);
+            # in that case ``converged`` is False and we should stop
+            # the outer loop here.
+            if abort_flag is not None and abort_flag.is_set():
+                truncated = True
+                break
+
+        return {
+            "iterations": iterations_out,
+            "truncated": truncated,
+            "total_requested": len(values),
+        }
+
     # ----- bundle import (Unit 10) -----
 
     def import_bundle(  # noqa: C901

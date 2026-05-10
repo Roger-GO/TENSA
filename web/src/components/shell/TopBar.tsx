@@ -1,10 +1,15 @@
-import { forwardRef } from 'react';
+import { forwardRef, useState } from 'react';
 import type { HTMLAttributes, ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 import { BundleExportButton, BundleExportDialog } from '@/components/bundle/BundleExportDialog';
 import { ReportDialog, ReportDialogButton } from '@/components/reports/ReportDialog';
 import { SnapshotMenu } from '@/components/snapshot/SnapshotMenu';
 import { HistoryDrawer, HistoryDrawerToggle } from '@/components/history/HistoryDrawer';
+import { SweepDialog } from '@/components/sweep/SweepDialog';
+import { Button } from '@/components/ui/button';
+import { useSessionStore } from '@/store/session';
+import { useCaseStore } from '@/store/case';
+import { useSweepStore } from '@/store/sweep';
 
 /**
  * TopBar. Fixed-height (~44px) bar with three slots — left, center, right —
@@ -42,6 +47,7 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
   { left, center, right, className, ...props },
   ref,
 ) {
+  const [sweepDialogOpen, setSweepDialogOpen] = useState(false);
   return (
     <header
       ref={ref}
@@ -69,11 +75,35 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
         <SnapshotMenu />
         <ReportDialogButton />
         <BundleExportButton />
+        <SweepDialogButton onOpen={() => setSweepDialogOpen(true)} />
         <HistoryDrawerToggle />
       </div>
       <BundleExportDialog />
       <ReportDialog />
       <HistoryDrawer />
+      <SweepDialog open={sweepDialogOpen} onOpenChange={setSweepDialogOpen} />
     </header>
   );
 });
+
+/** Trigger button for the SweepDialog. Mounted in the TopBar's right slot. */
+function SweepDialogButton({ onOpen }: { onOpen: () => void }) {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const caseSelection = useCaseStore((s) => s.selection);
+  const activeSweepId = useSweepStore((s) => s.activeSweepId);
+  const enabled =
+    sessionId !== null && caseSelection !== null && activeSweepId === null;
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      disabled={!enabled}
+      onClick={onOpen}
+      data-testid="sweep-dialog-trigger"
+      aria-label="Start a sensitivity sweep"
+    >
+      Sweep
+    </Button>
+  );
+}

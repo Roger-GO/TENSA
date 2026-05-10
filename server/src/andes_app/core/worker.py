@@ -742,6 +742,118 @@ def _handle_delete_snapshot(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return None
 
 
+def _handle_run_sweep(
+    wrapper: Wrapper,
+    args: dict[str, Any],
+    abort_event: EventType,
+    data_pipe: Connection | None = None,
+    seq: int | None = None,
+) -> Any:
+    """Run a sensitivity sweep — Unit 18.
+
+    Long-running, holds the per-session worker lock for the entire sweep.
+    Per-iteration progress is emitted on the data_pipe as
+    ``{"type": "sweep_progress", "seq": <run_seq>, "iteration": int,
+    "value": float, "result": <iter_dict>}``.
+
+    Args (validated by the route layer's Pydantic model before reaching
+    here):
+        - ``snapshot_name``: str
+        - ``parameter_kind``: str (one of the SweepParamKind literals)
+        - ``parameter_target``: int
+        - ``values``: list[float]
+        - ``tf``: float
+        - ``h``: float | None
+        - ``sweep_id``: str (route-assigned)
+    """
+    abort_flag = threading.Event()
+    if abort_event.is_set():
+        abort_flag.set()
+
+    def _bridge() -> None:
+        # Same pattern as run_tds: a daemon thread mirrors the
+        # multiprocessing event into a thread-local Event so the
+        # wrapper's run_tds (which only knows threading.Event) can
+        # cooperate.
+        while not abort_flag.is_set():
+            if abort_event.wait(timeout=0.1):
+                abort_flag.set()
+                return
+
+    bridge_thread = threading.Thread(
+        target=_bridge, name="sweep-abort-bridge", daemon=True
+    )
+    bridge_thread.start()
+
+    snapshot_name = args.get("snapshot_name")
+    if not isinstance(snapshot_name, str):
+        raise AndesAppError("'snapshot_name' must be a string")
+    parameter_kind = args.get("parameter_kind")
+    if not isinstance(parameter_kind, str):
+        raise AndesAppError("'parameter_kind' must be a string")
+    parameter_target_raw = args.get("parameter_target")
+    if not isinstance(parameter_target_raw, int) or parameter_target_raw < 0:
+        raise AndesAppError("'parameter_target' must be a non-negative int")
+    parameter_target = int(parameter_target_raw)
+    values_raw = args.get("values")
+    if not isinstance(values_raw, list) or not values_raw:
+        raise AndesAppError("'values' must be a non-empty list of floats")
+    try:
+        values = [float(v) for v in values_raw]
+    except (TypeError, ValueError) as exc:
+        raise AndesAppError("'values' must contain float-coercible scalars") from exc
+    tf_raw = args.get("tf")
+    if not isinstance(tf_raw, (int, float)) or tf_raw <= 0:
+        raise AndesAppError("'tf' must be a positive number")
+    tf = float(tf_raw)
+    h_raw = args.get("h")
+    h = float(h_raw) if h_raw is not None else None
+    sweep_id = args.get("sweep_id") or ""
+
+    total = len(values)
+
+    def _on_iteration(idx: int, value: float, iter_dict: dict[str, Any]) -> None:
+        if data_pipe is None:
+            return
+        envelope = {
+            "type": "sweep_progress",
+            "seq": seq,
+            "sweep_id": sweep_id,
+            "iteration": idx,
+            "total": total,
+            "value": value,
+            "result": iter_dict,
+        }
+        try:
+            data_pipe.send(envelope)
+        except (BrokenPipeError, OSError):
+            abort_flag.set()
+
+    try:
+        result = wrapper.run_sweep(
+            snapshot_name=snapshot_name,
+            parameter_kind=parameter_kind,
+            parameter_target=parameter_target,
+            values=values,
+            tf=tf,
+            h=h,
+            on_iteration=_on_iteration,
+            abort_flag=abort_flag,
+        )
+    finally:
+        abort_flag.set()
+
+    abort_event.clear()
+
+    # Augment the result with the sweep_id so the parent's eventual
+    # ``done`` envelope carries it for the WS layer.
+    result["sweep_id"] = sweep_id
+    result["parameter_kind"] = parameter_kind
+    result["parameter_target"] = parameter_target
+    result["snapshot_name"] = snapshot_name
+    return result
+
+
 def _handle_run_tds(
     wrapper: Wrapper,
     args: dict[str, Any],
@@ -1072,6 +1184,11 @@ def worker_main(
         try:
             if op == "run_tds":
                 payload = _handle_run_tds(wrapper, args, abort_event, data, seq)
+            elif op == "run_sweep":
+                # Sweep is also long-running + uses the data pipe for
+                # progress events + needs the abort event for
+                # cancellation. Same special-cased dispatch as run_tds.
+                payload = _handle_run_sweep(wrapper, args, abort_event, data, seq)
             else:
                 handler = HANDLERS.get(op)
                 if handler is None:

@@ -49,6 +49,28 @@ class SessionExpiredError(AndesAppError):
     never existed."""
 
 
+class SweepInProgressError(AndesAppError):
+    """Raised by ``SessionManager.invoke`` when a sweep holds the session
+    lock — Unit 18.
+
+    Carries the sweep_id + iteration progress so the routes layer can
+    build a ``503 Service Unavailable`` response with a ``Retry-After``
+    header and a useful detail string (``"Sweep <id> in progress;
+    <N>/<total> iterations complete"``).
+    """
+
+    def __init__(
+        self, sweep_id: str, *, iter_done: int, iter_total: int
+    ) -> None:
+        super().__init__(
+            f"Sweep {sweep_id} in progress; {iter_done}/{iter_total} "
+            "iterations complete"
+        )
+        self.sweep_id = sweep_id
+        self.iter_done = iter_done
+        self.iter_total = iter_total
+
+
 class WorkerError(AndesAppError):
     """Raised when the worker reports a structured error response. The
     ``category`` field maps onto specific HTTP status codes at the API layer
@@ -86,6 +108,17 @@ class _Session:
     seq: int = 0
     last_active: float = field(default_factory=time.monotonic)
     closed: bool = False
+    # Unit 18: sweep gate. When non-None, a sweep is running and the
+    # session-scoped routes return 503 + Retry-After. The string holds
+    # the sweep_id for the route's error detail. Set inside
+    # ``start_sweep`` BEFORE the background task is scheduled and
+    # cleared in the task's ``finally``. Read by ``invoke`` (and the
+    # routes layer can read it directly via ``sweep_in_progress``).
+    sweep_in_progress: str | None = None
+    # Iteration counter the routes layer surfaces in the 503 detail.
+    # Updated by the sweep task as each iteration completes.
+    sweep_iter_done: int = 0
+    sweep_iter_total: int = 0
 
 
 RunState = Literal["pending", "running", "completed", "error"]
@@ -123,6 +156,40 @@ class _RunBuffer:
 RUN_BUFFER_RETENTION_SECONDS = 30.0
 
 
+SweepState = Literal["pending", "running", "completed", "error", "aborted"]
+
+
+@dataclass
+class _SweepBuffer:
+    """Server-side buffer for an active or recently-completed sweep — Unit 18.
+
+    Per-iteration progress events flow into ``events`` (an asyncio Queue
+    snapshot deque mirror, similar to ``_RunBuffer.frames`` but JSON-shaped
+    rather than binary). Consumers attach via
+    ``SessionManager.attach_to_sweep`` and replay any buffered events
+    older than their last-seen iteration index, then receive live events.
+
+    Sweep iterations are bounded (Unit 18 plan caps at 200) so the deque
+    is unbounded — we keep every iteration's event for the sweep
+    lifetime + ``RUN_BUFFER_RETENTION_SECONDS`` post-completion.
+    """
+
+    sweep_id: str
+    session_id: str
+    parameter_kind: str = ""
+    parameter_target: int = 0
+    snapshot_name: str = ""
+    total: int = 0
+    completed_iterations: int = 0
+    iterations: list[dict[str, Any]] = field(default_factory=list)
+    state: SweepState = "pending"
+    error: tuple[str, str] | None = None  # (category, detail)
+    truncated: bool = False
+    consumers: list[asyncio.Queue[dict[str, Any]]] = field(default_factory=list)
+    finished_at: float | None = None
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
 class SessionManager:
     """Owns the registry of live sessions and the reaper task.
 
@@ -152,6 +219,11 @@ class SessionManager:
         # Background tasks for currently-running streaming runs. We keep
         # references so they aren't garbage-collected mid-run.
         self._run_tasks: dict[str, asyncio.Task[None]] = {}
+        # Unit 18: sweeps keyed by sweep_id. A sweep buffer outlives its
+        # background task by ``RUN_BUFFER_RETENTION_SECONDS`` so a late
+        # WS attach can still replay the iteration history.
+        self._sweeps: dict[str, _SweepBuffer] = {}
+        self._sweep_tasks: dict[str, asyncio.Task[None]] = {}
         # ``spawn`` (vs. fork) is the safe default: ANDES uses numpy/scipy/sympy
         # which are not always fork-safe (BLAS thread pools, signal handlers).
         # ``spawn`` re-imports cleanly per worker.
@@ -188,6 +260,17 @@ class SessionManager:
                 await task
         self._run_tasks.clear()
         self._runs.clear()
+
+        # Unit 18: same teardown for sweeps. Cancel the background
+        # tasks, await them, then drop the buffers.
+        sweep_tasks = list(self._sweep_tasks.values())
+        for task in sweep_tasks:
+            task.cancel()
+        for task in sweep_tasks:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+        self._sweep_tasks.clear()
+        self._sweeps.clear()
 
         with self._registry_lock:
             sessions = list(self._sessions.values())
@@ -281,6 +364,7 @@ class SessionManager:
         args: dict[str, Any] | None = None,
         *,
         timeout: float | None = None,
+        bypass_sweep_gate: bool = False,
     ) -> Any:
         """Send an op to the session's worker and await the response.
 
@@ -288,6 +372,9 @@ class SessionManager:
         ``Lock``). Raises:
 
         - ``SessionExpiredError`` if the session was reaped or never existed.
+        - ``SweepInProgressError`` if a sweep is holding the session lock
+          (Unit 18). Skip this check by passing ``bypass_sweep_gate=True``
+          — only the sweep's own background-task path uses this escape.
         - ``WorkerError`` if the worker returned a structured error response.
         - ``asyncio.TimeoutError`` if ``timeout`` is set and exceeded.
         """
@@ -295,6 +382,12 @@ class SessionManager:
             sess = self._sessions.get(session_id)
         if sess is None or sess.closed:
             raise SessionExpiredError(f"session {session_id!r} is not active")
+        if not bypass_sweep_gate and sess.sweep_in_progress is not None:
+            raise SweepInProgressError(
+                sess.sweep_in_progress,
+                iter_done=sess.sweep_iter_done,
+                iter_total=sess.sweep_iter_total,
+            )
 
         loop = asyncio.get_running_loop()
 
@@ -651,6 +744,311 @@ class SessionManager:
                 with contextlib.suppress(ValueError):
                     run_buf.consumers.remove(consumer)
 
+    # ----- sweep orchestration (Unit 18) ----------------------------------
+
+    async def start_sweep(
+        self,
+        session_id: str,
+        sweep_args: dict[str, Any],
+    ) -> str:
+        """Start a sweep as a background task; return its ``sweep_id``.
+
+        Sets the ``sweep_in_progress`` gate on the session BEFORE the
+        background task is scheduled so any racing ``invoke`` immediately
+        observes the flag and returns 503. The gate is cleared in the
+        task's ``finally`` after the worker returns or errors out.
+
+        ``sweep_args`` is the dict the worker's ``_handle_run_sweep``
+        consumes (``snapshot_name`` / ``parameter_kind`` /
+        ``parameter_target`` / ``values`` / ``tf`` / ``h``). The
+        ``sweep_id`` is appended here so the worker echoes it back in
+        progress envelopes.
+
+        Raises ``SessionExpiredError`` if the session is gone, or
+        ``SweepInProgressError`` if a sweep is already running on the
+        session.
+        """
+        with self._registry_lock:
+            sess = self._sessions.get(session_id)
+        if sess is None or sess.closed:
+            raise SessionExpiredError(f"session {session_id!r} is not active")
+        if sess.sweep_in_progress is not None:
+            raise SweepInProgressError(
+                sess.sweep_in_progress,
+                iter_done=sess.sweep_iter_done,
+                iter_total=sess.sweep_iter_total,
+            )
+
+        sweep_id = uuid.uuid4().hex
+        values_raw = sweep_args.get("values")
+        total = len(values_raw) if isinstance(values_raw, list) else 0
+
+        sweep_buf = _SweepBuffer(
+            sweep_id=sweep_id,
+            session_id=session_id,
+            parameter_kind=str(sweep_args.get("parameter_kind", "")),
+            parameter_target=int(sweep_args.get("parameter_target", 0) or 0),
+            snapshot_name=str(sweep_args.get("snapshot_name", "")),
+            total=total,
+        )
+        self._sweeps[sweep_id] = sweep_buf
+
+        # Set the gate BEFORE scheduling — the background task may yield
+        # before its first await on the worker pipe, so a racing route
+        # call needs to see the flag immediately.
+        sess.sweep_in_progress = sweep_id
+        sess.sweep_iter_done = 0
+        sess.sweep_iter_total = total
+
+        task = asyncio.create_task(
+            self._drive_sweep(sess, sweep_buf, sweep_args),
+            name=f"andes-app-sweep-{sweep_id[:8]}",
+        )
+        self._sweep_tasks[sweep_id] = task
+
+        def _on_sweep_done(_task: asyncio.Task[None], sid: str = sweep_id) -> None:
+            self._sweep_tasks.pop(sid, None)
+
+        task.add_done_callback(_on_sweep_done)
+        return sweep_id
+
+    async def _drive_sweep(
+        self,
+        sess: _Session,
+        sweep_buf: _SweepBuffer,
+        sweep_args: dict[str, Any],
+    ) -> None:
+        """Background task: pumps sweep_progress events from the worker
+        pipe into the sweep buffer + connected consumers.
+
+        Lifecycle parity with ``_drive_streaming_run``: send the op +
+        loop on data_pipe.recv. Per-iteration ``sweep_progress`` events
+        update the buffer's iteration list and any attached consumer
+        queues. The terminal ``result`` envelope flips state to
+        ``completed`` + clears the session gate.
+        """
+        loop = asyncio.get_running_loop()
+
+        async def _on_progress(envelope: dict[str, Any]) -> None:
+            iteration = int(envelope.get("iteration", 0))
+            value = float(envelope.get("value", 0.0))
+            iter_dict = envelope.get("result")
+            if not isinstance(iter_dict, dict):
+                iter_dict = {}
+            async with sweep_buf.lock:
+                sweep_buf.iterations.append(iter_dict)
+                sweep_buf.completed_iterations = iteration + 1
+                sweep_buf.state = "running"
+                event = {
+                    "type": "iteration",
+                    "iteration": iteration,
+                    "total": sweep_buf.total,
+                    "value": value,
+                    "result": iter_dict,
+                }
+                for q in sweep_buf.consumers:
+                    with contextlib.suppress(asyncio.QueueFull):
+                        q.put_nowait(event)
+            sess.sweep_iter_done = sweep_buf.completed_iterations
+
+        # Send the request from the executor (Pipe.send is sync), then
+        # loop on Pipe.recv for sweep_progress envelopes + the final
+        # result envelope.
+        sweep_args_with_id = {**sweep_args, "sweep_id": sweep_buf.sweep_id}
+        try:
+            with sess.lock:
+                sess.seq += 1
+                sess.last_active = time.monotonic()
+                seq = sess.seq
+                await loop.run_in_executor(
+                    None,
+                    lambda: sess.ctrl.send(
+                        {"op": "run_sweep", "args": sweep_args_with_id, "seq": seq}
+                    ),
+                )
+
+                async def _read_one() -> dict[str, Any]:
+                    msg = await loop.run_in_executor(None, sess.data.recv)
+                    sess.last_active = time.monotonic()
+                    if not isinstance(msg, dict):
+                        raise WorkerError(
+                            "malformed", f"non-dict response: {msg!r}"
+                        )
+                    return msg
+
+                while True:
+                    msg = await _read_one()
+                    msg_type = msg.get("type")
+                    if msg_type == "sweep_progress":
+                        await _on_progress(msg)
+                        continue
+                    if msg_type == "result":
+                        result = msg.get("payload") or {}
+                        await self._finish_sweep(
+                            sess, sweep_buf, "completed", result=result
+                        )
+                        return
+                    if msg_type == "error":
+                        await self._finish_sweep(
+                            sess,
+                            sweep_buf,
+                            "error",
+                            error=(
+                                str(msg.get("category", "unknown")),
+                                str(msg.get("detail", "")),
+                            ),
+                        )
+                        return
+                    # Unknown message type — surface as an error so the
+                    # WS client sees it rather than silently hanging.
+                    await self._finish_sweep(
+                        sess,
+                        sweep_buf,
+                        "error",
+                        error=("malformed", f"unexpected message type: {msg_type!r}"),
+                    )
+                    return
+        except asyncio.CancelledError:
+            await self._finish_sweep(
+                sess, sweep_buf, "aborted", error=("cancelled", "sweep cancelled")
+            )
+            raise
+        except SessionExpiredError as exc:
+            await self._finish_sweep(
+                sess, sweep_buf, "error", error=("session-expired", str(exc))
+            )
+        except WorkerError as exc:
+            await self._finish_sweep(
+                sess, sweep_buf, "error", error=(exc.category, exc.detail)
+            )
+        except Exception as exc:  # noqa: BLE001
+            await self._finish_sweep(
+                sess, sweep_buf, "error", error=("internal-error", str(exc))
+            )
+
+    async def _finish_sweep(
+        self,
+        sess: _Session,
+        sweep_buf: _SweepBuffer,
+        state: SweepState,
+        *,
+        result: dict[str, Any] | None = None,
+        error: tuple[str, str] | None = None,
+    ) -> None:
+        async with sweep_buf.lock:
+            sweep_buf.state = state
+            if result is not None:
+                sweep_buf.truncated = bool(result.get("truncated", False))
+            sweep_buf.error = error
+            sweep_buf.finished_at = time.monotonic()
+            event = {"type": "finished", "state": state}
+            if error is not None:
+                event["error"] = {"category": error[0], "detail": error[1]}
+            for q in sweep_buf.consumers:
+                with contextlib.suppress(asyncio.QueueFull):
+                    q.put_nowait(event)
+        # Clear the session-wide sweep gate so subsequent invocations
+        # are no longer 503'd. The buffer survives until the reaper
+        # cleans it up (so late WS reconnects can read iteration
+        # results back).
+        sess.sweep_in_progress = None
+
+    async def attach_to_sweep(
+        self,
+        session_id: str,
+        sweep_id: str,
+        last_iteration: int,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Attach to a sweep and yield its events — Unit 18.
+
+        Replays any iterations after ``last_iteration`` (use ``-1`` for
+        all), then streams live iteration + finished events.
+
+        Yields events shaped:
+
+          {"type": "snapshot", "buffer": {...}}      (always once at start)
+          {"type": "iteration", "iteration": N, "total": M, "value": V,
+           "result": {...}}
+          {"type": "finished", "state": "completed" | "error" | "aborted",
+           "error": {"category": ..., "detail": ...} | None}
+          {"type": "not_found"}                       (terminal; unknown
+                                                       sweep_id or wrong
+                                                       session)
+        """
+        sweep_buf = self._sweeps.get(sweep_id)
+        if sweep_buf is None or sweep_buf.session_id != session_id:
+            yield {"type": "not_found"}
+            return
+
+        consumer: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=10000)
+
+        async with sweep_buf.lock:
+            sweep_buf.consumers.append(consumer)
+            snapshot_state = sweep_buf.state
+            snapshot_iters = list(sweep_buf.iterations)
+            snapshot_total = sweep_buf.total
+            snapshot_error = sweep_buf.error
+
+        try:
+            # Initial snapshot envelope so the client can render the
+            # already-completed iterations on attach.
+            yield {
+                "type": "snapshot",
+                "sweep_id": sweep_id,
+                "total": snapshot_total,
+                "iterations_so_far": snapshot_iters,
+                "state": snapshot_state,
+            }
+
+            # Replay missed iterations after the caller's cursor.
+            for iter_dict in snapshot_iters:
+                idx = int(iter_dict.get("iteration", -1))
+                if idx <= last_iteration:
+                    continue
+                yield {
+                    "type": "iteration",
+                    "iteration": idx,
+                    "total": snapshot_total,
+                    "value": float(iter_dict.get("parameter_value", 0.0)),
+                    "result": iter_dict,
+                }
+
+            # If the sweep already finished by the time we attached,
+            # ship the terminal event from the snapshot.
+            if snapshot_state in {"completed", "error", "aborted"}:
+                terminal: dict[str, Any] = {
+                    "type": "finished",
+                    "state": snapshot_state,
+                }
+                if snapshot_error is not None:
+                    terminal["error"] = {
+                        "category": snapshot_error[0],
+                        "detail": snapshot_error[1],
+                    }
+                yield terminal
+                return
+
+            # Live phase: drain queue.
+            while True:
+                event = await consumer.get()
+                event_type = event.get("type")
+                if event_type == "iteration":
+                    idx = int(event.get("iteration", -1))
+                    if idx <= last_iteration:
+                        continue
+                    yield event
+                elif event_type == "finished":
+                    yield event
+                    return
+        finally:
+            async with sweep_buf.lock:
+                with contextlib.suppress(ValueError):
+                    sweep_buf.consumers.remove(consumer)
+
+    def get_sweep_buffer(self, sweep_id: str) -> _SweepBuffer | None:
+        """Return the sweep buffer (read-only access for the routes layer)."""
+        return self._sweeps.get(sweep_id)
+
     # ----- introspection -----
 
     def list_sessions(self) -> list[str]:
@@ -693,11 +1091,21 @@ class SessionManager:
                     continue
                 if now - run_buf.finished_at > RUN_BUFFER_RETENTION_SECONDS:
                     self._runs.pop(run_id, None)
+            # Same retention for sweep buffers (Unit 18). Iterations are
+            # bounded so memory pressure is moderate; we still drop the
+            # buffer after the retention window so a never-attached
+            # sweep doesn't leak.
+            for sweep_id, sweep_buf in list(self._sweeps.items()):
+                if sweep_buf.finished_at is None:
+                    continue
+                if now - sweep_buf.finished_at > RUN_BUFFER_RETENTION_SECONDS:
+                    self._sweeps.pop(sweep_id, None)
 
 
 __all__ = [
     "SessionExpiredError",
     "SessionManager",
+    "SweepInProgressError",
     "WorkerError",
 ]
 

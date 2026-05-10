@@ -26,6 +26,7 @@ import { useAnimationStore } from './animation';
 import { useConnectivityStore } from './connectivity';
 import { usePmuStore } from './pmu';
 import { useProfilesStore } from './profiles';
+import { useSweepStore } from './sweep';
 
 // Re-export slices so consumers have one import surface.
 export { useAuthStore } from './auth';
@@ -64,6 +65,7 @@ export function wireStoreCascade(): void {
     useConnectivityStore.getState().clear();
     usePmuStore.getState().clear();
     useProfilesStore.getState().clear();
+    useSweepStore.getState().clearSweeps();
   });
 
   // session clear → case + pflow + runs clear.
@@ -83,6 +85,7 @@ export function wireStoreCascade(): void {
       useConnectivityStore.getState().clear();
       usePmuStore.getState().clear();
       useProfilesStore.getState().clear();
+      useSweepStore.getState().clearSweeps();
       if (!state.recoveryInProgress) {
         useCaseStore.getState().clearCase();
         usePflowStore.getState().clearPflow();
@@ -137,6 +140,7 @@ export function __resetCascadeForTests(): void {
   });
   usePmuStore.setState({ pmus: [] });
   useProfilesStore.setState({ profiles: [] });
+  useSweepStore.setState({ sweeps: {}, activeSweepId: null });
 }
 
 // Side-effect: defensive auto-wire on first import. `wireStoreCascade` is

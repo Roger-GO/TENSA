@@ -37,6 +37,8 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import type { RunRecord } from '@/store/runs';
 import { HistoryRunRow } from './HistoryRunRow';
+import { SweepProgressPanel } from '@/components/sweep/SweepProgressPanel';
+import { useSweepStore } from '@/store/sweep';
 import { cn } from '@/lib/cn';
 
 export function HistoryDrawerToggle() {
@@ -95,6 +97,14 @@ function HistoryDrawerInner() {
   const setOverlayRuns = useRunsStore((s) => s.setOverlayRuns);
   const toastMessage = useHistoryStore((s) => s.toastMessage);
   const setToast = useHistoryStore((s) => s.setToast);
+  // Unit 18: only render the sweep progress panel when a sweep is
+  // actively in progress (or just finished and still cleaning up).
+  // The panel renders an empty-state otherwise; we suppress its
+  // mount entirely when there's no sweep so the drawer stays compact.
+  const activeSweepId = useSweepStore((s) => s.activeSweepId);
+  const sweeps = useSweepStore((s) => s.sweeps);
+  const showSweepPanel =
+    activeSweepId !== null || Object.keys(sweeps).length > 0;
 
   // Most-recent first: reverse insertion order. Insertion is
   // chronological; the user's mental model is "the latest run is at
@@ -165,6 +175,15 @@ function HistoryDrawerInner() {
           )}
         >
           {toastMessage}
+        </div>
+      ) : null}
+
+      {showSweepPanel ? (
+        <div
+          data-testid="history-drawer-sweep-section"
+          className="border-border rounded border p-2"
+        >
+          <SweepProgressPanel />
         </div>
       ) : null}
 
