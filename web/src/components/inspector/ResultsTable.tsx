@@ -3,6 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/Input';
 import { EmptyState } from '@/components/shell/EmptyState';
 import { useCaseStore } from '@/store/case';
+import { useSldStore } from '@/store/sld';
 import { useCurrentTopology } from '@/api/queries';
 import { usePflowStore } from '@/store/pflow';
 import type { PflowResult, TopologyEntry, TopologySummary } from '@/api/types';
@@ -507,6 +508,12 @@ export function ResultsTable({ className }: ResultsTableProps) {
   const pflowResult = usePflowStore((s) => s.lastRun);
   const selectedElement = useCaseStore((s) => s.selectedElement);
   const setSelectedElement = useCaseStore((s) => s.setSelectedElement);
+  // Unit 11 — also write the SLD store's selectedNodeId so the canvas
+  // pans + the bus-node visual highlight follow the row click. Bus
+  // rows use the bare idx as the React Flow node id; non-bus rows
+  // (lines, transformers, generators, loads, shunts) use the
+  // `${kind}-${idx}` shape buildGraph emits.
+  const setSelectedNodeId = useSldStore((s) => s.setSelectedNodeId);
 
   const [tab, setTab] = useState<TabKey>('buses');
 
@@ -535,7 +542,23 @@ export function ResultsTable({ className }: ResultsTableProps) {
   // topology bucket being empty rather than PF state.
   const prePflowLabel = pflowResult ? null : 'Run power flow to see results.';
 
-  const onRowClick = (selected: SelectedElement) => setSelectedElement(selected);
+  const onRowClick = (selected: SelectedElement) => {
+    setSelectedElement(selected);
+    // React Flow node ids: buses use the bare idx; non-bus device
+    // nodes use `${kind}-${idx}`. Lines + transformers don't have
+    // their own SLD node (they're rendered as edges) — they fall
+    // through to the bus selection only, no pan target.
+    const kind = selected.kind;
+    if (kind === 'bus') {
+      setSelectedNodeId(selected.idx);
+    } else if (kind === 'generator' || kind === 'load' || kind === 'shunt') {
+      setSelectedNodeId(`${kind}-${selected.idx}`);
+    } else {
+      // Lines / transformers — no node-level pan target. Clear the
+      // SLD selection so a stale highlight doesn't linger.
+      setSelectedNodeId(null);
+    }
+  };
 
   // Derive a slug-friendly case name from the loaded primary file path.
   // The case store carries the full WorkspacePath; the export filename

@@ -6,6 +6,7 @@ import {
   Controls,
   MiniMap,
   SelectionMode,
+  useReactFlow,
 } from '@xyflow/react';
 import type {
   Edge,
@@ -23,6 +24,9 @@ import '@xyflow/react/dist/style.css';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { useConnectivityStore } from '@/store/connectivity';
+import { useSldStore, __requestOpenSldSearch } from '@/store/sld';
+import { useHotkeys } from '@/lib/useHotkeys';
+import { SldNodeSearch } from './SldNodeSearch';
 import {
   useGetSidecar,
   usePutSidecar,
@@ -79,7 +83,11 @@ const LARGE_TOPOLOGY_THRESHOLD = 30;
 
 /**
  * Per-kind color hint for the React Flow MiniMap. Uses semantic CSS
- * tokens directly so dark-mode tracks the rest of the app.
+ * tokens directly so dark-mode (Unit 12) tracks the rest of the app
+ * without revisiting this map. Defined at module scope so the
+ * function reference is stable across renders — React Flow's MiniMap
+ * skips its internal recompute when `nodeColor` is referentially
+ * equal to the previous value.
  */
 function miniMapNodeColor(node: Node): string {
   switch (node.type) {
@@ -91,10 +99,34 @@ function miniMapNodeColor(node: Node): string {
       return 'var(--color-muted-foreground)';
     case 'shunt':
       return 'var(--color-warning)';
+    case 'line':
+      return 'var(--color-primary)';
     default:
       return 'var(--color-border)';
   }
 }
+
+/**
+ * MiniMap surface styling. Forwarded via the `style` prop so the React
+ * Flow defaults (which use hardcoded hex) don't bleed into dark mode.
+ * Unit 12 will flip the underlying tokens; this object stays untouched.
+ */
+const MINIMAP_STYLE: React.CSSProperties = {
+  backgroundColor: 'var(--color-background)',
+};
+
+/**
+ * Viewport-rectangle styling. Stroke uses the primary accent so the
+ * "what's currently visible" overlay reads at a glance against either
+ * theme; the fill is a low-alpha primary so it doesn't drown the
+ * minimap nodes underneath. We use rgba on a CSS variable via
+ * `color-mix` so Unit 12 only has to swap the token values.
+ */
+const MINIMAP_MASK_STYLE: React.CSSProperties = {
+  fill: 'color-mix(in srgb, var(--color-primary) 12%, transparent)',
+  stroke: 'var(--color-primary)',
+  strokeWidth: 1,
+};
 
 interface BannerProps {
   message: string;
@@ -151,7 +183,27 @@ interface InnerProps {
 function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: InnerProps) {
   const setSelectedElement = useCaseStore((s) => s.setSelectedElement);
   const selectedElement = useCaseStore((s) => s.selectedElement);
+  const selectedNodeId = useSldStore((s) => s.selectedNodeId);
+  const setSelectedNodeId = useSldStore((s) => s.setSelectedNodeId);
   const canvasRef = useRef<HTMLDivElement>(null);
+  // React Flow imperative API — used to pan the viewport when the
+  // selected-node id flips (search popover pick or inspector row
+  // click). The hook only resolves inside a `<ReactFlowProvider />`,
+  // which `SldCanvas` mounts above this component.
+  const rf = useReactFlow();
+  // ⌘/ (Cmd-/) opens the search popover. `enableOnFormTags` so the
+  // binding still fires when the inspector's filter input or the
+  // canvas-toolbar buttons have focus — same escape hatch the global
+  // ⌘K palette uses.
+  useHotkeys(
+    'meta+slash, ctrl+slash',
+    (e) => {
+      e.preventDefault();
+      __requestOpenSldSearch();
+    },
+    { enableOnFormTags: ['INPUT', 'TEXTAREA'] },
+    [],
+  );
   const [autoCoords, setAutoCoords] = useState<CoordsByIdx | null>(null);
   const [autoBendPoints, setAutoBendPoints] = useState<Map<string, [number, number][]> | null>(
     null,
@@ -446,8 +498,12 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
       }
       const kind = rawKind as 'bus' | 'line' | 'generator' | 'load' | 'shunt';
       setSelectedElement({ kind, idx: String(idx) });
+      // Unit 11: also write the SLD store's selectedNodeId so the
+      // canvas + bus-node visual highlight follow the click. The
+      // inspector-row → SLD-pan path goes through the same slot.
+      setSelectedNodeId(node.id);
     },
-    [setSelectedElement],
+    [setSelectedElement, setSelectedNodeId],
   );
 
   const onEdgeClick: EdgeMouseHandler = useCallback(
@@ -486,10 +542,20 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   const nodesWithSelection = useMemo(
     () =>
       nodes.map((n) => {
+        // Two paths produce a "selected" highlight:
+        //
+        //  1. The case-store `selectedElement` (driven by node clicks +
+        //     inspector deeper interactions — the v0.1 path).
+        //  2. The SLD-store `selectedNodeId` (driven by the search
+        //     popover and the inspector results-table row click — Unit
+        //     11). Either one alone is enough; we union them so the
+        //     visual stays consistent regardless of which channel
+        //     wrote.
         const selected =
-          selectedElement !== null &&
-          selectedElement.idx === n.id &&
-          selectedElement.kind === (n.type ?? 'bus');
+          (selectedElement !== null &&
+            selectedElement.idx === n.id &&
+            selectedElement.kind === (n.type ?? 'bus')) ||
+          selectedNodeId === n.id;
         // Greying only applies to bus nodes — non-bus device nodes are
         // children of buses for the purposes of energisation, but
         // their own grey-out cascade is handled by the connectivity
@@ -515,11 +581,42 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
             // this exact attribute rather than the className so the
             // assertion survives any future visual-styling tweak.
             energised: isDeEnergised ? false : true,
+            // Unit 11: forwarded to BusNode so its `data-selected`
+            // attribute can light up when the user picks a row from
+            // the search popover or the inspector. The `selected`
+            // boolean above already satisfies React Flow's own
+            // selection semantics; this dedicated flag lets the node
+            // component branch on the search-driven channel without
+            // re-deriving the union.
+            sldSelected: selectedNodeId === n.id,
           },
         };
       }),
-    [nodes, selectedElement, connectivityResult, energisedBusIdxes],
+    [nodes, selectedElement, selectedNodeId, connectivityResult, energisedBusIdxes],
   );
+
+  // Pan-on-selection effect (Unit 11). When `selectedNodeId` flips,
+  // centre the React Flow viewport on the matching node — keeping the
+  // current zoom level so users don't lose context. The effect runs
+  // for every change including the canvas's own click writes, but
+  // panning to a node that's already centred is a no-op so the cost
+  // is negligible. Skipped when the selected id doesn't match a
+  // mounted node (e.g., topology changed since the id was set).
+  useEffect(() => {
+    if (selectedNodeId === null) return;
+    const node = nodes.find((n) => n.id === selectedNodeId);
+    if (!node) return;
+    const currentZoom = rf.getZoom();
+    rf.setCenter(node.position.x, node.position.y, {
+      zoom: currentZoom,
+      duration: 250,
+    });
+    // We intentionally depend on `selectedNodeId` only — re-running on
+    // every node-position diff (drag) would yank the viewport on each
+    // mouse move. The user's last "select" intent is what should
+    // drive the pan, not subsequent layout adjustments.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNodeId]);
 
   // PNG export rasterises the entire canvas container (the ReactFlow
   // root + its embedded SVG). The SLD is rendered as a mix of HTML
@@ -566,7 +663,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
           onDismiss={() => setShowDriftBanner(false)}
         />
       ) : null}
-      <div ref={canvasRef} className="min-h-0 flex-1" data-testid="sld-canvas-surface">
+      <div ref={canvasRef} className="relative min-h-0 flex-1" data-testid="sld-canvas-surface">
         <ReactFlow
           nodes={nodesWithSelection}
           edges={edges}
@@ -582,8 +679,29 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
         >
           <Background />
           <Controls />
-          <MiniMap pannable zoomable nodeColor={miniMapNodeColor} />
+          <MiniMap
+            pannable
+            zoomable
+            nodeColor={miniMapNodeColor}
+            style={MINIMAP_STYLE}
+            maskColor={MINIMAP_MASK_STYLE.fill as string}
+            maskStrokeColor={MINIMAP_MASK_STYLE.stroke as string}
+            maskStrokeWidth={MINIMAP_MASK_STYLE.strokeWidth as number}
+          />
         </ReactFlow>
+        {/* Floating search affordance — sits inside the canvas surface
+            so it overlays the React Flow chrome rather than displacing
+            it. Bottom-right matches the React Flow Controls position
+            convention; the popover anchors above the trigger so it
+            doesn't hide the rest of the canvas. */}
+        <div
+          className="pointer-events-none absolute right-2 bottom-2 z-10 flex gap-2"
+          data-testid="sld-canvas-affordances"
+        >
+          <div className="pointer-events-auto">
+            <SldNodeSearch />
+          </div>
+        </div>
       </div>
     </div>
   );

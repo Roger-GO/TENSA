@@ -66,6 +66,14 @@ vi.mock('@xyflow/react', async () => {
     getSmoothStepPath: () => ['M0,0 L1,1', 0, 0, 0, 0],
     Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
     SelectionMode: { Partial: 'partial', Full: 'full' },
+    // Unit 11 — `useReactFlow` is consumed by SldCanvas and the search
+    // popover. Animation tests don't exercise it, but the hook must
+    // resolve to something callable so the canvas mounts.
+    useReactFlow: () => ({
+      setCenter: vi.fn(),
+      getZoom: vi.fn(() => 1),
+      getNodes: vi.fn(() => []),
+    }),
   };
 });
 
