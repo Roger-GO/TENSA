@@ -33,6 +33,13 @@ dependencies = [
     "pydantic>=2,<3",
     "andes>=2.0,<3.0",
     "typer>=0.12",
+    # Unit 15 (TimeSeries profile import): openpyxl is already an
+    # ANDES transitive dep but the substrate uses it directly for the
+    # CSV→XLSX transcoding path, so pin it explicitly. python-multipart
+    # is required by FastAPI to parse the ``UploadFile`` multipart body
+    # on the profile upload route.
+    "openpyxl>=3.1",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

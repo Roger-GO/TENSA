@@ -797,6 +797,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/profiles/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload a CSV / XLSX hourly profile to the session's workspace.
+         * @description Upload a profile and persist it to ``<workspace>/profiles/<uuid>.xlsx``.
+         *
+         *     The follow-up ``POST /profiles`` references the returned
+         *     ``profile_path`` to stage the TimeSeries device.
+         */
+        post: operations["uploadProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List currently-staged TimeSeries profiles on the session.
+         * @description Return every TimeSeries device currently registered on the
+         *     session's System.
+         *
+         *     Empty list when none have been staged (the common case for a
+         *     freshly-loaded stock case — ANDES's bundled cases ship with zero
+         *     TimeSeries devices).
+         */
+        get: operations["listProfiles"];
+        put?: never;
+        /**
+         * Stage a TimeSeries profile assignment on a pre-setup session.
+         * @description Stage a TimeSeries device pre-setup.
+         *
+         *     Returns the freshly-built ``TopologyEntry`` with the auto-assigned
+         *     ANDES idx (``TimeSeries_<n>``).
+         */
+        post: operations["addProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/profiles/{profile_idx}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a staged TimeSeries from the pre-setup session.
+         * @description Delete a TimeSeries previously staged via ``POST /profiles``.
+         *
+         *     Returns 204 on success. 404 when the idx isn't a known TimeSeries.
+         *     409 when the session is post-setup (call /reload first).
+         */
+        delete: operations["deleteProfile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -911,6 +989,58 @@ export interface components {
             Tv?: number | null;
         };
         /**
+         * AddProfileRequest
+         * @description Request body for ``POST /sessions/{id}/profiles``.
+         *
+         *     Mirrors the ``ss.add('TimeSeries', ...)`` parameter surface from
+         *     ``andes/models/timeseries.py:38-72``. ``profile_path`` is the
+         *     absolute path returned by the prior ``POST /profiles/upload``.
+         */
+        AddProfileRequest: {
+            /**
+             * Profile Path
+             * @description Absolute path of the on-disk profile xlsx — the value returned by ``POST /profiles/upload``. The file must exist before this call (ANDES reads it during setup).
+             */
+            profile_path: string;
+            /**
+             * Sheet
+             * @description XLSX sheet name to read. CSV uploads are transcoded to a single sheet named ``profile``; XLSX uploads keep their original sheet names.
+             */
+            sheet: string;
+            /**
+             * Fields
+             * @description Comma-separated column names from the source sheet providing the time series of values (e.g., ``p0``, ``p0,q0``). Each entry must match an existing column in the sheet.
+             */
+            fields: string;
+            /**
+             * Model
+             * @description ANDES model class name of the target device (e.g., ``PQ``, ``PV``, ``Slack``). Must reference a model present on the loaded System.
+             */
+            model: string;
+            /**
+             * Dev
+             * @description Idx of the target device within ``model`` (e.g., ``PQ_5``). The substrate validates existence before the underlying ``ss.add`` so the user gets a clean 422 instead of an ANDES-internal error.
+             */
+            dev: string;
+            /**
+             * Dests
+             * @description Comma-separated parameter names on the target device that receive the profile values (e.g., ``p0``, ``p0,q0``). Must align with ``fields`` (one destination per source column).
+             */
+            dests: string;
+            /**
+             * Tkey
+             * @description Source column carrying the timestamp (in seconds). Defaults to ``t`` — the convention shipped by ANDES's bundled examples.
+             * @default t
+             */
+            tkey: string;
+            /**
+             * Mode
+             * @description Application mode. ``1`` (exact) applies values at exact step times. ``2`` (interpolated) raises NotImplementedError in ANDES (verified per Unit 1a spike) — the substrate rejects mode=2 with 422; default to mode=1.
+             * @default 1
+             */
+            mode: number;
+        };
+        /**
          * AlterSpec
          * @description Parameter alteration at a scheduled time — used for load steps,
          *     parameter ramps, set-point changes, etc.
@@ -988,6 +1118,15 @@ export interface components {
         BlankSystemResponse: {
             /** @description Empty topology snapshot for the freshly-created blank System. All buckets are empty; ``state`` is ``pre-setup``. */
             topology: components["schemas"]["TopologySummary"];
+        };
+        /** Body_uploadProfile */
+        Body_uploadProfile: {
+            /**
+             * File
+             * Format: binary
+             * @description CSV or XLSX file. CSV inputs are transcoded to xlsx (single sheet named ``profile``) for uniformity with ANDES's preferred input format.
+             */
+            file: string;
         };
         /**
          * BundleExportRequest
@@ -1487,6 +1626,17 @@ export interface components {
              * @description Currently-placed PMU instances. Each entry's ``params`` carries ``bus`` / ``Ta`` / ``Tv``. Empty list when no PMUs have been placed.
              */
             pmus: components["schemas"]["TopologyEntry"][];
+        };
+        /**
+         * ListProfilesResponse
+         * @description Wire shape of ``GET /sessions/{id}/profiles``.
+         */
+        ListProfilesResponse: {
+            /**
+             * Profiles
+             * @description Currently-staged TimeSeries devices. Each entry's ``params`` carries ``path``, ``sheet``, ``fields``, ``model``, ``dev``, ``dests``, ``tkey``, ``mode``. Empty list when none have been added.
+             */
+            profiles: components["schemas"]["TopologyEntry"][];
         };
         /**
          * ListSnapshotsResponse
@@ -2250,6 +2400,22 @@ export interface components {
              * @description Dynamic controller devices: exciters (``IEEEX1``, ``ESDC2A``, ``SEXS``), governors (``IEEEG1``, ``TGOV1``), the ``IEEEST`` PSS, and the ``REGCA1`` renewable-converter model. Surfaces the seven Unit-8 whitelist additions so the disturbance editor can populate device pickers when the case includes them. Empty for cases that carry no dynamics addfile (stock IEEE 14 .raw alone).
              */
             controllers?: components["schemas"]["TopologyEntry"][];
+        };
+        /**
+         * UploadProfileResponse
+         * @description Wire shape of ``POST /sessions/{id}/profiles/upload``.
+         */
+        UploadProfileResponse: {
+            /**
+             * Profile Path
+             * @description Absolute path of the written xlsx on the substrate's workspace. Pass this verbatim as ``profile_path`` on the follow-up ``POST /profiles`` call.
+             */
+            profile_path: string;
+            /**
+             * Bytes Written
+             * @description Size of the on-disk xlsx in bytes. Reported back so the UI can confirm the upload completed end-to-end.
+             */
+            bytes_written: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -4639,6 +4805,263 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    uploadProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_uploadProfile"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadProfileResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The substrate was launched without a workspace — profile uploads require disk persistence. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Upload exceeds the 8388608-byte cap; split the profile into a smaller window. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported file extension OR malformed CSV (parse failure / non-UTF-8 bytes). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Disk write failed (full filesystem, permissions, or openpyxl error). The error detail surfaces the underlying cause. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    listProfiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListProfilesResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case has been loaded into this session yet. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    addProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopologyEntry"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session has already been committed (PF or TDS has run); call POST /api/sessions/{id}/reload to return to pre-setup. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Profile file does not exist OR target model/device is absent OR mode=2 was requested OR ANDES rejected the underlying ``ss.add('TimeSeries', ...)`` call. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    deleteProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                profile_idx: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found OR no TimeSeries with that idx. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session has already been committed; call POST /api/sessions/{id}/reload to return to pre-setup. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description TimeSeries originated from the loaded case file (not removable via this endpoint — reload to reset). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
         };

@@ -288,6 +288,30 @@ export type AddPmuRequest = components['schemas']['AddPmuRequest'];
  */
 export type ListPmusResponse = components['schemas']['ListPmusResponse'];
 
+// ---- TimeSeries profiles (Unit 15) ----------------------------------------
+
+/**
+ * Request body for ``POST /sessions/{id}/profiles``. Mirrors ANDES's
+ * ``TimeSeries`` parameter surface (``andes/models/timeseries.py:38-72``):
+ * ``profile_path`` is the absolute xlsx path returned from the upload
+ * endpoint; ``mode=1`` is the only supported mode (mode=2 raises
+ * NotImplementedError in ANDES per the Unit 1a spike).
+ */
+export type AddProfileRequest = components['schemas']['AddProfileRequest'];
+
+/**
+ * Response shape of ``POST /sessions/{id}/profiles/upload``. Echoes back
+ * the absolute on-disk path (passed verbatim to ``POST /profiles``)
+ * plus the byte count for end-to-end confirmation.
+ */
+export type UploadProfileResponse = components['schemas']['UploadProfileResponse'];
+
+/**
+ * Wire shape of ``GET /sessions/{id}/profiles`` — list of currently-
+ * staged TimeSeries devices.
+ */
+export type ListProfilesResponse = components['schemas']['ListProfilesResponse'];
+
 // ---- Connectivity (Unit 17 — island detection) ----------------------------
 
 /**
