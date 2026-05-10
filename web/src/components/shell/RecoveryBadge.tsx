@@ -8,7 +8,7 @@
  *   Auto-hides when ``recoveryInProgress`` flips back to false (which the
  *   App-level recovery driver does once the new session id is written).
  *
- * - ``recoveryFailed === true`` → destructive-styled pill with a "Cannot
+ * - ``recoveryFailed === true`` → danger-styled pill with a "Cannot
  *   reach substrate" message AND an inline "Reload" button. Stays
  *   pinned until the user reloads the tab; the ``recoveryFailed`` flag
  *   is intentionally terminal so the user is forced into a clean
@@ -59,7 +59,7 @@ export function RecoveryBadge() {
   const recoveryFailed = useSessionStore((s) => s.recoveryFailed);
   const hardReset = useSessionStore((s) => s.hardReset);
 
-  // Failed branch: destructive pill, stays pinned. We surface this even
+  // Failed branch: danger pill, stays pinned. We surface this even
   // when ``recoveryInProgress`` toggles, because the failed state is
   // terminal — the badge should not flip back to "Reconnecting..." on a
   // subsequent retry attempt.
@@ -71,7 +71,7 @@ export function RecoveryBadge() {
         data-testid="recovery-badge-failed"
         className={cn(
           'inline-flex items-center gap-2 rounded-full border px-2 py-1 text-xs',
-          'bg-destructive/10 border-destructive/40 text-destructive',
+          'bg-danger/10 border-danger/40 text-danger',
         )}
       >
         <span>Cannot reach substrate</span>
@@ -80,8 +80,8 @@ export function RecoveryBadge() {
           data-testid="recovery-badge-reload"
           onClick={() => hardReset()}
           className={cn(
-            'rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-xs',
-            'hover:bg-destructive/20 focus:outline-none focus:ring-2 focus:ring-destructive/40',
+            'rounded-full border border-danger/40 bg-danger/10 px-2 py-0.5 text-xs',
+            'hover:bg-danger/20 focus:outline-none focus:ring-2 focus:ring-danger/40',
           )}
         >
           Reload
