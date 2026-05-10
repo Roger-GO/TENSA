@@ -5,7 +5,7 @@
  * row-click cross-pane interaction.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
@@ -198,6 +198,47 @@ describe('<ResultsTable />', () => {
 
     await userEvent.click(screen.getByRole('tab', { name: /generators/i }));
     expect(screen.getByText(/no generators in this case/i)).toBeInTheDocument();
+  });
+
+  // --- Unit 5: filter input contract ----------------------------------------
+  //
+  // The filter input switched to `<Input>` in Unit 5. Lock in the IME
+  // deferral and the React-friendly setter pass-through.
+
+  it('IME composition does not narrow rows mid-composition; commits on compositionend', () => {
+    seedLoadedCase();
+    render(<ResultsTable />);
+    const filter = screen.getByLabelText(/filter results/i) as HTMLInputElement;
+
+    fireEvent.compositionStart(filter);
+    filter.value = 'Bus';
+    fireEvent.input(filter, { isComposing: true });
+    // Mid-composition: all 3 buses still visible (no filtering yet).
+    expect(screen.getByTestId('results-row-bus-1')).toBeInTheDocument();
+    expect(screen.getByTestId('results-row-bus-2')).toBeInTheDocument();
+    expect(screen.getByTestId('results-row-bus-3')).toBeInTheDocument();
+
+    filter.value = 'Bus2';
+    fireEvent.input(filter, { isComposing: true });
+    fireEvent.compositionEnd(filter);
+    // After commit, the filter narrows to Bus2.
+    expect(screen.queryByTestId('results-row-bus-1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('results-row-bus-2')).toBeInTheDocument();
+    expect(screen.queryByTestId('results-row-bus-3')).not.toBeInTheDocument();
+  });
+
+  it('React-friendly programmatic setter narrows the filter (Playwright fill escape hatch)', () => {
+    seedLoadedCase();
+    render(<ResultsTable />);
+    const filter = screen.getByLabelText(/filter results/i) as HTMLInputElement;
+
+    const desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+    desc!.set!.call(filter, 'Bus2');
+    filter.dispatchEvent(new Event('input', { bubbles: true }));
+
+    expect(screen.queryByTestId('results-row-bus-1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('results-row-bus-2')).toBeInTheDocument();
+    expect(screen.queryByTestId('results-row-bus-3')).not.toBeInTheDocument();
   });
 
   it('shows pre-PF copy ("Run power flow to see results") on the Buses tab when no PF run yet', () => {

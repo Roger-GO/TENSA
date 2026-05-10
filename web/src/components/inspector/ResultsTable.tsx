@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/Input';
 import { EmptyState } from '@/components/shell/EmptyState';
 import { useCaseStore } from '@/store/case';
 import { useCurrentTopology } from '@/api/queries';
@@ -395,18 +396,13 @@ function ResultTable({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2" data-testid={testId}>
       <div className="flex items-center gap-2">
-        <input
+        <Input
           type="search"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(next) => setQuery(next)}
           placeholder="Filter by idx or name…"
           aria-label="Filter results"
-          className={cn(
-            'border-border bg-background text-foreground',
-            'h-7 flex-1 rounded-[var(--radius-sm)] border px-2',
-            'font-mono text-xs',
-            'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
-          )}
+          className="h-7 flex-1 px-2 font-mono text-xs"
         />
         <ExportMenu
           formats={['csv']}

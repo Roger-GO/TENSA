@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/Input';
 import { useAuthStore } from '@/store/auth';
 
 /**
@@ -210,7 +211,7 @@ export function TokenPasteModal(): React.ReactElement | null {
           <label htmlFor={inputId} className="text-sm font-medium">
             Token
           </label>
-          <input
+          <Input
             id={inputId}
             ref={inputRef}
             type="password"
@@ -222,15 +223,15 @@ export function TokenPasteModal(): React.ReactElement | null {
               showInvalidFormat || showRejected || showNetworkError ? errorId : undefined
             }
             value={inputValue}
-            onChange={(e) => {
-              setInputValue(e.target.value);
+            onChange={(next) => {
+              setInputValue(next);
               // Reset transient errors on edit so the user sees fresh validation.
               if (pending.kind !== 'idle' && pending.kind !== 'checking') {
                 setPending({ kind: 'idle' });
               }
             }}
             placeholder="64 hex characters"
-            className="border-border bg-background text-foreground focus-visible:ring-ring h-9 rounded-md border px-3 font-mono text-sm focus-visible:ring-2 focus-visible:outline-none"
+            className="font-mono"
           />
 
           {showInvalidFormat ? (

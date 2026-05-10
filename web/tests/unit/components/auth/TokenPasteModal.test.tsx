@@ -11,7 +11,7 @@
  * resets the auth store between cases.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TokenPasteModal } from '@/components/auth/TokenPasteModal';
 import { useAuthStore } from '@/store/auth';
@@ -200,6 +200,44 @@ describe('<TokenPasteModal />', () => {
         get: () => original,
       });
     }
+  });
+
+  // --- Unit 5: IME composition + React-friendly setter contract ----------
+  //
+  // The token field is wrapped in `<Input>` (Unit 5). These two tests
+  // lock in the IME deferral and the programmatic-setter pass-through
+  // so a future regression in the Input primitive surfaces here too.
+
+  it('IME composition does not fire onChange mid-composition; commits on compositionend', () => {
+    render(<TokenPasteModal />);
+    const input = screen.getByLabelText('Token') as HTMLInputElement;
+
+    fireEvent.compositionStart(input);
+    input.value = 'ni';
+    fireEvent.input(input, { isComposing: true });
+    // Mid-composition should not have updated React state, so the
+    // submit button stays disabled (the value is not 64-hex valid yet
+    // either way, but the contract is "no onChange fires here").
+    expect(screen.getByRole('button', { name: /Continue/i })).toBeDisabled();
+
+    fireEvent.compositionEnd(input);
+    // After commit, React state updates; the input's displayed value
+    // matches what was composed.
+    expect(input.value).toBe('ni');
+  });
+
+  it('React-friendly programmatic setter (Playwright fill escape hatch) fills the field', async () => {
+    render(<TokenPasteModal />);
+    const input = screen.getByLabelText('Token') as HTMLInputElement;
+
+    const desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+    desc!.set!.call(input, VALID_TOKEN);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+
+    // Submit becomes enabled (formatValid is now true).
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Continue/i })).toBeEnabled(),
+    );
   });
 
   it('does not Esc-close (the app is locked behind it)', async () => {
