@@ -118,9 +118,7 @@ export function EditElementButton({
 
   if (!enabled) {
     return (
-      <span className={cn('text-foreground font-mono text-xs', className)}>
-        {String(value)}
-      </span>
+      <span className={cn('text-foreground font-mono text-xs', className)}>{String(value)}</span>
     );
   }
 
@@ -128,9 +126,7 @@ export function EditElementButton({
     return (
       <span className={cn('group flex items-center gap-1', className)}>
         <span className="text-foreground font-mono text-xs">{String(value)}</span>
-        {meta.unit ? (
-          <span className="text-muted-foreground text-[10px]">{meta.unit}</span>
-        ) : null}
+        {meta.unit ? <span className="text-muted-foreground text-[10px]">{meta.unit}</span> : null}
         <button
           type="button"
           onClick={() => setEditing(true)}
@@ -139,7 +135,7 @@ export function EditElementButton({
           className={cn(
             'text-muted-foreground hover:text-foreground',
             'inline-flex h-4 w-4 items-center justify-center rounded',
-            'opacity-60 transition-opacity hover:opacity-100 group-hover:opacity-100 focus-visible:opacity-100',
+            'opacity-60 transition-opacity group-hover:opacity-100 hover:opacity-100 focus-visible:opacity-100',
             'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
           )}
         >
@@ -202,9 +198,7 @@ export function EditElementButton({
             className="bg-background border-border h-6 w-20 rounded border px-1 font-mono text-xs"
           />
         )}
-        {meta.unit ? (
-          <span className="text-muted-foreground text-[10px]">{meta.unit}</span>
-        ) : null}
+        {meta.unit ? <span className="text-muted-foreground text-[10px]">{meta.unit}</span> : null}
         <button
           type="button"
           onClick={submit}

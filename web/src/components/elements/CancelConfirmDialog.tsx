@@ -23,11 +23,7 @@ export interface CancelConfirmDialogProps {
   onConfirm: () => void;
 }
 
-export function CancelConfirmDialog({
-  open,
-  onCancel,
-  onConfirm,
-}: CancelConfirmDialogProps) {
+export function CancelConfirmDialog({ open, onCancel, onConfirm }: CancelConfirmDialogProps) {
   return (
     <Dialog
       open={open}
@@ -38,8 +34,7 @@ export function CancelConfirmDialog({
       <DialogContent data-testid="add-element-cancel-confirm">
         <DialogTitle>Discard unsaved element?</DialogTitle>
         <DialogDescription className="mt-2">
-          You have unsaved changes in the form. Discarding will clear the
-          draft and close the panel.
+          You have unsaved changes in the form. Discarding will clear the draft and close the panel.
         </DialogDescription>
         <DialogFooter className="mt-4">
           <Button type="button" variant="ghost" size="sm" onClick={onCancel}>

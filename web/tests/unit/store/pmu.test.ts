@@ -40,8 +40,8 @@ describe('pmu store — setPmus', () => {
     usePmuStore.getState().setPmus([makePmu('PMU_1', '1'), makePmu('PMU_2', '5')]);
     const list = usePmuStore.getState().pmus;
     expect(list.length).toBe(2);
-    expect(list[0].idx).toBe('PMU_1');
-    expect(list[1].idx).toBe('PMU_2');
+    expect(list[0]!.idx).toBe('PMU_1');
+    expect(list[1]!.idx).toBe('PMU_2');
   });
 
   it('clears via empty list', () => {
@@ -79,17 +79,16 @@ describe('pmu store — appendPmu', () => {
     });
     const list = usePmuStore.getState().pmus;
     expect(list.length).toBe(1);
-    expect(list[0].params.Ta).toBe(0.07);
+    const first = list[0]!;
+    expect(first.params!['Ta']).toBe(0.07);
   });
 });
 
 describe('pmu store — removePmu', () => {
   it('drops the matching entry', () => {
-    usePmuStore.getState().setPmus([
-      makePmu('PMU_1', '1'),
-      makePmu('PMU_2', '5'),
-      makePmu('PMU_3', '9'),
-    ]);
+    usePmuStore
+      .getState()
+      .setPmus([makePmu('PMU_1', '1'), makePmu('PMU_2', '5'), makePmu('PMU_3', '9')]);
     usePmuStore.getState().removePmu('PMU_2');
     const list = usePmuStore.getState().pmus;
     expect(list.map((p) => p.idx)).toEqual(['PMU_1', 'PMU_3']);

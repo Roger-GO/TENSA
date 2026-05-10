@@ -71,14 +71,15 @@ export class SweepStream {
   private readonly opts: SweepStreamOptions;
   private readonly wsCtor: WebSocketCtor;
   private ws: WebSocketLike | null = null;
-  private phase: 'idle' | 'connecting' | 'authenticating' | 'streaming' | 'closed' =
-    'idle';
+  private phase: 'idle' | 'connecting' | 'authenticating' | 'streaming' | 'closed' = 'idle';
 
   constructor(opts: SweepStreamOptions, deps: SweepStreamInternalDeps = {}) {
     this.opts = opts;
     // ``WebSocket`` is the global default; tests inject a ``mock-socket``
     // ctor via ``deps.webSocketCtor``.
-    this.wsCtor = deps.webSocketCtor ?? (typeof WebSocket !== 'undefined' ? WebSocket : (null as unknown as WebSocketCtor));
+    this.wsCtor =
+      deps.webSocketCtor ??
+      (typeof WebSocket !== 'undefined' ? WebSocket : (null as unknown as WebSocketCtor));
   }
 
   /** Open the WS connection. Idempotent — re-calling start() is a no-op. */
@@ -113,9 +114,7 @@ export class SweepStream {
     this.ws.onopen = () => {
       this.phase = 'authenticating';
       try {
-        this.ws?.send(
-          JSON.stringify({ type: 'auth', token: this.opts.token }),
-        );
+        this.ws?.send(JSON.stringify({ type: 'auth', token: this.opts.token }));
       } catch (err) {
         log.warn('SweepStream: auth send failed', err);
       }

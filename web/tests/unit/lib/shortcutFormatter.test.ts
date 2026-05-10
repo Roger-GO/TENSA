@@ -15,10 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { formatShortcut, isSequenceShortcut } from '@/lib/shortcutFormatter';
 
-const ORIGINAL_NAVIGATOR_DESCRIPTOR = Object.getOwnPropertyDescriptor(
-  globalThis,
-  'navigator',
-);
+const ORIGINAL_NAVIGATOR_DESCRIPTOR = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 
 /**
  * Stubs `navigator.platform` so we can deterministically test the

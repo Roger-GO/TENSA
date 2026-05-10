@@ -10,11 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  useSldStore,
-  __requestOpenSldSearch,
-  subscribeOpenSldSearch,
-} from '@/store/sld';
+import { useSldStore, __requestOpenSldSearch, subscribeOpenSldSearch } from '@/store/sld';
 
 beforeEach(() => {
   // Reset the store to initial defaults before each test.

@@ -154,18 +154,14 @@ export function PmuPlacementDialog({ open, onOpenChange }: PmuPlacementDialogPro
       <DialogContent data-testid="pmu-placement-dialog" className="max-w-lg">
         <DialogTitle>Place PMU</DialogTitle>
         <DialogDescription className="mt-1">
-          Select one or more buses to instrument with phasor measurement
-          units. PMUs track bus voltage magnitude and angle during TDS;
-          export the trajectories as CSV from the Run history after the
-          simulation completes.
+          Select one or more buses to instrument with phasor measurement units. PMUs track bus
+          voltage magnitude and angle during TDS; export the trajectories as CSV from the Run
+          history after the simulation completes.
         </DialogDescription>
 
         {/* Currently-placed list */}
         <section className="mt-3" aria-labelledby="pmu-placed-heading">
-          <h3
-            id="pmu-placed-heading"
-            className="text-foreground text-xs font-medium uppercase"
-          >
+          <h3 id="pmu-placed-heading" className="text-foreground text-xs font-medium uppercase">
             Currently placed ({placedPmus.length})
           </h3>
           {placedPmus.length === 0 ? (
@@ -173,10 +169,7 @@ export function PmuPlacementDialog({ open, onOpenChange }: PmuPlacementDialogPro
               No PMUs placed on this session yet.
             </p>
           ) : (
-            <ul
-              data-testid="pmu-placed-list"
-              className="mt-1 flex flex-wrap gap-1"
-            >
+            <ul data-testid="pmu-placed-list" className="mt-1 flex flex-wrap gap-1">
               {placedPmus.map((pmu) => {
                 const idxStr = String(pmu.idx);
                 const busLabel = String(pmu.params?.bus ?? '?');
@@ -207,19 +200,14 @@ export function PmuPlacementDialog({ open, onOpenChange }: PmuPlacementDialogPro
 
         {/* Bus picker */}
         <section className="mt-3" aria-labelledby="pmu-buses-heading">
-          <h3
-            id="pmu-buses-heading"
-            className="text-foreground text-xs font-medium uppercase"
-          >
+          <h3 id="pmu-buses-heading" className="text-foreground text-xs font-medium uppercase">
             Available buses
           </h3>
           {buses.length === 0 ? (
-            <p className="text-muted-foreground mt-1 text-xs">
-              Load a case first.
-            </p>
+            <p className="text-muted-foreground mt-1 text-xs">Load a case first.</p>
           ) : (
             <div
-              className="mt-1 max-h-48 overflow-auto rounded border border-border p-2"
+              className="border-border mt-1 max-h-48 overflow-auto rounded border p-2"
               data-testid="pmu-bus-picker"
             >
               {buses.map((bus) => {
@@ -301,11 +289,7 @@ export function PmuPlacementDialog({ open, onOpenChange }: PmuPlacementDialogPro
         </section>
 
         {serverError !== null && (
-          <p
-            role="alert"
-            data-testid="pmu-server-error"
-            className="text-danger mt-2 text-xs"
-          >
+          <p role="alert" data-testid="pmu-server-error" className="text-danger mt-2 text-xs">
             {serverError}
           </p>
         )}

@@ -305,9 +305,7 @@ describe('<RunButton /> v0.2 — disabled / enabled', () => {
     const button = screen.getByTestId('run-pflow-button');
     expect(button).toBeDisabled();
     await userEvent.hover(button.parentElement!);
-    const matches = await screen.findAllByText(
-      /EIG initialised the dynamic state/i,
-    );
+    const matches = await screen.findAllByText(/EIG initialised the dynamic state/i);
     expect(matches.length).toBeGreaterThan(0);
 
     useAnalyzeStore.setState({ eigResult: null });
@@ -358,9 +356,7 @@ describe('<RunButton /> v0.2 — PF branch (legacy v0.1 flow still works)', () =
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-pflow-button'));
     await waitFor(() =>
-      expect(toastSuccessMock).toHaveBeenCalledWith(
-        'PF converged in 3 iterations.',
-      ),
+      expect(toastSuccessMock).toHaveBeenCalledWith('PF converged in 3 iterations.'),
     );
   });
 
@@ -441,8 +437,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
 
     let postedDisturbances = false;
     fetchSpy.mockImplementation((input) => {
-      const url =
-        typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
       if (url.includes('/disturbances')) {
         postedDisturbances = true;
         return Promise.resolve(
@@ -516,8 +511,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
 
     let disturbancesPosted = false;
     fetchSpy.mockImplementation((input) => {
-      const url =
-        typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
       if (url.includes('/disturbances')) {
         disturbancesPosted = true;
       }
@@ -580,8 +574,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
       wsOpened = true;
     });
     fetchSpy.mockImplementation((input) => {
-      const url =
-        typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
       if (url.includes('/disturbances')) {
         return Promise.resolve(
           jsonResponse(
@@ -651,9 +644,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     await userEvent.click(screen.getByTestId('run-tds-button'));
 
     await waitFor(() =>
-      expect(toastWarningMock).toHaveBeenCalledWith(
-        expect.stringMatching(/no longer available/i),
-      ),
+      expect(toastWarningMock).toHaveBeenCalledWith(expect.stringMatching(/no longer available/i)),
     );
   });
 
@@ -697,9 +688,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     await userEvent.click(screen.getByTestId('run-tds-button'));
 
     await waitFor(() =>
-      expect(toastWarningMock).toHaveBeenCalledWith(
-        expect.stringMatching(/connection dropped/i),
-      ),
+      expect(toastWarningMock).toHaveBeenCalledWith(expect.stringMatching(/connection dropped/i)),
     );
   });
 });
@@ -749,8 +738,7 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
 
     let abortPosted = false;
     fetchSpy.mockImplementation((input) => {
-      const url =
-        typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
       if (url.includes('/abort')) {
         abortPosted = true;
         return Promise.resolve(jsonResponse({ aborted: true }, 200));
@@ -857,8 +845,7 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
 
     let reloadPosted = false;
     fetchSpy.mockImplementation((input) => {
-      const url =
-        typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
       if (url.includes('/reload')) {
         reloadPosted = true;
         return Promise.resolve(

@@ -141,7 +141,9 @@ describe('HistoryDrawer', () => {
     const list = screen.getByTestId('history-drawer-list');
     // Direct children only — nested test ids on swatches/buttons would
     // otherwise leak in via the [data-run-id] attribute filter.
-    const rows = list.querySelectorAll('[data-testid="history-run-row-r1"], [data-testid="history-run-row-r2"], [data-testid="history-run-row-r3"]');
+    const rows = list.querySelectorAll(
+      '[data-testid="history-run-row-r1"], [data-testid="history-run-row-r2"], [data-testid="history-run-row-r3"]',
+    );
     // r3 first (most recent), r1 last.
     const ids = Array.from(rows).map((el) => el.getAttribute('data-run-id'));
     expect(ids).toEqual(['r3', 'r2', 'r1']);

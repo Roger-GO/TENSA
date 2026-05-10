@@ -206,8 +206,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       recoveryStuckSince: failed ? null : (prevStuckSince ?? now),
     });
   },
-  clearRecoveryInProgress: () =>
-    set({ recoveryInProgress: false, recoveryStuckSince: null }),
+  clearRecoveryInProgress: () => set({ recoveryInProgress: false, recoveryStuckSince: null }),
   markRecoveryFailed: () => {
     const state = get();
     // Idempotency: don't flip a state that's already past connecting.

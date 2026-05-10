@@ -35,8 +35,8 @@ export function SldEmptySystem({ className }: SldEmptySystemProps) {
       <div className="flex flex-col gap-1">
         <h2 className="text-foreground text-base font-semibold">Add your first bus</h2>
         <p className="text-muted-foreground max-w-sm text-sm">
-          New systems start empty. Add a Bus to anchor the topology, then
-          generators, loads, and lines branch off from there.
+          New systems start empty. Add a Bus to anchor the topology, then generators, loads, and
+          lines branch off from there.
         </p>
       </div>
       <Button

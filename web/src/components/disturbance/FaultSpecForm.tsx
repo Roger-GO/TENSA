@@ -45,12 +45,7 @@ export interface FaultSpecFormProps {
   className?: string;
 }
 
-export function FaultSpecForm({
-  spec,
-  onChange,
-  onValidityChange,
-  className,
-}: FaultSpecFormProps) {
+export function FaultSpecForm({ spec, onChange, onValidityChange, className }: FaultSpecFormProps) {
   // Keep the raw text inputs in local state so the user can clear a field
   // and re-type without it snapping back to the last-valid number on
   // every keystroke. The numeric values flow back into ``spec`` only on
@@ -112,15 +107,8 @@ export function FaultSpecForm({
   };
 
   return (
-    <div
-      data-testid="fault-spec-form"
-      className={cn('flex flex-col gap-3', className)}
-    >
-      <FieldRow
-        id="fault-bus-idx"
-        label="Bus"
-        error={errors.bus_idx}
-      >
+    <div data-testid="fault-spec-form" className={cn('flex flex-col gap-3', className)}>
+      <FieldRow id="fault-bus-idx" label="Bus" error={errors.bus_idx}>
         <BusIdxSelect
           id="fault-bus-idx"
           value={String(spec.bus_idx ?? '')}
@@ -187,11 +175,7 @@ function FieldRow({ id, label, error, children }: FieldRowProps) {
       </label>
       {children}
       {error ? (
-        <span
-          role="alert"
-          data-testid={`error-${id}`}
-          className="text-danger text-[10px]"
-        >
+        <span role="alert" data-testid={`error-${id}`} className="text-danger text-[10px]">
           {error}
         </span>
       ) : null}

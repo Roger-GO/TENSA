@@ -84,10 +84,7 @@ describe('<SweepProgressPanel />', () => {
       error: null,
     });
     render(<SweepProgressPanel />);
-    expect(screen.getByTestId('sweep-progress-panel')).toHaveAttribute(
-      'data-sweep-id',
-      'sw1',
-    );
+    expect(screen.getByTestId('sweep-progress-panel')).toHaveAttribute('data-sweep-id', 'sw1');
     // 2/4 iterations → 50%.
     const bar = screen.getByTestId('sweep-progress-bar');
     expect(bar.getAttribute('style')).toContain('width: 50%');
@@ -119,12 +116,7 @@ describe('<SweepProgressPanel />', () => {
     // Re-activate so the panel renders the failed sweep.
     useSweepStore.getState().setActiveSweep('sw1');
     render(<SweepProgressPanel />);
-    expect(screen.getByTestId('sweep-progress-error')).toHaveTextContent(
-      /worker_error: boom/,
-    );
-    expect(screen.getByTestId('sweep-progress-panel')).toHaveAttribute(
-      'data-sweep-state',
-      'error',
-    );
+    expect(screen.getByTestId('sweep-progress-error')).toHaveTextContent(/worker_error: boom/);
+    expect(screen.getByTestId('sweep-progress-panel')).toHaveAttribute('data-sweep-state', 'error');
   });
 });

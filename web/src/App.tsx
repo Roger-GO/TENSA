@@ -146,10 +146,7 @@ function RightDockTopPanel() {
  */
 function PlotPanelContent() {
   return (
-    <div
-      data-testid="plot-panel-content"
-      className={cn('flex h-full min-h-0 flex-col gap-2 p-2')}
-    >
+    <div data-testid="plot-panel-content" className={cn('flex h-full min-h-0 flex-col gap-2 p-2')}>
       <div className="min-h-0 flex-1">
         <TimeSeriesPlot />
       </div>

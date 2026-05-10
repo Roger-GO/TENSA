@@ -281,7 +281,10 @@ export async function autoLayout(
       bendPoints.set(edge.id, polyline);
     }
   } catch (err) {
-    console.warn('SLD auto-layout: ELK pass 2 failed, using pass-1 coords without bend points', err);
+    console.warn(
+      'SLD auto-layout: ELK pass 2 failed, using pass-1 coords without bend points',
+      err,
+    );
     return { coords, bendPoints: new Map() };
   }
 

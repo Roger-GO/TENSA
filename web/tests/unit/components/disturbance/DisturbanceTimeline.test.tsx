@@ -95,9 +95,7 @@ describe('<DisturbanceTimeline />', () => {
     const user = userEvent.setup();
     const onClick = vi.fn();
     const ds = [localFault('xyz', 1.0)];
-    render(
-      <DisturbanceTimeline disturbances={ds} tMax={10} onMarkerClick={onClick} />,
-    );
+    render(<DisturbanceTimeline disturbances={ds} tMax={10} onMarkerClick={onClick} />);
     await user.click(screen.getByTestId('disturbance-marker-xyz'));
     expect(onClick).toHaveBeenCalledWith('xyz');
   });

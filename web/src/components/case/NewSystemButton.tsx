@@ -48,9 +48,7 @@ export function NewSystemButton({ className }: NewSystemButtonProps) {
       },
       onError: (err) => {
         if (err instanceof ProblemDetailsError && err.status === 409) {
-          setError(
-            'A system is already loaded; discard it first or open a fresh tab.',
-          );
+          setError('A system is already loaded; discard it first or open a fresh tab.');
         } else if (err instanceof Error) {
           setError(err.message);
         }
@@ -81,11 +79,7 @@ export function NewSystemButton({ className }: NewSystemButtonProps) {
           {blank.isPending ? 'Creating…' : '+ New system'}
         </Button>
         {error ? (
-          <p
-            role="alert"
-            data-testid="new-system-error"
-            className="text-danger mt-1 text-[10px]"
-          >
+          <p role="alert" data-testid="new-system-error" className="text-danger mt-1 text-[10px]">
             {error}
           </p>
         ) : null}
@@ -99,16 +93,11 @@ export function NewSystemButton({ className }: NewSystemButtonProps) {
         <DialogContent>
           <DialogTitle>Discard current system?</DialogTitle>
           <DialogDescription className="mt-2">
-            Starting a new blank system will discard the loaded case + any
-            PF results. This cannot be undone.
+            Starting a new blank system will discard the loaded case + any PF results. This cannot
+            be undone.
           </DialogDescription>
           <DialogFooter className="mt-4">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setConfirmOpen(false)}
-            >
+            <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmOpen(false)}>
               Keep current
             </Button>
             <Button

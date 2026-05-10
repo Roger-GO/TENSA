@@ -88,8 +88,8 @@ export function ShortcutCheatsheet() {
               <span>Press</span>
               <kbd
                 className={cn(
-                  'inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5',
-                  'text-[10px] font-mono rounded border',
+                  'inline-flex h-5 min-w-[1.5rem] items-center justify-center px-1.5',
+                  'rounded border font-mono text-[10px]',
                   'border-border bg-muted text-foreground',
                 )}
               >
@@ -159,8 +159,8 @@ function ShortcutChips({ binding }: { binding: string }) {
           <kbd
             key={idx}
             className={cn(
-              'inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5',
-              'text-[10px] font-mono rounded border',
+              'inline-flex h-5 min-w-[1.5rem] items-center justify-center px-1.5',
+              'rounded border font-mono text-[10px]',
               'border-border bg-muted text-foreground',
             )}
           >
@@ -172,9 +172,7 @@ function ShortcutChips({ binding }: { binding: string }) {
   );
 }
 
-function bucketByGroup(
-  commands: readonly CommandDef[],
-): Record<CommandGroup, CommandDef[]> {
+function bucketByGroup(commands: readonly CommandDef[]): Record<CommandGroup, CommandDef[]> {
   const out: Record<CommandGroup, CommandDef[]> = {
     workspace: [],
     edit: [],

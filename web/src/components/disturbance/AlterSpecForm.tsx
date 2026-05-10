@@ -78,17 +78,9 @@ export interface AlterSpecFormProps {
   className?: string;
 }
 
-export function AlterSpecForm({
-  spec,
-  onChange,
-  onValidityChange,
-  className,
-}: AlterSpecFormProps) {
+export function AlterSpecForm({ spec, onChange, onValidityChange, className }: AlterSpecFormProps) {
   const topology = useCurrentTopology();
-  const devices = useMemo(
-    () => devicesForModel(topology, spec.model),
-    [topology, spec.model],
-  );
+  const devices = useMemo(() => devicesForModel(topology, spec.model), [topology, spec.model]);
   const paramsQuery = useAlterableParams(spec.model || null);
   const params = paramsQuery.data?.params ?? [];
 
@@ -131,15 +123,9 @@ export function AlterSpecForm({
   };
 
   return (
-    <div
-      data-testid="alter-spec-form"
-      className={cn('flex flex-col gap-3', className)}
-    >
+    <div data-testid="alter-spec-form" className={cn('flex flex-col gap-3', className)}>
       <div className="flex flex-col gap-1">
-        <label
-          htmlFor="alter-model"
-          className="text-muted-foreground text-xs font-medium"
-        >
+        <label htmlFor="alter-model" className="text-muted-foreground text-xs font-medium">
           Model
         </label>
         <select
@@ -162,10 +148,7 @@ export function AlterSpecForm({
       </div>
 
       <div className="flex flex-col gap-1">
-        <label
-          htmlFor="alter-dev-idx"
-          className="text-muted-foreground text-xs font-medium"
-        >
+        <label htmlFor="alter-dev-idx" className="text-muted-foreground text-xs font-medium">
           Device
         </label>
         <select
@@ -192,21 +175,14 @@ export function AlterSpecForm({
           ))}
         </select>
         {errors.dev_idx ? (
-          <span
-            role="alert"
-            data-testid="error-alter-dev-idx"
-            className="text-danger text-[10px]"
-          >
+          <span role="alert" data-testid="error-alter-dev-idx" className="text-danger text-[10px]">
             {errors.dev_idx}
           </span>
         ) : null}
       </div>
 
       <div className="flex flex-col gap-1">
-        <label
-          htmlFor="alter-src"
-          className="text-muted-foreground text-xs font-medium"
-        >
+        <label htmlFor="alter-src" className="text-muted-foreground text-xs font-medium">
           Parameter (src)
         </label>
         <select
@@ -234,21 +210,14 @@ export function AlterSpecForm({
           ))}
         </select>
         {errors.src ? (
-          <span
-            role="alert"
-            data-testid="error-alter-src"
-            className="text-danger text-[10px]"
-          >
+          <span role="alert" data-testid="error-alter-src" className="text-danger text-[10px]">
             {errors.src}
           </span>
         ) : null}
       </div>
 
       <div className="flex flex-col gap-1">
-        <label
-          htmlFor="alter-t"
-          className="text-muted-foreground text-xs font-medium"
-        >
+        <label htmlFor="alter-t" className="text-muted-foreground text-xs font-medium">
           t — apply at (s)
         </label>
         <input
@@ -264,21 +233,14 @@ export function AlterSpecForm({
           )}
         />
         {errors.t ? (
-          <span
-            role="alert"
-            data-testid="error-alter-t"
-            className="text-danger text-[10px]"
-          >
+          <span role="alert" data-testid="error-alter-t" className="text-danger text-[10px]">
             {errors.t}
           </span>
         ) : null}
       </div>
 
       <div className="flex flex-col gap-1">
-        <label
-          htmlFor="alter-value"
-          className="text-muted-foreground text-xs font-medium"
-        >
+        <label htmlFor="alter-value" className="text-muted-foreground text-xs font-medium">
           New value
         </label>
         <input
@@ -294,11 +256,7 @@ export function AlterSpecForm({
           )}
         />
         {errors.value ? (
-          <span
-            role="alert"
-            data-testid="error-alter-value"
-            className="text-danger text-[10px]"
-          >
+          <span role="alert" data-testid="error-alter-value" className="text-danger text-[10px]">
             {errors.value}
           </span>
         ) : null}

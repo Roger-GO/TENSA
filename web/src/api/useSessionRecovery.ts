@@ -121,9 +121,11 @@ export function deriveRecoveryState(args: {
  * future telemetry integration (Sentry / structured analytics) would
  * also plug in here.
  */
-export type RecoveryLogger = (
-  transition: { from: RecoveryState; to: RecoveryState; at: number },
-) => void;
+export type RecoveryLogger = (transition: {
+  from: RecoveryState;
+  to: RecoveryState;
+  at: number;
+}) => void;
 
 let recoveryLogger: RecoveryLogger = ({ from, to, at }) => {
   // eslint-disable-next-line no-console

@@ -78,10 +78,7 @@ describe('<PanelPickerTabs />', () => {
       'aria-selected',
       'true',
     );
-    expect(screen.getByTestId('panel-picker-tab-plot')).toHaveAttribute(
-      'aria-selected',
-      'false',
-    );
+    expect(screen.getByTestId('panel-picker-tab-plot')).toHaveAttribute('aria-selected', 'false');
   });
 
   it('clicking a tab updates the store and the selection state', async () => {
@@ -89,10 +86,7 @@ describe('<PanelPickerTabs />', () => {
     render(<PanelPickerTabs />);
     await user.click(screen.getByTestId('panel-picker-tab-plot'));
     expect(useUiStore.getState().activeRightDockTopPanel).toBe('plot');
-    expect(screen.getByTestId('panel-picker-tab-plot')).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    expect(screen.getByTestId('panel-picker-tab-plot')).toHaveAttribute('aria-selected', 'true');
   });
 
   it('cycles through all four panels', async () => {
@@ -138,13 +132,7 @@ describe('<PanelPickerTabs />', () => {
 
   it('roving-tabindex pattern: inactive tabs have tabIndex=-1', () => {
     render(<PanelPickerTabs />);
-    expect(screen.getByTestId('panel-picker-tab-inspector')).toHaveAttribute(
-      'tabindex',
-      '0',
-    );
-    expect(screen.getByTestId('panel-picker-tab-plot')).toHaveAttribute(
-      'tabindex',
-      '-1',
-    );
+    expect(screen.getByTestId('panel-picker-tab-inspector')).toHaveAttribute('tabindex', '0');
+    expect(screen.getByTestId('panel-picker-tab-plot')).toHaveAttribute('tabindex', '-1');
   });
 });

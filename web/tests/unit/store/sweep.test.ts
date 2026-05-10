@@ -114,9 +114,7 @@ describe('useSweepStore — appendIteration', () => {
     a('sw1', make(2));
     a('sw1', make(0));
     a('sw1', make(1));
-    const indices = useSweepStore
-      .getState()
-      .sweeps['sw1']!.iterations.map((i) => i.iteration);
+    const indices = useSweepStore.getState().sweeps['sw1']!.iterations.map((i) => i.iteration);
     expect(indices).toEqual([0, 1, 2]);
   });
 

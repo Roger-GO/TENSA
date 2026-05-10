@@ -700,15 +700,15 @@ function Tooltip({
       )}
       style={{ left, top }}
     >
-      <div className="text-muted-foreground mb-0.5 flex items-center gap-1.5 text-[9px] uppercase tracking-wider">
+      <div className="text-muted-foreground mb-0.5 flex items-center gap-1.5 text-[9px] tracking-wider uppercase">
         <span>Mode</span>
         <span className="text-foreground tabular-nums">#{fields.idx}</span>
       </div>
-      <div className="font-mono tabular-nums leading-snug">
+      <div className="font-mono leading-snug tabular-nums">
         λ = {realStr} {sign}{' '}
         {Math.abs(fields.imag) < LOG_EPSILON ? '≈0' : imagStr.replace(/^-/, '')}i
       </div>
-      <div className="font-mono tabular-nums leading-snug">
+      <div className="font-mono leading-snug tabular-nums">
         ζ = {dampPct}%, f = {fields.frequency.toFixed(3)} Hz
       </div>
     </div>

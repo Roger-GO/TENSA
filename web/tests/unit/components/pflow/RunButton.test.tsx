@@ -161,9 +161,7 @@ describe('<RunButton />', () => {
     // SuccessToast was retired; success now flows through the global
     // toast surface.
     await waitFor(() =>
-      expect(toastSuccessMock).toHaveBeenCalledWith(
-        'PF converged in 3 iterations.',
-      ),
+      expect(toastSuccessMock).toHaveBeenCalledWith('PF converged in 3 iterations.'),
     );
     expect(screen.queryByTestId('pflow-success-toast')).not.toBeInTheDocument();
   });
@@ -202,10 +200,7 @@ describe('<RunButton />', () => {
     seedLoadedCase();
     fetchSpy.mockImplementation(() =>
       Promise.resolve(
-        jsonResponse(
-          { title: 'Bad Request', status: 422, detail: 'bad case input' },
-          422,
-        ),
+        jsonResponse({ title: 'Bad Request', status: 422, detail: 'bad case input' }, 422),
       ),
     );
     const { Wrapper } = makeWrapper();
@@ -291,9 +286,7 @@ describe('<RunButton />', () => {
     const button = screen.getByTestId('run-pflow-button');
     expect(button).toBeDisabled();
     await userEvent.hover(button.parentElement!);
-    const matches = await screen.findAllByText(
-      /EIG initialised the dynamic state/i,
-    );
+    const matches = await screen.findAllByText(/EIG initialised the dynamic state/i);
     expect(matches.length).toBeGreaterThan(0);
 
     // Cleanup: clear the EIG flag so other tests aren't polluted.

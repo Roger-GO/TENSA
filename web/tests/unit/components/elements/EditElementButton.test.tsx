@@ -101,9 +101,7 @@ describe('EditElementButton', () => {
   it('rejects non-numeric input on a number field with inline error', async () => {
     const user = userEvent.setup();
     render(
-      withQueryClient(
-        <EditElementButton model="Bus" idx="1" meta={VnMeta} value={100} enabled />,
-      ),
+      withQueryClient(<EditElementButton model="Bus" idx="1" meta={VnMeta} value={100} enabled />),
     );
     await user.click(screen.getByLabelText('Edit Vn'));
     const input = screen.getByTestId('edit-input-Vn').querySelector('input');
@@ -117,9 +115,7 @@ describe('EditElementButton', () => {
   it('cancel reverts the draft and exits edit mode', async () => {
     const user = userEvent.setup();
     render(
-      withQueryClient(
-        <EditElementButton model="Bus" idx="1" meta={VnMeta} value={100} enabled />,
-      ),
+      withQueryClient(<EditElementButton model="Bus" idx="1" meta={VnMeta} value={100} enabled />),
     );
     await user.click(screen.getByLabelText('Edit Vn'));
     const input = screen.getByTestId('edit-input-Vn').querySelector('input');
@@ -134,9 +130,7 @@ describe('EditElementButton', () => {
   it('Enter key submits, Escape cancels', async () => {
     const user = userEvent.setup();
     render(
-      withQueryClient(
-        <EditElementButton model="Bus" idx="1" meta={VnMeta} value={100} enabled />,
-      ),
+      withQueryClient(<EditElementButton model="Bus" idx="1" meta={VnMeta} value={100} enabled />),
     );
     await user.click(screen.getByLabelText('Edit Vn'));
     const input = screen.getByTestId('edit-input-Vn').querySelector('input');

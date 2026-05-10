@@ -50,9 +50,7 @@ describe('<ToggleSpecForm />', () => {
   it('lists the chosen model devices in the dev_idx dropdown', () => {
     let current: ToggleSpec = { ...blankToggleSpec(), model: 'Line' };
     render(
-      withQueryClient(
-        <ToggleSpecForm spec={current} onChange={(next) => (current = next)} />,
-      ),
+      withQueryClient(<ToggleSpecForm spec={current} onChange={(next) => (current = next)} />),
     );
     const dev = screen.getByTestId('toggle-dev-idx') as HTMLSelectElement;
     const options = Array.from(dev.querySelectorAll('option'))
@@ -76,9 +74,7 @@ describe('<ToggleSpecForm />', () => {
       expect.objectContaining({ model: 'GENROU', dev_idx: '' }),
     );
     // Re-render with the new spec; dropdown should now list GENROU devices.
-    rerender(
-      withQueryClient(<ToggleSpecForm spec={current} onChange={onChange} />),
-    );
+    rerender(withQueryClient(<ToggleSpecForm spec={current} onChange={onChange} />));
     const dev = screen.getByTestId('toggle-dev-idx') as HTMLSelectElement;
     const options = Array.from(dev.querySelectorAll('option'))
       .map((o) => o.value)
@@ -105,10 +101,7 @@ describe('<ToggleSpecForm />', () => {
   it('disables the dev dropdown when the model has no devices in the topology', () => {
     render(
       withQueryClient(
-        <ToggleSpecForm
-          spec={{ ...blankToggleSpec(), model: 'Shunt' }}
-          onChange={() => {}}
-        />,
+        <ToggleSpecForm spec={{ ...blankToggleSpec(), model: 'Shunt' }} onChange={() => {}} />,
       ),
     );
     const dev = screen.getByTestId('toggle-dev-idx') as HTMLSelectElement;

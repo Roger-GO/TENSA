@@ -26,8 +26,7 @@ import type { ProblemDetails, TopologySummary } from '@/api/types';
 const postSpy = vi.fn();
 const putSpy = vi.fn();
 type Resolver = () => Promise<unknown>;
-let nextPost: Resolver = () =>
-  Promise.resolve({ filename: 'my-system.xlsx', bytes_written: 1024 });
+let nextPost: Resolver = () => Promise.resolve({ filename: 'my-system.xlsx', bytes_written: 1024 });
 let nextPut: Resolver = () => Promise.resolve(undefined);
 
 function emptyTopology(): TopologySummary {
@@ -91,8 +90,7 @@ function withQueryClient(ui: ReactNode) {
 beforeEach(() => {
   postSpy.mockClear();
   putSpy.mockClear();
-  nextPost = () =>
-    Promise.resolve({ filename: 'my-system.xlsx', bytes_written: 1024 });
+  nextPost = () => Promise.resolve({ filename: 'my-system.xlsx', bytes_written: 1024 });
   nextPut = () => Promise.resolve(undefined);
   MOCK_TOPOLOGY = emptyTopology();
   useSessionStore.setState({ sessionId: parseSessionId('test-session-id') });
@@ -160,9 +158,7 @@ describe('<SaveSystemButton />', () => {
     const user = userEvent.setup();
     const { ProblemDetailsError } = await import('@/api/client');
     nextPost = () =>
-      Promise.reject(
-        new ProblemDetailsError(makeProblemDetails(409, 'File exists')),
-      );
+      Promise.reject(new ProblemDetailsError(makeProblemDetails(409, 'File exists')));
     render(withQueryClient(<SaveSystemButton />));
     await user.click(screen.getByTestId('save-system-button'));
     await user.click(screen.getByTestId('save-confirm'));

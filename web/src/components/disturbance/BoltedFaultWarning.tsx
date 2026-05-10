@@ -51,9 +51,8 @@ export function BoltedFaultWarning({ xf, className }: BoltedFaultWarningProps) {
     >
       <span className="font-medium">Bolted fault — numerical instability risk</span>
       <span>
-        Bolted faults often diverge with fixed-step integration. If you hit
-        numerical instability, either set xf &ge; 0.01 or enable adaptive TDS
-        (planned: Unit 16).
+        Bolted faults often diverge with fixed-step integration. If you hit numerical instability,
+        either set xf &ge; 0.01 or enable adaptive TDS (planned: Unit 16).
       </span>
     </div>
   );

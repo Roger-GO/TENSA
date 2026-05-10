@@ -37,7 +37,7 @@ const PV_RESULT: CpfResult = {
   lambdas: [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.25, 3.1],
   voltages_per_bus: {
     '1': [1.06, 1.05, 1.04, 1.03, 1.02, 1.0, 0.97, 0.92, 0.85],
-    '2': [1.045, 1.04, 1.03, 1.02, 1.0, 0.98, 0.94, 0.88, 0.80],
+    '2': [1.045, 1.04, 1.03, 1.02, 1.0, 0.98, 0.94, 0.88, 0.8],
     '3': [1.01, 1.005, 1.0, 0.995, 0.99, 0.98, 0.96, 0.92, 0.85],
   },
   bus_idxes: ['1', '2', '3'],
@@ -120,9 +120,7 @@ describe('<CPFCurveChart />', () => {
     render(<CPFCurveChart result={TRUNCATED_RESULT} />);
     expect(screen.getByTestId('cpf-truncated-banner')).toBeInTheDocument();
     expect(screen.queryByTestId('cpf-nose-marker')).not.toBeInTheDocument();
-    expect(screen.getByTestId('cpf-truncated-banner').textContent).toMatch(
-      /Reached max steps/,
-    );
+    expect(screen.getByTestId('cpf-truncated-banner').textContent).toMatch(/Reached max steps/);
   });
 
   it('legend toggles bus visibility', async () => {
@@ -232,9 +230,7 @@ describe('<CPFCurveChart /> Unit 17 polish', () => {
   it('readout lists every visible bus sorted by V ascending', () => {
     render(<CPFCurveChart result={PV_RESULT} />);
     const readout = screen.getByTestId('cpf-lambda-readout');
-    const rows = Array.from(
-      readout.querySelectorAll('[data-testid^="cpf-lambda-readout-row-"]'),
-    );
+    const rows = Array.from(readout.querySelectorAll('[data-testid^="cpf-lambda-readout-row-"]'));
     expect(rows.length).toBe(3);
     // Default lambda is the nose (index 7, lambda=3.25). Voltages at idx 7:
     // bus 1 = 0.92, bus 2 = 0.88, bus 3 = 0.92. So sorted ascending: 2, then
@@ -254,10 +250,7 @@ describe('<CPFCurveChart /> Unit 17 polish', () => {
     slider.focus();
     // Drive the slider via a direct value change. Use the React-friendly
     // setter dance so React picks up the change synthetically.
-    const setter = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      'value',
-    )?.set;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
     act(() => {
       setter?.call(slider, '0.5');
       slider.dispatchEvent(new Event('input', { bubbles: true }));
@@ -274,14 +267,10 @@ describe('<CPFCurveChart /> Unit 17 polish', () => {
     expect(line.getAttribute('data-hovered')).toBe('false');
     await user.hover(line);
     expect(line.getAttribute('data-hovered')).toBe('true');
-    expect(
-      screen.getByTestId('cpf-curve-legend-2').getAttribute('data-hovered'),
-    ).toBe('true');
+    expect(screen.getByTestId('cpf-curve-legend-2').getAttribute('data-hovered')).toBe('true');
     await user.unhover(line);
     expect(line.getAttribute('data-hovered')).toBe('false');
-    expect(
-      screen.getByTestId('cpf-curve-legend-2').getAttribute('data-hovered'),
-    ).toBe('false');
+    expect(screen.getByTestId('cpf-curve-legend-2').getAttribute('data-hovered')).toBe('false');
   });
 
   it('truncated CPF: slider max equals last computed lambda', () => {

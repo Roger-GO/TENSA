@@ -9,12 +9,7 @@ import {
   validateTdsConfig,
   validateTdsToleranceOverrides,
 } from '@/store/ui';
-import type {
-  TdsConfig,
-  TdsIntegrator,
-  TdsToleranceOverrides,
-  TdsVarGroup,
-} from '@/store/ui';
+import type { TdsConfig, TdsIntegrator, TdsToleranceOverrides, TdsVarGroup } from '@/store/ui';
 import { Button } from '@/components/ui/button';
 import { useRunsStore, MAX_RETENTION_LIMIT } from '@/store/runs';
 
@@ -109,10 +104,7 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
   const [atolText, setAtolText] = useState(String(tdsToleranceOverrides.atol));
   const [maxStepText, setMaxStepText] = useState(String(tdsToleranceOverrides.maxStep));
 
-  const errors = useMemo<Record<string, string>>(
-    () => validateTdsConfig(tdsConfig),
-    [tdsConfig],
-  );
+  const errors = useMemo<Record<string, string>>(() => validateTdsConfig(tdsConfig), [tdsConfig]);
 
   // Tolerance errors only surface in Manual mode — Auto mode reads
   // ``DEFAULT_TDS_TOLERANCE_OVERRIDES`` directly and the inputs are
@@ -120,9 +112,7 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
   // misleading.
   const toleranceErrors = useMemo<Record<string, string>>(
     () =>
-      tdsIntegrator === 'qndf-manual'
-        ? validateTdsToleranceOverrides(tdsToleranceOverrides)
-        : {},
+      tdsIntegrator === 'qndf-manual' ? validateTdsToleranceOverrides(tdsToleranceOverrides) : {},
     [tdsIntegrator, tdsToleranceOverrides],
   );
 
@@ -221,13 +211,8 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
         placeholder="adaptive"
       />
 
-      <fieldset
-        className="flex flex-col gap-1.5"
-        data-testid="tds-config-integrator"
-      >
-        <legend className="text-muted-foreground text-xs font-medium">
-          Integrator
-        </legend>
+      <fieldset className="flex flex-col gap-1.5" data-testid="tds-config-integrator">
+        <legend className="text-muted-foreground text-xs font-medium">Integrator</legend>
         {INTEGRATOR_OPTIONS.map((opt) => {
           const id = `tds-config-integrator-${opt.value}`;
           const checked = tdsIntegrator === opt.value;
@@ -249,15 +234,13 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
                 checked={checked}
                 onChange={() => setTdsIntegrator(opt.value)}
                 className={cn(
-                  'mt-0.5 h-3.5 w-3.5 border border-border',
+                  'border-border mt-0.5 h-3.5 w-3.5 border',
                   'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
                 )}
               />
               <span className="flex flex-col">
                 <span className="text-foreground text-xs">{opt.label}</span>
-                <span className="text-muted-foreground text-[10px] leading-snug">
-                  {opt.hint}
-                </span>
+                <span className="text-muted-foreground text-[10px] leading-snug">{opt.hint}</span>
               </span>
             </label>
           );
@@ -267,11 +250,11 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
       {tdsIntegrator === 'qndf-manual' ? (
         <div
           data-testid="tds-config-tolerance-overrides"
-          className="flex flex-col gap-2 rounded border border-border/60 bg-muted/30 p-2"
+          className="border-border/60 bg-muted/30 flex flex-col gap-2 rounded border p-2"
         >
           <p className="text-muted-foreground text-[10px] leading-snug">
-            QNDF tolerances. Tighter values give more accuracy at the cost
-            of step count; too tight and the run may fail to advance.
+            QNDF tolerances. Tighter values give more accuracy at the cost of step count; too tight
+            and the run may fail to advance.
           </p>
           <NumberField
             id="tds-config-rtol"
@@ -328,7 +311,7 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
                 checked={checked}
                 onChange={() => toggleVar(group)}
                 className={cn(
-                  'mt-0.5 h-3.5 w-3.5 rounded border border-border',
+                  'border-border mt-0.5 h-3.5 w-3.5 rounded border',
                   'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
                 )}
               />
@@ -442,9 +425,9 @@ interface NumberFieldProps {
 }
 
 function NumberField({ id, label, value, onChange, error, hint, placeholder }: NumberFieldProps) {
-  const describedBy = [hint ? `${id}-hint` : null, error ? `${id}-error` : null]
-    .filter(Boolean)
-    .join(' ') || undefined;
+  const describedBy =
+    [hint ? `${id}-hint` : null, error ? `${id}-error` : null].filter(Boolean).join(' ') ||
+    undefined;
   return (
     <FieldRow id={id} label={label} error={error} hint={hint}>
       <input

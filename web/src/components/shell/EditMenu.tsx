@@ -103,12 +103,15 @@ export function EditMenu() {
         <DialogContent>
           <DialogTitle>Reload from file?</DialogTitle>
           <DialogDescription className="mt-2">
-            Reloading will re-parse the case from disk and discard every
-            element you&apos;ve added or edited since loading. Any PF results
-            will be cleared. This cannot be undone.
+            Reloading will re-parse the case from disk and discard every element you&apos;ve added
+            or edited since loading. Any PF results will be cleared. This cannot be undone.
           </DialogDescription>
           {error ? (
-            <p role="alert" className="text-danger mt-2 text-xs" data-testid="edit-menu-reload-error">
+            <p
+              role="alert"
+              className="text-danger mt-2 text-xs"
+              data-testid="edit-menu-reload-error"
+            >
               {error}
             </p>
           ) : null}

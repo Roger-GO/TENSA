@@ -268,7 +268,8 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     // both QNDF presets (Auto / Manual) ship the overrides too — the
     // user's last-edited Manual values are preserved in the store and
     // re-used in Auto mode (the inputs are hidden but the values stick).
-    const wireIntegrator = tdsIntegrator === 'trapezoidal' ? 'trapezoidal' : 'qndf';
+    const wireIntegrator: 'trapezoidal' | 'qndf' =
+      tdsIntegrator === 'trapezoidal' ? 'trapezoidal' : 'qndf';
     const tdsConfigOverrides =
       tdsIntegrator === 'trapezoidal'
         ? undefined

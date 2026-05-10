@@ -216,8 +216,7 @@ export function SEResidualChart({
   // Each bar gets ``plotW / binCount`` width with a 1-px gap on each side.
   const barWidth = bins.length > 0 ? plotW / bins.length : plotW;
 
-  const xToPx = (x: number) =>
-    PADDING_LEFT + ((x - xMin) / xRange) * plotW;
+  const xToPx = (x: number) => PADDING_LEFT + ((x - xMin) / xRange) * plotW;
   const countToPx = (c: number) =>
     PADDING_TOP + plotH - (maxCount > 0 ? (c / maxCount) * plotH : 0);
 
@@ -229,30 +228,21 @@ export function SEResidualChart({
   return (
     <div
       data-testid="se-residual-chart"
-      className={cn(
-        'border-border bg-background flex flex-col rounded border',
-        className,
-      )}
+      className={cn('border-border bg-background flex flex-col rounded border', className)}
     >
       <div
         data-testid="se-residual-summary"
         className="border-border text-muted-foreground border-b px-2 py-1 text-[10px]"
       >
         SE residual histogram —{' '}
-        <span className="text-foreground font-medium">
-          {result.measurement_count}
-        </span>{' '}
-        measurements,{' '}
-        <span className="text-foreground font-medium">
-          {result.iterations}
-        </span>{' '}
+        <span className="text-foreground font-medium">{result.measurement_count}</span>{' '}
+        measurements, <span className="text-foreground font-medium">{result.iterations}</span>{' '}
         iterations, J ={' '}
-        <span className="text-foreground font-medium">
-          {result.mismatch.toExponential(3)}
-        </span>
+        <span className="text-foreground font-medium">{result.mismatch.toExponential(3)}</span>
         {result.flagged_indices.length > 0 ? (
           <>
-            {' '}—{' '}
+            {' '}
+            —{' '}
             <span className="text-danger font-medium">
               {result.flagged_indices.length} flagged
             </span>{' '}
@@ -340,9 +330,7 @@ export function SEResidualChart({
           return (
             <rect
               key={`bar-${i}`}
-              data-testid={
-                b.flagged ? 'se-residual-bar-flagged' : `se-residual-bar-${i}`
-              }
+              data-testid={b.flagged ? 'se-residual-bar-flagged' : `se-residual-bar-${i}`}
               data-flagged={b.flagged ? 'true' : 'false'}
               data-bin-idx={i}
               data-selected={isSelected ? 'true' : 'false'}
@@ -353,9 +341,7 @@ export function SEResidualChart({
               className={cn(
                 'transition-[fill,stroke-width]',
                 interactive ? 'cursor-pointer' : '',
-                b.flagged
-                  ? 'fill-danger/70 stroke-danger'
-                  : 'fill-primary/40 stroke-primary',
+                b.flagged ? 'fill-danger/70 stroke-danger' : 'fill-primary/40 stroke-primary',
                 isSelected
                   ? b.flagged
                     ? 'fill-danger stroke-foreground'
@@ -363,9 +349,7 @@ export function SEResidualChart({
                   : '',
               )}
               strokeWidth={isSelected ? 2 : 0.5}
-              onClick={
-                interactive ? () => setSelectedBinIdx(i) : undefined
-              }
+              onClick={interactive ? () => setSelectedBinIdx(i) : undefined}
             />
           );
         })}
@@ -408,9 +392,7 @@ function SEResidualDetailPanel({
   residuals: number[];
   onClose: () => void;
 }) {
-  const flagReason = bin.flagged
-    ? '≥3σ from estimate'
-    : 'Within tolerance';
+  const flagReason = bin.flagged ? '≥3σ from estimate' : 'Within tolerance';
 
   // Min/max residual within the bin — surfaced as a quick "this
   // measurement is the worst offender" summary for flagged bins.
@@ -448,13 +430,12 @@ function SEResidualDetailPanel({
             <div className="text-foreground font-medium">
               Bin #{binIdx}{' '}
               <span className="text-muted-foreground font-normal">
-                · residuals in [{bin.lo.toExponential(2)},{' '}
-                {bin.hi.toExponential(2)}]
+                · residuals in [{bin.lo.toExponential(2)}, {bin.hi.toExponential(2)}]
               </span>
             </div>
             <div
               className={cn(
-                'mt-0.5 text-[10px] font-medium uppercase tracking-wider',
+                'mt-0.5 text-[10px] font-medium tracking-wider uppercase',
                 bin.flagged ? 'text-danger' : 'text-muted-foreground',
               )}
             >
@@ -489,14 +470,12 @@ function SEResidualDetailPanel({
           </>
         ) : null}
         <dt>Flag reason</dt>
-        <dd className={bin.flagged ? 'text-danger' : 'text-foreground'}>
-          {flagReason}
-        </dd>
+        <dd className={bin.flagged ? 'text-danger' : 'text-foreground'}>{flagReason}</dd>
       </dl>
 
       {visibleMembers.length > 0 ? (
         <div className="mt-2">
-          <div className="text-muted-foreground mb-1 text-[10px] uppercase tracking-wide">
+          <div className="text-muted-foreground mb-1 text-[10px] tracking-wide uppercase">
             Measurement indices
           </div>
           <ul className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] sm:grid-cols-3">
@@ -517,9 +496,7 @@ function SEResidualDetailPanel({
             })}
           </ul>
           {hiddenCount > 0 ? (
-            <div className="text-muted-foreground mt-1 text-[10px]">
-              + {hiddenCount} more
-            </div>
+            <div className="text-muted-foreground mt-1 text-[10px]">+ {hiddenCount} more</div>
           ) : null}
         </div>
       ) : null}

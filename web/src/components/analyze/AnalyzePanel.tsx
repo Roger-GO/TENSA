@@ -16,12 +16,7 @@ import { EIGParticipationTable } from './EIGParticipationTable';
 import { EIGDampingChart } from './EIGDampingChart';
 import { SEResidualChart } from './SEResidualChart';
 import { useAnalyzeStore } from '@/store/analyze';
-import {
-  useCpfRun,
-  useEigRun,
-  useSeGenerateMeasurements,
-  useSeRun,
-} from '@/api/queries';
+import { useCpfRun, useEigRun, useSeGenerateMeasurements, useSeRun } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
 import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
@@ -125,8 +120,7 @@ function AnalyzeRunButton({
   disabledOverride?: boolean;
 }) {
   const readiness = useRunReadiness(routine);
-  const disabled =
-    !readiness.ready || isPending || disabledOverride === true;
+  const disabled = !readiness.ready || isPending || disabledOverride === true;
 
   const button = (
     <Button
@@ -170,9 +164,8 @@ function AnalyzePflowSubMode() {
       className="text-muted-foreground flex flex-col gap-2 p-3 text-xs"
     >
       <p>
-        Power-flow results land in the Inspector and the bottom Results
-        table. Use the top-bar Run button (PF mode) to refresh the PF
-        solution.
+        Power-flow results land in the Inspector and the bottom Results table. Use the top-bar Run
+        button (PF mode) to refresh the PF solution.
       </p>
       {lastRun !== null ? (
         <div className="border-border bg-muted/20 rounded border p-2 font-mono">
@@ -208,8 +201,7 @@ function AnalyzeEigSubMode() {
   };
 
   const eigError = eigRun.error;
-  const isPrerequisite =
-    eigError instanceof ProblemDetailsError && eigError.status === 409;
+  const isPrerequisite = eigError instanceof ProblemDetailsError && eigError.status === 409;
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -231,8 +223,8 @@ function AnalyzeEigSubMode() {
               'rounded border px-2 py-1 text-[10px] leading-snug',
             )}
           >
-            Running EIG initialised the dynamic state. Subsequent TDS or
-            re-run PF will start from this initialised dae.
+            Running EIG initialised the dynamic state. Subsequent TDS or re-run PF will start from
+            this initialised dae.
           </span>
         ) : null}
       </div>
@@ -262,10 +254,7 @@ function AnalyzeEigSubMode() {
       {eigError !== null && !isPrerequisite ? (
         <div
           role="alert"
-          className={cn(
-            'border-danger/40 bg-danger/10 text-danger',
-            'rounded border p-3 text-xs',
-          )}
+          className={cn('border-danger/40 bg-danger/10 text-danger', 'rounded border p-3 text-xs')}
         >
           {eigError instanceof ProblemDetailsError
             ? (eigError.detail ?? eigError.title)
@@ -301,8 +290,7 @@ function AnalyzeCpfSubMode() {
   };
 
   const cpfError = cpfRun.error;
-  const isPrerequisite =
-    cpfError instanceof ProblemDetailsError && cpfError.status === 409;
+  const isPrerequisite = cpfError instanceof ProblemDetailsError && cpfError.status === 409;
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -316,14 +304,9 @@ function AnalyzeCpfSubMode() {
           testId="analyze-run-cpf"
         />
         {cpfResult !== null ? (
-          <span
-            data-testid="cpf-summary"
-            className="text-muted-foreground text-[10px]"
-          >
-            {cpfResult.mode === 'qv' ? 'QV-curve' : 'PV-curve'} —{' '}
-            {cpfResult.lambdas.length} steps; max{' '}
-            {cpfResult.mode === 'qv' ? 'Q' : 'lambda'} ={' '}
-            {cpfResult.max_lam.toFixed(4)}
+          <span data-testid="cpf-summary" className="text-muted-foreground text-[10px]">
+            {cpfResult.mode === 'qv' ? 'QV-curve' : 'PV-curve'} — {cpfResult.lambdas.length} steps;
+            max {cpfResult.mode === 'qv' ? 'Q' : 'lambda'} = {cpfResult.max_lam.toFixed(4)}
           </span>
         ) : null}
       </div>
@@ -353,10 +336,7 @@ function AnalyzeCpfSubMode() {
       {cpfError !== null && !isPrerequisite ? (
         <div
           role="alert"
-          className={cn(
-            'border-danger/40 bg-danger/10 text-danger',
-            'rounded border p-3 text-xs',
-          )}
+          className={cn('border-danger/40 bg-danger/10 text-danger', 'rounded border p-3 text-xs')}
         >
           {cpfError instanceof ProblemDetailsError
             ? (cpfError.detail ?? cpfError.title)
@@ -401,10 +381,7 @@ function AnalyzeSeSubMode() {
 
   // Cross-slice cascade cleanup — same shape as the EIG / CPF panels.
   useEffect(() => {
-    if (
-      lastPf === null &&
-      (seResult !== null || seMeasurementsCount !== null)
-    ) {
+    if (lastPf === null && (seResult !== null || seMeasurementsCount !== null)) {
       useAnalyzeStore.getState().clearSeResult();
     }
   }, [lastPf, seResult, seMeasurementsCount]);
@@ -421,8 +398,7 @@ function AnalyzeSeSubMode() {
   // The currently-active error (generate has priority — if it failed,
   // the run button is disabled and the error came from generate).
   const activeError = seGenerate.error ?? seRun.error;
-  const isPrerequisite =
-    activeError instanceof ProblemDetailsError && activeError.status === 409;
+  const isPrerequisite = activeError instanceof ProblemDetailsError && activeError.status === 409;
 
   const canGenerate = sessionId !== null && !seGenerate.isPending;
 
@@ -452,10 +428,7 @@ function AnalyzeSeSubMode() {
           testId="analyze-se-run"
         />
         {seMeasurementsCount !== null ? (
-          <span
-            data-testid="se-measurements-count"
-            className="text-muted-foreground text-[10px]"
-          >
+          <span data-testid="se-measurements-count" className="text-muted-foreground text-[10px]">
             {seMeasurementsCount} measurements ready
           </span>
         ) : null}
@@ -490,10 +463,7 @@ function AnalyzeSeSubMode() {
       {activeError !== null && !isPrerequisite ? (
         <div
           role="alert"
-          className={cn(
-            'border-danger/40 bg-danger/10 text-danger',
-            'rounded border p-3 text-xs',
-          )}
+          className={cn('border-danger/40 bg-danger/10 text-danger', 'rounded border p-3 text-xs')}
         >
           {activeError instanceof ProblemDetailsError
             ? (activeError.detail ?? activeError.title)

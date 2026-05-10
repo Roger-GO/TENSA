@@ -12,11 +12,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AnalyzePanel } from '@/components/analyze/AnalyzePanel';
-import {
-  ANALYZE_SUB_MODES,
-  DEFAULT_EIG_FILTER,
-  useAnalyzeStore,
-} from '@/store/analyze';
+import { ANALYZE_SUB_MODES, DEFAULT_EIG_FILTER, useAnalyzeStore } from '@/store/analyze';
 import { DEFAULT_TDS_CONFIG, useUiStore } from '@/store/ui';
 import { usePflowStore } from '@/store/pflow';
 import { useAuthStore } from '@/store/auth';
@@ -118,21 +114,14 @@ describe('<AnalyzePanel />', () => {
     expect(screen.getByTestId('analyze-panel')).toBeInTheDocument();
     expect(screen.getByTestId('analyze-sub-mode-picker')).toBeInTheDocument();
     for (const mode of ANALYZE_SUB_MODES) {
-      expect(
-        screen.getByTestId(`analyze-sub-mode-${mode}`),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId(`analyze-sub-mode-${mode}`)).toBeInTheDocument();
     }
   });
 
   it('PF sub-mode is active by default and shows the PF placeholder', () => {
     render(withQueryClient(<AnalyzePanel />));
-    expect(screen.getByTestId('analyze-sub-mode-pflow')).toHaveAttribute(
-      'aria-checked',
-      'true',
-    );
-    expect(
-      screen.getByTestId('analyze-sub-mode-pflow-content'),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('analyze-sub-mode-pflow')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('analyze-sub-mode-pflow-content')).toBeInTheDocument();
   });
 
   it('clicking the TDS sub-mode mounts TdsConfigPanel', async () => {
@@ -160,9 +149,7 @@ describe('<AnalyzePanel />', () => {
     useAnalyzeStore.getState().setSubMode('eig');
     useAnalyzeStore.getState().setEigResult(RESULT_WITH_TDS_INIT);
     render(withQueryClient(<AnalyzePanel />));
-    expect(
-      screen.getByTestId('eig-info-tds-initialized'),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('eig-info-tds-initialized')).toBeInTheDocument();
   });
 
   it('does NOT auto-run EIG on tab open (gated until user clicks Run EIG)', () => {
@@ -170,9 +157,7 @@ describe('<AnalyzePanel />', () => {
     render(withQueryClient(<AnalyzePanel />));
     // No result, no info banner, no participation table populated.
     expect(useAnalyzeStore.getState().eigResult).toBeNull();
-    expect(
-      screen.queryByTestId('eig-info-tds-initialized'),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('eig-info-tds-initialized')).not.toBeInTheDocument();
   });
 
   // ---- Run-readiness gates (v2.0 polish, Unit 4) -----------------------

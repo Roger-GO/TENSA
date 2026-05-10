@@ -199,9 +199,7 @@ describe('<ReportDialog /> — empty state', () => {
     useReportDialogStore.getState().openDialog('pflow');
     render(withQueryClient(<ReportDialog />));
     expect(await screen.findByTestId('report-dialog')).toBeInTheDocument();
-    expect(await screen.findByTestId('report-empty-pflow')).toHaveTextContent(
-      /run pflow first/i,
-    );
+    expect(await screen.findByTestId('report-empty-pflow')).toHaveTextContent(/run pflow first/i);
     // Empty-state path must NOT fire a network call (would 409 anyway).
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -235,12 +233,8 @@ describe('<ReportDialog /> — happy path', () => {
     const plain = await screen.findByTestId('report-plain-text-pflow');
     expect(plain).toHaveTextContent('Power flow converged in 4 iterations.');
 
-    expect(await screen.findByTestId('report-structured-table-0')).toHaveTextContent(
-      'BUS DATA',
-    );
-    expect(await screen.findByTestId('report-structured-table-1')).toHaveTextContent(
-      'LINE DATA',
-    );
+    expect(await screen.findByTestId('report-structured-table-0')).toHaveTextContent('BUS DATA');
+    expect(await screen.findByTestId('report-structured-table-1')).toHaveTextContent('LINE DATA');
   });
 
   it('LatexCopyButton click writes a tabular block to the clipboard', async () => {
@@ -284,9 +278,7 @@ describe('<ReportDialog /> — happy path', () => {
 
     await user.click(await screen.findByTestId('report-tab-tds'));
     await waitFor(() =>
-      expect(
-        fetchSpy.mock.calls.some((c) => String(c[0]).includes('routine=tds')),
-      ).toBe(true),
+      expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes('routine=tds'))).toBe(true),
     );
 
     expect(await screen.findByTestId('report-plain-text-tds')).toHaveTextContent(
@@ -305,15 +297,11 @@ describe('<ReportDialog /> — error path', () => {
     render(withQueryClient(<ReportDialog />));
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    expect(await screen.findByTestId('report-empty-pflow')).toHaveTextContent(
-      /run pflow first/i,
-    );
+    expect(await screen.findByTestId('report-empty-pflow')).toHaveTextContent(/run pflow first/i);
   });
 
   it('renders a role=alert for non-409 errors', async () => {
-    fetchSpy.mockResolvedValue(
-      makeProblemResponse(500, 'PFlow.report() raised: disk full'),
-    );
+    fetchSpy.mockResolvedValue(makeProblemResponse(500, 'PFlow.report() raised: disk full'));
     seedConvergedPflow();
     useReportDialogStore.getState().openDialog('pflow');
     render(withQueryClient(<ReportDialog />));

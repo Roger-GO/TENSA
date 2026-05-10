@@ -134,11 +134,7 @@ describe('computeHandleAssignments', () => {
     // south as the picker prefers the less-loaded axis.
     const topology = makeTopology(
       [bus(1), bus(2), bus(3), bus(4)],
-      [
-        line(10, 1, 2),
-        line(11, 1, 3),
-        line(12, 1, 4),
-      ],
+      [line(10, 1, 2), line(11, 1, 3), line(12, 1, 4)],
     );
     const coords = {
       '1': { x: 0, y: 0 },
@@ -164,13 +160,7 @@ describe('computeHandleAssignments', () => {
     // toward the south-west neighbour (2 → 5). Conflict avoidance
     // routes the second edge through south/north instead — clean
     // visual separation, no shared corridor at the bus 2 west handle.
-    const topology = makeTopology(
-      [bus(1), bus(2), bus(5)],
-      [
-        line(10, 1, 2),
-        line(11, 2, 5),
-      ],
-    );
+    const topology = makeTopology([bus(1), bus(2), bus(5)], [line(10, 1, 2), line(11, 2, 5)]);
     const coords = {
       '1': { x: 200, y: 100 },
       '2': { x: 400, y: 100 },

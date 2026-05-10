@@ -45,10 +45,7 @@ describe('<DisturbanceForm />', () => {
   it('renders the FaultSpecForm when kind=fault', () => {
     render(
       withQueryClient(
-        <DisturbanceForm
-          spec={{ ...blankFaultSpec(), bus_idx: '1' }}
-          onChange={() => {}}
-        />,
+        <DisturbanceForm spec={{ ...blankFaultSpec(), bus_idx: '1' }} onChange={() => {}} />,
       ),
     );
     expect(screen.getByTestId('fault-spec-form')).toBeInTheDocument();
@@ -58,10 +55,7 @@ describe('<DisturbanceForm />', () => {
   it('renders the ToggleSpecForm when kind=toggle', () => {
     render(
       withQueryClient(
-        <DisturbanceForm
-          spec={{ ...blankToggleSpec(), dev_idx: '7' }}
-          onChange={() => {}}
-        />,
+        <DisturbanceForm spec={{ ...blankToggleSpec(), dev_idx: '7' }} onChange={() => {}} />,
       ),
     );
     expect(screen.getByTestId('toggle-spec-form')).toBeInTheDocument();
@@ -78,9 +72,7 @@ describe('<DisturbanceForm />', () => {
     await user.selectOptions(screen.getByTestId('disturbance-kind'), 'toggle');
     // The dispatcher fires onChange with a blank Toggle spec — the
     // previous Fault spec data is discarded by design.
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'toggle' }),
-    );
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ kind: 'toggle' }));
   });
 
   it('hides the kind picker when hideKindPicker=true', () => {

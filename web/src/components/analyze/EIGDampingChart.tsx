@@ -27,10 +27,7 @@ export interface EIGDampingChartProps {
   result?: EigResult | null;
 }
 
-export function EIGDampingChart({
-  className,
-  result: resultProp,
-}: EIGDampingChartProps) {
+export function EIGDampingChart({ className, result: resultProp }: EIGDampingChartProps) {
   const storeResult = useAnalyzeStore((s) => s.eigResult);
   const selectedModeId = useAnalyzeStore((s) => s.selectedModeId);
   const setSelectedModeId = useAnalyzeStore((s) => s.setSelectedModeId);
@@ -55,9 +52,7 @@ export function EIGDampingChart({
           className,
         )}
       >
-        {result === null
-          ? 'No EIG result yet.'
-          : 'No damping ratios — case has no dynamic states.'}
+        {result === null ? 'No EIG result yet.' : 'No damping ratios — case has no dynamic states.'}
       </div>
     );
   }
@@ -73,27 +68,15 @@ export function EIGDampingChart({
   return (
     <div
       data-testid="eig-damping-chart"
-      className={cn(
-        'border-border bg-background flex flex-col rounded border',
-        className,
-      )}
+      className={cn('border-border bg-background flex flex-col rounded border', className)}
     >
       <div className="border-border text-muted-foreground border-b px-2 py-1 text-[10px]">
         Damping ratios — {barCount} of {result.mode_count} bars
-        {result.mode_count > MAX_VISIBLE_BARS
-          ? ` (capped at first ${MAX_VISIBLE_BARS})`
-          : ''}
-        {selectedModeId !== null
-          ? ` · selected mode ${selectedModeId}`
-          : ''}
+        {result.mode_count > MAX_VISIBLE_BARS ? ` (capped at first ${MAX_VISIBLE_BARS})` : ''}
+        {selectedModeId !== null ? ` · selected mode ${selectedModeId}` : ''}
       </div>
       <div className="overflow-auto">
-        <svg
-          width={svgWidth}
-          height={SVG_HEIGHT}
-          role="img"
-          aria-label="Damping ratios bar chart"
-        >
+        <svg width={svgWidth} height={SVG_HEIGHT} role="img" aria-label="Damping ratios bar chart">
           {/* baseline */}
           <line
             x1={4}

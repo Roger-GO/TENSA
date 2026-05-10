@@ -116,11 +116,7 @@ function routineLabel(routine: RunRoutine): string {
 }
 
 /** Routines whose result depends on a converged PF operating point. */
-const PF_DEPENDENT: ReadonlySet<RunRoutine> = new Set([
-  'eig',
-  'cpf',
-  'se',
-]);
+const PF_DEPENDENT: ReadonlySet<RunRoutine> = new Set(['eig', 'cpf', 'se']);
 
 /**
  * Compute the readiness of a Run button.
@@ -167,15 +163,8 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
   // user knows what they're waiting on.
   if (activeSweepId !== null) {
     const sweep = sweeps[activeSweepId];
-    const progress =
-      sweep === undefined
-        ? ''
-        : ` (${sweep.iterations.length}/${sweep.total})`;
-    return ready(
-      false,
-      `Sweep ${activeSweepId} in progress${progress}; wait or abort.`,
-      null,
-    );
+    const progress = sweep === undefined ? '' : ` (${sweep.iterations.length}/${sweep.total})`;
+    return ready(false, `Sweep ${activeSweepId} in progress${progress}; wait or abort.`, null);
   }
 
   // PF after EIG needs a reload — EIG.run() sets ``TDS.initialized=True``
@@ -185,11 +174,10 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
   // hint; the hook gates the button proactively so the user sees the
   // recovery affordance instead of having to click and read an error.
   if (routine === 'pflow' && eigResult !== null && eigResult.tds_initialized) {
-    return ready(
-      false,
-      'EIG initialised the dynamic state; reload case to re-run PF.',
-      { kind: 'reload-case', label: 'Reload case' },
-    );
+    return ready(false, 'EIG initialised the dynamic state; reload case to re-run PF.', {
+      kind: 'reload-case',
+      label: 'Reload case',
+    });
   }
 
   // Routines that consume the PF operating point (EIG / CPF / SE)

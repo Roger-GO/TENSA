@@ -105,12 +105,7 @@ describe('<BusIdxSelect />', () => {
     MOCK_TOPOLOGY = topology([bus(1, 'BUS1')]);
     render(
       withQueryClient(
-        <BusIdxSelect
-          id="test-bus-id"
-          aria-describedby="error-id"
-          value=""
-          onChange={() => {}}
-        />,
+        <BusIdxSelect id="test-bus-id" aria-describedby="error-id" value="" onChange={() => {}} />,
       ),
     );
     const select = screen.getByTestId('bus-idx-select');

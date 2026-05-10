@@ -124,10 +124,7 @@ export const useAnalyzeStore = create<AnalyzeState>((set) => ({
       let nextSelected = s.selectedModeId;
       if (result === null) {
         nextSelected = null;
-      } else if (
-        nextSelected !== null &&
-        nextSelected >= result.mode_count
-      ) {
+      } else if (nextSelected !== null && nextSelected >= result.mode_count) {
         nextSelected = null;
       }
       return { eigResult: result, selectedModeId: nextSelected };
@@ -138,8 +135,7 @@ export const useAnalyzeStore = create<AnalyzeState>((set) => ({
   setSelectedModeId: (id) => set({ selectedModeId: id }),
 
   filter: { ...DEFAULT_EIG_FILTER },
-  setFilter: (next) =>
-    set((s) => ({ filter: { ...s.filter, ...next } })),
+  setFilter: (next) => set((s) => ({ filter: { ...s.filter, ...next } })),
   resetFilter: () => set({ filter: { ...DEFAULT_EIG_FILTER } }),
 
   cpfResult: null,
@@ -148,8 +144,7 @@ export const useAnalyzeStore = create<AnalyzeState>((set) => ({
 
   seResult: null,
   setSeResult: (result) => set({ seResult: result }),
-  clearSeResult: () =>
-    set({ seResult: null, seMeasurementsCount: null }),
+  clearSeResult: () => set({ seResult: null, seMeasurementsCount: null }),
 
   seMeasurementsCount: null,
   setSeMeasurementsCount: (count) => set({ seMeasurementsCount: count }),
@@ -167,10 +162,7 @@ export const useAnalyzeStore = create<AnalyzeState>((set) => ({
  * "Hide" means "exclude from the result"; the visible-set is the
  * intersection of both conditions.
  */
-export function applyEigFilter(
-  result: EigResult,
-  filter: EigFilter,
-): number[] {
+export function applyEigFilter(result: EigResult, filter: EigFilter): number[] {
   const visible: number[] = [];
   for (let i = 0; i < result.eigenvalues.length; i++) {
     const z = result.eigenvalues[i];

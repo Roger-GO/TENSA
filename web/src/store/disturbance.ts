@@ -42,12 +42,7 @@
  */
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type {
-  AlterSpec,
-  DisturbanceSpec,
-  FaultSpec,
-  ToggleSpec,
-} from '@/api/types';
+import type { AlterSpec, DisturbanceSpec, FaultSpec, ToggleSpec } from '@/api/types';
 
 /**
  * One disturbance in the local editor. The ``id`` is a client-generated

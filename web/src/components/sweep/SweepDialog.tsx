@@ -19,7 +19,13 @@
  * inside the HistoryDrawer once the sweep is active).
  */
 import { useState } from 'react';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -73,8 +79,7 @@ function SweepDialogInner({ onClose }: { onClose: () => void }) {
   const readiness = useRunReadiness('sweep');
 
   const [snapshotName, setSnapshotName] = useState<string>('');
-  const [parameterKind, setParameterKind] =
-    useState<SweepParamKind>('disturbance.fault.tc');
+  const [parameterKind, setParameterKind] = useState<SweepParamKind>('disturbance.fault.tc');
   const [parameterTarget, setParameterTarget] = useState<number>(0);
   const [rangeStart, setRangeStart] = useState<number>(1.05);
   const [rangeEnd, setRangeEnd] = useState<number>(1.5);
@@ -135,9 +140,9 @@ function SweepDialogInner({ onClose }: { onClose: () => void }) {
     <DialogContent data-testid="sweep-dialog">
       <DialogTitle>Start sensitivity sweep</DialogTitle>
       <DialogDescription className="mt-2">
-        Iterate one parameter through a range. Each iteration restores the
-        named snapshot, applies the parameter override, and runs TDS. Other
-        session-scoped operations are paused for the sweep duration.
+        Iterate one parameter through a range. Each iteration restores the named snapshot, applies
+        the parameter override, and runs TDS. Other session-scoped operations are paused for the
+        sweep duration.
       </DialogDescription>
 
       <div className="mt-4 flex flex-col gap-3">
@@ -183,9 +188,7 @@ function SweepDialogInner({ onClose }: { onClose: () => void }) {
         </label>
 
         <label className="flex flex-col gap-1">
-          <span className="text-foreground text-xs font-medium">
-            Target disturbance index
-          </span>
+          <span className="text-foreground text-xs font-medium">Target disturbance index</span>
           <input
             type="number"
             min={0}
@@ -250,9 +253,7 @@ function SweepDialogInner({ onClose }: { onClose: () => void }) {
         </div>
 
         <label className="flex flex-col gap-1">
-          <span className="text-foreground text-xs font-medium">
-            Per-iteration tf (s)
-          </span>
+          <span className="text-foreground text-xs font-medium">Per-iteration tf (s)</span>
           <input
             type="number"
             step="any"
@@ -269,11 +270,7 @@ function SweepDialogInner({ onClose }: { onClose: () => void }) {
         </label>
 
         {validation !== null ? (
-          <p
-            role="alert"
-            data-testid="sweep-dialog-validation"
-            className="text-danger text-xs"
-          >
+          <p role="alert" data-testid="sweep-dialog-validation" className="text-danger text-xs">
             {validation}
           </p>
         ) : null}
@@ -343,8 +340,7 @@ function SweepConfirmButton({
   sessionId: unknown;
   onClick: () => void;
 }) {
-  const disabled =
-    isPending || sessionId === null || validationError !== null || !ready;
+  const disabled = isPending || sessionId === null || validationError !== null || !ready;
 
   const button = (
     <Button

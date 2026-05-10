@@ -24,11 +24,7 @@ function bus(idx: number | string, name = `b${idx}`): TopologyEntry {
   return { idx, name, kind: 'Bus', params: {} };
 }
 
-function gen(
-  idx: number | string,
-  busIdx: number | string,
-  kind = 'PV',
-): TopologyEntry {
+function gen(idx: number | string, busIdx: number | string, kind = 'PV'): TopologyEntry {
   return {
     idx,
     name: `gen-${idx}`,
@@ -104,13 +100,13 @@ function overlaps(a: PushOutNode, b: PushOutNode): boolean {
 
 /** Build a worst-case-style fixture: N non-bus elements all at the same coord. */
 function pileup(n: number, kind: 'generator' | 'load' = 'generator'): PushOutNode[] {
-  const out: PushOutNode[] = [
-    makePushNode('bus-1', 'bus', 0, 0),
-  ];
+  const out: PushOutNode[] = [makePushNode('bus-1', 'bus', 0, 0)];
   for (let i = 0; i < n; i += 1) {
-    out.push(makePushNode(`${kind}-${i}`, kind, 0, kind === 'generator' ? -50 : 50, {
-      parentBusId: 'bus-1',
-    }));
+    out.push(
+      makePushNode(`${kind}-${i}`, kind, 0, kind === 'generator' ? -50 : 50, {
+        parentBusId: 'bus-1',
+      }),
+    );
   }
   return out;
 }
@@ -259,9 +255,7 @@ describe('pushOutCollisions — algorithm', () => {
     // gives plenty of headroom on jsdom.
     const inputs: PushOutNode[] = [makePushNode('bus-1', 'bus', 0, 0)];
     for (let i = 0; i < 50; i += 1) {
-      inputs.push(
-        makePushNode(`generator-${i}`, 'generator', 0, -50, { parentBusId: 'bus-1' }),
-      );
+      inputs.push(makePushNode(`generator-${i}`, 'generator', 0, -50, { parentBusId: 'bus-1' }));
     }
     const start = performance.now();
     pushOutCollisions(inputs);
@@ -326,11 +320,7 @@ describe('buildGraph — push-out integration', () => {
       buses: [bus(1)],
       generators: [gen('G', 1)],
     });
-    const { nodes } = buildGraph(
-      topology,
-      { '1': { x: 0, y: 100 } },
-      { applyPushOut: false },
-    );
+    const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } }, { applyPushOut: false });
     const g = nodes.find((n) => n.type === 'generator')!;
     // Default offset: y = busY + (-70) = 30. Stagger ±28 on x.
     expect(g.position.y).toBe(30);
@@ -372,11 +362,7 @@ describe('buildGraph — push-out integration', () => {
       ['PV|G2', { x: 0, y: 30 }],
       ['PV|G3', { x: 0, y: 30 }],
     ]);
-    const { nodes } = buildGraph(
-      topology,
-      { '1': { x: 0, y: 100 } },
-      { nonBusCoords },
-    );
+    const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } }, { nonBusCoords });
     const gens = nodes.filter((n) => n.type === 'generator');
     expect(gens).toHaveLength(3);
     // After push-out, no pair shares a bounding-box overlap.
@@ -436,11 +422,7 @@ describe('buildGraph — push-out integration', () => {
       ['Shunt|S1', { x: 0, y: 0 }],
       ['Shunt|S2', { x: 0, y: 0 }],
     ]);
-    const { nodes } = buildGraph(
-      topology,
-      { '1': { x: 0, y: 200 } },
-      { nonBusCoords },
-    );
+    const { nodes } = buildGraph(topology, { '1': { x: 0, y: 200 } }, { nonBusCoords });
     const shunts = nodes.filter((n) => n.type === 'shunt');
     expect(shunts).toHaveLength(2);
     // After push-out the boxes don't overlap.

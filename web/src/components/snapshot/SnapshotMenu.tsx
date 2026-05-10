@@ -24,11 +24,7 @@
  * without a QueryClientProvider stay green).
  */
 import { Button } from '@/components/ui/button';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useSnapshotStore } from '@/store/snapshot';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
@@ -59,11 +55,7 @@ export function SnapshotMenu() {
             Snapshots
           </Button>
         </PopoverTrigger>
-        <PopoverContent
-          align="end"
-          className="w-56 p-2"
-          data-testid="snapshot-menu-content"
-        >
+        <PopoverContent align="end" className="w-56 p-2" data-testid="snapshot-menu-content">
           <button
             type="button"
             onClick={() => {
@@ -95,9 +87,9 @@ export function SnapshotMenu() {
             Load snapshot…
           </button>
           <p className="text-muted-foreground mt-2 px-2 text-[10px] leading-snug">
-            Snapshots capture the converged operating point + disturbance
-            log. Composable with ANDES upgrades (slow-path replay always
-            works); the dill optimisation kicks in when versions match.
+            Snapshots capture the converged operating point + disturbance log. Composable with ANDES
+            upgrades (slow-path replay always works); the dill optimisation kicks in when versions
+            match.
           </p>
         </PopoverContent>
       </Popover>

@@ -118,11 +118,7 @@ export function CommandPalette() {
           </DialogPrimitive.Description>
 
           {open ? (
-            <CmdkCommand
-              label="Command palette"
-              loop
-              className="flex max-h-[60vh] flex-col"
-            >
+            <CmdkCommand label="Command palette" loop className="flex max-h-[60vh] flex-col">
               <div className="border-border border-b">
                 <CmdkCommand.Input
                   data-testid="command-palette-input"
@@ -179,7 +175,10 @@ export function CommandPalette() {
                           )}
                         >
                           {cmd.icon ? (
-                            <span aria-hidden="true" className="flex h-4 w-4 shrink-0 items-center justify-center">
+                            <span
+                              aria-hidden="true"
+                              className="flex h-4 w-4 shrink-0 items-center justify-center"
+                            >
                               {cmd.icon}
                             </span>
                           ) : (
@@ -220,8 +219,8 @@ function PaletteShortcutHint({ binding }: { binding: string }) {
           <kbd
             key={idx}
             className={cn(
-              'inline-flex items-center justify-center min-w-[1.25rem] h-4 px-1',
-              'text-[10px] font-mono rounded border',
+              'inline-flex h-4 min-w-[1.25rem] items-center justify-center px-1',
+              'rounded border font-mono text-[10px]',
               'border-border bg-muted text-foreground',
             )}
           >

@@ -197,9 +197,7 @@ describe('<WorkflowToolbar />', () => {
   it('surfaces an inline error when Undo fails (e.g., 422 nothing-to-undo)', async () => {
     const { ProblemDetailsError } = await import('@/api/client');
     nextPost = () =>
-      Promise.reject(
-        new ProblemDetailsError(makeProblemDetails(422, 'Nothing to undo')),
-      );
+      Promise.reject(new ProblemDetailsError(makeProblemDetails(422, 'Nothing to undo')));
     useCaseStore.setState({
       selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
     });

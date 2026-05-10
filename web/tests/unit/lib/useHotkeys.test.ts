@@ -15,11 +15,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
-import {
-  useHotkeys,
-  isEditableTarget,
-  isEditableActiveElement,
-} from '@/lib/useHotkeys';
+import { useHotkeys, isEditableTarget, isEditableActiveElement } from '@/lib/useHotkeys';
 import type { Options } from '@/lib/useHotkeys';
 
 afterEach(() => {
@@ -99,11 +95,7 @@ describe('isEditableActiveElement', () => {
  * supply both. `KeyA` collapses to `'a'` in the lib's matcher (it
  * strips the `Key` / `Digit` / `Numpad` prefix).
  */
-function pressKey(
-  key: string,
-  code: string,
-  target: EventTarget = document,
-): void {
+function pressKey(key: string, code: string, target: EventTarget = document): void {
   const event = new KeyboardEvent('keydown', {
     key,
     code,

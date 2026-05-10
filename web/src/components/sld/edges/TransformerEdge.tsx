@@ -50,9 +50,7 @@ function buildPolyline(points: [number, number][]): string {
   return `M${first[0]},${first[1]} ` + rest.map(([x, y]) => `L${x},${y}`).join(' ');
 }
 
-function midpointOfPolyline(
-  points: [number, number][],
-): { x: number; y: number } | null {
+function midpointOfPolyline(points: [number, number][]): { x: number; y: number } | null {
   if (points.length < 2) return null;
   let total = 0;
   const segments: { ax: number; ay: number; bx: number; by: number; len: number }[] = [];
@@ -158,7 +156,7 @@ export const TransformerEdge = memo(function TransformerEdge({
             style={{ height: ICON_SIZE, width: ICON_SIZE, objectFit: 'contain' }}
           />
           {winding === '3w' ? (
-            <span className="bg-warning/20 text-foreground absolute -right-1 -top-1 rounded-[var(--radius-sm)] px-1 font-mono text-[8px] leading-tight">
+            <span className="bg-warning/20 text-foreground absolute -top-1 -right-1 rounded-[var(--radius-sm)] px-1 font-mono text-[8px] leading-tight">
               3w
             </span>
           ) : null}
