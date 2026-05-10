@@ -289,7 +289,7 @@ async def test_add_transformer_via_line_with_tap(
         headers={"X-Andes-Token": VALID_TOKEN},
     )).json()
     transformer_idxs = [str(t["idx"]) for t in topo["transformers"]]
-    line_idxs = [str(l["idx"]) for l in topo["lines"]]
+    line_idxs = [str(line["idx"]) for line in topo["lines"]]
     assert "T12" in transformer_idxs
     assert "T12" not in line_idxs
 
@@ -476,8 +476,8 @@ async def test_save_raw_format_round_trips_through_andes_reader(
     assert any(f["name"] == "round-trip.raw" for f in files), files
 
     # Read the file off disk and round-trip through ANDES.
+
     import andes
-    from pathlib import Path as _Path  # avoid shadowing
 
     # The fixture's workspace is in tmp_path/ws (see the `client` fixture).
     workspace = tmp_path / "ws"

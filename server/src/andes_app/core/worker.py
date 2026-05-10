@@ -312,7 +312,7 @@ def _handle_generate_report(wrapper: Wrapper, args: dict[str, Any]) -> Any:
         raise AndesAppError(
             f"unknown report routine: {routine_raw!r}; expected 'pflow', 'tds', or 'eig'"
         )
-    routine: ReportRoutine = routine_raw  # type: ignore[assignment]
+    routine: ReportRoutine = routine_raw
 
     ss = wrapper._require_loaded()  # noqa: SLF001 — internal access by design
 

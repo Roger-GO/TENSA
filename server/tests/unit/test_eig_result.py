@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import math
 
 import pytest
@@ -76,7 +77,7 @@ def test_eig_result_dataclass_is_frozen() -> None:
         state_names=[],
         tds_initialized=False,
     )
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         result.mode_count = 5  # type: ignore[misc]
 
 
