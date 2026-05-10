@@ -1,26 +1,36 @@
 /**
- * RecoveryBadge. Top-bar pill that surfaces session-recovery state (Unit 5
- * of the v0.1.y plan).
+ * RecoveryBadge. Top-bar pill that surfaces session-recovery state.
  *
- * Two visual modes, driven by ``useSessionStore``:
+ * Three visual modes, driven by ``useSessionStore``:
  *
  * - ``recoveryInProgress === true`` (and ``recoveryFailed === false``) →
  *   warning-styled pill with a small spinner + "Reconnecting..." copy.
  *   Auto-hides when ``recoveryInProgress`` flips back to false (which the
- *   ``useEnsureSession`` recovery effect does once the new session id is
- *   written).
+ *   App-level recovery driver does once the new session id is written).
  *
- * - ``recoveryFailed === true`` → destructive-styled pill with
- *   "Reconnection failed — reload the tab" copy. Stays pinned until the
- *   user reloads the tab; the ``recoveryFailed`` flag is intentionally
- *   terminal so the user is forced into a clean recovery rather than
- *   re-entering the same failure loop.
+ * - ``recoveryFailed === true`` → destructive-styled pill with a "Cannot
+ *   reach substrate" message AND an inline "Reload" button. Stays
+ *   pinned until the user reloads the tab; the ``recoveryFailed`` flag
+ *   is intentionally terminal so the user is forced into a clean
+ *   recovery rather than re-entering the same failure loop. The Reload
+ *   button calls the store's ``hardReset`` action (sessionStorage clear
+ *   + tab reload) so the user has a one-click affordance for the same
+ *   "Reload" instruction the toast surfaces.
+ *
+ * - hidden — neither flag set; nothing to surface.
  *
  * Non-blocking — the badge is a sibling of the other top-bar buttons, not
  * an overlay; the user can keep panning the canvas, opening modals, etc.
  * Session-scoped queries (``useTopology``, sidecar GET) are gated on
  * ``sessionId !== null`` and auto-pause during the recovery window, so no
  * additional input blocking is required.
+ *
+ * v2.0 polish Unit 2 — extended the failed branch with an inline Reload
+ * affordance. The previous copy ("Reconnection failed — reload the tab")
+ * told the user what to do but gave them nothing to click; the toast
+ * fired by the recovery driver is the louder surface, and this badge
+ * matches it so a user who dismissed the toast still has the recovery
+ * path one click away.
  */
 import { useSessionStore } from '@/store/session';
 import { cn } from '@/lib/cn';
@@ -47,6 +57,7 @@ function Spinner() {
 export function RecoveryBadge() {
   const recoveryInProgress = useSessionStore((s) => s.recoveryInProgress);
   const recoveryFailed = useSessionStore((s) => s.recoveryFailed);
+  const hardReset = useSessionStore((s) => s.hardReset);
 
   // Failed branch: destructive pill, stays pinned. We surface this even
   // when ``recoveryInProgress`` toggles, because the failed state is
@@ -59,11 +70,22 @@ export function RecoveryBadge() {
         aria-live="assertive"
         data-testid="recovery-badge-failed"
         className={cn(
-          'inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs',
+          'inline-flex items-center gap-2 rounded-full border px-2 py-1 text-xs',
           'bg-destructive/10 border-destructive/40 text-destructive',
         )}
       >
-        Reconnection failed — reload the tab
+        <span>Cannot reach substrate</span>
+        <button
+          type="button"
+          data-testid="recovery-badge-reload"
+          onClick={() => hardReset()}
+          className={cn(
+            'rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-xs',
+            'hover:bg-destructive/20 focus:outline-none focus:ring-2 focus:ring-destructive/40',
+          )}
+        >
+          Reload
+        </button>
       </span>
     );
   }
