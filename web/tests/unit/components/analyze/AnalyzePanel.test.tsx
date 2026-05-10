@@ -19,6 +19,11 @@ import {
 } from '@/store/analyze';
 import { DEFAULT_TDS_CONFIG, useUiStore } from '@/store/ui';
 import { usePflowStore } from '@/store/pflow';
+import { useAuthStore } from '@/store/auth';
+import { useCaseStore } from '@/store/case';
+import { useSessionStore } from '@/store/session';
+import { useSweepStore } from '@/store/sweep';
+import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { EigResult, PflowResult } from '@/api/types';
 
 function withQueryClient(ui: React.ReactNode) {
@@ -35,6 +40,8 @@ function resetStores() {
     selectedModeId: null,
     filter: { ...DEFAULT_EIG_FILTER },
     cpfResult: null,
+    seResult: null,
+    seMeasurementsCount: null,
   });
   useUiStore.setState({
     hideLabels: false,
@@ -46,6 +53,32 @@ function resetStores() {
     isRunning: false,
     error: null,
   });
+  // The Run-readiness hook (Unit 4 of the v2.0 polish plan) reads
+  // case + session + auth + sweep slices. Seed all four to a "happy
+  // path" baseline so the per-sub-mode disabled-reason tests start
+  // from a clean state.
+  useAuthStore.setState({ token: 'test-token', persistFailed: false });
+  useSessionStore.setState({
+    sessionId: parseSessionId('sess-1'),
+    recoveryInProgress: false,
+    recoveryFailed: false,
+    recoveryAttempts: [],
+  });
+  useCaseStore.setState({
+    selection: {
+      primaryPath: parseWorkspacePath('ieee14.raw'),
+      addfiles: [],
+    },
+    topology: null,
+    layoutSidecar: null,
+    selectedElement: null,
+    addPanelOpen: false,
+    addPanelKind: null,
+    addPanelDirty: false,
+    dragOverrides: {},
+    pendingDependents: [],
+  });
+  useSweepStore.setState({ sweeps: {}, activeSweepId: null });
 }
 
 const FAKE_PFLOW_RESULT: PflowResult = {
@@ -140,5 +173,93 @@ describe('<AnalyzePanel />', () => {
     expect(
       screen.queryByTestId('eig-info-tds-initialized'),
     ).not.toBeInTheDocument();
+  });
+
+  // ---- Run-readiness gates (v2.0 polish, Unit 4) -----------------------
+
+  it('Run EIG is disabled with "Run PFlow first" tooltip when no PF result is present', async () => {
+    useAnalyzeStore.getState().setSubMode('eig');
+    // Baseline already has no PF result.
+    render(withQueryClient(<AnalyzePanel />));
+    const button = screen.getByTestId('analyze-run-eig');
+    expect(button).toBeDisabled();
+    await userEvent.hover(button.parentElement!);
+    const matches = await screen.findAllByText(
+      /Run PFlow first; EIG requires a converged operating point/i,
+    );
+    expect(matches.length).toBeGreaterThan(0);
+  });
+
+  it('Run CPF is disabled with the CPF-specific "Run PFlow first" tooltip', async () => {
+    useAnalyzeStore.getState().setSubMode('cpf');
+    render(withQueryClient(<AnalyzePanel />));
+    const button = screen.getByTestId('analyze-run-cpf');
+    expect(button).toBeDisabled();
+    await userEvent.hover(button.parentElement!);
+    const matches = await screen.findAllByText(
+      /Run PFlow first; CPF requires a converged operating point/i,
+    );
+    expect(matches.length).toBeGreaterThan(0);
+  });
+
+  it('Run SE is disabled with "Generate measurements first." when PF is converged but no measurements', async () => {
+    useAnalyzeStore.getState().setSubMode('se');
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    // measurement count stays null.
+    render(withQueryClient(<AnalyzePanel />));
+    const button = screen.getByTestId('analyze-se-run');
+    expect(button).toBeDisabled();
+    await userEvent.hover(button.parentElement!);
+    const matches = await screen.findAllByText(/Generate measurements first/i);
+    expect(matches.length).toBeGreaterThan(0);
+  });
+
+  it('Run SE is disabled with "Run PFlow first" when PF has not run', async () => {
+    useAnalyzeStore.getState().setSubMode('se');
+    render(withQueryClient(<AnalyzePanel />));
+    const button = screen.getByTestId('analyze-se-run');
+    expect(button).toBeDisabled();
+    await userEvent.hover(button.parentElement!);
+    const matches = await screen.findAllByText(
+      /Run PFlow first; SE requires a converged operating point/i,
+    );
+    expect(matches.length).toBeGreaterThan(0);
+  });
+
+  it('Run EIG enables when PF is converged', () => {
+    useAnalyzeStore.getState().setSubMode('eig');
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    render(withQueryClient(<AnalyzePanel />));
+    expect(screen.getByTestId('analyze-run-eig')).toBeEnabled();
+  });
+
+  it('Run EIG / CPF / SE all show the sweep-in-progress tooltip when an active sweep is running', async () => {
+    useAnalyzeStore.getState().setSubMode('eig');
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    useAnalyzeStore.setState({ seMeasurementsCount: 5 });
+    useSweepStore.setState({
+      activeSweepId: 'sweep-9',
+      sweeps: {
+        'sweep-9': {
+          sweepId: 'sweep-9',
+          parameterKind: 'disturbance.fault.tc',
+          parameterTarget: 0,
+          snapshotName: 'snap-A',
+          total: 5,
+          state: 'running',
+          iterations: [],
+          truncated: false,
+          error: null,
+          startedAt: 0,
+        },
+      },
+    });
+
+    render(withQueryClient(<AnalyzePanel />));
+    const button = screen.getByTestId('analyze-run-eig');
+    expect(button).toBeDisabled();
+    await userEvent.hover(button.parentElement!);
+    const matches = await screen.findAllByText(/Sweep sweep-9 in progress/i);
+    expect(matches.length).toBeGreaterThan(0);
   });
 });

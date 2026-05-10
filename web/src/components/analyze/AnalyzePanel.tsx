@@ -1,6 +1,13 @@
 import { useEffect } from 'react';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipPortal,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { TdsConfigPanel } from '@/components/tds/TdsConfigPanel';
 import { AnalyzeSubModePicker } from './AnalyzeSubModePicker';
 import { CPFCurveChart } from './CPFCurveChart';
@@ -17,6 +24,7 @@ import {
 } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
+import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { ProblemDetailsError } from '@/api/client';
 
 /**
@@ -75,6 +83,85 @@ export function AnalyzePanel({ className }: AnalyzePanelProps) {
   );
 }
 
+/**
+ * AnalyzeRunButton — small wrapper around the per-routine run button so
+ * EIG / CPF / SE share the same "Run-readiness hook + tooltip on
+ * disabled" surface. Each sub-mode passes its own label, mutation
+ * pending state, click handler, and routine id; the wrapper handles
+ * the disabled merge (readiness + pending) and the tooltip wrap.
+ *
+ * Plan-divergence: the AnalyzePanel sub-modes already render a 409
+ * prerequisite-error banner with an "Open PF view" CTA after a failed
+ * click. The Run-readiness hook now gates the click *proactively* —
+ * the user sees the same "Run PFlow first" reason on hover before they
+ * click. The post-click 409 banner stays in place as a fallback for
+ * the case where the substrate disagrees with the client's view of
+ * readiness (e.g., the PF result we trust was actually invalidated
+ * server-side).
+ */
+function AnalyzeRunButton({
+  routine,
+  label,
+  pendingLabel,
+  isPending,
+  onClick,
+  testId,
+  disabledOverride,
+}: {
+  routine: RunRoutine;
+  label: string;
+  pendingLabel: string;
+  isPending: boolean;
+  onClick: () => void;
+  testId: string;
+  /**
+   * Sub-mode-specific extra disabled gate. SE for example also gates
+   * "Run SE" on a measurement count — the readiness hook covers that
+   * case too, but Generate Measurements has its own readiness gate.
+   * Passing ``true`` here disables the button without surfacing a
+   * tooltip (the sub-mode keeps its existing inline UI for the
+   * specific gate).
+   */
+  disabledOverride?: boolean;
+}) {
+  const readiness = useRunReadiness(routine);
+  const disabled =
+    !readiness.ready || isPending || disabledOverride === true;
+
+  const button = (
+    <Button
+      type="button"
+      variant="primary"
+      size="sm"
+      disabled={disabled}
+      onClick={onClick}
+      data-testid={testId}
+    >
+      {isPending ? pendingLabel : label}
+    </Button>
+  );
+
+  if (readiness.disabledReason !== null && !isPending) {
+    return (
+      <TooltipProvider delayDuration={150}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span tabIndex={0} className="inline-block">
+              {button}
+            </span>
+          </TooltipTrigger>
+          <TooltipPortal>
+            <TooltipContent data-testid={`${testId}-disabled-reason`}>
+              {readiness.disabledReason}
+            </TooltipContent>
+          </TooltipPortal>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+  return button;
+}
+
 function AnalyzePflowSubMode() {
   const lastRun = usePflowStore((s) => s.lastRun);
   return (
@@ -127,16 +214,14 @@ function AnalyzeEigSubMode() {
   return (
     <div className="flex flex-col gap-3 p-3">
       <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          variant="primary"
-          size="sm"
-          disabled={!sessionId || eigRun.isPending}
+        <AnalyzeRunButton
+          routine="eig"
+          label="Run EIG"
+          pendingLabel="Running EIG…"
+          isPending={eigRun.isPending}
           onClick={onRun}
-          data-testid="analyze-run-eig"
-        >
-          {eigRun.isPending ? 'Running EIG…' : 'Run EIG'}
-        </Button>
+          testId="analyze-run-eig"
+        />
         {eigResult !== null && eigResult.tds_initialized ? (
           <span
             role="status"
@@ -222,16 +307,14 @@ function AnalyzeCpfSubMode() {
   return (
     <div className="flex flex-col gap-3 p-3">
       <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          variant="primary"
-          size="sm"
-          disabled={!sessionId || cpfRun.isPending}
+        <AnalyzeRunButton
+          routine="cpf"
+          label="Run CPF"
+          pendingLabel="Running CPF…"
+          isPending={cpfRun.isPending}
           onClick={onRun}
-          data-testid="analyze-run-cpf"
-        >
-          {cpfRun.isPending ? 'Running CPF…' : 'Run CPF'}
-        </Button>
+          testId="analyze-run-cpf"
+        />
         {cpfResult !== null ? (
           <span
             data-testid="cpf-summary"
@@ -342,11 +425,6 @@ function AnalyzeSeSubMode() {
     activeError instanceof ProblemDetailsError && activeError.status === 409;
 
   const canGenerate = sessionId !== null && !seGenerate.isPending;
-  const canRun =
-    sessionId !== null &&
-    seMeasurementsCount !== null &&
-    seMeasurementsCount > 0 &&
-    !seRun.isPending;
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -365,16 +443,14 @@ function AnalyzeSeSubMode() {
               ? 'Re-generate Measurements'
               : 'Generate Measurements'}
         </Button>
-        <Button
-          type="button"
-          variant="primary"
-          size="sm"
-          disabled={!canRun}
+        <AnalyzeRunButton
+          routine="se"
+          label="Run SE"
+          pendingLabel="Running SE…"
+          isPending={seRun.isPending}
           onClick={onRun}
-          data-testid="analyze-se-run"
-        >
-          {seRun.isPending ? 'Running SE…' : 'Run SE'}
-        </Button>
+          testId="analyze-se-run"
+        />
         {seMeasurementsCount !== null ? (
           <span
             data-testid="se-measurements-count"

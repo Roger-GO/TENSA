@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -10,7 +10,6 @@ import {
 import { useAbortRun, useCommitDisturbances, useResetRun, useRunPflow } from '@/api/queries';
 import { ProblemDetailsError, ServerError } from '@/api/client';
 import { useSessionStore } from '@/store/session';
-import { useCaseStore } from '@/store/case';
 import { useAuthStore } from '@/store/auth';
 import { usePflowStore } from '@/store/pflow';
 import { useDisturbanceStore } from '@/store/disturbance';
@@ -19,6 +18,7 @@ import { useUiStore } from '@/store/ui';
 import { RunStream } from '@/streaming/RunStream';
 import type { RunStreamError, VarGroup } from '@/streaming/RunStream';
 import { buildRunStreamWsUrl } from '@/streaming/wsUrl';
+import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
 
@@ -118,7 +118,6 @@ function Spinner() {
 
 export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunButtonProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
-  const selection = useCaseStore((s) => s.selection);
   const token = useAuthStore((s) => s.token);
   const isPfRunning = usePflowStore((s) => s.isRunning);
   const disturbances = useDisturbanceStore((s) => s.disturbances);
@@ -208,12 +207,16 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     }
   }, [activeRun]);
 
-  const disabledReason = useMemo<string | null>(() => {
-    if (!selection) return 'Load a case first.';
-    if (!sessionId) return 'Connecting to substrate…';
-    if (!token) return 'Sign in to run.';
-    return null;
-  }, [selection, sessionId, token]);
+  // The Run-readiness hook (Unit 4 of the v2.0 polish plan) is the
+  // single source of truth for "why is this Run button disabled". The
+  // hook subscribes to the case + session + auth stores plus the
+  // routine-specific prerequisites (sweep-in-progress for any routine,
+  // EIG-mutated dae for PF). We pass the active mode so the same
+  // button surface reuses the right gate as the user toggles between
+  // PF and TDS.
+  const readinessRoutine: RunRoutine = mode === 'pf' ? 'pflow' : 'tds';
+  const readiness = useRunReadiness(readinessRoutine);
+  const disabledReason = readiness.disabledReason;
 
   // ---- TDS start flow -----------------------------------------------------
 
@@ -535,6 +538,27 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     </div>
   );
 
+  // ---- inline recovery affordance ----------------------------------------
+
+  // The Run-readiness hook surfaces a recovery descriptor when one is
+  // available (today: ``reload-case`` for PF after an EIG run). Reuse
+  // the existing reset-run mutation handle — both wire to the same
+  // ``POST /sessions/{id}/reload`` endpoint, so the user gets a clean
+  // re-parse + cleared dae.
+  const inlineRecovery =
+    readiness.recovery?.kind === 'reload-case' ? (
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={onReset}
+        disabled={resetRun.isPending}
+        data-testid="run-button-recovery-reload"
+      >
+        {resetRun.isPending ? 'Reloading…' : readiness.recovery.label}
+      </Button>
+    ) : null;
+
   // ---- render -------------------------------------------------------------
 
   return (
@@ -555,6 +579,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       ) : (
         primaryButton
       )}
+      {inlineRecovery}
       {modeSelector}
     </div>
   );

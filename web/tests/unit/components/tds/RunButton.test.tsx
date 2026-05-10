@@ -219,6 +219,99 @@ describe('<RunButton /> v0.2 — disabled / enabled', () => {
     expect(screen.getByTestId('run-mode-tds')).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByTestId('run-tds-button')).toBeInTheDocument();
   });
+
+  // ---- Run-readiness gates (v2.0 polish, Unit 4) -----------------------
+
+  it('shows the "No case loaded." tooltip on hover when no case is loaded', async () => {
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    const button = screen.getByTestId('run-pflow-button');
+    await userEvent.hover(button.parentElement!);
+    const matches = await screen.findAllByText(/No case loaded/i);
+    expect(matches.length).toBeGreaterThan(0);
+  });
+
+  it('shows "Sweep ... in progress" tooltip when an active sweep is running', async () => {
+    seedReady();
+    const { useSweepStore } = await import('@/store/sweep');
+    useSweepStore.setState({
+      activeSweepId: 'sweep-7',
+      sweeps: {
+        'sweep-7': {
+          sweepId: 'sweep-7',
+          parameterKind: 'disturbance.fault.tc',
+          parameterTarget: 0,
+          snapshotName: 'snap-A',
+          total: 5,
+          state: 'running',
+          iterations: [],
+          truncated: false,
+          error: null,
+          startedAt: 0,
+        },
+      },
+    });
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    expect(screen.getByTestId('run-pflow-button')).toBeDisabled();
+
+    const button = screen.getByTestId('run-pflow-button');
+    await userEvent.hover(button.parentElement!);
+    const matches = await screen.findAllByText(/Sweep sweep-7 in progress/i);
+    expect(matches.length).toBeGreaterThan(0);
+
+    // Cleanup so the next test gets a clean slate.
+    useSweepStore.setState({ activeSweepId: null, sweeps: {} });
+  });
+
+  it('PF mode after EIG mutated dae shows the reload-case inline recovery + tooltip', async () => {
+    seedReady();
+    const { useAnalyzeStore } = await import('@/store/analyze');
+    usePflowStore.setState({
+      lastRun: {
+        run_id: 'pf-1',
+        converged: true,
+        iterations: 3,
+        mismatch: 1e-7,
+        bus_voltages: {},
+        bus_angles: {},
+        line_flows: {},
+      },
+      isRunning: false,
+      error: null,
+    });
+    useAnalyzeStore.setState({
+      eigResult: {
+        eigenvalues: [{ real: -0.1, imag: 1.0 }],
+        damping_ratios: [0.1],
+        frequencies_hz: [0.159],
+        mode_count: 1,
+        state_count: 1,
+        state_names: ['delta_1'],
+        tds_initialized: true,
+      },
+    });
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+
+    // Inline recovery rendered.
+    const recovery = screen.getByTestId('run-button-recovery-reload');
+    expect(recovery).toBeInTheDocument();
+    expect(recovery).toHaveTextContent(/Reload case/i);
+
+    // Run button disabled with explanatory tooltip.
+    const button = screen.getByTestId('run-pflow-button');
+    expect(button).toBeDisabled();
+    await userEvent.hover(button.parentElement!);
+    const matches = await screen.findAllByText(
+      /EIG initialised the dynamic state/i,
+    );
+    expect(matches.length).toBeGreaterThan(0);
+
+    useAnalyzeStore.setState({ eigResult: null });
+  });
 });
 
 describe('<RunButton /> v0.2 — PF branch (legacy v0.1 flow still works)', () => {
