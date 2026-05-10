@@ -36,6 +36,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { toast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
 
 /** Supported export formats. The set of buttons rendered is `formats`. */
@@ -173,21 +174,21 @@ export function ExportMenu({
 }: ExportMenuProps) {
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const runFormat = useCallback(
     async (format: ExportFormat) => {
       const handler = format === 'csv' ? onExportCsv : format === 'png' ? onExportPng : onExportMat;
       if (!handler) return;
       setBusy(true);
-      setErrorMessage(null);
       try {
         const blob = await Promise.resolve(handler());
         if (!blob) {
-          // Handler chose "nothing to export" — surface the disabled
-          // tooltip copy inline so the user understands the click had
-          // no effect (rather than puzzling over a silent menu).
-          setErrorMessage(disabledTooltip);
+          // Handler chose "nothing to export" — surface a toast.warning
+          // so the user understands the click had no effect (rather
+          // than puzzling over a silent menu). Per Unit 3 of the v2.0
+          // polish plan: transient action results live on the global
+          // toast surface, not inline.
+          toast.warning(disabledTooltip);
           return;
         }
         const filename = buildFilename({
@@ -198,17 +199,17 @@ export function ExportMenu({
           timestamp: makeTimestamp(),
         });
         downloadBlob(blob, filename);
+        toast.success(`Exported ${filename}`);
         // Close on success so the menu doesn't linger over the panel
         // post-download.
         setOpen(false);
       } catch (err) {
-        // Surface a generic toast-equivalent message inline. The plan's
-        // test scenario ("URL.createObjectURL throws → toast 'Export
-        // failed; check browser settings'") matches this branch — there
-        // is no global toast system in v0.1 yet, so we render the
-        // message in the popover.
+        // Surface as toast.error with the underlying detail in the
+        // description so the user can paste it into a bug report.
         const detail = err instanceof Error ? err.message : 'unknown error';
-        setErrorMessage(`Export failed; check browser settings (${detail}).`);
+        toast.error('Export failed; check browser settings.', {
+          description: detail,
+        });
       } finally {
         setBusy(false);
       }
@@ -305,15 +306,10 @@ export function ExportMenu({
               </Tooltip>
             </TooltipProvider>
           )}
-          {errorMessage !== null && (
-            <p
-              role="alert"
-              data-testid="export-menu-error"
-              className="text-danger px-2 py-1 text-xs"
-            >
-              {errorMessage}
-            </p>
-          )}
+          {/* Errors no longer surface inline here — Unit 3 of the v2.0
+              polish plan routes export failures to the global toast
+              surface (see `@/lib/toast`). The popover stays focused on
+              format selection. */}
         </div>
       </PopoverContent>
     </Popover>

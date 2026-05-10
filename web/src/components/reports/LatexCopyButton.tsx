@@ -15,10 +15,11 @@
  * explicitly notes "we can't assume booktabs is in user's preamble";
  * ``tabular`` is part of the LaTeX kernel and always available.
  *
- * Error handling (per the plan's no-toast pattern from Unit 2):
- * clipboard permission denial surfaces as a ``role="alert"`` inline
- * message immediately below the button. The button stays enabled so
- * the user can retry; the message clears on the next successful copy.
+ * Error handling: clipboard permission denial surfaces via the global
+ * toast surface (`toast.error`). Per Unit 3 of the v2.0 polish plan
+ * the inline ``role="alert"`` block has been retired in favour of a
+ * single global toast surface that survives the unmount of this
+ * component. The button stays enabled so the user can retry.
  *
  * Forward-compat: the underlying serialisation function
  * (``tablesToLatex``) is exported so future units can re-use it for
@@ -27,7 +28,7 @@
  */
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/cn';
+import { toast } from '@/lib/toast';
 
 /**
  * Mirror of the substrate's ``ReportTable`` shape (defined in
@@ -92,7 +93,10 @@ function isNumericCell(value: string): boolean {
  * Pure over the table data — used both by ``tableToLatex`` and the
  * unit tests so the heuristic is testable in isolation.
  */
-export function pickColumnSpec(headers: readonly string[], rows: readonly (readonly string[])[]): string {
+export function pickColumnSpec(
+  headers: readonly string[],
+  rows: readonly (readonly string[])[],
+): string {
   const result: string[] = [];
   for (let c = 0; c < headers.length; c++) {
     let numeric = 0;
@@ -125,9 +129,7 @@ export function pickColumnSpec(headers: readonly string[], rows: readonly (reado
 export function tableToLatex(table: LatexReportTable): string {
   const colSpec = pickColumnSpec(table.headers, table.rows);
   const headerRow = table.headers.map(escapeLatexCell).join(' & ');
-  const dataRows = table.rows.map(
-    (row) => row.map(escapeLatexCell).join(' & ') + ' \\\\',
-  );
+  const dataRows = table.rows.map((row) => row.map(escapeLatexCell).join(' & ') + ' \\\\');
   const body = [
     `% ${table.title}`,
     `\\begin{tabular}{${colSpec}}`,
@@ -164,35 +166,30 @@ export interface LatexCopyButtonProps {
   disabled?: boolean;
 }
 
-export function LatexCopyButton({
-  tables,
-  testIdSuffix,
-  disabled,
-}: LatexCopyButtonProps) {
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+export function LatexCopyButton({ tables, testIdSuffix, disabled }: LatexCopyButtonProps) {
   const [copied, setCopied] = useState(false);
 
   const isEmpty = tables.length === 0;
   const handleClick = async () => {
     setCopied(false);
-    setErrorMessage(null);
     const payload = tablesToLatex(tables);
     if (payload.length === 0) {
-      setErrorMessage('Nothing to copy: this report has no structured tables.');
+      toast.warning('Nothing to copy: this report has no structured tables.');
       return;
     }
     if (typeof navigator === 'undefined' || !navigator.clipboard) {
-      setErrorMessage(
-        "Clipboard API unavailable in this browser — copy the text manually from the report body.",
+      toast.error(
+        'Clipboard API unavailable in this browser — copy the text manually from the report body.',
       );
       return;
     }
     try {
       await navigator.clipboard.writeText(payload);
       setCopied(true);
+      toast.success('Copied LaTeX tables to clipboard.');
     } catch (err) {
       const detail = err instanceof Error ? err.message : 'unknown clipboard error';
-      setErrorMessage(`Copy failed: ${detail}`);
+      toast.error('Copy failed.', { description: detail });
     }
   };
 
@@ -200,29 +197,15 @@ export function LatexCopyButton({
   const testId = testIdSuffix ? `${baseTestId}-${testIdSuffix}` : baseTestId;
 
   return (
-    <div className="flex flex-col gap-1">
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={disabled || isEmpty}
-        onClick={() => void handleClick()}
-        data-testid={testId}
-      >
-        {copied ? 'Copied!' : 'Copy as LaTeX'}
-      </Button>
-      {errorMessage !== null ? (
-        <div
-          role="alert"
-          data-testid={`${testId}-error`}
-          className={cn(
-            'border-destructive/30 bg-destructive/10 text-foreground',
-            'rounded-[var(--radius-sm)] border px-2 py-1.5 text-xs',
-          )}
-        >
-          {errorMessage}
-        </div>
-      ) : null}
-    </div>
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      disabled={disabled || isEmpty}
+      onClick={() => void handleClick()}
+      data-testid={testId}
+    >
+      {copied ? 'Copied!' : 'Copy as LaTeX'}
+    </Button>
   );
 }

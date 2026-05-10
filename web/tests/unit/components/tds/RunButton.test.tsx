@@ -14,6 +14,22 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { Server as MockServer, WebSocket as MockWebSocket } from 'mock-socket';
 import { tableFromArrays, tableToIPC } from 'apache-arrow';
+
+const toastSuccessMock = vi.fn();
+const toastErrorMock = vi.fn();
+const toastWarningMock = vi.fn();
+const toastInfoMock = vi.fn();
+
+vi.mock('@/lib/toast', () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccessMock(...args),
+    error: (...args: unknown[]) => toastErrorMock(...args),
+    warning: (...args: unknown[]) => toastWarningMock(...args),
+    info: (...args: unknown[]) => toastInfoMock(...args),
+    dismiss: vi.fn(),
+  },
+}));
+
 import { RunButton } from '@/components/tds/RunButton';
 import { makeQueryClient } from '@/api/queries';
 import { setTokenGetter } from '@/api/client';
@@ -41,6 +57,13 @@ beforeEach(() => {
       host: WS_HOST,
     },
   });
+  // Per Unit 3 of the v2.0 polish plan: toasts route through the
+  // global wrapper. Reset mocks at the file-level so every nested
+  // describe sees a clean call log.
+  toastSuccessMock.mockReset();
+  toastErrorMock.mockReset();
+  toastWarningMock.mockReset();
+  toastInfoMock.mockReset();
 });
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -224,7 +247,7 @@ describe('<RunButton /> v0.2 — PF branch (legacy v0.1 flow still works)', () =
     useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
   });
 
-  it('on PF success (converged), shows the success toast', async () => {
+  it('on PF success (converged), fires toast.success', async () => {
     fetchSpy.mockImplementation(() =>
       Promise.resolve(
         jsonResponse({
@@ -241,13 +264,14 @@ describe('<RunButton /> v0.2 — PF branch (legacy v0.1 flow still works)', () =
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-pflow-button'));
-    await waitFor(() => {
-      expect(screen.getByTestId('pflow-success-toast')).toBeInTheDocument();
-    });
-    expect(screen.getByTestId('pflow-success-toast')).toHaveTextContent(/converged in 3/i);
+    await waitFor(() =>
+      expect(toastSuccessMock).toHaveBeenCalledWith(
+        'PF converged in 3 iterations.',
+      ),
+    );
   });
 
-  it('on 5xx, sets pflow.error to ServerError (no inline toast — modal owns it)', async () => {
+  it('on 5xx, sets pflow.error to ServerError (no toast — modal owns it)', async () => {
     fetchSpy.mockImplementation(() =>
       Promise.resolve(
         jsonResponse({ title: 'Internal Server Error', status: 500, detail: 'boom' }, 500),
@@ -260,20 +284,23 @@ describe('<RunButton /> v0.2 — PF branch (legacy v0.1 flow still works)', () =
       expect(usePflowStore.getState().error).not.toBeNull();
       expect(usePflowStore.getState().error?.status).toBe(500);
     });
-    expect(screen.queryByTestId('pflow-error-toast')).not.toBeInTheDocument();
+    // 5xx routes through pflow.error to RuntimeCrashModal — no toast.
+    expect(toastErrorMock).not.toHaveBeenCalled();
   });
 
-  it('on 4xx, surfaces inline error toast', async () => {
+  it('on 4xx, fires toast.error with the substrate detail', async () => {
     fetchSpy.mockImplementation(() =>
       Promise.resolve(jsonResponse({ title: 'Bad Request', status: 422, detail: 'bad case' }, 422)),
     );
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-pflow-button'));
-    await waitFor(() => {
-      expect(screen.getByTestId('pflow-error-toast')).toBeInTheDocument();
-    });
-    expect(screen.getByTestId('pflow-error-toast')).toHaveTextContent(/bad case/i);
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Run PF failed',
+        expect.objectContaining({ description: 'bad case' }),
+      ),
+    );
   });
 });
 
@@ -477,10 +504,14 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-tds-button'));
 
-    await waitFor(() => {
-      expect(screen.getByTestId('tds-error-toast')).toBeInTheDocument();
-    });
-    expect(screen.getByTestId('tds-error-toast')).toHaveTextContent(/unknown bus_idx 99/);
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'TDS error',
+        expect.objectContaining({
+          description: expect.stringMatching(/unknown bus_idx 99/),
+        }),
+      ),
+    );
     await tick(20);
     expect(wsOpened).toBe(false);
   });
@@ -526,10 +557,11 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     await userEvent.click(screen.getByTestId('run-mode-tds'));
     await userEvent.click(screen.getByTestId('run-tds-button'));
 
-    await waitFor(() => {
-      expect(screen.getByTestId('tds-warning-toast')).toBeInTheDocument();
-    });
-    expect(screen.getByTestId('tds-warning-toast')).toHaveTextContent(/no longer available/i);
+    await waitFor(() =>
+      expect(toastWarningMock).toHaveBeenCalledWith(
+        expect.stringMatching(/no longer available/i),
+      ),
+    );
   });
 
   it('WS resync (buffer evicted) shows a non-modal warning toast', async () => {
@@ -571,10 +603,11 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     await userEvent.click(screen.getByTestId('run-mode-tds'));
     await userEvent.click(screen.getByTestId('run-tds-button'));
 
-    await waitFor(() => {
-      expect(screen.getByTestId('tds-warning-toast')).toBeInTheDocument();
-    });
-    expect(screen.getByTestId('tds-warning-toast')).toHaveTextContent(/connection dropped/i);
+    await waitFor(() =>
+      expect(toastWarningMock).toHaveBeenCalledWith(
+        expect.stringMatching(/connection dropped/i),
+      ),
+    );
   });
 });
 

@@ -10,6 +10,22 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
+
+const toastSuccessMock = vi.fn();
+const toastErrorMock = vi.fn();
+const toastWarningMock = vi.fn();
+const toastInfoMock = vi.fn();
+
+vi.mock('@/lib/toast', () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccessMock(...args),
+    error: (...args: unknown[]) => toastErrorMock(...args),
+    warning: (...args: unknown[]) => toastWarningMock(...args),
+    info: (...args: unknown[]) => toastInfoMock(...args),
+    dismiss: vi.fn(),
+  },
+}));
+
 import { RunButton } from '@/components/pflow/RunButton';
 import { makeQueryClient } from '@/api/queries';
 import { setTokenGetter } from '@/api/client';
@@ -69,6 +85,10 @@ describe('<RunButton />', () => {
       selectedElement: null,
     });
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+    toastSuccessMock.mockReset();
+    toastErrorMock.mockReset();
+    toastWarningMock.mockReset();
+    toastInfoMock.mockReset();
   });
 
   afterEach(() => {
@@ -99,7 +119,7 @@ describe('<RunButton />', () => {
     expect(screen.getByText(/running pf/i)).toBeInTheDocument();
   });
 
-  it('on PF success (converged), shows the success toast', async () => {
+  it('on PF success (converged), fires toast.success', async () => {
     seedLoadedCase();
     fetchSpy.mockImplementation(() =>
       Promise.resolve(
@@ -119,13 +139,18 @@ describe('<RunButton />', () => {
 
     await userEvent.click(screen.getByTestId('run-pflow-button'));
 
-    await waitFor(() => {
-      expect(screen.getByTestId('pflow-success-toast')).toBeInTheDocument();
-    });
-    expect(screen.getByTestId('pflow-success-toast')).toHaveTextContent(/converged in 3/i);
+    // Per Unit 3 of the v2.0 polish plan: the in-component
+    // SuccessToast was retired; success now flows through the global
+    // toast surface.
+    await waitFor(() =>
+      expect(toastSuccessMock).toHaveBeenCalledWith(
+        'PF converged in 3 iterations.',
+      ),
+    );
+    expect(screen.queryByTestId('pflow-success-toast')).not.toBeInTheDocument();
   });
 
-  it('on non-convergence (200 + converged=false), does NOT show success toast', async () => {
+  it('on non-convergence (200 + converged=false), does NOT fire toast.success', async () => {
     seedLoadedCase();
     fetchSpy.mockImplementation(() =>
       Promise.resolve(
@@ -152,7 +177,30 @@ describe('<RunButton />', () => {
 
     // No success toast — the convergence panel is the surface (a
     // different component subscribes to lastRun).
-    expect(screen.queryByTestId('pflow-success-toast')).not.toBeInTheDocument();
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+
+  it('on 4xx error, fires toast.error with the substrate detail', async () => {
+    seedLoadedCase();
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(
+        jsonResponse(
+          { title: 'Bad Request', status: 422, detail: 'bad case input' },
+          422,
+        ),
+      ),
+    );
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+
+    await userEvent.click(screen.getByTestId('run-pflow-button'));
+
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Run PF failed',
+        expect.objectContaining({ description: 'bad case input' }),
+      ),
+    );
   });
 
   it('on 5xx, sets pflow.error to a ServerError so RuntimeCrashModal opens', async () => {

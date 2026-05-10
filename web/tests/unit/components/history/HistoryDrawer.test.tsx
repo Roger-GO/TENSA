@@ -12,9 +12,24 @@
  * portals into document.body — Testing Library's screen.* finds the
  * portaled content fine).
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
+const toastInfoMock = vi.fn();
+const toastSuccessMock = vi.fn();
+const toastErrorMock = vi.fn();
+const toastWarningMock = vi.fn();
+
+vi.mock('@/lib/toast', () => ({
+  toast: {
+    info: (...args: unknown[]) => toastInfoMock(...args),
+    success: (...args: unknown[]) => toastSuccessMock(...args),
+    error: (...args: unknown[]) => toastErrorMock(...args),
+    warning: (...args: unknown[]) => toastWarningMock(...args),
+    dismiss: vi.fn(),
+  },
+}));
 
 import { HistoryDrawer, HistoryDrawerToggle } from '@/components/history/HistoryDrawer';
 import { useRunsStore } from '@/store/runs';
@@ -96,6 +111,10 @@ describe('HistoryDrawer', () => {
     });
     useHistoryStore.getState().reset();
     seedSessionAndCase();
+    toastInfoMock.mockReset();
+    toastSuccessMock.mockReset();
+    toastErrorMock.mockReset();
+    toastWarningMock.mockReset();
   });
 
   afterEach(() => {
@@ -128,15 +147,18 @@ describe('HistoryDrawer', () => {
     expect(ids).toEqual(['r3', 'r2', 'r1']);
   });
 
-  it('pinning a row from the drawer updates the overlay set', async () => {
+  it('pinning a row from the drawer updates the overlay set + fires toast.info', async () => {
     const user = userEvent.setup();
     seedRun('r1');
     useHistoryStore.getState().openDrawer();
     render(<HistoryDrawer />);
     await user.click(screen.getByTestId('history-run-row-pin-r1'));
     expect(useRunsStore.getState().overlayRunIds.has('r1')).toBe(true);
-    // The toast surfaces inline.
-    expect(screen.getByTestId('history-drawer-toast')).toHaveTextContent('Pinned');
+    // Per Unit 3 of the v2.0 polish plan: pin/unpin toasts route
+    // through the global surface (sonner) rather than the in-drawer
+    // alert div.
+    expect(toastInfoMock).toHaveBeenCalledWith('Pinned to overlay');
+    expect(screen.queryByTestId('history-drawer-toast')).toBeNull();
   });
 
   it('overlay count summary reflects how many runs are pinned', async () => {
@@ -151,7 +173,7 @@ describe('HistoryDrawer', () => {
     );
   });
 
-  it('Clear overlay button empties overlayRunIds', async () => {
+  it('Clear overlay button empties overlayRunIds + fires toast.info', async () => {
     const user = userEvent.setup();
     seedRun('r1');
     useRunsStore.getState().addOverlayRun('r1');
@@ -159,7 +181,17 @@ describe('HistoryDrawer', () => {
     render(<HistoryDrawer />);
     await user.click(screen.getByTestId('history-drawer-clear-overlay'));
     expect(useRunsStore.getState().overlayRunIds.size).toBe(0);
-    expect(screen.getByTestId('history-drawer-toast')).toHaveTextContent('cleared');
+    expect(toastInfoMock).toHaveBeenCalledWith('Overlay cleared');
+    expect(screen.queryByTestId('history-drawer-toast')).toBeNull();
+  });
+
+  it('reset row fires toast.info "Run dropped from history"', async () => {
+    const user = userEvent.setup();
+    seedRun('r1');
+    useHistoryStore.getState().openDrawer();
+    render(<HistoryDrawer />);
+    await user.click(screen.getByTestId('history-run-row-reset-r1'));
+    expect(toastInfoMock).toHaveBeenCalledWith('Run dropped from history');
   });
 
   it('Clear overlay button is disabled when nothing is pinned', () => {

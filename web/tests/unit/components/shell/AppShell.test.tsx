@@ -234,6 +234,19 @@ describe('AppShell', () => {
     expect(screen.queryByText('No element selected')).not.toBeInTheDocument();
     expect(screen.queryByText('No results yet')).not.toBeInTheDocument();
   });
+
+  it('mounts the global Toaster so toasts render anywhere in the tree (Unit 3)', async () => {
+    const { container } = render(<AppShell />);
+    // Sonner is lazy — the toaster's portal renders only on the first
+    // emitted toast. Fire one through the typed wrapper (which is
+    // load-bearing for every component using `@/lib/toast`) and
+    // confirm the portal landed in the document.
+    const { toast } = await import('@/lib/toast');
+    toast.success('hello from the toaster smoke test');
+    await screen.findByText(/hello from the toaster smoke test/i);
+    const sonnerRoot = container.ownerDocument.querySelector('[data-sonner-toaster]');
+    expect(sonnerRoot).not.toBeNull();
+  });
 });
 
 describe('AppShell — keyboard floor (R20)', () => {

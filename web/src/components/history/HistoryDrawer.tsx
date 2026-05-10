@@ -24,12 +24,7 @@
  * docked sheet via ``widthClassName`` + custom positioning class.
  */
 import { useMemo } from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useHistoryStore } from '@/store/history';
 import { useRunsStore } from '@/store/runs';
@@ -39,6 +34,7 @@ import type { RunRecord } from '@/store/runs';
 import { HistoryRunRow } from './HistoryRunRow';
 import { SweepProgressPanel } from '@/components/sweep/SweepProgressPanel';
 import { useSweepStore } from '@/store/sweep';
+import { toast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
 
 export function HistoryDrawerToggle() {
@@ -64,7 +60,10 @@ export function HistoryDrawerToggle() {
       aria-pressed={open}
       aria-label="Toggle run history"
     >
-      History {runCount > 0 ? <span className="text-muted-foreground ml-1 text-[10px]">({runCount})</span> : null}
+      History{' '}
+      {runCount > 0 ? (
+        <span className="text-muted-foreground ml-1 text-[10px]">({runCount})</span>
+      ) : null}
     </Button>
   );
 }
@@ -95,16 +94,13 @@ function HistoryDrawerInner() {
   const activeRunId = useRunsStore((s) => s.activeRunId);
   const overlayRunIds = useRunsStore((s) => s.overlayRunIds);
   const setOverlayRuns = useRunsStore((s) => s.setOverlayRuns);
-  const toastMessage = useHistoryStore((s) => s.toastMessage);
-  const setToast = useHistoryStore((s) => s.setToast);
   // Unit 18: only render the sweep progress panel when a sweep is
   // actively in progress (or just finished and still cleaning up).
   // The panel renders an empty-state otherwise; we suppress its
   // mount entirely when there's no sweep so the drawer stays compact.
   const activeSweepId = useSweepStore((s) => s.activeSweepId);
   const sweeps = useSweepStore((s) => s.sweeps);
-  const showSweepPanel =
-    activeSweepId !== null || Object.keys(sweeps).length > 0;
+  const showSweepPanel = activeSweepId !== null || Object.keys(sweeps).length > 0;
 
   // Most-recent first: reverse insertion order. Insertion is
   // chronological; the user's mental model is "the latest run is at
@@ -121,7 +117,11 @@ function HistoryDrawerInner() {
 
   const handleClearOverlay = () => {
     setOverlayRuns([]);
-    setToast('Overlay cleared');
+    // Per Unit 3 of the v2.0 polish plan: transient action results live
+    // on the global toast surface (`@/lib/toast`) so they survive the
+    // unmount of this drawer (the user often closes the drawer right
+    // after acting on a row).
+    toast.info('Overlay cleared');
   };
 
   const overlayCount = overlayRunIds.size;
@@ -142,16 +142,13 @@ function HistoryDrawerInner() {
     >
       <DialogTitle>Run history</DialogTitle>
       <DialogDescription>
-        Pin runs to the multi-run overlay or drop them to free memory.
-        The active run anchors the SLD animation regardless of the
-        overlay set.
+        Pin runs to the multi-run overlay or drop them to free memory. The active run anchors the
+        SLD animation regardless of the overlay set.
       </DialogDescription>
 
       <div className="flex items-center justify-between gap-2">
         <span data-testid="history-drawer-overlay-count" className="text-muted-foreground text-xs">
-          {overlayCount === 0
-            ? 'No runs pinned'
-            : `${overlayCount} pinned to overlay`}
+          {overlayCount === 0 ? 'No runs pinned' : `${overlayCount} pinned to overlay`}
         </span>
         <Button
           type="button"
@@ -165,18 +162,9 @@ function HistoryDrawerInner() {
         </Button>
       </div>
 
-      {toastMessage !== null ? (
-        <div
-          role="status"
-          data-testid="history-drawer-toast"
-          className={cn(
-            'border-border bg-muted/40 text-foreground',
-            'rounded-[var(--radius-sm)] border px-2 py-1.5 text-xs',
-          )}
-        >
-          {toastMessage}
-        </div>
-      ) : null}
+      {/* Per-row pin/unpin/reset toasts now route through the global
+          toast surface (Unit 3 of the v2.0 polish plan). The previous
+          inline `history-drawer-toast` div has been retired. */}
 
       {showSweepPanel ? (
         <div
@@ -206,9 +194,9 @@ function HistoryDrawerInner() {
               isActive={r.runId === activeRunId}
               isOverlayPinned={overlayRunIds.has(r.runId)}
               onTogglePin={(_id, willBePinned) =>
-                setToast(willBePinned ? 'Pinned to overlay' : 'Unpinned from overlay')
+                toast.info(willBePinned ? 'Pinned to overlay' : 'Unpinned from overlay')
               }
-              onReset={() => setToast('Run dropped from history')}
+              onReset={() => toast.info('Run dropped from history')}
             />
           ))
         )}
