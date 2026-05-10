@@ -63,7 +63,7 @@ export function NumericalErrorBanner({ className }: NumericalErrorBannerProps) {
       aria-label="TDS numerical error"
       data-testid="numerical-error-banner"
       className={cn(
-        'border-destructive/40 bg-destructive/10 text-foreground',
+        'border-danger/40 bg-danger/10 text-foreground',
         'border-b',
         className,
       )}

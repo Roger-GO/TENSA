@@ -272,7 +272,7 @@ function SweepDialogInner({ onClose }: { onClose: () => void }) {
           <p
             role="alert"
             data-testid="sweep-dialog-validation"
-            className="text-destructive text-xs"
+            className="text-danger text-xs"
           >
             {validation}
           </p>
@@ -282,7 +282,7 @@ function SweepDialogInner({ onClose }: { onClose: () => void }) {
             role="alert"
             data-testid="sweep-dialog-error"
             className={cn(
-              'border-destructive/30 bg-destructive/10 text-foreground',
+              'border-danger/30 bg-danger/10 text-foreground',
               'rounded-[var(--radius-sm)] border px-2 py-1.5 text-xs',
             )}
           >

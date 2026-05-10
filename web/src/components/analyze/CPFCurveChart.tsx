@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { useAnalyzeStore } from '@/store/analyze';
+import { useTheme } from '@/lib/useTheme';
 import type { CpfResult } from '@/api/types';
+import type { ResolvedTheme } from '@/store/theme';
 
 /**
  * CPFCurveChart — continuation power flow nose-curve / QV-curve render
@@ -131,13 +133,22 @@ export function pickDefaultVisibleBuses(
 /**
  * Stable-ish color picker — hashes bus idx → HSL hue. Avoids relying
  * on a fixed palette so even 100+ buses get distinguishable lines.
+ *
+ * Theme-aware lightness (Unit 12): on a dark background a 45%-L line
+ * disappears against the page; we bump to 65% in dark mode so the
+ * traces stay legible. Saturation stays at 65% across themes.
+ *
+ * Exported for tests so the dark / light L difference is assertable
+ * without rendering the full SVG.
  */
-function busColor(bus: string): string {
+// eslint-disable-next-line react-refresh/only-export-components
+export function busColor(bus: string, theme: ResolvedTheme = 'light'): string {
   let h = 0;
   for (let i = 0; i < bus.length; i++) {
     h = (h * 31 + bus.charCodeAt(i)) >>> 0;
   }
-  return `hsl(${h % 360}deg, 65%, 45%)`;
+  const lightness = theme === 'dark' ? 65 : 45;
+  return `hsl(${h % 360}deg, 65%, ${lightness}%)`;
 }
 
 export function CPFCurveChart({
@@ -147,6 +158,7 @@ export function CPFCurveChart({
 }: CPFCurveChartProps) {
   const storeResult = useAnalyzeStore((s) => s.cpfResult);
   const result = resultProp !== undefined ? resultProp : storeResult;
+  const { resolvedTheme } = useTheme();
 
   const defaultVisible = useMemo(
     () => (result === null ? [] : pickDefaultVisibleBuses(result, maxVisibleBuses)),
@@ -352,7 +364,7 @@ export function CPFCurveChart({
               key={bus}
               points={points}
               fill="none"
-              stroke={busColor(bus)}
+              stroke={busColor(bus, resolvedTheme)}
               strokeWidth={1.5}
               data-testid={`cpf-curve-line-${bus}`}
             />
@@ -411,7 +423,7 @@ export function CPFCurveChart({
               <span
                 aria-hidden
                 className="mr-1 inline-block h-2 w-2 rounded-full align-middle"
-                style={{ backgroundColor: busColor(bus) }}
+                style={{ backgroundColor: busColor(bus, resolvedTheme) }}
               />
               {bus}
             </button>

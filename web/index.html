@@ -8,6 +8,23 @@
     <title>ANDES App</title>
   </head>
   <body class="bg-background text-foreground antialiased">
+    <script>
+      // Theme no-flash bootstrap (Unit 12). Reads the persisted
+      // `andes-app:theme-preference` from localStorage and applies the
+      // `.dark` class to <html> synchronously, BEFORE React mounts —
+      // otherwise dark-mode users would see a flash of the light-mode
+      // background. The store + hook in src/ mirror this logic.
+      (function () {
+        try {
+          var pref = localStorage.getItem('andes-app:theme-preference') || 'system';
+          var dark = pref === 'dark' || (pref === 'system' &&
+            window.matchMedia &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+          else document.documentElement.classList.remove('dark');
+        } catch (e) { /* localStorage unavailable — fall through to default light */ }
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

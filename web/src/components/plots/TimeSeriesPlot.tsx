@@ -17,6 +17,8 @@ import { timeSeriesToCsv } from '@/components/export/exportToCsv';
 import { elementToPng } from '@/components/export/exportToPng';
 import { useCaseStore } from '@/store/case';
 import { runIdToStrokeStyle } from '@/lib/runIdToColor';
+import { useTheme } from '@/lib/useTheme';
+import type { ResolvedTheme } from '@/store/theme';
 import { cn } from '@/lib/cn';
 
 /**
@@ -94,8 +96,16 @@ function gradientColorFor(index: number, total: number): string {
  * within one run. When the plot is in multi-run mode we instead colour
  * by the runId-hash; vars within one run share the run's colour and
  * differ only by uPlot's built-in series legend ordering.
+ *
+ * Two arrays — one tuned for a light background (lightness ~0.45–0.65)
+ * and one bumped for dark mode (~0.65–0.78) so the strokes stay
+ * legible against the dark tokens. Each slot keeps the same hue so
+ * a series's identity is preserved across theme switches; only the L
+ * channel changes. Exported for tests so the dark / light swap is
+ * assertable without rendering the full plot.
  */
-const PALETTE: readonly string[] = [
+// eslint-disable-next-line react-refresh/only-export-components
+export const PALETTE_LIGHT: readonly string[] = [
   'oklch(0.55 0.20 28)', // red-orange
   'oklch(0.65 0.18 75)', // amber
   'oklch(0.65 0.18 145)', // green
@@ -108,13 +118,28 @@ const PALETTE: readonly string[] = [
   'oklch(0.50 0.18 295)', // purple
 ];
 
+// eslint-disable-next-line react-refresh/only-export-components
+export const PALETTE_DARK: readonly string[] = [
+  'oklch(0.72 0.18 28)', // red-orange
+  'oklch(0.78 0.16 75)', // amber
+  'oklch(0.75 0.16 145)', // green
+  'oklch(0.72 0.16 200)', // cyan
+  'oklch(0.70 0.20 265)', // blue
+  'oklch(0.70 0.20 320)', // magenta
+  'oklch(0.65 0.10 0)', // muted red
+  'oklch(0.68 0.12 100)', // olive
+  'oklch(0.68 0.12 175)', // teal
+  'oklch(0.65 0.16 295)', // purple
+];
+
 /** Pick a stable color from the palette by series-name hash. */
-function colorFor(name: string): string {
+function colorFor(name: string, theme: ResolvedTheme): string {
+  const palette = theme === 'dark' ? PALETTE_DARK : PALETTE_LIGHT;
   let h = 0;
   for (let i = 0; i < name.length; i++) {
     h = (h * 31 + name.charCodeAt(i)) >>> 0;
   }
-  return PALETTE[h % PALETTE.length]!;
+  return palette[h % palette.length]!;
 }
 
 /**
@@ -126,6 +151,7 @@ function buildGroupChart(
   group: VarGroup,
   selectedNames: readonly string[],
   syncKey: string,
+  theme: ResolvedTheme,
 ): { options: uPlot.Options; data: uPlot.AlignedData } {
   // Slice typed arrays to the logical seq count (the typed arrays are
   // over-allocated by the runs slice's geometric growth strategy).
@@ -140,7 +166,7 @@ function buildGroupChart(
     dataCols.push(col.subarray(0, len));
     series.push({
       label: name,
-      stroke: colorFor(name),
+      stroke: colorFor(name, theme),
       width: 1.5,
       points: { show: false },
     });
@@ -364,6 +390,7 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
   const overlayRunIds = useRunsStore((s) => s.overlayRunIds);
   const allRuns = useRunsStore((s) => s.runs);
   const effectiveRunId = runId ?? activeRunId;
+  const { resolvedTheme } = useTheme();
 
   // Resolve the set of runs to render. Priority:
   //   1. Explicit ``runId`` prop  → render that run only.
@@ -494,7 +521,7 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
           ...buildMultiRunGroupChart(overlayRuns, group, names, syncKey, colorMode),
         });
       } else {
-        out.push({ group, ...buildGroupChart(primaryRun!, group, names, syncKey) });
+        out.push({ group, ...buildGroupChart(primaryRun!, group, names, syncKey, resolvedTheme) });
       }
     }
     return out;
@@ -502,7 +529,7 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
     // returns a new object), so this memo recomputes each frame —
     // that's the intended hot path; the memo's role here is just
     // structuring.
-  }, [overlayRuns, isMultiRun, primaryRun, groupedSelections, syncKey, colorMode]);
+  }, [overlayRuns, isMultiRun, primaryRun, groupedSelections, syncKey, colorMode, resolvedTheme]);
 
   if (!effectiveRunId || overlayRuns.length === 0) {
     return (

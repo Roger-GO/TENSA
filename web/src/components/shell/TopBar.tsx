@@ -6,6 +6,7 @@ import { ReportDialog } from '@/components/reports/ReportDialog';
 import { HistoryDrawer, HistoryDrawerToggle } from '@/components/history/HistoryDrawer';
 import { Button } from '@/components/ui/button';
 import { useCommandPaletteStore } from '@/store/commandPalette';
+import { ThemeToggle } from '@/components/shell/ThemeToggle';
 
 /**
  * TopBar. Fixed-height (~44px) bar with three slots — left, center, right —
@@ -35,10 +36,10 @@ import { useCommandPaletteStore } from '@/store/commandPalette';
  *   Radix Popover portals, so the bar only sees the trigger buttons).
  * - ``center``: the primary Run button + RunStatusBadge.
  * - ``right``: a slot the App fills with the Export trigger + the
- *   "Hide labels" toggle. The TopBar adds the dark-mode toggle
- *   placeholder + History trigger after the slot content so they
- *   always sit at the rightmost edge regardless of what the App
- *   chooses to inject.
+ *   "Hide labels" toggle. The TopBar adds the command-palette hint,
+ *   the theme toggle (Unit 12), and History trigger after the slot
+ *   content so they always sit at the rightmost edge regardless of
+ *   what the App chooses to inject.
  *
  * The dialog wrappers for store-driven flows (BundleExportDialog,
  * ReportDialog, HistoryDrawer) stay mounted here because their open-
@@ -95,7 +96,7 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
       >
         {right}
         <CommandPaletteHint />
-        <DarkModeTogglePlaceholder />
+        <ThemeToggle />
         <HistoryDrawerToggle />
       </div>
       <BundleExportDialog />
@@ -135,60 +136,3 @@ function CommandPaletteHint() {
   );
 }
 
-/**
- * Placeholder dark-mode toggle. Unit 8 only ships the visual slot; the
- * actual theme-switching logic lands in Unit 12. The button is a no-op
- * onClick so users clicking it pre-Unit-12 don't see the page change
- * unexpectedly. The icon flips between sun (visual cue for "switch to
- * dark") and moon would be wired by Unit 12 once the theme provider is
- * in place; for now we render the sun glyph statically.
- */
-function DarkModeTogglePlaceholder() {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      onClick={() => {
-        // intentional no-op — Unit 12 will wire the actual theme toggle.
-      }}
-      data-testid="dark-mode-toggle-placeholder"
-      aria-label="Toggle dark mode (coming in Unit 12)"
-      className="px-2"
-    >
-      <SunGlyph className="h-4 w-4" />
-    </Button>
-  );
-}
-
-/**
- * Inline sun glyph. The codebase ships icons inline (see RunButton's
- * Spinner) rather than depending on `lucide-react`, which is not in
- * the project's dependency set. Unit 12 may swap these to Lucide
- * components if/when the package lands; the icon shapes here are
- * shape-compatible with Lucide's.
- */
-function SunGlyph({ className }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <circle cx="12" cy="12" r="4" />
-      <path d="M12 2v2" />
-      <path d="M12 20v2" />
-      <path d="m4.93 4.93 1.41 1.41" />
-      <path d="m17.66 17.66 1.41 1.41" />
-      <path d="M2 12h2" />
-      <path d="M20 12h2" />
-      <path d="m6.34 17.66-1.41 1.41" />
-      <path d="m19.07 4.93-1.41 1.41" />
-    </svg>
-  );
-}

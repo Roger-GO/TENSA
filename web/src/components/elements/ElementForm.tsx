@@ -268,7 +268,7 @@ export function ElementForm({
         <span className="text-muted-foreground flex items-center gap-1 font-mono text-xs">
           <span>{m.name}</span>
           {m.required ? (
-            <span className="text-destructive" aria-hidden="true">
+            <span className="text-danger" aria-hidden="true">
               *
             </span>
           ) : null}
@@ -310,7 +310,7 @@ export function ElementForm({
           ) : null}
         </span>
         {error ? (
-          <span id={errorId} role="alert" className="text-destructive text-[10px]">
+          <span id={errorId} role="alert" className="text-danger text-[10px]">
             {error}
           </span>
         ) : null}
@@ -349,7 +349,7 @@ export function ElementForm({
         <div
           role="alert"
           data-testid="form-server-error"
-          className="border-destructive/30 bg-destructive/10 text-foreground rounded-[var(--radius-sm)] border px-2 py-1.5 text-xs"
+          className="border-danger/30 bg-danger/10 text-foreground rounded-[var(--radius-sm)] border px-2 py-1.5 text-xs"
         >
           {serverError}
         </div>

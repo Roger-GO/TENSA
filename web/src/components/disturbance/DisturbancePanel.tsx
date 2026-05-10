@@ -129,7 +129,7 @@ export function DisturbancePanel({ className }: DisturbancePanelProps) {
                 data-testid={`disturbance-delete-${d.id}`}
                 className={cn(
                   'inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-sm)]',
-                  'text-muted-foreground hover:text-destructive hover:bg-destructive/10',
+                  'text-muted-foreground hover:text-danger hover:bg-danger/10',
                   'transition-colors',
                   'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
                 )}

@@ -277,7 +277,7 @@ export function EditElementButton({
         <span
           role="alert"
           data-testid={`edit-error-${meta.name}`}
-          className="text-destructive text-[10px]"
+          className="text-danger text-[10px]"
         >
           {error}
         </span>

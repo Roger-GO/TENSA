@@ -420,7 +420,7 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
                                       data-testid={`variable-tree-picker-leaf-availability-${s.name}`}
                                       className={cn(
                                         'text-muted-foreground ml-auto text-[10px] font-mono',
-                                        missingFromAny ? 'text-destructive/80' : '',
+                                        missingFromAny ? 'text-danger/80' : '',
                                       )}
                                       title={
                                         missingFromAny

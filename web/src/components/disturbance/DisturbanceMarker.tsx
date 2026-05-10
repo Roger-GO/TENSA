@@ -42,7 +42,7 @@ function glyphForKind(kind: 'fault' | 'toggle' | 'alter'): ReactNode {
         cx={GLYPH_SIZE / 2}
         cy={GLYPH_SIZE / 2}
         r={GLYPH_SIZE / 2 - 1}
-        className="fill-destructive"
+        className="fill-danger"
       />
     );
   }

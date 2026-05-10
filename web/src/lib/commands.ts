@@ -49,6 +49,7 @@ import { useHistoryStore } from '@/store/history';
 import { useReportDialogStore } from '@/components/reports/ReportDialog';
 import { useCurrentTopology, useReloadCase, useUndoLastEdit } from '@/api/queries';
 import { __requestOpenSldSearch } from '@/store/sld';
+import { useThemeStore } from '@/store/theme';
 import type { RunRoutine } from '@/lib/useRunReadiness';
 
 export type CommandGroup = 'workspace' | 'edit' | 'run' | 'export' | 'navigation' | 'help';
@@ -415,21 +416,22 @@ export function useCommandRegistry(): readonly Command[] {
         action: toggleCheatsheet,
         shortcut: '?',
       },
-      // Dark-mode toggle placeholder. Unit 12 wires the actual
-      // theme-switch logic; for now the action is a no-op so the
-      // shortcut is discoverable but harmless. The cheatsheet still
-      // lists it so power users learn the binding before Unit 12.
+      // Dark-mode cycle (Unit 12). Cycles light → dark → system →
+      // light via the theme slice. We read the action via
+      // ``useThemeStore.getState().cycleTheme()`` so the closure
+      // doesn't need a hook subscription — the slice's cycleTheme
+      // identity is stable, but reading via getState keeps the
+      // action call site uniform with the other store-driven
+      // commands and avoids needing to add the theme store to
+      // ``useCommandRegistry``'s subscription set (the registry
+      // doesn't need to re-render when the theme changes).
       {
         id: 'help.dark-mode',
-        label: 'Toggle dark mode (coming in Unit 12)',
+        label: 'Toggle dark mode',
         group: 'help',
-        keywords: ['dark', 'light', 'theme', 'mode'],
+        keywords: ['dark', 'light', 'theme', 'mode', 'system'],
         action: () => {
-          // Intentional no-op; Unit 12 swaps this for the real toggle.
-          if (typeof console !== 'undefined') {
-            // eslint-disable-next-line no-console
-            console.info('[shortcuts] Dark-mode toggle — wired in Unit 12.');
-          }
+          useThemeStore.getState().cycleTheme();
         },
         shortcut: 'meta+d, ctrl+d',
       },

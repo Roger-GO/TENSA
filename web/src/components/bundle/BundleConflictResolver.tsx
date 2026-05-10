@@ -90,7 +90,7 @@ function AddfileMissingBanner({
       role="alert"
       data-testid={`bundle-conflict-addfile-missing-${conflict.filename ?? 'unknown'}`}
       className={cn(
-        'border-destructive/30 bg-destructive/10 text-foreground',
+        'border-danger/30 bg-danger/10 text-foreground',
         'rounded-[var(--radius-sm)] border px-3 py-2',
       )}
     >

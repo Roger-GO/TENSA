@@ -31,6 +31,7 @@ import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useUiStore } from '@/store/ui';
+import { useThemeStore } from '@/store/theme';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary, PflowResult } from '@/api/types';
 
@@ -145,6 +146,26 @@ describe('<GlobalShortcuts /> — single-key bindings', () => {
     pressKey('g', 'KeyG');
     pressKey('s', 'KeyS');
     expect(useSnapshotStore.getState().saveDialogOpen).toBe(true);
+  });
+
+  it('cycles the theme when ⌘D is pressed (Unit 12)', () => {
+    useThemeStore.setState({
+      themePreference: 'light',
+      resolvedTheme: 'light',
+      persistFailed: false,
+    });
+    render(withProviders(<GlobalShortcuts />));
+    const event = new KeyboardEvent('keydown', {
+      key: 'd',
+      code: 'KeyD',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      document.dispatchEvent(event);
+    });
+    expect(useThemeStore.getState().themePreference).toBe('dark');
   });
 
   it('runs the active routine when ⌘Enter is pressed', () => {

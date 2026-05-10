@@ -188,20 +188,19 @@ describe('AppShell', () => {
 
     // Unit 8 added two auto-mounted right-slot anchors after the
     // caller-supplied content; Unit 9 inserted a third (the ⌘K
-    // command-palette hint button) between them. The DOM order in
-    // the right slot is now: caller content → command-palette-hint →
-    // dark-mode-toggle-placeholder → history-drawer-toggle. The
-    // history toggle is disabled (no session) so it's skipped in tab
-    // order, leaving the palette hint and the dark-mode placeholder
-    // as the auto-mounted stops between the caller's "Top action"
-    // and the rail collapse chevron.
+    // command-palette hint button); Unit 12 swapped the dark-mode
+    // placeholder for the live ``ThemeToggle``. DOM order in the
+    // right slot is: caller content → command-palette-hint →
+    // theme-toggle → history-drawer-toggle. The history toggle is
+    // disabled (no session) so it's skipped in tab order, leaving
+    // the palette hint and the theme toggle as the auto-mounted
+    // stops between the caller's "Top action" and the rail collapse
+    // chevron.
     await user.tab();
     expect(document.activeElement?.getAttribute('data-testid')).toBe('command-palette-hint');
 
     await user.tab();
-    expect(document.activeElement?.getAttribute('data-testid')).toBe(
-      'dark-mode-toggle-placeholder',
-    );
+    expect(document.activeElement?.getAttribute('data-testid')).toBe('theme-toggle');
 
     await user.tab();
     // Next focus stop is the rail collapse chevron.

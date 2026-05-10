@@ -84,7 +84,7 @@ export function NewSystemButton({ className }: NewSystemButtonProps) {
           <p
             role="alert"
             data-testid="new-system-error"
-            className="text-destructive mt-1 text-[10px]"
+            className="text-danger mt-1 text-[10px]"
           >
             {error}
           </p>
