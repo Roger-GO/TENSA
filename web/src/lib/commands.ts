@@ -50,6 +50,7 @@ import { useReportDialogStore } from '@/components/reports/ReportDialog';
 import { useCurrentTopology, useReloadCase, useUndoLastEdit } from '@/api/queries';
 import { __requestOpenSldSearch } from '@/store/sld';
 import { useThemeStore } from '@/store/theme';
+import { requestEigLogToggle, requestEigViewReset } from '@/lib/eigViewBus';
 import type { RunRoutine } from '@/lib/useRunReadiness';
 
 export type CommandGroup = 'workspace' | 'edit' | 'run' | 'export' | 'navigation' | 'help';
@@ -371,6 +372,27 @@ export function useCommandRegistry(): readonly Command[] {
         group: 'navigation',
         keywords: ['pan', 'goto', 'bus', 'centre', 'center', 'jump'],
         action: () => __requestOpenSldSearch(),
+      },
+      // Unit 15 — EIG scatter view controls. The action posts to the
+      // ``eigViewBus`` micro-bus; ``EIGScatter`` subscribes once on
+      // mount and reacts. When the EIG sub-mode isn't mounted the
+      // commands fire a no-op, which is fine — they're discoverable
+      // from the palette regardless. They sit in the navigation
+      // bucket because the equivalent "view" group would be a
+      // single-member section in the palette.
+      {
+        id: 'navigation.eig-reset-zoom',
+        label: 'Reset EIG zoom',
+        group: 'navigation',
+        keywords: ['eig', 'eigenvalue', 'zoom', 'reset', 'view', 'scatter'],
+        action: requestEigViewReset,
+      },
+      {
+        id: 'navigation.eig-toggle-log',
+        label: 'Toggle EIG log scale',
+        group: 'navigation',
+        keywords: ['eig', 'eigenvalue', 'log', 'scale', 'axis', 'scatter'],
+        action: requestEigLogToggle,
       },
 
       // ---- run controls --------------------------------------------------

@@ -165,7 +165,12 @@ describe('useCommandRegistry — group ordering', () => {
     // Promote PF converged so EIG shows up; otherwise we'd just be
     // testing the present subset.
     usePflowStore.setState({
-      lastRun: { converged: true, iterations: 4, max_mismatch: 1e-9, buses: [] } as unknown as PflowResult,
+      lastRun: {
+        converged: true,
+        iterations: 4,
+        max_mismatch: 1e-9,
+        buses: [],
+      } as unknown as PflowResult,
       isRunning: false,
       error: null,
     });
@@ -186,6 +191,23 @@ describe('useCommandRegistry — group ordering', () => {
       expect(idx).toBeGreaterThanOrEqual(cursor);
       cursor = idx;
     }
+  });
+});
+
+describe('useCommandRegistry — Unit 15 EIG view commands', () => {
+  it('exposes navigation.eig-reset-zoom and navigation.eig-toggle-log', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const ids = result.current.map((c) => c.id);
+    expect(ids).toContain('navigation.eig-reset-zoom');
+    expect(ids).toContain('navigation.eig-toggle-log');
+  });
+
+  it('eig view commands carry the eig keyword for fuzzy search', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const reset = result.current.find((c) => c.id === 'navigation.eig-reset-zoom');
+    const toggle = result.current.find((c) => c.id === 'navigation.eig-toggle-log');
+    expect(reset?.keywords).toContain('eig');
+    expect(toggle?.keywords).toContain('eig');
   });
 });
 
