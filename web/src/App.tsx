@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from '@/components/shell/AppShell';
 import { TokenPasteModal } from '@/components/auth/TokenPasteModal';
-import { CaseNav } from '@/components/case/CaseNav';
+import { LeftSidebar } from '@/components/shell/LeftSidebar';
 // v0.2 RunButton replaces the v0.1 PF-only one — handles BOTH PF and TDS,
 // branches on a UI mode toggle that defaults to TDS when the disturbance
 // editor has any disturbances.
@@ -155,7 +155,7 @@ export function App() {
               <HideLabelsToggle />
             </>
           }
-          leftSidebar={<CaseNav />}
+          leftSidebar={<LeftSidebar />}
           canvas={<CanvasSlot />}
           rightInspector={<RightInspectorSlot />}
           bottomDrawer={<BottomDrawerSlot />}

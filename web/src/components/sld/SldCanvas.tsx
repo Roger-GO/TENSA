@@ -32,6 +32,7 @@ import type { TopologySummary, SidecarLayout } from '@/api/types';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { elementToPng } from '@/components/export/exportToPng';
 
+import { COMPONENT_DND_MIME } from '@/components/shell/ComponentLibrary';
 import { BusNode } from './nodes/BusNode';
 import { LineNode } from './nodes/LineNode';
 import { GeneratorNode } from './nodes/GeneratorNode';
@@ -610,6 +611,55 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNodeId]);
 
+  // ---- Component Library drag-and-drop (v3 Unit 5) -----------------------
+  //
+  // The LeftSidebar's ComponentLibrary tiles are HTML5-draggable; the
+  // canvas accepts drops via the matching MIME type. The drop handler
+  // computes a flow-space coordinate via `useReactFlow().screenToFlowPosition`
+  // and routes through `useCaseStore.openAddPanel(kind, dropCoord)` so
+  // AddElementPanel can pre-fill the bus form's position seed when the
+  // dropped kind is "Bus". Non-Bus kinds get the panel opened with the
+  // kind pre-selected; the dropCoord is informational only (non-Bus
+  // elements anchor to a parent bus).
+  //
+  // F-DESIGN-1 cleanup: HTML5 dragend ALWAYS fires after a drop (whether
+  // successful or canceled / Escape / out-of-bounds). The drop handler
+  // does the productive work; the dragend handler is a no-op cleanup
+  // placeholder. We don't need to clear `addPanelDropCoord` from
+  // dragend because (a) on a successful drop the AddElementPanel close
+  // path already nulls the field via `closeAddPanel`, and (b) on a
+  // canceled drop the drop handler never ran so nothing was set in the
+  // first place. The `closeAddPanelDropCoord` action exists for the
+  // odd case where the drop handler ran but `openAddPanel` was rejected
+  // mid-flight by another action — defensive plumbing that's currently
+  // unreachable but documented for future contributors.
+  const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    // Required to make the area a valid drop target. Without this the
+    // browser shows the "no-drop" cursor and onDrop never fires.
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+  const onDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      const kind = e.dataTransfer.getData(COMPONENT_DND_MIME);
+      // Empty payload → some other DnD interaction (file drop, image
+      // drag, etc.). Bail without preventDefault so the browser can
+      // handle the original behaviour.
+      if (!kind) return;
+      e.preventDefault();
+      const flowCoord = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      useCaseStore.getState().openAddPanel(kind, { x: flowCoord.x, y: flowCoord.y });
+    },
+    [rf],
+  );
+  const onDragEnd = useCallback(() => {
+    // No-op cleanup placeholder per F-DESIGN-1. dragend always fires
+    // after drop (successful or canceled). The drop handler did the
+    // productive work; on cancel/escape it never ran. Nothing to clean
+    // up here. Comment is intentional — drops the noise from
+    // disappearing onDragEnd silently in code review.
+  }, []);
+
   // PNG export rasterises the entire canvas container (the ReactFlow
   // root + its embedded SVG). The SLD is rendered as a mix of HTML
   // overlays (banners, MiniMap controls) and SVG (edges) so we use
@@ -655,7 +705,14 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
           onDismiss={() => setShowDriftBanner(false)}
         />
       ) : null}
-      <div ref={canvasRef} className="relative min-h-0 flex-1" data-testid="sld-canvas-surface">
+      <div
+        ref={canvasRef}
+        className="relative min-h-0 flex-1"
+        data-testid="sld-canvas-surface"
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        onDragEnd={onDragEnd}
+      >
         <ReactFlow
           nodes={nodesWithSelection}
           edges={edges}

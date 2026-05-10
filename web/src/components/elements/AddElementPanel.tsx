@@ -76,6 +76,15 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
   const setKind = useCaseStore((s) => s.setAddPanelKind);
   const closeAddPanel = useCaseStore((s) => s.closeAddPanel);
   const setDirty = useCaseStore((s) => s.setAddPanelDirty);
+  // v3 Unit 5: optional drop coordinate seeded by SldCanvas's onDrop
+  // handler. For kind === 'Bus' this surfaces as a "drop position" hint
+  // above the form (the Bus model has no x/y param fields — coords
+  // live in the sidecar layout — so we surface the seed for the user
+  // to confirm rather than auto-writing into a non-existent field).
+  // For non-Bus kinds dropCoord is informational and the panel ignores
+  // it (non-Bus elements anchor to a parent bus, so a free coordinate
+  // doesn't apply).
+  const dropCoord = useCaseStore((s) => s.addPanelDropCoord);
   const sessionId = useSessionStore((s) => s.sessionId);
   const addMutation = useAddElement();
   const schema = useTopologySchema();
@@ -195,6 +204,20 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
             ))}
           </select>
         </div>
+
+        {kind === 'Bus' && dropCoord ? (
+          <div
+            data-testid="add-element-drop-coord"
+            className={cn(
+              'border-border bg-muted/40 text-muted-foreground',
+              'rounded-[var(--radius-sm)] border px-2 py-1 text-[10px]',
+            )}
+          >
+            <span className="font-mono">
+              Drop position: x={dropCoord.x.toFixed(0)}, y={dropCoord.y.toFixed(0)}
+            </span>
+          </div>
+        ) : null}
 
         {kind && schema.data && formModel ? (
           <ElementForm
