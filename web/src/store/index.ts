@@ -124,6 +124,7 @@ export function __resetCascadeForTests(): void {
     recoveryInProgress: false,
     recoveryFailed: false,
     recoveryAttempts: [],
+    recoveryStuckSince: null,
   });
   useCaseStore.setState({
     selection: null,

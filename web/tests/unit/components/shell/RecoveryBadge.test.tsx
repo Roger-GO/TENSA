@@ -8,9 +8,17 @@
  * - Visible destructive pill when ``recoveryFailed`` is true (takes
  *   precedence over the in-progress flag — the failed state is terminal).
  * - Auto-hides when ``recoveryInProgress`` flips back to false.
+ *
+ * v2.0 polish Unit 2 extensions:
+ *
+ * - Failed pill now exposes an inline Reload button + new "Cannot reach
+ *   substrate" copy.
+ * - Reload click invokes the store's ``hardReset`` action (which in
+ *   production clears sessionStorage + reloads the tab).
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { RecoveryBadge } from '@/components/shell/RecoveryBadge';
 import { useSessionStore } from '@/store/session';
 
@@ -21,6 +29,7 @@ describe('<RecoveryBadge />', () => {
       recoveryInProgress: false,
       recoveryFailed: false,
       recoveryAttempts: [],
+      recoveryStuckSince: null,
     });
   });
 
@@ -30,6 +39,7 @@ describe('<RecoveryBadge />', () => {
       recoveryInProgress: false,
       recoveryFailed: false,
       recoveryAttempts: [],
+      recoveryStuckSince: null,
     });
   });
 
@@ -55,12 +65,30 @@ describe('<RecoveryBadge />', () => {
     render(<RecoveryBadge />);
     const badge = screen.getByTestId('recovery-badge-failed');
     expect(badge).toBeInTheDocument();
-    expect(badge).toHaveTextContent(/Reconnection failed/i);
-    expect(badge).toHaveTextContent(/reload the tab/i);
+    expect(badge).toHaveTextContent(/Cannot reach substrate/i);
     expect(badge.className).toMatch(/bg-destructive/);
     expect(badge.className).toMatch(/text-destructive/);
     // The Reconnecting pill is NOT rendered.
     expect(screen.queryByTestId('recovery-badge')).not.toBeInTheDocument();
+  });
+
+  it('renders an inline Reload button on the failed pill (Unit 2 CTA)', () => {
+    useSessionStore.setState({ recoveryFailed: true });
+    render(<RecoveryBadge />);
+    const reload = screen.getByTestId('recovery-badge-reload');
+    expect(reload).toBeInTheDocument();
+    expect(reload.tagName).toBe('BUTTON');
+    expect(reload).toHaveTextContent(/Reload/i);
+  });
+
+  it('Reload click invokes the store hardReset action', async () => {
+    const hardResetMock = vi.fn();
+    useSessionStore.setState({ recoveryFailed: true, hardReset: hardResetMock });
+    const user = userEvent.setup();
+    render(<RecoveryBadge />);
+    const reload = screen.getByTestId('recovery-badge-reload');
+    await user.click(reload);
+    expect(hardResetMock).toHaveBeenCalledTimes(1);
   });
 
   it('hides when recoveryInProgress flips back to false', () => {

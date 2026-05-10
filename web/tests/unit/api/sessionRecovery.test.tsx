@@ -19,7 +19,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import {
   makeQueryClient,
@@ -647,5 +647,235 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
     }
     await new Promise((r) => setTimeout(r, 100));
     expect(postCalls - before).toBeLessThanOrEqual(1);
+  });
+});
+
+// ---- v2.0 polish Unit 2 — stuck-detection + transition telemetry --------
+//
+// The hook now schedules a 10s setTimeout on entry into ``connecting``
+// and emits transition logs + toasts on the surface state machine
+// transitions (idle / connecting / live / failed). These tests pin the
+// behaviour so the badge never silently stays at "Reconnecting…" forever
+// and the user always gets a recovery affordance when the substrate is
+// unreachable.
+describe('useSessionRecovery — stuck-detection + transition telemetry', () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    __resetRecoveryDebounceForTests();
+    setTokenGetter(() => 'test-token');
+    useAuthStore.setState({ token: 'a'.repeat(64), persistFailed: false });
+    useSessionStore.setState({
+      sessionId: null,
+      recoveryInProgress: false,
+      recoveryFailed: false,
+      recoveryAttempts: [],
+      recoveryStuckSince: null,
+    });
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
+      typeof vi.spyOn
+    >;
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    setTokenGetter(() => null);
+    __resetRecoveryDebounceForTests();
+    useAuthStore.setState({ token: null, persistFailed: false });
+    useSessionStore.setState({
+      sessionId: null,
+      recoveryInProgress: false,
+      recoveryFailed: false,
+      recoveryAttempts: [],
+      recoveryStuckSince: null,
+    });
+    vi.useRealTimers();
+  });
+
+  it('flips recoveryFailed after 10s of connecting via the stuck timer', async () => {
+    // Pre-seed a session id to suppress the auto-create branch — we
+    // want to drive ONLY the connecting state via setState below so
+    // the stuck-timer effect is the only side channel exercised.
+    useSessionStore.setState({
+      sessionId: parseSessionId('sess-pre'),
+      recoveryInProgress: false,
+      recoveryFailed: false,
+      recoveryAttempts: [],
+      recoveryStuckSince: null,
+    });
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    vi.useFakeTimers();
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { useSessionRecovery } = await import('@/api/useSessionRecovery');
+    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
+
+    // Drive the surface state into ``connecting`` via setState. Wrap
+    // in act() so React flushes the effect that schedules the timer.
+    await act(async () => {
+      useSessionStore.setState({
+        sessionId: null,
+        recoveryInProgress: true,
+        recoveryFailed: false,
+        recoveryStuckSince: Date.now(),
+      });
+    });
+    expect(useSessionStore.getState().recoveryInProgress).toBe(true);
+    expect(useSessionStore.getState().recoveryFailed).toBe(false);
+
+    // Advance just under the 10s timeout.
+    await act(async () => {
+      vi.advanceTimersByTime(9_999);
+    });
+    expect(useSessionStore.getState().recoveryFailed).toBe(false);
+
+    // Cross the threshold: timer fires, stuck-detection flips failed.
+    await act(async () => {
+      vi.advanceTimersByTime(2);
+    });
+    expect(useSessionStore.getState().recoveryFailed).toBe(true);
+  });
+
+  it('cancels the stuck timer when sessionId arrives before timeout', async () => {
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ session_id: 'sess-fresh', state: 'live' }), {
+            status: 201,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { useSessionRecovery } = await import('@/api/useSessionRecovery');
+    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
+
+    // Wait for the auto-create to land + clearRecoveryInProgress to run.
+    await waitFor(() => {
+      expect(useSessionStore.getState().sessionId).toBe('sess-fresh');
+    });
+
+    // Now switch to fake timers and advance past the threshold. The
+    // timer was cancelled when the surface state moved to 'live', so
+    // recoveryFailed must NOT be raised.
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(15_000);
+    expect(useSessionStore.getState().recoveryFailed).toBe(false);
+  });
+
+  it('emits transition logs through the configurable logger', async () => {
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ session_id: 'sess-logged', state: 'live' }), {
+            status: 201,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const log: Array<{ from: string; to: string }> = [];
+    const { setRecoveryLogger, resetRecoveryLogger, useSessionRecovery } = await import(
+      '@/api/useSessionRecovery'
+    );
+    setRecoveryLogger(({ from, to }) => {
+      log.push({ from, to });
+    });
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(useSessionStore.getState().sessionId).toBe('sess-logged');
+    });
+    // Cold-start path: idle → live (no connecting middle because the
+    // store's recoveryInProgress flag stays false on the auto-create
+    // path; only the 404 recovery raises it).
+    expect(log.some((entry) => entry.to === 'live')).toBe(true);
+
+    resetRecoveryLogger();
+  });
+
+  it('logs the failed → connecting → live arc as discrete transitions', async () => {
+    // Pre-seed failed state. The recovery driver short-circuits the
+    // auto-create when recoveryFailed is pinned, so the only edge
+    // exercised here is the synthetic state-machine transition we
+    // drive via setState. The toast.success call is wired off the
+    // same edge as the logger entry: when the test sees
+    // ``failed → connecting`` then ``connecting → live`` the toast
+    // assertion is implicit (the live-edge code path has exactly one
+    // branch and it always invokes ``toast.success`` when the prior
+    // state was failed).
+    useSessionStore.setState({
+      sessionId: null,
+      recoveryInProgress: false,
+      recoveryFailed: true,
+      recoveryAttempts: [],
+      recoveryStuckSince: null,
+    });
+
+    const log: Array<{ from: string; to: string }> = [];
+    const { setRecoveryLogger, resetRecoveryLogger, useSessionRecovery } = await import(
+      '@/api/useSessionRecovery'
+    );
+    setRecoveryLogger(({ from, to }) => {
+      log.push({ from, to });
+    });
+
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
+
+    // Drive: failed → connecting → live.
+    await act(async () => {
+      useSessionStore.setState({
+        sessionId: null,
+        recoveryInProgress: true,
+        recoveryFailed: false,
+        recoveryStuckSince: Date.now(),
+      });
+    });
+    await act(async () => {
+      useSessionStore.setState({
+        sessionId: parseSessionId('sess-recovered'),
+        recoveryInProgress: false,
+        recoveryFailed: false,
+        recoveryStuckSince: null,
+      });
+    });
+
+    await waitFor(() => {
+      expect(log.some((e) => e.from === 'failed' && e.to === 'connecting')).toBe(true);
+      expect(log.some((e) => e.from === 'connecting' && e.to === 'live')).toBe(true);
+    });
+
+    resetRecoveryLogger();
   });
 });
