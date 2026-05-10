@@ -32,6 +32,9 @@ import { setTokenGetter } from '@/api/client';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
+import { useAuthStore } from '@/store/auth';
+import { useAnalyzeStore } from '@/store/analyze';
+import { useSweepStore } from '@/store/sweep';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -85,6 +88,18 @@ describe('<RunButton />', () => {
       selectedElement: null,
     });
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+    // The Run-readiness hook (Unit 4) reads the auth store + analyze
+    // store + sweep store. Seed them to a "happy path" baseline so the
+    // existing PF tests assert the PF-specific gates without tripping
+    // the hook's other reasons.
+    useAuthStore.setState({ token: 'test-token', persistFailed: false });
+    useAnalyzeStore.setState({
+      eigResult: null,
+      cpfResult: null,
+      seResult: null,
+      seMeasurementsCount: null,
+    });
+    useSweepStore.setState({ activeSweepId: null, sweeps: {} });
     toastSuccessMock.mockReset();
     toastErrorMock.mockReset();
     toastWarningMock.mockReset();
@@ -94,6 +109,9 @@ describe('<RunButton />', () => {
   afterEach(() => {
     fetchSpy.mockRestore();
     setTokenGetter(() => null);
+    useAuthStore.setState({ token: null, persistFailed: false });
+    useAnalyzeStore.setState({ eigResult: null });
+    useSweepStore.setState({ activeSweepId: null, sweeps: {} });
   });
 
   it('is disabled when no case is loaded', () => {
@@ -229,7 +247,56 @@ describe('<RunButton />', () => {
     const button = screen.getByTestId('run-pflow-button');
     await userEvent.hover(button.parentElement!);
 
-    const matches = await screen.findAllByText(/Load a case first/i);
+    const matches = await screen.findAllByText(/No case loaded/i);
     expect(matches.length).toBeGreaterThan(0);
+  });
+
+  it('shows the EIG-mutated tooltip + inline Reload-case CTA when an EIG with tds_initialized has run', async () => {
+    seedLoadedCase();
+    usePflowStore.setState({
+      lastRun: {
+        run_id: 'pf-1',
+        converged: true,
+        iterations: 3,
+        mismatch: 1e-7,
+        bus_voltages: {},
+        bus_angles: {},
+        line_flows: {},
+        generator_outputs: {},
+        load_consumption: {},
+      },
+      isRunning: false,
+      error: null,
+    });
+    // Simulate the dae mutation flag from the EIG sub-mode.
+    useAnalyzeStore.setState({
+      eigResult: {
+        eigenvalues: [{ real: -0.1, imag: 1.0 }],
+        damping_ratios: [0.1],
+        frequencies_hz: [0.159],
+        mode_count: 1,
+        state_count: 1,
+        state_names: ['delta_1'],
+        tds_initialized: true,
+      },
+    });
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+
+    const recovery = screen.getByTestId('run-pflow-recovery-reload');
+    expect(recovery).toBeInTheDocument();
+    expect(recovery).toHaveTextContent(/Reload case/i);
+
+    const button = screen.getByTestId('run-pflow-button');
+    expect(button).toBeDisabled();
+    await userEvent.hover(button.parentElement!);
+    const matches = await screen.findAllByText(
+      /EIG initialised the dynamic state/i,
+    );
+    expect(matches.length).toBeGreaterThan(0);
+
+    // Cleanup: clear the EIG flag so other tests aren't polluted.
+    useAnalyzeStore.setState({ eigResult: null });
   });
 });

@@ -9,8 +9,8 @@ import {
 import { useReloadCase, useRunPflow } from '@/api/queries';
 import { ProblemDetailsError } from '@/api/client';
 import { useSessionStore } from '@/store/session';
-import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
+import { useRunReadiness } from '@/lib/useRunReadiness';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
 
@@ -19,9 +19,14 @@ import { cn } from '@/lib/cn';
  *
  * State machine (per the interaction-states matrix "Run controls" cell):
  *
- * - Idle (no case loaded) → button disabled with tooltip "Load a case
- *   first." (R20: tooltip explains the disabled cause; mirrors CaseNav).
+ * - Idle (no case loaded) → button disabled with tooltip "No case
+ *   loaded." (R20: tooltip explains the disabled cause; mirrors CaseNav).
  * - Idle (case loaded) → enabled, primary style.
+ * - EIG-mutated dae → button disabled with tooltip "EIG initialised the
+ *   dynamic state; reload case to re-run PF." + an inline "Reload case"
+ *   recovery button. Reading the disabled-state contract from a single
+ *   hook (`useRunReadiness`) so the same reasons surface across every
+ *   Run button (Unit 4 of the v2.0 polish plan).
  * - Running → spinner + "Running PF…" + disabled.
  * - Success → toast "PF converged in N iterations." (auto-dismiss 4s
  *   — sonner default). Lives on the global toast surface (Unit 3 of
@@ -39,17 +44,18 @@ export interface RunButtonProps {
 
 export function RunButton({ className }: RunButtonProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
-  const selection = useCaseStore((s) => s.selection);
   const isRunning = usePflowStore((s) => s.isRunning);
   const runPflow = useRunPflow();
   const reloadCase = useReloadCase();
+  const readiness = useRunReadiness('pflow');
 
-  const disabled = !selection || !sessionId || isRunning;
-  const disabledReason = !selection
-    ? 'Load a case first.'
-    : !sessionId
-      ? 'Connecting to substrate…'
-      : null;
+  // The hook's ``disabledReason`` is the canonical "why" text. The
+  // ``isRunning`` flag is an in-flight gate that the hook deliberately
+  // doesn't track (it's a transient UI state, not a prerequisite). We
+  // OR the two so the button is disabled while a run is in progress
+  // OR while the hook reports a prerequisite gap.
+  const disabled = !readiness.ready || isRunning;
+  const disabledReason = readiness.disabledReason;
 
   const onClick = () => {
     if (!sessionId) return;
@@ -122,6 +128,20 @@ export function RunButton({ className }: RunButtonProps) {
     });
   };
 
+  /**
+   * Inline recovery CTA. The hook surfaces a single recovery descriptor
+   * per disabled state; we render it as a small button next to the
+   * tooltip-wrapped Run button. Today the only kind we render here is
+   * ``"reload-case"`` (the EIG-mutated-dae path); the ``"open-pf"``
+   * recovery is owned by the Analyze panel where the affected button
+   * lives, not by the top-bar PF button itself.
+   */
+  const onRecoveryClick = () => {
+    if (readiness.recovery?.kind === 'reload-case') {
+      onReloadAndRetry();
+    }
+  };
+
   const button = (
     <Button
       type="button"
@@ -144,23 +164,45 @@ export function RunButton({ className }: RunButtonProps) {
     </Button>
   );
 
+  // When the hook surfaces a reload-case recovery, render an inline
+  // button next to the disabled Run button so the user has the recovery
+  // affordance on the same surface (R20 of the plan: every disabled
+  // control with a recovery shows the recovery inline, not behind a
+  // toast that may have already auto-dismissed).
+  const inlineRecovery =
+    readiness.recovery?.kind === 'reload-case' ? (
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={onRecoveryClick}
+        disabled={reloadCase.isPending}
+        data-testid="run-pflow-recovery-reload"
+      >
+        {reloadCase.isPending ? 'Reloading…' : readiness.recovery.label}
+      </Button>
+    ) : null;
+
   if (disabledReason) {
     return (
-      <TooltipProvider delayDuration={150}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            {/* Wrap the disabled button in a span so the tooltip trigger
-                still fires on hover/focus (disabled buttons swallow
-                pointer events). */}
-            <span tabIndex={0} className="inline-block">
-              {button}
-            </span>
-          </TooltipTrigger>
-          <TooltipPortal>
-            <TooltipContent id="run-pf-disabled-reason">{disabledReason}</TooltipContent>
-          </TooltipPortal>
-        </Tooltip>
-      </TooltipProvider>
+      <div className="flex items-center gap-2">
+        <TooltipProvider delayDuration={150}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              {/* Wrap the disabled button in a span so the tooltip trigger
+                  still fires on hover/focus (disabled buttons swallow
+                  pointer events). */}
+              <span tabIndex={0} className="inline-block">
+                {button}
+              </span>
+            </TooltipTrigger>
+            <TooltipPortal>
+              <TooltipContent id="run-pf-disabled-reason">{disabledReason}</TooltipContent>
+            </TooltipPortal>
+          </Tooltip>
+        </TooltipProvider>
+        {inlineRecovery}
+      </div>
     );
   }
   return button;

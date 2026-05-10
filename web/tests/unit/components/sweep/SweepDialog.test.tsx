@@ -19,7 +19,9 @@ import type { ReactNode } from 'react';
 import { SweepDialog } from '@/components/sweep/SweepDialog';
 import { useSessionStore } from '@/store/session';
 import { useSweepStore } from '@/store/sweep';
-import { parseSessionId } from '@/api/types';
+import { useAuthStore } from '@/store/auth';
+import { useCaseStore } from '@/store/case';
+import { parseSessionId, parseWorkspacePath } from '@/api/types';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -56,10 +58,42 @@ beforeEach(() => {
   globalThis.fetch = fetchSpy as unknown as typeof globalThis.fetch;
   useSessionStore.setState({ sessionId: parseSessionId('test-session-id') });
   useSweepStore.setState({ sweeps: {}, activeSweepId: null });
+  // The Run-readiness hook (Unit 4 of v2.0 polish) reads case + auth +
+  // sweep slices. Seed all three to a "happy path" baseline so the
+  // existing dialog tests continue to assert the dialog-local
+  // validation gates rather than tripping the new readiness gate.
+  useAuthStore.setState({ token: 'test-token', persistFailed: false });
+  useCaseStore.setState({
+    selection: {
+      primaryPath: parseWorkspacePath('ieee14.raw'),
+      addfiles: [],
+    },
+    topology: null,
+    layoutSidecar: null,
+    selectedElement: null,
+    addPanelOpen: false,
+    addPanelKind: null,
+    addPanelDirty: false,
+    dragOverrides: {},
+    pendingDependents: [],
+  });
 });
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  useAuthStore.setState({ token: null, persistFailed: false });
+  useCaseStore.setState({
+    selection: null,
+    topology: null,
+    layoutSidecar: null,
+    selectedElement: null,
+    addPanelOpen: false,
+    addPanelKind: null,
+    addPanelDirty: false,
+    dragOverrides: {},
+    pendingDependents: [],
+  });
+  useSweepStore.setState({ sweeps: {}, activeSweepId: null });
   cleanup();
 });
 
@@ -204,5 +238,108 @@ describe('<SweepDialog /> — cancel', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
     // Only the snapshots fetch should have fired.
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('<SweepDialog /> — Run-readiness gates (v2.0 polish, Unit 4)', () => {
+  it('confirm is disabled with a "No case loaded." tooltip when no case is loaded', async () => {
+    const user = userEvent.setup();
+    // Wipe the case so the readiness hook reports "No case loaded.".
+    useCaseStore.setState({
+      selection: null,
+      topology: null,
+      layoutSidecar: null,
+      selectedElement: null,
+      addPanelOpen: false,
+      addPanelKind: null,
+      addPanelDirty: false,
+      dragOverrides: {},
+      pendingDependents: [],
+    });
+    fetchSpy.mockResolvedValueOnce(
+      makeJsonResponse(200, {
+        snapshots: [
+          {
+            name: 'snap-A',
+            saved_at: '2026-05-09',
+            has_pflow: true,
+            has_tds: false,
+            has_dill: true,
+            andes_version: '2.0.0',
+            disturbance_count: 1,
+          },
+        ],
+      }),
+    );
+    render(withQueryClient(<SweepDialog open onOpenChange={() => {}} />));
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('sweep-dialog-snapshot').children.length,
+      ).toBeGreaterThan(1),
+    );
+    await user.selectOptions(
+      screen.getByTestId('sweep-dialog-snapshot'),
+      'snap-A',
+    );
+
+    const confirm = screen.getByTestId('sweep-dialog-confirm');
+    expect(confirm).toBeDisabled();
+    await user.hover(confirm.parentElement!);
+    const matches = await screen.findAllByText(/No case loaded/i);
+    expect(matches.length).toBeGreaterThan(0);
+  });
+
+  it('confirm is disabled with the sweep-in-progress tooltip when a sweep is already active', async () => {
+    const user = userEvent.setup();
+    useSweepStore.setState({
+      activeSweepId: 'sweep-already',
+      sweeps: {
+        'sweep-already': {
+          sweepId: 'sweep-already',
+          parameterKind: 'disturbance.fault.tc',
+          parameterTarget: 0,
+          snapshotName: 'snap-A',
+          total: 5,
+          state: 'running',
+          iterations: [],
+          truncated: false,
+          error: null,
+          startedAt: 0,
+        },
+      },
+    });
+    fetchSpy.mockResolvedValueOnce(
+      makeJsonResponse(200, {
+        snapshots: [
+          {
+            name: 'snap-A',
+            saved_at: '2026-05-09',
+            has_pflow: true,
+            has_tds: false,
+            has_dill: true,
+            andes_version: '2.0.0',
+            disturbance_count: 1,
+          },
+        ],
+      }),
+    );
+    render(withQueryClient(<SweepDialog open onOpenChange={() => {}} />));
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('sweep-dialog-snapshot').children.length,
+      ).toBeGreaterThan(1),
+    );
+    await user.selectOptions(
+      screen.getByTestId('sweep-dialog-snapshot'),
+      'snap-A',
+    );
+
+    const confirm = screen.getByTestId('sweep-dialog-confirm');
+    expect(confirm).toBeDisabled();
+    await user.hover(confirm.parentElement!);
+    const matches = await screen.findAllByText(
+      /Sweep sweep-already in progress/i,
+    );
+    expect(matches.length).toBeGreaterThan(0);
   });
 });

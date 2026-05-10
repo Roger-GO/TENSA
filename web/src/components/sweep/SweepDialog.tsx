@@ -21,10 +21,18 @@
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipPortal,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { useStartSweep, useListSnapshots } from '@/api/queries';
 import type { SweepParamKind } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { useSweepStore } from '@/store/sweep';
+import { useRunReadiness } from '@/lib/useRunReadiness';
 import { ProblemDetailsError } from '@/api/client';
 import { cn } from '@/lib/cn';
 
@@ -56,6 +64,13 @@ function SweepDialogInner({ onClose }: { onClose: () => void }) {
   const startSweep = useStartSweep();
   const startSweepRecord = useSweepStore((s) => s.startSweep);
   const snapshotsQuery = useListSnapshots();
+  // Run-readiness hook (Unit 4 of v2.0 polish) gates the submit button
+  // on the same prerequisites as the other Run buttons — most relevant
+  // here is "Sweep <id> in progress; wait or abort." which fires when
+  // the user opens the dialog while a sweep is already running. The
+  // dialog's local validation (snapshot picked, range valid, ...) is
+  // ANDed with the readiness state.
+  const readiness = useRunReadiness('sweep');
 
   const [snapshotName, setSnapshotName] = useState<string>('');
   const [parameterKind, setParameterKind] =
@@ -287,17 +302,85 @@ function SweepDialogInner({ onClose }: { onClose: () => void }) {
         >
           Cancel
         </Button>
-        <Button
-          type="button"
-          variant="primary"
-          size="sm"
+        <SweepConfirmButton
+          isPending={isPending}
+          validationError={validation}
+          readinessReason={readiness.disabledReason}
+          ready={readiness.ready}
+          sessionId={sessionId}
           onClick={() => void submit()}
-          disabled={isPending || sessionId === null || validation !== null}
-          data-testid="sweep-dialog-confirm"
-        >
-          {isPending ? 'Starting…' : 'Start sweep'}
-        </Button>
+        />
       </DialogFooter>
     </DialogContent>
   );
+}
+
+/**
+ * Confirm button for the sweep dialog. The submit is gated by three
+ * orthogonal concerns:
+ *
+ *   1. ``isPending`` — the start-sweep mutation is in flight.
+ *   2. ``validationError`` — local form validation (snapshot picked,
+ *      range valid, ...). Already surfaced inline as a ``role="alert"``
+ *      under the form fields, so we don't tooltip-double it.
+ *   3. ``readinessReason`` — the cross-cutting Run-readiness gate from
+ *      the hook (no case loaded, sweep already in progress, ...). This
+ *      one IS surfaced as a tooltip on the disabled button per Unit 4
+ *      of the v2.0 polish plan.
+ */
+function SweepConfirmButton({
+  isPending,
+  validationError,
+  readinessReason,
+  ready,
+  sessionId,
+  onClick,
+}: {
+  isPending: boolean;
+  validationError: string | null;
+  readinessReason: string | null;
+  ready: boolean;
+  sessionId: unknown;
+  onClick: () => void;
+}) {
+  const disabled =
+    isPending || sessionId === null || validationError !== null || !ready;
+
+  const button = (
+    <Button
+      type="button"
+      variant="primary"
+      size="sm"
+      onClick={onClick}
+      disabled={disabled}
+      data-testid="sweep-dialog-confirm"
+    >
+      {isPending ? 'Starting…' : 'Start sweep'}
+    </Button>
+  );
+
+  // Only surface the readiness reason as a tooltip — the validation
+  // error is already shown inline as a ``role="alert"``. If both are
+  // present (e.g., no case loaded AND no snapshot picked), the
+  // readiness reason wins as the tooltip surface; the inline
+  // validation alert still renders below the form.
+  if (readinessReason !== null) {
+    return (
+      <TooltipProvider delayDuration={150}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span tabIndex={0} className="inline-block">
+              {button}
+            </span>
+          </TooltipTrigger>
+          <TooltipPortal>
+            <TooltipContent data-testid="sweep-dialog-confirm-disabled-reason">
+              {readinessReason}
+            </TooltipContent>
+          </TooltipPortal>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+  return button;
 }
