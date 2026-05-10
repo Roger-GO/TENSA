@@ -87,7 +87,9 @@ describe('<ExportMenu />', () => {
     expect(useSnapshotStore.getState().saveDialogOpen).toBe(true);
   });
 
-  it('disables every item when no session/case is loaded', async () => {
+  it('hides every item when no session/case is loaded', async () => {
+    // Unit 9: commands whose `when()` returns false are HIDDEN, not
+    // rendered as disabled items.
     useSessionStore.setState({
       sessionId: null,
       recoveryInProgress: false,
@@ -98,8 +100,9 @@ describe('<ExportMenu />', () => {
     const user = userEvent.setup();
     render(withProviders(<ExportMenu />));
     await user.click(screen.getByTestId('topbar-menu-export-trigger'));
-    expect(await screen.findByTestId('topbar-menu-export-bundle')).toBeDisabled();
-    expect(screen.getByTestId('topbar-menu-export-snapshot')).toBeDisabled();
+    await screen.findByTestId('topbar-menu-export-content');
+    expect(screen.queryByTestId('topbar-menu-export-bundle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('topbar-menu-export-snapshot')).not.toBeInTheDocument();
   });
 
   it('Escape closes the menu', async () => {

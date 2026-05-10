@@ -1,12 +1,12 @@
 /**
- * Tests for `<EditMenu />` (Unit 8 of the v2.0 polish plan).
+ * Tests for `<EditMenu />`.
  *
- * EditMenu is intentionally thin: it embeds the existing
- * ``WorkflowToolbar`` (Undo + Reload) inside a TopBarMenu popover.
- * The Undo / Reload behaviour is already covered by
- * ``tests/unit/components/case/WorkflowToolbar.test.tsx``; we only
- * verify that opening the menu surfaces those buttons and that
- * Escape closes the menu cleanly.
+ * Unit 9 of the v2.0 polish plan refactored this menu to derive items
+ * from the shared command registry instead of embedding
+ * `<WorkflowToolbar />`. The menu now renders one
+ * `<TopBarMenuItem />` per command in the `edit` group; the
+ * underlying mutation logic is still exercised by
+ * `tests/unit/components/case/WorkflowToolbar.test.tsx`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -80,15 +80,15 @@ describe('<EditMenu />', () => {
     expect(screen.getByTestId('topbar-menu-edit-trigger')).toBeInTheDocument();
   });
 
-  it('opens on click and surfaces the Undo + Reload buttons', async () => {
+  it('opens on click and surfaces the Undo + Reload registry commands', async () => {
     const user = userEvent.setup();
     render(withProviders(<EditMenu />));
     await user.click(screen.getByTestId('topbar-menu-edit-trigger'));
     const content = await screen.findByTestId('topbar-menu-edit-content');
     expect(content).toBeInTheDocument();
-    // Undo + Reload come from the embedded WorkflowToolbar.
-    expect(screen.getByTestId('undo-last-edit-button')).toBeInTheDocument();
-    expect(screen.getByTestId('reload-case-button')).toBeInTheDocument();
+    // Items come from the registry (`edit.undo`, `edit.reload`).
+    expect(screen.getByTestId('topbar-menu-edit-undo')).toBeInTheDocument();
+    expect(screen.getByTestId('topbar-menu-edit-reload')).toBeInTheDocument();
   });
 
   it('Escape closes the menu', async () => {

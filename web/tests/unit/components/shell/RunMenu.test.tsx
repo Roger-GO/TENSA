@@ -22,6 +22,8 @@ import { RunMenu } from '@/components/shell/RunMenu';
 import { useRunModeStore } from '@/store/runMode';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useUiStore, DEFAULT_TDS_CONFIG } from '@/store/ui';
+import { usePflowStore } from '@/store/pflow';
+import type { PflowResult } from '@/api/types';
 
 function withProviders(ui: ReactElement) {
   const client = new QueryClient({
@@ -44,6 +46,20 @@ beforeEach(() => {
     hideLabels: false,
     activeRightDockTopPanel: 'inspector',
     tdsConfig: { ...DEFAULT_TDS_CONFIG },
+  });
+  // Unit 9: the registry gates "Run EIG" on PF having converged. Seed
+  // a converged PF result so every routine surfaces in the menu by
+  // default; the EIG-gating contract itself is exercised in
+  // `tests/unit/components/shell/CommandPalette.test.tsx`.
+  usePflowStore.setState({
+    lastRun: {
+      converged: true,
+      iterations: 4,
+      max_mismatch: 1e-9,
+      buses: [],
+    } as unknown as PflowResult,
+    isRunning: false,
+    error: null,
   });
 });
 

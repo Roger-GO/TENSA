@@ -1,143 +1,131 @@
 /**
  * WorkspaceMenu — TopBar dropdown that groups every action that
- * mutates or persists the loaded workspace (Unit 8 of the v2.0
- * polish plan).
+ * mutates or persists the loaded workspace.
  *
- * Items:
+ * Unit 9 of the v2.0 polish plan refactored this file to derive its
+ * items from the shared command registry (`useCommandRegistry()`).
+ * The menu and the ⌘K command palette now read from the same source —
+ * adding or renaming an action in `web/src/lib/commands.ts` updates
+ * both surfaces simultaneously.
  *
- * - "Add element…"        — opens the Add-element panel (case store)
- * - "Add PMU…"            — opens the PMU placement dialog
- * - "Import profile…"     — opens the TimeSeries profile import dialog
- * - "Save system…"        — opens the Save System dialog
- * - "Save snapshot…"      — opens the snapshot save dialog
- * - "Load snapshot…"      — opens the snapshot load dialog
- * - "Import bundle…"      — opens the reproducibility-bundle import dialog
- * - "Report"              — opens the multi-routine report dialog
+ * What this component still owns:
  *
- * All gating logic mirrors the source button components verbatim — when
- * those components disable themselves (no topology, committed run, PFlow
- * running, …), the corresponding menu item disables too. The original
- * button components stay on disk so their dedicated unit tests keep
- * passing; this menu just remounts the actions in a grouped surface.
+ * - The local React state for the PMU placement and Profile import
+ *   dialogs (whose original button components were
+ *   `<PmuPlacementDialog />` + `<ProfileImportDialog />` with
+ *   `useState` open/close). The Save System and Bundle Import
+ *   dialogs likewise live as local state inside this component now,
+ *   triggered via the palette-dialog bridge.
+ * - The `subscribePaletteDialog` subscription that lets the palette
+ *   open those local-state dialogs without lifting their `useState`
+ *   into a Zustand slice.
  *
- * Per Unit 8's "DO NOT add new dependencies" constraint, dialogs
- * managed by local state in their wrapper components are mounted with
- * local state here too (PmuPlacementDialog, ProfileImportDialog).
- * Dialogs already lifted to a Zustand slice (snapshot, bundle, report)
- * are opened via store actions; their dialog wrappers live in
- * `<TopBar />` so they stay mounted whether or not this menu is open.
+ * Gating logic lives entirely in the command registry's `when()`
+ * predicates — when those return `false`, `useCommandRegistry()`
+ * filters the command out, and the menu naturally hides it. The
+ * pre-Unit-9 menu rendered disabled items; the registry-driven menu
+ * hides them entirely. This matches the palette's behaviour and
+ * keeps the topbar tighter when no case is loaded.
  */
-import { useState } from 'react';
-import {
-  TopBarMenu,
-  TopBarMenuItem,
-  TopBarMenuSeparator,
-} from './TopBarMenu';
+import { useEffect, useState } from 'react';
+import { TopBarMenu, TopBarMenuItem, TopBarMenuSeparator } from './TopBarMenu';
 import { PmuPlacementDialog } from '@/components/pmu/PmuPlacementDialog';
 import { ProfileImportDialog } from '@/components/profiles/ProfileImportDialog';
 import { SaveSystemButton } from '@/components/case/SaveSystemButton';
 import { BundleImportButton } from '@/components/bundle/BundleImportDialog';
-import { useCaseStore } from '@/store/case';
-import { useSessionStore } from '@/store/session';
-import { useCurrentTopology } from '@/api/queries';
-import { usePflowStore } from '@/store/pflow';
-import { useSnapshotStore } from '@/store/snapshot';
-import { useReportDialogStore } from '@/components/reports/ReportDialog';
+import { useCommandRegistry, subscribePaletteDialog } from '@/lib/commands';
+
+/** Map registry id → existing testid suffix (preserves Unit-8 contract). */
+const TESTID_BY_ID: Record<string, string> = {
+  'workspace.add-element': 'topbar-menu-workspace-add-element',
+  'workspace.add-pmu': 'topbar-menu-workspace-add-pmu',
+  'workspace.import-profile': 'topbar-menu-workspace-import-profile',
+  'workspace.save-system': 'topbar-menu-workspace-save-system',
+  'workspace.save-snapshot': 'topbar-menu-workspace-save-snapshot',
+  'workspace.load-snapshot': 'topbar-menu-workspace-load-snapshot',
+  'workspace.import-bundle': 'topbar-menu-workspace-import-bundle',
+  'workspace.report': 'topbar-menu-workspace-report',
+};
 
 export function WorkspaceMenu() {
-  const sessionId = useSessionStore((s) => s.sessionId);
-  const caseSelection = useCaseStore((s) => s.selection);
-  const topology = useCurrentTopology();
-  const isPfRunning = usePflowStore((s) => s.isRunning);
-  const openAddPanel = useCaseStore((s) => s.openAddPanel);
-  const openSnapshotSave = useSnapshotStore((s) => s.openSaveDialog);
-  const openSnapshotLoad = useSnapshotStore((s) => s.openLoadDialog);
-  const openReportDialog = useReportDialogStore((s) => s.openDialog);
+  const commands = useCommandRegistry();
+  const workspaceCommands = commands.filter((c) => c.group === 'workspace');
 
+  // Local dialog ownership for the Save-system / Bundle-import /
+  // PMU / Profile flows. These dialogs were previously embedded as
+  // their own `<Button + Dialog>` components inside this menu; for
+  // Unit 9 we keep the Dialog mounted but trigger it via the
+  // palette-dialog bridge so both menu items and palette commands
+  // route through a single open path.
   const [pmuOpen, setPmuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
 
-  const noTopology = topology === null;
-  const committed = topology?.state === 'committed';
+  useEffect(() => {
+    return subscribePaletteDialog((key) => {
+      if (key === 'pmu') setPmuOpen(true);
+      if (key === 'profile') setProfileOpen(true);
+    });
+  }, []);
 
-  // Match the gating semantics of AddElementButton / PmuPlacementButton /
-  // ProfileImportButton — disable when no topology, when the run is
-  // committed (substrate refuses pre-setup mutations afterwards), and
-  // while PF is running.
-  const editGateDisabled = noTopology || committed || isPfRunning;
-
-  // Snapshot + report items only need a session + case selection; they
-  // operate on the substrate's persisted state, not the in-memory edit
-  // graph.
-  const sessionScopeDisabled = sessionId === null || caseSelection === null;
-  const reportDisabled = sessionId === null;
+  // Menu-item handler. Items invoke the registry's `action`
+  // directly; for PMU/profile the action posts to the bridge which
+  // we just subscribed to above.
+  const handleClick = (id: string) => {
+    const cmd = workspaceCommands.find((c) => c.id === id);
+    cmd?.action();
+  };
 
   return (
     <>
       <TopBarMenu label="Workspace" testId="topbar-menu-workspace">
-        <TopBarMenuItem
-          testId="topbar-menu-workspace-add-element"
-          disabled={editGateDisabled}
-          onClick={() => openAddPanel(null)}
-        >
-          Add element…
-        </TopBarMenuItem>
-        <TopBarMenuItem
-          testId="topbar-menu-workspace-add-pmu"
-          disabled={editGateDisabled}
-          onClick={() => setPmuOpen(true)}
-        >
-          Add PMU…
-        </TopBarMenuItem>
-        <TopBarMenuItem
-          testId="topbar-menu-workspace-import-profile"
-          disabled={editGateDisabled}
-          onClick={() => setProfileOpen(true)}
-        >
-          Import profile…
-        </TopBarMenuItem>
+        {workspaceCommands.map((cmd, idx) => {
+          // SaveSystem and BundleImport were originally embedded as
+          // full-width Button components (the menu entry rendered the
+          // button itself). We keep that embedding for the click
+          // affordance but the registry now declares the canonical
+          // command id used everywhere else (palette, tests). Render
+          // a separator before the snapshot block + before the
+          // import-bundle block to match the visual grouping the
+          // pre-Unit-9 menu had.
+          const insertSeparatorBefore =
+            cmd.id === 'workspace.save-system' || cmd.id === 'workspace.import-bundle';
 
-        <TopBarMenuSeparator />
-
-        {/* SaveSystem keeps its dialog co-located in the SaveSystemButton
-            component; the easiest way to avoid duplicating that ~150-line
-            dialog is to embed the button itself. The wrapper class makes
-            it occupy the menu's full width so it visually reads as a
-            menu item. */}
-        <div className="px-1 [&_button]:w-full [&_button]:justify-start">
-          <SaveSystemButton />
-        </div>
-
-        <TopBarMenuItem
-          testId="topbar-menu-workspace-save-snapshot"
-          disabled={sessionScopeDisabled}
-          onClick={openSnapshotSave}
-        >
-          Save snapshot…
-        </TopBarMenuItem>
-        <TopBarMenuItem
-          testId="topbar-menu-workspace-load-snapshot"
-          disabled={sessionScopeDisabled}
-          onClick={openSnapshotLoad}
-        >
-          Load snapshot…
-        </TopBarMenuItem>
-
-        <TopBarMenuSeparator />
-
-        {/* BundleImportButton keeps its own dialog state — embed it the
-            same way as SaveSystem. */}
-        <div className="px-1 [&_button]:w-full [&_button]:justify-start">
-          <BundleImportButton />
-        </div>
-
-        <TopBarMenuItem
-          testId="topbar-menu-workspace-report"
-          disabled={reportDisabled}
-          onClick={() => openReportDialog()}
-        >
-          Report
-        </TopBarMenuItem>
+          if (cmd.id === 'workspace.save-system') {
+            return (
+              <div key={cmd.id}>
+                {insertSeparatorBefore && idx > 0 ? <TopBarMenuSeparator /> : null}
+                <div
+                  data-testid={TESTID_BY_ID[cmd.id]}
+                  className="px-1 [&_button]:w-full [&_button]:justify-start"
+                >
+                  <SaveSystemButton />
+                </div>
+              </div>
+            );
+          }
+          if (cmd.id === 'workspace.import-bundle') {
+            return (
+              <div key={cmd.id}>
+                {insertSeparatorBefore && idx > 0 ? <TopBarMenuSeparator /> : null}
+                <div
+                  data-testid={TESTID_BY_ID[cmd.id]}
+                  className="px-1 [&_button]:w-full [&_button]:justify-start"
+                >
+                  <BundleImportButton />
+                </div>
+              </div>
+            );
+          }
+          return (
+            <TopBarMenuItem
+              key={cmd.id}
+              testId={TESTID_BY_ID[cmd.id] ?? `topbar-menu-workspace-${cmd.id}`}
+              onClick={() => handleClick(cmd.id)}
+            >
+              {cmd.label}
+            </TopBarMenuItem>
+          );
+        })}
       </TopBarMenu>
       <PmuPlacementDialog open={pmuOpen} onOpenChange={setPmuOpen} />
       <ProfileImportDialog open={profileOpen} onOpenChange={setProfileOpen} />

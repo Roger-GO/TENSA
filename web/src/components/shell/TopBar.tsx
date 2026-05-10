@@ -5,6 +5,7 @@ import { BundleExportDialog } from '@/components/bundle/BundleExportDialog';
 import { ReportDialog } from '@/components/reports/ReportDialog';
 import { HistoryDrawer, HistoryDrawerToggle } from '@/components/history/HistoryDrawer';
 import { Button } from '@/components/ui/button';
+import { useCommandPaletteStore } from '@/store/commandPalette';
 
 /**
  * TopBar. Fixed-height (~44px) bar with three slots — left, center, right —
@@ -93,6 +94,7 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
         className="flex min-w-0 flex-1 items-center justify-end gap-1"
       >
         {right}
+        <CommandPaletteHint />
         <DarkModeTogglePlaceholder />
         <HistoryDrawerToggle />
       </div>
@@ -102,6 +104,36 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
     </header>
   );
 });
+
+/**
+ * "⌘K" hint button (Unit 9). Mouse affordance for the command palette
+ * — discovers the shortcut for users who don't read keyboard hints.
+ * Sits between the Export menu / Hide-labels toggle (caller-provided
+ * right-slot content) and the dark-mode placeholder, so it consistently
+ * appears as the third-from-end control regardless of what the App
+ * chooses to inject into the right slot.
+ *
+ * The button label uses the platform-agnostic "⌘K" glyph plus a
+ * "Search" word so non-mac users still understand the affordance
+ * without having to learn the symbol.
+ */
+function CommandPaletteHint() {
+  const openPalette = useCommandPaletteStore((s) => s.openPalette);
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      onClick={openPalette}
+      data-testid="command-palette-hint"
+      aria-label="Open command palette"
+      className="gap-1 px-2 text-xs"
+    >
+      <span className="text-muted-foreground font-mono text-[10px]">⌘K</span>
+      <span>Search</span>
+    </Button>
+  );
+}
 
 /**
  * Placeholder dark-mode toggle. Unit 8 only ships the visual slot; the
