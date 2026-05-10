@@ -7,9 +7,12 @@ response is shaped as ``ProblemDetails`` per RFC 7807.
 
 from __future__ import annotations
 
+import math
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from andes_app.core.wrapper import ParamValue
 
 # ---- error envelope ---------------------------------------------------------
 
@@ -127,6 +130,18 @@ class TopologyEntry(BaseModel):
             "``PV``, ``Slack``, ``PQ``)."
         ),
     )
+    params: dict[str, ParamValue] = Field(
+        default_factory=dict,
+        description=(
+            "Flat dict of model-input parameters for this element (e.g., for "
+            "a Bus: ``Vn`` rated voltage in kV, ``vmax``/``vmin`` voltage "
+            "limits, ``area``, ``zone``; for a Line: ``r``, ``x``, ``b``, "
+            "``g``, ``tap``, ``phi``; for a generator: ``Sn`` rated MVA, "
+            "``Vn``, ``bus``, plus model-specific params). The Inspector "
+            "Properties tab in the v0.1 UI consumes this dict; absent params "
+            "(None or unavailable on a given model) are omitted."
+        ),
+    )
 
 
 class TopologySummary(BaseModel):
@@ -149,18 +164,101 @@ class TopologySummary(BaseModel):
     transformers: list[TopologyEntry] = Field(
         ...,
         description=(
-            "Transformer elements (currently empty for v0.1; ANDES models "
-            "transformers within the Line model)."
+            "Transformer elements split out from the ANDES ``Line`` bucket "
+            "via the ``tap != 1.0 OR phi != 0.0`` heuristic. Pure "
+            "transmission lines remain in ``lines``; off-nominal-tap and "
+            "phase-shifting branches move here."
         ),
     )
     generators: list[TopologyEntry] = Field(
         ...,
         description="Generator elements (PV, Slack, GENROU, GENCLS, etc.).",
     )
-    loads: list[TopologyEntry] = Field(..., description="Load elements (PQ).")
+    loads: list[TopologyEntry] = Field(
+        ...,
+        description="Load elements — both static (PQ) and dynamic (ZIP).",
+    )
+    shunts: list[TopologyEntry] = Field(
+        default_factory=list,
+        description=(
+            "Shunt elements (capacitors and reactors). Modeled as ANDES "
+            "``Shunt`` devices; rendered with the IEC 60617 shunt-cap or "
+            "shunt-reactor icon depending on the sign of ``b``."
+        ),
+    )
+    controllers: list[TopologyEntry] = Field(
+        default_factory=list,
+        description=(
+            "Dynamic controller devices: exciters (``IEEEX1``, ``ESDC2A``, "
+            "``SEXS``), governors (``IEEEG1``, ``TGOV1``), the ``IEEEST`` "
+            "PSS, and the ``REGCA1`` renewable-converter model. Surfaces "
+            "the seven Unit-8 whitelist additions so the disturbance editor "
+            "can populate device pickers when the case includes them. Empty "
+            "for cases that carry no dynamics addfile (stock IEEE 14 .raw "
+            "alone)."
+        ),
+    )
 
 
 # ---- power flow -------------------------------------------------------------
+
+
+class LineFlow(BaseModel):
+    """Per-line active and reactive power flow, measured at terminal 1
+    (``bus1``) flowing into the line toward terminal 2 (``bus2``).
+
+    Sign convention: positive ``p`` means real power flowing FROM ``bus1``
+    INTO the line; positive ``q`` means reactive power flowing FROM ``bus1``
+    INTO the line. The v0.1 SLD overlay uses the sign of ``p`` to render
+    directional arrows along each branch.
+    """
+
+    p: float = Field(
+        ...,
+        description=(
+            "Active power leaving ``bus1`` into the line, in MW (i.e., "
+            "computed in pu and multiplied by the system base MVA)."
+        ),
+    )
+    q: float = Field(
+        ...,
+        description=(
+            "Reactive power leaving ``bus1`` into the line, in MVAr."
+        ),
+    )
+    from_idx: int | str = Field(
+        ...,
+        description="ANDES idx of the ``bus1`` terminal (the from-side bus).",
+    )
+    to_idx: int | str = Field(
+        ...,
+        description="ANDES idx of the ``bus2`` terminal (the to-side bus).",
+    )
+
+
+class GeneratorOutput(BaseModel):
+    """Per-generator PF output. Active + reactive injection at the
+    generator's terminal bus, plus the terminal voltage (pu).
+    """
+
+    p: float = Field(
+        ..., description="Active power generated at the terminal bus, in MW."
+    )
+    q: float = Field(
+        ..., description="Reactive power generated at the terminal bus, in MVAr."
+    )
+    v: float = Field(
+        ..., description="Terminal bus voltage magnitude (pu)."
+    )
+    bus: int | str = Field(..., description="Terminal bus idx.")
+
+
+class LoadConsumption(BaseModel):
+    """Per-load PF consumption at the converged voltage."""
+
+    p: float = Field(..., description="Active power drawn, in MW.")
+    q: float = Field(..., description="Reactive power drawn, in MVAr.")
+    bus: int | str = Field(..., description="Terminal bus idx.")
 
 
 class PflowResult(BaseModel):
@@ -203,6 +301,34 @@ class PflowResult(BaseModel):
     bus_angles: dict[str, float] = Field(
         ...,
         description="Bus voltage angles (radians) keyed by ANDES idx (stringified).",
+    )
+    line_flows: dict[str, LineFlow] = Field(
+        default_factory=dict,
+        description=(
+            "Per-line P/Q flow at terminal 1, keyed by line idx (stringified). "
+            "Empty if the wrapper could not extract line flows from the post-"
+            "PF System (e.g., on an unexpected ANDES API change). "
+            "Populated by computing the standard pi-equivalent line "
+            "injection at ``bus1`` from the converged ``v1``/``a1``/``v2``/"
+            "``a2`` algebraic variables and the line's series + shunt "
+            "admittances."
+        ),
+    )
+    generator_outputs: dict[str, GeneratorOutput] = Field(
+        default_factory=dict,
+        description=(
+            "Per-generator P / Q output and terminal voltage, keyed by "
+            "generator idx (stringified). Covers PV, Slack, GENROU, and "
+            "GENCLS. Empty when PF did not converge."
+        ),
+    )
+    load_consumption: dict[str, LoadConsumption] = Field(
+        default_factory=dict,
+        description=(
+            "Per-load P / Q consumption at the converged voltage, keyed "
+            "by load idx (stringified). Covers PQ and ZIP. Empty when PF "
+            "did not converge."
+        ),
     )
 
 
@@ -271,6 +397,236 @@ class AddDisturbancesResponse(BaseModel):
     )
 
 
+# ---- topology mutations (Unit 2) -------------------------------------------
+
+
+class AddElementRequest(BaseModel):
+    """Request body for ``POST /sessions/{id}/elements``.
+
+    Adds a single topology element (Bus, Line, generator, load, shunt) to a
+    pre-setup System. The wrapper validates the model name + param keys
+    against an internal whitelist BEFORE invoking ANDES; unknown keys
+    surface as 422 ``ProblemDetails`` listing both the rejected and the
+    allowed sets.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = Field(
+        ...,
+        description=(
+            "ANDES model class name. Supported in v0.1.x: ``Bus``, ``Line``, "
+            "``PV``, ``Slack``, ``GENROU``, ``GENCLS``, ``PQ``, ``ZIP``, "
+            "``Shunt``. Unknown models are rejected with 422."
+        ),
+        min_length=1,
+    )
+    params: dict[str, ParamValue] = Field(
+        ...,
+        description=(
+            "Flat dict of model parameters. Keys are validated against the "
+            "per-model whitelist; values pass through to ``ss.add()``. "
+            "Required keys vary per model — query "
+            "``GET /api/topology/schema`` for the live form metadata."
+        ),
+    )
+
+
+class EditElementRequest(BaseModel):
+    """Request body for ``PUT /sessions/{id}/elements/{model}/{idx}``.
+
+    Updates one or more parameters on an existing element. The same
+    pre-setup gate + whitelist as ``AddElementRequest`` apply. ``idx`` and
+    ``name`` cannot be edited (they would desync ANDES's internal indexes);
+    create a new element if you need to reassign topology references.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    params: dict[str, ParamValue] = Field(
+        ...,
+        description=(
+            "Subset of model parameters to overwrite. Each key must be in "
+            "the per-model whitelist; ``idx`` / ``name`` are explicitly "
+            "rejected (create a new element instead)."
+        ),
+    )
+
+
+class ElementCreated(BaseModel):
+    """Response body for ``POST /sessions/{id}/elements`` (201).
+
+    Carries the newly-built ``TopologyEntry`` so the client can update its
+    cache without re-fetching the full topology. Web-side mutation hooks
+    use this to optimistically update bus dropdowns before the topology
+    re-fetch resolves.
+    """
+
+    element: TopologyEntry = Field(
+        ...,
+        description=(
+            "The element that was just added, with its assigned idx + the "
+            "parameters as ANDES read them back."
+        ),
+    )
+
+
+class BlankSystemResponse(BaseModel):
+    """Response body for ``POST /sessions/{id}/blank`` (201).
+
+    Returns the empty topology so the client immediately switches to the
+    blank-system rendering path (centered ``Add your first bus`` prompt).
+    """
+
+    topology: TopologySummary = Field(
+        ...,
+        description=(
+            "Empty topology snapshot for the freshly-created blank System. "
+            "All buckets are empty; ``state`` is ``pre-setup``."
+        ),
+    )
+
+
+class TopologyParamMeta(BaseModel):
+    """One parameter row in a model's add/edit form schema."""
+
+    name: str = Field(..., description="ANDES parameter name (e.g., ``Vn``).")
+    kind: Literal["string", "number", "bus_idx", "bool"] = Field(
+        ...,
+        description=(
+            "Form-input kind. ``string`` and ``number`` map to text/number "
+            "inputs; ``bus_idx`` renders as a dropdown of existing buses; "
+            "``bool`` is a checkbox."
+        ),
+    )
+    required: bool = Field(
+        False,
+        description=(
+            "Whether the field is required when adding a new element. "
+            "Optional fields collapse under the form's ``Show advanced`` "
+            "disclosure."
+        ),
+    )
+    unit: str | None = Field(
+        None,
+        description=(
+            "Display unit suffix (``kV``, ``pu``, ``MVA``, ``MWs/MVA``, "
+            "``rad``). Rendered inline next to numerical inputs."
+        ),
+    )
+
+
+class SaveCaseRequest(BaseModel):
+    """Request body for ``POST /sessions/{id}/save``.
+
+    ``filename`` is workspace-relative; the substrate canonicalizes it
+    through the workspace path validator (rejects traversal). ``format``
+    decides which writer ANDES uses — only xlsx and json are supported
+    in v0.1.x because ANDES 2.0 has no PSS/E ``.raw`` writer.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str = Field(
+        ...,
+        description=(
+            "Workspace-relative output filename. Extension must match "
+            "``format`` (``.xlsx`` for xlsx, ``.json`` for json, "
+            "``.raw`` for raw)."
+        ),
+        min_length=1,
+    )
+    format: Literal["xlsx", "json", "raw"] = Field(
+        ...,
+        description=(
+            "Output format. ``xlsx`` is the ANDES-native Excel layout. "
+            "``json`` is the ANDES JSON serialization. ``raw`` is "
+            "PSS/E v33 emitted by the substrate's hand-rolled writer; "
+            "it covers Bus, PQ/ZIP loads, Shunt, PV/Slack/GENROU/"
+            "GENCLS generators, Line, and 2W transformers. 3W "
+            "transformers and other PSS/E sections are emitted as "
+            "empty terminators."
+        ),
+    )
+    overwrite: bool = Field(
+        False,
+        description=(
+            "When ``true``, overwrites an existing file at the same "
+            "path. Default ``false`` returns 409 if the file exists."
+        ),
+    )
+
+
+class SaveCaseResponse(BaseModel):
+    """Response body for ``POST /sessions/{id}/save`` (201)."""
+
+    filename: str = Field(
+        ..., description="Workspace-relative path of the file just written."
+    )
+    bytes_written: int = Field(
+        ...,
+        description="Size in bytes of the file just written, as reported by ``os.stat``.",
+        ge=0,
+    )
+
+
+class DeleteBlockedResponse(BaseModel):
+    """Response body for ``DELETE /sessions/{id}/elements/{model}/{idx}``
+    when the deletion is blocked by cascade dependents (HTTP 422).
+
+    The list is capped at 25 entries; ``total`` reports the full count so
+    the UI can render a "Showing 25 of N dependents" footer when truncated.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    dependents: list[TopologyEntry] = Field(
+        ...,
+        description=(
+            "Up to 25 dependent topology entries that reference the "
+            "target element (e.g., Lines and generators attached to a "
+            "Bus the caller tried to delete). The UI surfaces these as "
+            "clickable rows the user must clear before re-issuing the "
+            "delete."
+        ),
+        max_length=25,
+    )
+    total: int = Field(
+        ...,
+        description=(
+            "Full count of dependent elements. Equals "
+            "``len(dependents)`` when ``total <= 25``; greater when "
+            "the list was truncated."
+        ),
+        ge=0,
+    )
+
+
+# ``DeleteElementResponse`` is a transparent alias for ``TopologySummary``:
+# a successful delete returns the post-delete topology snapshot. The alias
+# documents the relationship at the OpenAPI surface and gives the generated
+# TypeScript client a dedicated symbol for the success path.
+DeleteElementResponse = TopologySummary
+
+
+class TopologySchema(BaseModel):
+    """Per-model parameter metadata, used by the web client's polymorphic
+    form generator (Unit 6).
+
+    Returned from ``GET /api/topology/schema``. Mirrors the wrapper-side
+    ``_PARAMS_BY_MODEL`` table — adding a new model on the server
+    automatically expands the form picker.
+    """
+
+    models: dict[str, list[TopologyParamMeta]] = Field(
+        ...,
+        description=(
+            "Mapping from ANDES model class name to ordered parameter "
+            "metadata. Order is the rendering order in the form."
+        ),
+    )
+
+
 # ---- TDS --------------------------------------------------------------------
 
 
@@ -295,6 +651,51 @@ class TdsRunRequest(BaseModel):
             "use its case-default step size (typically 1/120 s)."
         ),
         gt=0.0,
+    )
+    vars: list[Literal["bus_v", "gen_state", "line_flow"]] | None = Field(
+        None,
+        description=(
+            "Optional selector for which variable groups appear as columns "
+            "in each per-step Arrow record batch on the streaming path. "
+            "``bus_v`` covers bus voltage magnitudes (the v0.1 default); "
+            "``gen_state`` adds generator rotor angle ``delta`` and per-"
+            "unit speed ``omega`` for every member of the ANDES ``SynGen`` "
+            "group (GENROU / GENCLS / PLBVFU1); ``line_flow`` adds active "
+            "power ``Line_<idx>_p`` (MW) at each line's bus1 terminal. "
+            "Unknown values are rejected with 422; an empty list is "
+            "rejected with 422. The batch path (``POST /tds``) ignores "
+            "this field at runtime — the streamed-only state values are "
+            "not surfaced in batch responses — but it is accepted on the "
+            "OpenAPI surface for symmetry with the WebSocket "
+            "``start_tds`` config so generated clients can share one "
+            "request shape. Defaults to ``[\"bus_v\"]`` when omitted."
+        ),
+        min_length=1,
+    )
+    integrator: Literal["trapezoidal", "qndf"] = Field(
+        "trapezoidal",
+        description=(
+            "DAE integrator (Unit 16). ``\"trapezoidal\"`` (default) maps "
+            "to ANDES's fixed-step Implicit Trapezoidal Method "
+            "(``ss.TDS.config.method = \"trapezoid\"``). ``\"qndf\"`` "
+            "selects the variable-order, variable-step QNDF (NDF) method "
+            "and forces ``fixt = 0`` so ANDES enables LTE-driven step "
+            "control. Combine ``integrator=\"qndf\"`` with the Auto "
+            "preset (``rtol=1e-3, atol=1e-6, max_step=0.05``) by passing "
+            "the values via ``tds_config_overrides``."
+        ),
+    )
+    tds_config_overrides: dict[str, float] | None = Field(
+        None,
+        description=(
+            "Optional adaptive-integrator tolerance overrides (Unit 16). "
+            "Supported keys are ``rtol`` (→ ``ss.TDS.config.reltol``), "
+            "``atol`` (→ ``ss.TDS.config.abstol``) and ``max_step`` (→ "
+            "``ss.TDS.config.dtmax``). Unknown keys are rejected with "
+            "500 ``SetupFailedError`` from the wrapper. Has no effect "
+            "when ``integrator=\"trapezoidal\"`` (the fixed-step path "
+            "ignores ``reltol/abstol`` and uses ``h`` for stepping)."
+        ),
     )
 
 
@@ -327,4 +728,199 @@ class TdsBatchResult(BaseModel):
             "Number of times the per-step ``TDS.callpert`` hook fired during "
             "the run. Useful as a sanity check that streaming is wired."
         ),
+    )
+
+
+# ---- abort + alterable-params (Unit 1b of v0.2) ----------------------------
+
+
+class AbortResponse(BaseModel):
+    """Response body for ``POST /sessions/{id}/abort``.
+
+    The endpoint is fire-and-forget at the wire level — it sets the session's
+    abort event and returns immediately. The actual TDS exit happens
+    cooperatively at the next ``callpert`` tick on the worker (typically
+    within a few milliseconds for IEEE 14, longer for larger cases). The
+    streaming WebSocket emits the terminal ``done`` message with
+    ``final_t < tf`` once the integration loop exits.
+
+    There is no ``aborted`` flag on the WS ``done`` payload — the UI infers
+    user-initiated abort from local state (it set the abort itself) vs.
+    numerical instability (a ``done`` with ``final_t < tf`` arrived without
+    a local abort).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    aborted: Literal[True] = Field(
+        True,
+        description=(
+            "Always ``true`` on a successful response. The signal has been "
+            "delivered to the worker; the actual TDS exit is cooperative "
+            "and lands on the next per-step ``callpert`` tick. No-op when "
+            "no TDS is currently running on the session (the abort event "
+            "is set but never consumed)."
+        ),
+    )
+
+
+class AlterableParamsResponse(BaseModel):
+    """Response body for ``GET /sessions/{id}/topology/models/{model}/alterable_params``.
+
+    Returns the ordered list of parameter names that ANDES will accept as
+    ``src`` for the ``Alter`` disturbance on the given model. The UI uses
+    this to populate the AlterSpec form's parameter dropdown.
+
+    The introspection rule (mirrors ANDES's own ``alter()`` contract):
+    a parameter is alterable iff it is a ``NumParam`` and not an
+    ``ExtParam`` (which is a derived/external param read off another
+    model). This excludes topology refs (``IdxParam``: ``bus``, ``bus1``,
+    ``bus2``, ``area``, ``zone``, ``owner``, ``coi``, etc.) and string
+    identifiers (``DataParam``: ``idx``, ``name``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = Field(
+        ...,
+        description=(
+            "ANDES model class name the params belong to (echoed back from "
+            "the path). Example: ``Bus``, ``PQ``, ``GENROU``."
+        ),
+    )
+    params: list[str] = Field(
+        ...,
+        description=(
+            "Ordered list of parameter names that ``ss.<model>.alter(src=...)`` "
+            "will accept. Order matches ANDES's internal declaration order on "
+            "the model class. Empty when the model has no alterable params."
+        ),
+    )
+
+
+# ---- workspace lister + layout sidecar -------------------------------------
+
+
+class WorkspaceFile(BaseModel):
+    """One entry in the workspace file lister response."""
+
+    name: str = Field(
+        ...,
+        description=(
+            "File name relative to the workspace root (no directory "
+            "components in v0.1; the lister does not recurse)."
+        ),
+    )
+    size_bytes: int = Field(
+        ...,
+        description="File size in bytes as reported by ``os.stat``.",
+        ge=0,
+    )
+    modified_iso: str = Field(
+        ...,
+        description=(
+            "Last-modified time in ISO 8601 format with timezone (UTC). "
+            "Computed from ``stat.st_mtime`` at list time."
+        ),
+    )
+    format: Literal["xlsx", "raw", "dyr", "json", "m"] = Field(
+        ...,
+        description=(
+            "Detected file format from the extension. Matches one of the "
+            "ANDES-supported formats; non-matching files are excluded by the "
+            "lister."
+        ),
+    )
+
+
+class WorkspaceFileList(BaseModel):
+    """Response shape for ``GET /workspace/files``."""
+
+    files: list[WorkspaceFile] = Field(
+        ...,
+        description=(
+            "Workspace files matching the supported extensions, sorted "
+            "alphabetically by ``name``. Hidden files (dotfiles) and "
+            "symlinks are excluded; subdirectories are not recursed in v0.1."
+        ),
+    )
+
+
+class BusCoord(BaseModel):
+    """One bus's 2D coordinate in the layout sidecar.
+
+    Coordinates are in arbitrary canvas units; the UI rescales them at render
+    time. Infinity / NaN are rejected at validation time.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    x: float = Field(..., description="Bus X coordinate, finite (no NaN/Inf).")
+    y: float = Field(..., description="Bus Y coordinate, finite (no NaN/Inf).")
+
+    @field_validator("x", "y")
+    @classmethod
+    def _finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("coordinate must be finite (no NaN/Inf)")
+        return value
+
+
+class SidecarLayout(BaseModel):
+    """Persisted SLD layout sidecar (one file per case).
+
+    Stored on disk as ``<case_path>.layout.json`` adjacent to the case file.
+    The PUT endpoint validates this body, then writes atomically with mode
+    0600.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: str = Field(
+        ...,
+        description=(
+            "Sidecar schema version (e.g., ``\"1.0\"``). Bumped on any "
+            "incompatible shape change so the UI can fall back to defaults."
+        ),
+        min_length=1,
+    )
+    andes_version: str = Field(
+        ...,
+        description=(
+            "ANDES version the layout was saved against (e.g., ``\"2.0.0\"``). "
+            "Recorded for diagnosis; not validated on read."
+        ),
+        min_length=1,
+    )
+    coordinates: dict[str, BusCoord] = Field(
+        ...,
+        description=(
+            "Per-bus coordinates, keyed by bus idx (stringified). Buses "
+            "missing from this dict fall back to the renderer's auto-layout."
+        ),
+    )
+    non_bus_coordinates: dict[str, dict[str, BusCoord]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-non-bus-element coordinates, two-level dict keyed by "
+            "ANDES model class (e.g., ``PV``, ``GENROU``, ``PQ``, ``Shunt``) "
+            "OR by UI category (``generator``, ``load``, ``shunt``), then by "
+            "element idx (stringified). The writer emits BOTH the model-"
+            "class-keyed entry and the UI-category-keyed entry for every "
+            "dragged non-bus element so kind-edits (e.g., ``PV`` → "
+            "``GENROU``) survive: the model-class entry becomes orphaned "
+            "but the UI-category entry still resolves on read. Optional + "
+            "additive — old sidecars without this field read as ``{}`` and "
+            "the renderer falls back to kind-default offsets."
+        ),
+    )
+    last_modified: str = Field(
+        ...,
+        description=(
+            "ISO 8601 timestamp recorded by the client at save time. The "
+            "server does NOT regenerate this on write; it stores the value "
+            "the client sent so collaborative-edit conflict detection (a "
+            "future feature) has a single source of truth."
+        ),
+        min_length=1,
     )

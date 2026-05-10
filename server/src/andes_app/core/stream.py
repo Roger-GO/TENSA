@@ -4,7 +4,10 @@ Each emitted Arrow batch is a self-contained IPC stream chunk (schema
 header + one RecordBatch with one or more rows). The schema is ``t:
 float64`` plus one float64 column per selected state variable; for v0.1
 the default selection is all bus voltages (``Bus.v`` indexed by ANDES
-bus idx, named ``Bus_<idx>_v``).
+bus idx, named ``Bus_<idx>_v``). v0.2 adds optional generator state
+columns (``Gen_<idx>_delta``, ``Gen_<idx>_omega``) and per-line active
+power columns (``Line_<idx>_p``); the WebSocket ``start_tds`` config's
+``vars`` list selects which variable groups are included in each frame.
 
 Two streaming modes:
 
@@ -29,6 +32,8 @@ and emits whatever rows the aggregator returns as one Arrow batch.
 from __future__ import annotations
 
 import io
+import logging
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
@@ -42,6 +47,14 @@ if TYPE_CHECKING:
 
 DecimationAlgorithm = Literal["none", "boxcar-mean", "boxcar-mean-best-effort"]
 DecimationMode = Literal["none", "mean"]
+
+# v0.2 ``vars`` selector: each entry expands into a contiguous run of
+# columns in the Arrow schema (in the order listed in ``VAR_GROUPS``).
+VarGroup = Literal["bus_v", "gen_state", "line_flow"]
+VAR_GROUPS: tuple[VarGroup, ...] = ("bus_v", "gen_state", "line_flow")
+DEFAULT_VARS: tuple[VarGroup, ...] = ("bus_v",)
+
+log = logging.getLogger("andes-app.stream")
 
 
 # ---- schema -----------------------------------------------------------------
@@ -58,6 +71,98 @@ def make_bus_voltage_schema(bus_idx_values: list[int | str]) -> pa.Schema:
     for idx in bus_idx_values:
         fields.append(pa.field(f"Bus_{idx}_v", pa.float64()))
     return pa.schema(fields)
+
+
+def _bus_voltage_columns(bus_idx_values: list[int | str]) -> list[pa.Field]:
+    return [pa.field(f"Bus_{idx}_v", pa.float64()) for idx in bus_idx_values]
+
+
+def make_generator_state_schema(syngen_idx_values: list[int | str]) -> pa.Schema:
+    """Build the Arrow schema for a stream emitting generator state over time.
+
+    Two columns per generator: ``Gen_<idx>_delta`` (rotor angle, rad) and
+    ``Gen_<idx>_omega`` (per-unit speed). Order: delta then omega for each
+    idx, in the listed idx order. ``syngen_idx_values`` covers the
+    ``SynGen`` group (parent of GENROU / GENCLS / PLBVFU1); static
+    generators (``PV`` / ``Slack``) have no rotor state and are NOT
+    included. An empty list yields a schema with only the ``t`` column,
+    which is well-formed but useless on its own — callers compose with
+    other schemas via :func:`make_combined_schema`.
+    """
+    fields: list[pa.Field] = [pa.field("t", pa.float64())]
+    fields.extend(_generator_state_columns(syngen_idx_values))
+    return pa.schema(fields)
+
+
+def _generator_state_columns(syngen_idx_values: list[int | str]) -> list[pa.Field]:
+    fields: list[pa.Field] = []
+    for idx in syngen_idx_values:
+        fields.append(pa.field(f"Gen_{idx}_delta", pa.float64()))
+        fields.append(pa.field(f"Gen_{idx}_omega", pa.float64()))
+    return fields
+
+
+def make_line_flow_schema(line_idx_values: list[int | str]) -> pa.Schema:
+    """Build the Arrow schema for a stream emitting per-line active power.
+
+    One column per line: ``Line_<idx>_p`` carrying the active power
+    flowing from ``bus1`` into the line, in MW (i.e., computed in pu and
+    multiplied by the system base MVA). An empty list yields a schema
+    with only the ``t`` column — useful in combination with other groups
+    via :func:`make_combined_schema`, and required to keep ``vars=[
+    "line_flow"]`` well-formed on cases with zero lines.
+    """
+    fields: list[pa.Field] = [pa.field("t", pa.float64())]
+    fields.extend(_line_flow_columns(line_idx_values))
+    return pa.schema(fields)
+
+
+def _line_flow_columns(line_idx_values: list[int | str]) -> list[pa.Field]:
+    return [pa.field(f"Line_{idx}_p", pa.float64()) for idx in line_idx_values]
+
+
+def make_combined_schema(
+    var_groups: list[VarGroup] | tuple[VarGroup, ...],
+    system: System,
+) -> tuple[pa.Schema, list[str]]:
+    """Build a unified Arrow schema for the requested variable groups.
+
+    ``var_groups`` is an ordered, deduplicated subset of :data:`VAR_GROUPS`.
+    The returned schema has ``t`` as its first column followed by, for
+    each requested group in canonical :data:`VAR_GROUPS` order, the
+    columns that group contributes (sourced live from ``system``). The
+    second tuple element is the column-name list (excluding ``t``) — the
+    same list ``stream_start.metadata.var_columns`` advertises to the
+    client so the picker tree can be wired without the client having to
+    re-introspect the topology.
+    """
+    if not var_groups:
+        raise ValueError("var_groups must be a non-empty subset of VAR_GROUPS")
+    requested = set(var_groups)
+    unknown = requested - set(VAR_GROUPS)
+    if unknown:
+        raise ValueError(f"unknown var groups: {sorted(unknown)!r}")
+
+    fields: list[pa.Field] = [pa.field("t", pa.float64())]
+    var_columns: list[str] = []
+
+    # Iterate in canonical group order so the schema layout is stable
+    # regardless of how the client ordered ``vars`` in the request.
+    for group in VAR_GROUPS:
+        if group not in requested:
+            continue
+        if group == "bus_v":
+            cols = _bus_voltage_columns(bus_idx_values_from_system(system))
+        elif group == "gen_state":
+            cols = _generator_state_columns(syngen_idx_values_from_system(system))
+        elif group == "line_flow":
+            cols = _line_flow_columns(line_idx_values_from_system(system))
+        else:  # pragma: no cover — exhaustively handled above
+            raise ValueError(f"unexpected var group: {group!r}")
+        fields.extend(cols)
+        var_columns.extend(f.name for f in cols)
+
+    return pa.schema(fields), var_columns
 
 
 # ---- encoding ---------------------------------------------------------------
@@ -111,6 +216,176 @@ def bus_idx_values_from_system(system: System) -> list[int | str]:
     """Return the ANDES bus idx values in the order their voltages will
     appear in each Arrow batch."""
     return list(system.Bus.idx.v)
+
+
+def syngen_idx_values_from_system(system: System) -> list[int | str]:
+    """Return the ANDES SynGen idx values (across GENROU / GENCLS / etc.)
+    in the order :func:`collect_generator_state` will read them.
+
+    ``ss.SynGen`` is the ANDES *group* parent of the dynamic generator
+    models (``GENROU``, ``GENCLS``, ``PLBVFU1``). Static generators
+    (``PV``, ``Slack``) are NOT in this group — they have no rotor state
+    and contribute zero columns to the gen_state stream. On a case with
+    no dynamic generators (e.g., a .raw loaded without a .dyr addfile),
+    this returns ``[]`` and the gen_state schema is well-formed-empty.
+    """
+    syngen = getattr(system, "SynGen", None)
+    if syngen is None:
+        return []
+    try:
+        return list(syngen.get_all_idxes())
+    except AttributeError:  # pragma: no cover — older ANDES versions
+        return []
+
+
+def collect_generator_state(
+    system: System, syngen_idx_values: list[int | str]
+) -> list[float]:
+    """Read the SynGen group's ``delta`` + ``omega`` for each idx, in the
+    same order :func:`make_generator_state_schema` lays out: ``[delta_0,
+    omega_0, delta_1, omega_1, ...]``. ``syngen_idx_values`` is captured
+    once at run start (it does not change mid-run).
+    """
+    if not syngen_idx_values:
+        return []
+    syngen = system.SynGen
+    deltas = list(syngen.get("delta", syngen_idx_values, "v"))
+    omegas = list(syngen.get("omega", syngen_idx_values, "v"))
+    out: list[float] = []
+    for d, o in zip(deltas, omegas, strict=True):
+        out.append(float(d))
+        out.append(float(o))
+    return out
+
+
+def line_idx_values_from_system(system: System) -> list[int | str]:
+    """Return the ANDES Line idx values in the order
+    :func:`collect_line_active_power` will read them. Cases with no Line
+    elements yield ``[]`` and a well-formed-empty line_flow schema."""
+    line = getattr(system, "Line", None)
+    if line is None:
+        return []
+    idx_var = getattr(line, "idx", None)
+    if idx_var is None:
+        return []
+    return list(getattr(idx_var, "v", []))
+
+
+# Line-flow attribute set sourced live from the System each callpert tick.
+# Mirrors ``andes_app.core.wrapper._extract_line_flows`` — ANDES does not
+# expose ``ss.Line.p1`` directly, so we recompute the same pi-equivalent
+# expression that ANDES injects into the bus1 power-balance equation.
+_LINE_FLOW_ATTRS: tuple[str, ...] = (
+    "v1", "v2", "a1", "a2", "phi", "ue",
+    "gh", "bh", "ghk", "bhk", "itap", "itap2",
+)
+
+
+def collect_line_active_power(
+    system: System, line_idx_values: list[int | str]
+) -> list[float]:
+    """Compute the active-power flow at terminal 1 for each line, in MW.
+
+    Mirrors :func:`andes_app.core.wrapper._extract_line_flows`'s formula.
+    Pulls live algebraic-variable values off ``ss.Line`` (``v1``/``v2``,
+    ``a1``/``a2``, plus the immutable per-line line params) and returns
+    one float per idx in ``line_idx_values``. Non-finite intermediate
+    results (e.g., a divergent step) emit ``nan`` rather than raising —
+    uPlot handles NaN gaps and the substrate must not crash a long sim
+    over a single bad line value.
+    """
+    if not line_idx_values:
+        return []
+    line = system.Line
+    arrays: dict[str, list[float]] = {}
+    for name in _LINE_FLOW_ATTRS:
+        attr = getattr(line, name, None)
+        if attr is None:
+            log.warning(
+                "line.%s missing; emitting NaN line_flow column", name
+            )
+            return [float("nan")] * len(line_idx_values)
+        values = getattr(attr, "v", None)
+        if values is None:
+            log.warning(
+                "line.%s.v is None; emitting NaN line_flow column", name
+            )
+            return [float("nan")] * len(line_idx_values)
+        try:
+            arrays[name] = [float(v) for v in values]
+        except (TypeError, ValueError):
+            log.warning(
+                "line.%s.v not iterable as floats; emitting NaN", name
+            )
+            return [float("nan")] * len(line_idx_values)
+
+    n = len(line_idx_values)
+    for name, vlist in arrays.items():
+        if len(vlist) != n:
+            log.warning(
+                "line.%s.v length %d != idx length %d; emitting NaN",
+                name, len(vlist), n,
+            )
+            return [float("nan")] * n
+
+    try:
+        mva_base = float(getattr(system.config, "mva", 100.0))
+    except (TypeError, ValueError):
+        mva_base = 100.0
+
+    out: list[float] = []
+    for i in range(n):
+        v1 = arrays["v1"][i]
+        v2 = arrays["v2"][i]
+        a1 = arrays["a1"][i]
+        a2 = arrays["a2"][i]
+        phi = arrays["phi"][i]
+        ue = arrays["ue"][i]
+        gh = arrays["gh"][i]
+        ghk = arrays["ghk"][i]
+        bhk = arrays["bhk"][i]
+        itap = arrays["itap"][i]
+        itap2 = arrays["itap2"][i]
+        d = a1 - a2 - phi
+        cos_d = math.cos(d)
+        sin_d = math.sin(d)
+        p_pu = ue * (
+            v1 * v1 * (gh + ghk) * itap2
+            - v1 * v2 * (ghk * cos_d + bhk * sin_d) * itap
+        )
+        p_mw = p_pu * mva_base
+        out.append(p_mw if math.isfinite(p_mw) else float("nan"))
+    return out
+
+
+def collect_combined_values(
+    system: System,
+    var_groups: list[VarGroup] | tuple[VarGroup, ...],
+    *,
+    syngen_idx_values: list[int | str],
+    line_idx_values: list[int | str],
+) -> list[float]:
+    """Read all selected groups' values and return them in the schema's
+    column order (matching :func:`make_combined_schema`).
+
+    ``syngen_idx_values`` and ``line_idx_values`` are captured once at
+    run start so we don't re-introspect the topology each callpert tick.
+    Bus voltages are read live every call because the Bus model is
+    always present; idx-snapshot caching is unnecessary there (``Bus.v.v``
+    is read directly).
+    """
+    requested = set(var_groups)
+    out: list[float] = []
+    for group in VAR_GROUPS:
+        if group not in requested:
+            continue
+        if group == "bus_v":
+            out.extend(collect_bus_voltages(system))
+        elif group == "gen_state":
+            out.extend(collect_generator_state(system, syngen_idx_values))
+        elif group == "line_flow":
+            out.extend(collect_line_active_power(system, line_idx_values))
+    return out
 
 
 # ---- aggregator -------------------------------------------------------------
@@ -241,11 +516,22 @@ class StreamAggregator:
 
 
 __all__ = [
+    "DEFAULT_VARS",
+    "VAR_GROUPS",
     "DecimationAlgorithm",
     "DecimationMode",
     "StreamAggregator",
+    "VarGroup",
     "bus_idx_values_from_system",
     "collect_bus_voltages",
+    "collect_combined_values",
+    "collect_generator_state",
+    "collect_line_active_power",
     "encode_batch",
+    "line_idx_values_from_system",
     "make_bus_voltage_schema",
+    "make_combined_schema",
+    "make_generator_state_schema",
+    "make_line_flow_schema",
+    "syngen_idx_values_from_system",
 ]

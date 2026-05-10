@@ -12,11 +12,17 @@ with ``callpert`` wired to count steps and check the abort flag.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 
 from andes_app.api.auth import RequireToken
-from andes_app.api.schemas import ProblemDetails, TdsBatchResult, TdsRunRequest
+from andes_app.api.schemas import (
+    AbortResponse,
+    ProblemDetails,
+    TdsBatchResult,
+    TdsRunRequest,
+)
 from andes_app.core.session import (
     SessionExpiredError,
     SessionManager,
@@ -47,7 +53,7 @@ def _map_worker_error(exc: WorkerError) -> HTTPException:
         return HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
-                f"{exc.detail} — call POST /sessions/{{id}}/reload to recover."
+                f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
             ),
         )
     return HTTPException(
@@ -81,7 +87,18 @@ async def run_tds(
     _: RequireToken,
 ) -> TdsBatchResult:
     mgr = _manager(request)
-    args: dict[str, float | None] = {"tf": body.tf, "h": body.h}
+    # Unit 16: forward integrator + tolerance overrides. The wrapper
+    # validates ``integrator`` (Literal-bounded by Pydantic) and the
+    # override keys (rtol/atol/max_step). ``tds_config_overrides`` is
+    # only forwarded when non-None so the wire shape stays minimal for
+    # the default trapezoidal path.
+    args: dict[str, Any] = {
+        "tf": body.tf,
+        "h": body.h,
+        "integrator": body.integrator,
+    }
+    if body.tds_config_overrides is not None:
+        args["tds_config_overrides"] = body.tds_config_overrides
     # Generous timeout: TDS for IEEE 14 / 1-second sim is sub-second; for
     # larger cases or longer horizons it can take minutes. The watchdog in
     # SessionManager handles wedged sessions; this timeout is a backstop.
@@ -106,3 +123,39 @@ async def run_tds(
         final_t=float(payload["final_t"]),
         callpert_count=int(payload["callpert_count"]),
     )
+
+
+@router.post(
+    "/sessions/{session_id}/abort",
+    operation_id="abortRun",
+    summary="Signal a cooperative abort of the active TDS run on a session.",
+    response_model=AbortResponse,
+    responses={
+        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
+        404: {"model": ProblemDetails, "description": "Session not found or already closed."},
+    },
+)
+async def abort_run(
+    session_id: str,
+    request: Request,
+    _: RequireToken,
+) -> AbortResponse:
+    """Set the session's abort event. Cooperatively terminates an active
+    streaming or batch ``run_tds`` invocation at the next ``callpert``
+    tick. Returns 200 immediately — the actual TDS exit is asynchronous
+    on the worker.
+
+    Session-scoped (not run-scoped): v0.2 has at most one active run per
+    session, mirroring ``SessionManager.signal_abort``'s API. Calling
+    abort while no TDS is running is a 200 no-op (the event is set but
+    never consumed; subsequent runs will see and clear it).
+    """
+    mgr = _manager(request)
+    try:
+        await mgr.signal_abort(session_id)
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    return AbortResponse(aborted=True)

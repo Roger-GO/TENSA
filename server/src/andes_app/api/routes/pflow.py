@@ -14,7 +14,14 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 
 from andes_app.api.auth import RequireToken
-from andes_app.api.schemas import PflowResult, PflowRunRequest, ProblemDetails
+from andes_app.api.schemas import (
+    GeneratorOutput,
+    LineFlow,
+    LoadConsumption,
+    PflowResult,
+    PflowRunRequest,
+    ProblemDetails,
+)
 from andes_app.core.session import (
     SessionExpiredError,
     SessionManager,
@@ -40,6 +47,32 @@ def _result_from_payload(payload: dict[str, Any], run_id: str) -> PflowResult:
     PflowResult dict. The wrapper sends bus_voltages / bus_angles keyed by
     Python idx values (which can be int or str on the wire); JSON object keys
     must be strings, so we stringify them at the boundary."""
+    raw_flows = payload.get("line_flows") or {}
+    line_flows: dict[str, LineFlow] = {}
+    for line_idx, flow in raw_flows.items():
+        line_flows[str(line_idx)] = LineFlow(
+            p=float(flow["p"]),
+            q=float(flow["q"]),
+            from_idx=flow["from_idx"],
+            to_idx=flow["to_idx"],
+        )
+    raw_gen = payload.get("generator_outputs") or {}
+    generator_outputs: dict[str, GeneratorOutput] = {}
+    for gen_idx, gen in raw_gen.items():
+        generator_outputs[str(gen_idx)] = GeneratorOutput(
+            p=float(gen["p"]),
+            q=float(gen["q"]),
+            v=float(gen["v"]),
+            bus=gen["bus"],
+        )
+    raw_load = payload.get("load_consumption") or {}
+    load_consumption: dict[str, LoadConsumption] = {}
+    for load_idx, load in raw_load.items():
+        load_consumption[str(load_idx)] = LoadConsumption(
+            p=float(load["p"]),
+            q=float(load["q"]),
+            bus=load["bus"],
+        )
     return PflowResult(
         run_id=run_id,
         converged=bool(payload["converged"]),
@@ -47,6 +80,9 @@ def _result_from_payload(payload: dict[str, Any], run_id: str) -> PflowResult:
         mismatch=float(payload["mismatch"]),
         bus_voltages={str(k): float(v) for k, v in payload["bus_voltages"].items()},
         bus_angles={str(k): float(v) for k, v in payload["bus_angles"].items()},
+        line_flows=line_flows,
+        generator_outputs=generator_outputs,
+        load_consumption=load_consumption,
     )
 
 
@@ -61,8 +97,18 @@ def _map_worker_error(exc: WorkerError) -> HTTPException:
         return HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
-                f"{exc.detail} — call POST /sessions/{{id}}/reload to recover."
+                f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
             ),
+        )
+    if category == "EigDirtyDaeError":
+        # Phase 1 smoke Issue 1: PF after EIG. The wrapper detects
+        # ``ss.TDS.initialized == True`` and refuses rather than
+        # surfacing NaN values / 5xx. The detail already carries the
+        # actionable "reload" hint that ``RunButton.tsx`` keys off
+        # to render a Reload-and-retry affordance.
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=exc.detail,
         )
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -84,7 +130,11 @@ def _map_worker_error(exc: WorkerError) -> HTTPException:
         },
         422: {
             "model": ProblemDetails,
-            "description": "ANDES setup() failed; call /reload to recover.",
+            "description": (
+                "ANDES setup() failed, OR a previous EIG run mutated dae "
+                "state (``TDS.initialized=True``). Either case requires "
+                "POST /reload to recover."
+            ),
         },
     },
 )

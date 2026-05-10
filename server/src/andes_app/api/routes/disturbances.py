@@ -1,14 +1,22 @@
-"""Disturbance management endpoint.
+"""Disturbance management endpoints.
 
-POST /sessions/{id}/disturbances accepts a list of FaultSpec / ToggleSpec /
-AlterSpec, all gated by pre-setup state. ANDES rejects post-setup
-``add()`` calls regardless of model type, so this endpoint returns 409 with
-guidance to call ``/reload`` once the System has been committed.
+- ``POST /sessions/{id}/disturbances`` accepts a list of FaultSpec /
+  ToggleSpec / AlterSpec, all gated by pre-setup state. ANDES rejects
+  post-setup ``add()`` calls regardless of model type, so this endpoint
+  returns 409 with guidance to call ``/reload`` once the System has been
+  committed.
+- ``GET /sessions/{id}/disturbances`` returns the substrate's
+  ``_disturbance_log`` (every spec successfully accepted since the most
+  recent ``load_case`` / ``reload_case`` / ``clear_disturbances``). The
+  client uses this to re-sync the disturbance editor after a reload.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Request, status
+from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api.auth import RequireToken
 from andes_app.api.schemas import (
@@ -17,6 +25,7 @@ from andes_app.api.schemas import (
     DisturbanceAck,
     ProblemDetails,
 )
+from andes_app.core.disturbance import AlterSpec, FaultSpec, ToggleSpec
 from andes_app.core.session import (
     SessionExpiredError,
     SessionManager,
@@ -24,6 +33,26 @@ from andes_app.core.session import (
 )
 
 router = APIRouter()
+
+
+class ListDisturbancesResponse(BaseModel):
+    """Wire shape of ``GET /sessions/{id}/disturbances``.
+
+    Mirrors the substrate's ``Wrapper.list_disturbances()`` — the
+    discriminated union over Fault / Toggle / Alter, in the order the
+    specs were accepted. Empty list when no disturbances are pending.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    disturbances: list[FaultSpec | ToggleSpec | AlterSpec] = Field(
+        ...,
+        description=(
+            "Currently-recorded disturbance specs. Same shape as the "
+            "``POST /sessions/{id}/disturbances`` request body's "
+            "``disturbances`` field."
+        ),
+    )
 
 
 def _manager(request: Request) -> SessionManager:
@@ -43,7 +72,7 @@ def _map_worker_error(exc: WorkerError) -> HTTPException:
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"{exc.detail} — call POST /sessions/{{id}}/reload to return "
+                f"{exc.detail} — call POST /api/sessions/{{id}}/reload to return "
                 "to pre-setup state."
             ),
         )
@@ -75,7 +104,7 @@ def _map_worker_error(exc: WorkerError) -> HTTPException:
             "model": ProblemDetails,
             "description": (
                 "Session has already been committed (PF or TDS has run); "
-                "call POST /sessions/{id}/reload to return to pre-setup."
+                "call POST /api/sessions/{id}/reload to return to pre-setup."
             ),
         },
         422: {
@@ -108,3 +137,66 @@ async def add_disturbances(
             raise _map_worker_error(exc) from exc
         accepted.append(DisturbanceAck(kind=spec.kind, idx=idx))
     return AddDisturbancesResponse(accepted=accepted)
+
+
+def _spec_from_dict(spec_dict: dict[str, Any]) -> FaultSpec | ToggleSpec | AlterSpec:
+    """Re-build a Pydantic disturbance spec from the worker's dict payload."""
+    kind = spec_dict.get("kind")
+    if kind == "fault":
+        return FaultSpec(**spec_dict)
+    if kind == "toggle":
+        return ToggleSpec(**spec_dict)
+    if kind == "alter":
+        return AlterSpec(**spec_dict)
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"worker returned a disturbance with unknown kind: {kind!r}",
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/disturbances",
+    operation_id="listDisturbances",
+    summary="List the disturbance specs currently recorded on the session.",
+    response_model=ListDisturbancesResponse,
+    responses={
+        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
+        404: {"model": ProblemDetails, "description": "Session not found or already closed."},
+    },
+)
+async def list_disturbances(
+    session_id: str,
+    request: Request,
+    _: RequireToken,
+) -> ListDisturbancesResponse:
+    """Return the wrapper's ``_disturbance_log`` for client sync.
+
+    Use case: after the client calls ``POST /sessions/{id}/reload``, the
+    substrate's disturbance log is wiped (the new System has no
+    disturbances). The client can then call ``GET`` (now empty) to confirm,
+    re-POST the originals, and re-GET to verify they were re-accepted.
+
+    No 409 path — even on a freshly-created session with no case loaded the
+    answer is well-defined (empty list).
+    """
+    mgr = _manager(request)
+    try:
+        payload = await mgr.invoke(session_id, "list_disturbances", {})
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except WorkerError as exc:
+        raise _map_worker_error(exc) from exc
+
+    if not isinstance(payload, list):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "worker returned a non-list payload for list_disturbances: "
+                f"{type(payload).__name__}"
+            ),
+        )
+    specs = [_spec_from_dict(d) for d in payload if isinstance(d, dict)]
+    return ListDisturbancesResponse(disturbances=specs)

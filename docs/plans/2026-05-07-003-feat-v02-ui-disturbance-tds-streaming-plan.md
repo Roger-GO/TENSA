@@ -1,8 +1,9 @@
 ---
 title: "feat: v0.2 UI — disturbance timeline + TDS streaming + animated SLD"
 type: feat
-status: active
+status: completed
 date: 2026-05-07
+completed: 2026-05-09
 origin: docs/brainstorms/2026-05-07-accessible-andes-power-systems-app-requirements.md
 ---
 
@@ -351,7 +352,7 @@ The plan is **phased**: Phase 1 lands the streaming pipeline + plot (largest ris
 
 ### Phase 1: Streaming pipeline + plot
 
-- [ ] **Unit 1: Server-side stream schema extension** *(server-side; can run in parallel with v0.1 implementation — this is misclassified as "UI plan" but is pure server work and must land before any v0.2 UI unit can integrate)*
+- [x] **Unit 1: Server-side stream schema extension** *(server-side; can run in parallel with v0.1 implementation — this is misclassified as "UI plan" but is pure server work and must land before any v0.2 UI unit can integrate)*
 
 **Goal:** Extend the existing bus-voltage Arrow schema (`server/src/andes_app/core/stream.py`) to also stream generator state (`δ`, `ω`) + line active power (`p_flow`). Extend the WebSocket `start_tds` handler to accept and validate a `vars` field selecting which variable groups to stream. Wire through the worker.
 
@@ -392,7 +393,7 @@ The plan is **phased**: Phase 1 lands the streaming pipeline + plot (largest ris
 
 ---
 
-- [ ] **Unit 1b: Substrate abort endpoint + alterable-params endpoint** *(server-side; depends on Unit 1 only for shared file ownership; can run in parallel)*
+- [x] **Unit 1b: Substrate abort endpoint + alterable-params endpoint** *(server-side; depends on Unit 1 only for shared file ownership; can run in parallel)*
 
 **Goal:** The plan's UI flow assumes a `POST /sessions/{id}/tds/abort/{run_id}` endpoint exists — it does NOT in stock Phase A. Add an HTTP route that exposes the existing `SessionManager.signal_abort` API. Also add a topology-introspection endpoint the AlterSpec form uses to populate its parameter dropdown (currently planned as "best-effort UI-side", which leaks substrate knowledge into the UI).
 
@@ -423,7 +424,7 @@ The plan is **phased**: Phase 1 lands the streaming pipeline + plot (largest ris
 
 ---
 
-- [ ] **Unit 2: WebSocket client + Arrow decoder + reconnect (+ R19 interaction-states matrix extension)**
+- [x] **Unit 2: WebSocket client + Arrow decoder + reconnect (+ R19 interaction-states matrix extension)**
 
 **Goal:** Implement `web/src/streaming/RunStream.ts` — a class that owns the WS lifecycle for a single TDS run, decodes Arrow IPC binary frames into typed-array columns, and feeds the runs Zustand slice. Includes auth, start/resume, exponential-backoff reconnect, resync handling, and connection-status events. Also extend the R19 interaction-states matrix for the new v0.2 surfaces (plot, scrub, run lifecycle, banner) **before** Unit 3, so plot/scrub state-cells are designed before code lands.
 
@@ -477,7 +478,7 @@ The plan is **phased**: Phase 1 lands the streaming pipeline + plot (largest ris
 
 ---
 
-- [ ] **Unit 3: TimeSeriesPlot component (stacked uPlot wrappers, sync'd cursors) + tree variable picker**
+- [x] **Unit 3: TimeSeriesPlot component (stacked uPlot wrappers, sync'd cursors) + tree variable picker**
 
 **Goal:** Build the project's plot component using uPlot. Multi-series across multiple variable groups (each group on its own y-scale, stacked vertically with synchronized cursors), zoom/pan via trackpad gestures, tree-style state-variable picker that adds/removes series live, smooth performance on streaming data at the UI-clamped 30 Hz output rate.
 
@@ -540,7 +541,7 @@ The plan is **phased**: Phase 1 lands the streaming pipeline + plot (largest ris
 
 ---
 
-- [ ] **Unit 4: ScrubControl + plot-SLD synchronization**
+- [x] **Unit 4: ScrubControl + plot-SLD synchronization**
 
 **Goal:** Build the timeline-strip scrub control. Drives a `t_current` value in the runs store; plot cursor + SLD overlay both subscribe to it. Play/pause/speed buttons. "Live" snap-to-head while streaming.
 
@@ -587,7 +588,7 @@ The plan is **phased**: Phase 1 lands the streaming pipeline + plot (largest ris
 
 ### Phase 2: Disturbance editor + TDS integration
 
-- [ ] **Unit 5: SLD animation overlay + selective-redraw plumbing (first-class deliverable)**
+- [x] **Unit 5: SLD animation overlay + selective-redraw plumbing (first-class deliverable)**
 
 **Goal:** Extend `web/src/components/sld/overlay.ts` (introduced in v0.1) to consume run frames during streaming + scrub. Bus voltages animate with smooth color transitions; line flows update direction + magnitude. **Selective redraw at 30 Hz is a deliverable, not a side-effect — earned via explicit memoization, per-bus selector hooks, and a measured benchmark gate.**
 
@@ -635,7 +636,7 @@ The plan is **phased**: Phase 1 lands the streaming pipeline + plot (largest ris
 
 ---
 
-- [ ] **Unit 6: Disturbance editor (timeline + form + spec components)**
+- [x] **Unit 6: Disturbance editor (timeline + form + spec components)**
 
 **Goal:** Build the disturbance editor: timeline strip with draggable markers, "Add event" button as the primary entry point, per-disturbance form using the discriminated union (FaultSpec / ToggleSpec / AlterSpec), validation with drag-time invalid-state prevention, commit-on-Run-TDS. Lives in the right-dock top region as one of the dockable panels (no global mode toggle).
 
@@ -697,7 +698,7 @@ The plan is **phased**: Phase 1 lands the streaming pipeline + plot (largest ris
 
 ---
 
-- [ ] **Unit 7: TDS run flow + status + abort + error surfaces**
+- [x] **Unit 7: TDS run flow + status + abort + error surfaces**
 
 **Goal:** Wire the TDS run lifecycle: extend RunButton from v0.1 (PF) to v0.2 (PF or TDS), top-bar status badge, abort button, NumericalErrorBanner + NumericalErrorDetails slide-out for instability errors, integration with RunStream + runs store. Includes the "Reset run" affordance and the pre-first-frame visual state.
 
@@ -757,7 +758,7 @@ The plan is **phased**: Phase 1 lands the streaming pipeline + plot (largest ris
 
 ---
 
-- [ ] **Unit 8: TdsConfigPanel + final integration polish**
+- [x] **Unit 8: TdsConfigPanel + final integration polish**
 
 **Goal:** The compact TDS config panel (tf, h override, vars selection, max_rate_hz override); cross-cutting polish (panel-picker disable rules during a run; preserved per-region scroll/resize state across panel swaps; transition animations); R19 interaction-states matrix already extended in Unit 2 — Unit 8 only audits and fills any gaps surfaced during implementation.
 
