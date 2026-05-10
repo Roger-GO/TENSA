@@ -40,13 +40,36 @@ import type { ResolvedTheme } from '@/store/theme';
  *   state locally; it is not reflected into the analyze store because
  *   only one consumer renders at a time.
  *
+ * Lambda slider (Unit 17):
+ *
+ * - A native ``<input type="range">`` below the chart drives a
+ *   selectable lambda value. The slider ranges from the smallest to
+ *   the largest computed lambda (i.e. ``max_lam`` for happy paths,
+ *   the last reached lambda for truncated runs). A vertical line on
+ *   the chart tracks the slider; a small readout below the slider
+ *   lists each visible bus's interpolated voltage at that lambda,
+ *   sorted V-ascending so the most-stressed bus rises to the top.
+ *
+ * Per-bus hover (Unit 17):
+ *
+ * - Pointer-enter on a polyline thickens its stroke to 3px and
+ *   highlights the matching legend chip; pointer-leave restores
+ *   default 1.5px / muted state. Hover state is local; the analyze
+ *   store is not touched because only one CPF chart renders at once.
+ *
  * Test hooks:
  *
  * - ``data-testid="cpf-curve"`` on the outer container.
  * - ``data-testid="cpf-curve-line-{busIdx}"`` on each polyline.
  * - ``data-testid="cpf-nose-marker"`` when the nose marker is rendered.
+ * - ``data-testid="cpf-nose-label"`` when the nose text label is rendered.
  * - ``data-testid="cpf-truncated-banner"`` when truncated.
+ * - ``data-testid="cpf-truncated-label"`` truncated annotation on chart.
  * - ``data-testid="cpf-empty"`` for the empty state.
+ * - ``data-testid="cpf-lambda-slider"`` slider input.
+ * - ``data-testid="cpf-lambda-readout"`` per-bus voltage readout.
+ * - ``data-testid="cpf-lambda-marker"`` vertical line driven by slider.
+ * - ``data-testid="cpf-lambda-readout-row-{busIdx}"`` rows in readout.
  */
 export interface CPFCurveChartProps {
   /** Override for tests; usually pulled from the analyze store. */
@@ -63,6 +86,8 @@ const PADDING_RIGHT = 16;
 const PADDING_TOP = 12;
 const PADDING_BOTTOM = 32;
 const DEFAULT_MAX_BUSES = 8;
+const STROKE_DEFAULT = 1.5;
+const STROKE_HOVERED = 3;
 
 /** Pure helper: compute the Y-range across all visible buses, with a 5% pad. */
 // eslint-disable-next-line react-refresh/only-export-components
@@ -151,6 +176,95 @@ export function busColor(bus: string, theme: ResolvedTheme = 'light'): string {
   return `hsl(${h % 360}deg, 65%, ${lightness}%)`;
 }
 
+/**
+ * Pure helper: linearly interpolate the voltage of ``bus`` at lambda
+ * ``lam`` from the CPF trace.
+ *
+ * The CPF trace can have a non-monotonic lambda axis: post-nose, the
+ * curve folds back, so a single ``lam`` value may correspond to two
+ * voltage points (one upper-branch, one lower-branch). To keep the
+ * readout deterministic we walk the trace in *trajectory order* and
+ * pick the rightmost segment whose lambda interval contains ``lam``;
+ * that biases towards the post-nose / collapse branch when both exist,
+ * which is the more useful answer for a stability researcher.
+ *
+ * Returns ``null`` when the trace is empty or lam is outside the union
+ * of segment ranges.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function interpolateBusVoltage(
+  result: CpfResult,
+  bus: string,
+  lam: number,
+): number | null {
+  const trace = result.voltages_per_bus[bus];
+  const lambdas = result.lambdas;
+  if (!trace || trace.length === 0 || lambdas.length === 0) return null;
+  if (trace.length === 1) {
+    const only = trace[0];
+    return only === undefined ? null : only;
+  }
+  let pick: number | null = null;
+  for (let i = 0; i < trace.length - 1; i++) {
+    const lamA = lambdas[i];
+    const lamB = lambdas[i + 1];
+    const vA = trace[i];
+    const vB = trace[i + 1];
+    if (
+      lamA === undefined ||
+      lamB === undefined ||
+      vA === undefined ||
+      vB === undefined
+    ) {
+      continue;
+    }
+    const lo = Math.min(lamA, lamB);
+    const hi = Math.max(lamA, lamB);
+    if (lam < lo || lam > hi) continue;
+    if (lamA === lamB) {
+      // Vertical segment — pick the later (rightmost in trajectory order) voltage.
+      pick = vB;
+      continue;
+    }
+    const t = (lam - lamA) / (lamB - lamA);
+    pick = vA + t * (vB - vA);
+  }
+  if (pick !== null) return pick;
+  // Fallback: clamp to nearest endpoint by lambda.
+  let nearestIdx = 0;
+  let nearestDist = Infinity;
+  for (let i = 0; i < lambdas.length; i++) {
+    const lamI = lambdas[i];
+    if (lamI === undefined) continue;
+    const dist = Math.abs(lamI - lam);
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      nearestIdx = i;
+    }
+  }
+  const fallback = trace[nearestIdx];
+  return fallback === undefined ? null : fallback;
+}
+
+/**
+ * Pure helper: compute the slider's lambda range. Uses ``max_lam``
+ * for the upper bound on happy paths so the slider stops at the nose;
+ * for truncated runs ``max_lam`` is still the last computed lambda,
+ * so the same expression works.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function computeLambdaRange(
+  result: CpfResult,
+): { min: number; max: number } {
+  const lambdas = result.lambdas;
+  if (lambdas.length === 0) return { min: 0, max: 0 };
+  const min = Math.min(...lambdas);
+  // ``max_lam`` is documented as the peak lambda reached and matches
+  // the rightmost point on the curve for both happy + truncated runs.
+  const max = Math.max(result.max_lam, ...lambdas);
+  return { min, max };
+}
+
 export function CPFCurveChart({
   result: resultProp,
   className,
@@ -166,6 +280,31 @@ export function CPFCurveChart({
   );
   const [visibleBuses, setVisibleBuses] = useState<string[] | null>(null);
   const effectiveVisible = visibleBuses ?? defaultVisible;
+  const [hoveredBus, setHoveredBus] = useState<string | null>(null);
+
+  const lambdaRange = useMemo(
+    () => (result === null ? { min: 0, max: 0 } : computeLambdaRange(result)),
+    [result],
+  );
+  // Default the slider to the nose lambda when present, otherwise to
+  // the last computed lambda. We derive the *displayed* value from a
+  // user-touched override (``sliderLambdaOverride``); when null we fall
+  // back to the nose-or-max default. This avoids a setState-after-mount
+  // (which would warn about act() in tests) when a result first lands.
+  const defaultSliderLambda =
+    result === null
+      ? null
+      : result.nose_idx >= 0 && result.nose_idx < result.lambdas.length
+        ? (result.lambdas[result.nose_idx] ?? lambdaRange.max)
+        : lambdaRange.max;
+  const [sliderLambdaOverride, setSliderLambdaOverride] = useState<
+    number | null
+  >(null);
+  // ``sliderLambda`` is the value rendered + sampled. ``null`` only
+  // when there's no result; once a result is loaded it always resolves
+  // to a number.
+  const sliderLambda: number | null =
+    sliderLambdaOverride ?? defaultSliderLambda;
 
   const viewport = useMemo(
     () =>
@@ -229,6 +368,22 @@ export function CPFCurveChart({
   const noseLambda: number | null =
     noseLambdaRaw === undefined ? null : noseLambdaRaw;
 
+  // V_min at the nose: the smallest bus voltage at the nose index
+  // across *all* buses (not just visible) because the annotation
+  // describes the system-wide collapse margin, not the legend pick.
+  let noseVMin: number | null = null;
+  if (noseLambda !== null) {
+    let lo = Infinity;
+    for (const bus of result.bus_idxes) {
+      const trace = result.voltages_per_bus[bus];
+      if (!trace) continue;
+      const v = trace[result.nose_idx];
+      if (v === undefined) continue;
+      if (v < lo) lo = v;
+    }
+    noseVMin = Number.isFinite(lo) ? lo : null;
+  }
+
   const toggleBus = (bus: string) => {
     setVisibleBuses((cur) => {
       const base = cur ?? defaultVisible;
@@ -238,6 +393,31 @@ export function CPFCurveChart({
       return [...base, bus];
     });
   };
+
+  // Slider-driven readout: per-visible-bus interpolated voltage at the
+  // current slider lambda, sorted V-ascending so the most-stressed bus
+  // sits at the top.
+  const sliderClamped =
+    sliderLambda === null
+      ? lambdaRange.max
+      : Math.min(Math.max(sliderLambda, lambdaRange.min), lambdaRange.max);
+
+  const readout: { bus: string; v: number | null }[] = effectiveVisible
+    .map((bus) => ({
+      bus,
+      v: interpolateBusVoltage(result, bus, sliderClamped),
+    }))
+    .sort((a, b) => {
+      if (a.v === null && b.v === null) return 0;
+      if (a.v === null) return 1;
+      if (b.v === null) return -1;
+      return a.v - b.v;
+    });
+
+  // Slider step: aim for ~200 stops across the range so a drag feels
+  // continuous without flooding the readout with no-op re-renders.
+  const sliderSpan = Math.max(lambdaRange.max - lambdaRange.min, 1e-6);
+  const sliderStep = sliderSpan / 200;
 
   return (
     <div
@@ -359,17 +539,39 @@ export function CPFCurveChart({
             })
             .filter((p): p is string => p !== null)
             .join(' ');
+          const isHovered = hoveredBus === bus;
           return (
             <polyline
               key={bus}
               points={points}
               fill="none"
               stroke={busColor(bus, resolvedTheme)}
-              strokeWidth={1.5}
+              strokeWidth={isHovered ? STROKE_HOVERED : STROKE_DEFAULT}
               data-testid={`cpf-curve-line-${bus}`}
+              data-hovered={isHovered ? 'true' : 'false'}
+              onPointerEnter={() => setHoveredBus(bus)}
+              onPointerLeave={() =>
+                setHoveredBus((cur) => (cur === bus ? null : cur))
+              }
+              style={{ cursor: 'pointer' }}
             />
           );
         })}
+
+        {/* slider-driven vertical marker */}
+        {sliderLambda !== null ? (
+          <line
+            data-testid="cpf-lambda-marker"
+            x1={xToPx(sliderClamped)}
+            y1={PADDING_TOP}
+            x2={xToPx(sliderClamped)}
+            y2={PADDING_TOP + plotH}
+            stroke="currentColor"
+            strokeOpacity={0.45}
+            strokeWidth={1}
+            className="text-foreground"
+          />
+        ) : null}
 
         {/* nose marker */}
         {noseLambda !== null ? (
@@ -395,9 +597,117 @@ export function CPFCurveChart({
             >
               nose @ {noseLambda.toFixed(3)}
             </text>
+            {/* Detailed annotation, offset below the nose triangle so
+                it stays clear of the marker even on a narrow plot. */}
+            <text
+              data-testid="cpf-nose-label"
+              x={(() => {
+                // Anchor on the right side of the nose unless the
+                // nose is in the rightmost 30% of the plot, in which
+                // case anchor on the left to avoid clipping.
+                const px = xToPx(noseLambda);
+                return px > PADDING_LEFT + plotW * 0.7 ? px - 6 : px + 6;
+              })()}
+              y={PADDING_TOP + 22}
+              textAnchor={(() => {
+                const px = xToPx(noseLambda);
+                return px > PADDING_LEFT + plotW * 0.7 ? 'end' : 'start';
+              })()}
+              className="fill-foreground text-[9px]"
+            >
+              {`Nose: λ=${noseLambda.toFixed(2)}${
+                noseVMin !== null ? `, V_min=${noseVMin.toFixed(2)}` : ''
+              }`}
+            </text>
           </g>
         ) : null}
+
+        {/* truncated annotation on chart */}
+        {result.truncated ? (
+          <text
+            data-testid="cpf-truncated-label"
+            x={PADDING_LEFT + 6}
+            y={PADDING_TOP + 12}
+            className="fill-foreground text-[9px]"
+          >
+            {`Truncated at λ_max=${result.max_lam.toFixed(2)} (no nose found)`}
+          </text>
+        ) : null}
       </svg>
+
+      {/* lambda slider + readout (Unit 17) */}
+      {sliderLambda !== null ? (
+        <div className="border-border flex flex-col gap-1 border-t px-2 py-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground w-10 shrink-0 text-[10px]">
+              {result.mode === 'qv' ? 'Q' : 'λ'}
+            </span>
+            <input
+              type="range"
+              data-testid="cpf-lambda-slider"
+              aria-label="Sample lambda value"
+              min={lambdaRange.min}
+              max={lambdaRange.max}
+              step={sliderStep}
+              value={sliderClamped}
+              onChange={(e) => setSliderLambdaOverride(Number(e.target.value))}
+              className={cn(
+                'h-1 grow appearance-none rounded-full',
+                'bg-muted accent-[var(--color-primary)]',
+                'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+              )}
+            />
+            <span
+              data-testid="cpf-lambda-value"
+              className="text-foreground w-16 shrink-0 text-right font-mono text-[10px] tabular-nums"
+            >
+              {sliderClamped.toFixed(3)}
+            </span>
+          </div>
+          <ul
+            data-testid="cpf-lambda-readout"
+            className={cn(
+              'border-border/50 bg-muted/20 max-h-24 overflow-y-auto',
+              'rounded border px-1.5 py-1 text-[10px] leading-tight',
+              'flex flex-col gap-0.5',
+            )}
+          >
+            {readout.length === 0 ? (
+              <li className="text-muted-foreground">No visible buses.</li>
+            ) : (
+              readout.map(({ bus, v }) => (
+                <li
+                  key={bus}
+                  data-testid={`cpf-lambda-readout-row-${bus}`}
+                  data-hovered={hoveredBus === bus ? 'true' : 'false'}
+                  onPointerEnter={() => setHoveredBus(bus)}
+                  onPointerLeave={() =>
+                    setHoveredBus((cur) => (cur === bus ? null : cur))
+                  }
+                  className={cn(
+                    'flex items-center justify-between gap-2 rounded px-1 py-0.5',
+                    hoveredBus === bus
+                      ? 'bg-muted/60 text-foreground'
+                      : 'text-foreground/80',
+                  )}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      aria-hidden
+                      className="inline-block h-2 w-2 rounded-full"
+                      style={{ backgroundColor: busColor(bus, resolvedTheme) }}
+                    />
+                    <span className="font-mono">{bus}</span>
+                  </span>
+                  <span className="text-foreground font-mono tabular-nums">
+                    {v === null ? '—' : `${v.toFixed(3)} pu`}
+                  </span>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      ) : null}
 
       <div
         data-testid="cpf-curve-legend"
@@ -405,18 +715,25 @@ export function CPFCurveChart({
       >
         {result.bus_idxes.map((bus) => {
           const isVisible = effectiveVisible.includes(bus);
+          const isHovered = hoveredBus === bus;
           return (
             <button
               key={bus}
               type="button"
               data-testid={`cpf-curve-legend-${bus}`}
               data-active={isVisible ? 'true' : 'false'}
+              data-hovered={isHovered ? 'true' : 'false'}
               onClick={() => toggleBus(bus)}
+              onPointerEnter={() => setHoveredBus(bus)}
+              onPointerLeave={() =>
+                setHoveredBus((cur) => (cur === bus ? null : cur))
+              }
               className={cn(
                 'rounded border px-1.5 py-0.5 transition-colors',
                 isVisible
                   ? 'border-border bg-muted/40 text-foreground'
                   : 'border-border/40 text-muted-foreground hover:text-foreground',
+                isHovered ? 'ring-1 ring-[var(--color-ring)]' : null,
               )}
               title={isVisible ? 'Click to hide bus' : 'Click to show bus'}
             >
