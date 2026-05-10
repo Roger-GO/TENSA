@@ -1,11 +1,12 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { useAnalyzeStore } from '@/store/analyze';
 import type { SeResult } from '@/api/types';
 
 /**
  * SEResidualChart — state-estimation residual histogram for the
- * Analyze panel's SE sub-mode (Unit 13 of the v2.0 plan).
+ * Analyze panel's SE sub-mode (Unit 13 of the v2.0 plan; click-to-
+ * inspect detail panel added in Unit 18).
  *
  * Rendering choice: SVG, mirroring ``EIGScatter`` (Unit 6) and
  * ``CPFCurveChart`` (Unit 12) for visual consistency. The histogram
@@ -28,14 +29,36 @@ import type { SeResult } from '@/api/types';
  * - ``result === null`` → "Run SE to see the residual histogram."
  * - ``residuals.length === 0`` → "SE returned no residuals." (rare)
  *
+ * Detail panel (Unit 18):
+ *
+ * - Click any bar → an inline detail card appears under the chart,
+ *   listing the measurements (residual indices + values) that fall
+ *   into that bin and the bin's flag-reason ("≥3σ from estimate" for
+ *   flagged bins, "Within tolerance" for non-flagged).
+ * - The panel is local state; re-running SE clobbers ``result``
+ *   identity, which a ``useEffect`` watches to clear any open
+ *   selection so stale indices don't bleed across runs.
+ *
+ * Wire-shape limitation: the substrate's ``SeResult`` only ships the
+ * scalar residual array + the flagged-index set — it does not yet
+ * surface per-measurement metadata (type / bus_idx / sigma). The
+ * detail panel works against what is available today; richer fields
+ * will slot into the same UI when the wire shape grows.
+ *
  * Test hooks:
  *
  * - ``data-testid="se-residual-chart"`` on the outer container.
- * - ``data-testid="se-residual-bar-{i}"`` on each histogram bar.
+ * - ``data-testid="se-residual-bar-{i}"`` on each non-flagged
+ *   histogram bar.
  * - ``data-testid="se-residual-bar-flagged"`` (data attribute
  *   ``data-flagged="true"``) on bars containing flagged measurements.
+ *   Each bar additionally carries ``data-bin-idx="{i}"`` so the click
+ *   handler and tests can locate a specific flagged bin.
  * - ``data-testid="se-residual-empty"`` for the empty state.
  * - ``data-testid="se-residual-summary"`` for the converged/iter/J row.
+ * - ``data-testid="se-residual-detail-panel"`` for the click-detail
+ *   card; ``data-testid="se-residual-detail-close"`` for its close
+ *   button.
  */
 export interface SEResidualChartProps {
   /** Override for tests; usually pulled from the analyze store. */
@@ -53,11 +76,22 @@ const PADDING_TOP = 12;
 const PADDING_BOTTOM = 28;
 const DEFAULT_BIN_COUNT = 20;
 
+/** One per-bin entry produced by ``buildHistogram``. */
+export interface HistogramBin {
+  lo: number;
+  hi: number;
+  count: number;
+  flagged: boolean;
+  /** Indices into the original ``residuals`` array that fell into this bin. */
+  memberIndices: number[];
+}
+
 /**
  * Pure helper: bin the residuals into ``binCount`` equal-width bins
  * spanning ``[min(residuals), max(residuals)]``. Returns one bin entry
- * per bin with edges, count, and whether ANY residual in the bin is in
- * the flagged-indices set. Exported for tests.
+ * per bin with edges, count, the original residual indices that fell
+ * into the bin, and whether ANY residual in the bin is in the flagged-
+ * indices set. Exported for tests.
  */
 // eslint-disable-next-line react-refresh/only-export-components
 export function buildHistogram(
@@ -65,7 +99,7 @@ export function buildHistogram(
   flaggedIndices: number[],
   binCount: number,
 ): {
-  bins: { lo: number; hi: number; count: number; flagged: boolean }[];
+  bins: HistogramBin[];
   xMin: number;
   xMax: number;
   maxCount: number;
@@ -87,13 +121,14 @@ export function buildHistogram(
   }
   const flaggedSet = new Set(flaggedIndices);
   const width = (xMax - xMin) / binCount;
-  const bins: { lo: number; hi: number; count: number; flagged: boolean }[] = [];
+  const bins: HistogramBin[] = [];
   for (let i = 0; i < binCount; i++) {
     bins.push({
       lo: xMin + i * width,
       hi: xMin + (i + 1) * width,
       count: 0,
       flagged: false,
+      memberIndices: [],
     });
   }
   for (let i = 0; i < residuals.length; i++) {
@@ -103,6 +138,7 @@ export function buildHistogram(
     if (binIdx >= binCount) binIdx = binCount - 1;
     if (binIdx < 0) binIdx = 0;
     bins[binIdx]!.count += 1;
+    bins[binIdx]!.memberIndices.push(i);
     if (flaggedSet.has(i)) {
       bins[binIdx]!.flagged = true;
     }
@@ -113,6 +149,9 @@ export function buildHistogram(
   }
   return { bins, xMin, xMax, maxCount };
 }
+
+/** Cap on how many member indices we list in the detail panel. */
+const DETAIL_MEMBER_LIMIT = 12;
 
 export function SEResidualChart({
   result: resultProp,
@@ -128,6 +167,17 @@ export function SEResidualChart({
     }
     return buildHistogram(result.residuals, result.flagged_indices, binCount);
   }, [result, binCount]);
+
+  /**
+   * Locally-selected histogram bin index. ``null`` means "no
+   * selection / detail panel hidden". Reset whenever the underlying
+   * ``result`` identity changes (re-running SE produces a fresh
+   * object), so stale bin indices don't survive across runs.
+   */
+  const [selectedBinIdx, setSelectedBinIdx] = useState<number | null>(null);
+  useEffect(() => {
+    setSelectedBinIdx(null);
+  }, [result]);
 
   if (result === null) {
     return (
@@ -170,6 +220,11 @@ export function SEResidualChart({
     PADDING_LEFT + ((x - xMin) / xRange) * plotW;
   const countToPx = (c: number) =>
     PADDING_TOP + plotH - (maxCount > 0 ? (c / maxCount) * plotH : 0);
+
+  const selectedBin =
+    selectedBinIdx !== null && selectedBinIdx >= 0 && selectedBinIdx < bins.length
+      ? bins[selectedBinIdx]!
+      : null;
 
   return (
     <div
@@ -278,6 +333,10 @@ export function SEResidualChart({
           const y = countToPx(b.count);
           const w = Math.max(0, barWidth - 1);
           const h = PADDING_TOP + plotH - y;
+          const isSelected = selectedBinIdx === i;
+          // Empty bins remain non-interactive — clicking nothing surfaces
+          // nothing useful. The cursor stays default for those.
+          const interactive = b.count > 0;
           return (
             <rect
               key={`bar-${i}`}
@@ -285,20 +344,169 @@ export function SEResidualChart({
                 b.flagged ? 'se-residual-bar-flagged' : `se-residual-bar-${i}`
               }
               data-flagged={b.flagged ? 'true' : 'false'}
+              data-bin-idx={i}
+              data-selected={isSelected ? 'true' : 'false'}
               x={x}
               y={y}
               width={w}
               height={h}
               className={cn(
+                interactive ? 'cursor-pointer' : '',
                 b.flagged
                   ? 'fill-danger/70 stroke-danger'
                   : 'fill-primary/40 stroke-primary',
+                isSelected ? 'stroke-foreground' : '',
               )}
-              strokeWidth={0.5}
+              strokeWidth={isSelected ? 1.5 : 0.5}
+              onClick={
+                interactive ? () => setSelectedBinIdx(i) : undefined
+              }
             />
           );
         })}
       </svg>
+
+      {selectedBin !== null ? (
+        <SEResidualDetailPanel
+          binIdx={selectedBinIdx!}
+          bin={selectedBin}
+          residuals={result.residuals}
+          onClose={() => setSelectedBinIdx(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Inline detail card rendered beneath the chart when a histogram bin
+ * is selected. Lists the bin's range, the contained measurement
+ * indices + their residual values, and a flag-reason line.
+ *
+ * Wire-shape note: the substrate's ``SeResult`` does not yet surface
+ * per-measurement type / bus_idx / sigma — the panel works with what
+ * the result object actually carries. The flag-reason follows the
+ * plan literal:
+ *
+ * - flagged bin → ``"≥3σ from estimate"`` (substrate flags any
+ *   measurement whose ``|r_i| / sigma_i > 3``).
+ * - non-flagged bin → ``"Within tolerance"``.
+ */
+function SEResidualDetailPanel({
+  binIdx,
+  bin,
+  residuals,
+  onClose,
+}: {
+  binIdx: number;
+  bin: HistogramBin;
+  residuals: number[];
+  onClose: () => void;
+}) {
+  const flagReason = bin.flagged
+    ? '≥3σ from estimate'
+    : 'Within tolerance';
+
+  // Min/max residual within the bin — surfaced as a quick "this
+  // measurement is the worst offender" summary for flagged bins.
+  let rMin = Infinity;
+  let rMax = -Infinity;
+  for (const idx of bin.memberIndices) {
+    const r = residuals[idx];
+    if (r === undefined) continue;
+    if (r < rMin) rMin = r;
+    if (r > rMax) rMax = r;
+  }
+  const haveExtrema = bin.memberIndices.length > 0;
+
+  const visibleMembers = bin.memberIndices.slice(0, DETAIL_MEMBER_LIMIT);
+  const hiddenCount = bin.memberIndices.length - visibleMembers.length;
+
+  return (
+    <div
+      data-testid="se-residual-detail-panel"
+      className={cn(
+        'border-border bg-muted/10 border-t px-3 py-2 text-xs',
+      )}
+    >
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div>
+          <div className="text-foreground font-medium">
+            Bin #{binIdx} ·{' '}
+            <span className="text-muted-foreground font-normal">
+              residuals in [{bin.lo.toExponential(2)},{' '}
+              {bin.hi.toExponential(2)}]
+            </span>
+          </div>
+          <div
+            className={cn(
+              'mt-0.5 text-[10px]',
+              bin.flagged ? 'text-danger' : 'text-muted-foreground',
+            )}
+          >
+            {flagReason}
+          </div>
+        </div>
+        <button
+          type="button"
+          data-testid="se-residual-detail-close"
+          onClick={onClose}
+          aria-label="Close measurement detail panel"
+          className={cn(
+            'text-muted-foreground hover:text-foreground',
+            'rounded px-1 leading-none transition-colors',
+          )}
+        >
+          ×
+        </button>
+      </div>
+
+      <dl className="text-muted-foreground grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5 text-[11px]">
+        <dt>Measurements in bin</dt>
+        <dd className="text-foreground">{bin.count}</dd>
+        {haveExtrema ? (
+          <>
+            <dt>Min residual</dt>
+            <dd className="text-foreground">{rMin.toExponential(3)}</dd>
+            <dt>Max residual</dt>
+            <dd className="text-foreground">{rMax.toExponential(3)}</dd>
+          </>
+        ) : null}
+        <dt>Flag reason</dt>
+        <dd className={bin.flagged ? 'text-danger' : 'text-foreground'}>
+          {flagReason}
+        </dd>
+      </dl>
+
+      {visibleMembers.length > 0 ? (
+        <div className="mt-2">
+          <div className="text-muted-foreground mb-1 text-[10px] uppercase tracking-wide">
+            Measurement indices
+          </div>
+          <ul className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] sm:grid-cols-3">
+            {visibleMembers.map((idx) => {
+              const r = residuals[idx];
+              return (
+                <li
+                  key={idx}
+                  data-testid={`se-residual-detail-member-${idx}`}
+                  className="font-mono"
+                >
+                  <span className="text-muted-foreground">#{idx}</span>{' '}
+                  <span className="text-foreground">
+                    {r !== undefined ? r.toExponential(2) : '—'}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          {hiddenCount > 0 ? (
+            <div className="text-muted-foreground mt-1 text-[10px]">
+              + {hiddenCount} more
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
