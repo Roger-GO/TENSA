@@ -49,22 +49,27 @@ interface SummaryCardProps {
 
 function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: SummaryCardProps) {
   const stateLabel = topology?.state ?? 'pre-setup';
-  const stateBadgeClass =
-    stateLabel === 'committed'
-      ? 'bg-success/15 text-foreground border-success/30'
-      : 'bg-muted text-muted-foreground border-border';
+  // Phase-1 polish: bump the non-committed badge contrast — the previous
+  // bg-muted / muted-foreground combo washed out against the rail. Use
+  // warning-toned tints for pre-setup so the state actually catches the
+  // eye, and keep the success tint for committed. The dot adds a
+  // pre-attentive cue so the badge reads as a status, not a tag.
+  const isCommitted = stateLabel === 'committed';
+  const stateBadgeClass = isCommitted
+    ? 'bg-success/15 text-foreground border-success/40'
+    : 'bg-warning/20 text-foreground border-warning/50';
+  const stateDotClass = isCommitted ? 'bg-success' : 'bg-warning';
 
-  // Compact ghost button — the loaded-case card is information-dense; a
-  // full-width primary-style button overweights the secondary action.
+  // Outline button reads as a real secondary action, not a footnote.
   const changeCaseButton = (
     <Button
       type="button"
-      variant="ghost"
+      variant="outline"
       size="sm"
       disabled={pflowRunning}
       onClick={onChangeCase}
       aria-describedby={pflowRunning ? 'change-case-disabled-reason' : undefined}
-      className="text-muted-foreground hover:text-foreground -ml-2 self-start text-xs"
+      className="self-start text-xs"
     >
       {selection.blank ? 'Discard system' : 'Change case'}
     </Button>
@@ -73,11 +78,11 @@ function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: Summar
   const isBlank = selection.blank === true;
   return (
     <div className={cn('flex flex-col gap-3 p-3')}>
-      <div className="flex flex-col gap-2">
-        <p className="text-muted-foreground text-xs font-medium">
+      <div className="flex flex-col gap-1.5">
+        <p className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
           {isBlank ? 'New system' : 'Loaded case'}
         </p>
-        <p className="text-foreground truncate font-mono text-sm">
+        <p className="text-foreground truncate font-mono text-sm font-medium">
           {isBlank
             ? '— blank —'
             : selection.primaryPath
@@ -101,11 +106,12 @@ function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: Summar
       <div className="flex items-center gap-2">
         <span
           className={cn(
-            'inline-flex items-center gap-1 rounded-[var(--radius-sm)] border px-2 py-0.5',
+            'inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] border px-2 py-0.5',
             'font-mono text-xs',
             stateBadgeClass,
           )}
         >
+          <span aria-hidden className={cn('h-1.5 w-1.5 rounded-full', stateDotClass)} />
           {stateLabel}
         </span>
       </div>

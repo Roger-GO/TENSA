@@ -54,9 +54,14 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
       role="banner"
       aria-label="Application top bar"
       className={cn(
-        // 44px tall, full-width strip with a hairline border below
-        'flex h-11 w-full shrink-0 items-center gap-2 px-3',
-        'border-border bg-background border-b',
+        // 44px tall, full-width strip with a hairline border below.
+        // Slot-level gap is bumped to gap-3 and we render thin
+        // dividers between functional groups so the bar stops reading
+        // as a 14-button wall (Phase-1 polish).
+        'flex h-11 w-full shrink-0 items-center gap-3 px-3',
+        'border-border bg-background/95 border-b backdrop-blur-sm',
+        // soft shadow to anchor the bar against the canvas
+        'shadow-[0_1px_0_0_rgba(0,0,0,0.02),0_1px_2px_-1px_rgba(0,0,0,0.04)]',
         // ensure the focus ring of any contained interactive element
         // isn't clipped at the top
         'relative z-10',
@@ -64,14 +69,21 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
       )}
       {...props}
     >
-      <div data-slot="left" className="flex min-w-0 flex-1 items-center justify-start gap-2">
+      <div
+        data-slot="left"
+        className="flex min-w-0 flex-1 items-center justify-start gap-1"
+      >
         {left}
       </div>
-      <div data-slot="center" className="flex min-w-0 flex-1 items-center justify-center gap-2">
+      <div
+        data-slot="center"
+        className="flex min-w-0 flex-initial items-center justify-center gap-2"
+      >
         {center}
       </div>
-      <div data-slot="right" className="flex min-w-0 flex-1 items-center justify-end gap-2">
+      <div data-slot="right" className="flex min-w-0 flex-1 items-center justify-end gap-1">
         {right}
+        <span aria-hidden className="bg-border/80 mx-1 h-5 w-px" />
         <SnapshotMenu />
         <ReportDialogButton />
         <BundleExportButton />

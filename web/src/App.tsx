@@ -182,6 +182,7 @@ export function App() {
               <PmuPlacementButton />
               <ProfileImportButton />
               <SaveSystemButton />
+              <span aria-hidden className="bg-border/80 mx-1 h-5 w-px" />
               <WorkflowToolbar />
             </>
           }

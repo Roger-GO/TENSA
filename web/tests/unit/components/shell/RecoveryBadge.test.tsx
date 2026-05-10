@@ -66,8 +66,8 @@ describe('<RecoveryBadge />', () => {
     const badge = screen.getByTestId('recovery-badge-failed');
     expect(badge).toBeInTheDocument();
     expect(badge).toHaveTextContent(/Cannot reach substrate/i);
-    expect(badge.className).toMatch(/bg-destructive/);
-    expect(badge.className).toMatch(/text-destructive/);
+    expect(badge.className).toMatch(/bg-danger/);
+    expect(badge.className).toMatch(/text-danger/);
     // The Reconnecting pill is NOT rendered.
     expect(screen.queryByTestId('recovery-badge')).not.toBeInTheDocument();
   });
