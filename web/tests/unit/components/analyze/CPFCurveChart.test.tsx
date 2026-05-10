@@ -11,11 +11,13 @@
  * - computeViewport returns sane defaults on degenerate inputs.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   CPFCurveChart,
+  computeLambdaRange,
   computeViewport,
+  interpolateBusVoltage,
   pickDefaultVisibleBuses,
 } from '@/components/analyze/CPFCurveChart';
 import { DEFAULT_EIG_FILTER, useAnalyzeStore } from '@/store/analyze';
@@ -182,6 +184,181 @@ describe('pickDefaultVisibleBuses', () => {
     };
     const visible = pickDefaultVisibleBuses(result, 2);
     expect(visible).toEqual(['big', 'med']);
+  });
+});
+
+describe('<CPFCurveChart /> Unit 17 polish', () => {
+  beforeEach(() => {
+    resetAnalyzeStore();
+  });
+  afterEach(() => {
+    resetAnalyzeStore();
+  });
+
+  it('renders the nose annotation label with lambda + V_min copy', () => {
+    render(<CPFCurveChart result={PV_RESULT} />);
+    const label = screen.getByTestId('cpf-nose-label');
+    expect(label).toBeInTheDocument();
+    // PV_RESULT.lambdas[7] === 3.25; min bus voltage at idx 7 is 0.88.
+    expect(label.textContent).toMatch(/Nose:/);
+    expect(label.textContent).toMatch(/3\.25/);
+    expect(label.textContent).toMatch(/V_min=0\.88/);
+  });
+
+  it('renders the truncated annotation label with lambda_max copy', () => {
+    render(<CPFCurveChart result={TRUNCATED_RESULT} />);
+    const label = screen.getByTestId('cpf-truncated-label');
+    expect(label).toBeInTheDocument();
+    expect(label.textContent).toMatch(/Truncated/);
+    expect(label.textContent).toMatch(/0\.30/);
+    expect(label.textContent).toMatch(/no nose found/);
+    // The happy-path nose label must NOT render on a truncated curve.
+    expect(screen.queryByTestId('cpf-nose-label')).not.toBeInTheDocument();
+  });
+
+  it('renders the lambda slider + readout below the chart', () => {
+    render(<CPFCurveChart result={PV_RESULT} />);
+    const slider = screen.getByTestId('cpf-lambda-slider');
+    expect(slider).toBeInTheDocument();
+    expect(slider).toHaveAttribute('type', 'range');
+    expect(slider.getAttribute('min')).toBe('0');
+    // max should be max_lam (3.25 from PV_RESULT).
+    expect(Number(slider.getAttribute('max'))).toBeCloseTo(3.25);
+    expect(screen.getByTestId('cpf-lambda-readout')).toBeInTheDocument();
+    // Vertical marker is rendered when the slider is initialised.
+    expect(screen.getByTestId('cpf-lambda-marker')).toBeInTheDocument();
+  });
+
+  it('readout lists every visible bus sorted by V ascending', () => {
+    render(<CPFCurveChart result={PV_RESULT} />);
+    const readout = screen.getByTestId('cpf-lambda-readout');
+    const rows = Array.from(
+      readout.querySelectorAll('[data-testid^="cpf-lambda-readout-row-"]'),
+    );
+    expect(rows.length).toBe(3);
+    // Default lambda is the nose (index 7, lambda=3.25). Voltages at idx 7:
+    // bus 1 = 0.92, bus 2 = 0.88, bus 3 = 0.92. So sorted ascending: 2, then
+    // (1 or 3), then (3 or 1). The most-stressed bus must come first.
+    const firstBusIdx = rows[0]?.getAttribute('data-testid');
+    expect(firstBusIdx).toBe('cpf-lambda-readout-row-2');
+  });
+
+  it('drag slider updates the readout + vertical marker position', async () => {
+    const user = userEvent.setup();
+    render(<CPFCurveChart result={PV_RESULT} />);
+    const slider = screen.getByTestId('cpf-lambda-slider') as HTMLInputElement;
+    const before = screen.getByTestId('cpf-lambda-value').textContent;
+    // userEvent doesn't drive type=range natively; use fireEvent-style
+    // value set, which jsdom flushes through React's controlled input.
+    await user.click(slider);
+    slider.focus();
+    // Drive the slider via a direct value change. Use the React-friendly
+    // setter dance so React picks up the change synthetically.
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value',
+    )?.set;
+    act(() => {
+      setter?.call(slider, '0.5');
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const after = screen.getByTestId('cpf-lambda-value').textContent;
+    expect(after).not.toBe(before);
+    expect(after).toMatch(/0\.5/);
+  });
+
+  it('hovering a bus polyline highlights matching legend entry', async () => {
+    const user = userEvent.setup();
+    render(<CPFCurveChart result={PV_RESULT} />);
+    const line = screen.getByTestId('cpf-curve-line-2');
+    expect(line.getAttribute('data-hovered')).toBe('false');
+    await user.hover(line);
+    expect(line.getAttribute('data-hovered')).toBe('true');
+    expect(
+      screen.getByTestId('cpf-curve-legend-2').getAttribute('data-hovered'),
+    ).toBe('true');
+    await user.unhover(line);
+    expect(line.getAttribute('data-hovered')).toBe('false');
+    expect(
+      screen.getByTestId('cpf-curve-legend-2').getAttribute('data-hovered'),
+    ).toBe('false');
+  });
+
+  it('truncated CPF: slider max equals last computed lambda', () => {
+    render(<CPFCurveChart result={TRUNCATED_RESULT} />);
+    const slider = screen.getByTestId('cpf-lambda-slider');
+    // TRUNCATED_RESULT.max_lam === 0.3 and the last lambda is also 0.3.
+    expect(Number(slider.getAttribute('max'))).toBeCloseTo(0.3);
+  });
+});
+
+describe('interpolateBusVoltage', () => {
+  it('linearly interpolates between two computed points', () => {
+    // Bus 1 trace at lambdas [0.0, 0.5, 1.0, ...] is [1.06, 1.05, 1.04, ...].
+    // Sampling at lambda=0.25 -> halfway between 1.06 and 1.05 -> 1.055.
+    const v = interpolateBusVoltage(PV_RESULT, '1', 0.25);
+    expect(v).not.toBeNull();
+    expect(v).toBeCloseTo(1.055, 3);
+  });
+
+  it('returns the post-nose branch voltage when lambda exists on both branches', () => {
+    // PV_RESULT folds back: lambdas[7]=3.25, lambdas[8]=3.10.
+    // Lambda=3.10 is the last entry exactly, so interpolation should
+    // pick the rightmost matching segment which terminates at 3.10
+    // (post-nose branch).
+    const v = interpolateBusVoltage(PV_RESULT, '1', 3.1);
+    // Bus 1 voltage at idx 8 (post-nose) is 0.85.
+    expect(v).toBeCloseTo(0.85, 3);
+  });
+
+  it('returns the only voltage when the trace has length 1', () => {
+    const single: CpfResult = {
+      lambdas: [0.5],
+      voltages_per_bus: { '1': [0.99] },
+      bus_idxes: ['1'],
+      nose_idx: -1,
+      max_lam: 0.5,
+      truncated: true,
+      done_msg: '',
+      mode: 'pv',
+    };
+    expect(interpolateBusVoltage(single, '1', 0.5)).toBeCloseTo(0.99, 5);
+  });
+
+  it('returns null for an unknown bus', () => {
+    expect(interpolateBusVoltage(PV_RESULT, 'nonexistent', 1.0)).toBeNull();
+  });
+
+  it('clamps to nearest endpoint when lambda is outside the trace', () => {
+    // Bus 1 trace covers lambdas [0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.25, 3.10].
+    // Querying lambda=10 (outside) clamps to the nearest endpoint.
+    const v = interpolateBusVoltage(PV_RESULT, '1', 10.0);
+    expect(v).not.toBeNull();
+    // Nearest lambda to 10 is 3.25 (index 7) — voltage there is 0.92.
+    expect(v).toBeCloseTo(0.92, 3);
+  });
+});
+
+describe('computeLambdaRange', () => {
+  it('returns min + max from the lambdas array', () => {
+    const range = computeLambdaRange(PV_RESULT);
+    expect(range.min).toBeCloseTo(0);
+    expect(range.max).toBeCloseTo(3.25);
+  });
+
+  it('returns zero range when lambdas is empty', () => {
+    const empty: CpfResult = {
+      ...PV_RESULT,
+      lambdas: [],
+      voltages_per_bus: {},
+      bus_idxes: [],
+      nose_idx: -1,
+      max_lam: 0,
+      truncated: true,
+    };
+    const range = computeLambdaRange(empty);
+    expect(range.min).toBe(0);
+    expect(range.max).toBe(0);
   });
 });
 
