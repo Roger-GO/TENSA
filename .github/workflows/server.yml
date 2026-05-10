@@ -36,7 +36,6 @@ jobs:
       # Without this step hatchling fails with "Forced include not found".
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
           package_json_file: web/package.json
 
       - name: Set up Node 20
