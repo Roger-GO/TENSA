@@ -55,7 +55,7 @@ const STATE_CLASS: Record<RunRecord['state'], string> = {
   starting: 'bg-muted text-muted-foreground',
   streaming: 'bg-primary/15 text-foreground',
   done: 'bg-success/15 text-foreground',
-  error: 'bg-destructive/15 text-foreground',
+  error: 'bg-danger/15 text-foreground',
   aborted: 'bg-muted text-muted-foreground',
 };
 

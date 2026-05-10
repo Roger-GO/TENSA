@@ -346,7 +346,7 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
             id="tds-config-vars-error"
             role="alert"
             data-testid="error-tds-config-vars"
-            className="text-destructive text-[10px]"
+            className="text-danger text-[10px]"
           >
             {errors.vars}
           </span>
@@ -422,7 +422,7 @@ function FieldRow({ id, label, error, hint, children }: FieldRowProps) {
           id={errorId}
           role="alert"
           data-testid={`error-${id}`}
-          className="text-destructive text-[10px]"
+          className="text-danger text-[10px]"
         >
           {error}
         </span>
@@ -460,7 +460,7 @@ function NumberField({ id, label, value, onChange, error, hint, placeholder }: N
         className={cn(
           'bg-background border-border h-7 rounded border px-2 font-mono text-xs',
           'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
-          error ? 'border-destructive' : '',
+          error ? 'border-danger' : '',
         )}
       />
     </FieldRow>

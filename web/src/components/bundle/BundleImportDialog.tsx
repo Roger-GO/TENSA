@@ -238,7 +238,7 @@ function BundleImportDialogInner({ onClose }: BundleImportDialogInnerProps) {
             role="alert"
             data-testid="bundle-import-error"
             className={cn(
-              'border-destructive/30 bg-destructive/10 text-foreground',
+              'border-danger/30 bg-danger/10 text-foreground',
               'rounded-[var(--radius-sm)] border px-2 py-1.5 text-xs',
             )}
           >

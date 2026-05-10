@@ -72,13 +72,13 @@ describe('<TopBar /> — structural contract', () => {
 });
 
 describe('<TopBar /> — auto-mounted right-slot anchors', () => {
-  it('renders the dark-mode toggle placeholder at the rightmost edge', () => {
+  it('renders the theme toggle at the rightmost edge', () => {
     render(<TopBar />);
-    const placeholder = screen.getByTestId('dark-mode-toggle-placeholder');
-    expect(placeholder).toBeInTheDocument();
-    expect(placeholder).toBeEnabled();
+    const toggle = screen.getByTestId('theme-toggle');
+    expect(toggle).toBeInTheDocument();
+    expect(toggle).toBeEnabled();
     // Living in the right slot keeps it anchored to the right edge.
-    expect(screen.getByTestId('top-bar-right').contains(placeholder)).toBe(true);
+    expect(screen.getByTestId('top-bar-right').contains(toggle)).toBe(true);
   });
 
   it('renders the history drawer toggle in the right slot', () => {
@@ -91,10 +91,10 @@ describe('<TopBar /> — auto-mounted right-slot anchors', () => {
     render(<TopBar right={<button data-testid="caller-right">x</button>} />);
     const right = screen.getByTestId('top-bar-right');
     const caller = screen.getByTestId('caller-right');
-    const placeholder = screen.getByTestId('dark-mode-toggle-placeholder');
+    const toggle = screen.getByTestId('theme-toggle');
     const callerIdx = Array.from(right.children).indexOf(caller);
-    const placeholderIdx = Array.from(right.children).indexOf(placeholder);
+    const toggleIdx = Array.from(right.children).indexOf(toggle);
     expect(callerIdx).toBeGreaterThanOrEqual(0);
-    expect(placeholderIdx).toBeGreaterThan(callerIdx);
+    expect(toggleIdx).toBeGreaterThan(callerIdx);
   });
 });

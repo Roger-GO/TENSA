@@ -56,7 +56,7 @@ function pickAppearance(run: RunRecord): BadgeAppearance {
   if (run.connection === 'disconnected') {
     return {
       label: 'Disconnected',
-      tone: 'border-destructive/40 bg-destructive/10 text-foreground',
+      tone: 'border-danger/40 bg-danger/10 text-foreground',
       pulse: false,
     };
   }
@@ -64,7 +64,7 @@ function pickAppearance(run: RunRecord): BadgeAppearance {
     case 'error':
       return {
         label: 'Error',
-        tone: 'border-destructive/40 bg-destructive/10 text-foreground',
+        tone: 'border-danger/40 bg-danger/10 text-foreground',
         pulse: false,
       };
     case 'aborted':

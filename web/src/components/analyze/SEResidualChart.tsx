@@ -198,7 +198,7 @@ export function SEResidualChart({
         {result.flagged_indices.length > 0 ? (
           <>
             {' '}—{' '}
-            <span className="text-destructive font-medium">
+            <span className="text-danger font-medium">
               {result.flagged_indices.length} flagged
             </span>{' '}
             (|r| / sigma {'>'} 3)
@@ -291,7 +291,7 @@ export function SEResidualChart({
               height={h}
               className={cn(
                 b.flagged
-                  ? 'fill-destructive/70 stroke-destructive'
+                  ? 'fill-danger/70 stroke-danger'
                   : 'fill-primary/40 stroke-primary',
               )}
               strokeWidth={0.5}

@@ -108,7 +108,7 @@ export function EditMenu() {
             will be cleared. This cannot be undone.
           </DialogDescription>
           {error ? (
-            <p role="alert" className="text-destructive mt-2 text-xs" data-testid="edit-menu-reload-error">
+            <p role="alert" className="text-danger mt-2 text-xs" data-testid="edit-menu-reload-error">
               {error}
             </p>
           ) : null}

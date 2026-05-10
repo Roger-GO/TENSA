@@ -15,6 +15,7 @@ import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 import { useHotkeys } from '@/lib/useHotkeys';
 import { GlobalShortcuts } from '@/lib/useGlobalShortcuts';
+import { useTheme } from '@/lib/useTheme';
 
 /**
  * AppShell. Top-level split-pane layout per R18.
@@ -94,6 +95,14 @@ export function AppShell({
   // the SLD canvas remains usable. The user can still expand the rail/dock
   // by dragging the resize handle once they widen the window.
   const [viewportTooSmall, setViewportTooSmall] = useState<boolean>(() => getViewportTooSmall());
+
+  // Theme bridge (Unit 12). Mounts once at AppShell so the matchMedia
+  // listener that tracks `prefers-color-scheme` is single-mounted.
+  // ``useTheme`` itself does not render anything; the call here is for
+  // its effects. The inline script in ``index.html`` already applied
+  // the correct ``.dark`` class before React mounted, so the first
+  // effect run is a no-op in the steady state.
+  useTheme();
 
   // ⌘K / Ctrl+K opens the command palette (Unit 9). Per AGENTS.md
   // this is one of the rare global shortcuts that should ALSO fire

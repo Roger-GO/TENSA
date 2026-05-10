@@ -112,7 +112,7 @@ export function WorkflowToolbar({ className }: WorkflowToolbarProps) {
           <span
             role="alert"
             data-testid="workflow-error"
-            className="text-destructive ml-2 text-[10px]"
+            className="text-danger ml-2 text-[10px]"
           >
             {error}
           </span>

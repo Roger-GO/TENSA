@@ -169,7 +169,7 @@ export function ToggleSpecForm({
           }}
           className={cn(
             'bg-background border-border h-7 rounded border px-2 font-mono text-xs',
-            errors.dev_idx ? 'border-destructive' : '',
+            errors.dev_idx ? 'border-danger' : '',
           )}
           disabled={devices.length === 0}
         >
@@ -186,7 +186,7 @@ export function ToggleSpecForm({
           <span
             role="alert"
             data-testid="error-toggle-dev-idx"
-            className="text-destructive text-[10px]"
+            className="text-danger text-[10px]"
           >
             {errors.dev_idx}
           </span>
@@ -209,14 +209,14 @@ export function ToggleSpecForm({
           onChange={(e) => setT(e.target.value)}
           className={cn(
             'bg-background border-border h-7 rounded border px-2 font-mono text-xs',
-            errors.t ? 'border-destructive' : '',
+            errors.t ? 'border-danger' : '',
           )}
         />
         {errors.t ? (
           <span
             role="alert"
             data-testid="error-toggle-t"
-            className="text-destructive text-[10px]"
+            className="text-danger text-[10px]"
           >
             {errors.t}
           </span>

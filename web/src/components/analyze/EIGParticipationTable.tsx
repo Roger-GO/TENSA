@@ -100,7 +100,7 @@ export function EIGParticipationTable({
         role="alert"
         data-testid="eig-participation-table"
         className={cn(
-          'border-destructive/40 bg-destructive/10 text-destructive',
+          'border-danger/40 bg-danger/10 text-danger',
           'rounded border p-3 text-xs',
           className,
         )}

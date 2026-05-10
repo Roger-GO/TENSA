@@ -178,7 +178,7 @@ export function AlterSpecForm({
           }}
           className={cn(
             'bg-background border-border h-7 rounded border px-2 font-mono text-xs',
-            errors.dev_idx ? 'border-destructive' : '',
+            errors.dev_idx ? 'border-danger' : '',
           )}
           disabled={devices.length === 0}
         >
@@ -195,7 +195,7 @@ export function AlterSpecForm({
           <span
             role="alert"
             data-testid="error-alter-dev-idx"
-            className="text-destructive text-[10px]"
+            className="text-danger text-[10px]"
           >
             {errors.dev_idx}
           </span>
@@ -217,7 +217,7 @@ export function AlterSpecForm({
           disabled={paramsQuery.isLoading || params.length === 0}
           className={cn(
             'bg-background border-border h-7 rounded border px-2 font-mono text-xs',
-            errors.src ? 'border-destructive' : '',
+            errors.src ? 'border-danger' : '',
           )}
         >
           <option value="" disabled>
@@ -237,7 +237,7 @@ export function AlterSpecForm({
           <span
             role="alert"
             data-testid="error-alter-src"
-            className="text-destructive text-[10px]"
+            className="text-danger text-[10px]"
           >
             {errors.src}
           </span>
@@ -260,14 +260,14 @@ export function AlterSpecForm({
           onChange={(e) => setT(e.target.value)}
           className={cn(
             'bg-background border-border h-7 rounded border px-2 font-mono text-xs',
-            errors.t ? 'border-destructive' : '',
+            errors.t ? 'border-danger' : '',
           )}
         />
         {errors.t ? (
           <span
             role="alert"
             data-testid="error-alter-t"
-            className="text-destructive text-[10px]"
+            className="text-danger text-[10px]"
           >
             {errors.t}
           </span>
@@ -290,14 +290,14 @@ export function AlterSpecForm({
           onChange={(e) => setValue(e.target.value)}
           className={cn(
             'bg-background border-border h-7 rounded border px-2 font-mono text-xs',
-            errors.value ? 'border-destructive' : '',
+            errors.value ? 'border-danger' : '',
           )}
         />
         {errors.value ? (
           <span
             role="alert"
             data-testid="error-alter-value"
-            className="text-destructive text-[10px]"
+            className="text-danger text-[10px]"
           >
             {errors.value}
           </span>

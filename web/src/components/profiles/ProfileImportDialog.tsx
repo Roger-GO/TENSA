@@ -343,7 +343,7 @@ export function ProfileImportDialog({ open, onOpenChange }: ProfileImportDialogP
                 data-testid="profile-fields-input"
                 className={cn(
                   'bg-background border-border h-7 rounded border px-2 text-xs',
-                  fields.trim().length === 0 && 'border-destructive',
+                  fields.trim().length === 0 && 'border-danger',
                 )}
               />
             </div>
@@ -363,7 +363,7 @@ export function ProfileImportDialog({ open, onOpenChange }: ProfileImportDialogP
                 data-testid="profile-dests-input"
                 className={cn(
                   'bg-background border-border h-7 rounded border px-2 text-xs',
-                  dests.trim().length === 0 && 'border-destructive',
+                  dests.trim().length === 0 && 'border-danger',
                 )}
               />
             </div>
@@ -417,7 +417,7 @@ export function ProfileImportDialog({ open, onOpenChange }: ProfileImportDialogP
           <p
             role="alert"
             data-testid="profile-server-error"
-            className="text-destructive mt-2 text-xs"
+            className="text-danger mt-2 text-xs"
           >
             {serverError}
           </p>

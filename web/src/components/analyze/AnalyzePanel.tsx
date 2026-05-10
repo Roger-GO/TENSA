@@ -263,7 +263,7 @@ function AnalyzeEigSubMode() {
         <div
           role="alert"
           className={cn(
-            'border-destructive/40 bg-destructive/10 text-destructive',
+            'border-danger/40 bg-danger/10 text-danger',
             'rounded border p-3 text-xs',
           )}
         >
@@ -354,7 +354,7 @@ function AnalyzeCpfSubMode() {
         <div
           role="alert"
           className={cn(
-            'border-destructive/40 bg-destructive/10 text-destructive',
+            'border-danger/40 bg-danger/10 text-danger',
             'rounded border p-3 text-xs',
           )}
         >
@@ -491,7 +491,7 @@ function AnalyzeSeSubMode() {
         <div
           role="alert"
           className={cn(
-            'border-destructive/40 bg-destructive/10 text-destructive',
+            'border-danger/40 bg-danger/10 text-danger',
             'rounded border p-3 text-xs',
           )}
         >

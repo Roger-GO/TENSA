@@ -124,7 +124,7 @@ export function EIGDampingChart({
                   isSelected
                     ? 'fill-primary'
                     : clamped < 0
-                      ? 'fill-destructive/70'
+                      ? 'fill-danger/70'
                       : 'fill-foreground/50 hover:fill-foreground/80',
                 )}
               />

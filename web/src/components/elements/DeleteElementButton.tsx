@@ -229,7 +229,7 @@ export function DeleteElementButton({ model, idx, kind, className }: DeleteEleme
         data-testid="delete-element-button"
         className={cn(
           'inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-sm)]',
-          'text-muted-foreground hover:text-destructive hover:bg-destructive/10',
+          'text-muted-foreground hover:text-danger hover:bg-danger/10',
           'transition-colors duration-[var(--duration-fast)]',
           'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
           className,
@@ -373,7 +373,7 @@ function renderDialogBody({
       </DialogTitle>
       <DialogDescription className="mt-2">This cannot be undone.</DialogDescription>
       {mode.kind === 'error-other' ? (
-        <p role="alert" data-testid="delete-error" className="text-destructive mt-3 text-xs">
+        <p role="alert" data-testid="delete-error" className="text-danger mt-3 text-xs">
           {mode.message}
         </p>
       ) : null}

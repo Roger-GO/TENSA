@@ -255,7 +255,7 @@ function ReportTabBody({ routine, hasRun, emptyHint }: ReportTabBodyProps) {
         role="alert"
         data-testid={`report-error-${routine}`}
         className={cn(
-          'border-destructive/30 bg-destructive/10 text-foreground',
+          'border-danger/30 bg-danger/10 text-foreground',
           'rounded-[var(--radius-sm)] border px-3 py-2 text-sm',
         )}
       >

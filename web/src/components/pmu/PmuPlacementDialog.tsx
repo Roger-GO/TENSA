@@ -273,7 +273,7 @@ export function PmuPlacementDialog({ open, onOpenChange }: PmuPlacementDialogPro
               data-testid="pmu-ta-input"
               className={cn(
                 'bg-background border-border h-7 w-20 rounded border px-2 text-xs',
-                !taValid && 'border-destructive',
+                !taValid && 'border-danger',
               )}
             />
           </div>
@@ -294,7 +294,7 @@ export function PmuPlacementDialog({ open, onOpenChange }: PmuPlacementDialogPro
               data-testid="pmu-tv-input"
               className={cn(
                 'bg-background border-border h-7 w-20 rounded border px-2 text-xs',
-                !tvValid && 'border-destructive',
+                !tvValid && 'border-danger',
               )}
             />
           </div>
@@ -304,7 +304,7 @@ export function PmuPlacementDialog({ open, onOpenChange }: PmuPlacementDialogPro
           <p
             role="alert"
             data-testid="pmu-server-error"
-            className="text-destructive mt-2 text-xs"
+            className="text-danger mt-2 text-xs"
           >
             {serverError}
           </p>

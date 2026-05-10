@@ -190,7 +190,7 @@ function FieldRow({ id, label, error, children }: FieldRowProps) {
         <span
           role="alert"
           data-testid={`error-${id}`}
-          className="text-destructive text-[10px]"
+          className="text-danger text-[10px]"
         >
           {error}
         </span>
@@ -219,7 +219,7 @@ function NumberField({ id, label, value, onChange, error }: NumberFieldProps) {
         onChange={(e) => onChange(e.target.value)}
         className={cn(
           'bg-background border-border h-7 rounded border px-2 font-mono text-xs',
-          error ? 'border-destructive' : '',
+          error ? 'border-danger' : '',
         )}
       />
     </FieldRow>
