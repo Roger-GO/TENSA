@@ -70,20 +70,27 @@
 :where(.dark) {
   --color-background: oklch(0.13 0.01 270);
   --color-foreground: oklch(0.97 0 0);
-  --color-muted: oklch(0.2 0.01 270);
-  --color-muted-foreground: oklch(0.65 0.01 270);
-  --color-border: oklch(0.25 0.005 270);
-  --color-input: oklch(0.25 0.005 270);
+  --color-muted: oklch(0.22 0.01 270);
+  --color-muted-foreground: oklch(0.7 0.01 270);
+  /* Border lifted from 0.25 → 0.3 so panel/card edges and hairline
+   * dividers actually read against the 0.13 background. The previous
+   * value disappeared in the right-cluster TopBar dividers and the
+   * coach card outline. */
+  --color-border: oklch(0.3 0.008 270);
+  --color-input: oklch(0.3 0.008 270);
 
-  --color-primary: oklch(0.7 0.13 250);
-  --color-primary-foreground: oklch(0.13 0.01 270);
+  /* Primary lifted slightly + chroma tightened so on-primary text
+   * (white-on-blue Run buttons) clears WCAG AA against the lighter
+   * blue. Foreground stays near-black for filled-button text. */
+  --color-primary: oklch(0.66 0.16 250);
+  --color-primary-foreground: oklch(0.99 0 0);
 
-  --color-ring: oklch(0.7 0.1 250 / 0.55);
+  --color-ring: oklch(0.7 0.12 250 / 0.6);
 
-  --color-success: oklch(0.7 0.15 145);
+  --color-success: oklch(0.72 0.15 145);
   --color-success-foreground: oklch(0.13 0.01 270);
-  --color-warning: oklch(0.78 0.12 80);
+  --color-warning: oklch(0.8 0.13 80);
   --color-warning-foreground: oklch(0.13 0.01 270);
-  --color-danger: oklch(0.66 0.18 25);
+  --color-danger: oklch(0.7 0.18 25);
   --color-danger-foreground: oklch(0.99 0 0);
 }

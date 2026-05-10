@@ -72,7 +72,7 @@ export const EmptyState = forwardRef<HTMLDivElement, EmptyStateProps>(function E
       data-testid="empty-state"
       data-empty-state-key={emptyStateKey}
       className={cn(
-        'flex h-full w-full flex-col items-center justify-center gap-3',
+        'flex h-full w-full flex-col items-center justify-center gap-3.5',
         'p-6 text-center',
         'text-muted-foreground',
         className,
@@ -80,13 +80,13 @@ export const EmptyState = forwardRef<HTMLDivElement, EmptyStateProps>(function E
       {...props}
     >
       {icon ? (
-        <div aria-hidden="true" className="text-muted-foreground/70">
+        <div aria-hidden="true" className="text-muted-foreground/60 mb-0.5">
           {icon}
         </div>
       ) : null}
-      <p className="text-foreground text-sm font-medium">{title}</p>
+      <p className="text-foreground text-[15px] font-semibold tracking-tight">{title}</p>
       {description ? (
-        <p className="text-muted-foreground max-w-xs text-xs leading-relaxed">{description}</p>
+        <p className="text-muted-foreground max-w-xs text-[13px] leading-relaxed">{description}</p>
       ) : null}
       {action ? (
         <Button
@@ -126,7 +126,7 @@ export function FolderIcon({ className }: GlyphProps) {
       strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={cn('h-8 w-8', className)}
+      className={cn('h-10 w-10', className)}
     >
       <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
     </svg>
@@ -144,7 +144,7 @@ export function InboxIcon({ className }: GlyphProps) {
       strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={cn('h-8 w-8', className)}
+      className={cn('h-10 w-10', className)}
     >
       <path d="M22 12h-6l-2 3h-4l-2-3H2" />
       <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
@@ -163,7 +163,7 @@ export function ChartLineIcon({ className }: GlyphProps) {
       strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={cn('h-8 w-8', className)}
+      className={cn('h-10 w-10', className)}
     >
       <path d="M3 3v18h18" />
       <path d="m7 14 4-4 4 4 5-6" />
@@ -182,7 +182,7 @@ export function CursorIcon({ className }: GlyphProps) {
       strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={cn('h-8 w-8', className)}
+      className={cn('h-10 w-10', className)}
     >
       <path d="m3 3 7 19 2-8 8-2z" />
     </svg>
@@ -200,7 +200,7 @@ export function BoltIcon({ className }: GlyphProps) {
       strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={cn('h-8 w-8', className)}
+      className={cn('h-10 w-10', className)}
     >
       <path d="M13 2 3 14h7l-1 8 10-12h-7z" />
     </svg>
@@ -218,7 +218,7 @@ export function HistoryIcon({ className }: GlyphProps) {
       strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={cn('h-8 w-8', className)}
+      className={cn('h-10 w-10', className)}
     >
       <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
       <path d="M3 3v5h5" />
@@ -238,7 +238,7 @@ export function SnapshotIcon({ className }: GlyphProps) {
       strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={cn('h-8 w-8', className)}
+      className={cn('h-10 w-10', className)}
     >
       <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
       <path d="M17 21v-8H7v8" />

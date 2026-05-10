@@ -128,19 +128,23 @@ export function FirstRunCoach() {
       className={cn(
         'fixed z-40 w-72 max-w-[calc(100vw-2rem)]',
         'border-border bg-background text-foreground',
-        'flex flex-col gap-2 rounded-[var(--radius-md)] border p-3 shadow-lg',
+        // Stronger card lift so the floating coach cleanly separates
+        // from the SLD canvas underneath; ring complements shadow on
+        // both light and dark backgrounds.
+        'flex flex-col gap-2.5 rounded-[var(--radius-lg)] border p-4',
+        'shadow-xl ring-1 ring-black/5 dark:ring-white/5',
         ANCHOR_CLASS[copy.anchor],
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="flex flex-col gap-0.5">
+        <div className="flex flex-col gap-1">
           <span
             data-testid="first-run-coach-step-indicator"
-            className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase"
+            className="text-primary text-[11px] font-semibold tracking-wider uppercase"
           >
             Step {coachStep} of 3
           </span>
-          <p className="text-foreground text-sm font-semibold">{copy.title}</p>
+          <p className="text-foreground text-base font-semibold tracking-tight">{copy.title}</p>
         </div>
         <button
           type="button"
@@ -159,7 +163,7 @@ export function FirstRunCoach() {
         </button>
       </div>
 
-      <p className="text-muted-foreground text-xs leading-relaxed">{copy.body}</p>
+      <p className="text-muted-foreground text-[13px] leading-relaxed">{copy.body}</p>
 
       <div className="mt-1 flex items-center justify-between gap-2">
         <StepDots active={coachStep} />
@@ -179,14 +183,17 @@ export function FirstRunCoach() {
 
 function StepDots({ active }: { active: 1 | 2 | 3 }) {
   return (
-    <div aria-hidden="true" data-testid="first-run-coach-dots" className="flex items-center gap-1">
+    <div aria-hidden="true" data-testid="first-run-coach-dots" className="flex items-center gap-1.5">
       {[1, 2, 3].map((i) => (
         <span
           key={i}
           className={cn(
-            'h-1.5 w-1.5 rounded-full',
-            'transition-colors duration-[var(--duration-fast)]',
-            i === active ? 'bg-primary' : 'bg-muted-foreground/30',
+            'h-1.5 rounded-full',
+            'transition-all duration-[var(--duration-fast)]',
+            // Active dot stretches into a small bar so progress reads
+            // at a glance even when the row is small; inactive dots
+            // get a touch more contrast against the card background.
+            i === active ? 'bg-primary w-4' : 'bg-muted-foreground/50 w-1.5',
           )}
         />
       ))}

@@ -128,8 +128,8 @@ export function CommandPalette() {
                   data-testid="command-palette-input"
                   placeholder="Search commands…"
                   className={cn(
-                    'w-full bg-transparent px-3 py-3 text-sm',
-                    'placeholder:text-muted-foreground',
+                    'w-full bg-transparent px-3.5 py-3.5 text-sm',
+                    'placeholder:text-muted-foreground/70',
                     'focus:outline-none',
                   )}
                 />
@@ -210,10 +210,10 @@ export function CommandPalette() {
 function PaletteShortcutHint({ binding }: { binding: string }) {
   const tokens = formatShortcut(binding);
   return (
-    <span className="ml-2 flex items-center gap-0.5">
+    <span className="ml-2 flex items-center gap-1">
       {tokens.map((tok, idx) =>
         tok === 'then' ? (
-          <span key={idx} className="text-muted-foreground text-[10px] italic">
+          <span key={idx} className="text-muted-foreground/80 text-[10px]">
             then
           </span>
         ) : (
@@ -222,7 +222,7 @@ function PaletteShortcutHint({ binding }: { binding: string }) {
             className={cn(
               'inline-flex items-center justify-center min-w-[1.25rem] h-4 px-1',
               'text-[10px] font-mono rounded border',
-              'border-border bg-muted text-muted-foreground',
+              'border-border bg-muted text-foreground',
             )}
           >
             {tok}
