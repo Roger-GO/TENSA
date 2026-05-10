@@ -187,12 +187,17 @@ describe('AppShell', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Top action' }));
 
     // Unit 8 added two auto-mounted right-slot anchors after the
-    // caller-supplied content: the dark-mode placeholder (always
-    // enabled) + the history drawer toggle (disabled when no session
-    // is loaded — this AppShell test renders no providers, so the
-    // toggle is skipped in tab order). The dark-mode placeholder is
-    // therefore the only auto-mounted stop between the caller's "Top
-    // action" and the rail collapse chevron.
+    // caller-supplied content; Unit 9 inserted a third (the ⌘K
+    // command-palette hint button) between them. The DOM order in
+    // the right slot is now: caller content → command-palette-hint →
+    // dark-mode-toggle-placeholder → history-drawer-toggle. The
+    // history toggle is disabled (no session) so it's skipped in tab
+    // order, leaving the palette hint and the dark-mode placeholder
+    // as the auto-mounted stops between the caller's "Top action"
+    // and the rail collapse chevron.
+    await user.tab();
+    expect(document.activeElement?.getAttribute('data-testid')).toBe('command-palette-hint');
+
     await user.tab();
     expect(document.activeElement?.getAttribute('data-testid')).toBe(
       'dark-mode-toggle-placeholder',

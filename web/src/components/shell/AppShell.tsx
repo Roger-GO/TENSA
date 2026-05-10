@@ -6,9 +6,12 @@ import { EmptyState } from './EmptyState';
 import { LeftRail } from './LeftRail';
 import { RightDock } from './RightDock';
 import { TopBar } from './TopBar';
+import { CommandPalette } from './CommandPalette';
 import { Toaster } from '@/components/ui/Toaster';
 import { SldCanvas } from '@/components/sld/SldCanvas';
 import { useCaseStore } from '@/store/case';
+import { useCommandPaletteStore } from '@/store/commandPalette';
+import { useHotkeys } from '@/lib/useHotkeys';
 
 /**
  * AppShell. Top-level split-pane layout per R18.
@@ -88,6 +91,21 @@ export function AppShell({
   // the SLD canvas remains usable. The user can still expand the rail/dock
   // by dragging the resize handle once they widen the window.
   const [viewportTooSmall, setViewportTooSmall] = useState<boolean>(() => getViewportTooSmall());
+
+  // ⌘K / Ctrl+K opens the command palette (Unit 9). Per AGENTS.md
+  // this is one of the rare global shortcuts that should ALSO fire
+  // when an `<input>` / `<textarea>` has focus — a user typing in
+  // the snapshot-name input still wants ⌘K to summon the palette.
+  const togglePalette = useCommandPaletteStore((s) => s.togglePalette);
+  useHotkeys(
+    'meta+k, ctrl+k',
+    (event) => {
+      event.preventDefault();
+      togglePalette();
+    },
+    { enableOnFormTags: ['INPUT', 'TEXTAREA'] },
+    [togglePalette],
+  );
 
   // Default `main` slot content depends on whether a case is loaded:
   // - no case → EmptyState ("No case loaded") — directs the user to the
@@ -208,6 +226,12 @@ export function AppShell({
           toast survives the unmount of its originating component. See
           `web/src/lib/toast.ts` for the typed wrapper + policy. */}
       <Toaster />
+
+      {/* Global command palette (Unit 9 of the v2.0 polish plan).
+          Mounted once at the shell root so the ⌘K hotkey can summon
+          it from anywhere — even when the user is mid-edit in a panel
+          that would otherwise unmount during a state transition. */}
+      <CommandPalette />
     </div>
   );
 }

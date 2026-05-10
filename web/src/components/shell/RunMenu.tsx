@@ -1,112 +1,85 @@
 /**
  * RunMenu — TopBar dropdown that picks the active routine for the
- * center Run button (Unit 8 of the v2.0 polish plan).
+ * center Run button.
  *
- * The active routine is tracked in ``useRunModeStore`` (a tiny slice
- * created for this unit). Selecting an item:
+ * Unit 9 of the v2.0 polish plan refactored this file to derive its
+ * items from the shared command registry (`useCommandRegistry()`).
+ * Each `run.*` command in the registry maps to one routine entry.
  *
- * - PFlow / TDS — sets ``activeRoutine``. The existing center
- *   ``<RunButton />`` keeps its own internal PF/TDS toggle (added in
- *   v0.2 Unit 9) so the actual click target follows the routine choice
- *   for those two modes.
- * - EIG / CPF / SE — sets ``activeRoutine`` AND swaps the right-dock
- *   top region to the Analyze panel + flips its sub-mode. This is the
- *   one place these routines have a UI home today; clicking the menu
- *   item is the most direct path to "I want to run EIG".
- * - Sweep — sets ``activeRoutine`` AND opens the SweepDialog (which
- *   manages its own start flow). The dialog is mounted here so the
- *   open/close state stays local; this matches the pre-Unit-8 wiring
- *   in ``TopBar``.
+ * UX preserved from Unit 8:
  *
- * Items appear in a stable order (PFlow first by convention so a fresh
- * session lands on the most-common routine). The active item shows a
- * leading checkmark via ``checked``; the menu's docstring on
- * ``TopBarMenuItem`` covers the visual.
+ * - The active routine appears at the top of the list with a
+ *   leading checkmark glyph (rendered via `<TopBarMenuItem checked />`).
+ * - Selecting EIG / CPF / SE flips the right-dock to the Analyze
+ *   panel + sets the corresponding sub-mode. That side-effect lives
+ *   in the registry's `action` closure; the menu just calls it.
+ * - Selecting Sweep opens the SweepDialog (whose open state is local
+ *   to this component); the registry posts to the palette-dialog
+ *   bridge and the subscription below toggles the dialog.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TopBarMenu, TopBarMenuItem, TopBarMenuLabel } from './TopBarMenu';
 import { SweepDialog } from '@/components/sweep/SweepDialog';
 import { useRunModeStore } from '@/store/runMode';
-import { useAnalyzeStore } from '@/store/analyze';
-import { useUiStore } from '@/store/ui';
 import type { RunRoutine } from '@/lib/useRunReadiness';
+import { useCommandRegistry, subscribePaletteDialog } from '@/lib/commands';
 
-interface RoutineEntry {
-  id: RunRoutine;
-  label: string;
-  testIdSuffix: string;
-}
-
-const ROUTINES: readonly RoutineEntry[] = [
-  { id: 'pflow', label: 'PFlow', testIdSuffix: 'pflow' },
-  { id: 'tds', label: 'TDS', testIdSuffix: 'tds' },
-  { id: 'eig', label: 'EIG', testIdSuffix: 'eig' },
-  { id: 'cpf', label: 'CPF', testIdSuffix: 'cpf' },
-  { id: 'se', label: 'SE', testIdSuffix: 'se' },
-  { id: 'sweep', label: 'Sweep', testIdSuffix: 'sweep' },
-];
-
-/**
- * Map a Run routine to the Analyze sub-mode that hosts its result
- * view. Routines without an Analyze home (PFlow, TDS, Sweep) return
- * null and the menu item skips the right-dock swap.
- */
-function analyzeSubModeFor(routine: RunRoutine): 'eig' | 'cpf' | 'se' | null {
-  if (routine === 'eig') return 'eig';
-  if (routine === 'cpf') return 'cpf';
-  if (routine === 'se') return 'se';
-  return null;
-}
+const TESTID_SUFFIX_BY_ID: Record<string, string> = {
+  'run.pflow': 'pflow',
+  'run.tds': 'tds',
+  'run.eig': 'eig',
+  'run.cpf': 'cpf',
+  'run.se': 'se',
+  'run.sweep': 'sweep',
+};
 
 export function RunMenu() {
+  const commands = useCommandRegistry();
+  const runCommands = commands.filter((c) => c.group === 'run');
   const activeRoutine = useRunModeStore((s) => s.activeRoutine);
-  const setActiveRoutine = useRunModeStore((s) => s.setActiveRoutine);
-  const setAnalyzeSubMode = useAnalyzeStore((s) => s.setSubMode);
-  const setRightDockPanel = useUiStore((s) => s.setActiveRightDockTopPanel);
 
   const [sweepOpen, setSweepOpen] = useState(false);
 
-  const handleSelect = (routine: RunRoutine) => {
-    setActiveRoutine(routine);
-    const subMode = analyzeSubModeFor(routine);
-    if (subMode !== null) {
-      setAnalyzeSubMode(subMode);
-      setRightDockPanel('analyze');
-    }
-    if (routine === 'sweep') {
-      setSweepOpen(true);
-    }
-  };
+  useEffect(() => {
+    return subscribePaletteDialog((key) => {
+      if (key === 'sweep') setSweepOpen(true);
+    });
+  }, []);
 
-  // Reorder so the active routine appears at the top of the list, per
-  // the spec: "The currently-active routine appears at the top with a
-  // check mark." The remainder keeps its declared order.
-  const orderedRoutines = [
-    ROUTINES.find((r) => r.id === activeRoutine)!,
-    ...ROUTINES.filter((r) => r.id !== activeRoutine),
+  // Re-order so the active routine appears first (matching the Unit-8
+  // visual). The registry returns commands in declared order; we
+  // sort here without mutating the source array.
+  const orderedCommands = [
+    ...runCommands.filter((c) => routineFromId(c.id) === activeRoutine),
+    ...runCommands.filter((c) => routineFromId(c.id) !== activeRoutine),
   ];
 
   return (
     <>
       <TopBarMenu label="Run" testId="topbar-menu-run">
         <TopBarMenuLabel>Active routine</TopBarMenuLabel>
-        {orderedRoutines.map((routine, idx) => (
-          <TopBarMenuItem
-            key={routine.id}
-            testId={`topbar-menu-run-${routine.testIdSuffix}`}
-            checked={routine.id === activeRoutine}
-            onClick={() => handleSelect(routine.id)}
-            // After the active routine, insert a visual hint that the
-            // remaining items are alternatives. Implemented as data-attr
-            // rather than a dedicated separator so the keyboard nav
-            // (which only counts items) doesn't have to skip it.
-            data-routine-position={idx === 0 ? 'active' : 'alternative'}
-          >
-            Run {routine.label}
-          </TopBarMenuItem>
-        ))}
+        {orderedCommands.map((cmd, idx) => {
+          const routine = routineFromId(cmd.id);
+          const isActive = routine === activeRoutine;
+          return (
+            <TopBarMenuItem
+              key={cmd.id}
+              testId={`topbar-menu-run-${TESTID_SUFFIX_BY_ID[cmd.id] ?? routine}`}
+              checked={isActive}
+              onClick={cmd.action}
+              data-routine-position={idx === 0 ? 'active' : 'alternative'}
+            >
+              {cmd.label}
+            </TopBarMenuItem>
+          );
+        })}
       </TopBarMenu>
       <SweepDialog open={sweepOpen} onOpenChange={setSweepOpen} />
     </>
   );
+}
+
+function routineFromId(id: string): RunRoutine {
+  // Registry ids are `run.<routine>`; strip the prefix.
+  return id.replace(/^run\./, '') as RunRoutine;
 }

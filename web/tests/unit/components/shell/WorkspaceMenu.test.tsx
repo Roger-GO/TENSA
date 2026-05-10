@@ -139,17 +139,22 @@ describe('<WorkspaceMenu /> — actions', () => {
 });
 
 describe('<WorkspaceMenu /> — gating', () => {
-  it('disables edit-gated items when no topology is loaded', async () => {
+  // Unit 9 changed gating semantics: commands whose `when()` returns
+  // false are HIDDEN from the menu (and the palette) entirely instead
+  // of rendered as disabled items. The disabled-state UX is gone —
+  // see `web/src/lib/commands.ts` and the v2.0 polish plan Unit 9.
+  it('hides edit-gated items when no topology is loaded', async () => {
     MOCK_TOPOLOGY = null;
     const user = userEvent.setup();
     render(withProviders(<WorkspaceMenu />));
     await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
-    expect(await screen.findByTestId('topbar-menu-workspace-add-element')).toBeDisabled();
-    expect(screen.getByTestId('topbar-menu-workspace-add-pmu')).toBeDisabled();
-    expect(screen.getByTestId('topbar-menu-workspace-import-profile')).toBeDisabled();
+    await screen.findByTestId('topbar-menu-workspace-content');
+    expect(screen.queryByTestId('topbar-menu-workspace-add-element')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('topbar-menu-workspace-add-pmu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('topbar-menu-workspace-import-profile')).not.toBeInTheDocument();
   });
 
-  it('disables session-scoped items when no session is present', async () => {
+  it('hides session-scoped items when no session is present', async () => {
     useSessionStore.setState({
       sessionId: null,
       recoveryInProgress: false,
@@ -160,9 +165,10 @@ describe('<WorkspaceMenu /> — gating', () => {
     const user = userEvent.setup();
     render(withProviders(<WorkspaceMenu />));
     await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
-    expect(await screen.findByTestId('topbar-menu-workspace-save-snapshot')).toBeDisabled();
-    expect(screen.getByTestId('topbar-menu-workspace-load-snapshot')).toBeDisabled();
-    expect(screen.getByTestId('topbar-menu-workspace-report')).toBeDisabled();
+    await screen.findByTestId('topbar-menu-workspace-content');
+    expect(screen.queryByTestId('topbar-menu-workspace-save-snapshot')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('topbar-menu-workspace-load-snapshot')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('topbar-menu-workspace-report')).not.toBeInTheDocument();
   });
 });
 
