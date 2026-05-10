@@ -374,3 +374,278 @@ describe('cross-slice cascade — session-clear during recovery', () => {
     expect(useCaseStore.getState().selection).toBeNull();
   });
 });
+
+// ---- v0.2 polish Unit 1 — useSessionRecovery driver --------------------
+//
+// The hook is now the SINGLE caller of ``useCreateSession.mutate()`` in the
+// app. These tests exercise the auto-create + post-DELETE re-create
+// behaviours the picker and CaseNav previously each owned (and raced).
+describe('useSessionRecovery — auto-create + post-delete re-create', () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    __resetRecoveryDebounceForTests();
+    setTokenGetter(() => 'test-token');
+    useAuthStore.setState({ token: 'a'.repeat(64), persistFailed: false });
+    useSessionStore.setState({
+      sessionId: null,
+      recoveryInProgress: false,
+      recoveryFailed: false,
+      recoveryAttempts: [],
+    });
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
+      typeof vi.spyOn
+    >;
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    setTokenGetter(() => null);
+    __resetRecoveryDebounceForTests();
+    useAuthStore.setState({ token: null, persistFailed: false });
+    useSessionStore.setState({
+      sessionId: null,
+      recoveryInProgress: false,
+      recoveryFailed: false,
+      recoveryAttempts: [],
+    });
+  });
+
+  function jsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  it('fires POST /sessions on first paint when authed and no session exists', async () => {
+    let postCalls = 0;
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        postCalls += 1;
+        return Promise.resolve(jsonResponse({ session_id: 'sess-fresh', state: 'live' }, 201));
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { useSessionRecovery } = await import('@/api/useSessionRecovery');
+    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(postCalls).toBe(1);
+    });
+    await waitFor(() => {
+      expect(useSessionStore.getState().sessionId).toBe('sess-fresh');
+    });
+  });
+
+  it('auto-creates a fresh session after DELETE clears the id (post-change-case)', async () => {
+    // Pre-seed a session id to model the "case loaded" state.
+    useSessionStore.setState({ sessionId: parseSessionId('sess-old') });
+
+    let postCalls = 0;
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        postCalls += 1;
+        return Promise.resolve(jsonResponse({ session_id: 'sess-after-delete', state: 'live' }, 201));
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { useSessionRecovery } = await import('@/api/useSessionRecovery');
+    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
+
+    // Initial pre-seed: no create should fire (sessionId is non-null).
+    await new Promise((r) => setTimeout(r, 50));
+    expect(postCalls).toBe(0);
+
+    // Simulate the change-case DELETE settling: clearSession() sets
+    // sessionId to null. The driver should notice and fire ONE POST.
+    useSessionStore.getState().clearSession();
+
+    await waitFor(() => {
+      expect(postCalls).toBe(1);
+    });
+    await waitFor(() => {
+      expect(useSessionStore.getState().sessionId).toBe('sess-after-delete');
+    });
+  });
+
+  it('does not fire when recoveryFailed is pinned (terminal state)', async () => {
+    useSessionStore.setState({ recoveryFailed: true });
+    let postCalls = 0;
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        postCalls += 1;
+        return Promise.resolve(jsonResponse({ session_id: 'sess-fresh', state: 'live' }, 201));
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { useSessionRecovery } = await import('@/api/useSessionRecovery');
+    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
+
+    await new Promise((r) => setTimeout(r, 100));
+    expect(postCalls).toBe(0);
+  });
+
+  it('does not fire when no token is present (auth-fast-path race guard)', async () => {
+    useAuthStore.setState({ token: null, persistFailed: false });
+    let postCalls = 0;
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        postCalls += 1;
+        return Promise.resolve(jsonResponse({ session_id: 'sess-fresh', state: 'live' }, 201));
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { useSessionRecovery } = await import('@/api/useSessionRecovery');
+    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
+
+    await new Promise((r) => setTimeout(r, 100));
+    expect(postCalls).toBe(0);
+  });
+
+  it('re-issues loadCase against the new session id when a case was loaded pre-recovery', async () => {
+    const { useCaseStore } = await import('@/store/case');
+    const { parseWorkspacePath } = await import('@/api/types');
+    useSessionStore.setState({ sessionId: parseSessionId('sess-pre') });
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
+      topology: null,
+      layoutSidecar: null,
+    });
+
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        return Promise.resolve(jsonResponse({ session_id: 'sess-new', state: 'live' }, 201));
+      }
+      if (url.endsWith('/api/sessions/sess-new/case')) {
+        return Promise.resolve(
+          jsonResponse({
+            state: 'pre-setup',
+            buses: [],
+            lines: [],
+            transformers: [],
+            generators: [],
+            loads: [],
+          }),
+        );
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { useSessionRecovery } = await import('@/api/useSessionRecovery');
+    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
+
+    // Trigger a recovery cycle.
+    useSessionStore.getState().resetSession();
+
+    // The driver should fire the post for the new session, then re-issue
+    // loadCase against it.
+    await waitFor(() => {
+      const call = fetchSpy.mock.calls.find(([url]) => {
+        const u = typeof url === 'string' ? url : ((url as Request).url ?? String(url));
+        return u.endsWith('/api/sessions/sess-new/case');
+      });
+      expect(call).toBeDefined();
+    });
+    await waitFor(() => {
+      expect(useSessionStore.getState().recoveryInProgress).toBe(false);
+    });
+  });
+
+  it('clears recoveryInProgress on the blank-session path (no re-load)', async () => {
+    const { useCaseStore } = await import('@/store/case');
+    useSessionStore.setState({ sessionId: parseSessionId('sess-pre') });
+    useCaseStore.setState({ selection: null, topology: null, layoutSidecar: null });
+
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        return Promise.resolve(jsonResponse({ session_id: 'sess-new', state: 'live' }, 201));
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { useSessionRecovery } = await import('@/api/useSessionRecovery');
+    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
+
+    useSessionStore.getState().resetSession();
+
+    await waitFor(() => {
+      expect(useSessionStore.getState().sessionId).toBe('sess-new');
+    });
+    await waitFor(() => {
+      expect(useSessionStore.getState().recoveryInProgress).toBe(false);
+    });
+  });
+
+  it('debounces rapid create attempts to at most one per second', async () => {
+    let postCalls = 0;
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        postCalls += 1;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ type: 'about:blank', title: 'Bad gateway', status: 502, detail: null }),
+            { status: 502, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { useSessionRecovery } = await import('@/api/useSessionRecovery');
+    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
+
+    // First attempt fires + fails.
+    await waitFor(() => {
+      expect(postCalls).toBeGreaterThanOrEqual(1);
+    });
+
+    // Burst of resetSession calls within the debounce window: at most
+    // one additional create should fire.
+    const before = postCalls;
+    for (let i = 0; i < 5; i += 1) {
+      useSessionStore.getState().resetSession();
+    }
+    await new Promise((r) => setTimeout(r, 100));
+    expect(postCalls - before).toBeLessThanOrEqual(1);
+  });
+});

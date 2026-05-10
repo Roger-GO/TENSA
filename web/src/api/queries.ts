@@ -72,6 +72,7 @@ import { useAnalyzeStore } from '@/store/analyze';
 import { useConnectivityStore } from '@/store/connectivity';
 import { usePmuStore } from '@/store/pmu';
 import { useProfilesStore } from '@/store/profiles';
+import { toast } from '@/lib/toast';
 
 /**
  * Routine name accepted by ``GET /sessions/{id}/report``. Phase 1
@@ -251,6 +252,23 @@ export function handleGlobalRecoveryError(
     if (sessionState.recoveryFailed) return 'noop';
     lastRecoveryAttemptTs = now;
     sessionState.resetSession();
+    // v0.2 polish Unit 1: surface the recovery transition as a toast so
+    // the user sees what's happening when their click silently 404s and
+    // we auto-recover behind the scenes. Includes a Reload action because
+    // the underlying state may not survive the recovery (e.g., a TDS run
+    // mid-stream loses its frames; reload gets the user a clean slate).
+    // The RecoveryBadge already shows the "Reconnecting..." pill — the
+    // toast complements it by being more prominent than a corner badge
+    // for an event the user didn't initiate.
+    toast.error('Session expired — reconnecting', {
+      description: 'The substrate forgot our session. Reconnecting now.',
+      action: {
+        label: 'Reload',
+        onClick: () => {
+          window.location.reload();
+        },
+      },
+    });
     return 'session-recovery';
   }
 
