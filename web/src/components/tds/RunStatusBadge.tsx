@@ -97,7 +97,7 @@ function pickAppearance(run: RunRecord): BadgeAppearance {
 
 export function RunStatusBadge({ className }: RunStatusBadgeProps) {
   const activeRunId = useRunsStore((s) => s.activeRunId);
-  const run = useRunsStore((s) => (activeRunId === null ? null : s.runs[activeRunId] ?? null));
+  const run = useRunsStore((s) => (activeRunId === null ? null : (s.runs[activeRunId] ?? null)));
 
   if (run === null) return null;
 

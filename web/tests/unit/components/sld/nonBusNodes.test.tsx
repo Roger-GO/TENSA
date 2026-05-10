@@ -15,11 +15,7 @@ function bus(idx: number | string, name = `b${idx}`): TopologyEntry {
   return { idx, name, kind: 'Bus', params: {} };
 }
 
-function gen(
-  idx: number | string,
-  busIdx: number | string,
-  kind = 'PV',
-): TopologyEntry {
+function gen(idx: number | string, busIdx: number | string, kind = 'PV'): TopologyEntry {
   return {
     idx,
     name: `gen-${idx}`,
@@ -147,9 +143,7 @@ describe('buildGraph — non-bus nodes', () => {
   it('marks Trafo3 transformer edges with the 3w winding flag', () => {
     const topology = makeTopology({
       buses: [bus(1), bus(2)],
-      transformers: [
-        { idx: 'T3', name: 't3', kind: 'Trafo3', params: { bus1: 1, bus2: 2 } },
-      ],
+      transformers: [{ idx: 'T3', name: 't3', kind: 'Trafo3', params: { bus1: 1, bus2: 2 } }],
     });
     const { edges } = buildGraph(topology, {
       '1': { x: 0, y: 100 },
@@ -193,14 +187,8 @@ describe('buildGraph — non-bus nodes', () => {
       buses: [bus(1)],
       generators: [gen('GEN_1', 1)],
     });
-    const nonBusCoords = new Map([
-      ['PV|GEN_1', { x: 500, y: 600 }],
-    ]);
-    const { nodes } = buildGraph(
-      topology,
-      { '1': { x: 0, y: 100 } },
-      { nonBusCoords },
-    );
+    const nonBusCoords = new Map([['PV|GEN_1', { x: 500, y: 600 }]]);
+    const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } }, { nonBusCoords });
     const genNode = nodes.find((n) => n.type === 'generator');
     expect(genNode?.position).toEqual({ x: 500, y: 600 });
   });

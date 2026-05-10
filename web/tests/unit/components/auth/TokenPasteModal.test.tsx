@@ -235,9 +235,7 @@ describe('<TokenPasteModal />', () => {
     input.dispatchEvent(new Event('input', { bubbles: true }));
 
     // Submit becomes enabled (formatValid is now true).
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /Continue/i })).toBeEnabled(),
-    );
+    await waitFor(() => expect(screen.getByRole('button', { name: /Continue/i })).toBeEnabled());
   });
 
   it('does not Esc-close (the app is locked behind it)', async () => {

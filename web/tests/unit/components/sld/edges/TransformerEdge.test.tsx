@@ -210,9 +210,6 @@ describe('<TransformerEdge />', () => {
 
   it('falls back gracefully when data is undefined (default 2w winding)', () => {
     const { getByTestId } = renderEdge({ id: 'tfm-empty' });
-    expect(getByTestId('transformer-edge-icon-tfm-empty')).toHaveAttribute(
-      'data-winding',
-      '2w',
-    );
+    expect(getByTestId('transformer-edge-icon-tfm-empty')).toHaveAttribute('data-winding', '2w');
   });
 });

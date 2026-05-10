@@ -60,22 +60,13 @@ const SHORTCUT_OPTS: Options = {
  * Keep this list in sync with the `useHotkeys(...)` calls inside
  * `AppShell.tsx`.
  */
-const APPSHELL_MANAGED_BINDINGS: ReadonlySet<string> = new Set<string>([
-  'meta+k, ctrl+k',
-  '?',
-]);
+const APPSHELL_MANAGED_BINDINGS: ReadonlySet<string> = new Set<string>(['meta+k, ctrl+k', '?']);
 
 /**
  * Bridge component: each command-with-shortcut gets one of these,
  * which calls `useHotkeys` once per render.
  */
-function ShortcutBinder({
-  binding,
-  action,
-}: {
-  binding: string;
-  action: () => void;
-}) {
+function ShortcutBinder({ binding, action }: { binding: string; action: () => void }) {
   useHotkeys(
     // react-hotkeys-hook's matcher takes the comma-aliased combo
     // string verbatim (e.g., "meta+k, ctrl+k") and registers each
@@ -114,11 +105,7 @@ export function GlobalShortcuts(): ReactElement {
   return (
     <>
       {bound.map((cmd) => (
-        <ShortcutBinder
-          key={cmd.id}
-          binding={cmd.shortcut as string}
-          action={cmd.action}
-        />
+        <ShortcutBinder key={cmd.id} binding={cmd.shortcut as string} action={cmd.action} />
       ))}
     </>
   );

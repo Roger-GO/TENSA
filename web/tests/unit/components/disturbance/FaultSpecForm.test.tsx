@@ -49,10 +49,7 @@ describe('<FaultSpecForm />', () => {
     const onChange = vi.fn();
     render(
       withQueryClient(
-        <FaultSpecForm
-          spec={{ ...blankFaultSpec(), bus_idx: '1' }}
-          onChange={onChange}
-        />,
+        <FaultSpecForm spec={{ ...blankFaultSpec(), bus_idx: '1' }} onChange={onChange} />,
       ),
     );
     expect(screen.getByTestId('fault-spec-form')).toBeInTheDocument();
@@ -117,9 +114,7 @@ describe('<FaultSpecForm />', () => {
     const onChange = vi.fn((next: FaultSpec) => {
       current = next;
     });
-    render(
-      withQueryClient(<FaultSpecForm spec={current} onChange={onChange} />),
-    );
+    render(withQueryClient(<FaultSpecForm spec={current} onChange={onChange} />));
     const input = screen.getByTestId('field-fault-tf') as HTMLInputElement;
     await user.clear(input);
     await user.type(input, '2.5');

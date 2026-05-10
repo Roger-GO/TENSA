@@ -360,10 +360,7 @@ describe('SldCanvas', () => {
     // pre-seeded with a 2-island result mirroring the real
     // ``ConnectivityResult`` shape ANDES emits after a critical line
     // trip (singletons-first ordering per ``_post_process_islands``).
-    mockTopology = makeTopology(
-      [bus(1), bus(2), bus(3)],
-      [line(10, 1, 2)],
-    );
+    mockTopology = makeTopology([bus(1), bus(2), bus(3)], [line(10, 1, 2)]);
     act(() => {
       useCaseStore.setState({
         selection: {

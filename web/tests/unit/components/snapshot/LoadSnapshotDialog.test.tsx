@@ -75,9 +75,7 @@ describe('<LoadSnapshotDialog /> — empty state', () => {
     fetchSpy.mockResolvedValue(makeJsonResponse(200, { snapshots: [] }));
     render(withQueryClient(<LoadSnapshotDialog />));
     expect(await screen.findByTestId('load-snapshot-dialog')).toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.queryByTestId('load-snapshot-loading')).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByTestId('load-snapshot-loading')).toBeNull());
     expect(await screen.findByTestId('load-snapshot-empty')).toBeInTheDocument();
     expect(screen.getByTestId('load-snapshot-confirm')).toBeDisabled();
   });
@@ -163,9 +161,7 @@ describe('<LoadSnapshotDialog /> — listing + restore', () => {
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
     // Second call is the restore POST.
     const [restoreUrl, restoreInit] = fetchSpy.mock.calls[1]!;
-    expect(String(restoreUrl)).toContain(
-      '/api/sessions/test-session-id/snapshot/restore',
-    );
+    expect(String(restoreUrl)).toContain('/api/sessions/test-session-id/snapshot/restore');
     expect((restoreInit as RequestInit).method).toBe('POST');
 
     const success = await screen.findByTestId('load-snapshot-success');
@@ -248,23 +244,17 @@ describe('<LoadSnapshotDialog /> — delete', () => {
     await user.click(deleteBtn);
     // After arming the button label flips.
     await waitFor(() =>
-      expect(screen.getByTestId('load-snapshot-delete-snap-a')).toHaveTextContent(
-        /Confirm delete/,
-      ),
+      expect(screen.getByTestId('load-snapshot-delete-snap-a')).toHaveTextContent(/Confirm delete/),
     );
     await user.click(screen.getByTestId('load-snapshot-delete-snap-a'));
 
     // The DELETE call should fire — count >=2 (initial GET + DELETE).
-    await waitFor(() =>
-      expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(2),
-    );
+    await waitFor(() => expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(2));
     const deleteCall = fetchSpy.mock.calls.find((c) => {
       const init = c[1] as RequestInit | undefined;
       return init?.method === 'DELETE';
     });
     expect(deleteCall).toBeDefined();
-    expect(String(deleteCall![0])).toContain(
-      '/api/sessions/test-session-id/snapshot/snap-a',
-    );
+    expect(String(deleteCall![0])).toContain('/api/sessions/test-session-id/snapshot/snap-a');
   });
 });

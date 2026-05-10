@@ -81,8 +81,7 @@ function bucketForModel(topology: TopologySummary, model: string): TopologyEntry
   if (model === 'Line') return [...(topology.lines ?? []), ...(topology.transformers ?? [])];
   if (['PV', 'Slack', 'GENROU', 'GENCLS'].includes(model))
     return (topology.generators ?? []).filter((g) => g.kind === model);
-  if (['PQ', 'ZIP'].includes(model))
-    return (topology.loads ?? []).filter((l) => l.kind === model);
+  if (['PQ', 'ZIP'].includes(model)) return (topology.loads ?? []).filter((l) => l.kind === model);
   if (model === 'Shunt') return topology.shunts ?? [];
   return [];
 }
@@ -125,10 +124,7 @@ export function ElementForm({
     [schema.data, model],
   );
 
-  const existingIdxs = useMemo(
-    () => existingIdxSetFor(topology, model),
-    [topology, model],
-  );
+  const existingIdxs = useMemo(() => existingIdxSetFor(topology, model), [topology, model]);
 
   const seedValues = (
     metas: TopologyParamMeta[],
@@ -305,9 +301,7 @@ export function ElementForm({
               className="bg-background border-border h-7 w-32 rounded border px-2 font-mono text-xs"
             />
           )}
-          {m.unit ? (
-            <span className="text-muted-foreground text-[10px]">{m.unit}</span>
-          ) : null}
+          {m.unit ? <span className="text-muted-foreground text-[10px]">{m.unit}</span> : null}
         </span>
         {error ? (
           <span id={errorId} role="alert" className="text-danger text-[10px]">
@@ -340,9 +334,7 @@ export function ElementForm({
           <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-xs font-medium">
             Show advanced ▾
           </summary>
-          <fieldset className="mt-2 flex flex-col gap-2">
-            {optional.map(renderField)}
-          </fieldset>
+          <fieldset className="mt-2 flex flex-col gap-2">{optional.map(renderField)}</fieldset>
         </details>
       ) : null}
       {serverError ? (

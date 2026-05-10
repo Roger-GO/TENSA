@@ -57,8 +57,7 @@ export function PanelPickerTabs({ className }: PanelPickerTabsProps) {
   const activeRunState = useRunsStore((s) =>
     activeRunId === null ? null : (s.runs[activeRunId]?.state ?? null),
   );
-  const isRunning =
-    activeRunState === 'starting' || activeRunState === 'streaming';
+  const isRunning = activeRunState === 'starting' || activeRunState === 'streaming';
 
   const tabs = useMemo<TabSpec[]>(() => {
     const disturbanceDisabled = isRunning

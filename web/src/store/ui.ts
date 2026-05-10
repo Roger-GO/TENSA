@@ -24,11 +24,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
  * (eigenvalue scatter, participation table, damping bar chart for
  * EIG; the existing TdsConfigPanel for TDS; PFlow result placeholder).
  */
-export type RightDockTopPanel =
-  | 'inspector'
-  | 'disturbance'
-  | 'plot'
-  | 'analyze';
+export type RightDockTopPanel = 'inspector' | 'disturbance' | 'plot' | 'analyze';
 
 export const RIGHT_DOCK_TOP_PANELS: readonly RightDockTopPanel[] = [
   'inspector',
@@ -40,11 +36,7 @@ export const RIGHT_DOCK_TOP_PANELS: readonly RightDockTopPanel[] = [
 /** Variable group selector forwarded by ``RunStream`` to ``start_tds``. */
 export type TdsVarGroup = 'bus_v' | 'gen_state' | 'line_flow';
 
-export const TDS_VAR_GROUPS: readonly TdsVarGroup[] = [
-  'bus_v',
-  'gen_state',
-  'line_flow',
-] as const;
+export const TDS_VAR_GROUPS: readonly TdsVarGroup[] = ['bus_v', 'gen_state', 'line_flow'] as const;
 
 /**
  * TdsConfigPanel form values. Defaults match the plan ("TdsConfigPanel
@@ -160,12 +152,10 @@ export const useUiStore = create<UiState>()(
       toggleHideLabels: () => set((s) => ({ hideLabels: !s.hideLabels })),
 
       activeRightDockTopPanel: 'inspector',
-      setActiveRightDockTopPanel: (panel) =>
-        set({ activeRightDockTopPanel: panel }),
+      setActiveRightDockTopPanel: (panel) => set({ activeRightDockTopPanel: panel }),
 
       tdsConfig: { ...DEFAULT_TDS_CONFIG },
-      setTdsConfig: (next) =>
-        set((s) => ({ tdsConfig: { ...s.tdsConfig, ...next } })),
+      setTdsConfig: (next) => set((s) => ({ tdsConfig: { ...s.tdsConfig, ...next } })),
       resetTdsConfig: () => set({ tdsConfig: { ...DEFAULT_TDS_CONFIG } }),
 
       tdsIntegrator: DEFAULT_TDS_INTEGRATOR,

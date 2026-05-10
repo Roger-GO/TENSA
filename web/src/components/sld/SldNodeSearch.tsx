@@ -63,9 +63,7 @@ const MAX_VISIBLE_ROWS = 50;
 function filterEntries(entries: readonly SldSearchEntry[], query: string): SldSearchEntry[] {
   const q = query.trim().toLowerCase();
   if (!q) return entries.slice();
-  return entries.filter(
-    (e) => e.idx.toLowerCase().includes(q) || e.name.toLowerCase().includes(q),
-  );
+  return entries.filter((e) => e.idx.toLowerCase().includes(q) || e.name.toLowerCase().includes(q));
 }
 
 export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSearch(_props, ref) {
@@ -250,7 +248,7 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
                       </span>
                       <span className="text-muted-foreground flex shrink-0 items-center gap-2 font-mono">
                         <span>{entry.idx}</span>
-                        <span className="text-[10px] uppercase tracking-wider">{entry.type}</span>
+                        <span className="text-[10px] tracking-wider uppercase">{entry.type}</span>
                       </span>
                     </button>
                   </li>

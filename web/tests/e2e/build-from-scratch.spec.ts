@@ -27,11 +27,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 
-async function fillField(
-  page: Page,
-  fieldName: string,
-  value: string | number,
-): Promise<void> {
+async function fillField(page: Page, fieldName: string, value: string | number): Promise<void> {
   const field = page.getByTestId(`field-${fieldName}`);
   const input = field.locator('input').first();
   await input.fill(String(value));

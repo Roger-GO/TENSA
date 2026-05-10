@@ -27,12 +27,7 @@ import { useConnectivityStore } from '@/store/connectivity';
 import { useSldStore, __requestOpenSldSearch } from '@/store/sld';
 import { useHotkeys } from '@/lib/useHotkeys';
 import { SldNodeSearch } from './SldNodeSearch';
-import {
-  useGetSidecar,
-  usePutSidecar,
-  useCurrentTopology,
-  useConnectivity,
-} from '@/api/queries';
+import { useGetSidecar, usePutSidecar, useCurrentTopology, useConnectivity } from '@/api/queries';
 import type { TopologySummary, SidecarLayout } from '@/api/types';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { elementToPng } from '@/components/export/exportToPng';
@@ -562,10 +557,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
         // result's bus membership. (Future: extend to PV/PQ devices
         // anchored to greyed buses; deferred to v2.5.)
         const isBus = (n.type ?? 'bus') === 'bus';
-        const isDeEnergised =
-          isBus &&
-          connectivityResult !== null &&
-          !energisedBusIdxes.has(n.id);
+        const isDeEnergised = isBus && connectivityResult !== null && !energisedBusIdxes.has(n.id);
         const baseClassName = (n as { className?: string }).className ?? '';
         const className = isDeEnergised
           ? `${baseClassName} sld-bus-de-energised opacity-40 grayscale`.trim()

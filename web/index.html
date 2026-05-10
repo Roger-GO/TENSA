@@ -17,12 +17,16 @@
       (function () {
         try {
           var pref = localStorage.getItem('andes-app:theme-preference') || 'system';
-          var dark = pref === 'dark' || (pref === 'system' &&
-            window.matchMedia &&
-            window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var dark =
+            pref === 'dark' ||
+            (pref === 'system' &&
+              window.matchMedia &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
           if (dark) document.documentElement.classList.add('dark');
           else document.documentElement.classList.remove('dark');
-        } catch (e) { /* localStorage unavailable — fall through to default light */ }
+        } catch (e) {
+          /* localStorage unavailable — fall through to default light */
+        }
       })();
     </script>
     <div id="root"></div>

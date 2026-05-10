@@ -136,10 +136,7 @@ export function computeViewport(
  * what the user wants to see first.
  */
 // eslint-disable-next-line react-refresh/only-export-components
-export function pickDefaultVisibleBuses(
-  result: CpfResult,
-  maxBuses: number,
-): string[] {
+export function pickDefaultVisibleBuses(result: CpfResult, maxBuses: number): string[] {
   if (result.bus_idxes.length <= maxBuses) {
     return [...result.bus_idxes];
   }
@@ -192,11 +189,7 @@ export function busColor(bus: string, theme: ResolvedTheme = 'light'): string {
  * of segment ranges.
  */
 // eslint-disable-next-line react-refresh/only-export-components
-export function interpolateBusVoltage(
-  result: CpfResult,
-  bus: string,
-  lam: number,
-): number | null {
+export function interpolateBusVoltage(result: CpfResult, bus: string, lam: number): number | null {
   const trace = result.voltages_per_bus[bus];
   const lambdas = result.lambdas;
   if (!trace || trace.length === 0 || lambdas.length === 0) return null;
@@ -210,12 +203,7 @@ export function interpolateBusVoltage(
     const lamB = lambdas[i + 1];
     const vA = trace[i];
     const vB = trace[i + 1];
-    if (
-      lamA === undefined ||
-      lamB === undefined ||
-      vA === undefined ||
-      vB === undefined
-    ) {
+    if (lamA === undefined || lamB === undefined || vA === undefined || vB === undefined) {
       continue;
     }
     const lo = Math.min(lamA, lamB);
@@ -253,9 +241,7 @@ export function interpolateBusVoltage(
  * so the same expression works.
  */
 // eslint-disable-next-line react-refresh/only-export-components
-export function computeLambdaRange(
-  result: CpfResult,
-): { min: number; max: number } {
+export function computeLambdaRange(result: CpfResult): { min: number; max: number } {
   const lambdas = result.lambdas;
   if (lambdas.length === 0) return { min: 0, max: 0 };
   const min = Math.min(...lambdas);
@@ -297,14 +283,11 @@ export function CPFCurveChart({
       : result.nose_idx >= 0 && result.nose_idx < result.lambdas.length
         ? (result.lambdas[result.nose_idx] ?? lambdaRange.max)
         : lambdaRange.max;
-  const [sliderLambdaOverride, setSliderLambdaOverride] = useState<
-    number | null
-  >(null);
+  const [sliderLambdaOverride, setSliderLambdaOverride] = useState<number | null>(null);
   // ``sliderLambda`` is the value rendered + sampled. ``null`` only
   // when there's no result; once a result is loaded it always resolves
   // to a number.
-  const sliderLambda: number | null =
-    sliderLambdaOverride ?? defaultSliderLambda;
+  const sliderLambda: number | null = sliderLambdaOverride ?? defaultSliderLambda;
 
   const viewport = useMemo(
     () =>
@@ -339,8 +322,7 @@ export function CPFCurveChart({
           className,
         )}
       >
-        CPF returned no continuation steps.{' '}
-        {result.done_msg ? `(${result.done_msg})` : null}
+        CPF returned no continuation steps. {result.done_msg ? `(${result.done_msg})` : null}
       </div>
     );
   }
@@ -349,10 +331,8 @@ export function CPFCurveChart({
   const yRange = viewport.yMax - viewport.yMin;
   const plotW = SVG_WIDTH - PADDING_LEFT - PADDING_RIGHT;
   const plotH = SVG_HEIGHT - PADDING_TOP - PADDING_BOTTOM;
-  const xToPx = (x: number) =>
-    PADDING_LEFT + ((x - viewport.xMin) / xRange) * plotW;
-  const yToPx = (y: number) =>
-    PADDING_TOP + ((viewport.yMax - y) / yRange) * plotH;
+  const xToPx = (x: number) => PADDING_LEFT + ((x - viewport.xMin) / xRange) * plotW;
+  const yToPx = (y: number) => PADDING_TOP + ((viewport.yMax - y) / yRange) * plotH;
 
   const xAxisLabel = result.mode === 'qv' ? 'Q injection (pu)' : 'lambda (load scale)';
   const yAxisLabel = 'Bus voltage (pu)';
@@ -365,8 +345,7 @@ export function CPFCurveChart({
     result.nose_idx >= 0 && result.nose_idx < result.lambdas.length
       ? result.lambdas[result.nose_idx]
       : undefined;
-  const noseLambda: number | null =
-    noseLambdaRaw === undefined ? null : noseLambdaRaw;
+  const noseLambda: number | null = noseLambdaRaw === undefined ? null : noseLambdaRaw;
 
   // V_min at the nose: the smallest bus voltage at the nose index
   // across *all* buses (not just visible) because the annotation
@@ -423,16 +402,11 @@ export function CPFCurveChart({
     <div
       data-testid="cpf-curve"
       data-mode={result.mode}
-      className={cn(
-        'border-border bg-background flex flex-col rounded border',
-        className,
-      )}
+      className={cn('border-border bg-background flex flex-col rounded border', className)}
     >
       <div className="border-border text-muted-foreground border-b px-2 py-1 text-[10px]">
-        CPF {result.mode === 'qv' ? 'QV-curve' : 'PV-curve / nose-curve'} —{' '}
-        {result.lambdas.length} steps, max {result.mode === 'qv' ? 'Q' : 'lambda'}
-        {' '}={' '}
-        {result.max_lam.toFixed(4)}
+        CPF {result.mode === 'qv' ? 'QV-curve' : 'PV-curve / nose-curve'} — {result.lambdas.length}{' '}
+        steps, max {result.mode === 'qv' ? 'Q' : 'lambda'} = {result.max_lam.toFixed(4)}
         {!result.truncated ? null : (
           <>
             {' '}
@@ -451,9 +425,8 @@ export function CPFCurveChart({
           )}
         >
           CPF terminated before reaching a nose point.{' '}
-          {result.done_msg ? `Reason: ${result.done_msg}.` : null} The voltage-
-          collapse margin could not be determined; widen ``max_iter`` or
-          adjust ``step`` and re-run.
+          {result.done_msg ? `Reason: ${result.done_msg}.` : null} The voltage- collapse margin
+          could not be determined; widen ``max_iter`` or adjust ``step`` and re-run.
         </div>
       ) : null}
 
@@ -499,33 +472,29 @@ export function CPFCurveChart({
           {yAxisLabel}
         </text>
         {/* y-axis tick labels (min, mid, max) */}
-        {[viewport.yMin, (viewport.yMin + viewport.yMax) / 2, viewport.yMax].map(
-          (yVal) => (
-            <text
-              key={`yt-${yVal}`}
-              x={PADDING_LEFT - 4}
-              y={yToPx(yVal) + 3}
-              textAnchor="end"
-              className="fill-muted-foreground text-[8px]"
-            >
-              {yVal.toFixed(2)}
-            </text>
-          ),
-        )}
+        {[viewport.yMin, (viewport.yMin + viewport.yMax) / 2, viewport.yMax].map((yVal) => (
+          <text
+            key={`yt-${yVal}`}
+            x={PADDING_LEFT - 4}
+            y={yToPx(yVal) + 3}
+            textAnchor="end"
+            className="fill-muted-foreground text-[8px]"
+          >
+            {yVal.toFixed(2)}
+          </text>
+        ))}
         {/* x-axis tick labels (min, mid, max) */}
-        {[viewport.xMin, (viewport.xMin + viewport.xMax) / 2, viewport.xMax].map(
-          (xVal) => (
-            <text
-              key={`xt-${xVal}`}
-              x={xToPx(xVal)}
-              y={PADDING_TOP + plotH + 12}
-              textAnchor="middle"
-              className="fill-muted-foreground text-[8px]"
-            >
-              {xVal.toFixed(2)}
-            </text>
-          ),
-        )}
+        {[viewport.xMin, (viewport.xMin + viewport.xMax) / 2, viewport.xMax].map((xVal) => (
+          <text
+            key={`xt-${xVal}`}
+            x={xToPx(xVal)}
+            y={PADDING_TOP + plotH + 12}
+            textAnchor="middle"
+            className="fill-muted-foreground text-[8px]"
+          >
+            {xVal.toFixed(2)}
+          </text>
+        ))}
 
         {/* per-bus polylines */}
         {effectiveVisible.map((bus) => {
@@ -550,9 +519,7 @@ export function CPFCurveChart({
               data-testid={`cpf-curve-line-${bus}`}
               data-hovered={isHovered ? 'true' : 'false'}
               onPointerEnter={() => setHoveredBus(bus)}
-              onPointerLeave={() =>
-                setHoveredBus((cur) => (cur === bus ? null : cur))
-              }
+              onPointerLeave={() => setHoveredBus((cur) => (cur === bus ? null : cur))}
               style={{ cursor: 'pointer' }}
             />
           );
@@ -614,7 +581,7 @@ export function CPFCurveChart({
                     width={labelW}
                     height={14}
                     rx={3}
-                    className="fill-background opacity-85 stroke-border"
+                    className="fill-background stroke-border opacity-85"
                     strokeWidth={0.5}
                   />
                   <text
@@ -695,14 +662,10 @@ export function CPFCurveChart({
                   data-testid={`cpf-lambda-readout-row-${bus}`}
                   data-hovered={hoveredBus === bus ? 'true' : 'false'}
                   onPointerEnter={() => setHoveredBus(bus)}
-                  onPointerLeave={() =>
-                    setHoveredBus((cur) => (cur === bus ? null : cur))
-                  }
+                  onPointerLeave={() => setHoveredBus((cur) => (cur === bus ? null : cur))}
                   className={cn(
                     'flex items-center justify-between gap-2 rounded px-1 py-0.5',
-                    hoveredBus === bus
-                      ? 'bg-muted/60 text-foreground'
-                      : 'text-foreground/80',
+                    hoveredBus === bus ? 'bg-muted/60 text-foreground' : 'text-foreground/80',
                   )}
                 >
                   <span className="flex items-center gap-1.5">
@@ -739,9 +702,7 @@ export function CPFCurveChart({
               data-hovered={isHovered ? 'true' : 'false'}
               onClick={() => toggleBus(bus)}
               onPointerEnter={() => setHoveredBus(bus)}
-              onPointerLeave={() =>
-                setHoveredBus((cur) => (cur === bus ? null : cur))
-              }
+              onPointerLeave={() => setHoveredBus((cur) => (cur === bus ? null : cur))}
               className={cn(
                 'rounded border px-1.5 py-0.5 transition-colors',
                 isVisible

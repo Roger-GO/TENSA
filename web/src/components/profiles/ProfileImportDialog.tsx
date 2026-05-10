@@ -189,9 +189,8 @@ export function ProfileImportDialog({ open, onOpenChange }: ProfileImportDialogP
       <DialogContent data-testid="profile-import-dialog" className="max-w-xl">
         <DialogTitle>Import time-series profile</DialogTitle>
         <DialogDescription className="mt-1">
-          Upload a CSV or XLSX file with timestamp + value columns,
-          then assign it to a load or generator parameter. ANDES applies
-          the values at exact step times during TDS.
+          Upload a CSV or XLSX file with timestamp + value columns, then assign it to a load or
+          generator parameter. ANDES applies the values at exact step times during TDS.
         </DialogDescription>
 
         {/* Currently-staged list */}
@@ -207,10 +206,7 @@ export function ProfileImportDialog({ open, onOpenChange }: ProfileImportDialogP
               No profiles staged on this session yet.
             </p>
           ) : (
-            <ul
-              data-testid="profiles-staged-list"
-              className="mt-1 flex flex-col gap-1"
-            >
+            <ul data-testid="profiles-staged-list" className="mt-1 flex flex-col gap-1">
               {stagedProfiles.map((p) => {
                 const idxStr = String(p.idx);
                 const tgtModel = String(p.params?.model ?? '?');
@@ -244,10 +240,7 @@ export function ProfileImportDialog({ open, onOpenChange }: ProfileImportDialogP
 
         {/* Step 1: file upload */}
         <section className="mt-3" aria-labelledby="profile-upload-heading">
-          <h3
-            id="profile-upload-heading"
-            className="text-foreground text-xs font-medium uppercase"
-          >
+          <h3 id="profile-upload-heading" className="text-foreground text-xs font-medium uppercase">
             1. Upload profile file
           </h3>
           <input
@@ -274,10 +267,7 @@ export function ProfileImportDialog({ open, onOpenChange }: ProfileImportDialogP
 
         {/* Step 2: target assignment */}
         <section className="mt-3" aria-labelledby="profile-target-heading">
-          <h3
-            id="profile-target-heading"
-            className="text-foreground text-xs font-medium uppercase"
-          >
+          <h3 id="profile-target-heading" className="text-foreground text-xs font-medium uppercase">
             2. Target assignment
           </h3>
           <div className="mt-1 grid grid-cols-2 gap-2">
@@ -403,22 +393,15 @@ export function ProfileImportDialog({ open, onOpenChange }: ProfileImportDialogP
             </div>
           </div>
 
-          <p
-            className="text-muted-foreground mt-2 text-[11px]"
-            data-testid="profile-mode-note"
-          >
-            Mode 1 (exact-step) is the only supported mode — interpolation
-            raises NotImplementedError in ANDES (per Unit 1a spike). The
-            substrate forces mode=1 on every staging.
+          <p className="text-muted-foreground mt-2 text-[11px]" data-testid="profile-mode-note">
+            Mode 1 (exact-step) is the only supported mode — interpolation raises
+            NotImplementedError in ANDES (per Unit 1a spike). The substrate forces mode=1 on every
+            staging.
           </p>
         </section>
 
         {serverError !== null && (
-          <p
-            role="alert"
-            data-testid="profile-server-error"
-            className="text-danger mt-2 text-xs"
-          >
+          <p role="alert" data-testid="profile-server-error" className="text-danger mt-2 text-xs">
             {serverError}
           </p>
         )}

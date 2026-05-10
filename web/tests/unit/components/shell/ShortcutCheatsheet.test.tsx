@@ -93,7 +93,12 @@ beforeEach(() => {
   // also surface in the cheatsheet — keeps the row count stable
   // across runs.
   usePflowStore.setState({
-    lastRun: { converged: true, iterations: 4, max_mismatch: 1e-9, buses: [] } as unknown as PflowResult,
+    lastRun: {
+      converged: true,
+      iterations: 4,
+      max_mismatch: 1e-9,
+      buses: [],
+    } as unknown as PflowResult,
     isRunning: false,
     error: null,
   });

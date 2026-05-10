@@ -30,11 +30,7 @@ import {
 } from '@/api/queries';
 import { ProblemDetailsError, setTokenGetter } from '@/api/client';
 import { useAuthStore } from '@/store/auth';
-import {
-  useSessionStore,
-  MAX_RECOVERY_ATTEMPTS,
-  RECOVERY_WINDOW_MS,
-} from '@/store/session';
+import { useSessionStore, MAX_RECOVERY_ATTEMPTS, RECOVERY_WINDOW_MS } from '@/store/session';
 import { parseSessionId } from '@/api/types';
 import type { ProblemDetails, SessionId } from '@/api/types';
 
@@ -103,11 +99,7 @@ describe('handleGlobalRecoveryError', () => {
   });
 
   it('matches a 404 on the bare /api/sessions/{id} path (session-describe)', () => {
-    const err = new ProblemDetailsError(
-      makeProblem(404),
-      undefined,
-      '/api/sessions/sess-abc',
-    );
+    const err = new ProblemDetailsError(makeProblem(404), undefined, '/api/sessions/sess-abc');
     expect(handleGlobalRecoveryError(err)).toBe('session-recovery');
   });
 
@@ -131,8 +123,7 @@ describe('handleGlobalRecoveryError', () => {
   });
 
   it('debounces a burst of session-scoped 404s — only one recovery fires', () => {
-    const err = (path: string) =>
-      new ProblemDetailsError(makeProblem(404), undefined, path);
+    const err = (path: string) => new ProblemDetailsError(makeProblem(404), undefined, path);
 
     handleGlobalRecoveryError(err('/api/sessions/sess-abc/topology'));
     handleGlobalRecoveryError(err('/api/sessions/sess-abc/topology'));
@@ -453,7 +444,9 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
       const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
       if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
         postCalls += 1;
-        return Promise.resolve(jsonResponse({ session_id: 'sess-after-delete', state: 'live' }, 201));
+        return Promise.resolve(
+          jsonResponse({ session_id: 'sess-after-delete', state: 'live' }, 201),
+        );
       }
       return Promise.reject(new Error(`Unexpected fetch: ${url}`));
     });
@@ -619,7 +612,12 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
         postCalls += 1;
         return Promise.resolve(
           new Response(
-            JSON.stringify({ type: 'about:blank', title: 'Bad gateway', status: 502, detail: null }),
+            JSON.stringify({
+              type: 'about:blank',
+              title: 'Bad gateway',
+              status: 502,
+              detail: null,
+            }),
             { status: 502, headers: { 'Content-Type': 'application/json' } },
           ),
         );
@@ -792,9 +790,8 @@ describe('useSessionRecovery — stuck-detection + transition telemetry', () => 
     });
 
     const log: Array<{ from: string; to: string }> = [];
-    const { setRecoveryLogger, resetRecoveryLogger, useSessionRecovery } = await import(
-      '@/api/useSessionRecovery'
-    );
+    const { setRecoveryLogger, resetRecoveryLogger, useSessionRecovery } =
+      await import('@/api/useSessionRecovery');
     setRecoveryLogger(({ from, to }) => {
       log.push({ from, to });
     });
@@ -835,9 +832,8 @@ describe('useSessionRecovery — stuck-detection + transition telemetry', () => 
     });
 
     const log: Array<{ from: string; to: string }> = [];
-    const { setRecoveryLogger, resetRecoveryLogger, useSessionRecovery } = await import(
-      '@/api/useSessionRecovery'
-    );
+    const { setRecoveryLogger, resetRecoveryLogger, useSessionRecovery } =
+      await import('@/api/useSessionRecovery');
     setRecoveryLogger(({ from, to }) => {
       log.push({ from, to });
     });

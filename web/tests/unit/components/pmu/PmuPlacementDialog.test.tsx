@@ -123,9 +123,7 @@ afterEach(() => {
 
 describe('<PmuPlacementDialog />', () => {
   it('renders nothing when open=false', () => {
-    render(
-      withQueryClient(<PmuPlacementDialog open={false} onOpenChange={() => {}} />),
-    );
+    render(withQueryClient(<PmuPlacementDialog open={false} onOpenChange={() => {}} />));
     expect(screen.queryByTestId('pmu-placement-dialog')).toBeNull();
   });
 
@@ -153,9 +151,7 @@ describe('<PmuPlacementDialog />', () => {
     MOCK_LIST_RESPONSE = { pmus: [placed] };
     usePmuStore.setState({ pmus: [placed] });
     render(withQueryClient(<PmuPlacementDialog open onOpenChange={() => {}} />));
-    await waitFor(() =>
-      expect(screen.getByTestId('pmu-placed-item-PMU_1')).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByTestId('pmu-placed-item-PMU_1')).toBeInTheDocument());
     expect(screen.getByTestId('pmu-delete-PMU_1')).toBeInTheDocument();
     // The bus already has a PMU — the picker should show that hint.
     expect(screen.getByText(/already has PMU/)).toBeInTheDocument();
@@ -204,7 +200,7 @@ describe('<PmuPlacementDialog />', () => {
     await user.click(screen.getByTestId('pmu-bus-checkbox-1'));
     await user.click(screen.getByTestId('pmu-place-submit'));
     await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1));
-    expect(postSpy.mock.calls[0][1]).toEqual({ bus_idx: '1', Ta: 0.1, Tv: 0.2 });
+    expect(postSpy.mock.calls[0]![1]).toEqual({ bus_idx: '1', Ta: 0.1, Tv: 0.2 });
   });
 
   it('disables submit on an invalid Ta', async () => {
@@ -224,9 +220,7 @@ describe('<PmuPlacementDialog />', () => {
     await user.click(screen.getByTestId('pmu-bus-checkbox-1'));
     await user.click(screen.getByTestId('pmu-place-submit'));
     await waitFor(() =>
-      expect(screen.getByTestId('pmu-server-error')).toHaveTextContent(
-        /no Bus with idx=999/,
-      ),
+      expect(screen.getByTestId('pmu-server-error')).toHaveTextContent(/no Bus with idx=999/),
     );
   });
 
@@ -244,21 +238,17 @@ describe('<PmuPlacementDialog />', () => {
     MOCK_LIST_RESPONSE = { pmus: [placed] };
     usePmuStore.setState({ pmus: [placed] });
     render(withQueryClient(<PmuPlacementDialog open onOpenChange={() => {}} />));
-    await waitFor(() =>
-      expect(screen.getByTestId('pmu-delete-PMU_1')).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByTestId('pmu-delete-PMU_1')).toBeInTheDocument());
     await user.click(screen.getByTestId('pmu-delete-PMU_1'));
     await waitFor(() => expect(deleteSpy).toHaveBeenCalledTimes(1));
-    const path = deleteSpy.mock.calls[0][0];
+    const path = deleteSpy.mock.calls[0]![0];
     expect(path).toContain('/pmu/PMU_1');
   });
 
   it('cancel button calls onOpenChange(false)', async () => {
     const user = userEvent.setup();
     const onOpenChange = vi.fn();
-    render(
-      withQueryClient(<PmuPlacementDialog open onOpenChange={onOpenChange} />),
-    );
+    render(withQueryClient(<PmuPlacementDialog open onOpenChange={onOpenChange} />));
     await user.click(screen.getByTestId('pmu-cancel'));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });

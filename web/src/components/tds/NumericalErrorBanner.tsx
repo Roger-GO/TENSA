@@ -33,7 +33,7 @@ export interface NumericalErrorBannerProps {
 
 export function NumericalErrorBanner({ className }: NumericalErrorBannerProps) {
   const activeRunId = useRunsStore((s) => s.activeRunId);
-  const run = useRunsStore((s) => (activeRunId === null ? null : s.runs[activeRunId] ?? null));
+  const run = useRunsStore((s) => (activeRunId === null ? null : (s.runs[activeRunId] ?? null)));
 
   const [expanded, setExpanded] = useState(false);
   // ``dismissedRunId`` records the run we dismissed. A new run (different
@@ -47,8 +47,7 @@ export function NumericalErrorBanner({ className }: NumericalErrorBannerProps) {
   //   numerical-instability (the substrate's ``done`` has no aborted
   //   flag; the UI infers).
   const isNumericalError =
-    run.state === 'error' ||
-    (run.state === 'done' && !run.abortedLocally && run.tCurrent < run.tf);
+    run.state === 'error' || (run.state === 'done' && !run.abortedLocally && run.tCurrent < run.tf);
   if (!isNumericalError) return null;
   if (dismissedRunId === run.runId) return null;
 
@@ -62,11 +61,7 @@ export function NumericalErrorBanner({ className }: NumericalErrorBannerProps) {
       role="region"
       aria-label="TDS numerical error"
       data-testid="numerical-error-banner"
-      className={cn(
-        'border-danger/40 bg-danger/10 text-foreground',
-        'border-b',
-        className,
-      )}
+      className={cn('border-danger/40 bg-danger/10 text-foreground', 'border-b', className)}
     >
       <div className="flex items-center gap-2 px-3 py-2">
         <p className="flex-1 text-sm">

@@ -69,11 +69,7 @@ function withProviders(ui: ReactNode) {
  * rationale (the lib subscribes via `document.addEventListener` and
  * keys off `event.code`).
  */
-function pressKey(
-  key: string,
-  code: string,
-  target: EventTarget = document,
-): void {
+function pressKey(key: string, code: string, target: EventTarget = document): void {
   const event = new KeyboardEvent('keydown', {
     key,
     code,
@@ -116,7 +112,12 @@ beforeEach(() => {
   // PF converged so EIG / other PF-gated commands surface (keeps the
   // registry stable across tests).
   usePflowStore.setState({
-    lastRun: { converged: true, iterations: 4, max_mismatch: 1e-9, buses: [] } as unknown as PflowResult,
+    lastRun: {
+      converged: true,
+      iterations: 4,
+      max_mismatch: 1e-9,
+      buses: [],
+    } as unknown as PflowResult,
     isRunning: false,
     error: null,
   });

@@ -37,11 +37,7 @@ export interface NumericalErrorDetailsProps {
   className?: string;
 }
 
-export function NumericalErrorDetails({
-  run,
-  onDismiss,
-  className,
-}: NumericalErrorDetailsProps) {
+export function NumericalErrorDetails({ run, onDismiss, className }: NumericalErrorDetailsProps) {
   const [copied, setCopied] = useState(false);
 
   const onCopy = async () => {
@@ -82,8 +78,8 @@ export function NumericalErrorDetails({
     >
       <p className="text-foreground text-xs leading-relaxed">
         The TDS integration exited before reaching the requested final time. This usually means the
-        Newton iteration diverged on a per-step solve (numerical instability). The partial buffer
-        is preserved — scrub through it to inspect bus state at the moment of failure.
+        Newton iteration diverged on a per-step solve (numerical instability). The partial buffer is
+        preserved — scrub through it to inspect bus state at the moment of failure.
       </p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt className="text-muted-foreground font-mono">final_t</dt>

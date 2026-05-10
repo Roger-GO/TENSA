@@ -109,11 +109,7 @@ export function WorkflowToolbar({ className }: WorkflowToolbarProps) {
           Reload
         </Button>
         {error ? (
-          <span
-            role="alert"
-            data-testid="workflow-error"
-            className="text-danger ml-2 text-[10px]"
-          >
+          <span role="alert" data-testid="workflow-error" className="text-danger ml-2 text-[10px]">
             {error}
           </span>
         ) : null}
@@ -127,9 +123,8 @@ export function WorkflowToolbar({ className }: WorkflowToolbarProps) {
         <DialogContent>
           <DialogTitle>Reload from file?</DialogTitle>
           <DialogDescription className="mt-2">
-            Reloading will re-parse the case from disk and discard every
-            element you've added or edited since loading. Any PF results
-            will be cleared. This cannot be undone.
+            Reloading will re-parse the case from disk and discard every element you've added or
+            edited since loading. Any PF results will be cleared. This cannot be undone.
           </DialogDescription>
           <DialogFooter className="mt-4">
             <Button

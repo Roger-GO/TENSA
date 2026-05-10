@@ -50,10 +50,7 @@ export function DisturbanceTimeline({
   // bumped a disturbance time beyond the current TdsConfigPanel value.)
   const effectiveTMax = useMemo(() => {
     if (disturbances.length === 0) return tMax;
-    const maxT = disturbances.reduce(
-      (m, d) => Math.max(m, disturbanceTime(d.spec)),
-      0,
-    );
+    const maxT = disturbances.reduce((m, d) => Math.max(m, disturbanceTime(d.spec)), 0);
     return Math.max(tMax, maxT * 1.05);
   }, [disturbances, tMax]);
 
@@ -81,13 +78,13 @@ export function DisturbanceTimeline({
       data-effective-tmax={effectiveTMax}
       className={cn('flex flex-col gap-1', className)}
     >
-      <div className="text-muted-foreground flex justify-between text-[10px] font-mono">
+      <div className="text-muted-foreground flex justify-between font-mono text-[10px]">
         <span>0s</span>
         <span data-testid="disturbance-timeline-tmax">{effectiveTMax.toFixed(1)}s</span>
       </div>
       <div
         ref={containerRef}
-        className="border-border relative h-12 rounded border bg-muted/20"
+        className="border-border bg-muted/20 relative h-12 rounded border"
         data-testid="disturbance-timeline-axis"
       >
         {/* Invisible spacer so the axis has a known measurable width even

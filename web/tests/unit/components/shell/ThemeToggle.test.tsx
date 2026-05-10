@@ -90,10 +90,7 @@ describe('<ThemeToggle />', () => {
   it('exposes the current preference via data-theme-preference', () => {
     useThemeStore.setState({ themePreference: 'dark', resolvedTheme: 'dark' });
     render(<ThemeToggle />);
-    expect(screen.getByTestId('theme-toggle')).toHaveAttribute(
-      'data-theme-preference',
-      'dark',
-    );
+    expect(screen.getByTestId('theme-toggle')).toHaveAttribute('data-theme-preference', 'dark');
   });
 
   it('clicking cycles light → dark → system → light', async () => {

@@ -48,11 +48,7 @@ import type {
   ReactElement,
   ReactNode,
 } from 'react';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
 
@@ -174,9 +170,7 @@ export function TopBarMenu({
     const root = contentRef.current;
     if (!root) return;
     const items = Array.from(
-      root.querySelectorAll<HTMLElement>(
-        '[role="menuitem"]:not([data-disabled="true"])',
-      ),
+      root.querySelectorAll<HTMLElement>('[role="menuitem"]:not([data-disabled="true"])'),
     );
     if (items.length === 0) return;
     const active = document.activeElement as HTMLElement | null;
@@ -240,8 +234,10 @@ export function TopBarMenu({
 
 // ---- Menu item primitive --------------------------------------------------
 
-export interface TopBarMenuItemProps
-  extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onSelect' | 'children'> {
+export interface TopBarMenuItemProps extends Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  'onSelect' | 'children'
+> {
   /** Item label. Rendered after the optional icon. */
   children: ReactNode;
   /** Optional icon component (Lucide-shape). */
@@ -348,11 +344,7 @@ function CheckGlyph() {
  */
 export function TopBarMenuSeparator() {
   return (
-    <div
-      role="separator"
-      aria-orientation="horizontal"
-      className="bg-border/60 mx-1 my-1 h-px"
-    />
+    <div role="separator" aria-orientation="horizontal" className="bg-border/60 mx-1 my-1 h-px" />
   );
 }
 

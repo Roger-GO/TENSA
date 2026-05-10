@@ -75,10 +75,7 @@ describe('<AlterSpecForm />', () => {
   it('passes the chosen model to useAlterableParams + populates src dropdown', () => {
     render(
       withQueryClient(
-        <AlterSpecForm
-          spec={{ ...blankAlterSpec(), model: 'PQ' }}
-          onChange={() => {}}
-        />,
+        <AlterSpecForm spec={{ ...blankAlterSpec(), model: 'PQ' }} onChange={() => {}} />,
       ),
     );
     expect(useAlterableParamsMock).toHaveBeenCalledWith('PQ');
@@ -106,10 +103,7 @@ describe('<AlterSpecForm />', () => {
     MOCK_ALTER_PARAMS = { data: { model: '', params: [] }, isLoading: true };
     render(
       withQueryClient(
-        <AlterSpecForm
-          spec={{ ...blankAlterSpec(), model: 'PQ' }}
-          onChange={() => {}}
-        />,
+        <AlterSpecForm spec={{ ...blankAlterSpec(), model: 'PQ' }} onChange={() => {}} />,
       ),
     );
     const src = screen.getByTestId('alter-src') as HTMLSelectElement;
@@ -120,10 +114,7 @@ describe('<AlterSpecForm />', () => {
   it('exposes Unit 8 dynamic models (IEEEX1, ESDC2A, IEEEG1, TGOV1, IEEEST, SEXS, REGCA1) in the model picker', () => {
     render(
       withQueryClient(
-        <AlterSpecForm
-          spec={{ ...blankAlterSpec(), model: 'PQ' }}
-          onChange={() => {}}
-        />,
+        <AlterSpecForm spec={{ ...blankAlterSpec(), model: 'PQ' }} onChange={() => {}} />,
       ),
     );
     const select = screen.getByTestId('alter-model') as HTMLSelectElement;
@@ -168,10 +159,7 @@ describe('<AlterSpecForm />', () => {
     };
     render(
       withQueryClient(
-        <AlterSpecForm
-          spec={{ ...blankAlterSpec(), model: 'IEEEG1' }}
-          onChange={() => {}}
-        />,
+        <AlterSpecForm spec={{ ...blankAlterSpec(), model: 'IEEEG1' }} onChange={() => {}} />,
       ),
     );
     const dev = screen.getByTestId('alter-dev-idx') as HTMLSelectElement;
@@ -185,16 +173,11 @@ describe('<AlterSpecForm />', () => {
   it('Unit 8.1: REGCA1 device picker pulls REGCA1 entries from the controllers bucket', () => {
     MOCK_TOPOLOGY = {
       ...(MOCK_TOPOLOGY as TopologySummary),
-      controllers: [
-        { idx: 'REGCA_1', name: 'REGCA1_1', kind: 'REGCA1', params: {} },
-      ],
+      controllers: [{ idx: 'REGCA_1', name: 'REGCA1_1', kind: 'REGCA1', params: {} }],
     };
     render(
       withQueryClient(
-        <AlterSpecForm
-          spec={{ ...blankAlterSpec(), model: 'REGCA1' }}
-          onChange={() => {}}
-        />,
+        <AlterSpecForm spec={{ ...blankAlterSpec(), model: 'REGCA1' }} onChange={() => {}} />,
       ),
     );
     const dev = screen.getByTestId('alter-dev-idx') as HTMLSelectElement;

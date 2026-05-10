@@ -140,30 +140,21 @@ describe('<SweepDialog /> — confirm flow', () => {
           ],
         }),
       )
-      .mockResolvedValueOnce(
-        makeJsonResponse(202, { sweep_id: 'sweep-xyz', total: 5 }),
-      );
+      .mockResolvedValueOnce(makeJsonResponse(202, { sweep_id: 'sweep-xyz', total: 5 }));
 
     const onOpenChange = vi.fn();
     render(withQueryClient(<SweepDialog open onOpenChange={onOpenChange} />));
 
     // Wait for the snapshots query to populate the dropdown.
     await waitFor(() =>
-      expect(
-        screen.getByTestId('sweep-dialog-snapshot').children.length,
-      ).toBeGreaterThan(1),
+      expect(screen.getByTestId('sweep-dialog-snapshot').children.length).toBeGreaterThan(1),
     );
 
     // Pick the snapshot.
-    await user.selectOptions(
-      screen.getByTestId('sweep-dialog-snapshot'),
-      'snap-A',
-    );
+    await user.selectOptions(screen.getByTestId('sweep-dialog-snapshot'), 'snap-A');
 
     // Confirm should be enabled now.
-    await waitFor(() =>
-      expect(screen.getByTestId('sweep-dialog-confirm')).toBeEnabled(),
-    );
+    await waitFor(() => expect(screen.getByTestId('sweep-dialog-confirm')).toBeEnabled());
 
     await user.click(screen.getByTestId('sweep-dialog-confirm'));
 
@@ -208,17 +199,10 @@ describe('<SweepDialog /> — confirm flow', () => {
 
     render(withQueryClient(<SweepDialog open onOpenChange={() => {}} />));
     await waitFor(() =>
-      expect(
-        screen.getByTestId('sweep-dialog-snapshot').children.length,
-      ).toBeGreaterThan(1),
+      expect(screen.getByTestId('sweep-dialog-snapshot').children.length).toBeGreaterThan(1),
     );
-    await user.selectOptions(
-      screen.getByTestId('sweep-dialog-snapshot'),
-      'snap-A',
-    );
-    await waitFor(() =>
-      expect(screen.getByTestId('sweep-dialog-confirm')).toBeEnabled(),
-    );
+    await user.selectOptions(screen.getByTestId('sweep-dialog-snapshot'), 'snap-A');
+    await waitFor(() => expect(screen.getByTestId('sweep-dialog-confirm')).toBeEnabled());
     await user.click(screen.getByTestId('sweep-dialog-confirm'));
 
     expect(await screen.findByTestId('sweep-dialog-error')).toHaveTextContent(
@@ -273,14 +257,9 @@ describe('<SweepDialog /> — Run-readiness gates (v2.0 polish, Unit 4)', () => 
     );
     render(withQueryClient(<SweepDialog open onOpenChange={() => {}} />));
     await waitFor(() =>
-      expect(
-        screen.getByTestId('sweep-dialog-snapshot').children.length,
-      ).toBeGreaterThan(1),
+      expect(screen.getByTestId('sweep-dialog-snapshot').children.length).toBeGreaterThan(1),
     );
-    await user.selectOptions(
-      screen.getByTestId('sweep-dialog-snapshot'),
-      'snap-A',
-    );
+    await user.selectOptions(screen.getByTestId('sweep-dialog-snapshot'), 'snap-A');
 
     const confirm = screen.getByTestId('sweep-dialog-confirm');
     expect(confirm).toBeDisabled();
@@ -325,21 +304,14 @@ describe('<SweepDialog /> — Run-readiness gates (v2.0 polish, Unit 4)', () => 
     );
     render(withQueryClient(<SweepDialog open onOpenChange={() => {}} />));
     await waitFor(() =>
-      expect(
-        screen.getByTestId('sweep-dialog-snapshot').children.length,
-      ).toBeGreaterThan(1),
+      expect(screen.getByTestId('sweep-dialog-snapshot').children.length).toBeGreaterThan(1),
     );
-    await user.selectOptions(
-      screen.getByTestId('sweep-dialog-snapshot'),
-      'snap-A',
-    );
+    await user.selectOptions(screen.getByTestId('sweep-dialog-snapshot'), 'snap-A');
 
     const confirm = screen.getByTestId('sweep-dialog-confirm');
     expect(confirm).toBeDisabled();
     await user.hover(confirm.parentElement!);
-    const matches = await screen.findAllByText(
-      /Sweep sweep-already in progress/i,
-    );
+    const matches = await screen.findAllByText(/Sweep sweep-already in progress/i);
     expect(matches.length).toBeGreaterThan(0);
   });
 });

@@ -78,9 +78,7 @@ describe('disturbance store — happy paths', () => {
   it('updateDisturbance with unknown id is a no-op', () => {
     useDisturbanceStore.getState().addDisturbance(blankFaultSpec());
     useDisturbanceStore.getState().markCommitted();
-    useDisturbanceStore
-      .getState()
-      .updateDisturbance('does-not-exist', blankToggleSpec());
+    useDisturbanceStore.getState().updateDisturbance('does-not-exist', blankToggleSpec());
     expect(useDisturbanceStore.getState().dirty).toBe(false);
     expect(useDisturbanceStore.getState().committed).toBe(true);
   });
@@ -194,15 +192,11 @@ describe('disturbance helpers — disturbanceTime + summary', () => {
 
 describe('sortedDisturbances — time order with insertion-order tie-break', () => {
   it('sorts by spec.t / spec.tf ascending', () => {
-    const a = useDisturbanceStore
-      .getState()
-      .addDisturbance({ ...blankToggleSpec(), t: 5.0 });
+    const a = useDisturbanceStore.getState().addDisturbance({ ...blankToggleSpec(), t: 5.0 });
     const b = useDisturbanceStore
       .getState()
       .addDisturbance({ ...blankFaultSpec(), tf: 1.0, tc: 1.1 });
-    const c = useDisturbanceStore
-      .getState()
-      .addDisturbance({ ...blankAlterSpec(), t: 2.5 });
+    const c = useDisturbanceStore.getState().addDisturbance({ ...blankAlterSpec(), t: 2.5 });
     const sorted = sortedDisturbances(useDisturbanceStore.getState().disturbances);
     expect(sorted.map((d) => d.id)).toEqual([b.id, c.id, a.id]);
   });
@@ -211,12 +205,8 @@ describe('sortedDisturbances — time order with insertion-order tie-break', () 
     const first = useDisturbanceStore
       .getState()
       .addDisturbance({ ...blankFaultSpec(), tf: 1.0, tc: 1.1 });
-    const second = useDisturbanceStore
-      .getState()
-      .addDisturbance({ ...blankToggleSpec(), t: 1.0 });
-    const third = useDisturbanceStore
-      .getState()
-      .addDisturbance({ ...blankAlterSpec(), t: 1.0 });
+    const second = useDisturbanceStore.getState().addDisturbance({ ...blankToggleSpec(), t: 1.0 });
+    const third = useDisturbanceStore.getState().addDisturbance({ ...blankAlterSpec(), t: 1.0 });
     const sorted = sortedDisturbances(useDisturbanceStore.getState().disturbances);
     expect(sorted.map((d) => d.id)).toEqual([first.id, second.id, third.id]);
   });

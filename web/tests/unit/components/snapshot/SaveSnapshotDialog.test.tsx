@@ -78,19 +78,14 @@ describe('<SaveSnapshotDialog /> — name validation', () => {
     const user = userEvent.setup();
     render(withQueryClient(<SaveSnapshotDialog />));
     await user.type(screen.getByTestId('save-snapshot-name-input'), '../bad');
-    expect(
-      await screen.findByTestId('save-snapshot-validation-error'),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId('save-snapshot-validation-error')).toBeInTheDocument();
     expect(screen.getByTestId('save-snapshot-confirm')).toBeDisabled();
   });
 
   it('enables confirm for a valid name', async () => {
     const user = userEvent.setup();
     render(withQueryClient(<SaveSnapshotDialog />));
-    await user.type(
-      screen.getByTestId('save-snapshot-name-input'),
-      'scenario-A',
-    );
+    await user.type(screen.getByTestId('save-snapshot-name-input'), 'scenario-A');
     expect(screen.getByTestId('save-snapshot-confirm')).toBeEnabled();
   });
 });
@@ -116,40 +111,26 @@ describe('<SaveSnapshotDialog /> — confirm flow', () => {
       }),
     );
     render(withQueryClient(<SaveSnapshotDialog />));
-    await user.type(
-      screen.getByTestId('save-snapshot-name-input'),
-      'scenario-A',
-    );
+    await user.type(screen.getByTestId('save-snapshot-name-input'), 'scenario-A');
     await user.click(screen.getByTestId('save-snapshot-confirm'));
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
     const [url, init] = fetchSpy.mock.calls[0]!;
     expect(String(url)).toContain('/api/sessions/test-session-id/snapshot');
     expect((init as RequestInit).method).toBe('POST');
-    await waitFor(() =>
-      expect(useSnapshotStore.getState().saveStatus).toBe('success'),
-    );
+    await waitFor(() => expect(useSnapshotStore.getState().saveStatus).toBe('success'));
   });
 
   it('409 collision surfaces an inline overwrite confirm', async () => {
     const user = userEvent.setup();
-    fetchSpy.mockResolvedValueOnce(
-      makeProblemResponse(409, 'snapshot already exists'),
-    );
+    fetchSpy.mockResolvedValueOnce(makeProblemResponse(409, 'snapshot already exists'));
     render(withQueryClient(<SaveSnapshotDialog />));
-    await user.type(
-      screen.getByTestId('save-snapshot-name-input'),
-      'scenario-A',
-    );
+    await user.type(screen.getByTestId('save-snapshot-name-input'), 'scenario-A');
     await user.click(screen.getByTestId('save-snapshot-confirm'));
 
-    expect(
-      await screen.findByTestId('save-snapshot-collision'),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId('save-snapshot-collision')).toBeInTheDocument();
     // Now an Overwrite button is visible; the original Save confirm is gone.
     expect(screen.queryByTestId('save-snapshot-confirm')).toBeNull();
-    expect(
-      screen.getByTestId('save-snapshot-confirm-overwrite'),
-    ).toBeEnabled();
+    expect(screen.getByTestId('save-snapshot-confirm-overwrite')).toBeEnabled();
 
     // Second click → re-issue with force=true.
     fetchSpy.mockResolvedValueOnce(
@@ -171,9 +152,7 @@ describe('<SaveSnapshotDialog /> — confirm flow', () => {
     );
     await user.click(screen.getByTestId('save-snapshot-confirm-overwrite'));
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
-    const secondCallBody = JSON.parse(
-      String((fetchSpy.mock.calls[1]![1] as RequestInit).body),
-    );
+    const secondCallBody = JSON.parse(String((fetchSpy.mock.calls[1]![1] as RequestInit).body));
     expect(secondCallBody.force).toBe(true);
   });
 
@@ -181,17 +160,10 @@ describe('<SaveSnapshotDialog /> — confirm flow', () => {
     const user = userEvent.setup();
     fetchSpy.mockResolvedValue(makeProblemResponse(422, 'invalid name'));
     render(withQueryClient(<SaveSnapshotDialog />));
-    await user.type(
-      screen.getByTestId('save-snapshot-name-input'),
-      'scenario-A',
-    );
+    await user.type(screen.getByTestId('save-snapshot-name-input'), 'scenario-A');
     await user.click(screen.getByTestId('save-snapshot-confirm'));
-    await waitFor(() =>
-      expect(useSnapshotStore.getState().saveStatus).toBe('error'),
-    );
-    expect(await screen.findByTestId('save-snapshot-error')).toHaveTextContent(
-      /invalid name/i,
-    );
+    await waitFor(() => expect(useSnapshotStore.getState().saveStatus).toBe('error'));
+    expect(await screen.findByTestId('save-snapshot-error')).toHaveTextContent(/invalid name/i);
   });
 
   it('cancel closes the dialog without firing the mutation', async () => {
@@ -227,9 +199,7 @@ describe('<SaveSnapshotDialog /> — confirm flow', () => {
 describe('<SaveSnapshotDialog /> — Input contract (Unit 5)', () => {
   it('IME composition does not fire onChange mid-composition', async () => {
     render(withQueryClient(<SaveSnapshotDialog />));
-    const input = (await screen.findByTestId(
-      'save-snapshot-name-input',
-    )) as HTMLInputElement;
+    const input = (await screen.findByTestId('save-snapshot-name-input')) as HTMLInputElement;
 
     fireEvent.compositionStart(input);
     input.value = 'sce';
@@ -244,17 +214,13 @@ describe('<SaveSnapshotDialog /> — Input contract (Unit 5)', () => {
 
   it('React-friendly programmatic setter fills the field and enables confirm', async () => {
     render(withQueryClient(<SaveSnapshotDialog />));
-    const input = (await screen.findByTestId(
-      'save-snapshot-name-input',
-    )) as HTMLInputElement;
+    const input = (await screen.findByTestId('save-snapshot-name-input')) as HTMLInputElement;
 
     const desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
     desc!.set!.call(input, 'scenario-A');
     input.dispatchEvent(new Event('input', { bubbles: true }));
 
-    await waitFor(() =>
-      expect(useSnapshotStore.getState().pendingName).toBe('scenario-A'),
-    );
+    await waitFor(() => expect(useSnapshotStore.getState().pendingName).toBe('scenario-A'));
     expect(screen.getByTestId('save-snapshot-confirm')).toBeEnabled();
   });
 });
@@ -325,9 +291,7 @@ describe('<SaveSnapshotDialog /> — keyboard scoping (Unit 6)', () => {
     input.focus();
     await user.keyboard('{Escape}');
     // Radix should have closed the dialog…
-    await waitFor(() =>
-      expect(useSnapshotStore.getState().saveDialogOpen).toBe(false),
-    );
+    await waitFor(() => expect(useSnapshotStore.getState().saveDialogOpen).toBe(false));
     // …without our global handler ever firing (the input was the
     // active element when Esc was pressed; the wrapper's default
     // `enableOnFormTags: false` swallows it).

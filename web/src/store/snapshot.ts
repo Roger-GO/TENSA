@@ -126,25 +126,19 @@ export const useSnapshotStore = create<SnapshotState>((set) => ({
       restoreStatus: 'idle',
       restoreError: null,
     }),
-  closeDialogs: () =>
-    set({ saveDialogOpen: false, loadDialogOpen: false }),
+  closeDialogs: () => set({ saveDialogOpen: false, loadDialogOpen: false }),
   setPendingName: (name) => set({ pendingName: name }),
   setSnapshots: (snapshots) => set({ snapshots: [...snapshots] }),
-  markSavePending: () =>
-    set({ saveStatus: 'pending', saveError: null }),
-  markSaveSuccess: () =>
-    set({ saveStatus: 'success', saveError: null }),
-  markSaveError: (message) =>
-    set({ saveStatus: 'error', saveError: message }),
-  markRestorePending: () =>
-    set({ restoreStatus: 'pending', restoreError: null }),
+  markSavePending: () => set({ saveStatus: 'pending', saveError: null }),
+  markSaveSuccess: () => set({ saveStatus: 'success', saveError: null }),
+  markSaveError: (message) => set({ saveStatus: 'error', saveError: message }),
+  markRestorePending: () => set({ restoreStatus: 'pending', restoreError: null }),
   markRestoreSuccess: (outcome) =>
     set({
       restoreStatus: 'success',
       restoreError: null,
       lastRestoreOutcome: outcome,
     }),
-  markRestoreError: (message) =>
-    set({ restoreStatus: 'error', restoreError: message }),
+  markRestoreError: (message) => set({ restoreStatus: 'error', restoreError: message }),
   reset: () => set({ ...INITIAL }),
 }));

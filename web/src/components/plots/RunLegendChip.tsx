@@ -182,7 +182,7 @@ function SwatchPicker({
   return (
     <div data-testid={`run-legend-swatch-picker-${runId}`} className="flex flex-col gap-3">
       <div>
-        <div className="text-muted-foreground mb-2 text-[10px] font-medium uppercase tracking-wider">
+        <div className="text-muted-foreground mb-2 text-[10px] font-medium tracking-wider uppercase">
           Pick a colour
         </div>
         <div className="grid grid-cols-4 gap-2">
@@ -214,7 +214,7 @@ function SwatchPicker({
       <div>
         <label
           htmlFor={`run-legend-swatch-custom-${runId}`}
-          className="text-muted-foreground mb-2 block text-[10px] font-medium uppercase tracking-wider"
+          className="text-muted-foreground mb-2 block text-[10px] font-medium tracking-wider uppercase"
         >
           Custom hex
         </label>

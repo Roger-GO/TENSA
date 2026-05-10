@@ -80,8 +80,8 @@ export function RecoveryBadge() {
           data-testid="recovery-badge-reload"
           onClick={() => hardReset()}
           className={cn(
-            'rounded-full border border-danger/40 bg-danger/10 px-2 py-0.5 text-xs',
-            'hover:bg-danger/20 focus:outline-none focus:ring-2 focus:ring-danger/40',
+            'border-danger/40 bg-danger/10 rounded-full border px-2 py-0.5 text-xs',
+            'hover:bg-danger/20 focus:ring-danger/40 focus:ring-2 focus:outline-none',
           )}
         >
           Reload

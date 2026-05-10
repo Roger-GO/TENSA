@@ -83,11 +83,7 @@ function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: Summar
           {isBlank ? 'New system' : 'Loaded case'}
         </p>
         <p className="text-foreground truncate font-mono text-sm font-medium">
-          {isBlank
-            ? '— blank —'
-            : selection.primaryPath
-              ? basename(selection.primaryPath)
-              : ''}
+          {isBlank ? '— blank —' : selection.primaryPath ? basename(selection.primaryPath) : ''}
         </p>
         {selection.addfiles.length > 0 ? (
           <div className="flex flex-col gap-0.5">

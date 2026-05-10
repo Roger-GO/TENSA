@@ -136,8 +136,8 @@ function CommandPaletteHint() {
       <kbd
         aria-hidden="true"
         className={cn(
-          'inline-flex items-center justify-center min-w-[1.25rem] h-4 px-1',
-          'text-[10px] font-mono rounded border',
+          'inline-flex h-4 min-w-[1.25rem] items-center justify-center px-1',
+          'rounded border font-mono text-[10px]',
           'border-border bg-muted text-muted-foreground',
         )}
       >
@@ -163,4 +163,3 @@ function TopBarDivider() {
     />
   );
 }
-

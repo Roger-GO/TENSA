@@ -99,9 +99,7 @@ const SAMPLE_LINE_TABLE: LatexReportTable = {
 
 describe('escapeLatexCell', () => {
   it('escapes the 7 minor special characters', () => {
-    expect(escapeLatexCell('a&b%c$d#e_f{g}h')).toBe(
-      'a\\&b\\%c\\$d\\#e\\_f\\{g\\}h',
-    );
+    expect(escapeLatexCell('a&b%c$d#e_f{g}h')).toBe('a\\&b\\%c\\$d\\#e\\_f\\{g\\}h');
   });
 
   it('escapes backslash before any other replacement so escapes are not double-applied', () => {
@@ -128,19 +126,25 @@ describe('pickColumnSpec', () => {
 
   it('returns all "r" when every column is numeric', () => {
     expect(
-      pickColumnSpec(['a', 'b', 'c'], [
-        ['1', '2', '3'],
-        ['4', '5', '6'],
-      ]),
+      pickColumnSpec(
+        ['a', 'b', 'c'],
+        [
+          ['1', '2', '3'],
+          ['4', '5', '6'],
+        ],
+      ),
     ).toBe('rrr');
   });
 
   it('returns "l" for an all-text column even past the first', () => {
     expect(
-      pickColumnSpec(['name', 'kind'], [
-        ['BUS1', 'PV'],
-        ['BUS2', 'Slack'],
-      ]),
+      pickColumnSpec(
+        ['name', 'kind'],
+        [
+          ['BUS1', 'PV'],
+          ['BUS2', 'Slack'],
+        ],
+      ),
     ).toBe('ll');
   });
 
@@ -310,9 +314,7 @@ describe('<LatexCopyButton />', () => {
     await user.click(screen.getByTestId('latex-copy-button'));
     await waitFor(() => expect(writeTextSpy).toHaveBeenCalled());
     await waitFor(() =>
-      expect(toastSuccessMock).toHaveBeenCalledWith(
-        'Copied LaTeX tables to clipboard.',
-      ),
+      expect(toastSuccessMock).toHaveBeenCalledWith('Copied LaTeX tables to clipboard.'),
     );
   });
 });

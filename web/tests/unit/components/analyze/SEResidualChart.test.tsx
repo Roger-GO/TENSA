@@ -15,10 +15,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import {
-  SEResidualChart,
-  buildHistogram,
-} from '@/components/analyze/SEResidualChart';
+import { SEResidualChart, buildHistogram } from '@/components/analyze/SEResidualChart';
 import { DEFAULT_EIG_FILTER, useAnalyzeStore } from '@/store/analyze';
 import type { SeResult } from '@/api/types';
 
@@ -39,9 +36,7 @@ const SE_RESULT: SeResult = {
   iterations: 3,
   mismatch: 12.345,
   // 10 residuals across [-0.05, +0.05] with one outlier at +0.5 (index 5)
-  residuals: [
-    -0.04, -0.02, -0.01, 0.0, 0.01, 0.5, 0.02, 0.03, 0.04, 0.045,
-  ],
+  residuals: [-0.04, -0.02, -0.01, 0.0, 0.01, 0.5, 0.02, 0.03, 0.04, 0.045],
   measurement_count: 10,
   flagged_indices: [5],
 };
@@ -122,9 +117,7 @@ describe('<SEResidualChart />', () => {
 
   it('does not render the detail panel until a bar is clicked', () => {
     render(<SEResidualChart result={SE_RESULT} binCount={10} />);
-    expect(
-      screen.queryByTestId('se-residual-detail-panel'),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('se-residual-detail-panel')).not.toBeInTheDocument();
   });
 
   it('clicking a flagged bar opens the detail panel with the ≥3σ flag reason', () => {
@@ -139,9 +132,7 @@ describe('<SEResidualChart />', () => {
     expect(panel.textContent).toMatch(/≥3σ from estimate/);
     // Member index 5 is the +0.5 outlier; it should appear in the bin's
     // member list as the flagged measurement.
-    expect(
-      screen.getByTestId('se-residual-detail-member-5'),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('se-residual-detail-member-5')).toBeInTheDocument();
   });
 
   it('clicking a non-flagged bar opens the detail panel with the "Within tolerance" reason', () => {
@@ -174,24 +165,16 @@ describe('<SEResidualChart />', () => {
   it('the detail panel close button dismisses the panel', () => {
     render(<SEResidualChart result={SE_RESULT} binCount={10} />);
     fireEvent.click(screen.getAllByTestId('se-residual-bar-flagged')[0]!);
-    expect(
-      screen.getByTestId('se-residual-detail-panel'),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('se-residual-detail-panel')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('se-residual-detail-close'));
-    expect(
-      screen.queryByTestId('se-residual-detail-panel'),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('se-residual-detail-panel')).not.toBeInTheDocument();
   });
 
   it('re-running SE (new result identity) clears any open detail panel', () => {
-    const { rerender } = render(
-      <SEResidualChart result={SE_RESULT} binCount={10} />,
-    );
+    const { rerender } = render(<SEResidualChart result={SE_RESULT} binCount={10} />);
     fireEvent.click(screen.getAllByTestId('se-residual-bar-flagged')[0]!);
-    expect(
-      screen.getByTestId('se-residual-detail-panel'),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('se-residual-detail-panel')).toBeInTheDocument();
 
     // Hand a NEW SeResult object (fresh identity, same shape) — the
     // useEffect keyed on ``result`` should reset the selection.
@@ -202,9 +185,7 @@ describe('<SEResidualChart />', () => {
     };
     rerender(<SEResidualChart result={nextResult} binCount={10} />);
 
-    expect(
-      screen.queryByTestId('se-residual-detail-panel'),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('se-residual-detail-panel')).not.toBeInTheDocument();
   });
 
   it('the detail panel surfaces the bin range and measurement count', () => {

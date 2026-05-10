@@ -35,7 +35,7 @@ export function SweepProgressPanel() {
   const streamRef = useRef<SweepStream | null>(null);
 
   useEffect(() => {
-    if (!sweep || sweep.state !== 'pending' && sweep.state !== 'running') return;
+    if (!sweep || (sweep.state !== 'pending' && sweep.state !== 'running')) return;
     if (!sessionId || !token) return;
     const stream = new SweepStream({
       sessionId,
@@ -93,17 +93,12 @@ export function SweepProgressPanel() {
       className="flex flex-col gap-2"
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-foreground text-xs font-medium">
-          Sweep · {sweep.parameterKind}
-        </span>
+        <span className="text-foreground text-xs font-medium">Sweep · {sweep.parameterKind}</span>
         <span className="text-muted-foreground text-xs">
           {completed}/{total} ({percent}%)
         </span>
       </div>
-      <div
-        className="bg-muted/40 h-2 w-full overflow-hidden rounded"
-        aria-label="sweep progress"
-      >
+      <div className="bg-muted/40 h-2 w-full overflow-hidden rounded" aria-label="sweep progress">
         <div
           data-testid="sweep-progress-bar"
           className={cn(

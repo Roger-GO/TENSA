@@ -32,12 +32,7 @@
  */
 import { useMemo } from 'react';
 import { create } from 'zustand';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import type { ReportResponse, ReportRoutine } from '@/api/queries';
@@ -147,15 +142,11 @@ function ReportDialogInner() {
   }, [activeRunId, runs]);
 
   return (
-    <DialogContent
-      data-testid="report-dialog"
-      className="max-w-3xl"
-    >
+    <DialogContent data-testid="report-dialog" className="max-w-3xl">
       <DialogTitle>Reports</DialogTitle>
       <DialogDescription className="mt-2">
-        Human-readable reports for the active session. Use{' '}
-        <strong>Copy as LaTeX</strong> to paste a <code>tabular</code> block into
-        your paper.
+        Human-readable reports for the active session. Use <strong>Copy as LaTeX</strong> to paste a{' '}
+        <code>tabular</code> block into your paper.
       </DialogDescription>
 
       <Tabs
@@ -218,10 +209,7 @@ function ReportTabBody({ routine, hasRun, emptyHint }: ReportTabBodyProps) {
 
   if (query.isLoading) {
     return (
-      <div
-        data-testid={`report-loading-${routine}`}
-        className="text-muted-foreground text-sm"
-      >
+      <div data-testid={`report-loading-${routine}`} className="text-muted-foreground text-sm">
         Loading report…
       </div>
     );
@@ -325,10 +313,7 @@ function StructuredTable({ routine, index, table }: StructuredTableProps) {
           <thead className="bg-muted/40">
             <tr>
               {table.headers.map((h, i) => (
-                <th
-                  key={`${h}-${i}`}
-                  className="border-border border-b px-2 py-1 font-medium"
-                >
+                <th key={`${h}-${i}`} className="border-border border-b px-2 py-1 font-medium">
                   {h}
                 </th>
               ))}

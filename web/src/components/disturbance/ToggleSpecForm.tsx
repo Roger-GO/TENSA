@@ -87,10 +87,7 @@ export function ToggleSpecForm({
   className,
 }: ToggleSpecFormProps) {
   const topology = useCurrentTopology();
-  const devices = useMemo(
-    () => devicesForModel(topology, spec.model),
-    [topology, spec.model],
-  );
+  const devices = useMemo(() => devicesForModel(topology, spec.model), [topology, spec.model]);
   const [tText, setTText] = useState(String(spec.t));
 
   useEffect(() => {
@@ -123,15 +120,9 @@ export function ToggleSpecForm({
   };
 
   return (
-    <div
-      data-testid="toggle-spec-form"
-      className={cn('flex flex-col gap-3', className)}
-    >
+    <div data-testid="toggle-spec-form" className={cn('flex flex-col gap-3', className)}>
       <div className="flex flex-col gap-1">
-        <label
-          htmlFor="toggle-model"
-          className="text-muted-foreground text-xs font-medium"
-        >
+        <label htmlFor="toggle-model" className="text-muted-foreground text-xs font-medium">
           Model
         </label>
         <select
@@ -150,10 +141,7 @@ export function ToggleSpecForm({
       </div>
 
       <div className="flex flex-col gap-1">
-        <label
-          htmlFor="toggle-dev-idx"
-          className="text-muted-foreground text-xs font-medium"
-        >
+        <label htmlFor="toggle-dev-idx" className="text-muted-foreground text-xs font-medium">
           Device
         </label>
         <select
@@ -183,21 +171,14 @@ export function ToggleSpecForm({
           ))}
         </select>
         {errors.dev_idx ? (
-          <span
-            role="alert"
-            data-testid="error-toggle-dev-idx"
-            className="text-danger text-[10px]"
-          >
+          <span role="alert" data-testid="error-toggle-dev-idx" className="text-danger text-[10px]">
             {errors.dev_idx}
           </span>
         ) : null}
       </div>
 
       <div className="flex flex-col gap-1">
-        <label
-          htmlFor="toggle-t"
-          className="text-muted-foreground text-xs font-medium"
-        >
+        <label htmlFor="toggle-t" className="text-muted-foreground text-xs font-medium">
           t — toggle time (s)
         </label>
         <input
@@ -213,11 +194,7 @@ export function ToggleSpecForm({
           )}
         />
         {errors.t ? (
-          <span
-            role="alert"
-            data-testid="error-toggle-t"
-            className="text-danger text-[10px]"
-          >
+          <span role="alert" data-testid="error-toggle-t" className="text-danger text-[10px]">
             {errors.t}
           </span>
         ) : null}

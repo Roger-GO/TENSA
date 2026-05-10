@@ -142,10 +142,7 @@ describe('<Input />', () => {
     render(<Harness />);
     const input = screen.getByLabelText('field') as HTMLInputElement;
 
-    const descriptor = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype,
-      'value',
-    );
+    const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
     descriptor!.set!.call(input, 'pasted-by-test');
     input.dispatchEvent(new Event('input', { bubbles: true }));
 
@@ -186,9 +183,7 @@ describe('<Input />', () => {
   });
 
   it('parent-controlled value drives the displayed value', () => {
-    const { rerender } = render(
-      <Input aria-label="field" value="initial" onChange={() => {}} />,
-    );
+    const { rerender } = render(<Input aria-label="field" value="initial" onChange={() => {}} />);
     const input = screen.getByLabelText('field') as HTMLInputElement;
     expect(input.value).toBe('initial');
 

@@ -12,20 +12,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import {
-  useRunReadiness,
-  type RunRoutine,
-} from '@/lib/useRunReadiness';
+import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { useAnalyzeStore, DEFAULT_EIG_FILTER } from '@/store/analyze';
 import { useAuthStore } from '@/store/auth';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useSessionStore } from '@/store/session';
 import { useSweepStore } from '@/store/sweep';
-import {
-  parseSessionId,
-  parseWorkspacePath,
-} from '@/api/types';
+import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { EigResult, PflowResult } from '@/api/types';
 
 const ALL_ROUTINES: RunRoutine[] = ['pflow', 'tds', 'eig', 'cpf', 'se', 'sweep'];
@@ -190,15 +184,12 @@ describe('useRunReadiness — happy path (PF converged)', () => {
     useAnalyzeStore.setState({ seMeasurementsCount: 5 });
   });
 
-  it.each(ALL_ROUTINES)(
-    '%s is ready with no disabledReason and no recovery',
-    (routine) => {
-      const { result } = renderHook(() => useRunReadiness(routine));
-      expect(result.current.ready).toBe(true);
-      expect(result.current.disabledReason).toBeNull();
-      expect(result.current.recovery).toBeNull();
-    },
-  );
+  it.each(ALL_ROUTINES)('%s is ready with no disabledReason and no recovery', (routine) => {
+    const { result } = renderHook(() => useRunReadiness(routine));
+    expect(result.current.ready).toBe(true);
+    expect(result.current.disabledReason).toBeNull();
+    expect(result.current.recovery).toBeNull();
+  });
 });
 
 describe('useRunReadiness — PF prerequisite (pre-PF)', () => {
@@ -214,9 +205,7 @@ describe('useRunReadiness — PF prerequisite (pre-PF)', () => {
       const { result } = renderHook(() => useRunReadiness(routine));
       expect(result.current.ready).toBe(false);
       expect(result.current.disabledReason).toMatch(/Run PFlow first/);
-      expect(result.current.disabledReason).toMatch(
-        /requires a converged operating point/,
-      );
+      expect(result.current.disabledReason).toMatch(/requires a converged operating point/);
       expect(result.current.recovery).toEqual({
         kind: 'open-pf',
         label: 'Open PF view',
@@ -359,9 +348,7 @@ describe('useRunReadiness — sweep in progress', () => {
   it('falls back to no-progress text when the sweep record is missing', () => {
     useSweepStore.setState({ activeSweepId: 'sweep-orphan', sweeps: {} });
     const { result } = renderHook(() => useRunReadiness('eig'));
-    expect(result.current.disabledReason).toBe(
-      'Sweep sweep-orphan in progress; wait or abort.',
-    );
+    expect(result.current.disabledReason).toBe('Sweep sweep-orphan in progress; wait or abort.');
   });
 });
 

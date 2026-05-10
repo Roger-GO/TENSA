@@ -98,7 +98,9 @@ describe('<CommandPalette /> — open / close', () => {
 
   it('renders the input + grouped headings when opened', async () => {
     render(withProviders(<CommandPalette />));
-    act(() => { useCommandPaletteStore.getState().openPalette(); });
+    act(() => {
+      useCommandPaletteStore.getState().openPalette();
+    });
     await screen.findByTestId('command-palette');
     expect(screen.getByTestId('command-palette-input')).toBeInTheDocument();
     expect(screen.getByText('Workspace')).toBeInTheDocument();
@@ -107,7 +109,9 @@ describe('<CommandPalette /> — open / close', () => {
   it('Escape closes the palette', async () => {
     const user = userEvent.setup();
     render(withProviders(<CommandPalette />));
-    act(() => { useCommandPaletteStore.getState().openPalette(); });
+    act(() => {
+      useCommandPaletteStore.getState().openPalette();
+    });
     await screen.findByTestId('command-palette');
     await user.keyboard('{Escape}');
     await waitFor(() => {
@@ -118,7 +122,9 @@ describe('<CommandPalette /> — open / close', () => {
   it('clicking the backdrop closes the palette', async () => {
     const user = userEvent.setup();
     render(withProviders(<CommandPalette />));
-    act(() => { useCommandPaletteStore.getState().openPalette(); });
+    act(() => {
+      useCommandPaletteStore.getState().openPalette();
+    });
     const overlay = await screen.findByTestId('command-palette-overlay');
     await user.click(overlay);
     await waitFor(() => {
@@ -131,19 +137,17 @@ describe('<CommandPalette /> — search', () => {
   it('typing "snapshot" surfaces both snapshot commands', async () => {
     const user = userEvent.setup();
     render(withProviders(<CommandPalette />));
-    act(() => { useCommandPaletteStore.getState().openPalette(); });
+    act(() => {
+      useCommandPaletteStore.getState().openPalette();
+    });
     const input = await screen.findByTestId('command-palette-input');
     await user.type(input, 'snapshot');
     // Save snapshot appears under both Workspace and Export groups.
     expect(
       await screen.findByTestId('command-palette-item-workspace.save-snapshot'),
     ).toBeInTheDocument();
-    expect(
-      screen.getByTestId('command-palette-item-workspace.load-snapshot'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByTestId('command-palette-item-export.snapshot'),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('command-palette-item-workspace.load-snapshot')).toBeInTheDocument();
+    expect(screen.getByTestId('command-palette-item-export.snapshot')).toBeInTheDocument();
     // Unrelated commands should not be visible.
     expect(screen.queryByTestId('command-palette-item-run.pflow')).not.toBeInTheDocument();
   });
@@ -151,18 +155,20 @@ describe('<CommandPalette /> — search', () => {
   it('typing a synonym ("PF") matches Run PFlow via keywords', async () => {
     const user = userEvent.setup();
     render(withProviders(<CommandPalette />));
-    act(() => { useCommandPaletteStore.getState().openPalette(); });
+    act(() => {
+      useCommandPaletteStore.getState().openPalette();
+    });
     const input = await screen.findByTestId('command-palette-input');
     await user.type(input, 'PF');
-    expect(
-      await screen.findByTestId('command-palette-item-run.pflow'),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId('command-palette-item-run.pflow')).toBeInTheDocument();
   });
 
   it('shows the empty state when nothing matches', async () => {
     const user = userEvent.setup();
     render(withProviders(<CommandPalette />));
-    act(() => { useCommandPaletteStore.getState().openPalette(); });
+    act(() => {
+      useCommandPaletteStore.getState().openPalette();
+    });
     const input = await screen.findByTestId('command-palette-input');
     await user.type(input, 'qzqzqzqz-not-a-command');
     expect(await screen.findByTestId('command-palette-empty')).toBeInTheDocument();
@@ -173,7 +179,9 @@ describe('<CommandPalette /> — when() gating', () => {
   it('hides "Run EIG" until PF has converged', async () => {
     const user = userEvent.setup();
     render(withProviders(<CommandPalette />));
-    act(() => { useCommandPaletteStore.getState().openPalette(); });
+    act(() => {
+      useCommandPaletteStore.getState().openPalette();
+    });
     const input = await screen.findByTestId('command-palette-input');
     await user.type(input, 'eig');
     expect(screen.queryByTestId('command-palette-item-run.eig')).not.toBeInTheDocument();
@@ -189,7 +197,9 @@ describe('<CommandPalette /> — when() gating', () => {
     usePflowStore.setState({ lastRun: convergedRun, isRunning: false, error: null });
     const user = userEvent.setup();
     render(withProviders(<CommandPalette />));
-    act(() => { useCommandPaletteStore.getState().openPalette(); });
+    act(() => {
+      useCommandPaletteStore.getState().openPalette();
+    });
     const input = await screen.findByTestId('command-palette-input');
     await user.type(input, 'eig');
     expect(await screen.findByTestId('command-palette-item-run.eig')).toBeInTheDocument();
@@ -200,7 +210,9 @@ describe('<CommandPalette /> — keyboard navigation', () => {
   it('arrow + Enter activates the highlighted command', async () => {
     const user = userEvent.setup();
     render(withProviders(<CommandPalette />));
-    act(() => { useCommandPaletteStore.getState().openPalette(); });
+    act(() => {
+      useCommandPaletteStore.getState().openPalette();
+    });
     const input = await screen.findByTestId('command-palette-input');
     // Narrow to a single deterministic match so Enter has only one
     // selectable target.
@@ -216,7 +228,9 @@ describe('<CommandPalette /> — keyboard navigation', () => {
   it('ArrowDown moves selection between items', async () => {
     const user = userEvent.setup();
     render(withProviders(<CommandPalette />));
-    act(() => { useCommandPaletteStore.getState().openPalette(); });
+    act(() => {
+      useCommandPaletteStore.getState().openPalette();
+    });
     await screen.findByTestId('command-palette-input');
     // The first item is selected by default. ArrowDown moves to the
     // next; cmdk marks the active item with `aria-selected="true"`.
@@ -245,7 +259,9 @@ describe('<CommandPalette /> — integration with menus', () => {
 
     // Path 2: via the palette.
     render(withProviders(<CommandPalette />));
-    act(() => { useCommandPaletteStore.getState().openPalette(); });
+    act(() => {
+      useCommandPaletteStore.getState().openPalette();
+    });
     await user.click(await screen.findByTestId('command-palette-item-workspace.save-snapshot'));
     expect(useSnapshotStore.getState().saveDialogOpen).toBe(true);
   });

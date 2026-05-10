@@ -183,7 +183,11 @@ export function FirstRunCoach() {
 
 function StepDots({ active }: { active: 1 | 2 | 3 }) {
   return (
-    <div aria-hidden="true" data-testid="first-run-coach-dots" className="flex items-center gap-1.5">
+    <div
+      aria-hidden="true"
+      data-testid="first-run-coach-dots"
+      className="flex items-center gap-1.5"
+    >
       {[1, 2, 3].map((i) => (
         <span
           key={i}

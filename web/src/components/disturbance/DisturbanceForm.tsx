@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { DisturbanceSpec } from '@/api/types';
-import {
-  blankAlterSpec,
-  blankFaultSpec,
-  blankToggleSpec,
-} from '@/store/disturbance';
+import { blankAlterSpec, blankFaultSpec, blankToggleSpec } from '@/store/disturbance';
 import { cn } from '@/lib/cn';
 import { FaultSpecForm } from './FaultSpecForm';
 import { ToggleSpecForm } from './ToggleSpecForm';
@@ -49,10 +45,7 @@ export function DisturbanceForm({
 
   // Memoize the validity callback so the sub-forms' useEffect doesn't fire
   // on every parent render.
-  const handleValidity = useMemo(
-    () => (next: Record<string, string>) => setErrors(next),
-    [],
-  );
+  const handleValidity = useMemo(() => (next: Record<string, string>) => setErrors(next), []);
 
   useEffect(() => {
     onValidityChange?.(errors);
@@ -65,16 +58,10 @@ export function DisturbanceForm({
   };
 
   return (
-    <div
-      data-testid="disturbance-form"
-      className={cn('flex flex-col gap-3', className)}
-    >
+    <div data-testid="disturbance-form" className={cn('flex flex-col gap-3', className)}>
       {!hideKindPicker ? (
         <div className="flex flex-col gap-1">
-          <label
-            htmlFor="disturbance-kind"
-            className="text-muted-foreground text-xs font-medium"
-          >
+          <label htmlFor="disturbance-kind" className="text-muted-foreground text-xs font-medium">
             Kind
           </label>
           <select

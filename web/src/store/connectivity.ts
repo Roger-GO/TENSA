@@ -42,9 +42,7 @@ export function isEnergisedIsland(island: readonly string[]): boolean {
  * on that and skips greying entirely (the user hasn't run
  * connectivity yet).
  */
-export function energisedBusIdxesFor(
-  result: ConnectivityResult | null,
-): ReadonlySet<string> {
+export function energisedBusIdxesFor(result: ConnectivityResult | null): ReadonlySet<string> {
   if (result === null) return new Set();
   const out = new Set<string>();
   for (const island of result.islands) {

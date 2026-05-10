@@ -152,7 +152,7 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
           // visible behind at the left ~30%.
           'w-[70%]',
           'bg-background border-border border-l shadow-xl',
-          'flex flex-col gap-3 p-4 overflow-auto',
+          'flex flex-col gap-3 overflow-auto p-4',
           className,
         )}
       >
@@ -171,10 +171,7 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
         </header>
 
         <div className="flex flex-col gap-1">
-          <label
-            htmlFor="add-element-kind"
-            className="text-muted-foreground text-xs font-medium"
-          >
+          <label htmlFor="add-element-kind" className="text-muted-foreground text-xs font-medium">
             Kind
           </label>
           <select

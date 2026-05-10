@@ -36,8 +36,7 @@ const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 function validateName(name: string): string | null {
   if (name.length === 0) return 'Name is required.';
-  if (!NAME_RE.test(name))
-    return 'Use 1-64 chars of letters, digits, dot, underscore, or dash.';
+  if (!NAME_RE.test(name)) return 'Use 1-64 chars of letters, digits, dot, underscore, or dash.';
   return null;
 }
 
@@ -103,10 +102,9 @@ function SaveSnapshotDialogInner() {
     <DialogContent data-testid="save-snapshot-dialog">
       <DialogTitle>Save snapshot</DialogTitle>
       <DialogDescription className="mt-2">
-        Capture the current operating point + disturbance log as a named
-        snapshot. Snapshots live under the workspace and survive across
-        sessions; the dill optimisation kicks in when the ANDES version
-        matches.
+        Capture the current operating point + disturbance log as a named snapshot. Snapshots live
+        under the workspace and survive across sessions; the dill optimisation kicks in when the
+        ANDES version matches.
       </DialogDescription>
 
       <div className="mt-4 flex flex-col gap-3">
@@ -155,8 +153,7 @@ function SaveSnapshotDialogInner() {
               'rounded-[var(--radius-sm)] border px-2 py-1.5 text-xs',
             )}
           >
-            A snapshot named <code>{collisionName}</code> already exists.
-            Overwrite?
+            A snapshot named <code>{collisionName}</code> already exists. Overwrite?
           </div>
         ) : null}
         {status === 'success' ? (

@@ -126,12 +126,10 @@ beforeEach(() => {
     ],
     lines: [],
     transformers: [],
-    generators: [
-      { idx: 'PV_3', name: 'PV_3', kind: 'PV', params: { bus: '5' } },
-    ],
+    generators: [{ idx: 'PV_3', name: 'PV_3', kind: 'PV', params: { bus: '5' } }],
     loads: [
       { idx: 'PQ_5', name: 'PQ_5', kind: 'PQ', params: { bus: '5', p0: 0.15 } },
-      { idx: 'PQ_8', name: 'PQ_8', kind: 'PQ', params: { bus: '8', p0: 0.10 } },
+      { idx: 'PQ_8', name: 'PQ_8', kind: 'PQ', params: { bus: '8', p0: 0.1 } },
     ],
     shunts: [],
   };
@@ -171,9 +169,7 @@ afterEach(() => {
 
 describe('<ProfileImportDialog />', () => {
   it('renders nothing when open=false', () => {
-    render(
-      withQueryClient(<ProfileImportDialog open={false} onOpenChange={() => {}} />),
-    );
+    render(withQueryClient(<ProfileImportDialog open={false} onOpenChange={() => {}} />));
     expect(screen.queryByTestId('profile-import-dialog')).toBeNull();
   });
 
@@ -183,9 +179,7 @@ describe('<ProfileImportDialog />', () => {
     expect(screen.getByText(/Import time-series profile/)).toBeInTheDocument();
     expect(screen.getByTestId('profile-file-input')).toBeInTheDocument();
     expect(screen.getByTestId('profile-stage-submit')).toBeDisabled();
-    expect(screen.getByTestId('profile-stage-submit')).toHaveTextContent(
-      'Upload a file first',
-    );
+    expect(screen.getByTestId('profile-stage-submit')).toHaveTextContent('Upload a file first');
     // Empty staged list message.
     expect(screen.getByText(/No profiles staged/)).toBeInTheDocument();
     // Mode-1 disclaimer.
@@ -216,9 +210,7 @@ describe('<ProfileImportDialog />', () => {
     const file = new File(['t,p0\n0,0.15\n'], 'ramp.csv', { type: 'text/csv' });
     await user.upload(fileInput, file);
     await waitFor(() =>
-      expect(screen.getByTestId('profile-upload-confirmation')).toHaveTextContent(
-        /ramp\.csv/,
-      ),
+      expect(screen.getByTestId('profile-upload-confirmation')).toHaveTextContent(/ramp\.csv/),
     );
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(fetchSpy.mock.calls[0]![0]).toContain('/profiles/upload');
@@ -286,9 +278,7 @@ describe('<ProfileImportDialog />', () => {
     const file = new File(['malformed,bytes'], 'profile.csv', { type: 'text/csv' });
     await user.upload(fileInput, file);
     await waitFor(() =>
-      expect(screen.getByTestId('profile-server-error')).toHaveTextContent(
-        /unsupported extension/,
-      ),
+      expect(screen.getByTestId('profile-server-error')).toHaveTextContent(/unsupported extension/),
     );
   });
 
@@ -305,9 +295,7 @@ describe('<ProfileImportDialog />', () => {
     await user.selectOptions(screen.getByTestId('profile-dev-input'), 'PQ_5');
     await user.click(screen.getByTestId('profile-stage-submit'));
     await waitFor(() =>
-      expect(screen.getByTestId('profile-server-error')).toHaveTextContent(
-        /no PQ with idx=PQ_999/,
-      ),
+      expect(screen.getByTestId('profile-server-error')).toHaveTextContent(/no PQ with idx=PQ_999/),
     );
   });
 
@@ -333,9 +321,7 @@ describe('<ProfileImportDialog />', () => {
   it('cancel button calls onOpenChange(false)', async () => {
     const user = userEvent.setup();
     const onOpenChange = vi.fn();
-    render(
-      withQueryClient(<ProfileImportDialog open onOpenChange={onOpenChange} />),
-    );
+    render(withQueryClient(<ProfileImportDialog open onOpenChange={onOpenChange} />));
     await user.click(screen.getByTestId('profile-cancel'));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });

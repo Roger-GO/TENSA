@@ -60,8 +60,10 @@ import { cn } from '@/lib/cn';
  * who wants to react to composition (rare; usually for analytics) can,
  * but the IME guard always runs regardless of those props.
  */
-export interface InputProps
-  extends Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'defaultValue' | 'onChange'> {
+export interface InputProps extends Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  'value' | 'defaultValue' | 'onChange'
+> {
   value: string;
   onChange: (next: string) => void;
 }

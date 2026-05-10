@@ -36,11 +36,7 @@
  * predicate without re-deriving the rules.
  */
 import { useHotkeys as useReactHotkeys } from 'react-hotkeys-hook';
-import type {
-  HotkeyCallback,
-  Keys,
-  Options,
-} from 'react-hotkeys-hook';
+import type { HotkeyCallback, Keys, Options } from 'react-hotkeys-hook';
 
 /**
  * Registers a keyboard shortcut. Auto-skips when an editable element

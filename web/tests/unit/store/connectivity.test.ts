@@ -62,10 +62,7 @@ describe('connectivity store — setResult', () => {
     // ``Bus.islands`` per ``_post_process_islands``.
     const result: ConnectivityResult = {
       island_count: 2,
-      islands: [
-        ['8'],
-        ['1', '2', '3', '4', '5', '6', '7', '9', '10', '11', '12', '13', '14'],
-      ],
+      islands: [['8'], ['1', '2', '3', '4', '5', '6', '7', '9', '10', '11', '12', '13', '14']],
       islanded_bus_idxes: ['8'],
     };
     useConnectivityStore.getState().setResult(result);

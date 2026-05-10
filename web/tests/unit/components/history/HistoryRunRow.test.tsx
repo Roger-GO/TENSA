@@ -35,7 +35,9 @@ describe('HistoryRunRow', () => {
     render(<HistoryRunRow run={run} isActive={false} isOverlayPinned={false} />);
     const row = screen.getByTestId('history-run-row-abcdef1234567890');
     expect(row).toHaveAttribute('data-run-id', 'abcdef1234567890');
-    expect(screen.getByTestId('history-run-row-state-abcdef1234567890')).toHaveTextContent('starting');
+    expect(screen.getByTestId('history-run-row-state-abcdef1234567890')).toHaveTextContent(
+      'starting',
+    );
     // Run id truncated to 12 chars.
     expect(row).toHaveTextContent('abcdef123456');
     expect(row).toHaveTextContent('tf=5s');
@@ -97,14 +99,7 @@ describe('HistoryRunRow', () => {
     const user = userEvent.setup();
     const run = seedRun('r1');
     const onReset = vi.fn();
-    render(
-      <HistoryRunRow
-        run={run}
-        isActive={false}
-        isOverlayPinned={false}
-        onReset={onReset}
-      />,
-    );
+    render(<HistoryRunRow run={run} isActive={false} isOverlayPinned={false} onReset={onReset} />);
     await user.click(screen.getByTestId('history-run-row-reset-r1'));
     expect(onReset).toHaveBeenCalledWith('r1');
   });

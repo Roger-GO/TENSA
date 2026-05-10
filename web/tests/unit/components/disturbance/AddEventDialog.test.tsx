@@ -48,30 +48,20 @@ beforeEach(() => {
 describe('<AddEventDialog />', () => {
   it('renders nothing when open=false', () => {
     render(
-      withQueryClient(
-        <AddEventDialog open={false} onOpenChange={() => {}} onSave={() => {}} />,
-      ),
+      withQueryClient(<AddEventDialog open={false} onOpenChange={() => {}} onSave={() => {}} />),
     );
     expect(screen.queryByTestId('add-event-dialog')).toBeNull();
   });
 
   it('opens with a blank Fault spec by default and shows the kind picker', () => {
-    render(
-      withQueryClient(
-        <AddEventDialog open onOpenChange={() => {}} onSave={() => {}} />,
-      ),
-    );
+    render(withQueryClient(<AddEventDialog open onOpenChange={() => {}} onSave={() => {}} />));
     expect(screen.getByTestId('add-event-dialog')).toBeInTheDocument();
     expect(screen.getByTestId('disturbance-kind')).toBeInTheDocument();
     expect(screen.getByTestId('fault-spec-form')).toBeInTheDocument();
   });
 
   it('save is disabled while the form is invalid (e.g., empty bus)', async () => {
-    render(
-      withQueryClient(
-        <AddEventDialog open onOpenChange={() => {}} onSave={() => {}} />,
-      ),
-    );
+    render(withQueryClient(<AddEventDialog open onOpenChange={() => {}} onSave={() => {}} />));
     const save = screen.getByTestId('add-event-save');
     // Default Fault spec has bus_idx='', which is invalid.
     await waitFor(() => expect(save).toBeDisabled());
@@ -81,16 +71,10 @@ describe('<AddEventDialog />', () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
     const onOpenChange = vi.fn();
-    render(
-      withQueryClient(
-        <AddEventDialog open onOpenChange={onOpenChange} onSave={onSave} />,
-      ),
-    );
+    render(withQueryClient(<AddEventDialog open onOpenChange={onOpenChange} onSave={onSave} />));
     // Pick a bus to make the form valid.
     await user.selectOptions(screen.getByTestId('bus-idx-select'), '5');
-    await waitFor(() =>
-      expect(screen.getByTestId('add-event-save')).not.toBeDisabled(),
-    );
+    await waitFor(() => expect(screen.getByTestId('add-event-save')).not.toBeDisabled());
     await user.click(screen.getByTestId('add-event-save'));
     expect(onSave).toHaveBeenCalled();
     const arg = (onSave.mock.calls[0]?.[0] ?? null) as DisturbanceSpec | null;
@@ -105,11 +89,7 @@ describe('<AddEventDialog />', () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
     const onOpenChange = vi.fn();
-    render(
-      withQueryClient(
-        <AddEventDialog open onOpenChange={onOpenChange} onSave={onSave} />,
-      ),
-    );
+    render(withQueryClient(<AddEventDialog open onOpenChange={onOpenChange} onSave={onSave} />));
     await user.click(screen.getByTestId('add-event-cancel'));
     expect(onSave).not.toHaveBeenCalled();
     expect(onOpenChange).toHaveBeenCalledWith(false);
@@ -119,12 +99,7 @@ describe('<AddEventDialog />', () => {
     const initial: FaultSpec = { ...blankFaultSpec(), bus_idx: '5', tf: 2.0, tc: 2.1 };
     render(
       withQueryClient(
-        <AddEventDialog
-          open
-          onOpenChange={() => {}}
-          onSave={() => {}}
-          initialSpec={initial}
-        />,
+        <AddEventDialog open onOpenChange={() => {}} onSave={() => {}} initialSpec={initial} />,
       ),
     );
     // Edit mode hides the kind picker (the Plan: edit doesn't change kind).

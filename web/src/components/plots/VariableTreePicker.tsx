@@ -419,7 +419,7 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
                                     <span
                                       data-testid={`variable-tree-picker-leaf-availability-${s.name}`}
                                       className={cn(
-                                        'text-muted-foreground ml-auto text-[10px] font-mono',
+                                        'text-muted-foreground ml-auto font-mono text-[10px]',
                                         missingFromAny ? 'text-danger/80' : '',
                                       )}
                                       title={
