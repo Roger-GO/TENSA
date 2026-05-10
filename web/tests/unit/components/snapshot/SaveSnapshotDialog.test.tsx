@@ -19,6 +19,7 @@ import { SaveSnapshotDialog } from '@/components/snapshot/SaveSnapshotDialog';
 import { useSessionStore } from '@/store/session';
 import { useSnapshotStore } from '@/store/snapshot';
 import { parseSessionId } from '@/api/types';
+import { useHotkeys as useHotkeysWrapper } from '@/lib/useHotkeys';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -199,5 +200,97 @@ describe('<SaveSnapshotDialog /> — confirm flow', () => {
     await user.click(screen.getByTestId('save-snapshot-cancel'));
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(useSnapshotStore.getState().saveDialogOpen).toBe(false);
+  });
+});
+
+// --- Unit 6: keyboard-interaction scenarios -----------------------------------
+//
+// The bug Unit 6 of the v2.0 polish plan documents: typing into the
+// snapshot-name input incidentally triggered other field handlers
+// (e.g., the bus filter), because hand-rolled `addEventListener`
+// keyboard handlers didn't check `document.activeElement`. The fix is
+// to (a) funnel all hotkey registration through `@/lib/useHotkeys`
+// (which auto-skips when the active element is editable) and (b) rely
+// on Radix Dialog's built-in `@radix-ui/react-focus-scope` to trap
+// focus while the dialog is open.
+//
+// These tests lock in the contract: a global hotkey registered with
+// the wrapper does NOT fire while the snapshot-name input has focus.
+// This is the structural guarantee that prevents the bus-filter
+// contamination class of bug from regressing.
+
+describe('<SaveSnapshotDialog /> — keyboard scoping (Unit 6)', () => {
+  it('typing into the name input does not trigger a global hotkey', async () => {
+    const user = userEvent.setup();
+    const globalHotkeyCallback = vi.fn();
+
+    function TestHarness() {
+      // A representative global hotkey — the same registration shape
+      // a future "?" cheatsheet or "/" focus-search shortcut would
+      // use. The wrapper's default `enableOnFormTags: false` should
+      // swallow keystrokes while the input has focus.
+      useHotkeysWrapper('a', globalHotkeyCallback);
+      return <SaveSnapshotDialog />;
+    }
+
+    render(withQueryClient(<TestHarness />));
+    const input = await screen.findByTestId('save-snapshot-name-input');
+    // userEvent.type both focuses and types into the input.
+    await user.type(input, 'a-snapshot-name');
+    expect(input).toHaveValue('a-snapshot-name');
+    expect(globalHotkeyCallback).not.toHaveBeenCalled();
+  });
+
+  it('a global hotkey opted in via enableOnFormTags DOES fire from inside the input', async () => {
+    const user = userEvent.setup();
+    const palette = vi.fn();
+
+    function TestHarness() {
+      // The escape-hatch case: a "command palette" style shortcut
+      // explicitly opts in to firing from inside form inputs. We use
+      // a plain key (not a modifier combo) because jsdom's
+      // KeyboardEvent doesn't carry modifier state through `userEvent`
+      // reliably for the test purpose here — the lib's matcher is the
+      // surface under test, not the OS's modifier handling.
+      useHotkeysWrapper('a', palette, { enableOnFormTags: ['INPUT'] });
+      return <SaveSnapshotDialog />;
+    }
+
+    render(withQueryClient(<TestHarness />));
+    const input = await screen.findByTestId('save-snapshot-name-input');
+    await user.type(input, 'a');
+    // The opted-in callback fires; the input value also updates.
+    expect(palette).toHaveBeenCalled();
+    expect(input).toHaveValue('a');
+  });
+
+  it('Escape closes the dialog (Radix default) without firing global hotkeys', async () => {
+    const user = userEvent.setup();
+    const globalEscape = vi.fn();
+
+    function TestHarness() {
+      // Even if the user binds Escape globally (e.g., a future
+      // "press Esc to close drawers" shortcut), the dialog's focus
+      // scope owns the keystroke. Radix Dialog's onEscapeKeyDown
+      // captures the event and closes the dialog; the global handler
+      // doesn't see it because the editable input has focus and the
+      // wrapper's default skips form tags.
+      useHotkeysWrapper('escape', globalEscape);
+      return <SaveSnapshotDialog />;
+    }
+
+    render(withQueryClient(<TestHarness />));
+    const input = await screen.findByTestId('save-snapshot-name-input');
+    // autoFocus targets the input on dialog open; reassert just in case.
+    input.focus();
+    await user.keyboard('{Escape}');
+    // Radix should have closed the dialog…
+    await waitFor(() =>
+      expect(useSnapshotStore.getState().saveDialogOpen).toBe(false),
+    );
+    // …without our global handler ever firing (the input was the
+    // active element when Esc was pressed; the wrapper's default
+    // `enableOnFormTags: false` swallows it).
+    expect(globalEscape).not.toHaveBeenCalled();
   });
 });
