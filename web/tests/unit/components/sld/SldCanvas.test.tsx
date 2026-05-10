@@ -96,9 +96,35 @@ vi.mock('@xyflow/react', async () => {
     ReactFlowProvider: ({ children }: { children: ReactNode }) =>
       React.createElement(React.Fragment, null, children),
     Handle: () => null,
-    Background: () => null,
-    Controls: () => null,
-    MiniMap: () => null,
+    // v3 Unit 6 — pass the props we assert on (variant, color, gap)
+    // through to a DOM stub so the dot-grid + chrome tests can read
+    // them. The real component renders an SVG; we only need a probe.
+    Background: ({
+      variant,
+      color,
+      gap,
+    }: {
+      variant?: string;
+      color?: string;
+      gap?: number;
+    }) =>
+      React.createElement('div', {
+        'data-testid': 'sld-canvas-dot-grid',
+        'data-variant': variant,
+        'data-color': color,
+        'data-gap': gap,
+      }),
+    Controls: ({ className }: { className?: string }) =>
+      React.createElement('div', {
+        'data-testid': 'sld-canvas-controls',
+        className,
+      }),
+    MiniMap: ({ className }: { className?: string }) =>
+      React.createElement('div', {
+        'data-testid': 'sld-canvas-minimap',
+        className,
+      }),
+    BackgroundVariant: { Lines: 'lines', Dots: 'dots', Cross: 'cross' },
     BaseEdge: () => null,
     getSmoothStepPath: () => ['M0,0 L1,1', 0, 0, 0, 0],
     Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
@@ -591,6 +617,75 @@ describe('SldCanvas', () => {
     fireEvent(surface, dropEvent);
     expect(useCaseStore.getState().addPanelKind).toBe('Bus');
     expect(useCaseStore.getState().addPanelDropCoord).toEqual({ x: 42, y: 99 });
+  });
+
+  // ---- v3 Unit 6 — dot-grid + IDE chrome ----------------------------------
+
+  it('renders React Flow Background with the dots variant + token-driven color', async () => {
+    mockTopology = makeTopology([bus(1), bus(2)], [line(10, 1, 2)]);
+    act(() => {
+      useCaseStore.setState({
+        selection: {
+          primaryPath: parseWorkspacePath('synthetic.raw'),
+          addfiles: [],
+        },
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('sld-canvas-dot-grid')).toBeInTheDocument();
+    });
+    const grid = screen.getByTestId('sld-canvas-dot-grid');
+    expect(grid.getAttribute('data-variant')).toBe('dots');
+    // Theme adaptation flows through the CSS variable; assert the
+    // token reference rather than a resolved colour value so swapping
+    // to .dark on <html> remains a one-line change in tokens.css.
+    expect(grid.getAttribute('data-color')).toBe('var(--color-dot-grid)');
+    expect(grid.getAttribute('data-gap')).toBe('16');
+  });
+
+  it('renders MiniMap with IDE chrome (border, rounded, shadow)', async () => {
+    mockTopology = makeTopology([bus(1), bus(2)], [line(10, 1, 2)]);
+    act(() => {
+      useCaseStore.setState({
+        selection: {
+          primaryPath: parseWorkspacePath('synthetic.raw'),
+          addfiles: [],
+        },
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('sld-canvas-minimap')).toBeInTheDocument();
+    });
+    const minimap = screen.getByTestId('sld-canvas-minimap');
+    const className = minimap.getAttribute('class') ?? '';
+    expect(className).toContain('border');
+    expect(className).toContain('border-border');
+    expect(className).toContain('rounded-lg');
+    expect(className).toContain('shadow-lg');
+  });
+
+  it('renders Controls with the same IDE chrome treatment', async () => {
+    mockTopology = makeTopology([bus(1), bus(2)], [line(10, 1, 2)]);
+    act(() => {
+      useCaseStore.setState({
+        selection: {
+          primaryPath: parseWorkspacePath('synthetic.raw'),
+          addfiles: [],
+        },
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('sld-canvas-controls')).toBeInTheDocument();
+    });
+    const controls = screen.getByTestId('sld-canvas-controls');
+    const className = controls.getAttribute('class') ?? '';
+    expect(className).toContain('border');
+    expect(className).toContain('border-border');
+    expect(className).toContain('rounded-lg');
+    expect(className).toContain('shadow-lg');
   });
 
   it('Recompute connectivity button reflects the latest island_count from the store', async () => {

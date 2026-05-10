@@ -3,6 +3,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   SelectionMode,
@@ -106,10 +107,32 @@ function miniMapNodeColor(node: Node): string {
  * MiniMap surface styling. Forwarded via the `style` prop so the React
  * Flow defaults (which use hardcoded hex) don't bleed into dark mode.
  * Unit 12 will flip the underlying tokens; this object stays untouched.
+ *
+ * v3 Unit 6 — IDE-style chrome on the floating overlay: bordered card
+ * with a soft drop shadow so the MiniMap visually separates from the
+ * canvas in both light and dark themes. The chrome utilities are
+ * appended via `MINIMAP_CHROME_CLASSNAME` rather than baked into the
+ * style object so Tailwind's responsive + dark variants can apply.
  */
 const MINIMAP_STYLE: React.CSSProperties = {
   backgroundColor: 'var(--color-background)',
 };
+
+/**
+ * IDE-style chrome shared by MiniMap + Controls (v3 Unit 6). Token-driven
+ * border + radius + shadow so dark mode tracks automatically. Both
+ * components float over the canvas (per Phase 2 Unit 11), so the chrome
+ * is purely cosmetic — no positional shift.
+ */
+const FLOATING_OVERLAY_CHROME = 'border border-border rounded-lg shadow-lg overflow-hidden';
+
+/**
+ * Dot-grid colour token consumed by React Flow's `<Background />` (v3
+ * Unit 6). React Flow forwards `color` to the SVG `<circle fill>`, and
+ * SVG paint accepts CSS variables natively — so the dark-mode swap from
+ * tokens.css's `:where(.dark)` block applies without a JS branch.
+ */
+const DOT_GRID_COLOR = 'var(--color-dot-grid)';
 
 /**
  * Viewport-rectangle styling. Stroke uses the primary accent so the
@@ -726,13 +749,20 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
           selectionMode={SelectionMode.Partial}
           proOptions={{ hideAttribution: true }}
         >
-          <Background />
-          <Controls />
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={16}
+            size={1}
+            color={DOT_GRID_COLOR}
+            data-testid="sld-canvas-dot-grid"
+          />
+          <Controls className={FLOATING_OVERLAY_CHROME} />
           <MiniMap
             pannable
             zoomable
             nodeColor={miniMapNodeColor}
             style={MINIMAP_STYLE}
+            className={FLOATING_OVERLAY_CHROME}
             maskColor={MINIMAP_MASK_STYLE.fill as string}
             maskStrokeColor={MINIMAP_MASK_STYLE.stroke as string}
             maskStrokeWidth={MINIMAP_MASK_STYLE.strokeWidth as number}
