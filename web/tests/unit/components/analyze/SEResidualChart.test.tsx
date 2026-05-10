@@ -1,5 +1,5 @@
 /**
- * Tests for ``<SEResidualChart />`` (Unit 13).
+ * Tests for ``<SEResidualChart />`` (Unit 13 + Unit 18).
  *
  * Coverage:
  * - Empty-state branches: result=null + result with empty residuals.
@@ -8,9 +8,13 @@
  * - Pulls the result from the store when no override prop is given.
  * - buildHistogram bins residuals into equal-width bins and flags bins
  *   containing any residual whose index is in flagged_indices.
+ * - Unit 18: clicking a bar opens the detail panel; the panel shows
+ *   the bin's contents + the correct flag reason; the close button
+ *   dismisses it; re-running SE (new result identity) clears any open
+ *   selection so stale indices don't bleed across runs.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import {
   SEResidualChart,
   buildHistogram,
@@ -112,6 +116,109 @@ describe('<SEResidualChart />', () => {
     useAnalyzeStore.getState().setSeResult(SE_RESULT);
     render(<SEResidualChart />);
     expect(screen.getByTestId('se-residual-chart')).toBeInTheDocument();
+  });
+
+  // ---- Unit 18: click-to-inspect detail panel ----------------------------
+
+  it('does not render the detail panel until a bar is clicked', () => {
+    render(<SEResidualChart result={SE_RESULT} binCount={10} />);
+    expect(
+      screen.queryByTestId('se-residual-detail-panel'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('clicking a flagged bar opens the detail panel with the ≥3σ flag reason', () => {
+    render(<SEResidualChart result={SE_RESULT} binCount={10} />);
+    const flaggedBars = screen.getAllByTestId('se-residual-bar-flagged');
+    expect(flaggedBars.length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(flaggedBars[0]!);
+
+    const panel = screen.getByTestId('se-residual-detail-panel');
+    expect(panel).toBeInTheDocument();
+    // Flagged bin must surface the literal flag-reason from the plan.
+    expect(panel.textContent).toMatch(/≥3σ from estimate/);
+    // Member index 5 is the +0.5 outlier; it should appear in the bin's
+    // member list as the flagged measurement.
+    expect(
+      screen.getByTestId('se-residual-detail-member-5'),
+    ).toBeInTheDocument();
+  });
+
+  it('clicking a non-flagged bar opens the detail panel with the "Within tolerance" reason', () => {
+    render(<SEResidualChart result={SE_RESULT} binCount={10} />);
+    // Find any non-flagged bar that has measurements in it. With 10
+    // residuals and 10 bins across [-0.04, 0.5], some bins are empty,
+    // so we walk the indexed testids and pick the first interactive one.
+    let clicked = false;
+    for (let i = 0; i < 10; i++) {
+      const bar = screen.queryByTestId(`se-residual-bar-${i}`);
+      if (bar !== null && bar.getAttribute('data-flagged') === 'false') {
+        // Skip empty bins (count=0); they are non-interactive.
+        // Detect by reading the data-bin-idx + cross-checking via
+        // height — but simpler: just try clicking and check for the
+        // panel's appearance.
+        fireEvent.click(bar);
+        if (screen.queryByTestId('se-residual-detail-panel') !== null) {
+          clicked = true;
+          break;
+        }
+      }
+    }
+    expect(clicked).toBe(true);
+
+    const panel = screen.getByTestId('se-residual-detail-panel');
+    expect(panel.textContent).toMatch(/Within tolerance/);
+    expect(panel.textContent).not.toMatch(/≥3σ/);
+  });
+
+  it('the detail panel close button dismisses the panel', () => {
+    render(<SEResidualChart result={SE_RESULT} binCount={10} />);
+    fireEvent.click(screen.getAllByTestId('se-residual-bar-flagged')[0]!);
+    expect(
+      screen.getByTestId('se-residual-detail-panel'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('se-residual-detail-close'));
+    expect(
+      screen.queryByTestId('se-residual-detail-panel'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('re-running SE (new result identity) clears any open detail panel', () => {
+    const { rerender } = render(
+      <SEResidualChart result={SE_RESULT} binCount={10} />,
+    );
+    fireEvent.click(screen.getAllByTestId('se-residual-bar-flagged')[0]!);
+    expect(
+      screen.getByTestId('se-residual-detail-panel'),
+    ).toBeInTheDocument();
+
+    // Hand a NEW SeResult object (fresh identity, same shape) — the
+    // useEffect keyed on ``result`` should reset the selection.
+    const nextResult: SeResult = {
+      ...SE_RESULT,
+      // Tweak a field so the object identity is unambiguously different.
+      iterations: SE_RESULT.iterations + 1,
+    };
+    rerender(<SEResidualChart result={nextResult} binCount={10} />);
+
+    expect(
+      screen.queryByTestId('se-residual-detail-panel'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('the detail panel surfaces the bin range and measurement count', () => {
+    render(<SEResidualChart result={SE_RESULT} binCount={10} />);
+    fireEvent.click(screen.getAllByTestId('se-residual-bar-flagged')[0]!);
+
+    const panel = screen.getByTestId('se-residual-detail-panel');
+    // Bin header includes "Bin #" + the bracketed range in scientific
+    // notation. Don't assert the exact bin index (depends on bin math);
+    // assert the structural pieces are present.
+    expect(panel.textContent).toMatch(/Bin #/);
+    expect(panel.textContent).toMatch(/residuals in \[/);
+    expect(panel.textContent).toMatch(/Min residual/);
+    expect(panel.textContent).toMatch(/Max residual/);
   });
 });
 
