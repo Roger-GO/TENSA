@@ -103,6 +103,16 @@ vi.mock('@xyflow/react', async () => {
     getSmoothStepPath: () => ['M0,0 L1,1', 0, 0, 0, 0],
     Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
     SelectionMode: { Partial: 'partial', Full: 'full' },
+    // Unit 11 — `useReactFlow` is consumed by SldCanvas (for
+    // `setCenter` panning) and by SldNodeSearch (for `getNodes` +
+    // `getZoom`). The stub returns the imperative methods the canvas
+    // calls; tests assert by spying on the returned functions when
+    // they care about pan side effects.
+    useReactFlow: () => ({
+      setCenter: vi.fn(),
+      getZoom: vi.fn(() => 1),
+      getNodes: vi.fn(() => []),
+    }),
   };
 });
 

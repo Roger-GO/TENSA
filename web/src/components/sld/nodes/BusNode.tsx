@@ -26,6 +26,14 @@ export interface SldNodeData extends Record<string, unknown> {
   kind: string;
   voltage?: number;
   angle?: number;
+  /**
+   * Unit 11 — true when this bus node is the active selection driven
+   * via the SLD search popover or an inspector-row click. The flag is
+   * stamped onto `node.data` by `SldCanvas.nodesWithSelection` so the
+   * highlight survives a click that originated outside React Flow's
+   * own selection model.
+   */
+  sldSelected?: boolean;
 }
 
 const SIDES: Array<{ side: Side; position: Position }> = [
@@ -83,6 +91,11 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
   const effectiveColorClass =
     frameOverlay !== null ? colorClassForBand(frameOverlay.band) : pflowOverlay.color_class;
 
+  // Unit 11 — `sldSelected` lights the same border/ring as React Flow's
+  // own `selected` flag. Both go through the same Tailwind branch via
+  // a `data-[selected=true]` selector so the visual stays in lockstep.
+  const isSldSelected = d.sldSelected === true;
+  const visuallySelected = selected || isSldSelected;
   return (
     <div
       data-testid={`bus-node-${d.idx}`}
@@ -91,13 +104,18 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
       data-band={effectiveBand}
       data-streaming={frameOverlay !== null ? 'true' : undefined}
       data-pending-dependent={isPendingDependent ? 'true' : undefined}
+      data-selected={visuallySelected ? 'true' : undefined}
       className={cn(
         'group flex flex-col items-center gap-0.5 px-2.5 py-1.5',
         'bg-background text-foreground',
         'rounded-[var(--radius-md)] border-2',
-        selected
+        visuallySelected
           ? 'border-[var(--color-ring)] ring-2 ring-[var(--color-ring)]'
           : effectiveColorClass,
+        // Tailwind data-attribute hook — keeps the selection ring in
+        // sync even if a parent wrapper later overwrites the inline
+        // border classes. Belt-and-braces with the conditional above.
+        'data-[selected=true]:border-[var(--color-ring)] data-[selected=true]:ring-2 data-[selected=true]:ring-[var(--color-ring)]',
         isPendingDependent ? 'ring-warning/60 ring-2' : '',
         'transition-colors duration-[var(--duration-fast)]',
         'cursor-pointer select-none',

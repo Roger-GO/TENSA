@@ -48,6 +48,7 @@ import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 import { useHistoryStore } from '@/store/history';
 import { useReportDialogStore } from '@/components/reports/ReportDialog';
 import { useCurrentTopology, useReloadCase, useUndoLastEdit } from '@/api/queries';
+import { __requestOpenSldSearch } from '@/store/sld';
 import type { RunRoutine } from '@/lib/useRunReadiness';
 
 export type CommandGroup = 'workspace' | 'edit' | 'run' | 'export' | 'navigation' | 'help';
@@ -347,11 +348,29 @@ export function useCommandRegistry(): readonly Command[] {
         action: openHistoryDrawer,
         shortcut: 'g>h',
       },
-      // TODO(Unit 11): bind `meta+slash, ctrl+slash` to focus the SLD
-      // node-search input once it ships. The hotkey is intentionally
-      // omitted here — wiring an action that targets a non-existent
-      // input would no-op silently, which is worse than showing
-      // nothing in the cheatsheet.
+      // Unit 11 — SLD node search. The action posts to the
+      // `subscribeOpenSldSearch` channel exposed by `store/sld.ts`;
+      // `SldNodeSearch` subscribes once on mount and flips its local
+      // Radix Popover open state. The actual `meta+/` keybind is
+      // wired inside `SldCanvas` (so it scopes to the canvas mount
+      // rather than firing globally even when no case is loaded);
+      // declaring the shortcut here is purely for the cheatsheet +
+      // palette display.
+      {
+        id: 'navigation.focusSearch',
+        label: 'Search nodes…',
+        group: 'navigation',
+        keywords: ['search', 'find', 'node', 'bus', 'jump', 'pan'],
+        action: () => __requestOpenSldSearch(),
+        shortcut: 'meta+slash, ctrl+slash',
+      },
+      {
+        id: 'navigation.panToBus',
+        label: 'Pan to bus…',
+        group: 'navigation',
+        keywords: ['pan', 'goto', 'bus', 'centre', 'center', 'jump'],
+        action: () => __requestOpenSldSearch(),
+      },
 
       // ---- run controls --------------------------------------------------
       // ⌘Enter / Ctrl+Enter — run whichever routine is currently
