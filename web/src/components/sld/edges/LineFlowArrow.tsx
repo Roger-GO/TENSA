@@ -98,6 +98,9 @@ export const LineFlowArrow = memo(function LineFlowArrow({
       data-arrow-size={size.toFixed(2)}
       points={points}
       fill="var(--color-foreground)"
+      stroke="var(--color-background)"
+      strokeWidth={0.75}
+      strokeLinejoin="round"
       style={{
         transform: `translate(${x}px, ${y}px) rotate(${rotation}deg)`,
         transformBox: 'fill-box',

@@ -489,19 +489,19 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
       data-x-scale={xScale}
       className={cn('border-border bg-background relative flex flex-col rounded border', className)}
     >
-      <div className="border-border text-muted-foreground flex items-center justify-between gap-2 border-b px-2 py-1 text-[10px]">
-        <span>
+      <div className="border-border text-muted-foreground flex items-center justify-between gap-3 border-b px-2.5 py-1.5 text-[11px]">
+        <span className="tabular-nums">
           Eigenvalue scatter — {points.length} of {result.mode_count} visible (filter: damping &lt;{' '}
           {filter.dampingMax}, |Re| &lt; {filter.realAbsMax})
         </span>
-        <div className="flex items-center gap-1">
+        <div className="bg-muted/40 flex items-center gap-0.5 rounded p-0.5">
           {xScale === 'log' && negativeDampingCount > 0 ? (
             <span
               data-testid="eig-scatter-log-warning"
               role="status"
               className={cn(
                 'border-warning/40 bg-warning/10 text-foreground',
-                'rounded border px-1.5 py-0.5 text-[9px] leading-none',
+                'mr-1 rounded border px-1.5 py-0.5 text-[9px] leading-none',
               )}
               title={`${negativeDampingCount} growing mode(s) have positive Re; on log-scale they map to the right half via signed magnitude.`}
             >
@@ -512,7 +512,7 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
             type="button"
             variant={xScale === 'log' ? 'secondary' : 'ghost'}
             size="sm"
-            className="h-6 px-2 text-[10px]"
+            className="h-6 px-2 text-[10px] font-medium"
             data-testid="eig-scatter-log-toggle"
             data-active={xScale === 'log' ? 'true' : 'false'}
             aria-pressed={xScale === 'log'}
@@ -525,7 +525,7 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
             type="button"
             variant="ghost"
             size="sm"
-            className="h-6 px-2 text-[10px]"
+            className="h-6 px-2 text-[10px] font-medium"
             data-testid="eig-scatter-zoom-reset"
             onClick={resetView}
             title="Reset zoom (double-click in chart also works)"
@@ -614,24 +614,35 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
               return null;
             }
             return (
-              <circle
-                key={p.idx}
-                cx={cx}
-                cy={cy}
-                r={isSelected ? 5 : isHovered ? 4 : 3}
-                data-testid={`eig-scatter-point-${p.idx}`}
-                data-selected={isSelected ? 'true' : 'false'}
-                className={cn(
-                  'cursor-pointer transition-[r,fill]',
-                  isSelected
-                    ? 'fill-primary stroke-foreground'
-                    : isHovered
-                      ? 'fill-primary'
-                      : 'fill-foreground/60 hover:fill-primary',
-                )}
-                strokeWidth={isSelected ? 1.5 : 0}
-                onClick={() => handlePointClick(p.idx)}
-              />
+              <g key={p.idx}>
+                {isSelected ? (
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={10}
+                    aria-hidden="true"
+                    className="fill-primary/15 stroke-primary/40 pointer-events-none"
+                    strokeWidth={1}
+                  />
+                ) : null}
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={isSelected ? 5 : isHovered ? 4 : 3}
+                  data-testid={`eig-scatter-point-${p.idx}`}
+                  data-selected={isSelected ? 'true' : 'false'}
+                  className={cn(
+                    'cursor-pointer transition-[r,fill]',
+                    isSelected
+                      ? 'fill-primary stroke-foreground'
+                      : isHovered
+                        ? 'fill-primary'
+                        : 'fill-foreground/60 hover:fill-primary',
+                  )}
+                  strokeWidth={isSelected ? 1.5 : 0}
+                  onClick={() => handlePointClick(p.idx)}
+                />
+              </g>
             );
           })}
         </g>
@@ -684,16 +695,20 @@ function Tooltip({
       className={cn(
         'pointer-events-none absolute z-10',
         'border-border bg-popover text-popover-foreground',
-        'rounded border px-2 py-1 text-[10px] shadow-md',
+        'rounded-md border px-2.5 py-1.5 text-[10px] shadow-lg ring-1 ring-black/5',
         'whitespace-nowrap',
       )}
       style={{ left, top }}
     >
-      <div>
+      <div className="text-muted-foreground mb-0.5 flex items-center gap-1.5 text-[9px] uppercase tracking-wider">
+        <span>Mode</span>
+        <span className="text-foreground tabular-nums">#{fields.idx}</span>
+      </div>
+      <div className="font-mono tabular-nums leading-snug">
         λ = {realStr} {sign}{' '}
         {Math.abs(fields.imag) < LOG_EPSILON ? '≈0' : imagStr.replace(/^-/, '')}i
       </div>
-      <div>
+      <div className="font-mono tabular-nums leading-snug">
         ζ = {dampPct}%, f = {fields.frequency.toFixed(3)} Hz
       </div>
     </div>

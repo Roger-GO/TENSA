@@ -351,13 +351,18 @@ export function SEResidualChart({
               width={w}
               height={h}
               className={cn(
+                'transition-[fill,stroke-width]',
                 interactive ? 'cursor-pointer' : '',
                 b.flagged
                   ? 'fill-danger/70 stroke-danger'
                   : 'fill-primary/40 stroke-primary',
-                isSelected ? 'stroke-foreground' : '',
+                isSelected
+                  ? b.flagged
+                    ? 'fill-danger stroke-foreground'
+                    : 'fill-primary stroke-foreground'
+                  : '',
               )}
-              strokeWidth={isSelected ? 1.5 : 0.5}
+              strokeWidth={isSelected ? 2 : 0.5}
               onClick={
                 interactive ? () => setSelectedBinIdx(i) : undefined
               }
@@ -426,25 +431,35 @@ function SEResidualDetailPanel({
     <div
       data-testid="se-residual-detail-panel"
       className={cn(
-        'border-border bg-muted/10 border-t px-3 py-2 text-xs',
+        'border-border bg-muted/30 border-t px-3 py-2.5 text-xs',
+        'shadow-[inset_0_1px_0_0_oklch(1_0_0/0.04)]',
       )}
     >
       <div className="mb-2 flex items-start justify-between gap-2">
-        <div>
-          <div className="text-foreground font-medium">
-            Bin #{binIdx} ·{' '}
-            <span className="text-muted-foreground font-normal">
-              residuals in [{bin.lo.toExponential(2)},{' '}
-              {bin.hi.toExponential(2)}]
-            </span>
-          </div>
-          <div
+        <div className="flex items-start gap-2">
+          <span
+            aria-hidden
             className={cn(
-              'mt-0.5 text-[10px]',
-              bin.flagged ? 'text-danger' : 'text-muted-foreground',
+              'mt-1 inline-block h-2.5 w-2.5 shrink-0 rounded-sm',
+              bin.flagged ? 'bg-danger' : 'bg-primary',
             )}
-          >
-            {flagReason}
+          />
+          <div>
+            <div className="text-foreground font-medium">
+              Bin #{binIdx}{' '}
+              <span className="text-muted-foreground font-normal">
+                · residuals in [{bin.lo.toExponential(2)},{' '}
+                {bin.hi.toExponential(2)}]
+              </span>
+            </div>
+            <div
+              className={cn(
+                'mt-0.5 text-[10px] font-medium uppercase tracking-wider',
+                bin.flagged ? 'text-danger' : 'text-muted-foreground',
+              )}
+            >
+              {flagReason}
+            </div>
           </div>
         </div>
         <button
@@ -453,8 +468,9 @@ function SEResidualDetailPanel({
           onClick={onClose}
           aria-label="Close measurement detail panel"
           className={cn(
-            'text-muted-foreground hover:text-foreground',
-            'rounded px-1 leading-none transition-colors',
+            'text-muted-foreground hover:text-foreground hover:bg-muted',
+            'flex h-6 w-6 items-center justify-center rounded',
+            'text-base leading-none transition-colors',
           )}
         >
           ×

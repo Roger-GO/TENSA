@@ -32,6 +32,52 @@ body {
   outline-offset: 2px;
 }
 
+/*
+ * Range-slider thumb sizing. The Tailwind ``accent-*`` utility colors
+ * the thumb but doesn't size it; browsers default to ~12px which feels
+ * brittle for a stability-margin slider. Bump to 14px and add a subtle
+ * ring on hover/focus so the affordance is obvious.
+ *
+ * Used by the CPF lambda slider (Unit 17) and any future range inputs.
+ */
+input[type='range'].slider-thumb-lg {
+  --slider-thumb-size: 14px;
+}
+input[type='range'].slider-thumb-lg::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: var(--slider-thumb-size);
+  height: var(--slider-thumb-size);
+  border-radius: 9999px;
+  background: var(--color-primary);
+  border: 2px solid var(--color-background);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  transition: box-shadow 120ms ease;
+}
+input[type='range'].slider-thumb-lg::-moz-range-thumb {
+  width: var(--slider-thumb-size);
+  height: var(--slider-thumb-size);
+  border-radius: 9999px;
+  background: var(--color-primary);
+  border: 2px solid var(--color-background);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  transition: box-shadow 120ms ease;
+}
+input[type='range'].slider-thumb-lg:hover::-webkit-slider-thumb,
+input[type='range'].slider-thumb-lg:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 4px var(--color-ring),
+    0 1px 2px rgba(0, 0, 0, 0.18);
+}
+input[type='range'].slider-thumb-lg:hover::-moz-range-thumb,
+input[type='range'].slider-thumb-lg:focus-visible::-moz-range-thumb {
+  box-shadow:
+    0 0 0 4px var(--color-ring),
+    0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
 /* Reduced-motion compliance: collapse durations + disable transforms for
  * users who have set prefers-reduced-motion: reduce. Per the
  * interaction-states.md cross-cutting behaviors section. */
