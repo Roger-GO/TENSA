@@ -262,6 +262,51 @@ describe('BusNode — v0.2 streaming overlay (active run)', () => {
   });
 });
 
+describe('BusNode — Unit 19 voltage transition easing', () => {
+  beforeEach(resetStores);
+  afterEach(() => {
+    cleanup();
+    resetStores();
+  });
+
+  it('applies a CSS transition on border-color + background-color with the cubic-out easing token', () => {
+    // The transition is the visual carrier of the voltage band change.
+    // We assert the inline-style transition string contains both the
+    // band-color property (border-color) AND the easing token so a future
+    // refactor can't silently drop the easing.
+    const { getByTestId } = render(<BusNode {...nodeProps('1')} />);
+    const node = getByTestId('bus-node-1');
+    const transition = node.style.transition;
+    expect(transition).toContain('border-color');
+    expect(transition).toContain('background-color');
+    expect(transition).toContain('var(--duration-base)');
+    expect(transition).toContain('var(--ease-out-quart)');
+  });
+
+  it('keeps the transition style stable across band changes (so CSS interpolates it)', () => {
+    // The transition CSS must not be re-keyed on band change — otherwise
+    // the new value would land instantly without easing. We verify by
+    // flipping the band and confirming the inline style string is the
+    // same (the className mutates, the transition does not).
+    useRunsStore.setState({ runs: {}, activeRunId: 'run-x' });
+    useAnimationStore
+      .getState()
+      .setBusOverlayForRun('run-x', new Map([['1', { band: 'success', voltage: 1.0 }]]));
+    const { getByTestId, rerender } = render(<BusNode {...nodeProps('1')} />);
+    const node = getByTestId('bus-node-1');
+    const transitionBefore = node.style.transition;
+
+    act(() => {
+      useAnimationStore
+        .getState()
+        .setBusOverlayForRun('run-x', new Map([['1', { band: 'danger', voltage: 0.85 }]]));
+    });
+    rerender(<BusNode {...nodeProps('1')} />);
+    expect(node.style.transition).toBe(transitionBefore);
+    expect(node).toHaveAttribute('data-band', 'danger');
+  });
+});
+
 describe('BusNode — edge cases', () => {
   beforeEach(resetStores);
   afterEach(() => {

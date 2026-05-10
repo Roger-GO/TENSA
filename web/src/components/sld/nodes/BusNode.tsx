@@ -117,9 +117,27 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
         // border classes. Belt-and-braces with the conditional above.
         'data-[selected=true]:border-[var(--color-ring)] data-[selected=true]:ring-2 data-[selected=true]:ring-[var(--color-ring)]',
         isPendingDependent ? 'ring-warning/60 ring-2' : '',
-        'transition-colors duration-[var(--duration-fast)]',
         'cursor-pointer select-none',
       )}
+      // Unit 19 — voltage band colour transition. We layer the transition
+      // on `border-color` (the visual carrier of the band) AND
+      // `background-color` for theme-token swaps. The cubic-out easing
+      // (`--ease-out-quart`) lands the new colour without overshoot;
+      // 200ms keeps the feedback tight on 60 Hz TDS playback.
+      //
+      // Reduced-motion: globals.css collapses transition-duration to 0ms
+      // under `@media (prefers-reduced-motion: reduce)`, so users that
+      // request reduced motion get instant updates with no extra wiring.
+      //
+      // We use inline `style` rather than a Tailwind utility because v4
+      // doesn't expose an arbitrary `transition-timing-function` shorthand
+      // backed by a CSS variable; the inline style is a single line and
+      // co-locates the easing with the property list.
+      style={{
+        transition:
+          'border-color var(--duration-base) var(--ease-out-quart), ' +
+          'background-color var(--duration-base) var(--ease-out-quart)',
+      }}
     >
       {SIDES.map(({ side, position }) => (
         <Fragment key={side}>

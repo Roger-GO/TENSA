@@ -5,6 +5,7 @@ import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
 import type { Side } from '../graph';
 import { getLineOverlayState } from '../overlay';
+import { LineFlowArrow } from './LineFlowArrow';
 
 /**
  * Topology edge. Connects two bus nodes via a polyline (orthogonal
@@ -81,6 +82,15 @@ export const TopologyEdge = memo(function TopologyEdge({
   const isLine = edgeData.bucket === 'line';
   const lineIdx = edgeData.idx;
   const overlay = isLine && lineIdx ? getLineOverlayState(lineIdx, pflowResult, hideLabels) : null;
+  // Tangent at the label point. The smooth-step path bends, but for the
+  // arrow we use the gross source→target direction — orthogonal segments
+  // make any midpoint tangent feel arbitrary, and the gross direction
+  // matches the user's mental model of the line's "from → to".
+  const arrowAngleDeg = (Math.atan2(targetY - sourceY, targetX - sourceX) * 180) / Math.PI;
+  const lineFlowAbsMw =
+    isLine && lineIdx && pflowResult?.line_flows
+      ? Math.abs(pflowResult.line_flows[lineIdx]?.p ?? 0)
+      : 0;
 
   // Style: thicker / colored stroke when we have flow data; neutral
   // otherwise. The arrow direction is encoded via the marker plus a
@@ -105,6 +115,16 @@ export const TopologyEdge = memo(function TopologyEdge({
       <BaseEdge path={edgePath} markerEnd={markerEnd} style={{ stroke, strokeWidth }} />
       <circle cx={sourcePoint.x} cy={sourcePoint.y} r={dotRadius} fill={dotFill} />
       <circle cx={targetPoint.x} cy={targetPoint.y} r={dotRadius} fill={dotFill} />
+      {overlay && overlay.has_data && overlay.direction !== 'neutral' ? (
+        <LineFlowArrow
+          x={labelX}
+          y={labelY}
+          angleDeg={arrowAngleDeg}
+          direction={overlay.direction}
+          absMw={lineFlowAbsMw}
+          testid={`line-flow-arrow-${id}`}
+        />
+      ) : null}
       {overlay && overlay.has_data && (overlay.p_label !== null || overlay.q_label !== null) ? (
         <EdgeLabelRenderer>
           <div

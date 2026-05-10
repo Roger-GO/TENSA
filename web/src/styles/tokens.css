@@ -61,6 +61,10 @@
   --duration-base: 200ms;
   --duration-slow: 300ms;
   --ease-out-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Material-style "standard" cubic-out — used by Unit 19 for SLD bus
+   * voltage colour transitions and line-flow direction arrow rotations.
+   * Keeps animations crisp without overshoot. */
+  --ease-out-quart: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Dark mode overrides. Selecting on .dark via the @custom-variant above lets
