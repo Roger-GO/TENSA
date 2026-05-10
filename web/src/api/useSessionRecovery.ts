@@ -275,8 +275,6 @@ export function useSessionRecovery(): void {
   // edges. Auto-create fires whenever sessionId is null and we have a
   // token; recovery-edge clears any prior error first so a stuck
   // ``isError`` doesn't pin the cycle.
-  const createIsError = createSession.isError;
-  const createIsPending = createSession.isPending;
 
   useEffect(() => {
     // Recovery edge: false → true. Reset stale error state so the
@@ -296,24 +294,28 @@ export function useSessionRecovery(): void {
   }, [recoveryInProgress]);
 
   useEffect(() => {
-    // Auto-create. Fires whenever:
+    // Auto-create gate. Fires whenever:
     //
     // - the user is authed
     // - we have no session id
-    // - no create is in flight
     // - we are not in a permanent recovery-failed state (the badge tells
     //   the user to reload the tab; firing more creates won't help)
     //
-    // Includes a 1s per-instance debounce so a re-render burst can't fire
-    // multiple POSTs within the same window. Note the gate intentionally
-    // does NOT exclude ``createSession.isError``: a previous failure
-    // should not permanently block the cycle. The recovery edge above
-    // calls ``createSession.reset()`` to scrub stale error state for UI;
-    // this gate just allows the next attempt as soon as nothing is in
-    // flight.
+    // The 1-second per-instance debounce is the *only* "is a request in
+    // flight" guard — we deliberately do NOT gate on
+    // ``createSession.isPending``. Reason: in React 19 + TanStack Query
+    // v5, the mutation's ``isPending`` flag does not reliably transition
+    // ``true → false`` in time for the next render after ``onSuccess``
+    // fires. The post-discard render cycle observed in v0.2 polish smoke
+    // showed sessionId returning to null while ``isPending`` stayed
+    // pinned at true (from the prior cold-start mutation), permanently
+    // blocking the gate. The debounce provides equivalent protection
+    // against re-render storms without depending on the mutation's
+    // transient observer state. ``createSession.mutate()`` itself is
+    // safe to call concurrently; TanStack will replace the in-flight
+    // observer with the new attempt's result.
     if (!tokenPresent) return;
     if (sessionId !== null) return;
-    if (createIsPending) return;
     if (recoveryFailed) return;
     const now = Date.now();
     if (now - lastCreateAttemptRef.current < CREATE_DEBOUNCE_MS) return;
@@ -322,7 +324,7 @@ export function useSessionRecovery(): void {
     // ``createSession`` excluded from deps for the same reason as above.
     // The dep array tracks the gate's primitive inputs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenPresent, sessionId, createIsPending, createIsError, recoveryFailed, recoveryInProgress]);
+  }, [tokenPresent, sessionId, recoveryFailed, recoveryInProgress]);
 
   // ---- Branch (3+4): re-load case after recovery --------------------------
   useEffect(() => {
