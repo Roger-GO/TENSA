@@ -25,6 +25,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/Input';
 import { useSaveSnapshot } from '@/api/queries';
 import { useSnapshotStore } from '@/store/snapshot';
 import { useSessionStore } from '@/store/session';
@@ -111,21 +112,16 @@ function SaveSnapshotDialogInner() {
       <div className="mt-4 flex flex-col gap-3">
         <label className="flex flex-col gap-1">
           <span className="text-foreground text-xs font-medium">Name</span>
-          <input
+          <Input
             type="text"
             data-testid="save-snapshot-name-input"
             value={pendingName}
-            onChange={(e) => {
-              setPendingName(e.target.value);
+            onChange={(next) => {
+              setPendingName(next);
               setCollisionName(null);
             }}
             placeholder="scenario-A"
             disabled={isPending}
-            className={cn(
-              'border-border bg-background text-foreground',
-              'rounded-[var(--radius-sm)] border px-2 py-1.5 text-sm',
-              'outline-none focus:ring-2 focus:ring-[var(--ring-color)]',
-            )}
             autoFocus
           />
         </label>

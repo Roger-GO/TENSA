@@ -10,7 +10,7 @@
  * - Cancel closes without firing the mutation.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -218,6 +218,46 @@ describe('<SaveSnapshotDialog /> — confirm flow', () => {
 // the wrapper does NOT fire while the snapshot-name input has focus.
 // This is the structural guarantee that prevents the bus-filter
 // contamination class of bug from regressing.
+
+// --- Unit 5: IME composition + React-friendly setter contract --------------
+//
+// The name field switched to `<Input>` in Unit 5. These tests pin the
+// IME-deferral and the Playwright-fill escape-hatch behaviour.
+
+describe('<SaveSnapshotDialog /> — Input contract (Unit 5)', () => {
+  it('IME composition does not fire onChange mid-composition', async () => {
+    render(withQueryClient(<SaveSnapshotDialog />));
+    const input = (await screen.findByTestId(
+      'save-snapshot-name-input',
+    )) as HTMLInputElement;
+
+    fireEvent.compositionStart(input);
+    input.value = 'sce';
+    fireEvent.input(input, { isComposing: true });
+    // Mid-composition: snapshot store should not have advanced.
+    expect(useSnapshotStore.getState().pendingName).toBe('');
+
+    fireEvent.compositionEnd(input);
+    // Commit lands in the store on compositionend.
+    expect(useSnapshotStore.getState().pendingName).toBe('sce');
+  });
+
+  it('React-friendly programmatic setter fills the field and enables confirm', async () => {
+    render(withQueryClient(<SaveSnapshotDialog />));
+    const input = (await screen.findByTestId(
+      'save-snapshot-name-input',
+    )) as HTMLInputElement;
+
+    const desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+    desc!.set!.call(input, 'scenario-A');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+
+    await waitFor(() =>
+      expect(useSnapshotStore.getState().pendingName).toBe('scenario-A'),
+    );
+    expect(screen.getByTestId('save-snapshot-confirm')).toBeEnabled();
+  });
+});
 
 describe('<SaveSnapshotDialog /> — keyboard scoping (Unit 6)', () => {
   it('typing into the name input does not trigger a global hotkey', async () => {
