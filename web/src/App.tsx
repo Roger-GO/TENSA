@@ -1,41 +1,31 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from '@/components/shell/AppShell';
 import { TokenPasteModal } from '@/components/auth/TokenPasteModal';
 import { CaseNav } from '@/components/case/CaseNav';
-import { ElementInspector } from '@/components/inspector/ElementInspector';
-import { ResultsTable } from '@/components/inspector/ResultsTable';
 // v0.2 RunButton replaces the v0.1 PF-only one — handles BOTH PF and TDS,
 // branches on a UI mode toggle that defaults to TDS when the disturbance
-// editor has any disturbances. The v0.1 RunButton file is kept untouched
-// so its tests + paths still pass; this top-level mount just doesn't
-// reference it any more.
+// editor has any disturbances.
 import { RunButton } from '@/components/tds/RunButton';
 import { RunStatusBadge } from '@/components/tds/RunStatusBadge';
 import { NumericalErrorBanner } from '@/components/tds/NumericalErrorBanner';
-import { AnalyzePanel } from '@/components/analyze/AnalyzePanel';
-import { DisturbancePanel } from '@/components/disturbance/DisturbancePanel';
-import { TimeSeriesPlot } from '@/components/plots/TimeSeriesPlot';
-import { ScrubControl } from '@/components/plots/ScrubControl';
-import { VariableTreePicker } from '@/components/plots/VariableTreePicker';
-import { PanelPickerTabs } from '@/components/shell/PanelPickerTabs';
-import { HideLabelsToggle } from '@/components/pflow/HideLabelsToggle';
 import { ConvergenceErrorPanel } from '@/components/pflow/ConvergenceErrorPanel';
 import { RuntimeCrashModal } from '@/components/pflow/RuntimeCrashModal';
 import { AddElementPanel } from '@/components/elements/AddElementPanel';
+import { HideLabelsToggle } from '@/components/pflow/HideLabelsToggle';
 import { WorkspaceMenu } from '@/components/shell/WorkspaceMenu';
 import { EditMenu } from '@/components/shell/EditMenu';
 import { RunMenu } from '@/components/shell/RunMenu';
 import { ExportMenu } from '@/components/shell/ExportMenu';
+import { SldCanvas } from '@/components/sld/SldCanvas';
+import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
 import { makeQueryClient, wireGlobalErrorRecovery } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
 import { useSldFrameOverlay } from '@/components/sld/overlay';
 import { RecoveryBadge } from '@/components/shell/RecoveryBadge';
 import { setTokenGetter } from '@/api/client';
 import { getAuthToken } from '@/store';
-import { useUiStore } from '@/store/ui';
-import { useRunsStore } from '@/store/runs';
-import { cn } from '@/lib/cn';
+import { useCaseStore } from '@/store/case';
 
 // Wire the API client's token-getter to the auth store. This runs once at
 // module load (the App.tsx import is the entry point); `getAuthToken`
@@ -45,11 +35,19 @@ setTokenGetter(getAuthToken);
 
 /**
  * Root component. Wraps the AppShell with the cross-cutting providers
- * (QueryClientProvider + global 401 cascade) and assembles the unit-9
- * shell composition: top bar with the run-PF + label-toggle controls,
- * left rail with case nav, right dock with inspector + results +
- * convergence-error overlay, and modals (TokenPasteModal +
- * RuntimeCrashModal).
+ * (QueryClientProvider + global 401 cascade) and assembles the v3 IDE
+ * layout slot composition: top bar with grouped menus + Run controls;
+ * left sidebar with case nav (Unit 3 will replace with the unified case
+ * + library + saved sidebar); canvas with SldCanvas; right inspector +
+ * bottom drawer placeholders (Units 7-14 will populate); dock overlay
+ * for AddElementPanel + transient banners; modals for token-paste +
+ * runtime crash.
+ *
+ * v3 Unit 1: this is the chassis-only commit. The right inspector and
+ * bottom drawer slots intentionally render placeholder content — Units
+ * 7+11+12+14 wire their real content. The chassis state (collapse,
+ * sizes, active tabs) is fully driven by ``useLayoutStore`` so later
+ * units can flip toggles via the existing store actions.
  *
  * Error-surface routing (R8 → R18):
  *
@@ -57,12 +55,6 @@ setTokenGetter(getAuthToken);
  * - Solver non-convergence → ConvergenceErrorPanel as dock overlay.
  * - Runtime crash (5xx) → RuntimeCrashModal as the one allowed
  *   non-destructive modal.
- *
- * v0.2 panel router (Unit 8): the right-dock top region cycles between
- * Inspector / DisturbancePanel / TimeSeriesPlot / TdsConfigPanel via the
- * PanelPickerTabs. The active panel is read from ``useUiStore``. The
- * App also runs one smart auto-switch — when a TDS run starts, switch
- * to the Plot panel so the user sees frames stream in.
  */
 function AppInner({ children }: { children: React.ReactNode }) {
   // Top-level recovery driver — must live INSIDE QueryClientProvider so
@@ -76,84 +68,55 @@ function AppInner({ children }: { children: React.ReactNode }) {
   // (avoids N-rAF-loops-for-N-buses at NPCC scale). The hook is a
   // no-op when no run is active.
   useSldFrameOverlay();
-  useTdsAutoSwitchToPlot();
   return <>{children}</>;
 }
 
 /**
- * One-shot auto-switch: when a fresh TDS run enters ``starting`` /
- * ``streaming``, swap the right-dock top region to the Plot panel so
- * the user sees frames as they arrive. We do NOT auto-switch on
- * terminal states (done / error / aborted) — the user may want to keep
- * looking at the plot OR may have already navigated away to the
- * Inspector to compare values; either choice is fine, and aggressive
- * auto-switching that fights the user is worse than no auto-switching.
- */
-function useTdsAutoSwitchToPlot(): void {
-  const activeRunId = useRunsStore((s) => s.activeRunId);
-  const runState = useRunsStore((s) =>
-    activeRunId === null ? null : (s.runs[activeRunId]?.state ?? null),
-  );
-  const setActive = useUiStore((s) => s.setActiveRightDockTopPanel);
-  const active = useUiStore((s) => s.activeRightDockTopPanel);
-
-  useEffect(() => {
-    // Auto-switch only on the leading edge of a run + only if the user
-    // is currently sitting on a panel that would be locked-out anyway
-    // (Disturbance during a run) OR on the Inspector default. If the
-    // user is already on Plot or TdsConfig, leave them alone.
-    if (runState !== 'starting' && runState !== 'streaming') return;
-    if (active === 'inspector' || active === 'disturbance') {
-      setActive('plot');
-    }
-    // Intentionally NOT depending on ``active`` — re-firing on every
-    // user-driven panel change would be the "fights the user" failure
-    // mode this hook is supposed to avoid.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runState, setActive]);
-}
-
-/**
- * Right-dock top region content router. Mounts the picker tab strip
- * above the active panel; the tab strip + the panel are part of the
- * same scroll region (the panel itself owns its inner scroll).
+ * Default ``canvas`` slot content depends on whether a case is loaded:
  *
- * Each candidate panel is mounted ONLY when active to keep the WebGL /
- * uPlot canvas teardown straightforward. This trades off a slight
- * remount cost on every swap for cleaner lifecycle reasoning — the
- * v0.2 plan accepts this trade in the "Panel-picker" key technical
- * decision.
+ * - no case → EmptyState ("No case loaded") — directs the user to the
+ *   left sidebar.
+ * - case loaded → SldCanvas (which itself shows the layout-skeleton
+ *   while ELK runs and the canvas once positions are known).
  */
-function RightDockTopPanel() {
-  const active = useUiStore((s) => s.activeRightDockTopPanel);
+function CanvasSlot() {
+  const caseSelection = useCaseStore((s) => s.selection);
+  if (caseSelection !== null) {
+    return <SldCanvas />;
+  }
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <PanelPickerTabs />
-      <div className="flex min-h-0 flex-1 flex-col">
-        {active === 'inspector' ? <ElementInspector /> : null}
-        {active === 'disturbance' ? <DisturbancePanel /> : null}
-        {active === 'plot' ? <PlotPanelContent /> : null}
-        {active === 'analyze' ? <AnalyzePanel /> : null}
-      </div>
-    </div>
+    <EmptyState
+      icon={<FolderIcon />}
+      title="No case loaded"
+      description="Pick a case file from the left sidebar to begin."
+      emptyStateKey="app-shell-no-case"
+    />
   );
 }
 
 /**
- * Composite content for the Plot panel: stacked uPlot + scrub control +
- * variable picker. Wraps them so the panel-picker only has to swap one
- * subtree.
+ * Right inspector placeholder. Unit 7 replaces this with the per-element
+ * accordion (Properties / Plots / Disturbances). For Unit 1 the AppShell
+ * itself renders an EmptyState when this slot is empty — passing nothing
+ * here is intentional.
  */
-function PlotPanelContent() {
+function RightInspectorSlot() {
+  return null;
+}
+
+/**
+ * Bottom drawer placeholder. Unit 11 replaces this with the tab strip +
+ * per-bucket data grids (Units 12 + 13) and Analysis sub-tab content
+ * (Unit 14). For Unit 1 it renders a labelled stub so the chassis isn't
+ * empty during dev.
+ */
+function BottomDrawerSlot() {
   return (
-    <div data-testid="plot-panel-content" className={cn('flex h-full min-h-0 flex-col gap-2 p-2')}>
-      <div className="min-h-0 flex-1">
-        <TimeSeriesPlot />
-      </div>
-      <ScrubControl />
-      <div className="border-border max-h-48 overflow-auto rounded border">
-        <VariableTreePicker />
-      </div>
+    <div
+      className="text-muted-foreground flex h-full items-center justify-center text-xs"
+      data-testid="bottom-drawer-placeholder"
+    >
+      Bottom drawer placeholder — Unit 11 wires the tab strip; Units 12-14 wire content.
     </div>
   );
 }
@@ -192,9 +155,10 @@ export function App() {
               <HideLabelsToggle />
             </>
           }
-          leftRail={<CaseNav />}
-          inspector={<RightDockTopPanel />}
-          results={<ResultsTable />}
+          leftSidebar={<CaseNav />}
+          canvas={<CanvasSlot />}
+          rightInspector={<RightInspectorSlot />}
+          bottomDrawer={<BottomDrawerSlot />}
           dockOverlay={
             <>
               <AddElementPanel />

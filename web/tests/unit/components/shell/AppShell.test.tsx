@@ -1,22 +1,35 @@
 import {
+  act,
   render as rtlRender,
   screen,
   within,
   type RenderOptions,
   type RenderResult,
 } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { AppShell } from '@/components/shell/AppShell';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import {
+  DEFAULT_LAYOUT,
+  LAYOUT_STORAGE_KEY,
+  useLayoutStore,
+} from '@/store/layout';
+import { useSldStore } from '@/store/sld';
 
 /**
- * Unit 7 mounts `CaseNav` as the LeftRail's default content; CaseNav
- * uses TanStack Query hooks which require a QueryClient in context.
- * Tests render the shell behind a fresh QueryClient so the CaseNav
- * mounts cleanly without exercising the queries it never fires here.
+ * AppShell tests cover the structural contract of the v3 4-pane chassis:
+ * each region renders its slot content, the dock-overlay slot mounts
+ * above the chassis, the modal slot mounts a Radix Dialog, the right
+ * inspector renders an EmptyState when expanded with no selection, and
+ * the layout store + persistence wiring round-trips through localStorage.
+ *
+ * Visual layout (computed widths, scrollbar painting) is intentionally
+ * out-of-scope — jsdom doesn't lay out, and the shell delegates that to
+ * `react-resizable-panels`, which has its own tests. The lib emits a
+ * "Panel size not found" warning on first mount in jsdom (registration
+ * race) — that's a lib-internal log, not a test failure.
  */
 function render(ui: ReactElement, options?: RenderOptions): RenderResult {
   const client = new QueryClient({
@@ -25,80 +38,56 @@ function render(ui: ReactElement, options?: RenderOptions): RenderResult {
   return rtlRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>, options);
 }
 
-/**
- * AppShell tests cover the shell's structural contract: regions render,
- * collapsing the left rail persists, layout sizes round-trip via
- * localStorage, the small-viewport fallback drops the right dock, and the
- * modal slot mounts a Radix Dialog above the shell.
- *
- * Visual layout (computed widths, scrollbar painting) is intentionally
- * out-of-scope — jsdom doesn't lay out, and the shell delegates that to
- * `react-resizable-panels`, which has its own tests.
- *
- * The vitest+jsdom environment in this repo does NOT ship a working
- * `localStorage` (it provides a bare object with no `setItem`/`getItem`/
- * `removeItem`/`clear` methods, with a `--localstorage-file` warning at
- * startup). We install an in-memory shim per test so persistence tests
- * have a deterministic substrate.
- */
-function installLocalStorageShim(): { store: Map<string, string> } {
-  const store = new Map<string, string>();
-  const shim: Storage = {
-    get length() {
-      return store.size;
-    },
-    key(index: number) {
-      return Array.from(store.keys())[index] ?? null;
-    },
-    getItem(key: string) {
-      return store.has(key) ? (store.get(key) ?? null) : null;
-    },
-    setItem(key: string, value: string) {
-      store.set(key, String(value));
-    },
-    removeItem(key: string) {
-      store.delete(key);
-    },
-    clear() {
-      store.clear();
-    },
-  };
-  Object.defineProperty(window, 'localStorage', {
-    configurable: true,
-    value: shim,
-  });
-  return { store };
+function resetLayoutStore(): void {
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT });
 }
 
-describe('AppShell', () => {
-  let storage: { store: Map<string, string> };
+function resetSldStore(): void {
+  useSldStore.setState({ selectedNodeId: null });
+}
 
-  beforeEach(() => {
-    storage = installLocalStorageShim();
-  });
+beforeEach(() => {
+  // The setup file already installs a working in-memory localStorage
+  // shim before any zustand store initializes. Just clear it here.
+  window.localStorage.clear();
+  resetLayoutStore();
+  resetSldStore();
+});
 
-  afterEach(() => {
-    storage.store.clear();
-  });
+afterEach(() => {
+  window.localStorage.clear();
+  vi.restoreAllMocks();
+});
 
-  it('renders all four regions with default empty placeholders', () => {
+describe('AppShell — structural contract', () => {
+  it('mounts the top bar landmark with the expected testid', () => {
     render(<AppShell />);
+    const banner = screen.getByRole('banner', { name: /top bar/i });
+    expect(banner).toBeInTheDocument();
+    expect(banner.getAttribute('data-testid')).toBe('top-bar');
+  });
 
-    // Top bar landmark is the banner.
-    expect(screen.getByRole('banner', { name: /top bar/i })).toBeInTheDocument();
+  it('renders the four chassis regions with the v3 testids', () => {
+    render(
+      <AppShell
+        leftSidebar={<span>left-content</span>}
+        canvas={<span>canvas-content</span>}
+        rightInspector={<span>inspector-content</span>}
+        bottomDrawer={<span>drawer-content</span>}
+      />,
+    );
 
-    // Left rail (case navigation), main canvas, right dock all expose
-    // accessible names.
-    expect(screen.getByRole('complementary', { name: /case navigation/i })).toBeInTheDocument();
-    expect(screen.getByRole('main', { name: /single-line diagram/i })).toBeInTheDocument();
-    expect(
-      screen.getByRole('complementary', { name: /inspector and results/i }),
-    ).toBeInTheDocument();
+    // Each region is a labelled landmark with a stable testid.
+    expect(screen.getByTestId('app-shell-left-sidebar')).toBeInTheDocument();
+    expect(screen.getByTestId('app-shell-canvas')).toBeInTheDocument();
+    expect(screen.getByTestId('app-shell-right-inspector')).toBeInTheDocument();
+    expect(screen.getByTestId('app-shell-bottom-drawer')).toBeInTheDocument();
 
-    // Inner regions render their EmptyState fallback captions.
-    expect(screen.getByText('No case loaded')).toBeInTheDocument();
-    expect(screen.getByText('No element selected')).toBeInTheDocument();
-    expect(screen.getByText('No results yet')).toBeInTheDocument();
+    // Each slot's content is rendered.
+    expect(screen.getByText('left-content')).toBeInTheDocument();
+    expect(screen.getByText('canvas-content')).toBeInTheDocument();
+    expect(screen.getByText('inspector-content')).toBeInTheDocument();
+    expect(screen.getByText('drawer-content')).toBeInTheDocument();
   });
 
   it('renders provided slot content into top bar regions', () => {
@@ -114,103 +103,6 @@ describe('AppShell', () => {
     expect(within(banner).getByText('case-name.raw')).toBeInTheDocument();
     expect(within(banner).getByText('ANDES App')).toBeInTheDocument();
     expect(within(banner).getByRole('button', { name: 'Run PF' })).toBeInTheDocument();
-  });
-
-  it('collapses and expands the left rail and persists the choice', async () => {
-    const user = userEvent.setup();
-    const { unmount } = render(<AppShell />);
-
-    const rail = screen.getByRole('complementary', { name: /case navigation/i });
-    expect(rail.dataset.collapsed).toBe('false');
-
-    const collapseButton = within(rail).getByRole('button', { name: /collapse left rail/i });
-    await user.click(collapseButton);
-
-    expect(rail.dataset.collapsed).toBe('true');
-    expect(window.localStorage.getItem('andes-app:layout:left-rail-collapsed')).toBe('1');
-
-    // Re-mounting should restore the collapsed state from localStorage.
-    unmount();
-    render(<AppShell />);
-    const railAgain = screen.getByRole('complementary', { name: /case navigation/i });
-    expect(railAgain.dataset.collapsed).toBe('true');
-  });
-
-  it('persists main layout sizes via the autoSaveId', () => {
-    // react-resizable-panels uses `autoSaveId` to namespace its writes to
-    // localStorage. We can't deterministically drag a handle in jsdom,
-    // but we can verify the PanelGroup is wired with the correct
-    // autoSaveId by checking the data attribute it renders.
-    render(<AppShell />);
-    const groups = document.querySelectorAll('[data-panel-group]');
-    const ids = Array.from(groups).map((el) => el.getAttribute('data-panel-group-id'));
-    // The shell creates two PanelGroups: main (horizontal) and right
-    // dock (vertical). Both should be present.
-    expect(ids.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('drops the right dock when the viewport is below the small breakpoint', () => {
-    const original = window.innerWidth;
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 800 });
-    try {
-      render(<AppShell />);
-      // The right-dock complementary should not render.
-      expect(
-        screen.queryByRole('complementary', { name: /inspector and results/i }),
-      ).not.toBeInTheDocument();
-      // The main canvas still renders.
-      expect(screen.getByRole('main', { name: /single-line diagram/i })).toBeInTheDocument();
-      // The left rail is force-collapsed.
-      const rail = screen.getByRole('complementary', { name: /case navigation/i });
-      expect(rail.dataset.collapsed).toBe('true');
-    } finally {
-      Object.defineProperty(window, 'innerWidth', { configurable: true, value: original });
-    }
-  });
-
-  it('places the top bar before the rail in tab order', async () => {
-    const user = userEvent.setup();
-    render(
-      <AppShell
-        topBarRight={<button type="button">Top action</button>}
-        leftRail={<button type="button">Rail action</button>}
-        main={<button type="button">Main action</button>}
-        results={<button type="button">Results action</button>}
-      />,
-    );
-
-    // Tab through the document; the first focusable tab stop should be
-    // a top-bar control (or the rail collapse button if no top-bar
-    // control was supplied — we supplied one to make the assertion
-    // meaningful).
-    await user.tab();
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Top action' }));
-
-    // Unit 8 added two auto-mounted right-slot anchors after the
-    // caller-supplied content; Unit 9 inserted a third (the ⌘K
-    // command-palette hint button); Unit 12 swapped the dark-mode
-    // placeholder for the live ``ThemeToggle``. DOM order in the
-    // right slot is: caller content → command-palette-hint →
-    // theme-toggle → history-drawer-toggle. The history toggle is
-    // disabled (no session) so it's skipped in tab order, leaving
-    // the palette hint and the theme toggle as the auto-mounted
-    // stops between the caller's "Top action" and the rail collapse
-    // chevron.
-    await user.tab();
-    expect(document.activeElement?.getAttribute('data-testid')).toBe('command-palette-hint');
-
-    await user.tab();
-    expect(document.activeElement?.getAttribute('data-testid')).toBe('theme-toggle');
-
-    await user.tab();
-    // Next focus stop is the rail collapse chevron.
-    expect(document.activeElement?.getAttribute('aria-label')).toMatch(/collapse left rail/i);
-
-    await user.tab();
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Rail action' }));
-
-    await user.tab();
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Main action' }));
   });
 
   it('mounts a Radix Dialog passed into the modal slot', () => {
@@ -229,46 +121,154 @@ describe('AppShell', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog).toBeInTheDocument();
     expect(within(dialog).getByText('Locked behind auth')).toBeInTheDocument();
-
-    // The dialog's z-index class is z-50, ensuring it stacks above the
-    // shell DOM (which uses z-10 on the top bar at most).
-    const zStacked = dialog.closest('[class*="z-50"]');
-    expect(zStacked).not.toBeNull();
   });
 
-  it('renders a dock overlay above inspector and results when supplied', () => {
-    render(<AppShell dockOverlay={<div>PF did not converge.</div>} />);
-    expect(screen.getByText('PF did not converge.')).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: /dock overlay/i })).toBeInTheDocument();
+  it('renders dockOverlay content in its dedicated slot', () => {
+    render(<AppShell dockOverlay={<div>Overlay banner</div>} />);
+    const overlay = screen.getByTestId('app-shell-dock-overlay');
+    expect(overlay).toBeInTheDocument();
+    expect(within(overlay).getByText('Overlay banner')).toBeInTheDocument();
+  });
+});
+
+describe('AppShell — right inspector visibility model', () => {
+  it('renders the inspector panel collapsed when no selection AND user has it collapsed', () => {
+    useLayoutStore.setState({ rightInspectorCollapsed: true });
+    useSldStore.setState({ selectedNodeId: null });
+    render(<AppShell rightInspector={<span>inspector-body</span>} />);
+    const inspector = screen.getByTestId('app-shell-right-inspector');
+    expect(inspector.dataset.collapsed).toBe('true');
+    // Children are gated behind the visibility predicate so a
+    // size-0 panel does not become a focus trap (spike finding b).
+    expect(screen.queryByText('inspector-body')).not.toBeInTheDocument();
   });
 
-  it('renders custom inspector and results content when provided', () => {
-    render(<AppShell inspector={<div>Bus 1 properties</div>} results={<div>v=1.0 pu</div>} />);
-    expect(screen.getByText('Bus 1 properties')).toBeInTheDocument();
-    expect(screen.getByText('v=1.0 pu')).toBeInTheDocument();
-    // Empty-state captions should be gone.
-    expect(screen.queryByText('No element selected')).not.toBeInTheDocument();
-    expect(screen.queryByText('No results yet')).not.toBeInTheDocument();
+  it('renders the inspector with its content when an element is selected', () => {
+    useSldStore.setState({ selectedNodeId: 'bus-5' });
+    render(<AppShell rightInspector={<span>bus-5 properties</span>} />);
+    const inspector = screen.getByTestId('app-shell-right-inspector');
+    expect(inspector.dataset.collapsed).toBe('false');
+    expect(screen.getByText('bus-5 properties')).toBeInTheDocument();
   });
 
-  it('mounts the global Toaster so toasts render anywhere in the tree (Unit 3)', async () => {
-    const { container } = render(<AppShell />);
-    // Sonner is lazy — the toaster's portal renders only on the first
-    // emitted toast. Fire one through the typed wrapper (which is
-    // load-bearing for every component using `@/lib/toast`) and
-    // confirm the portal landed in the document.
-    const { toast } = await import('@/lib/toast');
-    toast.success('hello from the toaster smoke test');
-    await screen.findByText(/hello from the toaster smoke test/i);
-    const sonnerRoot = container.ownerDocument.querySelector('[data-sonner-toaster]');
-    expect(sonnerRoot).not.toBeNull();
+  it('renders an EmptyState when manually opened with no selection', () => {
+    // Default state: rightInspectorCollapsed=false, selectedNodeId=null.
+    // The visibility predicate is OR — collapsed=false alone keeps the
+    // panel visible.
+    useLayoutStore.setState({ rightInspectorCollapsed: false });
+    useSldStore.setState({ selectedNodeId: null });
+    // Pass NO rightInspector so the AppShell's EmptyState fallback fires.
+    render(<AppShell />);
+    const inspector = screen.getByTestId('app-shell-right-inspector');
+    expect(inspector.dataset.collapsed).toBe('false');
+    expect(screen.getByText('Nothing selected')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /select an element on the canvas or a row in the data grid to inspect its properties/i,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('hides inspector children when collapsed but allows EmptyState when expanded', () => {
+    // Toggle the layout store's collapsed bit; the visibility predicate
+    // OR-s with a non-null selection — assert both branches.
+    useLayoutStore.setState({ rightInspectorCollapsed: true });
+    useSldStore.setState({ selectedNodeId: null });
+    const { rerender } = render(<AppShell rightInspector={<span>real-inspector</span>} />);
+    expect(screen.queryByText('real-inspector')).not.toBeInTheDocument();
+
+    // Flip to expanded with a selection — content renders. Wrap the
+    // store mutations in act() so React processes the resulting
+    // re-render synchronously before the rerender call.
+    act(() => {
+      useLayoutStore.setState({ rightInspectorCollapsed: false });
+      useSldStore.setState({ selectedNodeId: 'bus-1' });
+    });
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <AppShell rightInspector={<span>real-inspector</span>} />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText('real-inspector')).toBeInTheDocument();
+  });
+});
+
+describe('AppShell — left sidebar collapse', () => {
+  it('renders sidebar children when expanded', () => {
+    useLayoutStore.setState({ leftSidebarCollapsed: false });
+    render(<AppShell leftSidebar={<span>case-nav</span>} />);
+    expect(screen.getByText('case-nav')).toBeInTheDocument();
+    expect(screen.getByTestId('app-shell-left-sidebar').dataset.collapsed).toBe('false');
+  });
+
+  it('hides sidebar children when collapsed (no focus trap, spike finding b)', () => {
+    useLayoutStore.setState({ leftSidebarCollapsed: true });
+    render(<AppShell leftSidebar={<button type="button">should-be-hidden</button>} />);
+    expect(screen.queryByRole('button', { name: 'should-be-hidden' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('app-shell-left-sidebar').dataset.collapsed).toBe('true');
+  });
+});
+
+describe('AppShell — bottom drawer collapse', () => {
+  it('reflects bottomDrawerCollapsed via data attribute', () => {
+    useLayoutStore.setState({ bottomDrawerCollapsed: true });
+    render(<AppShell bottomDrawer={<span>drawer-content</span>} />);
+    expect(screen.getByTestId('app-shell-bottom-drawer').dataset.collapsed).toBe('true');
+  });
+});
+
+describe('AppShell — layout state persistence', () => {
+  it('hydrates default sizes from the layout store', () => {
+    render(<AppShell />);
+    // The PanelGroups all carry the v1-namespaced autoSaveIds so
+    // post-Unit-1 dragging persists per-group.
+    const groups = document.querySelectorAll('[data-panel-group]');
+    expect(groups.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('rehydrates from a persisted localStorage payload', async () => {
+    window.localStorage.setItem(
+      LAYOUT_STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          ...DEFAULT_LAYOUT,
+          bottomDrawerCollapsed: true,
+          bottomDrawerHeightPct: 50,
+          activeBottomDrawerTab: 'analysis',
+        },
+        version: 0,
+      }),
+    );
+    await useLayoutStore.persist.rehydrate();
+    expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(true);
+    expect(useLayoutStore.getState().bottomDrawerHeightPct).toBe(50);
+    expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('analysis');
+  });
+
+  it('falls back to defaults when localStorage holds malformed JSON', async () => {
+    window.localStorage.setItem(LAYOUT_STORAGE_KEY, 'not-json{');
+    resetLayoutStore();
+    await useLayoutStore.persist.rehydrate();
+    expect(useLayoutStore.getState().bottomDrawerHeightPct).toBe(
+      DEFAULT_LAYOUT.bottomDrawerHeightPct,
+    );
+  });
+
+  it('ignores stale `useUiStore.activeRightDockTopPanel` payloads (different storage key)', async () => {
+    window.localStorage.setItem(
+      'andes-ui-tds-integrator',
+      JSON.stringify({ state: { activeRightDockTopPanel: 'analyze' }, version: 0 }),
+    );
+    render(<AppShell />);
+    expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('buses');
   });
 });
 
 describe('AppShell — keyboard floor (R20)', () => {
   it('Esc dismisses an open Dialog mounted in the modal slot', async () => {
-    const user = userEvent.setup();
     const onOpenChange = vi.fn();
+    const { default: userEvent } = await import('@testing-library/user-event');
+    const user = userEvent.setup();
     render(
       <AppShell
         modal={
@@ -283,5 +283,16 @@ describe('AppShell — keyboard floor (R20)', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe('AppShell — Toaster mount (Unit 3)', () => {
+  it('mounts the global Toaster so toasts render anywhere in the tree', async () => {
+    const { container } = render(<AppShell />);
+    const { toast } = await import('@/lib/toast');
+    toast.success('hello from the v3 toaster smoke test');
+    await screen.findByText(/hello from the v3 toaster smoke test/i);
+    const sonnerRoot = container.ownerDocument.querySelector('[data-sonner-toaster]');
+    expect(sonnerRoot).not.toBeNull();
   });
 });

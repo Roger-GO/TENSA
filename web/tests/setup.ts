@@ -17,6 +17,47 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
     ResizeObserverStub;
 }
 
+// jsdom + vitest's bundled jsdom build ships a `window.localStorage`
+// object whose methods are stubs that throw at runtime (the
+// `--localstorage-file` warning at vitest startup). Modules that bind
+// `zustand/middleware/persist` capture the storage handle once at
+// `create()` time, so installing a shim later in `beforeEach` is too
+// late — the persist middleware already grabbed the broken object.
+// Shim here at setup time so every store-import sees a working backend.
+if (typeof window !== 'undefined') {
+  const installInMemoryStorage = (key: 'localStorage' | 'sessionStorage') => {
+    const store = new Map<string, string>();
+    const shim: Storage = {
+      get length() {
+        return store.size;
+      },
+      key(index: number) {
+        return Array.from(store.keys())[index] ?? null;
+      },
+      getItem(name: string) {
+        return store.has(name) ? (store.get(name) ?? null) : null;
+      },
+      setItem(name: string, value: string) {
+        store.set(name, String(value));
+      },
+      removeItem(name: string) {
+        store.delete(name);
+      },
+      clear() {
+        store.clear();
+      },
+    };
+    Object.defineProperty(window, key, { configurable: true, value: shim });
+  };
+  // Detect the broken jsdom stub by checking for a callable setItem.
+  if (typeof window.localStorage?.setItem !== 'function') {
+    installInMemoryStorage('localStorage');
+  }
+  if (typeof window.sessionStorage?.setItem !== 'function') {
+    installInMemoryStorage('sessionStorage');
+  }
+}
+
 // jsdom does not implement window.matchMedia. uPlot calls it at module
 // load to detect device-pixel-ratio changes; merely importing it under
 // jsdom would throw without this stub. The plot tests vi.mock uPlot
