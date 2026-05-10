@@ -46,6 +46,7 @@ const GROUP_HEADINGS: Record<CommandGroup, string> = {
   edit: 'Edit',
   run: 'Run',
   export: 'Export',
+  view: 'View',
   navigation: 'Navigation',
   help: 'Help',
 };
@@ -238,6 +239,7 @@ function bucketByGroup(commands: readonly CommandDef[]): Record<CommandGroup, Co
     edit: [],
     run: [],
     export: [],
+    view: [],
     navigation: [],
     help: [],
   };

@@ -7,6 +7,9 @@ import { HistoryDrawer, HistoryDrawerToggle } from '@/components/history/History
 import { Button } from '@/components/ui/button';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { ThemeToggle } from '@/components/shell/ThemeToggle';
+import { SidebarToggle } from '@/components/shell/SidebarToggle';
+import { InspectorToggle } from '@/components/shell/InspectorToggle';
+import { BottomDrawerToggle } from '@/components/shell/BottomDrawerToggle';
 
 /**
  * TopBar. Fixed-height (~44px) bar with three slots — left, center, right —
@@ -95,6 +98,16 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
         className="flex min-w-0 flex-1 items-center justify-end gap-1"
       >
         {right}
+        {/* v3 Unit 2 — pane toggles (sidebar / inspector / drawer).
+            Sit between caller-supplied right-slot content (RecoveryBadge,
+            ExportMenu, HideLabelsToggle) and the auto-mounted ⌘K /
+            theme / history cluster so the layout-controls form a
+            distinct perceptual group at roughly the visual centre of
+            the right cluster. */}
+        <TopBarDivider />
+        <SidebarToggle />
+        <InspectorToggle />
+        <BottomDrawerToggle />
         <TopBarDivider />
         <CommandPaletteHint />
         <TopBarDivider />
