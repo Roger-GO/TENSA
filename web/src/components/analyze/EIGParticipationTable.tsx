@@ -267,9 +267,11 @@ export function EIGParticipationTable({ className, rows }: EIGParticipationTable
   }
 
   const sortGlyph = (column: SortColumn): string => {
-    if (sort.column !== column || sort.direction === 'none') return '';
+    if (sort.column !== column || sort.direction === 'none') return ' ↕';
     return sort.direction === 'asc' ? ' ↑' : ' ↓';
   };
+  const sortGlyphActive = (column: SortColumn): boolean =>
+    sort.column === column && sort.direction !== 'none';
 
   const useVirtualization = processed.sorted.length > VIRTUALIZE_THRESHOLD;
 
@@ -302,9 +304,19 @@ export function EIGParticipationTable({ className, rows }: EIGParticipationTable
       {processed.sorted.length === 0 ? (
         <div
           data-testid="participation-empty-filter"
-          className="text-muted-foreground flex min-h-[80px] items-center justify-center px-2 py-4 text-xs"
+          className="text-muted-foreground flex min-h-[80px] flex-col items-center justify-center gap-1 px-2 py-4 text-xs"
         >
-          No states match “{filter}”.
+          <span aria-hidden className="text-base opacity-60">
+            ⌕
+          </span>
+          <span>No states match “{filter}”.</span>
+          <button
+            type="button"
+            onClick={() => setFilter('')}
+            className="text-primary text-[11px] hover:underline focus-visible:outline-none"
+          >
+            Clear filter
+          </button>
         </div>
       ) : useVirtualization ? (
         <>
@@ -328,7 +340,16 @@ export function EIGParticipationTable({ className, rows }: EIGParticipationTable
                   : 'none'
               }
             >
-              State{sortGlyph('state')}
+              <span>State</span>
+              <span
+                aria-hidden
+                className={cn(
+                  'ml-1 text-[10px]',
+                  sortGlyphActive('state') ? 'text-primary' : 'opacity-40',
+                )}
+              >
+                {sortGlyph('state').trim()}
+              </span>
             </button>
             <button
               type="button"
@@ -346,7 +367,16 @@ export function EIGParticipationTable({ className, rows }: EIGParticipationTable
                   : 'none'
               }
             >
-              Factor{sortGlyph('factor')}
+              <span>Factor</span>
+              <span
+                aria-hidden
+                className={cn(
+                  'ml-1 text-[10px]',
+                  sortGlyphActive('factor') ? 'text-primary' : 'opacity-40',
+                )}
+              >
+                {sortGlyph('factor').trim()}
+              </span>
             </button>
           </div>
           <FixedSizeList<VirtualRowData>
@@ -385,7 +415,16 @@ export function EIGParticipationTable({ className, rows }: EIGParticipationTable
                     )}
                     data-testid="participation-header-state"
                   >
-                    State{sortGlyph('state')}
+                    <span>State</span>
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'ml-1 text-[10px]',
+                        sortGlyphActive('state') ? 'text-primary' : 'opacity-40',
+                      )}
+                    >
+                      {sortGlyph('state').trim()}
+                    </span>
                   </button>
                 </th>
                 <th
@@ -408,7 +447,16 @@ export function EIGParticipationTable({ className, rows }: EIGParticipationTable
                     )}
                     data-testid="participation-header-factor"
                   >
-                    Factor{sortGlyph('factor')}
+                    <span>Factor</span>
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'ml-1 text-[10px]',
+                        sortGlyphActive('factor') ? 'text-primary' : 'opacity-40',
+                      )}
+                    >
+                      {sortGlyph('factor').trim()}
+                    </span>
                   </button>
                 </th>
               </tr>

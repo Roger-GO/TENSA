@@ -182,8 +182,10 @@ function SwatchPicker({
   return (
     <div data-testid={`run-legend-swatch-picker-${runId}`} className="flex flex-col gap-3">
       <div>
-        <div className="text-muted-foreground mb-1.5 text-[11px] font-medium">Pick a colour</div>
-        <div className="grid grid-cols-4 gap-1.5">
+        <div className="text-muted-foreground mb-2 text-[10px] font-medium uppercase tracking-wider">
+          Pick a colour
+        </div>
+        <div className="grid grid-cols-4 gap-2">
           {SWATCH_PALETTE.map((color) => {
             const isCurrent = currentOverride === color;
             return (
@@ -196,8 +198,11 @@ function SwatchPicker({
                 aria-pressed={isCurrent}
                 className={cn(
                   'h-7 w-full rounded-[var(--radius-sm)] border transition-shadow',
+                  'hover:shadow-md',
                   'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
-                  isCurrent ? 'border-foreground' : 'border-border',
+                  isCurrent
+                    ? 'border-foreground ring-2 ring-[var(--color-ring)] ring-offset-1 ring-offset-[var(--color-popover,var(--color-background))]'
+                    : 'border-border',
                 )}
                 style={{ background: color }}
               />
@@ -209,7 +214,7 @@ function SwatchPicker({
       <div>
         <label
           htmlFor={`run-legend-swatch-custom-${runId}`}
-          className="text-muted-foreground mb-1.5 block text-[11px] font-medium"
+          className="text-muted-foreground mb-2 block text-[10px] font-medium uppercase tracking-wider"
         >
           Custom hex
         </label>

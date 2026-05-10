@@ -590,35 +590,45 @@ export function CPFCurveChart({
               points={`${xToPx(noseLambda) - 4},${PADDING_TOP} ${xToPx(noseLambda) + 4},${PADDING_TOP} ${xToPx(noseLambda)},${PADDING_TOP + 6}`}
               className="fill-foreground"
             />
-            <text
-              x={xToPx(noseLambda) + 6}
-              y={PADDING_TOP + 8}
-              className="fill-foreground text-[8px]"
-            >
-              nose @ {noseLambda.toFixed(3)}
-            </text>
-            {/* Detailed annotation, offset below the nose triangle so
-                it stays clear of the marker even on a narrow plot. */}
-            <text
-              data-testid="cpf-nose-label"
-              x={(() => {
-                // Anchor on the right side of the nose unless the
-                // nose is in the rightmost 30% of the plot, in which
-                // case anchor on the left to avoid clipping.
-                const px = xToPx(noseLambda);
-                return px > PADDING_LEFT + plotW * 0.7 ? px - 6 : px + 6;
-              })()}
-              y={PADDING_TOP + 22}
-              textAnchor={(() => {
-                const px = xToPx(noseLambda);
-                return px > PADDING_LEFT + plotW * 0.7 ? 'end' : 'start';
-              })()}
-              className="fill-foreground text-[9px]"
-            >
-              {`Nose: λ=${noseLambda.toFixed(2)}${
+            {/* Detailed annotation rendered with a translucent background
+                pill so the text stays legible even when polylines pass
+                directly behind it. The right-edge anchor flips when the
+                nose sits in the rightmost 30% of the plot. */}
+            {(() => {
+              const px = xToPx(noseLambda);
+              const onRight = px > PADDING_LEFT + plotW * 0.7;
+              const labelX = onRight ? px - 6 : px + 6;
+              const anchor: 'start' | 'end' = onRight ? 'end' : 'start';
+              const label = `Nose: λ=${noseLambda.toFixed(2)}${
                 noseVMin !== null ? `, V_min=${noseVMin.toFixed(2)}` : ''
-              }`}
-            </text>
+              }`;
+              // Approximate width: 5px per char at 9px font.
+              const labelW = label.length * 5 + 8;
+              const rectX = onRight ? labelX - labelW : labelX - 4;
+              return (
+                <>
+                  <rect
+                    aria-hidden="true"
+                    x={rectX}
+                    y={PADDING_TOP + 11}
+                    width={labelW}
+                    height={14}
+                    rx={3}
+                    className="fill-background opacity-85 stroke-border"
+                    strokeWidth={0.5}
+                  />
+                  <text
+                    data-testid="cpf-nose-label"
+                    x={labelX}
+                    y={PADDING_TOP + 21}
+                    textAnchor={anchor}
+                    className="fill-foreground text-[9px] font-medium"
+                  >
+                    {label}
+                  </text>
+                </>
+              );
+            })()}
           </g>
         ) : null}
 
@@ -652,14 +662,18 @@ export function CPFCurveChart({
               value={sliderClamped}
               onChange={(e) => setSliderLambdaOverride(Number(e.target.value))}
               className={cn(
-                'h-1 grow appearance-none rounded-full',
+                'slider-thumb-lg h-1.5 grow appearance-none rounded-full',
                 'bg-muted accent-[var(--color-primary)]',
-                'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+                'focus-visible:outline-none',
               )}
             />
             <span
               data-testid="cpf-lambda-value"
-              className="text-foreground w-16 shrink-0 text-right font-mono text-[10px] tabular-nums"
+              className={cn(
+                'text-foreground bg-muted/60 border-border shrink-0 rounded-md border',
+                'px-1.5 py-0.5 text-right font-mono text-[10px] tabular-nums',
+                'min-w-[64px]',
+              )}
             >
               {sliderClamped.toFixed(3)}
             </span>

@@ -6,9 +6,9 @@
  */
 
 /** Minimum visible arrow size (pixels). Below this the glyph is hard to see. */
-export const ARROW_MIN_SIZE = 6;
+export const ARROW_MIN_SIZE = 7;
 /** Maximum arrow size (pixels). Above this the glyph crowds the path. */
-export const ARROW_MAX_SIZE = 14;
+export const ARROW_MAX_SIZE = 15;
 /**
  * Default magnitude (MW) at which the arrow saturates to ``ARROW_MAX_SIZE``.
  * Substrate doesn't surface a per-case maximum today; this value is large
