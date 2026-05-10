@@ -25,6 +25,7 @@ import { RuntimeCrashModal } from '@/components/pflow/RuntimeCrashModal';
 import { AddElementButton } from '@/components/elements/AddElementButton';
 import { AddElementPanel } from '@/components/elements/AddElementPanel';
 import { PmuPlacementButton } from '@/components/pmu/PmuPlacementButton';
+import { ProfileImportButton } from '@/components/profiles/ProfileImportButton';
 import { SaveSystemButton } from '@/components/case/SaveSystemButton';
 import { WorkflowToolbar } from '@/components/case/WorkflowToolbar';
 import { makeQueryClient, wireGlobalErrorRecovery } from '@/api/queries';
@@ -179,6 +180,7 @@ export function App() {
             <>
               <AddElementButton />
               <PmuPlacementButton />
+              <ProfileImportButton />
               <SaveSystemButton />
               <WorkflowToolbar />
             </>

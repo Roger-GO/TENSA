@@ -467,6 +467,70 @@ def _handle_export_pmu_csv(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return wrapper.export_pmu_csv()
 
 
+def _handle_upload_profile(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.upload_profile`` for Unit 15.
+
+    Args: ``{"filename": str, "content_bytes": bytes}``. Returns the
+    absolute path of the on-disk xlsx (string). The bytes payload
+    crosses the worker Pipe; profiles are typically small (KB range
+    for hourly data over 24 h) so this stays well within Pipe
+    tolerance.
+    """
+    filename = args.get("filename")
+    if not isinstance(filename, str):
+        raise AndesAppError("'filename' is required for upload_profile")
+    content_bytes = args.get("content_bytes")
+    if not isinstance(content_bytes, (bytes, bytearray)):
+        raise AndesAppError(
+            "'content_bytes' is required for upload_profile (bytes)"
+        )
+    return wrapper.upload_profile(filename, bytes(content_bytes))
+
+
+def _handle_add_timeseries(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.add_timeseries`` for Unit 15.
+
+    Args: ``{"profile_path": str, "sheet": str, "fields": str,
+    "model": str, "dev": str|int, "dests": str, "tkey": str?,
+    "mode": int?}``. Returns the serialized ``TopologyEntry`` for the
+    newly-added TimeSeries.
+    """
+    required = ("profile_path", "sheet", "fields", "model", "dev", "dests")
+    for key in required:
+        if args.get(key) is None:
+            raise AndesAppError(f"{key!r} is required for add_timeseries")
+    return _serialize_dataclass(
+        wrapper.add_timeseries(
+            profile_path=str(args["profile_path"]),
+            sheet=str(args["sheet"]),
+            fields=str(args["fields"]),
+            model=str(args["model"]),
+            dev=args["dev"],
+            dests=str(args["dests"]),
+            tkey=str(args.get("tkey", "t")),
+            mode=int(args.get("mode", 1)),
+        )
+    )
+
+
+def _handle_list_timeseries(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.list_timeseries`` for Unit 15.
+
+    Returns a list of serialized ``TopologyEntry`` dicts (one per
+    TimeSeries device); empty list when none have been added.
+    """
+    return _serialize_dataclass(wrapper.list_timeseries())
+
+
+def _handle_delete_timeseries(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.delete_timeseries`` for Unit 15. Returns ``None``."""
+    idx = args.get("idx")
+    if idx is None:
+        raise AndesAppError("'idx' is required for delete_timeseries")
+    wrapper.delete_timeseries(idx)
+    return None
+
+
 def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     """Assemble a reproducibility-bundle ``.zip`` (Unit 3 of the v2.0 plan).
 
@@ -906,6 +970,11 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "list_pmus": _handle_list_pmus,
     "delete_pmu": _handle_delete_pmu,
     "export_pmu_csv": _handle_export_pmu_csv,
+    # Unit 15 — TimeSeries profile import + assignment.
+    "upload_profile": _handle_upload_profile,
+    "add_timeseries": _handle_add_timeseries,
+    "list_timeseries": _handle_list_timeseries,
+    "delete_timeseries": _handle_delete_timeseries,
     # Unit 17 — connectivity / island detection (post-run only; no per-frame
     # streaming integration per the plan's auto-fix).
     "compute_connectivity": _handle_compute_connectivity,

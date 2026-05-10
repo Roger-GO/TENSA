@@ -33,6 +33,7 @@ import type {
   AddDisturbancesResponse,
   AddElementRequest,
   AddPmuRequest,
+  AddProfileRequest,
   AlterableParamsResponse,
   BlankSystemResponse,
   ConnectivityResult,
@@ -43,6 +44,7 @@ import type {
   EigResult,
   ElementCreated,
   ListPmusResponse,
+  ListProfilesResponse,
   LoadCaseRequest,
   ParamValue,
   PflowResult,
@@ -56,6 +58,7 @@ import type {
   TopologyEntry,
   TopologySchema,
   TopologySummary,
+  UploadProfileResponse,
   WorkspaceFileList,
   WorkspacePath,
 } from './types';
@@ -68,6 +71,7 @@ import { useRunsStore } from '@/store/runs';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useConnectivityStore } from '@/store/connectivity';
 import { usePmuStore } from '@/store/pmu';
+import { useProfilesStore } from '@/store/profiles';
 
 /**
  * Routine name accepted by ``GET /sessions/{id}/report``. Phase 1
@@ -110,6 +114,8 @@ export const queryKeys = {
   connectivity: (id: SessionId) => ['connectivity', id] as const,
   /** PMU placements list, scoped per session (Unit 14). */
   pmus: (id: SessionId) => ['pmus', id] as const,
+  /** TimeSeries profile assignments, scoped per session (Unit 15). */
+  profiles: (id: SessionId) => ['profiles', id] as const,
 } as const;
 
 // ---- QueryClient factory --------------------------------------------------
@@ -1687,6 +1693,199 @@ export function useExportPmuCsv(): UseMutationResult<Blob, Error, ExportPmuCsvVa
       }
 
       return await response.blob();
+    },
+  });
+}
+
+// ---- TimeSeries profiles (Unit 15) ---------------------------------------
+
+export interface UploadProfileVars {
+  sessionId: SessionId;
+  /**
+   * The CSV / XLSX ``File`` (or ``Blob``) the user picked. The
+   * substrate writes a fresh ``<uuid>.xlsx`` under
+   * ``<workspace>/profiles/`` and returns the absolute path so the
+   * follow-up ``addProfile`` mutation can reference it.
+   */
+  file: File;
+}
+
+/**
+ * ``POST /api/sessions/{id}/profiles/upload`` — multipart upload of a
+ * profile CSV/XLSX. Errors:
+ *
+ * - 409 — substrate has no workspace configured.
+ * - 413 — payload over the 8 MB cap.
+ * - 422 — unsupported extension OR malformed CSV.
+ * - 500 — disk write failed.
+ */
+export function useUploadProfile(): UseMutationResult<
+  UploadProfileResponse,
+  Error,
+  UploadProfileVars
+> {
+  return useMutation({
+    mutationFn: async ({ sessionId, file }: UploadProfileVars) => {
+      const url =
+        `/api/sessions/${encodeURIComponent(sessionId)}/profiles/upload`;
+      const headers = new Headers();
+      const token = getAuthToken();
+      if (token) headers.set('X-Andes-Token', token);
+      const form = new FormData();
+      form.set('file', file, file.name);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.workspace);
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: form,
+          signal: controller.signal,
+        });
+      } catch (err) {
+        clearTimeout(timeoutId);
+        throw new NetworkError(`Network error on POST ${url}`, err);
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (!response.ok) {
+        let parsed: unknown = undefined;
+        try {
+          parsed = await response.json();
+        } catch {
+          // ignore
+        }
+        const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<
+          string,
+          unknown
+        >;
+        const problem = {
+          type: typeof obj.type === 'string' ? obj.type : 'about:blank',
+          title: typeof obj.title === 'string' ? obj.title : `HTTP ${response.status}`,
+          status: typeof obj.status === 'number' ? obj.status : response.status,
+          detail: typeof obj.detail === 'string' ? obj.detail : null,
+          instance: typeof obj.instance === 'string' ? obj.instance : null,
+        };
+        throw new ProblemDetailsError(problem, parsed, url);
+      }
+
+      return (await response.json()) as UploadProfileResponse;
+    },
+  });
+}
+
+export interface AddProfileVars {
+  sessionId: SessionId;
+  /** Body forwarded to ``POST /sessions/{id}/profiles``. */
+  body: AddProfileRequest;
+}
+
+/**
+ * ``POST /api/sessions/{id}/profiles`` — stage a TimeSeries device
+ * pre-setup. On success: append the new entry to the profiles slice +
+ * invalidate the listProfiles + topology queries so any other consumer
+ * sees the new device without an extra round-trip.
+ *
+ * Errors:
+ *
+ * - 409 — session committed; caller surfaces a "reload to recover"
+ *   banner.
+ * - 422 — profile path missing / outside workspace, target device
+ *   absent, mode=2, or ANDES rejected the underlying ``ss.add``.
+ */
+export function useAddProfile(): UseMutationResult<
+  TopologyEntry,
+  Error,
+  AddProfileVars
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, body }: AddProfileVars) => {
+      return await andesClient.post<TopologyEntry>(
+        `/sessions/${encodeURIComponent(sessionId)}/profiles`,
+        { body, timeoutMs: TIMEOUTS.workspace },
+      );
+    },
+    onSuccess: (data, { sessionId }) => {
+      useProfilesStore.getState().appendProfile(data);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.profiles(sessionId) });
+      // The new TimeSeries also lives in the topology bucket
+      // (controllers) — refresh that too.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
+    },
+  });
+}
+
+/**
+ * ``GET /api/sessions/{id}/profiles`` — list every TimeSeries on the
+ * session. Empty list when none staged (the common case for a fresh
+ * load).
+ *
+ * On success: writes through to the profiles slice so non-Query
+ * consumers (the import dialog list) read synchronously.
+ */
+export function useListProfiles(): UseQueryResult<ListProfilesResponse, Error> {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const queryClient = useQueryClient();
+  const enabled = sessionId !== null;
+  return useQuery({
+    queryKey: enabled ? queryKeys.profiles(sessionId) : ['profiles', 'noop'],
+    enabled,
+    staleTime: 10_000,
+    queryFn: async () => {
+      if (!sessionId) {
+        throw new Error('useListProfiles enabled without a session id');
+      }
+      const data = await andesClient.get<ListProfilesResponse>(
+        `/sessions/${encodeURIComponent(sessionId)}/profiles`,
+        { timeoutMs: TIMEOUTS.workspace },
+      );
+      useProfilesStore.getState().setProfiles(data.profiles);
+      queryClient.setQueryData(queryKeys.profiles(sessionId), data);
+      return data;
+    },
+  });
+}
+
+export interface DeleteProfileVars {
+  sessionId: SessionId;
+  /** ANDES idx of the TimeSeries (e.g., ``"TimeSeries_1"``). */
+  idx: string;
+}
+
+/**
+ * ``DELETE /api/sessions/{id}/profiles/{idx}`` — remove a TimeSeries
+ * pre-setup.
+ *
+ * On success: drop the entry from the profiles slice + invalidate the
+ * listProfiles query so any other consumer sees the removal without
+ * waiting for a refetch.
+ *
+ * Errors:
+ *
+ * - 404 — unknown TimeSeries idx.
+ * - 409 — session committed; caller must reload first.
+ */
+export function useDeleteProfile(): UseMutationResult<
+  void,
+  Error,
+  DeleteProfileVars
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, idx }: DeleteProfileVars) => {
+      await andesClient.delete<unknown>(
+        `/sessions/${encodeURIComponent(sessionId)}/profiles/${encodeURIComponent(idx)}`,
+        { timeoutMs: TIMEOUTS.workspace },
+      );
+    },
+    onSuccess: (_data, { sessionId, idx }) => {
+      useProfilesStore.getState().removeProfile(idx);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.profiles(sessionId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
     },
   });
 }
