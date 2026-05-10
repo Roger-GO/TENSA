@@ -37,6 +37,7 @@ import {
   type Command as CommandDef,
   type CommandGroup,
 } from '@/lib/commands';
+import { formatShortcut } from '@/lib/shortcutFormatter';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 
 /** Heading text rendered above each group section in the palette. */
@@ -185,11 +186,7 @@ export function CommandPalette() {
                             <span aria-hidden="true" className="h-4 w-4 shrink-0" />
                           )}
                           <span className="flex-1 truncate">{cmd.label}</span>
-                          {cmd.shortcut ? (
-                            <span className="text-muted-foreground ml-2 font-mono text-[10px]">
-                              {cmd.shortcut}
-                            </span>
-                          ) : null}
+                          {cmd.shortcut ? <PaletteShortcutHint binding={cmd.shortcut} /> : null}
                         </CmdkCommand.Item>
                       ))}
                     </CmdkCommand.Group>
@@ -201,6 +198,38 @@ export function CommandPalette() {
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
+  );
+}
+
+/**
+ * Right-aligned shortcut hint for a palette row. Mirrors the
+ * cheatsheet's chip style at smaller weight so the palette row keeps
+ * its compact line height. Sequence shortcuts (e.g., "g s") render the
+ * literal "then" between steps.
+ */
+function PaletteShortcutHint({ binding }: { binding: string }) {
+  const tokens = formatShortcut(binding);
+  return (
+    <span className="ml-2 flex items-center gap-0.5">
+      {tokens.map((tok, idx) =>
+        tok === 'then' ? (
+          <span key={idx} className="text-muted-foreground text-[10px] italic">
+            then
+          </span>
+        ) : (
+          <kbd
+            key={idx}
+            className={cn(
+              'inline-flex items-center justify-center min-w-[1.25rem] h-4 px-1',
+              'text-[10px] font-mono rounded border',
+              'border-border bg-muted text-muted-foreground',
+            )}
+          >
+            {tok}
+          </kbd>
+        ),
+      )}
+    </span>
   );
 }
 

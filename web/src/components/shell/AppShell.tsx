@@ -7,11 +7,14 @@ import { LeftRail } from './LeftRail';
 import { RightDock } from './RightDock';
 import { TopBar } from './TopBar';
 import { CommandPalette } from './CommandPalette';
+import { ShortcutCheatsheet } from './ShortcutCheatsheet';
 import { Toaster } from '@/components/ui/Toaster';
 import { SldCanvas } from '@/components/sld/SldCanvas';
 import { useCaseStore } from '@/store/case';
 import { useCommandPaletteStore } from '@/store/commandPalette';
+import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 import { useHotkeys } from '@/lib/useHotkeys';
+import { GlobalShortcuts } from '@/lib/useGlobalShortcuts';
 
 /**
  * AppShell. Top-level split-pane layout per R18.
@@ -96,6 +99,13 @@ export function AppShell({
   // this is one of the rare global shortcuts that should ALSO fire
   // when an `<input>` / `<textarea>` has focus — a user typing in
   // the snapshot-name input still wants ⌘K to summon the palette.
+  // The same binding is also declared in the command registry
+  // (`help.command-palette`) so it surfaces in the cheatsheet; the
+  // registry's binding uses the project-default `enableOnFormTags:
+  // false` and so won't fire from inside an input — this AppShell-
+  // local registration is the one that wins inside form tags. (No
+  // duplicate fire: outside form tags, react-hotkeys-hook
+  // de-duplicates by combo signature.)
   const togglePalette = useCommandPaletteStore((s) => s.togglePalette);
   useHotkeys(
     'meta+k, ctrl+k',
@@ -105,6 +115,26 @@ export function AppShell({
     },
     { enableOnFormTags: ['INPUT', 'TEXTAREA'] },
     [togglePalette],
+  );
+
+  // ? opens the keyboard cheatsheet (Unit 10). Inherits the project
+  // default `enableOnFormTags: false`, so a user typing into an input
+  // (where `?` would just be a literal question mark) does NOT see
+  // the modal pop. The `help.shortcuts` registry entry binds the
+  // SAME key — registering twice is intentional: the registry
+  // surface keeps the cheatsheet visible to discovery (palette +
+  // cheatsheet itself), and this AppShell-local registration
+  // guarantees the binding stays mounted even if the registry
+  // memoisation churns.
+  const toggleCheatsheet = useShortcutCheatsheetStore((s) => s.toggleCheatsheet);
+  useHotkeys(
+    '?',
+    (event) => {
+      event.preventDefault();
+      toggleCheatsheet();
+    },
+    undefined,
+    [toggleCheatsheet],
   );
 
   // Default `main` slot content depends on whether a case is loaded:
@@ -232,6 +262,18 @@ export function AppShell({
           it from anywhere — even when the user is mid-edit in a panel
           that would otherwise unmount during a state transition. */}
       <CommandPalette />
+
+      {/* Global keyboard-shortcut cheatsheet (Unit 10). Same lifecycle
+          rationale as the command palette — mounted once at root so
+          the `?` hotkey can summon the modal from any surface. */}
+      <ShortcutCheatsheet />
+
+      {/* Per-command shortcut registrar (Unit 10). Renders one
+          invisible binder per command-with-shortcut so each binding
+          gets its own `useHotkeys` registration. Mounted ONCE at
+          the shell root — duplicating it would register every
+          binding twice. */}
+      <GlobalShortcuts />
     </div>
   );
 }

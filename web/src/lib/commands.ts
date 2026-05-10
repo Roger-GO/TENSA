@@ -43,6 +43,9 @@ import { usePflowStore } from '@/store/pflow';
 import { useRunModeStore } from '@/store/runMode';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useUiStore } from '@/store/ui';
+import { useCommandPaletteStore } from '@/store/commandPalette';
+import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
+import { useHistoryStore } from '@/store/history';
 import { useReportDialogStore } from '@/components/reports/ReportDialog';
 import { useCurrentTopology, useReloadCase, useUndoLastEdit } from '@/api/queries';
 import type { RunRoutine } from '@/lib/useRunReadiness';
@@ -91,10 +94,14 @@ export interface Command {
    */
   keywords?: string[];
   /**
-   * Display-only keyboard shortcut hint (e.g., "⌘K"). The actual
-   * binding is registered separately via `useHotkeys`. Unit 10
-   * wires per-command bindings; Unit 9 only sets the palette open
-   * shortcut, so most commands have no shortcut yet.
+   * Keyboard shortcut binding string. Two roles in one field:
+   *
+   *  1. Display: rendered as `<kbd>` chips by `<CommandPalette />` and
+   *     `<ShortcutCheatsheet />` via `formatShortcut(...)`.
+   *  2. Wiring: consumed by `<GlobalShortcuts />` (Unit 10), which
+   *     registers each binding with `react-hotkeys-hook`. Sequence
+   *     shortcuts use the `>`-delimited syntax (e.g., `g>s`); aliases
+   *     are comma-separated (e.g., `meta+k, ctrl+k`).
    */
   shortcut?: string;
 }
@@ -128,6 +135,9 @@ export function useCommandRegistry(): readonly Command[] {
   const setActiveRoutine = useRunModeStore((s) => s.setActiveRoutine);
   const setAnalyzeSubMode = useAnalyzeStore((s) => s.setSubMode);
   const setRightDockPanel = useUiStore((s) => s.setActiveRightDockTopPanel);
+  const togglePalette = useCommandPaletteStore((s) => s.togglePalette);
+  const toggleCheatsheet = useShortcutCheatsheetStore((s) => s.toggleCheatsheet);
+  const openHistoryDrawer = useHistoryStore((s) => s.openDrawer);
 
   // ---- mutations (Edit group) -------------------------------------------
   const reloadMutation = useReloadCase();
@@ -206,6 +216,12 @@ export function useCommandRegistry(): readonly Command[] {
         keywords: ['save', 'snapshot', 'persist', 'state'],
         action: openSnapshotSave,
         when: () => !sessionScopeDisabled,
+        // Sequence shortcut "g s" (Linear-style "go to Snapshots"). The
+        // plan called this binding "open Snapshots dialog"; we wire it
+        // to the SAVE flow rather than the LOAD flow because Save is
+        // the more frequently-invoked snapshot action in researcher
+        // workflows (every TDS run typically wants a checkpoint).
+        shortcut: 'g>s',
       },
       {
         id: 'workspace.load-snapshot',
@@ -266,9 +282,28 @@ export function useCommandRegistry(): readonly Command[] {
       // if needed. For Unit 9 the strict gate is the right behaviour:
       // a user clicking "Run EIG" with no converged PF would just
       // produce a noop in the substrate.
-      ...(['pflow', 'tds', 'eig', 'cpf', 'se', 'sweep'] as const).map<Command>((routine) => ({
+      // Per-routine sequence shortcuts: `r p` (Run PFlow), `r t` (Run
+      // TDS), `r e` (Run EIG), `r c` (Run CPF), `r s` (Run SE),
+      // `r w` (Run sWeep — `w` since `s` is already taken). The
+      // active routine still gets a visual badge — we encode it by
+      // appending "  ✓" to the label so the palette + cheatsheet
+      // both surface the marker without overloading the `shortcut`
+      // field with a non-binding sentinel.
+      ...(
+        [
+          ['pflow', 'r>p'],
+          ['tds', 'r>t'],
+          ['eig', 'r>e'],
+          ['cpf', 'r>c'],
+          ['se', 'r>s'],
+          ['sweep', 'r>w'],
+        ] as const
+      ).map<Command>(([routine, shortcut]) => ({
         id: `run.${routine}`,
-        label: `Run ${routine.toUpperCase()}`,
+        label:
+          routine === activeRoutine
+            ? `Run ${routine.toUpperCase()}  ✓`
+            : `Run ${routine.toUpperCase()}`,
         group: 'run',
         keywords: keywordsForRoutine(routine),
         action: () => {
@@ -278,7 +313,7 @@ export function useCommandRegistry(): readonly Command[] {
           }
         },
         when: routine === 'eig' ? () => pfConverged : undefined,
-        shortcut: routine === activeRoutine ? '✓' : undefined,
+        shortcut,
       })),
 
       // ---- export --------------------------------------------------------
@@ -297,6 +332,87 @@ export function useCommandRegistry(): readonly Command[] {
         keywords: ['save', 'snapshot', 'persist', 'state'],
         action: openSnapshotSave,
         when: () => !sessionScopeDisabled,
+      },
+
+      // ---- navigation ----------------------------------------------------
+      // Sequence shortcut "g h" — opens the run-history drawer.
+      // Mirrors the "g s" pattern for the snapshot dialog. Always
+      // surfaced (the drawer renders its own empty state if there
+      // are no runs yet).
+      {
+        id: 'navigation.history',
+        label: 'Open History',
+        group: 'navigation',
+        keywords: ['history', 'runs', 'drawer', 'past'],
+        action: openHistoryDrawer,
+        shortcut: 'g>h',
+      },
+      // TODO(Unit 11): bind `meta+slash, ctrl+slash` to focus the SLD
+      // node-search input once it ships. The hotkey is intentionally
+      // omitted here — wiring an action that targets a non-existent
+      // input would no-op silently, which is worse than showing
+      // nothing in the cheatsheet.
+
+      // ---- run controls --------------------------------------------------
+      // ⌘Enter / Ctrl+Enter — run whichever routine is currently
+      // marked active in the Run menu. Re-uses the same "select
+      // routine" path that the per-routine palette commands do, so
+      // the analyze sub-mode + right-dock panel align after the
+      // dispatch. Always surfaced — there is always SOME active
+      // routine (defaults to PFlow).
+      {
+        id: 'run.active-routine',
+        label: `Run active routine (${activeRoutine.toUpperCase()})`,
+        group: 'run',
+        keywords: ['run', 'active', 'go', activeRoutine],
+        action: () => {
+          handleSelectRoutine(activeRoutine);
+        },
+        shortcut: 'meta+enter, ctrl+enter',
+      },
+
+      // ---- help ----------------------------------------------------------
+      // Palette open/close — registered so the binding shows up in
+      // the cheatsheet. The actual ⌘K hotkey is wired separately at
+      // AppShell with `enableOnFormTags: ['INPUT', 'TEXTAREA']` so it
+      // fires inside text inputs (the one global shortcut that does);
+      // the binding here uses the project default and so won't
+      // double-fire from inside an input — `<GlobalShortcuts />` and
+      // the AppShell registration target the same key but the latter
+      // is the one that wins inside form tags.
+      {
+        id: 'help.command-palette',
+        label: 'Open command palette',
+        group: 'help',
+        keywords: ['palette', 'search', 'commands', 'k'],
+        action: togglePalette,
+        shortcut: 'meta+k, ctrl+k',
+      },
+      {
+        id: 'help.shortcuts',
+        label: 'Show keyboard shortcuts',
+        group: 'help',
+        keywords: ['shortcuts', 'cheatsheet', 'help', 'keys'],
+        action: toggleCheatsheet,
+        shortcut: '?',
+      },
+      // Dark-mode toggle placeholder. Unit 12 wires the actual
+      // theme-switch logic; for now the action is a no-op so the
+      // shortcut is discoverable but harmless. The cheatsheet still
+      // lists it so power users learn the binding before Unit 12.
+      {
+        id: 'help.dark-mode',
+        label: 'Toggle dark mode (coming in Unit 12)',
+        group: 'help',
+        keywords: ['dark', 'light', 'theme', 'mode'],
+        action: () => {
+          // Intentional no-op; Unit 12 swaps this for the real toggle.
+          if (typeof console !== 'undefined') {
+            // eslint-disable-next-line no-console
+            console.info('[shortcuts] Dark-mode toggle — wired in Unit 12.');
+          }
+        },
+        shortcut: 'meta+d, ctrl+d',
       },
     ];
 
@@ -330,6 +446,9 @@ export function useCommandRegistry(): readonly Command[] {
     setActiveRoutine,
     setAnalyzeSubMode,
     setRightDockPanel,
+    togglePalette,
+    toggleCheatsheet,
+    openHistoryDrawer,
     reloadMutation,
     undoMutation,
     editGateDisabled,
