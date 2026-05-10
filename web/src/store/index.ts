@@ -34,12 +34,15 @@ export { useSessionStore } from './session';
 export { useCaseStore } from './case';
 export { usePflowStore } from './pflow';
 export { useRunsStore } from './runs';
+export { useLayoutStore, DEFAULT_LAYOUT, LAYOUT_STORAGE_KEY } from './layout';
+export { BOTTOM_DRAWER_TABS, ANALYSIS_SUB_TABS } from './layout';
 export { registerAuthClearCascade, getAuthToken } from './auth';
 export type { AuthState } from './auth';
 export type { SessionState } from './session';
 export type { CaseState, CaseSelection } from './case';
 export type { PflowState } from './pflow';
 export type { RunsState, RunRecord, RunState, RunConnectionStatus } from './runs';
+export type { LayoutState, BottomDrawerTab, AnalysisSubTab } from './layout';
 
 // ---- cascade wiring -------------------------------------------------------
 
