@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -11,10 +11,9 @@ import { EmptyState } from '@/components/shell/EmptyState';
 import { ParseErrorBanner } from './ParseErrorBanner';
 import { NewSystemButton } from './NewSystemButton';
 import { BundleImportButton } from '@/components/bundle/BundleImportDialog';
-import { useListWorkspaceFiles, useLoadCase, useCreateSession } from '@/api/queries';
+import { useListWorkspaceFiles, useLoadCase } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
-import { useAuthStore } from '@/store/auth';
 import { ServerError } from '@/api/client';
 import { parseWorkspacePath } from '@/api/types';
 import type { SessionId, WorkspaceFile, WorkspaceFileList } from '@/api/types';
@@ -94,173 +93,39 @@ function PickerSkeleton() {
 }
 
 /**
- * Hook — ensure we have a session id for the case-load mutation. The
- * parent `CaseNav` doesn't know whether one exists; the picker creates
- * one lazily on first render so the user can click "Load" without a
- * separate "Connect" step.
+ * Hook — read the session id from the store. The session lifecycle (both
+ * initial create and post-change-case re-create) is owned by the
+ * App-level ``useSessionRecovery`` driver in ``api/useSessionRecovery.ts``;
+ * the picker is purely a consumer here.
  *
- * If `useCreateSession` errors (e.g., 401 → caught globally), the
- * picker stays interactive but Load is disabled.
+ * Bug history: v0.1 had the picker fire its own ``useCreateSession``
+ * cycle. The v0.2-Unit-1 plan documented the race that occurred during
+ * the change-case flow when both ``CaseNav`` and the picker held their
+ * own ``useCreateSession`` instances and both fired after the DELETE.
+ * The substrate would mint two sessions and only one ``setSessionId``
+ * call won; the picker frequently rendered against the loser, the next
+ * Load click POSTed to a 404'd session, and the global 404 recovery
+ * restarted the whole loop. The fix collapses session creation to a
+ * single App-level consumer.
+ *
+ * ``creating`` here means "no session id yet AND we expect one soon" —
+ * derived from the same primitive (``sessionId === null``) the App-level
+ * driver consumes, so the Load button's "Connecting..." state stays in
+ * sync without the picker observing the mutation directly.
  */
 function useEnsureSession(): {
   sessionId: SessionId | null;
   creating: boolean;
-  createError: Error | null;
 } {
   const sessionId = useSessionStore((s) => s.sessionId);
-  const recoveryInProgress = useSessionStore((s) => s.recoveryInProgress);
-  const clearRecoveryInProgress = useSessionStore((s) => s.clearRecoveryInProgress);
-  const tokenPresent = useAuthStore((s) => s.token !== null);
-  const createSession = useCreateSession();
-  const loadCase = useLoadCase();
-  // Capture the case selection once so the recovery effect can re-issue
-  // ``loadCase`` against the new session id without re-rendering on every
-  // selection change. A loaded session pre-recovery should land on the
-  // same case post-recovery; a blank session stays blank.
-  const caseSelection = useCaseStore((s) => s.selection);
-  // Don't fire create-session before auth is established. A pre-auth
-  // POST /api/sessions returns 401, which would race the URL-fragment
-  // fast-path's setToken and wipe out the token via the global 401
-  // handler. The picker is rendered behind the auth modal but its
-  // hooks still run; gate the mutate() call explicitly.
-  //
-  // v0.1.y Unit 6 — sticky-error fix. The previous gate also tested
-  // ``!createSession.isError``, which trapped the cycle once any
-  // 401/404/timeout fired (the error stayed pinned and the gate stayed
-  // false forever). The fix drops the ``!isError`` term: the cycle is
-  // now idempotent — as long as no create is in flight, a fresh attempt
-  // is allowed. The recovery effect below calls ``createSession.reset()``
-  // when the recovery flag flips ``false → true`` to clear any prior
-  // error before the gate re-evaluates.
-  //
-  // Multi-component coordination caveat: today only WorkspaceFilePicker
-  // calls useEnsureSession. If a future component (e.g., a v0.2 session
-  // badge) also calls it, two hook instances racing the create cycle
-  // could double-fire ``POST /sessions``. Mitigation deferred — v0.1.y
-  // has only one caller; the per-instance debounce below is a
-  // belt-and-suspenders guard but does NOT cross instance boundaries. A
-  // v0.2 implementer adding a second consumer should hoist the cycle to
-  // a singleton bridge or a shared zustand action.
-  const shouldCreate = tokenPresent && sessionId === null && !createSession.isPending;
-
-  // Per-instance debounce: prevent rapid-fire create attempts from
-  // re-render loops. Allows at most one mutate() call per second.
-  // The recovery handler in queries.ts has its own module-level debounce
-  // for the 404→reset path; this ref guards the create-cycle re-entry
-  // inside this hook.
-  const lastCreateAttemptRef = useRef<number>(0);
-  const CREATE_DEBOUNCE_MS = 1_000;
-
-  // Capture mutation status flags as primitive deps so the effect re-runs
-  // on the meaningful transitions without depending on the (non-stable)
-  // mutation object itself.
-  const createIsError = createSession.isError;
-
-  useEffect(() => {
-    if (!shouldCreate) return;
-    const now = Date.now();
-    if (now - lastCreateAttemptRef.current < CREATE_DEBOUNCE_MS) return;
-    lastCreateAttemptRef.current = now;
-    createSession.mutate();
-    // ``createIsError`` is intentional: with the Unit 6 gate change, the
-    // false→true transition (error fires) re-runs this effect (debounce
-    // blocks the mutate); the true→false transition (recovery effect's
-    // ``reset()``) re-runs it again so a fresh attempt can fire once the
-    // debounce window passes. This is the sticky-error fix — the old
-    // ``!isError`` gate would have permanently blocked the second branch.
-    // ``createSession`` itself is excluded from deps because TanStack
-    // mutation objects are not referentially stable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shouldCreate, createIsError]);
-
-  // ---- recovery effect (v0.1.y Unit 5) -----------------------------------
-  // When the global error-recovery handler (``wireGlobalErrorRecovery`` in
-  // queries.ts) detects a 404 on a session-scoped path, it calls
-  // ``useSessionStore.resetSession()``. That clears the session id AND
-  // raises ``recoveryInProgress``. Below:
-  //
-  // 1. On the false→true transition we reset any prior ``createSession``
-  //    error state. (Unit 6 dropped the ``!isError`` gate term, so a
-  //    stale error no longer pins the cycle on its own; we still call
-  //    ``reset()`` here to scrub the mutation's exposed ``error`` /
-  //    ``isError`` so consumer UI — e.g., the createError banner below —
-  //    doesn't keep showing a stale error across the recovery boundary.)
-  // 2. Once the new session id is written by ``useCreateSession``'s
-  //    success path, we re-issue ``loadCase`` against the previously
-  //    loaded ``primaryPath`` (if any) so the new session has the case
-  //    re-applied; blank sessions stay blank.
-  // 3. After the re-load completes (or immediately on a blank session),
-  //    we clear ``recoveryInProgress`` which auto-hides the badge.
-  //
-  // The effect runs entirely inside this hook instance because a global
-  // QueryClient subscriber cannot directly call a hook-bound mutation
-  // method like ``createSession.reset()`` — the recovery handler raises
-  // a flag in the Zustand store and this effect bridges the gap.
-  const recoveryReloadFiredRef = useRef(false);
-  useEffect(() => {
-    if (recoveryInProgress) {
-      // Bridge step (1): clear any prior createSession error so the
-      // shouldCreate gate above can re-evaluate true on the next render.
-      // Idempotent — reset() is a no-op when already idle.
-      createSession.reset();
-      recoveryReloadFiredRef.current = false;
-    }
-    // Intentionally omit createSession from the dep list (mutation
-    // objects are not referentially stable across renders, and we only
-    // want to react to the recoveryInProgress edge).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recoveryInProgress]);
-
-  useEffect(() => {
-    // Bridge steps (2) + (3): runs on every render where recovery is in
-    // progress AND a fresh session id has just been written. Branches:
-    //
-    // - Loaded session (primaryPath !== null): fire loadCase once; on
-    //   success clear recoveryInProgress.
-    // - Blank session (primaryPath === null OR no selection): nothing
-    //   to re-load; clear immediately.
-    if (!recoveryInProgress) return;
-    if (sessionId === null) return;
-    if (recoveryReloadFiredRef.current) return;
-
-    if (caseSelection === null || caseSelection.primaryPath === null) {
-      // Blank session or no case loaded pre-recovery; just clear the flag.
-      recoveryReloadFiredRef.current = true;
-      clearRecoveryInProgress();
-      return;
-    }
-
-    recoveryReloadFiredRef.current = true;
-    loadCase.mutate(
-      {
-        sessionId,
-        request: {
-          primary_path: caseSelection.primaryPath,
-          addfiles: caseSelection.addfiles.length > 0 ? caseSelection.addfiles : null,
-        },
-      },
-      {
-        onSettled: () => {
-          // Settled rather than onSuccess so a 404/422 on the re-load
-          // still drops out of the recovery state — the user sees the
-          // load error surface normally rather than a stuck spinner.
-          clearRecoveryInProgress();
-        },
-      },
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recoveryInProgress, sessionId]);
-
-  // Derive ``creating`` against the sessionId-is-null invariant so a stale
-  // ``createSession.isPending`` (TanStack v5 observer desync seen in
-  // StrictMode dev — the MutationCache transitions to ``success`` but the
-  // hook observer can stay ``pending``) can't trap the button. Once
-  // ``setSessionId`` has run on the success path, ``sessionId !== null``
-  // and we are no longer ``creating`` regardless of what the observer says.
+  const recoveryFailed = useSessionStore((s) => s.recoveryFailed);
+  // ``creating`` is true whenever we have no session id and we expect the
+  // App-level driver to be working on one — that is, we're not in the
+  // permanent recovery-failed state. The Load button reads this to render
+  // "Connecting..." while it stays disabled.
   return {
     sessionId,
-    creating: createSession.isPending && sessionId === null,
-    createError: createSession.error,
+    creating: sessionId === null && !recoveryFailed,
   };
 }
 
@@ -271,7 +136,7 @@ export interface WorkspaceFilePickerProps {
 export function WorkspaceFilePicker({ className }: WorkspaceFilePickerProps) {
   const filesQuery = useListWorkspaceFiles();
   const loadCase = useLoadCase();
-  const { sessionId, creating: creatingSession, createError } = useEnsureSession();
+  const { sessionId, creating: creatingSession } = useEnsureSession();
   const setCase = useCaseStore((s) => s.setCase);
 
   const [selectedPrimary, setSelectedPrimary] = useState<string | null>(null);
@@ -310,6 +175,8 @@ export function WorkspaceFilePicker({ className }: WorkspaceFilePickerProps) {
     }
   }, [loadCase.error]);
 
+  const currentSelection = useCaseStore((s) => s.selection);
+
   const onLoad = () => {
     if (!selectedPrimary || !sessionId) return;
     let primary;
@@ -325,6 +192,21 @@ export function WorkspaceFilePicker({ className }: WorkspaceFilePickerProps) {
       setBannerError(err instanceof Error ? err : new Error(String(err)));
       return;
     }
+
+    // v0.2 polish Unit 1 — same-file no-op guard. If the user picks the
+    // case that's already loaded (same primary + same addfiles, in the
+    // same order) the click is a no-op rather than a spurious reload —
+    // reloading would tear down PF results, snapshots, and disturbance
+    // log to land back at the same case.
+    if (
+      currentSelection !== null &&
+      currentSelection.primaryPath === primary &&
+      currentSelection.addfiles.length === addfiles.length &&
+      currentSelection.addfiles.every((p, i) => p === addfiles[i])
+    ) {
+      return;
+    }
+
     loadCase.mutate(
       {
         sessionId,
@@ -392,7 +274,11 @@ export function WorkspaceFilePicker({ className }: WorkspaceFilePickerProps) {
         </p>
       ) : null}
 
-      {createError ? <ParseErrorBanner error={createError} onDismiss={() => {}} /> : null}
+      {/* createSession errors are surfaced by the App-level RecoveryBadge —
+          the picker is no longer the create driver, so it doesn't render its
+          own create-error banner. The badge transitions to the destructive
+          "Reconnection failed — reload the tab" copy after 3 failed attempts
+          in 30s; intermediate failures stay visible as "Reconnecting..." */}
 
       <div className="flex flex-col gap-1.5">
         <NewSystemButton />

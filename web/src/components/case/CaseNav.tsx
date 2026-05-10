@@ -12,7 +12,7 @@ import { ChangeCaseConfirmDialog } from './ChangeCaseConfirmDialog';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
-import { useCreateSession, useDeleteSession } from '@/api/queries';
+import { useDeleteSession } from '@/api/queries';
 import { cn } from '@/lib/cn';
 import type { CaseSelection } from '@/store/case';
 import type { TopologySummary } from '@/api/types';
@@ -148,12 +148,19 @@ export function CaseNav({ className }: CaseNavProps) {
   const clearPflow = usePflowStore((s) => s.clearPflow);
 
   const deleteSession = useDeleteSession();
-  const createSession = useCreateSession();
 
   const [confirmOpen, setConfirmOpen] = useState<boolean>(false);
 
-  const isConfirming = deleteSession.isPending || createSession.isPending;
+  const isConfirming = deleteSession.isPending;
 
+  // v0.2 polish Unit 1 — session re-creation after DELETE is owned by the
+  // App-level ``useSessionRecovery`` driver (single source of truth for
+  // ``useCreateSession``). CaseNav previously called ``createSession.mutate``
+  // here too, racing the picker's own ``useEnsureSession`` instance — both
+  // would fire ``POST /sessions`` and only one ``setSessionId`` won. The
+  // picker would then render against the loser and the next Load click
+  // would 404. Now CaseNav just clears state + deletes the session; the
+  // App-level driver notices ``sessionId === null`` and mints a fresh one.
   const onConfirmChangeCase = () => {
     const proceed = () => {
       // Clear the case + pflow slices regardless of DELETE outcome — the
@@ -162,14 +169,10 @@ export function CaseNav({ className }: CaseNavProps) {
       // the session clear when sessionId transitions to null.
       clearCase();
       clearPflow();
-      // Remint a session so the picker can immediately load the next
-      // case. `useDeleteSession` clears `sessionId`; `useCreateSession`
-      // sets it again on success.
-      createSession.mutate(undefined, {
-        onSettled: () => {
-          setConfirmOpen(false);
-        },
-      });
+      // Close the dialog. The App-level useSessionRecovery driver will
+      // notice ``sessionId === null`` and fire a fresh ``POST /sessions``
+      // automatically.
+      setConfirmOpen(false);
     };
 
     if (sessionId) {

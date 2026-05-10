@@ -132,7 +132,13 @@ describe('<CaseNav />', () => {
     expect(useCaseStore.getState().selection?.primaryPath).toBe('ieee14.raw');
   });
 
-  it('confirm fires DELETE then POST and clears the case slice', async () => {
+  it('confirm fires DELETE and clears the case slice (POST owned by App-level driver)', async () => {
+    // v0.2 polish Unit 1 — CaseNav no longer calls ``createSession``
+    // itself. The session re-create is owned by the App-level
+    // ``useSessionRecovery`` driver (single source of truth — see hook
+    // docstring). CaseNav's responsibility ends at clearing the slices
+    // and issuing DELETE; the recovery hook picks up ``sessionId === null``
+    // and mints the fresh one.
     seedLoadedCase();
     fetchSpy.mockImplementation((...args: unknown[]) => {
       const input = args[0] as RequestInfo | URL;
@@ -143,6 +149,8 @@ describe('<CaseNav />', () => {
         return Promise.resolve(new Response(null, { status: 204 }));
       }
       if (url.endsWith('/api/sessions') && method === 'POST') {
+        // CaseNav should NOT fire this (App-level driver owns it). If we
+        // see it, the test will assert against it below.
         return Promise.resolve(jsonResponse({ session_id: 'sess-new', state: 'live' }, 201));
       }
       return new Promise<Response>(() => {});
@@ -170,14 +178,18 @@ describe('<CaseNav />', () => {
     });
     expect(deleteCall).toBeDefined();
 
-    // And a fresh session was minted.
+    // CaseNav does NOT call ``POST /sessions`` itself any more. The
+    // App-level useSessionRecovery driver owns that. (Test does not
+    // mount the driver, so no POST should fire from this surface.)
     const postCall = fetchSpy.mock.calls.find(([url, init]) => {
       const u = typeof url === 'string' ? url : ((url as Request).url ?? String(url));
       const m = (init as RequestInit | undefined)?.method;
       return u.endsWith('/api/sessions') && m === 'POST';
     });
-    expect(postCall).toBeDefined();
-    expect(useSessionStore.getState().sessionId).toBe('sess-new');
+    expect(postCall).toBeUndefined();
+    // Session id was cleared by the DELETE handler's ``clearSession()``
+    // and stays null until the App-level driver mints a new one.
+    expect(useSessionStore.getState().sessionId).toBeNull();
   });
 
   it('disables Change case while pflow is running and shows the explanatory tooltip', async () => {
