@@ -208,11 +208,18 @@ export function TopBarMenu({
           disabled={disabled}
           aria-haspopup="menu"
           data-testid={`${testId}-trigger`}
-          className={cn('gap-1 px-2 text-xs', triggerClassName)}
+          className={cn(
+            'gap-1 px-2 text-xs',
+            // Visual weight to the active (open) menu, matching the
+            // popover hover state so the trigger and content read as
+            // one continuous surface.
+            'data-[state=open]:bg-muted data-[state=open]:text-foreground',
+            triggerClassName,
+          )}
         >
           {Icon ? <Icon className="h-3.5 w-3.5" /> : null}
           <span>{label}</span>
-          <ChevronDown className="ml-0.5 opacity-70" />
+          <ChevronDown className="ml-0.5 opacity-80" />
         </Button>
       </PopoverTrigger>
       <PopoverContent

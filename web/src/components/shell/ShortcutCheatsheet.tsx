@@ -81,11 +81,21 @@ export function ShortcutCheatsheet() {
           )}
         >
           <div className="border-border flex items-center justify-between border-b px-4 py-3">
-            <DialogPrimitive.Title className="text-sm font-semibold">
+            <DialogPrimitive.Title className="text-base font-semibold tracking-tight">
               Keyboard shortcuts
             </DialogPrimitive.Title>
-            <DialogPrimitive.Description className="text-muted-foreground text-xs">
-              Press Esc to close
+            <DialogPrimitive.Description className="text-muted-foreground flex items-center gap-1.5 text-xs">
+              <span>Press</span>
+              <kbd
+                className={cn(
+                  'inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5',
+                  'text-[10px] font-mono rounded border',
+                  'border-border bg-muted text-foreground',
+                )}
+              >
+                Esc
+              </kbd>
+              <span>to close</span>
             </DialogPrimitive.Description>
           </div>
 
@@ -142,7 +152,7 @@ function ShortcutChips({ binding }: { binding: string }) {
     <span className="flex items-center gap-1" data-testid="shortcut-chips">
       {tokens.map((tok, idx) =>
         tok === 'then' ? (
-          <span key={idx} className="text-muted-foreground text-[10px] italic">
+          <span key={idx} className="text-muted-foreground/80 text-[11px]">
             then
           </span>
         ) : (
@@ -151,7 +161,7 @@ function ShortcutChips({ binding }: { binding: string }) {
             className={cn(
               'inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5',
               'text-[10px] font-mono rounded border',
-              'border-border bg-muted text-muted-foreground',
+              'border-border bg-muted text-foreground',
             )}
           >
             {tok}

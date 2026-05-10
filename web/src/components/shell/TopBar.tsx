@@ -95,7 +95,9 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
         className="flex min-w-0 flex-1 items-center justify-end gap-1"
       >
         {right}
+        <TopBarDivider />
         <CommandPaletteHint />
+        <TopBarDivider />
         <ThemeToggle />
         <HistoryDrawerToggle />
       </div>
@@ -128,11 +130,37 @@ function CommandPaletteHint() {
       onClick={openPalette}
       data-testid="command-palette-hint"
       aria-label="Open command palette"
-      className="gap-1 px-2 text-xs"
+      className="gap-1.5 px-2 text-xs"
     >
-      <span className="text-muted-foreground font-mono text-[10px]">⌘K</span>
       <span>Search</span>
+      <kbd
+        aria-hidden="true"
+        className={cn(
+          'inline-flex items-center justify-center min-w-[1.25rem] h-4 px-1',
+          'text-[10px] font-mono rounded border',
+          'border-border bg-muted text-muted-foreground',
+        )}
+      >
+        ⌘K
+      </kbd>
     </Button>
+  );
+}
+
+/**
+ * Hairline vertical separator used to group the right-cluster items
+ * (Export menu / Labels toggle / ⌘K hint / Theme toggle / History) into
+ * three perceptual groups: caller-supplied controls, search, then
+ * theme + history. Without these dividers the cluster reads as eight
+ * undifferentiated chips.
+ */
+function TopBarDivider() {
+  return (
+    <span
+      aria-hidden="true"
+      data-testid="top-bar-divider"
+      className="bg-border mx-1.5 h-5 w-px shrink-0"
+    />
   );
 }
 
