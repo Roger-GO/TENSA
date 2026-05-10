@@ -44,11 +44,12 @@ from andes_app.api.routes.reports import router as reports_router
 from andes_app.api.routes.se import router as se_router
 from andes_app.api.routes.sessions import router as sessions_router
 from andes_app.api.routes.snapshot import router as snapshot_router
+from andes_app.api.routes.sweep import router as sweep_router
 from andes_app.api.routes.tds import router as tds_router
 from andes_app.api.routes.workspace import router as workspace_router
 from andes_app.api.routes.ws import router as ws_router
 from andes_app.api.schemas import ProblemDetails
-from andes_app.core.session import SessionManager
+from andes_app.core.session import SessionManager, SweepInProgressError
 from andes_app.security.middleware import (
     make_host_origin_middleware,
     make_token_redaction_middleware,
@@ -184,6 +185,13 @@ def make_app(
     app.add_exception_handler(
         RequestValidationError, _request_validation_to_problem_details
     )
+    # Unit 18: any session-scoped route that triggers an ``invoke()``
+    # while a sweep holds the lock will let ``SweepInProgressError``
+    # bubble. Translate to 503 with ``Retry-After: 5`` here so every
+    # route inherits the behaviour without per-route boilerplate.
+    app.add_exception_handler(
+        SweepInProgressError, _sweep_in_progress_to_problem_details
+    )
 
     # Spec-driven agents discover the per-launch token via this securityScheme.
     app.openapi = _custom_openapi_factory(app)  # type: ignore[method-assign]
@@ -258,6 +266,8 @@ def make_app(
     # Unit 15 — TimeSeries profile import + assignment (pre-setup
     # upload/add/list/delete).
     app.include_router(profiles_router, prefix="/api", tags=["profiles"])
+    # Unit 18 — sensitivity sweep harness (POST + WS progress channel).
+    app.include_router(sweep_router, prefix="/api", tags=["sweep"])
     app.include_router(ws_router, prefix="/api", tags=["streaming"])
 
     # SPA mount goes LAST so the ``/api/*`` routers and ``/openapi.json``
@@ -334,6 +344,36 @@ def _problem_details_handler(_request: Request, exc: Exception) -> JSONResponse:
     body.update(extra)
     headers = getattr(exc, "headers", None)
     return JSONResponse(status_code=status_code, content=body, headers=headers)
+
+
+def _sweep_in_progress_to_problem_details(
+    _request: Request, exc: Exception
+) -> JSONResponse:
+    """Translate ``SweepInProgressError`` to ``503 Service Unavailable``.
+
+    Per Unit 18 of the v2.0 plan: while a sweep holds the per-session
+    worker lock, every other session-scoped route returns 503 with a
+    ``Retry-After`` header (estimated remaining sweep time, conservatively
+    5 seconds — the UI polls and refreshes when the sweep completes) and
+    a detail string identifying the sweep.
+    """
+    if not isinstance(exc, SweepInProgressError):  # pragma: no cover
+        raise exc
+    body = ProblemDetails(
+        type="about:blank",
+        title="Service Unavailable",
+        status=503,
+        detail=str(exc),
+        instance=None,
+    ).model_dump(mode="json")
+    body["sweep_id"] = exc.sweep_id
+    body["iter_done"] = exc.iter_done
+    body["iter_total"] = exc.iter_total
+    return JSONResponse(
+        status_code=503,
+        content=body,
+        headers={"Retry-After": "5"},
+    )
 
 
 def _request_validation_to_problem_details(

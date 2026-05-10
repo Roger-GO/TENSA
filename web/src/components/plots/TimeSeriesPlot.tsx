@@ -61,6 +61,32 @@ export interface TimeSeriesPlotProps {
    */
   runId?: string;
   className?: string;
+  /**
+   * Multi-run colour mode (Unit 18 of the v2.0 plan).
+   *
+   * - ``"hash"`` (default) — each run's series gets a stable colour
+   *   from the runId-hash palette (Unit 9 multi-run overlay).
+   * - ``"gradient"`` — colours are interpolated across the run set in
+   *   insertion order (sweep iterations are inserted in
+   *   parameter-value order, so the gradient maps to the parameter
+   *   axis).
+   */
+  colorMode?: 'hash' | 'gradient';
+}
+
+/**
+ * Pick a colour from a perceptually-uniform gradient (oklch hue ramp)
+ * for a given (index, total) pair. Maps 0 → magenta, 0.5 → green,
+ * 1 → blue. Used by the sweep results viewer (Unit 18) so the
+ * parameter axis is visible at a glance.
+ */
+function gradientColorFor(index: number, total: number): string {
+  if (total <= 1) return 'oklch(0.55 0.20 265)';
+  const t = index / (total - 1);
+  // Hue ramp from 320 (magenta) → 145 (green) → 265 (blue).
+  // Two-segment piecewise linear keeps the ramp readable.
+  const hue = t < 0.5 ? 320 - t * 2 * (320 - 145) : 145 + (t - 0.5) * 2 * (265 - 145);
+  return `oklch(0.60 0.18 ${hue.toFixed(0)})`;
 }
 
 /**
@@ -159,6 +185,7 @@ function buildMultiRunGroupChart(
   group: VarGroup,
   selectedNames: readonly string[],
   syncKey: string,
+  colorMode: 'hash' | 'gradient' = 'hash',
 ): { options: uPlot.Options; data: uPlot.AlignedData } {
   // Collect the union of timestamps. Use a Set for dedup; sort once at
   // the end. Each run's t-array is already sorted, so a merge would be
@@ -183,8 +210,14 @@ function buildMultiRunGroupChart(
   const dataCols: uPlot.AlignedData = [tUnion];
   const series: uPlot.Series[] = [{ label: 't' }];
 
-  for (const run of runs) {
+  for (let runIdx = 0; runIdx < runs.length; runIdx += 1) {
+    const run = runs[runIdx]!;
     const style = runIdToStrokeStyle(run.runId);
+    const gradientColor =
+      colorMode === 'gradient'
+        ? gradientColorFor(runIdx, runs.length)
+        : null;
+    const stroke = gradientColor ?? style.color;
     const len = run.seqCount;
     for (const name of selectedNames) {
       const col = run.columns[name];
@@ -202,13 +235,15 @@ function buildMultiRunGroupChart(
       const runPrefix = run.runId.length > 8 ? run.runId.slice(0, 8) : run.runId;
       const seriesProps: uPlot.Series = {
         label: `${runPrefix}·${name}`,
-        stroke: style.color,
+        stroke,
         width: 1.5,
         points: { show: false },
       };
       // uPlot's Series.dash is typed as number[] — only set when non-empty
-      // so the default solid behaviour kicks in.
-      if (style.dash.length > 0) {
+      // so the default solid behaviour kicks in. Skip the dash pattern
+      // entirely in gradient mode — the colour ramp already conveys
+      // run identity, dashes would be visual noise.
+      if (colorMode === 'hash' && style.dash.length > 0) {
         seriesProps.dash = [...style.dash];
       }
       series.push(seriesProps);
@@ -324,7 +359,7 @@ function GroupChart({
   );
 }
 
-export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
+export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSeriesPlotProps) {
   const activeRunId = useRunsStore((s) => s.activeRunId);
   const overlayRunIds = useRunsStore((s) => s.overlayRunIds);
   const allRuns = useRunsStore((s) => s.runs);
@@ -454,7 +489,10 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
     const out: Array<{ group: VarGroup; options: uPlot.Options; data: uPlot.AlignedData }> = [];
     for (const [group, names] of groupedSelections) {
       if (isMultiRun) {
-        out.push({ group, ...buildMultiRunGroupChart(overlayRuns, group, names, syncKey) });
+        out.push({
+          group,
+          ...buildMultiRunGroupChart(overlayRuns, group, names, syncKey, colorMode),
+        });
       } else {
         out.push({ group, ...buildGroupChart(primaryRun!, group, names, syncKey) });
       }
@@ -464,7 +502,7 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
     // returns a new object), so this memo recomputes each frame —
     // that's the intended hot path; the memo's role here is just
     // structuring.
-  }, [overlayRuns, isMultiRun, primaryRun, groupedSelections, syncKey]);
+  }, [overlayRuns, isMultiRun, primaryRun, groupedSelections, syncKey, colorMode]);
 
   if (!effectiveRunId || overlayRuns.length === 0) {
     return (
@@ -495,6 +533,7 @@ export function TimeSeriesPlot({ runId, className }: TimeSeriesPlotProps) {
       data-run-id={effectiveRunId}
       data-overlay-count={overlayRuns.length}
       data-scrub-t={scrubT === null ? '' : String(scrubT)}
+      data-color-mode={colorMode}
       className={cn('flex h-full w-full flex-col gap-2', className)}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
