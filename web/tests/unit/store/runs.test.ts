@@ -404,3 +404,85 @@ describe('runs store — internals', () => {
     expect(__internal.isCompletedState('aborted')).toBe(true);
   });
 });
+
+describe('runs store — per-run displayName + colorOverride (Unit 20 v2.0)', () => {
+  beforeEach(reset);
+  afterEach(reset);
+
+  it('setRunDisplayName stores a trimmed name on the run', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().setRunDisplayName('r1', '  Fault @ tc=0.1  ');
+    expect(useRunsStore.getState().runs.r1!.displayName).toBe('Fault @ tc=0.1');
+  });
+
+  it('setRunDisplayName clears the override when given an empty / whitespace value', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().setRunDisplayName('r1', 'first');
+    expect(useRunsStore.getState().runs.r1!.displayName).toBe('first');
+    useRunsStore.getState().setRunDisplayName('r1', '   ');
+    expect(useRunsStore.getState().runs.r1!.displayName).toBeUndefined();
+  });
+
+  it('setRunDisplayName is a no-op for unknown run ids', () => {
+    useRunsStore.getState().setRunDisplayName('ghost', 'whatever');
+    expect(useRunsStore.getState().runs.ghost).toBeUndefined();
+  });
+
+  it('setRunDisplayName is a no-op when value is unchanged (no churn)', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().setRunDisplayName('r1', 'foo');
+    const before = useRunsStore.getState().runs;
+    useRunsStore.getState().setRunDisplayName('r1', 'foo');
+    expect(useRunsStore.getState().runs).toBe(before);
+  });
+
+  it('setRunColorOverride stores a colour string on the run', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().setRunColorOverride('r1', '#3366ff');
+    expect(useRunsStore.getState().runs.r1!.colorOverride).toBe('#3366ff');
+  });
+
+  it('setRunColorOverride(null) clears the override', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().setRunColorOverride('r1', '#3366ff');
+    useRunsStore.getState().setRunColorOverride('r1', null);
+    expect(useRunsStore.getState().runs.r1!.colorOverride).toBeUndefined();
+  });
+
+  it('setRunColorOverride("") clears the override (defensive)', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().setRunColorOverride('r1', '#3366ff');
+    useRunsStore.getState().setRunColorOverride('r1', '');
+    expect(useRunsStore.getState().runs.r1!.colorOverride).toBeUndefined();
+  });
+
+  it('setRunColorOverride is a no-op for unknown run ids', () => {
+    useRunsStore.getState().setRunColorOverride('ghost', '#ff0000');
+    expect(useRunsStore.getState().runs.ghost).toBeUndefined();
+  });
+
+  it('setRunColorOverride is a no-op when value is unchanged', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().setRunColorOverride('r1', '#abc');
+    const before = useRunsStore.getState().runs;
+    useRunsStore.getState().setRunColorOverride('r1', '#abc');
+    expect(useRunsStore.getState().runs).toBe(before);
+  });
+
+  it('appendFrame preserves displayName + colorOverride across frames', () => {
+    useRunsStore.getState().startRun({
+      runId: 'r1',
+      tf: 1.0,
+      columnNames: ['Bus_1_v'],
+    });
+    useRunsStore.getState().setRunDisplayName('r1', 'Custom');
+    useRunsStore.getState().setRunColorOverride('r1', '#ff00aa');
+    useRunsStore.getState().appendFrame('r1', {
+      t: new Float64Array([0.0]),
+      columns: { Bus_1_v: new Float64Array([1.0]) },
+    });
+    const r = useRunsStore.getState().runs.r1!;
+    expect(r.displayName).toBe('Custom');
+    expect(r.colorOverride).toBe('#ff00aa');
+  });
+});

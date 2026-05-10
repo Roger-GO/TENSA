@@ -96,6 +96,21 @@ export interface RunRecord {
   abortedLocally: boolean;
   /** Optional human-facing reason when ``state === "error"``. */
   errorReason: string | null;
+  /**
+   * Optional researcher-supplied label for this run (Unit 20, v2.0).
+   * Surfaced by the ``RunLegendChip`` and any other run-identifying
+   * UI when present; falls back to the auto-generated short-id + tf
+   * label otherwise. Session-scoped (never persisted across reloads).
+   */
+  displayName?: string;
+  /**
+   * Optional researcher-picked stroke colour override (Unit 20, v2.0).
+   * Any valid CSS colour string. When set, ``runIdToColor`` returns
+   * this value instead of the hash-derived hue, and the ``TimeSeriesPlot``
+   * + ``RunLegendChip`` swatches both pick it up automatically. Session-
+   * scoped.
+   */
+  colorOverride?: string;
 }
 
 /** Default initial capacity for typed arrays (one row each on first append). */
@@ -231,6 +246,23 @@ export interface RunsState {
    * limit evicts excess completed runs.
    */
   setRetentionLimit: (n: number) => void;
+
+  /**
+   * Set the per-run human-facing label (Unit 20, v2.0). Trimmed
+   * automatically; an empty / whitespace-only value clears the override
+   * back to the auto-generated default. No-op when the run id is
+   * unknown.
+   */
+  setRunDisplayName: (runId: string, name: string) => void;
+
+  /**
+   * Set the per-run stroke colour override (Unit 20, v2.0). Pass
+   * ``null`` or an empty string to clear back to the hash-derived
+   * colour. Caller is responsible for validating the colour string
+   * (the swatch picker rejects malformed hex inline). No-op when the
+   * run id is unknown.
+   */
+  setRunColorOverride: (runId: string, color: string | null) => void;
 }
 
 // ---- internal helpers -----------------------------------------------------
@@ -588,8 +620,7 @@ export const useRunsStore = create<RunsState>((set, get) => ({
     });
   },
 
-  clearRuns: () =>
-    set({ runs: {}, activeRunId: null, overlayRunIds: new Set<string>() }),
+  clearRuns: () => set({ runs: {}, activeRunId: null, overlayRunIds: new Set<string>() }),
 
   setOverlayRuns: (ids) => {
     const runs = get().runs;
@@ -622,6 +653,41 @@ export const useRunsStore = create<RunsState>((set, get) => ({
       retentionLimit: clamped,
       runs: nextRuns,
       overlayRunIds: reconcileOverlay(get().overlayRunIds, nextRuns),
+    });
+  },
+
+  setRunDisplayName: (runId, name) => {
+    const cur = get().runs[runId];
+    if (!cur) return;
+    const trimmed = name.trim();
+    // Skip the update when nothing is actually changing — keeps Zustand
+    // subscribers from churning on no-op blur commits.
+    const nextDisplayName = trimmed.length === 0 ? undefined : trimmed;
+    if (cur.displayName === nextDisplayName) return;
+    const nextRecord: RunRecord = { ...cur };
+    if (nextDisplayName === undefined) delete nextRecord.displayName;
+    else nextRecord.displayName = nextDisplayName;
+    set({
+      runs: {
+        ...get().runs,
+        [runId]: nextRecord,
+      },
+    });
+  },
+
+  setRunColorOverride: (runId, color) => {
+    const cur = get().runs[runId];
+    if (!cur) return;
+    const next = color === null || color.trim().length === 0 ? undefined : color;
+    if (cur.colorOverride === next) return;
+    const nextRecord: RunRecord = { ...cur };
+    if (next === undefined) delete nextRecord.colorOverride;
+    else nextRecord.colorOverride = next;
+    set({
+      runs: {
+        ...get().runs,
+        [runId]: nextRecord,
+      },
     });
   },
 }));

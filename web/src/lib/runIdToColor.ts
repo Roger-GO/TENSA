@@ -64,8 +64,16 @@ export function runIdToPaletteSlot(runId: string): number {
  * lightness (45%) keep the chips readable in both light and dark
  * themes; only the hue varies with the runId. Hues are spread by
  * golden-ratio rotation across the [0, 360) range.
+ *
+ * **Override (Unit 20, v2.0):** when ``override`` is a non-empty
+ * string, it is returned verbatim instead of the hash-derived hue.
+ * Callers fetch the override from the runs store
+ * (``runs[runId].colorOverride``) and pass it through; keeping the
+ * function pure (no store import) lets it be called from non-React
+ * code paths (e.g., tests) without dragging in the global store.
  */
-export function runIdToColor(runId: string): string {
+export function runIdToColor(runId: string, override?: string | null): string {
+  if (override && override.length > 0) return override;
   const slot = runIdToPaletteSlot(runId);
   const hue = Math.round((360 / PALETTE_SIZE) * slot);
   return `hsl(${hue}, 70%, 45%)`;
@@ -85,7 +93,7 @@ export function runIdToDash(runId: string): readonly number[] {
   // Bucket into "dash family" by hashing again into a small space.
   // Mix the hash a bit so the dash family is decoupled from the hue
   // bucket (otherwise runs in palette slot 0 would always be solid).
-  const dashSlot = Math.floor(((h ^ 0xdeadbeef) >>> 0) / 0x100000000 * 4);
+  const dashSlot = Math.floor((((h ^ 0xdeadbeef) >>> 0) / 0x100000000) * 4);
   switch (dashSlot) {
     case 0:
       return [];
@@ -112,6 +120,6 @@ export interface RunStrokeStyle {
   dash: readonly number[];
 }
 
-export function runIdToStrokeStyle(runId: string): RunStrokeStyle {
-  return { color: runIdToColor(runId), dash: runIdToDash(runId) };
+export function runIdToStrokeStyle(runId: string, override?: string | null): RunStrokeStyle {
+  return { color: runIdToColor(runId, override), dash: runIdToDash(runId) };
 }
