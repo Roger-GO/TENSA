@@ -531,6 +531,42 @@ def _handle_delete_timeseries(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return None
 
 
+def _handle_import_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire :meth:`Wrapper.import_bundle` for Unit 10.
+
+    Args:
+        ``zip_bytes``: required ``bytes`` payload of the .zip bundle.
+        ``force_resolve``: optional bool, default False. When False
+            and the bundle has conflicts, returns ``status="plan"``
+            with the conflict list so the route layer can short-circuit
+            with a 409. When True, the substrate proceeds with the
+            extraction + replay using the resolution choices below.
+        ``use_bundle_case``: optional bool, default True. Controls
+            sha-mismatch resolution (True overwrites workspace; False
+            preserves workspace + writes sibling).
+        ``accept_version_mismatch``: optional bool, default True.
+            Carried through for symmetry with the BundleResolveChoices
+            dataclass; the substrate currently always proceeds on
+            version-mismatch (warning surfaces in the plan).
+
+    Returns the result dict from :meth:`Wrapper.import_bundle`.
+    """
+    zip_bytes = args.get("zip_bytes")
+    if not isinstance(zip_bytes, (bytes, bytearray)):
+        raise AndesAppError(
+            "'zip_bytes' is required for import_bundle (bytes)"
+        )
+    force_resolve = bool(args.get("force_resolve", False))
+    use_bundle_case = bool(args.get("use_bundle_case", True))
+    accept_version_mismatch = bool(args.get("accept_version_mismatch", True))
+    return wrapper.import_bundle(
+        bytes(zip_bytes),
+        force_resolve=force_resolve,
+        use_bundle_case=use_bundle_case,
+        accept_version_mismatch=accept_version_mismatch,
+    )
+
+
 def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     """Assemble a reproducibility-bundle ``.zip`` (Unit 3 of the v2.0 plan).
 
@@ -955,6 +991,8 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "run_pflow": _handle_run_pflow,
     "alterable_params": _handle_alterable_params,
     "export_bundle": _handle_export_bundle,
+    # Unit 10 — bundle import + conflict resolution.
+    "import_bundle": _handle_import_bundle,
     "generate_report": _handle_generate_report,
     "run_eig": _handle_run_eig,
     "eig_participation": _handle_eig_participation,
@@ -1077,14 +1115,28 @@ def worker_main(
                 }
             )
         except AndesAppError as exc:
-            data.send(
-                {
-                    "type": "error",
-                    "seq": seq,
-                    "category": exc.__class__.__name__,
-                    "detail": str(exc),
-                }
-            )
+            # Bundle-validation errors carry a domain-level ``category``
+            # field (e.g., ``corrupt-zip``, ``manifest-malformed``) that
+            # the route layer maps to specific HTTP statuses. Surface it
+            # via the wire's ``category`` channel so the router doesn't
+            # have to peek into ``detail`` strings.
+            wire_category = exc.__class__.__name__
+            extra: dict[str, Any] | None = None
+            bundle_category = getattr(exc, "category", None)
+            if isinstance(bundle_category, str) and exc.__class__.__name__ == "BundleValidationError":
+                wire_category = f"BundleValidationError:{bundle_category}"
+                missing_fields = getattr(exc, "missing_fields", None)
+                if missing_fields:
+                    extra = {"missing_fields": list(missing_fields)}
+            error_payload: dict[str, Any] = {
+                "type": "error",
+                "seq": seq,
+                "category": wire_category,
+                "detail": str(exc),
+            }
+            if extra is not None:
+                error_payload["extra"] = extra
+            data.send(error_payload)
         except Exception as exc:  # noqa: BLE001 — last-resort
             data.send(
                 {
