@@ -71,7 +71,7 @@ async def app_workspace(tmp_path: Path) -> AsyncIterator[tuple[httpx.AsyncClient
 
 
 async def _create_session(client: httpx.AsyncClient) -> str:
-    resp = await client.post("/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
     assert resp.status_code == 201, resp.text
     return str(resp.json()["session_id"])
 
@@ -84,7 +84,7 @@ async def test_load_case_returns_topology(
     sid = await _create_session(client)
 
     resp = await client.post(
-        f"/sessions/{sid}/case",
+        f"/api/sessions/{sid}/case",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={"primary_path": "ieee14.raw"},
     )
@@ -101,7 +101,7 @@ async def test_load_case_with_addfile(
     client, _ws = app_workspace
     sid = await _create_session(client)
     resp = await client.post(
-        f"/sessions/{sid}/case",
+        f"/api/sessions/{sid}/case",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={"primary_path": "ieee14.raw", "addfiles": ["ieee14.dyr"]},
     )
@@ -115,7 +115,7 @@ async def test_load_case_traversal_returns_400(
     client, _ws = app_workspace
     sid = await _create_session(client)
     resp = await client.post(
-        f"/sessions/{sid}/case",
+        f"/api/sessions/{sid}/case",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={"primary_path": "../../etc/passwd"},
     )
@@ -129,7 +129,7 @@ async def test_load_case_absolute_path_returns_400(
     client, _ws = app_workspace
     sid = await _create_session(client)
     resp = await client.post(
-        f"/sessions/{sid}/case",
+        f"/api/sessions/{sid}/case",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={"primary_path": "/etc/passwd"},
     )
@@ -143,7 +143,7 @@ async def test_load_case_missing_file_returns_400(
     client, _ws = app_workspace
     sid = await _create_session(client)
     resp = await client.post(
-        f"/sessions/{sid}/case",
+        f"/api/sessions/{sid}/case",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={"primary_path": "no-such-case.xlsx"},
     )
@@ -156,7 +156,7 @@ async def test_load_case_unknown_session_returns_404(
 ) -> None:
     client, _ws = app_workspace
     resp = await client.post(
-        "/sessions/does-not-exist/case",
+        "/api/sessions/does-not-exist/case",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={"primary_path": "ieee14.raw"},
     )
@@ -170,7 +170,7 @@ async def test_topology_before_load_returns_409(
     client, _ws = app_workspace
     sid = await _create_session(client)
     resp = await client.get(
-        f"/sessions/{sid}/topology",
+        f"/api/sessions/{sid}/topology",
         headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 409, resp.text
@@ -183,12 +183,12 @@ async def test_run_pflow_after_load_returns_converged(
     client, _ws = app_workspace
     sid = await _create_session(client)
     await client.post(
-        f"/sessions/{sid}/case",
+        f"/api/sessions/{sid}/case",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={"primary_path": "ieee14.raw"},
     )
     resp = await client.post(
-        f"/sessions/{sid}/pflow",
+        f"/api/sessions/{sid}/pflow",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
@@ -202,10 +202,101 @@ async def test_run_pflow_after_load_returns_converged(
 
     # Topology after PF reflects the committed state
     topo_resp = await client.get(
-        f"/sessions/{sid}/topology",
+        f"/api/sessions/{sid}/topology",
         headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert topo_resp.json()["state"] == "committed"
+
+
+@pytest.mark.integration
+async def test_pflow_returns_line_flows(
+    app_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """``PflowResult.line_flows`` is populated on a converged IEEE 14 PF."""
+    client, _ws = app_workspace
+    sid = await _create_session(client)
+    await client.post(
+        f"/api/sessions/{sid}/case",
+        headers={"X-Andes-Token": VALID_TOKEN},
+        json={"primary_path": "ieee14.raw"},
+    )
+    resp = await client.post(
+        f"/api/sessions/{sid}/pflow",
+        headers={"X-Andes-Token": VALID_TOKEN},
+        json={},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    line_flows = body["line_flows"]
+    assert isinstance(line_flows, dict)
+    # IEEE 14 has 20 branches; we expect a non-zero count and shape on each.
+    assert len(line_flows) > 0
+    for line_idx, flow in line_flows.items():
+        assert isinstance(line_idx, str)
+        assert "p" in flow
+        assert "q" in flow
+        assert "from_idx" in flow
+        assert "to_idx" in flow
+        assert isinstance(flow["p"], (int, float))
+        assert isinstance(flow["q"], (int, float))
+    # At least one branch carries non-trivial real power (MW), confirming
+    # the values aren't all zero.
+    assert any(abs(flow["p"]) > 1.0 for flow in line_flows.values())
+
+
+@pytest.mark.integration
+async def test_topology_includes_params(
+    app_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """``TopologyEntry.params`` is populated for buses + generators."""
+    client, _ws = app_workspace
+    sid = await _create_session(client)
+    resp = await client.post(
+        f"/api/sessions/{sid}/case",
+        headers={"X-Andes-Token": VALID_TOKEN},
+        json={"primary_path": "ieee14.raw", "addfiles": ["ieee14.dyr"]},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["buses"], "expected non-empty buses"
+    bus0 = body["buses"][0]
+    assert "params" in bus0
+    # IEEE 14 buses always have Vn, vmax, vmin
+    assert "Vn" in bus0["params"]
+    assert "vmax" in bus0["params"]
+    assert "vmin" in bus0["params"]
+    assert isinstance(bus0["params"]["Vn"], (int, float))
+
+    # Generators are PV/Slack pre-setup (GENROU/GENCLS show up after addfile
+    # has been parsed; they're in ``generators``).
+    assert body["generators"], "expected at least one generator"
+    gen0 = body["generators"][0]
+    assert "params" in gen0
+    # Sn / Vn / bus are always present on PV/Slack/GENROU/GENCLS
+    assert "Sn" in gen0["params"] or "bus" in gen0["params"]
+
+
+@pytest.mark.integration
+async def test_topology_line_params_include_r_x(
+    app_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    client, _ws = app_workspace
+    sid = await _create_session(client)
+    await client.post(
+        f"/api/sessions/{sid}/case",
+        headers={"X-Andes-Token": VALID_TOKEN},
+        json={"primary_path": "ieee14.raw"},
+    )
+    topo_resp = await client.get(
+        f"/api/sessions/{sid}/topology",
+        headers={"X-Andes-Token": VALID_TOKEN},
+    )
+    assert topo_resp.status_code == 200
+    body = topo_resp.json()
+    assert body["lines"], "expected non-empty lines"
+    line0 = body["lines"][0]
+    assert "r" in line0["params"]
+    assert "x" in line0["params"]
 
 
 @pytest.mark.integration
@@ -215,7 +306,7 @@ async def test_run_pflow_before_load_returns_409(
     client, _ws = app_workspace
     sid = await _create_session(client)
     resp = await client.post(
-        f"/sessions/{sid}/pflow",
+        f"/api/sessions/{sid}/pflow",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
@@ -229,25 +320,25 @@ async def test_reload_returns_to_pre_setup(
     client, _ws = app_workspace
     sid = await _create_session(client)
     await client.post(
-        f"/sessions/{sid}/case",
+        f"/api/sessions/{sid}/case",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={"primary_path": "ieee14.raw"},
     )
     await client.post(
-        f"/sessions/{sid}/pflow",
+        f"/api/sessions/{sid}/pflow",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     # State is committed
     topo = await client.get(
-        f"/sessions/{sid}/topology",
+        f"/api/sessions/{sid}/topology",
         headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert topo.json()["state"] == "committed"
 
     # Reload returns to pre-setup
     reload_resp = await client.post(
-        f"/sessions/{sid}/reload",
+        f"/api/sessions/{sid}/reload",
         headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert reload_resp.status_code == 200

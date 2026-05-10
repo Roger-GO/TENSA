@@ -64,13 +64,13 @@ async def _create_session_and_load(
     client: httpx.AsyncClient, primary: str = "ieee14.raw", addfile: str | None = None
 ) -> str:
     """Helper: create a session, load IEEE 14, return the session id."""
-    resp = await client.post("/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
     sid = str(resp.json()["session_id"])
     body: dict[str, object] = {"primary_path": primary}
     if addfile:
         body["addfiles"] = [addfile]
     await client.post(
-        f"/sessions/{sid}/case",
+        f"/api/sessions/{sid}/case",
         headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
@@ -81,7 +81,7 @@ async def _create_session_and_load(
 async def test_add_fault_pre_setup_returns_idx(client: httpx.AsyncClient) -> None:
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp = await client.post(
-        f"/sessions/{sid}/disturbances",
+        f"/api/sessions/{sid}/disturbances",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "disturbances": [
@@ -102,7 +102,7 @@ async def test_add_multiple_disturbances_in_one_request(
 ) -> None:
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp = await client.post(
-        f"/sessions/{sid}/disturbances",
+        f"/api/sessions/{sid}/disturbances",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "disturbances": [
@@ -123,12 +123,12 @@ async def test_add_disturbance_post_setup_returns_409(
     sid = await _create_session_and_load(client, "ieee14.raw")
     # PF triggers setup
     await client.post(
-        f"/sessions/{sid}/pflow",
+        f"/api/sessions/{sid}/pflow",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     resp = await client.post(
-        f"/sessions/{sid}/disturbances",
+        f"/api/sessions/{sid}/disturbances",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "disturbances": [
@@ -148,26 +148,26 @@ async def test_add_then_reload_then_re_add_works(
     pre-setup so disturbances can be added again."""
     sid = await _create_session_and_load(client, "ieee14.raw")
     await client.post(
-        f"/sessions/{sid}/pflow",
+        f"/api/sessions/{sid}/pflow",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     # 409 before reload
     bad = await client.post(
-        f"/sessions/{sid}/disturbances",
+        f"/api/sessions/{sid}/disturbances",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={"disturbances": [{"kind": "fault", "bus_idx": 4, "tf": 1.0, "tc": 1.1}]},
     )
     assert bad.status_code == 409
     # Reload
     rl = await client.post(
-        f"/sessions/{sid}/reload",
+        f"/api/sessions/{sid}/reload",
         headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert rl.status_code == 200
     # Now add succeeds
     ok = await client.post(
-        f"/sessions/{sid}/disturbances",
+        f"/api/sessions/{sid}/disturbances",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={"disturbances": [{"kind": "fault", "bus_idx": 4, "tf": 1.0, "tc": 1.1}]},
     )
@@ -180,7 +180,7 @@ async def test_run_tds_batch(client: httpx.AsyncClient) -> None:
     callpert fired and final_t reached tf."""
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp = await client.post(
-        f"/sessions/{sid}/tds",
+        f"/api/sessions/{sid}/tds",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={"tf": 1.0, "h": 1 / 120},
     )
@@ -192,10 +192,10 @@ async def test_run_tds_batch(client: httpx.AsyncClient) -> None:
 
 @pytest.mark.integration
 async def test_run_tds_before_load_returns_409(client: httpx.AsyncClient) -> None:
-    resp = await client.post("/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
     sid = str(resp.json()["session_id"])
     resp = await client.post(
-        f"/sessions/{sid}/tds",
+        f"/api/sessions/{sid}/tds",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={"tf": 1.0},
     )
@@ -207,7 +207,7 @@ async def test_add_disturbance_unknown_session_returns_404(
     client: httpx.AsyncClient,
 ) -> None:
     resp = await client.post(
-        "/sessions/does-not-exist/disturbances",
+        "/api/sessions/does-not-exist/disturbances",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={"disturbances": [{"kind": "fault", "bus_idx": 4, "tf": 1.0, "tc": 1.1}]},
     )
@@ -221,7 +221,7 @@ async def test_add_disturbance_empty_list_returns_422(
     """An empty disturbances list violates ``min_length=1``."""
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp = await client.post(
-        f"/sessions/{sid}/disturbances",
+        f"/api/sessions/{sid}/disturbances",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={"disturbances": []},
     )
@@ -234,7 +234,7 @@ async def test_add_disturbance_unknown_kind_returns_422(
 ) -> None:
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp = await client.post(
-        f"/sessions/{sid}/disturbances",
+        f"/api/sessions/{sid}/disturbances",
         headers={"X-Andes-Token": VALID_TOKEN},
         json={"disturbances": [{"kind": "bogus", "bus_idx": 4}]},
     )

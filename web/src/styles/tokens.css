@@ -1,0 +1,100 @@
+/*
+ * Design tokens (Unit 2).
+ *
+ * Color tokens use OKLCH for perceptually-uniform interpolation. Light mode is
+ * the default at :root; dark mode toggles via the `.dark` class on <html>
+ * (Tailwind v4's class-based dark variant). The :root selectors below match
+ * Tailwind's @custom-variant configuration.
+ *
+ * Type / spacing / motion / radius tokens follow the v0.1 plan's
+ * "Key Technical Decisions" section.
+ *
+ * Tailwind v4's @theme directive registers each custom property as a Tailwind
+ * utility namespace; e.g. `--color-primary` → `bg-primary text-primary
+ * border-primary` etc.
+ */
+
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* ---- color: neutrals (light) -------------------------------------------- */
+  --color-background: oklch(0.99 0 0);
+  --color-foreground: oklch(0.15 0.01 270);
+  --color-muted: oklch(0.96 0 0);
+  --color-muted-foreground: oklch(0.45 0.02 270);
+  --color-border: oklch(0.91 0.005 270);
+  --color-input: oklch(0.91 0.005 270);
+
+  /* ---- color: primary (light) -------------------------------------------- */
+  --color-primary: oklch(0.5 0.15 250);
+  --color-primary-foreground: oklch(0.99 0 0);
+
+  /* ---- color: focus ring ------------------------------------------------- */
+  --color-ring: oklch(0.5 0.1 250 / 0.55);
+
+  /* ---- color: limit-violation band (Unit 9) ------------------------------ */
+  --color-success: oklch(0.65 0.16 145);
+  --color-success-foreground: oklch(0.13 0.01 270);
+  --color-warning: oklch(0.75 0.13 80);
+  --color-warning-foreground: oklch(0.13 0.01 270);
+  --color-danger: oklch(0.6 0.2 25);
+  --color-danger-foreground: oklch(0.99 0 0);
+
+  /* ---- type ------------------------------------------------------------- */
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-mono:
+    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    monospace;
+
+  /* ---- radius ----------------------------------------------------------- */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* ---- motion ----------------------------------------------------------- */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 300ms;
+  --ease-out-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Material-style "standard" cubic-out — used by Unit 19 for SLD bus
+   * voltage colour transitions and line-flow direction arrow rotations.
+   * Keeps animations crisp without overshoot. */
+  --ease-out-quart: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Dark mode overrides. Selecting on .dark via the @custom-variant above lets
+ * Tailwind utilities like `dark:bg-foreground` resolve, but the tokens
+ * themselves swap at this layer so utilities like `bg-background` change
+ * automatically when the .dark class is toggled on <html> or <body>. */
+:where(.dark) {
+  --color-background: oklch(0.13 0.01 270);
+  --color-foreground: oklch(0.97 0 0);
+  --color-muted: oklch(0.22 0.01 270);
+  --color-muted-foreground: oklch(0.7 0.01 270);
+  /* Border lifted from 0.25 → 0.3 so panel/card edges and hairline
+   * dividers actually read against the 0.13 background. The previous
+   * value disappeared in the right-cluster TopBar dividers and the
+   * coach card outline. */
+  --color-border: oklch(0.3 0.008 270);
+  --color-input: oklch(0.3 0.008 270);
+
+  /* Primary lifted slightly + chroma tightened so on-primary text
+   * (white-on-blue Run buttons) clears WCAG AA against the lighter
+   * blue. Foreground stays near-black for filled-button text. */
+  --color-primary: oklch(0.66 0.16 250);
+  --color-primary-foreground: oklch(0.99 0 0);
+
+  --color-ring: oklch(0.7 0.12 250 / 0.6);
+
+  --color-success: oklch(0.72 0.15 145);
+  --color-success-foreground: oklch(0.13 0.01 270);
+  --color-warning: oklch(0.8 0.13 80);
+  --color-warning-foreground: oklch(0.13 0.01 270);
+  --color-danger: oklch(0.7 0.18 25);
+  --color-danger-foreground: oklch(0.99 0 0);
+}

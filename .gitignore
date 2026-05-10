@@ -10,6 +10,13 @@ build/
 dist/
 wheels/
 .pytest_cache/
+
+# Per-run artifacts from compound-engineering skills (ce-code-review etc.)
+.context/
+.playwright-mcp/
+
+# Polish-loop screenshots (transient — regenerated per session)
+polish-*.png
 .mypy_cache/
 .ruff_cache/
 .coverage

@@ -50,6 +50,7 @@ from andes_app.core.session import (
     SessionExpiredError,
     SessionManager,
 )
+from andes_app.core.stream import DEFAULT_VARS, VAR_GROUPS
 from andes_app.security.token import constant_time_eq
 
 router = APIRouter()
@@ -182,19 +183,76 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         )
         return
 
+    # Optional ``vars`` selector — picks which variable groups (bus_v,
+    # gen_state, line_flow) appear as columns in each Arrow record batch.
+    # Validation lives here (not just in the schemas/Pydantic layer) because
+    # the WS path doesn't go through FastAPI request-body machinery.
+    vars_raw = cfg.get("vars", list(DEFAULT_VARS))
+    if not isinstance(vars_raw, list) or not all(
+        isinstance(v, str) for v in vars_raw
+    ):
+        await _close_with_error(
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            "'vars' must be a list of variable-group strings",
+        )
+        return
+    if not vars_raw:
+        await _close_with_error(
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            "'vars' must be a non-empty list when provided",
+        )
+        return
+    unknown = [v for v in vars_raw if v not in VAR_GROUPS]
+    if unknown:
+        await _close_with_error(
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            f"unknown var group(s) {unknown!r}; expected one of {list(VAR_GROUPS)!r}",
+        )
+        return
+
+    # Optional Unit 16 fields: integrator + tolerance overrides. These
+    # default to the trapezoidal-fixed-step path so existing clients see
+    # no change. Validation is light-touch here (literal + dict shape);
+    # the wrapper raises ``SetupFailedError`` on unknown override keys
+    # which the WS path surfaces as a worker_error close.
+    integrator_raw = cfg.get("integrator", "trapezoidal")
+    if integrator_raw not in ("trapezoidal", "qndf"):
+        await _close_with_error(
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            f"unknown integrator {integrator_raw!r}; expected 'trapezoidal' or 'qndf'",
+        )
+        return
+    overrides_raw = cfg.get("tds_config_overrides")
+    if overrides_raw is not None and not isinstance(overrides_raw, dict):
+        await _close_with_error(
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            "'tds_config_overrides' must be an object of {rtol, atol, max_step} → number",
+        )
+        return
+
     # Start the streaming run as a background task; the run survives WS
     # disconnect and can be resumed via {"type":"resume",...}.
+    run_args: dict[str, Any] = {
+        "tf": tf,
+        "h": h,
+        "stream": True,
+        "decimation": decimation_raw,
+        "max_rate_hz": max_rate_hz,
+        "vars": vars_raw,
+        "integrator": integrator_raw,
+    }
+    if overrides_raw is not None:
+        run_args["tds_config_overrides"] = overrides_raw
     try:
         run_id = await mgr.start_streaming_run(
             session_id,
             "run_tds",
-            {
-                "tf": tf,
-                "h": h,
-                "stream": True,
-                "decimation": decimation_raw,
-                "max_rate_hz": max_rate_hz,
-            },
+            run_args,
         )
     except SessionExpiredError as exc:
         await _close_with_error(websocket, WS_CLOSE_SESSION_NOT_FOUND, str(exc))

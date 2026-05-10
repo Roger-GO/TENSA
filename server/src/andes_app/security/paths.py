@@ -149,3 +149,103 @@ def _check_within_workspace(workspace: Path, canonical: Path) -> None:
             f"path resolves outside the workspace: "
             f"{canonical!s} not under {workspace!s}"
         ) from exc
+
+
+def list_workspace_files(
+    workspace: Path,
+    allowed_extensions: frozenset[str],
+) -> list[Path]:
+    """Enumerate workspace files matching ``allowed_extensions``.
+
+    Non-recursive (workspace root only in v0.1). Excludes:
+
+    - hidden files (names starting with ``.``)
+    - symlinks (``entry.is_symlink()`` true)
+    - directories
+    - files whose extension (lowercased) is not in ``allowed_extensions``
+
+    Returns absolute paths sorted alphabetically by name. ``allowed_extensions``
+    entries should include the leading dot (e.g., ``frozenset({".xlsx",
+    ".raw"})``); comparison is case-insensitive on the suffix.
+    """
+    workspace = workspace.resolve(strict=True)
+    if not workspace.is_dir():
+        raise WorkspacePathError(f"workspace path is not a directory: {workspace!s}")
+    results: list[Path] = []
+    with os.scandir(workspace) as it:
+        for entry in it:
+            if entry.name.startswith("."):
+                continue
+            # ``is_symlink`` does not follow; ``is_file(follow_symlinks=False)``
+            # rejects symlinks too. Belt + suspenders.
+            if entry.is_symlink():
+                continue
+            try:
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+            except OSError:
+                continue
+            suffix = Path(entry.name).suffix.lower()
+            if suffix not in allowed_extensions:
+                continue
+            results.append(Path(entry.path))
+    results.sort(key=lambda p: p.name)
+    return results
+
+
+@contextmanager
+def open_workspace_file_for_write(
+    workspace: Path,
+    client_path: str,
+) -> Iterator[Path]:
+    """Validate ``client_path`` for a write operation under ``workspace`` and
+    yield the canonical target Path. The caller is responsible for the actual
+    write (typically via ``tempfile.NamedTemporaryFile`` in the parent
+    directory followed by ``os.replace``).
+
+    Validation:
+
+    - ``_reject_unsafe_input`` — refuses absolute paths and NUL bytes.
+    - The target's parent directory must exist and not be a symlink (so a
+      symlink-races attack at the directory level is defeated).
+    - The resolved target must be inside the workspace.
+
+    The target file itself MAY be missing (this is a write — the file is
+    being created or replaced). If it exists, it must not be a symlink.
+    """
+    _reject_unsafe_input(client_path)
+
+    workspace = workspace.resolve(strict=True)
+    candidate = (workspace / client_path).expanduser()
+    parent = candidate.parent
+
+    # The parent dir must exist (we don't auto-mkdir for writes — the case
+    # file already lives in a real directory in the workspace).
+    if not parent.exists():
+        raise WorkspacePathError(
+            f"parent directory does not exist for write: {client_path!r}"
+        )
+
+    if sys.platform != "win32" and parent.is_symlink():
+        raise WorkspacePathError(
+            f"refusing to write under a symlinked parent directory: {client_path!r}"
+        )
+
+    canonical_parent = parent.resolve(strict=True)
+    _check_within_workspace(workspace, canonical_parent)
+
+    if candidate.exists() and candidate.is_symlink():
+        raise WorkspacePathError(
+            f"refusing to overwrite a symlink: {client_path!r}"
+        )
+
+    # Re-check the final target is within workspace (covers the case where
+    # the file exists already and resolves elsewhere).
+    if candidate.exists():
+        canonical_target = candidate.resolve(strict=True)
+        _check_within_workspace(workspace, canonical_target)
+        yield canonical_target
+    else:
+        # File does not yet exist — return the canonical-parent + name so the
+        # caller can write atomically.
+        yield canonical_parent / candidate.name
