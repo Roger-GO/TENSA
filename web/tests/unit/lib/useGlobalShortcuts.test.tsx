@@ -32,6 +32,7 @@ import { usePflowStore } from '@/store/pflow';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useUiStore } from '@/store/ui';
 import { useThemeStore } from '@/store/theme';
+import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary, PflowResult } from '@/api/types';
 
@@ -124,6 +125,8 @@ beforeEach(() => {
   if (document.activeElement instanceof HTMLElement) {
     document.activeElement.blur();
   }
+  window.localStorage.clear();
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT });
 });
 
 afterEach(() => {
@@ -271,6 +274,83 @@ describe('<GlobalShortcuts /> — AppShell-managed bindings', () => {
       document.dispatchEvent(event);
     });
     expect(useCommandPaletteStore.getState().open).toBe(false);
+  });
+});
+
+describe('<GlobalShortcuts /> — v3 Unit 2 view toggles', () => {
+  it('⌘B toggles the left sidebar', () => {
+    render(withProviders(<GlobalShortcuts />));
+    expect(useLayoutStore.getState().leftSidebarCollapsed).toBe(false);
+    const event = new KeyboardEvent('keydown', {
+      key: 'b',
+      code: 'KeyB',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      document.dispatchEvent(event);
+    });
+    expect(useLayoutStore.getState().leftSidebarCollapsed).toBe(true);
+  });
+
+  it('⌘J toggles the bottom drawer AND clears the unread bit', () => {
+    useLayoutStore.setState({
+      drawerHasUnreadResults: true,
+      bottomDrawerCollapsed: true,
+    });
+    render(withProviders(<GlobalShortcuts />));
+    const event = new KeyboardEvent('keydown', {
+      key: 'j',
+      code: 'KeyJ',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      document.dispatchEvent(event);
+    });
+    expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(false);
+    expect(useLayoutStore.getState().drawerHasUnreadResults).toBe(false);
+  });
+
+  it('⌘\\ toggles the right inspector', () => {
+    render(withProviders(<GlobalShortcuts />));
+    expect(useLayoutStore.getState().rightInspectorCollapsed).toBe(false);
+    const event = new KeyboardEvent('keydown', {
+      key: '\\',
+      code: 'Backslash',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      document.dispatchEvent(event);
+    });
+    expect(useLayoutStore.getState().rightInspectorCollapsed).toBe(true);
+  });
+
+  it('does NOT fire ⌘B when focus is inside a text input', () => {
+    render(withProviders(<GlobalShortcuts />));
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+    try {
+      expect(document.activeElement).toBe(input);
+      const event = new KeyboardEvent('keydown', {
+        key: 'b',
+        code: 'KeyB',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      act(() => {
+        input.dispatchEvent(event);
+      });
+      expect(useLayoutStore.getState().leftSidebarCollapsed).toBe(false);
+    } finally {
+      input.remove();
+    }
   });
 });
 

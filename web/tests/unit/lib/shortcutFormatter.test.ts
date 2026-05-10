@@ -134,6 +134,10 @@ describe('formatShortcut — special tokens', () => {
     expect(formatShortcut('meta+slash')).toEqual(['Ctrl', '/']);
   });
 
+  it('renders `backslash` as `\\`', () => {
+    expect(formatShortcut('meta+backslash')).toEqual(['Ctrl', '\\']);
+  });
+
   it('renders arrow keys as glyphs', () => {
     expect(formatShortcut('arrowup')).toEqual(['↑']);
     expect(formatShortcut('arrowdown')).toEqual(['↓']);

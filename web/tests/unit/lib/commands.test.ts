@@ -30,6 +30,7 @@ import {
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
+import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary, PflowResult } from '@/api/types';
 
@@ -87,11 +88,15 @@ beforeEach(() => {
     pendingDependents: [],
   });
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  window.localStorage.clear();
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT });
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  window.localStorage.clear();
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT });
 });
 
 describe('useCommandRegistry — shape', () => {
@@ -208,6 +213,72 @@ describe('useCommandRegistry — Unit 15 EIG view commands', () => {
     const toggle = result.current.find((c) => c.id === 'navigation.eig-toggle-log');
     expect(reset?.keywords).toContain('eig');
     expect(toggle?.keywords).toContain('eig');
+  });
+});
+
+describe('useCommandRegistry — v3 Unit 2 view commands', () => {
+  it('exposes the three view-toggle commands', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const ids = result.current.map((c) => c.id);
+    expect(ids).toContain('view.toggleLeftSidebar');
+    expect(ids).toContain('view.toggleBottomDrawer');
+    expect(ids).toContain('view.toggleRightInspector');
+  });
+
+  it('view commands carry the documented keyboard shortcuts', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const sidebar = result.current.find((c) => c.id === 'view.toggleLeftSidebar');
+    const drawer = result.current.find((c) => c.id === 'view.toggleBottomDrawer');
+    const inspector = result.current.find(
+      (c) => c.id === 'view.toggleRightInspector',
+    );
+    expect(sidebar?.shortcut).toBe('meta+b, ctrl+b');
+    expect(drawer?.shortcut).toBe('meta+j, ctrl+j');
+    expect(inspector?.shortcut).toBe('meta+backslash, ctrl+backslash');
+  });
+
+  it('view commands belong to the "view" group', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    for (const id of [
+      'view.toggleLeftSidebar',
+      'view.toggleBottomDrawer',
+      'view.toggleRightInspector',
+    ]) {
+      const cmd = result.current.find((c) => c.id === id);
+      expect(cmd?.group).toBe('view');
+    }
+  });
+
+  it('view.toggleLeftSidebar action flips the layout slice', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'view.toggleLeftSidebar');
+    expect(useLayoutStore.getState().leftSidebarCollapsed).toBe(false);
+    cmd?.action();
+    expect(useLayoutStore.getState().leftSidebarCollapsed).toBe(true);
+    cmd?.action();
+    expect(useLayoutStore.getState().leftSidebarCollapsed).toBe(false);
+  });
+
+  it('view.toggleRightInspector action flips the layout slice', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find(
+      (c) => c.id === 'view.toggleRightInspector',
+    );
+    expect(useLayoutStore.getState().rightInspectorCollapsed).toBe(false);
+    cmd?.action();
+    expect(useLayoutStore.getState().rightInspectorCollapsed).toBe(true);
+  });
+
+  it('view.toggleBottomDrawer action toggles AND clears the unread bit', () => {
+    useLayoutStore.setState({
+      drawerHasUnreadResults: true,
+      bottomDrawerCollapsed: true,
+    });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'view.toggleBottomDrawer');
+    cmd?.action();
+    expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(false);
+    expect(useLayoutStore.getState().drawerHasUnreadResults).toBe(false);
   });
 });
 

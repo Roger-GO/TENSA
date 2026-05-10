@@ -50,10 +50,18 @@ import { useReportDialogStore } from '@/components/reports/ReportDialog';
 import { useCurrentTopology, useReloadCase, useUndoLastEdit } from '@/api/queries';
 import { __requestOpenSldSearch } from '@/store/sld';
 import { useThemeStore } from '@/store/theme';
+import { useLayoutStore } from '@/store/layout';
 import { requestEigLogToggle, requestEigViewReset } from '@/lib/eigViewBus';
 import type { RunRoutine } from '@/lib/useRunReadiness';
 
-export type CommandGroup = 'workspace' | 'edit' | 'run' | 'export' | 'navigation' | 'help';
+export type CommandGroup =
+  | 'workspace'
+  | 'edit'
+  | 'run'
+  | 'export'
+  | 'view'
+  | 'navigation'
+  | 'help';
 
 /** Stable group ordering — palette renders sections in this order. */
 export const COMMAND_GROUP_ORDER: readonly CommandGroup[] = [
@@ -61,6 +69,7 @@ export const COMMAND_GROUP_ORDER: readonly CommandGroup[] = [
   'edit',
   'run',
   'export',
+  'view',
   'navigation',
   'help',
 ];
@@ -335,6 +344,48 @@ export function useCommandRegistry(): readonly Command[] {
         keywords: ['save', 'snapshot', 'persist', 'state'],
         action: openSnapshotSave,
         when: () => !sessionScopeDisabled,
+      },
+
+      // ---- view ----------------------------------------------------------
+      // v3 Unit 2 — IDE-style pane toggles. Each command mirrors a
+      // TopBar icon button; both surfaces call the same layout-store
+      // action so click + shortcut paths are interchangeable. The
+      // ⌘B / ⌘J / ⌘\ choices match VS Code's defaults so users
+      // muscle-memorying from another editor land where they expect.
+      {
+        id: 'view.toggleLeftSidebar',
+        label: 'Toggle left sidebar',
+        group: 'view',
+        keywords: ['sidebar', 'left', 'panel', 'toggle', 'show', 'hide', 'cases'],
+        action: () => {
+          useLayoutStore.getState().toggleLeftSidebar();
+        },
+        shortcut: 'meta+b, ctrl+b',
+      },
+      {
+        id: 'view.toggleBottomDrawer',
+        label: 'Toggle bottom drawer',
+        group: 'view',
+        keywords: ['drawer', 'bottom', 'panel', 'toggle', 'show', 'hide', 'results', 'data'],
+        action: () => {
+          // Toggle + clear unread atomically so opening the drawer
+          // via ⌘J dismisses the unread-results dot the same way a
+          // mouse click on the BottomDrawerToggle does.
+          const { toggleBottomDrawer, clearDrawerUnread } = useLayoutStore.getState();
+          toggleBottomDrawer();
+          clearDrawerUnread();
+        },
+        shortcut: 'meta+j, ctrl+j',
+      },
+      {
+        id: 'view.toggleRightInspector',
+        label: 'Toggle inspector',
+        group: 'view',
+        keywords: ['inspector', 'right', 'panel', 'toggle', 'show', 'hide', 'properties'],
+        action: () => {
+          useLayoutStore.getState().toggleRightInspector();
+        },
+        shortcut: 'meta+backslash, ctrl+backslash',
       },
 
       // ---- navigation ----------------------------------------------------

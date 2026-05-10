@@ -75,6 +75,8 @@ function formatToken(token: string, mac: boolean): string {
       return 'Del';
     case 'slash':
       return '/';
+    case 'backslash':
+      return '\\';
     case 'period':
     case 'dot':
       return '.';

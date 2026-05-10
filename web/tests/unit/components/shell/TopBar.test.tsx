@@ -24,6 +24,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 
 import { TopBar } from '@/components/shell/TopBar';
+import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 
 function render(ui: ReactElement): RenderResult {
   const client = new QueryClient({
@@ -34,6 +35,8 @@ function render(ui: ReactElement): RenderResult {
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT });
 });
 
 describe('<TopBar /> — structural contract', () => {
@@ -96,5 +99,56 @@ describe('<TopBar /> — auto-mounted right-slot anchors', () => {
     const toggleIdx = Array.from(right.children).indexOf(toggle);
     expect(callerIdx).toBeGreaterThanOrEqual(0);
     expect(toggleIdx).toBeGreaterThan(callerIdx);
+  });
+});
+
+describe('<TopBar /> — v3 Unit 2 pane toggles', () => {
+  it('mounts the sidebar / inspector / drawer toggles in the right cluster', () => {
+    render(<TopBar />);
+    const right = screen.getByTestId('top-bar-right');
+    const sidebar = screen.getByTestId('top-bar-toggle-sidebar');
+    const inspector = screen.getByTestId('top-bar-toggle-inspector');
+    const drawer = screen.getByTestId('top-bar-toggle-drawer');
+    expect(right.contains(sidebar)).toBe(true);
+    expect(right.contains(inspector)).toBe(true);
+    expect(right.contains(drawer)).toBe(true);
+  });
+
+  it('orders pane toggles sidebar → inspector → drawer', () => {
+    render(<TopBar />);
+    const right = screen.getByTestId('top-bar-right');
+    const sidebarIdx = Array.from(right.children).indexOf(
+      screen.getByTestId('top-bar-toggle-sidebar'),
+    );
+    const inspectorIdx = Array.from(right.children).indexOf(
+      screen.getByTestId('top-bar-toggle-inspector'),
+    );
+    const drawerIdx = Array.from(right.children).indexOf(
+      screen.getByTestId('top-bar-toggle-drawer'),
+    );
+    expect(sidebarIdx).toBeGreaterThanOrEqual(0);
+    expect(inspectorIdx).toBeGreaterThan(sidebarIdx);
+    expect(drawerIdx).toBeGreaterThan(inspectorIdx);
+  });
+
+  it('places pane toggles AFTER caller right-slot content but BEFORE the theme toggle', () => {
+    render(<TopBar right={<button data-testid="caller-right">x</button>} />);
+    const right = screen.getByTestId('top-bar-right');
+    const indexOf = (testid: string) =>
+      Array.from(right.children).indexOf(screen.getByTestId(testid));
+    const callerIdx = indexOf('caller-right');
+    const sidebarIdx = indexOf('top-bar-toggle-sidebar');
+    const drawerIdx = indexOf('top-bar-toggle-drawer');
+    const themeIdx = indexOf('theme-toggle');
+    expect(sidebarIdx).toBeGreaterThan(callerIdx);
+    expect(drawerIdx).toBeLessThan(themeIdx);
+  });
+
+  it('drawer toggle surfaces the unread dot when drawerHasUnreadResults is set', () => {
+    useLayoutStore.setState({ drawerHasUnreadResults: true });
+    render(<TopBar />);
+    expect(
+      screen.getByTestId('top-bar-toggle-drawer-unread-dot'),
+    ).toBeInTheDocument();
   });
 });
