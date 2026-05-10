@@ -2,7 +2,7 @@ import { forwardRef } from 'react';
 import type { HTMLAttributes, ReactNode } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { cn } from '@/lib/cn';
-import { EmptyState } from './EmptyState';
+import { CursorIcon, EmptyState, ChartLineIcon } from '@/components/ui/EmptyState';
 
 /**
  * RightDock. The dockable right region from R18, vertically split between
@@ -64,8 +64,10 @@ export const RightDock = forwardRef<HTMLElement, RightDockProps>(function RightD
           <section aria-label="Inspector" className="flex h-full min-h-0 flex-col">
             {inspector ?? (
               <EmptyState
+                icon={<CursorIcon />}
                 title="No element selected"
                 description="Click an element on the diagram to inspect it."
+                emptyStateKey="right-dock-inspector"
               />
             )}
           </section>
@@ -105,7 +107,12 @@ export const RightDock = forwardRef<HTMLElement, RightDockProps>(function RightD
             className="border-border flex h-full min-h-0 flex-col border-t"
           >
             {results ?? (
-              <EmptyState title="No results yet" description="Run power flow to see results." />
+              <EmptyState
+                icon={<ChartLineIcon />}
+                title="No results yet"
+                description="Run power flow to see results."
+                emptyStateKey="right-dock-results"
+              />
             )}
           </section>
         </Panel>

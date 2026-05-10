@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { EmptyState } from '@/components/shell/EmptyState';
+import { ChartLineIcon, CursorIcon, EmptyState, FolderIcon } from '@/components/ui/EmptyState';
+import { useRunModeStore } from '@/store/runMode';
 import { EditElementButton } from '@/components/elements/EditElementButton';
 import { DeleteElementButton } from '@/components/elements/DeleteElementButton';
 import { useCaseStore } from '@/store/case';
@@ -201,11 +202,15 @@ interface ResultsTabProps {
 }
 
 function ResultsTab({ selected, pflowResult }: ResultsTabProps) {
+  const setActiveRoutine = useRunModeStore((s) => s.setActiveRoutine);
   if (!pflowResult) {
     return (
       <EmptyState
+        icon={<ChartLineIcon />}
         title="No results yet"
         description="Run power flow to see results."
+        action={{ label: 'Run PF', onClick: () => setActiveRoutine('pflow') }}
+        emptyStateKey="inspector-results-no-pf"
         className="py-6"
       />
     );
@@ -382,7 +387,12 @@ export function ElementInspector({ className }: ElementInspectorProps) {
   if (selection === null) {
     return (
       <div className={cn('flex h-full flex-col', className)}>
-        <EmptyState title="No case loaded" description="Load a case to inspect elements." />
+        <EmptyState
+          icon={<FolderIcon />}
+          title="No case loaded"
+          description="Load a case to inspect elements."
+          emptyStateKey="inspector-no-case"
+        />
       </div>
     );
   }
@@ -390,8 +400,10 @@ export function ElementInspector({ className }: ElementInspectorProps) {
     return (
       <div className={cn('flex h-full flex-col', className)}>
         <EmptyState
+          icon={<CursorIcon />}
           title="No element selected"
           description="Click an element on the diagram to inspect it."
+          emptyStateKey="inspector-no-selection"
         />
       </div>
     );

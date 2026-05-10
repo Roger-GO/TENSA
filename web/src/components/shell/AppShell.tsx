@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { cn } from '@/lib/cn';
-import { EmptyState } from './EmptyState';
+import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
+import { FirstRunCoach } from './FirstRunCoach';
 import { LeftRail } from './LeftRail';
 import { RightDock } from './RightDock';
 import { TopBar } from './TopBar';
@@ -158,8 +159,10 @@ export function AppShell({
       <SldCanvas />
     ) : (
       <EmptyState
+        icon={<FolderIcon />}
         title="No case loaded"
         description="Pick a case file from the left rail to begin."
+        emptyStateKey="app-shell-no-case"
       />
     );
 
@@ -283,6 +286,13 @@ export function AppShell({
           the shell root — duplicating it would register every
           binding twice. */}
       <GlobalShortcuts />
+
+      {/* First-run coach (Unit 13). Floating, non-blocking 3-step
+          card that walks a brand-new user through pick-case → run-PF →
+          analyze. Auto-advances on the corresponding store changes
+          and persists dismissal in localStorage so returning users
+          never see it. The component renders nothing once dismissed. */}
+      <FirstRunCoach />
     </div>
   );
 }

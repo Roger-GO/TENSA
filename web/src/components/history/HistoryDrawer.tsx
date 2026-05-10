@@ -26,6 +26,8 @@
 import { useMemo } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { EmptyState, HistoryIcon } from '@/components/ui/EmptyState';
+import { useRunModeStore } from '@/store/runMode';
 import { useHistoryStore } from '@/store/history';
 import { useRunsStore } from '@/store/runs';
 import { useSessionStore } from '@/store/session';
@@ -94,6 +96,8 @@ function HistoryDrawerInner() {
   const activeRunId = useRunsStore((s) => s.activeRunId);
   const overlayRunIds = useRunsStore((s) => s.overlayRunIds);
   const setOverlayRuns = useRunsStore((s) => s.setOverlayRuns);
+  const setActiveRoutine = useRunModeStore((s) => s.setActiveRoutine);
+  const closeDrawer = useHistoryStore((s) => s.closeDrawer);
   // Unit 18: only render the sweep progress panel when a sweep is
   // actively in progress (or just finished and still cleaning up).
   // The panel renders an empty-state otherwise; we suppress its
@@ -180,11 +184,23 @@ function HistoryDrawerInner() {
         className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto"
       >
         {orderedRuns.length === 0 ? (
-          <div
-            data-testid="history-drawer-empty"
-            className="text-muted-foreground p-3 text-center text-xs"
-          >
-            No runs yet. Run a TDS to populate the history.
+          <div data-testid="history-drawer-empty">
+            <EmptyState
+              icon={<HistoryIcon />}
+              title="No runs yet"
+              description="Run a TDS to populate the history."
+              action={{
+                label: 'Run TDS',
+                onClick: () => {
+                  // Flip the active routine so the topbar Run button
+                  // becomes "Run TDS" and the cmd palette routes to
+                  // it; close the drawer so the user sees the change.
+                  setActiveRoutine('tds');
+                  closeDrawer();
+                },
+              }}
+              emptyStateKey="history-drawer"
+            />
           </div>
         ) : (
           orderedRuns.map((r) => (
