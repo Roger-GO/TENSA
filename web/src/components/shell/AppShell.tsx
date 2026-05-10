@@ -6,6 +6,7 @@ import { EmptyState } from './EmptyState';
 import { LeftRail } from './LeftRail';
 import { RightDock } from './RightDock';
 import { TopBar } from './TopBar';
+import { Toaster } from '@/components/ui/Toaster';
 import { SldCanvas } from '@/components/sld/SldCanvas';
 import { useCaseStore } from '@/store/case';
 
@@ -201,6 +202,12 @@ export function AppShell({
           render them and so the shell DOM has a documented top-level
           overlay region. */}
       {modal}
+
+      {/* Global toast surface (Unit 3 of the v2.0 polish plan). Sonner
+          owns the portal — `<Toaster />` mounted once here means a
+          toast survives the unmount of its originating component. See
+          `web/src/lib/toast.ts` for the typed wrapper + policy. */}
+      <Toaster />
     </div>
   );
 }

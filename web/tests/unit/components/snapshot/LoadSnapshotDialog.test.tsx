@@ -15,6 +15,21 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
+const toastErrorMock = vi.fn();
+const toastSuccessMock = vi.fn();
+const toastInfoMock = vi.fn();
+const toastWarningMock = vi.fn();
+
+vi.mock('@/lib/toast', () => ({
+  toast: {
+    error: (...args: unknown[]) => toastErrorMock(...args),
+    success: (...args: unknown[]) => toastSuccessMock(...args),
+    info: (...args: unknown[]) => toastInfoMock(...args),
+    warning: (...args: unknown[]) => toastWarningMock(...args),
+    dismiss: vi.fn(),
+  },
+}));
+
 import { LoadSnapshotDialog } from '@/components/snapshot/LoadSnapshotDialog';
 import { useSessionStore } from '@/store/session';
 import { useSnapshotStore } from '@/store/snapshot';
@@ -42,6 +57,10 @@ beforeEach(() => {
   globalThis.fetch = fetchSpy as unknown as typeof globalThis.fetch;
   useSessionStore.setState({ sessionId: parseSessionId('test-session-id') });
   useSnapshotStore.getState().reset();
+  toastErrorMock.mockReset();
+  toastSuccessMock.mockReset();
+  toastInfoMock.mockReset();
+  toastWarningMock.mockReset();
   // Open the dialog so the inner body mounts.
   useSnapshotStore.getState().openLoadDialog();
 });
@@ -152,6 +171,53 @@ describe('<LoadSnapshotDialog /> — listing + restore', () => {
     const success = await screen.findByTestId('load-snapshot-success');
     expect(success).toHaveTextContent(/replay\+PF/);
     expect(success).toHaveTextContent(/ANDES version mismatch/);
+  });
+});
+
+describe('<LoadSnapshotDialog /> — error toast (Unit 3)', () => {
+  it('restore failure fires toast.error with a Retry action', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      makeJsonResponse(200, {
+        snapshots: [
+          {
+            name: 'snap-a',
+            saved_at: 'now',
+            has_pflow: true,
+            has_tds: false,
+            has_dill: true,
+            andes_version: '2.0.0',
+            disturbance_count: 0,
+          },
+        ],
+      }),
+    );
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          type: 'about:blank',
+          title: 'Internal Server Error',
+          status: 500,
+          detail: 'disk full',
+          instance: null,
+        }),
+        { status: 500, headers: { 'content-type': 'application/problem+json' } },
+      ),
+    );
+    const user = userEvent.setup();
+    render(withQueryClient(<LoadSnapshotDialog />));
+    await user.click(await screen.findByTestId('load-snapshot-select-snap-a'));
+    await user.click(screen.getByTestId('load-snapshot-confirm'));
+
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        expect.stringMatching(/restore failed.*disk full/i),
+        expect.objectContaining({
+          action: expect.objectContaining({ label: 'Retry' }),
+        }),
+      ),
+    );
+    // Inline error block was retired in Unit 3 of the v2.0 polish plan.
+    expect(screen.queryByTestId('load-snapshot-error')).toBeNull();
   });
 });
 

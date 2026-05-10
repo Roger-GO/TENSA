@@ -25,15 +25,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import {
-  useDeleteSnapshot,
-  useListSnapshots,
-  useRestoreSnapshot,
-} from '@/api/queries';
+import { useDeleteSnapshot, useListSnapshots, useRestoreSnapshot } from '@/api/queries';
 import type { SnapshotListEntry } from '@/api/queries';
 import { useSnapshotStore } from '@/store/snapshot';
 import { useSessionStore } from '@/store/session';
 import { ProblemDetailsError } from '@/api/client';
+import { toast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
 
 export function LoadSnapshotDialog() {
@@ -55,11 +52,26 @@ function LoadSnapshotDialogInner() {
   const sessionId = useSessionStore((s) => s.sessionId);
   const closeDialogs = useSnapshotStore((s) => s.closeDialogs);
   const status = useSnapshotStore((s) => s.restoreStatus);
-  const error = useSnapshotStore((s) => s.restoreError);
   const lastOutcome = useSnapshotStore((s) => s.lastRestoreOutcome);
   const markPending = useSnapshotStore((s) => s.markRestorePending);
   const markSuccess = useSnapshotStore((s) => s.markRestoreSuccess);
   const markError = useSnapshotStore((s) => s.markRestoreError);
+
+  // Surface restore / delete failures via the global toast surface
+  // (Unit 3 of the v2.0 polish plan). The substrate still owns the
+  // error string in the snapshot slice so the dialog can re-open and
+  // re-arm without losing the failure context, but the user-visible
+  // surface is now the toast (with a Retry action that re-fires the
+  // last attempt). Success keeps its inline rendering because the
+  // outcome carries content-rich detail (`fallback_reason`,
+  // `disturbances_replayed`) that doesn't fit a 4s toast.
+  const surfaceErrorToast = (message: string, onRetry?: () => void) => {
+    if (onRetry) {
+      toast.error(message, { action: { label: 'Retry', onClick: onRetry } });
+    } else {
+      toast.error(message);
+    }
+  };
 
   const listQuery = useListSnapshots();
   const restoreMutation = useRestoreSnapshot();
@@ -99,7 +111,9 @@ function LoadSnapshotDialogInner() {
           : err instanceof Error
             ? err.message
             : 'unknown error';
-      markError(`Restore failed: ${detail}`);
+      const message = `Restore failed: ${detail}`;
+      markError(message);
+      surfaceErrorToast(message, () => void submitRestore());
     }
   };
 
@@ -109,10 +123,7 @@ function LoadSnapshotDialogInner() {
       // First click — arm. Auto-disarm after 3s so a stale prompt
       // doesn't surprise the user.
       setArmedDeleteName(name);
-      setTimeout(
-        () => setArmedDeleteName((prev) => (prev === name ? null : prev)),
-        3000,
-      );
+      setTimeout(() => setArmedDeleteName((prev) => (prev === name ? null : prev)), 3000);
       return;
     }
     setArmedDeleteName(null);
@@ -126,7 +137,9 @@ function LoadSnapshotDialogInner() {
           : err instanceof Error
             ? err.message
             : 'unknown error';
-      markError(`Delete failed: ${detail}`);
+      const message = `Delete failed: ${detail}`;
+      markError(message);
+      surfaceErrorToast(message, () => void submitDelete(name));
     }
   };
 
@@ -136,24 +149,17 @@ function LoadSnapshotDialogInner() {
     <DialogContent data-testid="load-snapshot-dialog" className="max-w-2xl">
       <DialogTitle>Load snapshot</DialogTitle>
       <DialogDescription className="mt-2">
-        Restore a previously-saved operating point. The dill optimisation
-        skips the PF re-solve when the ANDES version matches; otherwise
-        the always-works replay+PF path takes over.
+        Restore a previously-saved operating point. The dill optimisation skips the PF re-solve when
+        the ANDES version matches; otherwise the always-works replay+PF path takes over.
       </DialogDescription>
 
       <div className="mt-4 flex flex-col gap-3">
         {listQuery.isLoading ? (
-          <p
-            data-testid="load-snapshot-loading"
-            className="text-muted-foreground text-xs"
-          >
+          <p data-testid="load-snapshot-loading" className="text-muted-foreground text-xs">
             Loading snapshots…
           </p>
         ) : snapshots.length === 0 ? (
-          <p
-            data-testid="load-snapshot-empty"
-            className="text-muted-foreground text-xs"
-          >
+          <p data-testid="load-snapshot-empty" className="text-muted-foreground text-xs">
             No snapshots saved against this case yet.
           </p>
         ) : (
@@ -176,9 +182,7 @@ function LoadSnapshotDialogInner() {
                   className={cn(
                     'flex items-center justify-between gap-2',
                     'rounded-[var(--radius-sm)] px-2 py-1.5',
-                    selectedName === s.name
-                      ? 'bg-primary/10 text-foreground'
-                      : 'hover:bg-muted/60',
+                    selectedName === s.name ? 'bg-primary/10 text-foreground' : 'hover:bg-muted/60',
                   )}
                 >
                   <button
@@ -224,23 +228,11 @@ function LoadSnapshotDialogInner() {
             onChange={(e) => setUseDillOpt(e.target.checked)}
             disabled={isPending}
           />
-          <span>
-            Use dill optimisation (skips PF re-solve when ANDES version matches)
-          </span>
+          <span>Use dill optimisation (skips PF re-solve when ANDES version matches)</span>
         </label>
 
-        {error !== null ? (
-          <div
-            role="alert"
-            data-testid="load-snapshot-error"
-            className={cn(
-              'border-destructive/30 bg-destructive/10 text-foreground',
-              'rounded-[var(--radius-sm)] border px-2 py-1.5 text-xs',
-            )}
-          >
-            {error}
-          </div>
-        ) : null}
+        {/* Error rendering moved to the global toast surface — see
+            `surfaceErrorToast` above + `@/lib/toast`. */}
         {status === 'success' && lastOutcome !== null ? (
           <div
             role="status"
@@ -251,8 +243,7 @@ function LoadSnapshotDialogInner() {
             )}
           >
             <p className="font-medium">
-              Restored {lastOutcome.name} (
-              {lastOutcome.used_dill ? 'dill fast path' : 'replay+PF'};{' '}
+              Restored {lastOutcome.name} ({lastOutcome.used_dill ? 'dill fast path' : 'replay+PF'};{' '}
               {lastOutcome.disturbances_replayed} disturbance
               {lastOutcome.disturbances_replayed === 1 ? '' : 's'} replayed).
             </p>

@@ -7,12 +7,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import {
-  useAbortRun,
-  useCommitDisturbances,
-  useResetRun,
-  useRunPflow,
-} from '@/api/queries';
+import { useAbortRun, useCommitDisturbances, useResetRun, useRunPflow } from '@/api/queries';
 import { ProblemDetailsError, ServerError } from '@/api/client';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
@@ -24,6 +19,7 @@ import { useUiStore } from '@/store/ui';
 import { RunStream } from '@/streaming/RunStream';
 import type { RunStreamError, VarGroup } from '@/streaming/RunStream';
 import { buildRunStreamWsUrl } from '@/streaming/wsUrl';
+import { toast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
 
 /**
@@ -102,15 +98,6 @@ export interface RunButtonProps {
   defaultH?: number;
 }
 
-/** Toast message kinds the button surfaces inline above the dock. */
-type Toast =
-  | { kind: 'pf-success'; message: string }
-  | { kind: 'pf-error'; detail: string; recoverViaReload: boolean }
-  | { kind: 'tds-warning'; message: string }
-  | { kind: 'tds-error'; detail: string };
-
-const TOAST_AUTO_DISMISS_MS = 4000;
-
 function Spinner() {
   return (
     <svg
@@ -129,29 +116,7 @@ function Spinner() {
   );
 }
 
-function CloseIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      width="10"
-      height="10"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-    >
-      <path d="M4 4 L12 12 M12 4 L4 12" />
-    </svg>
-  );
-}
-
-export function RunButton({
-  className,
-  defaultVars,
-  defaultTf,
-  defaultH,
-}: RunButtonProps) {
+export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunButtonProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
   const selection = useCaseStore((s) => s.selection);
   const token = useAuthStore((s) => s.token);
@@ -170,7 +135,7 @@ export function RunButton({
   // Active-run handle (if any) — drives the Reset / Abort label switch.
   const activeRunId = useRunsStore((s) => s.activeRunId);
   const activeRun = useRunsStore((s) =>
-    activeRunId === null ? null : s.runs[activeRunId] ?? null,
+    activeRunId === null ? null : (s.runs[activeRunId] ?? null),
   );
 
   const runPflow = useRunPflow();
@@ -186,15 +151,10 @@ export function RunButton({
   const autoMode: RunMode = disturbances.length > 0 ? 'tds' : 'pf';
   const mode: RunMode = manualMode ?? autoMode;
 
-  // Toast slot. One at a time keeps the top-bar uncluttered; new toasts
-  // replace the previous one rather than stacking.
-  const [toast, setToast] = useState<Toast | null>(null);
-  useEffect(() => {
-    if (toast === null) return;
-    if (toast.kind === 'pf-error' || toast.kind === 'tds-error') return;
-    const id = setTimeout(() => setToast(null), TOAST_AUTO_DISMISS_MS);
-    return () => clearTimeout(id);
-  }, [toast]);
+  // Toasts route through the global surface (Unit 3 of the v2.0 polish
+  // plan: see `@/lib/toast` + `<Toaster />` mounted in AppShell). The
+  // previous local-state toast slot has been retired — sonner stacks
+  // multiple toasts and survives this component's unmount.
 
   // Active RunStream handle. Lives in a ref so renders don't re-create
   // it; cleaned up on unmount + on terminal events.
@@ -221,9 +181,7 @@ export function RunButton({
 
   const isTdsTerminal =
     activeRun !== null &&
-    (activeRun.state === 'done' ||
-      activeRun.state === 'error' ||
-      activeRun.state === 'aborted');
+    (activeRun.state === 'done' || activeRun.state === 'error' || activeRun.state === 'aborted');
   const isTdsRunning =
     activeRun !== null &&
     !isTdsTerminal &&
@@ -262,7 +220,6 @@ export function RunButton({
   const startTds = async () => {
     if (!sessionId || !token) return;
     setTdsStarting(true);
-    setToast(null);
 
     // Step 1: commit disturbances if non-empty. The substrate's
     // ``AddDisturbancesRequest`` has ``min_length=1`` so an empty list
@@ -277,17 +234,15 @@ export function RunButton({
         setTdsStarting(false);
         if (err instanceof ProblemDetailsError) {
           const detail = err.detail ?? err.title ?? `HTTP ${err.status}`;
-          setToast({
-            kind: 'tds-error',
-            detail:
+          toast.error('TDS error', {
+            description:
               err.status === 422
                 ? `Disturbance rejected: ${detail}. Fix the failing row and retry.`
                 : `Could not commit disturbances: ${detail}`,
           });
         } else {
-          setToast({
-            kind: 'tds-error',
-            detail: err instanceof Error ? err.message : 'Could not commit disturbances.',
+          toast.error('TDS error', {
+            description: err instanceof Error ? err.message : 'Could not commit disturbances.',
           });
         }
         return;
@@ -304,7 +259,7 @@ export function RunButton({
     // ``h`` is special: ``null`` from the store means "let substrate
     // pick adaptively" → omit from the wire payload entirely. The
     // ``defaultH`` prop overrides only when explicitly set.
-    const h = defaultH !== undefined ? defaultH : tdsConfig.h ?? undefined;
+    const h = defaultH !== undefined ? defaultH : (tdsConfig.h ?? undefined);
     // Unit 16: derive wire-side integrator + override payload from the
     // UI-side preset. ``trapezoidal`` ships only the integrator key;
     // both QNDF presets (Auto / Manual) ship the overrides too — the
@@ -352,25 +307,18 @@ export function RunButton({
           // the v0.1 path. No need to surface a separate toast.
           useAuthStore.getState().clearToken();
         } else if (err.code === 'run_not_found') {
-          setToast({
-            kind: 'tds-warning',
-            message:
-              'Run no longer available on the substrate (it may have been restarted). Reset and re-run.',
-          });
+          toast.warning(
+            'Run no longer available on the substrate (it may have been restarted). Reset and re-run.',
+          );
         } else if (err.code === 'buffer_evicted') {
-          setToast({
-            kind: 'tds-warning',
-            message:
-              'Connection dropped too long; partial buffer retained. Reset and re-run to resume.',
-          });
+          toast.warning(
+            'Connection dropped too long; partial buffer retained. Reset and re-run to resume.',
+          );
         } else {
           // protocol_error / worker_error / max_retries — surface as a
           // hard error toast. The runs slice was already marked errored
           // by RunStream, so the NumericalErrorBanner ALSO surfaces.
-          setToast({
-            kind: 'tds-error',
-            detail: `${err.code}: ${err.reason}`,
-          });
+          toast.error('TDS error', { description: `${err.code}: ${err.reason}` });
         }
         streamRef.current?.dispose();
         streamRef.current = null;
@@ -392,8 +340,8 @@ export function RunButton({
         const detail =
           err instanceof ProblemDetailsError
             ? (err.detail ?? err.title ?? `HTTP ${err.status}`)
-            : err.message ?? 'Abort failed';
-        setToast({ kind: 'tds-error', detail: `Could not abort: ${detail}` });
+            : (err.message ?? 'Abort failed');
+        toast.error('TDS error', { description: `Could not abort: ${detail}` });
       },
     });
   };
@@ -402,14 +350,13 @@ export function RunButton({
 
   const onReset = () => {
     if (!sessionId) return;
-    setToast(null);
     resetRun.mutate(sessionId, {
       onError: (err) => {
         const detail =
           err instanceof ProblemDetailsError
             ? (err.detail ?? err.title ?? `HTTP ${err.status}`)
-            : err.message ?? 'Reset failed';
-        setToast({ kind: 'tds-error', detail: `Could not reset: ${detail}` });
+            : (err.message ?? 'Reset failed');
+        toast.error('TDS error', { description: `Could not reset: ${detail}` });
       },
     });
   };
@@ -418,32 +365,35 @@ export function RunButton({
 
   const onClickPf = () => {
     if (!sessionId) return;
-    setToast(null);
     runPflow.mutate(sessionId, {
       onSuccess: (data) => {
         if (data.converged) {
-          setToast({
-            kind: 'pf-success',
-            message: `PF converged in ${data.iterations} iterations.`,
-          });
-        } else {
-          // Non-convergence is a 200; ConvergenceErrorPanel reads from
-          // the pflow slice and surfaces. No toast.
-          setToast(null);
+          toast.success(`PF converged in ${data.iterations} iterations.`);
         }
+        // Non-convergence is a 200; ConvergenceErrorPanel reads from
+        // the pflow slice and surfaces. No toast.
       },
       onError: (err) => {
         if (err instanceof ServerError) {
           // 5xx routes through pflow.error to RuntimeCrashModal already;
-          // no inline toast (the modal is the surface).
+          // no toast (the modal is the surface).
           return;
         }
         if (err instanceof ProblemDetailsError) {
           const detail = err.detail ?? err.title ?? `HTTP ${err.status}`;
           const recoverViaReload = /reload/i.test(detail);
-          setToast({ kind: 'pf-error', detail, recoverViaReload });
+          if (recoverViaReload) {
+            toast.error('Run PF failed', {
+              description: detail,
+              action: { label: 'Reload case + retry', onClick: onReset },
+            });
+          } else {
+            toast.error('Run PF failed', { description: detail });
+          }
         } else {
-          setToast({ kind: 'pf-error', detail: err.message ?? 'Run PF failed', recoverViaReload: false });
+          toast.error('Run PF failed', {
+            description: err.message ?? 'Run PF failed',
+          });
         }
       },
     });
@@ -585,79 +535,9 @@ export function RunButton({
     </div>
   );
 
-  // ---- toasts -------------------------------------------------------------
-
-  const toastBlock = toast ? (
-    <div
-      role={toast.kind === 'pf-success' ? 'status' : 'alert'}
-      data-testid={
-        toast.kind === 'pf-success'
-          ? 'pflow-success-toast'
-          : toast.kind === 'pf-error'
-            ? 'pflow-error-toast'
-            : toast.kind === 'tds-warning'
-              ? 'tds-warning-toast'
-              : 'tds-error-toast'
-      }
-      className={cn(
-        'fixed top-14 right-4 z-50 max-w-md',
-        toast.kind === 'pf-success'
-          ? 'border-success/30 bg-success/10'
-          : toast.kind === 'tds-warning'
-            ? 'border-warning/40 bg-warning/10'
-            : 'border-destructive/40 bg-destructive/10',
-        'text-foreground rounded-[var(--radius-md)] border px-3 py-2 shadow-md',
-        'flex flex-col gap-2 text-sm',
-      )}
-    >
-      <div className="flex items-start gap-2">
-        <span className="font-medium">
-          {toast.kind === 'pf-success'
-            ? 'Power flow'
-            : toast.kind === 'pf-error'
-              ? 'Run PF failed'
-              : toast.kind === 'tds-warning'
-                ? 'TDS streaming'
-                : 'TDS error'}
-        </span>
-        <button
-          type="button"
-          onClick={() => setToast(null)}
-          aria-label="Dismiss"
-          className={cn(
-            'text-muted-foreground hover:text-foreground ml-auto',
-            'inline-flex h-5 w-5 items-center justify-center rounded',
-            'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
-          )}
-        >
-          <CloseIcon />
-        </button>
-      </div>
-      <p className="text-foreground text-xs leading-snug">
-        {toast.kind === 'pf-success'
-          ? toast.message
-          : toast.kind === 'tds-warning'
-            ? toast.message
-            : toast.detail}
-      </p>
-      {toast.kind === 'pf-error' && toast.recoverViaReload ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="primary"
-          onClick={onReset}
-          disabled={resetRun.isPending}
-          className="self-end"
-        >
-          {resetRun.isPending ? 'Reloading…' : 'Reload case + retry'}
-        </Button>
-      ) : null}
-    </div>
-  ) : null;
-
   // ---- render -------------------------------------------------------------
 
-  const buttonGroup = (
+  return (
     <div className="flex items-center gap-2">
       {disabledReason ? (
         <TooltipProvider delayDuration={150}>
@@ -677,12 +557,5 @@ export function RunButton({
       )}
       {modeSelector}
     </div>
-  );
-
-  return (
-    <>
-      {buttonGroup}
-      {toastBlock}
-    </>
   );
 }

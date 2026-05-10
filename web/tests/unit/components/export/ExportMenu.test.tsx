@@ -4,14 +4,35 @@
  * Covers:
  *  - Format gating (CSV-only, PNG-only, MAT slot)
  *  - Disabled state with tooltip copy "No data to export"
- *  - Happy path: CSV handler returns Blob → download triggered
- *  - Error path: handler throws → inline error message surfaces
- *  - URL.createObjectURL throwing is handled gracefully
+ *  - Happy path: CSV handler returns Blob → download triggered + success toast
+ *  - Error path: handler throws → toast.error fires
+ *  - URL.createObjectURL throwing is handled gracefully via toast.error
  *  - Filename composition matches `{case}_{run}_{panel}_{ts}.{ext}`
+ *
+ * Toast assertions: Unit 3 of the v2.0 polish plan moved transient
+ * action results to the global toast surface (`@/lib/toast`). We mock
+ * the wrapper here so we can assert on the call shape without mounting
+ * the full sonner provider.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
+const toastSuccessMock = vi.fn();
+const toastErrorMock = vi.fn();
+const toastWarningMock = vi.fn();
+const toastInfoMock = vi.fn();
+
+vi.mock('@/lib/toast', () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccessMock(...args),
+    error: (...args: unknown[]) => toastErrorMock(...args),
+    warning: (...args: unknown[]) => toastWarningMock(...args),
+    info: (...args: unknown[]) => toastInfoMock(...args),
+    dismiss: vi.fn(),
+  },
+}));
+
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { downloadBlob } from '@/components/export/downloadBlob';
 
@@ -26,6 +47,10 @@ beforeEach(() => {
   revokeObjectUrlMock = vi.fn();
   URL.createObjectURL = createObjectUrlMock as unknown as typeof URL.createObjectURL;
   URL.revokeObjectURL = revokeObjectUrlMock as unknown as typeof URL.revokeObjectURL;
+  toastSuccessMock.mockReset();
+  toastErrorMock.mockReset();
+  toastWarningMock.mockReset();
+  toastInfoMock.mockReset();
 });
 
 afterEach(() => {
@@ -89,7 +114,7 @@ describe('<ExportMenu />', () => {
     expect(arg.type).toBe('text/csv');
   });
 
-  it('handler returning null surfaces the disabled-tooltip copy inline', async () => {
+  it('handler returning null fires a warning toast (no inline error)', async () => {
     const user = userEvent.setup();
     const onExportCsv = vi.fn(() => null);
     render(
@@ -103,11 +128,13 @@ describe('<ExportMenu />', () => {
     await user.click(screen.getByTestId('export-menu-trigger'));
     await user.click(await screen.findByTestId('export-menu-csv'));
     await waitFor(() => expect(onExportCsv).toHaveBeenCalled());
-    expect(await screen.findByTestId('export-menu-error')).toHaveTextContent('No data to export');
+    await waitFor(() => expect(toastWarningMock).toHaveBeenCalledWith('No data to export'));
     expect(createObjectUrlMock).not.toHaveBeenCalled();
+    // Inline error UI was retired in Unit 3.
+    expect(screen.queryByTestId('export-menu-error')).toBeNull();
   });
 
-  it('createObjectURL throwing surfaces the failure copy', async () => {
+  it('createObjectURL throwing fires toast.error with the underlying detail', async () => {
     const user = userEvent.setup();
     createObjectUrlMock.mockImplementation(() => {
       throw new Error('quota exceeded');
@@ -116,12 +143,15 @@ describe('<ExportMenu />', () => {
     render(<ExportMenu formats={['csv']} panel="time-series" onExportCsv={onExportCsv} />);
     await user.click(screen.getByTestId('export-menu-trigger'));
     await user.click(await screen.findByTestId('export-menu-csv'));
-    expect(await screen.findByTestId('export-menu-error')).toHaveTextContent(
-      /Export failed; check browser settings/i,
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Export failed; check browser settings.',
+        expect.objectContaining({ description: 'quota exceeded' }),
+      ),
     );
   });
 
-  it('handler throwing an exception surfaces the failure copy', async () => {
+  it('handler throwing an exception fires toast.error', async () => {
     const user = userEvent.setup();
     const onExportCsv = vi.fn(() => {
       throw new Error('serialization failed');
@@ -129,7 +159,30 @@ describe('<ExportMenu />', () => {
     render(<ExportMenu formats={['csv']} panel="time-series" onExportCsv={onExportCsv} />);
     await user.click(screen.getByTestId('export-menu-trigger'));
     await user.click(await screen.findByTestId('export-menu-csv'));
-    expect(await screen.findByTestId('export-menu-error')).toHaveTextContent(/Export failed/i);
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Export failed; check browser settings.',
+        expect.objectContaining({ description: 'serialization failed' }),
+      ),
+    );
+  });
+
+  it('happy path also fires a toast.success with the output filename', async () => {
+    const user = userEvent.setup();
+    const onExportCsv = vi.fn(() => new Blob(['data'], { type: 'text/csv' }));
+    render(
+      <ExportMenu
+        formats={['csv']}
+        panel="time-series"
+        caseName="ieee14"
+        onExportCsv={onExportCsv}
+      />,
+    );
+    await user.click(screen.getByTestId('export-menu-trigger'));
+    await user.click(await screen.findByTestId('export-menu-csv'));
+    await waitFor(() => expect(onExportCsv).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledTimes(1));
+    expect(String(toastSuccessMock.mock.calls[0]![0])).toMatch(/^Exported ieee14_time-series_/);
   });
 
   it('MAT button has its tooltip copy and respects the absent handler', async () => {

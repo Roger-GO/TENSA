@@ -21,6 +21,20 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+const toastSuccessMock = vi.fn();
+const toastErrorMock = vi.fn();
+const toastWarningMock = vi.fn();
+
+vi.mock('@/lib/toast', () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccessMock(...args),
+    error: (...args: unknown[]) => toastErrorMock(...args),
+    warning: (...args: unknown[]) => toastWarningMock(...args),
+    info: vi.fn(),
+    dismiss: vi.fn(),
+  },
+}));
+
 import {
   LatexCopyButton,
   escapeLatexCell,
@@ -36,6 +50,9 @@ const originalClipboard = (globalThis.navigator as Navigator | undefined)?.clipb
 beforeEach(() => {
   writeTextSpy.mockReset();
   writeTextSpy.mockResolvedValue(undefined);
+  toastSuccessMock.mockReset();
+  toastErrorMock.mockReset();
+  toastWarningMock.mockReset();
   // jsdom doesn't ship a navigator.clipboard; install the stub.
   Object.defineProperty(globalThis.navigator, 'clipboard', {
     value: { writeText: writeTextSpy },
@@ -225,7 +242,7 @@ describe('<LatexCopyButton />', () => {
     expect(screen.getByTestId('latex-copy-button')).toBeDisabled();
   });
 
-  it('surfaces clipboard permission denial inline as a role=alert block', async () => {
+  it('surfaces clipboard permission denial via toast.error (no inline alert)', async () => {
     const user = userEvent.setup();
     // Replace the persistent resolution with a persistent rejection so
     // the writeText path always throws — matches the real "permission
@@ -241,10 +258,16 @@ describe('<LatexCopyButton />', () => {
     });
     render(<LatexCopyButton tables={[SAMPLE_BUS_TABLE]} />);
     await user.click(screen.getByTestId('latex-copy-button'));
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent(/write denied/i);
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Copy failed.',
+        expect.objectContaining({ description: 'NotAllowedError: write denied' }),
+      ),
+    );
     // Button stays enabled so the user can retry.
     expect(screen.getByTestId('latex-copy-button')).toBeEnabled();
+    // Inline role=alert block was retired in Unit 3 of the v2.0 polish plan.
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('does not call writeText when the tables list is empty', async () => {
@@ -258,7 +281,7 @@ describe('<LatexCopyButton />', () => {
     expect(writeTextSpy).not.toHaveBeenCalled();
   });
 
-  it('falls back to an inline error when navigator.clipboard is unavailable', async () => {
+  it('fires toast.error when navigator.clipboard is unavailable', async () => {
     const user = userEvent.setup();
     // user-event v14 sets navigator.clipboard at setup() — clear it
     // AFTER setup so the button's check trips on undefined.
@@ -269,7 +292,27 @@ describe('<LatexCopyButton />', () => {
     });
     render(<LatexCopyButton tables={[SAMPLE_BUS_TABLE]} />);
     await user.click(screen.getByTestId('latex-copy-button'));
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent(/clipboard api unavailable/i);
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        expect.stringMatching(/clipboard api unavailable/i),
+      ),
+    );
+  });
+
+  it('happy path also fires toast.success', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      value: { writeText: writeTextSpy },
+      configurable: true,
+      writable: true,
+    });
+    render(<LatexCopyButton tables={[SAMPLE_BUS_TABLE]} />);
+    await user.click(screen.getByTestId('latex-copy-button'));
+    await waitFor(() => expect(writeTextSpy).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(toastSuccessMock).toHaveBeenCalledWith(
+        'Copied LaTeX tables to clipboard.',
+      ),
+    );
   });
 });
