@@ -60,6 +60,7 @@ vi.mock('@xyflow/react', async () => {
       React.createElement(React.Fragment, null, children),
     Handle: () => null,
     Background: () => null,
+    BackgroundVariant: { Lines: 'lines', Dots: 'dots', Cross: 'cross' },
     Controls: () => null,
     MiniMap: () => null,
     BaseEdge: () => null,

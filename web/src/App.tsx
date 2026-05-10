@@ -18,6 +18,7 @@ import { EditMenu } from '@/components/shell/EditMenu';
 import { RunMenu } from '@/components/shell/RunMenu';
 import { ExportMenu } from '@/components/shell/ExportMenu';
 import { SldCanvas } from '@/components/sld/SldCanvas';
+import { RightInspector } from '@/components/inspector/RightInspector';
 import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
 import { makeQueryClient, wireGlobalErrorRecovery } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
@@ -95,16 +96,6 @@ function CanvasSlot() {
 }
 
 /**
- * Right inspector placeholder. Unit 7 replaces this with the per-element
- * accordion (Properties / Plots / Disturbances). For Unit 1 the AppShell
- * itself renders an EmptyState when this slot is empty — passing nothing
- * here is intentional.
- */
-function RightInspectorSlot() {
-  return null;
-}
-
-/**
  * Bottom drawer placeholder. Unit 11 replaces this with the tab strip +
  * per-bucket data grids (Units 12 + 13) and Analysis sub-tab content
  * (Unit 14). For Unit 1 it renders a labelled stub so the chassis isn't
@@ -157,7 +148,7 @@ export function App() {
           }
           leftSidebar={<LeftSidebar />}
           canvas={<CanvasSlot />}
-          rightInspector={<RightInspectorSlot />}
+          rightInspector={<RightInspector />}
           bottomDrawer={<BottomDrawerSlot />}
           dockOverlay={
             <>
