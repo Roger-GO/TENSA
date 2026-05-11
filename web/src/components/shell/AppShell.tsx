@@ -496,19 +496,22 @@ function ResizeHandle({ direction, label }: ResizeHandleProps) {
       className={cn(
         'group relative flex shrink-0 items-center justify-center',
         direction === 'horizontal' ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize',
-        'bg-border hover:bg-[var(--color-ring)]',
+        'bg-border hover:bg-primary/70',
         'transition-colors duration-[var(--duration-fast)]',
-        'data-[resize-handle-state=drag]:bg-[var(--color-ring)]',
-        'focus-visible:bg-[var(--color-ring)] focus-visible:outline-none',
+        'data-[resize-handle-state=drag]:bg-primary',
+        'focus-visible:bg-primary focus-visible:outline-none',
       )}
     >
       <span
         aria-hidden="true"
         className={cn(
           'block rounded-full',
-          direction === 'horizontal' ? 'h-6 w-px' : 'h-px w-6',
-          'bg-muted-foreground/40 group-hover:bg-background',
-          'transition-colors duration-[var(--duration-fast)]',
+          // Hover/drag grow the inner pill so the handle "lifts" toward
+          // the user — the bar itself remains 4px so layout doesn't shift.
+          direction === 'horizontal' ? 'h-8 w-[2px] group-hover:h-12' : 'h-[2px] w-8 group-hover:w-12',
+          'bg-muted-foreground/30 group-hover:bg-primary-foreground/90',
+          'group-data-[resize-handle-state=drag]:bg-primary-foreground',
+          'transition-all duration-[var(--duration-fast)]',
         )}
       />
     </PanelResizeHandle>

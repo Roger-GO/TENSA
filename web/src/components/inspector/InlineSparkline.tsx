@@ -101,7 +101,7 @@ export function InlineSparkline({ values, label, valueFormat, className }: Inlin
         viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
         preserveAspectRatio="none"
         className={cn(
-          'border-border/40 bg-muted/20 h-[64px] w-full rounded-[var(--radius-sm)] border',
+          'border-border/60 bg-muted/30 h-[64px] w-full rounded-[var(--radius-sm)] border',
         )}
       >
         {path ? (
@@ -110,12 +110,24 @@ export function InlineSparkline({ values, label, valueFormat, className }: Inlin
             d={path}
             fill="none"
             stroke="var(--color-primary)"
-            strokeWidth="1.5"
+            strokeWidth="1.75"
             strokeLinecap="round"
             strokeLinejoin="round"
             vectorEffect="non-scaling-stroke"
           />
-        ) : null}
+        ) : (
+          <text
+            x="50%"
+            y="50%"
+            textAnchor="middle"
+            dominantBaseline="middle"
+            className="fill-muted-foreground"
+            fontSize="10"
+            fontFamily="var(--font-sans)"
+          >
+            Run TDS to see data
+          </text>
+        )}
       </svg>
     </div>
   );

@@ -78,6 +78,40 @@ input[type='range'].slider-thumb-lg:focus-visible::-moz-range-thumb {
     0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
+/*
+ * React Flow Controls + MiniMap dark-mode chrome (v3 Unit 17).
+ *
+ * The library ships hardcoded light-mode greys for the zoom buttons and
+ * minimap surface. The IDE chrome wrapper class
+ * (``border border-border rounded-lg shadow-lg``) and the ``style`` prop
+ * (``backgroundColor: var(--color-background)``) cover the outer card,
+ * but the inner button surfaces / hover states / icon strokes still
+ * render against ``#fefefe``. The dark-mode overrides below swap them
+ * to the chassis tokens so the chrome stops glowing white at night.
+ *
+ * Selectors are scoped under ``.dark`` so light mode keeps the React
+ * Flow defaults — the light theme's white surface already matches
+ * ``--color-background``.
+ */
+.dark .react-flow__controls-button {
+  background-color: var(--color-background);
+  border-bottom: 1px solid var(--color-border);
+  fill: var(--color-foreground);
+  color: var(--color-foreground);
+}
+.dark .react-flow__controls-button:hover {
+  background-color: var(--color-muted);
+}
+.dark .react-flow__controls-button svg {
+  fill: var(--color-foreground);
+}
+.dark .react-flow__minimap {
+  background-color: var(--color-background);
+}
+.dark .react-flow__minimap-mask {
+  fill: color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
 /* Reduced-motion compliance: collapse durations + disable transforms for
  * users who have set prefers-reduced-motion: reduce. Per the
  * interaction-states.md cross-cutting behaviors section. */

@@ -38,10 +38,17 @@ export function SidebarToggle({ className }: SidebarToggleProps) {
       onClick={toggle}
       data-testid="top-bar-toggle-sidebar"
       data-collapsed={collapsed ? 'true' : 'false'}
+      data-active={collapsed ? 'false' : 'true'}
       aria-label={tooltip}
       aria-pressed={!collapsed}
       title={tooltip}
-      className={cn('px-2', className)}
+      className={cn(
+        'px-2',
+        // Active (panel open) state: subtle filled chip so the user can
+        // see at a glance which panes are open without parsing chevrons.
+        'data-[active=true]:bg-muted data-[active=true]:text-foreground',
+        className,
+      )}
     >
       <SidebarChevron collapsed={collapsed} className="h-4 w-4" />
     </Button>

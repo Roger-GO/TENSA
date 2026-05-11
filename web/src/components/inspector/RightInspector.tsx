@@ -180,8 +180,14 @@ function Section({ id, label, children }: SectionProps) {
           data-testid={`right-inspector-section-trigger-${id}`}
           className={cn(
             'group flex flex-1 items-center justify-between gap-2 px-3 py-2',
-            'text-foreground text-xs font-semibold tracking-wide uppercase',
-            'hover:bg-muted/40 transition-colors',
+            // Subtle section-header band: bg-muted recess on the strip
+            // when collapsed, lifts to bg-background when open so the
+            // body content visually attaches. Radix sets data-state on
+            // the trigger itself.
+            'bg-muted/40 data-[state=open]:bg-background',
+            'text-muted-foreground data-[state=open]:text-foreground',
+            'text-[10px] font-semibold tracking-[0.12em] uppercase',
+            'hover:text-foreground transition-colors',
             'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
           )}
         >
@@ -265,11 +271,24 @@ export function RightInspector({ className }: RightInspectorProps) {
     <div data-testid="right-inspector" className={cn('flex h-full min-h-0 flex-col', className)}>
       <header
         data-testid="right-inspector-header"
-        className={cn('border-border bg-background flex items-center gap-2 border-b px-3 py-2')}
+        className={cn('border-border bg-background flex items-center gap-2 border-b px-3 py-2.5')}
       >
-        <KindGlyph kind={selectedElement.kind} className="text-muted-foreground" />
-        <p className="text-foreground truncate font-mono text-sm">
-          {titleCase(selectedElement.kind)} {headerName ?? selectedElement.idx}
+        <KindGlyph kind={selectedElement.kind} className="text-primary" />
+        {/* Kind chip + element name. The chip carries the element kind
+            in a tracking-wider uppercase eyebrow; the name dominates so
+            the user reads "BUS5" first, kind second. */}
+        <span
+          data-testid="right-inspector-header-kind"
+          className={cn(
+            'rounded-[var(--radius-sm)] border px-1.5 py-px',
+            'border-primary/30 bg-primary/10 text-primary',
+            'text-[9px] font-semibold tracking-[0.1em] uppercase',
+          )}
+        >
+          {titleCase(selectedElement.kind)}
+        </span>
+        <p className="text-foreground truncate font-mono text-sm font-semibold">
+          {headerName ?? selectedElement.idx}
         </p>
       </header>
       <AccordionPrimitive.Root

@@ -117,11 +117,15 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
             value={tab}
             data-testid={`bottom-drawer-tab-${tab}`}
             className={cn(
-              'inline-flex items-center px-3 text-sm font-medium whitespace-nowrap',
+              'relative inline-flex items-center px-3 text-sm font-medium whitespace-nowrap',
               'text-muted-foreground hover:text-foreground',
               'border-r-border border-r last:border-r-0',
               'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
               'data-[state=active]:bg-background data-[state=active]:text-foreground',
+              // 2px primary top-rail on the active tab — the IDE pattern
+              // that makes the active tab read instantly even from a
+              // wide-aspect viewport.
+              'data-[state=active]:shadow-[inset_0_2px_0_0_var(--color-primary)]',
               'transition-colors duration-[var(--duration-fast)]',
             )}
           >

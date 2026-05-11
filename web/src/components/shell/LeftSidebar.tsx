@@ -77,8 +77,12 @@ function Section({ heading, testId, children }: SectionProps) {
       <h2
         data-testid={`${testId}-heading`}
         className={cn(
-          'text-muted-foreground px-3 pt-3 pb-1.5',
-          'text-[10px] font-semibold tracking-wider uppercase',
+          'text-muted-foreground/90 px-3 pt-3 pb-1.5',
+          // Wider tracking + slightly tighter line-height so the eyebrow
+          // reads as a section label (not a card title). Letter-spacing
+          // is the load-bearing change vs the previous tracking-wider.
+          'text-[10px] font-semibold uppercase leading-none',
+          'tracking-[0.12em]',
         )}
       >
         {heading}

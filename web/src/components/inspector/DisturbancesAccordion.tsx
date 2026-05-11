@@ -110,9 +110,16 @@ export function DisturbancesAccordion({ className }: DisturbancesAccordionProps)
           size="sm"
           onClick={openAdd}
           data-testid="disturbances-accordion-add"
-          className="h-7 px-2 text-xs"
+          className={cn(
+            'h-7 gap-1 px-2 text-xs font-medium',
+            // Tinted ghost so the add affordance reads as the primary
+            // action in this section without competing with the section
+            // header for visual weight.
+            'text-primary border-primary/30 hover:bg-primary/10 border',
+          )}
         >
-          + Add
+          <span aria-hidden className="text-base leading-none">+</span>
+          Add
         </Button>
       </div>
 
