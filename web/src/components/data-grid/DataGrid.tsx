@@ -24,9 +24,10 @@
  * each per-bucket grid keeps its own row shape; the ``DataGrid`` only
  * touches rows through the column accessors.
  */
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { FixedSizeList, type ListChildComponentProps } from 'react-window';
 import { cn } from '@/lib/cn';
+import { useHotkeys } from '@/lib/useHotkeys';
 
 const VIRTUALIZE_THRESHOLD = 50;
 const ROW_HEIGHT = 28;
@@ -111,6 +112,7 @@ interface VirtualRowData<Row> {
   rowIdAccessor: (row: Row) => string;
   onRowClick?: (id: string) => void;
   selectedRowId?: string | null;
+  focusedRowIndex: number;
   testId?: string;
 }
 
@@ -123,12 +125,14 @@ function VirtualRow<Row>({
   if (row === undefined) return null;
   const id = data.rowIdAccessor(row);
   const isSelected = data.selectedRowId === id;
+  const isFocused = data.focusedRowIndex === index;
   return (
     <div
       role="row"
       style={style}
       data-testid={data.testId ? `${data.testId}-row-${id}` : undefined}
       data-selected={isSelected ? 'true' : 'false'}
+      data-focused={isFocused ? 'true' : undefined}
       aria-selected={isSelected}
       onClick={data.onRowClick ? () => data.onRowClick?.(id) : undefined}
       className={cn(
@@ -137,6 +141,7 @@ function VirtualRow<Row>({
         isSelected
           ? 'bg-muted ring-1 ring-[var(--color-ring)] ring-inset'
           : 'hover:bg-muted/40',
+        isFocused && !isSelected ? 'bg-muted/20' : '',
       )}
     >
       {data.columns.map((col) => {
@@ -174,6 +179,12 @@ export function DataGrid<Row>({
   testId,
 }: DataGridProps<Row>) {
   const [sort, setSort] = useState<SortState>({ column: null, direction: 'none' });
+  // Keyboard-nav cursor. Separate from `selectedRowId` so the user can
+  // scan rows without committing a selection; Enter writes the
+  // selection. Tracked by index (rather than rowId) so a re-sort moves
+  // the cursor to "the row at this position" rather than chasing a
+  // particular row through sort flips.
+  const [focusedRowIndex, setFocusedRowIndex] = useState<number>(0);
 
   const sortedRows = useMemo(() => {
     if (sort.column === null || sort.direction === 'none') return rows;
@@ -185,15 +196,116 @@ export function DataGrid<Row>({
     );
   }, [rows, columns, sort]);
 
+  // Clamp the cursor to the current row range. Without this, a row
+  // count drop (case reload, filter narrowing) could leave the cursor
+  // pointing past the end of the array.
+  useEffect(() => {
+    setFocusedRowIndex((prev) => {
+      if (sortedRows.length === 0) return 0;
+      if (prev >= sortedRows.length) return sortedRows.length - 1;
+      return prev;
+    });
+  }, [sortedRows.length]);
+
   const onHeaderClick = useCallback((columnKey: string) => {
     setSort((prev) => nextSortState(prev, columnKey));
   }, []);
+
+  // ---- keyboard nav ---------------------------------------------------
+  // The hotkey ref returned below scopes each binding to the container
+  // element (or its descendants). Mirrors the Phase 3 Unit 16
+  // ``EIGParticipationTable`` pattern: the ref is attached to the
+  // grid's outer div + ``tabIndex={0}`` makes the container focusable.
+  // ``enabled`` is left to react-hotkeys-hook's element-scope check
+  // (the ref attachment) — we never need to fire these arrows globally.
+  const advanceFocus = useCallback((delta: number) => {
+    setFocusedRowIndex((prev) => {
+      if (sortedRows.length === 0) return 0;
+      const next = prev + delta;
+      if (next < 0) return 0;
+      if (next >= sortedRows.length) return sortedRows.length - 1;
+      return next;
+    });
+  }, [sortedRows.length]);
+
+  const arrowDownRef = useHotkeys<HTMLDivElement>(
+    'down',
+    (e) => {
+      e.preventDefault();
+      advanceFocus(1);
+    },
+    {},
+    [advanceFocus],
+  );
+
+  const arrowUpRef = useHotkeys<HTMLDivElement>(
+    'up',
+    (e) => {
+      e.preventDefault();
+      advanceFocus(-1);
+    },
+    {},
+    [advanceFocus],
+  );
+
+  const homeRef = useHotkeys<HTMLDivElement>(
+    'home',
+    (e) => {
+      e.preventDefault();
+      setFocusedRowIndex(0);
+    },
+    {},
+    [],
+  );
+
+  const endRef = useHotkeys<HTMLDivElement>(
+    'end',
+    (e) => {
+      e.preventDefault();
+      if (sortedRows.length > 0) setFocusedRowIndex(sortedRows.length - 1);
+    },
+    {},
+    [sortedRows.length],
+  );
+
+  const enterRef = useHotkeys<HTMLDivElement>(
+    'enter',
+    (e) => {
+      e.preventDefault();
+      if (sortedRows.length === 0 || !onRowClick) return;
+      const row = sortedRows[focusedRowIndex];
+      if (row === undefined) return;
+      onRowClick(rowIdAccessor(row));
+    },
+    {},
+    [sortedRows, focusedRowIndex, onRowClick, rowIdAccessor],
+  );
+
+  // Combine the per-binding refs into one ref callback so the container
+  // gets all five attachments. Each ``useHotkeys`` call returns its own
+  // ref; merging here keeps the JSX clean.
+  const containerRefCallback = useCallback(
+    (el: HTMLDivElement | null) => {
+      arrowDownRef(el);
+      arrowUpRef(el);
+      homeRef(el);
+      endRef(el);
+      enterRef(el);
+    },
+    [arrowDownRef, arrowUpRef, homeRef, endRef, enterRef],
+  );
 
   if (rows.length === 0) {
     return (
       <div
         data-testid={testId}
-        className={cn('flex min-h-0 flex-1 flex-col overflow-hidden', className)}
+        ref={containerRefCallback}
+        tabIndex={0}
+        className={cn(
+          'flex min-h-0 flex-1 flex-col overflow-hidden',
+          'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+          className,
+        )}
       >
         <Header columns={columns} sort={sort} onHeaderClick={onHeaderClick} testId={testId} />
         <div
@@ -211,7 +323,13 @@ export function DataGrid<Row>({
   return (
     <div
       data-testid={testId}
-      className={cn('flex min-h-0 flex-1 flex-col overflow-hidden', className)}
+      ref={containerRefCallback}
+      tabIndex={0}
+      className={cn(
+        'flex min-h-0 flex-1 flex-col overflow-hidden',
+        'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+        className,
+      )}
     >
       <Header columns={columns} sort={sort} onHeaderClick={onHeaderClick} testId={testId} />
       {useVirtualization ? (
@@ -230,6 +348,7 @@ export function DataGrid<Row>({
               rowIdAccessor,
               onRowClick,
               selectedRowId,
+              focusedRowIndex,
               testId,
             }}
             overscanCount={4}
@@ -239,15 +358,17 @@ export function DataGrid<Row>({
         </div>
       ) : (
         <div role="rowgroup" className="min-h-0 flex-1 overflow-auto">
-          {sortedRows.map((row) => {
+          {sortedRows.map((row, index) => {
             const id = rowIdAccessor(row);
             const isSelected = selectedRowId === id;
+            const isFocused = focusedRowIndex === index;
             return (
               <div
                 key={id}
                 role="row"
                 data-testid={testId ? `${testId}-row-${id}` : undefined}
                 data-selected={isSelected ? 'true' : 'false'}
+                data-focused={isFocused ? 'true' : undefined}
                 aria-selected={isSelected}
                 onClick={onRowClick ? () => onRowClick(id) : undefined}
                 className={cn(
@@ -256,6 +377,7 @@ export function DataGrid<Row>({
                   isSelected
                     ? 'bg-muted ring-1 ring-[var(--color-ring)] ring-inset'
                     : 'hover:bg-muted/40',
+                  isFocused && !isSelected ? 'bg-muted/20' : '',
                 )}
                 style={{ height: ROW_HEIGHT }}
               >

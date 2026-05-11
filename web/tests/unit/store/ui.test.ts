@@ -2,13 +2,13 @@
  * Tests for the `ui` slice.
  *
  * v0.1: HideLabels preference.
- * v0.2 (Unit 8): panel-picker state for the right-dock top region +
- * TdsConfigPanel form values + the ``validateTdsConfig`` helper.
+ * v0.2 (Unit 8): TdsConfigPanel form values + the ``validateTdsConfig``
+ * helper. (The panel-picker field ``activeRightDockTopPanel`` was
+ * retired in v3 Unit 15 — the layout slice now owns dock state.)
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_TDS_CONFIG,
-  RIGHT_DOCK_TOP_PANELS,
   TDS_VAR_GROUPS,
   useUiStore,
   validateTdsConfig,
@@ -18,7 +18,6 @@ import type { TdsConfig } from '@/store/ui';
 function resetUiStore() {
   useUiStore.setState({
     hideLabels: false,
-    activeRightDockTopPanel: 'inspector',
     tdsConfig: { ...DEFAULT_TDS_CONFIG },
   });
 }
@@ -43,29 +42,6 @@ describe('useUiStore — hideLabels (v0.1 surface)', () => {
     expect(useUiStore.getState().hideLabels).toBe(true);
     useUiStore.getState().toggleHideLabels();
     expect(useUiStore.getState().hideLabels).toBe(false);
-  });
-});
-
-describe('useUiStore — panel picker (v0.2 Unit 8)', () => {
-  afterEach(() => {
-    resetUiStore();
-  });
-
-  it('defaults activeRightDockTopPanel to "inspector" (matches v0.1)', () => {
-    expect(useUiStore.getState().activeRightDockTopPanel).toBe('inspector');
-  });
-
-  it('exposes RIGHT_DOCK_TOP_PANELS as the canonical ordered list', () => {
-    // Unit 6 (KTD-6) replaced ``tds-config`` with ``analyze``; the
-    // TDS config form lives inside Analyze's TDS sub-mode now.
-    expect(RIGHT_DOCK_TOP_PANELS).toEqual(['inspector', 'disturbance', 'plot', 'analyze']);
-  });
-
-  it('setActiveRightDockTopPanel swaps the active panel', () => {
-    useUiStore.getState().setActiveRightDockTopPanel('plot');
-    expect(useUiStore.getState().activeRightDockTopPanel).toBe('plot');
-    useUiStore.getState().setActiveRightDockTopPanel('disturbance');
-    expect(useUiStore.getState().activeRightDockTopPanel).toBe('disturbance');
   });
 });
 

@@ -34,8 +34,10 @@ export interface SldState {
    *     inspector and the bus-node visual highlight follow the click.
    *  2. `SldNodeSearch` writes the row's id when the user picks a
    *     match; the canvas's effect calls `setCenter()` to pan there.
-   *  3. `ResultsTable.onRowClick` writes the row's id so the SLD pans
-   *     to the chosen element.
+   *  3. The v3 BottomDrawer per-bucket grids (`BusesGrid`, `LinesGrid`,
+   *     `GeneratorsGrid`, `LoadsGrid`, `ShuntsGrid`) write the row's id
+   *     so the SLD pans to the chosen element. (Replaced the v2
+   *     ``ResultsTable.onRowClick`` writer retired in v3 Unit 15.)
    *
    * Read by `BusNode` (visual highlight) and `SldCanvas` (pan effect).
    */

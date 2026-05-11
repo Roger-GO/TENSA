@@ -30,7 +30,6 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useAnalyzeStore } from '@/store/analyze';
-import { useUiStore } from '@/store/ui';
 import { useThemeStore } from '@/store/theme';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
@@ -175,16 +174,21 @@ describe('<GlobalShortcuts /> — single-key bindings', () => {
   it('runs the active routine when ⌘Enter is pressed', () => {
     // The default active routine is `pflow`. After ⌘Enter, the
     // run.active-routine command's `action` calls `handleSelectRoutine`
-    // which delegates to the analyze + ui stores for non-pflow
+    // which delegates to the analyze + layout stores for non-pflow
     // routines. Switch to `eig` so the test has an observable side
     // effect.
     const setSubMode = vi.fn();
-    const setRightDockPanel = vi.fn();
+    const setActiveBottomDrawerTab = vi.fn();
+    const setActiveAnalysisSubTab = vi.fn();
     const origSetSubMode = useAnalyzeStore.getState().setSubMode;
-    const origSetRightDock = useUiStore.getState().setActiveRightDockTopPanel;
+    const origSetActiveBottomDrawerTab = useLayoutStore.getState().setActiveBottomDrawerTab;
+    const origSetActiveAnalysisSubTab = useLayoutStore.getState().setActiveAnalysisSubTab;
     act(() => {
       useAnalyzeStore.setState({ setSubMode });
-      useUiStore.setState({ setActiveRightDockTopPanel: setRightDockPanel });
+      useLayoutStore.setState({
+        setActiveBottomDrawerTab,
+        setActiveAnalysisSubTab,
+      });
       useRunModeStore.setState({ activeRoutine: 'eig' });
     });
     try {
@@ -200,11 +204,15 @@ describe('<GlobalShortcuts /> — single-key bindings', () => {
         document.dispatchEvent(event);
       });
       expect(setSubMode).toHaveBeenCalledWith('eig');
-      expect(setRightDockPanel).toHaveBeenCalledWith('analyze');
+      expect(setActiveBottomDrawerTab).toHaveBeenCalledWith('analysis');
+      expect(setActiveAnalysisSubTab).toHaveBeenCalledWith('eig');
     } finally {
       act(() => {
         useAnalyzeStore.setState({ setSubMode: origSetSubMode });
-        useUiStore.setState({ setActiveRightDockTopPanel: origSetRightDock });
+        useLayoutStore.setState({
+          setActiveBottomDrawerTab: origSetActiveBottomDrawerTab,
+          setActiveAnalysisSubTab: origSetActiveAnalysisSubTab,
+        });
       });
     }
   });

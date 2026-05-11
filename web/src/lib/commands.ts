@@ -42,7 +42,6 @@ import { useBundleStore } from '@/store/bundle';
 import { usePflowStore } from '@/store/pflow';
 import { useRunModeStore } from '@/store/runMode';
 import { useAnalyzeStore } from '@/store/analyze';
-import { useUiStore } from '@/store/ui';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 import { useHistoryStore } from '@/store/history';
@@ -146,7 +145,6 @@ export function useCommandRegistry(): readonly Command[] {
   const openBundleDialog = useBundleStore((s) => s.openDialog);
   const setActiveRoutine = useRunModeStore((s) => s.setActiveRoutine);
   const setAnalyzeSubMode = useAnalyzeStore((s) => s.setSubMode);
-  const setRightDockPanel = useUiStore((s) => s.setActiveRightDockTopPanel);
   const togglePalette = useCommandPaletteStore((s) => s.togglePalette);
   const toggleCheatsheet = useShortcutCheatsheetStore((s) => s.toggleCheatsheet);
   const openHistoryDrawer = useHistoryStore((s) => s.openDrawer);
@@ -170,13 +168,10 @@ export function useCommandRegistry(): readonly Command[] {
       setActiveRoutine(routine);
       if (routine === 'eig') {
         setAnalyzeSubMode('eig');
-        setRightDockPanel('analyze');
       } else if (routine === 'cpf') {
         setAnalyzeSubMode('cpf');
-        setRightDockPanel('analyze');
       } else if (routine === 'se') {
         setAnalyzeSubMode('se');
-        setRightDockPanel('analyze');
       }
       // v3 Unit 14 auto-route — every Run command also points the
       // BottomDrawer at the matching Analysis sub-tab. Per the
@@ -563,7 +558,6 @@ export function useCommandRegistry(): readonly Command[] {
     openBundleDialog,
     setActiveRoutine,
     setAnalyzeSubMode,
-    setRightDockPanel,
     togglePalette,
     toggleCheatsheet,
     openHistoryDrawer,

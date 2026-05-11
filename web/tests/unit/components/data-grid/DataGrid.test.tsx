@@ -160,6 +160,172 @@ describe('<DataGrid /> — row interaction', () => {
   });
 });
 
+describe('<DataGrid /> — keyboard nav (Unit 16)', () => {
+  // Helper: focus the grid container then dispatch the named key. The
+  // hotkeys lib registers via element-scope refs (the container's ref
+  // attachment), so the binding only fires when the container or one
+  // of its descendants has focus.
+  async function focusGridThenPress(key: string) {
+    const container = screen.getByTestId('dg');
+    container.focus();
+    const { default: userEvent } = await import('@testing-library/user-event');
+    const user = userEvent.setup();
+    await user.keyboard(key);
+  }
+
+  it('ArrowDown advances the focused row', async () => {
+    render(
+      <DataGrid<FixtureRow>
+        columns={COLUMNS}
+        rows={[
+          { id: 'a', name: 'Bus_A', v: 1.0 },
+          { id: 'b', name: 'Bus_B', v: 1.0 },
+          { id: 'c', name: 'Bus_C', v: 1.0 },
+        ]}
+        rowIdAccessor={(r) => r.id}
+        testId="dg"
+      />,
+    );
+    // Default focus index is 0 — first row.
+    expect(screen.getByTestId('dg-row-a')).toHaveAttribute('data-focused', 'true');
+    await focusGridThenPress('{ArrowDown}');
+    expect(screen.getByTestId('dg-row-b')).toHaveAttribute('data-focused', 'true');
+    expect(screen.getByTestId('dg-row-a')).not.toHaveAttribute('data-focused');
+    await focusGridThenPress('{ArrowDown}');
+    expect(screen.getByTestId('dg-row-c')).toHaveAttribute('data-focused', 'true');
+  });
+
+  it('ArrowUp at row 0 stays at 0', async () => {
+    render(
+      <DataGrid<FixtureRow>
+        columns={COLUMNS}
+        rows={[
+          { id: 'a', name: 'Bus_A', v: 1.0 },
+          { id: 'b', name: 'Bus_B', v: 1.0 },
+        ]}
+        rowIdAccessor={(r) => r.id}
+        testId="dg"
+      />,
+    );
+    expect(screen.getByTestId('dg-row-a')).toHaveAttribute('data-focused', 'true');
+    await focusGridThenPress('{ArrowUp}');
+    expect(screen.getByTestId('dg-row-a')).toHaveAttribute('data-focused', 'true');
+    expect(screen.getByTestId('dg-row-b')).not.toHaveAttribute('data-focused');
+  });
+
+  it('ArrowDown at last row stays at last', async () => {
+    render(
+      <DataGrid<FixtureRow>
+        columns={COLUMNS}
+        rows={[
+          { id: 'a', name: 'Bus_A', v: 1.0 },
+          { id: 'b', name: 'Bus_B', v: 1.0 },
+        ]}
+        rowIdAccessor={(r) => r.id}
+        testId="dg"
+      />,
+    );
+    await focusGridThenPress('{ArrowDown}');
+    expect(screen.getByTestId('dg-row-b')).toHaveAttribute('data-focused', 'true');
+    await focusGridThenPress('{ArrowDown}');
+    // Still at b, not past the end.
+    expect(screen.getByTestId('dg-row-b')).toHaveAttribute('data-focused', 'true');
+  });
+
+  it('Home / End jump to bounds', async () => {
+    render(
+      <DataGrid<FixtureRow>
+        columns={COLUMNS}
+        rows={[
+          { id: 'a', name: 'Bus_A', v: 1.0 },
+          { id: 'b', name: 'Bus_B', v: 1.0 },
+          { id: 'c', name: 'Bus_C', v: 1.0 },
+          { id: 'd', name: 'Bus_D', v: 1.0 },
+        ]}
+        rowIdAccessor={(r) => r.id}
+        testId="dg"
+      />,
+    );
+    await focusGridThenPress('{End}');
+    expect(screen.getByTestId('dg-row-d')).toHaveAttribute('data-focused', 'true');
+    await focusGridThenPress('{Home}');
+    expect(screen.getByTestId('dg-row-a')).toHaveAttribute('data-focused', 'true');
+  });
+
+  it('Enter calls onRowClick with the focused row id', async () => {
+    const onRowClick = vi.fn();
+    render(
+      <DataGrid<FixtureRow>
+        columns={COLUMNS}
+        rows={[
+          { id: 'a', name: 'Bus_A', v: 1.0 },
+          { id: 'b', name: 'Bus_B', v: 1.0 },
+          { id: 'c', name: 'Bus_C', v: 1.0 },
+        ]}
+        rowIdAccessor={(r) => r.id}
+        onRowClick={onRowClick}
+        testId="dg"
+      />,
+    );
+    await focusGridThenPress('{ArrowDown}');
+    await focusGridThenPress('{Enter}');
+    expect(onRowClick).toHaveBeenCalledWith('b');
+  });
+
+  it('keyboard bindings are scoped to the grid container (do not fire when focus is elsewhere)', async () => {
+    const onRowClick = vi.fn();
+    const { default: userEvent } = await import('@testing-library/user-event');
+    const user = userEvent.setup();
+    render(
+      <div>
+        <input data-testid="external-input" />
+        <DataGrid<FixtureRow>
+          columns={COLUMNS}
+          rows={[
+            { id: 'a', name: 'Bus_A', v: 1.0 },
+            { id: 'b', name: 'Bus_B', v: 1.0 },
+          ]}
+          rowIdAccessor={(r) => r.id}
+          onRowClick={onRowClick}
+          testId="dg"
+        />
+      </div>,
+    );
+    // Focus the external input; arrow keys must not advance the grid
+    // cursor because the container's hotkey ref is element-scoped.
+    screen.getByTestId('external-input').focus();
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(onRowClick).not.toHaveBeenCalled();
+    expect(screen.getByTestId('dg-row-a')).toHaveAttribute('data-focused', 'true');
+  });
+
+  it('focused row clamps to last when row count drops', () => {
+    const { rerender } = render(
+      <DataGrid<FixtureRow>
+        columns={COLUMNS}
+        rows={[
+          { id: 'a', name: 'Bus_A', v: 1.0 },
+          { id: 'b', name: 'Bus_B', v: 1.0 },
+          { id: 'c', name: 'Bus_C', v: 1.0 },
+        ]}
+        rowIdAccessor={(r) => r.id}
+        testId="dg"
+      />,
+    );
+    // Drop to a single row — focusedRowIndex (initially 0) is still
+    // valid; verify no crash + the surviving row keeps focus.
+    rerender(
+      <DataGrid<FixtureRow>
+        columns={COLUMNS}
+        rows={[{ id: 'a', name: 'Bus_A', v: 1.0 }]}
+        rowIdAccessor={(r) => r.id}
+        testId="dg"
+      />,
+    );
+    expect(screen.getByTestId('dg-row-a')).toHaveAttribute('data-focused', 'true');
+  });
+});
+
 describe('<DataGrid /> — virtualization threshold', () => {
   it('does NOT virtualize for 50 rows', () => {
     const rows = Array.from({ length: 50 }, (_, i) => ({

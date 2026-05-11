@@ -11,8 +11,10 @@
  *   user selected, so downstream pandas / R / MATLAB readers don't need
  *   schema discovery per export.
  *
- * - Table: `(row_label, column, value)` — used by `<ResultsTable>`. One
- *   physical CSV row per (visible-row x visible-column) tuple. Mirrors
+ * - Table: `(row_label, column, value)` — used by the v3 ``DataGrid``
+ *   per-bucket tabs in the BottomDrawer (and by the now-retired v2
+ *   ``<ResultsTable>``, removed in v3 Unit 15). One physical CSV row
+ *   per (visible-row x visible-column) tuple. Mirrors
  *   the visible filter + sort state in the table; the caller is
  *   expected to pass already-filtered/sorted rows.
  *

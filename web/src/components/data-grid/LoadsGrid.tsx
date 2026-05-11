@@ -10,9 +10,10 @@
  * ``rawKind`` in ``SldCanvas.onNodeClick``). We use ``load-${idx}``
  * so canvas highlight + inspector both stay in sync.
  *
- * Columns mirror ResultsTable.tsx's LOAD_COLUMNS verbatim plus a
- * status column. PQ vs ZIP load distinction lives in the kind field
- * but is omitted from the headline columns to keep the grid scannable.
+ * Columns mirror the retired v2 LOAD_COLUMNS shape (file retired in
+ * v3 Unit 15) verbatim plus a status column. PQ vs ZIP load distinction
+ * lives in the kind field but is omitted from the headline columns to
+ * keep the grid scannable.
  */
 import { useMemo } from 'react';
 import { DataGrid, type ColumnConfig } from './DataGrid';

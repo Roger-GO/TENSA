@@ -41,7 +41,6 @@ function resetStores() {
   });
   useUiStore.setState({
     hideLabels: false,
-    activeRightDockTopPanel: 'analyze',
     tdsConfig: { ...DEFAULT_TDS_CONFIG },
   });
   usePflowStore.setState({

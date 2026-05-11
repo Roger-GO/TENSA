@@ -1,12 +1,13 @@
 /**
  * UI slice. Tracks ephemeral display preferences that don't belong on
- * any of the other slices (auth/session/case/pflow). v0.2 extends this
- * slice with the panel-picker state per dock region and the
- * ``TdsConfigPanel`` form values (tf, h override, vars, max_rate_hz).
+ * any of the other slices (auth/session/case/pflow). v0.2 extended this
+ * slice with the ``TdsConfigPanel`` form values (tf, h override, vars,
+ * max_rate_hz). v3 Unit 15 retired the ``activeRightDockTopPanel``
+ * field — the layout slice (``useLayoutStore``) now owns dock state
+ * via ``activeBottomDrawerTab`` + ``activeAnalysisSubTab``.
  *
  * Lifecycle:
- * - Display prefs (``hideLabels``, ``activeRightDockTopPanel``) reset on
- *   tab close.
+ * - Display prefs (``hideLabels``) reset on tab close.
  * - The TDS-integrator pick (``tdsIntegrator`` + ``tdsToleranceOverrides``)
  *   is persisted to ``sessionStorage`` so a refresh during a study
  *   doesn't reset to "trapezoidal" — Unit 16 KTD per-tab persistence.
@@ -15,23 +16,6 @@
  */
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-
-/** Identifier for a panel that can mount in the right-dock top region.
- *
- * Per Unit 6's KTD-6: ``tds-config`` was folded into the new ``analyze``
- * panel as its TDS sub-mode. The Analyze panel hosts the routine
- * sub-mode picker (PF / TDS / EIG) plus the per-routine result views
- * (eigenvalue scatter, participation table, damping bar chart for
- * EIG; the existing TdsConfigPanel for TDS; PFlow result placeholder).
- */
-export type RightDockTopPanel = 'inspector' | 'disturbance' | 'plot' | 'analyze';
-
-export const RIGHT_DOCK_TOP_PANELS: readonly RightDockTopPanel[] = [
-  'inspector',
-  'disturbance',
-  'plot',
-  'analyze',
-] as const;
 
 /** Variable group selector forwarded by ``RunStream`` to ``start_tds``. */
 export type TdsVarGroup = 'bus_v' | 'gen_state' | 'line_flow';
@@ -108,15 +92,6 @@ export interface UiState {
   setHideLabels: (hide: boolean) => void;
   toggleHideLabels: () => void;
 
-  /**
-   * Currently mounted panel in the right-dock top region. Defaults to
-   * ``"inspector"`` — matches v0.1 behavior. The PanelPickerTabs
-   * component drives this; consumers (App.tsx) read it to decide which
-   * panel to render.
-   */
-  activeRightDockTopPanel: RightDockTopPanel;
-  setActiveRightDockTopPanel: (panel: RightDockTopPanel) => void;
-
   /** TdsConfigPanel form values. Read by ``RunButton`` at start time. */
   tdsConfig: TdsConfig;
   setTdsConfig: (next: Partial<TdsConfig>) => void;
@@ -151,9 +126,6 @@ export const useUiStore = create<UiState>()(
       setHideLabels: (hide: boolean) => set({ hideLabels: hide }),
       toggleHideLabels: () => set((s) => ({ hideLabels: !s.hideLabels })),
 
-      activeRightDockTopPanel: 'inspector',
-      setActiveRightDockTopPanel: (panel) => set({ activeRightDockTopPanel: panel }),
-
       tdsConfig: { ...DEFAULT_TDS_CONFIG },
       setTdsConfig: (next) => set((s) => ({ tdsConfig: { ...s.tdsConfig, ...next } })),
       resetTdsConfig: () => set({ tdsConfig: { ...DEFAULT_TDS_CONFIG } }),
@@ -179,6 +151,17 @@ export const useUiStore = create<UiState>()(
         tdsIntegrator: state.tdsIntegrator,
         tdsToleranceOverrides: state.tdsToleranceOverrides,
       }),
+      // v3 Unit 15 cleanup: ``activeRightDockTopPanel`` was never in
+      // ``partialize`` so it shouldn't be on disk, but migrate
+      // defensively in case any branch ever wrote one. Drops the key
+      // and leaves the rest of the payload alone.
+      migrate: (persisted) => {
+        if (persisted && typeof persisted === 'object') {
+          const { activeRightDockTopPanel: _drop, ...rest } = persisted as Record<string, unknown>;
+          return rest;
+        }
+        return persisted;
+      },
     },
   ),
 );
