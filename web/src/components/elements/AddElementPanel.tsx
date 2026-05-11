@@ -155,7 +155,10 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
         aria-label="Add element"
         data-testid="add-element-panel"
         className={cn(
-          'absolute inset-y-0 right-0 z-30',
+          // ``pointer-events-auto`` opts THIS visible panel into hit-testing.
+          // Required because v3 AppShell's dock-overlay wrapper is
+          // ``pointer-events-none`` to avoid blocking chassis clicks.
+          'pointer-events-auto absolute inset-y-0 right-0 z-30',
           // ~70% of the dock width via inline style — the dock itself is
           // resizable, so a percentage on the panel keeps the inspector
           // visible behind at the left ~30%.

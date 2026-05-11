@@ -63,7 +63,11 @@ export function ConvergenceErrorPanel({ className }: ConvergencePanelProps) {
       role="region"
       aria-label="Power flow convergence error"
       data-testid="convergence-error-panel"
-      className={cn('border-warning/40 bg-warning/10 text-foreground', 'border-b', className)}
+      className={cn(
+        'pointer-events-auto border-warning/40 bg-warning/10 text-foreground',
+        'border-b',
+        className,
+      )}
     >
       <div className="flex items-center gap-2 px-3 py-2">
         <p className="flex-1 text-sm">

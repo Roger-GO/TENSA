@@ -417,22 +417,19 @@ export function AppShell({
         </PanelGroup>
 
         {/* dockOverlay slot — absolutely positioned over the canvas +
-            inspector + drawer column (the right side of the outer
-            PanelGroup). Each child handles its own placement.
-            ``pointer-events-none`` on the wrapper + ``pointer-events-auto``
-            on the children would let banners stack non-blockingly, but
-            the existing AddElementPanel already manages this internally
-            with z-30 + an explicit width. */}
+            inspector + drawer column. The wrapper is
+            ``pointer-events-none`` so it never intercepts clicks on the
+            chassis surfaces below; each overlay child (AddElementPanel,
+            ConvergenceErrorPanel, NumericalErrorBanner) is responsible
+            for adding ``pointer-events-auto`` on its own visible panel
+            when it actually renders content. Children that return null
+            when inactive contribute zero hit-testing surface. */}
         {dockOverlay ? (
           <div
             data-testid="app-shell-dock-overlay"
             className="pointer-events-none absolute inset-0"
           >
-            {/* Re-enable pointer events for the children. Each child is
-                expected to set its own ``inset-y-0 right-0 w-[…]``
-                positioning so the overlay anchors to the right side of
-                the chassis content area, not the (now-removed) dock. */}
-            <div className="pointer-events-auto absolute inset-0">{dockOverlay}</div>
+            {dockOverlay}
           </div>
         ) : null}
       </div>

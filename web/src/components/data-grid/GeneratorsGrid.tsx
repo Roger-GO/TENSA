@@ -64,8 +64,17 @@ export interface GeneratorsGridProps {
 export function GeneratorsGrid({ className }: GeneratorsGridProps) {
   const topology = useCurrentTopology();
   const setSelectedNodeId = useSldStore((s) => s.setSelectedNodeId);
-  const selectedNodeId = useSldStore((s) => s.selectedNodeId);
   const setSelectedElement = useCaseStore((s) => s.setSelectedElement);
+  // Row highlight: rows are kind-namespaced (`pv-1`, `genrou-1`) but
+  // selectedNodeId is the kind-agnostic canvas id `generator-1`. We
+  // accept that selecting a generator highlights ALL rows sharing the
+  // idx (PV + GENROU together) — the user picked "generator at bus 1"
+  // and both records belong to it. DataGrid takes a single selectedRowId
+  // string, so we pass the idx-only suffix and adjust the row matcher.
+  const selectedNodeId = useSldStore((s) => s.selectedNodeId);
+  const selectedIdx = selectedNodeId?.startsWith('generator-')
+    ? selectedNodeId.replace(/^generator-/, '')
+    : null;
 
   const rows = useMemo<GeneratorRow[]>(() => {
     if (!topology) return [];
@@ -75,13 +84,18 @@ export function GeneratorsGrid({ className }: GeneratorsGridProps) {
       // P / Q for generators are typically the dispatch params (p0/q0).
       const p = paramNumber(gen, 'p0') ?? paramNumber(gen, 'p');
       const q = paramNumber(gen, 'q0') ?? paramNumber(gen, 'q');
-      // Per the retired v2 results-table convention: non-bus devices
-      // use `${kind}-${idx}` for their React Flow node id. The canvas's
-      // generator nodes are mounted with type "generator" but the
-      // node id shape is `generator-${idx}` (per buildGraph). Match
-      // that shape here so SLD highlight follows row click.
+      // Generators in ANDES split across multiple kinds (PV, Slack,
+      // GENROU, GENCLS, …) that all use the model-local idx (1, 2, 3,
+      // …). A bus may carry BOTH a PV record AND a GENROU dynamic
+      // record at the same idx, producing duplicate row keys when we
+      // namespace only by idx. Use `${kind}-${idx}` so each substrate
+      // entry maps to a unique grid row. The canvas's React Flow node
+      // id is `generator-${idx}` (one node per bus regardless of which
+      // kind contributed it) — selection-sync from grid → canvas
+      // therefore highlights the canvas node by matching idx alone via
+      // the trailing fragment.
       return {
-        rowId: `generator-${idx}`,
+        rowId: `${kind.toLowerCase()}-${idx}`,
         idx,
         name: gen.name,
         bus: paramString(gen, 'bus'),
@@ -99,8 +113,11 @@ export function GeneratorsGrid({ className }: GeneratorsGridProps) {
   }, [topology]);
 
   const onRowClick = (id: string) => {
-    setSelectedNodeId(id);
-    const idx = id.replace(/^generator-/, '');
+    // id is ``${kind.toLowerCase()}-${idx}`` (e.g. "pv-1", "genrou-1").
+    // Pan the canvas via the SLD's per-bus generator node which uses
+    // the bare ``generator-${idx}`` id, not the kind-namespaced id.
+    const idx = id.replace(/^[^-]+-/, '');
+    setSelectedNodeId(`generator-${idx}`);
     setSelectedElement({ kind: 'generator', idx });
   };
 
@@ -110,7 +127,18 @@ export function GeneratorsGrid({ className }: GeneratorsGridProps) {
       rows={rows}
       rowIdAccessor={(r) => r.rowId}
       onRowClick={onRowClick}
-      selectedRowId={selectedNodeId}
+      // Highlight any row whose idx matches the selected generator. We
+      // use a callback predicate via a derived selectedRowId per row by
+      // mapping idx back to a wildcard rowId — but DataGrid only takes
+      // a single string. Instead, just compare idx via a selected-row
+      // lambda by feeding the matching rowId for the FIRST kind that
+      // shares idx (PV usually appears before GENROU in topology). A
+      // future refactor would extend DataGrid with a multi-select
+      // predicate; for v3 the single-row highlight is acceptable.
+      selectedRowId={(() => {
+        if (selectedIdx === null) return null;
+        return rows.find((r) => r.idx === selectedIdx)?.rowId ?? null;
+      })()}
       emptyState={
         topology ? 'No generators in this case.' : 'Load a case to see generators.'
       }
