@@ -45,22 +45,24 @@ afterEach(() => {
 });
 
 describe('<GeneratorsGrid />', () => {
-  it('renders rows with generator-prefixed rowIds', () => {
+  it('renders rows with kind-namespaced rowIds (avoids dup keys when PV+GENROU share idx)', () => {
     mockTopology = TOPOLOGY;
     render(<GeneratorsGrid />);
-    expect(screen.getByTestId('generators-grid-row-generator-0')).toBeInTheDocument();
-    expect(screen.getByTestId('generators-grid-row-generator-1')).toBeInTheDocument();
+    // GENROU generator at idx=0 → "genrou-0"; PV at idx=1 → "pv-1".
+    expect(screen.getByTestId('generators-grid-row-genrou-0')).toBeInTheDocument();
+    expect(screen.getByTestId('generators-grid-row-pv-1')).toBeInTheDocument();
   });
 
-  it('row click sets selectedElement to {kind:"generator", idx}', async () => {
+  it('row click sets selectedElement to {kind:"generator", idx} + canvas-aligned selectedNodeId', async () => {
     const user = userEvent.setup();
     mockTopology = TOPOLOGY;
     render(<GeneratorsGrid />);
-    await user.click(screen.getByTestId('generators-grid-row-generator-1'));
+    await user.click(screen.getByTestId('generators-grid-row-pv-1'));
     expect(useCaseStore.getState().selectedElement).toEqual({
       kind: 'generator',
       idx: '1',
     });
+    // Canvas node id stays kind-agnostic so SLD highlight follows.
     expect(useSldStore.getState().selectedNodeId).toBe('generator-1');
   });
 });

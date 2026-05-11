@@ -7,7 +7,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { WorkspaceFilePicker } from './WorkspaceFilePicker';
 import { ChangeCaseConfirmDialog } from './ChangeCaseConfirmDialog';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
@@ -196,7 +195,17 @@ export function CaseNav({ className }: CaseNavProps) {
   return (
     <div className={cn('flex h-full min-h-0 flex-col', className)}>
       {selection === null ? (
-        <WorkspaceFilePicker />
+        // v3 LeftSidebar mounts SavedCasesList in a sibling section, so
+        // the full WorkspaceFilePicker UI here would duplicate the file
+        // list. Render a brief inline hint instead — the user finds the
+        // canonical loader in the Saved Cases section below.
+        <div
+          data-testid="case-nav-empty"
+          className="text-muted-foreground p-3 text-xs"
+        >
+          No case loaded. Pick a file from <span className="font-medium">Saved cases</span> below or
+          drag a component onto the canvas to start a blank system.
+        </div>
       ) : (
         <SummaryCard
           selection={selection}

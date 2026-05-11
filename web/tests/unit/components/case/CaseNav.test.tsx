@@ -84,16 +84,17 @@ describe('<CaseNav />', () => {
     useAuthStore.setState({ token: null, persistFailed: false });
   });
 
-  it('renders the picker when no case is loaded', () => {
-    // Workspace fetch never resolves; we just verify the picker mounts
-    // (its loading skeleton is enough evidence that CaseNav routed to it).
+  it('renders an inline empty hint (not the full picker) when no case is loaded', () => {
+    // v3 LeftSidebar mounts SavedCasesList in a sibling section, so
+    // CaseNav's no-case branch shows an inline hint pointing the user
+    // there instead of duplicating the file picker.
     fetchSpy.mockImplementation(() => new Promise(() => {}));
     const { Wrapper } = makeWrapper();
 
     render(<CaseNav />, { wrapper: Wrapper });
 
-    expect(screen.getByRole('status', { name: /loading workspace/i })).toBeInTheDocument();
-    // Summary card not present.
+    expect(screen.getByTestId('case-nav-empty')).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: /loading workspace/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/Loaded case/i)).not.toBeInTheDocument();
   });
 

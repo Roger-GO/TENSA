@@ -61,7 +61,11 @@ export function NumericalErrorBanner({ className }: NumericalErrorBannerProps) {
       role="region"
       aria-label="TDS numerical error"
       data-testid="numerical-error-banner"
-      className={cn('border-danger/40 bg-danger/10 text-foreground', 'border-b', className)}
+      className={cn(
+        'pointer-events-auto border-danger/40 bg-danger/10 text-foreground',
+        'border-b',
+        className,
+      )}
     >
       <div className="flex items-center gap-2 px-3 py-2">
         <p className="flex-1 text-sm">
