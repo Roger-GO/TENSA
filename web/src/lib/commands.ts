@@ -178,6 +178,30 @@ export function useCommandRegistry(): readonly Command[] {
         setAnalyzeSubMode('se');
         setRightDockPanel('analyze');
       }
+      // v3 Unit 14 auto-route — every Run command also points the
+      // BottomDrawer at the matching Analysis sub-tab. Per the
+      // F-DESIGN-5 resolution: write the layout fields unconditionally
+      // (so opening the drawer later lands on the right sub-tab) but
+      // ONLY auto-expand the drawer if it's already open. If it's
+      // collapsed, flip the unread bit so the BottomDrawerToggle
+      // badges a dot — the user opens the drawer at their pace and
+      // the click clears the badge atomically.
+      const layout = useLayoutStore.getState();
+      layout.setActiveBottomDrawerTab('analysis');
+      // ``pflow`` and ``sweep`` aren't AnalysisSubTab values —
+      // mapping per F-FEAS-3: pflow has no sub-tab in v3 (PF results
+      // land on the Buses grid + inspector); sweep is a dialog. For
+      // those routines we leave activeAnalysisSubTab alone (its
+      // last-set value will surface when the user opens the drawer)
+      // but still flip the unread bit so the user knows results
+      // arrived. For tds/eig/cpf/se the routine name maps 1:1 to
+      // the AnalysisSubTab id.
+      if (routine === 'tds' || routine === 'eig' || routine === 'cpf' || routine === 'se') {
+        layout.setActiveAnalysisSubTab(routine);
+      }
+      if (layout.bottomDrawerCollapsed) {
+        layout.setDrawerHasUnreadResults(true);
+      }
     };
 
     const all: Command[] = [

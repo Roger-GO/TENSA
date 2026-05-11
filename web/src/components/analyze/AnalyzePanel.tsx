@@ -180,7 +180,7 @@ function AnalyzePflowSubMode() {
   );
 }
 
-function AnalyzeEigSubMode() {
+export function AnalyzeEigSubMode() {
   const sessionId = useSessionStore((s) => s.sessionId);
   const lastPf = usePflowStore((s) => s.lastRun);
   const eigResult = useAnalyzeStore((s) => s.eigResult);
@@ -269,7 +269,7 @@ function AnalyzeEigSubMode() {
   );
 }
 
-function AnalyzeCpfSubMode() {
+export function AnalyzeCpfSubMode() {
   const sessionId = useSessionStore((s) => s.sessionId);
   const lastPf = usePflowStore((s) => s.lastRun);
   const cpfResult = useAnalyzeStore((s) => s.cpfResult);
@@ -370,7 +370,7 @@ function AnalyzeCpfSubMode() {
  * cascade), drop any stale SE result + measurement count so the empty
  * state shows on first paint.
  */
-function AnalyzeSeSubMode() {
+export function AnalyzeSeSubMode() {
   const sessionId = useSessionStore((s) => s.sessionId);
   const lastPf = usePflowStore((s) => s.lastRun);
   const seResult = useAnalyzeStore((s) => s.seResult);
