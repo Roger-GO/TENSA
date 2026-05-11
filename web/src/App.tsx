@@ -19,6 +19,7 @@ import { RunMenu } from '@/components/shell/RunMenu';
 import { ExportMenu } from '@/components/shell/ExportMenu';
 import { SldCanvas } from '@/components/sld/SldCanvas';
 import { RightInspector } from '@/components/inspector/RightInspector';
+import { BottomDrawer } from '@/components/shell/BottomDrawer';
 import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
 import { makeQueryClient, wireGlobalErrorRecovery } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
@@ -95,23 +96,6 @@ function CanvasSlot() {
   );
 }
 
-/**
- * Bottom drawer placeholder. Unit 11 replaces this with the tab strip +
- * per-bucket data grids (Units 12 + 13) and Analysis sub-tab content
- * (Unit 14). For Unit 1 it renders a labelled stub so the chassis isn't
- * empty during dev.
- */
-function BottomDrawerSlot() {
-  return (
-    <div
-      className="text-muted-foreground flex h-full items-center justify-center text-xs"
-      data-testid="bottom-drawer-placeholder"
-    >
-      Bottom drawer placeholder — Unit 11 wires the tab strip; Units 12-14 wire content.
-    </div>
-  );
-}
-
 export function App() {
   // The QueryClient is created once per mount via `useState`'s lazy
   // initializer — re-renders preserve the instance, but unmount/remount
@@ -149,7 +133,7 @@ export function App() {
           leftSidebar={<LeftSidebar />}
           canvas={<CanvasSlot />}
           rightInspector={<RightInspector />}
-          bottomDrawer={<BottomDrawerSlot />}
+          bottomDrawer={<BottomDrawer />}
           dockOverlay={
             <>
               <AddElementPanel />

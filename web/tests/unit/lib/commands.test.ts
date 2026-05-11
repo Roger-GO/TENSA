@@ -15,7 +15,7 @@
  *   `__requestPaletteDialog` round-trip.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { renderHook, cleanup } from '@testing-library/react';
+import { renderHook, cleanup, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import React from 'react';
@@ -279,6 +279,86 @@ describe('useCommandRegistry — v3 Unit 2 view commands', () => {
     cmd?.action();
     expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(false);
     expect(useLayoutStore.getState().drawerHasUnreadResults).toBe(false);
+  });
+});
+
+describe('useCommandRegistry — v3 Unit 14 auto-route on Run', () => {
+  // Each test promotes a converged PF result so `run.eig` is registered
+  // (gated by `pfConverged`); the EIG path is the most useful auto-route
+  // assertion since EIG is the default Run target after PFlow.
+  function withConvergedPf() {
+    usePflowStore.setState({
+      lastRun: {
+        converged: true,
+        iterations: 4,
+        max_mismatch: 1e-9,
+        buses: [],
+      } as unknown as PflowResult,
+      isRunning: false,
+      error: null,
+    });
+  }
+
+  it('Run EIG sets activeBottomDrawerTab=analysis + activeAnalysisSubTab=eig', () => {
+    withConvergedPf();
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'run.eig');
+    expect(cmd).toBeDefined();
+    act(() => cmd?.action());
+    const layout = useLayoutStore.getState();
+    expect(layout.activeBottomDrawerTab).toBe('analysis');
+    expect(layout.activeAnalysisSubTab).toBe('eig');
+  });
+
+  it('Run TDS sets the analysis sub-tab to tds', () => {
+    withConvergedPf();
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'run.tds');
+    act(() => cmd?.action());
+    const layout = useLayoutStore.getState();
+    expect(layout.activeBottomDrawerTab).toBe('analysis');
+    expect(layout.activeAnalysisSubTab).toBe('tds');
+  });
+
+  it('with drawer NOT collapsed, drawerHasUnreadResults stays false', () => {
+    withConvergedPf();
+    useLayoutStore.setState({ bottomDrawerCollapsed: false });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'run.eig');
+    act(() => cmd?.action());
+    const layout = useLayoutStore.getState();
+    expect(layout.activeBottomDrawerTab).toBe('analysis');
+    expect(layout.activeAnalysisSubTab).toBe('eig');
+    expect(layout.drawerHasUnreadResults).toBe(false);
+    expect(layout.bottomDrawerCollapsed).toBe(false);
+  });
+
+  it('with drawer COLLAPSED, drawerHasUnreadResults flips to true (no auto-expand)', () => {
+    withConvergedPf();
+    useLayoutStore.setState({ bottomDrawerCollapsed: true });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'run.cpf');
+    act(() => cmd?.action());
+    const layout = useLayoutStore.getState();
+    expect(layout.activeBottomDrawerTab).toBe('analysis');
+    expect(layout.activeAnalysisSubTab).toBe('cpf');
+    expect(layout.drawerHasUnreadResults).toBe(true);
+    // Critical: the drawer stays collapsed — the badge replaces the
+    // auto-expand per F-DESIGN-5.
+    expect(layout.bottomDrawerCollapsed).toBe(true);
+  });
+
+  it('Run PFlow leaves activeAnalysisSubTab alone (no PF sub-tab in v3)', () => {
+    useLayoutStore.setState({ activeAnalysisSubTab: 'eig' });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'run.pflow');
+    act(() => cmd?.action());
+    const layout = useLayoutStore.getState();
+    // The outer drawer tab still routes to analysis; the sub-tab stays
+    // on whatever the user last used (PF results land on the Buses
+    // grid + inspector, not in an Analysis sub-tab).
+    expect(layout.activeBottomDrawerTab).toBe('analysis');
+    expect(layout.activeAnalysisSubTab).toBe('eig');
   });
 });
 
