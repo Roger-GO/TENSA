@@ -196,7 +196,7 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
       {/* Workspace files group ------------------------------------------- */}
       <div className="flex flex-col gap-1">
         <p
-          className="text-muted-foreground px-1 pb-0.5 text-[10px] font-medium tracking-wide uppercase"
+          className="text-muted-foreground/70 px-1 pb-0.5 text-[9px] font-medium tracking-[0.08em] uppercase"
           data-testid="saved-cases-files-heading"
         >
           Workspace

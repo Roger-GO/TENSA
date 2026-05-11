@@ -40,10 +40,15 @@ export function InspectorToggle({ className }: InspectorToggleProps) {
       onClick={toggle}
       data-testid="top-bar-toggle-inspector"
       data-collapsed={collapsed ? 'true' : 'false'}
+      data-active={collapsed ? 'false' : 'true'}
       aria-label={tooltip}
       aria-pressed={!collapsed}
       title={tooltip}
-      className={cn('px-2', className)}
+      className={cn(
+        'px-2',
+        'data-[active=true]:bg-muted data-[active=true]:text-foreground',
+        className,
+      )}
     >
       <InspectorChevron collapsed={collapsed} className="h-4 w-4" />
     </Button>

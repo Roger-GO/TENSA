@@ -107,8 +107,10 @@
   --color-danger: oklch(0.7 0.18 25);
   --color-danger-foreground: oklch(0.99 0 0);
 
-  /* Warm muted white for the SLD dot-grid in dark mode (v3 Unit 6). Same
-   * alpha as the light-mode token so the visual weight of the pattern
-   * stays comparable across themes. */
-  --color-dot-grid: oklch(0.4 0.005 270 / 0.5);
+  /* Warm muted white for the SLD dot-grid in dark mode (v3 Unit 6).
+   * Lifted from 0.4/0.5 → 0.5/0.7 in v3 Unit 17 because the dots had
+   * disappeared against the new 0.13 background — the dark canvas was
+   * reading as solid black. The new value keeps the pattern subtle but
+   * legible without overwhelming the bus glyphs. */
+  --color-dot-grid: oklch(0.5 0.005 270 / 0.7);
 }

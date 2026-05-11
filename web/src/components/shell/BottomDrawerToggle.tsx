@@ -54,11 +54,16 @@ export function BottomDrawerToggle({ className }: BottomDrawerToggleProps) {
       onClick={onClick}
       data-testid="top-bar-toggle-drawer"
       data-collapsed={collapsed ? 'true' : 'false'}
+      data-active={collapsed ? 'false' : 'true'}
       data-has-unread={hasUnread ? 'true' : 'false'}
       aria-label={tooltip}
       aria-pressed={!collapsed}
       title={tooltip}
-      className={cn('relative px-2', className)}
+      className={cn(
+        'relative px-2',
+        'data-[active=true]:bg-muted data-[active=true]:text-foreground',
+        className,
+      )}
     >
       <DrawerChevron collapsed={collapsed} className="h-4 w-4" />
       {hasUnread ? (
@@ -66,8 +71,11 @@ export function BottomDrawerToggle({ className }: BottomDrawerToggleProps) {
           data-testid="top-bar-toggle-drawer-unread-dot"
           aria-hidden="true"
           className={cn(
-            'absolute -top-0.5 -right-0.5 size-1.5 rounded-full',
-            'bg-primary shadow-sm',
+            // Slightly larger dot (size-2 vs 1.5) + ring halo so it
+            // reads as a notification pip rather than a stray pixel.
+            'absolute -top-0.5 -right-0.5 size-2 rounded-full',
+            'bg-primary ring-background ring-2',
+            'animate-pulse',
           )}
         />
       ) : null}

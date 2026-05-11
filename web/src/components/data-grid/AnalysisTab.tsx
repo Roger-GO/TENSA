@@ -69,7 +69,10 @@ export function AnalysisTab({
       <TabsPrimitive.List
         aria-label="Analysis sub-tabs"
         className={cn(
-          'border-border bg-muted/30 flex h-7 shrink-0 items-stretch border-b',
+          // Deeper recess (bg-muted instead of bg-muted/30) + left
+          // padding so the inner strip visually nests under the outer
+          // Analysis tab pill rather than reading as a peer strip.
+          'border-border bg-muted/70 flex h-7 shrink-0 items-stretch border-b pl-2',
           'overflow-x-auto',
         )}
       >
@@ -79,11 +82,15 @@ export function AnalysisTab({
             value={sub}
             data-testid={`analysis-sub-tab-${sub}`}
             className={cn(
-              'inline-flex items-center px-3 text-xs font-medium whitespace-nowrap',
+              // Sub-tabs are pill-shaped (rounded-t) without right
+              // borders — visually softer than the outer tab strip so
+              // the nesting reads on a single glance.
+              'relative inline-flex items-center px-3 text-xs font-medium whitespace-nowrap',
               'text-muted-foreground hover:text-foreground',
-              'border-r-border border-r last:border-r-0',
               'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
               'data-[state=active]:bg-background data-[state=active]:text-foreground',
+              'data-[state=active]:shadow-[inset_0_2px_0_0_var(--color-primary)]',
+              'rounded-t-[var(--radius-sm)]',
               'transition-colors duration-[var(--duration-fast)]',
             )}
           >

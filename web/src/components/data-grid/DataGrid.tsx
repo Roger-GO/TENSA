@@ -138,10 +138,12 @@ function VirtualRow<Row>({
       className={cn(
         'border-border/60 flex items-center border-b text-xs',
         data.onRowClick ? 'cursor-pointer' : '',
+        // Selected: 2px primary left-rail (IDE pattern) + tinted bg.
+        // Reads at a glance even when the user is scanning long grids.
         isSelected
-          ? 'bg-muted ring-1 ring-[var(--color-ring)] ring-inset'
-          : 'hover:bg-muted/40',
-        isFocused && !isSelected ? 'bg-muted/20' : '',
+          ? 'bg-primary/[0.07] shadow-[inset_2px_0_0_0_var(--color-primary)]'
+          : 'hover:bg-muted/50',
+        isFocused && !isSelected ? 'bg-muted/30' : '',
       )}
     >
       {data.columns.map((col) => {
@@ -375,9 +377,9 @@ export function DataGrid<Row>({
                   'border-border/60 flex items-center border-b text-xs',
                   onRowClick ? 'cursor-pointer' : '',
                   isSelected
-                    ? 'bg-muted ring-1 ring-[var(--color-ring)] ring-inset'
-                    : 'hover:bg-muted/40',
-                  isFocused && !isSelected ? 'bg-muted/20' : '',
+                    ? 'bg-primary/[0.07] shadow-[inset_2px_0_0_0_var(--color-primary)]'
+                    : 'hover:bg-muted/50',
+                  isFocused && !isSelected ? 'bg-muted/30' : '',
                 )}
                 style={{ height: ROW_HEIGHT }}
               >
@@ -429,7 +431,9 @@ function Header<Row>({ columns, sort, onHeaderClick, testId }: HeaderProps<Row>)
       {columns.map((col) => {
         const sortable = col.sortable !== false;
         const active = sort.column === col.key && sort.direction !== 'none';
-        const glyph = !active ? '↕' : sort.direction === 'asc' ? '↑' : '↓';
+        // Inactive: subtle dotted dash (•) so the header doesn't look
+        // crowded at small sizes. Active: bold up/down arrow.
+        const glyph = !active ? '·' : sort.direction === 'asc' ? '▲' : '▼';
         const aria =
           active && sort.direction === 'asc'
             ? 'ascending'
@@ -464,8 +468,9 @@ function Header<Row>({ columns, sort, onHeaderClick, testId }: HeaderProps<Row>)
                 <span
                   aria-hidden
                   className={cn(
-                    'text-[10px]',
-                    active ? 'text-primary' : 'opacity-40',
+                    active
+                      ? 'text-primary text-[8px] font-bold'
+                      : 'text-muted-foreground/50 text-[12px] leading-none',
                   )}
                 >
                   {glyph}
