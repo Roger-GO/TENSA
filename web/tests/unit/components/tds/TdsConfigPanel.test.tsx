@@ -21,7 +21,6 @@ import {
 function resetUi() {
   useUiStore.setState({
     hideLabels: false,
-    activeRightDockTopPanel: 'inspector',
     tdsConfig: { ...DEFAULT_TDS_CONFIG },
     tdsIntegrator: DEFAULT_TDS_INTEGRATOR,
     tdsToleranceOverrides: { ...DEFAULT_TDS_TOLERANCE_OVERRIDES },

@@ -100,6 +100,21 @@ describe('<BusesGrid />', () => {
     expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'bus', idx: '2' });
   });
 
+  it('keyboard nav (ArrowDown + Enter) writes BOTH stores per F-DESIGN-7', async () => {
+    // Integration-style: verifies that keyboard cursor advance + Enter
+    // commit fires BusesGrid's onRowClick which dual-writes to
+    // useSldStore (drives canvas pan / highlight) AND useCaseStore
+    // (drives the right inspector form data).
+    const user = userEvent.setup();
+    mockTopology = TOPOLOGY;
+    render(<BusesGrid />);
+    const container = screen.getByTestId('buses-grid');
+    container.focus();
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(useSldStore.getState().selectedNodeId).toBe('2');
+    expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'bus', idx: '2' });
+  });
+
   it('renders the empty-state when no topology is loaded', () => {
     mockTopology = null;
     render(<BusesGrid />);

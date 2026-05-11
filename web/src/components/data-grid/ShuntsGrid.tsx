@@ -4,13 +4,14 @@
  * Bottom-drawer "Shunts" tab. rowId is ``shunt-${idx}`` matching the
  * React Flow node id shape ``buildGraph`` emits for non-bus device
  * nodes. The plan calls for ``Shunt-${idx}`` "mirror existing
- * convention" — the actual SLD shape is lowercase per ResultsTable's
- * existing ``onRowClick`` mapping. We use lowercase so canvas
- * highlight + inspector stay in sync.
+ * convention" — the actual SLD shape is lowercase per the legacy
+ * v2 results table's ``onRowClick`` mapping (file retired in v3
+ * Unit 15). We use lowercase so canvas highlight + inspector stay
+ * in sync.
  *
- * Columns: idx, bus, B (susceptance), G (conductance). Mirrors
- * ResultsTable.tsx's SHUNT_COLUMNS (with idx, name, bus, g, b, Vn) but
- * trimmed to the v3 spec's columns + bus.
+ * Columns: idx, bus, B (susceptance), G (conductance). Mirrors the
+ * retired v2 SHUNT_COLUMNS shape (idx, name, bus, g, b, Vn) trimmed
+ * to the v3 spec's columns + bus.
  */
 import { useMemo } from 'react';
 import { DataGrid, type ColumnConfig } from './DataGrid';

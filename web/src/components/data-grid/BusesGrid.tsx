@@ -9,12 +9,12 @@
  * rowId is the bare ``idx`` string — bus React Flow nodes use the
  * bare idx as their node id.
  *
- * Columns mirror ResultsTable.tsx's BUS_COLUMNS verbatim (the
- * canonical pattern from Phase 2 Unit 11) plus area + zone (per the
- * v3 plan unit-13 spec). p_inj / q_inj per-bus injections aren't
- * surfaced by the v0.1 substrate at per-element granularity, so
- * those cells render as ``—`` until a future server-side enhancement
- * lands.
+ * Columns mirror the retired v2 BUS_COLUMNS shape verbatim (the
+ * canonical pattern from Phase 2 Unit 11; v2 file retired in v3
+ * Unit 15) plus area + zone (per the v3 plan unit-13 spec).
+ * p_inj / q_inj per-bus injections aren't surfaced by the v0.1
+ * substrate at per-element granularity, so those cells render as
+ * ``—`` until a future server-side enhancement lands.
  */
 import { useMemo } from 'react';
 import { DataGrid, type ColumnConfig } from './DataGrid';
@@ -83,8 +83,8 @@ export function BusesGrid({ className }: BusesGridProps) {
         theta: typeof theta === 'number' && Number.isFinite(theta) ? theta : null,
         // Per-bus injection isn't surfaced at per-element granularity
         // by the v0.1 substrate — leaves the cells as em-dashes until
-        // a future enhancement adds them. Mirrors ResultsTable.tsx's
-        // existing "—" branch for these columns.
+        // a future enhancement adds them. Mirrors the retired v2
+        // results-table's "—" branch for these columns.
         p_inj: null,
         q_inj: null,
         area: paramString(bus, 'area'),

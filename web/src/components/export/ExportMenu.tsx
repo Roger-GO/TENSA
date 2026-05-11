@@ -76,7 +76,7 @@ export interface ExportMenuProps {
   /**
    * Optional run id (full UUID-like string). The first 8 chars are
    * used in the filename to disambiguate runs of the same case. Pass
-   * undefined for non-run-scoped panels (e.g., ResultsTable pre-PF).
+   * undefined for non-run-scoped panels (e.g., a Buses grid pre-PF).
    */
   runId?: string;
   /**

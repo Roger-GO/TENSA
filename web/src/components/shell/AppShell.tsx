@@ -486,8 +486,10 @@ interface ResizeHandleProps {
 
 function ResizeHandle({ direction, label }: ResizeHandleProps) {
   // 4px draggable bar with hover + drag affordance per the v3 spec.
-  // Mirrors the styling pattern from the v2 RightDock + AppShell handles
-  // so the new chassis reads as the same visual family.
+  // Mirrors the styling pattern from the v2 AppShell handles so the
+  // new chassis reads as the same visual family. (The v2 RightDock
+  // wrapper that originally seeded this style was retired in v3 Unit
+  // 15; the visual contract lives on here.)
   return (
     <PanelResizeHandle
       aria-label={label}

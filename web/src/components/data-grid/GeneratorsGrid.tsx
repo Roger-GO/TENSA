@@ -8,10 +8,10 @@
  * the pan effect; the inspector form data populates from
  * ``case.selectedElement`` per the F-DESIGN-7 dual-write pattern.
  *
- * Columns mirror ResultsTable.tsx's GEN_COLUMNS plus a kind column
- * (e.g. ``GENROU`` vs. ``PV``) and a status column. Per v0.1 the
- * status is not exposed at per-element granularity; falls back to
- * "online" when the param is absent.
+ * Columns mirror the retired v2 GEN_COLUMNS shape (file retired in
+ * v3 Unit 15) plus a kind column (e.g. ``GENROU`` vs. ``PV``) and a
+ * status column. Per v0.1 the status is not exposed at per-element
+ * granularity; falls back to "online" when the param is absent.
  */
 import { useMemo } from 'react';
 import { DataGrid, type ColumnConfig } from './DataGrid';
@@ -75,8 +75,8 @@ export function GeneratorsGrid({ className }: GeneratorsGridProps) {
       // P / Q for generators are typically the dispatch params (p0/q0).
       const p = paramNumber(gen, 'p0') ?? paramNumber(gen, 'p');
       const q = paramNumber(gen, 'q0') ?? paramNumber(gen, 'q');
-      // Per ResultsTable.tsx convention: non-bus devices use
-      // `${kind}-${idx}` for their React Flow node id. The canvas's
+      // Per the retired v2 results-table convention: non-bus devices
+      // use `${kind}-${idx}` for their React Flow node id. The canvas's
       // generator nodes are mounted with type "generator" but the
       // node id shape is `generator-${idx}` (per buildGraph). Match
       // that shape here so SLD highlight follows row click.

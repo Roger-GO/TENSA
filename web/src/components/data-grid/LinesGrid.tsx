@@ -8,7 +8,8 @@
  * right inspector still populates because case.selectedElement drives
  * its form data per the F-DESIGN-7 dual-write pattern.
  *
- * Columns mirror ResultsTable.tsx's LINE_COLUMNS plus per-end power
+ * Columns mirror the retired v2 LINE_COLUMNS shape (file retired in
+ * v3 Unit 15) plus per-end power
  * + loss split per the v3 plan unit-13 spec. Loss is computed as
  * (P_from + P_to) — line-flow conservation says these two are equal
  * in magnitude and opposite in sign for a lossless line; their sum is

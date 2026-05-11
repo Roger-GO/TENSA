@@ -22,6 +22,7 @@ import { RunMenu } from '@/components/shell/RunMenu';
 import { useRunModeStore } from '@/store/runMode';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useUiStore, DEFAULT_TDS_CONFIG } from '@/store/ui';
+import { useLayoutStore } from '@/store/layout';
 import { usePflowStore } from '@/store/pflow';
 import type { PflowResult } from '@/api/types';
 
@@ -44,7 +45,6 @@ beforeEach(() => {
   });
   useUiStore.setState({
     hideLabels: false,
-    activeRightDockTopPanel: 'inspector',
     tdsConfig: { ...DEFAULT_TDS_CONFIG },
   });
   // Unit 9: the registry gates "Run EIG" on PF having converged. Seed
@@ -112,24 +112,28 @@ describe('<RunMenu /> — render', () => {
 });
 
 describe('<RunMenu /> — selection effects', () => {
-  it('selecting PFlow updates `activeRoutine` and does not change the right-dock panel', async () => {
+  it('selecting PFlow updates `activeRoutine` and does not change the analysis sub-tab', async () => {
     const user = userEvent.setup();
     useRunModeStore.setState({ activeRoutine: 'tds' });
+    const beforeSubTab = useLayoutStore.getState().activeAnalysisSubTab;
     render(withProviders(<RunMenu />));
     await user.click(screen.getByTestId('topbar-menu-run-trigger'));
     await user.click(await screen.findByTestId('topbar-menu-run-pflow'));
     expect(useRunModeStore.getState().activeRoutine).toBe('pflow');
-    expect(useUiStore.getState().activeRightDockTopPanel).toBe('inspector');
+    // PFlow has no analysis sub-tab (F-FEAS-3); ``activeAnalysisSubTab``
+    // is left alone — only the drawer's outer tab is set to ``analysis``.
+    expect(useLayoutStore.getState().activeAnalysisSubTab).toBe(beforeSubTab);
   });
 
-  it('selecting EIG flips activeRoutine + analyze.subMode + opens the Analyze panel', async () => {
+  it('selecting EIG flips activeRoutine + analyze.subMode + opens the Analyze sub-tab', async () => {
     const user = userEvent.setup();
     render(withProviders(<RunMenu />));
     await user.click(screen.getByTestId('topbar-menu-run-trigger'));
     await user.click(await screen.findByTestId('topbar-menu-run-eig'));
     expect(useRunModeStore.getState().activeRoutine).toBe('eig');
     expect(useAnalyzeStore.getState().subMode).toBe('eig');
-    expect(useUiStore.getState().activeRightDockTopPanel).toBe('analyze');
+    expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('analysis');
+    expect(useLayoutStore.getState().activeAnalysisSubTab).toBe('eig');
   });
 
   it('selecting CPF routes to the CPF Analyze sub-mode', async () => {
@@ -138,7 +142,8 @@ describe('<RunMenu /> — selection effects', () => {
     await user.click(screen.getByTestId('topbar-menu-run-trigger'));
     await user.click(await screen.findByTestId('topbar-menu-run-cpf'));
     expect(useAnalyzeStore.getState().subMode).toBe('cpf');
-    expect(useUiStore.getState().activeRightDockTopPanel).toBe('analyze');
+    expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('analysis');
+    expect(useLayoutStore.getState().activeAnalysisSubTab).toBe('cpf');
   });
 
   it('selecting SE routes to the SE Analyze sub-mode', async () => {
