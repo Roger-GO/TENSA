@@ -38,6 +38,7 @@ from andes_app.api.routes.cpf import router as cpf_router
 from andes_app.api.routes.disturbances import router as disturbances_router
 from andes_app.api.routes.eig import router as eig_router
 from andes_app.api.routes.elements import router as elements_router
+from andes_app.api.routes.jobs import router as jobs_router
 from andes_app.api.routes.pflow import router as pflow_router
 from andes_app.api.routes.pmu import router as pmu_router
 from andes_app.api.routes.profiles import router as profiles_router
@@ -161,6 +162,8 @@ def make_app(
             idle_timeout=idle_timeout_seconds,
             workspace=str(workspace),
         )
+        # ``start`` launches BOTH the idle-session reaper AND the v3.1 Unit 5a
+        # job-liveness sweeper (10s; KTD-18). ``shutdown`` cancels both.
         await mgr.start()
         app.state.session_manager = mgr
         app.state.expected_token = expected_token
@@ -280,6 +283,10 @@ def make_app(
     app.include_router(profiles_router, prefix="/api", tags=["profiles"])
     # Unit 18 — sensitivity sweep harness (POST + WS progress channel).
     app.include_router(sweep_router, prefix="/api", tags=["sweep"])
+    # v3.1 Unit 5a — jobs surface (list / get / cancel + per-session
+    # multiplexed WS). The 10s liveness sweeper is owned by SessionManager and
+    # started in ``mgr.start()`` / cancelled in ``mgr.shutdown()`` above.
+    app.include_router(jobs_router, prefix="/api", tags=["jobs"])
     app.include_router(ws_router, prefix="/api", tags=["streaming"])
 
     # SPA mount goes LAST so the ``/api/*`` routers and ``/openapi.json``

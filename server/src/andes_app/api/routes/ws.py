@@ -73,6 +73,70 @@ def _manager(request: Request | WebSocket) -> SessionManager | None:
     return getattr(request.app.state, "session_manager", None)
 
 
+async def require_ws_auth(websocket: WebSocket) -> bool:
+    """Shared WebSocket auth handshake (extracted from the TDS handler).
+
+    Contract — the socket MUST already be accepted before this is called:
+
+    - Reads the first text frame within ``AUTH_DEADLINE_SECONDS`` and
+      validates ``{"type":"auth","token":"..."}`` against the app's
+      ``expected_token`` in constant time. On any failure (timeout, malformed
+      JSON, wrong type, bad token) the socket is closed with ``4401`` and
+      ``False`` is returned. On success returns ``True`` *without* consuming
+      any further frames.
+    - Honors ``app.state.require_auth``: when it is ``False`` (the
+      ``serve --no-auth`` dev toggle) the token check is skipped and ``True``
+      is returned immediately, mirroring the HTTP ``require_token`` gate. This
+      keeps ``--no-auth`` dev mode working for WebSockets.
+
+    A clean client disconnect during the handshake returns ``False`` without
+    attempting a close (the socket is already gone).
+
+    Both the TDS streaming handler and the ``/jobs/events`` handler call this
+    at the start of their flow so the handshake has one source of truth.
+    """
+    require_auth = getattr(websocket.app.state, "require_auth", True)
+    if not require_auth:
+        return True
+
+    expected_token = _expected_token(websocket)
+    if expected_token is None:
+        # Misconfiguration (the CLI installs the token at startup). Surface as
+        # an internal-error close rather than an auth failure.
+        await _close_with_error(
+            websocket, WS_CLOSE_INTERNAL_ERROR, "server not configured"
+        )
+        return False
+
+    try:
+        first = await asyncio.wait_for(
+            websocket.receive_text(), timeout=AUTH_DEADLINE_SECONDS
+        )
+    except TimeoutError:
+        await _close_with_error(
+            websocket, WS_CLOSE_AUTH_FAILED, "auth deadline exceeded"
+        )
+        return False
+    except WebSocketDisconnect:
+        return False
+
+    try:
+        auth_msg = json.loads(first)
+    except json.JSONDecodeError:
+        await _close_with_error(
+            websocket, WS_CLOSE_AUTH_FAILED, "auth message must be JSON"
+        )
+        return False
+
+    if auth_msg.get("type") != "auth" or not constant_time_eq(
+        expected_token, str(auth_msg.get("token", ""))
+    ):
+        await _close_with_error(websocket, WS_CLOSE_AUTH_FAILED, "invalid token")
+        return False
+
+    return True
+
+
 @router.websocket("/ws/{session_id}")
 async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
     """WebSocket endpoint for streaming TDS results.
@@ -85,37 +149,15 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
     close.
     """
     await websocket.accept()
-    expected_token = _expected_token(websocket)
     mgr = _manager(websocket)
-    if expected_token is None or mgr is None:
+    if mgr is None:
         await _close_with_error(
             websocket, WS_CLOSE_INTERNAL_ERROR, "server not configured"
         )
         return
 
-    # ---- AUTH (first message; 2-second deadline) ----
-    try:
-        first = await asyncio.wait_for(
-            websocket.receive_text(), timeout=AUTH_DEADLINE_SECONDS
-        )
-    except TimeoutError:
-        await _close_with_error(
-            websocket, WS_CLOSE_AUTH_FAILED, "auth deadline exceeded"
-        )
-        return
-    except WebSocketDisconnect:
-        return
-
-    try:
-        auth_msg = json.loads(first)
-    except json.JSONDecodeError:
-        await _close_with_error(websocket, WS_CLOSE_AUTH_FAILED, "auth message must be JSON")
-        return
-
-    if auth_msg.get("type") != "auth" or not constant_time_eq(
-        expected_token, str(auth_msg.get("token", ""))
-    ):
-        await _close_with_error(websocket, WS_CLOSE_AUTH_FAILED, "invalid token")
+    # ---- AUTH (shared first-message handshake; 2-second deadline) ----
+    if not await require_ws_auth(websocket):
         return
 
     if not mgr.is_alive(session_id):
