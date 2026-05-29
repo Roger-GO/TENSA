@@ -14,11 +14,25 @@ if TYPE_CHECKING:
 
 
 class AndesAppError(Exception):
-    """Base class for all wrapper-level exceptions."""
+    """Base class for all wrapper-level exceptions.
+
+    ``recovery_kind`` is the single source of truth the shared error mapper
+    (Unit 4a) consults to attach a ``RecoveryDescriptor`` to the response. It
+    is a plain ``str`` here (NOT the ``RecoveryKind`` Literal in
+    ``api/schemas.py`` — importing that into ``core/`` would create a
+    core->api import cycle); the string values must match that Literal, and a
+    reflection test cross-checks for drift. The base default ``None`` means
+    'unclassified / no CTA'; the string ``'none'`` means 'considered, no
+    canonical recovery' — both render without a CTA in the UI.
+    """
+
+    recovery_kind: str | None = None
 
 
 class NoCaseLoadedError(AndesAppError):
     """Raised when an operation requires a loaded case but none has been loaded."""
+
+    recovery_kind: str | None = "load-case"
 
 
 class CaseLoadError(AndesAppError):
@@ -26,6 +40,8 @@ class CaseLoadError(AndesAppError):
 
     The original exception (if any) is chained via ``__cause__``.
     """
+
+    recovery_kind: str | None = "load-case"
 
     def __init__(self, path: str, message: str) -> None:
         super().__init__(f"failed to load case {path!r}: {message}")
@@ -40,6 +56,8 @@ class DisturbanceCommitError(AndesAppError):
     ANDES rejects all post-setup ``System.add(...)`` calls regardless of model
     type. The caller must invoke ``reload_case`` to return to pre-setup state.
     """
+
+    recovery_kind: str | None = "reload-case"
 
     def __init__(self) -> None:
         super().__init__(
@@ -56,6 +74,8 @@ class SetupFailedError(AndesAppError):
     invoke ``reload_case``.
     """
 
+    recovery_kind: str | None = "reload-case"
+
     def __init__(self, detail: str) -> None:
         super().__init__(f"ANDES setup() failed: {detail}; call reload_case() to recover")
         self.detail = detail
@@ -64,6 +84,8 @@ class SetupFailedError(AndesAppError):
 class DisturbanceValidationError(AndesAppError):
     """Raised when a disturbance specification fails validation against the
     ANDES model (e.g., bus idx not present in the loaded case)."""
+
+    recovery_kind: str | None = "none"
 
 
 class ElementValidationError(AndesAppError):
@@ -76,15 +98,21 @@ class ElementValidationError(AndesAppError):
     install-tree paths never leak to the client.
     """
 
+    recovery_kind: str | None = "none"
+
 
 class ElementNotFoundError(AndesAppError):
     """Raised when ``edit_element(model, idx, ...)`` references an idx that
     does not exist in the loaded System. Surfaced as HTTP 404."""
 
+    recovery_kind: str | None = "none"
+
 
 class SystemAlreadyLoadedError(AndesAppError):
     """Raised when ``create_blank()`` is called on a session that already has
     a loaded System. The caller must reload or open a fresh session."""
+
+    recovery_kind: str | None = "reload-case"
 
 
 class EigPrerequisiteError(AndesAppError):
@@ -98,11 +126,15 @@ class EigPrerequisiteError(AndesAppError):
     raises this error so the routes layer can surface a clean 409.
     """
 
+    recovery_kind: str | None = "run-pflow"
+
 
 class EigComputationError(AndesAppError):
     """Raised when ``ss.EIG.run()`` itself raises (e.g., singular Jacobian
     after regularization, LinAlg failure, or any other ANDES-side
     exception inside the routine body)."""
+
+    recovery_kind: str | None = "retry"
 
 
 class CpfPrerequisiteError(AndesAppError):
@@ -116,6 +148,8 @@ class CpfPrerequisiteError(AndesAppError):
     (see :class:`EigPrerequisiteError`).
     """
 
+    recovery_kind: str | None = "run-pflow"
+
 
 class CpfDivergedError(AndesAppError):
     """Raised when ``ss.CPF.run()`` / ``ss.CPF.run_qv()`` itself raises an
@@ -127,6 +161,8 @@ class CpfDivergedError(AndesAppError):
     truncated :class:`CpfResult` rather than raising. This error covers
     only the "ANDES blew up mid-routine" case.
     """
+
+    recovery_kind: str | None = "retry"
 
 
 class SePrerequisiteError(AndesAppError):
@@ -145,6 +181,8 @@ class SePrerequisiteError(AndesAppError):
     "Generate measurements first".
     """
 
+    recovery_kind: str | None = "run-pflow"
+
 
 class SeNonConvergentError(AndesAppError):
     """Raised when ``ss.SE.run()`` returned False after running to
@@ -159,6 +197,8 @@ class SeNonConvergentError(AndesAppError):
     LinAlg failure outside the singular-gain path).
     """
 
+    recovery_kind: str | None = "retry"
+
 
 class SeUnderDeterminedError(AndesAppError):
     """Raised when the measurement set has insufficient redundancy to
@@ -170,6 +210,8 @@ class SeUnderDeterminedError(AndesAppError):
     as 422 from the route layer with an actionable "add more
     measurements" message.
     """
+
+    recovery_kind: str | None = "add-measurements"
 
 
 class EigDirtyDaeError(AndesAppError):
@@ -189,6 +231,8 @@ class EigDirtyDaeError(AndesAppError):
     not know how to shrink arrays`` after EIG-induced TDS init).
     """
 
+    recovery_kind: str | None = "reload-case"
+
 
 class ElementHasDependentsError(AndesAppError):
     """Raised when ``delete_element(model, idx)`` would orphan references on
@@ -203,6 +247,8 @@ class ElementHasDependentsError(AndesAppError):
     from ``TopologyEntry`` dataclasses) so the value can cross the worker
     Pipe without re-importing the wrapper module on the parent side.
     """
+
+    recovery_kind: str | None = "none"
 
     def __init__(
         self,
