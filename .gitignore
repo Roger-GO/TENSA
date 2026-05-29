@@ -30,9 +30,10 @@ htmlcov/
 venv/
 env/
 
-# Editor / IDE
+# Editor / IDE / agent tooling
 .vscode/
 .idea/
+.claude/settings.local.json
 *.swp
 *.swo
 *~
