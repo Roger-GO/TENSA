@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from andes_app.core.errors import AndesAppError
+from andes_app.core.jobs import _JobRegistry
 from andes_app.core.worker import worker_main
 
 # Default tick for the idle-reaper background task. Smaller = more responsive
@@ -119,6 +120,12 @@ class _Session:
     # Updated by the sweep task as each iteration completes.
     sweep_iter_done: int = 0
     sweep_iter_total: int = 0
+    # v3.1 Unit 1: per-session job registry. Mirrors every routine
+    # invocation so the activity panel (Unit 11) can render in-flight +
+    # historical jobs across all kinds (PF/EIG/CPF/SE/sweep/clone-edit/...).
+    # Population is wired in Unit 5 (per-routine route migration); Unit 1
+    # only instantiates the per-session container.
+    job_registry: _JobRegistry = field(default_factory=_JobRegistry)
 
 
 RunState = Literal["pending", "running", "completed", "error"]
