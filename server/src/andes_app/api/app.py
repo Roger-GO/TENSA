@@ -141,6 +141,7 @@ def make_app(
     extra_allowed_hosts: frozenset[str] = frozenset(),
     extra_allowed_origins: frozenset[str] = frozenset(),
     static_override: Path | None = None,
+    require_auth: bool = True,
 ) -> FastAPI:
     """Build the FastAPI app. Caller is responsible for serving it via
     uvicorn (see ``andes_app.cli``).
@@ -163,6 +164,10 @@ def make_app(
         await mgr.start()
         app.state.session_manager = mgr
         app.state.expected_token = expected_token
+        # ``require_auth=False`` (serve --no-auth dev toggle) makes the
+        # ``require_token`` dependency a no-op while leaving it wired on every
+        # route. Default True; the token is still installed either way.
+        app.state.require_auth = require_auth
         app.state.workspace = workspace
         try:
             yield
