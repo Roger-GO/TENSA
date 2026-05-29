@@ -29,7 +29,16 @@ function mockFetchOnce(response: Response | Error): void {
 describe('<TokenPasteModal />', () => {
   beforeEach(() => {
     sessionStorage.clear();
-    useAuthStore.setState({ token: null, persistFailed: false });
+    // authProbeDone: true + authDisabled: false is the realistic precondition
+    // for the paste flow — the boot no-auth probe resolved against an auth-on
+    // substrate, so the modal is shown. (The modal stays hidden until the
+    // probe resolves, to avoid flashing on a no-auth backend.)
+    useAuthStore.setState({
+      token: null,
+      persistFailed: false,
+      authDisabled: false,
+      authProbeDone: true,
+    });
     // Reset URL hash if any test set it.
     if (typeof window !== 'undefined') {
       window.history.replaceState(null, '', window.location.pathname);
@@ -49,6 +58,20 @@ describe('<TokenPasteModal />', () => {
 
   it('returns null when token is set', () => {
     useAuthStore.setState({ token: VALID_TOKEN, persistFailed: false });
+    const { container } = render(<TokenPasteModal />);
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('returns null when the backend is no-auth (authDisabled)', () => {
+    useAuthStore.setState({ token: null, authDisabled: true, authProbeDone: true });
+    const { container } = render(<TokenPasteModal />);
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('stays hidden until the boot probe resolves (no flash)', () => {
+    useAuthStore.setState({ token: null, authDisabled: false, authProbeDone: false });
     const { container } = render(<TokenPasteModal />);
     expect(container.firstChild).toBeNull();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

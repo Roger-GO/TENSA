@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from '@/components/shell/AppShell';
 import { TokenPasteModal } from '@/components/auth/TokenPasteModal';
@@ -27,6 +27,7 @@ import { useSldFrameOverlay } from '@/components/sld/overlay';
 import { RecoveryBadge } from '@/components/shell/RecoveryBadge';
 import { setTokenGetter } from '@/api/client';
 import { getAuthToken } from '@/store';
+import { useAuthStore } from '@/store/auth';
 import { useCaseStore } from '@/store/case';
 
 // Wire the API client's token-getter to the auth store. This runs once at
@@ -58,6 +59,39 @@ setTokenGetter(getAuthToken);
  * - Runtime crash (5xx) → RuntimeCrashModal as the one allowed
  *   non-destructive modal.
  */
+/**
+ * Dev-mode no-auth detection. When no token is present at boot, probe the
+ * substrate once: a 200 means it was started with `serve --no-auth`, so the
+ * token gate is skipped (the API client sends no header and the no-auth
+ * backend accepts it); a 401 leaves the TokenPasteModal to handle auth. The
+ * probe is one-shot (StrictMode-safe via a ref) and never aborts — it's an
+ * idempotent GET. `authProbeDone` keeps the modal hidden until this resolves
+ * so a no-auth backend never flashes the paste modal.
+ */
+function useNoAuthProbe(): void {
+  const setAuthDisabled = useAuthStore((s) => s.setAuthDisabled);
+  const markAuthProbeDone = useAuthStore((s) => s.markAuthProbeDone);
+  const probedRef = useRef(false);
+  useEffect(() => {
+    if (probedRef.current) return;
+    probedRef.current = true;
+    if (getAuthToken() !== null) {
+      markAuthProbeDone();
+      return;
+    }
+    void (async () => {
+      try {
+        const res = await fetch('/api/sessions');
+        if (res.status === 200) setAuthDisabled();
+      } catch {
+        // Substrate unreachable — leave the TokenPasteModal to surface it.
+      } finally {
+        markAuthProbeDone();
+      }
+    })();
+  }, [setAuthDisabled, markAuthProbeDone]);
+}
+
 function AppInner({ children }: { children: React.ReactNode }) {
   // Top-level recovery driver — must live INSIDE QueryClientProvider so
   // ``useCreateSession`` / ``useLoadCase`` can subscribe to the cache.
@@ -65,6 +99,9 @@ function AppInner({ children }: { children: React.ReactNode }) {
   // unmount that would otherwise kill the recovery cycle once a case is
   // loaded (v0.1.y Unit 5 bug fix).
   useSessionRecovery();
+  // Dev-mode: detect a `serve --no-auth` substrate so the token gate is
+  // skipped without a paste modal (no-op against an auth-on substrate).
+  useNoAuthProbe();
   // v0.2 Unit 5: SINGLE rAF loop driving the SLD streaming overlay.
   // Mounted once at the App root so all BusNodes share one tick source
   // (avoids N-rAF-loops-for-N-buses at NPCC scale). The hook is a

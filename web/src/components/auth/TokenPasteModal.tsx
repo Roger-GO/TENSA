@@ -84,6 +84,8 @@ export function TokenPasteModal(): React.ReactElement | null {
   const token = useAuthStore((s) => s.token);
   const persistFailed = useAuthStore((s) => s.persistFailed);
   const setToken = useAuthStore((s) => s.setToken);
+  const authDisabled = useAuthStore((s) => s.authDisabled);
+  const authProbeDone = useAuthStore((s) => s.authProbeDone);
 
   const [inputValue, setInputValue] = useState<string>('');
   const [pending, setPending] = useState<PendingState>({ kind: 'idle' });
@@ -173,7 +175,10 @@ export function TokenPasteModal(): React.ReactElement | null {
   };
 
   // ---- render -----------------------------------------------------------
-  if (token !== null) return null;
+  // Hidden when: a token is set; the backend is no-auth (serve --no-auth); or
+  // the boot probe hasn't resolved yet (so a no-auth backend never flashes
+  // this modal before the probe lands).
+  if (token !== null || authDisabled || !authProbeDone) return null;
 
   const trimmed = inputValue.trim();
   const formatValid = TOKEN_FORMAT.test(trimmed);
