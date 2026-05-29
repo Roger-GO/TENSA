@@ -1436,6 +1436,33 @@ Phased delivery: Phase 0 first (gate everything downstream), then Phases 1-2 in 
 
 ---
 
+### Phase 7 — Final acceptance: browser UX verification via Playwright MCP
+
+- [ ] **Unit 25: End-to-end UX verification in a real browser (Playwright MCP)**
+
+**Goal:** The v3.1 overhaul targets UX, so `pytest`/`vitest` passing is necessary but NOT sufficient — green code tests can coexist with a frozen UI, a silent failure, or an unreachable capability. After ALL prior units land, run the actual app (FastAPI substrate + Vite web client) and drive every UX-critical workflow through Playwright MCP (`mcp__playwright__*`), capturing screenshots as evidence. This is the acceptance gate for the whole effort. (Per memory `ux-playwright-verification`, added at user request.)
+
+**Requirements:** R1–R18 (behavioural acceptance, browser-observed).
+
+**Dependencies:** All prior units (0–24).
+
+**Setup:**
+- Launch the substrate: `server/` FastAPI app (uvicorn) with a real ANDES env (the unit-test env lacks the `andes` package; this gate needs it installed).
+- Launch the web client: `web/` Vite dev server (or production build preview) pointed at the substrate; inject the per-launch token into sessionStorage.
+- Connect Playwright MCP to the running web URL.
+
+**Workflows to verify (per pillar) — each scripted + screenshotted:**
+- *Pillar 1 — non-blocking:* load `kundur_full`; start a long routine (TDS stream / sweep) and confirm the UI stays interactive (pan SLD, open inspector, switch tabs) while it runs; the Activity panel shows the in-flight job with live progress; firing a second routine on the busy session surfaces the 409 "session busy" wait/cancel affordance, never a freeze or spinner-of-death.
+- *Pillar 2 — error visibility:* provoke each recoverable error from the GUI (run EIG/CPF/SE without PF → prerequisite; bad param edit → validation; reload-needed states); assert `<ProblemDetailsErrorSurface>` renders title + "why" detail + a recovery CTA matching the error's `recovery_kind`, and clicking the CTA performs the recovery.
+- *Pillar 3 — GUI parity:* walk the parity ledger; confirm every capability (CPF QV / gen-nose, advanced settings, etc.) is reachable via GUI / command palette with no CLI-only escape hatch.
+- *Pillar 4 — dynamic inspector:* load a dyr/xlsx case with dynamic models; confirm controllers are visible + inspectable on the SLD and in the inspector; the dynamic-content indicator correctly reflects whether dynamic routines are available; edit a whitelisted dynamic param (clone-on-write) and confirm it round-trips (edit → setup → re-render), undo/redo works, and the modified case saves/loads as a custom case.
+
+**Verification:** A screenshot-backed report demonstrating each pillar's workflow succeeds in the browser. Any UX regression (frozen UI, missing/incorrect error surface, unreachable capability, dynamic edit not round-tripping) is a release blocker. Screenshots captured under repo root as `phase7-*.png` (transient — gitignored per the existing polish-screenshot convention).
+
+**Execution note:** Browser-observed acceptance — verifies *behaviour in the running app*, not code. If a workflow fails here despite green code tests, the failing flow gets a regression test added in its owning unit before re-verifying.
+
+---
+
 ## System-Wide Impact
 
 - **Interaction graph:** Every routine flow (PF, EIG, CPF, SE, TDS, sweep, snapshot, bundle, element add/edit/delete) now registers in `_JobRegistry`. The session lock try-acquire affects every concurrent invocation. The `recovery` field flows through every ProblemDetails. The activity panel and in-flight chip observe every job. The inspector's controller branch affects every selection. The write router affects every dynamic-param edit.
@@ -1525,7 +1552,12 @@ Phased delivery: Phase 0 first (gate everything downstream), then Phases 1-2 in 
 - Unit 22 — Inspector clone-edit UI + Edit/Run mode toggle + undo/redo + save-as dialog *(parallelisable with Unit 23 after Unit 21 lands)*
 - Unit 23 — Modified-from-Original dot + revert-this-field affordance *(parallelisable with Unit 22)*
 
-**Phase 6 milestone (v3.1.0 release): full feature complete. Tag a single v3.1.0 release; mint Zenodo DOI.**
+**Phase 6 milestone (full feature complete). Do NOT tag the release yet — Phase 7 is the acceptance gate.**
+
+### Phase 7 — Final acceptance: browser UX verification (Wk 9)
+- Unit 25 — End-to-end UX verification of all four pillars in a real browser via Playwright MCP (`mcp__playwright__*`); screenshot-backed; UX regressions are release blockers. Runs only after all prior units land.
+
+**Phase 7 milestone (v3.1.0 release): all four UX pillars verified behaviourally in-browser. Only then tag a single v3.1.0 release; mint Zenodo DOI.**
 
 ## Alternative Approaches Considered
 
