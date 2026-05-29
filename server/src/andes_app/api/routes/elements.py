@@ -24,6 +24,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from andes_app.api.auth import RequireToken
+from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
     AddElementRequest,
     BlankSystemResponse,
@@ -97,46 +98,35 @@ def _enforce_body_size(request: Request) -> None:
         )
 
 
-def _map_worker_error(exc: WorkerError) -> HTTPException:
-    """Translate WorkerError categories into HTTP responses for these
-    endpoints. Mirrors the disturbance.py mapping where overlap exists."""
+def _to_http_error(exc: WorkerError) -> HTTPException:
+    """Route-local adapter over the shared ``map_worker_error`` (Unit 4b).
+
+    The shared mapper owns the canonical category→status table, recovery, and the
+    body shape. This route carries two documented per-route deltas (audit #9):
+
+    - ``SetupFailedError`` → **409** here (pre-setup gate semantics), overriding the
+      shared table's canonical 422. ``disturbance-commit`` is also 409. Both get the
+      "reload to pre-setup state" hint appended to their detail.
+    - everything else uses the canonical mapping (``SystemAlreadyLoadedError`` /
+      ``no-case-loaded`` → 409, ``ElementNotFoundError`` → 404,
+      ``ElementValidationError`` / ``DisturbanceValidationError`` / ``CaseLoadError``
+      / ``ElementHasDependentsError`` → 422). The DELETE route handles
+      ``ElementHasDependentsError`` with its bespoke ``DeleteBlockedResponse`` branch
+      *before* calling this adapter, so the generic 422 path here only fires for the
+      non-DELETE call sites.
+    """
     if exc.category in ("disturbance-commit", "SetupFailedError"):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"{exc.detail} — call POST /api/sessions/{{id}}/reload to return "
-                "to pre-setup state."
-            ),
+        exc.detail = (
+            f"{exc.detail} — call POST /api/sessions/{{id}}/reload to return "
+            "to pre-setup state."
         )
-    if exc.category == "SystemAlreadyLoadedError":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
-        )
-    if exc.category == "no-case-loaded":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
-        )
-    if exc.category == "ElementNotFoundError":
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=exc.detail,
-        )
-    if exc.category in {
-        "ElementValidationError",
-        "DisturbanceValidationError",
-        "CaseLoadError",
-        "ElementHasDependentsError",
-    }:
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=exc.detail,
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"{exc.category}: {exc.detail}",
-    )
+        http = map_worker_error(exc)
+        # Audit #9 override: pre-setup gate semantics make ``SetupFailedError`` a
+        # 409 here (the canonical table is 422). ``disturbance-commit`` is already
+        # 409 in the shared table; the assignment is a no-op for it.
+        http.status_code = status.HTTP_409_CONFLICT
+        return http
+    return map_worker_error(exc)
 
 
 # ---- topology schema --------------------------------------------------------
@@ -221,7 +211,7 @@ async def add_element(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
     return ElementCreated(element=TopologyEntry(**payload))
 
 
@@ -284,7 +274,7 @@ async def edit_element(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
     return TopologyEntry(**payload)
 
 
@@ -327,7 +317,7 @@ async def create_blank(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
     return BlankSystemResponse(topology=TopologySummary(**payload))
 
 
@@ -420,7 +410,7 @@ async def save_case(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
     bytes_written = canonical.stat().st_size if canonical.exists() else 0
     return SaveCaseResponse(filename=body.filename, bytes_written=bytes_written)
 
@@ -464,7 +454,7 @@ async def undo_last_edit(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
     return TopologySummary(**payload)
 
 
@@ -542,5 +532,5 @@ async def delete_element(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 content=body.model_dump(),
             )
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
     return TopologySummary(**payload)

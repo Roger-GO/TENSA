@@ -11,8 +11,9 @@ case + a synthesized profile xlsx. Exercises:
 - Edge: profile assigned to deleted device → cascade-delete covered
   by ``test_pmu_delete`` parity (TimeSeries delegates to
   ``delete_element`` so the same code path applies).
-- Edge: file write fails → covered as 500 mapping in
-  ``_map_worker_error``.
+- Edge: file write fails → covered as 500 mapping in the route's
+  ``_to_http_error`` (SetupFailedError override over the shared
+  ``map_worker_error``).
 - Error: mandatory field missing → 422 (Pydantic).
 - Error: mode=2 → 422 with NotImplementedError hint.
 - Error: profile path outside workspace → 422.

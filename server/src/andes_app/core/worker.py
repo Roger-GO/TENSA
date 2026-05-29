@@ -68,7 +68,7 @@ from andes_app.core.errors import (
 # AndesAppError catches the new ElementValidationError /
 # ElementNotFoundError / SystemAlreadyLoadedError subclasses and forwards
 # them with their class name as ``category``; the routes layer maps each
-# to the right HTTP status (see api/routes/elements.py:_map_worker_error).
+# to the right HTTP status (see api/error_mapping.py:map_worker_error).
 from andes_app.core.stream import (
     DEFAULT_VARS,
     VAR_GROUPS,

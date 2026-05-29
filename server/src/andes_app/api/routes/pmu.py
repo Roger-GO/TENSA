@@ -37,6 +37,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api.auth import RequireToken
+from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
     ProblemDetails,
     TopologyEntry,
@@ -134,49 +135,32 @@ def _manager(request: Request) -> SessionManager:
     return mgr
 
 
-def _map_worker_error(exc: WorkerError) -> HTTPException:
-    """Map worker error categories to HTTP responses for PMU routes.
+def _to_http_error(exc: WorkerError) -> HTTPException:
+    """Route-local adapter over the shared ``map_worker_error`` (Unit 4b).
 
-    - ``no-case-loaded`` → 409 (no case loaded).
-    - ``disturbance-commit`` → 409 (post-setup add/delete; reload to recover).
-    - ``SetupFailedError`` → 409 on PMU CSV export (TDS not run yet) /
-      422 elsewhere with reload hint.
-    - ``ElementValidationError`` → 422 (bad bus idx, ANDES rejection).
-    - ``ElementNotFoundError`` → 404 (delete of a non-existent PMU).
+    The shared mapper owns the canonical category→status table, recovery, and the
+    body shape. This route carries two documented per-route deltas (audit #11):
+
+    - ``disturbance-commit`` → 409 (already canonical) with the "reload to pre-setup
+      state" hint appended.
+    - ``SetupFailedError`` → **409** here (PMU CSV export: TDS not run yet),
+      overriding the shared table's canonical 422. Detail is verbatim (no hint).
+    - everything else uses the canonical mapping (``no-case-loaded`` → 409,
+      ``ElementNotFoundError`` → 404, ``ElementValidationError`` /
+      ``ElementHasDependentsError`` → 422; no dependents body on PMU).
     """
-    category = exc.category
-    if category == "no-case-loaded":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
+    if exc.category == "disturbance-commit":
+        exc.detail = (
+            f"{exc.detail} — call POST /api/sessions/{{id}}/reload to "
+            "return to pre-setup state."
         )
-    if category == "disturbance-commit":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"{exc.detail} — call POST /api/sessions/{{id}}/reload to "
-                "return to pre-setup state."
-            ),
-        )
-    if category == "SetupFailedError":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
-        )
-    if category == "ElementNotFoundError":
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=exc.detail,
-        )
-    if category in {"ElementValidationError", "ElementHasDependentsError"}:
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=exc.detail,
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"{category}: {exc.detail}",
-    )
+    if exc.category == "SetupFailedError":
+        http = map_worker_error(exc)
+        # Audit #11 override: SetupFailedError on the PMU CSV export means TDS
+        # has not been run yet — a 409 conflict, not the canonical 422.
+        http.status_code = status.HTTP_409_CONFLICT
+        return http
+    return map_worker_error(exc)
 
 
 def _entry_from_payload(payload: object) -> TopologyEntry:
@@ -262,7 +246,7 @@ async def add_pmu(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     return _entry_from_payload(payload)
 
@@ -301,7 +285,7 @@ async def list_pmus(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     if not isinstance(payload, list):
         raise HTTPException(
@@ -363,7 +347,7 @@ async def delete_pmu(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -415,7 +399,7 @@ async def export_pmu_csv(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     if not isinstance(payload, str):
         raise HTTPException(

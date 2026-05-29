@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api.auth import RequireToken
+from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
     AddDisturbancesRequest,
     AddDisturbancesResponse,
@@ -66,30 +67,20 @@ def _manager(request: Request) -> SessionManager:
     return mgr
 
 
-def _map_worker_error(exc: WorkerError) -> HTTPException:
-    """Translate WorkerError categories into HTTP responses for this endpoint."""
+def _to_http_error(exc: WorkerError) -> HTTPException:
+    """Route-local adapter over the shared ``map_worker_error`` (Unit 4b).
+
+    The shared mapper owns the canonical category→status table (``no-case-loaded``
+    → 409, ``disturbance-commit`` → 409, ``DisturbanceValidationError`` /
+    ``CaseLoadError`` → 422), recovery, and the body shape. This route only appends
+    the documented "reload to pre-setup state" hint to ``disturbance-commit``.
+    """
     if exc.category == "disturbance-commit":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"{exc.detail} — call POST /api/sessions/{{id}}/reload to return "
-                "to pre-setup state."
-            ),
+        exc.detail = (
+            f"{exc.detail} — call POST /api/sessions/{{id}}/reload to return "
+            "to pre-setup state."
         )
-    if exc.category == "no-case-loaded":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
-        )
-    if exc.category in {"DisturbanceValidationError", "CaseLoadError"}:
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=exc.detail,
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"{exc.category}: {exc.detail}",
-    )
+    return map_worker_error(exc)
 
 
 @router.post(
@@ -134,7 +125,7 @@ async def add_disturbances(
                 detail=str(exc),
             ) from exc
         except WorkerError as exc:
-            raise _map_worker_error(exc) from exc
+            raise _to_http_error(exc) from exc
         accepted.append(DisturbanceAck(kind=spec.kind, idx=idx))
     return AddDisturbancesResponse(accepted=accepted)
 
@@ -188,7 +179,7 @@ async def list_disturbances(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     if not isinstance(payload, list):
         raise HTTPException(

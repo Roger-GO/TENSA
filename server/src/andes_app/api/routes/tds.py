@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 
 from andes_app.api.auth import RequireToken
+from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
     AbortResponse,
     ProblemDetails,
@@ -43,23 +44,18 @@ def _manager(request: Request) -> SessionManager:
     return mgr
 
 
-def _map_worker_error(exc: WorkerError) -> HTTPException:
-    if exc.category == "no-case-loaded":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
-        )
+def _to_http_error(exc: WorkerError) -> HTTPException:
+    """Route-local adapter over the shared ``map_worker_error`` (Unit 4b).
+
+    The shared mapper owns the canonical category→status table (``no-case-loaded``
+    → 409, ``SetupFailedError`` → 422), recovery, and the body shape. This route
+    only appends the documented "reload to recover" hint to ``SetupFailedError``.
+    """
     if exc.category == "SetupFailedError":
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
-            ),
+        exc.detail = (
+            f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
         )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"{exc.category}: {exc.detail}",
-    )
+    return map_worker_error(exc)
 
 
 @router.post(
@@ -115,7 +111,7 @@ async def run_tds(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     return TdsBatchResult(
         run_id=uuid.uuid4().hex,

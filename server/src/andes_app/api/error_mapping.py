@@ -13,11 +13,13 @@ Two public entry points:
   and returns a ``RecoveryDescriptor`` iff the kind is a known, non-``"none"``
   ``RecoveryKind``; otherwise ``None`` (so both ``recovery_kind="none"`` and a
   missing/``None`` attr render without a CTA).
-- :func:`map_worker_error` — consolidates the 13 per-route ``_map_worker_error``
-  helpers (audited in ``_error_audit.md``) into one mapping, preserving each
-  documented status + extras shape and attaching ``recovery``.
+- :func:`map_worker_error` — consolidates the 13 per-route worker-error
+  helpers (audited during Unit 4a in the now-removed ``_error_audit.md``;
+  the surviving contract lives in the v3.1 plan, ``docs/plans/
+  2026-05-29-001-feat-v3-ux-overhaul-plan.md`` §"Unit 4") into one mapping,
+  preserving each documented status + extras shape and attaching ``recovery``.
 
-Design (documented in ``_error_audit.md``): the worker's wire ``category`` is
+Design: the worker's wire ``category`` is
 almost always the ``AndesAppError`` subclass ``__name__`` (e.g.
 ``"EigPrerequisiteError"``), but two categories are bespoke hyphenated strings
 (``"no-case-loaded"`` for :class:`NoCaseLoadedError`, ``"disturbance-commit"``
@@ -89,7 +91,8 @@ _WIRE_CATEGORY_ALIASES: dict[str, str] = {
 
 
 # Canonical ``category -> HTTP status``. This is the CONTRACT distilled from
-# the 13 per-route audits (``_error_audit.md``); it captures the *dominant*
+# the 13 per-route audits (originally ``_error_audit.md``, removed once the
+# migration landed; see the v3.1 plan §"Unit 4"); it captures the *dominant*
 # status for each category. Where a single route overrides the canonical
 # status (pmu ``SetupFailedError`` -> 409, profiles ``SetupFailedError`` ->
 # 500, snapshot ``SetupFailedError`` -> 422, bundle-export wide 422 bucket),
@@ -181,8 +184,9 @@ def map_worker_error(
 ) -> HTTPException:
     """Map a :class:`WorkerError` to an :class:`HTTPException`.
 
-    Consolidates the per-route ``_map_worker_error`` helpers (see
-    ``_error_audit.md``): looks up the canonical HTTP status for the wire
+    Consolidates the per-route worker-error helpers (audited during Unit 4a
+    in the now-removed ``_error_audit.md``): looks up the canonical HTTP
+    status for the wire
     ``category``, attaches the recovery descriptor read off the resolved error
     class, and spreads any ``extras`` (e.g. the DELETE-elements
     ``dependents`` / ``total``) into the detail dict so they ride along the
