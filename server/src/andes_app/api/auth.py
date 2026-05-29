@@ -38,7 +38,17 @@ def _supplied_token_from_scope(request: Request) -> str | None:
 
 async def require_token(request: Request) -> None:
     """FastAPI dependency. Raises 401 if the inbound request did not carry a
-    valid ``X-Andes-Token`` header."""
+    valid ``X-Andes-Token`` header.
+
+    When the app was built with ``require_auth=False`` (the ``serve --no-auth``
+    dev toggle), this is a no-op: the dependency stays wired on every route so
+    the auth contract and OpenAPI security scheme are preserved, but the token
+    is not enforced. Auth is on by default; ``--no-auth`` is opt-in and
+    loopback-only. The Host/Origin ASGI middleware still runs regardless, so
+    this does not open the substrate to cross-origin callers.
+    """
+    if not getattr(request.app.state, "require_auth", True):
+        return
     expected = _expected_token_from_app(request)
     supplied = _supplied_token_from_scope(request)
     if supplied is None or not constant_time_eq(expected, supplied):

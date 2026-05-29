@@ -16,6 +16,7 @@ Subcommands:
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import threading
 import time
@@ -25,6 +26,7 @@ from urllib.parse import urlparse
 
 import typer
 import uvicorn
+from fastapi import FastAPI
 
 from andes_app.api.app import make_app
 from andes_app.security.paths import ensure_workspace
@@ -102,6 +104,24 @@ def serve(
             "boot via ``history.replaceState``."
         ),
     ),
+    no_auth: bool = typer.Option(
+        False,
+        "--no-auth",
+        help=(
+            "DEV ONLY: disable X-Andes-Token enforcement. The auth dependency "
+            "stays wired on every route (OpenAPI security scheme unchanged) but "
+            "is bypassed, so local debugging needs no token. Loopback bind + "
+            "Host/Origin checks still apply. Never use off-loopback."
+        ),
+    ),
+    reload: bool = typer.Option(
+        False,
+        "--reload",
+        help=(
+            "DEV ONLY: auto-reload the server when files in the andes_app "
+            "package change (uvicorn reload). Requires a fixed --port."
+        ),
+    ),
 ) -> None:
     """Run the andes-app substrate."""
     logging.basicConfig(
@@ -175,6 +195,42 @@ def serve(
         extra_hosts.add(host_only)
         log.info("CORS allow-origin: %s (host: %s)", origin, host_only)
 
+    if no_auth:
+        log.warning(
+            "DEV --no-auth: X-Andes-Token enforcement is DISABLED. The auth "
+            "dependency is bypassed (structure preserved); use only on a "
+            "trusted loopback bind for local debugging."
+        )
+
+    # ``--reload`` runs uvicorn against an import-string factory so the
+    # reloader subprocess can re-import the app on source changes. The factory
+    # is called with no args in the worker, so config is threaded through
+    # ``ANDES_APP_RELOAD_*`` env vars set here. With --no-auth there is no token
+    # churn across reloads.
+    if reload:
+        os.environ["ANDES_APP_RELOAD_WORKSPACE"] = str(canonical_workspace)
+        os.environ["ANDES_APP_RELOAD_BIND"] = bind
+        os.environ["ANDES_APP_RELOAD_PORT"] = str(port)
+        os.environ["ANDES_APP_RELOAD_NO_AUTH"] = "1" if no_auth else "0"
+        os.environ["ANDES_APP_RELOAD_TOKEN"] = token.value
+        os.environ["ANDES_APP_RELOAD_ORIGINS"] = ",".join(sorted(extra_origins))
+        os.environ["ANDES_APP_RELOAD_HOSTS"] = ",".join(sorted(extra_hosts))
+        os.environ["ANDES_APP_RELOAD_MAX_SESSIONS"] = str(max_sessions)
+        os.environ["ANDES_APP_RELOAD_IDLE"] = str(idle_timeout_seconds)
+        watch_dir = Path(__file__).resolve().parent  # the andes_app package
+        log.info("dev --reload: watching %s for changes", watch_dir)
+        uvicorn.run(
+            "andes_app.cli:_reload_app_factory",
+            factory=True,
+            reload=True,
+            reload_dirs=[str(watch_dir)],
+            host=bind,
+            port=port,
+            log_level="info",
+            access_log=False,
+        )
+        return
+
     fastapi_app = make_app(
         expected_token=token.value,
         workspace=canonical_workspace,
@@ -184,6 +240,7 @@ def serve(
         idle_timeout_seconds=idle_timeout_seconds,
         extra_allowed_hosts=frozenset(extra_hosts),
         extra_allowed_origins=frozenset(extra_origins),
+        require_auth=not no_auth,
     )
 
     # ``--open`` sentinel: spawn a watcher thread that polls until uvicorn
@@ -207,6 +264,40 @@ def serve(
         port=port,
         log_level="info",
         access_log=False,
+    )
+
+
+def _reload_app_factory() -> FastAPI:
+    """App factory for ``serve --reload`` (DEV ONLY).
+
+    uvicorn's reloader re-imports this module in a worker subprocess and calls
+    this with no args, so every config value is read from the
+    ``ANDES_APP_RELOAD_*`` env vars that ``serve`` sets before ``uvicorn.run``.
+    Not used on the normal (non-reload) path.
+    """
+    workspace = Path(os.environ["ANDES_APP_RELOAD_WORKSPACE"])
+    bind = os.environ.get("ANDES_APP_RELOAD_BIND", "127.0.0.1")
+    port = int(os.environ.get("ANDES_APP_RELOAD_PORT", "0"))
+    no_auth = os.environ.get("ANDES_APP_RELOAD_NO_AUTH") == "1"
+    token = os.environ.get("ANDES_APP_RELOAD_TOKEN", "")
+    origins = frozenset(
+        o for o in os.environ.get("ANDES_APP_RELOAD_ORIGINS", "").split(",") if o
+    )
+    hosts = frozenset(
+        h for h in os.environ.get("ANDES_APP_RELOAD_HOSTS", "").split(",") if h
+    )
+    max_sessions = int(os.environ.get("ANDES_APP_RELOAD_MAX_SESSIONS", "4"))
+    idle = float(os.environ.get("ANDES_APP_RELOAD_IDLE", "180.0"))
+    return make_app(
+        expected_token=token,
+        workspace=ensure_workspace(workspace),
+        bind_host=bind,
+        bind_port=port,
+        max_sessions=max_sessions,
+        idle_timeout_seconds=idle,
+        extra_allowed_hosts=hosts,
+        extra_allowed_origins=origins,
+        require_auth=not no_auth,
     )
 
 
