@@ -35,8 +35,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from andes_app.core.errors import AndesAppError
-from andes_app.core.jobs import _JobRegistry
+from andes_app.core.errors import AndesAppError, SessionBusyError
+from andes_app.core.jobs import JobRecord, JobStatus, _JobRegistry
 from andes_app.core.worker import worker_main
 
 # Default tick for the idle-reaper background task. Smaller = more responsive
@@ -105,7 +105,7 @@ class _Session:
     ctrl: Any  # multiprocessing.connection.Connection (no Generic in 3.12 stdlib)
     data: Any
     abort_event: Any  # multiprocessing.synchronize.Event
-    lock: threading.Lock = field(default_factory=threading.Lock)
+    lock: threading.RLock = field(default_factory=threading.RLock)
     seq: int = 0
     last_active: float = field(default_factory=time.monotonic)
     closed: bool = False
@@ -126,6 +126,23 @@ class _Session:
     # Population is wired in Unit 5 (per-routine route migration); Unit 1
     # only instantiates the per-session container.
     job_registry: _JobRegistry = field(default_factory=_JobRegistry)
+
+
+def _current_inflight_job(sess: _Session) -> JobRecord | None:
+    """Return the session's current in-flight job for ``SessionBusyError``.
+
+    Prefers a ``running`` job over a ``pending`` one, and the
+    most-recently-updated within each bucket. Returns ``None`` when the
+    registry holds no in-flight record — the race window where the lock is
+    held but the row has not yet been inserted, and (until Unit 5 wires
+    per-route registration) the common case.
+    """
+    statuses: tuple[JobStatus, ...] = ("running", "pending")
+    for status in statuses:
+        jobs = sess.job_registry.list_jobs(status=status)
+        if jobs:
+            return max(jobs, key=lambda job: job.updated_at)
+    return None
 
 
 RunState = Literal["pending", "running", "completed", "error"]
@@ -372,16 +389,25 @@ class SessionManager:
         *,
         timeout: float | None = None,
         bypass_sweep_gate: bool = False,
+        bypass_session_gate: bool = False,
     ) -> Any:
         """Send an op to the session's worker and await the response.
 
-        One in-flight invocation per session at a time (per-session
-        ``Lock``). Raises:
+        At most one in-flight invocation per session at a time (per-session
+        ``RLock``). The gate is now *non-blocking*: a second concurrent
+        request fails fast rather than queueing behind the in-flight op.
+        Raises:
 
         - ``SessionExpiredError`` if the session was reaped or never existed.
         - ``SweepInProgressError`` if a sweep is holding the session lock
           (Unit 18). Skip this check by passing ``bypass_sweep_gate=True``
           — only the sweep's own background-task path uses this escape.
+        - ``SessionBusyError`` if another operation already holds the session
+          ``RLock`` (the non-blocking try-acquire failed). The routes layer
+          maps this to 409. ``bypass_session_gate=True`` skips this fail-fast
+          gate and acquires with a blocking wait instead (re-entrant on the
+          same thread); it is reserved for future internal callers and is
+          unused in v3.1.
         - ``WorkerError`` if the worker returned a structured error response.
         - ``asyncio.TimeoutError`` if ``timeout`` is set and exceeded.
         """
@@ -399,7 +425,17 @@ class SessionManager:
         loop = asyncio.get_running_loop()
 
         def _rpc() -> Any:
-            with sess.lock:
+            # Non-blocking session gate (KTD-2a/2b). The RLock is acquired and
+            # released on this executor thread (never the event loop), so it
+            # provides true mutual exclusion between distinct concurrent
+            # invocations. A second request whose op is already in flight fails
+            # fast with SessionBusyError instead of blocking the executor.
+            # bypass_session_gate (see the docstring) takes a blocking acquire.
+            if bypass_session_gate:
+                sess.lock.acquire()
+            elif not sess.lock.acquire(blocking=False):
+                raise SessionBusyError(current_job=_current_inflight_job(sess))
+            try:
                 sess.seq += 1
                 sess.last_active = time.monotonic()
                 seq = sess.seq
@@ -407,6 +443,8 @@ class SessionManager:
                 response = sess.data.recv()
                 sess.last_active = time.monotonic()
                 return response
+            finally:
+                sess.lock.release()
 
         if timeout is not None:
             response = await asyncio.wait_for(

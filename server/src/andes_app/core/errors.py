@@ -7,7 +7,10 @@ specific HTTP status + rfc7807 ``ProblemDetails`` body in Unit 7.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from andes_app.core.jobs import JobRecord
 
 
 class AndesAppError(Exception):
@@ -217,3 +220,40 @@ class ElementHasDependentsError(AndesAppError):
         # Dependents capped at 25; ``total`` is the full count.
         self.dependents = dependents
         self.total = total
+
+
+class SessionBusyError(AndesAppError):
+    """Raised by ``SessionManager.invoke`` when the per-session lock is
+    already held by an in-flight operation (the non-blocking try-acquire
+    failed) — KTD-2a/2b of the v3.1 UX overhaul.
+
+    Unlike :class:`~andes_app.core.session.SweepInProgressError` (a
+    long-running sweep deliberately holds the session for many iterations),
+    this is the general single-operation contention guard: one routine is
+    already running on this session and a second request would otherwise
+    block the event loop. Surfacing it lets the routes layer return a clean
+    ``409 Conflict`` with a ``wait-for-job`` recovery descriptor so the UI
+    can show the in-flight job and offer wait/cancel instead of freezing.
+
+    ``current_job`` carries the in-flight :class:`~andes_app.core.jobs.JobRecord`
+    when the registry knows about it; it is ``None`` during the race window
+    where the lock is held but the job row has not yet been inserted, and —
+    until Unit 5 wires per-route registry population — in the common case.
+
+    The ``recovery_kind`` / ``http_status`` class attributes are the single
+    source of truth the shared error mapper (Unit 4a) consults.
+    """
+
+    recovery_kind: str | None = "wait-for-job"
+    http_status: int = 409
+
+    def __init__(self, current_job: JobRecord | None = None) -> None:
+        if current_job is not None:
+            detail = (
+                f"session is busy with an in-flight {current_job.kind} "
+                f"operation (job {current_job.id})"
+            )
+        else:
+            detail = "session is busy with an in-flight operation"
+        super().__init__(detail)
+        self.current_job = current_job
