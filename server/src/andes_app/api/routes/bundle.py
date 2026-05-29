@@ -30,6 +30,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from andes_app.api._run_as_job import _run_as_job
 from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
@@ -120,6 +121,16 @@ class BundleImportResponse(BaseModel):
         description=(
             "Count of disturbance specs successfully re-applied to the "
             "newly-loaded System. Zero on ``status=plan``."
+        ),
+    )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring the bundle-import routine (v3.1 Unit "
+            "5b, kind ``bundle-import``). Recorded in the manager-wide global "
+            "registry (KTD-20) so it survives the session being replaced on a "
+            "committed import. Present on both the ``committed`` (200) body and "
+            "the ``plan`` (409) body. ``null`` on legacy responses."
         ),
     )
 
@@ -303,18 +314,36 @@ async def import_bundle(
         )
 
     mgr = _manager(request)
+    # request_summary drops the (large, binary) zip body — the user-facing
+    # retry knobs are the resolution flags only.
+    summary = {
+        "force_resolve": force_resolve,
+        "use_bundle_case": use_bundle_case,
+        "accept_version_mismatch": accept_version_mismatch,
+    }
     try:
-        payload = await mgr.invoke(
+        # Session-MUTATING (KTD-20): a committed import replaces the session's
+        # System, so the record lives in the global registry. The ``plan``
+        # outcome is a *successful* validation (a 409 conflict, not a failure),
+        # so the job is marked done either way once the invoke returns.
+        async with _run_as_job(
+            mgr,
             session_id,
-            "import_bundle",
-            {
-                "zip_bytes": content,
-                "force_resolve": force_resolve,
-                "use_bundle_case": use_bundle_case,
-                "accept_version_mismatch": accept_version_mismatch,
-            },
-            timeout=120.0,
-        )
+            "bundle-import",
+            request_summary=summary,
+            use_global_registry=True,
+        ) as job_id:
+            payload = await mgr.invoke(
+                session_id,
+                "import_bundle",
+                {
+                    "zip_bytes": content,
+                    "force_resolve": force_resolve,
+                    "use_bundle_case": use_bundle_case,
+                    "accept_version_mismatch": accept_version_mismatch,
+                },
+                timeout=120.0,
+            )
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -347,6 +376,7 @@ async def import_bundle(
             str(f) for f in (payload.get("addfile_filenames") or [])
         ],
         disturbances_replayed=int(payload.get("disturbances_replayed") or 0),
+        job_id=job_id,
     )
 
     if status_value == "plan":

@@ -18,6 +18,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from andes_app.api._run_as_job import _run_as_job
 from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
@@ -112,22 +113,31 @@ async def add_disturbances(
 ) -> AddDisturbancesResponse:
     mgr = _manager(request)
     accepted: list[DisturbanceAck] = []
-    for spec in body.disturbances:
-        try:
-            idx = await mgr.invoke(
-                session_id,
-                "add_disturbance",
-                {"spec": spec.model_dump()},
-            )
-        except SessionExpiredError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=str(exc),
-            ) from exc
-        except WorkerError as exc:
-            raise _to_http_error(exc) from exc
-        accepted.append(DisturbanceAck(kind=spec.kind, idx=idx))
-    return AddDisturbancesResponse(accepted=accepted)
+    try:
+        # One job covers the whole batch (kind ``disturbance-commit``); a
+        # rejected spec mid-loop fails the job and re-raises so the existing
+        # error mapping is unchanged.
+        async with _run_as_job(
+            mgr,
+            session_id,
+            "disturbance-commit",
+            request_summary=body.model_dump(),
+        ) as job_id:
+            for spec in body.disturbances:
+                idx = await mgr.invoke(
+                    session_id,
+                    "add_disturbance",
+                    {"spec": spec.model_dump()},
+                )
+                accepted.append(DisturbanceAck(kind=spec.kind, idx=idx))
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except WorkerError as exc:
+        raise _to_http_error(exc) from exc
+    return AddDisturbancesResponse(accepted=accepted, job_id=job_id)
 
 
 def _spec_from_dict(spec_dict: dict[str, Any]) -> FaultSpec | ToggleSpec | AlterSpec:

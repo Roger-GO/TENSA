@@ -36,6 +36,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from andes_app.api._run_as_job import _run_as_job
 from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
@@ -239,7 +240,10 @@ async def add_pmu(
     if body.Tv is not None:
         args["Tv"] = body.Tv
     try:
-        payload = await mgr.invoke(session_id, "add_pmu", args)
+        async with _run_as_job(
+            mgr, session_id, "pmu-add", request_summary=body.model_dump()
+        ) as job_id:
+            payload = await mgr.invoke(session_id, "add_pmu", args)
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -248,7 +252,9 @@ async def add_pmu(
     except WorkerError as exc:
         raise _to_http_error(exc) from exc
 
-    return _entry_from_payload(payload)
+    entry = _entry_from_payload(payload)
+    entry.job_id = job_id
+    return entry
 
 
 @router.get(
@@ -340,7 +346,10 @@ async def delete_pmu(
     """
     mgr = _manager(request)
     try:
-        await mgr.invoke(session_id, "delete_pmu", {"idx": pmu_idx})
+        async with _run_as_job(
+            mgr, session_id, "pmu-delete", request_summary={"idx": pmu_idx}
+        ) as job_id:
+            await mgr.invoke(session_id, "delete_pmu", {"idx": pmu_idx})
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -349,7 +358,11 @@ async def delete_pmu(
     except WorkerError as exc:
         raise _to_http_error(exc) from exc
 
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    # 204 has no JSON body; the mirrored job id rides an ``X-Job-Id`` header.
+    return Response(
+        status_code=status.HTTP_204_NO_CONTENT,
+        headers={"X-Job-Id": job_id},
+    )
 
 
 @router.get(

@@ -28,6 +28,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from andes_app.api._run_as_job import _run_as_job
 from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
@@ -132,6 +133,14 @@ class EigResultResponse(BaseModel):
             "from this initialised dae."
         ),
     )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring this EIG routine (v3.1 Unit 5b, kind "
+            "``eig``). ``GET /sessions/{id}/jobs/{job_id}`` returns the "
+            "matching record; ``null`` on legacy responses."
+        ),
+    )
 
 
 class ParticipationFactorModel(BaseModel):
@@ -226,7 +235,7 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
 )
 async def run_eig(
     session_id: str,
-    body: EigRunRequest,  # noqa: ARG001 — accepted for forward-compat
+    body: EigRunRequest,
     request: Request,
     _: RequireToken,
 ) -> EigResultResponse:
@@ -239,7 +248,10 @@ async def run_eig(
     """
     mgr = _manager(request)
     try:
-        payload = await mgr.invoke(session_id, "run_eig", {})
+        async with _run_as_job(
+            mgr, session_id, "eig", request_summary=body.model_dump()
+        ) as job_id:
+            payload = await mgr.invoke(session_id, "run_eig", {})
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -268,6 +280,7 @@ async def run_eig(
         state_count=int(payload.get("state_count", 0)),
         state_names=[str(n) for n in payload.get("state_names") or []],
         tds_initialized=bool(payload.get("tds_initialized", False)),
+        job_id=job_id,
     )
 
 
