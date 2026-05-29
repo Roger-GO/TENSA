@@ -58,7 +58,14 @@ class SweepInProgressError(AndesAppError):
     build a ``503 Service Unavailable`` response with a ``Retry-After``
     header and a useful detail string (``"Sweep <id> in progress;
     <N>/<total> iterations complete"``).
+
+    ``recovery_kind`` is a plain ``str`` (matching the ``RecoveryKind``
+    Literal in ``api/schemas.py`` without importing it — see
+    :class:`~andes_app.core.errors.AndesAppError`) so the shared error mapper
+    (Unit 4a) can attach a ``wait-for-sweep`` recovery descriptor.
     """
+
+    recovery_kind: str | None = "wait-for-sweep"
 
     def __init__(
         self, sweep_id: str, *, iter_done: int, iter_total: int
