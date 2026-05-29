@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import multiprocessing as mp
 import threading
 import time
@@ -36,13 +37,26 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from andes_app.core.errors import AndesAppError, SessionBusyError
-from andes_app.core.jobs import JobRecord, JobStatus, _JobRegistry
+from andes_app.core.jobs import JobKind, JobRecord, JobStatus, _JobRegistry
 from andes_app.core.worker import worker_main
+
+log = logging.getLogger("andes-app.session")
 
 # Default tick for the idle-reaper background task. Smaller = more responsive
 # reaping but more wakeups; larger = laggier reaping. 5 s is a fine balance for
 # a default 180 s idle timeout.
 IDLE_REAP_TICK = 5.0
+
+# v3.1 Unit 5a: tick for the job-liveness sweeper (KTD-18). Every tick the
+# sweeper scans sessions that have at least one ``running`` job and marks any
+# whose worker process has died as ``failed`` (category ``WorkerDied``). 10 s
+# keeps the cost proportional to active work while bounding how long a job can
+# sit ``running`` against a dead worker before the activity panel reflects it.
+JOB_LIVENESS_TICK = 10.0
+
+# Category string the liveness sweeper stamps onto the synthesized
+# ``ProblemDetails`` of a job orphaned by a dead worker.
+WORKER_DIED_CATEGORY = "WorkerDied"
 
 
 class SessionExpiredError(AndesAppError):
@@ -133,6 +147,15 @@ class _Session:
     # Population is wired in Unit 5 (per-routine route migration); Unit 1
     # only instantiates the per-session container.
     job_registry: _JobRegistry = field(default_factory=_JobRegistry)
+    # v3.1 Unit 5a: live job-event subscribers for the per-session multiplexed
+    # ``/jobs/events`` WebSocket. Each connected client owns an asyncio Queue;
+    # every registry transition (register/running/done/failed/cancelled/
+    # progress) is broadcast as a JSON envelope to all queues so multiple
+    # subscribers see every event with no loss. Attach/detach is managed by
+    # ``SessionManager.subscribe_job_events``.
+    job_event_subscribers: list[asyncio.Queue[dict[str, Any]]] = field(
+        default_factory=list
+    )
 
 
 def _current_inflight_job(sess: _Session) -> JobRecord | None:
@@ -150,6 +173,25 @@ def _current_inflight_job(sess: _Session) -> JobRecord | None:
         if jobs:
             return max(jobs, key=lambda job: job.updated_at)
     return None
+
+
+def _job_event_envelope(record: JobRecord) -> dict[str, Any]:
+    """Build the per-session WS envelope for a job transition (Unit 5a).
+
+    Shape: ``{job_id, kind, status, progress?, problem?}`` — ``progress`` and
+    ``problem`` are included only when populated so the wire stays lean and the
+    client can treat their absence as "unchanged / indeterminate".
+    """
+    envelope: dict[str, Any] = {
+        "job_id": record.id,
+        "kind": record.kind,
+        "status": record.status,
+    }
+    if record.progress is not None:
+        envelope["progress"] = record.progress
+    if record.problem is not None:
+        envelope["problem"] = record.problem
+    return envelope
 
 
 RunState = Literal["pending", "running", "completed", "error"]
@@ -243,7 +285,18 @@ class SessionManager:
         self._sessions: dict[str, _Session] = {}
         self._registry_lock = threading.Lock()
         self._reaper_task: asyncio.Task[None] | None = None
+        # v3.1 Unit 5a: job-liveness sweeper task (KTD-18). Started alongside
+        # the reaper in ``start`` and cancelled in ``shutdown``.
+        self._liveness_task: asyncio.Task[None] | None = None
         self._closed = False
+        # v3.1 Unit 5a (KTD-20): registry for *session-mutating* jobs whose
+        # lifecycle spans more than one worker session (snapshot restore,
+        # bundle import, case reload). A per-session registry would be lost
+        # when the session it mutated INTO is replaced, so these records live
+        # on the manager itself and are surfaced through every session's
+        # ``GET /jobs`` view (see ``list_session_jobs``). Population lands in
+        # Unit 5b; Unit 5a only instantiates the container + the read path.
+        self._global_job_registry = _JobRegistry()
         # Streaming runs keyed by run_id. Each run's frames + metadata + final
         # state live here for the resume window even after the WS disconnects.
         self._runs: dict[str, _RunBuffer] = {}
@@ -266,10 +319,14 @@ class SessionManager:
     # ----- lifecycle -----
 
     async def start(self) -> None:
-        """Start the background reaper task. Idempotent."""
+        """Start the background reaper + job-liveness sweeper tasks. Idempotent."""
         if self._reaper_task is None or self._reaper_task.done():
             self._reaper_task = asyncio.create_task(
                 self._reap_loop(), name="session-reaper"
+            )
+        if self._liveness_task is None or self._liveness_task.done():
+            self._liveness_task = asyncio.create_task(
+                self._liveness_loop(), name="job-liveness-sweeper"
             )
 
     async def shutdown(self) -> None:
@@ -280,6 +337,11 @@ class SessionManager:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._reaper_task
             self._reaper_task = None
+        if self._liveness_task is not None:
+            self._liveness_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._liveness_task
+            self._liveness_task = None
 
         # Cancel any in-flight streaming run tasks so they release their
         # per-session locks and the worker subprocesses can be torn down.
@@ -1101,6 +1163,154 @@ class SessionManager:
         """Return the sweep buffer (read-only access for the routes layer)."""
         return self._sweeps.get(sweep_id)
 
+    # ----- jobs surface (v3.1 Unit 5a) ------------------------------------
+
+    def _require_session(self, session_id: str) -> _Session:
+        """Return the live ``_Session`` or raise ``SessionExpiredError``."""
+        with self._registry_lock:
+            sess = self._sessions.get(session_id)
+        if sess is None or sess.closed:
+            raise SessionExpiredError(f"session {session_id!r} is not active")
+        return sess
+
+    def session_job_registry(self, session_id: str) -> _JobRegistry:
+        """Return the session's per-session ``_JobRegistry``.
+
+        The lifecycle hook ``_run_as_job`` (Unit 5a) drives transitions through
+        this handle. Raises ``SessionExpiredError`` for an unknown / closed
+        session. For session-MUTATING jobs (KTD-20), Unit 5b uses
+        ``global_job_registry`` instead.
+        """
+        return self._require_session(session_id).job_registry
+
+    @property
+    def global_job_registry(self) -> _JobRegistry:
+        """The manager-wide registry for session-mutating jobs (KTD-20).
+
+        Read-only accessor; the registry's own thread-safe API mutates it.
+        Snapshot restore / bundle import / case reload register here in Unit 5b
+        so a record survives the session it mutated INTO being replaced.
+        """
+        return self._global_job_registry
+
+    def list_session_jobs(
+        self,
+        session_id: str,
+        *,
+        kind: JobKind | None = None,
+        status: JobStatus | None = None,
+    ) -> list[JobRecord]:
+        """Return the session's jobs for ``GET /sessions/{id}/jobs``.
+
+        Surfaces BOTH the per-session registry AND the manager-wide
+        ``_global_job_registry`` (KTD-20): session-mutating jobs (snapshot
+        restore, bundle import, case reload) live in the global registry so a
+        record survives the session it mutated INTO being replaced, yet must
+        still appear in the activity panel of the session that started it.
+        Records are returned newest-last by ``started_at`` so the panel scrolls
+        in chronological order across both registries.
+
+        Raises ``SessionExpiredError`` for an unknown / closed session.
+        """
+        sess = self._require_session(session_id)
+        records = sess.job_registry.list_jobs(kind=kind, status=status)
+        records += self._global_job_registry.list_jobs(kind=kind, status=status)
+        records.sort(key=lambda r: r.started_at)
+        return records
+
+    def get_session_job(self, session_id: str, job_id: str) -> JobRecord | None:
+        """Return one job for ``GET /sessions/{id}/jobs/{job_id}``.
+
+        Checks the per-session registry first, then the global registry
+        (KTD-20). Returns ``None`` when neither holds the id. Raises
+        ``SessionExpiredError`` for an unknown / closed session.
+        """
+        sess = self._require_session(session_id)
+        record = sess.job_registry.get_job(job_id)
+        if record is not None:
+            return record
+        return self._global_job_registry.get_job(job_id)
+
+    def cancel_session_job(
+        self, session_id: str, job_id: str
+    ) -> JobRecord | None:
+        """Cancel a job for ``DELETE /sessions/{id}/jobs/{job_id}``.
+
+        Resolves the owning registry (per-session first, then global), calls
+        ``mark_cancelled`` (a no-op if the job is already terminal), broadcasts
+        the transition to ``/jobs/events`` subscribers, and returns the updated
+        record. Returns ``None`` when the job is unknown OR was already terminal
+        (the route surfaces that as 404 / a no-longer-cancellable race).
+
+        The route enforces the ``can_cancel`` policy (409 for non-cancellable);
+        this method assumes the caller has already decided cancellation is
+        permitted.
+
+        Raises ``SessionExpiredError`` for an unknown / closed session.
+        """
+        sess = self._require_session(session_id)
+        registry = sess.job_registry
+        if registry.get_job(job_id) is None:
+            registry = self._global_job_registry
+            if registry.get_job(job_id) is None:
+                return None
+        registry.mark_cancelled(job_id)
+        updated = registry.get_job(job_id)
+        if updated is None or updated.status != "cancelled":
+            # Was already terminal (done/failed/cancelled) — mark_cancelled is
+            # a no-op in that case. Treat as "not cancellable any more".
+            return None
+        self.broadcast_job_event(session_id, updated)
+        return updated
+
+    async def subscribe_job_events(
+        self, session_id: str
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Yield this session's live job-event envelopes for the WS handler.
+
+        Each yielded envelope is shaped
+        ``{"job_id", "kind", "status", "progress"?, "problem"?}`` — one per
+        registry transition (register/running/done/failed/cancelled/progress)
+        for any job in the session. Multiple concurrent subscribers each get
+        their own queue, so every subscriber receives every broadcast with no
+        loss.
+
+        This is a *live* feed — it does not replay history. The WS route sends
+        the current job list as an HTTP-style snapshot first (or the client
+        GETs ``/jobs``), then opens this stream for subsequent transitions.
+
+        Raises ``SessionExpiredError`` for an unknown / closed session.
+        """
+        sess = self._require_session(session_id)
+        consumer: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=10000)
+        sess.job_event_subscribers.append(consumer)
+        try:
+            while True:
+                yield await consumer.get()
+        finally:
+            with contextlib.suppress(ValueError):
+                sess.job_event_subscribers.remove(consumer)
+
+    def broadcast_job_event(self, session_id: str, record: JobRecord) -> None:
+        """Push a job-transition envelope to every subscriber of the session.
+
+        Synchronous + non-blocking: it never awaits and silently drops on a
+        full queue (a subscriber that can't keep up loses live events but can
+        re-fetch via ``GET /jobs``). Safe to call from any thread or the event
+        loop. A no-op when the session is gone or has no subscribers.
+
+        ``_run_as_job`` (and Unit 5c's streaming/sweep hooks) call this after
+        each registry transition so connected activity panels update live.
+        """
+        with self._registry_lock:
+            sess = self._sessions.get(session_id)
+        if sess is None:
+            return
+        envelope = _job_event_envelope(record)
+        for queue in list(sess.job_event_subscribers):
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(dict(envelope))
+
     # ----- introspection -----
 
     def list_sessions(self) -> list[str]:
@@ -1152,6 +1362,74 @@ class SessionManager:
                     continue
                 if now - sweep_buf.finished_at > RUN_BUFFER_RETENTION_SECONDS:
                     self._sweeps.pop(sweep_id, None)
+
+    async def _liveness_loop(self) -> None:
+        """Background task: every ``JOB_LIVENESS_TICK`` seconds, fail jobs whose
+        worker has died (KTD-18). Wraps the per-tick body in a broad guard so a
+        single bad sweep never kills the loop."""
+        while not self._closed:
+            try:
+                await asyncio.sleep(JOB_LIVENESS_TICK)
+            except asyncio.CancelledError:
+                return
+            try:
+                self.sweep_dead_worker_jobs()
+            except Exception:  # noqa: BLE001 — the loop must outlive any one tick
+                log.exception("job-liveness sweep tick failed")
+
+    def sweep_dead_worker_jobs(self) -> int:
+        """One liveness pass (KTD-18). Returns the number of jobs failed.
+
+        Iterates ONLY sessions that have at least one ``running`` job (idle
+        sessions are skipped so cost is proportional to active work). For each
+        ``running`` job whose worker process is not alive, marks it ``failed``
+        with a synthesized ``WorkerDied`` ``ProblemDetails`` and broadcasts the
+        transition to any ``/jobs/events`` subscribers.
+
+        Exposed (not just the 10 s loop) so tests can drive a single tick
+        deterministically without shortening the interval or sleeping.
+        """
+        with self._registry_lock:
+            sessions = list(self._sessions.items())
+
+        failed = 0
+        for session_id, sess in sessions:
+            if sess.closed:
+                continue
+            running = sess.job_registry.list_jobs(status="running")
+            if not running:
+                # Skip idle sessions entirely — the common case.
+                continue
+            if sess.process is not None and sess.process.is_alive():
+                # Worker is healthy; its running jobs are legitimately in
+                # flight. Nothing to fail.
+                continue
+            # Worker is dead (or absent) but the session still carries
+            # ``running`` jobs — orphan them so the activity panel reflects
+            # reality instead of a spinner that never resolves.
+            for job in running:
+                problem = _worker_died_problem(job)
+                sess.job_registry.mark_failed(job.id, problem=problem)
+                updated = sess.job_registry.get_job(job.id)
+                if updated is not None:
+                    self.broadcast_job_event(session_id, updated)
+                failed += 1
+        return failed
+
+
+def _worker_died_problem(record: JobRecord) -> dict[str, Any]:
+    """Synthesize the ``WorkerDied`` ProblemDetails for an orphaned job."""
+    return {
+        "type": "about:blank",
+        "title": "Internal Server Error",
+        "status": 500,
+        "category": WORKER_DIED_CATEGORY,
+        "detail": (
+            f"the worker process for the {record.kind} job died while the "
+            "job was still running; the session must be recreated"
+        ),
+        "recovery": None,
+    }
 
 
 __all__ = [
