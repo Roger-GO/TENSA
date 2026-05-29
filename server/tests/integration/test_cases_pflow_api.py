@@ -199,6 +199,17 @@ async def test_run_pflow_after_load_returns_converged(
     assert isinstance(body["bus_voltages"], dict)
     # 14 buses → 14 voltage entries
     assert len(body["bus_voltages"]) == 14
+    # v3.1 Unit 5b: the routine is mirrored as a job; the response carries the
+    # job_id and GET /jobs/{id} returns the matching done record.
+    job_id = body["job_id"]
+    assert isinstance(job_id, str) and job_id
+    job = await client.get(
+        f"/api/sessions/{sid}/jobs/{job_id}",
+        headers={"X-Andes-Token": VALID_TOKEN},
+    )
+    assert job.status_code == 200, job.text
+    assert job.json()["kind"] == "pflow"
+    assert job.json()["status"] == "done"
 
     # Topology after PF reflects the committed state
     topo_resp = await client.get(

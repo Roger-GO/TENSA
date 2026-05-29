@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from andes_app.api._run_as_job import _run_as_job
 from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
@@ -143,14 +144,17 @@ async def load_case(
         ) from exc
 
     try:
-        payload = await mgr.invoke(
-            session_id,
-            "load_case",
-            {
-                "path": primary_str,
-                "addfiles": canonical_addfiles or None,
-            },
-        )
+        async with _run_as_job(
+            mgr, session_id, "case-load", request_summary=body.model_dump()
+        ) as job_id:
+            payload = await mgr.invoke(
+                session_id,
+                "load_case",
+                {
+                    "path": primary_str,
+                    "addfiles": canonical_addfiles or None,
+                },
+            )
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -159,7 +163,9 @@ async def load_case(
     except WorkerError as exc:
         raise map_worker_error(exc) from exc
 
-    return _topology_from_payload(payload)
+    summary = _topology_from_payload(payload)
+    summary.job_id = job_id
+    return summary
 
 
 @router.get(
@@ -287,7 +293,16 @@ async def reload_case(
     callers can budget for multi-second latency on large cases."""
     mgr = _manager(request)
     try:
-        payload = await mgr.invoke(session_id, "reload_case", {})
+        # Session-MUTATING (KTD-20): reload re-parses the case into a fresh
+        # System, so the record lives in the global registry.
+        async with _run_as_job(
+            mgr,
+            session_id,
+            "case-reload",
+            request_summary={},
+            use_global_registry=True,
+        ) as job_id:
+            payload = await mgr.invoke(session_id, "reload_case", {})
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -295,7 +310,9 @@ async def reload_case(
         ) from exc
     except WorkerError as exc:
         raise map_worker_error(exc) from exc
-    return _topology_from_payload(payload)
+    summary = _topology_from_payload(payload)
+    summary.job_id = job_id
+    return summary
 
 
 @router.get(

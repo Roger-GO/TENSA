@@ -39,7 +39,7 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from andes_app.core.jobs import JobKind
+    from andes_app.core.jobs import JobKind, _JobRegistry
     from andes_app.core.session import SessionManager
 
 # Wire category stamped onto the synthesized ProblemDetails when an exception
@@ -69,6 +69,7 @@ async def _run_as_job(
     *,
     can_cancel: bool = False,
     result_ref: str | None = None,
+    use_global_registry: bool = False,
 ) -> AsyncIterator[str]:
     """Register a job, run the wrapped block, and drive its lifecycle.
 
@@ -87,17 +88,29 @@ async def _run_as_job(
     is synchronous from the caller's view (PF / EIG / CPF / SE) — the cancel
     affordance belongs to streaming / sweep jobs (Unit 5c). Pass ``True`` only
     if a future invoke-backed job grows a cooperative-abort path.
+
+    ``use_global_registry`` (KTD-20) routes the record into the manager-wide
+    ``global_job_registry`` rather than the per-session registry. Session-
+    MUTATING jobs — snapshot restore, bundle import, case reload — set this so
+    the record survives the session it mutated INTO being replaced. The record
+    still surfaces in the originating session's activity panel because
+    ``list_session_jobs`` / ``get_session_job`` span both registries; the WS
+    broadcast targets the same ``session_id`` either way.
     """
-    registry = mgr.session_job_registry(session_id)
+    registry = (
+        mgr.global_job_registry
+        if use_global_registry
+        else mgr.session_job_registry(session_id)
+    )
     job_id = registry.register_job(
         kind=kind,
         can_cancel=can_cancel,
         request_summary=request_summary or {},
     )
-    _broadcast(mgr, session_id, job_id)
+    _broadcast(mgr, session_id, registry, job_id)
 
     registry.mark_running(job_id)
-    _broadcast(mgr, session_id, job_id)
+    _broadcast(mgr, session_id, registry, job_id)
 
     try:
         yield job_id
@@ -108,21 +121,26 @@ async def _run_as_job(
         # the exception escapes; the liveness sweeper would NOT catch it (the
         # worker is alive — it raised and returned to idle).
         registry.mark_failed(job_id, problem=_internal_error_problem(kind, exc))
-        _broadcast(mgr, session_id, job_id)
+        _broadcast(mgr, session_id, registry, job_id)
         raise
     else:
         registry.mark_done(job_id, result_ref=result_ref)
-        _broadcast(mgr, session_id, job_id)
+        _broadcast(mgr, session_id, registry, job_id)
 
 
-def _broadcast(mgr: SessionManager, session_id: str, job_id: str) -> None:
+def _broadcast(
+    mgr: SessionManager,
+    session_id: str,
+    registry: _JobRegistry,
+    job_id: str,
+) -> None:
     """Broadcast the current state of ``job_id`` to the session's WS subscribers.
 
-    Re-reads the record (the registry coalesces failures by signature, so the
-    post-transition record is the authoritative one) and pushes its envelope.
-    A no-op when the record has been coalesced away.
+    Re-reads the record from its owning ``registry`` (the registry coalesces
+    failures by signature, so the post-transition record is the authoritative
+    one) and pushes its envelope to the originating session's subscribers. A
+    no-op when the record has been coalesced away.
     """
-    registry = mgr.session_job_registry(session_id)
     record = registry.get_job(job_id)
     if record is not None:
         mgr.broadcast_job_event(session_id, record)

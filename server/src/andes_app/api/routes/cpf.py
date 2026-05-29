@@ -25,6 +25,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from andes_app.api._run_as_job import _run_as_job
 from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
@@ -186,6 +187,15 @@ class CpfResultResponse(BaseModel):
         ),
         pattern="^(pv|qv)$",
     )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring this CPF routine (v3.1 Unit 5b, kind "
+            "``cpf`` for the PV sweep, ``cpf-qv`` for the QV curve). "
+            "``GET /sessions/{id}/jobs/{job_id}`` returns the matching "
+            "record; ``null`` on legacy responses."
+        ),
+    )
 
 
 # ---- helpers --------------------------------------------------------------
@@ -217,7 +227,9 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
     return map_worker_error(exc)
 
 
-def _payload_to_response(payload: object) -> CpfResultResponse:
+def _payload_to_response(
+    payload: object, job_id: str | None = None
+) -> CpfResultResponse:
     """Coerce a worker payload dict into a typed response model.
 
     Defensive against payload shape drift (the worker serializer is
@@ -249,6 +261,7 @@ def _payload_to_response(payload: object) -> CpfResultResponse:
         truncated=bool(payload.get("truncated", True)),
         done_msg=str(payload.get("done_msg", "")),
         mode=str(payload.get("mode", "pv")),
+        job_id=job_id,
     )
 
 
@@ -300,7 +313,10 @@ async def run_cpf(
     if body.max_iter is not None:
         args["max_iter"] = body.max_iter
     try:
-        payload = await mgr.invoke(session_id, "run_cpf", args)
+        async with _run_as_job(
+            mgr, session_id, "cpf", request_summary=body.model_dump()
+        ) as job_id:
+            payload = await mgr.invoke(session_id, "run_cpf", args)
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -309,7 +325,7 @@ async def run_cpf(
     except WorkerError as exc:
         raise _to_http_error(exc) from exc
 
-    return _payload_to_response(payload)
+    return _payload_to_response(payload, job_id)
 
 
 @router.post(
@@ -349,7 +365,10 @@ async def run_cpf_qv(
     if body.q_range is not None:
         args["q_range"] = body.q_range
     try:
-        payload = await mgr.invoke(session_id, "run_cpf_qv", args)
+        async with _run_as_job(
+            mgr, session_id, "cpf-qv", request_summary=body.model_dump()
+        ) as job_id:
+            payload = await mgr.invoke(session_id, "run_cpf_qv", args)
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -358,4 +377,4 @@ async def run_cpf_qv(
     except WorkerError as exc:
         raise _to_http_error(exc) from exc
 
-    return _payload_to_response(payload)
+    return _payload_to_response(payload, job_id)

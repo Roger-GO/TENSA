@@ -157,6 +157,17 @@ async def test_snapshot_save_then_restore_via_dill_fast_path(
     body = resp.json()
     assert body["used_dill"] is True
     assert body["fallback_reason"] is None
+    # v3.1 Unit 5b: restore is session-mutating, so its JobRecord lives in the
+    # GLOBAL registry (KTD-20) yet still surfaces via the session's /jobs/{id}.
+    restore_job = body["job_id"]
+    assert isinstance(restore_job, str) and restore_job
+    job = await client.get(
+        f"/api/sessions/{sid}/jobs/{restore_job}",
+        headers={"X-Andes-Token": VALID_TOKEN},
+    )
+    assert job.status_code == 200, job.text
+    assert job.json()["kind"] == "snapshot-restore"
+    assert job.json()["status"] == "done"
 
 
 @pytest.mark.integration

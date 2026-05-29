@@ -13,6 +13,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from andes_app.api._run_as_job import _run_as_job
 from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
@@ -127,13 +128,16 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
 )
 async def run_pflow(
     session_id: str,
-    body: PflowRunRequest,  # noqa: ARG001 — accepted for forward-compat
+    body: PflowRunRequest,
     request: Request,
     _: RequireToken,
 ) -> PflowResult:
     mgr = _manager(request)
     try:
-        payload = await mgr.invoke(session_id, "run_pflow", {})
+        async with _run_as_job(
+            mgr, session_id, "pflow", request_summary=body.model_dump()
+        ) as job_id:
+            payload = await mgr.invoke(session_id, "run_pflow", {})
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -143,4 +147,6 @@ async def run_pflow(
         raise _to_http_error(exc) from exc
 
     run_id = uuid.uuid4().hex
-    return _result_from_payload(payload, run_id)
+    result = _result_from_payload(payload, run_id)
+    result.job_id = job_id
+    return result

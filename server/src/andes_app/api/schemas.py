@@ -336,6 +336,15 @@ class TopologyEntry(BaseModel):
             "(None or unavailable on a given model) are omitted."
         ),
     )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring the mutation that produced this entry "
+            "(v3.1 Unit 5b). Populated only when this ``TopologyEntry`` is the "
+            "top-level response of an edit / PMU-add / profile-add routine; "
+            "``null`` for nested entries inside a ``TopologySummary``."
+        ),
+    )
 
 
 class TopologySummary(BaseModel):
@@ -390,6 +399,15 @@ class TopologySummary(BaseModel):
             "can populate device pickers when the case includes them. Empty "
             "for cases that carry no dynamics addfile (stock IEEE 14 .raw "
             "alone)."
+        ),
+    )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring the routine that produced this topology "
+            "snapshot (v3.1 Unit 5b) — case load / reload, element delete / "
+            "undo, or blank-system create. ``null`` when the summary is a plain "
+            "read (``GET /topology``)."
         ),
     )
 
@@ -524,6 +542,15 @@ class PflowResult(BaseModel):
             "did not converge."
         ),
     )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring this routine invocation (v3.1 Unit "
+            "5b). Additive: ``GET /sessions/{id}/jobs/{job_id}`` returns the "
+            "matching ``JobRecord`` (kind ``pflow``). ``null`` only on legacy "
+            "responses synthesised outside the job lifecycle."
+        ),
+    )
 
 
 class PflowRunRequest(BaseModel):
@@ -588,6 +615,14 @@ class AddDisturbancesResponse(BaseModel):
 
     accepted: list[DisturbanceAck] = Field(
         ..., description="One ack entry per accepted disturbance, in input order."
+    )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring the disturbance-commit routine (v3.1 "
+            "Unit 5b, kind ``disturbance-commit``). One job covers the whole "
+            "batch; ``null`` on legacy responses."
+        ),
     )
 
 
@@ -661,6 +696,13 @@ class ElementCreated(BaseModel):
         description=(
             "The element that was just added, with its assigned idx + the "
             "parameters as ANDES read them back."
+        ),
+    )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring the element-add routine (v3.1 Unit 5b, "
+            "kind ``element-add``). ``null`` on legacy responses."
         ),
     )
 
@@ -761,6 +803,13 @@ class SaveCaseResponse(BaseModel):
         ...,
         description="Size in bytes of the file just written, as reported by ``os.stat``.",
         ge=0,
+    )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring the case-save routine (v3.1 Unit 5b, "
+            "kind ``case-save``). ``null`` on legacy responses."
+        ),
     )
 
 

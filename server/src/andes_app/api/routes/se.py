@@ -24,6 +24,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from andes_app.api._run_as_job import _run_as_job
 from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
@@ -91,6 +92,15 @@ class SeMeasurementsGeneratedResponse(BaseModel):
         ),
         ge=0,
     )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring the SE measurement-generation routine "
+            "(v3.1 Unit 5b, kind ``se-measurements``). "
+            "``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; "
+            "``null`` on legacy responses."
+        ),
+    )
 
 
 class SeResultResponse(BaseModel):
@@ -156,6 +166,14 @@ class SeResultResponse(BaseModel):
             "histogram bars in red."
         ),
     )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring the SE run routine (v3.1 Unit 5b, kind "
+            "``se``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching "
+            "record; ``null`` on legacy responses."
+        ),
+    )
 
 
 # ---- helpers --------------------------------------------------------------
@@ -188,7 +206,9 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
     return map_worker_error(exc)
 
 
-def _generate_payload_to_response(payload: object) -> SeMeasurementsGeneratedResponse:
+def _generate_payload_to_response(
+    payload: object, job_id: str | None = None
+) -> SeMeasurementsGeneratedResponse:
     """Coerce a worker payload dict into a typed response model."""
     if not isinstance(payload, dict):
         raise HTTPException(
@@ -200,10 +220,13 @@ def _generate_payload_to_response(payload: object) -> SeMeasurementsGeneratedRes
         )
     return SeMeasurementsGeneratedResponse(
         count=int(payload.get("count", 0)),
+        job_id=job_id,
     )
 
 
-def _se_payload_to_response(payload: object) -> SeResultResponse:
+def _se_payload_to_response(
+    payload: object, job_id: str | None = None
+) -> SeResultResponse:
     """Coerce a worker payload dict into a typed SeResultResponse."""
     if not isinstance(payload, dict):
         raise HTTPException(
@@ -220,6 +243,7 @@ def _se_payload_to_response(payload: object) -> SeResultResponse:
         residuals=[float(x) for x in (payload.get("residuals") or [])],
         measurement_count=int(payload.get("measurement_count", 0)),
         flagged_indices=[int(i) for i in (payload.get("flagged_indices") or [])],
+        job_id=job_id,
     )
 
 
@@ -270,9 +294,12 @@ async def generate_se_measurements(
     if body.noise_seed is not None:
         args["noise_seed"] = body.noise_seed
     try:
-        payload = await mgr.invoke(
-            session_id, "generate_measurements_from_pflow", args
-        )
+        async with _run_as_job(
+            mgr, session_id, "se-measurements", request_summary=body.model_dump()
+        ) as job_id:
+            payload = await mgr.invoke(
+                session_id, "generate_measurements_from_pflow", args
+            )
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -281,7 +308,7 @@ async def generate_se_measurements(
     except WorkerError as exc:
         raise _to_http_error(exc) from exc
 
-    return _generate_payload_to_response(payload)
+    return _generate_payload_to_response(payload, job_id)
 
 
 @router.post(
@@ -312,7 +339,7 @@ async def generate_se_measurements(
 )
 async def run_se(
     session_id: str,
-    body: SeRunRequest,  # noqa: ARG001 — accepted for forward-compat
+    body: SeRunRequest,
     request: Request,
     _: RequireToken,
 ) -> SeResultResponse:
@@ -333,7 +360,10 @@ async def run_se(
     """
     mgr = _manager(request)
     try:
-        payload = await mgr.invoke(session_id, "run_se", {})
+        async with _run_as_job(
+            mgr, session_id, "se", request_summary=body.model_dump()
+        ) as job_id:
+            payload = await mgr.invoke(session_id, "run_se", {})
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -342,4 +372,4 @@ async def run_se(
     except WorkerError as exc:
         raise _to_http_error(exc) from exc
 
-    return _se_payload_to_response(payload)
+    return _se_payload_to_response(payload, job_id)

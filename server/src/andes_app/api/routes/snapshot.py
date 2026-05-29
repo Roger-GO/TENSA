@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from andes_app.api._run_as_job import _run_as_job
 from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
@@ -228,8 +229,15 @@ async def export_bundle(
         "run_id": body.run_id,
     }
 
+    # request_summary drops the (potentially large) ``results_csv`` body — the
+    # activity-panel Retry only needs the user-facing knobs, not the CSV blob.
+    summary = body.model_dump(exclude={"results_csv"})
+
     try:
-        payload = await mgr.invoke(session_id, "export_bundle", args)
+        async with _run_as_job(
+            mgr, session_id, "bundle-export", request_summary=summary
+        ) as job_id:
+            payload = await mgr.invoke(session_id, "export_bundle", args)
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -249,13 +257,16 @@ async def export_bundle(
 
     # Suggest a filename — the client's BundleExportDialog overrides it
     # locally before triggering the download, but the header is still
-    # the right thing to ship for direct-curl callers.
+    # the right thing to ship for direct-curl callers. The binary body can't
+    # carry a ``job_id`` JSON field, so the mirrored job id rides an
+    # ``X-Job-Id`` header (additive; the JobRecord is the source of truth).
     filename = f"andes-bundle-{session_id[:8]}.zip"
     return Response(
         content=bytes(payload),
         media_type="application/zip",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Job-Id": job_id,
         },
     )
 
@@ -314,6 +325,13 @@ class SaveSnapshotResponse(BaseModel):
     metadata_bytes: int = Field(
         ..., description="Size of the sidecar JSON on disk, in bytes."
     )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring the snapshot-save routine (v3.1 Unit "
+            "5b, kind ``snapshot-save``). ``null`` on legacy responses."
+        ),
+    )
 
 
 class RestoreSnapshotRequest(BaseModel):
@@ -363,6 +381,16 @@ class RestoreSnapshotResponse(BaseModel):
         ),
     )
     metadata: SnapshotMetadataModel
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring the snapshot-restore routine (v3.1 Unit "
+            "5b, kind ``snapshot-restore``). Recorded in the manager-wide "
+            "global registry (KTD-20) so it survives the session being "
+            "replaced, yet still surfaces via "
+            "``GET /sessions/{id}/jobs/{job_id}``. ``null`` on legacy responses."
+        ),
+    )
 
 
 class SnapshotListEntry(BaseModel):
@@ -474,12 +502,15 @@ async def save_snapshot(
     """
     mgr = _manager(request)
     try:
-        payload = await mgr.invoke(
-            session_id,
-            "save_snapshot",
-            {"name": body.name, "force": body.force},
-            timeout=60.0,
-        )
+        async with _run_as_job(
+            mgr, session_id, "snapshot-save", request_summary=body.model_dump()
+        ) as job_id:
+            payload = await mgr.invoke(
+                session_id,
+                "save_snapshot",
+                {"name": body.name, "force": body.force},
+                timeout=60.0,
+            )
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -496,7 +527,7 @@ async def save_snapshot(
                 f"{type(payload).__name__}"
             ),
         )
-    return SaveSnapshotResponse(**payload)
+    return SaveSnapshotResponse(**payload, job_id=job_id)
 
 
 @router.post(
@@ -535,15 +566,24 @@ async def restore_snapshot(
     """
     mgr = _manager(request)
     try:
-        payload = await mgr.invoke(
+        # Session-MUTATING (KTD-20): restore replaces the session's System, so
+        # the record lives in the manager-wide global registry to survive it.
+        async with _run_as_job(
+            mgr,
             session_id,
-            "restore_snapshot",
-            {
-                "name": body.name,
-                "use_dill_optimization": body.use_dill_optimization,
-            },
-            timeout=120.0,
-        )
+            "snapshot-restore",
+            request_summary=body.model_dump(),
+            use_global_registry=True,
+        ) as job_id:
+            payload = await mgr.invoke(
+                session_id,
+                "restore_snapshot",
+                {
+                    "name": body.name,
+                    "use_dill_optimization": body.use_dill_optimization,
+                },
+                timeout=120.0,
+            )
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -560,7 +600,7 @@ async def restore_snapshot(
                 f"{type(payload).__name__}"
             ),
         )
-    return RestoreSnapshotResponse(**payload)
+    return RestoreSnapshotResponse(**payload, job_id=job_id)
 
 
 @router.get(
@@ -636,7 +676,10 @@ async def delete_snapshot(
     """Delete snapshot endpoint — Unit 7."""
     mgr = _manager(request)
     try:
-        await mgr.invoke(session_id, "delete_snapshot", {"name": name})
+        async with _run_as_job(
+            mgr, session_id, "snapshot-delete", request_summary={"name": name}
+        ) as job_id:
+            await mgr.invoke(session_id, "delete_snapshot", {"name": name})
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -644,4 +687,8 @@ async def delete_snapshot(
         ) from exc
     except WorkerError as exc:
         raise _map_snapshot_error(exc) from exc
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    # 204 has no JSON body; the mirrored job id rides an ``X-Job-Id`` header.
+    return Response(
+        status_code=status.HTTP_204_NO_CONTENT,
+        headers={"X-Job-Id": job_id},
+    )

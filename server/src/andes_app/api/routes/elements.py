@@ -23,6 +23,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
+from andes_app.api._run_as_job import _run_as_job
 from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
@@ -200,11 +201,14 @@ async def add_element(
     _enforce_body_size(request)
     mgr = _manager(request)
     try:
-        payload: Any = await mgr.invoke(
-            session_id,
-            "add_element",
-            {"model": body.model, "params": body.params},
-        )
+        async with _run_as_job(
+            mgr, session_id, "element-add", request_summary=body.model_dump()
+        ) as job_id:
+            payload: Any = await mgr.invoke(
+                session_id,
+                "add_element",
+                {"model": body.model, "params": body.params},
+            )
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -212,7 +216,7 @@ async def add_element(
         ) from exc
     except WorkerError as exc:
         raise _to_http_error(exc) from exc
-    return ElementCreated(element=TopologyEntry(**payload))
+    return ElementCreated(element=TopologyEntry(**payload), job_id=job_id)
 
 
 @router.put(
@@ -262,12 +266,16 @@ async def edit_element(
 ) -> TopologyEntry:
     _enforce_body_size(request)
     mgr = _manager(request)
+    summary = {"model": model, "idx": idx, **body.model_dump()}
     try:
-        payload: Any = await mgr.invoke(
-            session_id,
-            "edit_element",
-            {"model": model, "idx": idx, "params": body.params},
-        )
+        async with _run_as_job(
+            mgr, session_id, "element-edit", request_summary=summary
+        ) as job_id:
+            payload: Any = await mgr.invoke(
+                session_id,
+                "edit_element",
+                {"model": model, "idx": idx, "params": body.params},
+            )
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -275,7 +283,7 @@ async def edit_element(
         ) from exc
     except WorkerError as exc:
         raise _to_http_error(exc) from exc
-    return TopologyEntry(**payload)
+    return TopologyEntry(**payload, job_id=job_id)
 
 
 @router.post(
@@ -399,11 +407,14 @@ async def save_case(
             ),
         )
     try:
-        await mgr.invoke(
-            session_id,
-            "save_case",
-            {"format": body.format, "filename": str(canonical)},
-        )
+        async with _run_as_job(
+            mgr, session_id, "case-save", request_summary=body.model_dump()
+        ) as job_id:
+            await mgr.invoke(
+                session_id,
+                "save_case",
+                {"format": body.format, "filename": str(canonical)},
+            )
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -412,7 +423,9 @@ async def save_case(
     except WorkerError as exc:
         raise _to_http_error(exc) from exc
     bytes_written = canonical.stat().st_size if canonical.exists() else 0
-    return SaveCaseResponse(filename=body.filename, bytes_written=bytes_written)
+    return SaveCaseResponse(
+        filename=body.filename, bytes_written=bytes_written, job_id=job_id
+    )
 
 
 # ---- undo (Unit 12) -------------------------------------------------------
@@ -447,7 +460,10 @@ async def undo_last_edit(
     _enforce_body_size(request)
     mgr = _manager(request)
     try:
-        payload: Any = await mgr.invoke(session_id, "undo_last_edit", {})
+        async with _run_as_job(
+            mgr, session_id, "element-undo", request_summary={}
+        ) as job_id:
+            payload: Any = await mgr.invoke(session_id, "undo_last_edit", {})
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -455,7 +471,7 @@ async def undo_last_edit(
         ) from exc
     except WorkerError as exc:
         raise _to_http_error(exc) from exc
-    return TopologySummary(**payload)
+    return TopologySummary(**payload, job_id=job_id)
 
 
 # ---- delete (Unit 1, v0.1.y) -----------------------------------------------
@@ -505,12 +521,16 @@ async def delete_element(
 ) -> TopologySummary | JSONResponse:
     _enforce_body_size(request)
     mgr = _manager(request)
+    summary = {"model": model, "idx": idx}
     try:
-        payload: Any = await mgr.invoke(
-            session_id,
-            "delete_element",
-            {"model": model, "idx": idx},
-        )
+        async with _run_as_job(
+            mgr, session_id, "element-delete", request_summary=summary
+        ) as job_id:
+            payload: Any = await mgr.invoke(
+                session_id,
+                "delete_element",
+                {"model": model, "idx": idx},
+            )
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -521,7 +541,9 @@ async def delete_element(
         # body instead of the generic ``ProblemDetails`` envelope. The
         # extra payload (dependents + total) crosses the worker Pipe via
         # ``WorkerError.extra`` (set by the worker's
-        # ``ElementHasDependentsError`` handler).
+        # ``ElementHasDependentsError`` handler). The wrapping
+        # ``_run_as_job`` already transitioned the job to ``failed`` (the
+        # delete did not happen — blocked by dependents).
         if exc.category == "ElementHasDependentsError":
             extra = exc.extra
             dependents_raw = extra.get("dependents", [])
@@ -533,4 +555,4 @@ async def delete_element(
                 content=body.model_dump(),
             )
         raise _to_http_error(exc) from exc
-    return TopologySummary(**payload)
+    return TopologySummary(**payload, job_id=job_id)
