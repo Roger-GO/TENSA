@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 
 from andes_app.api.auth import RequireToken
+from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
     GeneratorOutput,
     LineFlow,
@@ -86,34 +87,20 @@ def _result_from_payload(payload: dict[str, Any], run_id: str) -> PflowResult:
     )
 
 
-def _map_worker_error(exc: WorkerError) -> HTTPException:
-    category = exc.category
-    if category == "no-case-loaded":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
+def _to_http_error(exc: WorkerError) -> HTTPException:
+    """Route-local adapter over the shared ``map_worker_error`` (Unit 4b).
+
+    The shared mapper owns the canonical category→status table, the recovery
+    descriptor, and the ProblemDetails body shape. This route only carries its
+    one documented detail-copy delta: ``SetupFailedError`` gets the actionable
+    "reload to recover" hint appended (``RunButton.tsx`` keys off ``/reload/i``).
+    ``EigDirtyDaeError`` already carries the reload hint in the wrapper detail.
+    """
+    if exc.category == "SetupFailedError":
+        exc.detail = (
+            f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
         )
-    if category == "SetupFailedError":
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
-            ),
-        )
-    if category == "EigDirtyDaeError":
-        # Phase 1 smoke Issue 1: PF after EIG. The wrapper detects
-        # ``ss.TDS.initialized == True`` and refuses rather than
-        # surfacing NaN values / 5xx. The detail already carries the
-        # actionable "reload" hint that ``RunButton.tsx`` keys off
-        # to render a Reload-and-retry affordance.
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=exc.detail,
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"{category}: {exc.detail}",
-    )
+    return map_worker_error(exc)
 
 
 @router.post(
@@ -153,7 +140,7 @@ async def run_pflow(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     run_id = uuid.uuid4().hex
     return _result_from_payload(payload, run_id)

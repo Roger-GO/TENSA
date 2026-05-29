@@ -20,7 +20,7 @@ Conflict resolution flow:
    commits.
 
 The route layer maps :class:`BundleValidationError` categories to HTTP
-statuses; see :func:`_map_worker_error` below.
+statuses; see :func:`_to_http_error` below.
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, s
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api.auth import RequireToken
+from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
 from andes_app.core.bundle import MAX_BUNDLE_BYTES
 from andes_app.core.session import (
@@ -150,42 +151,36 @@ _BUNDLE_VALIDATION_STATUS: dict[str, int] = {
 }
 
 
-def _map_worker_error(exc: WorkerError) -> HTTPException:
-    """Translate a worker error into the right HTTP status for this route.
+def _to_http_error(exc: WorkerError) -> HTTPException:
+    """Bundle-import adapter over the shared ``map_worker_error`` (Unit 4b).
 
-    BundleValidationError is shipped over the wire as
-    ``"BundleValidationError:<sub-category>"`` (see worker.py). We
-    split on the colon and map the sub-category to a status; unknown
-    sub-categories (a future addition without a route mapping) fall
-    back to 422 with the worker-provided detail.
+    The shared mapper owns the canonical category→status table, recovery, and the
+    body shape. The bundle-import route carries one documented per-route delta
+    (audit #7): ``BundleValidationError`` is shipped over the wire as
+    ``"BundleValidationError:<sub-category>"`` (see worker.py), and the
+    sub-category — not the bare class — decides the status (corrupt-zip → 400,
+    oversize → 413, the rest → 422). We keep that per-sub-category table route-local
+    and use the shared mapper only for the body/recovery shape, passing the
+    ``category`` (sub) + optional ``missing_fields`` as extras and overriding the
+    status. ``no-case-loaded`` → 409, the other 422 categories, and the 500 fallback
+    come straight from the shared mapper.
     """
     category = exc.category or ""
     if category.startswith("BundleValidationError:"):
         sub = category.split(":", 1)[1]
-        http_status = _BUNDLE_VALIDATION_STATUS.get(sub, status.HTTP_422_UNPROCESSABLE_ENTITY)
-        detail: dict[str, Any] = {"detail": exc.detail, "category": sub}
+        http_status = _BUNDLE_VALIDATION_STATUS.get(
+            sub, status.HTTP_422_UNPROCESSABLE_ENTITY
+        )
+        extras: dict[str, Any] = {"category": sub}
         missing = exc.extra.get("missing_fields") if exc.extra else None
         if missing:
-            detail["missing_fields"] = list(missing)
-        return HTTPException(status_code=http_status, detail=detail)
-    if category == "no-case-loaded":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
-        )
-    if category in {
-        "CaseLoadError",
-        "DisturbanceValidationError",
-        "ElementValidationError",
-    }:
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=exc.detail,
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"{exc.category}: {exc.detail}",
-    )
+            extras["missing_fields"] = list(missing)
+        http = map_worker_error(exc, extras=extras)
+        # Audit #7 override: the sub-category drives the status (400/413/422),
+        # not the shared table's flat composite default (422).
+        http.status_code = http_status
+        return http
+    return map_worker_error(exc)
 
 
 def _coerce_plan(payload: dict[str, Any]) -> BundleImportPlanModel:
@@ -326,7 +321,7 @@ async def import_bundle(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     if not isinstance(payload, dict):
         raise HTTPException(

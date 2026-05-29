@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api.auth import RequireToken
+from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
 from andes_app.core.session import (
     SessionExpiredError,
@@ -201,43 +202,19 @@ def _manager(request: Request) -> SessionManager:
     return mgr
 
 
-def _map_worker_error(exc: WorkerError) -> HTTPException:
-    """Map worker error categories to HTTP responses for CPF routes.
+def _to_http_error(exc: WorkerError) -> HTTPException:
+    """Route-local adapter over the shared ``map_worker_error`` (Unit 4b).
 
-    - ``no-case-loaded`` → 409 (no case at all on this session).
-    - ``CpfPrerequisiteError`` → 409 (no converged PFlow yet).
-    - ``CpfDivergedError`` → 422 (ANDES routine raised — singular Jac,
-      missing PQ for QV, etc.).
-    - ``SetupFailedError`` → 422 (post-load setup failure).
-    - Anything else → 500.
+    The shared mapper owns the canonical category→status table (``no-case-loaded``
+    → 409, ``CpfPrerequisiteError`` → 409, ``CpfDivergedError`` → 422,
+    ``SetupFailedError`` → 422), recovery, and the body shape. This route only
+    appends the documented "reload to recover" hint to ``SetupFailedError``.
     """
-    category = exc.category
-    if category == "no-case-loaded":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
+    if exc.category == "SetupFailedError":
+        exc.detail = (
+            f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
         )
-    if category == "CpfPrerequisiteError":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
-        )
-    if category == "CpfDivergedError":
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=exc.detail,
-        )
-    if category == "SetupFailedError":
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
-            ),
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"{category}: {exc.detail}",
-    )
+    return map_worker_error(exc)
 
 
 def _payload_to_response(payload: object) -> CpfResultResponse:
@@ -330,7 +307,7 @@ async def run_cpf(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     return _payload_to_response(payload)
 
@@ -379,6 +356,6 @@ async def run_cpf_qv(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     return _payload_to_response(payload)

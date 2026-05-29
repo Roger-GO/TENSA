@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api.auth import RequireToken
+from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
     AlterableParamsResponse,
     LoadCaseRequest,
@@ -98,31 +99,6 @@ def _topology_from_payload(payload: dict[str, Any]) -> TopologySummary:
     )
 
 
-def _map_worker_error(exc: WorkerError) -> HTTPException:
-    """Translate a WorkerError into the appropriate HTTP status code."""
-    category = exc.category
-    if category == "no-case-loaded":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
-        )
-    if category == "CaseLoadError":
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=exc.detail,
-        )
-    if category == "SetupFailedError":
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=exc.detail,
-        )
-    # Fallback: surface as 500 with the worker-provided detail
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"{category}: {exc.detail}",
-    )
-
-
 @router.post(
     "/sessions/{session_id}/case",
     operation_id="loadCase",
@@ -181,7 +157,7 @@ async def load_case(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise map_worker_error(exc) from exc
 
     return _topology_from_payload(payload)
 
@@ -214,7 +190,7 @@ async def get_topology(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise map_worker_error(exc) from exc
     return _topology_from_payload(payload)
 
 
@@ -278,7 +254,7 @@ async def get_alterable_params(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=exc.detail,
             ) from exc
-        raise _map_worker_error(exc) from exc
+        raise map_worker_error(exc) from exc
     if not isinstance(payload, list):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -318,7 +294,7 @@ async def reload_case(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise map_worker_error(exc) from exc
     return _topology_from_payload(payload)
 
 
@@ -371,9 +347,10 @@ async def get_connectivity(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        # SetupFailedError → 422 with the reload hint; everything else
-        # falls through to ``_map_worker_error``'s standard mapping
-        # (no-case-loaded → 409, fallback → 500).
+        # SetupFailedError → 422 with the reload hint (this connectivity route
+        # appends the hint, unlike the other case routes which surface the
+        # verbatim 422); everything else falls through to the shared
+        # ``map_worker_error`` (no-case-loaded → 409, fallback → 500).
         if exc.category == "SetupFailedError":
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -381,7 +358,7 @@ async def get_connectivity(
                     f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
                 ),
             ) from exc
-        raise _map_worker_error(exc) from exc
+        raise map_worker_error(exc) from exc
 
     if not isinstance(payload, dict):
         raise HTTPException(

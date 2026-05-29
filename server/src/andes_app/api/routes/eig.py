@@ -29,6 +29,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api.auth import RequireToken
+from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
 from andes_app.core.session import (
     SessionExpiredError,
@@ -179,49 +180,20 @@ def _manager(request: Request) -> SessionManager:
     return mgr
 
 
-def _map_worker_error(exc: WorkerError) -> HTTPException:
-    """Map worker error categories to HTTP responses for EIG routes.
+def _to_http_error(exc: WorkerError) -> HTTPException:
+    """Route-local adapter over the shared ``map_worker_error`` (Unit 4b).
 
-    - ``no-case-loaded`` → 409 (no case at all on this session).
-    - ``EigPrerequisiteError`` → 409 (no converged PFlow / no EIG run yet).
-    - ``ElementNotFoundError`` → 404 (mode index out of range).
-    - ``EigComputationError`` → 422 (ANDES routine failed; e.g.,
-      singular Jacobian after regularization).
-    - ``SetupFailedError`` → 422 (post-load setup failure; reload to recover).
-    - Anything else → 500.
+    The shared mapper owns the canonical category→status table (``no-case-loaded``
+    → 409, ``EigPrerequisiteError`` → 409, ``ElementNotFoundError`` → 404,
+    ``EigComputationError`` → 422, ``SetupFailedError`` → 422), recovery, and the
+    body shape. This route only appends the documented "reload to recover" hint to
+    ``SetupFailedError``'s detail.
     """
-    category = exc.category
-    if category == "no-case-loaded":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
+    if exc.category == "SetupFailedError":
+        exc.detail = (
+            f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
         )
-    if category == "EigPrerequisiteError":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
-        )
-    if category == "ElementNotFoundError":
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=exc.detail,
-        )
-    if category == "EigComputationError":
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=exc.detail,
-        )
-    if category == "SetupFailedError":
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
-            ),
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"{category}: {exc.detail}",
-    )
+    return map_worker_error(exc)
 
 
 # ---- routes ---------------------------------------------------------------
@@ -274,7 +246,7 @@ async def run_eig(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     if not isinstance(payload, dict):
         raise HTTPException(
@@ -346,7 +318,7 @@ async def get_eig_participation(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     if not isinstance(payload, dict):
         raise HTTPException(
@@ -412,7 +384,7 @@ async def get_eig_state_matrix(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     if not isinstance(payload, (bytes, bytearray)):
         raise HTTPException(

@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api.auth import RequireToken
+from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
 from andes_app.core.session import (
     SessionExpiredError,
@@ -125,42 +126,6 @@ def _manager(request: Request) -> SessionManager:
     return mgr
 
 
-def _map_worker_error(exc: WorkerError) -> HTTPException:
-    """Map worker error categories to HTTP responses for the report route.
-
-    The four substantively-distinct failure modes:
-
-    - ``no-case-loaded`` → 409 (no case at all on this session).
-    - ``PflowNotConvergedError`` / ``TdsNotRunError`` → 409 with the
-      pre-condition message verbatim (the UI's empty state shows it as-is).
-    - ``ReportGenerationError`` → 500 with the original ANDES error text.
-    - ``AndesAppError`` and unknown categories → 500.
-    """
-    if exc.category == "no-case-loaded":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
-        )
-    if exc.category in {
-        "PflowNotConvergedError",
-        "TdsNotRunError",
-        "EigReportPrerequisiteError",
-    }:
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
-        )
-    if exc.category == "ReportGenerationError":
-        return HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=exc.detail,
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"{exc.category}: {exc.detail}",
-    )
-
-
 # ---- routes ---------------------------------------------------------------
 
 
@@ -224,7 +189,7 @@ async def get_report(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise map_worker_error(exc) from exc
 
     if not isinstance(payload, dict):
         raise HTTPException(

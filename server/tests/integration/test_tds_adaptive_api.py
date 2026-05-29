@@ -162,7 +162,7 @@ async def test_run_tds_unknown_override_key_returns_500(
 
     The wrapper raises ``SetupFailedError`` (catalogued as
     ``SetupFailedError`` category in the worker), which the routes
-    layer maps to 422 (per ``_map_worker_error``). Either 422 or 500
+    layer maps to 422 (per the shared ``map_worker_error``). Either 422 or 500
     is acceptable per R8 — the key check is that the error makes it
     back to the client and isn't silently swallowed.
     """

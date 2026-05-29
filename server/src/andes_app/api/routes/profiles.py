@@ -44,6 +44,7 @@ from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFil
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api.auth import RequireToken
+from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
     ProblemDetails,
     TopologyEntry,
@@ -208,49 +209,32 @@ def _manager(request: Request) -> SessionManager:
     return mgr
 
 
-def _map_worker_error(exc: WorkerError) -> HTTPException:
-    """Map worker error categories to HTTP responses for profile routes.
+def _to_http_error(exc: WorkerError) -> HTTPException:
+    """Route-local adapter over the shared ``map_worker_error`` (Unit 4b).
 
-    - ``no-case-loaded`` → 409 (no case loaded OR no workspace).
-    - ``disturbance-commit`` → 409 (post-setup add/delete; reload to recover).
-    - ``ElementValidationError`` → 422 (mode=2, missing target,
-      profile path outside workspace, ANDES rejection).
-    - ``ElementNotFoundError`` → 404 (delete of non-existent TimeSeries).
-    - ``SetupFailedError`` → 500 (file write failure).
+    The shared mapper owns the canonical category→status table, recovery, and the
+    body shape. This route carries two documented per-route deltas (audit #12):
+
+    - ``disturbance-commit`` → 409 (already canonical) with the "reload to pre-setup
+      state" hint appended.
+    - ``SetupFailedError`` → **500** here (file write failure), overriding the
+      shared table's canonical 422. Detail is verbatim.
+    - everything else uses the canonical mapping (``no-case-loaded`` → 409,
+      ``ElementNotFoundError`` → 404, ``ElementValidationError`` /
+      ``ElementHasDependentsError`` → 422).
     """
-    category = exc.category
-    if category == "no-case-loaded":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
+    if exc.category == "disturbance-commit":
+        exc.detail = (
+            f"{exc.detail} — call POST /api/sessions/{{id}}/reload to "
+            "return to pre-setup state."
         )
-    if category == "disturbance-commit":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"{exc.detail} — call POST /api/sessions/{{id}}/reload to "
-                "return to pre-setup state."
-            ),
-        )
-    if category == "ElementNotFoundError":
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=exc.detail,
-        )
-    if category in {"ElementValidationError", "ElementHasDependentsError"}:
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=exc.detail,
-        )
-    if category == "SetupFailedError":
-        return HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=exc.detail,
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"{category}: {exc.detail}",
-    )
+    if exc.category == "SetupFailedError":
+        http = map_worker_error(exc)
+        # Audit #12 override: SetupFailedError here is a profile file-write
+        # failure — a 500, not the canonical 422.
+        http.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        return http
+    return map_worker_error(exc)
 
 
 def _entry_from_payload(payload: object) -> TopologyEntry:
@@ -366,7 +350,7 @@ async def upload_profile(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     if not isinstance(payload, str):
         raise HTTPException(
@@ -439,7 +423,7 @@ async def add_profile(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     return _entry_from_payload(payload)
 
@@ -479,7 +463,7 @@ async def list_profiles(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     if not isinstance(payload, list):
         raise HTTPException(
@@ -543,6 +527,6 @@ async def delete_profile(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)

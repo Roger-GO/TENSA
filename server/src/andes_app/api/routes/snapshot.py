@@ -24,6 +24,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api.auth import RequireToken
+from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
 from andes_app.core.disturbance import AlterSpec, FaultSpec, ToggleSpec
 from andes_app.core.session import (
@@ -135,38 +136,36 @@ def _manager(request: Request) -> SessionManager:
     return mgr
 
 
-def _map_worker_error(exc: WorkerError) -> HTTPException:
-    """Translate worker error categories into HTTP responses for this endpoint.
+def _to_http_error(exc: WorkerError) -> HTTPException:
+    """Bundle-export adapter over the shared ``map_worker_error`` (Unit 4b).
 
-    The bundle endpoint can fail in three substantively-different ways:
-
-    - ``no-case-loaded`` → 409 (the user's session has no case to bundle).
-    - ``ElementValidationError`` / ``CaseLoadError`` → 422 (the canonical
-      xlsx export went wrong, e.g., elements ANDES can't roundtrip; the
-      detail copy points at the actionable next step).
-    - Anything else → 500 (genuine server bug).
+    The shared mapper owns the canonical category→status table, recovery, and the
+    body shape. The bundle-export route carries one documented per-route delta
+    (audit #6): a wide 422 bucket — ``ElementValidationError`` / ``CaseLoadError``
+    (both canonical 422) PLUS the bare ``AndesAppError`` category, which is NOT in
+    the shared table (it would 500) and is **overridden to 422** here — all with the
+    "roundtrip-capable case (reload to recover)" hint appended. ``no-case-loaded``
+    → 409 and everything else → 500 come straight from the shared mapper.
     """
-    if exc.category == "no-case-loaded":
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=exc.detail,
+    if exc.category in {"ElementValidationError", "CaseLoadError", "AndesAppError"}:
+        exc.detail = (
+            f"{exc.detail} — bundle export needs a roundtrip-capable case "
+            "(reload to recover)."
         )
-    if exc.category in {
-        "ElementValidationError",
-        "CaseLoadError",
-        "AndesAppError",
-    }:
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"{exc.detail} — bundle export needs a roundtrip-capable case "
-                "(reload to recover)."
-            ),
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"{exc.category}: {exc.detail}",
-    )
+        if exc.category == "AndesAppError":
+            # Audit #6 override: the bare ``AndesAppError`` category is unmapped in
+            # the shared table (a deliberate 500 default + log). Build the 422 body
+            # directly so the legitimate export-failure path neither 500s nor emits
+            # the shared mapper's "unmapped category" error log. ``AndesAppError``'s
+            # ``recovery_kind`` is the base ``None`` → no CTA, matching the original.
+            return HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"detail": exc.detail, "recovery": None},
+            )
+        # ElementValidationError / CaseLoadError already resolve to 422 in the
+        # shared table; route through it to pick up their per-class recovery.
+        return map_worker_error(exc)
+    return map_worker_error(exc)
 
 
 # ---- routes ---------------------------------------------------------------
@@ -237,7 +236,7 @@ async def export_bundle(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        raise _map_worker_error(exc) from exc
+        raise _to_http_error(exc) from exc
 
     if not isinstance(payload, (bytes, bytearray)):
         raise HTTPException(
