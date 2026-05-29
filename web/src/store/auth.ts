@@ -54,8 +54,22 @@ export interface AuthState {
    * uses this to render a "won't survive a reload" banner.
    */
   persistFailed: boolean;
+  /**
+   * True when the substrate was started with `serve --no-auth` (the boot
+   * probe got a 200 without a token). The token gate is skipped entirely —
+   * the API client sends no header and the no-auth backend accepts it.
+   */
+  authDisabled: boolean;
+  /**
+   * True once the boot no-auth probe has resolved (or was skipped because a
+   * token was already present). The TokenPasteModal stays hidden until this
+   * flips, so a no-auth backend never flashes the paste modal.
+   */
+  authProbeDone: boolean;
   setToken: (token: string) => void;
   clearToken: () => void;
+  setAuthDisabled: () => void;
+  markAuthProbeDone: () => void;
 }
 
 /**
@@ -91,6 +105,8 @@ function fireCascade(): void {
 export const useAuthStore = create<AuthState>((set) => ({
   token: readPersistedToken(),
   persistFailed: false,
+  authDisabled: false,
+  authProbeDone: false,
   setToken: (token: string) => {
     const ok = writePersistedToken(token);
     set({ token, persistFailed: !ok });
@@ -100,6 +116,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ token: null, persistFailed: false });
     fireCascade();
   },
+  setAuthDisabled: () => set({ authDisabled: true }),
+  markAuthProbeDone: () => set({ authProbeDone: true }),
 }));
 
 /**
