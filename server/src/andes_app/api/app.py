@@ -31,6 +31,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import Scope
 
 from andes_app import __version__
+from andes_app.api.error_mapping import recovery_for
 from andes_app.api.routes.bundle import router as bundle_import_router
 from andes_app.api.routes.cases import router as cases_router
 from andes_app.api.routes.cpf import router as cpf_router
@@ -48,7 +49,8 @@ from andes_app.api.routes.sweep import router as sweep_router
 from andes_app.api.routes.tds import router as tds_router
 from andes_app.api.routes.workspace import router as workspace_router
 from andes_app.api.routes.ws import router as ws_router
-from andes_app.api.schemas import ProblemDetails
+from andes_app.api.schemas import JobRecordSchema, ProblemDetails
+from andes_app.core.errors import SessionBusyError
 from andes_app.core.session import SessionManager, SweepInProgressError
 from andes_app.security.middleware import (
     make_host_origin_middleware,
@@ -192,6 +194,11 @@ def make_app(
     app.add_exception_handler(
         SweepInProgressError, _sweep_in_progress_to_problem_details
     )
+    # v3.1 Unit 4a: a second concurrent invoke on a busy session fails fast
+    # with ``SessionBusyError`` (KTD-2). Translate to 409 with a
+    # ``wait-for-job`` recovery CTA and the in-flight job as a ``current_job``
+    # extra so the activity panel can offer wait/cancel instead of freezing.
+    app.add_exception_handler(SessionBusyError, _session_busy_to_problem_details)
 
     # Spec-driven agents discover the per-launch token via this securityScheme.
     app.openapi = _custom_openapi_factory(app)  # type: ignore[method-assign]
@@ -311,6 +318,11 @@ def _problem_details_handler(_request: Request, exc: Exception) -> JSONResponse:
     detail_value = exc.detail
     instance: str | None = None
     extra: dict[str, object] = {}
+    # ``recovery`` is the typed CTA the shared error mapper (Unit 4a) embeds in
+    # a dict-shaped ``detail``. Lift it onto the ProblemDetails field rather
+    # than spreading it as an opaque extra so it validates as a
+    # ``RecoveryDescriptor`` and matches the OpenAPI shape.
+    recovery: object | None = None
     if isinstance(detail_value, dict):
         # Preserve `instance` if the route author embedded one; spread any
         # other fields into the response so callers don't lose context.
@@ -324,8 +336,10 @@ def _problem_details_handler(_request: Request, exc: Exception) -> JSONResponse:
             if isinstance(detail_value.get("detail"), str)
             else None
         )
+        if "recovery" in detail_value:
+            recovery = detail_value["recovery"]
         for k, v in detail_value.items():
-            if k in {"detail", "instance", "title"}:
+            if k in {"detail", "instance", "title", "recovery"}:
                 continue
             extra[k] = v
     elif isinstance(detail_value, str):
@@ -340,6 +354,7 @@ def _problem_details_handler(_request: Request, exc: Exception) -> JSONResponse:
         status=status_code,
         detail=detail_str,
         instance=instance,
+        recovery=recovery,  # type: ignore[arg-type]  # coerced/validated by pydantic
     ).model_dump(mode="json")
     body.update(extra)
     headers = getattr(exc, "headers", None)
@@ -365,6 +380,7 @@ def _sweep_in_progress_to_problem_details(
         status=503,
         detail=str(exc),
         instance=None,
+        recovery=recovery_for(exc),
     ).model_dump(mode="json")
     body["sweep_id"] = exc.sweep_id
     body["iter_done"] = exc.iter_done
@@ -374,6 +390,40 @@ def _sweep_in_progress_to_problem_details(
         content=body,
         headers={"Retry-After": "5"},
     )
+
+
+def _session_busy_to_problem_details(
+    _request: Request, exc: Exception
+) -> JSONResponse:
+    """Translate ``SessionBusyError`` to ``409 Conflict`` (v3.1 Unit 4a).
+
+    A second concurrent ``invoke()`` on a session whose per-session lock is
+    already held fails fast with ``SessionBusyError`` (KTD-2). We surface a
+    ``wait-for-job`` recovery CTA and attach the in-flight ``JobRecord`` (or
+    ``None`` during the race window before the row is inserted, and until
+    Unit 5 wires per-route registry population) as a ``current_job`` extra so
+    the activity panel can offer wait/cancel instead of freezing the UI.
+    """
+    if not isinstance(exc, SessionBusyError):  # pragma: no cover
+        raise exc
+    body = ProblemDetails(
+        type="about:blank",
+        title="Conflict",
+        status=409,
+        detail=str(exc),
+        instance=None,
+        recovery=recovery_for(exc),
+    ).model_dump(mode="json")
+    # ``current_job`` rides along as an extra (ProblemDetails is extra="allow").
+    # Serialize the JobRecord dataclass through JobRecordSchema so the wire
+    # shape matches the rest of the jobs API; ``None`` stays null.
+    if exc.current_job is not None:
+        body["current_job"] = JobRecordSchema.model_validate(
+            exc.current_job, from_attributes=True
+        ).model_dump(mode="json")
+    else:
+        body["current_job"] = None
+    return JSONResponse(status_code=409, content=body)
 
 
 def _request_validation_to_problem_details(
@@ -394,6 +444,13 @@ def _request_validation_to_problem_details(
         status=422,
         detail=f"request body failed validation: {exc.errors()!r}",
         instance=None,
+        # ``RequestValidationError`` carries no ``recovery_kind`` attr, so this
+        # resolves to ``None`` today — wire shape is byte-identical with or
+        # without the call (``recovery`` defaults to ``None``). Kept for
+        # uniformity with the other three handlers per the Unit 4a spec's
+        # "use ``recovery_for`` when building EVERY ProblemDetails" rule, so a
+        # future "fix-request" CTA has a single consistent attach point.
+        recovery=recovery_for(exc),
     ).model_dump(mode="json")
     return JSONResponse(status_code=422, content=body)
 
