@@ -39,6 +39,7 @@
  * topology edits" gate it can land here next to the other reasons.
  */
 import type { ReactNode } from 'react';
+import type { RecoveryDescriptor } from '@/lib/recovery';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useAuthStore } from '@/store/auth';
 import { useCaseStore } from '@/store/case';
@@ -60,13 +61,15 @@ export type RunRoutine = 'pflow' | 'tds' | 'eig' | 'cpf' | 'se' | 'sweep';
  * hook itself stays free of React-tree dependencies (queries, query
  * client, mutation refs).
  *
- * Today the only kind is ``"reload-case"`` (clearing the EIG-induced dae
- * mutation so PF can re-run). Future kinds (e.g. ``"abort-sweep"``,
- * ``"commit-disturbances"``) extend the union.
+ * Unit 7 unifies this with the post-error recovery shape: ``RecoveryAction``
+ * is now an alias of the shared ``RecoveryDescriptor`` (``@/lib/recovery``)
+ * so readiness preconditions and ``ProblemDetailsError.recovery`` flow
+ * through the SAME ``<RecoveryActionButton>`` switch. The readiness producer
+ * uses the ``"reload-case"`` kind (clearing the EIG-induced dae mutation so
+ * PF can re-run) and the readiness-only ``"open-pf"`` kind (the "Run PFlow
+ * first" precondition); both are members of the shared union.
  */
-export type RecoveryAction =
-  | { kind: 'reload-case'; label: string }
-  | { kind: 'open-pf'; label: string };
+export type RecoveryAction = RecoveryDescriptor;
 
 export interface RunReadiness {
   /** True when the routine can be invoked right now. */
