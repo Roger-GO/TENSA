@@ -972,6 +972,17 @@ class TdsBatchResult(BaseModel):
             "the run. Useful as a sanity check that streaming is wired."
         ),
     )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring this TDS run (v3.1 Unit 5c). Additive "
+            "and IDENTICAL to ``run_id`` — the two fields alias the same value, "
+            "with ``run_id`` preserved for backward compatibility. "
+            "``GET /sessions/{id}/jobs/{job_id}`` returns the matching "
+            "``JobRecord`` (kind ``tds-batch``). ``null`` only on legacy "
+            "responses synthesised outside the job lifecycle."
+        ),
+    )
 
 
 # ---- abort + alterable-params (Unit 1b of v0.2) ----------------------------

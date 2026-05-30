@@ -29,6 +29,9 @@ from andes_app.core.session import (
     SessionManager,
     WorkerError,
 )
+from andes_app.core.session import (
+    _stream_error_problem as _job_error_problem,
+)
 
 router = APIRouter()
 
@@ -95,6 +98,31 @@ async def run_tds(
     }
     if body.tds_config_overrides is not None:
         args["tds_config_overrides"] = body.tds_config_overrides
+
+    # v3.1 Unit 5c: mirror the batch run as a first-class job whose ``job_id``
+    # EQUALS the response's ``run_id`` (same value across both fields — additive,
+    # nothing removed). The ``run_id`` is minted FIRST so it can seed the
+    # registry id; the registry lifecycle (running → done / failed) is driven
+    # inline here rather than via ``_run_as_job`` because that helper mints its
+    # own id and we need the alias. Falls back to a bare ``run_id`` (no record)
+    # when the session is already gone — the invoke below will 404 anyway.
+    run_id = uuid.uuid4().hex
+    registry = None
+    try:
+        registry = mgr.session_job_registry(session_id)
+    except SessionExpiredError:
+        registry = None
+    if registry is not None:
+        registry.register_job(
+            kind="tds-batch",
+            can_cancel=True,
+            request_summary=body.model_dump(),
+            job_id=run_id,
+        )
+        _broadcast_job(mgr, session_id, run_id)
+        registry.mark_running(run_id)
+        _broadcast_job(mgr, session_id, run_id)
+
     # Generous timeout: TDS for IEEE 14 / 1-second sim is sub-second; for
     # larger cases or longer horizons it can take minutes. The watchdog in
     # SessionManager handles wedged sessions; this timeout is a backstop.
@@ -111,14 +139,35 @@ async def run_tds(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
+        if registry is not None:
+            registry.mark_failed(
+                run_id, problem=_job_error_problem("tds-batch", (exc.category, exc.detail))
+            )
+            _broadcast_job(mgr, session_id, run_id)
         raise _to_http_error(exc) from exc
 
+    if registry is not None:
+        registry.mark_done(run_id)
+        _broadcast_job(mgr, session_id, run_id)
+
     return TdsBatchResult(
-        run_id=uuid.uuid4().hex,
+        run_id=run_id,
+        job_id=run_id,
         converged=bool(payload["converged"]),
         final_t=float(payload["final_t"]),
         callpert_count=int(payload["callpert_count"]),
     )
+
+
+def _broadcast_job(mgr: SessionManager, session_id: str, job_id: str) -> None:
+    """Broadcast the current state of ``job_id`` to the session's WS subscribers."""
+    try:
+        registry = mgr.session_job_registry(session_id)
+    except SessionExpiredError:
+        return
+    record = registry.get_job(job_id)
+    if record is not None:
+        mgr.broadcast_job_event(session_id, record)
 
 
 @router.post(

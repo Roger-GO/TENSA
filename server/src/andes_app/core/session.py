@@ -661,6 +661,18 @@ class SessionManager:
         )
         self._runs[run_id] = run_buf
 
+        # v3.1 Unit 5c: register the streaming run as a first-class job whose
+        # ``job_id`` EQUALS the ``run_id`` (same value across both fields). The
+        # ``_drive_streaming_run`` driver below transitions it running → done /
+        # failed; cancellation is cooperative via the abort event so the record
+        # is ``can_cancel=True``.
+        self.register_streaming_job(
+            session_id,
+            run_id=run_id,
+            kind="tds-stream",
+            request_summary=_streaming_request_summary(args),
+        )
+
         task = asyncio.create_task(
             self._drive_streaming_run(run_buf, op, args),
             name=f"andes-app-run-{run_id[:8]}",
@@ -693,6 +705,9 @@ class SessionManager:
                 for q in run_buf.consumers:
                     with contextlib.suppress(asyncio.QueueFull):
                         q.put_nowait(event)
+            # v3.1 Unit 5c: the worker has begun emitting frames — flip the
+            # registry record running so the activity panel shows the spinner.
+            self._mark_streaming_job_running(run_buf)
 
         async def _on_frame(payload: bytes) -> None:
             nonlocal frame_seq_counter
@@ -749,6 +764,11 @@ class SessionManager:
             for q in run_buf.consumers:
                 with contextlib.suppress(asyncio.QueueFull):
                     q.put_nowait(event)
+        # v3.1 Unit 5c: reconcile the registry record (job_id == run_id) to its
+        # terminal status so the activity panel resolves the spinner. Done
+        # outside the buffer lock since it touches a different lock (the
+        # registry's) and broadcasts.
+        self._finish_streaming_job(run_buf, state, error=error)
 
     async def attach_to_run(
         self,
@@ -914,6 +934,22 @@ class SessionManager:
         sess.sweep_iter_done = 0
         sess.sweep_iter_total = total
 
+        # v3.1 Unit 5c: register the sweep as a first-class job whose ``job_id``
+        # EQUALS the ``sweep_id`` (same value across both fields). The sweep has
+        # a cooperative abort path (the shared abort event), so the record is
+        # ``can_cancel=True``. ``_drive_sweep`` / ``_finish_sweep`` flip it
+        # running → done / failed.
+        self.register_sweep_job(
+            session_id,
+            sweep_id=sweep_id,
+            kind="sweep",
+            request_summary=_sweep_request_summary(sweep_args, total),
+        )
+        sess.job_registry.mark_running(sweep_id)
+        running_record = sess.job_registry.get_job(sweep_id)
+        if running_record is not None:
+            self.broadcast_job_event(session_id, running_record)
+
         task = asyncio.create_task(
             self._drive_sweep(sess, sweep_buf, sweep_args),
             name=f"andes-app-sweep-{sweep_id[:8]}",
@@ -964,6 +1000,16 @@ class SessionManager:
                     with contextlib.suppress(asyncio.QueueFull):
                         q.put_nowait(event)
             sess.sweep_iter_done = sweep_buf.completed_iterations
+            # v3.1 Unit 5c: surface fractional progress on the registry record
+            # (job_id == sweep_id) so the activity panel renders a bar.
+            if sweep_buf.total > 0:
+                sess.job_registry.update_progress(
+                    sweep_buf.sweep_id,
+                    sweep_buf.completed_iterations / sweep_buf.total,
+                )
+                progressed = sess.job_registry.get_job(sweep_buf.sweep_id)
+                if progressed is not None:
+                    self.broadcast_job_event(sess.session_id, progressed)
 
         # Send the request from the executor (Pipe.send is sync), then
         # loop on Pipe.recv for sweep_progress envelopes + the final
@@ -1066,6 +1112,11 @@ class SessionManager:
         # cleans it up (so late WS reconnects can read iteration
         # results back).
         sess.sweep_in_progress = None
+        # v3.1 Unit 5c: reconcile the registry record (job_id == sweep_id) to
+        # its terminal status. completed → done, aborted → cancelled, error →
+        # failed (with a synthesized ProblemDetails from the sweep's error
+        # tuple).
+        self._finish_sweep_job(sess, sweep_buf.sweep_id, state, error=error)
 
     async def attach_to_sweep(
         self,
@@ -1311,6 +1362,144 @@ class SessionManager:
             with contextlib.suppress(asyncio.QueueFull):
                 queue.put_nowait(dict(envelope))
 
+    # ----- streaming / sweep job registration (v3.1 Unit 5c) --------------
+
+    def register_streaming_job(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+        kind: JobKind = "tds-stream",
+        request_summary: dict[str, Any] | None = None,
+    ) -> str:
+        """Register a streaming TDS run as a first-class job (Unit 5c).
+
+        The registry ``job_id`` is aliased onto the caller-minted ``run_id`` —
+        the same value is reused so the wire shape gains a ``job_id`` field
+        equal to the legacy ``run_id`` with nothing removed. The record is
+        created ``pending`` + ``can_cancel=True`` (the run has a cooperative
+        abort via the session's abort event) and broadcast to ``/jobs/events``
+        subscribers. ``_drive_streaming_run`` flips it running → done / failed.
+
+        A no-op-on-duplicate (returns the existing id) so a resume that re-runs
+        ``start_streaming_run`` plumbing never clobbers the live record. Returns
+        the ``job_id`` ( == ``run_id``). Silently no-ops when the session is
+        already gone.
+        """
+        with self._registry_lock:
+            sess = self._sessions.get(session_id)
+        if sess is None or sess.closed:
+            return run_id
+        sess.job_registry.register_job(
+            kind=kind,
+            can_cancel=True,
+            request_summary=request_summary or {},
+            job_id=run_id,
+        )
+        record = sess.job_registry.get_job(run_id)
+        if record is not None:
+            self.broadcast_job_event(session_id, record)
+        return run_id
+
+    def register_sweep_job(
+        self,
+        session_id: str,
+        *,
+        sweep_id: str,
+        kind: JobKind = "sweep",
+        request_summary: dict[str, Any] | None = None,
+    ) -> str:
+        """Register a sweep as a first-class job (Unit 5c).
+
+        Mirror of :meth:`register_streaming_job` for sweeps: the registry
+        ``job_id`` is aliased onto the caller-minted ``sweep_id`` (same value),
+        ``can_cancel=True`` (the sweep cooperatively aborts via the shared abort
+        event / task cancellation). Returns the ``job_id`` ( == ``sweep_id``).
+        Silently no-ops when the session is already gone.
+        """
+        with self._registry_lock:
+            sess = self._sessions.get(session_id)
+        if sess is None or sess.closed:
+            return sweep_id
+        sess.job_registry.register_job(
+            kind=kind,
+            can_cancel=True,
+            request_summary=request_summary or {},
+            job_id=sweep_id,
+        )
+        record = sess.job_registry.get_job(sweep_id)
+        if record is not None:
+            self.broadcast_job_event(session_id, record)
+        return sweep_id
+
+    def _mark_streaming_job_running(self, run_buf: _RunBuffer) -> None:
+        """Flip the streaming run's registry record running + broadcast."""
+        with self._registry_lock:
+            sess = self._sessions.get(run_buf.session_id)
+        if sess is None:
+            return
+        sess.job_registry.mark_running(run_buf.run_id)
+        record = sess.job_registry.get_job(run_buf.run_id)
+        if record is not None:
+            self.broadcast_job_event(run_buf.session_id, record)
+
+    def _finish_streaming_job(
+        self,
+        run_buf: _RunBuffer,
+        state: RunState,
+        *,
+        error: tuple[str, str] | None,
+    ) -> None:
+        """Reconcile the streaming run's registry record to terminal (Unit 5c).
+
+        ``completed`` → ``done``; ``error`` → ``failed`` with a synthesized
+        ``ProblemDetails`` built from the ``(category, detail)`` error tuple.
+        The ``pending`` / ``running`` states are non-terminal and never reach
+        here. Broadcasts the transition. A no-op when the session is gone.
+        """
+        with self._registry_lock:
+            sess = self._sessions.get(run_buf.session_id)
+        if sess is None:
+            return
+        registry = sess.job_registry
+        if state == "completed":
+            registry.mark_done(run_buf.run_id)
+        elif state == "error":
+            registry.mark_failed(
+                run_buf.run_id,
+                problem=_stream_error_problem("tds-stream", error),
+            )
+        record = registry.get_job(run_buf.run_id)
+        if record is not None:
+            self.broadcast_job_event(run_buf.session_id, record)
+
+    def _finish_sweep_job(
+        self,
+        sess: _Session,
+        sweep_id: str,
+        state: SweepState,
+        *,
+        error: tuple[str, str] | None,
+    ) -> None:
+        """Reconcile the sweep's registry record to terminal (Unit 5c).
+
+        ``completed`` → ``done``; ``aborted`` → ``cancelled``; ``error`` →
+        ``failed`` with a synthesized ``ProblemDetails``. Broadcasts the
+        transition.
+        """
+        registry = sess.job_registry
+        if state == "completed":
+            registry.mark_done(sweep_id)
+        elif state == "aborted":
+            registry.mark_cancelled(sweep_id)
+        elif state == "error":
+            registry.mark_failed(
+                sweep_id, problem=_stream_error_problem("sweep", error)
+            )
+        record = registry.get_job(sweep_id)
+        if record is not None:
+            self.broadcast_job_event(sess.session_id, record)
+
     # ----- introspection -----
 
     def list_sessions(self) -> list[str]:
@@ -1415,6 +1604,57 @@ class SessionManager:
                     self.broadcast_job_event(session_id, updated)
                 failed += 1
         return failed
+
+
+def _streaming_request_summary(args: dict[str, Any]) -> dict[str, Any]:
+    """User-facing variables captured for a streaming-TDS job's retry (Unit 5c).
+
+    Mirrors the routine routes' ``request.model_dump()`` summaries: the fields a
+    Retry button (Unit 11) would replay. Internal plumbing flags (``stream``)
+    are dropped; only the user-meaningful run parameters are kept.
+    """
+    summary: dict[str, Any] = {}
+    for key in ("tf", "h", "integrator", "decimation", "max_rate_hz", "vars"):
+        if key in args and args[key] is not None:
+            summary[key] = args[key]
+    if args.get("tds_config_overrides") is not None:
+        summary["tds_config_overrides"] = args["tds_config_overrides"]
+    return summary
+
+
+def _sweep_request_summary(
+    sweep_args: dict[str, Any], total: int
+) -> dict[str, Any]:
+    """User-facing variables captured for a sweep job's retry (Unit 5c)."""
+    summary: dict[str, Any] = {
+        "snapshot_name": sweep_args.get("snapshot_name", ""),
+        "parameter_kind": sweep_args.get("parameter_kind", ""),
+        "parameter_target": sweep_args.get("parameter_target", 0),
+        "tf": sweep_args.get("tf"),
+        "h": sweep_args.get("h"),
+        "total": total,
+    }
+    return summary
+
+
+def _stream_error_problem(
+    kind: JobKind, error: tuple[str, str] | None
+) -> dict[str, Any]:
+    """Synthesize a ``ProblemDetails`` for a failed streaming / sweep job.
+
+    Built from the driver's ``(category, detail)`` error tuple so the failed
+    record carries the same diagnostic the WS terminal ``error`` frame ships.
+    Falls back to an indeterminate ``internal-error`` when the tuple is absent.
+    """
+    category, detail = error if error is not None else ("internal-error", "")
+    return {
+        "type": "about:blank",
+        "title": "Internal Server Error",
+        "status": 500,
+        "category": category,
+        "detail": detail,
+        "recovery": None,
+    }
 
 
 def _worker_died_problem(record: JobRecord) -> dict[str, Any]:
