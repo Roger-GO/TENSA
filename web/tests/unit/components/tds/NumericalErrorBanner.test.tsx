@@ -100,6 +100,19 @@ describe('<NumericalErrorBanner />', () => {
     expect(screen.queryByTestId('numerical-error-details')).not.toBeInTheDocument();
   });
 
+  it('renders via the primitive; the t_current detail flows through the formatter into the grid', async () => {
+    seedRun({ state: 'error', tCurrent: 2.345, tf: 5, seqCount: 47 });
+    render(<NumericalErrorBanner />);
+    // The migrated wrapper renders the primitive's banner surface.
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('numerical-error-toggle'));
+    const details = screen.getByTestId('numerical-error-details');
+    // The EXACT pre-migration formatting (toFixed(4)) survives the formatter.
+    expect(details).toHaveTextContent(/2\.3450 s/);
+    expect(details).toHaveTextContent(/5\.0000 s/);
+    expect(details).toHaveTextContent(/47/);
+  });
+
   it('hides the banner after Dismiss; per-run, so a new run re-shows it', async () => {
     seedRun({ runId: 'run-A', state: 'error' });
     const { rerender } = render(<NumericalErrorBanner />);

@@ -7,8 +7,8 @@
  * and the tds-initialized info banner; deeper EIG result-view
  * behaviour is covered by EIGScatter.test / EIGParticipationTable.test.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AnalyzePanel } from '@/components/analyze/AnalyzePanel';
@@ -19,6 +19,8 @@ import { useAuthStore } from '@/store/auth';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { useSweepStore } from '@/store/sweep';
+import { useRunModeStore } from '@/store/runMode';
+import { setTokenGetter } from '@/api/client';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { EigResult, PflowResult } from '@/api/types';
 
@@ -245,5 +247,146 @@ describe('<AnalyzePanel />', () => {
     await userEvent.hover(button.parentElement!);
     const matches = await screen.findAllByText(/Sweep sweep-9 in progress/i);
     expect(matches.length).toBeGreaterThan(0);
+  });
+
+  // ---- migrated routine-error surfaces (v3.1 Unit 9) -------------------
+  //
+  // The per-routine EIG / CPF / SE inline error banners are now thin
+  // wrappers around the single ``<ProblemDetailsErrorSurface>`` primitive.
+  // These tests assert the post-click error UI renders the SAME branches
+  // (409 prerequisite vs generic 4xx/5xx) and the 409 recovery CTA routes
+  // the user back to the PF view.
+
+  describe('routine error surfaces', () => {
+    let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      setTokenGetter(() => 'test-token');
+      fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
+        typeof vi.spyOn
+      >;
+      // Seed a converged PF so the Run-readiness gate enables the button —
+      // the 409 we inject simulates the substrate disagreeing post-click.
+      usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    });
+
+    afterEach(() => {
+      fetchSpy.mockRestore();
+      setTokenGetter(() => null);
+    });
+
+    function respondWith(status: number, body: Record<string, unknown>) {
+      fetchSpy.mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify(body), {
+            status,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        ),
+      );
+    }
+
+    it('EIG 409 prerequisite renders the warning banner + a "Run PFlow" recovery CTA wired to the PF view', async () => {
+      respondWith(409, {
+        type: 'about:blank',
+        title: 'Prerequisite not met',
+        status: 409,
+        detail: 'Run PFlow before EIG.',
+        recovery: { kind: 'run-pflow', label: 'Open PF view' },
+      });
+      useAnalyzeStore.getState().setSubMode('eig');
+      // Reset the run-mode store so the recovery routing is observable.
+      useRunModeStore.setState({ activeRoutine: 'eig' });
+
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('analyze-run-eig'));
+
+      // The migrated prerequisite surface renders via the primitive.
+      const banner = await screen.findByTestId('eig-prerequisite-error');
+      expect(banner).toBeInTheDocument();
+      // The EXACT bespoke detail copy is preserved.
+      expect(banner).toHaveTextContent('Run PFlow before EIG.');
+
+      // The recovery CTA routes back to the PF view (sub-mode + run mode).
+      const cta = screen.getByRole('button', { name: /open pf view/i });
+      await userEvent.click(cta);
+      expect(useAnalyzeStore.getState().subMode).toBe('pflow');
+      expect(useRunModeStore.getState().activeRoutine).toBe('pflow');
+    });
+
+    it('EIG generic 5xx renders the danger error banner with the detail copy', async () => {
+      respondWith(500, {
+        type: 'about:blank',
+        title: 'Internal Server Error',
+        status: 500,
+        detail: 'eig solver crashed',
+      });
+      useAnalyzeStore.getState().setSubMode('eig');
+
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('analyze-run-eig'));
+
+      const banner = await screen.findByTestId('eig-error');
+      expect(banner).toHaveTextContent('eig solver crashed');
+      // No prerequisite banner for a non-409 error.
+      expect(screen.queryByTestId('eig-prerequisite-error')).not.toBeInTheDocument();
+    });
+
+    it('CPF 409 prerequisite renders the prerequisite banner with the run-pflow CTA', async () => {
+      respondWith(409, {
+        type: 'about:blank',
+        title: 'Prerequisite not met',
+        status: 409,
+        detail: 'Run PFlow before CPF.',
+        recovery: { kind: 'run-pflow', label: 'Open PF view' },
+      });
+      useAnalyzeStore.getState().setSubMode('cpf');
+
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('analyze-run-cpf'));
+
+      const banner = await screen.findByTestId('cpf-prerequisite-error');
+      expect(banner).toHaveTextContent('Run PFlow before CPF.');
+      expect(screen.getByRole('button', { name: /open pf view/i })).toBeInTheDocument();
+    });
+
+    it('SE 409 prerequisite renders the prerequisite banner with the run-pflow CTA', async () => {
+      respondWith(409, {
+        type: 'about:blank',
+        title: 'Prerequisite not met',
+        status: 409,
+        detail: 'Run PFlow before SE.',
+        recovery: { kind: 'run-pflow', label: 'Open PF view' },
+      });
+      useAnalyzeStore.getState().setSubMode('se');
+      // SE's run gate also needs a measurement count to enable the button.
+      useAnalyzeStore.setState({ seMeasurementsCount: 5 });
+
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+
+      const banner = await screen.findByTestId('se-prerequisite-error');
+      expect(banner).toHaveTextContent('Run PFlow before SE.');
+      expect(screen.getByRole('button', { name: /open pf view/i })).toBeInTheDocument();
+    });
+
+    it('a 409 with NO recovery field still synthesises the run-pflow CTA (staged-rollout fallback)', async () => {
+      respondWith(409, {
+        type: 'about:blank',
+        title: 'Prerequisite not met',
+        status: 409,
+        detail: 'Run PFlow first.',
+        // no `recovery` field — legacy body during the staged rollout.
+      });
+      useAnalyzeStore.getState().setSubMode('eig');
+
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('analyze-run-eig'));
+
+      await screen.findByTestId('eig-prerequisite-error');
+      const cta = screen.getByRole('button', { name: /open pf view/i });
+      await userEvent.click(cta);
+      await waitFor(() => expect(useAnalyzeStore.getState().subMode).toBe('pflow'));
+    });
   });
 });

@@ -21,6 +21,8 @@ import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
 import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { ProblemDetailsError } from '@/api/client';
+import { ProblemDetailsErrorSurface } from '@/components/error/ProblemDetailsErrorSurface';
+import type { RecoveryDescriptor } from '@/lib/recovery';
 
 /**
  * AnalyzePanel — Unit 6's new right-dock tab. Hosts a sub-mode picker
@@ -156,6 +158,68 @@ function AnalyzeRunButton({
   return button;
 }
 
+/**
+ * AnalyzeRoutineError — the per-routine error surface for EIG / CPF / SE,
+ * migrated onto the single ``<ProblemDetailsErrorSurface>`` primitive
+ * (v3.1 Unit 9). Replaces the three bespoke inline ``role="alert"`` banners.
+ *
+ * Branch → recovery mapping:
+ *
+ * - **409 prerequisite** (the routine needs a converged operating point):
+ *   warning-toned banner + a ``run-pflow`` recovery (label "Open PF view")
+ *   whose ``<RecoveryActionButton>`` routes the user to the PF run mode +
+ *   Analyze PF sub-mode. The substrate's own ``recovery`` descriptor is used
+ *   when present; otherwise we synthesise the canonical ``run-pflow`` CTA so
+ *   the affordance is preserved during the staged rollout.
+ * - **generic 4xx / 5xx**: danger-toned banner carrying whatever ``recovery``
+ *   the substrate attached (``null`` → dismiss-only, per the staged-rollout
+ *   fallback). The detail is the ProblemDetails ``detail`` (falling back to
+ *   ``title`` / ``message``), preserving the bespoke copy.
+ *
+ * ``error`` is the live mutation error (a ``ProblemDetailsError`` or a plain
+ * ``Error``). ``null`` renders nothing.
+ */
+function AnalyzeRoutineError({ routine, error }: { routine: RunRoutine; error: Error | null }) {
+  if (error === null) return null;
+
+  const isPrerequisite = error instanceof ProblemDetailsError && error.status === 409;
+
+  if (isPrerequisite) {
+    // Prefer the substrate's typed recovery; otherwise synthesise the
+    // canonical run-pflow CTA so the "Open PF view" affordance survives the
+    // staged rollout (legacy 409s with no recovery field).
+    const recovery: RecoveryDescriptor = error.recovery ?? {
+      kind: 'run-pflow',
+      label: 'Open PF view',
+    };
+    return (
+      <ProblemDetailsErrorSurface
+        variant="banner"
+        tone="warning"
+        testId={`${routine}-prerequisite-error`}
+        hideRawDisclosure
+        error={{
+          title: error.detail ?? 'Run PFlow first.',
+          recovery,
+        }}
+      />
+    );
+  }
+
+  const detail =
+    error instanceof ProblemDetailsError ? (error.detail ?? error.title) : error.message;
+  const recovery = error instanceof ProblemDetailsError ? error.recovery : null;
+  return (
+    <ProblemDetailsErrorSurface
+      variant="banner"
+      tone="danger"
+      testId={`${routine}-error`}
+      hideRawDisclosure
+      error={{ title: detail, recovery }}
+    />
+  );
+}
+
 function AnalyzePflowSubMode() {
   const lastRun = usePflowStore((s) => s.lastRun);
   return (
@@ -184,7 +248,6 @@ export function AnalyzeEigSubMode() {
   const sessionId = useSessionStore((s) => s.sessionId);
   const lastPf = usePflowStore((s) => s.lastRun);
   const eigResult = useAnalyzeStore((s) => s.eigResult);
-  const setSubMode = useAnalyzeStore((s) => s.setSubMode);
   const eigRun = useEigRun();
 
   // When the case changes (PF cleared on case-load via cross-slice
@@ -201,7 +264,6 @@ export function AnalyzeEigSubMode() {
   };
 
   const eigError = eigRun.error;
-  const isPrerequisite = eigError instanceof ProblemDetailsError && eigError.status === 409;
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -229,38 +291,7 @@ export function AnalyzeEigSubMode() {
         ) : null}
       </div>
 
-      {isPrerequisite ? (
-        <div
-          role="alert"
-          data-testid="eig-prerequisite-error"
-          className={cn(
-            'border-warning/40 bg-warning/10 text-foreground',
-            'flex flex-col gap-2 rounded border p-3 text-xs',
-          )}
-        >
-          <span>{eigError.detail ?? 'Run PFlow first.'}</span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            data-testid="eig-prerequisite-cta"
-            onClick={() => setSubMode('pflow')}
-          >
-            Open PF view
-          </Button>
-        </div>
-      ) : null}
-
-      {eigError !== null && !isPrerequisite ? (
-        <div
-          role="alert"
-          className={cn('border-danger/40 bg-danger/10 text-danger', 'rounded border p-3 text-xs')}
-        >
-          {eigError instanceof ProblemDetailsError
-            ? (eigError.detail ?? eigError.title)
-            : eigError.message}
-        </div>
-      ) : null}
+      <AnalyzeRoutineError routine="eig" error={eigError} />
 
       <EIGScatter className="min-h-[260px] flex-shrink-0" />
       <EIGParticipationTable className="min-h-[140px] flex-shrink-0" />
@@ -273,7 +304,6 @@ export function AnalyzeCpfSubMode() {
   const sessionId = useSessionStore((s) => s.sessionId);
   const lastPf = usePflowStore((s) => s.lastRun);
   const cpfResult = useAnalyzeStore((s) => s.cpfResult);
-  const setSubMode = useAnalyzeStore((s) => s.setSubMode);
   const cpfRun = useCpfRun();
 
   // When PF clears (case change cascade), drop the stale CPF result so
@@ -290,7 +320,6 @@ export function AnalyzeCpfSubMode() {
   };
 
   const cpfError = cpfRun.error;
-  const isPrerequisite = cpfError instanceof ProblemDetailsError && cpfError.status === 409;
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -311,38 +340,7 @@ export function AnalyzeCpfSubMode() {
         ) : null}
       </div>
 
-      {isPrerequisite ? (
-        <div
-          role="alert"
-          data-testid="cpf-prerequisite-error"
-          className={cn(
-            'border-warning/40 bg-warning/10 text-foreground',
-            'flex flex-col gap-2 rounded border p-3 text-xs',
-          )}
-        >
-          <span>{cpfError.detail ?? 'Run PFlow first.'}</span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            data-testid="cpf-prerequisite-cta"
-            onClick={() => setSubMode('pflow')}
-          >
-            Open PF view
-          </Button>
-        </div>
-      ) : null}
-
-      {cpfError !== null && !isPrerequisite ? (
-        <div
-          role="alert"
-          className={cn('border-danger/40 bg-danger/10 text-danger', 'rounded border p-3 text-xs')}
-        >
-          {cpfError instanceof ProblemDetailsError
-            ? (cpfError.detail ?? cpfError.title)
-            : cpfError.message}
-        </div>
-      ) : null}
+      <AnalyzeRoutineError routine="cpf" error={cpfError} />
 
       <CPFCurveChart className="min-h-[300px] flex-shrink-0" />
     </div>
@@ -375,7 +373,6 @@ export function AnalyzeSeSubMode() {
   const lastPf = usePflowStore((s) => s.lastRun);
   const seResult = useAnalyzeStore((s) => s.seResult);
   const seMeasurementsCount = useAnalyzeStore((s) => s.seMeasurementsCount);
-  const setSubMode = useAnalyzeStore((s) => s.setSubMode);
   const seGenerate = useSeGenerateMeasurements();
   const seRun = useSeRun();
 
@@ -398,7 +395,6 @@ export function AnalyzeSeSubMode() {
   // The currently-active error (generate has priority — if it failed,
   // the run button is disabled and the error came from generate).
   const activeError = seGenerate.error ?? seRun.error;
-  const isPrerequisite = activeError instanceof ProblemDetailsError && activeError.status === 409;
 
   const canGenerate = sessionId !== null && !seGenerate.isPending;
 
@@ -434,42 +430,7 @@ export function AnalyzeSeSubMode() {
         ) : null}
       </div>
 
-      {isPrerequisite ? (
-        <div
-          role="alert"
-          data-testid="se-prerequisite-error"
-          className={cn(
-            'border-warning/40 bg-warning/10 text-foreground',
-            'flex flex-col gap-2 rounded border p-3 text-xs',
-          )}
-        >
-          <span>
-            {activeError instanceof ProblemDetailsError
-              ? (activeError.detail ?? 'Run PFlow first.')
-              : 'Run PFlow first.'}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            data-testid="se-prerequisite-cta"
-            onClick={() => setSubMode('pflow')}
-          >
-            Open PF view
-          </Button>
-        </div>
-      ) : null}
-
-      {activeError !== null && !isPrerequisite ? (
-        <div
-          role="alert"
-          className={cn('border-danger/40 bg-danger/10 text-danger', 'rounded border p-3 text-xs')}
-        >
-          {activeError instanceof ProblemDetailsError
-            ? (activeError.detail ?? activeError.title)
-            : activeError.message}
-        </div>
-      ) : null}
+      <AnalyzeRoutineError routine="se" error={activeError ?? null} />
 
       <SEResidualChart className="min-h-[260px] flex-shrink-0" />
     </div>
