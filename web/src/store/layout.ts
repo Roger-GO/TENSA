@@ -28,6 +28,7 @@
  */
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import type { JobKind } from '@/store/jobs';
 
 /**
  * Outer tab strip identifier for the BottomDrawer (Unit 11). The first
@@ -78,6 +79,19 @@ export const ANALYSIS_SUB_TABS: readonly AnalysisSubTab[] = [
 export type ActivityPanelTab = 'active' | 'history';
 
 export const ACTIVITY_PANEL_TABS: readonly ActivityPanelTab[] = ['active', 'history'] as const;
+
+/**
+ * HistoryDrawer kind-filter selection (Unit 12). ``runs`` is the default —
+ * the historical TDS-runs-only view, sourced from ``useRunsStore`` so the
+ * scrub/overlay affordances stay intact. ``all`` surfaces every job kind in
+ * one chronological list (sourced from ``useJobsStore``; deliberately
+ * overlaps the Activity panel). Any other value is a concrete ``JobKind``
+ * (e.g. ``pflow``) that filters the All-style job list down to that kind.
+ *
+ * Display-state only — safe to persist (the JobRecord data it filters lives
+ * in the in-memory ``useJobsStore`` and is NEVER persisted; security F2).
+ */
+export type HistoryKindFilter = 'runs' | 'all' | JobKind;
 
 export interface LayoutState {
   /** Left sidebar collapse state (driven by Unit 2 toggle + ⌘B). */
@@ -154,6 +168,14 @@ export interface LayoutState {
    */
   selectedJobId: string | null;
   setSelectedJobId: (id: string | null) => void;
+
+  /**
+   * HistoryDrawer kind-filter selection (Unit 12). Defaults to ``runs``
+   * (the historical TDS-runs-only view). Persisted as a display preference;
+   * the JobRecord data it filters is in-memory only (security F2).
+   */
+  historyKindFilter: HistoryKindFilter;
+  setHistoryKindFilter: (filter: HistoryKindFilter) => void;
 }
 
 /**
@@ -177,6 +199,7 @@ export const DEFAULT_LAYOUT: Pick<
   | 'activityPanelTab'
   | 'activityPanelCollapsed'
   | 'selectedJobId'
+  | 'historyKindFilter'
 > = {
   leftSidebarCollapsed: false,
   bottomDrawerCollapsed: false,
@@ -189,6 +212,7 @@ export const DEFAULT_LAYOUT: Pick<
   activityPanelTab: 'active',
   activityPanelCollapsed: true,
   selectedJobId: null,
+  historyKindFilter: 'runs',
 };
 
 export const LAYOUT_STORAGE_KEY = 'andes-app:layout-v1';
@@ -226,6 +250,8 @@ export const useLayoutStore = create<LayoutState>()(
         set((state) => ({ activityPanelCollapsed: !state.activityPanelCollapsed })),
 
       setSelectedJobId: (id) => set({ selectedJobId: id }),
+
+      setHistoryKindFilter: (filter) => set({ historyKindFilter: filter }),
     }),
     {
       name: LAYOUT_STORAGE_KEY,
@@ -250,6 +276,10 @@ export const useLayoutStore = create<LayoutState>()(
         activityPanelTab: state.activityPanelTab,
         activityPanelCollapsed: state.activityPanelCollapsed,
         selectedJobId: state.selectedJobId,
+        // HistoryDrawer kind-filter (Unit 12). Display-state — the filtered
+        // JobRecord data lives in the in-memory ``useJobsStore`` and is
+        // NEVER persisted (security F2).
+        historyKindFilter: state.historyKindFilter,
       }),
     },
   ),
