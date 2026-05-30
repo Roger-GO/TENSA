@@ -606,6 +606,111 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
     });
   });
 
+  it('warns and does NOT re-load when a BLANK system was active pre-recovery', async () => {
+    const { useCaseStore } = await import('@/store/case');
+    const { parseWorkspacePath: _pwp } = await import('@/api/types');
+    void _pwp;
+    const toastMod = await import('@/lib/toast');
+    const errSpy = vi.spyOn(toastMod.toast, 'error');
+    useSessionStore.setState({ sessionId: parseSessionId('sess-pre') });
+    // Blank system: no file to re-load into the fresh session.
+    useCaseStore.setState({
+      selection: { primaryPath: null, addfiles: [], blank: true },
+      topology: null,
+      layoutSidecar: null,
+    });
+
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        return Promise.resolve(jsonResponse({ session_id: 'sess-new', state: 'live' }, 201));
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { useSessionRecovery } = await import('@/api/useSessionRecovery');
+    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
+
+    useSessionStore.getState().resetSession();
+
+    await waitFor(() => {
+      expect(useSessionStore.getState().recoveryInProgress).toBe(false);
+    });
+    // No /case re-load was attempted (there is no file), and the user was told.
+    const caseCall = fetchSpy.mock.calls.find(([url]) => {
+      const u = typeof url === 'string' ? url : ((url as Request).url ?? String(url));
+      return u.includes('/case');
+    });
+    expect(caseCall).toBeUndefined();
+    expect(errSpy).toHaveBeenCalledWith(
+      'Session expired — blank system lost',
+      expect.anything(),
+    );
+    errSpy.mockRestore();
+  });
+
+  it('re-loads and warns about lost edits when clone-on-write was active pre-recovery', async () => {
+    const { useCaseStore } = await import('@/store/case');
+    const { parseWorkspacePath } = await import('@/api/types');
+    const toastMod = await import('@/lib/toast');
+    const infoSpy = vi.spyOn(toastMod.toast, 'info');
+    useSessionStore.setState({ sessionId: parseSessionId('sess-pre') });
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
+      topology: null,
+      layoutSidecar: null,
+      cloneInitialized: true,
+    });
+
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        return Promise.resolve(jsonResponse({ session_id: 'sess-new', state: 'live' }, 201));
+      }
+      if (url.endsWith('/api/sessions/sess-new/case')) {
+        return Promise.resolve(
+          jsonResponse({
+            state: 'pre-setup',
+            buses: [],
+            lines: [],
+            transformers: [],
+            generators: [],
+            loads: [],
+          }),
+        );
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { useSessionRecovery } = await import('@/api/useSessionRecovery');
+    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
+
+    useSessionStore.getState().resetSession();
+
+    // The file is re-loaded...
+    await waitFor(() => {
+      const call = fetchSpy.mock.calls.find(([url]) => {
+        const u = typeof url === 'string' ? url : ((url as Request).url ?? String(url));
+        return u.endsWith('/api/sessions/sess-new/case');
+      });
+      expect(call).toBeDefined();
+    });
+    // ...the user is warned their pending edits were lost, and clone state clears.
+    await waitFor(() => {
+      expect(infoSpy).toHaveBeenCalledWith('Unsaved edits lost', expect.anything());
+    });
+    expect(useCaseStore.getState().cloneInitialized).toBe(false);
+    infoSpy.mockRestore();
+  });
+
   it('clears recoveryInProgress on the blank-session path (no re-load)', async () => {
     const { useCaseStore } = await import('@/store/case');
     useSessionStore.setState({ sessionId: parseSessionId('sess-pre') });
