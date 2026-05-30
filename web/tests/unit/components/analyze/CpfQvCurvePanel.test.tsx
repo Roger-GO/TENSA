@@ -43,7 +43,21 @@ import { CpfQvCurvePanel } from '@/components/analyze/CpfQvCurvePanel';
 import { useSessionStore } from '@/store/session';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useRunModeStore } from '@/store/runMode';
-import { parseSessionId } from '@/api/types';
+import { useAuthStore } from '@/store/auth';
+import { useCaseStore } from '@/store/case';
+import { usePflowStore } from '@/store/pflow';
+import { parseSessionId, parseWorkspacePath } from '@/api/types';
+import type { PflowResult } from '@/api/types';
+
+const CONVERGED_PF: PflowResult = {
+  run_id: 'pf-1',
+  converged: true,
+  iterations: 4,
+  mismatch: 1e-6,
+  bus_voltages: {},
+  bus_angles: {},
+  line_flows: {},
+} as unknown as PflowResult;
 
 const TOPOLOGY: TopologySummary = {
   state: 'pre-setup',
@@ -85,6 +99,15 @@ beforeEach(() => {
   });
   useAnalyzeStore.setState({ subMode: 'cpf', activeCpfSubMode: 'qv' });
   useRunModeStore.setState({ activeRoutine: 'cpf' });
+  // CPF (incl. its QV mode) is PF-dependent. Seed the readiness inputs to a
+  // happy-path baseline (case + auth + converged PF) so the Run button is
+  // gated only by the bus picker; individual tests override as needed.
+  useAuthStore.setState({ token: 'test-token', persistFailed: false });
+  useCaseStore.setState({
+    selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
+    topology: null,
+  });
+  usePflowStore.setState({ lastRun: CONVERGED_PF, isRunning: false, error: null });
 });
 
 afterEach(() => {
@@ -116,6 +139,23 @@ describe('<CpfQvCurvePanel />', () => {
       sessionId: parseSessionId('sess-1'),
       busIdx: '5',
     });
+  });
+
+  it('disables Run with a "Run PFlow first" tooltip when PF has not converged', async () => {
+    // No converged PF → CPF (and QV) is gated; the user should see the
+    // prerequisite BEFORE clicking, not only as a post-click 409.
+    usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+    const user = userEvent.setup();
+    render(withQueryClient(<CpfQvCurvePanel />));
+
+    await user.selectOptions(screen.getByTestId('bus-idx-select'), '5');
+    const runButton = screen.getByTestId('cpf-qv-run');
+    expect(runButton).toBeDisabled();
+
+    await user.hover(runButton.parentElement!);
+    expect(await screen.findByTestId('cpf-qv-run-disabled-reason')).toHaveTextContent(
+      /Run PFlow first/i,
+    );
   });
 
   it('renders the QV chart for a result', () => {

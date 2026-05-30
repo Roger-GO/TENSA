@@ -162,6 +162,60 @@ function AnalyzeRunButton({
 }
 
 /**
+ * SeGenerateButton — the "Generate Measurements" button + its pre-click
+ * disabled-reason tooltip. Unlike ``AnalyzeRunButton`` it can't use
+ * ``useRunReadiness('se')`` directly (that gate also requires measurements to
+ * exist, which is exactly what this button creates — circular). The caller
+ * passes a PF-only ``disabledReason``; when set the button is wrapped in a
+ * tooltip so the prerequisite shows on hover, matching the run buttons.
+ */
+function SeGenerateButton({
+  disabled,
+  isPending,
+  hasMeasurements,
+  onClick,
+  disabledReason,
+}: {
+  disabled: boolean;
+  isPending: boolean;
+  hasMeasurements: boolean;
+  onClick: () => void;
+  disabledReason: string | null;
+}) {
+  const button = (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      disabled={disabled}
+      onClick={onClick}
+      data-testid="analyze-se-generate-measurements"
+    >
+      {isPending ? 'Generating…' : hasMeasurements ? 'Re-generate Measurements' : 'Generate Measurements'}
+    </Button>
+  );
+
+  if (disabledReason === null) return button;
+
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span tabIndex={0} className="inline-block">
+            {button}
+          </span>
+        </TooltipTrigger>
+        <TooltipPortal>
+          <TooltipContent data-testid="analyze-se-generate-measurements-disabled-reason">
+            {disabledReason}
+          </TooltipContent>
+        </TooltipPortal>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+/**
  * AnalyzeRoutineError — the per-routine error surface for EIG / CPF / SE,
  * migrated onto the single ``<ProblemDetailsErrorSurface>`` primitive
  * (v3.1 Unit 9). Replaces the three bespoke inline ``role="alert"`` banners.
@@ -518,25 +572,29 @@ export function AnalyzeSeSubMode() {
   // the run button is disabled and the error came from generate).
   const activeError = seGenerate.error ?? seRun.error;
 
-  const canGenerate = sessionId !== null && !seGenerate.isPending && noiseSeedError === null;
+  // SE measurements are synthesised from a converged operating point, so the
+  // Generate button is PF-dependent. Gate it on PF-converged directly (NOT the
+  // full ``se`` readiness, whose "Generate measurements first" sub-gate would
+  // be circular here) and surface the same pre-click reason its siblings show.
+  const pfConverged = lastPf !== null && lastPf.converged;
+  const generateDisabledReason = pfConverged
+    ? null
+    : 'Run PFlow first; SE requires a converged operating point.';
+  const canGenerate =
+    sessionId !== null && !seGenerate.isPending && noiseSeedError === null && pfConverged;
 
   return (
     <div className="flex flex-col gap-3 p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
+        <SeGenerateButton
           disabled={!canGenerate}
+          isPending={seGenerate.isPending}
+          hasMeasurements={seMeasurementsCount !== null}
           onClick={onGenerate}
-          data-testid="analyze-se-generate-measurements"
-        >
-          {seGenerate.isPending
-            ? 'Generating…'
-            : seMeasurementsCount !== null
-              ? 'Re-generate Measurements'
-              : 'Generate Measurements'}
-        </Button>
+          // PF-readiness reason shows on hover; the noise-seed validation
+          // error is an inline form error, so it stays silent here.
+          disabledReason={noiseSeedError !== null || seGenerate.isPending ? null : generateDisabledReason}
+        />
         <AnalyzeRunButton
           routine="se"
           label="Run SE"
