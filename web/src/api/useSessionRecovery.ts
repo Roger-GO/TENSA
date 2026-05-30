@@ -333,20 +333,35 @@ export function useSessionRecovery(): void {
 
   // ---- Branch (3+4): re-load case after recovery --------------------------
   useEffect(() => {
-    // Once the new session id has been written and a case path is still
-    // in the case slice, re-issue ``loadCase``.
+    // Once the new session id has been written, restore what we can.
     if (!recoveryInProgress) return;
     if (sessionId === null) return;
     if (reloadFiredRef.current) return;
 
-    if (caseSelection === null || caseSelection.primaryPath === null) {
-      // Blank session pre-recovery; nothing to re-load.
-      reloadFiredRef.current = true;
+    reloadFiredRef.current = true;
+
+    if (caseSelection === null) {
+      // No case was loaded before recovery; nothing to restore.
       clearRecoveryInProgress();
       return;
     }
 
-    reloadFiredRef.current = true;
+    // A blank system lives only in the (now-dead) worker — there is no file
+    // to re-load into the fresh session. Tell the user plainly rather than
+    // leaving the UI showing stale cached topology over an empty session.
+    if (caseSelection.primaryPath === null) {
+      clearRecoveryInProgress();
+      toast.error('Session expired — blank system lost', {
+        description:
+          'A blank system only lives in the active session and could not be recovered. Start a new blank system or load a case file.',
+      });
+      return;
+    }
+
+    // File-backed case: re-load the file into the new session. Clone-on-write
+    // edits (if any) lived in the old session's scratch dir and are gone; the
+    // re-loaded file is the original, so warn that pending edits were lost.
+    const cloneWasInitialized = useCaseStore.getState().cloneInitialized;
     loadCase.mutate(
       {
         sessionId,
@@ -356,6 +371,15 @@ export function useSessionRecovery(): void {
         },
       },
       {
+        onSuccess: () => {
+          if (cloneWasInitialized) {
+            useCaseStore.getState().setCloneInitialized(false);
+            toast.info('Unsaved edits lost', {
+              description:
+                'The session expired while you had pending edits. The case was reloaded from its file; your changes were not saved.',
+            });
+          }
+        },
         onSettled: () => {
           // Settled — drop out of the recovery state regardless of
           // success/error so the user sees the load error normally.
