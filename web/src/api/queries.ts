@@ -72,7 +72,7 @@ import { useAnalyzeStore } from '@/store/analyze';
 import { useConnectivityStore } from '@/store/connectivity';
 import { usePmuStore } from '@/store/pmu';
 import { useProfilesStore } from '@/store/profiles';
-import { useJobsStore, mintLocalJobId } from '@/store/jobs';
+import { useJobsStore, mintLocalJobId, LOCAL_ID_PREFIX } from '@/store/jobs';
 import type { JobKind, JobRecord } from '@/store/jobs';
 import { toast } from '@/lib/toast';
 
@@ -144,8 +144,44 @@ function reconcileJobSuccess(tempId: string, data: unknown, patch?: Partial<JobR
  * the ProblemDetails envelope onto the record so the Activity panel's
  * per-job error surface can render it. A 409 ``SessionBusy`` flows through
  * here too — tracked as a ``failed`` job state rather than unhandled noise.
+ *
+ * ASYMMETRY NOTE (vs ``reconcileJobSuccess``): a *success* response embeds
+ * the canonical substrate ``job_id`` so the placeholder re-keys onto it and
+ * merges with any racing ``JobStream`` event — exactly one row. A *failure*
+ * HTTP body (``map_worker_error`` → ``{detail, recovery, **extras}``) carries
+ * NO ``job_id``, while the substrate's ``_run_as_job`` wrapper ALSO broadcasts
+ * the canonical ``failed`` record over WS (under ``srv-X``). If we blindly
+ * marked the ``local:`` placeholder failed in place, BOTH would survive as
+ * terminal rows — a visible duplicate in the Activity panel / HistoryDrawer.
+ * So: when a canonical (non-``local:``) terminal record for the same job kind
+ * already exists in the store (the WS event won the race, the common case
+ * since the broadcast fires before the HTTP error unwinds), DROP the
+ * placeholder and let the canonical record be the single source of truth.
+ * Only when no canonical record is present (e.g. the WS is disconnected /
+ * not yet delivered) do we mark the placeholder failed in place so the
+ * outcome is still surfaced somewhere.
  */
 function failJob(tempId: string, err: unknown): void {
+  const placeholder = useJobsStore.getState().jobs[tempId];
+  if (placeholder && placeholder.isPlaceholder) {
+    // Match the canonical ``failed`` record the WS just broadcast for THIS
+    // operation: same kind, non-``local:`` id, ``failed``, and RECENT (within
+    // a few seconds of the placeholder's registration) so we never coalesce
+    // onto an unrelated older same-kind failure already sitting in History.
+    const now = Date.now() / 1000;
+    const canonical = Object.values(useJobsStore.getState().jobs).find(
+      (j) =>
+        j.id !== tempId &&
+        !j.id.startsWith(LOCAL_ID_PREFIX) &&
+        j.kind === placeholder.kind &&
+        j.status === 'failed' &&
+        now - j.updated_at < 30,
+    );
+    if (canonical) {
+      useJobsStore.getState().removeJob(tempId);
+      return;
+    }
+  }
   const patch: Partial<JobRecord> = { status: 'failed' };
   if (err instanceof ProblemDetailsError) {
     patch.problem = {

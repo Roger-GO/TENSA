@@ -26,6 +26,7 @@ import { useSessionRecovery } from '@/api/useSessionRecovery';
 import { useJobEventsStream } from '@/streaming/useJobEventsStream';
 import { useSldFrameOverlay } from '@/components/sld/overlay';
 import { RecoveryBadge } from '@/components/shell/RecoveryBadge';
+import { JobAnnouncer } from '@/components/shell/JobAnnouncer';
 import { setTokenGetter } from '@/api/client';
 import { getAuthToken } from '@/store';
 import { useAuthStore } from '@/store/auth';
@@ -114,7 +115,14 @@ function AppInner({ children }: { children: React.ReactNode }) {
   // (avoids N-rAF-loops-for-N-buses at NPCC scale). The hook is a
   // no-op when no run is active.
   useSldFrameOverlay();
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      {/* a11y: announce background job outcomes (done/failed/cancelled) to
+          assistive tech regardless of whether the Activity panel is open. */}
+      <JobAnnouncer />
+    </>
+  );
 }
 
 /**

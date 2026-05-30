@@ -18,6 +18,7 @@
  * plan calls for — but mirrors the TopBar icon-button + tooltip pattern
  * (``BottomDrawerToggle`` / ``Tooltip``).
  */
+import { useMemo } from 'react';
 import {
   Tooltip,
   TooltipContent,
@@ -37,9 +38,17 @@ export function InFlightChip() {
   const setActivityPanelTab = useLayoutStore((s) => s.setActivityPanelTab);
   const clearDrawerUnread = useLayoutStore((s) => s.clearDrawerUnread);
 
-  const active = Object.values(jobs)
-    .filter((j) => !isTerminalStatus(j.status))
-    .sort((a, b) => b.started_at - a.started_at);
+  // Memoize the filter+sort: this control is always mounted in the TopBar and
+  // ``jobs`` gets a fresh reference on every JobStream event (incl. terminal
+  // churn that doesn't touch the in-flight set). Without the memo a burst of
+  // WS events re-allocates+re-sorts the full job array on each one.
+  const active = useMemo(
+    () =>
+      Object.values(jobs)
+        .filter((j) => !isTerminalStatus(j.status))
+        .sort((a, b) => b.started_at - a.started_at),
+    [jobs],
+  );
 
   // 0 active → hidden.
   if (active.length === 0) return null;

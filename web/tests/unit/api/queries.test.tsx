@@ -26,6 +26,7 @@ import {
 import { parseSessionId } from '@/api/types';
 import { setTokenGetter } from '@/api/client';
 import { useSessionStore } from '@/store/session';
+import { useJobsStore, LOCAL_ID_PREFIX } from '@/store/jobs';
 import type { SessionId } from '@/api/types';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -57,6 +58,7 @@ describe('queries hooks', () => {
   afterEach(() => {
     fetchSpy.mockRestore();
     setTokenGetter(() => null);
+    useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
   });
 
   it('useCreateSession writes session_id to the session store', async () => {
@@ -124,6 +126,103 @@ describe('queries hooks', () => {
     // with fetchStatus "idle".
     expect(result.current.fetchStatus).toBe('idle');
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('useRunPflow onMutate registers a pending placeholder; onSuccess re-keys to the server job_id', async () => {
+    useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        run_id: 'r1',
+        converged: true,
+        iterations: 3,
+        mismatch: 1e-6,
+        bus_voltages: {},
+        bus_angles: {},
+        line_flows: {},
+        job_id: 'srv-pf-1',
+      }),
+    );
+
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useRunPflow(), { wrapper: Wrapper });
+    result.current.mutate('sess-7' as SessionId);
+
+    // onMutate placeholder appears synchronously.
+    await waitFor(() => {
+      const ids = Object.keys(useJobsStore.getState().jobs);
+      expect(ids.some((id) => id.startsWith(LOCAL_ID_PREFIX))).toBe(true);
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const jobs = useJobsStore.getState().jobs;
+    // The placeholder re-keyed onto the canonical server job_id.
+    expect(jobs['srv-pf-1']).toBeDefined();
+    expect(jobs['srv-pf-1']!.status).toBe('done');
+    expect(jobs['srv-pf-1']!.isPlaceholder).toBeUndefined();
+    expect(Object.keys(jobs).some((id) => id.startsWith(LOCAL_ID_PREFIX))).toBe(false);
+  });
+
+  it('useRunPflow onSuccess WITHOUT a job_id marks the placeholder done in place', async () => {
+    useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        run_id: 'r2',
+        converged: true,
+        iterations: 2,
+        mismatch: 1e-7,
+        bus_voltages: {},
+        bus_angles: {},
+        line_flows: {},
+        // No job_id field.
+      }),
+    );
+
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useRunPflow(), { wrapper: Wrapper });
+    result.current.mutate('sess-8' as SessionId);
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const jobs = useJobsStore.getState().jobs;
+    const ids = Object.keys(jobs);
+    // The temp record stays under its local id, marked done.
+    expect(ids).toHaveLength(1);
+    expect(ids[0]!.startsWith(LOCAL_ID_PREFIX)).toBe(true);
+    expect(jobs[ids[0]!]!.status).toBe('done');
+  });
+
+  it('a 409 SessionBusy onError produces a failed JobRecord carrying the problem + recovery', async () => {
+    useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          type: 'about:blank',
+          title: 'Session Busy',
+          status: 409,
+          detail: 'A routine is already running on this session.',
+          recovery: { kind: 'retry', label: 'Retry' },
+        },
+        409,
+      ),
+    );
+
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useRunPflow(), { wrapper: Wrapper });
+    result.current.mutate('sess-9' as SessionId);
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    const jobs = useJobsStore.getState().jobs;
+    const ids = Object.keys(jobs);
+    // No canonical record exists (WS not connected in this test), so the
+    // placeholder is marked failed in place, carrying the problem.
+    expect(ids).toHaveLength(1);
+    const rec = jobs[ids[0]!]!;
+    expect(rec.status).toBe('failed');
+    expect(rec.problem?.title).toBe('Session Busy');
+    expect(rec.problem?.status).toBe(409);
+    expect(rec.problem?.recovery).toEqual({ kind: 'retry', label: 'Retry' });
   });
 
   it('useRunPflow invalidates the topology cache', async () => {

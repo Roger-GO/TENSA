@@ -122,6 +122,24 @@ describe('<ActivityPanel />', () => {
     expect(screen.queryByTestId('activity-row-cancel-j3')).not.toBeInTheDocument();
   });
 
+  it('hides Cancel while the id is still a local: placeholder (DELETE would 404)', () => {
+    // A cancellable sweep whose canonical id has not yet reconciled — Cancel
+    // must NOT render (DELETE /jobs/local:... cannot match a server job).
+    seedJob({ id: 'local:abc', kind: 'sweep', status: 'running', can_cancel: true });
+    render(<ActivityPanel />);
+    expect(screen.queryByTestId('activity-row-cancel-local:abc')).not.toBeInTheDocument();
+  });
+
+  it('exposes the progress bar as a progressbar with aria-valuenow/min/max', () => {
+    seedJob({ id: 'jp', kind: 'sweep', status: 'running', progress: 0.42 });
+    render(<ActivityPanel />);
+    const bar = screen.getByTestId('activity-row-progress-jp');
+    expect(bar).toHaveAttribute('role', 'progressbar');
+    expect(bar).toHaveAttribute('aria-valuenow', '42');
+    expect(bar).toHaveAttribute('aria-valuemin', '0');
+    expect(bar).toHaveAttribute('aria-valuemax', '100');
+  });
+
   it('failed history row shows Retry + View error; Retry re-fires the mutation', async () => {
     const user = userEvent.setup();
     seedJob({
