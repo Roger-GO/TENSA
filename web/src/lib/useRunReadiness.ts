@@ -191,20 +191,24 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
     return ready(false, `Sweep ${activeSweepId} in progress${progress}; wait or abort.`, null);
   }
 
-  // Dynamic-content prerequisite (R18): TDS/EIG can't run on a static-only
-  // case at all — gate them with the same nudge the dynamic-content badge
-  // shows. Only fires once the topology has resolved (controllers known);
-  // while loading, fall through so the button isn't flicker-disabled.
-  if (
-    DYNAMIC_REQUIRED.has(routine) &&
-    topology !== null &&
-    (topology.controllers ?? []).length === 0
-  ) {
-    return ready(
-      false,
-      `${routineLabel(routine)} requires dynamic-model data. Load a .dyr addfile via the case picker to enable.`,
-      null,
+  // Dynamic-content prerequisite (R18): TDS/EIG need dynamic-model data —
+  // either a synchronous-machine generator (GENROU/GENCLS), which carries the
+  // rotor DAE states, OR a controller (exciter/governor/PSS) on top. A
+  // GENCLS-only system IS dynamic, so don't gate it. Only fires once the
+  // topology has resolved; while loading, fall through so the button isn't
+  // flicker-disabled.
+  if (DYNAMIC_REQUIRED.has(routine) && topology !== null) {
+    const hasDynamicGenerator = (topology.generators ?? []).some(
+      (g) => g.kind === 'GENROU' || g.kind === 'GENCLS',
     );
+    const hasController = (topology.controllers ?? []).length > 0;
+    if (!hasDynamicGenerator && !hasController) {
+      return ready(
+        false,
+        `${routineLabel(routine)} requires dynamic-model data. Load a .dyr addfile (or add a GENROU/GENCLS generator) to enable.`,
+        null,
+      );
+    }
   }
 
   // PF after EIG needs a reload — EIG.run() sets ``TDS.initialized=True``

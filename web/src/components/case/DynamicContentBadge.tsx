@@ -77,17 +77,31 @@ export function DynamicContentBadge({ compact = false, className }: DynamicConte
     [topology?.controllers],
   );
 
+  // A synchronous-machine generator (GENROU/GENCLS) carries rotor DAE states,
+  // so a system with one IS dynamic even with zero controllers (matches the
+  // TDS/EIG readiness gate). Without this, a from-scratch GENCLS system read
+  // as "static-only".
+  const dynamicGenCount = useMemo(
+    () => (topology?.generators ?? []).filter((g) => g.kind === 'GENROU' || g.kind === 'GENCLS').length,
+    [topology?.generators],
+  );
+
   if (selection === null) return null;
 
-  const state: BadgeState =
-    topology === null ? 'loading' : summary.total > 0 ? 'dynamic' : 'static-only';
+  const isDynamic = summary.total > 0 || dynamicGenCount > 0;
+  const state: BadgeState = topology === null ? 'loading' : isDynamic ? 'dynamic' : 'static-only';
 
   const label =
     state === 'loading' ? 'Loading…' : state === 'dynamic' ? 'Dynamic' : 'Static-only';
 
-  const present = SUBKIND_ORDER.filter((k) => summary.bySubKind[k] > 0).map(
-    (k) => `${summary.bySubKind[k]} ${controllerSubKindLabel(k).toLowerCase()}`,
-  );
+  const present = [
+    ...(dynamicGenCount > 0
+      ? [`${dynamicGenCount} synchronous machine${dynamicGenCount > 1 ? 's' : ''}`]
+      : []),
+    ...SUBKIND_ORDER.filter((k) => summary.bySubKind[k] > 0).map(
+      (k) => `${summary.bySubKind[k]} ${controllerSubKindLabel(k).toLowerCase()}`,
+    ),
+  ];
   const tooltip =
     state === 'loading'
       ? 'Reading the case…'

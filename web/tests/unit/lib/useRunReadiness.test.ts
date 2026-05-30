@@ -25,7 +25,22 @@ const TOPOLOGY_WITH_CONTROLLER: TopologySummary = {
   loads: [],
   controllers: [{ idx: 'TGOV1_1', name: 't', kind: 'TGOV1', params: { syn: 'GENROU_1' } }],
 };
-const TOPOLOGY_STATIC_ONLY: TopologySummary = { ...TOPOLOGY_WITH_CONTROLLER, controllers: [] };
+// Truly static: only a Slack static generator, no dynamic machine, no
+// controller — TDS/EIG must be gated here.
+const TOPOLOGY_STATIC_ONLY: TopologySummary = {
+  ...TOPOLOGY_WITH_CONTROLLER,
+  generators: [{ idx: '1', name: 'slack', kind: 'Slack', params: {} }],
+  controllers: [],
+};
+// Dynamic via a GENCLS machine alone (no controller) — TDS/EIG should run.
+const TOPOLOGY_GENCLS_ONLY: TopologySummary = {
+  ...TOPOLOGY_WITH_CONTROLLER,
+  generators: [
+    { idx: '1', name: 'slack', kind: 'Slack', params: {} },
+    { idx: '1', name: 'g1', kind: 'GENCLS', params: {} },
+  ],
+  controllers: [],
+};
 
 import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { useAnalyzeStore, DEFAULT_EIG_FILTER } from '@/store/analyze';
@@ -141,6 +156,31 @@ describe('useRunReadiness — no case loaded', () => {
       expect(result.current.ready).toBe(false);
       expect(result.current.disabledReason).toBe('No case loaded.');
       expect(result.current.recovery).toBeNull();
+    },
+  );
+});
+
+describe('useRunReadiness — dynamic via a synchronous machine (no controllers)', () => {
+  it.each(['tds', 'eig'] as RunRoutine[])(
+    '%s: READY on a GENCLS-only topology (the machine provides the dynamic states)',
+    (routine) => {
+      seedReadyBaseline();
+      usePflowStore.setState({ lastRun: FAKE_PFLOW_OK, isRunning: false, error: null });
+      useCaseStore.setState({ topology: TOPOLOGY_GENCLS_ONLY });
+      const { result } = renderHook(() => useRunReadiness(routine));
+      expect(result.current.ready).toBe(true);
+      expect(result.current.disabledReason).toBeNull();
+    },
+  );
+
+  it.each(['tds', 'eig'] as RunRoutine[])(
+    '%s: still BLOCKED on a truly static topology (Slack only, no dynamic machine)',
+    (routine) => {
+      seedReadyBaseline();
+      useCaseStore.setState({ topology: TOPOLOGY_STATIC_ONLY });
+      const { result } = renderHook(() => useRunReadiness(routine));
+      expect(result.current.ready).toBe(false);
+      expect(result.current.disabledReason).toMatch(/requires dynamic-model data/i);
     },
   );
 });
