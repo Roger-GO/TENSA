@@ -72,7 +72,98 @@ import { useAnalyzeStore } from '@/store/analyze';
 import { useConnectivityStore } from '@/store/connectivity';
 import { usePmuStore } from '@/store/pmu';
 import { useProfilesStore } from '@/store/profiles';
+import { useJobsStore, mintLocalJobId } from '@/store/jobs';
+import type { JobKind, JobRecord } from '@/store/jobs';
 import { toast } from '@/lib/toast';
+
+// ---- job registration glue (Unit 6) ---------------------------------------
+
+/**
+ * Register an optimistic placeholder ``JobRecord`` in ``useJobsStore`` for a
+ * mutation that has just fired (``onMutate``). Returns the temp id the
+ * caller threads into ``reconcileJobSuccess`` / ``failJob`` so the canonical
+ * substrate ``job_id`` (which arrives on the response) re-keys the record.
+ *
+ * Two write paths converge in the store (this optimistic path + the
+ * ``JobStream`` canonical events); they reconcile by ``job_id`` (see
+ * ``store/jobs.ts``). Registering here is what powers the Activity panel's
+ * instant feedback and tracks ``SessionBusy`` as a job state.
+ *
+ * NOTE: ``request_summary`` is in-memory only (security F2) — it is NEVER
+ * persisted. Keep it small + free of credentials/blobs; the store's
+ * ``partialize`` excludes the job map entirely, but callers should still
+ * avoid stuffing large payloads here.
+ */
+function registerJob(
+  kind: JobKind,
+  request_summary: Record<string, unknown> = {},
+  canCancel = false,
+): string {
+  const id = mintLocalJobId();
+  useJobsStore.getState().addJob({
+    id,
+    kind,
+    status: 'pending',
+    can_cancel: canCancel,
+    request_summary,
+    isPlaceholder: true,
+  });
+  return id;
+}
+
+/** Pull a substrate ``job_id`` off a mutation response, if present. The
+ *  generated TS result types don't all declare ``job_id`` yet (the substrate
+ *  embeds it per Unit 5b), so read it defensively. */
+function extractJobId(data: unknown): string | undefined {
+  if (data && typeof data === 'object' && 'job_id' in data) {
+    const v = (data as Record<string, unknown>)['job_id'];
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+  return undefined;
+}
+
+/**
+ * Reconcile an optimistic placeholder to ``done`` (mutation ``onSuccess``).
+ * If the response carried a substrate ``job_id`` we re-key onto it (so the
+ * canonical ``JobStream`` events for the same id merge); otherwise we mark
+ * the temp record done in place. The ``JobStream`` event may have already
+ * landed under the server id — ``reconcileJob`` handles that race.
+ */
+function reconcileJobSuccess(tempId: string, data: unknown, patch?: Partial<JobRecord>): void {
+  const serverId = extractJobId(data);
+  const donePatch: Partial<JobRecord> = { status: 'done', ...patch };
+  if (serverId) {
+    useJobsStore.getState().reconcileJob(tempId, serverId, donePatch);
+  } else {
+    useJobsStore.getState().updateJob(tempId, donePatch);
+  }
+}
+
+/**
+ * Mark an optimistic placeholder ``failed`` (mutation ``onError``). Carries
+ * the ProblemDetails envelope onto the record so the Activity panel's
+ * per-job error surface can render it. A 409 ``SessionBusy`` flows through
+ * here too — tracked as a ``failed`` job state rather than unhandled noise.
+ */
+function failJob(tempId: string, err: unknown): void {
+  const patch: Partial<JobRecord> = { status: 'failed' };
+  if (err instanceof ProblemDetailsError) {
+    patch.problem = {
+      type: err.type,
+      title: err.title,
+      status: err.status,
+      detail: err.detail ?? null,
+      instance: err.instance ?? null,
+      recovery:
+        err.rawBody && typeof err.rawBody === 'object'
+          ? (err.rawBody as Record<string, unknown>)['recovery']
+          : undefined,
+    };
+  } else if (err instanceof Error) {
+    patch.problem = { title: err.name || 'Error', detail: err.message };
+  }
+  useJobsStore.getState().updateJob(tempId, patch);
+}
 
 /**
  * Routine name accepted by ``GET /sessions/{id}/report``. Phase 1
@@ -350,11 +441,18 @@ export function useLoadCase(): UseMutationResult<TopologySummary, Error, LoadCas
         { body: request, timeoutMs: TIMEOUTS.caseLoad },
       );
     },
-    onSuccess: (data, { sessionId }) => {
+    onMutate: ({ request }) => ({
+      jobId: registerJob('case-load', { primary_path: request.primary_path }),
+    }),
+    onSuccess: (data, { sessionId }, ctx) => {
       // Seed the topology cache with the load response (the substrate's
       // load handler returns the topology already; saves a round-trip).
       queryClient.setQueryData(queryKeys.topology(sessionId), data);
       useCaseStore.getState().setTopology(data);
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -448,18 +546,21 @@ export function useRunPflow(): UseMutationResult<PflowResult, Error, SessionId> 
     },
     onMutate: () => {
       usePflowStore.getState().setRunning(true);
+      return { jobId: registerJob('pflow') };
     },
-    onSuccess: (data, sessionId) => {
+    onSuccess: (data, sessionId, ctx) => {
       usePflowStore.getState().setLastRun({
         ...data,
         run_id: parseRunId(data.run_id),
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
     },
-    onError: (err) => {
+    onError: (err, _sessionId, ctx) => {
       if (err instanceof ProblemDetailsError) {
         usePflowStore.getState().setError(err);
       }
+      if (ctx) failJob(ctx.jobId, err);
     },
     onSettled: () => {
       usePflowStore.getState().setRunning(false);
@@ -482,10 +583,15 @@ export function useReloadCase(): UseMutationResult<TopologySummary, Error, Sessi
         { body: {}, timeoutMs: TIMEOUTS.caseLoad },
       );
     },
-    onSuccess: (data, sessionId) => {
+    onMutate: () => ({ jobId: registerJob('case-reload') }),
+    onSuccess: (data, sessionId, ctx) => {
       queryClient.setQueryData(queryKeys.topology(sessionId), data);
       useCaseStore.getState().setTopology(data);
       usePflowStore.getState().clearPflow();
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -605,8 +711,13 @@ export function useAddElement(): UseMutationResult<ElementCreated, Error, AddEle
         { body, timeoutMs: TIMEOUTS.workspace },
       );
     },
-    onSuccess: (_data, { sessionId }) => {
+    onMutate: ({ body }) => ({ jobId: registerJob('element-add', { model: body.model }) }),
+    onSuccess: (data, { sessionId }, ctx) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -633,8 +744,13 @@ export function useEditElement(): UseMutationResult<TopologyEntry, Error, EditEl
         { body, timeoutMs: TIMEOUTS.workspace },
       );
     },
-    onSuccess: (_data, { sessionId }) => {
+    onMutate: ({ model, idx }) => ({ jobId: registerJob('element-edit', { model, idx }) }),
+    onSuccess: (data, { sessionId }, ctx) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -671,7 +787,9 @@ export function useDeleteElement(): UseMutationResult<TopologySummary, Error, De
         { timeoutMs: TIMEOUTS.workspace },
       );
     },
-    onSuccess: (data, { sessionId, model, idx }) => {
+    onMutate: ({ model, idx }) => ({ jobId: registerJob('element-delete', { model, idx }) }),
+    onSuccess: (data, { sessionId, model, idx }, ctx) => {
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
       queryClient.setQueryData(queryKeys.topology(sessionId), data);
       useCaseStore.getState().setTopology(data);
       // If the deleted element was the one being inspected, fall back to
@@ -695,6 +813,9 @@ export function useDeleteElement(): UseMutationResult<TopologySummary, Error, De
       // and the next 422 (if any) will repopulate the list with the
       // current truth.
       useCaseStore.getState().clearPendingDependents();
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -741,8 +862,13 @@ export function useSaveCase(): UseMutationResult<SaveCaseResponse, Error, SaveCa
         { body, timeoutMs: TIMEOUTS.workspace },
       );
     },
-    onSuccess: () => {
+    onMutate: () => ({ jobId: registerJob('case-save') }),
+    onSuccess: (data, _vars, ctx) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.workspaceFiles });
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -762,9 +888,14 @@ export function useUndoLastEdit(): UseMutationResult<TopologySummary, Error, Ses
         { body: {}, timeoutMs: TIMEOUTS.workspace },
       );
     },
-    onSuccess: (data, sessionId) => {
+    onMutate: () => ({ jobId: registerJob('element-undo') }),
+    onSuccess: (data, sessionId, ctx) => {
       queryClient.setQueryData(queryKeys.topology(sessionId), data);
       useCaseStore.getState().setTopology(data);
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -805,8 +936,15 @@ export function useCommitDisturbances(): UseMutationResult<
         { body, timeoutMs: TIMEOUTS.workspace },
       );
     },
-    onSuccess: () => {
+    onMutate: ({ disturbances }) => ({
+      jobId: registerJob('disturbance-commit', { count: disturbances.length }),
+    }),
+    onSuccess: (data, _vars, ctx) => {
       useDisturbanceStore.getState().markCommitted();
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -962,6 +1100,13 @@ export function useExportBundle(): UseMutationResult<Blob, Error, ExportBundleVa
       }
 
       return await response.blob();
+    },
+    onMutate: () => ({ jobId: registerJob('bundle-export') }),
+    onSuccess: (data, _vars, ctx) => {
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -1162,7 +1307,9 @@ export function useImportBundle(): UseMutationResult<
 
       return parsed as BundleImportResponse;
     },
-    onSuccess: (data, { sessionId }) => {
+    onMutate: ({ file }) => ({ jobId: registerJob('bundle-import', { filename: file.name }) }),
+    onSuccess: (data, { sessionId }, ctx) => {
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
       // Only invalidate caches when the substrate actually committed —
       // a plan response means the user is mid-conflict-resolution and
       // the session state is unchanged.
@@ -1178,6 +1325,9 @@ export function useImportBundle(): UseMutationResult<
         useRunsStore.getState().resetRun(activeRunId);
       }
       useDisturbanceStore.setState({ committed: false, dirty: true });
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -1275,8 +1425,13 @@ export function useSaveSnapshot(): UseMutationResult<
         },
       );
     },
-    onSuccess: (_data, { sessionId }) => {
+    onMutate: ({ name }) => ({ jobId: registerJob('snapshot-save', { name }) }),
+    onSuccess: (data, { sessionId }, ctx) => {
       void queryClient.invalidateQueries({ queryKey: snapshotsKey(sessionId) });
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -1307,7 +1462,8 @@ export function useRestoreSnapshot(): UseMutationResult<
         },
       );
     },
-    onSuccess: (_data, { sessionId }) => {
+    onMutate: ({ name }) => ({ jobId: registerJob('snapshot-restore', { name }) }),
+    onSuccess: (data, { sessionId }, ctx) => {
       // Restore swaps the System; every session-scoped query is now
       // potentially stale. Invalidate the broad set rather than
       // hand-list each one — a snapshot restore is a rare operation
@@ -1317,6 +1473,10 @@ export function useRestoreSnapshot(): UseMutationResult<
       // Disturbance log is reset by the restore; tell the disturbance
       // store to mark itself dirty so the next TDS run re-syncs.
       useDisturbanceStore.setState({ committed: false, dirty: true });
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -1361,8 +1521,13 @@ export function useDeleteSnapshot(): UseMutationResult<void, Error, DeleteSnapsh
         { timeoutMs: TIMEOUTS.workspace },
       );
     },
-    onSuccess: (_data, { sessionId }) => {
+    onMutate: ({ name }) => ({ jobId: registerJob('snapshot-delete', { name }) }),
+    onSuccess: (data, { sessionId }, ctx) => {
       void queryClient.invalidateQueries({ queryKey: snapshotsKey(sessionId) });
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -1452,9 +1617,14 @@ export function useEigRun(): UseMutationResult<EigResult, Error, SessionId> {
         timeoutMs: TIMEOUTS.pflowRun,
       });
     },
-    onSuccess: (data, sessionId) => {
+    onMutate: () => ({ jobId: registerJob('eig') }),
+    onSuccess: (data, sessionId, ctx) => {
       useAnalyzeStore.getState().setEigResult(data);
       queryClient.setQueryData(queryKeys.eig(sessionId), data);
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -1561,9 +1731,14 @@ export function useCpfRun(): UseMutationResult<CpfResult, Error, CpfRunVars> {
         { body, timeoutMs: TIMEOUTS.caseLoad },
       );
     },
-    onSuccess: (data, { sessionId }) => {
+    onMutate: ({ direction }) => ({ jobId: registerJob('cpf', { direction: direction ?? 'load' }) }),
+    onSuccess: (data, { sessionId }, ctx) => {
       useAnalyzeStore.getState().setCpfResult(data);
       queryClient.setQueryData(queryKeys.cpf(sessionId), data);
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -1585,9 +1760,14 @@ export function useCpfQvRun(): UseMutationResult<CpfResult, Error, CpfQvRunVars>
         { body, timeoutMs: TIMEOUTS.caseLoad },
       );
     },
-    onSuccess: (data, { sessionId }) => {
+    onMutate: ({ busIdx }) => ({ jobId: registerJob('cpf-qv', { bus_idx: busIdx }) }),
+    onSuccess: (data, { sessionId }, ctx) => {
       useAnalyzeStore.getState().setCpfResult(data);
       queryClient.setQueryData(queryKeys.cpf(sessionId), data);
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -1636,12 +1816,17 @@ export function useSeGenerateMeasurements(): UseMutationResult<
         { body, timeoutMs: TIMEOUTS.pflowRun },
       );
     },
-    onSuccess: (data, { sessionId }) => {
+    onMutate: () => ({ jobId: registerJob('se-measurements') }),
+    onSuccess: (data, { sessionId }, ctx) => {
       useAnalyzeStore.getState().setSeMeasurementsCount(data.count);
       // Generating fresh measurements invalidates any prior SE result —
       // the residuals would be measured against the old z values.
       useAnalyzeStore.getState().setSeResult(null);
       queryClient.setQueryData(queryKeys.seMeasurements(sessionId), data);
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -1674,9 +1859,14 @@ export function useSeRun(): UseMutationResult<SeResult, Error, SessionId> {
         { body: {}, timeoutMs: TIMEOUTS.pflowRun },
       );
     },
-    onSuccess: (data, sessionId) => {
+    onMutate: () => ({ jobId: registerJob('se') }),
+    onSuccess: (data, sessionId, ctx) => {
       useAnalyzeStore.getState().setSeResult(data);
       queryClient.setQueryData(queryKeys.se(sessionId), data);
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -1766,12 +1956,17 @@ export function useAddPmu(): UseMutationResult<TopologyEntry, Error, AddPmuVars>
         { body, timeoutMs: TIMEOUTS.workspace },
       );
     },
-    onSuccess: (data, { sessionId }) => {
+    onMutate: () => ({ jobId: registerJob('pmu-add') }),
+    onSuccess: (data, { sessionId }, ctx) => {
       usePmuStore.getState().appendPmu(data);
       void queryClient.invalidateQueries({ queryKey: queryKeys.pmus(sessionId) });
       // The PMU also lives in the topology bucket (controllers) — a
       // fresh placement should refresh the SLD's controller layer.
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -1836,10 +2031,15 @@ export function useDeletePmu(): UseMutationResult<void, Error, DeletePmuVars> {
         { timeoutMs: TIMEOUTS.workspace },
       );
     },
-    onSuccess: (_data, { sessionId, idx }) => {
+    onMutate: ({ idx }) => ({ jobId: registerJob('pmu-delete', { idx }) }),
+    onSuccess: (data, { sessionId, idx }, ctx) => {
       usePmuStore.getState().removePmu(idx);
       void queryClient.invalidateQueries({ queryKey: queryKeys.pmus(sessionId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -1990,6 +2190,13 @@ export function useUploadProfile(): UseMutationResult<
 
       return (await response.json()) as UploadProfileResponse;
     },
+    onMutate: ({ file }) => ({ jobId: registerJob('profile-upload', { filename: file.name }) }),
+    onSuccess: (data, _vars, ctx) => {
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
+    },
   });
 }
 
@@ -2021,12 +2228,17 @@ export function useAddProfile(): UseMutationResult<TopologyEntry, Error, AddProf
         { body, timeoutMs: TIMEOUTS.workspace },
       );
     },
-    onSuccess: (data, { sessionId }) => {
+    onMutate: () => ({ jobId: registerJob('profile-add') }),
+    onSuccess: (data, { sessionId }, ctx) => {
       useProfilesStore.getState().appendProfile(data);
       void queryClient.invalidateQueries({ queryKey: queryKeys.profiles(sessionId) });
       // The new TimeSeries also lives in the topology bucket
       // (controllers) — refresh that too.
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -2090,10 +2302,15 @@ export function useDeleteProfile(): UseMutationResult<void, Error, DeleteProfile
         { timeoutMs: TIMEOUTS.workspace },
       );
     },
-    onSuccess: (_data, { sessionId, idx }) => {
+    onMutate: ({ idx }) => ({ jobId: registerJob('profile-delete', { idx }) }),
+    onSuccess: (data, { sessionId, idx }, ctx) => {
       useProfilesStore.getState().removeProfile(idx);
       void queryClient.invalidateQueries({ queryKey: queryKeys.profiles(sessionId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
@@ -2164,6 +2381,25 @@ export function useStartSweep(): UseMutationResult<StartSweepResponse, Error, St
         `/sessions/${encodeURIComponent(vars.sessionId)}/sweep`,
         { body, timeoutMs: TIMEOUTS.sessionLifecycle },
       );
+    },
+    onMutate: (vars) => ({
+      jobId: registerJob(
+        'sweep',
+        { kind: vars.parameterKind, steps: vars.rangeSteps },
+        // Sweeps are cancellable (cooperative abort at iteration boundary).
+        true,
+      ),
+    }),
+    onSuccess: (data, _vars, ctx) => {
+      // The substrate aliases ``sweep_id`` onto the registry job_id, so the
+      // placeholder reconciles onto it; subsequent JobStream events for the
+      // same id (kept ``running`` by the sweep itself, then ``done``) merge.
+      if (ctx) {
+        useJobsStore.getState().reconcileJob(ctx.jobId, data.sweep_id, { status: 'running' });
+      }
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
     },
   });
 }
