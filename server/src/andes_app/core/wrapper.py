@@ -1248,9 +1248,10 @@ class Wrapper:
         bus_voltages: dict[int | str, float] = {}
         bus_angles: dict[int | str, float] = {}
         if hasattr(ss, "Bus") and getattr(ss.Bus, "v", None) is not None:
+            drift = _reference_angle_drift(ss)
             for i, idx in enumerate(ss.Bus.idx.v):
                 bus_voltages[idx] = float(ss.Bus.v.v[i])
-                bus_angles[idx] = float(ss.Bus.a.v[i])
+                bus_angles[idx] = float(ss.Bus.a.v[i]) - drift
 
         line_flows = _extract_line_flows(ss) if converged else {}
         generator_outputs = _extract_generator_outputs(ss) if converged else {}
@@ -1290,12 +1291,13 @@ class Wrapper:
         bus_voltages: dict[int | str, float] = {}
         bus_angles: dict[int | str, float] = {}
         if hasattr(ss, "Bus") and getattr(ss.Bus, "v", None) is not None:
+            drift = _reference_angle_drift(ss)
             for i, idx in enumerate(ss.Bus.idx.v):
                 v = float(ss.Bus.v.v[i])
                 a = float(ss.Bus.a.v[i])
                 if math.isfinite(v) and math.isfinite(a):
                     bus_voltages[idx] = v
-                    bus_angles[idx] = a
+                    bus_angles[idx] = a - drift
         return PflowResult(
             converged=len(bus_voltages) > 0,
             iterations=0,
@@ -4113,6 +4115,53 @@ def _sanitize_message(message: str) -> str:
     install-tree details. Replaces matches with ``<path>``.
     """
     return _PATH_PATTERN.sub("<path>", message)
+
+
+def _reference_angle_drift(ss: System) -> float:
+    """Common-mode bus-angle drift to subtract so displayed angles stay
+    physical after TDS.
+
+    ANDES integrates bus angles against a system reference frame that
+    *rotates*; after a TDS run every ``Bus.a`` carries a large common-mode
+    offset (e.g. ~9.5 rad) even though angle DIFFERENCES — the only physical
+    quantity — are preserved. The PF convention pins the slack bus at its
+    ``a0`` setpoint, so the drift is ``(slack bus angle now) - (slack a0)``.
+
+    Subtracting this drift:
+    - leaves PF results unchanged (drift ≈ 0 right after PF, since the slack
+      bus sits at a0), and
+    - removes only the accumulated rotation after TDS, returning the slack
+      bus to a0 and every other bus to its physical relative angle.
+
+    Falls back to the mean angle (mean-centring) when there isn't exactly one
+    enabled slack — islanded / all-PV / multi-slack systems have no canonical
+    reference. Non-finite angles are skipped; returns a finite float (0.0 if
+    nothing usable).
+    """
+    if not hasattr(ss, "Bus") or getattr(ss.Bus, "a", None) is None:
+        return 0.0
+
+    slack = getattr(ss, "Slack", None)
+    enabled_slacks = (
+        sum(1 for u in slack.u.v if float(u) != 0.0)
+        if slack is not None and getattr(slack, "n", 0)
+        else 0
+    )
+    if enabled_slacks == 1:
+        slack_bus = slack.bus.v[0]
+        bus_idx = list(ss.Bus.idx.v)
+        for i, idx in enumerate(bus_idx):
+            if str(idx) == str(slack_bus):
+                a_now = float(ss.Bus.a.v[i])
+                a0 = float(slack.a0.v[0])
+                drift = a_now - a0
+                return drift if math.isfinite(drift) else 0.0
+        # Slack references a missing bus → fall through to mean.
+
+    finite = [float(a) for a in ss.Bus.a.v if math.isfinite(float(a))]
+    if not finite:
+        return 0.0
+    return sum(finite) / len(finite)
 
 
 def _extract_generator_outputs(ss: System) -> dict[str, GeneratorOutput]:
