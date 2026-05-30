@@ -152,6 +152,46 @@ shared readiness/tooltip — they enable in pre-setup and surface the
 prerequisite only as a post-click 409 banner, unlike their siblings. Low
 severity (the error is still shown), but worth aligning to the shared pattern.
 
+## Session 2b — scenario sweep (snapshot bugs + remaining routines)
+
+### SE (state estimation) ✅
+Generate Measurements ("30 measurements ready") → Run SE → residual histogram
+("31 measurements, 2 iterations, J=5.879e+0"). Pre-setup gating: "Generate
+Measurements" is enabled and 409s on click (surfaces a "Run PFlow first"
+banner + recovery) — works, but post-click rather than a pre-click disabled
+hint like its siblings (minor follow-up).
+
+### Snapshot save/load ❌→✅ (two real bugs, both fixed + merged)
+1. **Dialogs never mounted** (`b49591a`): "Save/Load snapshot…" set the store
+   flag but `SaveSnapshotDialog`/`LoadSnapshotDialog` were mounted only inside
+   `SnapshotMenu`, which a v3 refactor stopped rendering → silent no-op, and
+   Sweep (needs a snapshot) was unreachable. Mounted them in App's modal slot.
+2. **Per-case list not refreshed on case load** (`74f53c4`): snapshots are
+   listed per-case (disk: `snapshots/<case>/`), but `useListSnapshots` first
+   runs pre-case-load (caches `[]`) and `useLoadCase` never invalidated it —
+   so a loaded case's existing snapshots never surfaced. Invalidate on load.
+   Verified: load kundur → `sweep-base` appears in panel + Sweep picker.
+
+### Sweep ⚠️ picker unblocked; full run needs a disturbance
+Dialog validates correctly (requires a snapshot; clear message; Start
+disabled). After the snapshot fixes the picker populates ("sweep-base (0
+disturbances)"). A full run additionally needs a snapshot WITH a disturbance
+(it sweeps a fault parameter over a range) — legitimate prerequisite, not a
+bug. Full multi-iteration run not executed.
+
+### Export ✅
+Top-bar Export menu correctly shows "No exports available" before any run,
+then "Export bundle…" + "Save snapshot…" after PF. "Export bundle…" opens the
+reproducibility-bundle dialog. (Full zip download round-trip not automated.)
+
+### Session churn — ROOT-CAUSED (test artifact)
+The recurring mid-session churn = the **180s default idle timeout** reaping
+sessions during slow MCP-driven testing; recovery then creates a fresh
+caseless session (2 sessions; browser on the empty one → disabled Run, empty
+snapshots/exports, topology 409). Fixed for testing by restarting with
+`--idle-timeout-seconds 3600`. Product note: recovery does not re-load the
+case into the new session — worth a look for real users who idle out.
+
 ### Pipelines still to run
-SE end-to-end, SWEEP, CPF-QV, F (concurrency/recovery), G (export round-trip),
-I–L (PMU / profile-import / multi-case compare).
+Full SWEEP run (snapshot+disturbance), CPF-QV curve, PMU placement, profile
+/ time-series import, multi-case compare, concurrency/recovery.
