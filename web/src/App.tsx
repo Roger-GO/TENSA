@@ -21,7 +21,7 @@ import { SldCanvas } from '@/components/sld/SldCanvas';
 import { RightInspector } from '@/components/inspector/RightInspector';
 import { BottomDrawer } from '@/components/shell/BottomDrawer';
 import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
-import { makeQueryClient, wireGlobalErrorRecovery } from '@/api/queries';
+import { makeQueryClient, wireGlobalErrorRecovery, useCurrentTopology } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
 import { useJobEventsStream } from '@/streaming/useJobEventsStream';
 import { useSldFrameOverlay } from '@/components/sld/overlay';
@@ -94,6 +94,23 @@ function useNoAuthProbe(): void {
   }, [setAuthDisabled, markAuthProbeDone]);
 }
 
+/**
+ * Mirror the topology query into the case store on every change. The store
+ * holds a synchronous `topology` mirror that non-query consumers read (the
+ * dynamic-content badge + the run-readiness dynamic gate, Unit 24). The plain
+ * topology query is often served from the TanStack cache (seeded by the load
+ * mutation), so its `queryFn` doesn't re-run to set the mirror — this effect
+ * keeps the mirror faithful to `useCurrentTopology()` whether the data came
+ * from a fetch or the cache. Mounted once at the app root.
+ */
+function useSyncTopologyMirror(): void {
+  const topology = useCurrentTopology();
+  const setTopology = useCaseStore((s) => s.setTopology);
+  useEffect(() => {
+    if (topology !== null) setTopology(topology);
+  }, [topology, setTopology]);
+}
+
 function AppInner({ children }: { children: React.ReactNode }) {
   // Top-level recovery driver — must live INSIDE QueryClientProvider so
   // ``useCreateSession`` / ``useLoadCase`` can subscribe to the cache.
@@ -107,6 +124,10 @@ function AppInner({ children }: { children: React.ReactNode }) {
   // the TopBar in-flight chip + the panel history stay live. Disposes on
   // session change / token loss / unmount.
   useJobEventsStream();
+  // Keep the case-store topology mirror in sync with the topology query so the
+  // dynamic-content badge + run-readiness gate (Unit 24) reflect the loaded
+  // case even when the query is served from cache.
+  useSyncTopologyMirror();
   // Dev-mode: detect a `serve --no-auth` substrate so the token gate is
   // skipped without a paste modal (no-op against an auth-on substrate).
   useNoAuthProbe();

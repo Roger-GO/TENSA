@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { EditElementButton } from '@/components/elements/EditElementButton';
@@ -104,6 +104,21 @@ function CloneEditField({ model, idx, param, value, streamingLock, diff }: Clone
 
   const inFlight = cloneEdit.isPending;
   const disabled = streamingLock || sessionId === null;
+
+  // Re-sync to the upstream value when it changes EXTERNALLY (undo / redo /
+  // reset / a topology re-fetch) and no commit is in flight, so the input
+  // reflects the current clone-file value rather than a stale local draft.
+  // Without this, an undo reverts the substrate but the field keeps showing
+  // the just-undone value.
+  useEffect(() => {
+    if (!inFlight) {
+      setCommitted(value);
+      setDraft(String(value));
+    }
+    // `inFlight` intentionally excluded — only re-sync on an upstream value
+    // change, not when a commit toggles the pending flag.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
 
   const commit = () => {
     if (disabled || inFlight) return;

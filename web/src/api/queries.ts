@@ -2718,6 +2718,14 @@ export function useCloneDiff(
         ? queryKeys.cloneDiff(sessionId, model, idx)
         : ['clone-diff', 'noop'],
     enabled,
+    // The diff refetch (fired by `invalidateAfterCloneChange` right after an
+    // edit) races the post-edit query storm for the substrate's non-blocking
+    // session lock and can transiently 409. Retry briefly so the
+    // Modified-from-Original dot resolves once the lock frees, instead of
+    // sticking on the empty pre-edit diff.
+    retry: (failureCount, error) =>
+      error instanceof ProblemDetailsError && error.status === 409 && failureCount < 5,
+    retryDelay: 250,
     queryFn: async () => {
       if (!sessionId || !model || !idx) {
         throw new Error('clone-diff query enabled without a session / model / idx');

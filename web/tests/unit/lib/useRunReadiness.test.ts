@@ -40,7 +40,7 @@ import type { EigResult, PflowResult } from '@/api/types';
 const ALL_ROUTINES: RunRoutine[] = ['pflow', 'tds', 'eig', 'cpf', 'se', 'sweep'];
 
 function resetStores(): void {
-  useAuthStore.setState({ token: null, persistFailed: false });
+  useAuthStore.setState({ token: null, persistFailed: false, authDisabled: false });
   useSessionStore.setState({
     sessionId: null,
     recoveryInProgress: false,
@@ -259,6 +259,33 @@ describe('useRunReadiness — no auth token', () => {
       expect(result.current.ready).toBe(false);
       expect(result.current.disabledReason).toBe('Sign in to run.');
     }
+  });
+
+  it('does NOT block on a no-auth substrate (token null but authDisabled)', () => {
+    // `serve --no-auth`: token stays null, authDisabled is set. Runs must not
+    // be stuck on "Sign in to run." (Unit 25 live-found).
+    useAuthStore.setState({ token: null, authDisabled: true, persistFailed: false });
+    useSessionStore.setState({
+      sessionId: parseSessionId('sess-1'),
+      recoveryInProgress: false,
+      recoveryFailed: false,
+      recoveryAttempts: [],
+    });
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
+      topology: null,
+      layoutSidecar: null,
+      selectedElement: null,
+      addPanelOpen: false,
+      addPanelKind: null,
+      addPanelDirty: false,
+      dragOverrides: {},
+      pendingDependents: [],
+    });
+    // pflow has no further prerequisites, so it is ready under no-auth.
+    const { result } = renderHook(() => useRunReadiness('pflow'));
+    expect(result.current.disabledReason).not.toBe('Sign in to run.');
+    expect(result.current.ready).toBe(true);
   });
 });
 
