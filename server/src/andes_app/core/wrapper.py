@@ -1179,16 +1179,26 @@ class Wrapper:
           Maps to ANDES ``ss.TDS.config.method = "qndf"``. Requires
           ``ss.TDS.config.fixt = 0`` (which the wrapper sets explicitly).
 
-        ``tds_config_overrides`` (optional) is a dict of ANDES TDS config
-        field names → values. The supported keys for adaptive runs are:
-        - ``rtol`` → ``ss.TDS.config.reltol`` (relative tolerance).
-        - ``atol`` → ``ss.TDS.config.abstol`` (absolute tolerance).
-        - ``max_step`` → ``ss.TDS.config.dtmax`` (maximum step size; the
-          ANDES field is ``dtmax``, NOT ``h_max``).
+        ``tds_config_overrides`` (optional) is a dict of TDS config
+        field names → values. Two key flavours are accepted:
 
-        Unknown override keys raise ``SetupFailedError``. The Auto preset
-        (``rtol=1e-3, atol=1e-6, max_step=0.05``) is the caller's
-        responsibility to set; this method does NOT inject defaults.
+        - Three wrapper-canonical aliases for the common adaptive knobs:
+          - ``rtol`` → ``ss.TDS.config.reltol`` (relative tolerance).
+          - ``atol`` → ``ss.TDS.config.abstol`` (absolute tolerance).
+          - ``max_step`` → ``ss.TDS.config.dtmax`` (maximum step size; the
+            ANDES field is ``dtmax``, NOT ``h_max``).
+        - Any genuine ``ss.TDS.config`` field name (e.g. ``tol``,
+          ``max_iter``, ``fixt``, ``shrinkt``, ``honest``, ``tstep``,
+          ``reltol``, ``abstol``, ``dtmax``). These are validated against
+          the live config object (``hasattr``) and ``setattr`` directly.
+          This is what the GUI's free-form override editor forwards.
+
+        A key that is neither a canonical alias nor a real ``ss.TDS.config``
+        field raises ``SetupFailedError`` (the wrapper stays a strict
+        gatekeeper — it never sets an attribute that does not exist). The
+        Auto preset (``rtol=1e-3, atol=1e-6, max_step=0.05``) is the
+        caller's responsibility to set; this method does NOT inject
+        defaults.
         """
         ss = self._require_loaded()
         self._ensure_setup()
@@ -1222,9 +1232,14 @@ class Wrapper:
                 f"unknown integrator {integrator!r}; expected 'trapezoidal' or 'qndf'"
             )
 
-        # Tolerance / max-step overrides. Keys are wrapper-canonical
-        # (``rtol`` / ``atol`` / ``max_step``); the ANDES field names are
-        # ``reltol`` / ``abstol`` / ``dtmax``.
+        # Tolerance / max-step overrides. Three keys are wrapper-canonical
+        # aliases (``rtol`` / ``atol`` / ``max_step``) that map to the
+        # ANDES field names ``reltol`` / ``abstol`` / ``dtmax``. Any other
+        # key is treated as a literal ``ss.TDS.config`` field name and is
+        # set directly after validating it exists on the live config — this
+        # is what the GUI free-form override editor forwards (e.g. ``tol``,
+        # ``max_iter``). A key that is neither a canonical alias nor a real
+        # config field raises (the wrapper never sets a non-existent attr).
         if tds_config_overrides:
             _OVERRIDE_MAP = {
                 "rtol": "reltol",
@@ -1232,11 +1247,12 @@ class Wrapper:
                 "max_step": "dtmax",
             }
             for key, value in tds_config_overrides.items():
-                andes_field = _OVERRIDE_MAP.get(key)
-                if andes_field is None:
+                andes_field = _OVERRIDE_MAP.get(key, key)
+                if not hasattr(ss.TDS.config, andes_field):
                     raise SetupFailedError(
-                        f"unknown TDS override key {key!r}; expected one of "
-                        f"{list(_OVERRIDE_MAP)!r}"
+                        f"unknown TDS override key {key!r}; expected a "
+                        f"wrapper-canonical alias {list(_OVERRIDE_MAP)!r} or "
+                        f"a real ss.TDS.config field name"
                     )
                 setattr(ss.TDS.config, andes_field, value)
 

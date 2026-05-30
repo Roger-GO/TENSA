@@ -465,10 +465,13 @@ export function AnalyzeCpfNoseSubMode() {
 function validateSeNoiseSeed(text: string): string | null {
   const trimmed = text.trim();
   if (trimmed.length === 0) return null;
-  // The substrate requires an int seed — reject anything that isn't a
-  // base-10 integer (no decimals, no exponent, no stray characters).
-  if (!/^[-+]?\d+$/.test(trimmed)) {
-    return 'Enter a whole number (integer) seed, or leave blank.';
+  // The substrate requires a NON-NEGATIVE int seed (numpy's
+  // ``default_rng`` raises ``ValueError`` on negatives). Reject anything
+  // that isn't a base-10 non-negative integer (no leading '-', no
+  // decimals, no exponent, no stray characters) so a bad seed surfaces
+  // inline rather than as a misleading "non-convergent" run error.
+  if (!/^\+?\d+$/.test(trimmed)) {
+    return 'Enter a non-negative whole number (integer) seed, or leave blank.';
   }
   if (!Number.isSafeInteger(Number(trimmed))) {
     return 'Seed is too large — use a smaller integer.';

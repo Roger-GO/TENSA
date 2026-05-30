@@ -11,14 +11,14 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | GUI location | Routes |
 | --- | --- |
 | `activity-panel` | 2 |
-| `analysis-panel` | 7 |
+| `analysis-panel` | 6 |
 | `auto` | 3 |
 | `bundle-dialog` | 2 |
 | `command-palette` | 3 |
 | `disturbance-panel` | 2 |
 | `inspector` | 4 |
 | `left-sidebar` | 2 |
-| `none` | 4 |
+| `none` | 5 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -48,7 +48,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `GET` | `/api/sessions/{session_id}/disturbances` | `none` | Recorded disturbances are mirrored in the disturbance-panel Zustand store and rehydrated from snapshot restore; the web client never re-reads them via this GET (read-back endpoint kept for API/agent parity). |
 | `POST` | `/api/sessions/{session_id}/eig` | `analysis-panel` |  |
 | `GET` | `/api/sessions/{session_id}/eig/modes/{mode_idx}/participation` | `analysis-panel` |  |
-| `GET` | `/api/sessions/{session_id}/eig/state-matrix.mat` | `analysis-panel` |  |
+| `GET` | `/api/sessions/{session_id}/eig/state-matrix.mat` | `none` | The EIG state-matrix .mat export client (web exportToMat.ts) is shipped but not yet wired into any ExportMenu mount, and setMatExportTokenGetter is not called at app boot. Until the Export-menu MAT entry lands (formats={['mat']}+onExportMat on the analysis/EIG ExportMenu), this download is CLI/agent-only. |
 | `POST` | `/api/sessions/{session_id}/elements` | `inspector` |  |
 | `PUT` | `/api/sessions/{session_id}/elements/{model}/{idx}` | `inspector` |  |
 | `DELETE` | `/api/sessions/{session_id}/elements/{model}/{idx}` | `inspector` |  |

@@ -155,6 +155,34 @@ async def test_run_tds_qndf_with_auto_preset_completes(
 
 
 @pytest.mark.integration
+async def test_run_tds_freeform_real_config_key_round_trips(
+    client: httpx.AsyncClient,
+) -> None:
+    """A free-form override key the GUI advertises (``tol``) survives the
+    full HTTP → worker → wrapper path and the run completes.
+
+    This is the cross-boundary guard for the Unit 14 contract: the editor's
+    datalist + help text promise that genuine ``ss.TDS.config`` keys forward
+    to the substrate, so a real key must NOT be rejected the way ``bogus``
+    is. Without this test the web/backend halves can silently drift apart.
+    """
+    sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
+    resp = await client.post(
+        f"/api/sessions/{sid}/tds",
+        headers={"X-Andes-Token": VALID_TOKEN},
+        json={
+            "tf": 1.0,
+            "integrator": "qndf",
+            "tds_config_overrides": {"tol": 1e-5, "max_iter": 25},
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["converged"] is True, f"run with free-form keys failed: {body}"
+    assert body["final_t"] >= 0.99
+
+
+@pytest.mark.integration
 async def test_run_tds_unknown_override_key_returns_500(
     client: httpx.AsyncClient,
 ) -> None:

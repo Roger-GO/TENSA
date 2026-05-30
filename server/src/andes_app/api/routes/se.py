@@ -52,12 +52,15 @@ class SeGenerateMeasurementsRequest(BaseModel):
 
     noise_seed: int | None = Field(
         default=None,
+        ge=0,
         description=(
-            "Optional integer seed for the Gaussian-noise draw inside "
-            "``Measurements.generate_from_pflow``. ``None`` (default) "
-            "uses an unseeded ``np.random.default_rng``; pinning the "
-            "seed lets the UI re-generate the same measurement set "
-            "across page refreshes."
+            "Optional non-negative integer seed for the Gaussian-noise "
+            "draw inside ``Measurements.generate_from_pflow``. ``None`` "
+            "(default) uses an unseeded ``np.random.default_rng``; pinning "
+            "the seed lets the UI re-generate the same measurement set "
+            "across page refreshes. ``ge=0`` because numpy's "
+            "``default_rng`` rejects negative seeds — a clean 422 here "
+            "beats a misleading non-convergent error downstream."
         ),
     )
 
