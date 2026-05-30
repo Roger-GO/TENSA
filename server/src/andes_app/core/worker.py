@@ -315,6 +315,10 @@ def _handle_reset_clone(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return wrapper.reset_clone()
 
 
+def _handle_clone_diff(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    return wrapper.clone_diff(args["model"], args["idx"])
+
+
 def _handle_run_pflow(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.run_pflow())
 
@@ -1139,6 +1143,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "redo_clone_edit": _handle_redo_clone_edit,
     "save_clone_as": _handle_save_clone_as,
     "reset_clone": _handle_reset_clone,
+    "clone_diff": _handle_clone_diff,
     "export_bundle": _handle_export_bundle,
     # Unit 10 — bundle import + conflict resolution.
     "import_bundle": _handle_import_bundle,

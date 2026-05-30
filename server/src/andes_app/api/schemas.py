@@ -872,6 +872,46 @@ class CloneResetResponse(BaseModel):
     )
 
 
+class CloneDiffPair(BaseModel):
+    """One changed param's original-vs-current file values (Unit 23)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    original: ParamValue | None = Field(
+        default=None,
+        description=(
+            "The param value in the ORIGINAL case file (pre-setup read). "
+            "``null`` when the param is absent on the original device."
+        ),
+    )
+    current: ParamValue | None = Field(
+        default=None,
+        description=(
+            "The param value in the CLONE case file (pre-setup read). "
+            "``null`` when the param is absent on the clone device."
+        ),
+    )
+
+
+class CloneDiffResponse(BaseModel):
+    """Response body for ``GET /sessions/{id}/case/clone/diff/{model}/{idx}``.
+
+    Maps each whitelisted controller param whose clone-file value differs from
+    the original-file value to its ``{original, current}`` pair. An empty
+    ``params`` means no edits relative to the original (or no clone yet).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    params: dict[str, CloneDiffPair] = Field(
+        default_factory=dict,
+        description=(
+            "Changed params keyed by name; unchanged / unedited params are "
+            "absent. Empty when no clone is initialised."
+        ),
+    )
+
+
 class TopologyParamMeta(BaseModel):
     """One parameter row in a model's add/edit form schema."""
 

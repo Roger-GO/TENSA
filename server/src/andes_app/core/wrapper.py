@@ -464,6 +464,16 @@ class Wrapper:
         self._clone_mgr().reset_clone()
         return {"reset": True}
 
+    def clone_diff(self, model: str, idx: int | str) -> dict[str, Any]:
+        """Diff the clone-file vs original-file values for one device (Unit 23).
+
+        Returns ``{"params": {param: {original, current}}}`` for the
+        whitelisted controller params that differ; an empty mapping when there
+        is no clone (no edits) or nothing changed.
+        """
+        result = self._clone_mgr().clone_diff(model, str(idx))
+        return {"params": result.params}
+
     @staticmethod
     def _clone_edit_payload(result: Any) -> dict[str, Any]:
         return {

@@ -341,6 +341,25 @@ export interface ConnectivityResult {
   islanded_bus_idxes: string[];
 }
 
+// ---- clone-on-write edit (Units 21-23) ------------------------------------
+
+/** Request body for ``PUT /sessions/{id}/case/clone/params/{model}/{idx}/{param}``. */
+export type CloneEditRequest = components['schemas']['CloneEditRequest'];
+/** Response for the clone edit / undo / redo routes (carries undo/redo depths). */
+export type CloneEditResponse = components['schemas']['CloneEditResponse'];
+/** Response for ``POST /sessions/{id}/case/clone`` (clone init). */
+export type CloneInitResponse = components['schemas']['CloneInitResponse'];
+/** Request body for ``POST /sessions/{id}/case/clone/save-as``. */
+export type CloneSaveAsRequest = components['schemas']['CloneSaveAsRequest'];
+/** Response (201) for ``POST /sessions/{id}/case/clone/save-as``. */
+export type CloneSaveAsResponse = components['schemas']['CloneSaveAsResponse'];
+/** Response for ``POST /sessions/{id}/case/clone/reset``. */
+export type CloneResetResponse = components['schemas']['CloneResetResponse'];
+/** One changed param's ``{original, current}`` pair (Unit 23 diff). */
+export type CloneDiffPair = components['schemas']['CloneDiffPair'];
+/** Response for ``GET /sessions/{id}/case/clone/diff/{model}/{idx}`` (Unit 23). */
+export type CloneDiffResponse = components['schemas']['CloneDiffResponse'];
+
 // ---- branded types ---------------------------------------------------------
 
 /**
