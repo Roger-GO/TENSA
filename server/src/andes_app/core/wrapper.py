@@ -1250,8 +1250,13 @@ class Wrapper:
         if hasattr(ss, "Bus") and getattr(ss.Bus, "v", None) is not None:
             drift = _reference_angle_drift(ss)
             for i, idx in enumerate(ss.Bus.idx.v):
-                bus_voltages[idx] = float(ss.Bus.v.v[i])
-                bus_angles[idx] = float(ss.Bus.a.v[i]) - drift
+                v = float(ss.Bus.v.v[i])
+                a = float(ss.Bus.a.v[i])
+                # Guard finiteness (mirrors operating_point): a dirty dae can
+                # leave NaN/Inf in Bus.a/v, which would break JSON encoding.
+                if math.isfinite(v) and math.isfinite(a):
+                    bus_voltages[idx] = v
+                    bus_angles[idx] = a - drift
 
         line_flows = _extract_line_flows(ss) if converged else {}
         generator_outputs = _extract_generator_outputs(ss) if converged else {}
@@ -4133,30 +4138,33 @@ def _reference_angle_drift(ss: System) -> float:
     - removes only the accumulated rotation after TDS, returning the slack
       bus to a0 and every other bus to its physical relative angle.
 
-    Falls back to the mean angle (mean-centring) when there isn't exactly one
-    enabled slack — islanded / all-PV / multi-slack systems have no canonical
-    reference. Non-finite angles are skipped; returns a finite float (0.0 if
-    nothing usable).
+    Anchors to the FIRST ENABLED slack (each slack is pinned at its ``a0``, so
+    any enabled slack is a valid reference; the first is deterministic). Falls
+    back to mean-centring only when NO slack is enabled — an islanded / all-PV
+    system has no canonical reference. Non-finite angles are skipped; returns a
+    finite float (0.0 if nothing usable).
     """
     if not hasattr(ss, "Bus") or getattr(ss.Bus, "a", None) is None:
         return 0.0
 
     slack = getattr(ss, "Slack", None)
-    enabled_slacks = (
-        sum(1 for u in slack.u.v if float(u) != 0.0)
-        if slack is not None and getattr(slack, "n", 0)
-        else 0
-    )
-    if enabled_slacks == 1:
-        slack_bus = slack.bus.v[0]
-        bus_idx = list(ss.Bus.idx.v)
-        for i, idx in enumerate(bus_idx):
+    # Index of the first ENABLED slack (u != 0). Don't assume row 0 is enabled.
+    slack_row: int | None = None
+    if slack is not None and getattr(slack, "n", 0):
+        for j, u in enumerate(slack.u.v):
+            if float(u) != 0.0:
+                slack_row = j
+                break
+
+    if slack_row is not None:
+        slack_bus = slack.bus.v[slack_row]
+        for i, idx in enumerate(ss.Bus.idx.v):
             if str(idx) == str(slack_bus):
                 a_now = float(ss.Bus.a.v[i])
-                a0 = float(slack.a0.v[0])
+                a0 = float(slack.a0.v[slack_row])
                 drift = a_now - a0
                 return drift if math.isfinite(drift) else 0.0
-        # Slack references a missing bus → fall through to mean.
+        # Slack references a missing bus → fall through to mean-centring.
 
     finite = [float(a) for a in ss.Bus.a.v if math.isfinite(float(a))]
     if not finite:
