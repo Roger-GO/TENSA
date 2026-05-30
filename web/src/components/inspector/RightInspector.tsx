@@ -10,6 +10,7 @@ import { cn } from '@/lib/cn';
 import { PropertiesAccordion } from './PropertiesAccordion';
 import { PlotsAccordion } from './PlotsAccordion';
 import { DisturbancesAccordion } from './DisturbancesAccordion';
+import { EditModeToggle } from './EditModeToggle';
 
 /**
  * RightInspector (v3 Unit 7).
@@ -302,6 +303,11 @@ export function RightInspector({ className }: RightInspectorProps) {
         <p className="text-foreground truncate font-mono text-sm font-semibold">
           {headerName ?? selectedElement.idx}
         </p>
+        {/* Edit/Run mode toggle (Unit 22) — pushed to the header's right edge.
+            Only meaningful for clone-editable controllers, but it mounts for
+            every selection so the mode is always discoverable; the per-param
+            inputs gate themselves on both the mode AND the element kind. */}
+        <EditModeToggle className="ml-auto" />
       </header>
       <AccordionPrimitive.Root
         type="multiple"

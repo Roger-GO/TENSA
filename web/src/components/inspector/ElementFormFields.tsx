@@ -1,14 +1,31 @@
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/Input';
 import { EditElementButton } from '@/components/elements/EditElementButton';
+import { ProblemDetailsErrorSurface } from '@/components/error/ProblemDetailsErrorSurface';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipPortal,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
+import { useRunsStore } from '@/store/runs';
 import { useSessionStore } from '@/store/session';
-import { useCurrentTopology, useReloadCase, useTopologySchema } from '@/api/queries';
-import type { ParamValue, TopologyEntry, TopologyParamMeta } from '@/api/types';
+import {
+  useCloneDiff,
+  useCloneEdit,
+  useCurrentTopology,
+  useReloadCase,
+  useTopologySchema,
+} from '@/api/queries';
+import type { CloneDiffPair, ParamValue, TopologyEntry, TopologyParamMeta } from '@/api/types';
 import type { SelectedElement } from '@/store/case';
 import { findTopologyEntry } from '@/lib/topology';
 import { cn } from '@/lib/cn';
+import { ModifiedFromOriginalDot } from './ModifiedFromOriginalDot';
 
 /**
  * ElementFormFields (v3 Unit 8 — extracted from ElementInspector).
@@ -45,16 +62,168 @@ function formatValue(v: number | string | boolean): string {
   return v;
 }
 
+/** Coerce raw input text back to the param's value type (number / bool / str). */
+function coerceInput(raw: string, sample: ParamValue): ParamValue {
+  if (typeof sample === 'number') {
+    const n = Number(raw);
+    return Number.isNaN(n) ? raw : n;
+  }
+  if (typeof sample === 'boolean') {
+    return raw === 'true' || raw === '1';
+  }
+  return raw;
+}
+
+interface CloneEditFieldProps {
+  model: string;
+  idx: string;
+  param: string;
+  value: ParamValue;
+  /** Disabled (e.g. a TDS run is streaming) — input is locked with a tooltip. */
+  streamingLock: boolean;
+  /** This param's clone-vs-original diff pair, when it differs. */
+  diff?: CloneDiffPair;
+}
+
+/**
+ * One clone-editable controller param (Unit 22). Commits via ``useCloneEdit``
+ * on blur / Enter; shows a spinner while the write + reload + setup round-trip
+ * is in flight; on success the value updates from the substrate's ``new_value``;
+ * on failure the local edit reverts and an inline ``ProblemDetailsErrorSurface``
+ * banner renders below the input. While a TDS run streams the input is disabled
+ * with a tooltip.
+ */
+function CloneEditField({ model, idx, param, value, streamingLock, diff }: CloneEditFieldProps) {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const cloneEdit = useCloneEdit();
+  // Local mirror of the committed value (seeded from the topology value, then
+  // updated from the substrate's read-back on a successful edit).
+  const [committed, setCommitted] = useState<ParamValue>(value);
+  const [draft, setDraft] = useState<string>(String(value));
+  const [error, setError] = useState<Error | null>(null);
+
+  const inFlight = cloneEdit.isPending;
+  const disabled = streamingLock || sessionId === null;
+
+  const commit = () => {
+    if (disabled || inFlight) return;
+    const next = coerceInput(draft, committed);
+    if (next === committed) return; // no-op edit
+    if (sessionId === null) return;
+    setError(null);
+    cloneEdit.mutate(
+      { sessionId, model, idx, param, value: next },
+      {
+        onSuccess: (resp) => {
+          // ``new_value`` is the post-setup read-back (may differ from the
+          // file value under per-unit normalisation) — surface it verbatim.
+          const applied = resp.new_value ?? next;
+          setCommitted(applied);
+          setDraft(String(applied));
+        },
+        onError: (err) => {
+          // Revert the draft to the last committed value + surface the banner.
+          setDraft(String(committed));
+          setError(err);
+        },
+      },
+    );
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-1.5">
+        {streamingLock ? (
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-block w-full">
+                  <Input
+                    type="text"
+                    data-testid={`clone-edit-input-${param}`}
+                    value={draft}
+                    onChange={setDraft}
+                    disabled
+                    className="h-6 text-xs"
+                  />
+                </span>
+              </TooltipTrigger>
+              <TooltipPortal>
+                <TooltipContent data-testid={`clone-edit-tds-tooltip-${param}`}>
+                  TDS streaming — edit available when the run completes.
+                </TooltipContent>
+              </TooltipPortal>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          <Input
+            type="text"
+            data-testid={`clone-edit-input-${param}`}
+            value={draft}
+            onChange={setDraft}
+            disabled={disabled || inFlight}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commit();
+              }
+            }}
+            className="h-6 text-xs"
+          />
+        )}
+        {inFlight ? (
+          <span
+            data-testid={`clone-edit-spinner-${param}`}
+            aria-label="Saving"
+            className="border-muted-foreground border-t-foreground inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2"
+          />
+        ) : null}
+        {diff ? (
+          <ModifiedFromOriginalDot model={model} idx={idx} param={param} diff={diff} />
+        ) : null}
+      </div>
+      {error ? (
+        <ProblemDetailsErrorSurface
+          variant="banner"
+          error={error}
+          testId={`clone-edit-error-${param}`}
+          onDismiss={() => setError(null)}
+          className="text-xs"
+        />
+      ) : null}
+    </div>
+  );
+}
+
 interface PropertiesBodyProps {
   entry: TopologyEntry | null;
   selected: SelectedElement;
-  /** Whether per-field edit affordances should render. */
+  /** Whether per-field edit affordances (static-element path) should render. */
   editable: boolean;
+  /**
+   * Whether the clone-on-write edit path is active (Edit mode + a
+   * clone-editable controller selection). When true, whitelisted controller
+   * params render a ``CloneEditField`` instead of read-only text.
+   */
+  cloneEditable: boolean;
+  /** A TDS run is streaming — clone inputs are locked with a tooltip. */
+  streamingLock: boolean;
   /** Per-field metadata from the topology schema; falls back to read-only when missing. */
   paramMetas: Map<string, TopologyParamMeta>;
+  /** Per-param clone-vs-original diff pairs (Unit 23), keyed by param name. */
+  diffByParam: Map<string, CloneDiffPair>;
 }
 
-function PropertiesBody({ entry, selected, editable, paramMetas }: PropertiesBodyProps) {
+function PropertiesBody({
+  entry,
+  selected,
+  editable,
+  cloneEditable,
+  streamingLock,
+  paramMetas,
+  diffByParam,
+}: PropertiesBodyProps) {
   // Local optimistic mirror so an edited value is reflected immediately
   // without waiting for the topology re-fetch round-trip.
   const [overrides, setOverrides] = useState<Record<string, ParamValue>>({});
@@ -86,19 +255,31 @@ function PropertiesBody({ entry, selected, editable, paramMetas }: PropertiesBod
       ) : (
         entries.map(([key, value]) => {
           const meta = paramMetas.get(key);
-          // bus_idx fields aren't editable in v0.1.x (structural-link
-          // edits are deferred); render read-only.
-          const canEditThisField =
-            editable &&
-            meta !== undefined &&
-            meta.kind !== 'bus_idx' &&
-            key !== 'idx' &&
-            key !== 'name';
+          const isIdentifierField = key === 'idx' || key === 'name' || meta?.kind === 'bus_idx';
+          // Clone-edit path (Unit 22): whitelisted controller params become
+          // editable inputs that commit via the clone-on-write endpoint. The
+          // substrate is whitelist-first, so a non-editable param simply 422s
+          // — but we still gate the UI to identifier fields to avoid surfacing
+          // an input that would always fail.
+          const canCloneEdit = cloneEditable && !isIdentifierField;
+          // Static-element edit path (unchanged): per-field EditElementButton.
+          const canEditThisField = editable && meta !== undefined && !isIdentifierField;
           return (
             <div key={key} className="contents">
-              <dt className="text-muted-foreground font-mono text-xs">{key}</dt>
+              <dt className="text-muted-foreground flex items-center gap-1 font-mono text-xs">
+                {key}
+              </dt>
               <dd className="text-foreground font-mono text-xs">
-                {canEditThisField && meta ? (
+                {canCloneEdit ? (
+                  <CloneEditField
+                    model={entry.kind}
+                    idx={String(entry.idx)}
+                    param={key}
+                    value={value}
+                    streamingLock={streamingLock}
+                    diff={diffByParam.get(key)}
+                  />
+                ) : canEditThisField && meta ? (
                   <EditElementButton
                     model={entry.kind}
                     idx={String(entry.idx)}
@@ -108,12 +289,24 @@ function PropertiesBody({ entry, selected, editable, paramMetas }: PropertiesBod
                     onUpdated={(next) => setOverrides((curr) => ({ ...curr, [key]: next }))}
                   />
                 ) : (
-                  <>
-                    {formatValue(value)}
-                    {meta?.unit ? (
-                      <span className="text-muted-foreground ml-1 text-[10px]">{meta.unit}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span>
+                      {formatValue(value)}
+                      {meta?.unit ? (
+                        <span className="text-muted-foreground ml-1 text-[10px]">{meta.unit}</span>
+                      ) : null}
+                    </span>
+                    {/* Read-only mode still surfaces the Modified-from-Original
+                        dot so a user in Run mode can see what they changed. */}
+                    {diffByParam.has(key) ? (
+                      <ModifiedFromOriginalDot
+                        model={entry.kind}
+                        idx={String(entry.idx)}
+                        param={key}
+                        diff={diffByParam.get(key)!}
+                      />
                     ) : null}
-                  </>
+                  </span>
                 )}
               </dd>
             </div>
@@ -168,8 +361,12 @@ export interface ElementFormFieldsProps {
  */
 export function ElementFormFields({ className }: ElementFormFieldsProps) {
   const selectedElement = useCaseStore((s) => s.selectedElement);
+  const editMode = useCaseStore((s) => s.editMode);
   const topology = useCurrentTopology();
   const isPflowRunning = usePflowStore((s) => s.isRunning);
+  const tdsStreaming = useRunsStore((s) =>
+    Object.values(s.runs).some((r) => r.state === 'starting' || r.state === 'streaming'),
+  );
   const sessionId = useSessionStore((s) => s.sessionId);
   const reloadCase = useReloadCase();
   const schema = useTopologySchema();
@@ -178,6 +375,22 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
     if (!topology || !selectedElement) return null;
     return findTopologyEntry(topology, selectedElement);
   }, [topology, selectedElement]);
+
+  // Clone diff (Unit 23) — gated inside the hook on cloneInitialized + a
+  // non-empty (model, idx). For controllers the model is the ANDES class; for
+  // static elements there is no clone editing, so we pass nulls (disabled).
+  const isController = selectedElement?.kind === 'controller';
+  const diffModel = isController && entry ? entry.kind : null;
+  const diffIdx = isController && entry ? String(entry.idx) : null;
+  const cloneDiff = useCloneDiff(diffModel, diffIdx);
+
+  const diffByParam = useMemo(() => {
+    const map = new Map<string, CloneDiffPair>();
+    const params = cloneDiff.data?.params;
+    if (!params) return map;
+    for (const [name, pair] of Object.entries(params)) map.set(name, pair);
+    return map;
+  }, [cloneDiff.data]);
 
   const paramMetas = useMemo(() => {
     const map = new Map<string, TopologyParamMeta>();
@@ -192,6 +405,10 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
   const isPreSetup = topology?.state === 'pre-setup';
   const isCommitted = topology?.state === 'committed';
   const editable = isPreSetup && !isPflowRunning;
+  // Clone-edit is available for controllers in Edit mode. Unlike the static
+  // edit path it does NOT require a pre-setup System — the clone endpoint
+  // re-loads + re-setups from the edited files on every commit.
+  const cloneEditable = editMode === 'edit' && isController;
 
   const onResetRun = () => {
     if (!sessionId) return;
@@ -200,12 +417,17 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
 
   return (
     <div data-testid="element-form-fields" className={cn('flex min-h-0 flex-col gap-2', className)}>
-      {isCommitted ? <ResetBanner onReset={onResetRun} resetting={reloadCase.isPending} /> : null}
+      {isCommitted && !cloneEditable ? (
+        <ResetBanner onReset={onResetRun} resetting={reloadCase.isPending} />
+      ) : null}
       <PropertiesBody
         entry={entry}
         selected={selectedElement}
         editable={editable}
+        cloneEditable={cloneEditable}
+        streamingLock={tdsStreaming}
         paramMetas={paramMetas}
+        diffByParam={diffByParam}
       />
     </div>
   );

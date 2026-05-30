@@ -129,6 +129,23 @@ export interface CaseState {
    * with no dependents) or when the user explicitly clears it.
    */
   pendingDependents: TopologyEntry[];
+  /**
+   * Inspector edit/run mode (v3.1 Unit 22). In `'edit'` mode the inspector's
+   * whitelisted controller params become editable and commit via the
+   * clone-on-write endpoint; `'run'` mode (the default) keeps them read-only.
+   * Switching to `'edit'` ensures the clone is initialised on first edit.
+   */
+  editMode: 'run' | 'edit';
+  /**
+   * `true` once the per-session clone-on-write copy has been initialised
+   * (the first edit, or an explicit init). Gates the Modified-from-Original
+   * diff query (Unit 23) — nothing to diff before a clone exists.
+   */
+  cloneInitialized: boolean;
+  /** Number of clone edits recoverable via undo (substrate is source of truth). */
+  cloneUndoDepth: number;
+  /** Number of undone clone edits re-appliable via redo. */
+  cloneRedoDepth: number;
   setCase: (selection: CaseSelection) => void;
   setDragOverrides: (next: DragOverrides) => void;
   clearDragOverrides: () => void;
@@ -137,6 +154,16 @@ export interface CaseState {
   setSelectedElement: (element: SelectedElement | null) => void;
   setPendingDependents: (entries: TopologyEntry[]) => void;
   clearPendingDependents: () => void;
+  /** Set the inspector edit/run mode (Unit 22). */
+  setEditMode: (mode: 'run' | 'edit') => void;
+  /** Mark the clone-on-write copy as initialised (Unit 22). */
+  setCloneInitialized: (initialized: boolean) => void;
+  /**
+   * Record the clone undo/redo stack depths returned by an edit / undo /
+   * redo response. Also flips `cloneInitialized` true (a depth implies a
+   * live clone).
+   */
+  setCloneDepths: (undoDepth: number, redoDepth: number) => void;
   /**
    * Open the AddElementPanel.
    *
@@ -169,9 +196,14 @@ export const useCaseStore = create<CaseState>((set) => ({
   addPanelDropCoord: null,
   dragOverrides: {},
   pendingDependents: [],
+  editMode: 'run',
+  cloneInitialized: false,
+  cloneUndoDepth: 0,
+  cloneRedoDepth: 0,
   setCase: (selection: CaseSelection) =>
     // A new case wipes the old topology + sidecar + selection so
     // consumers don't see stale data while the new fetches are in flight.
+    // The clone-on-write state is per-case too — a new case has no clone.
     set({
       selection,
       topology: null,
@@ -183,6 +215,10 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelDropCoord: null,
       dragOverrides: {},
       pendingDependents: [],
+      editMode: 'run',
+      cloneInitialized: false,
+      cloneUndoDepth: 0,
+      cloneRedoDepth: 0,
     }),
   setDragOverrides: (next: DragOverrides) => set({ dragOverrides: next }),
   clearDragOverrides: () => set({ dragOverrides: {} }),
@@ -191,6 +227,10 @@ export const useCaseStore = create<CaseState>((set) => ({
   setSelectedElement: (element: SelectedElement | null) => set({ selectedElement: element }),
   setPendingDependents: (entries: TopologyEntry[]) => set({ pendingDependents: entries }),
   clearPendingDependents: () => set({ pendingDependents: [] }),
+  setEditMode: (mode: 'run' | 'edit') => set({ editMode: mode }),
+  setCloneInitialized: (initialized: boolean) => set({ cloneInitialized: initialized }),
+  setCloneDepths: (undoDepth: number, redoDepth: number) =>
+    set({ cloneUndoDepth: undoDepth, cloneRedoDepth: redoDepth, cloneInitialized: true }),
   openAddPanel: (kind: string | null, dropCoord?: { x: number; y: number }) =>
     set({
       addPanelOpen: true,
@@ -223,5 +263,9 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelDropCoord: null,
       dragOverrides: {},
       pendingDependents: [],
+      editMode: 'run',
+      cloneInitialized: false,
+      cloneUndoDepth: 0,
+      cloneRedoDepth: 0,
     }),
 }));
