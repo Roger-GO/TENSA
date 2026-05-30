@@ -141,11 +141,22 @@ class _JobRegistry:
         kind: JobKind,
         can_cancel: bool,
         request_summary: dict[str, Any] | None = None,
+        job_id: str | None = None,
     ) -> str:
-        """Register a fresh ``pending`` job. Returns the new ``job_id``."""
+        """Register a fresh ``pending`` job. Returns the new ``job_id``.
+
+        ``job_id`` defaults to a freshly-minted uuid. v3.1 Unit 5c passes an
+        explicit id so the streaming-TDS / sweep jobs can alias the registry
+        ``job_id`` onto the pre-existing ``run_id`` / ``sweep_id`` (same value
+        across both fields). Re-registering an already-present id is a no-op
+        that returns the existing id rather than clobbering its lifecycle.
+        """
         now = time.monotonic()
-        job_id = str(uuid.uuid4())
+        if job_id is None:
+            job_id = str(uuid.uuid4())
         with self._lock:
+            if job_id in self._records:
+                return job_id
             self._records[job_id] = JobRecord(
                 id=job_id,
                 kind=kind,

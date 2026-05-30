@@ -107,6 +107,16 @@ class StartSweepResponse(BaseModel):
     total: int = Field(
         ..., description="Number of iterations the sweep will run."
     )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring this sweep (v3.1 Unit 5c). Additive "
+            "and IDENTICAL to ``sweep_id`` — the two fields alias the same "
+            "value, with ``sweep_id`` preserved for backward compatibility. "
+            "``GET /sessions/{id}/jobs/{job_id}`` returns the matching "
+            "``JobRecord`` (kind ``sweep``)."
+        ),
+    )
 
 
 # ---- routes ---------------------------------------------------------------
@@ -190,7 +200,12 @@ async def start_sweep(
             headers={"Retry-After": "5"},
         ) from exc
 
-    return StartSweepResponse(sweep_id=sweep_id, total=len(values))
+    # v3.1 Unit 5c: ``job_id`` aliases ``sweep_id`` (same value across both
+    # fields) — the sweep is registered as a first-class job inside
+    # ``SessionManager.start_sweep``. Additive: nothing is removed.
+    return StartSweepResponse(
+        sweep_id=sweep_id, total=len(values), job_id=sweep_id
+    )
 
 
 # ---- WS progress channel --------------------------------------------------
