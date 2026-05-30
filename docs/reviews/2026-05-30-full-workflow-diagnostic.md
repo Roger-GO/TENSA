@@ -240,3 +240,33 @@ workflow (27 agents); all fixes tested + live-verified.
 ### Still to smoke (not run this session)
 PMU placement, profile/time-series import, multi-case compare, full SWEEP run,
 CPF/SE on the built system.
+
+---
+
+## Session 3b — dynamic-build fixes + remaining smokes
+
+### Dynamic-build findings from §3 — NOW FIXED ✅ (grounded by a 3-agent research workflow)
+- **GENROU/GENCLS `gen` link** added to the add-element schema (new `gen_idx`
+  param kind) + a `GenIdxSelect` picker → dynamic generators build from scratch.
+- **GENCLS `H` → `M`**: GENCLS has no `H` (ANDES silently dropped it); corrected
+  to the real inertia param `M` (required).
+- **Dynamic-content gate** (useRunReadiness + DynamicContentBadge): a
+  GENROU/GENCLS machine now counts as dynamic even with zero controllers, so
+  TDS/EIG aren't wrongly gated.
+- **xlsx/raw save EOFError**: ANDES's writers call `input()` to confirm
+  overwrite; the TTY-less worker EOFs. Pass `overwrite=True` (route already
+  guards collisions) + delete 0-byte files left by a failed write.
+- **Verified live end-to-end**: built a GENCLS dynamic system entirely from
+  scratch → PF converges → badge "Dynamic … 1 synchronous machine" → Run TDS
+  enabled → **TDS runs to completion**. xlsx save (incl. overwrite) works.
+
+### Remaining smokes
+- **PMU placement** ✅ — "Place PMU" dialog; placed 2 PMUs (bus 1 + 3, Ta/Tv
+  0.05); backend `/pmu` confirms both.
+- **Profile / time-series import** ✅ — uploaded a CSV (t,p0), mapped to
+  PQ_0.p0, staged ("Currently staged (1)").
+- **Multi-case comparison** — ✗ NOT A FEATURE. No compare UI / command exists;
+  the app offers plot-overlay of multiple TDS *runs* and clone-on-write param
+  diffs, but no side-by-side *case* comparison. (Documented, not a bug.)
+- **Full SWEEP run** — picker unblocked by the §2b snapshot fixes; the full
+  add-disturbance → snapshot → multi-iteration run was not executed this pass.
