@@ -21,6 +21,7 @@
  * and let the queries layer decide; the client itself is dumb on purpose.
  */
 import type { ProblemDetails } from './types';
+import { parseRecoveryDescriptor, type RecoveryDescriptor } from '@/lib/recovery';
 
 // ---- error taxonomy --------------------------------------------------------
 
@@ -68,6 +69,25 @@ export class ProblemDetailsError extends Error {
     this.raw = problem;
     this.rawBody = rawBody ?? problem;
     this.requestPath = requestPath;
+  }
+
+  /**
+   * The typed recovery descriptor the substrate attaches to every 4xx/5xx
+   * ProblemDetails body (Unit 4 substrate; ``schemas.RecoveryDescriptor``).
+   * Read off ``rawBody`` (the verbatim parsed body), which the client
+   * already preserves for both RFC-7807 and non-RFC-7807 shapes.
+   *
+   * Returns ``null`` when the body carries no ``recovery`` field, an
+   * explicit ``null`` recovery, or a malformed shape. The error UI primitive
+   * (``<ProblemDetailsErrorSurface>`` / ``<RecoveryActionButton>``) consumes
+   * this to render the right recovery CTA. A forward-compat ``kind`` the web
+   * build predates still parses here (any string ``kind`` is accepted); the
+   * router decides whether to route it or render its label as plain text.
+   */
+  get recovery(): RecoveryDescriptor | null {
+    const body = this.rawBody;
+    if (body === null || typeof body !== 'object') return null;
+    return parseRecoveryDescriptor((body as Record<string, unknown>)['recovery']);
   }
 }
 
