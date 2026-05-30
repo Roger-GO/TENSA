@@ -406,6 +406,26 @@ export function useCommandRegistry(): readonly Command[] {
         },
         shortcut: 'meta+backslash, ctrl+backslash',
       },
+      // v3.1 Unit 11 — Activity panel. Opens/expands the BottomDrawer onto
+      // the Activity tab (Active sub-tab) so the user can watch in-flight
+      // jobs + the failure/retry history. ⌘⇧J mirrors the ⌘J drawer toggle
+      // but is unconditional-open (it always reveals Activity rather than
+      // toggling the drawer shut). Clearing the unread bit matches the ⌘J
+      // path so the BottomDrawerToggle badge dismisses on open.
+      {
+        id: 'view.toggleActivityPanel',
+        label: 'Open Activity panel',
+        group: 'view',
+        keywords: ['activity', 'jobs', 'running', 'progress', 'panel', 'drawer', 'tasks'],
+        action: () => {
+          const layout = useLayoutStore.getState();
+          layout.setActiveBottomDrawerTab('activity');
+          layout.setActivityPanelTab('active');
+          layout.setBottomDrawerCollapsed(false);
+          layout.clearDrawerUnread();
+        },
+        shortcut: 'meta+shift+j, ctrl+shift+j',
+      },
 
       // ---- navigation ----------------------------------------------------
       // Sequence shortcut "g h" — opens the run-history drawer.

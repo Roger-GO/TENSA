@@ -34,7 +34,14 @@ import { persist, createJSONStorage } from 'zustand/middleware';
  * five tabs are per-bucket data grids (Units 12 + 13); ``analysis`` opens
  * the nested sub-tab strip (Unit 14).
  */
-export type BottomDrawerTab = 'buses' | 'lines' | 'generators' | 'loads' | 'shunts' | 'analysis';
+export type BottomDrawerTab =
+  | 'buses'
+  | 'lines'
+  | 'generators'
+  | 'loads'
+  | 'shunts'
+  | 'analysis'
+  | 'activity';
 
 export const BOTTOM_DRAWER_TABS: readonly BottomDrawerTab[] = [
   'buses',
@@ -43,6 +50,7 @@ export const BOTTOM_DRAWER_TABS: readonly BottomDrawerTab[] = [
   'loads',
   'shunts',
   'analysis',
+  'activity',
 ] as const;
 
 /**

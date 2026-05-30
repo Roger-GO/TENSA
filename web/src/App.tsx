@@ -23,6 +23,7 @@ import { BottomDrawer } from '@/components/shell/BottomDrawer';
 import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
 import { makeQueryClient, wireGlobalErrorRecovery } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
+import { useJobEventsStream } from '@/streaming/useJobEventsStream';
 import { useSldFrameOverlay } from '@/components/sld/overlay';
 import { RecoveryBadge } from '@/components/shell/RecoveryBadge';
 import { setTokenGetter } from '@/api/client';
@@ -99,6 +100,12 @@ function AppInner({ children }: { children: React.ReactNode }) {
   // unmount that would otherwise kill the recovery cycle once a case is
   // loaded (v0.1.y Unit 5 bug fix).
   useSessionRecovery();
+  // v3.1 Unit 11: own the per-session JobStream here (the mount Unit 6
+  // deferred). One WS per active session feeds canonical job events into
+  // ``useJobsStore`` REGARDLESS of whether the Activity panel is open, so
+  // the TopBar in-flight chip + the panel history stay live. Disposes on
+  // session change / token loss / unmount.
+  useJobEventsStream();
   // Dev-mode: detect a `serve --no-auth` substrate so the token gate is
   // skipped without a paste modal (no-op against an auth-on substrate).
   useNoAuthProbe();

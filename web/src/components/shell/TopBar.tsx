@@ -10,6 +10,7 @@ import { ThemeToggle } from '@/components/shell/ThemeToggle';
 import { SidebarToggle } from '@/components/shell/SidebarToggle';
 import { InspectorToggle } from '@/components/shell/InspectorToggle';
 import { BottomDrawerToggle } from '@/components/shell/BottomDrawerToggle';
+import { InFlightChip } from '@/components/shell/InFlightChip';
 
 /**
  * TopBar. Fixed-height (~44px) bar with three slots — left, center, right —
@@ -98,6 +99,11 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
         className="flex min-w-0 flex-1 items-center justify-end gap-1"
       >
         {right}
+        {/* v3.1 Unit 11 — in-flight job summary chip. Hidden when no
+            active jobs; clicking opens the Activity panel. Sits at the
+            start of the auto-mounted cluster so a "Running…" pill reads
+            adjacent to the run controls. */}
+        <InFlightChip />
         {/* v3 Unit 2 — pane toggles (sidebar / inspector / drawer).
             Sit between caller-supplied right-slot content (RecoveryBadge,
             ExportMenu, HideLabelsToggle) and the auto-mounted ⌘K /

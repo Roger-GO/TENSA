@@ -81,12 +81,25 @@ afterEach(() => {
 });
 
 describe('<BottomDrawer />', () => {
-  it('renders all 6 outer tabs', () => {
+  it('renders all 7 outer tabs', () => {
     render(<BottomDrawer />, { wrapper });
     expect(screen.getByTestId('bottom-drawer')).toBeInTheDocument();
-    for (const tab of ['buses', 'lines', 'generators', 'loads', 'shunts', 'analysis']) {
+    for (const tab of ['buses', 'lines', 'generators', 'loads', 'shunts', 'analysis', 'activity']) {
       expect(screen.getByTestId(`bottom-drawer-tab-${tab}`)).toBeInTheDocument();
     }
+  });
+
+  it('renders + selects the Activity tab', async () => {
+    const user = userEvent.setup();
+    render(<BottomDrawer />, { wrapper });
+    const activityTab = screen.getByTestId('bottom-drawer-tab-activity');
+    expect(activityTab).toBeInTheDocument();
+
+    await user.click(activityTab);
+    expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('activity');
+    // The Activity panel content mounts (it renders the sub-tab strip).
+    expect(screen.getByTestId('bottom-drawer-tab-content-activity')).toBeInTheDocument();
+    expect(screen.getByTestId('activity-panel-subtab-active')).toBeInTheDocument();
   });
 
   it('clicking a tab switches activeBottomDrawerTab', async () => {

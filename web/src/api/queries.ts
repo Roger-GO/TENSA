@@ -2403,3 +2403,38 @@ export function useStartSweep(): UseMutationResult<StartSweepResponse, Error, St
     },
   });
 }
+
+// ---- job cancellation (v3.1 Unit 11) --------------------------------------
+
+/** Variables for ``useCancelJob`` — the owning session + the job to cancel. */
+export interface CancelJobVars {
+  sessionId: SessionId;
+  jobId: string;
+}
+
+/**
+ * ``DELETE /sessions/{id}/jobs/{job_id}`` — request cooperative cancellation
+ * of an in-flight job (Activity panel "Cancel" affordance, v3.1 Unit 11).
+ *
+ * The substrate flips the job to ``cancelled`` (or leaves it terminal if it
+ * already finished) and the canonical transition arrives over ``JobStream``;
+ * we optimistically mark the placeholder ``cancelled`` so the row updates
+ * instantly even before the WS event lands. A failed DELETE (e.g. the job
+ * already completed) is swallowed at the call site — the JobStream remains
+ * the source of truth and will reconcile the real terminal state.
+ */
+export function useCancelJob(): UseMutationResult<void, Error, CancelJobVars> {
+  return useMutation({
+    mutationFn: async ({ sessionId, jobId }: CancelJobVars) => {
+      await andesClient.delete<void>(
+        `/sessions/${encodeURIComponent(sessionId)}/jobs/${encodeURIComponent(jobId)}`,
+        { timeoutMs: TIMEOUTS.sessionLifecycle },
+      );
+    },
+    onSuccess: (_data, { jobId }) => {
+      // Optimistic terminal flip; the canonical JobStream ``cancelled`` event
+      // merges onto this by id.
+      useJobsStore.getState().updateJob(jobId, { status: 'cancelled', can_cancel: false });
+    },
+  });
+}
