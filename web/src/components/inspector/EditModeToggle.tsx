@@ -76,7 +76,10 @@ export function EditModeToggle({ className }: EditModeToggleProps) {
             type="button"
             role="switch"
             aria-checked={isEdit}
-            aria-label={isEdit ? 'Edit mode (on)' : 'Edit mode (off)'}
+            // Fixed name for the switch; aria-checked carries on/off so AT
+            // doesn't double-announce state (the visible "Edit"/"Run" label is
+            // decorative for sighted users).
+            aria-label="Edit mode"
             data-testid="edit-mode-toggle"
             data-mode={editMode}
             disabled={disabled}

@@ -17,7 +17,7 @@
  * On a successful save the workspace-files query is invalidated by
  * ``useCloneSaveAs`` so the new case appears in ``SavedCasesList`` immediately.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -81,6 +81,7 @@ export function SaveAsCustomCaseDialog({ open, onOpenChange }: SaveAsCustomCaseD
 
 function SaveAsCustomCaseDialogInner({ onClose }: { onClose: () => void }) {
   const sessionId = useSessionStore((s) => s.sessionId);
+  const nameErrorId = useId();
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -153,26 +154,36 @@ function SaveAsCustomCaseDialogInner({ onClose }: { onClose: () => void }) {
             }}
             placeholder="kundur_tuned"
             disabled={isPending}
+            aria-invalid={validation !== null || error !== null}
+            aria-describedby={validation !== null || error !== null ? nameErrorId : undefined}
             autoFocus
           />
         </label>
-        {validation !== null ? (
-          <p role="alert" data-testid="save-as-custom-validation-error" className="text-danger text-xs">
-            {validation}
-          </p>
-        ) : null}
-        {error !== null ? (
-          <div
-            role="alert"
-            data-testid="save-as-custom-error"
-            className={cn(
-              'border-danger/30 bg-danger/10 text-foreground',
-              'rounded-[var(--radius-sm)] border px-2 py-1.5 text-xs',
-            )}
-          >
-            {error}
-          </div>
-        ) : null}
+        {/* Single described-by region so the name input announces whichever
+            message is active (validation or server error). */}
+        <div id={nameErrorId}>
+          {validation !== null ? (
+            <p
+              role="alert"
+              data-testid="save-as-custom-validation-error"
+              className="text-danger text-xs"
+            >
+              {validation}
+            </p>
+          ) : null}
+          {error !== null ? (
+            <div
+              role="alert"
+              data-testid="save-as-custom-error"
+              className={cn(
+                'border-danger/30 bg-danger/10 text-foreground',
+                'rounded-[var(--radius-sm)] border px-2 py-1.5 text-xs',
+              )}
+            >
+              {error}
+            </div>
+          ) : null}
+        </div>
         {saved ? (
           <div
             role="status"

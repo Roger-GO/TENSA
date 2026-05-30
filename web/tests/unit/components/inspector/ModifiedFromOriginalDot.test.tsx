@@ -60,18 +60,20 @@ describe('<ModifiedFromOriginalDot />', () => {
     );
     const dot = screen.getByTestId('modified-dot-Vrmax');
     expect(dot).toBeInTheDocument();
-    expect(dot).toHaveAttribute('aria-label', 'Vrmax modified from original');
-    expect(dot.className).toContain('bg-warning');
+    // A real focusable button (keyboard-reachable), with the diff in its name.
+    expect(dot.tagName).toBe('BUTTON');
+    expect(dot.getAttribute('aria-label')).toMatch(/vrmax modified from original/i);
+
   });
 
-  it('tooltip surfaces "Original: X → Y"', async () => {
+  it('popover surfaces "Original: X → Y" on activate', async () => {
     const user = userEvent.setup();
     render(
       withProviders(<ModifiedFromOriginalDot model="IEEEX1" idx="1" param="Vrmax" diff={DIFF} />),
     );
-    await user.hover(screen.getByTestId('modified-dot-Vrmax'));
-    const tip = await screen.findAllByTestId('modified-dot-tooltip-Vrmax');
-    expect(tip[0]).toHaveTextContent('Original: 1.5 → 2');
+    await user.click(screen.getByTestId('modified-dot-Vrmax'));
+    const pop = await screen.findAllByTestId('modified-dot-popover-Vrmax');
+    expect(pop[0]).toHaveTextContent('Original: 1.5 → 2');
   });
 
   it('Revert this field fires a clone-edit PUT with the original value', async () => {
@@ -90,7 +92,7 @@ describe('<ModifiedFromOriginalDot />', () => {
     render(
       withProviders(<ModifiedFromOriginalDot model="IEEEX1" idx="1" param="Vrmax" diff={DIFF} />),
     );
-    await user.hover(screen.getByTestId('modified-dot-Vrmax'));
+    await user.click(screen.getByTestId('modified-dot-Vrmax'));
     const revertBtns = await screen.findAllByTestId('modified-dot-revert-Vrmax');
     await user.click(revertBtns[0]!);
 

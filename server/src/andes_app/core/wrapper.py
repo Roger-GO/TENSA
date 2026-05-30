@@ -454,9 +454,9 @@ class Wrapper:
         result = self._clone_mgr().redo()
         return self._clone_edit_payload(result)
 
-    def save_clone_as(self, name: str) -> dict[str, Any]:
+    def save_clone_as(self, name: str, *, overwrite: bool = False) -> dict[str, Any]:
         """Copy the clone files to the workspace as ``<name>.<ext>``."""
-        result = self._clone_mgr().save_as(name)
+        result = self._clone_mgr().save_as(name, overwrite=overwrite)
         return {"name": result.name, "files": result.files}
 
     def reset_clone(self) -> dict[str, Any]:

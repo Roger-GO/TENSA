@@ -1713,9 +1713,15 @@ export interface components {
         CloneSaveAsRequest: {
             /**
              * Name
-             * @description Workspace-relative case name (stem only — no extension, no path separators or traversal). The clone's files are written as ``<name>.<ext>`` for each cloned format. Re-using a name overwrites.
+             * @description Workspace-relative case name (stem only — no extension, no path separators or traversal). The clone's files are written as ``<name>.<ext>`` for each cloned format.
              */
             name: string;
+            /**
+             * Overwrite
+             * @description When false (the default), save-as REFUSES to overwrite an existing workspace file (a 422) — this protects the loaded original case, which lives in the same workspace, from being silently clobbered. Pass true to intentionally overwrite an existing case.
+             * @default false
+             */
+            overwrite: boolean;
         };
         /**
          * CloneSaveAsResponse
@@ -4629,7 +4635,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No clone to save, an invalid / traversal name, or the workspace is not configured. */
+            /** @description No clone to save, an invalid / traversal name, the workspace is not configured, or the name collides with an existing workspace file (pass overwrite=true to replace it). */
             422: {
                 headers: {
                     [name: string]: unknown;

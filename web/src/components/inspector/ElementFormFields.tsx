@@ -137,7 +137,15 @@ function CloneEditField({ model, idx, param, value, streamingLock, diff }: Clone
           <TooltipProvider delayDuration={200}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="inline-block w-full">
+                {/* tabIndex+role+aria-label make the lock reason reachable by
+                    keyboard (a disabled input can't be focused, so the tooltip
+                    would otherwise never open without a pointer). */}
+                <span
+                  tabIndex={0}
+                  role="group"
+                  aria-label={`${param} — TDS streaming, editing available when the run completes`}
+                  className="focus-visible:ring-ring inline-block w-full rounded-[var(--radius-sm)] focus-visible:ring-2 focus-visible:outline-none"
+                >
                   <Input
                     type="text"
                     data-testid={`clone-edit-input-${param}`}
@@ -175,7 +183,9 @@ function CloneEditField({ model, idx, param, value, streamingLock, diff }: Clone
         {inFlight ? (
           <span
             data-testid={`clone-edit-spinner-${param}`}
-            aria-label="Saving"
+            role="status"
+            aria-live="polite"
+            aria-label={`Saving ${param}`}
             className="border-muted-foreground border-t-foreground inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2"
           />
         ) : null}

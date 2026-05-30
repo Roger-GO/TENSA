@@ -2622,6 +2622,12 @@ export function useCloneRedo(): UseMutationResult<CloneEditResponse, Error, Sess
 export interface CloneSaveAsVars {
   sessionId: SessionId;
   name: string;
+  /**
+   * When true, overwrite an existing workspace file of the same name. Default
+   * false — the substrate refuses a collision (protecting the loaded original)
+   * and the dialog blocks colliding names client-side. (review(phase6))
+   */
+  overwrite?: boolean;
 }
 
 /**
@@ -2636,8 +2642,8 @@ export function useCloneSaveAs(): UseMutationResult<
 > {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ sessionId, name }: CloneSaveAsVars) => {
-      const body: CloneSaveAsRequest = { name };
+    mutationFn: async ({ sessionId, name, overwrite = false }: CloneSaveAsVars) => {
+      const body: CloneSaveAsRequest = { name, overwrite };
       return await andesClient.post<CloneSaveAsResponse>(
         `/sessions/${encodeURIComponent(sessionId)}/case/clone/save-as`,
         { body, timeoutMs: TIMEOUTS.caseLoad },

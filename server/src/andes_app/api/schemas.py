@@ -834,8 +834,16 @@ class CloneSaveAsRequest(BaseModel):
         description=(
             "Workspace-relative case name (stem only — no extension, no path "
             "separators or traversal). The clone's files are written as "
-            "``<name>.<ext>`` for each cloned format. Re-using a name "
-            "overwrites."
+            "``<name>.<ext>`` for each cloned format."
+        ),
+    )
+    overwrite: bool = Field(
+        default=False,
+        description=(
+            "When false (the default), save-as REFUSES to overwrite an existing "
+            "workspace file (a 422) — this protects the loaded original case, "
+            "which lives in the same workspace, from being silently clobbered. "
+            "Pass true to intentionally overwrite an existing case."
         ),
     )
 
