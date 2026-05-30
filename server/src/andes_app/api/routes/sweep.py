@@ -36,7 +36,6 @@ implementation lives in ``andes_app.core.wrapper.Wrapper.run_sweep``.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
 import logging
@@ -47,6 +46,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from andes_app.api.auth import RequireToken
+from andes_app.api.routes.ws import require_ws_auth
 from andes_app.api.schemas import ProblemDetails
 from andes_app.core.session import (
     SessionExpiredError,
@@ -58,7 +58,6 @@ from andes_app.core.sweep import (
     SweepValidationError,
     parse_sweep_target,
 )
-from andes_app.security.token import constant_time_eq
 
 router = APIRouter()
 
@@ -66,12 +65,11 @@ log = logging.getLogger("andes-app.sweep")
 
 
 # WS close codes — same alphabet as the TDS streaming endpoint so
-# clients can share the close-code translation logic.
-WS_CLOSE_AUTH_FAILED = 4401
+# clients can share the close-code translation logic. The auth-failed
+# close (4401) and the 2s auth deadline now live in ``require_ws_auth``
+# (api/routes/ws.py), which this endpoint delegates the handshake to.
 WS_CLOSE_SESSION_NOT_FOUND = 4404
 WS_CLOSE_INTERNAL_ERROR = 4500
-
-AUTH_DEADLINE_SECONDS = 2.0
 
 
 def _manager(request: Request | WebSocket) -> SessionManager:
@@ -83,10 +81,6 @@ def _manager(request: Request | WebSocket) -> SessionManager:
         )
     assert isinstance(mgr, SessionManager)
     return mgr
-
-
-def _expected_token(request: Request | WebSocket) -> str | None:
-    return getattr(request.app.state, "expected_token", None)
 
 
 # ---- response shapes -------------------------------------------------------
@@ -227,38 +221,24 @@ async def ws_sweep_progress(
     ``attach_to_sweep`` async iterator.
     """
     await websocket.accept()
-    expected_token = _expected_token(websocket)
     mgr_obj = getattr(websocket.app.state, "session_manager", None)
-    if expected_token is None or mgr_obj is None:
+    if mgr_obj is None:
         await _close_with_error(
             websocket, WS_CLOSE_INTERNAL_ERROR, "server not configured"
         )
         return
     mgr: SessionManager = mgr_obj
 
-    # ---- AUTH ----
-    try:
-        first = await asyncio.wait_for(
-            websocket.receive_text(), timeout=AUTH_DEADLINE_SECONDS
-        )
-    except TimeoutError:
-        await _close_with_error(
-            websocket, WS_CLOSE_AUTH_FAILED, "auth deadline exceeded"
-        )
-        return
-    except WebSocketDisconnect:
-        return
-
-    try:
-        auth_msg = json.loads(first)
-    except json.JSONDecodeError:
-        await _close_with_error(websocket, WS_CLOSE_AUTH_FAILED, "auth message must be JSON")
-        return
-
-    if auth_msg.get("type") != "auth" or not constant_time_eq(
-        expected_token, str(auth_msg.get("token", ""))
-    ):
-        await _close_with_error(websocket, WS_CLOSE_AUTH_FAILED, "invalid token")
+    # ---- AUTH (shared first-message handshake; honors serve --no-auth) ----
+    # Delegate to the same helper the TDS / jobs-events sockets use so this
+    # channel honors ``app.state.require_auth``. The previous inline check
+    # called ``constant_time_eq(expected_token, token)`` UNCONDITIONALLY, which
+    # rejected the empty no-auth token with 4401 and left the sweep progress
+    # stream dead in ``serve --no-auth`` mode — the sweep ran to completion on
+    # the substrate but the UI never received a single iteration. ``require_ws_auth``
+    # closes the socket itself (4401 / internal-error) and returns False on any
+    # failure, mirroring the TDS handler.
+    if not await require_ws_auth(websocket):
         return
 
     if not mgr.is_alive(session_id):

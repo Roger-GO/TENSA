@@ -22,7 +22,17 @@ import { cn } from '@/lib/cn';
 export function SweepProgressPanel() {
   const activeSweepId = useSweepStore((s) => s.activeSweepId);
   const sweeps = useSweepStore((s) => s.sweeps);
-  const sweep = activeSweepId ? sweeps[activeSweepId] : null;
+  // While a sweep runs, show the active one. Once it finishes,
+  // ``markSweepFinished`` clears ``activeSweepId`` — but the user still wants
+  // to see the results, so fall back to the most-recently-started sweep
+  // (``sweeps`` keeps insertion = chronological order). Without this the panel
+  // snapped straight back to "No sweep in progress" the instant a sweep
+  // completed, hiding every iteration that just streamed in. The WS effect
+  // below is gated on pending/running state, so a terminal sweep surfaced via
+  // this fallback never opens a socket.
+  const sweep = activeSweepId
+    ? (sweeps[activeSweepId] ?? null)
+    : (Object.values(sweeps).at(-1) ?? null);
 
   const sessionId = useSessionStore((s) => s.sessionId);
   const token = useAuthStore((s) => s.token);
