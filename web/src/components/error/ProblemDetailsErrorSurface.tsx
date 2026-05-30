@@ -3,8 +3,9 @@
  *
  * The SINGLE error UI primitive used everywhere. Three variants:
  *
- * - `banner` — inline alert (mirrors `ParseErrorBanner`): title + detail +
- *   a collapsible raw-JSON disclosure + dismiss + the recovery action.
+ * - `banner` — inline alert (the case-load parse-error surface): title +
+ *   detail + a collapsible raw-JSON disclosure + dismiss + the recovery
+ *   action.
  * - `modal` — the one allowed non-destructive PF-crash-style modal (mirrors
  *   `RuntimeCrashModal`): Radix dialog, locked backdrop, a single Close
  *   affordance + the recovery action.
@@ -157,7 +158,7 @@ function RawDisclosure({ rawJson, testId }: { rawJson: string; testId: string })
   );
 }
 
-/** Inline banner variant — mirrors `ParseErrorBanner`. */
+/** Inline banner variant — the case-load parse-error surface. */
 function BannerSurface({
   normalised,
   onDismiss,

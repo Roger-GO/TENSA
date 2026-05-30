@@ -8,7 +8,8 @@
  * - Selecting a `.raw` exposes the addfile selector; non-`.raw` hides it.
  * - Empty workspace shows the EmptyState copy from interaction-states.md.
  * - Loading state renders the skeleton.
- * - Parse error (422 ProblemDetails) renders `ParseErrorBanner`.
+ * - Parse error (422 ProblemDetails) renders the
+ *   `<ProblemDetailsErrorSurface variant="banner">` parse-error surface.
  * - Load mutation fires with the right body (primary + addfiles).
  *
  * Network is stubbed via `globalThis.fetch`. The picker creates a session
@@ -250,7 +251,7 @@ describe('<WorkspaceFilePicker />', () => {
     expect(screen.getByRole('button', { name: /^Load$/ })).toBeDisabled();
   });
 
-  it('renders ParseErrorBanner with the substrate detail on 422 load failure', async () => {
+  it('renders the parse-error banner surface with the substrate detail on 422 load failure', async () => {
     useSessionStore.setState({ sessionId: parseSessionId('sess-pre') });
     stubInitialFetches(fetchSpy);
     const { Wrapper } = makeWrapper();
