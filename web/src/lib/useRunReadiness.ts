@@ -145,6 +145,7 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
   const selection = useCaseStore((s) => s.selection);
   const sessionId = useSessionStore((s) => s.sessionId);
   const token = useAuthStore((s) => s.token);
+  const authDisabled = useAuthStore((s) => s.authDisabled);
   const pflowLastRun = usePflowStore((s) => s.lastRun);
   const eigResult = useAnalyzeStore((s) => s.eigResult);
   const seMeasurementsCount = useAnalyzeStore((s) => s.seMeasurementsCount);
@@ -168,8 +169,11 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
   }
   // The TDS branch needs a token to open the WebSocket; PF/EIG/CPF/SE
   // also require auth at the HTTP layer (the api client refuses without
-  // one). Sweep is HTTP-only so it requires the token too.
-  if (token === null) {
+  // one). Sweep is HTTP-only so it requires the token too. A `serve
+  // --no-auth` substrate (authDisabled) accepts unauthenticated requests,
+  // so a missing token is fine there — without this, every Run button is
+  // stuck on "Sign in to run." in no-auth dev mode.
+  if (token === null && !authDisabled) {
     return ready(false, 'Sign in to run.', null);
   }
 
