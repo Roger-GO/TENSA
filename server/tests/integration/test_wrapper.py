@@ -125,34 +125,83 @@ def test_operating_point_populated_after_tds_without_pflow() -> None:
 
 
 @pytest.mark.integration
-def test_operating_point_normalizes_post_tds_angle_drift() -> None:
-    """Bus angles read after TDS must stay physical. ANDES integrates angles
-    against a rotating reference, so raw ``Bus.a`` carries a large common-mode
-    drift post-TDS (~9.5 rad) even though differences are preserved. The read
-    subtracts the slack-referenced drift so angles return to a plausible
-    range, while PF angles (drift ≈ 0) are left essentially unchanged."""
+def test_operating_point_removes_common_mode_angle_drift() -> None:
+    """The read must strip the common-mode reference drift that TDS leaves in
+    ``Bus.a``. A flat TDS barely rotates the reference, so to prove the fix
+    actually fires we inject a known large drift (+5 rad on every bus, exactly
+    what a rotating reference does) and assert it is removed: the slack bus
+    returns to its ``a0`` and every angle is plausible again — while angle
+    DIFFERENCES (the only physical quantity) are preserved to machine epsilon.
+    Without the normalization the injected +5 rad would survive and this fails."""
     raw, dyr = _ieee14_paths()
     w = Wrapper()
     w.load_case(raw, addfiles=[dyr])
-
     pf = w.run_pflow()
-    # PF: slack bus sits at its a0 (≈0 on IEEE 14) and all angles are small.
-    assert max(abs(a) for a in pf.bus_angles.values()) < 1.0
 
+    ss = w._require_loaded()
+    slack_bus = ss.Slack.bus.v[0]
+    slack_a0 = float(ss.Slack.a0.v[0])
+    slack_pos = next(i for i, idx in enumerate(ss.Bus.idx.v) if str(idx) == str(slack_bus))
+
+    # Simulate the rotating-reference drift TDS leaves behind: a big common
+    # offset added to every bus angle (differences unchanged).
+    DRIFT = 5.0
+    for i in range(len(ss.Bus.a.v)):
+        ss.Bus.a.v[i] = float(ss.Bus.a.v[i]) + DRIFT
+
+    op = w.operating_point()
+    assert op.bus_angles, "operating point should carry bus angles"
+    # Common-mode drift removed → angles plausible again (the injected +5 is gone).
+    assert max(abs(a) for a in op.bus_angles.values()) < 1.0, (
+        f"drift not removed: max|a|={max(abs(a) for a in op.bus_angles.values())}"
+    )
+    # Slack bus is pinned back at its a0 setpoint.
+    assert op.bus_angles[slack_bus] == pytest.approx(slack_a0, abs=1e-6)
+    # Differences vs the slack preserved to machine epsilon across ALL buses.
+    for idx, a in pf.bus_angles.items():
+        pf_diff = a - pf.bus_angles[slack_bus]
+        op_diff = op.bus_angles[idx] - op.bus_angles[slack_bus]
+        assert op_diff == pytest.approx(pf_diff, abs=1e-9)
+    assert slack_pos >= 0  # sanity: slack bus is in the topology
+
+
+@pytest.mark.integration
+def test_operating_point_angle_drift_mean_fallback_when_no_enabled_slack() -> None:
+    """With no ENABLED slack (islanded / all-PV), there is no canonical angle
+    reference, so the drift falls back to mean-centring: the returned angles
+    sum to ~0 after a common offset is removed."""
+    raw, _ = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw)
+    w.run_pflow()
+    ss = w._require_loaded()
+    # Disable every slack so the helper takes the mean-centring branch.
+    for j in range(len(ss.Slack.u.v)):
+        ss.Slack.u.v[j] = 0.0
+    DRIFT = 3.0
+    for i in range(len(ss.Bus.a.v)):
+        ss.Bus.a.v[i] = float(ss.Bus.a.v[i]) + DRIFT
+
+    op = w.operating_point()
+    angles = list(op.bus_angles.values())
+    assert angles
+    # Mean-centred: the average angle is ~0 (the common offset incl. DRIFT removed).
+    assert abs(sum(angles) / len(angles)) < 1e-9
+
+
+@pytest.mark.integration
+def test_operating_point_after_real_tds_is_finite_and_plausible() -> None:
+    """End-to-end sanity: after a genuine TDS run the read returns finite,
+    plausible angles (no multi-radian drift) for every bus."""
+    raw, dyr = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw, addfiles=[dyr])
+    w.run_pflow()
     w.run_tds(tf=2.0, h=1 / 120)
     op = w.operating_point()
-    # Post-TDS angles are normalized: no multi-radian common-mode drift.
-    assert op.bus_angles, "operating point should carry bus angles"
-    assert max(abs(a) for a in op.bus_angles.values()) < 3.0, (
-        f"post-TDS angles still drifting: max|a|="
-        f"{max(abs(a) for a in op.bus_angles.values())}"
-    )
-    # Angle DIFFERENCES (the physical quantity) are preserved across the read.
-    keys = list(pf.bus_angles)
-    b0, b1 = keys[0], keys[1]
-    pf_diff = pf.bus_angles[b0] - pf.bus_angles[b1]
-    op_diff = op.bus_angles[b0] - op.bus_angles[b1]
-    assert abs(pf_diff - op_diff) < 0.1
+    assert op.bus_angles
+    assert all(abs(a) < 3.0 for a in op.bus_angles.values())
+    assert all(0.8 < v < 1.2 for v in op.bus_voltages.values())
 
 
 @pytest.mark.integration
