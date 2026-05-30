@@ -16,7 +16,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `bundle-dialog` | 2 |
 | `command-palette` | 5 |
 | `disturbance-panel` | 2 |
-| `inspector` | 8 |
+| `inspector` | 9 |
 | `left-sidebar` | 2 |
 | `none` | 5 |
 | `pmu-dialog` | 4 |
@@ -26,7 +26,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `snapshot-dialog` | 4 |
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
-| **total** | **56** |
+| **total** | **57** |
 
 ## OpenAPI routes
 
@@ -42,6 +42,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `POST` | `/api/sessions/{session_id}/bundle/import` | `bundle-dialog` |  |
 | `POST` | `/api/sessions/{session_id}/case` | `left-sidebar` |  |
 | `POST` | `/api/sessions/{session_id}/case/clone` | `inspector` |  |
+| `GET` | `/api/sessions/{session_id}/case/clone/diff/{model}/{idx}` | `inspector` |  |
 | `PUT` | `/api/sessions/{session_id}/case/clone/params/{model}/{idx}/{param}` | `inspector` |  |
 | `POST` | `/api/sessions/{session_id}/case/clone/redo` | `inspector` |  |
 | `POST` | `/api/sessions/{session_id}/case/clone/reset` | `command-palette` |  |

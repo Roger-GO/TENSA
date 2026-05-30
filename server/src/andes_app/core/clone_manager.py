@@ -23,6 +23,7 @@ files — only the clone. The parent ``SessionManager`` deletes the whole
 from __future__ import annotations
 
 import contextlib
+import math
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -105,6 +106,23 @@ class CloneSaveAsResult:
 
     name: str
     files: list[str] = field(default_factory=list)
+
+
+@dataclass
+class CloneDiffResult:
+    """Return shape of :meth:`CloneManager.clone_diff` (Unit 23).
+
+    ``params`` maps each WHITELISTED controller param whose clone-file value
+    differs from the original-file value to its ``{original, current}`` pair.
+    Params that are unchanged (or absent on the device) are omitted, so an
+    empty mapping means "no edits relative to the original".
+
+    The comparison is on the FILE values read pre-setup (``setup=False``), not
+    the per-unit-normalised live ``ss.<model>.<param>.v`` — matching the
+    file-diff semantics the undo/redo stack tracks (KTD-10).
+    """
+
+    params: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 class CloneManager:
@@ -487,6 +505,92 @@ class CloneManager:
         if getattr(self._wrapper, "_case_path", None) is not None:
             self._wrapper.reload_case()
 
+    # ----- diff (Unit 23) -----
+
+    def clone_diff(self, model: str, idx: str) -> CloneDiffResult:
+        """Diff the clone-file values vs the original-file values for one device.
+
+        Returns the whitelisted controller params whose value in the clone file
+        differs from the original file, each as ``{original, current}``. When no
+        clone is initialised (no edits yet) the result is empty — there is
+        nothing to diff. The comparison loads BOTH file sets with
+        ``andes.load(setup=False)`` and reads each param's ``.v[i]`` for the
+        device (file value, pre-normalisation), then compares.
+
+        ``model`` must be a whitelisted dynamic-controller class (defence in
+        depth — the route validates first). An unknown device idx yields an
+        empty diff (the device simply has no params to compare).
+        """
+        self._validate_whitelist_model(model)
+        if not self.is_initialized or not self.clone_paths:
+            return CloneDiffResult()
+
+        params = allowed_param_names(model)
+        original_values = self._load_file_values(self.original_paths, model, idx, params)
+        clone_values = self._load_file_values(self.clone_paths, model, idx, params)
+
+        diff: dict[str, dict[str, Any]] = {}
+        for param in params:
+            original = original_values.get(param)
+            current = clone_values.get(param)
+            if original is None and current is None:
+                continue
+            if not _values_equal(original, current):
+                diff[param] = {"original": original, "current": current}
+        return CloneDiffResult(params=diff)
+
+    def _validate_whitelist_model(self, model: str) -> None:
+        """Whitelist the ``model`` only (the diff has no per-param input)."""
+        if model not in _CONTROLLER_MODEL_SET:
+            raise ElementValidationError(
+                f"{model!r} is not a dynamic-controller model; clone diffing "
+                "is only for controller params."
+            )
+
+    @staticmethod
+    def _load_file_values(
+        paths: list[Path], model: str, idx: str, params: tuple[str, ...]
+    ) -> dict[str, Any]:
+        """Read ``<model>.<param>.v[i]`` (pre-setup) for ``idx`` from ``paths``.
+
+        Loads with ``setup=False`` so the values are the file values, not the
+        per-unit-normalised post-setup live values. Returns a param→value map
+        for the params present on the device; absent / unmatched params are
+        simply omitted.
+        """
+        import andes  # heavy import — kept lazy
+
+        if not paths:
+            return {}
+        case = paths[0]
+        addfiles = [str(p) for p in paths[1:]] or None
+        ss = andes.load(
+            str(case),
+            addfile=addfiles,
+            setup=False,
+            no_output=True,
+            default_config=True,
+        )
+        if ss is None:
+            return {}
+        model_obj = getattr(ss, model, None)
+        if model_obj is None:
+            return {}
+        idx_values = _values_of(model_obj, "idx")
+        idx_str = str(idx)
+        try:
+            i = next(
+                pos for pos, value in enumerate(idx_values) if str(value) == idx_str
+            )
+        except StopIteration:
+            return {}
+        out: dict[str, Any] = {}
+        for param in params:
+            values = _values_of(model_obj, param)
+            if i < len(values):
+                out[param] = _jsonable(values[i])
+        return out
+
     # ----- reload helper -----
 
     def _reload_from_clone(self) -> None:
@@ -538,6 +642,22 @@ def _values_of(model_obj: Any, attr: str) -> list[Any]:
         return list(values)
     except TypeError:
         return []
+
+
+def _values_equal(original: Any, current: Any) -> bool:
+    """Compare two file values with a float tolerance.
+
+    Numeric values are compared with ``math.isclose`` so a float round-trip
+    through the file writer (e.g. ``0.49`` → ``0.49``) is treated as unchanged;
+    non-numeric values fall back to ``==``.
+    """
+    if isinstance(original, bool) or isinstance(current, bool):
+        return bool(original == current)
+    if isinstance(original, int | float) and isinstance(current, int | float):
+        return math.isclose(
+            float(original), float(current), rel_tol=1e-9, abs_tol=1e-12
+        )
+    return bool(original == current)
 
 
 def _jsonable(value: Any) -> Any:

@@ -43,6 +43,8 @@ from andes_app.api._run_as_job import _run_as_job
 from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
+    CloneDiffPair,
+    CloneDiffResponse,
     CloneEditRequest,
     CloneEditResponse,
     CloneInitResponse,
@@ -115,6 +117,23 @@ def _whitelist_or_422(model: str, param: str) -> None:
                 "parameter; clone editing is restricted to the whitelisted "
                 "controller models. Use the edit-element route for "
                 "static-topology edits."
+            ),
+        )
+
+
+def _whitelist_model_or_422(model: str) -> None:
+    """Whitelist-first validation for the diff route (no per-param input).
+
+    ``model`` must be a dynamic-controller class. Out-of-whitelist requests
+    422 here, before any invoke — also the path-traversal guard for ``model``
+    (a ``..`` segment never matches a known model name).
+    """
+    if model not in _CONTROLLER_MODEL_SET:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"{model} is not a dynamic-controller model; clone diffing is "
+                "restricted to the whitelisted controller models."
             ),
         )
 
@@ -364,6 +383,52 @@ async def reset_clone(
     except WorkerError as exc:
         raise map_worker_error(exc) from exc
     return CloneResetResponse(reset=bool(payload["reset"]), job_id=job_id)
+
+
+@router.get(
+    "/sessions/{session_id}/case/clone/diff/{model}/{idx}",
+    openapi_extra={"x-andes-app-gui-location": "inspector"},
+    operation_id="getCloneDiff",
+    summary="Diff the clone-file vs original-file values for one device.",
+    response_model=CloneDiffResponse,
+    responses={
+        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
+        404: {"model": ProblemDetails, "description": "Session not found or already closed."},
+        409: {"model": ProblemDetails, "description": "Session busy with an in-flight job."},
+        422: {
+            "model": ProblemDetails,
+            "description": (
+                "The model is not a whitelisted dynamic-controller class."
+            ),
+        },
+    },
+)
+async def get_clone_diff(
+    session_id: str,
+    model: str,
+    idx: str,
+    request: Request,
+    _: RequireToken,
+) -> CloneDiffResponse:
+    # Whitelist-first — BEFORE any invoke. Doubles as the path-traversal guard
+    # for ``model``. ``idx`` is matched against the loaded device by the
+    # substrate (an unmatched idx yields an empty diff, not an error).
+    _whitelist_model_or_422(model)
+    _enforce_body_size(request)
+    mgr = _manager(request)
+    try:
+        payload: Any = await mgr.invoke(
+            session_id, "clone_diff", {"model": model, "idx": idx}
+        )
+    except SessionExpiredError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except WorkerError as exc:
+        raise map_worker_error(exc) from exc
+    params = {
+        name: CloneDiffPair(**pair)
+        for name, pair in payload.get("params", {}).items()
+    }
+    return CloneDiffResponse(params=params)
 
 
 def _edit_response(payload: dict[str, Any], job_id: str) -> CloneEditResponse:

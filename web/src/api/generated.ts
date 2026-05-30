@@ -412,6 +412,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/case/clone/diff/{model}/{idx}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Diff the clone-file vs original-file values for one device. */
+        get: operations["getCloneDiff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/tds": {
         parameters: {
             query?: never;
@@ -1553,6 +1570,39 @@ export interface components {
              * @description Bus Y coordinate, finite (no NaN/Inf).
              */
             y: number;
+        };
+        /**
+         * CloneDiffPair
+         * @description One changed param's original-vs-current file values (Unit 23).
+         */
+        CloneDiffPair: {
+            /**
+             * Original
+             * @description The param value in the ORIGINAL case file (pre-setup read). ``null`` when the param is absent on the original device.
+             */
+            original?: number | string | boolean | null;
+            /**
+             * Current
+             * @description The param value in the CLONE case file (pre-setup read). ``null`` when the param is absent on the clone device.
+             */
+            current?: number | string | boolean | null;
+        };
+        /**
+         * CloneDiffResponse
+         * @description Response body for ``GET /sessions/{id}/case/clone/diff/{model}/{idx}``.
+         *
+         *     Maps each whitelisted controller param whose clone-file value differs from
+         *     the original-file value to its ``{original, current}`` pair. An empty
+         *     ``params`` means no edits relative to the original (or no clone yet).
+         */
+        CloneDiffResponse: {
+            /**
+             * Params
+             * @description Changed params keyed by name; unchanged / unedited params are absent. Empty when no clone is initialised.
+             */
+            params?: {
+                [key: string]: components["schemas"]["CloneDiffPair"];
+            };
         };
         /**
          * CloneEditRequest
@@ -4644,6 +4694,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCloneDiff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                model: string;
+                idx: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloneDiffResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session busy with an in-flight job. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The model is not a whitelisted dynamic-controller class. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
