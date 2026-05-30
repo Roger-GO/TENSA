@@ -21,10 +21,23 @@
  * foreground). NEVER `destructive` — those classes silently no-op in this
  * codebase (the destructive→danger sweep is Unit 10).
  *
- * This is additive: the existing bespoke error components are NOT migrated
- * here (Units 8/9 do that). This unit builds the primitive + tests only.
+ * Unit 9 migrates the remaining bespoke error components onto this primitive.
+ * To preserve their EXACT visuals + diagnostics, the surface gained four
+ * additive, optional props (defaults reproduce the Unit-7 behaviour 1:1):
+ *
+ * - `tone` (`'danger' | 'warning'`) — banner chrome tonality. PF
+ *   non-convergence is warning-toned (a recoverable numerical outcome), so its
+ *   wrapper passes `warning`.
+ * - `extras` — a routine-specific detail node (the iteration / mismatch /
+ *   `t_current` dl-grid produced by `routineErrorDetails`), rendered in the
+ *   surface body. `extrasCollapsible` hides it behind the bespoke
+ *   "View details ▸" toggle.
+ * - `actions` — extra footer buttons (e.g. "Copy report") the bespoke surface
+ *   carried, rendered next to the recovery CTA / Close.
+ * - `hideRawDisclosure` — suppress the generic raw-JSON dump where the wrapper
+ *   surfaces a curated `extras` grid instead.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -41,6 +54,16 @@ import { parseRecoveryDescriptor, type RecoveryDescriptor } from '@/lib/recovery
 import { RecoveryActionButton } from './RecoveryActionButton';
 
 export type ErrorSurfaceVariant = 'banner' | 'modal' | 'toast';
+
+/**
+ * Visual tonality for the banner / modal chrome. Defaults to `danger`. The
+ * migrated routine wrappers (Unit 9) pass `warning` where the bespoke
+ * component they replace was warning-toned (PF non-convergence — a recoverable
+ * numerical outcome, not a server fault), so the migration preserves the
+ * EXACT pre-existing colour. `danger` keeps the original parse-error /
+ * runtime-crash chrome.
+ */
+export type ErrorSurfaceTone = 'danger' | 'warning';
 
 /**
  * A ProblemDetails-shaped error. Accepts either a live `ProblemDetailsError`
@@ -74,6 +97,52 @@ export interface ProblemDetailsErrorSurfaceProps {
   className?: string;
   /** data-testid root; defaults to `problem-error-surface`. */
   testId?: string;
+  /**
+   * Banner / modal chrome tonality. Defaults to `danger`. Unit 9's routine
+   * wrappers pass `warning` to preserve the warning-toned chrome of the
+   * bespoke component they replace (PF non-convergence).
+   */
+  tone?: ErrorSurfaceTone;
+  /**
+   * Routine-specific detail block rendered in the surface body (the per-routine
+   * formatter's output — e.g. an iteration / mismatch / `t_current` dl-grid).
+   * Unit 9 threads this so the migrated wrappers render the EXACT same
+   * diagnostic numbers the bespoke components showed, inside the single
+   * primitive. The block is collapsible behind a "View details" toggle when
+   * `extrasCollapsible` is set; otherwise it renders inline.
+   */
+  extras?: ReactNode;
+  /**
+   * When set, the `extras` block is hidden behind a "View details" toggle
+   * (mirrors the bespoke convergence / numerical banners' expand affordance).
+   */
+  extrasCollapsible?: boolean;
+  /**
+   * Extra footer actions rendered alongside the recovery CTA / Close button
+   * (e.g. a "Copy report" button the bespoke crash / numerical surfaces
+   * carried). Rendered as-is; the wrapper owns the button + its handler.
+   */
+  actions?: ReactNode;
+  /**
+   * Hide the raw-JSON disclosure. The bespoke convergence / numerical banners
+   * surfaced a curated dl-grid (the `extras`) instead of a raw-body dump, so
+   * their wrappers suppress the generic disclosure to preserve the visual.
+   */
+  hideRawDisclosure?: boolean;
+  /**
+   * `aria-label` for the banner dismiss button. Defaults to `Dismiss error`;
+   * Unit 9's wrappers override it (e.g. `Dismiss convergence error`) to keep
+   * the bespoke accessible name + the per-component test selectors.
+   */
+  dismissLabel?: string;
+  /**
+   * Suppress the modal's default "Close" footer button. The runtime-crash
+   * wrapper sets this: its bespoke modal is LOCKED to two explicit recovery
+   * paths (Reload / Copy report) with no neutral escape, and the migration
+   * preserves that "one-allowed-non-destructive-modal" behaviour exactly. The
+   * wrapper supplies Reload + Copy via `actions` instead.
+   */
+  hideModalClose?: boolean;
 }
 
 /** Normalised view of the error every variant renders from. */
@@ -123,6 +192,57 @@ function hasCta(recovery: RecoveryDescriptor | null): boolean {
   return recovery !== null && recovery.kind !== 'none';
 }
 
+/** Banner chrome classes per tonality (border + bg + title colour). */
+function bannerToneClasses(tone: ErrorSurfaceTone): { container: string; title: string } {
+  if (tone === 'warning') {
+    return {
+      container: 'border-warning/40 bg-warning/10 text-foreground',
+      title: 'text-foreground',
+    };
+  }
+  return {
+    container: 'border-danger/30 bg-danger/10 text-foreground',
+    title: 'text-danger',
+  };
+}
+
+/**
+ * The routine-specific detail block. When `collapsible`, hide it behind a
+ * "View details" toggle (mirrors the bespoke convergence / numerical banners).
+ * The toggle testid is `${testId}-toggle`; the body keeps the wrapper's own
+ * inner testids untouched.
+ */
+function ExtrasBlock({
+  extras,
+  collapsible,
+  testId,
+}: {
+  extras: ReactNode;
+  collapsible: boolean;
+  testId: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (!collapsible) return <>{extras}</>;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        data-testid={`${testId}-toggle`}
+        className={cn(
+          'text-muted-foreground hover:text-foreground',
+          'self-start rounded-[var(--radius-sm)] px-2 py-0.5 text-xs',
+          'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+        )}
+      >
+        {expanded ? 'Hide details' : 'View details ▸'}
+      </button>
+      {expanded ? extras : null}
+    </>
+  );
+}
+
 /** Shared raw-JSON disclosure (banner + modal). */
 function RawDisclosure({ rawJson, testId }: { rawJson: string; testId: string }) {
   const [showRaw, setShowRaw] = useState(false);
@@ -166,6 +286,12 @@ function BannerSurface({
   jobId,
   className,
   testId,
+  tone,
+  extras,
+  extrasCollapsible,
+  actions,
+  hideRawDisclosure,
+  dismissLabel,
 }: {
   normalised: NormalisedError;
   onDismiss?: () => void;
@@ -173,14 +299,21 @@ function BannerSurface({
   jobId?: string;
   className?: string;
   testId: string;
+  tone: ErrorSurfaceTone;
+  extras?: ReactNode;
+  extrasCollapsible: boolean;
+  actions?: ReactNode;
+  hideRawDisclosure: boolean;
+  dismissLabel: string;
 }) {
   const { title, detail, recovery, rawJson } = normalised;
+  const toneClasses = bannerToneClasses(tone);
   return (
     <div
       role="alert"
       data-testid={testId}
       className={cn(
-        'border-danger/30 bg-danger/10 text-foreground',
+        toneClasses.container,
         'rounded-[var(--radius-md)] border p-3',
         'flex flex-col gap-2 text-sm',
         className,
@@ -188,14 +321,14 @@ function BannerSurface({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-col gap-1">
-          <p className="text-danger font-medium">{title}</p>
+          <p className={cn('font-medium', toneClasses.title)}>{title}</p>
           {detail ? <p className="text-muted-foreground text-xs">{detail}</p> : null}
         </div>
         {onDismiss ? (
           <button
             type="button"
             onClick={onDismiss}
-            aria-label="Dismiss error"
+            aria-label={dismissLabel}
             data-testid={`${testId}-dismiss`}
             className={cn(
               'text-muted-foreground hover:text-foreground',
@@ -220,11 +353,18 @@ function BannerSurface({
         ) : null}
       </div>
 
-      <RawDisclosure rawJson={rawJson} testId={testId} />
+      {extras !== undefined ? (
+        <ExtrasBlock extras={extras} collapsible={extrasCollapsible} testId={testId} />
+      ) : null}
 
-      {hasCta(recovery) ? (
-        <div className="self-start">
-          <RecoveryActionButton recovery={recovery} onRetry={onRetry} jobId={jobId} />
+      {hideRawDisclosure ? null : <RawDisclosure rawJson={rawJson} testId={testId} />}
+
+      {hasCta(recovery) || actions !== undefined ? (
+        <div className="flex flex-wrap items-center gap-2 self-start">
+          {hasCta(recovery) ? (
+            <RecoveryActionButton recovery={recovery} onRetry={onRetry} jobId={jobId} />
+          ) : null}
+          {actions}
         </div>
       ) : null}
     </div>
@@ -239,6 +379,10 @@ function ModalSurface({
   jobId,
   className,
   testId,
+  extras,
+  actions,
+  hideRawDisclosure,
+  hideModalClose,
 }: {
   normalised: NormalisedError;
   onDismiss?: () => void;
@@ -246,6 +390,10 @@ function ModalSurface({
   jobId?: string;
   className?: string;
   testId: string;
+  extras?: ReactNode;
+  actions?: ReactNode;
+  hideRawDisclosure: boolean;
+  hideModalClose: boolean;
 }) {
   const { title, detail, recovery, rawJson } = normalised;
   return (
@@ -264,18 +412,22 @@ function ModalSurface({
         </DialogHeader>
 
         <div className="mt-4 flex flex-col gap-2 text-sm">
-          <RawDisclosure rawJson={rawJson} testId={testId} />
+          {extras}
+          {hideRawDisclosure ? null : <RawDisclosure rawJson={rawJson} testId={testId} />}
         </div>
 
         <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onDismiss}
-            data-testid={`${testId}-close`}
-          >
-            Close
-          </Button>
+          {hideModalClose ? null : (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onDismiss}
+              data-testid={`${testId}-close`}
+            >
+              Close
+            </Button>
+          )}
+          {actions}
           {hasCta(recovery) ? (
             <RecoveryActionButton
               recovery={recovery}
@@ -345,6 +497,13 @@ export function ProblemDetailsErrorSurface({
   jobId,
   className,
   testId = 'problem-error-surface',
+  tone = 'danger',
+  extras,
+  extrasCollapsible = false,
+  actions,
+  hideRawDisclosure = false,
+  dismissLabel = 'Dismiss error',
+  hideModalClose = false,
 }: ProblemDetailsErrorSurfaceProps) {
   const normalised = normaliseError(error);
 
@@ -360,6 +519,10 @@ export function ProblemDetailsErrorSurface({
         jobId={jobId}
         className={className}
         testId={testId}
+        extras={extras}
+        actions={actions}
+        hideRawDisclosure={hideRawDisclosure}
+        hideModalClose={hideModalClose}
       />
     );
   }
@@ -371,6 +534,12 @@ export function ProblemDetailsErrorSurface({
       jobId={jobId}
       className={className}
       testId={testId}
+      tone={tone}
+      extras={extras}
+      extrasCollapsible={extrasCollapsible}
+      actions={actions}
+      hideRawDisclosure={hideRawDisclosure}
+      dismissLabel={dismissLabel}
     />
   );
 }

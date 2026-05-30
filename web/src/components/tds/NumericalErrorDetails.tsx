@@ -2,14 +2,22 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import type { RunRecord } from '@/store/runs';
 import { cn } from '@/lib/cn';
+import { numericalErrorReport, numericalErrorRows } from '@/components/error/routineErrorDetails';
+import { RoutineDetailGrid } from '@/components/error/routineErrorExtras';
 
 /**
- * NumericalErrorDetails — slide-out body content surfaced when the user
- * clicks "View details" on the ``NumericalErrorBanner``. Per the v0.2
- * plan's "non-modal slide-out" mandate (R8 → R18), this is NOT a modal
- * dialog: the inspector + scrub controls remain accessible underneath so
- * the researcher can keep diagnosing the partial buffer at the moment of
- * failure.
+ * NumericalErrorDetails — the routine detail-formatter (extras renderer) the
+ * migrated ``NumericalErrorBanner`` passes to the single
+ * ``<ProblemDetailsErrorSurface>`` primitive's ``extras`` slot (v3.1 Unit 9).
+ * It is no longer a standalone error surface — the primitive owns the banner
+ * chrome; this file renders ONLY the diagnostic block (grid + note + Copy /
+ * Dismiss footer) inside it. The grid rows + report blob come from the shared
+ * ``routineErrorDetails`` formatter so the numbers match across surfaces.
+ *
+ * Per the v0.2 plan's "non-modal slide-out" mandate (R8 → R18), the host
+ * banner is NOT a modal dialog: the inspector + scrub controls remain
+ * accessible underneath so the researcher can keep diagnosing the partial
+ * buffer at the moment of failure.
  *
  * Visible content (per the unit-7 brief):
  *
@@ -41,19 +49,7 @@ export function NumericalErrorDetails({ run, onDismiss, className }: NumericalEr
   const [copied, setCopied] = useState(false);
 
   const onCopy = async () => {
-    const report = JSON.stringify(
-      {
-        run_id: run.runId,
-        final_t: run.tCurrent,
-        tf: run.tf,
-        seq_count: run.seqCount,
-        error_reason: run.errorReason ?? null,
-        timestamp: new Date().toISOString(),
-        user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
-      },
-      null,
-      2,
-    );
+    const report = numericalErrorReport(run);
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(report);
@@ -81,18 +77,7 @@ export function NumericalErrorDetails({ run, onDismiss, className }: NumericalEr
         Newton iteration diverged on a per-step solve (numerical instability). The partial buffer is
         preserved — scrub through it to inspect bus state at the moment of failure.
       </p>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-        <dt className="text-muted-foreground font-mono">final_t</dt>
-        <dd className="text-foreground font-mono">{run.tCurrent.toFixed(4)} s</dd>
-        <dt className="text-muted-foreground font-mono">tf (requested)</dt>
-        <dd className="text-foreground font-mono">{run.tf.toFixed(4)} s</dd>
-        <dt className="text-muted-foreground font-mono">rows decoded</dt>
-        <dd className="text-foreground font-mono">{run.seqCount}</dd>
-        <dt className="text-muted-foreground font-mono">last reason</dt>
-        <dd className="text-foreground font-mono break-words">{run.errorReason ?? '—'}</dd>
-        <dt className="text-muted-foreground font-mono">run_id</dt>
-        <dd className="text-foreground truncate font-mono">{run.runId}</dd>
-      </dl>
+      <RoutineDetailGrid rows={numericalErrorRows(run)} />
       <div className="flex justify-end gap-2 pt-1">
         {onDismiss ? (
           <Button type="button" size="sm" variant="outline" onClick={onDismiss}>

@@ -87,6 +87,21 @@ describe('<ConvergenceErrorPanel />', () => {
     expect(screen.getByText(/30 iterations/i)).toBeInTheDocument();
   });
 
+  it('renders via the single error primitive (role=alert banner; "Run again" is the recovery CTA)', () => {
+    usePflowStore.setState({
+      lastRun: makeNonConvergedResult({ iterations: 30 }),
+      isRunning: false,
+      error: null,
+    });
+    const { Wrapper } = makeWrapper();
+    render(<ConvergenceErrorPanel />, { wrapper: Wrapper });
+
+    // The migrated wrapper renders the primitive's banner surface.
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    // The recovery descriptor (kind: retry) surfaces the "Run again" CTA.
+    expect(screen.getByRole('button', { name: /run again/i })).toBeInTheDocument();
+  });
+
   it('expands details on click; shows iteration + mismatch + run_id', async () => {
     usePflowStore.setState({
       lastRun: makeNonConvergedResult({ iterations: 28, mismatch: 0.0123 }),

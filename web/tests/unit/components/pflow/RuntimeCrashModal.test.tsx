@@ -54,6 +54,27 @@ describe('<RuntimeCrashModal />', () => {
     expect(screen.getByText(/something went wrong on the server/i)).toBeInTheDocument();
   });
 
+  it('renders via the primitive modal but keeps the locked two-path footer (no neutral Close)', () => {
+    usePflowStore.setState({
+      error: new ServerError({
+        type: 'about:blank',
+        title: 'Internal Server Error',
+        status: 500,
+        detail: 'pflow crashed',
+      }),
+    });
+    render(<RuntimeCrashModal />);
+
+    // The migrated wrapper renders the primitive's modal (role=dialog).
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    // The bespoke "one-allowed-modal" behaviour: ONLY Copy + Reload — the
+    // primitive's generic "Close" escape hatch is suppressed.
+    expect(screen.getByTestId('runtime-crash-copy')).toBeInTheDocument();
+    expect(screen.getByTestId('runtime-crash-reload')).toBeInTheDocument();
+    expect(screen.queryByTestId('runtime-crash-modal-close')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^close$/i })).not.toBeInTheDocument();
+  });
+
   it('expands technical detail on disclosure click', async () => {
     usePflowStore.setState({
       error: new ServerError({
