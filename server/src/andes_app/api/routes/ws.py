@@ -97,6 +97,19 @@ async def require_ws_auth(websocket: WebSocket) -> bool:
     """
     require_auth = getattr(websocket.app.state, "require_auth", True)
     if not require_auth:
+        # `serve --no-auth`: skip token VALIDATION, but still CONSUME the
+        # client's `{type:'auth'}` frame so the wire protocol stays aligned
+        # regardless of auth mode. Clients always send the auth frame first;
+        # the caller then reads the NEXT frame as its payload (e.g. the TDS
+        # config). Returning without reading here would leave the auth frame in
+        # the buffer and the caller would misread it as the payload — which
+        # silently stalls the TDS handshake ("Streaming…" forever).
+        # A client that opened without an auth frame is tolerated under no-auth
+        # — proceed and let the caller read the real first frame.
+        with contextlib.suppress(TimeoutError, WebSocketDisconnect):
+            await asyncio.wait_for(
+                websocket.receive_text(), timeout=AUTH_DEADLINE_SECONDS
+            )
         return True
 
     expected_token = _expected_token(websocket)

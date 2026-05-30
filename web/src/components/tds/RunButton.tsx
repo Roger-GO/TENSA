@@ -119,6 +119,9 @@ function Spinner() {
 export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunButtonProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
   const token = useAuthStore((s) => s.token);
+  // A `serve --no-auth` substrate accepts an empty token (the WS auth frame
+  // `{type:'auth', token:''}` passes), so a missing token is fine there.
+  const authDisabled = useAuthStore((s) => s.authDisabled);
   const isPfRunning = usePflowStore((s) => s.isRunning);
   const disturbances = useDisturbanceStore((s) => s.disturbances);
   // TDS args are owned by ``TdsConfigPanel`` (Unit 8) and live in
@@ -224,7 +227,10 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   // ---- TDS start flow -----------------------------------------------------
 
   const startTds = async () => {
-    if (!sessionId || !token) return;
+    // No-auth: token may be null but the run is still allowed (empty token
+    // accepted by the WS handshake). Without this, Run TDS is a silent no-op
+    // in `serve --no-auth` even though the button is enabled.
+    if (!sessionId || (token === null && !authDisabled)) return;
     setTdsStarting(true);
 
     // Step 1: commit disturbances if non-empty. The substrate's
@@ -301,7 +307,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
 
     const stream = new RunStream({
       sessionId,
-      token,
+      token: token ?? '',
       wsUrl: buildRunStreamWsUrl(),
       tdsArgs,
       maxRateHz: tdsConfig.maxRateHz,

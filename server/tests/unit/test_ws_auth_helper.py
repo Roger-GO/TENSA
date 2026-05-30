@@ -114,11 +114,26 @@ def test_timeout_closes_4401() -> None:
     assert ws.closed_code == WS_CLOSE_AUTH_FAILED
 
 
-def test_no_auth_bypass_returns_true_without_reading() -> None:
-    """``require_auth=False`` → no token needed, no frame consumed (mirrors the
-    HTTP ``require_token`` no-op so --no-auth dev WS mode works)."""
+def test_no_auth_consumes_the_auth_frame_so_the_protocol_stays_aligned() -> None:
+    """``require_auth=False`` → token VALIDATION is skipped, but the client's
+    ``{type:'auth'}`` frame is still CONSUMED so the caller reads the NEXT frame
+    (e.g. the TDS config) — not the stale auth frame. Skipping the read here
+    silently stalled the TDS handshake ("Streaming…" forever)."""
+    ws = _FakeWebSocket(
+        require_auth=False,
+        frames=[json.dumps({"type": "auth", "token": "anything"})],
+    )
+    result = asyncio.run(require_ws_auth(ws))  # type: ignore[arg-type]
+    assert result is True
+    assert ws.reads == 1  # the auth frame was consumed
+    assert ws.closed_code is None
+
+
+def test_no_auth_tolerates_a_missing_auth_frame() -> None:
+    """A no-auth client that opens without sending an auth frame is tolerated:
+    the read times out and the handshake proceeds (the caller reads the real
+    first frame)."""
     ws = _FakeWebSocket(require_auth=False, frames=[])
     result = asyncio.run(require_ws_auth(ws))  # type: ignore[arg-type]
     assert result is True
-    assert ws.reads == 0
     assert ws.closed_code is None
