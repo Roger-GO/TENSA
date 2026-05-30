@@ -385,9 +385,36 @@ export const useJobsStore = create<JobsState>()(
       },
 
       upsertJob: (envelope) => {
-        const existing = get().jobs[envelope.job_id];
+        const prev = get().jobs;
+        const existing = prev[envelope.job_id];
         const merged = mergeEnvelope(envelope, existing);
-        set({ jobs: applyRetention({ ...get().jobs, [envelope.job_id]: merged }) });
+        const next = { ...prev, [envelope.job_id]: merged };
+        // Coalesce an orphaned ``failed`` placeholder onto this canonical
+        // record. The failure HTTP body carries no ``job_id`` (it can only
+        // mark the ``local:`` placeholder failed in place; see ``failJob``),
+        // so when the canonical ``failed`` WS event for the same operation
+        // lands AFTER that fallback, drop the now-redundant placeholder to
+        // avoid a duplicate terminal row. Matched by (kind, terminal-failed,
+        // placeholder) — the only ambiguity is concurrent same-kind failures,
+        // which collapse to one row (acceptable, mirrors the substrate's own
+        // failure-signature coalescing).
+        if (
+          !envelope.job_id.startsWith(LOCAL_ID_PREFIX) &&
+          isTerminalStatus(merged.status)
+        ) {
+          for (const [id, rec] of Object.entries(prev)) {
+            if (
+              id !== envelope.job_id &&
+              id.startsWith(LOCAL_ID_PREFIX) &&
+              rec.isPlaceholder &&
+              rec.status === 'failed' &&
+              rec.kind === merged.kind
+            ) {
+              delete next[id];
+            }
+          }
+        }
+        set({ jobs: applyRetention(next) });
       },
 
       reconcileJob: (tempId, serverId, patch) => {

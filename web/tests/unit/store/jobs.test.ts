@@ -147,6 +147,35 @@ describe('useJobsStore — upsert + reconcile', () => {
     expect(rec.request_summary).toEqual({ seed: 1 });
   });
 
+  it('upsertJob coalesces an orphaned failed placeholder onto the canonical failed record', () => {
+    // Mutation onError marked the local placeholder failed in place (no
+    // job_id in the error body). Then the canonical WS failed event lands.
+    const tempId = useJobsStore.getState().addJob({ kind: 'pflow' });
+    useJobsStore.getState().updateJob(tempId, {
+      status: 'failed',
+      problem: { title: 'boom', detail: 'no case loaded' },
+    });
+    expect(useJobsStore.getState().jobs[tempId]!.status).toBe('failed');
+    // Canonical failed event for the same operation.
+    useJobsStore.getState().upsertJob({ job_id: 'srv-pf', kind: 'pflow', status: 'failed' });
+    const jobs = useJobsStore.getState().jobs;
+    // The orphaned placeholder is gone; only the canonical failed row remains.
+    expect(jobs[tempId]).toBeUndefined();
+    expect(jobs['srv-pf']!.status).toBe('failed');
+    const failedRows = Object.values(jobs).filter((j) => j.status === 'failed');
+    expect(failedRows).toHaveLength(1);
+  });
+
+  it('upsertJob leaves a reconciled (non-placeholder) failed record untouched', () => {
+    // A failed record that is NOT a local placeholder must not be coalesced
+    // away by a later same-kind canonical event.
+    useJobsStore.getState().upsertJob({ job_id: 'srv-a', kind: 'eig', status: 'failed' });
+    useJobsStore.getState().upsertJob({ job_id: 'srv-b', kind: 'eig', status: 'failed' });
+    const jobs = useJobsStore.getState().jobs;
+    expect(jobs['srv-a']).toBeDefined();
+    expect(jobs['srv-b']).toBeDefined();
+  });
+
   it('syncJobs replaces canonical records but preserves in-flight local placeholders', () => {
     const tempId = useJobsStore.getState().addJob({ kind: 'pflow' });
     useJobsStore.getState().upsertJob({ job_id: 'srv-old', kind: 'eig', status: 'done' });
@@ -158,6 +187,62 @@ describe('useJobsStore — upsert + reconcile', () => {
     // The in-flight local placeholder survives the re-sync (its server id
     // hasn't landed yet, so it's not in the snapshot).
     expect(jobs[tempId]).toBeDefined();
+  });
+
+  it('syncJobs preserves a reconciled non-local in-flight record absent from the snapshot', () => {
+    // The mutation path already reconciled an optimistic record onto a
+    // canonical id (srv-X, running, with a request_summary), but a reconnect
+    // snapshot was captured by the server BEFORE that job registered. The
+    // in-flight canonical record must survive (dropping it would lose the
+    // optimistic request_summary the row needs); a terminal one absent from
+    // the snapshot is genuinely gone.
+    useJobsStore.getState().upsertJob({
+      job_id: 'srv-X',
+      kind: 'sweep',
+      status: 'running',
+      request_summary: { steps: 12 },
+    });
+    useJobsStore.getState().upsertJob({ job_id: 'srv-Y', kind: 'eig', status: 'done' });
+    useJobsStore.getState().syncJobs([{ job_id: 'srv-Z', kind: 'cpf', status: 'running' }]);
+    const jobs = useJobsStore.getState().jobs;
+    // In-flight canonical record absent from the snapshot is preserved...
+    expect(jobs['srv-X']).toBeDefined();
+    expect(jobs['srv-X']!.request_summary).toEqual({ steps: 12 });
+    // ...while a terminal record absent from the snapshot is dropped.
+    expect(jobs['srv-Y']).toBeUndefined();
+    expect(jobs['srv-Z']).toBeDefined();
+  });
+
+  it('reconcileJob synthesizes a record when neither placeholder nor server id exists', () => {
+    // Defensive third branch: the response references a server id with no
+    // local placeholder and no prior canonical record — synthesize from patch
+    // so the response is not silently dropped.
+    useJobsStore.getState().reconcileJob('missing-temp', 'srv-Z', { status: 'done', kind: 'eig' });
+    const rec = useJobsStore.getState().jobs['srv-Z'];
+    expect(rec).toBeDefined();
+    expect(rec!.id).toBe('srv-Z');
+    expect(rec!.status).toBe('done');
+    expect(rec!.kind).toBe('eig');
+    expect(useJobsStore.getState().jobs['missing-temp']).toBeUndefined();
+  });
+
+  it('mergeEnvelope clears a problem on explicit problem:null but leaves it on omission', () => {
+    // Seed a record carrying a problem.
+    useJobsStore.getState().upsertJob({
+      job_id: 'srv-rec',
+      kind: 'pflow',
+      status: 'failed',
+      problem: { title: 'boom', detail: 'x' },
+    });
+    expect(useJobsStore.getState().jobs['srv-rec']!.problem).toBeTruthy();
+    // An event OMITTING problem leaves it intact.
+    useJobsStore.getState().upsertJob({ job_id: 'srv-rec', kind: 'pflow', status: 'running' });
+    expect(useJobsStore.getState().jobs['srv-rec']!.problem).toBeTruthy();
+    // An explicit problem:null clears it (the job recovered).
+    useJobsStore
+      .getState()
+      .upsertJob({ job_id: 'srv-rec', kind: 'pflow', status: 'done', problem: null });
+    expect(useJobsStore.getState().jobs['srv-rec']!.problem).toBeNull();
   });
 });
 

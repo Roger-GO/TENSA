@@ -24,7 +24,7 @@
  * Tokens: ``danger`` for the failed-state accents (NEVER ``destructive`` —
  * a lint rule enforces this).
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
@@ -33,6 +33,7 @@ import { ProblemDetailsErrorSurface } from '@/components/error/ProblemDetailsErr
 import {
   useJobsStore,
   isTerminalStatus,
+  LOCAL_ID_PREFIX,
   type JobRecord,
   type JobStatus,
 } from '@/store/jobs';
@@ -84,7 +85,13 @@ interface RowActions {
 /** A single job row. Generalises ``HistoryRunRow`` for the job-record shape. */
 function ActivityRow({ job, actions }: { job: JobRecord; actions: RowActions }) {
   const failed = job.status === 'failed';
-  const cancellable = job.can_cancel && !isTerminalStatus(job.status);
+  // Cancel targets ``DELETE /jobs/{job_id}`` verbatim. A ``local:``
+  // placeholder has no server-side job yet (the canonical id only lands in
+  // the mutation ``onSuccess``), so a DELETE on it would 404 — and the
+  // optimistic ``cancelled`` flip would be a lie while the real job keeps
+  // running. Gate Cancel on a reconciled (non-placeholder) id.
+  const cancellable =
+    job.can_cancel && !isTerminalStatus(job.status) && !job.id.startsWith(LOCAL_ID_PREFIX);
   const progressPct =
     job.progress !== undefined ? Math.round(Math.max(0, Math.min(1, job.progress)) * 100) : null;
 
@@ -127,7 +134,11 @@ function ActivityRow({ job, actions }: { job: JobRecord; actions: RowActions }) 
       {progressPct !== null && !isTerminalStatus(job.status) ? (
         <div
           data-testid={`activity-row-progress-${job.id}`}
+          role="progressbar"
           aria-label={`Progress ${progressPct}%`}
+          aria-valuenow={progressPct}
+          aria-valuemin={0}
+          aria-valuemax={100}
           className="bg-muted h-1 w-full overflow-hidden rounded-full"
         >
           <div
@@ -214,6 +225,18 @@ export function ActivityPanel() {
       .sort((a, b) => (b.ended_at ?? b.updated_at) - (a.ended_at ?? a.updated_at));
     return { active: inFlight, history: terminal };
   }, [jobs]);
+
+  // Tick once a second WHILE any job is in flight so the per-row elapsed
+  // label advances even when a long-running job emits no progress/status
+  // events (``elapsedFor`` reads ``Date.now()`` at render). Gated on
+  // ``active.length`` so there are no idle re-renders when nothing is running;
+  // ``_tick`` is intentionally unused beyond forcing the re-render.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (active.length === 0) return;
+    const id = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [active.length]);
 
   const retryFor = (job: JobRecord): (() => void) | undefined => {
     if (sessionId === null) return undefined;

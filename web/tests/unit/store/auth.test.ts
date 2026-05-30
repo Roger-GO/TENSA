@@ -141,6 +141,55 @@ describe('auth store', () => {
     expect(usePflowStore.getState().lastRun).toBeNull();
   });
 
+  it('clearToken wipes the in-memory JobRecord map (security F2) but keeps dismissals', async () => {
+    const storeIndex = await import('@/store');
+    storeIndex.__resetCascadeForTests();
+    storeIndex.wireStoreCascade();
+
+    const { useAuthStore } = storeIndex;
+    const { useJobsStore } = await import('@/store/jobs');
+
+    useAuthStore.getState().setToken('e'.repeat(64));
+    // Seed a JobRecord carrying sensitive in-memory data + a dismissal.
+    const jobId = useJobsStore.getState().addJob({
+      kind: 'pflow',
+      request_summary: { primary_path: 'secret/case.xlsx' },
+    });
+    useJobsStore.getState().dismissJob(jobId);
+    expect(Object.keys(useJobsStore.getState().jobs)).toHaveLength(1);
+
+    useAuthStore.getState().clearToken();
+
+    // The sensitive record map is wiped...
+    expect(useJobsStore.getState().jobs).toEqual({});
+    // ...but the (non-sensitive) dismissal preference survives, per intent.
+    expect(useJobsStore.getState().dismissedJobIds).toEqual([jobId]);
+  });
+
+  it('session → null transition clears the in-memory JobRecord map', async () => {
+    const storeIndex = await import('@/store');
+    storeIndex.__resetCascadeForTests();
+    storeIndex.wireStoreCascade();
+
+    const { useSessionStore } = storeIndex;
+    const { useJobsStore } = await import('@/store/jobs');
+
+    useSessionStore
+      .getState()
+      .setSessionId(
+        'session-jobs' as Parameters<
+          ReturnType<typeof useSessionStore.getState>['setSessionId']
+        >[0],
+      );
+    useJobsStore.getState().addJob({ kind: 'eig', request_summary: { seed: 1 } });
+    expect(Object.keys(useJobsStore.getState().jobs)).toHaveLength(1);
+
+    // Session clears (e.g. expiry) → jobs are session-scoped and must wipe.
+    useSessionStore.getState().clearSession();
+
+    expect(useJobsStore.getState().jobs).toEqual({});
+  });
+
   it('case selection change clears pflow state', async () => {
     const storeIndex = await import('@/store');
     storeIndex.__resetCascadeForTests();

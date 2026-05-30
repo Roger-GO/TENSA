@@ -214,3 +214,119 @@ describe('JobStream — reconnect re-sync', () => {
     stream.dispose();
   });
 });
+
+describe('JobStream — close codes + frame errors', () => {
+  let server: MockServerHandle;
+
+  beforeEach(() => {
+    resetStore();
+    server = freshServer();
+  });
+
+  afterEach(() => {
+    server.stop();
+  });
+
+  async function runWithClose(
+    closeCode: number,
+  ): Promise<{
+    onError: ReturnType<typeof vi.fn>;
+    fetchJobs: ReturnType<typeof vi.fn>;
+    stream: JobStream;
+  }> {
+    server.on('connection', (socket) => {
+      socket.on('message', (raw: unknown) => {
+        const msg = JSON.parse(String(raw));
+        if (msg.type === 'auth') {
+          socket.send(JSON.stringify({ type: 'ready' }));
+          socket.close({ code: closeCode, reason: `code-${closeCode}` });
+        }
+      });
+    });
+    const onError = vi.fn();
+    const fetchJobs = vi.fn(async () => [] as JobEventEnvelope[]);
+    const stream = new JobStream(
+      { sessionId: SESSION_ID, token: 'tok', wsUrl: WS_URL, onError, autoReconnect: true, reconnectDelayMs: 0 },
+      { webSocketCtor: MockWebSocket as unknown as typeof WebSocket, fetchJobs },
+    );
+    stream.start();
+    for (let i = 0; i < 15 && onError.mock.calls.length === 0; i += 1) await tick();
+    return { onError, fetchJobs, stream };
+  }
+
+  it('4401 fires auth_failed and does NOT reconnect or re-sync', async () => {
+    const { onError, fetchJobs, stream } = await runWithClose(4401);
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'auth_failed' }),
+    );
+    // No HTTP re-sync, no reconnect for a non-transient auth failure.
+    await tick(10);
+    expect(fetchJobs).not.toHaveBeenCalled();
+    stream.dispose();
+  });
+
+  it('4404 fires session_not_found and does NOT reconnect or re-sync', async () => {
+    const { onError, fetchJobs, stream } = await runWithClose(4404);
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'session_not_found' }),
+    );
+    await tick(10);
+    expect(fetchJobs).not.toHaveBeenCalled();
+    stream.dispose();
+  });
+
+  it('4500 fires internal_error AND still re-syncs', async () => {
+    const { onError, fetchJobs, stream } = await runWithClose(4500);
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'internal_error' }),
+    );
+    // 4500 is treated as a transient drop: HTTP re-sync fires.
+    for (let i = 0; i < 10 && fetchJobs.mock.calls.length === 0; i += 1) await tick();
+    expect(fetchJobs).toHaveBeenCalledWith(SESSION_ID);
+    stream.dispose();
+  });
+
+  it('a malformed JSON frame fires a protocol_error', async () => {
+    server.on('connection', (socket) => {
+      socket.on('message', (raw: unknown) => {
+        const msg = JSON.parse(String(raw));
+        if (msg.type === 'auth') {
+          socket.send(JSON.stringify({ type: 'ready' }));
+          socket.send('this is not json{');
+        }
+      });
+    });
+    const onError = vi.fn();
+    const stream = new JobStream(
+      { sessionId: SESSION_ID, token: 'tok', wsUrl: WS_URL, onError, autoReconnect: false },
+      { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
+    );
+    stream.start();
+    for (let i = 0; i < 15 && onError.mock.calls.length === 0; i += 1) await tick();
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'protocol_error' }),
+    );
+    stream.dispose();
+  });
+
+  it('a {type:"error"} frame fires an internal_error with the reason', async () => {
+    server.on('connection', (socket) => {
+      socket.on('message', (raw: unknown) => {
+        const msg = JSON.parse(String(raw));
+        if (msg.type === 'auth') {
+          socket.send(JSON.stringify({ type: 'ready' }));
+          socket.send(JSON.stringify({ type: 'error', reason: 'boom' }));
+        }
+      });
+    });
+    const onError = vi.fn();
+    const stream = new JobStream(
+      { sessionId: SESSION_ID, token: 'tok', wsUrl: WS_URL, onError, autoReconnect: false },
+      { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
+    );
+    stream.start();
+    for (let i = 0; i < 15 && onError.mock.calls.length === 0; i += 1) await tick();
+    expect(onError).toHaveBeenCalledWith({ code: 'internal_error', reason: 'boom' });
+    stream.dispose();
+  });
+});
