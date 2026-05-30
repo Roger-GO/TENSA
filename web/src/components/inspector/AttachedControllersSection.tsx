@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useCaseStore } from '@/store/case';
 import { useSldStore } from '@/store/sld';
 import { useCurrentTopology } from '@/api/queries';
-import { subKindForControllerClass } from '@/lib/controllers';
+import { controllerSubKindLabel, subKindForControllerClass } from '@/lib/controllers';
 import { ControllerGlyph } from '@/components/sld/nodes/ControllerGlyph';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { cn } from '@/lib/cn';
@@ -70,9 +70,13 @@ export function AttachedControllersSection({ className }: { className?: string }
                 <button
                   type="button"
                   data-testid={`attached-controller-row-${idx}`}
+                  // Announce the role the glyph conveys visually, e.g.
+                  // "Exciter: EXST1 EXST1_1" (the glyph itself is aria-hidden).
+                  aria-label={`${controllerSubKindLabel(subKind)}: ${c.kind} ${idx}`}
                   onClick={() => {
-                    setSelectedElement({ kind: 'controller', subKind, idx });
-                    setSelectedNodeId(`controller-${idx}`);
+                    setSelectedElement({ kind: 'controller', subKind, modelClass: c.kind, idx });
+                    // Node id is namespaced by model class (review(phase5)).
+                    setSelectedNodeId(`controller-${c.kind}-${idx}`);
                   }}
                   className={cn(
                     'group flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5',

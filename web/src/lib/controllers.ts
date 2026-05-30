@@ -31,17 +31,6 @@ export type ControllerSubKind =
   | 'profile'
   | 'other';
 
-/** All sub-kinds, in display order — handy for icon manifests + tests. */
-export const CONTROLLER_SUB_KINDS: readonly ControllerSubKind[] = [
-  'exciter',
-  'governor',
-  'pss',
-  'renewable',
-  'measurement',
-  'profile',
-  'other',
-] as const;
-
 // Synchronous-machine AVR / exciter classes (ANDES ``Exciter`` group).
 const EXCITER_CLASSES: ReadonlySet<string> = new Set([
   'IEEEX1',

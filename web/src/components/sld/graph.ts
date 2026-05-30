@@ -269,7 +269,7 @@ export function computeHandleAssignments(
     kind: 'generator' | 'load' | 'shunt';
   }> = [
     {
-      entries: topology.generators ?? [],
+      entries: dedupeGeneratorsByIdx(topology.generators ?? []),
       parentKey: 'bus',
       kindSide: 'north',
       kind: 'generator',
@@ -651,6 +651,41 @@ interface NonBusBucket {
   kind: 'generator' | 'load' | 'shunt';
 }
 
+/** ANDES SynGen (rotor) model classes — the dynamic half of a machine. */
+const DYNAMIC_GENERATOR_KINDS: ReadonlySet<string> = new Set(['GENROU', 'GENCLS']);
+
+/**
+ * Collapse the generators bucket to one entry per idx. ANDES shares an idx
+ * between a machine's static power-flow record (`PV`/`Slack`) and its dynamic
+ * rotor model (`GENROU`/`GENCLS`), so the raw bucket carries two entries per
+ * machine. Emitting both produces a duplicate `generator-<idx>` React node id
+ * (and `stub-generator-<idx>` edge id) — a console error + an ambiguous anchor
+ * for controllers that dock via `syn`. Keep one entry per idx, preferring the
+ * dynamic record (it owns the rotor stack controllers attach to), and preserve
+ * first-seen idx order.
+ */
+function dedupeGeneratorsByIdx(entries: readonly TopologyEntry[]): TopologyEntry[] {
+  const chosen = new Map<string, TopologyEntry>();
+  for (const e of entries) {
+    const key = String(e.idx);
+    const existing = chosen.get(key);
+    if (existing === undefined) {
+      chosen.set(key, e);
+    } else if (DYNAMIC_GENERATOR_KINDS.has(e.kind) && !DYNAMIC_GENERATOR_KINDS.has(existing.kind)) {
+      chosen.set(key, e);
+    }
+  }
+  const seen = new Set<string>();
+  const out: TopologyEntry[] = [];
+  for (const e of entries) {
+    const key = String(e.idx);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(chosen.get(key)!);
+  }
+  return out;
+}
+
 function _busFromParam(entry: TopologyEntry, key: string): string | null {
   const params = entry.params;
   if (!params) return null;
@@ -738,7 +773,7 @@ export function buildGraph(
   // one bus stack along the offset axis.
   const nonBusBuckets: NonBusBucket[] = [
     {
-      entries: topology.generators ?? [],
+      entries: dedupeGeneratorsByIdx(topology.generators ?? []),
       parentBus: (e) => _busFromParam(e, 'bus'),
       kind: 'generator',
     },
@@ -912,39 +947,52 @@ const CONTROLLER_DOCK = { x: 32, y: -18, stackDy: 22 } as const;
 
 /**
  * Resolve the React Flow node id a controller should dock to, given the
- * nodes placed so far. Returns the target node id, `'orphan'` (no ref param
- * at all), or `'wait'` (a ref param exists but its target node hasn't been
- * placed yet — retry on a later pass).
+ * nodes placed so far. Returns the target node id, `'orphan'` (no resolvable
+ * ref param), or `'wait'` (a ref exists but its target node hasn't been placed
+ * yet — retry on a later pass).
+ *
+ * Generator/bus references resolve directly (those nodes are placed before any
+ * controller). Upstream-controller references (`avr`→Exciter, `reg`→RenGen,
+ * `ree`→RenExciter) name another controller by its model-local idx, so they
+ * resolve through `controllerNodeIdByIdx` (idx → kind-namespaced node id),
+ * which is why the renewable / PSS chains need iterative passes.
  */
 function resolveControllerParent(
   entry: TopologyEntry,
   nodeById: ReadonlyMap<string, Node>,
+  controllerNodeIdByIdx: ReadonlyMap<string, string>,
 ): { id: string } | 'orphan' | 'wait' {
   const params = entry.params;
   if (!params) return 'orphan';
-  const ref = (key: string, prefix: string): string | null => {
+  const refVal = (key: string): string | null => {
     const v = params[key];
     if (v === undefined || v === null || typeof v === 'boolean') return null;
     const s = String(v);
-    return s === '' ? null : prefix + s;
+    return s === '' ? null : s;
   };
-  // Priority: SynGen / StaticGen (a generator node) → Bus node → an
-  // upstream controller (Exciter / RenGen / RenExciter). Bus node ids carry
-  // no prefix; generator/controller nodes are `generator-<idx>` /
-  // `controller-<idx>`.
-  const candidates = [
-    ref('syn', 'generator-'),
-    ref('gen', 'generator-'),
-    ref('bus', ''),
-    ref('avr', 'controller-'),
-    ref('reg', 'controller-'),
-    ref('ree', 'controller-'),
-  ].filter((c): c is string => c !== null);
-  if (candidates.length === 0) return 'orphan';
-  for (const id of candidates) {
+  // Direct device refs: SynGen / StaticGen → a generator node; ACNode → a
+  // bus node (bus node ids carry no prefix). Generators are de-duped by idx
+  // upstream, so `generator-<idx>` is unambiguous.
+  const directRefs: string[] = [];
+  const synRef = refVal('syn') ?? refVal('gen');
+  if (synRef !== null) directRefs.push('generator-' + synRef);
+  const busRef = refVal('bus');
+  if (busRef !== null) directRefs.push(busRef);
+  for (const id of directRefs) {
     if (nodeById.has(id)) return { id };
   }
-  return 'wait';
+  // Upstream-controller ref: resolve the referenced controller's idx to its
+  // placed (kind-namespaced) node id; wait if it hasn't been placed yet.
+  const ctrlRef = refVal('avr') ?? refVal('reg') ?? refVal('ree');
+  if (ctrlRef !== null) {
+    const cid = controllerNodeIdByIdx.get(ctrlRef);
+    if (cid !== undefined && nodeById.has(cid)) return { id: cid };
+    return 'wait';
+  }
+  // A direct ref was named but its node is missing (dangling): the parent
+  // device is genuinely absent — keep waiting (becomes an orphan after the
+  // passes drain). No ref at all → immediate orphan.
+  return directRefs.length > 0 ? 'wait' : 'orphan';
 }
 
 /**
@@ -957,10 +1005,19 @@ function appendControllerNodes(nodes: Node[], controllers: readonly TopologyEntr
   if (controllers.length === 0) return;
   const nodeById = new Map<string, Node>(nodes.map((n) => [n.id, n] as const));
   const stackCounts = new Map<string, number>();
+  // idx → placed controller node id, so `avr`/`reg`/`ree` chain refs (which
+  // name a controller by its model-local idx) resolve to the right node even
+  // though node ids are kind-namespaced. First-placed wins under the rare
+  // case of two controllers sharing an idx.
+  const controllerNodeIdByIdx = new Map<string, string>();
 
   const place = (entry: TopologyEntry, parentId: string | null): void => {
     const idx = String(entry.idx);
-    const nodeId = `controller-${idx}`;
+    // Namespace by model class: ANDES idx is model-local, so two different
+    // controllers (e.g. an exciter + a governor on the same machine) can
+    // share a numeric idx. A bare `controller-<idx>` id would collide,
+    // dropping one badge from the SLD and aliasing inspector lookups.
+    const nodeId = `controller-${entry.kind}-${idx}`;
     const subKind = subKindForControllerClass(entry.kind);
     const parent = parentId !== null ? nodeById.get(parentId) : undefined;
     const stackKey = parent ? parentId! : '__orphan__';
@@ -1003,6 +1060,7 @@ function appendControllerNodes(nodes: Node[], controllers: readonly TopologyEntr
     };
     nodes.push(node);
     nodeById.set(nodeId, node);
+    if (!controllerNodeIdByIdx.has(idx)) controllerNodeIdByIdx.set(idx, nodeId);
   };
 
   const pending = [...controllers];
@@ -1011,7 +1069,7 @@ function appendControllerNodes(nodes: Node[], controllers: readonly TopologyEntr
     changed = false;
     for (let i = pending.length - 1; i >= 0; i -= 1) {
       const entry = pending[i]!;
-      const resolved = resolveControllerParent(entry, nodeById);
+      const resolved = resolveControllerParent(entry, nodeById, controllerNodeIdByIdx);
       if (resolved === 'wait') continue;
       pending.splice(i, 1);
       changed = true;

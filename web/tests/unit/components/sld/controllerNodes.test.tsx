@@ -54,7 +54,7 @@ describe('buildGraph — controller nodes', () => {
     const { nodes } = buildGraph(topology, COORDS);
 
     const genNode = nodeById(nodes, 'generator-GENROU_1');
-    const ctrlNode = nodeById(nodes, 'controller-EXST1_1');
+    const ctrlNode = nodeById(nodes, 'controller-EXST1-EXST1_1');
     expect(genNode).toBeDefined();
     expect(ctrlNode).toBeDefined();
     expect(ctrlNode?.type).toBe('controller');
@@ -79,7 +79,7 @@ describe('buildGraph — controller nodes', () => {
       controllers: [ctrl('IEEEG1_1', 'IEEEG1', { syn: 'GENROU_1' })],
     });
     const { nodes } = buildGraph(topology, COORDS);
-    const c = nodeById(nodes, 'controller-IEEEG1_1');
+    const c = nodeById(nodes, 'controller-IEEEG1-IEEEG1_1');
     expect((c?.data as Record<string, unknown>).subKind).toBe('governor');
     expect((c?.data as Record<string, unknown>).parentNodeId).toBe('generator-GENROU_1');
   });
@@ -94,13 +94,13 @@ describe('buildGraph — controller nodes', () => {
       ],
     });
     const { nodes } = buildGraph(topology, COORDS);
-    const pss = nodeById(nodes, 'controller-IEEEST_1');
+    const pss = nodeById(nodes, 'controller-IEEEST-IEEEST_1');
     expect(pss).toBeDefined();
     const d = pss?.data as Record<string, unknown>;
     expect(d.subKind).toBe('pss');
     expect(d.orphan).toBe(false);
     // Docked beside the exciter node, not the generator.
-    expect(d.parentNodeId).toBe('controller-EXST1_1');
+    expect(d.parentNodeId).toBe('controller-EXST1-EXST1_1');
   });
 
   it('resolves the renewable plant chain REPCA1 → REECA1 → REGCP1 → Bus', () => {
@@ -114,16 +114,16 @@ describe('buildGraph — controller nodes', () => {
       ],
     });
     const { nodes } = buildGraph(topology, COORDS);
-    const reg = nodeById(nodes, 'controller-REGCP1_1');
-    const ree = nodeById(nodes, 'controller-REECA1_1');
-    const rep = nodeById(nodes, 'controller-REPCA1_1');
+    const reg = nodeById(nodes, 'controller-REGCP1-REGCP1_1');
+    const ree = nodeById(nodes, 'controller-REECA1-REECA1_1');
+    const rep = nodeById(nodes, 'controller-REPCA1-REPCA1_1');
     expect(reg).toBeDefined();
     expect(ree).toBeDefined();
     expect(rep).toBeDefined();
     // REGCP1 prefers its StaticGen (`gen`) over the bus.
     expect((reg?.data as Record<string, unknown>).parentNodeId).toBe('generator-PV_1');
-    expect((ree?.data as Record<string, unknown>).parentNodeId).toBe('controller-REGCP1_1');
-    expect((rep?.data as Record<string, unknown>).parentNodeId).toBe('controller-REECA1_1');
+    expect((ree?.data as Record<string, unknown>).parentNodeId).toBe('controller-REGCP1-REGCP1_1');
+    expect((rep?.data as Record<string, unknown>).parentNodeId).toBe('controller-REECA1-REECA1_1');
     for (const n of [reg, ree, rep]) {
       expect((n?.data as Record<string, unknown>).subKind).toBe('renewable');
       expect((n?.data as Record<string, unknown>).orphan).toBe(false);
@@ -136,7 +136,7 @@ describe('buildGraph — controller nodes', () => {
       controllers: [ctrl('PMU_1', 'PMU', { bus: 1 })],
     });
     const { nodes } = buildGraph(topology, COORDS);
-    const pmu = nodeById(nodes, 'controller-PMU_1');
+    const pmu = nodeById(nodes, 'controller-PMU-PMU_1');
     const d = pmu?.data as Record<string, unknown>;
     expect(d.subKind).toBe('measurement');
     expect(d.parentNodeId).toBe('1'); // bus node ids carry no prefix
@@ -152,8 +152,8 @@ describe('buildGraph — controller nodes', () => {
       ],
     });
     const { nodes } = buildGraph(topology, COORDS);
-    const a = nodeById(nodes, 'controller-EXST1_1');
-    const b = nodeById(nodes, 'controller-IEEEG1_1');
+    const a = nodeById(nodes, 'controller-EXST1-EXST1_1');
+    const b = nodeById(nodes, 'controller-IEEEG1-IEEEG1_1');
     expect(a!.position.x).toBe(b!.position.x); // same column
     expect(Math.abs(a!.position.y - b!.position.y)).toBe(22); // stacked by stackDy
   });
@@ -165,7 +165,7 @@ describe('buildGraph — controller nodes', () => {
       controllers: [ctrl('EXST1_X', 'EXST1', { syn: 'GHOST_9' })],
     });
     const { nodes } = buildGraph(topology, COORDS);
-    const orphan = nodeById(nodes, 'controller-EXST1_X');
+    const orphan = nodeById(nodes, 'controller-EXST1-EXST1_X');
     expect(orphan).toBeDefined();
     const d = orphan?.data as Record<string, unknown>;
     expect(d.orphan).toBe(true);
@@ -178,5 +178,47 @@ describe('buildGraph — controller nodes', () => {
     const topology = makeTopology({ buses: [bus(1)], generators: [gen('GENROU_1', 1)] });
     const { nodes } = buildGraph(topology, COORDS);
     expect(nodes.some((n) => n.type === 'controller')).toBe(false);
+  });
+
+  it('gives two different controllers sharing a numeric idx distinct node ids', () => {
+    // ANDES idx is model-local — an exciter + a governor on the same machine
+    // can both be idx 1. A bare `controller-1` id would collide and drop one
+    // badge; the id is namespaced by model class.
+    const topology = makeTopology({
+      buses: [bus(1)],
+      generators: [gen('GENROU_1', 1)],
+      controllers: [
+        ctrl('1', 'IEEEX1', { syn: 'GENROU_1' }),
+        ctrl('1', 'IEEEG1', { syn: 'GENROU_1' }),
+      ],
+    });
+    const { nodes } = buildGraph(topology, COORDS);
+    const exc = nodeById(nodes, 'controller-IEEEX1-1');
+    const gov = nodeById(nodes, 'controller-IEEEG1-1');
+    expect(exc).toBeDefined();
+    expect(gov).toBeDefined();
+    expect((exc?.data as Record<string, unknown>).subKind).toBe('exciter');
+    expect((gov?.data as Record<string, unknown>).subKind).toBe('governor');
+    // Both docked to the same generator; two distinct controller nodes exist.
+    expect(nodes.filter((n) => n.type === 'controller')).toHaveLength(2);
+  });
+
+  it('de-dupes the PV+GENROU shared-idx generator and docks the governor to the single node', () => {
+    // kundur_full's real shape: a static PV and a dynamic GENROU share idx 2.
+    const topology = makeTopology({
+      buses: [bus(1)],
+      generators: [gen('2', 1, 'PV'), gen('2', 1, 'GENROU')],
+      controllers: [ctrl('TGOV1_1', 'TGOV1', { syn: '2' })],
+    });
+    const { nodes, edges } = buildGraph(topology, COORDS);
+    const genNodes = nodes.filter((n) => n.id === 'generator-2');
+    expect(genNodes).toHaveLength(1); // exactly one node, not two
+    // The surviving node is the dynamic rotor model (preferred).
+    expect((genNodes[0]?.data as Record<string, unknown>).kind).toBe('GENROU');
+    // One stub edge, no duplicate-key collision.
+    expect(edges.filter((e) => e.id === 'stub-generator-2')).toHaveLength(1);
+    // The governor docks to the single generator node.
+    const gov = nodeById(nodes, 'controller-TGOV1-TGOV1_1');
+    expect((gov?.data as Record<string, unknown>).parentNodeId).toBe('generator-2');
   });
 });

@@ -75,9 +75,11 @@ describe('<AttachedControllersSection />', () => {
     expect(useCaseStore.getState().selectedElement).toEqual({
       kind: 'controller',
       subKind: 'exciter',
+      modelClass: 'EXST1',
       idx: 'EXST1_1',
     });
-    expect(useSldStore.getState().selectedNodeId).toBe('controller-EXST1_1');
+    // Node id is namespaced by model class.
+    expect(useSldStore.getState().selectedNodeId).toBe('controller-EXST1-EXST1_1');
   });
 
   it('renders the empty state for a machine with no attached controllers', () => {

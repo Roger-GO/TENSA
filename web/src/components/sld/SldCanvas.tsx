@@ -524,8 +524,9 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
       // by buildGraph; fall back to re-deriving from the model class.
       if (rawKind === 'controller') {
         const cd = node.data as { kind?: string; subKind?: ControllerSubKind };
-        const subKind = cd.subKind ?? subKindForControllerClass(cd.kind ?? '');
-        setSelectedElement({ kind: 'controller', subKind, idx: String(idx) });
+        const modelClass = cd.kind ?? '';
+        const subKind = cd.subKind ?? subKindForControllerClass(modelClass);
+        setSelectedElement({ kind: 'controller', subKind, modelClass, idx: String(idx) });
         setSelectedNodeId(node.id);
         return;
       }

@@ -60,10 +60,15 @@ export type StaticElementKind =
  * `subKind` drives the inspector/SLD glyph and per-kind accordion-state
  * persistence; the rendered params still key on the matched entry's real
  * `kind` (e.g. `EXST1`), exactly as for static elements.
+ *
+ * `modelClass` is the controller's ANDES model class (e.g. `EXST1`). ANDES
+ * idx is model-local, so two different controllers can share an idx; the
+ * inspector disambiguates by `(modelClass, idx)` and the SLD node id is
+ * namespaced `controller-<modelClass>-<idx>` (review(phase5)).
  */
 export type SelectedElement =
   | { kind: StaticElementKind; idx: string }
-  | { kind: 'controller'; subKind: ControllerSubKind; idx: string };
+  | { kind: 'controller'; subKind: ControllerSubKind; modelClass: string; idx: string };
 
 /**
  * Per-node coordinate overrides captured from user drags on the SLD
