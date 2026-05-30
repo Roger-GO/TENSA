@@ -205,6 +205,42 @@ def test_operating_point_after_real_tds_is_finite_and_plausible() -> None:
 
 
 @pytest.mark.integration
+def test_build_dynamic_system_from_scratch_with_gen_link(tmp_path: object) -> None:
+    """A dynamic generator (GENCLS) can be built from scratch once the form
+    exposes the mandatory ``gen`` link, and the resulting System runs PF and
+    saves to xlsx (including a 2nd overwrite save, which used to EOFError)."""
+    import os
+
+    w = Wrapper()
+    w.create_blank()
+    w.add_element("Bus", {"idx": "1", "name": "B1", "Vn": 110})
+    w.add_element("Bus", {"idx": "2", "name": "B2", "Vn": 110})
+    w.add_element("Slack", {"idx": "1", "name": "S1", "bus": "1", "Sn": 100, "Vn": 110, "v0": 1.0})
+    w.add_element("PQ", {"idx": "1", "name": "L1", "bus": "2", "Vn": 110, "p0": 0.5, "q0": 0.2})
+    w.add_element("Line", {"idx": "L1", "name": "Ln", "bus1": "1", "bus2": "2", "r": 0.01, "x": 0.06})
+    # The whole point: GENCLS WITH its mandatory ``gen`` link (→ Slack idx 1).
+    w.add_element(
+        "GENCLS",
+        {"idx": "1", "name": "G1", "bus": "1", "gen": "1", "Sn": 100, "Vn": 110, "M": 6},
+    )
+
+    topo = w.topology_snapshot()
+    kinds = {g.kind for g in topo.generators}
+    assert "GENCLS" in kinds, "GENCLS should be in the built topology"
+
+    pf = w.run_pflow()
+    assert pf.converged
+
+    # xlsx save twice — the 2nd is the overwrite path that used to raise
+    # "EOFError: EOF when reading a line" (ANDES's input()-based confirm).
+    target = os.path.join(str(tmp_path), "built.xlsx")  # type: ignore[arg-type]
+    w.save_case("xlsx", target)
+    assert os.path.getsize(target) > 0
+    w.save_case("xlsx", target)  # overwrite
+    assert os.path.getsize(target) > 0
+
+
+@pytest.mark.integration
 def test_callpert_abort_flag_terminates_tds() -> None:
     """Edge case: setting the abort flag mid-TDS causes the wrapper to mark
     ``ss.TDS.busted = True``, terminating the integration loop within the next

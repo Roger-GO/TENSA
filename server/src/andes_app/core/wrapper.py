@@ -1080,22 +1080,35 @@ class Wrapper:
         """
         ss = self._require_loaded()
         target = Path(filename)
-        if format == "xlsx":
-            from andes.io import xlsx
+        # ANDES's xlsx/json writers call ``confirm_overwrite`` which falls back
+        # to ``input()`` when the file exists and ``overwrite`` is unset — in
+        # the TTY-less worker that raises "EOFError: EOF when reading a line".
+        # The route already guards collisions (409 unless overwrite=true), so
+        # by the time we're here the write is authorised: force ``overwrite``.
+        try:
+            if format == "xlsx":
+                from andes.io import xlsx
 
-            xlsx.write(ss, str(target))
-        elif format == "json":
-            from andes.io import json as andes_json
+                xlsx.write(ss, str(target), overwrite=True)
+            elif format == "json":
+                from andes.io import json as andes_json
 
-            andes_json.write(ss, str(target))
-        elif format == "raw":
-            from andes_app.core.psse_writer import write_raw
+                andes_json.write(ss, str(target), overwrite=True)
+            elif format == "raw":
+                from andes_app.core.psse_writer import write_raw
 
-            write_raw(ss, str(target))
-        else:  # pragma: no cover — Literal narrows the type
-            raise ElementValidationError(
-                f"unsupported save format {format!r}; supported: xlsx, json, raw"
-            )
+                write_raw(ss, str(target))
+            else:  # pragma: no cover — Literal narrows the type
+                raise ElementValidationError(
+                    f"unsupported save format {format!r}; supported: xlsx, json, raw"
+                )
+        except Exception:
+            # A failed write (e.g. ANDES choking on a from-scratch System) can
+            # leave a 0-byte file behind that then masquerades as a real case
+            # in the workspace listing. Remove it so the listing stays honest.
+            if target.exists() and target.stat().st_size == 0:
+                target.unlink()
+            raise
         return target
 
     def create_blank(self) -> TopologySnapshot:
@@ -3358,7 +3371,7 @@ _REFERENCE_ATTRS: dict[str, tuple[str, ...]] = {
 # optionally ``phi``). The Add panel's "Transformer 2W" form maps to
 # ``model='Line'`` with ``tap`` required; downstream ``_topology_snapshot``
 # splits them via the ``tap != 1.0 OR phi != 0.0`` heuristic.
-ParamKind = Literal["string", "number", "bus_idx", "bool"]
+ParamKind = Literal["string", "number", "bus_idx", "gen_idx", "bool"]
 
 
 @dataclass(frozen=True)
@@ -3424,6 +3437,10 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         ParamMeta("idx", "string", required=True),
         ParamMeta("name", "string", required=True),
         ParamMeta("bus", "bus_idx", required=True),
+        # ``gen`` links the dynamic machine to its static generator (PV/Slack);
+        # ANDES marks it mandatory. Without it the form produced a malformed
+        # GENROU (rejected by ANDES + corrupting xlsx save).
+        ParamMeta("gen", "gen_idx", required=True),
         ParamMeta("Sn", "number", required=True, unit="MVA"),
         ParamMeta("Vn", "number", required=True, unit="kV"),
         ParamMeta("H", "number", required=True, unit="MWs/MVA"),
@@ -3440,11 +3457,15 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         ParamMeta("idx", "string", required=True),
         ParamMeta("name", "string", required=True),
         ParamMeta("bus", "bus_idx", required=True),
+        # See GENROU above — ``gen`` is the mandatory static-generator link.
+        ParamMeta("gen", "gen_idx", required=True),
         ParamMeta("Sn", "number", required=True, unit="MVA"),
         ParamMeta("Vn", "number", required=True, unit="kV"),
-        ParamMeta("H", "number", required=True, unit="MWs/MVA"),
+        # GENCLS's inertia parameter is ``M`` (ANDES GENCLS has no ``H`` — it
+        # was silently dropped before). Mark it required so the machine gets a
+        # real inertia instead of a default.
+        ParamMeta("M", "number", required=True, unit="MWs/MVA"),
         ParamMeta("D", "number", unit="pu"),
-        ParamMeta("M", "number"),
         ParamMeta("ra", "number", unit="pu"),
         ParamMeta("xl", "number", unit="pu"),
     ),
