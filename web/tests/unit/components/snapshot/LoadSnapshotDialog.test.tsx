@@ -168,6 +168,61 @@ describe('<LoadSnapshotDialog /> — listing + restore', () => {
     expect(success).toHaveTextContent(/replay\+PF/);
     expect(success).toHaveTextContent(/ANDES version mismatch/);
   });
+
+  it('Force replay (debug) toggle sends use_dill_optimization=false on restore', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      makeJsonResponse(200, {
+        snapshots: [
+          {
+            name: 'snap-a',
+            saved_at: 'now',
+            has_pflow: true,
+            has_tds: false,
+            has_dill: true,
+            andes_version: '2.0.0',
+            disturbance_count: 0,
+          },
+        ],
+      }),
+    );
+    fetchSpy.mockResolvedValueOnce(
+      makeJsonResponse(200, {
+        used_dill: false,
+        fallback_reason: 'forced replay (debug)',
+        disturbances_replayed: 0,
+        metadata: {
+          andes_version: '2.0.0',
+          andes_app_version: '0.1.0',
+          case_filename: 'ieee14.raw',
+          case_sha256: null,
+          disturbance_log: [],
+          saved_at: 'now',
+          has_pflow: true,
+          has_tds: false,
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    render(withQueryClient(<LoadSnapshotDialog />));
+    await user.click(await screen.findByTestId('load-snapshot-select-snap-a'));
+
+    // Open the Advanced disclosure and flip the Force-replay toggle ON.
+    await user.click(screen.getByTestId('load-snapshot-advanced'));
+    const forceReplay = screen.getByTestId('load-snapshot-force-replay');
+    expect(forceReplay).not.toBeChecked();
+    await user.click(forceReplay);
+    expect(forceReplay).toBeChecked();
+    // Flipping force-replay ON unchecks + disables the dill checkbox.
+    expect(screen.getByTestId('load-snapshot-use-dill')).toBeDisabled();
+
+    await user.click(screen.getByTestId('load-snapshot-confirm'));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    const [restoreUrl, restoreInit] = fetchSpy.mock.calls[1]!;
+    expect(String(restoreUrl)).toContain('/api/sessions/test-session-id/snapshot/restore');
+    const body = JSON.parse((restoreInit as RequestInit).body as string);
+    expect(body.use_dill_optimization).toBe(false);
+  });
 });
 
 describe('<LoadSnapshotDialog /> — error toast (Unit 3)', () => {

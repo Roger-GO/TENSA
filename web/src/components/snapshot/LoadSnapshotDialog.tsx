@@ -84,6 +84,12 @@ function LoadSnapshotDialogInner() {
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [armedDeleteName, setArmedDeleteName] = useState<string | null>(null);
   const [useDillOpt, setUseDillOpt] = useState(true);
+  // Unit 14 — "Force replay (debug)" toggle behind an Advanced
+  // disclosure (collapsed by default). When ON it forces the
+  // always-works replay+PF path by sending ``use_dill_optimization=false``
+  // regardless of the dill checkbox above. Default OFF keeps behaviour
+  // unchanged.
+  const [forceReplay, setForceReplay] = useState(false);
 
   const isPending = status === 'pending';
 
@@ -94,7 +100,9 @@ function LoadSnapshotDialogInner() {
       const result = await restoreMutation.mutateAsync({
         sessionId,
         name: selectedName,
-        useDillOptimization: useDillOpt,
+        // Force-replay (debug) wins: when ON the dill fast path is
+        // bypassed regardless of the checkbox above.
+        useDillOptimization: forceReplay ? false : useDillOpt,
       });
       markSuccess({
         used_dill: result.used_dill,
@@ -238,12 +246,36 @@ function LoadSnapshotDialogInner() {
           <input
             type="checkbox"
             data-testid="load-snapshot-use-dill"
-            checked={useDillOpt}
+            checked={forceReplay ? false : useDillOpt}
             onChange={(e) => setUseDillOpt(e.target.checked)}
-            disabled={isPending}
+            disabled={isPending || forceReplay}
           />
           <span>Use dill optimisation (skips PF re-solve when ANDES version matches)</span>
         </label>
+
+        <details className="group" data-testid="load-snapshot-advanced">
+          <summary
+            className={cn(
+              'text-muted-foreground hover:text-foreground cursor-pointer text-[11px] font-medium',
+              'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+            )}
+          >
+            Advanced
+          </summary>
+          <label className="mt-2 flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              data-testid="load-snapshot-force-replay"
+              checked={forceReplay}
+              onChange={(e) => setForceReplay(e.target.checked)}
+              disabled={isPending}
+            />
+            <span>
+              Force replay (debug) — always re-converge via replay+PF
+              (sends <code className="font-mono">use_dill_optimization=false</code>).
+            </span>
+          </label>
+        </details>
 
         {/* Error rendering moved to the global toast surface — see
             `surfaceErrorToast` above + `@/lib/toast`. */}

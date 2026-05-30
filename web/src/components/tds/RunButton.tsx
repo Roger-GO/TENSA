@@ -130,6 +130,9 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   // exposes the inputs in TdsConfigPanel; Auto uses the same defaults.
   const tdsIntegrator = useUiStore((s) => s.tdsIntegrator);
   const tdsToleranceOverrides = useUiStore((s) => s.tdsToleranceOverrides);
+  // Unit 14: free-form ``tds_config_overrides`` dict from the TDS
+  // Advanced key-value editor. Empty by default → no overrides forwarded.
+  const tdsConfigOverridesCustom = useUiStore((s) => s.tdsConfigOverrides);
 
   // Active-run handle (if any) — drives the Reset / Abort label switch.
   const activeRunId = useRunsStore((s) => s.activeRunId);
@@ -270,7 +273,12 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     // re-used in Auto mode (the inputs are hidden but the values stick).
     const wireIntegrator: 'trapezoidal' | 'qndf' =
       tdsIntegrator === 'trapezoidal' ? 'trapezoidal' : 'qndf';
-    const tdsConfigOverrides =
+    // Base overrides: the structured rtol/atol/max_step preset (QNDF
+    // modes only). Unit 14 then merges the free-form editor dict on top
+    // (the editor wins on key collisions). An empty editor + trapezoidal
+    // integrator → ``undefined`` so the wire stays minimal and behaviour
+    // is unchanged for the default path.
+    const baseOverrides: Record<string, number> | undefined =
       tdsIntegrator === 'trapezoidal'
         ? undefined
         : {
@@ -278,6 +286,11 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
             atol: tdsToleranceOverrides.atol,
             max_step: tdsToleranceOverrides.maxStep,
           };
+    const hasCustomOverrides = Object.keys(tdsConfigOverridesCustom).length > 0;
+    const tdsConfigOverrides =
+      baseOverrides === undefined && !hasCustomOverrides
+        ? undefined
+        : { ...(baseOverrides ?? {}), ...tdsConfigOverridesCustom };
     const tdsArgs = {
       tf,
       vars,
