@@ -125,6 +125,37 @@ def test_operating_point_populated_after_tds_without_pflow() -> None:
 
 
 @pytest.mark.integration
+def test_operating_point_normalizes_post_tds_angle_drift() -> None:
+    """Bus angles read after TDS must stay physical. ANDES integrates angles
+    against a rotating reference, so raw ``Bus.a`` carries a large common-mode
+    drift post-TDS (~9.5 rad) even though differences are preserved. The read
+    subtracts the slack-referenced drift so angles return to a plausible
+    range, while PF angles (drift ≈ 0) are left essentially unchanged."""
+    raw, dyr = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw, addfiles=[dyr])
+
+    pf = w.run_pflow()
+    # PF: slack bus sits at its a0 (≈0 on IEEE 14) and all angles are small.
+    assert max(abs(a) for a in pf.bus_angles.values()) < 1.0
+
+    w.run_tds(tf=2.0, h=1 / 120)
+    op = w.operating_point()
+    # Post-TDS angles are normalized: no multi-radian common-mode drift.
+    assert op.bus_angles, "operating point should carry bus angles"
+    assert max(abs(a) for a in op.bus_angles.values()) < 3.0, (
+        f"post-TDS angles still drifting: max|a|="
+        f"{max(abs(a) for a in op.bus_angles.values())}"
+    )
+    # Angle DIFFERENCES (the physical quantity) are preserved across the read.
+    keys = list(pf.bus_angles)
+    b0, b1 = keys[0], keys[1]
+    pf_diff = pf.bus_angles[b0] - pf.bus_angles[b1]
+    op_diff = op.bus_angles[b0] - op.bus_angles[b1]
+    assert abs(pf_diff - op_diff) < 0.1
+
+
+@pytest.mark.integration
 def test_callpert_abort_flag_terminates_tds() -> None:
     """Edge case: setting the abort flag mid-TDS causes the wrapper to mark
     ``ss.TDS.busted = True``, terminating the integration loop within the next
