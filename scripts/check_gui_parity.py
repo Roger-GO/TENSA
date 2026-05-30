@@ -25,12 +25,30 @@ It does two passes:
    the documented HTTP surface (the TDS / jobs / sweep WS channels + the SPA
    mount).
 
+2b. **Schema-invisible HTTP routes (fail-closed).** ``app.openapi()`` only
+   reports routes with ``include_in_schema=True``. A future app route
+   registered with ``include_in_schema=False`` would be a Starlette
+   ``Route``/``APIRoute`` (not a ``WebSocketRoute``/``Mount``), so it would
+   slip past *both* Pass 1 (absent from the spec) and Pass 2 (not a WS/mount).
+   Pass 1b walks ``app.router.routes`` directly and fails closed on any
+   HTTP route whose path is absent from the OpenAPI spec and is not one of
+   FastAPI's own docs endpoints (``/openapi.json`` ``/docs`` ``/redoc``
+   ``/docs/oauth2-redirect``).
+
 On success: prints a one-line ledger summary for CI logs, writes the full
 ledger to ``docs/gui-parity-ledger.md``, and exits 0.
 
 The script imports the app with a dummy token; it never binds a socket or
 spawns a worker, so it is safe to run in CI alongside (not inside) the
 server-spawning acceptance suite.
+
+CAVEAT — truthfulness vs presence. Pass 1 verifies that every route carries a
+GUI-location *tag* (and that ``"none"`` carries a deferral). It does NOT
+machine-verify that the named surface ("analysis-panel", "inspector", …)
+actually invokes the route from the web client: surface names are
+reviewer-asserted. A route tagged with a real-but-unwired surface therefore
+passes here and must be caught in code review. Keep this in mind before
+over-trusting the green check.
 """
 
 from __future__ import annotations
@@ -54,7 +72,8 @@ SERVER_SRC = REPO_ROOT / "server" / "src"
 if SERVER_SRC.is_dir() and str(SERVER_SRC) not in sys.path:
     sys.path.insert(0, str(SERVER_SRC))
 
-from starlette.routing import Mount, WebSocketRoute  # noqa: E402
+from fastapi.routing import APIRoute  # noqa: E402
+from starlette.routing import Mount, Route, WebSocketRoute  # noqa: E402
 
 from andes_app.api.app import make_app  # noqa: E402
 
@@ -68,6 +87,13 @@ PARITY_MARKER_RE = re.compile(r"#\s*parity-reviewed:\s*(\d{4}-\d{2}-\d{2})")
 # Framework-internal endpoints (OpenAPI/Swagger/ReDoc) are tooling, not
 # substrate capabilities — they carry no GUI parity obligation.
 _FRAMEWORK_MODULE_PREFIXES = ("fastapi.", "starlette.")
+
+# FastAPI's own docs endpoints. These are ``include_in_schema=False`` plain
+# Starlette ``Route``s, so they are absent from ``app.openapi()``; Pass 1b
+# allow-lists them so it only fails on *app* routes that escaped the spec.
+_FRAMEWORK_DOC_PATHS = frozenset(
+    {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
+)
 
 
 def _build_app() -> Any:
@@ -134,6 +160,33 @@ def main() -> int:
             openapi_rows.append(
                 (verb, path, location, str(deferral) if deferral else "")
             )
+
+    # --- Pass 1b: schema-invisible HTTP routes (fail-closed) ------------
+    # An app HTTP route registered with include_in_schema=False is absent
+    # from the OpenAPI spec (Pass 1 can't see it) yet is a Route/APIRoute,
+    # not a WebSocketRoute/Mount (Pass 2 skips it). Walk the router directly
+    # and fail closed on any such route that isn't a framework docs endpoint.
+    spec_paths = set(spec.get("paths", {}).keys())
+    for route in app.router.routes:
+        if isinstance(route, (Mount, WebSocketRoute)):
+            continue
+        if not isinstance(route, (Route, APIRoute)):
+            continue
+        path = getattr(route, "path", "")
+        if path in spec_paths or path in _FRAMEWORK_DOC_PATHS:
+            continue
+        endpoint = getattr(route, "endpoint", None)
+        module = getattr(endpoint, "__module__", "")
+        if module.startswith(_FRAMEWORK_MODULE_PREFIXES):
+            continue
+        methods = ",".join(sorted(getattr(route, "methods", None) or {"?"}))
+        failures.append(
+            f"SCHEMA-INVISIBLE {methods} {path}: HTTP route absent from the "
+            f"OpenAPI spec (include_in_schema=False?) and not a framework "
+            f"docs endpoint — it escapes both the tag check and the WS/mount "
+            f"review. Either include it in the schema (so Pass 1 tags it) or "
+            f"add it to the framework allow-list with justification."
+        )
 
     # --- Pass 2: non-OpenAPI routes (WS + mounts) -----------------------
     # manual-review row: (kind, path-or-name, source-file, reviewed-flag)

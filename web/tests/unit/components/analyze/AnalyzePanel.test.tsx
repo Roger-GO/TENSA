@@ -477,5 +477,27 @@ describe('<AnalyzePanel />', () => {
         fetchSpy.mock.calls.some((c) => String(c[0]).includes('/se/measurements/generate')),
       ).toBe(false);
     });
+
+    it('blocks generate for a negative seed (numpy default_rng rejects it)', async () => {
+      fetchSpy.mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ count: 28 }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        ),
+      );
+      render(withQueryClient(<AnalyzePanel />));
+
+      await userEvent.click(screen.getByTestId('se-advanced'));
+      await userEvent.type(screen.getByTestId('field-se-noise-seed'), '-5');
+      expect(screen.getByTestId('error-se-noise-seed')).toBeInTheDocument();
+      expect(screen.getByTestId('analyze-se-generate-measurements')).toBeDisabled();
+      // No generate request fired — the bad seed is caught inline, not
+      // surfaced as a misleading non-convergent error downstream.
+      expect(
+        fetchSpy.mock.calls.some((c) => String(c[0]).includes('/se/measurements/generate')),
+      ).toBe(false);
+    });
   });
 });

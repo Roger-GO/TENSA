@@ -359,7 +359,16 @@ async def get_eig_participation(
 
 @router.get(
     "/sessions/{session_id}/eig/state-matrix.mat",
-    openapi_extra={"x-andes-app-gui-location": "analysis-panel"},
+    openapi_extra={
+        "x-andes-app-gui-location": "none",
+        "x-andes-app-parity-deferred": (
+            "The EIG state-matrix .mat export client (web exportToMat.ts) is "
+            "shipped but not yet wired into any ExportMenu mount, and "
+            "setMatExportTokenGetter is not called at app boot. Until the "
+            "Export-menu MAT entry lands (formats={['mat']}+onExportMat on the "
+            "analysis/EIG ExportMenu), this download is CLI/agent-only."
+        ),
+    },
     operation_id="getEigStateMatrix",
     summary="Download EIG.As + EIG.mu as a .mat file.",
     response_class=Response,

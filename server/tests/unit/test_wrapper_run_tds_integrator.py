@@ -102,7 +102,8 @@ def test_run_tds_unknown_override_key_raises(loaded_wrapper: Wrapper) -> None:
     """Unknown override keys are caller bugs — surface as SetupFailedError.
 
     Keeps the wrapper a strict gatekeeper; we don't silently set arbitrary
-    ANDES fields from the wire.
+    ANDES fields from the wire. ``bogus`` is neither a canonical alias nor a
+    real ``ss.TDS.config`` field, so it must raise.
     """
     w = loaded_wrapper
     with pytest.raises(SetupFailedError, match="unknown TDS override key"):
@@ -111,6 +112,27 @@ def test_run_tds_unknown_override_key_raises(loaded_wrapper: Wrapper) -> None:
             integrator="qndf",
             tds_config_overrides={"bogus": 1.0},
         )
+
+
+def test_run_tds_freeform_real_andes_config_key_applies(
+    loaded_wrapper: Wrapper,
+) -> None:
+    """A genuine ``ss.TDS.config`` field name (not a canonical alias) is set
+    directly — this is the GUI free-form override editor's contract.
+
+    ``tol`` and ``max_iter`` are real ANDES TDS.config fields the GUI
+    advertises in its datalist + help text; they must round-trip onto the
+    live config rather than being rejected.
+    """
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    w.run_tds(
+        tf=0.1,
+        integrator="qndf",
+        tds_config_overrides={"tol": 1e-5, "max_iter": 25},
+    )
+    assert float(ss.TDS.config.tol) == pytest.approx(1e-5)
+    assert int(ss.TDS.config.max_iter) == 25
 
 
 def test_run_tds_trapezoidal_does_not_force_fixt(loaded_wrapper: Wrapper) -> None:

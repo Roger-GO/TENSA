@@ -1048,7 +1048,8 @@ def _handle_run_tds(
         if not isinstance(overrides_raw, dict):
             raise AndesAppError(
                 "'tds_config_overrides' must be a dict of "
-                "{rtol, atol, max_step} → float"
+                "{string → float}; keys are canonical aliases "
+                "(rtol/atol/max_step) or real ss.TDS.config field names"
             )
         coerced: dict[str, float] = {}
         for key, value in overrides_raw.items():

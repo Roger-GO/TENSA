@@ -276,7 +276,9 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         await _close_with_error(
             websocket,
             WS_CLOSE_INTERNAL_ERROR,
-            "'tds_config_overrides' must be an object of {rtol, atol, max_step} → number",
+            "'tds_config_overrides' must be an object of {string → number}; "
+            "keys are canonical aliases (rtol/atol/max_step) or real "
+            "ss.TDS.config field names, validated by the substrate",
         )
         return
 

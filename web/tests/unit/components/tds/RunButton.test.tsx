@@ -693,6 +693,124 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
   });
 });
 
+describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let server: MockServerHandle;
+
+  /**
+   * Drive a TDS run to the point the client emits ``start_tds`` and return
+   * the payload's ``tds_config_overrides`` field (or ``undefined`` when the
+   * key is absent). This is the load-bearing wire decision the store-level
+   * tests never exercise: the RunButton merge of the structured QNDF preset
+   * with the free-form editor dict + the trapezoidal/empty gating.
+   */
+  async function captureStartTdsOverrides(): Promise<unknown> {
+    seedReady();
+    useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+
+    const captured: { value: unknown; seen: boolean } = { value: undefined, seen: false };
+    server.on('connection', (socket) => {
+      socket.on('message', (raw: unknown) => {
+        const msg = JSON.parse(String(raw)) as Record<string, unknown>;
+        if (msg.type === 'auth') {
+          socket.send(JSON.stringify({ type: 'ready' }));
+        } else if (msg.type === 'start_tds') {
+          captured.value = msg.tds_config_overrides;
+          captured.seen = true;
+          socket.close({ code: 1000 });
+        }
+      });
+    });
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+    await waitFor(() => expect(captured.seen).toBe(true));
+    return captured.value;
+  }
+
+  beforeEach(async () => {
+    installMockWebSocket();
+    setTokenGetter(() => 'test-token');
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
+      typeof vi.spyOn
+    >;
+    useRunsStore.setState({
+      runs: {},
+      activeRunId: null,
+      memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
+    });
+    server = new MockServer(`ws://${WS_HOST}/ws/${SESSION_ID}`) as unknown as MockServerHandle;
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('trapezoidal');
+    useUiStore.getState().resetTdsToleranceOverrides();
+    useUiStore.getState().resetTdsConfigOverrides();
+  });
+
+  afterEach(async () => {
+    server.stop();
+    fetchSpy.mockRestore();
+    setTokenGetter(() => null);
+    restoreWebSocket();
+    useSessionStore.setState({ sessionId: null });
+    useCaseStore.setState({
+      selection: null,
+      topology: null,
+      layoutSidecar: null,
+      selectedElement: null,
+    });
+    useAuthStore.setState({ token: null, persistFailed: false });
+    useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
+    useRunsStore.setState({
+      runs: {},
+      activeRunId: null,
+      memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
+    });
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('trapezoidal');
+    useUiStore.getState().resetTdsToleranceOverrides();
+    useUiStore.getState().resetTdsConfigOverrides();
+  });
+
+  it('trapezoidal + empty editor → no tds_config_overrides key on the wire', async () => {
+    // Defaults already trapezoidal + empty editor.
+    const overrides = await captureStartTdsOverrides();
+    expect(overrides).toBeUndefined();
+  });
+
+  it('qndf + empty editor → only the structured rtol/atol/max_step preset', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('qndf-auto');
+    const overrides = await captureStartTdsOverrides();
+    expect(overrides).toEqual({ rtol: 1e-3, atol: 1e-6, max_step: 0.05 });
+  });
+
+  it('qndf + free-form key → editor dict merged on top of the preset', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('qndf-auto');
+    useUiStore.getState().setTdsConfigOverrides({ tol: 1e-5 });
+    const overrides = await captureStartTdsOverrides();
+    expect(overrides).toEqual({ rtol: 1e-3, atol: 1e-6, max_step: 0.05, tol: 1e-5 });
+  });
+
+  it('collision: an editor key wins over the structured preset value', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('qndf-auto');
+    useUiStore.getState().setTdsConfigOverrides({ rtol: 5e-4 });
+    const overrides = await captureStartTdsOverrides();
+    expect((overrides as Record<string, number>).rtol).toBe(5e-4);
+  });
+
+  it('trapezoidal + free-form key → just the editor dict (no preset)', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsConfigOverrides({ max_iter: 25 });
+    const overrides = await captureStartTdsOverrides();
+    expect(overrides).toEqual({ max_iter: 25 });
+  });
+});
+
 describe('<RunButton /> v0.2 — abort + reset', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
   let server: MockServerHandle;

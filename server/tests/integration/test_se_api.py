@@ -249,6 +249,24 @@ async def test_se_generate_invalid_noise_seed_returns_422(
     assert resp.status_code == 422, resp.text
 
 
+@pytest.mark.integration
+async def test_se_generate_negative_noise_seed_returns_422(
+    client: httpx.AsyncClient,
+) -> None:
+    """A negative seed is rejected at the Pydantic layer (``ge=0``) rather
+    than reaching numpy's ``default_rng`` (which raises and would surface as
+    a misleading non-convergent error). Defense-in-depth for the client
+    validator that already blocks negatives inline."""
+    sid = await _create_session_and_load(client)
+
+    resp = await client.post(
+        f"/api/sessions/{sid}/se/measurements/generate",
+        headers={"X-Andes-Token": VALID_TOKEN},
+        json={"noise_seed": -5},
+    )
+    assert resp.status_code == 422, resp.text
+
+
 # ---- request-validation: extra field rejected ----------------------------
 
 
