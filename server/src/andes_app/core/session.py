@@ -28,12 +28,14 @@ import asyncio
 import contextlib
 import logging
 import multiprocessing as mp
+import shutil
 import threading
 import time
 import uuid
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 from andes_app.core.errors import AndesAppError, SessionBusyError
@@ -396,7 +398,7 @@ class SessionManager:
 
         process = self._spawn_ctx.Process(
             target=worker_main,
-            args=(child_ctrl, child_data, abort_event, self._workspace),
+            args=(child_ctrl, child_data, abort_event, self._workspace, session_id),
             name=f"andes-worker-{session_id[:8]}",
             daemon=False,
         )
@@ -453,6 +455,21 @@ class SessionManager:
         for conn in (sess.ctrl, sess.data):
             with contextlib.suppress(OSError):
                 conn.close()
+
+        # Unit 21 (KTD-9): delete the session's clone-on-write scratch dir
+        # ``<workspace>/.sessions/<session_id>/`` on reap. The clone files live
+        # on the parent-visible filesystem, so cleanup does not require the
+        # (now-dead) worker. Best-effort — a missing dir is fine.
+        self._cleanup_clone_dir(sess.session_id)
+
+    def _cleanup_clone_dir(self, session_id: str) -> None:
+        """Remove the per-session clone scratch dir, if any (Unit 21)."""
+        if self._workspace is None:
+            return
+        clone_root = Path(self._workspace) / ".sessions" / session_id
+        if clone_root.exists():
+            with contextlib.suppress(OSError):
+                shutil.rmtree(clone_root)
 
     # ----- request/response -----
 

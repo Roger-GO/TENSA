@@ -268,6 +268,37 @@ class ElementHasDependentsError(AndesAppError):
         self.total = total
 
 
+class CloneEditError(AndesAppError):
+    """Raised when a clone-on-write file edit fails (Unit 21 / KTD-9).
+
+    Covers the format-writer failure modes the clone substrate surfaces to
+    the UI:
+
+    - A ``.dyr`` / ``.raw`` file whose target record does not match the
+      expected ``(BUS, MODEL, ID)`` pattern, or whose target field cannot be
+      located at the spike-index position (malformed / hand-edited file).
+    - An ``.xlsx`` clone whose sheet / idx-row / param-column is absent.
+    - A controller-param edit routed to the ``.raw`` writer — controllers
+      never live in ``.raw`` (they live in the paired ``.dyr``). The
+      recovery hint directs the user to the existing edit-element route for
+      static-topology edits.
+
+    Surfaced as HTTP 422 ``ProblemDetails``. The wrapper sanitizes embedded
+    filesystem paths from the message before re-raising so workspace and
+    install-tree paths never leak to the client.
+
+    ``recovery_kind`` is ``"none"`` — there is no single canonical CTA for a
+    malformed clone file; the detail string carries the actionable guidance
+    (and, for the ``.raw`` controller case, the "use edit-element" hint).
+    The orthogonal ``ui_hint``/``conflict`` recovery axes described in KTD-3
+    are not yet modelled on :class:`RecoveryDescriptor` (it carries only
+    ``kind`` + ``label``); the ``use-edit-element`` hint therefore rides in
+    the detail string rather than a structured field.
+    """
+
+    recovery_kind: str | None = "none"
+
+
 class SessionBusyError(AndesAppError):
     """Raised by ``SessionManager.invoke`` when the per-session lock is
     already held by an in-flight operation (the non-blocking try-acquire

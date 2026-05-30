@@ -114,8 +114,9 @@ no_implicit_optional = true
 files = ["src"]
 
 [[tool.mypy.overrides]]
-# ANDES has no type stubs; allow untyped imports
-module = ["andes", "andes.*", "kvxopt", "kvxopt.*"]
+# ANDES has no type stubs; allow untyped imports. openpyxl likewise ships no
+# stubs (the clone-on-write xlsx writer + the profiles route both import it).
+module = ["andes", "andes.*", "kvxopt", "kvxopt.*", "openpyxl", "openpyxl.*"]
 ignore_missing_imports = true
 
 

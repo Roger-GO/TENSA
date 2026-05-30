@@ -34,6 +34,7 @@ from andes_app import __version__
 from andes_app.api.error_mapping import recovery_for
 from andes_app.api.routes.bundle import router as bundle_import_router
 from andes_app.api.routes.cases import router as cases_router
+from andes_app.api.routes.clone import router as clone_router
 from andes_app.api.routes.cpf import router as cpf_router
 from andes_app.api.routes.disturbances import router as disturbances_router
 from andes_app.api.routes.eig import router as eig_router
@@ -260,6 +261,7 @@ def make_app(
     app.include_router(pflow_router, prefix="/api", tags=["pflow"])
     app.include_router(disturbances_router, prefix="/api", tags=["disturbances"])
     app.include_router(elements_router, prefix="/api", tags=["elements"])
+    app.include_router(clone_router, prefix="/api", tags=["clone"])
     app.include_router(tds_router, prefix="/api", tags=["tds"])
     app.include_router(workspace_router, prefix="/api", tags=["workspace"])
     # Houses both the Unit-3 bundle-export endpoint AND the Unit-7
