@@ -295,6 +295,9 @@ def make_app(
     # routes like ``/case/foo`` survive a hard reload).
     spa_dir = static_override if static_override is not None else _find_spa_dir()
     if spa_dir is not None and (spa_dir / "index.html").is_file():
+        # parity-reviewed: 2026-05-30 — gui-location: workspace. This mount IS
+        # the GUI (it serves the React SPA at /); it has no separate capability
+        # to surface, so it is reviewed-as-shell rather than tagged per-route.
         app.mount(
             "/",
             _SpaStaticFiles(directory=str(spa_dir), html=True),

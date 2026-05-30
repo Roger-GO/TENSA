@@ -86,6 +86,7 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
 
 @router.post(
     "/sessions/{session_id}/disturbances",
+    openapi_extra={"x-andes-app-gui-location": "disturbance-panel"},
     operation_id="addDisturbances",
     summary="Register one or more disturbances on a pre-setup session.",
     response_model=AddDisturbancesResponse,
@@ -157,6 +158,10 @@ def _spec_from_dict(spec_dict: dict[str, Any]) -> FaultSpec | ToggleSpec | Alter
 
 @router.get(
     "/sessions/{session_id}/disturbances",
+    openapi_extra={
+        "x-andes-app-gui-location": "none",
+        "x-andes-app-parity-deferred": "Recorded disturbances are mirrored in the disturbance-panel Zustand store and rehydrated from snapshot restore; the web client never re-reads them via this GET (read-back endpoint kept for API/agent parity).",
+    },
     operation_id="listDisturbances",
     summary="List the disturbance specs currently recorded on the session.",
     response_model=ListDisturbancesResponse,

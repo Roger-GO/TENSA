@@ -275,6 +275,7 @@ def _entry_from_payload(payload: object) -> TopologyEntry:
 
 @router.post(
     "/sessions/{session_id}/profiles/upload",
+    openapi_extra={"x-andes-app-gui-location": "profile-dialog"},
     operation_id="uploadProfile",
     summary="Upload a CSV / XLSX hourly profile to the session's workspace.",
     response_model=UploadProfileResponse,
@@ -386,6 +387,7 @@ async def upload_profile(
 
 @router.post(
     "/sessions/{session_id}/profiles",
+    openapi_extra={"x-andes-app-gui-location": "profile-dialog"},
     operation_id="addProfile",
     summary="Stage a TimeSeries profile assignment on a pre-setup session.",
     response_model=TopologyEntry,
@@ -452,6 +454,7 @@ async def add_profile(
 
 @router.get(
     "/sessions/{session_id}/profiles",
+    openapi_extra={"x-andes-app-gui-location": "profile-dialog"},
     operation_id="listProfiles",
     summary="List currently-staged TimeSeries profiles on the session.",
     response_model=ListProfilesResponse,
@@ -501,6 +504,7 @@ async def list_profiles(
 
 @router.delete(
     "/sessions/{session_id}/profiles/{profile_idx}",
+    openapi_extra={"x-andes-app-gui-location": "profile-dialog"},
     operation_id="deleteProfile",
     summary="Remove a staged TimeSeries from the pre-setup session.",
     status_code=status.HTTP_204_NO_CONTENT,

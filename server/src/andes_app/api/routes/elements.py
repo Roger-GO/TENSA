@@ -135,6 +135,7 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
 
 @router.get(
     "/topology/schema",
+    openapi_extra={"x-andes-app-gui-location": "inspector"},
     operation_id="getTopologySchema",
     summary="Per-model parameter metadata for the add/edit forms.",
     response_model=TopologySchema,
@@ -161,6 +162,7 @@ async def topology_schema(_: RequireToken) -> TopologySchema:
 
 @router.post(
     "/sessions/{session_id}/elements",
+    openapi_extra={"x-andes-app-gui-location": "inspector"},
     operation_id="addElement",
     summary="Add a topology element to a pre-setup session.",
     response_model=ElementCreated,
@@ -221,6 +223,7 @@ async def add_element(
 
 @router.put(
     "/sessions/{session_id}/elements/{model}/{idx}",
+    openapi_extra={"x-andes-app-gui-location": "inspector"},
     operation_id="editElement",
     summary="Edit parameters on an existing pre-setup element.",
     response_model=TopologyEntry,
@@ -288,6 +291,7 @@ async def edit_element(
 
 @router.post(
     "/sessions/{session_id}/blank",
+    openapi_extra={"x-andes-app-gui-location": "command-palette"},
     operation_id="createBlankSystem",
     summary="Create an empty andes.System() for a session.",
     response_model=BlankSystemResponse,
@@ -356,6 +360,7 @@ def _validate_save_filename(workspace: Path, filename: str, format: str) -> Path
 
 @router.post(
     "/sessions/{session_id}/save",
+    openapi_extra={"x-andes-app-gui-location": "command-palette"},
     operation_id="saveCase",
     summary="Write the current System to the workspace as xlsx or json.",
     response_model=SaveCaseResponse,
@@ -433,6 +438,7 @@ async def save_case(
 
 @router.post(
     "/sessions/{session_id}/undo-last-edit",
+    openapi_extra={"x-andes-app-gui-location": "command-palette"},
     operation_id="undoLastEdit",
     summary="Drop the last add() and rebuild the System.",
     response_model=TopologySummary,
@@ -479,6 +485,7 @@ async def undo_last_edit(
 
 @router.delete(
     "/sessions/{session_id}/elements/{model}/{idx}",
+    openapi_extra={"x-andes-app-gui-location": "inspector"},
     operation_id="deleteElement",
     summary="Delete a previously-added pre-setup element.",
     response_model=TopologySummary,

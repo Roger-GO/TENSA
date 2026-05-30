@@ -63,6 +63,10 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
 
 @router.post(
     "/sessions/{session_id}/tds",
+    openapi_extra={
+        "x-andes-app-gui-location": "none",
+        "x-andes-app-parity-deferred": "Batch (synchronous) TDS; the GUI runs TDS exclusively through the streaming WS channel (/ws/{session_id}) for live plotting. The batch POST is retained for CLI/agent/scripted use.",
+    },
     operation_id="runTds",
     summary="Run a time-domain simulation (batch mode; streaming lands in Unit 6).",
     response_model=TdsBatchResult,
@@ -197,6 +201,7 @@ def _broadcast_job(mgr: SessionManager, session_id: str, job_id: str) -> None:
 
 @router.post(
     "/sessions/{session_id}/abort",
+    openapi_extra={"x-andes-app-gui-location": "run-controls"},
     operation_id="abortRun",
     summary="Signal a cooperative abort of the active TDS run on a session.",
     response_model=AbortResponse,

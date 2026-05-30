@@ -106,6 +106,7 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
 
 @router.post(
     "/sessions/{session_id}/pflow",
+    openapi_extra={"x-andes-app-gui-location": "run-controls"},
     operation_id="runPflow",
     summary="Run power flow on the session's loaded case.",
     response_model=PflowResult,

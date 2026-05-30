@@ -84,6 +84,7 @@ def _job_to_schema(record: Any) -> JobRecordSchema:
 
 @router.get(
     "/sessions/{session_id}/jobs",
+    openapi_extra={"x-andes-app-gui-location": "activity-panel"},
     operation_id="listJobs",
     summary="List jobs for a session (v3.1 Unit 5a).",
     response_model=list[JobRecordSchema],
@@ -123,6 +124,10 @@ async def list_jobs(
 
 @router.get(
     "/sessions/{session_id}/jobs/{job_id}",
+    openapi_extra={
+        "x-andes-app-gui-location": "none",
+        "x-andes-app-parity-deferred": "The activity panel hydrates job state from the multiplexed jobs WS + the GET /jobs list resync; it never polls a single job by id (single-job GET kept for API/agent parity).",
+    },
     operation_id="getJob",
     summary="Fetch one job by id (v3.1 Unit 5a).",
     response_model=JobRecordSchema,
@@ -158,6 +163,7 @@ async def get_job(
 
 @router.delete(
     "/sessions/{session_id}/jobs/{job_id}",
+    openapi_extra={"x-andes-app-gui-location": "activity-panel"},
     operation_id="cancelJob",
     summary="Cancel a job (v3.1 Unit 5a).",
     response_model=JobRecordSchema,
@@ -227,6 +233,9 @@ async def cancel_job(
 # ---- WebSocket: per-session multiplexed job events ------------------------
 
 
+# parity-reviewed: 2026-05-30 — gui-location: activity-panel. The activity
+# panel (web/src/streaming/JobStream.ts) subscribes to this multiplexed feed
+# to render live job status; resyncs via GET /jobs on disconnect.
 @router.websocket("/ws/{session_id}/jobs/events")
 async def ws_job_events(websocket: WebSocket, session_id: str) -> None:
     """Per-session multiplexed job-event feed (v3.1 Unit 5a).
