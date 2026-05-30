@@ -38,6 +38,7 @@ import { GeneratorsGrid } from '@/components/data-grid/GeneratorsGrid';
 import { LoadsGrid } from '@/components/data-grid/LoadsGrid';
 import { ShuntsGrid } from '@/components/data-grid/ShuntsGrid';
 import { AnalysisTab } from '@/components/data-grid/AnalysisTab';
+import { ActivityPanel } from '@/components/shell/ActivityPanel';
 
 const TAB_LABELS: Record<BottomDrawerTab, string> = {
   buses: 'Buses',
@@ -46,6 +47,7 @@ const TAB_LABELS: Record<BottomDrawerTab, string> = {
   loads: 'Loads',
   shunts: 'Shunts',
   analysis: 'Analysis',
+  activity: 'Activity',
 };
 
 export interface BottomDrawerProps {
@@ -188,6 +190,13 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
                 }
               }}
             />
+          </TabsPrimitive.Content>
+          <TabsPrimitive.Content
+            value="activity"
+            data-testid="bottom-drawer-tab-content-activity"
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <ActivityPanel />
           </TabsPrimitive.Content>
         </div>
       )}
