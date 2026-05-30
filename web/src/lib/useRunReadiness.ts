@@ -46,6 +46,7 @@ import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useSessionStore } from '@/store/session';
 import { useSweepStore } from '@/store/sweep';
+import { useRunsStore } from '@/store/runs';
 
 /**
  * The set of routines that own a Run button. Each value matches the
@@ -149,6 +150,9 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
   const pflowLastRun = usePflowStore((s) => s.lastRun);
   const eigResult = useAnalyzeStore((s) => s.eigResult);
   const seMeasurementsCount = useAnalyzeStore((s) => s.seMeasurementsCount);
+  // A live/just-finished TDS run leaves the model in the dynamic-initialized
+  // (dae) state until the user resets — see the post-TDS gate below.
+  const activeRunId = useRunsStore((s) => s.activeRunId);
   const activeSweepId = useSweepStore((s) => s.activeSweepId);
   const sweeps = useSweepStore((s) => s.sweeps);
   // Store mirror of the topology query (kept in sync by `setTopology`), so the
@@ -214,6 +218,22 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
       kind: 'reload-case',
       label: 'Reload case',
     });
+  }
+
+  // After a TDS run the model is left in the dynamic-initialized (dae) state.
+  // PF and the PF-dependent static routines (CPF / EIG / SE) fail against it
+  // — the substrate 409s or 500s — so gate them until the user resets the run
+  // ("Reset run" = POST /reload restores a clean operating point). TDS itself
+  // re-initialises each run, so it is NOT gated. The grid still shows the
+  // post-TDS operating point; this only blocks routines that would crash.
+  if ((routine === 'pflow' || PF_DEPENDENT.has(routine)) && activeRunId !== null) {
+    return ready(
+      false,
+      `Reset the run first; TDS left the model in a dynamic state, so ${routineLabel(
+        routine,
+      )} needs a clean operating point.`,
+      { kind: 'reload-case', label: 'Reset run' },
+    );
   }
 
   // Routines that consume the PF operating point (EIG / CPF / SE)
