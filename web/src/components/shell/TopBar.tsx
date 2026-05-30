@@ -11,6 +11,7 @@ import { SidebarToggle } from '@/components/shell/SidebarToggle';
 import { InspectorToggle } from '@/components/shell/InspectorToggle';
 import { BottomDrawerToggle } from '@/components/shell/BottomDrawerToggle';
 import { InFlightChip } from '@/components/shell/InFlightChip';
+import { DynamicContentBadge } from '@/components/case/DynamicContentBadge';
 
 /**
  * TopBar. Fixed-height (~44px) bar with three slots — left, center, right —
@@ -99,6 +100,11 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
         className="flex min-w-0 flex-1 items-center justify-end gap-1"
       >
         {right}
+        {/* v3.1 Unit 24 (R18) — compact dynamic-content indicator: an
+            icon-only chip with a tooltip, so the user always sees whether
+            the loaded case supports the dynamic routines. Renders nothing
+            when no case is loaded. */}
+        <DynamicContentBadge compact />
         {/* v3.1 Unit 11 — in-flight job summary chip. Hidden when no
             active jobs; clicking opens the Activity panel. Sits at the
             start of the auto-mounted cluster so a "Running…" pill reads

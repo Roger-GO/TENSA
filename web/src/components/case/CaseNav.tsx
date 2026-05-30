@@ -8,6 +8,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { ChangeCaseConfirmDialog } from './ChangeCaseConfirmDialog';
+import { DynamicContentBadge } from './DynamicContentBadge';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
@@ -98,7 +99,7 @@ function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: Summar
         ) : null}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <span
           className={cn(
             'inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] border px-2 py-0.5',
@@ -109,6 +110,8 @@ function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: Summar
           <span aria-hidden className={cn('h-1.5 w-1.5 rounded-full', stateDotClass)} />
           {stateLabel}
         </span>
+        {/* R18: does the case carry dynamic-model data (TDS/EIG enabler)? */}
+        <DynamicContentBadge />
       </div>
 
       {pflowRunning ? (

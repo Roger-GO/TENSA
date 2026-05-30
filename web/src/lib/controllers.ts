@@ -103,6 +103,34 @@ export function subKindForControllerClass(modelClass: string): ControllerSubKind
   return 'other';
 }
 
+export interface ControllerSummary {
+  total: number;
+  bySubKind: Record<ControllerSubKind, number>;
+}
+
+/**
+ * Count a topology's controllers by sub-kind. Drives the dynamic-content
+ * badge (Unit 24) — derived client-side from the existing `controllers`
+ * bucket rather than a dedicated substrate field.
+ */
+export function summarizeControllers(
+  controllers: readonly { kind: string }[],
+): ControllerSummary {
+  const bySubKind: Record<ControllerSubKind, number> = {
+    exciter: 0,
+    governor: 0,
+    pss: 0,
+    renewable: 0,
+    measurement: 0,
+    profile: 0,
+    other: 0,
+  };
+  for (const c of controllers) {
+    bySubKind[subKindForControllerClass(c.kind)] += 1;
+  }
+  return { total: controllers.length, bySubKind };
+}
+
 /** Human-readable label for a sub-kind (header eyebrow, drill-down rows). */
 export function controllerSubKindLabel(subKind: ControllerSubKind): string {
   switch (subKind) {

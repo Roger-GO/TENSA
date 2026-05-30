@@ -122,6 +122,16 @@ function routineLabel(routine: RunRoutine): string {
 const PF_DEPENDENT: ReadonlySet<RunRoutine> = new Set(['eig', 'cpf', 'se']);
 
 /**
+ * Routines that require dynamic-model data (controllers / rotor models) to
+ * run at all (R18, Unit 24). Time-domain simulation integrates the dynamic
+ * DAE and eigenvalue analysis linearises it — neither is defined for a
+ * static-only case. CPF and SE are static analyses (continuation power flow
+ * and state estimation over the power-flow model), so they are deliberately
+ * NOT gated here — gating them would wrongly block valid runs.
+ */
+const DYNAMIC_REQUIRED: ReadonlySet<RunRoutine> = new Set(['tds', 'eig']);
+
+/**
  * Compute the readiness of a Run button.
  *
  * The hook subscribes to the minimum slice of each store it needs so
@@ -140,6 +150,9 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
   const seMeasurementsCount = useAnalyzeStore((s) => s.seMeasurementsCount);
   const activeSweepId = useSweepStore((s) => s.activeSweepId);
   const sweeps = useSweepStore((s) => s.sweeps);
+  // Store mirror of the topology query (kept in sync by `setTopology`), so the
+  // readiness hook stays a pure store reader — no query side effects.
+  const topology = useCaseStore((s) => s.topology);
 
   // Order matters: the most fundamental gate (no case) shadows every
   // subsequent reason, then session, then auth, then routine-specific
@@ -168,6 +181,22 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
     const sweep = sweeps[activeSweepId];
     const progress = sweep === undefined ? '' : ` (${sweep.iterations.length}/${sweep.total})`;
     return ready(false, `Sweep ${activeSweepId} in progress${progress}; wait or abort.`, null);
+  }
+
+  // Dynamic-content prerequisite (R18): TDS/EIG can't run on a static-only
+  // case at all — gate them with the same nudge the dynamic-content badge
+  // shows. Only fires once the topology has resolved (controllers known);
+  // while loading, fall through so the button isn't flicker-disabled.
+  if (
+    DYNAMIC_REQUIRED.has(routine) &&
+    topology !== null &&
+    (topology.controllers ?? []).length === 0
+  ) {
+    return ready(
+      false,
+      `${routineLabel(routine)} requires dynamic-model data. Load a .dyr addfile via the case picker to enable.`,
+      null,
+    );
   }
 
   // PF after EIG needs a reload — EIG.run() sets ``TDS.initialized=True``

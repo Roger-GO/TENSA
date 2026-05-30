@@ -115,6 +115,9 @@ function seedReady(opts: { withDisturbances?: boolean } = {}) {
       transformers: [],
       generators: [],
       loads: [],
+      // A TDS-runnable case has dynamic models; carry one so Unit 24's
+      // dynamic-content gate keeps the TDS button enabled.
+      controllers: [{ idx: 'TGOV1_1', name: 't', kind: 'TGOV1', params: {} }],
     },
     layoutSidecar: null,
     selectedElement: null,
