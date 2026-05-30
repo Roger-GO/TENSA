@@ -212,6 +212,28 @@ describe('<AnalyzePanel />', () => {
     expect(matches.length).toBeGreaterThan(0);
   });
 
+  it('Generate Measurements is disabled with a "Run PFlow first" tooltip when PF has not run', async () => {
+    // SE measurements derive from a converged operating point, so the
+    // Generate button must surface the prerequisite BEFORE the click (it
+    // used to enable in pre-setup and only 409 afterwards).
+    useAnalyzeStore.getState().setSubMode('se');
+    render(withQueryClient(<AnalyzePanel />));
+    const button = screen.getByTestId('analyze-se-generate-measurements');
+    expect(button).toBeDisabled();
+    await userEvent.hover(button.parentElement!);
+    const matches = await screen.findAllByText(
+      /Run PFlow first; SE requires a converged operating point/i,
+    );
+    expect(matches.length).toBeGreaterThan(0);
+  });
+
+  it('Generate Measurements enables once PF is converged', () => {
+    useAnalyzeStore.getState().setSubMode('se');
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    render(withQueryClient(<AnalyzePanel />));
+    expect(screen.getByTestId('analyze-se-generate-measurements')).toBeEnabled();
+  });
+
   it('Run EIG enables when PF is converged', () => {
     useAnalyzeStore.getState().setSubMode('eig');
     usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
