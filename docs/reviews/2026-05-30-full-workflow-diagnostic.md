@@ -130,6 +130,28 @@ labels/colour overlay now populate. Verified live on kundur_full.
 files 27 pass. Fixed 11 pre-existing RunButton TDS test failures (stale
 `/ws/` mock-server URL vs the `/api/ws/` production path) in e460c97.
 
+### Analysis routines (Pipelines C/E) — verified ✅
+Run menu → routine opens the bottom-drawer Analysis tab → sub-tabs
+(Plot / EIG / CPF / SE / TDS), each with config + Run + results.
+- **CPF** ✅ — nose curve renders (44 steps, max λ=0.6082, "Nose: λ=0.61,
+  V_min=0.72"); SLD updates with line flows.
+- **EIG** ✅ — eigenvalue scatter (3 of 52 visible, damping<0.05); and
+  exemplary state-mutation visibility: a banner "Running EIG initialised the
+  dynamic state. Subsequent TDS or re-run PF will start from this initialised
+  dae." + a top-bar **Reload case** recovery button appear after EIG. This is
+  the error-visibility pillar working as intended.
+- Pre-setup gating IS surfaced: EIG/CPF-nose/SE-Run wrap their disabled Run
+  button in a Radix tooltip (`AnalyzeRunButton` + `useRunReadiness`) → "Run
+  PFlow first; <routine> requires a converged operating point." + an "Open PF
+  view" recovery. (Earlier "disabled with no reason" note was a false alarm —
+  the reason shows on hover.)
+
+**Minor inconsistency (follow-up, not yet fixed):** the **CPF QV-curve**
+(`cpf-qv-run`) and **SE "Generate Measurements"** buttons do NOT use the
+shared readiness/tooltip — they enable in pre-setup and surface the
+prerequisite only as a post-click 409 banner, unlike their siblings. Low
+severity (the error is still shown), but worth aligning to the shared pattern.
+
 ### Pipelines still to run
-C/E (EIG / CPF+QV / SE analyses), F (concurrency/recovery), G (export round
--trip), I–L (sweeps / PMU / profile-import / multi-case compare).
+SE end-to-end, SWEEP, CPF-QV, F (concurrency/recovery), G (export round-trip),
+I–L (PMU / profile-import / multi-case compare).
