@@ -11,6 +11,8 @@ import {
 import { TdsConfigPanel } from '@/components/tds/TdsConfigPanel';
 import { AnalyzeSubModePicker } from './AnalyzeSubModePicker';
 import { CPFCurveChart } from './CPFCurveChart';
+import { CpfConfigPanel } from './CpfConfigPanel';
+import { CpfQvCurvePanel } from './CpfQvCurvePanel';
 import { EIGScatter } from './EIGScatter';
 import { EIGParticipationTable } from './EIGParticipationTable';
 import { EIGDampingChart } from './EIGDampingChart';
@@ -300,7 +302,84 @@ export function AnalyzeEigSubMode() {
   );
 }
 
+/**
+ * AnalyzeCpfSubMode — CPF home (Unit 12, extended Unit 13).
+ *
+ * Hosts a ``nose`` / ``qv`` sub-mode strip. ``nose`` is the full
+ * PV-curve sweep driven by ``CpfConfigPanel`` (direction load|gen +
+ * step + max_iter behind an Advanced disclosure); ``qv`` is the
+ * single-bus QV-curve driven by ``CpfQvCurvePanel`` (bus picker + Run).
+ * The strip + both flows live under one Analyze ``cpf`` sub-tab so all
+ * three CPF endpoint variants (load nose, gen nose, QV) are reachable
+ * from the GUI.
+ */
 export function AnalyzeCpfSubMode() {
+  const activeCpfSubMode = useAnalyzeStore((s) => s.activeCpfSubMode);
+
+  return (
+    <div className="flex flex-col gap-3 p-3">
+      <CpfSubModePicker />
+      {activeCpfSubMode === 'nose' ? <AnalyzeCpfNoseSubMode /> : <CpfQvCurvePanel />}
+    </div>
+  );
+}
+
+/**
+ * CpfSubModePicker — segmented control swapping the CPF nose / QV flow
+ * (Unit 13). Mirrors the AnalyzeSubModePicker visual.
+ */
+function CpfSubModePicker() {
+  const activeCpfSubMode = useAnalyzeStore((s) => s.activeCpfSubMode);
+  const setActiveCpfSubMode = useAnalyzeStore((s) => s.setActiveCpfSubMode);
+  const options: ReadonlyArray<{ value: 'nose' | 'qv'; label: string; hint: string }> = [
+    { value: 'nose', label: 'Nose curve', hint: 'PV-curve sweep (load or generation direction)' },
+    { value: 'qv', label: 'QV curve', hint: 'Single-bus reactive-margin curve' },
+  ];
+  return (
+    <div
+      role="radiogroup"
+      aria-label="CPF sub-mode"
+      data-testid="cpf-sub-mode-picker"
+      className={cn(
+        'inline-flex self-start overflow-hidden rounded-[var(--radius-md)]',
+        'border-border border text-xs',
+      )}
+    >
+      {options.map((opt, idx) => {
+        const isActive = activeCpfSubMode === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="radio"
+            aria-checked={isActive}
+            data-testid={`cpf-sub-mode-${opt.value}`}
+            title={opt.hint}
+            onClick={() => setActiveCpfSubMode(opt.value)}
+            className={cn(
+              'px-3 py-1 transition-colors',
+              idx > 0 && 'border-border border-l',
+              isActive
+                ? 'bg-primary/15 text-foreground'
+                : 'text-muted-foreground hover:text-foreground',
+              'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+            )}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * AnalyzeCpfNoseSubMode — the full PV-curve / nose-curve flow. Wires
+ * ``CpfConfigPanel`` (direction + step + max_iter) into ``useCpfRun``,
+ * wrapping the panel's Run button in the readiness-tooltip
+ * ``AnalyzeRunButton`` via the panel's ``renderRunButton`` prop.
+ */
+export function AnalyzeCpfNoseSubMode() {
   const sessionId = useSessionStore((s) => s.sessionId);
   const lastPf = usePflowStore((s) => s.lastRun);
   const cpfResult = useAnalyzeStore((s) => s.cpfResult);
@@ -314,31 +393,36 @@ export function AnalyzeCpfSubMode() {
     }
   }, [lastPf, cpfResult]);
 
-  const onRun = () => {
-    if (!sessionId) return;
-    cpfRun.mutate({ sessionId, direction: 'load' });
-  };
-
   const cpfError = cpfRun.error;
 
   return (
-    <div className="flex flex-col gap-3 p-3">
-      <div className="flex items-center gap-2">
-        <AnalyzeRunButton
-          routine="cpf"
-          label="Run CPF"
-          pendingLabel="Running CPF…"
-          isPending={cpfRun.isPending}
-          onClick={onRun}
-          testId="analyze-run-cpf"
-        />
-        {cpfResult !== null ? (
-          <span data-testid="cpf-summary" className="text-muted-foreground text-[10px]">
-            {cpfResult.mode === 'qv' ? 'QV-curve' : 'PV-curve'} — {cpfResult.lambdas.length} steps;
-            max {cpfResult.mode === 'qv' ? 'Q' : 'lambda'} = {cpfResult.max_lam.toFixed(4)}
-          </span>
-        ) : null}
-      </div>
+    <div className="flex flex-col gap-3">
+      <CpfConfigPanel
+        runLabel={cpfRun.isPending ? 'Running CPF…' : 'Run CPF'}
+        runButtonTestId="analyze-run-cpf"
+        renderRunButton={({ onClick, disabled }) => (
+          <AnalyzeRunButton
+            routine="cpf"
+            label="Run CPF"
+            pendingLabel="Running CPF…"
+            isPending={cpfRun.isPending}
+            onClick={onClick}
+            testId="analyze-run-cpf"
+            disabledOverride={disabled}
+          />
+        )}
+        onRun={({ direction, step, maxIter }) => {
+          if (!sessionId) return;
+          cpfRun.mutate({ sessionId, direction, step, maxIter });
+        }}
+      />
+
+      {cpfResult !== null ? (
+        <span data-testid="cpf-summary" className="text-muted-foreground text-[10px]">
+          {cpfResult.mode === 'qv' ? 'QV-curve' : 'PV-curve'} — {cpfResult.lambdas.length} steps; max{' '}
+          {cpfResult.mode === 'qv' ? 'Q' : 'lambda'} = {cpfResult.max_lam.toFixed(4)}
+        </span>
+      ) : null}
 
       <AnalyzeRoutineError routine="cpf" error={cpfError} />
 

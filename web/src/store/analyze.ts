@@ -50,6 +50,22 @@ export const ANALYZE_SUB_MODES: readonly AnalyzeSubMode[] = [
 ] as const;
 
 /**
+ * CPF sub-mode (v3.1 Unit 13). The CPF panel exposes two distinct
+ * continuation flows under one Analyze sub-tab:
+ *
+ * - ``nose`` — the full PV-curve / nose-curve sweep (``POST /cpf``),
+ *   driven by ``CpfConfigPanel`` (direction load|gen + step + max_iter).
+ * - ``qv`` — a single-bus QV-curve continuation (``POST /cpf/qv``),
+ *   driven by ``CpfQvCurvePanel`` (bus picker + Run).
+ *
+ * Default ``nose`` so the CPF sub-tab opens on the familiar full-sweep
+ * surface. Not persisted across tabs.
+ */
+export type CpfSubMode = 'nose' | 'qv';
+
+export const CPF_SUB_MODES: readonly CpfSubMode[] = ['nose', 'qv'] as const;
+
+/**
  * EIG scatter filter (KTD-7). Defaults match the plan: hide
  * well-damped fast modes so the under-damped / oscillatory modes
  * dominate the visible scatter on large cases (kundur, NPCC).
@@ -90,6 +106,14 @@ export interface AnalyzeState {
   cpfResult: CpfResult | null;
   setCpfResult: (result: CpfResult | null) => void;
   clearCpfResult: () => void;
+
+  /**
+   * Which CPF flow the CPF sub-tab is showing (Unit 13). ``nose`` is
+   * the full PV-curve sweep; ``qv`` is the single-bus QV-curve.
+   * Defaults to ``nose``.
+   */
+  activeCpfSubMode: CpfSubMode;
+  setActiveCpfSubMode: (next: CpfSubMode) => void;
 
   /**
    * Most recent SE result (Unit 13). ``null`` means "no SE run yet on
@@ -141,6 +165,9 @@ export const useAnalyzeStore = create<AnalyzeState>((set) => ({
   cpfResult: null,
   setCpfResult: (result) => set({ cpfResult: result }),
   clearCpfResult: () => set({ cpfResult: null }),
+
+  activeCpfSubMode: 'nose',
+  setActiveCpfSubMode: (next) => set({ activeCpfSubMode: next }),
 
   seResult: null,
   setSeResult: (result) => set({ seResult: result }),
