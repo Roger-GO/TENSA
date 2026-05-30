@@ -437,13 +437,21 @@ class CloneManager:
 
     # ----- save-as / reset -----
 
-    def save_as(self, name: str) -> CloneSaveAsResult:
+    def save_as(self, name: str, *, overwrite: bool = False) -> CloneSaveAsResult:
         """Copy the clone files to ``<workspace>/<name>.<ext>``.
 
         ``name`` is the stem only (no extension, no separators / traversal);
-        the manager appends each clone file's extension. Idempotent —
-        re-invoking with the same name overwrites. The new files appear in the
-        workspace listing immediately (so the UI's SavedCasesList shows them).
+        the manager appends each clone file's extension. The new files appear in
+        the workspace listing immediately (so the UI's SavedCasesList shows
+        them).
+
+        **Refuses to clobber an existing workspace file** unless ``overwrite``
+        is explicitly ``True``. The originals live in the same workspace, so a
+        save-as whose name collides with the loaded original would otherwise
+        silently destroy it — breaking the clone-on-write invariant that the
+        originals are never touched. The web dialog blocks name collisions
+        client-side; this is the defence-in-depth that also closes the
+        direct-API path. (review(phase6))
         """
         if not self.is_initialized:
             raise CloneEditError(
@@ -455,11 +463,24 @@ class CloneManager:
                 "without one"
             )
         safe = self._validate_save_as_name(name)
-        written: list[str] = []
+        # Resolve all destinations + check for collisions BEFORE writing any, so
+        # a partial save can't half-clobber the workspace.
+        dests: list[Path] = []
         for clone_path in self.clone_paths:
             dest = self._workspace / f"{safe}{clone_path.suffix}"
             # Defence in depth: the dest must resolve inside the workspace.
             self._assert_within_workspace(dest)
+            dests.append(dest)
+        if not overwrite:
+            collisions = sorted(d.name for d in dests if d.exists())
+            if collisions:
+                raise CloneEditError(
+                    f"a workspace file already exists for {collisions}; choose a "
+                    "different name (overwriting an existing case — including the "
+                    "original you loaded — is refused to avoid data loss)"
+                )
+        written: list[str] = []
+        for clone_path, dest in zip(self.clone_paths, dests, strict=True):
             shutil.copy2(clone_path, dest)
             written.append(str(dest))
         return CloneSaveAsResult(name=safe, files=written)

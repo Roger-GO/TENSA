@@ -324,8 +324,9 @@ async def redo_clone_edit(
         422: {
             "model": ProblemDetails,
             "description": (
-                "No clone to save, an invalid / traversal name, or the "
-                "workspace is not configured."
+                "No clone to save, an invalid / traversal name, the workspace "
+                "is not configured, or the name collides with an existing "
+                "workspace file (pass overwrite=true to replace it)."
             ),
         },
     },
@@ -343,7 +344,9 @@ async def save_clone_as(
             mgr, session_id, "clone-save-as", request_summary={"name": body.name}
         ) as job_id:
             payload: Any = await mgr.invoke(
-                session_id, "save_clone_as", {"name": body.name}
+                session_id,
+                "save_clone_as",
+                {"name": body.name, "overwrite": body.overwrite},
             )
     except SessionExpiredError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

@@ -308,7 +308,7 @@ def _handle_redo_clone_edit(wrapper: Wrapper, args: dict[str, Any]) -> Any:
 
 
 def _handle_save_clone_as(wrapper: Wrapper, args: dict[str, Any]) -> Any:
-    return wrapper.save_clone_as(args["name"])
+    return wrapper.save_clone_as(args["name"], overwrite=bool(args.get("overwrite", False)))
 
 
 def _handle_reset_clone(wrapper: Wrapper, args: dict[str, Any]) -> Any:

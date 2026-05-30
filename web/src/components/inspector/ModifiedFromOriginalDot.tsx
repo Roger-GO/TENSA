@@ -1,26 +1,26 @@
 /**
- * ModifiedFromOriginalDot (v3.1 Unit 23).
+ * ModifiedFromOriginalDot (v3.1 Unit 23; a11y-hardened in review(phase6)).
  *
- * A 4px ``bg-warning`` dot rendered next to a clone-editable param label when
- * that param's value in the clone file differs from the original case file. The
- * hover tooltip surfaces both values ("Original: X → Y") and a one-click
- * "Revert this field" mini-button that re-applies the original value via
- * ``useCloneEdit``.
+ * A ``bg-warning`` dot rendered next to a clone-editable param label when that
+ * param's value in the clone file differs from the original case file. The dot
+ * is a real focusable button that opens a **Popover** (keyboard-reachable
+ * interactive content — a Tooltip cannot hold a focusable action) showing both
+ * values ("Original: X → Y") and a one-click "Revert this field" button that
+ * re-applies the original value via ``useCloneEdit``.
  *
- * The dot is purely presentational: the caller (``ElementFormFields``) reads the
- * per-device diff via ``useCloneDiff`` once and passes each changed param's
- * ``{original, current}`` pair down. Params not in the diff render no dot.
+ * The caller (``ElementFormFields``) reads the per-device diff via
+ * ``useCloneDiff`` once and passes each changed param's ``{original, current}``
+ * pair down. Params not in the diff render no dot.
  */
 import { useCloneEdit } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import type { CloneDiffPair, ParamValue } from '@/api/types';
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipPortal,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+  Popover,
+  PopoverContent,
+  PopoverPortal,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { cn } from '@/lib/cn';
 
 /** Format a diff value for the tooltip ("—" for an absent value). */
@@ -69,42 +69,52 @@ export function ModifiedFromOriginalDot({
     cloneEdit.mutate({ sessionId, model, idx, param, value: original });
   };
 
+  const summary = `Original ${formatDiffValue(original)}, now ${formatDiffValue(current)}`;
   return (
-    <TooltipProvider delayDuration={200}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span
-            role="img"
-            aria-label={`${param} modified from original`}
-            data-testid={`modified-dot-${param}`}
-            className={cn('bg-warning inline-block h-1 w-1 rounded-full', className)}
-          />
-        </TooltipTrigger>
-        <TooltipPortal>
-          <TooltipContent
-            data-testid={`modified-dot-tooltip-${param}`}
-            className="flex flex-col gap-1.5"
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          // A real button so the modified state + the diff/revert action are
+          // keyboard-reachable (the dot alone is a colour-only cue otherwise).
+          aria-label={`${param} modified from original. ${summary}. Activate to view or revert.`}
+          data-testid={`modified-dot-${param}`}
+          className={cn(
+            'inline-flex items-center justify-center rounded-full',
+            'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+            className,
+          )}
+        >
+          <span aria-hidden className="bg-warning inline-block h-1.5 w-1.5 rounded-full" />
+        </button>
+      </PopoverTrigger>
+      <PopoverPortal>
+        <PopoverContent
+          align="start"
+          data-testid={`modified-dot-popover-${param}`}
+          className="flex w-auto flex-col gap-1.5 p-2 text-xs"
+        >
+          <span className="text-muted-foreground">
+            Original: {formatDiffValue(original)} → {formatDiffValue(current)}
+          </span>
+          <button
+            type="button"
+            data-testid={`modified-dot-revert-${param}`}
+            aria-label={`Revert ${param} to its original value`}
+            disabled={cloneEdit.isPending || sessionId === null || original === null}
+            onClick={handleRevert}
+            className={cn(
+              'self-start rounded-[var(--radius-sm)] border px-1.5 py-0.5',
+              'border-border bg-background text-foreground text-[10px] font-medium',
+              'hover:bg-muted transition-colors duration-[var(--duration-fast)]',
+              'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+              'disabled:cursor-not-allowed disabled:opacity-50',
+            )}
           >
-            <span>
-              Original: {formatDiffValue(original)} → {formatDiffValue(current)}
-            </span>
-            <button
-              type="button"
-              data-testid={`modified-dot-revert-${param}`}
-              disabled={cloneEdit.isPending || sessionId === null || original === null}
-              onClick={handleRevert}
-              className={cn(
-                'self-start rounded-[var(--radius-sm)] px-1.5 py-0.5',
-                'bg-background text-foreground text-[10px] font-medium',
-                'hover:bg-muted transition-colors duration-[var(--duration-fast)]',
-                'disabled:cursor-not-allowed disabled:opacity-50',
-              )}
-            >
-              {cloneEdit.isPending ? 'Reverting…' : 'Revert this field'}
-            </button>
-          </TooltipContent>
-        </TooltipPortal>
-      </Tooltip>
-    </TooltipProvider>
+            {cloneEdit.isPending ? 'Reverting…' : 'Revert this field'}
+          </button>
+        </PopoverContent>
+      </PopoverPortal>
+    </Popover>
   );
 }
