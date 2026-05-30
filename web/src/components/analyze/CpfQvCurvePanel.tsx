@@ -108,9 +108,12 @@ export function CpfQvCurvePanel({ className }: CpfQvCurvePanelProps) {
           disabled={runDisabled}
           isPending={cpfQvRun.isPending}
           onClick={onRun}
-          // Surface the PF-readiness reason on hover; the bus-not-picked
-          // gate stays silent (an inline affordance, not an error).
-          disabledReason={busMissing || cpfQvRun.isPending ? null : readiness.disabledReason}
+          // Surface the PF-readiness reason whenever PF is the unmet gate —
+          // even if the bus is also unpicked, the deeper prerequisite is the
+          // useful thing to explain. Once PF is ready, the only remaining
+          // gate is bus-not-picked, which stays silent (the picker is right
+          // there as the inline affordance).
+          disabledReason={cpfQvRun.isPending ? null : readiness.disabledReason}
         />
         {qvResult !== null ? (
           <span data-testid="cpf-qv-summary" className="text-muted-foreground text-[10px]">
@@ -167,7 +170,7 @@ function CpfQvRunButton({
     <TooltipProvider delayDuration={150}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span tabIndex={0} className="inline-block">
+          <span tabIndex={0} aria-disabled="true" className="inline-block">
             {button}
           </span>
         </TooltipTrigger>

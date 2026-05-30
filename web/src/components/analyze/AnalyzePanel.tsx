@@ -201,7 +201,7 @@ function SeGenerateButton({
     <TooltipProvider delayDuration={150}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span tabIndex={0} className="inline-block">
+          <span tabIndex={0} aria-disabled="true" className="inline-block">
             {button}
           </span>
         </TooltipTrigger>
