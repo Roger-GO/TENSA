@@ -61,6 +61,16 @@ export const ANALYSIS_SUB_TABS: readonly AnalysisSubTab[] = [
   'tds',
 ] as const;
 
+/**
+ * Active tab in the Activity panel (Unit 11). ``active`` shows in-flight +
+ * pending jobs; ``history`` shows the terminal (done/failed/cancelled)
+ * rolling log. Display-state — safe to persist (the actual JobRecord data
+ * lives in the in-memory ``useJobsStore``, never persisted).
+ */
+export type ActivityPanelTab = 'active' | 'history';
+
+export const ACTIVITY_PANEL_TABS: readonly ActivityPanelTab[] = ['active', 'history'] as const;
+
 export interface LayoutState {
   /** Left sidebar collapse state (driven by Unit 2 toggle + ⌘B). */
   leftSidebarCollapsed: boolean;
@@ -114,6 +124,28 @@ export interface LayoutState {
   drawerHasUnreadResults: boolean;
   setDrawerHasUnreadResults: (has: boolean) => void;
   clearDrawerUnread: () => void;
+
+  /**
+   * Active tab in the Activity panel (Unit 11). Display-state only — the
+   * underlying JobRecord data is in-memory (security F2); this is just which
+   * tab the user last looked at, safe to persist.
+   */
+  activityPanelTab: ActivityPanelTab;
+  setActivityPanelTab: (tab: ActivityPanelTab) => void;
+
+  /** Activity panel collapse state. Persisted (display-state). */
+  activityPanelCollapsed: boolean;
+  setActivityPanelCollapsed: (collapsed: boolean) => void;
+  toggleActivityPanel: () => void;
+
+  /**
+   * The job id the user has selected in the Activity panel (drives the
+   * per-job detail surface). Persisted as a display preference; the
+   * referenced JobRecord itself is NOT persisted (security F2) — on reload
+   * a stale id simply resolves to "no job" until a matching record exists.
+   */
+  selectedJobId: string | null;
+  setSelectedJobId: (id: string | null) => void;
 }
 
 /**
@@ -134,6 +166,9 @@ export const DEFAULT_LAYOUT: Pick<
   | 'activeBottomDrawerTab'
   | 'activeAnalysisSubTab'
   | 'drawerHasUnreadResults'
+  | 'activityPanelTab'
+  | 'activityPanelCollapsed'
+  | 'selectedJobId'
 > = {
   leftSidebarCollapsed: false,
   bottomDrawerCollapsed: false,
@@ -143,6 +178,9 @@ export const DEFAULT_LAYOUT: Pick<
   activeBottomDrawerTab: 'buses',
   activeAnalysisSubTab: 'eig',
   drawerHasUnreadResults: false,
+  activityPanelTab: 'active',
+  activityPanelCollapsed: true,
+  selectedJobId: null,
 };
 
 export const LAYOUT_STORAGE_KEY = 'andes-app:layout-v1';
@@ -173,6 +211,13 @@ export const useLayoutStore = create<LayoutState>()(
 
       setDrawerHasUnreadResults: (has) => set({ drawerHasUnreadResults: has }),
       clearDrawerUnread: () => set({ drawerHasUnreadResults: false }),
+
+      setActivityPanelTab: (tab) => set({ activityPanelTab: tab }),
+      setActivityPanelCollapsed: (collapsed) => set({ activityPanelCollapsed: collapsed }),
+      toggleActivityPanel: () =>
+        set((state) => ({ activityPanelCollapsed: !state.activityPanelCollapsed })),
+
+      setSelectedJobId: (id) => set({ selectedJobId: id }),
     }),
     {
       name: LAYOUT_STORAGE_KEY,
@@ -191,6 +236,12 @@ export const useLayoutStore = create<LayoutState>()(
         activeBottomDrawerTab: state.activeBottomDrawerTab,
         activeAnalysisSubTab: state.activeAnalysisSubTab,
         drawerHasUnreadResults: state.drawerHasUnreadResults,
+        // Activity-panel display-state (Unit 6). These ARE display state —
+        // safe to persist. The JobRecord data they reference lives in the
+        // in-memory ``useJobsStore`` and is NEVER persisted (security F2).
+        activityPanelTab: state.activityPanelTab,
+        activityPanelCollapsed: state.activityPanelCollapsed,
+        selectedJobId: state.selectedJobId,
       }),
     },
   ),

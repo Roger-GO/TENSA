@@ -2,6 +2,21 @@
  * `SweepStream` — owns the WebSocket lifecycle for one sensitivity sweep
  * — Unit 18.
  *
+ * As of v3.1 Unit 6 ``SweepStream`` is the ``'sweep'``-kind view over the
+ * generalised job model (``JobStream`` / ``useJobsStore``). The two operate
+ * on DIFFERENT WS channels by design — ``JobStream`` consumes the
+ * per-session multiplexed ``/jobs/events`` feed (one socket per session,
+ * lean ``{job_id, kind, status, ...}`` envelopes), while ``SweepStream``
+ * consumes the dedicated per-sweep ``/sweep/{sweepId}`` feed that carries
+ * the full per-iteration payloads the sweep store needs. ``JobStream`` is
+ * the canonical lifecycle source (a sweep's ``pending → running → done``
+ * transitions flow through it and into ``useJobsStore`` keyed by the
+ * ``sweep_id`` job id); ``SweepStream`` remains the fine-grained iteration
+ * source. The ``SweepStreamView`` typed alias below documents that
+ * relationship so consumers reason about both through one job-kind lens
+ * without any runtime change — existing ``SweepStream`` consumers are
+ * UNAFFECTED.
+ *
  * Responsibilities:
  *
  * 1. Open WS to ``/ws/{sessionId}/sweep/{sweepId}`` with the auth handshake.
@@ -18,6 +33,8 @@
  * - No ring-buffer eviction concerns — every iteration is small
  *   (a JSON object), the substrate keeps them all.
  */
+import type { JobKind } from '@/store/jobs';
+
 const log = console;
 
 export interface SweepIteration {
@@ -227,3 +244,23 @@ export class SweepStream {
     this.ws = null;
   }
 }
+
+/**
+ * The job kind this stream is a view of. Pins the relationship between
+ * ``SweepStream`` and the generalised job model at the type level: a sweep
+ * surfaces in ``useJobsStore`` under a ``JobRecord`` whose ``kind`` is
+ * exactly this value, keyed by the ``sweep_id`` (which the substrate aliases
+ * onto the registry ``job_id``).
+ */
+export const SWEEP_JOB_KIND: Extract<JobKind, 'sweep'> = 'sweep';
+
+/**
+ * Typed view alias — ``SweepStream`` IS the ``'sweep'``-kind window onto the
+ * job model. Declared as a distinct exported type so call sites and future
+ * units can name "the sweep view of a job stream" without re-deriving the
+ * class shape, and so a hypothetical generic ``JobStreamView<K>`` can slot
+ * ``SweepStream`` in for ``K extends 'sweep'`` without a cast. Runtime
+ * identity: ``SweepStreamView === SweepStream``.
+ */
+export type SweepStreamView = SweepStream;
+export const SweepStreamView = SweepStream;

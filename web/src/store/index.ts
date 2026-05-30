@@ -27,6 +27,7 @@ import { useConnectivityStore } from './connectivity';
 import { usePmuStore } from './pmu';
 import { useProfilesStore } from './profiles';
 import { useSweepStore } from './sweep';
+import { useJobsStore } from './jobs';
 
 // Re-export slices so consumers have one import surface.
 export { useAuthStore } from './auth';
@@ -69,6 +70,7 @@ export function wireStoreCascade(): void {
     usePmuStore.getState().clear();
     useProfilesStore.getState().clear();
     useSweepStore.getState().clearSweeps();
+    useJobsStore.getState().clearJobs();
   });
 
   // session clear → case + pflow + runs clear.
@@ -89,6 +91,9 @@ export function wireStoreCascade(): void {
       usePmuStore.getState().clear();
       useProfilesStore.getState().clear();
       useSweepStore.getState().clearSweeps();
+      // Jobs are session-scoped (a job's lifecycle belongs to the worker
+      // that produced it); always clear on session change, recovery or not.
+      useJobsStore.getState().clearJobs();
       if (!state.recoveryInProgress) {
         useCaseStore.getState().clearCase();
         usePflowStore.getState().clearPflow();
@@ -145,6 +150,7 @@ export function __resetCascadeForTests(): void {
   usePmuStore.setState({ pmus: [] });
   useProfilesStore.setState({ profiles: [] });
   useSweepStore.setState({ sweeps: {}, activeSweepId: null });
+  useJobsStore.setState({ jobs: {} });
 }
 
 // Side-effect: defensive auto-wire on first import. `wireStoreCascade` is
