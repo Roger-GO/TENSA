@@ -7,7 +7,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { useAbortRun, useCommitDisturbances, useResetRun, useRunPflow } from '@/api/queries';
+import {
+  useAbortRun,
+  useCommitDisturbances,
+  useResetRun,
+  useRunPflow,
+  loadOperatingPointIntoStore,
+} from '@/api/queries';
 import { ProblemDetailsError, ServerError } from '@/api/client';
 import { useSessionStore } from '@/store/session';
 import { useAuthStore } from '@/store/auth';
@@ -322,6 +328,10 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
         // handle so a stale instance doesn't dangle.
         streamRef.current?.dispose();
         streamRef.current = null;
+        // Surface the post-TDS operating point in the data grid. TDS never
+        // writes usePflowStore.lastRun, so without this the Buses grid sits
+        // empty after a TDS-only run. Best-effort, read-only.
+        void loadOperatingPointIntoStore(sessionId);
       },
       onError: (err: RunStreamError) => {
         setTdsStarting(false);

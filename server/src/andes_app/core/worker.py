@@ -220,6 +220,10 @@ def _handle_topology(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.topology_snapshot())
 
 
+def _handle_operating_point(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    return _serialize_dataclass(wrapper.operating_point())
+
+
 def _handle_add_disturbance(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     spec = _disturbance_from_dict(args["spec"])
     return wrapper.add_disturbance(spec)
@@ -1124,6 +1128,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "load_case": _handle_load_case,
     "reload_case": _handle_reload_case,
     "topology": _handle_topology,
+    "operating_point": _handle_operating_point,
     "add_disturbance": _handle_add_disturbance,
     "list_disturbances": _handle_list_disturbances,
     "replay_disturbances": _handle_replay_disturbances,

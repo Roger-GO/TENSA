@@ -354,3 +354,50 @@ async def test_reload_returns_to_pre_setup(
     )
     assert reload_resp.status_code == 200
     assert reload_resp.json()["state"] == "pre-setup"
+
+
+@pytest.mark.integration
+async def test_operating_point_after_pflow_matches_pflow(
+    app_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """GET /operating-point returns the solved bus V/θ without re-running.
+    After a PF it must agree with the PF result (reads the same arrays)."""
+    client, _ws = app_workspace
+    sid = await _create_session(client)
+    await client.post(
+        f"/api/sessions/{sid}/case",
+        headers={"X-Andes-Token": VALID_TOKEN},
+        json={"primary_path": "ieee14.raw"},
+    )
+    pf = await client.post(
+        f"/api/sessions/{sid}/pflow",
+        headers={"X-Andes-Token": VALID_TOKEN},
+        json={},
+    )
+    assert pf.status_code == 200, pf.text
+
+    op = await client.get(
+        f"/api/sessions/{sid}/operating-point",
+        headers={"X-Andes-Token": VALID_TOKEN},
+    )
+    assert op.status_code == 200, op.text
+    body = op.json()
+    assert body["converged"] is True
+    assert len(body["bus_voltages"]) == 14
+    assert body["bus_voltages"] == pf.json()["bus_voltages"]
+    assert body["bus_angles"] == pf.json()["bus_angles"]
+
+
+@pytest.mark.integration
+async def test_operating_point_before_load_returns_409(
+    app_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """No case loaded → the read-only operating-point endpoint 409s, same as
+    other routines that require a loaded system."""
+    client, _ws = app_workspace
+    sid = await _create_session(client)
+    resp = await client.get(
+        f"/api/sessions/{sid}/operating-point",
+        headers={"X-Andes-Token": VALID_TOKEN},
+    )
+    assert resp.status_code == 409, resp.text
