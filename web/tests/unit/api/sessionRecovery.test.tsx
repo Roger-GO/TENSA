@@ -393,7 +393,7 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
     fetchSpy.mockRestore();
     setTokenGetter(() => null);
     __resetRecoveryDebounceForTests();
-    useAuthStore.setState({ token: null, persistFailed: false });
+    useAuthStore.setState({ token: null, authDisabled: false, persistFailed: false });
     useSessionStore.setState({
       sessionId: null,
       recoveryInProgress: false,
@@ -518,6 +518,38 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
 
     await new Promise((r) => setTimeout(r, 100));
     expect(postCalls).toBe(0);
+  });
+
+  it('fires POST /sessions on a no-auth backend (authDisabled, no token)', async () => {
+    // `serve --no-auth`: the boot probe sets authDisabled and never a token.
+    // Auto-create must still fire, or the app has no session and is unusable.
+    useAuthStore.setState({ token: null, authDisabled: true, persistFailed: false });
+    setTokenGetter(() => null);
+    let postCalls = 0;
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        postCalls += 1;
+        return Promise.resolve(jsonResponse({ session_id: 'sess-noauth', state: 'live' }, 201));
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { useSessionRecovery } = await import('@/api/useSessionRecovery');
+    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(postCalls).toBe(1);
+    });
+    await waitFor(() => {
+      expect(useSessionStore.getState().sessionId).toBe('sess-noauth');
+    });
+    // Restore for sibling tests (afterEach also resets).
+    useAuthStore.setState({ authDisabled: false });
   });
 
   it('re-issues loadCase against the new session id when a case was loaded pre-recovery', async () => {

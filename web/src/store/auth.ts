@@ -128,3 +128,14 @@ export const useAuthStore = create<AuthState>((set) => ({
 export function getAuthToken(): string | null {
   return useAuthStore.getState().token;
 }
+
+/**
+ * `true` once the app may safely issue authenticated requests: either a
+ * token is present, or the boot probe found a `serve --no-auth` substrate
+ * that accepts unauthenticated requests. Queries gated on auth (workspace
+ * files, topology schema) must use this rather than `token !== null` alone,
+ * or they stay permanently disabled against a no-auth backend.
+ */
+export function useAuthReady(): boolean {
+  return useAuthStore((s) => s.token !== null || s.authDisabled);
+}

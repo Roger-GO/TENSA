@@ -38,7 +38,7 @@
  *
  * Responsibilities (post-v0.2-Unit-1):
  *
- * 1. **Auto-create** when ``tokenPresent && sessionId === null`` and we
+ * 1. **Auto-create** when ``authReady && sessionId === null`` and we
  *    are NOT currently in a recovery cycle. This covers (a) first paint
  *    after auth, and (b) the post-change-case window where CaseNav has
  *    fired DELETE and the session has been cleared.
@@ -85,7 +85,7 @@ import { useEffect, useRef } from 'react';
 import { useCreateSession, useLoadCase } from './queries';
 import { useSessionStore, RECOVERY_STUCK_TIMEOUT_MS } from '@/store/session';
 import { useCaseStore } from '@/store/case';
-import { useAuthStore } from '@/store/auth';
+import { useAuthReady } from '@/store/auth';
 import { toast } from '@/lib/toast';
 
 const CREATE_DEBOUNCE_MS = 1_000;
@@ -144,7 +144,10 @@ export function resetRecoveryLogger(): void {
 }
 
 export function useSessionRecovery(): void {
-  const tokenPresent = useAuthStore((s) => s.token !== null);
+  // Auth-ready = a token is present OR the substrate is `serve --no-auth`
+  // (boot probe). Gating session auto-create on token-only would leave a
+  // no-auth backend with no session — and therefore an unusable app.
+  const authReady = useAuthReady();
   const recoveryInProgress = useSessionStore((s) => s.recoveryInProgress);
   const recoveryFailed = useSessionStore((s) => s.recoveryFailed);
   const sessionId = useSessionStore((s) => s.sessionId);
@@ -316,7 +319,7 @@ export function useSessionRecovery(): void {
     // transient observer state. ``createSession.mutate()`` itself is
     // safe to call concurrently; TanStack will replace the in-flight
     // observer with the new attempt's result.
-    if (!tokenPresent) return;
+    if (!authReady) return;
     if (sessionId !== null) return;
     if (recoveryFailed) return;
     const now = Date.now();
@@ -326,7 +329,7 @@ export function useSessionRecovery(): void {
     // ``createSession`` excluded from deps for the same reason as above.
     // The dep array tracks the gate's primitive inputs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenPresent, sessionId, recoveryFailed, recoveryInProgress]);
+  }, [authReady, sessionId, recoveryFailed, recoveryInProgress]);
 
   // ---- Branch (3+4): re-load case after recovery --------------------------
   useEffect(() => {
