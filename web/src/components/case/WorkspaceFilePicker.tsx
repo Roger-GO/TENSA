@@ -8,7 +8,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
-import { ParseErrorBanner } from './ParseErrorBanner';
+import { ProblemDetailsErrorSurface } from '@/components/error/ProblemDetailsErrorSurface';
 import { NewSystemButton } from './NewSystemButton';
 import { BundleImportButton } from '@/components/bundle/BundleImportDialog';
 import { useListWorkspaceFiles, useLoadCase } from '@/api/queries';
@@ -32,14 +32,14 @@ import { cn } from '@/lib/cn';
  *   copy.
  * - Populated list: rows; selected row uses `bg-muted`+`text-foreground`;
  *   `.dyr` selector visible after `.raw` is picked.
- * - Parse error: `ParseErrorBanner` above the list (R8 taxonomy mapping
- *   below).
+ * - Parse error: `<ProblemDetailsErrorSurface variant="banner">` above
+ *   the list (R8 taxonomy mapping below).
  *
  * Error mapping (R8):
  *
- * - 422 ProblemDetails (parse error) → `ParseErrorBanner` inline above
- *   the list. Selection of the offending file is unset so the user can
- *   pick again.
+ * - 422 ProblemDetails (parse error) → `<ProblemDetailsErrorSurface
+ *   variant="banner">` inline above the list. Selection of the offending
+ *   file is unset so the user can pick again.
  * - 5xx → kept as a typed `ServerError`; surfaced inline as a recovery
  *   prompt (Unit 9 will hook the runtime-crash modal). For Unit 7 we
  *   show a banner with "Reload page" copy + the underlying detail.
@@ -240,7 +240,11 @@ export function WorkspaceFilePicker({ className }: WorkspaceFilePickerProps) {
   if (filesQuery.isError) {
     return (
       <div className={cn('flex flex-col gap-3 p-3', className)}>
-        <ParseErrorBanner error={filesQuery.error} onDismiss={() => filesQuery.refetch()} />
+        <ProblemDetailsErrorSurface
+          variant="banner"
+          error={filesQuery.error}
+          onDismiss={() => filesQuery.refetch()}
+        />
       </div>
     );
   }
@@ -255,7 +259,8 @@ export function WorkspaceFilePicker({ className }: WorkspaceFilePickerProps) {
   // a recovery banner inline; the picker stays interactive.
   const isServerError = bannerError instanceof ServerError;
   const banner = bannerError ? (
-    <ParseErrorBanner
+    <ProblemDetailsErrorSurface
+      variant="banner"
       error={bannerError}
       onDismiss={() => {
         setBannerError(null);

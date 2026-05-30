@@ -54,7 +54,7 @@ setTokenGetter(getAuthToken);
  *
  * Error-surface routing (R8 → R18):
  *
- * - Parse error (load failed) → ParseErrorBanner inside CaseNav.
+ * - Parse error (load failed) → ProblemDetailsErrorSurface (banner) inside CaseNav.
  * - Solver non-convergence → ConvergenceErrorPanel as dock overlay.
  * - Runtime crash (5xx) → RuntimeCrashModal as the one allowed
  *   non-destructive modal.
