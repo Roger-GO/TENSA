@@ -431,6 +431,12 @@ class SessionManager:
         if sess.closed:
             return
         sess.closed = True
+        # Wake any /jobs/events subscribers parked on ``consumer.get()`` with a
+        # terminal sentinel so their generator unblocks and the WS closes,
+        # instead of leaking a half-open socket + parked task across reaps.
+        for queue in list(sess.job_event_subscribers):
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait({"__closed__": True})
         # Best-effort graceful shutdown
         with contextlib.suppress(BrokenPipeError, OSError):
             sess.ctrl.send({"op": "shutdown", "args": {}, "seq": -1})
@@ -1265,7 +1271,14 @@ class SessionManager:
         """
         sess = self._require_session(session_id)
         records = sess.job_registry.list_jobs(kind=kind, status=status)
-        records += self._global_job_registry.list_jobs(kind=kind, status=status)
+        # Only this session's global-registry jobs (filtered by the stamped
+        # ``origin_session_id``) — the global registry is manager-wide and
+        # blending all sessions' records would leak them cross-session.
+        records += [
+            r
+            for r in self._global_job_registry.list_jobs(kind=kind, status=status)
+            if r.origin_session_id == session_id
+        ]
         records.sort(key=lambda r: r.started_at)
         return records
 
@@ -1280,7 +1293,13 @@ class SessionManager:
         record = sess.job_registry.get_job(job_id)
         if record is not None:
             return record
-        return self._global_job_registry.get_job(job_id)
+        # Global registry is manager-wide; only resolve a global job that
+        # belongs to THIS session (stamped ``origin_session_id``) so session B
+        # can't read session A's session-mutating jobs by id.
+        global_record = self._global_job_registry.get_job(job_id)
+        if global_record is not None and global_record.origin_session_id == session_id:
+            return global_record
+        return None
 
     def cancel_session_job(
         self, session_id: str, job_id: str
@@ -1297,14 +1316,46 @@ class SessionManager:
         this method assumes the caller has already decided cancellation is
         permitted.
 
+        For the three genuinely long-lived cancellable kinds — ``tds-stream``,
+        ``tds-batch`` (both driven by an in-worker ``run_tds``) and ``sweep`` —
+        this ALSO triggers the real abort, not just the record flip: the
+        session abort event is set (cooperatively halts ``run_tds`` at the next
+        ``callpert`` tick) and the backing ``sweep`` task is cancelled (its
+        driver maps ``CancelledError`` → ``aborted`` → ``cancelled``). Without
+        this, ``mark_cancelled`` alone would be cosmetic — the worker would run
+        to completion while the record falsely reads ``cancelled``.
+
         Raises ``SessionExpiredError`` for an unknown / closed session.
         """
         sess = self._require_session(session_id)
         registry = sess.job_registry
         if registry.get_job(job_id) is None:
             registry = self._global_job_registry
-            if registry.get_job(job_id) is None:
+            global_record = registry.get_job(job_id)
+            # Only the owning session may cancel a global (session-mutating)
+            # job — otherwise session B could cancel session A's job by id.
+            if global_record is None or global_record.origin_session_id != session_id:
                 return None
+
+        # Trigger the REAL abort for in-flight long-lived runs before flipping
+        # the record, so the cancel affordance actually stops the work.
+        target = registry.get_job(job_id)
+        if target is not None and target.status in ("pending", "running"):
+            if target.kind in ("tds-stream", "tds-batch"):
+                # Cooperative abort: set the session abort event. ``run_tds``
+                # checks it each ``callpert`` tick and exits early. Setting the
+                # multiprocessing Event is non-blocking, safe to call inline.
+                with contextlib.suppress(Exception):
+                    sess.abort_event.set()
+            elif target.kind == "sweep":
+                # Cancel the backing sweep task; ``_drive_sweep``'s
+                # ``CancelledError`` arm finishes the sweep ``aborted`` and
+                # reconciles the record. ``task.cancel()`` is safe from the
+                # event loop (the cancel route runs there).
+                task = self._sweep_tasks.get(job_id)
+                if task is not None and not task.done():
+                    task.cancel()
+
         registry.mark_cancelled(job_id)
         updated = registry.get_job(job_id)
         if updated is None or updated.status != "cancelled":
@@ -1337,7 +1388,17 @@ class SessionManager:
         sess.job_event_subscribers.append(consumer)
         try:
             while True:
-                yield await consumer.get()
+                envelope = await consumer.get()
+                if envelope.get("__closed__"):
+                    # Session was reaped / closed: ``_close_session`` pushed a
+                    # terminal sentinel so this awaiting generator unblocks
+                    # instead of parking on ``consumer.get()`` forever (a
+                    # half-open-socket leak across reaps). The WS handler maps
+                    # ``SessionExpiredError`` to a 4404 close.
+                    raise SessionExpiredError(
+                        f"session {session_id!r} was closed"
+                    )
+                yield envelope
         finally:
             with contextlib.suppress(ValueError):
                 sess.job_event_subscribers.remove(consumer)
@@ -1462,14 +1523,18 @@ class SessionManager:
         if sess is None:
             return
         registry = sess.job_registry
+        terminal_id = run_buf.run_id
         if state == "completed":
             registry.mark_done(run_buf.run_id)
         elif state == "error":
-            registry.mark_failed(
+            # ``mark_failed`` may coalesce into a prior same-signature record
+            # (deleting ``run_id``); broadcast the survivor it returns so the
+            # terminal transition is not dropped.
+            terminal_id = registry.mark_failed(
                 run_buf.run_id,
                 problem=_stream_error_problem("tds-stream", error),
             )
-        record = registry.get_job(run_buf.run_id)
+        record = registry.get_job(terminal_id)
         if record is not None:
             self.broadcast_job_event(run_buf.session_id, record)
 
@@ -1488,15 +1553,18 @@ class SessionManager:
         transition.
         """
         registry = sess.job_registry
+        terminal_id = sweep_id
         if state == "completed":
             registry.mark_done(sweep_id)
         elif state == "aborted":
             registry.mark_cancelled(sweep_id)
         elif state == "error":
-            registry.mark_failed(
+            # ``mark_failed`` may coalesce into a prior same-signature record
+            # (deleting ``sweep_id``); broadcast the survivor it returns.
+            terminal_id = registry.mark_failed(
                 sweep_id, problem=_stream_error_problem("sweep", error)
             )
-        record = registry.get_job(sweep_id)
+        record = registry.get_job(terminal_id)
         if record is not None:
             self.broadcast_job_event(sess.session_id, record)
 
@@ -1573,13 +1641,27 @@ class SessionManager:
         sessions are skipped so cost is proportional to active work). For each
         ``running`` job whose worker process is not alive, marks it ``failed``
         with a synthesized ``WorkerDied`` ``ProblemDetails`` and broadcasts the
-        transition to any ``/jobs/events`` subscribers.
+        transition to any ``/jobs/events`` subscribers. Also scans the
+        manager-wide global registry (session-mutating jobs, KTD-20) and
+        orphans ``running`` records whose originating session's worker is dead
+        — the per-session pass never sees those because they live in the
+        global registry.
 
         Exposed (not just the 10 s loop) so tests can drive a single tick
         deterministically without shortening the interval or sleeping.
         """
         with self._registry_lock:
             sessions = list(self._sessions.items())
+        sessions_by_id = dict(sessions)
+
+        def _worker_dead(session_id: str | None) -> bool:
+            """True when the session is gone/closed or its worker is not alive."""
+            if session_id is None:
+                return False
+            sess = sessions_by_id.get(session_id)
+            if sess is None or sess.closed:
+                return True
+            return not (sess.process is not None and sess.process.is_alive())
 
         failed = 0
         for session_id, sess in sessions:
@@ -1598,11 +1680,25 @@ class SessionManager:
             # reality instead of a spinner that never resolves.
             for job in running:
                 problem = _worker_died_problem(job)
-                sess.job_registry.mark_failed(job.id, problem=problem)
-                updated = sess.job_registry.get_job(job.id)
+                survivor_id = sess.job_registry.mark_failed(job.id, problem=problem)
+                updated = sess.job_registry.get_job(survivor_id)
                 if updated is not None:
                     self.broadcast_job_event(session_id, updated)
                 failed += 1
+
+        # Global-registry pass (KTD-20): session-mutating jobs live here, so the
+        # per-session loop above never inspects them. Orphan any ``running``
+        # global record whose originating session's worker has died.
+        for job in self._global_job_registry.list_jobs(status="running"):
+            origin = job.origin_session_id
+            if not _worker_dead(origin):
+                continue
+            problem = _worker_died_problem(job)
+            survivor_id = self._global_job_registry.mark_failed(job.id, problem=problem)
+            updated = self._global_job_registry.get_job(survivor_id)
+            if updated is not None and origin is not None:
+                self.broadcast_job_event(origin, updated)
+            failed += 1
         return failed
 
 

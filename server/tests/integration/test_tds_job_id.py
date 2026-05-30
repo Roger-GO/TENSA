@@ -158,9 +158,52 @@ async def test_streaming_start_registers_tds_stream_job_with_aliased_id(
     record = rec.json()
     assert record["id"] == run_id
     assert record["kind"] == "tds-stream"
-    assert record["status"] in ("pending", "running", "done", "failed")
+    # Immediately post-start the run is still in-flight: the record is
+    # registered synchronously ``pending`` and the driver may have flipped it
+    # ``running`` once the worker began emitting frames. It has NOT had time to
+    # reach a terminal state, so a tight in-flight assertion is load-bearing
+    # (the prior "every status except cancelled" set validated nothing).
+    assert record["status"] in ("pending", "running")
     assert record["can_cancel"] is True
 
     # Cooperatively abort so the background driver tears down promptly and the
     # fixture's ``mgr.shutdown`` (which cancels run tasks) is fast.
     await mgr.signal_abort(sid)
+
+
+@pytest.mark.integration
+async def test_delete_cancel_of_live_stream_fires_real_abort(
+    client: tuple[httpx.AsyncClient, SessionManager],
+) -> None:
+    """DELETE /jobs/{id} for a LIVE streaming run must actually abort the work,
+    not just flip the record to ``cancelled``: the session abort event must be
+    set (the cooperative-abort path ``run_tds`` checks each ``callpert`` tick).
+
+    Regression for the Phase-2 finding that ``cancel_session_job`` only called
+    ``mark_cancelled`` and never wired ``signal_abort`` / task cancellation, so
+    the worker ran to completion while the record falsely read ``cancelled``.
+    """
+    ac, mgr = client
+    sid = await _new_session(ac)
+    await _load_case(ac, sid)
+
+    run_args: dict[str, object] = {
+        "tf": 5.0,
+        "h": None,
+        "stream": True,
+        "decimation": "none",
+        "max_rate_hz": None,
+        "vars": ["bus_v"],
+        "integrator": "trapezoidal",
+    }
+    run_id = await mgr.start_streaming_run(sid, "run_tds", run_args)
+
+    sess = mgr._sessions[sid]
+    assert not sess.abort_event.is_set()
+
+    resp = await ac.delete(f"/api/sessions/{sid}/jobs/{run_id}", headers=HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "cancelled"
+
+    # The REAL abort fired — not just the record flip.
+    assert sess.abort_event.is_set()
