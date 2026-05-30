@@ -62,7 +62,7 @@ import type {
   WorkspaceFileList,
   WorkspacePath,
 } from './types';
-import { useAuthStore } from '@/store/auth';
+import { useAuthStore, useAuthReady } from '@/store/auth';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
@@ -635,15 +635,16 @@ export function useReloadCase(): UseMutationResult<TopologySummary, Error, Sessi
 // ---- workspace lister -----------------------------------------------------
 
 /** `GET /workspace/files`. Stable across the tab; modest stale time.
- * Gated on `auth.token !== null` so the query doesn't fire on first
- * paint before the URL-fragment fast-path has had a chance to land
- * (which would 401, race the fast-path, and wipe the token via the
- * global 401 handler). */
+ * Gated on `useAuthReady()` (token present OR a no-auth substrate) so the
+ * query doesn't fire on first paint before the URL-fragment fast-path has
+ * had a chance to land (which would 401, race the fast-path, and wipe the
+ * token via the global 401 handler) — while still firing against a
+ * `serve --no-auth` backend, where no token is ever set. */
 export function useListWorkspaceFiles(): UseQueryResult<WorkspaceFileList, Error> {
-  const tokenPresent = useAuthStore((s) => s.token !== null);
+  const authReady = useAuthReady();
   return useQuery({
     queryKey: queryKeys.workspaceFiles,
-    enabled: tokenPresent,
+    enabled: authReady,
     queryFn: async () => {
       return await andesClient.get<WorkspaceFileList>('/workspace/files', {
         timeoutMs: TIMEOUTS.workspace,
@@ -714,10 +715,10 @@ export function usePutSidecar(): UseMutationResult<void, Error, PutSidecarVars> 
  * server-side `_PARAMS_BY_MODEL` table; rarely changes — long stale time.
  */
 export function useTopologySchema(): UseQueryResult<TopologySchema, Error> {
-  const tokenPresent = useAuthStore((s) => s.token !== null);
+  const authReady = useAuthReady();
   return useQuery({
     queryKey: queryKeys.topologySchema,
-    enabled: tokenPresent,
+    enabled: authReady,
     staleTime: 24 * 60 * 60 * 1000,
     queryFn: async () => {
       return await andesClient.get<TopologySchema>('/topology/schema', {
