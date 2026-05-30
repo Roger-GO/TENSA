@@ -33,10 +33,16 @@ import { useReloadCase } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { useCommandRegistry, subscribePaletteDialog } from '@/lib/commands';
 import { ProblemDetailsError } from '@/api/client';
+import { SaveAsCustomCaseDialog } from '@/components/case/SaveAsCustomCaseDialog';
 
 const TESTID_BY_ID: Record<string, string> = {
   'edit.undo': 'topbar-menu-edit-undo',
   'edit.reload': 'topbar-menu-edit-reload',
+  'inspector.toggle-edit-mode': 'topbar-menu-edit-toggle-edit-mode',
+  'clone.undo': 'topbar-menu-edit-clone-undo',
+  'clone.redo': 'topbar-menu-edit-clone-redo',
+  'clone.save-as': 'topbar-menu-edit-clone-save-as',
+  'clone.reset': 'topbar-menu-edit-clone-reset',
 };
 
 export function EditMenu() {
@@ -138,6 +144,10 @@ export function EditMenu() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Save-as-custom-case dialog (Unit 22). Uncontrolled — it subscribes to
+          the ``save-as-custom`` palette bridge so the ``clone.save-as`` command
+          (menu click + ⌘⇧S) opens it. */}
+      <SaveAsCustomCaseDialog />
     </>
   );
 }

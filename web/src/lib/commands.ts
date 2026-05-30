@@ -46,7 +46,14 @@ import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 import { useHistoryStore } from '@/store/history';
 import { useReportDialogStore } from '@/components/reports/ReportDialog';
-import { useCurrentTopology, useReloadCase, useUndoLastEdit } from '@/api/queries';
+import {
+  useCloneRedo,
+  useCloneReset,
+  useCloneUndo,
+  useCurrentTopology,
+  useReloadCase,
+  useUndoLastEdit,
+} from '@/api/queries';
 import { __requestOpenSldSearch } from '@/store/sld';
 import { useThemeStore } from '@/store/theme';
 import { useLayoutStore } from '@/store/layout';
@@ -153,6 +160,16 @@ export function useCommandRegistry(): readonly Command[] {
   // ---- mutations (Edit group) -------------------------------------------
   const reloadMutation = useReloadCase();
   const undoMutation = useUndoLastEdit();
+
+  // ---- clone-on-write edit (Unit 22) ------------------------------------
+  const editMode = useCaseStore((s) => s.editMode);
+  const setEditMode = useCaseStore((s) => s.setEditMode);
+  const cloneInitialized = useCaseStore((s) => s.cloneInitialized);
+  const cloneUndoDepth = useCaseStore((s) => s.cloneUndoDepth);
+  const cloneRedoDepth = useCaseStore((s) => s.cloneRedoDepth);
+  const cloneUndoMutation = useCloneUndo();
+  const cloneRedoMutation = useCloneRedo();
+  const cloneResetMutation = useCloneReset();
 
   // ---- derived gates ----------------------------------------------------
   const noTopology = topology === null;
@@ -304,6 +321,75 @@ export function useCommandRegistry(): readonly Command[] {
         keywords: ['reload', 'reset', 'discard', 'edits'],
         action: () => __requestPaletteDialog('reload-confirm'),
         when: () => sessionId !== null && !reloadDisabled && !reloadMutation.isPending,
+      },
+
+      // ---- clone-on-write edit (Unit 22) --------------------------------
+      // Edit/Run mode toggle — flips the inspector between read-only (Run)
+      // and clone-editable (Edit). Mirrors the EditModeToggle button so the
+      // shortcut + click paths are interchangeable. Always surfaced when a
+      // session exists (the toggle itself no-ops on a non-controller).
+      {
+        id: 'inspector.toggle-edit-mode',
+        label: editMode === 'edit' ? 'Switch to Run mode' : 'Switch to Edit mode',
+        group: 'edit',
+        keywords: ['edit', 'run', 'mode', 'toggle', 'inspector', 'controller', 'parameter'],
+        action: () => setEditMode(editMode === 'edit' ? 'run' : 'edit'),
+        when: () => sessionId !== null,
+      },
+      // Clone undo / redo (Ctrl+Z / Ctrl+Shift+Z). NOTE: the existing
+      // ``edit.undo`` (Undo last edit) is palette/menu-only with NO shortcut
+      // binding, so Ctrl+Z is free to bind here without collision. Gated on a
+      // live clone + a non-empty stack so the binding is a no-op otherwise.
+      {
+        id: 'clone.undo',
+        label: 'Undo parameter edit',
+        group: 'edit',
+        keywords: ['undo', 'clone', 'parameter', 'edit', 'revert', 'controller'],
+        action: () => {
+          if (sessionId !== null) cloneUndoMutation.mutate(sessionId);
+        },
+        when: () =>
+          sessionId !== null &&
+          cloneInitialized &&
+          cloneUndoDepth > 0 &&
+          !cloneUndoMutation.isPending,
+        shortcut: 'ctrl+z, meta+z',
+      },
+      {
+        id: 'clone.redo',
+        label: 'Redo parameter edit',
+        group: 'edit',
+        keywords: ['redo', 'clone', 'parameter', 'edit', 'reapply', 'controller'],
+        action: () => {
+          if (sessionId !== null) cloneRedoMutation.mutate(sessionId);
+        },
+        when: () =>
+          sessionId !== null &&
+          cloneInitialized &&
+          cloneRedoDepth > 0 &&
+          !cloneRedoMutation.isPending,
+        shortcut: 'ctrl+shift+z, meta+shift+z',
+      },
+      {
+        id: 'clone.save-as',
+        label: 'Save as custom case…',
+        group: 'edit',
+        keywords: ['save', 'save as', 'custom', 'case', 'clone', 'workspace', 'tuned'],
+        action: () => __requestPaletteDialog('save-as-custom'),
+        when: () => sessionId !== null && cloneInitialized,
+        shortcut: 'ctrl+shift+s, meta+shift+s',
+      },
+      {
+        id: 'clone.reset',
+        label: 'Discard all parameter edits',
+        group: 'edit',
+        keywords: ['discard', 'reset', 'clone', 'edits', 'revert', 'original'],
+        action: () => {
+          if (sessionId !== null) cloneResetMutation.mutate(sessionId);
+        },
+        // No shortcut — destructive, menu/palette-only per the plan.
+        when: () =>
+          sessionId !== null && cloneInitialized && !cloneResetMutation.isPending,
       },
 
       // ---- run -----------------------------------------------------------
@@ -611,6 +697,14 @@ export function useCommandRegistry(): readonly Command[] {
     openHistoryDrawer,
     reloadMutation,
     undoMutation,
+    editMode,
+    setEditMode,
+    cloneInitialized,
+    cloneUndoDepth,
+    cloneRedoDepth,
+    cloneUndoMutation,
+    cloneRedoMutation,
+    cloneResetMutation,
     editGateDisabled,
     sessionScopeDisabled,
     reportDisabled,
@@ -663,7 +757,8 @@ export type PaletteDialogKey =
   | 'save-system'
   | 'import-bundle'
   | 'reload-confirm'
-  | 'sweep';
+  | 'sweep'
+  | 'save-as-custom';
 
 type Listener = (key: PaletteDialogKey) => void;
 
