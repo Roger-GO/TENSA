@@ -310,6 +310,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/case/clone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Initialise the clone-on-write copy of the active case. */
+        post: operations["initClone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/case/clone/params/{model}/{idx}/{param}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Edit one whitelisted controller param on the clone (write + reload + setup). */
+        put: operations["applyCloneEdit"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/case/clone/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undo the most recent clone edit (restore prior file state + re-setup). */
+        post: operations["undoCloneEdit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/case/clone/redo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-apply the most recently undone clone edit. */
+        post: operations["redoCloneEdit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/case/clone/save-as": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Write the clone to the workspace as a custom case. */
+        post: operations["saveCloneAs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/case/clone/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Discard the clone and revert to the original case files. */
+        post: operations["resetClone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/tds": {
         parameters: {
             query?: never;
@@ -514,6 +616,37 @@ export interface paths {
          * @description Delete snapshot endpoint — Unit 7.
          */
         delete: operations["deleteSnapshot"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/bundle/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a reproducibility bundle (.zip) into the current session.
+         * @description Import a reproducibility bundle.
+         *
+         *     See module docstring for the conflict-resolution flow. The
+         *     response is always a :class:`BundleImportResponse` — the route
+         *     layer differentiates the two outcomes via HTTP status:
+         *
+         *     - ``200 OK`` + ``status="committed"``: case loaded, disturbances
+         *       replayed. ``case_filename`` and ``disturbances_replayed`` carry
+         *       the post-commit bookkeeping.
+         *     - ``409 Conflict`` + ``status="plan"``: conflicts present, nothing
+         *       committed. The UI renders the conflict resolver and re-issues
+         *       with ``force_resolve=true``.
+         */
+        post: operations["importBundle"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -875,6 +1008,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/sweep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a sensitivity sweep — Unit 18.
+         * @description Start a sweep. Returns immediately; the WS channel emits progress.
+         *
+         *     Validates the parameter kind locally (so a bad request doesn't
+         *     waste a worker round trip), materialises the parameter range, then
+         *     schedules the background task via ``SessionManager.start_sweep``.
+         *     The ``sweep_in_progress`` flag is set BEFORE this call returns so
+         *     the next session-scoped route call observes it.
+         */
+        post: operations["startSweep"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List jobs for a session (v3.1 Unit 5a).
+         * @description Return the session's jobs, newest-last, optionally filtered.
+         *
+         *     ``kind`` filters by routine kind; ``status`` (the wire query param) filters
+         *     by lifecycle state — aliased to the local ``status_filter`` so it doesn't
+         *     shadow the imported ``status`` module. Both default to ``None`` (no
+         *     filter). The list spans the per-session registry AND the manager-wide
+         *     global registry so session-mutating jobs (KTD-20) surface here too.
+         */
+        get: operations["listJobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch one job by id (v3.1 Unit 5a).
+         * @description Return one job record. 404 when the session or job id is unknown.
+         */
+        get: operations["getJob"];
+        put?: never;
+        post?: never;
+        /**
+         * Cancel a job (v3.1 Unit 5a).
+         * @description Cancel a job.
+         *
+         *     - ``can_cancel == true`` → ``mark_cancelled`` + broadcast + 200 with the
+         *       updated record.
+         *     - ``can_cancel == false`` → 409 ``SessionBusyError`` (``wait-for-job``
+         *       recovery, ``retryable: false``): the job is running and must be waited
+         *       out. The shared ``SessionBusyError`` exception handler renders the
+         *       ProblemDetails envelope with the recovery CTA + the ``current_job``.
+         *     - Unknown job id → 404.
+         */
+        delete: operations["cancelJob"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -931,6 +1148,11 @@ export interface components {
              * @description One ack entry per accepted disturbance, in input order.
              */
             accepted: components["schemas"]["DisturbanceAck"][];
+            /**
+             * Job Id
+             * @description Job-registry id mirroring the disturbance-commit routine (v3.1 Unit 5b, kind ``disturbance-commit``). One job covers the whole batch; ``null`` on legacy responses.
+             */
+            job_id?: string | null;
         };
         /**
          * AddElementRequest
@@ -1119,6 +1341,33 @@ export interface components {
             /** @description Empty topology snapshot for the freshly-created blank System. All buckets are empty; ``state`` is ``pre-setup``. */
             topology: components["schemas"]["TopologySummary"];
         };
+        /** Body_importBundle */
+        Body_importBundle: {
+            /**
+             * File
+             * Format: binary
+             * @description Reproducibility bundle ``.zip`` (the same format produced by ``POST /api/sessions/{id}/bundle/export``).
+             */
+            file: string;
+            /**
+             * Force Resolve
+             * @description When False (default), the substrate validates the bundle and returns ``status=plan`` if any conflict is detected (sha mismatch, version mismatch, missing addfile). When True, the substrate proceeds with the extraction + replay honouring ``use_bundle_case`` / ``accept_version_mismatch``.
+             * @default false
+             */
+            force_resolve: boolean;
+            /**
+             * Use Bundle Case
+             * @description Sha-mismatch resolution. True (default) overwrites the workspace's copy of the case file with the bundle's; False preserves the workspace file and writes the bundle's to a sibling ``<filename>.from-bundle`` for offline diff.
+             * @default true
+             */
+            use_bundle_case: boolean;
+            /**
+             * Accept Version Mismatch
+             * @description When True (default), the substrate proceeds even when the bundle's ANDES major.minor differs from the installed version (the warning surfaces in the response's ``plan``).
+             * @default true
+             */
+            accept_version_mismatch: boolean;
+        };
         /** Body_uploadProfile */
         Body_uploadProfile: {
             /**
@@ -1127,6 +1376,44 @@ export interface components {
              * @description CSV or XLSX file. CSV inputs are transcoded to xlsx (single sheet named ``profile``) for uniformity with ANDES's preferred input format.
              */
             file: string;
+        };
+        /**
+         * BundleConflictModel
+         * @description One conflict surfaced by ``validate_bundle``.
+         */
+        BundleConflictModel: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "andes-version" | "addfile-missing" | "sha-mismatch";
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "warning" | "blocker";
+            /** Message */
+            message: string;
+            /** Filename */
+            filename?: string | null;
+            /**
+             * Bundle Meta
+             * @description Side-by-side metadata for the bundle's copy of the case file. Populated for ``sha-mismatch``.
+             */
+            bundle_meta?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Workspace Meta
+             * @description Side-by-side metadata for the workspace's copy of the case file. Populated for ``sha-mismatch``.
+             */
+            workspace_meta?: {
+                [key: string]: unknown;
+            } | null;
+            /** Bundle Andes Version */
+            bundle_andes_version?: string | null;
+            /** Current Andes Version */
+            current_andes_version?: string | null;
         };
         /**
          * BundleExportRequest
@@ -1156,6 +1443,60 @@ export interface components {
              * @description Run id of the most recent TDS run. Surfaced in the manifest for cross-referencing with run-history exports.
              */
             run_id?: string | null;
+        };
+        /**
+         * BundleImportPlanModel
+         * @description ``BundleImportPlan`` shape echoed in both plan and committed responses.
+         */
+        BundleImportPlanModel: {
+            /** Manifest */
+            manifest: {
+                [key: string]: unknown;
+            };
+            /** Case Files */
+            case_files: string[];
+            /** Conflicts */
+            conflicts?: components["schemas"]["BundleConflictModel"][];
+            /** Blocked */
+            blocked: boolean;
+            /** Has Conflicts */
+            has_conflicts: boolean;
+        };
+        /**
+         * BundleImportResponse
+         * @description Response body for ``POST /sessions/{id}/bundle/import``.
+         */
+        BundleImportResponse: {
+            /**
+             * Status
+             * @description ``plan`` = conflicts present, nothing committed; the user resolves them and re-issues with ``force_resolve=true``. ``committed`` = case loaded and disturbances replayed.
+             * @enum {string}
+             */
+            status: "plan" | "committed";
+            plan: components["schemas"]["BundleImportPlanModel"];
+            /** Warnings */
+            warnings?: string[];
+            /**
+             * Case Filename
+             * @description Basename of the case file the substrate loaded. Populated on ``status=committed``; null on ``status=plan``.
+             */
+            case_filename?: string | null;
+            /**
+             * Addfile Filenames
+             * @description Basenames of any addfiles the substrate extracted alongside the primary case (e.g., ``ieee14.dyr`` for a PSS/E .raw + .dyr bundle). Empty on ``status=plan``.
+             */
+            addfile_filenames?: string[];
+            /**
+             * Disturbances Replayed
+             * @description Count of disturbance specs successfully re-applied to the newly-loaded System. Zero on ``status=plan``.
+             * @default 0
+             */
+            disturbances_replayed: number;
+            /**
+             * Job Id
+             * @description Job-registry id mirroring the bundle-import routine (v3.1 Unit 5b, kind ``bundle-import``). Recorded in the manager-wide global registry (KTD-20) so it survives the session being replaced on a committed import. Present on both the ``committed`` (200) body and the ``plan`` (409) body. ``null`` on legacy responses.
+             */
+            job_id?: string | null;
         };
         /**
          * BundleSimParams
@@ -1212,6 +1553,140 @@ export interface components {
              * @description Bus Y coordinate, finite (no NaN/Inf).
              */
             y: number;
+        };
+        /**
+         * CloneEditRequest
+         * @description Request body for ``PUT /sessions/{id}/case/clone/params/{model}/{idx}/{param}``.
+         *
+         *     Carries only the new ``value`` — ``model`` / ``idx`` / ``param`` are path
+         *     parameters, whitelist-validated by the route BEFORE any clone work. The
+         *     edit modifies the cloned case file (never the original), then re-loads +
+         *     re-setups the System so runs reflect the new value.
+         */
+        CloneEditRequest: {
+            /**
+             * Value
+             * @description New value for the parameter. Written to the clone case file; ANDES re-reads it on the subsequent ``load(setup=False) → setup()`` cycle. Some params are per-unit-normalised at setup, so the read-back live value may differ from the file value.
+             */
+            value: number | string | boolean;
+        };
+        /**
+         * CloneEditResponse
+         * @description Response body for the clone edit / undo / redo routes.
+         *
+         *     Returns the post-setup live value plus the current undo / redo stack
+         *     depths so the inspector can enable / disable its undo / redo affordances.
+         */
+        CloneEditResponse: {
+            /**
+             * Model
+             * @description ANDES model class of the edited device (echoed from the path). Empty string on undo / redo responses (the stack entry, not a single field, is the unit of work).
+             */
+            model: string;
+            /**
+             * Idx
+             * @description Device idx of the edited element (empty on undo / redo).
+             */
+            idx: string;
+            /**
+             * Param
+             * @description Edited parameter name (empty on undo / redo).
+             */
+            param: string;
+            /**
+             * New Value
+             * @description The parameter value read back from the re-setup System (``ss.<model>.<param>.v[i]``). ``null`` on undo / redo.
+             */
+            new_value?: number | string | boolean | null;
+            /**
+             * Undo Depth
+             * @description Number of edits currently recoverable via undo (0-50).
+             */
+            undo_depth: number;
+            /**
+             * Redo Depth
+             * @description Number of undone edits currently re-appliable via redo.
+             */
+            redo_depth: number;
+            /**
+             * Job Id
+             * @description Job-registry id mirroring the clone routine (v3.1 Unit 5b, kinds ``clone-edit`` / ``clone-undo`` / ``clone-redo``). ``null`` on legacy responses.
+             */
+            job_id?: string | null;
+        };
+        /**
+         * CloneInitResponse
+         * @description Response body for ``POST /sessions/{id}/case/clone`` (clone init).
+         */
+        CloneInitResponse: {
+            /**
+             * Clone Dir
+             * @description Absolute path of the per-session clone scratch directory.
+             */
+            clone_dir: string;
+            /**
+             * Clone Files
+             * @description Absolute paths of the cloned case files (case + addfiles).
+             */
+            clone_files?: string[];
+            /**
+             * Already Initialized
+             * @description ``true`` when the clone already existed (idempotent re-init — no re-copy, so pending edits are preserved).
+             */
+            already_initialized: boolean;
+            /**
+             * Job Id
+             * @description Job-registry id for the ``clone-init`` routine.
+             */
+            job_id?: string | null;
+        };
+        /**
+         * CloneResetResponse
+         * @description Response body for ``POST /sessions/{id}/case/clone/reset``.
+         */
+        CloneResetResponse: {
+            /**
+             * Reset
+             * @description Always ``true`` — the clone dir was discarded and the session reverted to the original case files.
+             */
+            reset: boolean;
+            /**
+             * Job Id
+             * @description Job-registry id for the ``clone-reset`` routine.
+             */
+            job_id?: string | null;
+        };
+        /**
+         * CloneSaveAsRequest
+         * @description Request body for ``POST /sessions/{id}/case/clone/save-as``.
+         */
+        CloneSaveAsRequest: {
+            /**
+             * Name
+             * @description Workspace-relative case name (stem only — no extension, no path separators or traversal). The clone's files are written as ``<name>.<ext>`` for each cloned format. Re-using a name overwrites.
+             */
+            name: string;
+        };
+        /**
+         * CloneSaveAsResponse
+         * @description Response body for ``POST /sessions/{id}/case/clone/save-as`` (201).
+         */
+        CloneSaveAsResponse: {
+            /**
+             * Name
+             * @description The saved case name (stem).
+             */
+            name: string;
+            /**
+             * Files
+             * @description Absolute paths of the written workspace files.
+             */
+            files?: string[];
+            /**
+             * Job Id
+             * @description Job-registry id for the ``clone-save-as`` routine.
+             */
+            job_id?: string | null;
         };
         /**
          * ComplexNumberModel
@@ -1322,6 +1797,11 @@ export interface components {
              * @description Discriminator: ``"pv"`` for the full PV-curve sweep (``CPF.run``) or ``"qv"`` for a single-bus QV-curve (``CPF.run_qv``). The wire shape is the same; the UI uses ``mode`` to label the X-axis (lambda vs Q).
              */
             mode: string;
+            /**
+             * Job Id
+             * @description Job-registry id mirroring this CPF routine (v3.1 Unit 5b, kind ``cpf`` for the PV sweep, ``cpf-qv`` for the QV curve). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
+             */
+            job_id?: string | null;
         };
         /**
          * CpfRunRequest
@@ -1464,6 +1944,11 @@ export interface components {
              * @description Always ``true`` after a successful EIG.run. ANDES's ``EIG._pre_check`` calls ``TDS.init()`` + ``TDS.itm_step()`` if not already initialised — the substrate surfaces this so the UI can warn that subsequent TDS / re-run PF will start from this initialised dae.
              */
             tds_initialized: boolean;
+            /**
+             * Job Id
+             * @description Job-registry id mirroring this EIG routine (v3.1 Unit 5b, kind ``eig``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
+             */
+            job_id?: string | null;
         };
         /**
          * EigRunRequest
@@ -1487,6 +1972,11 @@ export interface components {
         ElementCreated: {
             /** @description The element that was just added, with its assigned idx + the parameters as ANDES read them back. */
             element: components["schemas"]["TopologyEntry"];
+            /**
+             * Job Id
+             * @description Job-registry id mirroring the element-add routine (v3.1 Unit 5b, kind ``element-add``). ``null`` on legacy responses.
+             */
+            job_id?: string | null;
         };
         /**
          * FaultSpec
@@ -1563,6 +2053,78 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * JobRecordSchema
+         * @description HTTP-visible shape of a ``_JobRegistry`` record.
+         *
+         *     Returned by ``GET /sessions/{id}/jobs`` and ``GET /sessions/{id}/jobs/{job_id}``
+         *     in Unit 5a. Every routine response from Unit 5b also embeds a ``job_id``
+         *     that resolves to one of these records.
+         */
+        JobRecordSchema: {
+            /**
+             * Id
+             * @description Server-generated UUID identifier for the job.
+             */
+            id: string;
+            /**
+             * Kind
+             * @description Discriminator for the routine kind (``pflow``, ``tds-stream``, ``eig``, ``cpf``, ``cpf-qv``, ``se``, ``sweep``, ``snapshot-*``, ``bundle-*``, ``element-*``, ``clone-*``, etc.). The full enum lives in ``andes_app.core.jobs.JobKind``.
+             * @enum {string}
+             */
+            kind: "pflow" | "tds-batch" | "tds-stream" | "eig" | "cpf" | "cpf-qv" | "se" | "se-measurements" | "sweep" | "snapshot-save" | "snapshot-restore" | "snapshot-delete" | "bundle-export" | "bundle-import" | "case-load" | "case-reload" | "case-save" | "element-add" | "element-edit" | "element-delete" | "element-undo" | "disturbance-commit" | "pmu-add" | "pmu-delete" | "profile-upload" | "profile-add" | "profile-delete" | "clone-init" | "clone-edit" | "clone-undo" | "clone-redo" | "clone-save-as" | "clone-reset";
+            /**
+             * Status
+             * @description Lifecycle state: ``pending`` (registered), ``running`` (worker actively executing), ``done`` (completed successfully), ``failed`` (worker raised; ``problem`` populated), or ``cancelled`` (cooperative-abort succeeded).
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed" | "cancelled";
+            /**
+             * Started At
+             * @description Monotonic clock seconds when the job was registered. Use differences between ``started_at`` / ``updated_at`` / ``ended_at`` for elapsed-time display.
+             */
+            started_at: number;
+            /**
+             * Updated At
+             * @description Monotonic clock seconds at the most recent state mutation.
+             */
+            updated_at: number;
+            /**
+             * Ended At
+             * @description Monotonic clock seconds at terminal transition (done/failed/cancelled). ``None`` while in-flight.
+             */
+            ended_at?: number | null;
+            /**
+             * Can Cancel
+             * @description True if the job exposes a cooperative-abort path (TDS streaming, sweep, clone reload-replay). Synchronous routines like PF/EIG/CPF/SE are not cancellable; the UI must NOT render a cancel button for ``can_cancel: false`` records.
+             */
+            can_cancel: boolean;
+            /**
+             * Progress
+             * @description Fractional progress in ``[0.0, 1.0]`` when the job emits per-step progress (sweep iterations, clone reload-replay phases). ``None`` means indeterminate.
+             */
+            progress?: number | null;
+            /**
+             * Request Summary
+             * @description Serializable subset of the original request body. Used by the Activity panel's Retry affordance to re-fire the same mutation variables. Must NOT carry credentials or large blobs (R16: this field is in-memory only and excluded from any Zustand persist whitelist on the web side).
+             */
+            request_summary?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Result Ref
+             * @description Opaque reference to the job's result, populated on ``done``. For TDS this is the ``run_id``; for sweep, the ``sweep_id``; for clone edits, the new param value reference.
+             */
+            result_ref?: string | null;
+            /** @description Populated on ``failed`` with the full ProblemDetails envelope (includes the typed ``recovery`` axes from KTD-3). Drives the Activity panel's per-job ``<ProblemDetailsErrorSurface>``. */
+            problem?: components["schemas"]["ProblemDetails"] | null;
+            /**
+             * Repeated Count
+             * @description Number of identical-signature failures that coalesced into this record (KTD-19 sticky-first semantics). For ``done`` and in-flight jobs this is always ``0``.
+             * @default 0
+             */
+            repeated_count: number;
         };
         /**
          * LineFlow
@@ -1761,6 +2323,11 @@ export interface components {
             load_consumption?: {
                 [key: string]: components["schemas"]["LoadConsumption"];
             };
+            /**
+             * Job Id
+             * @description Job-registry id mirroring this routine invocation (v3.1 Unit 5b). Additive: ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``pflow``). ``null`` only on legacy responses synthesised outside the job lifecycle.
+             */
+            job_id?: string | null;
         };
         /**
          * PflowRunRequest
@@ -1799,8 +2366,33 @@ export interface components {
              * @description URI reference that identifies the specific occurrence of the problem.
              */
             instance?: string | null;
+            /** @description Optional recovery call-to-action describing how the client can resolve the problem (e.g., load a case, run power flow, retry). ``None`` means no recovery action is offered. Populated by the shared error mapper (Unit 4a) from the error's recovery kind. */
+            recovery?: components["schemas"]["RecoveryDescriptor"] | null;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * RecoveryDescriptor
+         * @description Recovery call-to-action attached to an error response.
+         *
+         *     The ``kind`` is the stable, machine-readable discriminator the UI keys
+         *     off to render the right action (e.g., a "Run power flow" button); the
+         *     ``label`` is the human-facing copy. ``kind == "none"`` means the error was
+         *     considered but has no canonical recovery action — the UI renders it
+         *     without a CTA, same as an absent ``recovery``.
+         */
+        RecoveryDescriptor: {
+            /**
+             * Kind
+             * @description Stable, machine-readable discriminator for the recovery action the client should offer (e.g., ``run-pflow``, ``load-case``, ``retry``). ``none`` means no canonical recovery action applies.
+             * @enum {string}
+             */
+            kind: "load-case" | "reload-case" | "run-pflow" | "retry" | "add-measurements" | "none" | "wait-for-job" | "wait-for-sweep";
+            /**
+             * Label
+             * @description Human-readable copy describing the recovery action, suitable for rendering on a call-to-action button or hint.
+             */
+            label: string;
         };
         /**
          * ReportResponse
@@ -1902,6 +2494,11 @@ export interface components {
              */
             disturbances_replayed: number;
             metadata: components["schemas"]["SnapshotMetadataModel"];
+            /**
+             * Job Id
+             * @description Job-registry id mirroring the snapshot-restore routine (v3.1 Unit 5b, kind ``snapshot-restore``). Recorded in the manager-wide global registry (KTD-20) so it survives the session being replaced, yet still surfaces via ``GET /sessions/{id}/jobs/{job_id}``. ``null`` on legacy responses.
+             */
+            job_id?: string | null;
         };
         /**
          * SaveCaseRequest
@@ -1946,6 +2543,11 @@ export interface components {
              * @description Size in bytes of the file just written, as reported by ``os.stat``.
              */
             bytes_written: number;
+            /**
+             * Job Id
+             * @description Job-registry id mirroring the case-save routine (v3.1 Unit 5b, kind ``case-save``). ``null`` on legacy responses.
+             */
+            job_id?: string | null;
         };
         /**
          * SaveSnapshotRequest
@@ -1982,6 +2584,11 @@ export interface components {
              * @description Size of the sidecar JSON on disk, in bytes.
              */
             metadata_bytes: number;
+            /**
+             * Job Id
+             * @description Job-registry id mirroring the snapshot-save routine (v3.1 Unit 5b, kind ``snapshot-save``). ``null`` on legacy responses.
+             */
+            job_id?: string | null;
         };
         /**
          * SeGenerateMeasurementsRequest
@@ -1994,7 +2601,7 @@ export interface components {
         SeGenerateMeasurementsRequest: {
             /**
              * Noise Seed
-             * @description Optional integer seed for the Gaussian-noise draw inside ``Measurements.generate_from_pflow``. ``None`` (default) uses an unseeded ``np.random.default_rng``; pinning the seed lets the UI re-generate the same measurement set across page refreshes.
+             * @description Optional non-negative integer seed for the Gaussian-noise draw inside ``Measurements.generate_from_pflow``. ``None`` (default) uses an unseeded ``np.random.default_rng``; pinning the seed lets the UI re-generate the same measurement set across page refreshes. ``ge=0`` because numpy's ``default_rng`` rejects negative seeds — a clean 422 here beats a misleading non-convergent error downstream.
              */
             noise_seed?: number | null;
         };
@@ -2008,6 +2615,11 @@ export interface components {
              * @description Number of scalar measurements in the substrate's ``Measurements`` object. For IEEE 14: 14 bus voltage measurements + 28 bus injection (P+Q for each bus) = 42. Note: ``SE.init`` adds an angle-reference pseudo-measurement at the slack bus on the first ``run_se`` call, so the eventual ``SeResult.residuals`` length will be one greater per island.
              */
             count: number;
+            /**
+             * Job Id
+             * @description Job-registry id mirroring the SE measurement-generation routine (v3.1 Unit 5b, kind ``se-measurements``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
+             */
+            job_id?: string | null;
         };
         /**
          * SeResultResponse
@@ -2047,6 +2659,11 @@ export interface components {
              * @description Indices into ``residuals`` whose normalised residual ``|r_i| / sigma_i`` exceeds 3-sigma. These are candidate bad-data measurements; the UI highlights the corresponding histogram bars in red.
              */
             flagged_indices: number[];
+            /**
+             * Job Id
+             * @description Job-registry id mirroring the SE run routine (v3.1 Unit 5b, kind ``se``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
+             */
+            job_id?: string | null;
         };
         /**
          * SeRunRequest
@@ -2177,6 +2794,116 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * StartSweepResponse
+         * @description Response body for ``POST /sessions/{id}/sweep``.
+         */
+        StartSweepResponse: {
+            /**
+             * Sweep Id
+             * @description Identifier the WS progress channel keys on. The UI uses this to subscribe via ``/api/ws/{session_id}/sweep/{sweep_id}``.
+             */
+            sweep_id: string;
+            /**
+             * Total
+             * @description Number of iterations the sweep will run.
+             */
+            total: number;
+            /**
+             * Job Id
+             * @description Job-registry id mirroring this sweep (v3.1 Unit 5c). Additive and IDENTICAL to ``sweep_id`` — the two fields alias the same value, with ``sweep_id`` preserved for backward compatibility. ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``sweep``).
+             */
+            job_id?: string | null;
+        };
+        /**
+         * SweepParameter
+         * @description Discriminated sweep target.
+         *
+         *     ``target`` is the ANDES-side device identifier the parameter applies
+         *     to (e.g., the disturbance idx returned by ``add_disturbance``). The
+         *     orchestrator looks up the matching spec in the snapshot's recorded
+         *     ``disturbance_log`` and overrides its field.
+         *
+         *     For v2.0 the target is the disturbance's index in the snapshot's log
+         *     (zero-based). Future revisions may extend this to (model, idx,
+         *     field) tuples for topology parameters.
+         */
+        SweepParameter: {
+            /**
+             * Kind
+             * @description Discriminator: which spec field is being swept. Includes the disturbance kind so the spec lookup can validate the target type matches.
+             * @enum {string}
+             */
+            kind: "disturbance.fault.tc" | "disturbance.fault.tf" | "disturbance.fault.xf" | "disturbance.fault.rf" | "disturbance.toggle.t" | "disturbance.alter.t" | "disturbance.alter.value";
+            /**
+             * Target
+             * @description Index into the snapshot's ``disturbance_log`` identifying which spec to mutate. v2.0 only supports per-disturbance sweeps; topology sweeps are deferred.
+             */
+            target: number;
+            /** @description Inclusive linear sweep range over the parameter values. */
+            range: components["schemas"]["SweepRange"];
+        };
+        /**
+         * SweepRange
+         * @description Inclusive-endpoint linear sweep range.
+         *
+         *     ``steps`` is the iteration count (>= 2). The endpoints ``start`` and
+         *     ``end`` always appear in the iteration set so the user gets exactly
+         *     the boundary they asked for.
+         */
+        SweepRange: {
+            /**
+             * Start
+             * @description First parameter value.
+             */
+            start: number;
+            /**
+             * End
+             * @description Last parameter value.
+             */
+            end: number;
+            /**
+             * Steps
+             * @description Iteration count (must be >= 2; capped at 200 to keep memory + runtime bounded for v2.0).
+             */
+            steps: number;
+        };
+        /**
+         * SweepRequest
+         * @description Request body for ``POST /sessions/{id}/sweep``.
+         */
+        SweepRequest: {
+            /** @description Parameter target + range definition. Identifies the spec to mutate per iteration and the values to iterate over. */
+            parameter: components["schemas"]["SweepParameter"];
+            /** @description Per-iteration TDS simulation parameters (tf, optional h, optional vars). Applied identically to every iteration. */
+            sim: components["schemas"]["SweepSimParams"];
+            /**
+             * Snapshot Name
+             * @description Name of a previously-saved snapshot. Each iteration restores this snapshot before applying the parameter override.
+             */
+            snapshot_name: string;
+        };
+        /**
+         * SweepSimParams
+         * @description Per-iteration TDS parameters. Mirrors the ``run_tds`` call shape.
+         */
+        SweepSimParams: {
+            /**
+             * Tf
+             * @description Final sim time per iteration.
+             */
+            tf: number;
+            /**
+             * H
+             * @description Fixed integration step (seconds). ``None`` to use the wrapper default (currently 1/120 s).
+             */
+            h?: number | null;
+            /**
+             * Vars
+             * @description Variable groups to record per iteration (kept as metadata only — the sweep stores aggregate convergence + final_t, not the full per-step state, to keep memory bounded).
+             */
+            vars?: string[] | null;
+        };
+        /**
          * TdsBatchResult
          * @description Result of a batch TDS run (post-completion delivery).
          *
@@ -2206,6 +2933,11 @@ export interface components {
              * @description Number of times the per-step ``TDS.callpert`` hook fired during the run. Useful as a sanity check that streaming is wired.
              */
             callpert_count: number;
+            /**
+             * Job Id
+             * @description Job-registry id mirroring this TDS run (v3.1 Unit 5c). Additive and IDENTICAL to ``run_id`` — the two fields alias the same value, with ``run_id`` preserved for backward compatibility. ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``tds-batch``). ``null`` only on legacy responses synthesised outside the job lifecycle.
+             */
+            job_id?: string | null;
         };
         /**
          * TdsRunRequest
@@ -2304,6 +3036,11 @@ export interface components {
             params?: {
                 [key: string]: number | string | boolean;
             };
+            /**
+             * Job Id
+             * @description Job-registry id mirroring the mutation that produced this entry (v3.1 Unit 5b). Populated only when this ``TopologyEntry`` is the top-level response of an edit / PMU-add / profile-add routine; ``null`` for nested entries inside a ``TopologySummary``.
+             */
+            job_id?: string | null;
         };
         /**
          * TopologyParamMeta
@@ -2400,6 +3137,11 @@ export interface components {
              * @description Dynamic controller devices: exciters (``IEEEX1``, ``ESDC2A``, ``SEXS``), governors (``IEEEG1``, ``TGOV1``), the ``IEEEST`` PSS, and the ``REGCA1`` renewable-converter model. Surfaces the seven Unit-8 whitelist additions so the disturbance editor can populate device pickers when the case includes them. Empty for cases that carry no dynamics addfile (stock IEEE 14 .raw alone).
              */
             controllers?: components["schemas"]["TopologyEntry"][];
+            /**
+             * Job Id
+             * @description Job-registry id mirroring the routine that produced this topology snapshot (v3.1 Unit 5b) — case load / reload, element delete / undo, or blank-system create. ``null`` when the summary is a plain read (``GET /topology``).
+             */
+            job_id?: string | null;
         };
         /**
          * UploadProfileResponse
@@ -2416,6 +3158,11 @@ export interface components {
              * @description Size of the on-disk xlsx in bytes. Reported back so the UI can confirm the upload completed end-to-end.
              */
             bytes_written: number;
+            /**
+             * Job Id
+             * @description Job-registry id mirroring the profile-upload routine (v3.1 Unit 5b, kind ``profile-upload``). ``null`` on legacy responses.
+             */
+            job_id?: string | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -3524,6 +4271,383 @@ export interface operations {
             };
         };
     };
+    initClone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloneInitResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case is loaded, the session is busy with an in-flight job, or a sweep holds the session lock. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The loaded case cannot be cloned (e.g. a blank session). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    applyCloneEdit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                model: string;
+                idx: string;
+                param: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CloneEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloneEditResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found, or no device of the given model+idx exists. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The session is busy with an in-flight job (e.g. TDS streaming) or a sweep holds the lock; retry when it completes. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Body exceeded the 64 KB cap. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The (model, param) is not a whitelisted dynamic-controller param, the param is read-only in the loaded format, or the clone writer rejected the edit (malformed file / setup failed). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    undoCloneEdit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloneEditResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session busy with an in-flight job. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Nothing to undo. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    redoCloneEdit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloneEditResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session busy with an in-flight job. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Nothing to redo. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    saveCloneAs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CloneSaveAsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloneSaveAsResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session busy with an in-flight job. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Body exceeded the 64 KB cap. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No clone to save, an invalid / traversal name, or the workspace is not configured. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    resetClone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloneResetResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session busy with an in-flight job. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     runTds: {
         parameters: {
             query?: never;
@@ -4066,6 +5190,86 @@ export interface operations {
                 };
             };
             /** @description Invalid snapshot name. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    importBundle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_importBundle"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BundleImportResponse"];
+                };
+            };
+            /** @description Bundle is not a valid ZIP archive. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflicts detected (sha mismatch / version mismatch / addfile missing). Body is a ``BundleImportResponse`` with ``status='plan'`` so the UI can render the conflict resolver. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Bundle exceeds the 67108864-byte cap. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Manifest malformed (missing required fields, not a JSON object, references a case file the zip doesn't have); OR disturbances.json malformed; OR caller forced resolution on a bundle with blocker conflicts. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -5062,6 +6266,230 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    startSweep: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SweepRequest"];
+            };
+        };
+        responses: {
+            /** @description Sweep started; subscribe to the WS channel for progress. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StartSweepResponse"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A sweep is already running on this session OR no snapshot was found by the requested name. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Invalid sweep parameter kind, target out of range, or snapshot has no matching disturbance. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    listJobs: {
+        parameters: {
+            query?: {
+                kind?: ("pflow" | "tds-batch" | "tds-stream" | "eig" | "cpf" | "cpf-qv" | "se" | "se-measurements" | "sweep" | "snapshot-save" | "snapshot-restore" | "snapshot-delete" | "bundle-export" | "bundle-import" | "case-load" | "case-reload" | "case-save" | "element-add" | "element-edit" | "element-delete" | "element-undo" | "disturbance-commit" | "pmu-add" | "pmu-delete" | "profile-upload" | "profile-add" | "profile-delete" | "clone-init" | "clone-edit" | "clone-undo" | "clone-redo" | "clone-save-as" | "clone-reset") | null;
+                /** @description Optional lifecycle-state filter (pending/running/done/failed/cancelled). */
+                status?: ("pending" | "running" | "done" | "failed" | "cancelled") | null;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRecordSchema"][];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRecordSchema"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session or job not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancelJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Job cancelled; the updated record is returned. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRecordSchema"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session or job not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The job is not cancellable (a synchronous routine that must run to completion). Carries a ``wait-for-job`` recovery CTA. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
