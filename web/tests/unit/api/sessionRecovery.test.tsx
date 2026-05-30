@@ -653,7 +653,7 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
     errSpy.mockRestore();
   });
 
-  it('re-loads and warns about lost edits when clone-on-write was active pre-recovery', async () => {
+  it('re-loads and warns about lost edits when clone-on-write had pending edits pre-recovery', async () => {
     const { useCaseStore } = await import('@/store/case');
     const { parseWorkspacePath } = await import('@/api/types');
     const toastMod = await import('@/lib/toast');
@@ -664,6 +664,8 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
       topology: null,
       layoutSidecar: null,
       cloneInitialized: true,
+      cloneUndoDepth: 2, // actual edits pending → warning is warranted
+      cloneRedoDepth: 0,
     });
 
     fetchSpy.mockImplementation((input) => {
@@ -703,10 +705,75 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
       });
       expect(call).toBeDefined();
     });
-    // ...the user is warned their pending edits were lost, and clone state clears.
+    // ...the user is warned their pending edits were lost, and ALL clone
+    // state clears (incl. depths, so a stale Undo can't fire against a clone
+    // that no longer exists).
     await waitFor(() => {
       expect(infoSpy).toHaveBeenCalledWith('Unsaved edits lost', expect.anything());
     });
+    expect(useCaseStore.getState().cloneInitialized).toBe(false);
+    expect(useCaseStore.getState().cloneUndoDepth).toBe(0);
+    expect(useCaseStore.getState().cloneRedoDepth).toBe(0);
+    infoSpy.mockRestore();
+  });
+
+  it('re-loads SILENTLY (no edits-lost toast) when Edit mode was on but nothing was edited', async () => {
+    const { useCaseStore } = await import('@/store/case');
+    const { parseWorkspacePath } = await import('@/api/types');
+    const toastMod = await import('@/lib/toast');
+    const infoSpy = vi.spyOn(toastMod.toast, 'info');
+    useSessionStore.setState({ sessionId: parseSessionId('sess-pre') });
+    // Edit mode toggled (clone initialised) but ZERO edits — nothing to lose.
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
+      topology: null,
+      layoutSidecar: null,
+      cloneInitialized: true,
+      cloneUndoDepth: 0,
+      cloneRedoDepth: 0,
+    });
+
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
+        return Promise.resolve(jsonResponse({ session_id: 'sess-new', state: 'live' }, 201));
+      }
+      if (url.endsWith('/api/sessions/sess-new/case')) {
+        return Promise.resolve(
+          jsonResponse({
+            state: 'pre-setup',
+            buses: [],
+            lines: [],
+            transformers: [],
+            generators: [],
+            loads: [],
+          }),
+        );
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { useSessionRecovery } = await import('@/api/useSessionRecovery');
+    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
+    useSessionStore.getState().resetSession();
+
+    await waitFor(() => {
+      const call = fetchSpy.mock.calls.find(([url]) => {
+        const u = typeof url === 'string' ? url : ((url as Request).url ?? String(url));
+        return u.endsWith('/api/sessions/sess-new/case');
+      });
+      expect(call).toBeDefined();
+    });
+    await waitFor(() => {
+      expect(useSessionStore.getState().recoveryInProgress).toBe(false);
+    });
+    // No false-positive "Unsaved edits lost" — there were no edits.
+    expect(infoSpy).not.toHaveBeenCalled();
+    // Clone state still cleared so a stale Undo can't act on the dead clone.
     expect(useCaseStore.getState().cloneInitialized).toBe(false);
     infoSpy.mockRestore();
   });

@@ -358,10 +358,16 @@ export function useSessionRecovery(): void {
       return;
     }
 
-    // File-backed case: re-load the file into the new session. Clone-on-write
-    // edits (if any) lived in the old session's scratch dir and are gone; the
-    // re-loaded file is the original, so warn that pending edits were lost.
-    const cloneWasInitialized = useCaseStore.getState().cloneInitialized;
+    // File-backed case: re-load the file into the new session. Any
+    // clone-on-write state lived in the old session's scratch dir and is gone
+    // regardless of whether the re-load succeeds, so capture it now.
+    const cloneSnapshot = useCaseStore.getState();
+    const cloneWasInitialized = cloneSnapshot.cloneInitialized;
+    // "Edits lost" only when there were ACTUAL edits — merely toggling Edit
+    // mode initialises a clone (depth 0) with nothing to lose; warning then
+    // would be a false alarm.
+    const hadPendingEdits =
+      cloneSnapshot.cloneUndoDepth > 0 || cloneSnapshot.cloneRedoDepth > 0;
     loadCase.mutate(
       {
         sessionId,
@@ -371,18 +377,26 @@ export function useSessionRecovery(): void {
         },
       },
       {
-        onSuccess: () => {
-          if (cloneWasInitialized) {
-            useCaseStore.getState().setCloneInitialized(false);
-            toast.info('Unsaved edits lost', {
-              description:
-                'The session expired while you had pending edits. The case was reloaded from its file; your changes were not saved.',
-            });
-          }
-        },
         onSettled: () => {
-          // Settled — drop out of the recovery state regardless of
-          // success/error so the user sees the load error normally.
+          // The old clone is gone whether the re-load succeeded or failed, so
+          // drop ALL clone state (incl. depths) here — a stale Undo must not
+          // act on a clone that no longer exists. Done in onSettled (not
+          // onSuccess) so a failed re-load doesn't leave dangling clone state.
+          if (cloneWasInitialized) {
+            useCaseStore.setState({
+              cloneInitialized: false,
+              cloneUndoDepth: 0,
+              cloneRedoDepth: 0,
+            });
+            if (hadPendingEdits) {
+              toast.info('Unsaved edits lost', {
+                description:
+                  'The session expired while you had pending edits. The case was reloaded from its file; your changes were not saved.',
+              });
+            }
+          }
+          // Drop out of the recovery state regardless of success/error so the
+          // user sees any load error normally.
           clearRecoveryInProgress();
         },
       },
