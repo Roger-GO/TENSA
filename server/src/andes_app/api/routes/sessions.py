@@ -39,6 +39,7 @@ def _manager(request: Request) -> SessionManager:
 
 @router.post(
     "/sessions",
+    openapi_extra={"x-andes-app-gui-location": "auto"},
     operation_id="createSession",
     summary="Create a new session backed by a fresh ANDES worker subprocess.",
     response_model=SessionDescriptor,
@@ -87,6 +88,7 @@ async def create_session(
 
 @router.get(
     "/sessions",
+    openapi_extra={"x-andes-app-gui-location": "auto"},
     operation_id="listSessions",
     summary="List currently-active sessions.",
     response_model=SessionList,
@@ -101,6 +103,10 @@ async def list_sessions(request: Request, _: RequireToken) -> SessionList:
 
 @router.get(
     "/sessions/{session_id}",
+    openapi_extra={
+        "x-andes-app-gui-location": "none",
+        "x-andes-app-parity-deferred": "Session metadata is not surfaced standalone in the GUI; the web client tracks the active session client-side and never issues a bare GET /sessions/{id}.",
+    },
     operation_id="getSession",
     summary="Describe a session.",
     response_model=SessionDescriptor,
@@ -123,6 +129,7 @@ async def get_session(
 
 @router.delete(
     "/sessions/{session_id}",
+    openapi_extra={"x-andes-app-gui-location": "auto"},
     operation_id="closeSession",
     summary="Close a session and reap its worker subprocess.",
     status_code=status.HTTP_204_NO_CONTENT,

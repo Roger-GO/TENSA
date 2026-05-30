@@ -137,6 +137,9 @@ async def require_ws_auth(websocket: WebSocket) -> bool:
     return True
 
 
+# parity-reviewed: 2026-05-30 — gui-location: run-controls. The TDS "Run"
+# affordance (web/src/components/tds/RunButton.tsx) opens this WS for live
+# streaming plots; it is the GUI's sole TDS path (batch POST /tds is CLI-only).
 @router.websocket("/ws/{session_id}")
 async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
     """WebSocket endpoint for streaming TDS results.

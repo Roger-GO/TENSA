@@ -270,6 +270,7 @@ def _payload_to_response(
 
 @router.post(
     "/sessions/{session_id}/cpf",
+    openapi_extra={"x-andes-app-gui-location": "analysis-panel"},
     operation_id="runCpf",
     summary="Run continuation power flow (PV-curve / nose-curve) on the session.",
     response_model=CpfResultResponse,
@@ -330,6 +331,7 @@ async def run_cpf(
 
 @router.post(
     "/sessions/{session_id}/cpf/qv",
+    openapi_extra={"x-andes-app-gui-location": "analysis-panel"},
     operation_id="runCpfQv",
     summary="Run a single-bus QV-curve continuation on the session.",
     response_model=CpfResultResponse,

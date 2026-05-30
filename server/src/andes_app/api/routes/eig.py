@@ -210,6 +210,7 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
 
 @router.post(
     "/sessions/{session_id}/eig",
+    openapi_extra={"x-andes-app-gui-location": "analysis-panel"},
     operation_id="runEig",
     summary="Run eigenvalue analysis (small-signal stability) on the session.",
     response_model=EigResultResponse,
@@ -286,6 +287,7 @@ async def run_eig(
 
 @router.get(
     "/sessions/{session_id}/eig/modes/{mode_idx}/participation",
+    openapi_extra={"x-andes-app-gui-location": "analysis-panel"},
     operation_id="getEigParticipation",
     summary="Per-mode participation factor row for the given mode index.",
     response_model=EigParticipationResponse,
@@ -357,6 +359,7 @@ async def get_eig_participation(
 
 @router.get(
     "/sessions/{session_id}/eig/state-matrix.mat",
+    openapi_extra={"x-andes-app-gui-location": "analysis-panel"},
     operation_id="getEigStateMatrix",
     summary="Download EIG.As + EIG.mu as a .mat file.",
     response_class=Response,

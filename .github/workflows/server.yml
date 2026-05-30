@@ -59,6 +59,15 @@ jobs:
       - name: ci-matrix.sh
         run: bash ./scripts/ci-matrix.sh
 
+      # GUI-parity ledger (v3.1 Unit 16, KTD-12). Fails when a new route lands
+      # without an x-andes-app-gui-location tag, when a 'none'-tagged route has
+      # no deferral reason, or when a WS route / static mount lacks a
+      # '# parity-reviewed: <date>' marker. Runs after the install step so the
+      # app (and its OpenAPI schema) imports cleanly.
+      - name: GUI-parity ledger check
+        working-directory: server
+        run: PYTHONPATH=src python ../scripts/check_gui_parity.py
+
   acceptance:
     name: curl walkthrough (Phase A R3)
     runs-on: ubuntu-latest

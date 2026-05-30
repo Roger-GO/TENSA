@@ -102,6 +102,7 @@ def _topology_from_payload(payload: dict[str, Any]) -> TopologySummary:
 
 @router.post(
     "/sessions/{session_id}/case",
+    openapi_extra={"x-andes-app-gui-location": "left-sidebar"},
     operation_id="loadCase",
     summary="Load an ANDES case file (with optional addfiles) into a session.",
     response_model=TopologySummary,
@@ -170,6 +171,7 @@ async def load_case(
 
 @router.get(
     "/sessions/{session_id}/topology",
+    openapi_extra={"x-andes-app-gui-location": "workspace"},
     operation_id="getTopology",
     summary="Get the current topology view of a session's loaded case.",
     response_model=TopologySummary,
@@ -202,6 +204,7 @@ async def get_topology(
 
 @router.get(
     "/sessions/{session_id}/topology/models/{model}/alterable_params",
+    openapi_extra={"x-andes-app-gui-location": "disturbance-panel"},
     operation_id="getAlterableParams",
     summary=(
         "List parameter names ANDES will accept as ``src`` for an Alter "
@@ -271,6 +274,7 @@ async def get_alterable_params(
 
 @router.post(
     "/sessions/{session_id}/reload",
+    openapi_extra={"x-andes-app-gui-location": "run-controls"},
     operation_id="reloadCase",
     summary="Re-load the current case to return to pre-setup state.",
     response_model=TopologySummary,
@@ -317,6 +321,7 @@ async def reload_case(
 
 @router.get(
     "/sessions/{session_id}/connectivity",
+    openapi_extra={"x-andes-app-gui-location": "workspace"},
     operation_id="getConnectivity",
     summary="Compute connected-component island count + per-island bus membership.",
     response_model=ConnectivityResponse,

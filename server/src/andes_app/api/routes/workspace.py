@@ -101,6 +101,7 @@ def _layout_sidecar_path(workspace: Path, case_path: str) -> Path:
 
 @router.get(
     "/workspace/files",
+    openapi_extra={"x-andes-app-gui-location": "left-sidebar"},
     operation_id="listWorkspaceFiles",
     summary="List supported case files in the workspace root.",
     response_model=WorkspaceFileList,
@@ -147,6 +148,7 @@ async def list_files(
 
 @router.get(
     "/workspace/layout",
+    openapi_extra={"x-andes-app-gui-location": "workspace"},
     operation_id="getWorkspaceLayout",
     summary="Read the SLD layout sidecar JSON adjacent to a case file.",
     response_model=SidecarLayout,
@@ -227,6 +229,7 @@ def _enforce_layout_content_length(request: Request) -> None:
 
 @router.put(
     "/workspace/layout",
+    openapi_extra={"x-andes-app-gui-location": "workspace"},
     operation_id="putWorkspaceLayout",
     summary="Write the SLD layout sidecar JSON adjacent to a case file.",
     status_code=status.HTTP_204_NO_CONTENT,

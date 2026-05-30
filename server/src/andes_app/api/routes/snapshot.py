@@ -174,6 +174,7 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
 
 @router.post(
     "/sessions/{session_id}/bundle/export",
+    openapi_extra={"x-andes-app-gui-location": "bundle-dialog"},
     operation_id="exportBundle",
     summary="Export a reproducibility bundle (.zip) for the current session.",
     response_class=Response,
@@ -469,6 +470,7 @@ def _map_snapshot_error(exc: WorkerError) -> HTTPException:
 
 @router.post(
     "/sessions/{session_id}/snapshot",
+    openapi_extra={"x-andes-app-gui-location": "snapshot-dialog"},
     operation_id="saveSnapshot",
     summary="Save the current operating point as a named snapshot.",
     response_model=SaveSnapshotResponse,
@@ -532,6 +534,7 @@ async def save_snapshot(
 
 @router.post(
     "/sessions/{session_id}/snapshot/restore",
+    openapi_extra={"x-andes-app-gui-location": "snapshot-dialog"},
     operation_id="restoreSnapshot",
     summary="Restore a previously-saved snapshot onto the session.",
     response_model=RestoreSnapshotResponse,
@@ -605,6 +608,7 @@ async def restore_snapshot(
 
 @router.get(
     "/sessions/{session_id}/snapshots",
+    openapi_extra={"x-andes-app-gui-location": "snapshot-dialog"},
     operation_id="listSnapshots",
     summary="List snapshots saved against the current case.",
     response_model=ListSnapshotsResponse,
@@ -651,6 +655,7 @@ async def list_snapshots(
 
 @router.delete(
     "/sessions/{session_id}/snapshot/{name}",
+    openapi_extra={"x-andes-app-gui-location": "snapshot-dialog"},
     operation_id="deleteSnapshot",
     summary="Delete a snapshot by name.",
     status_code=status.HTTP_204_NO_CONTENT,

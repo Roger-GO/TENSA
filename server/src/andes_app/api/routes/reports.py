@@ -131,6 +131,7 @@ def _manager(request: Request) -> SessionManager:
 
 @router.get(
     "/sessions/{session_id}/report",
+    openapi_extra={"x-andes-app-gui-location": "report-dialog"},
     operation_id="getReport",
     summary="Render a human-readable report from PFlow or TDS results.",
     response_model=ReportResponse,

@@ -252,6 +252,7 @@ def _se_payload_to_response(
 
 @router.post(
     "/sessions/{session_id}/se/measurements/generate",
+    openapi_extra={"x-andes-app-gui-location": "analysis-panel"},
     operation_id="generateSeMeasurements",
     summary="Generate the default SE measurement set from the converged PF solution.",
     response_model=SeMeasurementsGeneratedResponse,
@@ -313,6 +314,7 @@ async def generate_se_measurements(
 
 @router.post(
     "/sessions/{session_id}/se",
+    openapi_extra={"x-andes-app-gui-location": "analysis-panel"},
     operation_id="runSe",
     summary="Run static state estimation against the cached measurement set.",
     response_model=SeResultResponse,

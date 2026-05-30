@@ -212,6 +212,7 @@ def _coerce_plan(payload: dict[str, Any]) -> BundleImportPlanModel:
 
 @router.post(
     "/sessions/{session_id}/bundle/import",
+    openapi_extra={"x-andes-app-gui-location": "bundle-dialog"},
     operation_id="importBundle",
     summary="Import a reproducibility bundle (.zip) into the current session.",
     response_model=BundleImportResponse,

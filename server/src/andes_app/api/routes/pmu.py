@@ -198,6 +198,7 @@ def _entry_from_payload(payload: object) -> TopologyEntry:
 
 @router.post(
     "/sessions/{session_id}/pmu",
+    openapi_extra={"x-andes-app-gui-location": "pmu-dialog"},
     operation_id="addPmu",
     summary="Place a PMU at the given bus on a pre-setup session.",
     response_model=TopologyEntry,
@@ -259,6 +260,7 @@ async def add_pmu(
 
 @router.get(
     "/sessions/{session_id}/pmu",
+    openapi_extra={"x-andes-app-gui-location": "pmu-dialog"},
     operation_id="listPmus",
     summary="List currently-placed PMU instances on the session.",
     response_model=ListPmusResponse,
@@ -307,6 +309,7 @@ async def list_pmus(
 
 @router.delete(
     "/sessions/{session_id}/pmu/{pmu_idx}",
+    openapi_extra={"x-andes-app-gui-location": "pmu-dialog"},
     operation_id="deletePmu",
     summary="Remove a PMU from the pre-setup session.",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -367,6 +370,7 @@ async def delete_pmu(
 
 @router.get(
     "/sessions/{session_id}/pmu/{run_id}/export.csv",
+    openapi_extra={"x-andes-app-gui-location": "pmu-dialog"},
     operation_id="exportPmuCsv",
     summary="Download the PMU am/vm trajectories from the most recent TDS run.",
     response_class=Response,

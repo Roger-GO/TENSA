@@ -124,6 +124,7 @@ class StartSweepResponse(BaseModel):
 
 @router.post(
     "/sessions/{session_id}/sweep",
+    openapi_extra={"x-andes-app-gui-location": "sweep-dialog"},
     operation_id="startSweep",
     summary="Start a sensitivity sweep — Unit 18.",
     response_model=StartSweepResponse,
@@ -211,6 +212,9 @@ async def start_sweep(
 # ---- WS progress channel --------------------------------------------------
 
 
+# parity-reviewed: 2026-05-30 — gui-location: sweep-dialog. The sweep dialog
+# (web/src/streaming/SweepStream.ts, opened from SweepDialog.tsx) subscribes
+# here for per-iteration progress after POST /sweep starts the run.
 @router.websocket("/ws/{session_id}/sweep/{sweep_id}")
 async def ws_sweep_progress(
     websocket: WebSocket, session_id: str, sweep_id: str
