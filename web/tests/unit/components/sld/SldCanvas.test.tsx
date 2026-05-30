@@ -340,6 +340,36 @@ describe('SldCanvas', () => {
     expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'bus', idx: '4' });
   });
 
+  it('renders a controller node and selects it (with sub-kind) on click', async () => {
+    const user = userEvent.setup();
+    const topology: TopologySummary = {
+      ...makeTopology([bus(1)]),
+      generators: [{ idx: 'GENROU_1', name: 'g1', kind: 'GENROU', params: { bus: 1 } }],
+      controllers: [{ idx: 'EXST1_1', name: 'EXST1 1', kind: 'EXST1', params: { syn: 'GENROU_1' } }],
+    };
+    mockTopology = topology;
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('synthetic.raw'), addfiles: [] },
+        selectedElement: null,
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('controller-node-EXST1_1')).toBeInTheDocument();
+    });
+    const wrapper = screen
+      .getByTestId('controller-node-EXST1_1')
+      .closest('[data-rf-node-id]');
+    expect(wrapper).not.toBeNull();
+    await user.click(wrapper as HTMLElement);
+    expect(useCaseStore.getState().selectedElement).toEqual({
+      kind: 'controller',
+      subKind: 'exciter',
+      idx: 'EXST1_1',
+    });
+  });
+
   it('shows the >30-buses banner with no curated layout + no sidecar', async () => {
     const buses = Array.from({ length: 35 }, (_, i) => bus(i + 1));
     mockTopology = makeTopology(buses);
