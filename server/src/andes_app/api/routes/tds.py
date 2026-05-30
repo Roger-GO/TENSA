@@ -134,17 +134,42 @@ async def run_tds(
             timeout=300.0,
         )
     except SessionExpiredError as exc:
+        # Session is gone — the record (if any) goes with it. No reconcile.
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
         if registry is not None:
-            registry.mark_failed(
+            survivor_id = registry.mark_failed(
                 run_id, problem=_job_error_problem("tds-batch", (exc.category, exc.detail))
             )
-            _broadcast_job(mgr, session_id, run_id)
+            _broadcast_job(mgr, session_id, survivor_id)
         raise _to_http_error(exc) from exc
+    except Exception as exc:
+        # The inline tds-batch lifecycle re-implements register→mark_running→
+        # mark_done/failed (instead of ``_run_as_job``) so it can alias
+        # ``job_id`` onto the pre-minted ``run_id``. That re-opened the
+        # "stuck ``running``" trap ``_run_as_job``'s ``except Exception`` was
+        # written to close: ``mgr.invoke`` can also raise ``SessionBusyError``
+        # (concurrent op on the session gate), ``SweepInProgressError`` (a
+        # sweep holds the session), or ``asyncio.TimeoutError`` (the 300 s
+        # backstop) — none of which are ``WorkerError``/``SessionExpiredError``.
+        # The worker stays alive in all three cases, so the liveness sweeper
+        # (dead-worker only) never rescues the record. Mark it failed here
+        # before re-raising so the app-level handlers (SessionBusyError→409,
+        # SweepInProgressError→503, TimeoutError→500) still render unchanged.
+        # NOT BaseException — CancelledError/KeyboardInterrupt/SystemExit are
+        # lifecycle signals, left to propagate untouched.
+        if registry is not None:
+            survivor_id = registry.mark_failed(
+                run_id,
+                problem=_job_error_problem(
+                    "tds-batch", ("WorkerInternalError", str(exc))
+                ),
+            )
+            _broadcast_job(mgr, session_id, survivor_id)
+        raise
 
     if registry is not None:
         registry.mark_done(run_id)

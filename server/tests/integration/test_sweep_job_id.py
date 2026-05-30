@@ -168,7 +168,11 @@ async def test_sweep_returns_sweep_id_and_identical_job_id(
     record = rec.json()
     assert record["id"] == job_id
     assert record["kind"] == "sweep"
-    assert record["status"] in ("pending", "running", "done")
+    # ``start_sweep`` calls ``mark_running`` synchronously before returning, so
+    # ``pending`` is never observable here — the record is ``running`` (the
+    # common case while the gate is held) or already ``done`` if the small
+    # sweep raced to completion. ``pending`` in the prior set was dead weight.
+    assert record["status"] in ("running", "done")
     assert record["can_cancel"] is True
 
     # Drain so teardown is fast, then confirm the record reconciled to ``done``.
@@ -176,3 +180,58 @@ async def test_sweep_returns_sweep_id_and_identical_job_id(
     rec2 = await ac.get(f"/api/sessions/{sid}/jobs/{job_id}", headers=HEADERS)
     assert rec2.status_code == 200, rec2.text
     assert rec2.json()["status"] == "done"
+
+
+@pytest.mark.integration
+async def test_delete_cancel_of_live_sweep_aborts_the_task(
+    client: tuple[httpx.AsyncClient, SessionManager],
+) -> None:
+    """DELETE /jobs/{id} for a LIVE sweep must actually cancel the backing
+    sweep task (whose ``CancelledError`` arm finishes the sweep ``aborted``),
+    not merely flip the record to ``cancelled``.
+
+    Regression for the Phase-2 finding that ``cancel_session_job`` only called
+    ``mark_cancelled`` and never cancelled ``self._sweep_tasks[sweep_id]`` — so
+    the sweep kept iterating to completion on the worker.
+    """
+    ac, mgr = client
+    sid = await _seed_session_with_fault_snapshot(ac, "sweep-cancel")
+
+    resp = await ac.post(
+        f"/api/sessions/{sid}/sweep",
+        headers=HEADERS,
+        json={
+            "parameter": {
+                "kind": "disturbance.fault.tc",
+                "target": 0,
+                "range": {"start": 1.05, "end": 1.25, "steps": 8},
+            },
+            "sim": {"tf": 0.5, "h": None, "vars": None},
+            "snapshot_name": "sweep-cancel",
+        },
+    )
+    assert resp.status_code == 202, resp.text
+    sweep_id = resp.json()["sweep_id"]
+
+    task = mgr._sweep_tasks.get(sweep_id)
+    assert task is not None and not task.done()
+
+    resp = await ac.delete(f"/api/sessions/{sid}/jobs/{sweep_id}", headers=HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "cancelled"
+
+    # The REAL abort fired: the backing sweep task was cancelled (not left to
+    # run to completion). Awaiting the cancelled task surfaces ``CancelledError``;
+    # ``_drive_sweep``'s arm finishes the sweep ``aborted`` and reconciles the
+    # registry record. The buffer therefore never reaches ``completed``.
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert task.cancelled()
+    buf = mgr.get_sweep_buffer(sweep_id)
+    assert buf is not None
+    assert buf.state != "completed"
+    # The registry record is terminal ``cancelled`` (the user's intent), not a
+    # spinner that would otherwise hang.
+    rec = await ac.get(f"/api/sessions/{sid}/jobs/{sweep_id}", headers=HEADERS)
+    assert rec.status_code == 200, rec.text
+    assert rec.json()["status"] == "cancelled"

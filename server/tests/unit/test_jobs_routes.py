@@ -146,16 +146,41 @@ def test_list_filters_by_status(fixture: Any) -> None:
 
 def test_list_includes_global_registry(fixture: Any) -> None:
     """KTD-20: session-mutating jobs in the global registry surface in the
-    session's /jobs view."""
+    OWNING session's /jobs view (filtered by the stamped ``origin_session_id``
+    so they don't leak into other sessions)."""
     client, mgr, sess = fixture
     local_id = sess.job_registry.register_job(kind="pflow", can_cancel=False)
     global_id = mgr.global_job_registry.register_job(
-        kind="snapshot-restore", can_cancel=False
+        kind="snapshot-restore", can_cancel=False, origin_session_id="s1"
     )
     resp = client.get("/api/sessions/s1/jobs", headers=_headers())
     assert resp.status_code == 200, resp.text
     ids = {j["id"] for j in resp.json()}
     assert ids == {local_id, global_id}
+
+
+def test_list_excludes_other_sessions_global_jobs(fixture: Any) -> None:
+    """Cross-session isolation: a global (session-mutating) job stamped with a
+    DIFFERENT ``origin_session_id`` must NOT appear in this session's /jobs
+    view — the global registry is manager-wide, so unfiltered blending would
+    leak every session's session-mutating jobs into every other session."""
+    client, mgr, sess = fixture
+    local_id = sess.job_registry.register_job(kind="pflow", can_cancel=False)
+    other_global_id = mgr.global_job_registry.register_job(
+        kind="snapshot-restore", can_cancel=False, origin_session_id="other-session"
+    )
+    resp = client.get("/api/sessions/s1/jobs", headers=_headers())
+    assert resp.status_code == 200, resp.text
+    ids = {j["id"] for j in resp.json()}
+    assert ids == {local_id}
+    assert other_global_id not in ids
+    # And session s1 cannot resolve/cancel the other session's global job by id.
+    assert (
+        client.get(f"/api/sessions/s1/jobs/{other_global_id}", headers=_headers())
+    ).status_code == 404
+    assert (
+        client.delete(f"/api/sessions/s1/jobs/{other_global_id}", headers=_headers())
+    ).status_code == 404
 
 
 def test_list_unknown_session_returns_404(fixture: Any) -> None:

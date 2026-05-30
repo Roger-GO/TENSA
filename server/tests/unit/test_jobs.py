@@ -266,6 +266,51 @@ def test_distinct_failure_signatures_stay_separate(
     assert len(failed) == 2
 
 
+def test_mark_failed_returns_surviving_id_on_coalesce(
+    registry: _JobRegistry,
+) -> None:
+    """``mark_failed`` returns the SURVIVING record's id so callers broadcast
+    the right id when a fresh failure coalesces into a prior one (otherwise the
+    terminal WS envelope is dropped and the activity panel spins forever)."""
+    problem = _problem("PFlowDivergence", "max_iter reached")
+    first = registry.register_job(kind="pflow", can_cancel=False)
+    survivor_first = registry.mark_failed(first, problem=problem)
+    # No prior signature → the just-passed id is the survivor.
+    assert survivor_first == first
+
+    second = registry.register_job(kind="pflow", can_cancel=False)
+    survivor_second = registry.mark_failed(second, problem=problem)
+    # Coalesced into ``first`` → that prior id is the survivor, and the
+    # just-passed (deleted) id resolves to None.
+    assert survivor_second == first
+    assert registry.get_job(second) is None
+    survivor_record = registry.get_job(survivor_second)
+    assert survivor_record is not None
+    assert survivor_record.repeated_count == 1
+
+
+def test_mark_failed_does_not_overwrite_terminal(registry: _JobRegistry) -> None:
+    """Symmetric with ``test_mark_done_does_not_overwrite_terminal``: a late
+    driver error must NOT flip a ``cancelled`` / ``done`` record to ``failed``
+    (the cancel path does not abort the work synchronously, so a post-cancel
+    error can race the cancel transition)."""
+    # done → mark_failed is a no-op.
+    done_id = registry.register_job(kind="pflow", can_cancel=False)
+    registry.mark_done(done_id)
+    survivor = registry.mark_failed(done_id, problem=_problem("PFlowDivergence"))
+    assert survivor == done_id
+    rec = registry.get_job(done_id)
+    assert rec is not None and rec.status == "done"
+
+    # cancelled → mark_failed is a no-op.
+    cancelled_id = registry.register_job(kind="sweep", can_cancel=True)
+    registry.mark_running(cancelled_id)
+    registry.mark_cancelled(cancelled_id)
+    registry.mark_failed(cancelled_id, problem=_problem("SweepError"))
+    rec2 = registry.get_job(cancelled_id)
+    assert rec2 is not None and rec2.status == "cancelled"
+
+
 # ---- retention --------------------------------------------------------------
 
 

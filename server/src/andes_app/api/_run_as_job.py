@@ -38,18 +38,41 @@ import contextlib
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
+from andes_app.api.error_mapping import WORKER_ERROR_HTTP_MAP
+from andes_app.core.session import WorkerError
+
 if TYPE_CHECKING:
     from andes_app.core.jobs import JobKind, _JobRegistry
     from andes_app.core.session import SessionManager
 
-# Wire category stamped onto the synthesized ProblemDetails when an exception
-# escapes the wrapped block. Distinct from the liveness sweeper's
+# Wire category stamped onto the synthesized ProblemDetails when a NON-WorkerError
+# exception escapes the wrapped block. Distinct from the liveness sweeper's
 # ``WorkerDied`` (the worker is alive here; it raised).
 WORKER_INTERNAL_CATEGORY = "WorkerInternalError"
 
 
 def _internal_error_problem(kind: JobKind, exc: Exception) -> dict[str, Any]:
-    """Synthesize the 500 ProblemDetails for an exception escaping the block."""
+    """Synthesize the ProblemDetails for an exception escaping the block.
+
+    For a :class:`WorkerError` the record carries the REAL ``category`` and the
+    mapped HTTP status (e.g. ``no-case-loaded`` → 409, ``ElementHasDependentsError``
+    → 422) so the activity-panel failure log and the failure-signature
+    coalescing key off the true error, not a blanket ``WorkerInternalError``/500.
+    A business-conflict like a blocked delete is thus recorded as its own 422
+    category rather than masquerading as a 500 server error. Everything else
+    (genuinely unexpected exceptions) keeps the synthesized 500.
+    """
+    if isinstance(exc, WorkerError):
+        category = exc.category or WORKER_INTERNAL_CATEGORY
+        http_status = WORKER_ERROR_HTTP_MAP.get(category, 500)
+        return {
+            "type": "about:blank",
+            "title": "Internal Server Error" if http_status >= 500 else "Request Failed",
+            "status": http_status,
+            "category": category,
+            "detail": exc.detail,
+            "recovery": None,
+        }
     return {
         "type": "about:blank",
         "title": "Internal Server Error",
@@ -102,10 +125,15 @@ async def _run_as_job(
         if use_global_registry
         else mgr.session_job_registry(session_id)
     )
+    # Stamp the originating session onto global-registry records so the
+    # per-session HTTP surface (list/get/cancel) can filter the shared registry
+    # to this session — otherwise every session would see (and be able to
+    # cancel) every other session's session-mutating jobs (cross-session leak).
     job_id = registry.register_job(
         kind=kind,
         can_cancel=can_cancel,
         request_summary=request_summary or {},
+        origin_session_id=session_id if use_global_registry else None,
     )
     _broadcast(mgr, session_id, registry, job_id)
 
@@ -120,8 +148,14 @@ async def _run_as_job(
         # failed here is what keeps the job from being stuck ``running`` when
         # the exception escapes; the liveness sweeper would NOT catch it (the
         # worker is alive — it raised and returned to idle).
-        registry.mark_failed(job_id, problem=_internal_error_problem(kind, exc))
-        _broadcast(mgr, session_id, registry, job_id)
+        # ``mark_failed`` may coalesce this failure into a prior same-signature
+        # record (deleting THIS job_id); broadcast the SURVIVOR it returns so
+        # the terminal transition still reaches WS subscribers instead of being
+        # dropped (a re-read of the deleted id would yield None).
+        survivor_id = registry.mark_failed(
+            job_id, problem=_internal_error_problem(kind, exc)
+        )
+        _broadcast(mgr, session_id, registry, survivor_id)
         raise
     else:
         registry.mark_done(job_id, result_ref=result_ref)

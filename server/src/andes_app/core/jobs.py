@@ -112,6 +112,14 @@ class JobRecord:
     # matches this record bumps the count rather than displacing the
     # first-occurrence diagnostic.
     repeated_count: int = 0
+    # Originating session id. Stamped on records that live in the manager-wide
+    # global registry (session-mutating jobs, KTD-20) so the per-session HTTP
+    # surface can filter the shared registry to the owning session — otherwise
+    # every session's ``GET /jobs`` would leak every other session's global
+    # jobs. ``None`` for per-session-registry records (no filtering needed
+    # there — the registry is already session-scoped). Internal: NOT serialized
+    # onto the wire ``JobRecordSchema`` (which only declares its own fields).
+    origin_session_id: str | None = None
 
 
 def _failure_signature(record: JobRecord) -> tuple[str, str, str] | None:
@@ -142,6 +150,7 @@ class _JobRegistry:
         can_cancel: bool,
         request_summary: dict[str, Any] | None = None,
         job_id: str | None = None,
+        origin_session_id: str | None = None,
     ) -> str:
         """Register a fresh ``pending`` job. Returns the new ``job_id``.
 
@@ -150,6 +159,11 @@ class _JobRegistry:
         ``job_id`` onto the pre-existing ``run_id`` / ``sweep_id`` (same value
         across both fields). Re-registering an already-present id is a no-op
         that returns the existing id rather than clobbering its lifecycle.
+
+        ``origin_session_id`` stamps the owning session onto the record. It is
+        passed for records that land in the manager-wide global registry
+        (session-mutating jobs) so the per-session HTTP surface can filter the
+        shared registry to its own session.
         """
         now = time.monotonic()
         if job_id is None:
@@ -165,6 +179,7 @@ class _JobRegistry:
                 updated_at=now,
                 can_cancel=can_cancel,
                 request_summary=dict(request_summary or {}),
+                origin_session_id=origin_session_id,
             )
             self._evict_if_over_cap()
         return job_id
@@ -189,25 +204,46 @@ class _JobRegistry:
             record.ended_at = now
             self._evict_if_over_cap()
 
-    def mark_failed(self, job_id: str, *, problem: dict[str, Any]) -> None:
+    def mark_failed(self, job_id: str, *, problem: dict[str, Any]) -> str:
         """Mark the job failed and apply sticky-first signature coalescing.
+
+        Returns the ``job_id`` of the SURVIVING record — equal to the passed
+        ``job_id`` normally, or (on coalescing) the id of the PRIOR record the
+        failure collapsed into. Callers MUST broadcast the RETURNED id (not the
+        passed one) so the live ``/jobs/events`` feed always reflects the
+        transition: when the passed id is coalesced away the surviving prior
+        record (with its bumped ``repeated_count``) is the authoritative one,
+        and re-reading the deleted passed id would yield ``None`` → a dropped
+        terminal envelope leaving WS-only panels spinning forever.
 
         If an existing failed record shares this record's
         ``(kind, category, detail)`` signature, the new record is
         discarded and the prior record's ``repeated_count`` is
         incremented (preserving the original ``started_at`` and problem
         dict so the diagnostic isn't lost).
+
+        A no-op (returns the passed ``job_id``) when the record is already
+        terminal — guarding against a post-cancel driver error flipping a
+        ``cancelled`` / ``done`` record back to ``failed`` (the cancel path
+        does NOT abort the underlying work synchronously, so a late driver
+        error can race the cancel transition).
         """
         with self._lock:
             record = self._records.get(job_id)
             if record is None:
-                return
+                return job_id
+            if record.status in ("done", "failed", "cancelled"):
+                # Already terminal: do not overwrite. Symmetric with
+                # ``mark_done`` / ``mark_cancelled``; closes the race where a
+                # late driver error flips a ``cancelled`` record to ``failed``.
+                return job_id
             now = time.monotonic()
             record.problem = dict(problem)
             record.status = "failed"
             record.updated_at = now
             record.ended_at = now
             signature = _failure_signature(record)
+            survivor_id = job_id
             if signature is not None:
                 for prior_id, prior in list(self._records.items()):
                     if prior_id == job_id:
@@ -216,8 +252,12 @@ class _JobRegistry:
                         prior.repeated_count += 1
                         prior.updated_at = now
                         del self._records[job_id]
+                        # The prior record is the survivor; callers broadcast
+                        # it so the coalesced failure still reaches subscribers.
+                        survivor_id = prior_id
                         break
             self._evict_if_over_cap()
+        return survivor_id
 
     def mark_cancelled(self, job_id: str) -> None:
         with self._lock:
@@ -313,4 +353,5 @@ def _copy_record(record: JobRecord) -> JobRecord:
         result_ref=record.result_ref,
         problem=deepcopy(record.problem) if record.problem else None,
         repeated_count=record.repeated_count,
+        origin_session_id=record.origin_session_id,
     )

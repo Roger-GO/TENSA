@@ -92,6 +92,49 @@ def test_idle_session_with_dead_worker_is_skipped() -> None:
 
 
 @pytest.mark.integration
+def test_dead_worker_global_registry_running_job_marked_failed() -> None:
+    """KTD-20: session-mutating jobs live in the manager-wide global registry,
+    so the per-session pass never sees them. The sweeper must also orphan a
+    ``running`` global record whose originating session's worker is dead —
+    otherwise a snapshot-restore / bundle-import / case-reload that outlives a
+    crashed worker stays stuck ``running`` forever."""
+    mgr = SessionManager()
+    sess = _session("s1", alive=False)
+    mgr._sessions["s1"] = sess
+    job_id = mgr.global_job_registry.register_job(
+        kind="snapshot-restore", can_cancel=False, origin_session_id="s1"
+    )
+    mgr.global_job_registry.mark_running(job_id)
+
+    failed = mgr.sweep_dead_worker_jobs()
+    assert failed == 1
+
+    record = mgr.global_job_registry.get_job(job_id)
+    assert record is not None
+    assert record.status == "failed"
+    assert record.problem is not None
+    assert record.problem["category"] == WORKER_DIED_CATEGORY
+
+
+@pytest.mark.integration
+def test_global_registry_job_with_live_worker_is_untouched() -> None:
+    """A global-registry ``running`` job whose originating session's worker is
+    alive is legitimately in flight and must NOT be orphaned."""
+    mgr = SessionManager()
+    sess = _session("s1", alive=True)
+    mgr._sessions["s1"] = sess
+    job_id = mgr.global_job_registry.register_job(
+        kind="bundle-import", can_cancel=False, origin_session_id="s1"
+    )
+    mgr.global_job_registry.mark_running(job_id)
+
+    failed = mgr.sweep_dead_worker_jobs()
+    assert failed == 0
+    rec = mgr.global_job_registry.get_job(job_id)
+    assert rec is not None and rec.status == "running"
+
+
+@pytest.mark.integration
 def test_liveness_loop_fires_within_short_tick(monkeypatch: pytest.MonkeyPatch) -> None:
     """The 10s ``_liveness_loop`` body runs on its tick — shorten the tick to
     keep the test fast and assert the running job is failed within the
