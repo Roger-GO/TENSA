@@ -41,7 +41,7 @@ describe('ComponentDropZone', () => {
     // are forwarded too, but jsdom's synthetic drop event is a plain
     // Event with no clientX/clientY, so only a real browser carries real
     // geometry — verified live.)
-    expect(onDrop.mock.calls[0][0]).toBe('Generator');
+    expect(onDrop.mock.calls[0]?.[0]).toBe('Generator');
   });
 
   it('ignores drags that do not carry a component payload', () => {
