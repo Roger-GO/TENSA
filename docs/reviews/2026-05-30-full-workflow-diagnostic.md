@@ -195,3 +195,48 @@ case into the new session — worth a look for real users who idle out.
 ### Pipelines still to run
 Full SWEEP run (snapshot+disturbance), CPF-QV curve, PMU placement, profile
 / time-series import, multi-case compare, concurrency/recovery.
+
+---
+
+## Session 3 — recovery gap + minor follow-ups + build-from-scratch
+
+Goal: "do the gap + minor follow-ups to have everything perfect" + "build the
+IEEE 9-bus from scratch, run all experiments, save/load" + "smoke the rest."
+Grounded with a parallel research workflow (6 agents) and an adversarial review
+workflow (27 agents); all fixes tested + live-verified.
+
+### Code fixes shipped (branch fix/recovery-and-polish, 9 commits)
+- **Post-TDS bus-angle normalization** — the grid/SLD showed ~9.5 rad / ~549°
+  after TDS (rotating reference). Subtract the slack-referenced drift; PF
+  unchanged. Live-verified on kundur (max|angle| 0.356 rad). Helper hardened
+  for enabled-slack index / multi-slack / no-slack after review.
+- **Session-recovery gap** — file-backed cases already re-load on recovery;
+  added blank-system handling ("blank system lost") + clone-loss warning,
+  gated on ACTUAL edits (depth>0, not just clone-init), depths reset, error
+  path handled.
+- **CPF-QV + SE-generate pre-click tooltips** — aligned with EIG/CPF-nose/SE-Run
+  (useRunReadiness + "Run PFlow first…" tooltip) instead of post-click 409.
+- **Post-TDS dae-dirty gate (review-found)** — CPF/EIG/SE/PF 500'd after a TDS
+  run (dirty dae) with no gate. Now gated with "Reset the run first" + reset
+  recovery while a run is active. Live-verified CPF disabled (was 500).
+
+### Build-from-scratch (Task: "create the ieee 9 bus") — ✅ static, ❌ dynamic
+- ✅ A 3-bus STATIC system built entirely via drag-drop + add-element (9
+  elements). PF converges. Save (JSON) + load round-trips to an identical
+  topology and identical PF result (V = 1.0 / 0.983 / 0.983).
+- ❌ **GENCLS/GENROU add form omits the mandatory `gen` field** (the link to a
+  static generator) — "ANDES rejected add('GENCLS'): Mandatory parameter
+  GENCLS.gen is missing." So dynamic generators cannot be built from scratch,
+  which means **TDS/EIG cannot run on a self-built system**. The malformed
+  GENCLS also corrupts save ("ValueError: All arrays must be of the same
+  length").
+- ❌ **xlsx/raw save of a built system errors** (ValueError / "EOFError: EOF
+  when reading a line"); **JSON save works** (the "cleanest round-trip" format).
+- ⚠️ **dynamic-content gate keys only on `topology.controllers`**, ignoring
+  GENCLS/GENROU generators — a GENCLS-only system reads as "static-only" and
+  TDS/EIG are gated.
+- ⚠️ a failed save leaves a 0-byte file in the workspace.
+
+### Still to smoke (not run this session)
+PMU placement, profile/time-series import, multi-case compare, full SWEEP run,
+CPF/SE on the built system.
