@@ -21,16 +21,23 @@ import { SldCanvas } from '@/components/sld/SldCanvas';
 import { RightInspector } from '@/components/inspector/RightInspector';
 import { BottomDrawer } from '@/components/shell/BottomDrawer';
 import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
-import { makeQueryClient, wireGlobalErrorRecovery, useCurrentTopology } from '@/api/queries';
+import {
+  makeQueryClient,
+  wireGlobalErrorRecovery,
+  useCurrentTopology,
+  useBlankSystem,
+} from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
 import { useJobEventsStream } from '@/streaming/useJobEventsStream';
 import { useSldFrameOverlay } from '@/components/sld/overlay';
 import { RecoveryBadge } from '@/components/shell/RecoveryBadge';
 import { JobAnnouncer } from '@/components/shell/JobAnnouncer';
-import { setTokenGetter } from '@/api/client';
+import { setTokenGetter, ProblemDetailsError } from '@/api/client';
 import { getAuthToken } from '@/store';
 import { useAuthStore } from '@/store/auth';
 import { useCaseStore } from '@/store/case';
+import { useSessionStore } from '@/store/session';
+import { ComponentDropZone } from '@/components/sld/ComponentDropZone';
 
 // Wire the API client's token-getter to the auth store. This runs once at
 // module load (the App.tsx import is the entry point); `getAuthToken`
@@ -149,23 +156,62 @@ function AppInner({ children }: { children: React.ReactNode }) {
 /**
  * Default ``canvas`` slot content depends on whether a case is loaded:
  *
- * - no case → EmptyState ("No case loaded") — directs the user to the
- *   left sidebar.
+ * - no case → EmptyState ("No case loaded"), wrapped in a
+ *   ComponentDropZone — directs the user to the left sidebar AND accepts
+ *   a dragged Component Library tile, which spins up a blank system and
+ *   opens that kind's add form (the build-from-scratch entry the sidebar
+ *   advertises but which previously did nothing on drop).
  * - case loaded → SldCanvas (which itself shows the layout-skeleton
  *   while ELK runs and the canvas once positions are known).
  */
 function CanvasSlot() {
   const caseSelection = useCaseStore((s) => s.selection);
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const setCase = useCaseStore((s) => s.setCase);
+  const openAddPanel = useCaseStore((s) => s.openAddPanel);
+  const blank = useBlankSystem();
+  const [dropError, setDropError] = useState<string | null>(null);
+
   if (caseSelection !== null) {
     return <SldCanvas />;
   }
+
+  // Drop = "start a blank system seeded with this element". Mirrors
+  // NewSystemButton's blank flow, then opens the dropped kind's form.
+  const handleDropComponent = (kind: string) => {
+    if (!sessionId || blank.isPending) return;
+    setDropError(null);
+    blank.mutate(sessionId, {
+      onSuccess: () => {
+        setCase({ primaryPath: null, addfiles: [], blank: true });
+        openAddPanel(kind);
+      },
+      onError: (err) => {
+        if (err instanceof ProblemDetailsError && err.status === 409) {
+          setDropError('A system is already loaded; discard it first or open a fresh tab.');
+        } else if (err instanceof Error) {
+          setDropError(err.message);
+        }
+      },
+    });
+  };
+
   return (
-    <EmptyState
-      icon={<FolderIcon />}
-      title="No case loaded"
-      description="Pick a case file from the left sidebar to begin."
-      emptyStateKey="app-shell-no-case"
-    />
+    <ComponentDropZone
+      onDropComponent={handleDropComponent}
+      className="h-full w-full"
+      data-testid="no-case-drop-zone"
+    >
+      <EmptyState
+        icon={<FolderIcon />}
+        title="No case loaded"
+        description={
+          dropError ??
+          'Pick a case file from the left sidebar — or drag a component here to start a blank system.'
+        }
+        emptyStateKey="app-shell-no-case"
+      />
+    </ComponentDropZone>
   );
 }
 

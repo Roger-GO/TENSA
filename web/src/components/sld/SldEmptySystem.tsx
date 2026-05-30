@@ -2,13 +2,19 @@ import { Button } from '@/components/ui/button';
 import { useCaseStore } from '@/store/case';
 import { iconForModel } from '@/icons/iec60617/manifest';
 import { cn } from '@/lib/cn';
+import { ComponentDropZone } from './ComponentDropZone';
 
 /**
  * SldEmptySystem — centered empty-state shown when a session has been
  * loaded (or blank-created) but the topology has no buses yet.
  *
  * The CTA opens the AddElementPanel pre-filled with kind='Bus' so the
- * user lands directly on the Bus form instead of the kind picker.
+ * user lands directly on the Bus form instead of the kind picker. The
+ * whole surface is also a drop target (ComponentDropZone): dragging a
+ * Component Library tile here opens that kind's add form, matching the
+ * loaded-canvas behaviour. Without this, the only way to add the first
+ * element was the button — drag-and-drop silently failed on an empty
+ * system.
  */
 export interface SldEmptySystemProps {
   className?: string;
@@ -17,7 +23,8 @@ export interface SldEmptySystemProps {
 export function SldEmptySystem({ className }: SldEmptySystemProps) {
   const openAddPanel = useCaseStore((s) => s.openAddPanel);
   return (
-    <div
+    <ComponentDropZone
+      onDropComponent={(kind) => openAddPanel(kind)}
       role="status"
       data-testid="sld-empty-system"
       className={cn(
@@ -48,6 +55,6 @@ export function SldEmptySystem({ className }: SldEmptySystemProps) {
       >
         Add a Bus
       </Button>
-    </div>
+    </ComponentDropZone>
   );
 }
