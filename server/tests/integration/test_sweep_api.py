@@ -477,3 +477,96 @@ def test_sweep_progress_via_websocket(workspace: Path) -> None:
                     finished_state = msg.get("state")
                     break
             assert finished_state == "completed"
+
+
+def test_sweep_progress_via_websocket_no_auth(workspace: Path) -> None:
+    """Regression: the sweep WS progress channel must work under
+    ``serve --no-auth``.
+
+    The endpoint previously ran its own inline auth handshake that called
+    ``constant_time_eq(expected_token, token)`` UNCONDITIONALLY — it did not
+    honor ``app.state.require_auth``. In ``--no-auth`` mode the browser sends
+    an empty token, so every sweep WS closed with 4401 "invalid token": the
+    sweep ran to completion on the substrate but the UI never received a single
+    iteration (the progress panel sat at 0/N forever). The fix delegates the
+    handshake to the shared ``require_ws_auth`` helper, which skips token
+    validation when ``require_auth`` is False. This test pins that behavior by
+    connecting with an EMPTY token against a ``require_auth=False`` app and
+    asserting the full ready → snapshot → finished flow still streams.
+    """
+    from starlette.testclient import TestClient
+
+    app = make_app(
+        expected_token=VALID_TOKEN,
+        workspace=workspace,
+        bind_host="127.0.0.1",
+        bind_port=8000,
+        max_sessions=4,
+        idle_timeout_seconds=180.0,
+        # The serve --no-auth dev toggle: HTTP + WS token gates become no-ops.
+        require_auth=False,
+        extra_allowed_hosts=frozenset({"testserver"}),
+        extra_allowed_origins=frozenset(
+            {"http://testserver", "http://localhost"}
+        ),
+    )
+    with TestClient(app) as tc:
+        # No X-Andes-Token header anywhere — no-auth mode accepts it.
+        resp = tc.post("/api/sessions")
+        assert resp.status_code == 201, resp.text
+        sid = str(resp.json()["session_id"])
+        resp = tc.post(
+            f"/api/sessions/{sid}/case", json={"primary_path": "ieee14.raw"}
+        )
+        assert resp.status_code in (200, 201), resp.text
+        resp = tc.post(
+            f"/api/sessions/{sid}/disturbances",
+            json={
+                "disturbances": [
+                    {
+                        "kind": "fault",
+                        "bus_idx": 5,
+                        "tf": 1.0,
+                        "tc": 1.1,
+                        "xf": 0.0001,
+                        "rf": 0.0,
+                    }
+                ]
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        resp = tc.post(f"/api/sessions/{sid}/pflow", json={})
+        assert resp.status_code == 200, resp.text
+        resp = tc.post(
+            f"/api/sessions/{sid}/snapshot", json={"name": "sweep-ws-noauth"}
+        )
+        assert resp.status_code == 200, resp.text
+        resp = tc.post(
+            f"/api/sessions/{sid}/sweep",
+            json={
+                "parameter": {
+                    "kind": "disturbance.fault.tc",
+                    "target": 0,
+                    "range": {"start": 1.05, "end": 1.15, "steps": 3},
+                },
+                "sim": {"tf": 0.2, "h": None, "vars": None},
+                "snapshot_name": "sweep-ws-noauth",
+            },
+        )
+        assert resp.status_code == 202, resp.text
+        sweep_id = resp.json()["sweep_id"]
+        with tc.websocket_connect(f"/api/ws/{sid}/sweep/{sweep_id}") as ws:
+            # Empty token — would have been rejected with 4401 before the fix.
+            ws.send_text(json.dumps({"type": "auth", "token": ""}))
+            ready = json.loads(ws.receive_text())
+            assert ready["type"] == "ready"
+            snapshot = json.loads(ws.receive_text())
+            assert snapshot["type"] == "snapshot"
+            assert snapshot["total"] == 3
+            finished_state: str | None = None
+            for _ in range(20):
+                msg = json.loads(ws.receive_text())
+                if msg["type"] == "finished":
+                    finished_state = msg.get("state")
+                    break
+            assert finished_state == "completed"
