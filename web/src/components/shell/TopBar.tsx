@@ -76,28 +76,48 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
         // ensure the focus ring of any contained interactive element
         // isn't clipped at the top
         'relative z-10',
+        // When the viewport is too narrow to fit every control (dense
+        // right cluster + run controls), scroll horizontally instead of
+        // letting slots overlap — the run controls used to spill out of
+        // the squeezed centre box and collide with the Export trigger.
+        // Scrollbar hidden so the bar still reads as a clean strip; every
+        // control stays reachable by scroll. Dropdowns/dialogs portal out,
+        // so this scroll container doesn't clip them.
+        'overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
         className,
       )}
       {...props}
     >
+      {/* Layout: three content-sized (``shrink-0``) slots separated by two
+          equal ``flex-1`` spacers. The spacers — not the slots — own the
+          slack, so left pins left, right pins right, and center stays
+          geometrically centred (equal spacers). Because every slot is
+          content-sized, no slot's content can overflow its own box and
+          spill onto a neighbour: the previous ``flex-1 justify-end`` right
+          slot squeezed below its content width and overflowed LEFT, laying
+          the Export trigger on top of the run controls (clicks on Run PF
+          hit Export). When the viewport is too narrow even for collapsed
+          spacers, the header (``overflow-x-auto``) scrolls instead. */}
       <div
         data-slot="left"
         data-testid="top-bar-left"
-        className="flex min-w-0 flex-1 items-center justify-start gap-1"
+        className="flex shrink-0 items-center justify-start gap-1"
       >
         {left}
       </div>
+      <div aria-hidden="true" className="min-w-0 flex-1" />
       <div
         data-slot="center"
         data-testid="top-bar-center"
-        className="flex min-w-0 flex-initial items-center justify-center gap-2"
+        className="flex shrink-0 items-center justify-center gap-2"
       >
         {center}
       </div>
+      <div aria-hidden="true" className="min-w-0 flex-1" />
       <div
         data-slot="right"
         data-testid="top-bar-right"
-        className="flex min-w-0 flex-1 items-center justify-end gap-1"
+        className="flex shrink-0 items-center justify-end gap-1"
       >
         {right}
         {/* v3.1 Unit 24 (R18) — compact dynamic-content indicator: an
