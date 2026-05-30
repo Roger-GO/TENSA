@@ -34,6 +34,7 @@ import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useSessionStore } from '@/store/session';
 import { useSweepStore } from '@/store/sweep';
+import { useRunsStore } from '@/store/runs';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { EigResult, PflowResult } from '@/api/types';
 
@@ -69,6 +70,7 @@ function resetStores(): void {
     seMeasurementsCount: null,
   });
   useSweepStore.setState({ sweeps: {}, activeSweepId: null });
+  useRunsStore.setState({ activeRunId: null });
 }
 
 /** Seed a happy-path "case loaded + session live + token paste" baseline. */
@@ -141,6 +143,38 @@ describe('useRunReadiness — no case loaded', () => {
       expect(result.current.recovery).toBeNull();
     },
   );
+});
+
+describe('useRunReadiness — post-TDS dae-dirty gate', () => {
+  // After a TDS run (activeRunId set) the model is dynamic-initialized; PF and
+  // the PF-dependent static routines must be gated until the user resets,
+  // else the substrate 409s/500s.
+  it.each(['pflow', 'cpf', 'eig', 'se'] as RunRoutine[])(
+    '%s: gated with a "Reset the run" reason + recovery while a TDS run is active',
+    (routine) => {
+      seedReadyBaseline();
+      // Make the deeper prerequisites satisfied so the post-TDS gate is the
+      // reason surfaced (converged PF, measurements, dynamic case).
+      usePflowStore.setState({ lastRun: FAKE_PFLOW_OK, isRunning: false, error: null });
+      useAnalyzeStore.setState({ seMeasurementsCount: 5 });
+      useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
+      useRunsStore.setState({ activeRunId: 'run-tds-1' });
+
+      const { result } = renderHook(() => useRunReadiness(routine));
+      expect(result.current.ready).toBe(false);
+      expect(result.current.disabledReason).toMatch(/Reset the run first/i);
+      expect(result.current.recovery).toEqual({ kind: 'reload-case', label: 'Reset run' });
+    },
+  );
+
+  it('tds: NOT gated by an active run (TDS re-initialises each run)', () => {
+    seedReadyBaseline();
+    useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
+    useRunsStore.setState({ activeRunId: 'run-tds-1' });
+    const { result } = renderHook(() => useRunReadiness('tds'));
+    // TDS stays ready (null reason) — the post-TDS gate excludes it.
+    expect(result.current.disabledReason ?? '').not.toMatch(/Reset the run first/i);
+  });
 });
 
 describe('useRunReadiness — dynamic-content gate (R18, Unit 24)', () => {
