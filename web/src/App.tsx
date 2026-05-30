@@ -38,6 +38,8 @@ import { useAuthStore } from '@/store/auth';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { ComponentDropZone } from '@/components/sld/ComponentDropZone';
+import { SaveSnapshotDialog } from '@/components/snapshot/SaveSnapshotDialog';
+import { LoadSnapshotDialog } from '@/components/snapshot/LoadSnapshotDialog';
 
 // Wire the API client's token-getter to the auth store. This runs once at
 // module load (the App.tsx import is the entry point); `getAuthToken`
@@ -264,6 +266,15 @@ export function App() {
             <>
               <TokenPasteModal />
               <RuntimeCrashModal />
+              {/* Snapshot save/load dialogs are store-driven (saveDialogOpen /
+                  loadDialogOpen) and self-gate to null when closed. They were
+                  previously mounted only inside SnapshotMenu, which a v3
+                  refactor stopped rendering — so the Workspace menu's "Save
+                  snapshot…" / "Load snapshot…" flipped the store flag but
+                  nothing rendered (and Sweep, which needs a snapshot, was
+                  unreachable). Mount them at the app root so the actions work. */}
+              <SaveSnapshotDialog />
+              <LoadSnapshotDialog />
             </>
           }
         />
