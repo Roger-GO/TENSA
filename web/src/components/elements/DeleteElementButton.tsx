@@ -11,7 +11,7 @@ import { useDeleteElement } from '@/api/queries';
 import { ProblemDetailsError } from '@/api/client';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
-import type { SelectedElement } from '@/store/case';
+import type { SelectedElement, StaticElementKind } from '@/store/case';
 import type { DeleteBlockedResponse, TopologyEntry } from '@/api/types';
 import { cn } from '@/lib/cn';
 
@@ -60,8 +60,13 @@ function isDeleteBlockedResponse(body: unknown): body is DeleteBlockedResponse {
   return Array.isArray(obj.dependents) && typeof obj.total === 'number';
 }
 
-/** Map an ANDES model class name onto the inspector's kind taxonomy. */
-function modelToInspectorKind(model: string): SelectedElement['kind'] | null {
+/**
+ * Map an ANDES model class name onto the inspector's kind taxonomy. Returns
+ * only static (deletable) kinds — controllers aren't deleted through this
+ * button, so the controller variant of `SelectedElement` is intentionally
+ * unreachable here.
+ */
+function modelToInspectorKind(model: string): StaticElementKind | null {
   const m = model.toLowerCase();
   if (m === 'bus') return 'bus';
   if (m === 'line') return 'line';

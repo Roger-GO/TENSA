@@ -53,6 +53,8 @@ function bucketFor(
       return topology.loads;
     case 'shunt':
       return topology.shunts ?? [];
+    case 'controller':
+      return topology.controllers ?? [];
     default:
       return null;
   }

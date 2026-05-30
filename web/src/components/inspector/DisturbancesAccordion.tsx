@@ -37,6 +37,10 @@ const KIND_TO_MODELS: Record<SelectedElement['kind'], readonly string[]> = {
   generator: ['PV', 'Slack', 'GENROU', 'GENCLS', 'REGCP1'],
   load: ['PQ', 'PQzip'],
   shunt: ['Shunt'],
+  // Controllers aren't direct disturbance targets — a user disturbs the
+  // parent device (generator/bus), so a controller selection matches no
+  // toggle/alter spec. Empty shortlist keeps `matchesElement` total.
+  controller: [],
 };
 
 function matchesElement(spec: DisturbanceSpec, selected: SelectedElement): boolean {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChartLineIcon, EmptyState } from '@/components/ui/EmptyState';
 import { useCaseStore } from '@/store/case';
+import type { SelectedElement } from '@/store/case';
 import { useRunsStore } from '@/store/runs';
 import { usePflowStore } from '@/store/pflow';
 import type { RunRecord } from '@/store/runs';
@@ -31,7 +32,10 @@ import { InlineSparkline } from './InlineSparkline';
 
 const SAMPLE_CAP = 200;
 
-type SelectedKind = 'bus' | 'line' | 'transformer' | 'generator' | 'load' | 'shunt';
+// Plot channels exist only for static elements; a controller selection
+// falls through `KindContent`'s default branch to the empty state (a
+// controller's signals plot under its parent device).
+type SelectedKind = SelectedElement['kind'];
 
 /**
  * Subscribe to the active run's column slice with a frame throttle.
