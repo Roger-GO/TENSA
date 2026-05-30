@@ -3,7 +3,7 @@
  *
  * Responsibilities:
  *
- * 1. Open WS to ``/ws/{sessionId}`` (``binaryType = "arraybuffer"``).
+ * 1. Open WS to ``/api/ws/{sessionId}`` (``binaryType = "arraybuffer"``).
  * 2. Send ``{type: "auth", token}`` within the substrate's 2-second deadline.
  * 3. Wait for ``{type: "ready"}``.
  * 4. Send ``{type: "start_tds", tf, h, decimation: "mean", max_rate_hz: 30, vars}``
@@ -292,7 +292,12 @@ export class RunStream {
   // ---- internal: socket lifecycle -----------------------------------------
 
   private openSocket(resume: boolean): void {
-    const url = `${this.opts.wsUrl.replace(/\/+$/, '')}/ws/${this.opts.sessionId}`;
+    // Connect to the real substrate path ``/api/ws/{id}`` (matching JobStream /
+    // SweepStream), so the single ``/api`` dev proxy upgrades it — the old
+    // ``/ws/{id}`` path relied on a separate rewrite proxy that silently
+    // dropped the WS upgrade in dev. Same path in a production bundle (the
+    // substrate serves the SPA + the ``/api/ws`` route at one origin).
+    const url = `${this.opts.wsUrl.replace(/\/+$/, '')}/api/ws/${this.opts.sessionId}`;
     let ws: WebSocketLike;
     try {
       ws = new this.deps.webSocketCtor(url);

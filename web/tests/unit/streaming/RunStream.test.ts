@@ -15,7 +15,7 @@ import { useRunsStore, DEFAULT_MEMORY_BUDGET_BYTES } from '@/store/runs';
 
 const WS_URL = 'ws://localhost:1234';
 const SESSION_ID = 'sess-abc';
-const FULL_URL = `${WS_URL}/ws/${SESSION_ID}`;
+const FULL_URL = `${WS_URL}/api/ws/${SESSION_ID}`;
 
 /** Build one Arrow IPC stream chunk (= one WS binary message). */
 function batch(t: number[], cols: Record<string, number[]>): ArrayBuffer {
