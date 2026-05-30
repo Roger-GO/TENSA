@@ -135,7 +135,7 @@ describe('controller inspection — Properties body', () => {
   it('renders an exciter’s params when its idx is selected', () => {
     seedLoadedCase();
     useCaseStore.setState({
-      selectedElement: { kind: 'controller', subKind: 'exciter', idx: 'EXST1_1' },
+      selectedElement: { kind: 'controller', subKind: 'exciter', modelClass: 'EXST1', idx: 'EXST1_1' },
     });
     render(withQueryClient(<PropertiesAccordion />));
     expect(screen.getByTestId('inspector-properties')).toBeInTheDocument();
@@ -149,7 +149,7 @@ describe('controller inspection — Properties body', () => {
   it('renders a governor’s params when its idx is selected', () => {
     seedLoadedCase();
     useCaseStore.setState({
-      selectedElement: { kind: 'controller', subKind: 'governor', idx: 'IEEEG1_1' },
+      selectedElement: { kind: 'controller', subKind: 'governor', modelClass: 'IEEEG1', idx: 'IEEEG1_1' },
     });
     render(withQueryClient(<PropertiesAccordion />));
     expect(screen.getByText('IEEEG1')).toBeInTheDocument();
@@ -160,11 +160,38 @@ describe('controller inspection — Properties body', () => {
   it('renders the empty-params branch for an unknown controller class', () => {
     seedLoadedCase();
     useCaseStore.setState({
-      selectedElement: { kind: 'controller', subKind: 'other', idx: 'MYSTERY_1' },
+      selectedElement: { kind: 'controller', subKind: 'other', modelClass: 'ZZUNKNOWN', idx: 'MYSTERY_1' },
     });
     render(withQueryClient(<PropertiesAccordion />));
     expect(screen.getByText('ZZUNKNOWN')).toBeInTheDocument();
     expect(screen.getByText(/no additional parameters reported by andes/i)).toBeInTheDocument();
+  });
+
+  it('disambiguates two controllers that share a numeric idx by (modelClass, idx)', () => {
+    // ANDES idx is model-local: an exciter and a governor on the same machine
+    // can both be idx "1". Selecting by idx alone would alias to the first
+    // match; the inspector must key on (modelClass, idx).
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('shared.xlsx'), addfiles: [] },
+      selectedElement: { kind: 'controller', subKind: 'governor', modelClass: 'IEEEG1', idx: '1' },
+    });
+    mockTopology = {
+      state: 'pre-setup',
+      buses: [],
+      lines: [],
+      transformers: [],
+      generators: [],
+      loads: [],
+      controllers: [
+        { idx: '1', name: 'EXST1 one', kind: 'EXST1', params: { Ka: 200 } },
+        { idx: '1', name: 'IEEEG1 one', kind: 'IEEEG1', params: { PMAX: 1.0 } },
+      ],
+    };
+    render(withQueryClient(<PropertiesAccordion />));
+    // The governor (IEEEG1) is selected, not the exciter that shares idx 1.
+    expect(screen.getByText('IEEEG1')).toBeInTheDocument();
+    expect(screen.getByText('PMAX')).toBeInTheDocument();
+    expect(screen.queryByText('Ka')).not.toBeInTheDocument();
   });
 });
 
@@ -182,7 +209,7 @@ describe('controller inspection — RightInspector header', () => {
   it('shows the sub-kind eyebrow + entry name for a selected exciter', () => {
     seedLoadedCase();
     useCaseStore.setState({
-      selectedElement: { kind: 'controller', subKind: 'exciter', idx: 'EXST1_1' },
+      selectedElement: { kind: 'controller', subKind: 'exciter', modelClass: 'EXST1', idx: 'EXST1_1' },
     });
     render(withQueryClient(<RightInspector />));
     const header = screen.getByTestId('right-inspector-header');

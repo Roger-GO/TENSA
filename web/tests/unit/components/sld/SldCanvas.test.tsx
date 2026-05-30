@@ -366,6 +366,7 @@ describe('SldCanvas', () => {
     expect(useCaseStore.getState().selectedElement).toEqual({
       kind: 'controller',
       subKind: 'exciter',
+      modelClass: 'EXST1',
       idx: 'EXST1_1',
     });
   });

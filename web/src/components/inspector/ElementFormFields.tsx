@@ -5,8 +5,9 @@ import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useSessionStore } from '@/store/session';
 import { useCurrentTopology, useReloadCase, useTopologySchema } from '@/api/queries';
-import type { ParamValue, TopologyEntry, TopologyParamMeta, TopologySummary } from '@/api/types';
+import type { ParamValue, TopologyEntry, TopologyParamMeta } from '@/api/types';
 import type { SelectedElement } from '@/store/case';
+import { findTopologyEntry } from '@/lib/topology';
 import { cn } from '@/lib/cn';
 
 /**
@@ -28,37 +29,6 @@ import { cn } from '@/lib/cn';
  * Edit-affordance gating mirrors v2 behaviour: editable when topology is
  * pre-setup AND no PF run is in flight.
  */
-
-/** Look up an entry in a topology bucket by idx-as-string. */
-function findEntry(topology: TopologySummary, selected: SelectedElement): TopologyEntry | null {
-  const bucket = bucketFor(topology, selected.kind);
-  if (!bucket) return null;
-  return bucket.find((e) => String(e.idx) === selected.idx) ?? null;
-}
-
-function bucketFor(
-  topology: TopologySummary,
-  kind: SelectedElement['kind'],
-): TopologyEntry[] | null {
-  switch (kind) {
-    case 'bus':
-      return topology.buses;
-    case 'line':
-      return topology.lines;
-    case 'transformer':
-      return topology.transformers;
-    case 'generator':
-      return topology.generators;
-    case 'load':
-      return topology.loads;
-    case 'shunt':
-      return topology.shunts ?? [];
-    case 'controller':
-      return topology.controllers ?? [];
-    default:
-      return null;
-  }
-}
 
 /**
  * Format a single parameter value for display. Numbers get a fixed-
@@ -206,7 +176,7 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
 
   const entry = useMemo(() => {
     if (!topology || !selectedElement) return null;
-    return findEntry(topology, selectedElement);
+    return findTopologyEntry(topology, selectedElement);
   }, [topology, selectedElement]);
 
   const paramMetas = useMemo(() => {

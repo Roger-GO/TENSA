@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { cn } from '@/lib/cn';
+import { controllerSubKindLabel } from '@/lib/controllers';
 import type { ControllerSubKind } from '@/lib/controllers';
 import { ControllerGlyph } from './ControllerGlyph';
 import type { SldNodeData } from './BusNode';
@@ -68,6 +69,15 @@ export const ControllerNode = memo(function ControllerNode({ data, selected }: N
         </svg>
       ) : null}
       <div
+        role="img"
+        // Role-bearing accessible name so AT conveys the sub-kind + orphan
+        // state that are otherwise carried only by the (aria-hidden) glyph,
+        // colour, and "!" mark.
+        aria-label={
+          d.orphan
+            ? `${controllerSubKindLabel(d.subKind)} ${d.kind} ${d.idx}, orphaned — parent device not found`
+            : `${controllerSubKindLabel(d.subKind)} ${d.kind} ${d.idx}`
+        }
         className={cn(
           'flex items-center gap-1 px-1.5 py-0.5',
           'bg-background text-foreground',

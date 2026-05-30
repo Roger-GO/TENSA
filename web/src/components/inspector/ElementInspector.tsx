@@ -6,8 +6,9 @@ import { DeleteElementButton } from '@/components/elements/DeleteElementButton';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useCurrentTopology } from '@/api/queries';
-import type { PflowResult, TopologyEntry, TopologySummary } from '@/api/types';
+import type { PflowResult } from '@/api/types';
 import type { SelectedElement } from '@/store/case';
+import { findTopologyEntry } from '@/lib/topology';
 import { cn } from '@/lib/cn';
 import { ElementFormFields } from './ElementFormFields';
 
@@ -36,37 +37,6 @@ import { ElementFormFields } from './ElementFormFields';
  * ``PropertiesAccordion``; the form-by-type rendering body lives in
  * ``ElementFormFields.tsx`` for shared use.
  */
-
-/** Look up an entry in a topology bucket by idx-as-string. */
-function findEntry(topology: TopologySummary, selected: SelectedElement): TopologyEntry | null {
-  const bucket = bucketFor(topology, selected.kind);
-  if (!bucket) return null;
-  return bucket.find((e) => String(e.idx) === selected.idx) ?? null;
-}
-
-function bucketFor(
-  topology: TopologySummary,
-  kind: SelectedElement['kind'],
-): TopologyEntry[] | null {
-  switch (kind) {
-    case 'bus':
-      return topology.buses;
-    case 'line':
-      return topology.lines;
-    case 'transformer':
-      return topology.transformers;
-    case 'generator':
-      return topology.generators;
-    case 'load':
-      return topology.loads;
-    case 'shunt':
-      return topology.shunts ?? [];
-    case 'controller':
-      return topology.controllers ?? [];
-    default:
-      return null;
-  }
-}
 
 interface ResultsTabProps {
   selected: SelectedElement;
@@ -226,7 +196,7 @@ export function ElementInspector({ className }: ElementInspectorProps) {
   const initialTab: 'properties' | 'results' = pflowResult ? 'results' : 'properties';
   const [tab, setTab] = useState<'properties' | 'results'>(initialTab);
 
-  const entry = topology && selectedElement ? findEntry(topology, selectedElement) : null;
+  const entry = topology && selectedElement ? findTopologyEntry(topology, selectedElement) : null;
 
   const isPreSetup = topology?.state === 'pre-setup';
   // Edit affordances disabled mid-PF so the user can't fire a write

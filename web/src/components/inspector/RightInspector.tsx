@@ -4,6 +4,7 @@ import { CursorIcon, EmptyState } from '@/components/ui/EmptyState';
 import { useCaseStore } from '@/store/case';
 import type { SelectedElement } from '@/store/case';
 import { controllerSubKindLabel } from '@/lib/controllers';
+import { findTopologyEntry } from '@/lib/topology';
 import { useCurrentTopology } from '@/api/queries';
 import { cn } from '@/lib/cn';
 import { PropertiesAccordion } from './PropertiesAccordion';
@@ -261,21 +262,8 @@ export function RightInspector({ className }: RightInspectorProps) {
 
   const headerName = useMemo(() => {
     if (!selectedElement || !topology) return null;
-    const buckets: Record<
-      SelectedElement['kind'],
-      readonly { idx: string | number; name: string }[]
-    > = {
-      bus: topology.buses,
-      line: topology.lines,
-      transformer: topology.transformers,
-      generator: topology.generators,
-      load: topology.loads,
-      shunt: topology.shunts ?? [],
-      controller: topology.controllers ?? [],
-    };
-    const bucket = buckets[selectedElement.kind] ?? [];
-    const entry = bucket.find((e) => String(e.idx) === selectedElement.idx);
-    return entry?.name ?? null;
+    // Shared lookup disambiguates controllers by (modelClass, idx).
+    return findTopologyEntry(topology, selectedElement)?.name ?? null;
   }, [selectedElement, topology]);
 
   if (!selectedElement) {
