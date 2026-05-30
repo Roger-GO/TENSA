@@ -144,6 +144,12 @@ async def test_get_topology_schema(client: httpx.AsyncClient) -> None:
     assert bus_params["Vn"]["required"] is True
     assert bus_params["Vn"]["kind"] == "number"
     assert bus_params["Vn"]["unit"] == "kV"
+    # Dynamic machines expose the mandatory ``gen`` link (a gen_idx picker) so
+    # they can actually be built from scratch — ANDES rejects them otherwise.
+    for dyn in ("GENROU", "GENCLS"):
+        params = {p["name"]: p for p in body["models"][dyn]}
+        assert params["gen"]["required"] is True, f"{dyn}.gen must be required"
+        assert params["gen"]["kind"] == "gen_idx", f"{dyn}.gen must be a gen_idx picker"
 
 
 @pytest.mark.integration
