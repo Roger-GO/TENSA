@@ -23,6 +23,8 @@ import type {
 import '@xyflow/react/dist/style.css';
 
 import { useCaseStore } from '@/store/case';
+import { subKindForControllerClass } from '@/lib/controllers';
+import type { ControllerSubKind } from '@/lib/controllers';
 import { useSessionStore } from '@/store/session';
 import { useConnectivityStore } from '@/store/connectivity';
 import { useSldStore, __requestOpenSldSearch } from '@/store/sld';
@@ -39,6 +41,7 @@ import { LineNode } from './nodes/LineNode';
 import { GeneratorNode } from './nodes/GeneratorNode';
 import { LoadNode } from './nodes/LoadNode';
 import { ShuntNode } from './nodes/ShuntNode';
+import { ControllerNode } from './nodes/ControllerNode';
 import { TopologyEdge } from './edges/TopologyEdge';
 import { RoutedEdge } from './edges/RoutedEdge';
 import { TransformerEdge } from './edges/TransformerEdge';
@@ -66,6 +69,7 @@ const NODE_TYPES: NodeTypes = {
   generator: GeneratorNode,
   load: LoadNode,
   shunt: ShuntNode,
+  controller: ControllerNode,
 };
 
 const EDGE_TYPES: EdgeTypes = {
@@ -513,6 +517,16 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
       const rawKind = node.type ?? 'bus';
       if (!Object.prototype.hasOwnProperty.call(NODE_TYPES, rawKind)) {
         console.warn(`SldCanvas: ignoring click on node with unknown type ${String(rawKind)}`);
+        return;
+      }
+      // Controllers carry a sub-kind on the `'controller'` SelectedElement
+      // variant (Unit 18). Prefer the sub-kind already stamped on the node
+      // by buildGraph; fall back to re-deriving from the model class.
+      if (rawKind === 'controller') {
+        const cd = node.data as { kind?: string; subKind?: ControllerSubKind };
+        const subKind = cd.subKind ?? subKindForControllerClass(cd.kind ?? '');
+        setSelectedElement({ kind: 'controller', subKind, idx: String(idx) });
+        setSelectedNodeId(node.id);
         return;
       }
       const kind = rawKind as 'bus' | 'line' | 'generator' | 'load' | 'shunt';

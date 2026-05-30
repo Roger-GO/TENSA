@@ -7,6 +7,7 @@
  */
 import type { Edge, Node } from '@xyflow/react';
 import type { BusCoord, TopologyEntry, TopologySummary } from '@/api/types';
+import { subKindForControllerClass } from '@/lib/controllers';
 import type { CoordsByIdx } from './sidecar';
 
 /** Cardinal handle sides exposed by every Bus node. */
@@ -892,7 +893,133 @@ export function buildGraph(
     }
   }
 
+  // ---- Dynamic controllers (Unit 19) ----------------------------------
+  // Dock each controller beside the device it references. ANDES wires a
+  // controller to a SynGen (`syn`), a Bus/StaticGen (`bus`/`gen`), or
+  // another controller (`avr`→Exciter, `reg`→RenGen, `ree`→RenExciter), so
+  // resolution runs in iterative passes: a PSS docks beside its exciter,
+  // which has already docked beside its GENROU; REPCA1→REECA1→REGCP1
+  // resolves the same way. Runs after collision push-out so anchors use
+  // each parent's final position. A controller whose reference can't be
+  // resolved renders as an orphan badge in the gutter.
+  appendControllerNodes(nodes, topology.controllers ?? []);
+
   return { nodes, edges };
+}
+
+/** Docked offset of a controller badge from its parent device's origin. */
+const CONTROLLER_DOCK = { x: 32, y: -18, stackDy: 22 } as const;
+
+/**
+ * Resolve the React Flow node id a controller should dock to, given the
+ * nodes placed so far. Returns the target node id, `'orphan'` (no ref param
+ * at all), or `'wait'` (a ref param exists but its target node hasn't been
+ * placed yet — retry on a later pass).
+ */
+function resolveControllerParent(
+  entry: TopologyEntry,
+  nodeById: ReadonlyMap<string, Node>,
+): { id: string } | 'orphan' | 'wait' {
+  const params = entry.params;
+  if (!params) return 'orphan';
+  const ref = (key: string, prefix: string): string | null => {
+    const v = params[key];
+    if (v === undefined || v === null || typeof v === 'boolean') return null;
+    const s = String(v);
+    return s === '' ? null : prefix + s;
+  };
+  // Priority: SynGen / StaticGen (a generator node) → Bus node → an
+  // upstream controller (Exciter / RenGen / RenExciter). Bus node ids carry
+  // no prefix; generator/controller nodes are `generator-<idx>` /
+  // `controller-<idx>`.
+  const candidates = [
+    ref('syn', 'generator-'),
+    ref('gen', 'generator-'),
+    ref('bus', ''),
+    ref('avr', 'controller-'),
+    ref('reg', 'controller-'),
+    ref('ree', 'controller-'),
+  ].filter((c): c is string => c !== null);
+  if (candidates.length === 0) return 'orphan';
+  for (const id of candidates) {
+    if (nodeById.has(id)) return { id };
+  }
+  return 'wait';
+}
+
+/**
+ * Append a docked badge node for each controller in `controllers`,
+ * mutating `nodes` in place. Iterative passes resolve controller→controller
+ * reference chains; anything still unresolved after the passes (a dangling
+ * idx) is placed as an orphan.
+ */
+function appendControllerNodes(nodes: Node[], controllers: readonly TopologyEntry[]): void {
+  if (controllers.length === 0) return;
+  const nodeById = new Map<string, Node>(nodes.map((n) => [n.id, n] as const));
+  const stackCounts = new Map<string, number>();
+
+  const place = (entry: TopologyEntry, parentId: string | null): void => {
+    const idx = String(entry.idx);
+    const nodeId = `controller-${idx}`;
+    const subKind = subKindForControllerClass(entry.kind);
+    const parent = parentId !== null ? nodeById.get(parentId) : undefined;
+    const stackKey = parent ? parentId! : '__orphan__';
+    const stackIndex = stackCounts.get(stackKey) ?? 0;
+    stackCounts.set(stackKey, stackIndex + 1);
+
+    let position: { x: number; y: number };
+    let connectorDx = 0;
+    let connectorDy = 0;
+    if (parent) {
+      position = {
+        x: parent.position.x + CONTROLLER_DOCK.x,
+        y: parent.position.y + CONTROLLER_DOCK.y + stackIndex * CONTROLLER_DOCK.stackDy,
+      };
+      // Vector (controller origin → parent origin) so ControllerNode can
+      // draw an exact tether back to the device for any stack row.
+      connectorDx = parent.position.x - position.x;
+      connectorDy = parent.position.y - position.y;
+    } else {
+      position = { x: 24, y: 24 + stackIndex * CONTROLLER_DOCK.stackDy };
+    }
+
+    const node: Node = {
+      id: nodeId,
+      type: 'controller',
+      position,
+      // Docked badges aren't free-dragged (no sidecar persistence for
+      // controllers); they follow their parent device.
+      draggable: false,
+      data: {
+        idx,
+        name: entry.name,
+        kind: entry.kind,
+        subKind,
+        orphan: !parent,
+        connectorDx,
+        connectorDy,
+        parentNodeId: parentId ?? undefined,
+      },
+    };
+    nodes.push(node);
+    nodeById.set(nodeId, node);
+  };
+
+  const pending = [...controllers];
+  let changed = true;
+  while (changed && pending.length > 0) {
+    changed = false;
+    for (let i = pending.length - 1; i >= 0; i -= 1) {
+      const entry = pending[i]!;
+      const resolved = resolveControllerParent(entry, nodeById);
+      if (resolved === 'wait') continue;
+      pending.splice(i, 1);
+      changed = true;
+      place(entry, resolved === 'orphan' ? null : resolved.id);
+    }
+  }
+  // Dangling references (a parent idx that names no node) → orphan badges.
+  for (const entry of pending) place(entry, null);
 }
 
 /** Returns "3w" when an entry references a 3-winding transformer, else "2w". */
