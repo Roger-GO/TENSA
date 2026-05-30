@@ -12,6 +12,7 @@
  */
 import { create } from 'zustand';
 import type { TopologyEntry, TopologySummary, SidecarLayout, WorkspacePath } from '@/api/types';
+import type { ControllerSubKind } from '@/lib/controllers';
 
 export interface CaseSelection {
   /**
@@ -30,18 +31,39 @@ export interface CaseSelection {
 }
 
 /**
+ * The static (power-flow-topology) element kinds. Each mirrors a
+ * `TopologySummary` bucket name and is selectable from the SLD canvas or a
+ * data grid. Controllers are dynamic devices handled by the separate
+ * `'controller'` variant of `SelectedElement` below.
+ */
+export type StaticElementKind =
+  | 'bus'
+  | 'line'
+  | 'transformer'
+  | 'generator'
+  | 'load'
+  | 'shunt';
+
+/**
  * A handle to one element on the SLD canvas. Written by `SldCanvas`
  * (Unit 8) on node click; read by `ElementInspector` (Unit 9) to drive
  * the right-dock inspector.
  *
- * `kind` mirrors the topology bucket name (`bus`, `line`, `transformer`,
- * `generator`, `load`, `shunt`); `idx` is the ANDES idx as a string so
- * the same shape works for both numeric and string-named idx values.
+ * `kind` mirrors the topology bucket name; `idx` is the ANDES idx as a
+ * string so the same shape works for both numeric and string-named idx
+ * values.
+ *
+ * v3.1 Unit 18 widens this to a discriminated union: dynamic controllers
+ * (exciters / governors / PSS / renewable / measurement / profile) read
+ * from `topology.controllers` and carry an extra `subKind` derived from
+ * the controller's ANDES model class (see `@/lib/controllers`). The
+ * `subKind` drives the inspector/SLD glyph and per-kind accordion-state
+ * persistence; the rendered params still key on the matched entry's real
+ * `kind` (e.g. `EXST1`), exactly as for static elements.
  */
-export interface SelectedElement {
-  kind: 'bus' | 'line' | 'transformer' | 'generator' | 'load' | 'shunt';
-  idx: string;
-}
+export type SelectedElement =
+  | { kind: StaticElementKind; idx: string }
+  | { kind: 'controller'; subKind: ControllerSubKind; idx: string };
 
 /**
  * Per-node coordinate overrides captured from user drags on the SLD

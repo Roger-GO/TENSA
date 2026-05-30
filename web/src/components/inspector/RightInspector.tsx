@@ -3,6 +3,7 @@ import * as AccordionPrimitive from '@radix-ui/react-accordion';
 import { CursorIcon, EmptyState } from '@/components/ui/EmptyState';
 import { useCaseStore } from '@/store/case';
 import type { SelectedElement } from '@/store/case';
+import { controllerSubKindLabel } from '@/lib/controllers';
 import { useCurrentTopology } from '@/api/queries';
 import { cn } from '@/lib/cn';
 import { PropertiesAccordion } from './PropertiesAccordion';
@@ -131,6 +132,18 @@ function KindGlyph({ kind, className }: { kind: SelectedElement['kind']; classNa
           <circle cx="15" cy="12" r="4" />
         </svg>
       );
+    case 'controller':
+      // Generic dynamic-controller placeholder glyph (a control block with
+      // an input/output tap). Unit 19 introduces per-sub-kind IEC-style
+      // glyphs on the SLD; the inspector header keeps this neutral block.
+      return (
+        <svg {...common}>
+          <rect x="6" y="7" width="12" height="10" rx="1.5" />
+          <path d="M3 12h3" />
+          <path d="M18 12h3" />
+          <path d="M9.5 12h5" />
+        </svg>
+      );
     default:
       return <svg {...common} />;
   }
@@ -160,6 +173,16 @@ function ChevronGlyph({ className }: { className?: string }) {
 /** Capitalize the first letter for header display. */
 function titleCase(kind: SelectedElement['kind']): string {
   return kind.charAt(0).toUpperCase() + kind.slice(1);
+}
+
+/**
+ * Header eyebrow label for the selected element. Controllers surface their
+ * sub-kind (e.g. "Exciter", "Governor") so the user reads the controller's
+ * role rather than the generic "Controller"; static elements use the kind.
+ */
+function headerKindLabel(selected: SelectedElement): string {
+  if (selected.kind === 'controller') return controllerSubKindLabel(selected.subKind);
+  return titleCase(selected.kind);
 }
 
 interface SectionProps {
@@ -248,6 +271,7 @@ export function RightInspector({ className }: RightInspectorProps) {
       generator: topology.generators,
       load: topology.loads,
       shunt: topology.shunts ?? [],
+      controller: topology.controllers ?? [],
     };
     const bucket = buckets[selectedElement.kind] ?? [];
     const entry = bucket.find((e) => String(e.idx) === selectedElement.idx);
@@ -285,7 +309,7 @@ export function RightInspector({ className }: RightInspectorProps) {
             'text-[9px] font-semibold tracking-[0.1em] uppercase',
           )}
         >
-          {titleCase(selectedElement.kind)}
+          {headerKindLabel(selectedElement)}
         </span>
         <p className="text-foreground truncate font-mono text-sm font-semibold">
           {headerName ?? selectedElement.idx}
