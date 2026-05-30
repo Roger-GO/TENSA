@@ -4,6 +4,7 @@ import { useCurrentTopology, useTopologySchema } from '@/api/queries';
 import type { ParamValue, TopologyEntry, TopologyParamMeta, TopologySummary } from '@/api/types';
 import { cn } from '@/lib/cn';
 import { BusIdxSelect } from './BusIdxSelect';
+import { GenIdxSelect } from './GenIdxSelect';
 
 /**
  * ElementForm — polymorphic form generated from `_PARAMS_BY_MODEL`
@@ -272,6 +273,14 @@ export function ElementForm({
         <span className="flex items-center gap-1">
           {m.kind === 'bus_idx' ? (
             <BusIdxSelect
+              id={inputId}
+              value={String(value)}
+              onChange={(v) => setField(m.name, v)}
+              required={m.required}
+              aria-describedby={error ? errorId : undefined}
+            />
+          ) : m.kind === 'gen_idx' ? (
+            <GenIdxSelect
               id={inputId}
               value={String(value)}
               onChange={(v) => setField(m.name, v)}

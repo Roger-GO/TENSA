@@ -77,6 +77,23 @@ describe('<DynamicContentBadge />', () => {
     expect(badge.getAttribute('aria-label')).toMatch(/load a \.dyr addfile/i);
   });
 
+  it('reads as dynamic when a GENROU/GENCLS machine is present even with no controllers', () => {
+    // A synchronous machine carries the rotor DAE states, so a from-scratch
+    // GENCLS system is dynamic (TDS/EIG can run) despite zero controllers.
+    loadCase({
+      ...DYNAMIC,
+      generators: [
+        { idx: '1', name: 'slack', kind: 'Slack', params: {} },
+        { idx: '1', name: 'g1', kind: 'GENCLS', params: {} },
+      ],
+      controllers: [],
+    });
+    render(<DynamicContentBadge />);
+    const badge = screen.getByTestId('dynamic-content-badge');
+    expect(badge).toHaveAttribute('data-state', 'dynamic');
+    expect(badge.getAttribute('aria-label')).toMatch(/1 synchronous machine/i);
+  });
+
   it('compact mode hides the text label but keeps the accessible name', () => {
     loadCase(DYNAMIC);
     render(<DynamicContentBadge compact />);
