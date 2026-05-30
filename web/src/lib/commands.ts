@@ -145,6 +145,7 @@ export function useCommandRegistry(): readonly Command[] {
   const openBundleDialog = useBundleStore((s) => s.openDialog);
   const setActiveRoutine = useRunModeStore((s) => s.setActiveRoutine);
   const setAnalyzeSubMode = useAnalyzeStore((s) => s.setSubMode);
+  const setActiveCpfSubMode = useAnalyzeStore((s) => s.setActiveCpfSubMode);
   const togglePalette = useCommandPaletteStore((s) => s.togglePalette);
   const toggleCheatsheet = useShortcutCheatsheetStore((s) => s.toggleCheatsheet);
   const openHistoryDrawer = useHistoryStore((s) => s.openDrawer);
@@ -164,12 +165,18 @@ export function useCommandRegistry(): readonly Command[] {
   const pfConverged = lastPfRun?.converged === true;
 
   return useMemo<readonly Command[]>(() => {
-    const handleSelectRoutine = (routine: RunRoutine) => {
+    const handleSelectRoutine = (
+      routine: RunRoutine,
+      opts?: { cpfSubMode?: 'nose' | 'qv' },
+    ) => {
       setActiveRoutine(routine);
       if (routine === 'eig') {
         setAnalyzeSubMode('eig');
       } else if (routine === 'cpf') {
         setAnalyzeSubMode('cpf');
+        // Default the CPF sub-tab to the nose-curve flow unless the
+        // caller asked for the QV variant (``run.cpfQv``).
+        setActiveCpfSubMode(opts?.cpfSubMode ?? 'nose');
       } else if (routine === 'se') {
         setAnalyzeSubMode('se');
       }
@@ -336,7 +343,14 @@ export function useCommandRegistry(): readonly Command[] {
             ? `Run ${routine.toUpperCase()}  ✓`
             : `Run ${routine.toUpperCase()}`,
         group: 'run',
-        keywords: keywordsForRoutine(routine),
+        // ``run.cpf`` routes to the CPF nose-curve flow; the direction
+        // (load | gen) knob lives in the panel's Advanced disclosure, so
+        // we surface "load" / "gen" / "direction" as search synonyms so
+        // a user searching for the gen-direction nose lands here.
+        keywords:
+          routine === 'cpf'
+            ? [...keywordsForRoutine(routine), 'direction', 'load', 'gen', 'generation']
+            : keywordsForRoutine(routine),
         action: () => {
           handleSelectRoutine(routine);
           if (routine === 'sweep') {
@@ -346,6 +360,19 @@ export function useCommandRegistry(): readonly Command[] {
         when: routine === 'eig' ? () => pfConverged : undefined,
         shortcut,
       })),
+      // v3.1 Unit 13 — CPF QV-curve command. Routes to the CPF sub-tab
+      // and flips the CPF sub-mode to ``qv`` so the QV bus-picker +
+      // chart mount. Shipped with the feature for palette
+      // discoverability (per the retired-Unit-17 note).
+      {
+        id: 'run.cpfQv',
+        label: 'Run CPF QV-curve',
+        group: 'run',
+        keywords: ['cpf', 'qv', 'qv curve', 'reactive', 'voltage stability', 'bus', 'q margin'],
+        action: () => {
+          handleSelectRoutine('cpf', { cpfSubMode: 'qv' });
+        },
+      },
 
       // ---- export --------------------------------------------------------
       {
@@ -578,6 +605,7 @@ export function useCommandRegistry(): readonly Command[] {
     openBundleDialog,
     setActiveRoutine,
     setAnalyzeSubMode,
+    setActiveCpfSubMode,
     togglePalette,
     toggleCheatsheet,
     openHistoryDrawer,
