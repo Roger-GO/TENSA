@@ -1267,6 +1267,43 @@ class Wrapper:
             load_consumption=load_consumption,
         )
 
+    def operating_point(self) -> PflowResult:
+        """Read the System's CURRENT operating point WITHOUT running anything.
+
+        The data grid shows solved bus V/θ from the last ``PflowResult``. A
+        PF run sets that; a TDS run does NOT — so after a TDS-only run the
+        grid sat empty even though ``ss.Bus.v``/``ss.Bus.a`` hold the
+        final-time operating point. This read-only accessor reads the same
+        ``Bus.v``/``Bus.a`` arrays ``run_pflow`` reads so the client can
+        refresh the grid after TDS (and any routine that leaves a solved
+        state) — no re-solve, no dae mutation.
+
+        ``converged`` here means "a finite solution is present" (Bus.v set),
+        not a fresh PF convergence. Non-finite entries (e.g. a dae left
+        dirty by a prior EIG run) are skipped so JSON encoding never sees
+        NaN/Inf. Line/generator/load flows are intentionally omitted: this
+        read targets the Buses grid (V/θ), and deriving the rest from a
+        possibly-dirty dae risks non-finite values; the PF path still
+        populates them.
+        """
+        ss = self._require_loaded()
+        bus_voltages: dict[int | str, float] = {}
+        bus_angles: dict[int | str, float] = {}
+        if hasattr(ss, "Bus") and getattr(ss.Bus, "v", None) is not None:
+            for i, idx in enumerate(ss.Bus.idx.v):
+                v = float(ss.Bus.v.v[i])
+                a = float(ss.Bus.a.v[i])
+                if math.isfinite(v) and math.isfinite(a):
+                    bus_voltages[idx] = v
+                    bus_angles[idx] = a
+        return PflowResult(
+            converged=len(bus_voltages) > 0,
+            iterations=0,
+            mismatch=0.0,
+            bus_voltages=bus_voltages,
+            bus_angles=bus_angles,
+        )
+
     def run_tds(
         self,
         tf: float,

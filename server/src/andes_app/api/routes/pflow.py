@@ -151,3 +151,42 @@ async def run_pflow(
     result = _result_from_payload(payload, run_id)
     result.job_id = job_id
     return result
+
+
+@router.get(
+    "/sessions/{session_id}/operating-point",
+    openapi_extra={"x-andes-app-gui-location": "data-grid"},
+    operation_id="getOperatingPoint",
+    summary="Read the session's current operating point (bus V/θ) without running.",
+    response_model=PflowResult,
+    responses={
+        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
+        404: {"model": ProblemDetails, "description": "Session not found or already closed."},
+        409: {
+            "model": ProblemDetails,
+            "description": "No case has been loaded into this session.",
+        },
+    },
+)
+async def get_operating_point(
+    session_id: str,
+    request: Request,
+    _: RequireToken,
+) -> PflowResult:
+    """Return the System's current solved bus voltages/angles WITHOUT
+    re-running anything. After a TDS run the data grid otherwise sits empty
+    (only PF writes ``usePflowStore.lastRun``); the client fetches this on
+    run completion to surface the final operating point. Read-only — does
+    not run a job or mutate dae state."""
+    mgr = _manager(request)
+    try:
+        payload = await mgr.invoke(session_id, "operating_point", {})
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except WorkerError as exc:
+        raise _to_http_error(exc) from exc
+
+    return _result_from_payload(payload, uuid.uuid4().hex)

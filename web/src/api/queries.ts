@@ -614,6 +614,31 @@ export function useRunPflow(): UseMutationResult<PflowResult, Error, SessionId> 
   });
 }
 
+/**
+ * Refresh the data grid's solved values from the System's CURRENT operating
+ * point (read-only `GET /sessions/{id}/operating-point`).
+ *
+ * The Buses grid reads V/θ from `usePflowStore.lastRun`, which only a PF run
+ * sets. After a TDS-only run the grid sat empty even though the substrate
+ * holds the final-time operating point. Calling this on TDS completion writes
+ * those values into the same store slot so the grid (and every other
+ * `lastRun` consumer) populates. Best-effort: a failure leaves the grid as-is.
+ */
+export async function loadOperatingPointIntoStore(sessionId: SessionId): Promise<void> {
+  try {
+    const op = await andesClient.get<PflowResult>(
+      `/sessions/${encodeURIComponent(sessionId)}/operating-point`,
+      { timeoutMs: TIMEOUTS.workspace },
+    );
+    if (op.converged) {
+      usePflowStore.getState().setLastRun({ ...op, run_id: parseRunId(op.run_id) });
+    }
+  } catch {
+    // Read-only refresh; if the substrate has no solved state yet (or the
+    // session expired), leave the grid untouched rather than surfacing noise.
+  }
+}
+
 // ---- reload --------------------------------------------------------------
 
 /**

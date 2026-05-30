@@ -85,6 +85,46 @@ def test_run_tds_with_dynamics_no_disturbance() -> None:
 
 
 @pytest.mark.integration
+def test_operating_point_after_pflow_matches_pflow_result() -> None:
+    """``operating_point`` reads the same solved Bus v/a as ``run_pflow``
+    without re-running. After a PF, the two must agree."""
+    raw, _ = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw)
+    pf = w.run_pflow()
+    assert pf.converged
+
+    op = w.operating_point()
+    assert op.converged
+    assert op.bus_voltages, "operating point should carry solved bus voltages"
+    # Same operating point → identical V/θ (read of the same arrays).
+    assert set(op.bus_voltages) == set(pf.bus_voltages)
+    for idx, v in pf.bus_voltages.items():
+        assert op.bus_voltages[idx] == pytest.approx(v)
+        assert op.bus_angles[idx] == pytest.approx(pf.bus_angles[idx])
+
+
+@pytest.mark.integration
+def test_operating_point_populated_after_tds_without_pflow() -> None:
+    """The fix: a TDS-only run leaves a readable operating point. ``run_tds``
+    never returns bus voltages (and the grid only reads from the PF result),
+    so the data grid sat empty after TDS. ``operating_point`` must surface
+    the final-time Bus v/a so the grid can populate."""
+    raw, dyr = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw, addfiles=[dyr])
+
+    w.run_tds(tf=1.0, h=1 / 120)  # no explicit run_pflow first
+
+    op = w.operating_point()
+    assert op.converged, "TDS leaves a finite operating point"
+    assert len(op.bus_voltages) == 14
+    # Voltages are finite and near nominal (steady-state, no disturbance).
+    for v in op.bus_voltages.values():
+        assert 0.8 < v < 1.2, f"bus voltage {v} out of plausible range"
+
+
+@pytest.mark.integration
 def test_callpert_abort_flag_terminates_tds() -> None:
     """Edge case: setting the abort flag mid-TDS causes the wrapper to mark
     ``ss.TDS.busted = True``, terminating the integration loop within the next
