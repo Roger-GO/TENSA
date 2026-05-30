@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/Input';
 import {
   Tooltip,
   TooltipContent,
@@ -452,6 +453,29 @@ export function AnalyzeCpfNoseSubMode() {
  * cascade), drop any stale SE result + measurement count so the empty
  * state shows on first paint.
  */
+/**
+ * Validate the optional SE ``noise_seed`` text input. The substrate
+ * draws the measurement noise from a seeded RNG and requires an integer
+ * seed; the GUI exposes it as an optional override (blank → the
+ * substrate picks its own seed). Returns ``null`` when valid (blank or a
+ * parseable integer) or a form-level error string otherwise. Behaviour
+ * is covered through the AnalyzePanel SE-sub-mode tests (driven via the
+ * DOM), so this stays a module-local helper.
+ */
+function validateSeNoiseSeed(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return null;
+  // The substrate requires an int seed — reject anything that isn't a
+  // base-10 integer (no decimals, no exponent, no stray characters).
+  if (!/^[-+]?\d+$/.test(trimmed)) {
+    return 'Enter a whole number (integer) seed, or leave blank.';
+  }
+  if (!Number.isSafeInteger(Number(trimmed))) {
+    return 'Seed is too large — use a smaller integer.';
+  }
+  return null;
+}
+
 export function AnalyzeSeSubMode() {
   const sessionId = useSessionStore((s) => s.sessionId);
   const lastPf = usePflowStore((s) => s.lastRun);
@@ -459,6 +483,12 @@ export function AnalyzeSeSubMode() {
   const seMeasurementsCount = useAnalyzeStore((s) => s.seMeasurementsCount);
   const seGenerate = useSeGenerateMeasurements();
   const seRun = useSeRun();
+
+  // Optional integer noise seed forwarded to the measurement-generation
+  // request (Unit 14). Blank (the default) → omit ``noise_seed`` from
+  // the body so the substrate picks its own seed (unchanged behaviour).
+  const [noiseSeedText, setNoiseSeedText] = useState('');
+  const noiseSeedError = validateSeNoiseSeed(noiseSeedText);
 
   // Cross-slice cascade cleanup — same shape as the EIG / CPF panels.
   useEffect(() => {
@@ -469,7 +499,12 @@ export function AnalyzeSeSubMode() {
 
   const onGenerate = () => {
     if (!sessionId) return;
-    seGenerate.mutate({ sessionId });
+    if (noiseSeedError !== null) return;
+    const trimmed = noiseSeedText.trim();
+    seGenerate.mutate({
+      sessionId,
+      ...(trimmed.length === 0 ? {} : { noiseSeed: Number(trimmed) }),
+    });
   };
   const onRun = () => {
     if (!sessionId) return;
@@ -480,7 +515,7 @@ export function AnalyzeSeSubMode() {
   // the run button is disabled and the error came from generate).
   const activeError = seGenerate.error ?? seRun.error;
 
-  const canGenerate = sessionId !== null && !seGenerate.isPending;
+  const canGenerate = sessionId !== null && !seGenerate.isPending && noiseSeedError === null;
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -513,6 +548,50 @@ export function AnalyzeSeSubMode() {
           </span>
         ) : null}
       </div>
+
+      <details className="group" data-testid="se-advanced">
+        <summary
+          className={cn(
+            'text-muted-foreground hover:text-foreground cursor-pointer text-[11px] font-medium',
+            'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+          )}
+        >
+          Advanced
+        </summary>
+        <div className="mt-2 flex flex-col gap-1">
+          <label htmlFor="se-noise-seed" className="text-muted-foreground text-xs font-medium">
+            noise_seed — RNG seed (optional)
+          </label>
+          <Input
+            id="se-noise-seed"
+            data-testid="field-se-noise-seed"
+            inputMode="numeric"
+            value={noiseSeedText}
+            onChange={setNoiseSeedText}
+            placeholder="substrate default"
+            aria-invalid={noiseSeedError ? true : undefined}
+            aria-describedby={
+              noiseSeedError ? 'se-noise-seed-error' : 'se-noise-seed-hint'
+            }
+            className="h-7 font-mono text-xs"
+          />
+          {noiseSeedError ? (
+            <span
+              id="se-noise-seed-error"
+              role="alert"
+              data-testid="error-se-noise-seed"
+              className="text-danger text-[10px]"
+            >
+              {noiseSeedError}
+            </span>
+          ) : (
+            <span id="se-noise-seed-hint" className="text-muted-foreground text-[10px] leading-snug">
+              Fix the noise draw for reproducible measurements. Leave blank to let the substrate
+              choose.
+            </span>
+          )}
+        </div>
+      </details>
 
       <AnalyzeRoutineError routine="se" error={activeError ?? null} />
 

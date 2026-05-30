@@ -389,4 +389,93 @@ describe('<AnalyzePanel />', () => {
       await waitFor(() => expect(useAnalyzeStore.getState().subMode).toBe('pflow'));
     });
   });
+
+  // ---- Unit 14: SE noise_seed pass-through + inline validation ---------
+
+  describe('SE noise_seed (Unit 14)', () => {
+    let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      setTokenGetter(() => 'test-token');
+      fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
+        typeof vi.spyOn
+      >;
+      // Converged PF so the Generate Measurements button is enabled.
+      usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+      useAnalyzeStore.getState().setSubMode('se');
+    });
+
+    afterEach(() => {
+      fetchSpy.mockRestore();
+      setTokenGetter(() => null);
+    });
+
+    it('forwards an integer noise_seed to the measurement-generate request', async () => {
+      fetchSpy.mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ count: 28 }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        ),
+      );
+      render(withQueryClient(<AnalyzePanel />));
+
+      await userEvent.click(screen.getByTestId('se-advanced'));
+      await userEvent.type(screen.getByTestId('field-se-noise-seed'), '42');
+      await userEvent.click(screen.getByTestId('analyze-se-generate-measurements'));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+      const generateCall = fetchSpy.mock.calls.find((c) =>
+        String(c[0]).includes('/se/measurements/generate'),
+      );
+      expect(generateCall).toBeDefined();
+      const body = JSON.parse((generateCall![1] as RequestInit).body as string);
+      expect(body.noise_seed).toBe(42);
+    });
+
+    it('omits noise_seed entirely when the input is left blank', async () => {
+      fetchSpy.mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ count: 28 }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        ),
+      );
+      render(withQueryClient(<AnalyzePanel />));
+
+      await userEvent.click(screen.getByTestId('analyze-se-generate-measurements'));
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+      const generateCall = fetchSpy.mock.calls.find((c) =>
+        String(c[0]).includes('/se/measurements/generate'),
+      );
+      expect(generateCall).toBeDefined();
+      const body = JSON.parse((generateCall![1] as RequestInit).body as string);
+      expect(body).not.toHaveProperty('noise_seed');
+    });
+
+    it('shows a form-level inline error and blocks generate for a non-integer seed', async () => {
+      fetchSpy.mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ count: 28 }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        ),
+      );
+      render(withQueryClient(<AnalyzePanel />));
+
+      await userEvent.click(screen.getByTestId('se-advanced'));
+      await userEvent.type(screen.getByTestId('field-se-noise-seed'), '1.5');
+      expect(screen.getByTestId('error-se-noise-seed')).toBeInTheDocument();
+      // The button is disabled while the seed is invalid.
+      expect(screen.getByTestId('analyze-se-generate-measurements')).toBeDisabled();
+      // No generate request fired.
+      expect(
+        fetchSpy.mock.calls.some((c) => String(c[0]).includes('/se/measurements/generate')),
+      ).toBe(false);
+    });
+  });
 });

@@ -13,6 +13,7 @@ import userEvent from '@testing-library/user-event';
 import { TdsConfigPanel } from '@/components/tds/TdsConfigPanel';
 import {
   DEFAULT_TDS_CONFIG,
+  DEFAULT_TDS_CONFIG_OVERRIDES,
   DEFAULT_TDS_INTEGRATOR,
   DEFAULT_TDS_TOLERANCE_OVERRIDES,
   useUiStore,
@@ -24,6 +25,7 @@ function resetUi() {
     tdsConfig: { ...DEFAULT_TDS_CONFIG },
     tdsIntegrator: DEFAULT_TDS_INTEGRATOR,
     tdsToleranceOverrides: { ...DEFAULT_TDS_TOLERANCE_OVERRIDES },
+    tdsConfigOverrides: { ...DEFAULT_TDS_CONFIG_OVERRIDES },
   });
 }
 
@@ -205,5 +207,57 @@ describe('<TdsConfigPanel />', () => {
     await user.click(screen.getByTestId('tds-config-reset'));
     expect(useUiStore.getState().tdsIntegrator).toBe('trapezoidal');
     expect(useUiStore.getState().tdsToleranceOverrides).toEqual(DEFAULT_TDS_TOLERANCE_OVERRIDES);
+  });
+
+  // ---- Unit 14: tds_config_overrides key-value editor ----
+
+  it('the overrides editor is empty by default and forwards no overrides', () => {
+    render(<TdsConfigPanel />);
+    expect(screen.getByTestId('tds-config-overrides-editor')).toBeInTheDocument();
+    expect(screen.getByTestId('tds-config-overrides-empty')).toBeInTheDocument();
+    expect(useUiStore.getState().tdsConfigOverrides).toEqual({});
+  });
+
+  it('adding a row with a custom key + numeric value commits it to the store dict', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-override-add'));
+    await user.type(screen.getByTestId('tds-config-override-key-0'), 'tol');
+    await user.type(screen.getByTestId('tds-config-override-value-0'), '0.0001');
+    expect(useUiStore.getState().tdsConfigOverrides).toEqual({ tol: 0.0001 });
+  });
+
+  it('removing the only row clears the override back to an empty dict', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-override-add'));
+    await user.type(screen.getByTestId('tds-config-override-key-0'), 'max_iter');
+    await user.type(screen.getByTestId('tds-config-override-value-0'), '30');
+    expect(useUiStore.getState().tdsConfigOverrides).toEqual({ max_iter: 30 });
+    await user.click(screen.getByTestId('tds-config-override-remove-0'));
+    expect(useUiStore.getState().tdsConfigOverrides).toEqual({});
+    expect(screen.getByTestId('tds-config-overrides-empty')).toBeInTheDocument();
+  });
+
+  it('a non-numeric override value surfaces an inline error and is not committed', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-override-add'));
+    await user.type(screen.getByTestId('tds-config-override-key-0'), 'tol');
+    await user.type(screen.getByTestId('tds-config-override-value-0'), 'abc');
+    expect(screen.getByTestId('error-tds-config-override-0')).toBeInTheDocument();
+    expect(useUiStore.getState().tdsConfigOverrides).toEqual({});
+  });
+
+  it('Reset clears any committed overrides', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-override-add'));
+    await user.type(screen.getByTestId('tds-config-override-key-0'), 'tol');
+    await user.type(screen.getByTestId('tds-config-override-value-0'), '0.0001');
+    expect(useUiStore.getState().tdsConfigOverrides).toEqual({ tol: 0.0001 });
+    await user.click(screen.getByTestId('tds-config-reset'));
+    expect(useUiStore.getState().tdsConfigOverrides).toEqual({});
+    expect(screen.getByTestId('tds-config-overrides-empty')).toBeInTheDocument();
   });
 });

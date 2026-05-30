@@ -4,12 +4,20 @@ import { cn } from '@/lib/cn';
 import {
   DEFAULT_TDS_CONFIG,
   DEFAULT_TDS_TOLERANCE_OVERRIDES,
+  KNOWN_TDS_CONFIG_KEYS,
   TDS_VAR_GROUPS,
   useUiStore,
   validateTdsConfig,
   validateTdsToleranceOverrides,
 } from '@/store/ui';
-import type { TdsConfig, TdsIntegrator, TdsToleranceOverrides, TdsVarGroup } from '@/store/ui';
+import type {
+  TdsConfig,
+  TdsConfigOverrides,
+  TdsIntegrator,
+  TdsToleranceOverrides,
+  TdsVarGroup,
+} from '@/store/ui';
+import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/button';
 import { useRunsStore, MAX_RETENTION_LIMIT } from '@/store/runs';
 
@@ -37,6 +45,12 @@ import { useRunsStore, MAX_RETENTION_LIMIT } from '@/store/runs';
 
 export interface TdsConfigPanelProps {
   className?: string;
+}
+
+/** One editable row in the Unit 14 ``tds_config_overrides`` key-value editor. */
+interface OverrideRow {
+  key: string;
+  value: string;
 }
 
 const VAR_GROUP_LABELS: Record<TdsVarGroup, string> = {
@@ -83,6 +97,9 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
   const tdsToleranceOverrides = useUiStore((s) => s.tdsToleranceOverrides);
   const setTdsToleranceOverrides = useUiStore((s) => s.setTdsToleranceOverrides);
   const resetTdsToleranceOverrides = useUiStore((s) => s.resetTdsToleranceOverrides);
+  // Unit 14 — free-form ``tds_config_overrides`` key-value editor.
+  const setTdsConfigOverrides = useUiStore((s) => s.setTdsConfigOverrides);
+  const resetTdsConfigOverrides = useUiStore((s) => s.resetTdsConfigOverrides);
   const retentionLimit = useRunsStore((s) => s.retentionLimit);
   const setRetentionLimit = useRunsStore((s) => s.setRetentionLimit);
 
@@ -103,6 +120,58 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
   const [rtolText, setRtolText] = useState(String(tdsToleranceOverrides.rtol));
   const [atolText, setAtolText] = useState(String(tdsToleranceOverrides.atol));
   const [maxStepText, setMaxStepText] = useState(String(tdsToleranceOverrides.maxStep));
+
+  // Unit 14 — the free-form ``tds_config_overrides`` editor owns its row
+  // model locally (an ordered list of {key, value} text pairs) so the
+  // user can add/remove rows and clear+retype a value without the store
+  // snapping the input back. Each edit re-derives the committed dict in
+  // ``commitOverrideRows`` (only rows with a non-empty key AND a finite
+  // numeric value land in the dict — partial rows are ignored, so an
+  // empty editor commits ``{}`` and forwards no overrides).
+  const initialOverrideRows = useMemo<OverrideRow[]>(
+    () =>
+      Object.entries(useUiStore.getState().tdsConfigOverrides).map(([key, value]) => ({
+        key,
+        value: String(value),
+      })),
+    [],
+  );
+  const [overrideRows, setOverrideRows] = useState<OverrideRow[]>(initialOverrideRows);
+
+  const commitOverrideRows = (rows: OverrideRow[]) => {
+    setOverrideRows(rows);
+    const dict: TdsConfigOverrides = {};
+    for (const row of rows) {
+      const key = row.key.trim();
+      const valueText = row.value.trim();
+      if (key.length === 0 || valueText.length === 0) continue;
+      const value = Number(valueText);
+      if (!Number.isFinite(value)) continue;
+      dict[key] = value;
+    }
+    setTdsConfigOverrides(dict);
+  };
+
+  const addOverrideRow = () => setOverrideRows((rows) => [...rows, { key: '', value: '' }]);
+  const updateOverrideRow = (idx: number, patch: Partial<OverrideRow>) =>
+    commitOverrideRows(overrideRows.map((row, i) => (i === idx ? { ...row, ...patch } : row)));
+  const removeOverrideRow = (idx: number) =>
+    commitOverrideRows(overrideRows.filter((_, i) => i !== idx));
+
+  // Per-row validation: a key with a non-numeric value is the only
+  // failure mode (a blank/partial row is simply ignored on commit).
+  const overrideRowErrors = useMemo<ReadonlyArray<string | undefined>>(
+    () =>
+      overrideRows.map((row) => {
+        const key = row.key.trim();
+        const valueText = row.value.trim();
+        if (key.length === 0 && valueText.length === 0) return undefined;
+        if (valueText.length === 0) return undefined;
+        if (!Number.isFinite(Number(valueText))) return 'Enter a finite number';
+        return undefined;
+      }),
+    [overrideRows],
+  );
 
   const errors = useMemo<Record<string, string>>(() => validateTdsConfig(tdsConfig), [tdsConfig]);
 
@@ -160,6 +229,7 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
   const onReset = () => {
     resetTdsConfig();
     resetTdsToleranceOverrides();
+    resetTdsConfigOverrides();
     setTdsIntegrator('trapezoidal');
     setTfText(String(DEFAULT_TDS_CONFIG.tf));
     setHText(DEFAULT_TDS_CONFIG.h === null ? '' : String(DEFAULT_TDS_CONFIG.h));
@@ -167,6 +237,7 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
     setRtolText(String(DEFAULT_TDS_TOLERANCE_OVERRIDES.rtol));
     setAtolText(String(DEFAULT_TDS_TOLERANCE_OVERRIDES.atol));
     setMaxStepText(String(DEFAULT_TDS_TOLERANCE_OVERRIDES.maxStep));
+    setOverrideRows([]);
   };
 
   return (
@@ -344,6 +415,103 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
         error={errors.maxRateHz}
         hint="Power-user override. Higher values raise memory + redraw cost."
       />
+
+      <details className="group" data-testid="tds-config-advanced">
+        <summary
+          className={cn(
+            'text-muted-foreground hover:text-foreground cursor-pointer text-xs font-medium',
+            'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+          )}
+        >
+          Advanced — ANDES TDS config overrides
+        </summary>
+        <div
+          data-testid="tds-config-overrides-editor"
+          className="border-border/60 bg-muted/30 mt-2 flex flex-col gap-2 rounded border p-2"
+        >
+          <p className="text-muted-foreground text-[10px] leading-snug">
+            Forward additional <code className="font-mono">ss.TDS.config</code> keys to the
+            substrate (e.g. <code className="font-mono">tol</code>,{' '}
+            <code className="font-mono">max_iter</code>). Leave empty to send no overrides. Unknown
+            keys are rejected by the substrate.
+          </p>
+
+          {/* Shared autocomplete list for every key input. */}
+          <datalist id="tds-config-override-keys">
+            {KNOWN_TDS_CONFIG_KEYS.map((k) => (
+              <option key={k} value={k} />
+            ))}
+          </datalist>
+
+          {overrideRows.length === 0 ? (
+            <p
+              data-testid="tds-config-overrides-empty"
+              className="text-muted-foreground text-[10px] italic"
+            >
+              No overrides.
+            </p>
+          ) : (
+            overrideRows.map((row, idx) => (
+              <div key={idx} className="flex flex-col gap-1" data-testid={`tds-config-override-${idx}`}>
+                <div className="flex items-center gap-2">
+                  <Input
+                    list="tds-config-override-keys"
+                    aria-label={`Override key ${idx + 1}`}
+                    data-testid={`tds-config-override-key-${idx}`}
+                    value={row.key}
+                    onChange={(t) => updateOverrideRow(idx, { key: t })}
+                    placeholder="key"
+                    className="h-7 flex-1 font-mono text-xs"
+                  />
+                  <Input
+                    inputMode="decimal"
+                    aria-label={`Override value ${idx + 1}`}
+                    data-testid={`tds-config-override-value-${idx}`}
+                    value={row.value}
+                    onChange={(t) => updateOverrideRow(idx, { value: t })}
+                    placeholder="value"
+                    aria-invalid={overrideRowErrors[idx] ? true : undefined}
+                    className={cn(
+                      'h-7 w-24 font-mono text-xs',
+                      overrideRowErrors[idx] ? 'border-danger' : '',
+                    )}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeOverrideRow(idx)}
+                    aria-label={`Remove override ${idx + 1}`}
+                    data-testid={`tds-config-override-remove-${idx}`}
+                  >
+                    Remove
+                  </Button>
+                </div>
+                {overrideRowErrors[idx] ? (
+                  <span
+                    role="alert"
+                    data-testid={`error-tds-config-override-${idx}`}
+                    className="text-danger text-[10px]"
+                  >
+                    {overrideRowErrors[idx]}
+                  </span>
+                ) : null}
+              </div>
+            ))
+          )}
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addOverrideRow}
+            data-testid="tds-config-override-add"
+            className="self-start"
+          >
+            Add override
+          </Button>
+        </div>
+      </details>
 
       <FieldRow
         id="tds-config-retention"

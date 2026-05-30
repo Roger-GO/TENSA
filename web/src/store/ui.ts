@@ -83,6 +83,41 @@ export const DEFAULT_TDS_TOLERANCE_OVERRIDES: TdsToleranceOverrides = {
 
 export const DEFAULT_TDS_INTEGRATOR: TdsIntegrator = 'trapezoidal';
 
+/**
+ * Free-form ``tds_config_overrides`` keyspace (Unit 14). A dict of
+ * additional ANDES TDS config keys → numeric values the user supplies in
+ * the TDS Advanced key-value editor. Empty by default → no overrides
+ * forwarded (unchanged behaviour). Distinct from
+ * ``tdsToleranceOverrides`` (the structured rtol/atol/max_step QNDF
+ * preset); both are merged onto the single wire ``tds_config_overrides``
+ * dict at run start, with the free-form editor winning on key collisions.
+ */
+export type TdsConfigOverrides = Record<string, number>;
+
+export const DEFAULT_TDS_CONFIG_OVERRIDES: TdsConfigOverrides = {};
+
+/**
+ * Known ANDES ``ss.TDS.config`` keys offered as autocomplete in the
+ * Unit 14 key-value editor. Not exhaustive and not a whitelist — the
+ * editor accepts any key the user types; these just seed the datalist so
+ * common keys are one keystroke away. The substrate is the source of
+ * truth for which keys are accepted (unknown keys raise a 500
+ * ``SetupFailedError``).
+ */
+export const KNOWN_TDS_CONFIG_KEYS: readonly string[] = [
+  'tol',
+  'reltol',
+  'abstol',
+  'dtmax',
+  'dtmin',
+  'max_iter',
+  'qrtdamping',
+  'fixt',
+  'shrinkt',
+  'honest',
+  'tstep',
+] as const;
+
 export interface UiState {
   /**
    * When true, voltage / angle / flow magnitude labels are suppressed on
@@ -112,6 +147,15 @@ export interface UiState {
   tdsToleranceOverrides: TdsToleranceOverrides;
   setTdsToleranceOverrides: (next: Partial<TdsToleranceOverrides>) => void;
   resetTdsToleranceOverrides: () => void;
+
+  /**
+   * Unit 14 free-form ``tds_config_overrides`` dict. Whole-value setter
+   * (the editor owns the row model in component state and commits the
+   * parsed dict here). Empty default → no overrides forwarded.
+   */
+  tdsConfigOverrides: TdsConfigOverrides;
+  setTdsConfigOverrides: (next: TdsConfigOverrides) => void;
+  resetTdsConfigOverrides: () => void;
 }
 
 /**
@@ -140,6 +184,10 @@ export const useUiStore = create<UiState>()(
         })),
       resetTdsToleranceOverrides: () =>
         set({ tdsToleranceOverrides: { ...DEFAULT_TDS_TOLERANCE_OVERRIDES } }),
+
+      tdsConfigOverrides: { ...DEFAULT_TDS_CONFIG_OVERRIDES },
+      setTdsConfigOverrides: (next) => set({ tdsConfigOverrides: { ...next } }),
+      resetTdsConfigOverrides: () => set({ tdsConfigOverrides: { ...DEFAULT_TDS_CONFIG_OVERRIDES } }),
     }),
     {
       name: 'andes-ui-tds-integrator',

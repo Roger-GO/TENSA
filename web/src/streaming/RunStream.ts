@@ -72,16 +72,15 @@ export interface TdsArgs {
    */
   integrator?: TdsIntegratorWire;
   /**
-   * Unit 16 adaptive tolerance / max-step overrides. Forwarded as
-   * ``tds_config_overrides`` on the wire. Keys are the wrapper-canonical
-   * ``rtol`` / ``atol`` / ``max_step``; the substrate maps them to
-   * ANDES's ``reltol`` / ``abstol`` / ``dtmax``.
+   * Unit 16 adaptive tolerance / max-step overrides, plus the Unit 14
+   * free-form ``tds_config_overrides`` keyspace. Forwarded verbatim as
+   * ``tds_config_overrides`` on the wire. The wrapper-canonical
+   * ``rtol`` / ``atol`` / ``max_step`` keys map to ANDES's
+   * ``reltol`` / ``abstol`` / ``dtmax``; any additional keys the user
+   * supplies in the TDS Advanced editor pass through to ANDES's TDS
+   * config namespace (unknown keys are rejected substrate-side).
    */
-  tdsConfigOverrides?: {
-    rtol?: number;
-    atol?: number;
-    max_step?: number;
-  };
+  tdsConfigOverrides?: Record<string, number>;
 }
 
 /** Connection-status events surfaced to the UI status badge. */
