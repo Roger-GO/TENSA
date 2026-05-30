@@ -286,6 +286,35 @@ def _handle_alterable_params(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return list(wrapper.alterable_params(args["model"]))
 
 
+# ---- clone-on-write (Unit 21) ----------------------------------------------
+
+
+def _handle_init_clone(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    return wrapper.init_clone()
+
+
+def _handle_apply_clone_edit(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    return wrapper.apply_clone_edit(
+        args["model"], args["idx"], args["param"], args["value"]
+    )
+
+
+def _handle_undo_clone_edit(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    return wrapper.undo_clone_edit()
+
+
+def _handle_redo_clone_edit(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    return wrapper.redo_clone_edit()
+
+
+def _handle_save_clone_as(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    return wrapper.save_clone_as(args["name"])
+
+
+def _handle_reset_clone(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    return wrapper.reset_clone()
+
+
 def _handle_run_pflow(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.run_pflow())
 
@@ -1103,6 +1132,13 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "delete_element": _handle_delete_element,
     "run_pflow": _handle_run_pflow,
     "alterable_params": _handle_alterable_params,
+    # Unit 21 — clone-on-write file edits (init / edit / undo / redo / save-as / reset).
+    "init_clone": _handle_init_clone,
+    "apply_clone_edit": _handle_apply_clone_edit,
+    "undo_clone_edit": _handle_undo_clone_edit,
+    "redo_clone_edit": _handle_redo_clone_edit,
+    "save_clone_as": _handle_save_clone_as,
+    "reset_clone": _handle_reset_clone,
     "export_bundle": _handle_export_bundle,
     # Unit 10 — bundle import + conflict resolution.
     "import_bundle": _handle_import_bundle,
@@ -1146,6 +1182,7 @@ def worker_main(
     data: Connection,
     abort_event: EventType,
     workspace: str | None = None,
+    session_id: str | None = None,
 ) -> int:
     """Subprocess entry. Runs until a ``shutdown`` command arrives, the parent
     dies, or an unrecoverable error occurs.
@@ -1153,6 +1190,11 @@ def worker_main(
     ``workspace``, when provided, enables the best-effort ``sys.audit`` hook
     that warns on out-of-workspace file opens (see
     ``_install_strict_fs_audit_hook`` for caveats).
+
+    ``session_id`` (Unit 21) is forwarded so the wrapper's clone-on-write
+    manager can name its per-session scratch dir
+    ``<workspace>/.sessions/<session_id>/clone/`` — the same id the parent
+    SessionManager uses to clean up the dir on session reap.
 
     Returns the process exit code (0 = clean shutdown).
     """
@@ -1164,7 +1206,7 @@ def worker_main(
     # (Unit 7) can resolve ``<workspace>/snapshots/<case>/<name>.{dill,json}``
     # without re-deriving the directory from the FastAPI app state (which
     # the worker subprocess can't read).
-    wrapper = Wrapper(workspace=workspace)
+    wrapper = Wrapper(workspace=workspace, session_id=session_id)
 
     while True:
         try:

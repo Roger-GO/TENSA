@@ -124,6 +124,8 @@ _CONTROLLER_MODEL_NAMES: tuple[str, ...] = (
 if TYPE_CHECKING:
     from andes.system import System
 
+    from andes_app.core.clone_manager import CloneManager
+
 
 @dataclass
 class TopologyEntry:
@@ -241,7 +243,12 @@ class Wrapper:
     invocations.
     """
 
-    def __init__(self, *, workspace: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        workspace: str | Path | None = None,
+        session_id: str | None = None,
+    ) -> None:
         self._ss: System | None = None
         self._case_path: Path | None = None
         self._addfiles: list[Path] | None = None
@@ -281,6 +288,30 @@ class Wrapper:
         # ``reload_case`` because a new System invalidates the cached
         # measurement model references.
         self._se_measurements: object | None = None
+        # ``_session_id`` (Unit 21) names the clone-on-write scratch dir
+        # ``<workspace>/.sessions/<session_id>/clone/``. ``None`` in pure
+        # unit tests that don't exercise the clone surface — the clone
+        # manager is constructed lazily and 409s without a workspace.
+        self._session_id: str | None = session_id
+        # The clone-on-write manager (KTD-9) is created lazily on first
+        # ``init_clone`` so a session that never edits pays nothing. It holds
+        # the per-session clone files + undo/redo stacks.
+        self._clone_manager: CloneManager | None = None
+
+    def _clone_mgr(self) -> CloneManager:
+        """Return (creating on first use) this session's clone manager."""
+        # Deferred import — ``clone_manager`` imports wrapper-level symbols
+        # (``_CONTROLLER_MODEL_NAMES``, ``allowed_param_names``), so importing
+        # it at module top would create an import cycle.
+        from andes_app.core.clone_manager import CloneManager as _CloneManager
+
+        if self._clone_manager is None:
+            self._clone_manager = _CloneManager(
+                wrapper=self,
+                workspace=self._workspace,
+                session_id=self._session_id,
+            )
+        return self._clone_manager
 
     # ----- lifecycle -----
 
@@ -390,6 +421,77 @@ class Wrapper:
                 ) from exc
             self._replay_buffer.append((model_name, dict(params)))
         return self._topology_snapshot_locked()
+
+    # ----- clone-on-write (Unit 21) -----
+
+    def init_clone(self) -> dict[str, Any]:
+        """Initialise (or return) the per-session clone of the active case.
+
+        Delegates to :class:`~andes_app.core.clone_manager.CloneManager`.
+        Returns a JSON-friendly dict of the clone metadata.
+        """
+        result = self._clone_mgr().init_clone()
+        return {
+            "clone_dir": result.clone_dir,
+            "clone_files": result.clone_files,
+            "already_initialized": result.already_initialized,
+        }
+
+    def apply_clone_edit(
+        self, model: str, idx: int | str, param: str, value: Any
+    ) -> dict[str, Any]:
+        """Apply one clone-on-write edit and return the new value + stack depths."""
+        result = self._clone_mgr().apply_edit(model, str(idx), param, value)
+        return self._clone_edit_payload(result)
+
+    def undo_clone_edit(self) -> dict[str, Any]:
+        """Undo the most recent clone edit (restore prior file state + re-setup)."""
+        result = self._clone_mgr().undo()
+        return self._clone_edit_payload(result)
+
+    def redo_clone_edit(self) -> dict[str, Any]:
+        """Redo the most recently undone clone edit."""
+        result = self._clone_mgr().redo()
+        return self._clone_edit_payload(result)
+
+    def save_clone_as(self, name: str) -> dict[str, Any]:
+        """Copy the clone files to the workspace as ``<name>.<ext>``."""
+        result = self._clone_mgr().save_as(name)
+        return {"name": result.name, "files": result.files}
+
+    def reset_clone(self) -> dict[str, Any]:
+        """Discard the clone, delete its scratch dir, and revert to the originals."""
+        self._clone_mgr().reset_clone()
+        return {"reset": True}
+
+    @staticmethod
+    def _clone_edit_payload(result: Any) -> dict[str, Any]:
+        return {
+            "model": result.model,
+            "idx": result.idx,
+            "param": result.param,
+            "new_value": result.new_value,
+            "undo_depth": result.undo_depth,
+            "redo_depth": result.redo_depth,
+        }
+
+    def _bind_clone_system(self, ss: System) -> None:
+        """Bind a clone-loaded ``System`` to this wrapper and commit ``setup()``.
+
+        Used only by the clone manager's reload path. Mirrors the state reset
+        ``load_case`` performs (clears disturbance / SE / replay caches keyed
+        on the prior System) WITHOUT re-pointing ``_case_path`` / ``_addfiles``
+        at the clone — the original paths must survive so ``reset_clone`` can
+        revert to them. Commits ``setup()`` so PF / TDS / EIG / CPF / SE are
+        ready against the edited files; a setup failure surfaces as
+        :class:`SetupFailedError`.
+        """
+        self._ss = ss
+        self._setup_failed = False
+        self._replay_buffer = []
+        self._disturbance_log = []
+        self._se_measurements = None
+        self._ensure_setup()
 
     # ----- introspection -----
 

@@ -123,6 +123,7 @@ WORKER_ERROR_HTTP_MAP: dict[str, int] = {
     "SeUnderDeterminedError": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "ElementValidationError": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "ElementHasDependentsError": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "CloneEditError": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "DisturbanceValidationError": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "CaseLoadError": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "SnapshotMetadataError": status.HTTP_422_UNPROCESSABLE_ENTITY,
