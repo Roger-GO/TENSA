@@ -101,6 +101,33 @@ describe('queries hooks', () => {
     expect(client.getQueryData(queryKeys.topology(sessionId))).toEqual(topology);
   });
 
+  it('useLoadCase invalidates the per-case snapshots list on success', async () => {
+    // Snapshots are listed per-case; the query first runs before any case
+    // is loaded (caching []). Loading a case must invalidate it so the new
+    // case's existing snapshots surface (panel + Sweep picker).
+    const topology = {
+      state: 'pre-setup' as const,
+      buses: [],
+      lines: [],
+      transformers: [],
+      generators: [],
+      loads: [],
+    };
+    fetchSpy.mockResolvedValueOnce(jsonResponse(topology));
+
+    const { client, Wrapper } = makeWrapper();
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useLoadCase(), { wrapper: Wrapper });
+
+    const sessionId = 'sess-snap' as SessionId;
+    result.current.mutate({ sessionId, request: { primary_path: 'kundur_full.xlsx' } });
+
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['snapshots', sessionId] });
+  });
+
   it('useAlterableParams hits the substrate path scoped to (session, model)', async () => {
     const sessionId = parseSessionId('sess-alter');
     useSessionStore.setState({ sessionId });

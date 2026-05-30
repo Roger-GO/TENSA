@@ -495,6 +495,13 @@ export function useLoadCase(): UseMutationResult<TopologySummary, Error, LoadCas
       // load handler returns the topology already; saves a round-trip).
       queryClient.setQueryData(queryKeys.topology(sessionId), data);
       useCaseStore.getState().setTopology(data);
+      // Snapshots are listed per-case (scanned from
+      // ``<workspace>/snapshots/<case>/``). The snapshots query first runs
+      // on session-create — before any case is loaded — and caches ``[]``;
+      // loading a case must invalidate it or the new case's existing
+      // snapshots never surface (panel shows "No snapshots", and Sweep's
+      // picker stays empty) even though they exist on disk.
+      void queryClient.invalidateQueries({ queryKey: snapshotsKey(sessionId) });
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
     },
     onError: (err, _vars, ctx) => {
