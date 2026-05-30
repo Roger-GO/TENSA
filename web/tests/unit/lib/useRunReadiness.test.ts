@@ -12,6 +12,21 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renderHook } from '@testing-library/react';
+import type { TopologySummary } from '@/api/types';
+
+// Unit 24's dynamic-content gate reads `case.topology` (the store mirror of
+// the topology query). Seed it via the store; null = still loading.
+const TOPOLOGY_WITH_CONTROLLER: TopologySummary = {
+  state: 'pre-setup',
+  buses: [],
+  lines: [],
+  transformers: [],
+  generators: [{ idx: 'GENROU_1', name: 'g', kind: 'GENROU', params: {} }],
+  loads: [],
+  controllers: [{ idx: 'TGOV1_1', name: 't', kind: 'TGOV1', params: { syn: 'GENROU_1' } }],
+};
+const TOPOLOGY_STATIC_ONLY: TopologySummary = { ...TOPOLOGY_WITH_CONTROLLER, controllers: [] };
+
 import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { useAnalyzeStore, DEFAULT_EIG_FILTER } from '@/store/analyze';
 import { useAuthStore } from '@/store/auth';
@@ -126,6 +141,76 @@ describe('useRunReadiness — no case loaded', () => {
       expect(result.current.recovery).toBeNull();
     },
   );
+});
+
+describe('useRunReadiness — dynamic-content gate (R18, Unit 24)', () => {
+  it.each(['tds', 'eig'] as RunRoutine[])(
+    '%s: blocked on a static-only case with the dynamic-content reason',
+    (routine) => {
+      seedReadyBaseline();
+      useAuthStore.setState({ token: 'test-token', persistFailed: false });
+      useSessionStore.setState({
+        sessionId: parseSessionId('sess-1'),
+        recoveryInProgress: false,
+        recoveryFailed: false,
+        recoveryAttempts: [],
+      });
+      usePflowStore.setState({ lastRun: FAKE_PFLOW_OK, isRunning: false, error: null });
+      useCaseStore.setState({ topology: TOPOLOGY_STATIC_ONLY });
+      const { result } = renderHook(() => useRunReadiness(routine));
+      expect(result.current.ready).toBe(false);
+      expect(result.current.disabledReason).toMatch(/requires dynamic-model data/i);
+    },
+  );
+
+  it.each(['cpf', 'se'] as RunRoutine[])(
+    '%s: NOT gated by dynamic content (static analysis)',
+    (routine) => {
+      seedReadyBaseline();
+      useAuthStore.setState({ token: 'test-token', persistFailed: false });
+      useSessionStore.setState({
+        sessionId: parseSessionId('sess-1'),
+        recoveryInProgress: false,
+        recoveryFailed: false,
+        recoveryAttempts: [],
+      });
+      usePflowStore.setState({ lastRun: FAKE_PFLOW_OK, isRunning: false, error: null });
+      useAnalyzeStore.setState({ seMeasurementsCount: 5 });
+      useCaseStore.setState({ topology: TOPOLOGY_STATIC_ONLY });
+      const { result } = renderHook(() => useRunReadiness(routine));
+      // With PF converged + (for SE) measurements, a static-only case is ready
+      // — the dynamic-content reason must never appear for these routines.
+      expect(result.current.disabledReason ?? '').not.toMatch(/requires dynamic-model data/i);
+    },
+  );
+
+  it('tds: ready on a dynamic case (controllers present)', () => {
+    seedReadyBaseline();
+    useAuthStore.setState({ token: 'test-token', persistFailed: false });
+    useSessionStore.setState({
+      sessionId: parseSessionId('sess-1'),
+      recoveryInProgress: false,
+      recoveryFailed: false,
+      recoveryAttempts: [],
+    });
+    useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
+    const { result } = renderHook(() => useRunReadiness('tds'));
+    expect(result.current.ready).toBe(true);
+  });
+
+  it('tds: not flicker-disabled while the topology is still loading (null)', () => {
+    seedReadyBaseline();
+    useAuthStore.setState({ token: 'test-token', persistFailed: false });
+    useSessionStore.setState({
+      sessionId: parseSessionId('sess-1'),
+      recoveryInProgress: false,
+      recoveryFailed: false,
+      recoveryAttempts: [],
+    });
+    useCaseStore.setState({ topology: null });
+    const { result } = renderHook(() => useRunReadiness('tds'));
+    expect(result.current.disabledReason ?? '').not.toMatch(/requires dynamic-model data/i);
+  });
 });
 
 describe('useRunReadiness — no session', () => {
