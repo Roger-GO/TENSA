@@ -144,14 +144,17 @@ describe('disturbance store — substrate-shape spec contract', () => {
     expect(spec).toHaveProperty('t');
   });
 
-  it('blankAlterSpec uses kind/model/dev_idx/src/t/value', () => {
+  it('blankAlterSpec uses kind/model/dev_idx/src/t/method/amount (no value)', () => {
     const spec = blankAlterSpec();
     expect(spec.kind).toBe('alter');
     expect(spec).toHaveProperty('model');
     expect(spec).toHaveProperty('dev_idx');
     expect(spec).toHaveProperty('src');
     expect(spec).toHaveProperty('t');
-    expect(spec).toHaveProperty('value');
+    // ANDES's Alter model has no ``value`` — the contract is method+amount.
+    expect(spec).not.toHaveProperty('value');
+    expect(spec.method).toBe('=');
+    expect(spec.amount).toBe(0.0);
   });
 });
 
@@ -179,14 +182,26 @@ describe('disturbance helpers — disturbanceTime + summary', () => {
       ...blankAlterSpec(),
       model: 'PQ',
       dev_idx: '3',
-      src: 'p0',
-      value: 1.2,
+      src: 'Ppf',
+      method: '+',
+      amount: 0.2,
       t: 3.0,
     };
-    expect(disturbanceSummary(alter)).toMatch(/alter/i);
-    expect(disturbanceSummary(alter)).toContain('PQ.3');
-    expect(disturbanceSummary(alter)).toContain('p0');
-    expect(disturbanceSummary(alter)).toContain('1.2');
+    const alterText = disturbanceSummary(alter);
+    expect(alterText).toMatch(/alter/i);
+    expect(alterText).toContain('PQ.3');
+    expect(alterText).toContain('Ppf');
+    // method '+' renders the readable verb + amount (not a '→ value').
+    expect(alterText).toContain('increase by');
+    expect(alterText).toContain('0.2');
+    expect(alterText).not.toContain('→');
+
+    // '=' renders "set to"; '*' renders "scale by".
+    const setAlter: AlterSpec = { ...blankAlterSpec(), src: 'Ppf', method: '=', amount: 1.2 };
+    expect(disturbanceSummary(setAlter)).toContain('set to');
+    expect(disturbanceSummary(setAlter)).toContain('1.2');
+    const scaleAlter: AlterSpec = { ...blankAlterSpec(), src: 'Ppf', method: '*', amount: 1.2 };
+    expect(disturbanceSummary(scaleAlter)).toContain('scale by');
   });
 });
 

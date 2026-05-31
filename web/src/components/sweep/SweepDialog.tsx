@@ -49,7 +49,7 @@ const PARAM_KIND_OPTIONS: ReadonlyArray<{ value: SweepParamKind; label: string }
   { value: 'disturbance.fault.rf', label: 'Fault resistance (rf)' },
   { value: 'disturbance.toggle.t', label: 'Toggle time (t)' },
   { value: 'disturbance.alter.t', label: 'Alter time (t)' },
-  { value: 'disturbance.alter.value', label: 'Alter value' },
+  { value: 'disturbance.alter.amount', label: 'Alter amount' },
 ];
 
 export interface SweepDialogProps {

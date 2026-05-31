@@ -99,8 +99,8 @@ describe('<DisturbancesAccordion />', () => {
   it('alter on a generator matches the selected generator', () => {
     useCaseStore.setState({ selectedElement: { kind: 'generator', idx: 'G1' } });
     const add = useDisturbanceStore.getState().addDisturbance;
-    add({ kind: 'alter', model: 'PV', dev_idx: 'G1', src: 'p0', t: 1.0, value: 1.2 });
-    add({ kind: 'alter', model: 'PQ', dev_idx: 'G1', src: 'p0', t: 1.0, value: 1.2 });
+    add({ kind: 'alter', model: 'PV', dev_idx: 'G1', src: 'p0', t: 1.0, method: '=', amount: 1.2 });
+    add({ kind: 'alter', model: 'PQ', dev_idx: 'G1', src: 'p0', t: 1.0, method: '=', amount: 1.2 });
     render(withQueryClient(<DisturbancesAccordion />));
     const list = screen.getByTestId('disturbances-accordion-list');
     expect(list.querySelectorAll('li').length).toBe(1);
