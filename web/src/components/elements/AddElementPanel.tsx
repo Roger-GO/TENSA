@@ -90,6 +90,12 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
   const schema = useTopologySchema();
   const [serverError, setServerError] = useState<string | null>(null);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
+  // Building a system means adding many elements in a row, so the panel stays
+  // OPEN after a successful add and resets the form for the next element
+  // (close explicitly via the ✕). ``addedCount`` bumps the form ``key`` so it
+  // remounts with fresh defaults; ``lastAdded`` drives a brief confirmation.
+  const [addedCount, setAddedCount] = useState(0);
+  const [lastAdded, setLastAdded] = useState<string | null>(null);
 
   if (!open) return null;
 
@@ -117,13 +123,14 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
       { sessionId, body: { model: submitModel, params: finalParams } },
       {
         onSuccess: () => {
-          // Wait for the topology re-fetch the mutation triggered;
-          // closing immediately would flash the empty-state. The
-          // mutation's onSuccess invalidates the topology query, and
-          // React Query refetches in the background — the panel can
-          // close as soon as we know the add succeeded.
-          closeAddPanel();
+          // Keep the panel OPEN so the user can add the next element without
+          // re-opening it (building a system is many adds in a row). Reset the
+          // form via a key bump and clear the dirty flag; the kind is kept so
+          // a run of same-kind adds (e.g. 9 buses) is fast. ✕ closes manually.
           setServerError(null);
+          setDirty(false);
+          setLastAdded(submitModel);
+          setAddedCount((c) => c + 1);
         },
         onError: (err) => {
           if (err instanceof ProblemDetailsError) {
@@ -222,8 +229,22 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
           </div>
         ) : null}
 
+        {lastAdded ? (
+          <div
+            role="status"
+            data-testid="add-element-success"
+            className={cn(
+              'border-success/30 bg-success/10 text-foreground',
+              'rounded-[var(--radius-sm)] border px-2 py-1 text-[11px]',
+            )}
+          >
+            Added {lastAdded} ✓ — form reset for the next element.
+          </div>
+        ) : null}
+
         {kind && schema.data && formModel ? (
           <ElementForm
+            key={`${formModel}-${addedCount}`}
             model={formModel}
             kindHint={kind}
             defaultParams={defaultParams}

@@ -699,6 +699,40 @@ class Wrapper:
 
     # ----- topology mutation (Unit 2) -----
 
+    def _inject_line_voltage_base(self, ss: Any, params: dict[str, Any]) -> None:
+        """Fill a Line/Transformer's Vn1/Vn2 from its connected buses and Sn
+        from the system MVA base, in-place, when the caller omitted them.
+
+        ANDES rebases line r/x/b from (Sn, Vn1) to the system base; if Vn1/Vn2
+        default to 110 kV instead of the actual bus voltages, system-base
+        impedances are mangled and PF diverges (see add_element). Deriving the
+        base from the buses makes entered system-base impedances correct and
+        makes a Vn1≠Vn2 pair read as a transformer automatically.
+        """
+        bus = getattr(ss, "Bus", None)
+        if bus is None:
+            return
+
+        def _bus_vn(bus_idx: Any) -> float | None:
+            try:
+                uid = bus.idx2uid(bus_idx)
+                return float(bus.Vn.v[uid])
+            except Exception:  # noqa: BLE001 — best-effort derivation
+                return None
+
+        if "Vn1" not in params and params.get("bus1") is not None:
+            vn1 = _bus_vn(params["bus1"])
+            if vn1 is not None:
+                params["Vn1"] = vn1
+        if "Vn2" not in params and params.get("bus2") is not None:
+            vn2 = _bus_vn(params["bus2"])
+            if vn2 is not None:
+                params["Vn2"] = vn2
+        if "Sn" not in params:
+            mva = getattr(getattr(ss, "config", None), "mva", None)
+            if mva is not None:
+                params["Sn"] = float(mva)
+
     def add_element(
         self, model: str, params: dict[str, Any]
     ) -> TopologyEntry:
@@ -733,6 +767,19 @@ class Wrapper:
                 f"unknown param keys for {model}: {unknown}; "
                 f"allowed keys: {list(allowed)}"
             )
+
+        # A Line/Transformer's r/x/b are per-unit on the line's own voltage base
+        # (Vn1/Vn2) and MVA base (Sn). When a researcher builds from scratch and
+        # only gives bus1/bus2 + r/x, ANDES defaults Vn1/Vn2 to 110 kV, so the
+        # entered system-base impedances get RE-BASED against the wrong voltage
+        # (e.g. 0.0576 → 2.56 for a 16.5 kV terminal) and power flow diverges.
+        # Derive the voltage base from the connected buses and the MVA base from
+        # the system, so impedances entered on the system base are interpreted
+        # correctly. The form doesn't surface Vn1/Vn2, so this server-side
+        # derivation is the single source of truth. Only fills when absent — an
+        # explicit Vn1/Vn2/Sn from the caller still wins.
+        if model == "Line":
+            self._inject_line_voltage_base(ss, params)
 
         # Snapshot the params for replay BEFORE ANDES gets a chance to
         # mutate the dict in-place — ``ss.add`` pops ``idx`` (and possibly
