@@ -176,6 +176,20 @@ export interface LayoutState {
    */
   historyKindFilter: HistoryKindFilter;
   setHistoryKindFilter: (filter: HistoryKindFilter) => void;
+
+  /**
+   * Full-space results view (v3.1). When ``true`` the AppShell
+   * short-circuits the SLD diagram + inspector + drawer chassis and
+   * renders the dedicated ResultsView instead, so plots/tables get the
+   * full content area ("results should be presented in a new page, hide
+   * the system and its parameters"). Independent of
+   * ``bottomDrawerCollapsed`` — entering results view does not touch the
+   * drawer's own collapse bit, so exiting restores whatever drawer state
+   * the user left behind. Display-state — safe to persist.
+   */
+  resultsViewActive: boolean;
+  setResultsViewActive: (active: boolean) => void;
+  toggleResultsView: () => void;
 }
 
 /**
@@ -200,6 +214,7 @@ export const DEFAULT_LAYOUT: Pick<
   | 'activityPanelCollapsed'
   | 'selectedJobId'
   | 'historyKindFilter'
+  | 'resultsViewActive'
 > = {
   leftSidebarCollapsed: false,
   bottomDrawerCollapsed: false,
@@ -213,6 +228,7 @@ export const DEFAULT_LAYOUT: Pick<
   activityPanelCollapsed: true,
   selectedJobId: null,
   historyKindFilter: 'runs',
+  resultsViewActive: false,
 };
 
 export const LAYOUT_STORAGE_KEY = 'andes-app:layout-v1';
@@ -252,6 +268,10 @@ export const useLayoutStore = create<LayoutState>()(
       setSelectedJobId: (id) => set({ selectedJobId: id }),
 
       setHistoryKindFilter: (filter) => set({ historyKindFilter: filter }),
+
+      setResultsViewActive: (active) => set({ resultsViewActive: active }),
+      toggleResultsView: () =>
+        set((state) => ({ resultsViewActive: !state.resultsViewActive })),
     }),
     {
       name: LAYOUT_STORAGE_KEY,
@@ -280,6 +300,10 @@ export const useLayoutStore = create<LayoutState>()(
         // JobRecord data lives in the in-memory ``useJobsStore`` and is
         // NEVER persisted (security F2).
         historyKindFilter: state.historyKindFilter,
+        // Full-space results view (v3.1). Pure display-state — which
+        // surface the user last looked at. The results data it shows lives
+        // in the in-memory run/analyze slices and is never persisted.
+        resultsViewActive: state.resultsViewActive,
       }),
     },
   ),

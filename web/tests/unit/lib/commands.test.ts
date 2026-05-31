@@ -282,6 +282,31 @@ describe('useCommandRegistry — v3 Unit 2 view commands', () => {
   });
 });
 
+describe('useCommandRegistry — v3.1 results view command', () => {
+  it('exposes view.toggle-results-view in the view group', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'view.toggle-results-view');
+    expect(cmd).toBeDefined();
+    expect(cmd?.group).toBe('view');
+  });
+
+  it('carries the ⌘⇧M / Ctrl+⇧M shortcut', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'view.toggle-results-view');
+    expect(cmd?.shortcut).toBe('meta+shift+m, ctrl+shift+m');
+  });
+
+  it('action flips resultsViewActive on the layout slice', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'view.toggle-results-view');
+    expect(useLayoutStore.getState().resultsViewActive).toBe(false);
+    act(() => cmd?.action());
+    expect(useLayoutStore.getState().resultsViewActive).toBe(true);
+    act(() => cmd?.action());
+    expect(useLayoutStore.getState().resultsViewActive).toBe(false);
+  });
+});
+
 describe('useCommandRegistry — v3 Unit 14 auto-route on Run', () => {
   // Each test promotes a converged PF result so `run.eig` is registered
   // (gated by `pfConverged`); the EIG path is the most useful auto-route

@@ -10,6 +10,7 @@ import { ThemeToggle } from '@/components/shell/ThemeToggle';
 import { SidebarToggle } from '@/components/shell/SidebarToggle';
 import { InspectorToggle } from '@/components/shell/InspectorToggle';
 import { BottomDrawerToggle } from '@/components/shell/BottomDrawerToggle';
+import { ResultsViewToggle } from '@/components/shell/ResultsViewToggle';
 import { InFlightChip } from '@/components/shell/InFlightChip';
 import { DynamicContentBadge } from '@/components/case/DynamicContentBadge';
 
@@ -140,6 +141,9 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
         <SidebarToggle />
         <InspectorToggle />
         <BottomDrawerToggle />
+        {/* v3.1 — full-space results view toggle. Sits alongside the other
+            pane toggles so the four layout controls form one group. */}
+        <ResultsViewToggle />
         <TopBarDivider />
         <CommandPaletteHint />
         <TopBarDivider />
