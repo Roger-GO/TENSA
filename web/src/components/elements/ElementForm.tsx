@@ -5,6 +5,7 @@ import type { ParamValue, TopologyEntry, TopologyParamMeta, TopologySummary } fr
 import { cn } from '@/lib/cn';
 import { BusIdxSelect } from './BusIdxSelect';
 import { GenIdxSelect } from './GenIdxSelect';
+import { SynIdxSelect } from './SynIdxSelect';
 
 /**
  * ElementForm — polymorphic form generated from `_PARAMS_BY_MODEL`
@@ -281,6 +282,14 @@ export function ElementForm({
             />
           ) : m.kind === 'gen_idx' ? (
             <GenIdxSelect
+              id={inputId}
+              value={String(value)}
+              onChange={(v) => setField(m.name, v)}
+              required={m.required}
+              aria-describedby={error ? errorId : undefined}
+            />
+          ) : m.kind === 'syn_idx' ? (
+            <SynIdxSelect
               id={inputId}
               value={String(value)}
               onChange={(v) => setField(m.name, v)}

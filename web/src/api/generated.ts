@@ -3155,10 +3155,10 @@ export interface components {
             name: string;
             /**
              * Kind
-             * @description Form-input kind. ``string`` and ``number`` map to text/number inputs; ``bus_idx`` renders as a dropdown of existing buses; ``gen_idx`` a dropdown of existing static generators; ``bool`` is a checkbox.
+             * @description Form-input kind. ``string`` and ``number`` map to text/number inputs; ``bus_idx`` renders as a dropdown of existing buses; ``gen_idx`` a dropdown of existing static generators; ``syn_idx`` a dropdown of existing synchronous machines (GENROU/GENCLS) for an exciter/governor's machine link; ``bool`` is a checkbox.
              * @enum {string}
              */
-            kind: "string" | "number" | "bus_idx" | "gen_idx" | "bool";
+            kind: "string" | "number" | "bus_idx" | "gen_idx" | "syn_idx" | "bool";
             /**
              * Required
              * @description Whether the field is required when adding a new element. Optional fields collapse under the form's ``Show advanced`` disclosure.

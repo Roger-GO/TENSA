@@ -924,12 +924,14 @@ class TopologyParamMeta(BaseModel):
     """One parameter row in a model's add/edit form schema."""
 
     name: str = Field(..., description="ANDES parameter name (e.g., ``Vn``).")
-    kind: Literal["string", "number", "bus_idx", "gen_idx", "bool"] = Field(
+    kind: Literal["string", "number", "bus_idx", "gen_idx", "syn_idx", "bool"] = Field(
         ...,
         description=(
             "Form-input kind. ``string`` and ``number`` map to text/number "
             "inputs; ``bus_idx`` renders as a dropdown of existing buses; "
             "``gen_idx`` a dropdown of existing static generators; "
+            "``syn_idx`` a dropdown of existing synchronous machines "
+            "(GENROU/GENCLS) for an exciter/governor's machine link; "
             "``bool`` is a checkbox."
         ),
     )

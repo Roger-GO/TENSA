@@ -76,10 +76,13 @@ def test_param_names_match_real_andes(model: str, system: andes.System) -> None:
 @pytest.mark.parametrize("model", NEW_MODELS)
 def test_kinds_well_formed(model: str, system: andes.System) -> None:
     for p in _PARAMS_BY_MODEL[model]:
-        assert p.kind in ("string", "number", "bus_idx")
+        assert p.kind in ("string", "number", "bus_idx", "syn_idx")
         # bus references render with the bus picker
         if p.name in ("bus", "bus1", "bus2"):
             assert p.kind == "bus_idx"
+        # an exciter/governor's machine link renders with the machine picker
+        if p.name == "syn":
+            assert p.kind == "syn_idx"
 
 
 def test_regcp1_bus_is_a_dependent_reference() -> None:

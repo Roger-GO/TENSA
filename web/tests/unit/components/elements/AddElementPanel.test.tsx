@@ -137,7 +137,10 @@ describe('<AddElementPanel />', () => {
       model: 'Bus',
       params: { idx: '1', name: 'BUS1', Vn: 110 },
     });
-    expect(useCaseStore.getState().addPanelOpen).toBe(false);
+    // The panel now stays OPEN after a successful add (so the user can add the
+    // next element without re-opening it) and shows a confirmation.
+    expect(useCaseStore.getState().addPanelOpen).toBe(true);
+    await waitFor(() => expect(screen.getByTestId('add-element-success')).toBeInTheDocument());
   });
 
   it('rejects submit when a required field is empty', async () => {
