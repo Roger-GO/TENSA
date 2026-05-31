@@ -1,5 +1,7 @@
 /**
- * AlterSpecForm — model + dev + src (from useAlterableParams) + t + value.
+ * AlterSpecForm — model + dev + src (from useAlterableParams) + t +
+ * method + amount. ANDES's Alter model has no ``value``; the new value is
+ * ``v_current <method> amount``.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -55,7 +57,7 @@ beforeEach(() => {
 });
 
 describe('<AlterSpecForm />', () => {
-  it('renders model + dev + src dropdowns + t + value inputs', () => {
+  it('renders model + dev + src dropdowns + t + method + amount inputs', () => {
     render(
       withQueryClient(
         <AlterSpecForm
@@ -69,7 +71,90 @@ describe('<AlterSpecForm />', () => {
     expect(screen.getByTestId('alter-dev-idx')).toBeInTheDocument();
     expect(screen.getByTestId('alter-src')).toBeInTheDocument();
     expect(screen.getByTestId('field-alter-t')).toBeInTheDocument();
+    expect(screen.getByTestId('alter-method-select')).toBeInTheDocument();
+    // Amount input keeps the old value-input testid for continuity.
     expect(screen.getByTestId('field-alter-value')).toBeInTheDocument();
+  });
+
+  it('renders the five method options and binds the select to spec.method', () => {
+    render(
+      withQueryClient(
+        <AlterSpecForm
+          spec={{ ...blankAlterSpec(), model: 'PQ', dev_idx: 'L1', method: '*' }}
+          onChange={() => {}}
+        />,
+      ),
+    );
+    const method = screen.getByTestId('alter-method-select') as HTMLSelectElement;
+    const values = Array.from(method.querySelectorAll('option')).map((o) => o.value);
+    expect(values).toEqual(['=', '+', '-', '*', '/']);
+    expect(method.value).toBe('*');
+  });
+
+  it('changing the method writes spec.method', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      withQueryClient(
+        <AlterSpecForm
+          spec={{ ...blankAlterSpec(), model: 'PQ', dev_idx: 'L1', method: '=' }}
+          onChange={onChange}
+        />,
+      ),
+    );
+    await user.selectOptions(screen.getByTestId('alter-method-select'), '+');
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ method: '+' }));
+  });
+
+  it('typing in the amount input writes a finite spec.amount', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      withQueryClient(
+        <AlterSpecForm
+          spec={{ ...blankAlterSpec(), model: 'PQ', dev_idx: 'L1' }}
+          onChange={onChange}
+        />,
+      ),
+    );
+    const amount = screen.getByTestId('field-alter-value');
+    await user.clear(amount);
+    await user.type(amount, '0.2');
+    // Last onChange call carries the fully-typed value.
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ amount: 0.2 }));
+  });
+
+  it('flags a non-finite amount as required', async () => {
+    let validity: Record<string, string> = {};
+    render(
+      withQueryClient(
+        <AlterSpecForm
+          spec={{ ...blankAlterSpec(), model: 'PQ', dev_idx: 'L1', amount: Number.NaN }}
+          onChange={() => {}}
+          onValidityChange={(errs) => {
+            validity = errs;
+          }}
+        />,
+      ),
+    );
+    await waitFor(() => {
+      expect(validity.amount).toMatch(/finite/i);
+    });
+  });
+
+  it('shows the Ppf/Qpf hint for PQ loads only', () => {
+    const { rerender } = render(
+      withQueryClient(
+        <AlterSpecForm spec={{ ...blankAlterSpec(), model: 'PQ' }} onChange={() => {}} />,
+      ),
+    );
+    expect(screen.getByTestId('alter-pq-hint')).toBeInTheDocument();
+    rerender(
+      withQueryClient(
+        <AlterSpecForm spec={{ ...blankAlterSpec(), model: 'GENROU' }} onChange={() => {}} />,
+      ),
+    );
+    expect(screen.queryByTestId('alter-pq-hint')).not.toBeInTheDocument();
   });
 
   it('passes the chosen model to useAlterableParams + populates src dropdown', () => {

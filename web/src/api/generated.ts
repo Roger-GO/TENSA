@@ -174,6 +174,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/operating-point": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the session's current operating point (bus V/θ) without running.
+         * @description Return the System's current solved bus voltages/angles WITHOUT
+         *     re-running anything. After a TDS run the data grid otherwise sits empty
+         *     (only PF writes ``usePflowStore.lastRun``); the client fetches this on
+         *     run completion to surface the final operating point. Read-only — does
+         *     not run a job or mutate dae state.
+         */
+        get: operations["getOperatingPoint"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/disturbances": {
         parameters: {
             query?: never;
@@ -1284,7 +1308,21 @@ export interface components {
          * @description Parameter alteration at a scheduled time — used for load steps,
          *     parameter ramps, set-point changes, etc.
          *
-         *     Maps to ``ss.add('Alter', model=..., dev=..., src=..., t=..., value=...)``.
+         *     Maps to ``ss.add('Alter', model=..., dev=..., src=..., t=..., method=...,
+         *     amount=...)``. ANDES's ``Alter`` model has NO ``value`` parameter — the new
+         *     value is ``v_new = v_current <method> amount`` where ``method`` is one of
+         *     ``+ - * / =`` and ``amount`` is the operand (verified against ANDES 2.0.0;
+         *     ``method`` is MANDATORY — omitting it raises "Mandatory parameter method
+         *     missing"). Examples:
+         *
+         *     - set absolute: ``method='=', amount=1.2``
+         *     - step up by 0.2 pu: ``method='+', amount=0.2``
+         *     - scale (e.g. +20% load): ``method='*', amount=1.2``
+         *
+         *     NOTE for load increases: ANDES applies time-domain alterations to ``Ppf`` /
+         *     ``Qpf`` on PQ loads, not ``p0`` / ``q0`` (the latter only feed power flow and
+         *     are no-ops in TDS) — pick ``Ppf``/``Qpf`` as ``src`` for a load change that
+         *     actually moves the simulation.
          */
         AlterSpec: {
             /**
@@ -1306,7 +1344,7 @@ export interface components {
             dev_idx: number | string;
             /**
              * Src
-             * @description Source parameter name on the model (e.g., 'p0' for active-power set-point on a generator).
+             * @description Source parameter name on the model (e.g., 'Ppf' for a PQ load's time-domain active power, or a generator set-point).
              */
             src: string;
             /**
@@ -1315,10 +1353,17 @@ export interface components {
              */
             t: number;
             /**
-             * Value
-             * @description New value of the parameter at time ``t``.
+             * Method
+             * @description How ``amount`` is combined with the parameter's current value: '=' set, '+' add, '-' subtract, '*' multiply, '/' divide. Mandatory in ANDES; defaults to '=' (absolute set).
+             * @default =
+             * @enum {string}
              */
-            value: number;
+            method: "+" | "-" | "*" | "/" | "=";
+            /**
+             * Amount
+             * @description Operand applied via ``method`` (the absolute value when method='=', the delta/factor otherwise).
+             */
+            amount: number;
         };
         /**
          * AlterableParamsResponse
@@ -2889,7 +2934,7 @@ export interface components {
              * @description Discriminator: which spec field is being swept. Includes the disturbance kind so the spec lookup can validate the target type matches.
              * @enum {string}
              */
-            kind: "disturbance.fault.tc" | "disturbance.fault.tf" | "disturbance.fault.xf" | "disturbance.fault.rf" | "disturbance.toggle.t" | "disturbance.alter.t" | "disturbance.alter.value";
+            kind: "disturbance.fault.tc" | "disturbance.fault.tf" | "disturbance.fault.xf" | "disturbance.fault.rf" | "disturbance.toggle.t" | "disturbance.alter.t" | "disturbance.alter.amount" | "disturbance.alter.value";
             /**
              * Target
              * @description Index into the snapshot's ``disturbance_log`` identifying which spec to mutate. v2.0 only supports per-disturbance sweeps; topology sweeps are deferred.
@@ -3792,6 +3837,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    getOperatingPoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PflowResult"];
+                };
+            };
+            /** @description Missing or invalid X-Andes-Token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case has been loaded into this session. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

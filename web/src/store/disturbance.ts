@@ -87,7 +87,13 @@ export function blankToggleSpec(): ToggleSpec {
   };
 }
 
-/** Default values for a freshly-created Alter row. */
+/** Default values for a freshly-created Alter row.
+ *
+ * ANDES's ``Alter`` model has no ``value`` parameter — the new value is
+ * ``v_new = v_current <method> amount``. ``method`` defaults to ``'='``
+ * (absolute set) so a fresh row reads as "set to amount"; ``amount``
+ * defaults to 0.0. See ``server/src/andes_app/core/disturbance.py``.
+ */
 export function blankAlterSpec(): AlterSpec {
   return {
     kind: 'alter',
@@ -95,9 +101,23 @@ export function blankAlterSpec(): AlterSpec {
     dev_idx: '',
     src: '',
     t: 1.0,
-    value: 0.0,
+    method: '=',
+    amount: 0.0,
   };
 }
+
+/**
+ * Human-readable verb for each Alter ``method``, used in summary text.
+ * Mirrors the operand semantics: ``'='`` is an absolute set; the rest
+ * combine ``amount`` with the parameter's current value.
+ */
+const ALTER_METHOD_VERB: Record<AlterSpec['method'], string> = {
+  '=': 'set to',
+  '+': 'increase by',
+  '-': 'decrease by',
+  '*': 'scale by',
+  '/': 'divide by',
+};
 
 /**
  * Returns the time at which the disturbance fires for sort + display.
@@ -115,7 +135,7 @@ export function disturbanceTime(spec: DisturbanceSpec): number {
  *
  *   "Fault on Bus 5 at t=1.000s"
  *   "Toggle Line 7 at t=2.500s"
- *   "Alter PQ.4 p0 → 1.20 at t=3.000s"
+ *   "Alter PQ.4 Ppf increase by 0.2 at t=3.000s"
  */
 export function disturbanceSummary(spec: DisturbanceSpec): string {
   if (spec.kind === 'fault') {
@@ -128,7 +148,8 @@ export function disturbanceSummary(spec: DisturbanceSpec): string {
   }
   const dev = String(spec.dev_idx).length === 0 ? '?' : String(spec.dev_idx);
   const src = spec.src.length === 0 ? '?' : spec.src;
-  return `Alter ${spec.model}.${dev} ${src} → ${spec.value} at t=${spec.t.toFixed(3)}s`;
+  const verb = ALTER_METHOD_VERB[spec.method];
+  return `Alter ${spec.model}.${dev} ${src} ${verb} ${spec.amount} at t=${spec.t.toFixed(3)}s`;
 }
 
 export interface DisturbanceState {

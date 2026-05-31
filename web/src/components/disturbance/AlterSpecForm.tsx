@@ -13,7 +13,12 @@ import { cn } from '@/lib/cn';
  *   ``GET /sessions/{id}/topology/models/{model}/alterable_params``
  *   (Unit 1b endpoint, hook ``useAlterableParams``).
  * - ``t``: time the alter fires (seconds, must be ≥ 0).
- * - ``value``: new value (finite number).
+ * - ``method``: how ``amount`` combines with the current value — one of
+ *   ``= + - * /`` (set / add / subtract / multiply / divide). ANDES's
+ *   ``Alter`` model has NO ``value`` field; the new value is
+ *   ``v_new = v_current <method> amount``.
+ * - ``amount``: the operand (finite number) — the absolute value when
+ *   ``method='='``, otherwise the delta/factor.
  *
  * NOTE: the plan's prose uses ``dev`` for the field name; the substrate
  * uses ``dev_idx``.
@@ -51,6 +56,19 @@ const CONTROLLER_MODELS: ReadonlySet<string> = new Set([
   'REGCA1',
 ]);
 
+/**
+ * Method options for the ``Alter`` operation. ``method`` controls how
+ * ``amount`` combines with the parameter's current value
+ * (``v_new = v_current <method> amount``); ``'='`` is an absolute set.
+ */
+const ALTER_METHODS: ReadonlyArray<{ value: AlterSpec['method']; label: string }> = [
+  { value: '=', label: 'Set to' },
+  { value: '+', label: 'Increase by' },
+  { value: '-', label: 'Decrease by' },
+  { value: '*', label: 'Scale by' },
+  { value: '/', label: 'Divide by' },
+];
+
 function devicesForModel(
   topology: ReturnType<typeof useCurrentTopology>,
   model: string,
@@ -85,14 +103,14 @@ export function AlterSpecForm({ spec, onChange, onValidityChange, className }: A
   const params = paramsQuery.data?.params ?? [];
 
   const [tText, setTText] = useState(String(spec.t));
-  const [valueText, setValueText] = useState(String(spec.value));
+  const [amountText, setAmountText] = useState(String(spec.amount));
 
   useEffect(() => {
     setTText(String(spec.t));
   }, [spec.t]);
   useEffect(() => {
-    setValueText(String(spec.value));
-  }, [spec.value]);
+    setAmountText(String(spec.amount));
+  }, [spec.amount]);
 
   const errors = useMemo(() => {
     const out: Record<string, string> = {};
@@ -103,7 +121,7 @@ export function AlterSpecForm({ spec, onChange, onValidityChange, className }: A
     if (!spec.src || spec.src.length === 0) out.src = 'Required';
     if (!Number.isFinite(spec.t)) out.t = 'Enter a finite number';
     else if (spec.t < 0) out.t = 'Must be ≥ 0';
-    if (!Number.isFinite(spec.value)) out.value = 'Enter a finite number';
+    if (!Number.isFinite(spec.amount)) out.amount = 'Enter a finite number';
     return out;
   }, [spec]);
 
@@ -116,10 +134,10 @@ export function AlterSpecForm({ spec, onChange, onValidityChange, className }: A
     const trimmed = text.trim();
     onChange({ ...spec, t: trimmed.length === 0 ? Number.NaN : Number(trimmed) });
   };
-  const setValue = (text: string) => {
-    setValueText(text);
+  const setAmount = (text: string) => {
+    setAmountText(text);
     const trimmed = text.trim();
-    onChange({ ...spec, value: trimmed.length === 0 ? Number.NaN : Number(trimmed) });
+    onChange({ ...spec, amount: trimmed.length === 0 ? Number.NaN : Number(trimmed) });
   };
 
   return (
@@ -240,24 +258,48 @@ export function AlterSpecForm({ spec, onChange, onValidityChange, className }: A
       </div>
 
       <div className="flex flex-col gap-1">
-        <label htmlFor="alter-value" className="text-muted-foreground text-xs font-medium">
-          New value
+        <label htmlFor="alter-method" className="text-muted-foreground text-xs font-medium">
+          Method
+        </label>
+        <select
+          id="alter-method"
+          data-testid="alter-method-select"
+          value={spec.method}
+          onChange={(e) => onChange({ ...spec, method: e.target.value as AlterSpec['method'] })}
+          className="bg-background border-border h-7 rounded border px-2 text-xs"
+        >
+          {ALTER_METHODS.map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor="alter-amount" className="text-muted-foreground text-xs font-medium">
+          Amount
         </label>
         <input
-          id="alter-value"
+          id="alter-amount"
           data-testid="field-alter-value"
           type="text"
           inputMode="decimal"
-          value={valueText}
-          onChange={(e) => setValue(e.target.value)}
+          value={amountText}
+          onChange={(e) => setAmount(e.target.value)}
           className={cn(
             'bg-background border-border h-7 rounded border px-2 font-mono text-xs',
-            errors.value ? 'border-danger' : '',
+            errors.amount ? 'border-danger' : '',
           )}
         />
-        {errors.value ? (
+        {errors.amount ? (
           <span role="alert" data-testid="error-alter-value" className="text-danger text-[10px]">
-            {errors.value}
+            {errors.amount}
+          </span>
+        ) : null}
+        {spec.model === 'PQ' ? (
+          <span data-testid="alter-pq-hint" className="text-muted-foreground text-[10px]">
+            For a load change in TDS pick Ppf/Qpf — p0/q0 only affect power flow.
           </span>
         ) : null}
       </div>

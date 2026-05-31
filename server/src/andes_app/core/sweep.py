@@ -28,7 +28,7 @@ Concurrency model (KTD-9 + Unit 18 spec):
   sweep returns the iterations completed so far + a truncated flag.
 
 The sweep ONLY supports parameter overrides on disturbance specs
-(Fault.tc, Fault.tf, Fault.xf, Fault.rf, Toggle.t, Alter.t, Alter.value)
+(Fault.tc, Fault.tf, Fault.xf, Fault.rf, Toggle.t, Alter.t, Alter.amount)
 in v2.0. Topology-parameter sweeps would require pre-setup wrapper
 mutation between iterations and are out of scope.
 
@@ -71,6 +71,9 @@ SweepParamKind = Literal[
     "disturbance.fault.rf",
     "disturbance.toggle.t",
     "disturbance.alter.t",
+    "disturbance.alter.amount",
+    # Legacy alias retained so already-saved sweeps keep working: AlterSpec's
+    # ``value`` field was renamed to ``amount`` (ANDES uses method+amount).
     "disturbance.alter.value",
 ]
 
@@ -83,7 +86,9 @@ _KIND_TO_FIELD: dict[str, tuple[str, str]] = {
     "disturbance.fault.rf": ("fault", "rf"),
     "disturbance.toggle.t": ("toggle", "t"),
     "disturbance.alter.t": ("alter", "t"),
-    "disturbance.alter.value": ("alter", "value"),
+    "disturbance.alter.amount": ("alter", "amount"),
+    # Legacy: map the old ``.value`` target onto the renamed ``amount`` field.
+    "disturbance.alter.value": ("alter", "amount"),
 }
 
 
