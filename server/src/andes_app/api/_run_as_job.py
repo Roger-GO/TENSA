@@ -35,6 +35,7 @@ raised and returned to idle), so the dead-worker check never fires.
 from __future__ import annotations
 
 import contextlib
+import time
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
@@ -152,9 +153,21 @@ async def _run_as_job(
         # record (deleting THIS job_id); broadcast the SURVIVOR it returns so
         # the terminal transition still reaches WS subscribers instead of being
         # dropped (a re-read of the deleted id would yield None).
-        survivor_id = registry.mark_failed(
-            job_id, problem=_internal_error_problem(kind, exc)
-        )
+        problem = _internal_error_problem(kind, exc)
+        # Snapshot the (still-``running``) record BEFORE mark_failed coalesces it
+        # away, so we can synthesize a terminal envelope for THIS id if it gets
+        # deleted. Without this, a client that saw ``job_id`` go ``running`` over
+        # the WS would never hear it reach a terminal state when the failure is
+        # coalesced into a prior id (the survivor is broadcast under a DIFFERENT
+        # id) — its in-flight activity pill then spins forever (the "load case
+        # stuck running" bug for a repeated same-signature failure).
+        pre = registry.get_job(job_id)
+        survivor_id = registry.mark_failed(job_id, problem=problem)
+        if survivor_id != job_id and pre is not None:
+            pre.status = "failed"
+            pre.problem = problem
+            pre.ended_at = pre.updated_at = time.monotonic()
+            mgr.broadcast_job_event(session_id, pre)
         _broadcast(mgr, session_id, registry, survivor_id)
         raise
     else:
