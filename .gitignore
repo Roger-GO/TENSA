@@ -14,9 +14,17 @@ wheels/
 # Per-run artifacts from compound-engineering skills (ce-code-review etc.)
 .context/
 .playwright-mcp/
+.claude/
 
-# Polish-loop screenshots (transient — regenerated per session)
+# Transient screenshot / scratch artifacts (regenerated per session, never committed)
 polish-*.png
+diag-*.png
+phase[0-9]*-*.png
+v[0-9]-*.png
+*-smoke.png
+sweep-*.png
+devmode-*.png
+/server/openapi.json
 .mypy_cache/
 .ruff_cache/
 .coverage
