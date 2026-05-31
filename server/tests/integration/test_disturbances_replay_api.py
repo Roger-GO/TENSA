@@ -21,6 +21,7 @@ import logging
 import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -169,13 +170,12 @@ def test_add_disturbance_invalid_spec_does_not_pollute_log() -> None:
     """Edge: when ``ss.add`` rejects, the log must NOT grow — atomic from
     the caller's perspective.
 
-    ANDES defers most invariant checks (existence of bus_idx, etc.) to
-    ``setup()``, so a bad bus_idx alone passes pre-setup. AlterSpec is the
-    one variant where ANDES enforces a model-level mandatory-parameter
-    check at ``add()`` time (the ``Alter`` model declares ``method``
-    mandatory), which we exercise via the substrate's wrapper API by
-    sending an Alter spec — the wrapper's own kwargs mapping omits
-    ``method``, triggering the ANDES rejection.
+    ANDES is lenient at pre-setup ``add()`` time — it defers invariant checks
+    (bus existence, valid src, etc.) to ``setup()`` — so no Pydantic-valid spec
+    reliably raises at add() anymore. We therefore force ``ss.add`` to raise and
+    assert the "append only on success" invariant holds independent of which
+    specs ANDES happens to reject. (Previously this test exploited the
+    now-fixed bug where every Alter raised "Mandatory parameter method missing".)
     """
     raw, dyr = _ieee14_paths()
     w = Wrapper()
@@ -184,16 +184,44 @@ def test_add_disturbance_invalid_spec_does_not_pollute_log() -> None:
     w.add_disturbance(FaultSpec(bus_idx=4, tf=1.0, tc=1.1))
     baseline = list(w.list_disturbances())
 
-    with pytest.raises(DisturbanceValidationError):
-        # ANDES Alter model declares ``method`` mandatory; the wrapper does
-        # not pass it, so ``ss.add`` rejects with a "Mandatory parameter
-        # method missing" error.
-        w.add_disturbance(
-            AlterSpec(model="Bus", dev_idx=1, src="v0", t=1.0, value=1.0)
-        )
+    with patch.object(w._ss, "add", side_effect=ValueError("ANDES boom")):
+        with pytest.raises(DisturbanceValidationError):
+            w.add_disturbance(
+                AlterSpec(
+                    model="PQ", dev_idx="PQ_0", src="Ppf", t=1.0, method="*", amount=1.2
+                )
+            )
 
     # Log is unchanged — no rollback needed because we only append on success.
     assert w.list_disturbances() == baseline
+
+
+def test_alter_disturbance_method_amount_round_trips() -> None:
+    """Regression: a valid Alter (method + amount) is accepted and recorded.
+
+    Pins the fix for the bug where the wrapper passed a non-existent ``value``
+    kwarg to ANDES's ``Alter`` and every load-increase / parameter-alter failed
+    with "Mandatory parameter method missing". Also covers the legacy
+    ``{value: X}`` back-compat shim mapping to ``method='=', amount=X``.
+    """
+    raw, dyr = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw, addfiles=[dyr])
+    pq_idx = w._ss.PQ.idx.v[0]
+
+    # method/amount Alter is accepted and appears in the log.
+    w.add_disturbance(
+        AlterSpec(model="PQ", dev_idx=pq_idx, src="Ppf", t=1.0, method="*", amount=1.2)
+    )
+    log = w.list_disturbances()
+    assert len(log) == 1
+    assert log[0].method == "*" and log[0].amount == 1.2
+
+    # Legacy ``value`` deserializes to an absolute set.
+    legacy = AlterSpec.model_validate(
+        {"kind": "alter", "model": "PQ", "dev_idx": pq_idx, "src": "Ppf", "t": 2.0, "value": 0.5}
+    )
+    assert legacy.method == "=" and legacy.amount == 0.5
 
 
 @pytest.mark.integration
@@ -391,10 +419,10 @@ async def test_post_invalid_spec_does_not_show_in_get(
 ) -> None:
     """Atomic: a 422-rejected POST must NOT show in the subsequent GET.
 
-    Use an Alter spec — ANDES rejects it at ``add()`` time because the
-    wrapper's kwargs mapping omits the model's mandatory ``method``
-    parameter. Bus-existence checks fire only at ``setup()``, so e.g.
-    ``bus_idx=99999`` is silently accepted pre-setup."""
+    ANDES is lenient at pre-setup ``add()`` time, so we trigger the 422 at the
+    request-validation layer instead: an Alter with a ``method`` outside the
+    allowed ``+ - * / =`` set fails Pydantic discriminated-union validation
+    BEFORE reaching the worker, so nothing is added to the log."""
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     bad = await client.post(
         f"/api/sessions/{sid}/disturbances",
@@ -403,11 +431,12 @@ async def test_post_invalid_spec_does_not_show_in_get(
             "disturbances": [
                 {
                     "kind": "alter",
-                    "model": "Bus",
-                    "dev_idx": 1,
-                    "src": "v0",
+                    "model": "PQ",
+                    "dev_idx": "PQ_0",
+                    "src": "Ppf",
                     "t": 1.0,
-                    "value": 1.0,
+                    "method": "@",
+                    "amount": 1.0,
                 }
             ]
         },

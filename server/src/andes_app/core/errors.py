@@ -49,6 +49,28 @@ class CaseLoadError(AndesAppError):
         self.message = message
 
 
+class CaseSaveError(AndesAppError):
+    """Raised when saving the current System to a workspace file fails or
+    would produce a corrupt artifact.
+
+    The xlsx/json writers are not atomic — ``andes.io.xlsx.write`` opens the
+    file (0 bytes) and only flushes the zip content at ``close()``, so any
+    failure between open and close (or a worker kill) leaves a 0-byte file that
+    then masquerades as a real case and fails to load with "File is not a zip
+    file". ``save_case`` now writes to a temp file, validates it is non-empty
+    and a valid container, and atomically renames it onto the target; on any
+    failure it raises this error and leaves no partial file behind.
+
+    Surfaced as HTTP 422 ``ProblemDetails``.
+    """
+
+    recovery_kind: str | None = "retry"
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(f"failed to save case: {detail}")
+        self.detail = detail
+
+
 class DisturbanceCommitError(AndesAppError):
     """Raised when an ``add_disturbance`` / ``delete_disturbance`` call is made
     after ``ss.setup()`` has been committed.
