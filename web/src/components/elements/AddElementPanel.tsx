@@ -43,7 +43,7 @@ import { CancelConfirmDialog } from './CancelConfirmDialog';
 const SUPPORTED_KINDS: ReadonlyArray<{
   value: string;
   label: string;
-  group: 'Network' | 'Transformers' | 'Generators' | 'Loads' | 'Shunts';
+  group: 'Network' | 'Transformers' | 'Generators' | 'Exciters' | 'Governors' | 'Loads' | 'Shunts';
   submitModel: string;
   defaultParams?: Record<string, string | number | boolean>;
 }> = [
@@ -60,6 +60,16 @@ const SUPPORTED_KINDS: ReadonlyArray<{
   { value: 'Slack', label: 'Slack generator', group: 'Generators', submitModel: 'Slack' },
   { value: 'GENROU', label: 'GENROU (synchronous)', group: 'Generators', submitModel: 'GENROU' },
   { value: 'GENCLS', label: 'GENCLS (classic)', group: 'Generators', submitModel: 'GENCLS' },
+  // Dynamic controllers — attach to a synchronous machine (GENROU/GENCLS) via
+  // the ``syn`` link. They make the machine's voltage (exciters) and speed
+  // (governors) regulated, so a from-scratch dynamic system is no longer
+  // GENROU-only. The machine link renders as a SynIdxSelect dropdown.
+  { value: 'IEEEX1', label: 'IEEEX1 exciter', group: 'Exciters', submitModel: 'IEEEX1' },
+  { value: 'ESDC2A', label: 'ESDC2A exciter', group: 'Exciters', submitModel: 'ESDC2A' },
+  { value: 'EXST1', label: 'EXST1 exciter', group: 'Exciters', submitModel: 'EXST1' },
+  { value: 'SEXS', label: 'SEXS exciter (simple)', group: 'Exciters', submitModel: 'SEXS' },
+  { value: 'TGOV1', label: 'TGOV1 governor', group: 'Governors', submitModel: 'TGOV1' },
+  { value: 'IEEEG1', label: 'IEEEG1 governor', group: 'Governors', submitModel: 'IEEEG1' },
   { value: 'PQ', label: 'PQ load', group: 'Loads', submitModel: 'PQ' },
   { value: 'ZIP', label: 'ZIP load', group: 'Loads', submitModel: 'ZIP' },
   { value: 'Shunt', label: 'Shunt', group: 'Shunts', submitModel: 'Shunt' },

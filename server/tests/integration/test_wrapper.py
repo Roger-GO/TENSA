@@ -248,6 +248,42 @@ def test_build_dynamic_system_from_scratch_with_gen_link(tmp_path: object) -> No
 
 
 @pytest.mark.integration
+def test_build_genrou_h_to_m_and_attach_controllers() -> None:
+    """A from-scratch GENROU's intuitive ``H`` is converted to ANDES's ``M``
+    (=2H), and exciters/governors can be attached to it via the ``syn`` link
+    (the UI exposes these as new add-element kinds)."""
+    w = Wrapper()
+    w.create_blank()
+    w.add_element("Bus", {"idx": "1", "name": "B1", "Vn": 16.5})
+    w.add_element("Bus", {"idx": "2", "name": "B2", "Vn": 16.5})
+    w.add_element("Slack", {"idx": "1", "name": "S1", "bus": "1", "Sn": 100, "Vn": 16.5, "v0": 1.04})
+    w.add_element("PQ", {"idx": "L", "bus": "2", "Vn": 16.5, "p0": 0.5, "q0": 0.1})
+    w.add_element("Line", {"idx": "Ln", "name": "Ln", "bus1": "1", "bus2": "2", "r": 0.01, "x": 0.1})
+    # H=5 must land as M=10 (ANDES GENROU has no H param — it was dropped before).
+    w.add_element("GENROU", {"idx": "G", "name": "G", "bus": "1", "gen": "1", "Sn": 100, "Vn": 16.5, "H": 5})
+    assert w._ss.GENROU.M.v[w._ss.GENROU.idx2uid("G")] == 10.0
+
+    # Exciter + governor attach to the machine via ``syn``.
+    w.add_element("EXST1", {"idx": "exc1", "name": "exc1", "syn": "G", "KA": 20})
+    w.add_element("TGOV1", {"idx": "gov1", "name": "gov1", "syn": "G", "R": 0.05})
+    assert w._ss.EXST1.n == 1 and w._ss.TGOV1.n == 1
+
+    pf = w.run_pflow()
+    assert pf.converged
+
+
+@pytest.mark.integration
+def test_controller_schema_syn_link_uses_syn_idx() -> None:
+    """An exciter/governor's machine link renders as a machine picker."""
+    from andes_app.core.wrapper import _PARAMS_BY_MODEL
+
+    for model in ("TGOV1", "IEEEG1", "SEXS", "IEEEX1", "ESDC2A", "EXST1"):
+        metas = _PARAMS_BY_MODEL[model]
+        syn = [m for m in metas if m.name == "syn"]
+        assert syn and syn[0].kind == "syn_idx" and syn[0].required
+
+
+@pytest.mark.integration
 def test_save_case_failed_write_is_atomic_and_raises(tmp_path: Path) -> None:
     """A writer failure must leave NO 0-byte artifact (the bug behind the
     corrupt 'File is not a zip file' built-3bus.xlsx) and must not clobber a

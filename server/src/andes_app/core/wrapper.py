@@ -781,6 +781,16 @@ class Wrapper:
         if model == "Line":
             self._inject_line_voltage_base(ss, params)
 
+        # ANDES GENROU has no ``H`` parameter — it carries inertia as ``M`` (=2H).
+        # The form exposes the more intuitive inertia constant ``H``; convert it
+        # to ``M`` so the value actually takes effect (ANDES silently ignored a
+        # raw ``H`` field and the machine got a default inertia).
+        if model == "GENROU" and "H" in params:
+            try:
+                params["M"] = 2.0 * float(params.pop("H"))
+            except (TypeError, ValueError):
+                params.pop("H", None)
+
         # Snapshot the params for replay BEFORE ANDES gets a chance to
         # mutate the dict in-place — ``ss.add`` pops ``idx`` (and possibly
         # other identifier fields) out of the input dict during model
@@ -3503,7 +3513,7 @@ _REFERENCE_ATTRS: dict[str, tuple[str, ...]] = {
 # optionally ``phi``). The Add panel's "Transformer 2W" form maps to
 # ``model='Line'`` with ``tap`` required; downstream ``_topology_snapshot``
 # splits them via the ``tap != 1.0 OR phi != 0.0`` heuristic.
-ParamKind = Literal["string", "number", "bus_idx", "gen_idx", "bool"]
+ParamKind = Literal["string", "number", "bus_idx", "gen_idx", "syn_idx", "bool"]
 
 
 @dataclass(frozen=True)
@@ -3652,7 +3662,7 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         # mandatory=True). NumParams from EXDC2Data (exdc2.py:16-93).
         ParamMeta("idx", "string", required=True),
         ParamMeta("name", "string", required=True),
-        ParamMeta("syn", "string", required=True),
+        ParamMeta("syn", "syn_idx", required=True),
         ParamMeta("TR", "number", unit="s"),
         ParamMeta("TA", "number", unit="s"),
         ParamMeta("TC", "number", unit="s"),
@@ -3675,7 +3685,7 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         # mode flag that PSS/E doesn't implement but ANDES exposes.
         ParamMeta("idx", "string", required=True),
         ParamMeta("name", "string", required=True),
-        ParamMeta("syn", "string", required=True),
+        ParamMeta("syn", "syn_idx", required=True),
         ParamMeta("TR", "number", unit="s"),
         ParamMeta("KA", "number", unit="pu"),
         ParamMeta("TA", "number", unit="s"),
@@ -3698,7 +3708,7 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         # NumParams from SEXSData (sexs.py:13-43).
         ParamMeta("idx", "string", required=True),
         ParamMeta("name", "string", required=True),
-        ParamMeta("syn", "string", required=True),
+        ParamMeta("syn", "syn_idx", required=True),
         ParamMeta("TATB", "number"),
         ParamMeta("TB", "number", unit="s"),
         ParamMeta("K", "number", unit="pu"),
@@ -3712,7 +3722,7 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         # PMAX/PMIN, K1-K8 NumParams from IEEEG1Data (ieeeg1.py:16-104).
         ParamMeta("idx", "string", required=True),
         ParamMeta("name", "string", required=True),
-        ParamMeta("syn", "string", required=True),
+        ParamMeta("syn", "syn_idx", required=True),
         ParamMeta("syn2", "string"),
         ParamMeta("Tn", "number", unit="MVA"),
         ParamMeta("wref0", "number", unit="pu"),
@@ -3742,7 +3752,7 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         # (tgbase.py:17-32). NumParams from TGOV1Data (tgov1.py:10-42).
         ParamMeta("idx", "string", required=True),
         ParamMeta("name", "string", required=True),
-        ParamMeta("syn", "string", required=True),
+        ParamMeta("syn", "syn_idx", required=True),
         ParamMeta("Tn", "number", unit="MVA"),
         ParamMeta("wref0", "number", unit="pu"),
         ParamMeta("R", "number", unit="pu"),
@@ -3820,7 +3830,7 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
     "EXST1": (
         ParamMeta("idx", "string", required=True),
         ParamMeta("name", "string", required=True),
-        ParamMeta("syn", "string", required=True),
+        ParamMeta("syn", "syn_idx", required=True),
         ParamMeta("TR", "number"),
         ParamMeta("VIMAX", "number"),
         ParamMeta("VIMIN", "number"),
@@ -3837,7 +3847,7 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
     "ESST1A": (
         ParamMeta("idx", "string", required=True),
         ParamMeta("name", "string", required=True),
-        ParamMeta("syn", "string", required=True),
+        ParamMeta("syn", "syn_idx", required=True),
         ParamMeta("TR", "number"),
         ParamMeta("VIMAX", "number"),
         ParamMeta("VIMIN", "number"),
@@ -3862,7 +3872,7 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
     "GAST": (
         ParamMeta("idx", "string", required=True),
         ParamMeta("name", "string", required=True),
-        ParamMeta("syn", "string", required=True),
+        ParamMeta("syn", "syn_idx", required=True),
         ParamMeta("Tn", "number", unit="MVA"),
         ParamMeta("wref0", "number", unit="pu"),
         ParamMeta("R", "number", unit="pu"),
@@ -3878,7 +3888,7 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
     "HYGOV": (
         ParamMeta("idx", "string", required=True),
         ParamMeta("name", "string", required=True),
-        ParamMeta("syn", "string", required=True),
+        ParamMeta("syn", "syn_idx", required=True),
         ParamMeta("Tn", "number", unit="MVA"),
         ParamMeta("wref0", "number", unit="pu"),
         ParamMeta("R", "number", unit="pu"),
@@ -3897,7 +3907,7 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
     "IEESGO": (
         ParamMeta("idx", "string", required=True),
         ParamMeta("name", "string", required=True),
-        ParamMeta("syn", "string", required=True),
+        ParamMeta("syn", "syn_idx", required=True),
         ParamMeta("Tn", "number", unit="MVA"),
         ParamMeta("wref0", "number", unit="pu"),
         ParamMeta("T1", "number"),
