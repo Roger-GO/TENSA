@@ -60,6 +60,7 @@ function makeTopology(opts: Partial<TopologySummary>): TopologySummary {
     generators: opts.generators ?? [],
     loads: opts.loads ?? [],
     shunts: opts.shunts ?? [],
+    controllers: opts.controllers ?? [],
   };
 }
 
@@ -191,5 +192,77 @@ describe('buildGraph — non-bus nodes', () => {
     const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } }, { nonBusCoords });
     const genNode = nodes.find((n) => n.type === 'generator');
     expect(genNode?.position).toEqual({ x: 500, y: 600 });
+  });
+});
+
+/**
+ * Pre-measure size hints (MiniMap fix).
+ *
+ * RF v12's MiniMap only draws a rect for a node whose user object carries
+ * dimensions; nodes built with only `{id,type,position,data}` measure 0 and
+ * are filtered out, leaving the minimap white. `buildGraph` now seeds
+ * `initialWidth`/`initialHeight` on every node so a rect renders before the
+ * DOM measures the real glyph. These are *initial* hints (dropped after
+ * measurement), not `width`/`height`, so the glyph/handles aren't pinned.
+ */
+describe('buildGraph — minimap size hints', () => {
+  type SizedNode = { initialWidth?: unknown; initialHeight?: unknown };
+
+  it('emits numeric initialWidth/initialHeight > 0 on every node kind', () => {
+    const topology = makeTopology({
+      buses: [bus(1)],
+      generators: [gen('GEN_1', 1)],
+      loads: [load('PQ_1', 1)],
+      shunts: [shunt('SH1', 1)],
+      // Exciter controller docked to the generator via its `syn` ref so a
+      // controller badge node is actually emitted.
+      controllers: [{ idx: 'AVR1', name: 'avr-1', kind: 'EXDC2', params: { syn: 'GEN_1' } }],
+    });
+    const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
+
+    // All five node kinds must be present so the assertion below covers each.
+    const kinds = new Set(nodes.map((n) => n.type));
+    expect(kinds).toEqual(new Set(['bus', 'generator', 'load', 'shunt', 'controller']));
+
+    for (const n of nodes) {
+      const sized = n as SizedNode;
+      expect(typeof sized.initialWidth, `${n.type} ${n.id} initialWidth`).toBe('number');
+      expect(typeof sized.initialHeight, `${n.type} ${n.id} initialHeight`).toBe('number');
+      expect(sized.initialWidth as number).toBeGreaterThan(0);
+      expect(sized.initialHeight as number).toBeGreaterThan(0);
+    }
+  });
+
+  it('uses the per-kind NODE_FOOTPRINT for bus and device nodes', () => {
+    const topology = makeTopology({
+      buses: [bus(1)],
+      generators: [gen('GEN_1', 1)],
+      loads: [load('PQ_1', 1)],
+      shunts: [shunt('SH1', 1)],
+    });
+    const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
+    const sized = (type: string) => nodes.find((n) => n.type === type) as SizedNode | undefined;
+
+    expect(sized('bus')?.initialWidth).toBe(90);
+    expect(sized('bus')?.initialHeight).toBe(56);
+    expect(sized('generator')?.initialWidth).toBe(50);
+    expect(sized('generator')?.initialHeight).toBe(46);
+    expect(sized('load')?.initialWidth).toBe(50);
+    expect(sized('load')?.initialHeight).toBe(46);
+    expect(sized('shunt')?.initialWidth).toBe(50);
+    expect(sized('shunt')?.initialHeight).toBe(46);
+  });
+
+  it('sizes controller badges with the 28×28 glyph footprint', () => {
+    const topology = makeTopology({
+      buses: [bus(1)],
+      generators: [gen('GEN_1', 1)],
+      controllers: [{ idx: 'AVR1', name: 'avr-1', kind: 'EXDC2', params: { syn: 'GEN_1' } }],
+    });
+    const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
+    const ctrl = nodes.find((n) => n.type === 'controller') as SizedNode | undefined;
+    expect(ctrl).toBeDefined();
+    expect(ctrl?.initialWidth).toBe(28);
+    expect(ctrl?.initialHeight).toBe(28);
   });
 });

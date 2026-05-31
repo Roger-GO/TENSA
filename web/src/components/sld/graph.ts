@@ -367,6 +367,14 @@ export const NODE_FOOTPRINT: Record<
   shunt: { width: 50, height: 46 },
 };
 
+/**
+ * Pre-measure size hint for controller badge nodes. `NODE_FOOTPRINT` has
+ * no controller entry (badges aren't part of the push-out overlap math),
+ * so this small square approximates the `ControllerNode` glyph just well
+ * enough that RF v12 draws a MiniMap rect before the DOM measures it.
+ */
+export const CONTROLLER_GLYPH_FOOTPRINT = 28;
+
 /** Pixels of clear space the push-out pass keeps between nodes after a shift. */
 export const PUSH_OUT_SAFETY_GAP = 8;
 
@@ -711,6 +719,12 @@ export function buildGraph(
       id: idx,
       type: 'bus',
       position: { x: c.x, y: c.y },
+      // Pre-measure size hint. RF v12 only draws a MiniMap rect for a
+      // node whose user object carries dimensions; `initialWidth/Height`
+      // seed that before the DOM measures the real glyph and are dropped
+      // afterward, so they never pin the node (unlike `width/height`).
+      initialWidth: NODE_FOOTPRINT.bus.width,
+      initialHeight: NODE_FOOTPRINT.bus.height,
       data: {
         idx,
         name: b.name,
@@ -843,6 +857,10 @@ export function buildGraph(
         id: nodeId,
         type: NON_BUS_NODE_TYPE[bucket.kind],
         position: { x, y },
+        // Pre-measure size hint so RF v12 draws a MiniMap rect; see the
+        // bus-node note above. Dropped once the device glyph is measured.
+        initialWidth: NODE_FOOTPRINT[bucket.kind].width,
+        initialHeight: NODE_FOOTPRINT[bucket.kind].height,
         data: {
           idx: String(entry.idx),
           name: entry.name,
@@ -1044,6 +1062,11 @@ function appendControllerNodes(nodes: Node[], controllers: readonly TopologyEntr
       id: nodeId,
       type: 'controller',
       position,
+      // Pre-measure size hint so RF v12 draws a MiniMap rect; see the
+      // bus-node note above. `NODE_FOOTPRINT` has no controller entry, so
+      // approximate the small badge glyph with a 28×28 box.
+      initialWidth: CONTROLLER_GLYPH_FOOTPRINT,
+      initialHeight: CONTROLLER_GLYPH_FOOTPRINT,
       // Docked badges aren't free-dragged (no sidecar persistence for
       // controllers); they follow their parent device.
       draggable: false,

@@ -53,6 +53,7 @@ describe('useLayoutStore — defaults', () => {
     expect(state.activeBottomDrawerTab).toBe('buses');
     expect(state.activeAnalysisSubTab).toBe('eig');
     expect(state.drawerHasUnreadResults).toBe(false);
+    expect(state.resultsViewActive).toBe(false);
   });
 
   it('exposes BOTTOM_DRAWER_TABS as the canonical ordered list', () => {
@@ -148,6 +149,29 @@ describe('useLayoutStore — actions', () => {
     useLayoutStore.getState().clearDrawerUnread();
     expect(useLayoutStore.getState().drawerHasUnreadResults).toBe(false);
   });
+
+  it('setResultsViewActive writes through', () => {
+    useLayoutStore.getState().setResultsViewActive(true);
+    expect(useLayoutStore.getState().resultsViewActive).toBe(true);
+    useLayoutStore.getState().setResultsViewActive(false);
+    expect(useLayoutStore.getState().resultsViewActive).toBe(false);
+  });
+
+  it('toggleResultsView alternates the flag', () => {
+    expect(useLayoutStore.getState().resultsViewActive).toBe(false);
+    useLayoutStore.getState().toggleResultsView();
+    expect(useLayoutStore.getState().resultsViewActive).toBe(true);
+    useLayoutStore.getState().toggleResultsView();
+    expect(useLayoutStore.getState().resultsViewActive).toBe(false);
+  });
+
+  it('toggleResultsView is independent of bottomDrawerCollapsed', () => {
+    useLayoutStore.setState({ bottomDrawerCollapsed: true });
+    useLayoutStore.getState().toggleResultsView();
+    expect(useLayoutStore.getState().resultsViewActive).toBe(true);
+    // Entering results view must NOT touch the drawer's own collapse bit.
+    expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(true);
+  });
 });
 
 describe('useLayoutStore — persistence', () => {
@@ -174,6 +198,27 @@ describe('useLayoutStore — persistence', () => {
     expect(parsed.state.leftSidebarCollapsed).toBe(true);
     expect(parsed.state.bottomDrawerHeightPct).toBe(50);
     expect(parsed.state.activeBottomDrawerTab).toBe('analysis');
+  });
+
+  it('persists resultsViewActive to localStorage', async () => {
+    useLayoutStore.getState().setResultsViewActive(true);
+    await Promise.resolve();
+    const raw = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw as string) as { state: Record<string, unknown> };
+    expect(parsed.state.resultsViewActive).toBe(true);
+  });
+
+  it('round-trips resultsViewActive via rehydrate()', async () => {
+    window.localStorage.setItem(
+      LAYOUT_STORAGE_KEY,
+      JSON.stringify({
+        state: { ...DEFAULT_LAYOUT, resultsViewActive: true },
+        version: 0,
+      }),
+    );
+    await useLayoutStore.persist.rehydrate();
+    expect(useLayoutStore.getState().resultsViewActive).toBe(true);
   });
 
   it('round-trips persisted state via rehydrate()', async () => {

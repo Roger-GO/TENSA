@@ -20,6 +20,7 @@ import { ExportMenu } from '@/components/shell/ExportMenu';
 import { SldCanvas } from '@/components/sld/SldCanvas';
 import { RightInspector } from '@/components/inspector/RightInspector';
 import { BottomDrawer } from '@/components/shell/BottomDrawer';
+import { ResultsView } from '@/components/shell/ResultsView';
 import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
 import {
   makeQueryClient,
@@ -255,6 +256,7 @@ export function App() {
           canvas={<CanvasSlot />}
           rightInspector={<RightInspector />}
           bottomDrawer={<BottomDrawer />}
+          resultsView={<ResultsView />}
           dockOverlay={
             <>
               <AddElementPanel />

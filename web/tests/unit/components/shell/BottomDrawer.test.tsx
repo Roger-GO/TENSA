@@ -89,6 +89,21 @@ describe('<BottomDrawer />', () => {
     }
   });
 
+  it('renders a group divider before the Analysis tab (grids | tools split)', () => {
+    render(<BottomDrawer />, { wrapper });
+    const divider = screen.getByTestId('bottom-drawer-tab-group-divider');
+    expect(divider).toBeInTheDocument();
+    // Exactly one divider — it splits the five element grids from the
+    // Analysis | Activity tools group.
+    expect(screen.getAllByTestId('bottom-drawer-tab-group-divider')).toHaveLength(1);
+    // The divider must sit immediately before the Analysis trigger in DOM
+    // order (the grids read as one group, Analysis|Activity as the next).
+    const analysisTab = screen.getByTestId('bottom-drawer-tab-analysis');
+    expect(divider.compareDocumentPosition(analysisTab) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const shuntsTab = screen.getByTestId('bottom-drawer-tab-shunts');
+    expect(shuntsTab.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('renders + selects the Activity tab', async () => {
     const user = userEvent.setup();
     render(<BottomDrawer />, { wrapper });

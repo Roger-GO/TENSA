@@ -539,6 +539,24 @@ export function useCommandRegistry(): readonly Command[] {
         },
         shortcut: 'meta+shift+j, ctrl+shift+j',
       },
+      // v3.1 — full-space results view. Toggles
+      // ``useLayoutStore.resultsViewActive``, which makes the AppShell
+      // short-circuit the diagram + inspector + drawer and render the
+      // dedicated ResultsView instead ("results in a new page, hide the
+      // system and its parameters"). Mirrors the ResultsViewToggle button
+      // so click + shortcut paths are interchangeable. ⌘⇧M is free —
+      // ⌘M is unbound and ⌘⇧S/⌘⇧Z are taken but not the M variant.
+      // Deliberately NOT auto-entered on Run; the user opts in.
+      {
+        id: 'view.toggle-results-view',
+        label: 'Toggle results view',
+        group: 'view',
+        keywords: ['results', 'view', 'maximize', 'fullscreen', 'plot', 'analysis', 'page', 'hide diagram'],
+        action: () => {
+          useLayoutStore.getState().toggleResultsView();
+        },
+        shortcut: 'meta+shift+m, ctrl+shift+m',
+      },
 
       // ---- navigation ----------------------------------------------------
       // Sequence shortcut "g h" — opens the run-history drawer.

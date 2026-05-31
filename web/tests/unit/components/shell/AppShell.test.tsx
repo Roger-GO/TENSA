@@ -131,6 +131,61 @@ describe('AppShell — structural contract', () => {
   });
 });
 
+describe('AppShell — full-space results view (v3.1)', () => {
+  it('renders the chassis (NOT the results region) when resultsViewActive=false', () => {
+    useLayoutStore.setState({ resultsViewActive: false });
+    render(
+      <AppShell
+        canvas={<span>canvas-content</span>}
+        rightInspector={<span>inspector-content</span>}
+        bottomDrawer={<span>drawer-content</span>}
+        resultsView={<span>results-page</span>}
+      />,
+    );
+    // Chassis regions present; results region absent.
+    expect(screen.getByTestId('app-shell-canvas')).toBeInTheDocument();
+    expect(screen.getByTestId('app-shell-bottom-drawer')).toBeInTheDocument();
+    expect(screen.queryByTestId('app-shell-results-view')).not.toBeInTheDocument();
+    expect(screen.queryByText('results-page')).not.toBeInTheDocument();
+  });
+
+  it('short-circuits to the results region (hiding canvas/inspector/drawer) when active', () => {
+    useLayoutStore.setState({ resultsViewActive: true });
+    render(
+      <AppShell
+        canvas={<span>canvas-content</span>}
+        rightInspector={<span>inspector-content</span>}
+        bottomDrawer={<span>drawer-content</span>}
+        resultsView={<span>results-page</span>}
+      />,
+    );
+    // The diagram + inspector + drawer are fully unmounted.
+    expect(screen.queryByTestId('app-shell-canvas')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('app-shell-right-inspector')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('app-shell-bottom-drawer')).not.toBeInTheDocument();
+    expect(screen.queryByText('canvas-content')).not.toBeInTheDocument();
+    expect(screen.queryByText('inspector-content')).not.toBeInTheDocument();
+    expect(screen.queryByText('drawer-content')).not.toBeInTheDocument();
+    // The results region + its content are mounted.
+    const region = screen.getByTestId('app-shell-results-view');
+    expect(region).toBeInTheDocument();
+    expect(within(region).getByText('results-page')).toBeInTheDocument();
+  });
+
+  it('keeps the TopBar mounted in the results-view branch', () => {
+    useLayoutStore.setState({ resultsViewActive: true });
+    render(
+      <AppShell
+        topBarCenter={<span>ANDES App</span>}
+        resultsView={<span>results-page</span>}
+      />,
+    );
+    const banner = screen.getByRole('banner', { name: /top bar/i });
+    expect(banner).toBeInTheDocument();
+    expect(within(banner).getByText('ANDES App')).toBeInTheDocument();
+  });
+});
+
 describe('AppShell — right inspector visibility model', () => {
   it('renders the inspector panel collapsed when no selection AND user has it collapsed', () => {
     useLayoutStore.setState({ rightInspectorCollapsed: true });

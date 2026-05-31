@@ -129,6 +129,13 @@ export interface AppShellProps {
   /** Bottom drawer content (Unit 11 supplies the tab strip + grid bodies). */
   bottomDrawer?: ReactNode;
   /**
+   * Full-space results page (v3.1). When ``useLayoutStore.resultsViewActive``
+   * is true the shell short-circuits the canvas/inspector/drawer chassis and
+   * mounts this single region instead, so plots/tables get the whole content
+   * area. The TopBar + overlays stay mounted in both branches.
+   */
+  resultsView?: ReactNode;
+  /**
    * Floating overlay anchored over the canvas/inspector/drawer column.
    * Hosts AddElementPanel and any non-modal banners (NumericalErrorBanner,
    * ConvergenceErrorPanel) that need to sit above the chassis content
@@ -149,6 +156,7 @@ export function AppShell({
   canvas,
   rightInspector,
   bottomDrawer,
+  resultsView,
   dockOverlay,
   modal,
 }: AppShellProps) {
@@ -188,6 +196,9 @@ export function AppShell({
   const bottomDrawerHeightPct = useLayoutStore((s) => s.bottomDrawerHeightPct);
   const rightInspectorCollapsed = useLayoutStore((s) => s.rightInspectorCollapsed);
   const setBottomDrawerHeightPct = useLayoutStore((s) => s.setBottomDrawerHeightPct);
+  // v3.1 — full-space results view. When active we render a single
+  // results region in place of the canvas/inspector/drawer chassis.
+  const resultsViewActive = useLayoutStore((s) => s.resultsViewActive);
 
   // Selection state drives inspector visibility per F-DESIGN-2.
   const selectedNodeId = useSldStore((s) => s.selectedNodeId);
@@ -251,9 +262,25 @@ export function AppShell({
     >
       <TopBar left={topBarLeft} center={topBarCenter} right={topBarRight} />
 
-      <div className="relative flex min-h-0 flex-1">
-        {/* Outer horizontal split: LeftSidebar | RightSide */}
-        <PanelGroup
+      {resultsViewActive ? (
+        /* v3.1 full-space results view — a top-level conditional render
+           (NOT an imperative panel collapse) per the plan: simpler than
+           driving the fragile inspectorVisible/syncPanel logic to size=0,
+           and it guarantees the diagram + parameters are fully unmounted
+           ("hide the system and its parameters"). The TopBar above + the
+           modal/overlay/Toaster/palette below stay mounted in both
+           branches so global affordances keep working. */
+        <main
+          aria-label="Results"
+          data-testid="app-shell-results-view"
+          className="bg-background flex min-h-0 flex-1 flex-col"
+        >
+          {resultsView}
+        </main>
+      ) : (
+        <div className="relative flex min-h-0 flex-1">
+          {/* Outer horizontal split: LeftSidebar | RightSide */}
+          <PanelGroup
           direction="horizontal"
           autoSaveId="andes-app:layout-v1:outer"
           className="flex h-full w-full"
@@ -432,7 +459,8 @@ export function AppShell({
             {dockOverlay}
           </div>
         ) : null}
-      </div>
+        </div>
+      )}
 
       {modal}
 
