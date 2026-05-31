@@ -161,6 +161,30 @@ export const MAX_TERMINAL = 100;
 /** Prefix for client-minted placeholder ids (pre-server-job_id). */
 export const LOCAL_ID_PREFIX = 'local:';
 
+/**
+ * Long-running STREAMING kinds that legitimately stay in-flight for the whole
+ * run (a TDS integration or a parameter sweep can run far longer than any
+ * fixed timeout) and so are EXCLUDED from the staleness sweep. Their terminal
+ * state arrives over the dedicated TDS / sweep streams, not the invoke path.
+ * Everything NOT in this set is an invoke-backed op whose terminal event must
+ * arrive promptly — if it hasn't by ``STALE_INFLIGHT_THRESHOLD_S`` the sweep
+ * marks it failed (see ``sweepStaleJobs``).
+ */
+export const STREAMING_KINDS: ReadonlySet<JobKind> = new Set<JobKind>([
+  'tds-stream',
+  'tds-batch',
+  'sweep',
+]);
+
+/**
+ * Age (seconds) past which an invoke-backed in-flight record is considered
+ * stranded — no terminal event ever arrived (the server coalesced the failure
+ * under a different job_id, the WS dropped, etc.). Generous so a slow-but-live
+ * routine (a big EIG / CPF) is never swept mid-run; the longest invoke-backed
+ * op (a case-load / reload) is bounded well under this by the HTTP timeout.
+ */
+export const STALE_INFLIGHT_THRESHOLD_S = 90;
+
 /** Mint a fresh client-side placeholder job id. */
 export function mintLocalJobId(): string {
   const rand =
@@ -261,6 +285,23 @@ export interface JobsState {
    *  session swap; they're cheap and self-healing (a dismissed id that never
    *  recurs is harmless). */
   clearJobs: () => void;
+
+  /**
+   * BACKSTOP: mark any invoke-backed in-flight record older than
+   * ``STALE_INFLIGHT_THRESHOLD_S`` as ``failed`` with a synthetic
+   * "no terminal event received" problem. Guarantees no InFlightChip pill can
+   * spin forever when a routine's terminal event never arrives (server
+   * coalesced the failure under a different job_id, WS dropped mid-run, etc.).
+   *
+   * EXCLUDES long-running streaming kinds (``STREAMING_KINDS``) — a TDS run or
+   * sweep legitimately stays in-flight well past the threshold; their terminal
+   * state comes over their own streams. Driven on a timer by
+   * ``useJobEventsStream``; idempotent (already-terminal records are skipped).
+   *
+   * ``nowSeconds`` is injectable for deterministic tests; defaults to wall
+   * clock.
+   */
+  sweepStaleJobs: (nowSeconds?: number) => void;
 }
 
 // ---- internal helpers -----------------------------------------------------
@@ -511,6 +552,32 @@ export const useJobsStore = create<JobsState>()(
       },
 
       clearJobs: () => set({ jobs: {} }),
+
+      sweepStaleJobs: (nowSeconds) => {
+        const now = nowSeconds ?? Date.now() / 1000;
+        const prev = get().jobs;
+        let mutated = false;
+        const next = { ...prev };
+        for (const [id, rec] of Object.entries(prev)) {
+          if (isTerminalStatus(rec.status)) continue;
+          if (STREAMING_KINDS.has(rec.kind)) continue;
+          if (now - rec.updated_at < STALE_INFLIGHT_THRESHOLD_S) continue;
+          mutated = true;
+          next[id] = {
+            ...rec,
+            status: 'failed',
+            updated_at: now,
+            ended_at: now,
+            problem: {
+              title: 'No response',
+              detail: 'No terminal event received; the routine may have failed silently.',
+              category: 'stale-timeout',
+            },
+          };
+          delete next[id].isPlaceholder;
+        }
+        if (mutated) set({ jobs: applyRetention(next) });
+      },
     }),
     {
       name: JOBS_STORAGE_KEY,

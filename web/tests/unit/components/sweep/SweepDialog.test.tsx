@@ -240,26 +240,12 @@ describe('<SweepDialog /> — Run-readiness gates (v2.0 polish, Unit 4)', () => 
       dragOverrides: {},
       pendingDependents: [],
     });
-    fetchSpy.mockResolvedValueOnce(
-      makeJsonResponse(200, {
-        snapshots: [
-          {
-            name: 'snap-A',
-            saved_at: '2026-05-09',
-            has_pflow: true,
-            has_tds: false,
-            has_dill: true,
-            andes_version: '2.0.0',
-            disturbance_count: 1,
-          },
-        ],
-      }),
-    );
+    // With no case loaded, ``useListSnapshots`` is gated off (the listing
+    // endpoint 409s on a no-case session), so the snapshot dropdown never
+    // populates. That's fine — the "No case loaded." readiness gate is
+    // independent of snapshot selection, so we don't pick one here.
     render(withQueryClient(<SweepDialog open onOpenChange={() => {}} />));
-    await waitFor(() =>
-      expect(screen.getByTestId('sweep-dialog-snapshot').children.length).toBeGreaterThan(1),
-    );
-    await user.selectOptions(screen.getByTestId('sweep-dialog-snapshot'), 'snap-A');
+    await screen.findByTestId('sweep-dialog');
 
     const confirm = screen.getByTestId('sweep-dialog-confirm');
     expect(confirm).toBeDisabled();

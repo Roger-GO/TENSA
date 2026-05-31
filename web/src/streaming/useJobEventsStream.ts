@@ -31,6 +31,18 @@ import { JobStream } from '@/streaming/JobStream';
 import { buildRunStreamWsUrl } from '@/streaming/wsUrl';
 import { useSessionStore } from '@/store/session';
 import { useAuthStore } from '@/store/auth';
+import { useJobsStore } from '@/store/jobs';
+
+/**
+ * Cadence of the staleness-sweep backstop. Every ~30s we drive any
+ * invoke-backed in-flight record past ``STALE_INFLIGHT_THRESHOLD_S`` (90s) to
+ * ``failed`` so the TopBar InFlightChip pill can never spin forever when a
+ * routine's terminal event never lands (the server coalesced the failure under
+ * a different job_id, the WS dropped, etc.). Streaming kinds are excluded by
+ * ``sweepStaleJobs`` itself. Exported so the app-root owner and tests share the
+ * value.
+ */
+export const STALE_SWEEP_INTERVAL_MS = 30_000;
 
 export function useJobEventsStream(): void {
   const sessionId = useSessionStore((s) => s.sessionId);
@@ -79,4 +91,15 @@ export function useJobEventsStream(): void {
       if (streamRef.current === stream) streamRef.current = null;
     };
   }, [sessionId, token, authDisabled]);
+
+  // STUCK-PILL BACKSTOP: independent of the stream lifecycle (the pill must
+  // clear even when no stream is open / the WS is down), run the staleness
+  // sweep on a timer for the whole app lifetime. ``sweepStaleJobs`` is a no-op
+  // when nothing is stale, so the interval is cheap.
+  useEffect(() => {
+    const id = setInterval(() => {
+      useJobsStore.getState().sweepStaleJobs();
+    }, STALE_SWEEP_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, []);
 }

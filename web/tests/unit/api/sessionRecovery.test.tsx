@@ -31,8 +31,9 @@ import {
 import { ProblemDetailsError, setTokenGetter } from '@/api/client';
 import { useAuthStore } from '@/store/auth';
 import { useSessionStore, MAX_RECOVERY_ATTEMPTS, RECOVERY_WINDOW_MS } from '@/store/session';
-import { parseSessionId } from '@/api/types';
+import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { ProblemDetails, SessionId } from '@/api/types';
+import { useCaseStore } from '@/store/case';
 
 function makeProblem(status: number, title = 'Error'): ProblemDetails {
   return {
@@ -201,6 +202,12 @@ describe('wireGlobalErrorRecovery — cache subscriber integration', () => {
       recoveryFailed: false,
       recoveryAttempts: [],
     });
+    // ``useTopology`` is gated on a loaded case (it 409s on a no-case
+    // session), so set a case selection here for the subscriber-integration
+    // test that needs the topology query to actually fire and 404.
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
+    });
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
       typeof vi.spyOn
     >;
@@ -217,6 +224,7 @@ describe('wireGlobalErrorRecovery — cache subscriber integration', () => {
       recoveryFailed: false,
       recoveryAttempts: [],
     });
+    useCaseStore.setState({ selection: null, topology: null, layoutSidecar: null });
   });
 
   it('routes a topology 404 through the QueryCache subscriber and triggers recovery', async () => {

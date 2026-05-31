@@ -17,7 +17,9 @@ import {
   JOBS_STORAGE_KEY,
   LOCAL_ID_PREFIX,
   MAX_TERMINAL,
+  STALE_INFLIGHT_THRESHOLD_S,
   useJobsStore,
+  isTerminalStatus,
   type JobEventEnvelope,
 } from '@/store/jobs';
 
@@ -291,6 +293,76 @@ describe('useJobsStore — retention (KTD-19 mirror)', () => {
     // The oldest terminal evicted.
     expect(jobs['done-0']).toBeUndefined();
     expect(jobs['done-1']).toBeDefined();
+  });
+});
+
+describe('useJobsStore — staleness sweep (stuck-pill backstop)', () => {
+  beforeEach(() => {
+    clearStorage();
+    resetJobsStore();
+  });
+
+  it('marks an orphaned canonical running case-load record failed once stale', () => {
+    // A case-load failure can strand a canonical ``srv-X`` record stuck
+    // ``running`` (server coalesced the failure under a different id / no
+    // terminal WS event arrived). The sweep is the guaranteed backstop.
+    const now = 1_000_000;
+    useJobsStore.getState().upsertJob({
+      job_id: 'srv-load',
+      kind: 'case-load',
+      status: 'running',
+      updated_at: now - (STALE_INFLIGHT_THRESHOLD_S + 5),
+    });
+    // While still fresh it is NOT swept.
+    useJobsStore.getState().sweepStaleJobs(now - STALE_INFLIGHT_THRESHOLD_S - 5 + 1);
+    expect(useJobsStore.getState().jobs['srv-load']!.status).toBe('running');
+    // Past the threshold it is driven to ``failed`` with a synthetic problem.
+    useJobsStore.getState().sweepStaleJobs(now);
+    const rec = useJobsStore.getState().jobs['srv-load']!;
+    expect(rec.status).toBe('failed');
+    expect(isTerminalStatus(rec.status)).toBe(true);
+    expect(rec.ended_at).toBe(now);
+    expect(rec.problem?.title).toBeTruthy();
+  });
+
+  it('NEVER sweeps long-running streaming kinds (tds-stream / tds-batch / sweep)', () => {
+    const old = 1; // ancient updated_at — well past any threshold.
+    for (const kind of ['tds-stream', 'tds-batch', 'sweep'] as const) {
+      useJobsStore.getState().upsertJob({
+        job_id: `srv-${kind}`,
+        kind,
+        status: 'running',
+        updated_at: old,
+      });
+    }
+    useJobsStore.getState().sweepStaleJobs(1_000_000);
+    for (const kind of ['tds-stream', 'tds-batch', 'sweep'] as const) {
+      expect(useJobsStore.getState().jobs[`srv-${kind}`]!.status).toBe('running');
+    }
+  });
+
+  it('leaves a fresh in-flight invoke record untouched', () => {
+    const now = 1_000_000;
+    useJobsStore.getState().upsertJob({
+      job_id: 'srv-eig',
+      kind: 'eig',
+      status: 'running',
+      updated_at: now - 1,
+    });
+    useJobsStore.getState().sweepStaleJobs(now);
+    expect(useJobsStore.getState().jobs['srv-eig']!.status).toBe('running');
+  });
+
+  it('leaves already-terminal records untouched (idempotent)', () => {
+    const now = 1_000_000;
+    useJobsStore.getState().upsertJob({
+      job_id: 'srv-done',
+      kind: 'pflow',
+      status: 'done',
+      updated_at: now - 10_000,
+    });
+    useJobsStore.getState().sweepStaleJobs(now);
+    expect(useJobsStore.getState().jobs['srv-done']!.status).toBe('done');
   });
 });
 

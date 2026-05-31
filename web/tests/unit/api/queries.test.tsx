@@ -20,14 +20,19 @@ import {
   queryKeys,
   useAlterableParams,
   useCreateSession,
+  useListPmus,
+  useListProfiles,
+  useListSnapshots,
   useLoadCase,
   useRunPflow,
+  useTopology,
 } from '@/api/queries';
 import { parseSessionId } from '@/api/types';
 import { setTokenGetter } from '@/api/client';
 import { useSessionStore } from '@/store/session';
-import { useJobsStore, LOCAL_ID_PREFIX } from '@/store/jobs';
-import type { SessionId } from '@/api/types';
+import { useCaseStore } from '@/store/case';
+import { useJobsStore, LOCAL_ID_PREFIX, isTerminalStatus } from '@/store/jobs';
+import type { SessionId, WorkspacePath } from '@/api/types';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -53,12 +58,15 @@ describe('queries hooks', () => {
       typeof vi.spyOn
     >;
     useSessionStore.setState({ sessionId: null });
+    useCaseStore.setState({ selection: null });
+    useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
   });
 
   afterEach(() => {
     fetchSpy.mockRestore();
     setTokenGetter(() => null);
     useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
+    useCaseStore.setState({ selection: null });
   });
 
   it('useCreateSession writes session_id to the session store', async () => {
@@ -285,5 +293,114 @@ describe('queries hooks', () => {
       expect(result.current.isSuccess).toBe(true);
     });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.topology(sessionId) });
+  });
+
+  it('a 422 case-load leaves NO in-flight record (placeholder cleared, none stranded)', async () => {
+    // STUCK-PILL FIX: a failed case-load must not leave any record in a
+    // pending/running state that would spin the InFlightChip pill forever.
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          type: 'about:blank',
+          title: 'Unprocessable Entity',
+          status: 422,
+          detail: 'Failed to parse case file.',
+        },
+        422,
+      ),
+    );
+
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useLoadCase(), { wrapper: Wrapper });
+    result.current.mutate({ sessionId: 'sess-422' as SessionId, request: { primary_path: 'bad.xlsx' } });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    const jobs = Object.values(useJobsStore.getState().jobs);
+    // No record may remain in-flight — every record is terminal (here: the
+    // single placeholder, marked failed in place).
+    expect(jobs.every((j) => isTerminalStatus(j.status))).toBe(true);
+    expect(jobs.some((j) => j.status === 'failed')).toBe(true);
+  });
+
+  it('failJob drives a stranded canonical running case-load record to failed (instant pill clear)', async () => {
+    // Simulate the WS having registered the canonical ``srv-load`` record
+    // (running) for this case-load before the HTTP 422 unwinds. The error
+    // carries no job_id, so failJob must drive that stranded canonical record
+    // to ``failed`` immediately — clearing the pill without a terminal WS event.
+    useJobsStore.getState().upsertJob({
+      job_id: 'srv-load',
+      kind: 'case-load',
+      status: 'running',
+    });
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(
+        { type: 'about:blank', title: 'Unprocessable Entity', status: 422, detail: 'parse error' },
+        422,
+      ),
+    );
+
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useLoadCase(), { wrapper: Wrapper });
+    result.current.mutate({ sessionId: 'sess-x' as SessionId, request: { primary_path: 'bad.xlsx' } });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    const jobs = useJobsStore.getState().jobs;
+    // The stranded canonical record is now terminal — the pill clears.
+    expect(jobs['srv-load']!.status).toBe('failed');
+    expect(Object.values(jobs).every((j) => isTerminalStatus(j.status))).toBe(true);
+  });
+
+  it('useTopology stays disabled when selection is null even with a sessionId', () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-gate') });
+    useCaseStore.setState({ selection: null });
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useTopology(parseSessionId('sess-gate')), {
+      wrapper: Wrapper,
+    });
+    expect(result.current.fetchStatus).toBe('idle');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('useTopology fires once a case is loaded (selection set)', async () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-loaded') });
+    useCaseStore.setState({
+      selection: { primaryPath: 'ieee14.xlsx' as WorkspacePath, addfiles: [] },
+    });
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        state: 'pre-setup',
+        buses: [],
+        lines: [],
+        transformers: [],
+        generators: [],
+        loads: [],
+      }),
+    );
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useTopology(parseSessionId('sess-loaded')), {
+      wrapper: Wrapper,
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  it('the landing-state list queries stay disabled when selection is null (no 409 noise)', () => {
+    // useListSnapshots / useListPmus / useListProfiles must NOT fire on a
+    // fresh session with no case loaded — each would 409 and spam the console.
+    useSessionStore.setState({ sessionId: parseSessionId('sess-landing') });
+    useCaseStore.setState({ selection: null });
+    const { Wrapper } = makeWrapper();
+
+    const snap = renderHook(() => useListSnapshots(), { wrapper: Wrapper });
+    const pmus = renderHook(() => useListPmus(), { wrapper: Wrapper });
+    const profiles = renderHook(() => useListProfiles(), { wrapper: Wrapper });
+
+    expect(snap.result.current.fetchStatus).toBe('idle');
+    expect(pmus.result.current.fetchStatus).toBe('idle');
+    expect(profiles.result.current.fetchStatus).toBe('idle');
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

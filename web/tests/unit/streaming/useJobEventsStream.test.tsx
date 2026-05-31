@@ -38,9 +38,10 @@ vi.mock('@/streaming/JobStream', () => {
   return { JobStream };
 });
 
-import { useJobEventsStream } from '@/streaming/useJobEventsStream';
+import { useJobEventsStream, STALE_SWEEP_INTERVAL_MS } from '@/streaming/useJobEventsStream';
 import { useSessionStore } from '@/store/session';
 import { useAuthStore } from '@/store/auth';
+import { useJobsStore } from '@/store/jobs';
 
 function setSession(id: string | null): void {
   useSessionStore.setState({
@@ -125,5 +126,43 @@ describe('useJobEventsStream', () => {
     // Fire the stream's onError with an auth_failed code.
     instances[0]!.opts.onError?.({ code: 'auth_failed', reason: 'stale' });
     expect(clearSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('useJobEventsStream — staleness-sweep backstop timer', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    instances.length = 0;
+    useSessionStore.setState({ sessionId: null });
+    useAuthStore.setState({ token: null, authDisabled: false });
+    useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
+  });
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+    vi.clearAllMocks();
+    useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
+  });
+
+  it('fires sweepStaleJobs on the interval even with no session/stream open', () => {
+    // The backstop runs for the whole app lifetime, independent of the
+    // stream — the pill must clear even when no stream is open.
+    const sweepSpy = vi.spyOn(useJobsStore.getState(), 'sweepStaleJobs');
+    renderHook(() => useJobEventsStream());
+    expect(instances).toHaveLength(0); // no session → no stream...
+    expect(sweepSpy).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(STALE_SWEEP_INTERVAL_MS);
+    expect(sweepSpy).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(STALE_SWEEP_INTERVAL_MS);
+    expect(sweepSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears the sweep interval on unmount', () => {
+    const sweepSpy = vi.spyOn(useJobsStore.getState(), 'sweepStaleJobs');
+    const { unmount } = renderHook(() => useJobEventsStream());
+    unmount();
+    vi.advanceTimersByTime(STALE_SWEEP_INTERVAL_MS * 3);
+    expect(sweepSpy).not.toHaveBeenCalled();
   });
 });
