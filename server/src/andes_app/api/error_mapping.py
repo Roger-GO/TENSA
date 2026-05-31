@@ -126,6 +126,7 @@ WORKER_ERROR_HTTP_MAP: dict[str, int] = {
     "CloneEditError": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "DisturbanceValidationError": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "CaseLoadError": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "CaseSaveError": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "SnapshotMetadataError": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "SnapshotVersionMismatchError": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "SweepValidationError": status.HTTP_422_UNPROCESSABLE_ENTITY,

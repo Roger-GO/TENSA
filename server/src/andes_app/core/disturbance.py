@@ -14,9 +14,9 @@ plan); advanced users still drop into Python and edit ANDES models directly.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class FaultSpec(BaseModel):
@@ -71,7 +71,21 @@ class AlterSpec(BaseModel):
     """Parameter alteration at a scheduled time — used for load steps,
     parameter ramps, set-point changes, etc.
 
-    Maps to ``ss.add('Alter', model=..., dev=..., src=..., t=..., value=...)``.
+    Maps to ``ss.add('Alter', model=..., dev=..., src=..., t=..., method=...,
+    amount=...)``. ANDES's ``Alter`` model has NO ``value`` parameter — the new
+    value is ``v_new = v_current <method> amount`` where ``method`` is one of
+    ``+ - * / =`` and ``amount`` is the operand (verified against ANDES 2.0.0;
+    ``method`` is MANDATORY — omitting it raises "Mandatory parameter method
+    missing"). Examples:
+
+    - set absolute: ``method='=', amount=1.2``
+    - step up by 0.2 pu: ``method='+', amount=0.2``
+    - scale (e.g. +20% load): ``method='*', amount=1.2``
+
+    NOTE for load increases: ANDES applies time-domain alterations to ``Ppf`` /
+    ``Qpf`` on PQ loads, not ``p0`` / ``q0`` (the latter only feed power flow and
+    are no-ops in TDS) — pick ``Ppf``/``Qpf`` as ``src`` for a load change that
+    actually moves the simulation.
     """
 
     kind: Literal["alter"] = Field(
@@ -87,12 +101,38 @@ class AlterSpec(BaseModel):
     src: str = Field(
         ...,
         description=(
-            "Source parameter name on the model (e.g., 'p0' for active-power "
-            "set-point on a generator)."
+            "Source parameter name on the model (e.g., 'Ppf' for a PQ load's "
+            "time-domain active power, or a generator set-point)."
         ),
     )
     t: float = Field(..., description="Time the parameter change applies, in seconds.")
-    value: float = Field(..., description="New value of the parameter at time ``t``.")
+    method: Literal["+", "-", "*", "/", "="] = Field(
+        "=",
+        description=(
+            "How ``amount`` is combined with the parameter's current value: "
+            "'=' set, '+' add, '-' subtract, '*' multiply, '/' divide. "
+            "Mandatory in ANDES; defaults to '=' (absolute set)."
+        ),
+    )
+    amount: float = Field(
+        ...,
+        description=(
+            "Operand applied via ``method`` (the absolute value when "
+            "method='=', the delta/factor otherwise)."
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_legacy_value(cls, data: Any) -> Any:
+        """Back-compat: an old AlterSpec persisted as ``{..., 'value': X}``
+        (pre method/amount) deserializes as an absolute set ``method='=',
+        amount=X`` so existing snapshots/bundles keep loading."""
+        if isinstance(data, dict) and "value" in data and "amount" not in data:
+            data = dict(data)
+            data["amount"] = data.pop("value")
+            data.setdefault("method", "=")
+        return data
 
 
 # Discriminated union — Pydantic v2 picks the variant by ``kind``.

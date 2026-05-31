@@ -233,11 +233,66 @@ def test_build_dynamic_system_from_scratch_with_gen_link(tmp_path: object) -> No
 
     # xlsx save twice — the 2nd is the overwrite path that used to raise
     # "EOFError: EOF when reading a line" (ANDES's input()-based confirm).
+    import zipfile
+
     target = os.path.join(str(tmp_path), "built.xlsx")  # type: ignore[arg-type]
     w.save_case("xlsx", target)
     assert os.path.getsize(target) > 0
+    assert zipfile.is_zipfile(target), "saved xlsx must be a valid (non-empty) zip"
     w.save_case("xlsx", target)  # overwrite
     assert os.path.getsize(target) > 0
+    assert zipfile.is_zipfile(target)
+    # No hidden temp files left behind in the directory.
+    leftovers = [p.name for p in Path(str(tmp_path)).iterdir() if p.name.startswith(".")]
+    assert leftovers == [], f"atomic save left temp files: {leftovers}"
+
+
+@pytest.mark.integration
+def test_save_case_failed_write_is_atomic_and_raises(tmp_path: Path) -> None:
+    """A writer failure must leave NO 0-byte artifact (the bug behind the
+    corrupt 'File is not a zip file' built-3bus.xlsx) and must not clobber a
+    prior valid file; it raises CaseSaveError (→ 422)."""
+    import zipfile
+    from unittest.mock import patch
+
+    from andes.io import xlsx as andes_xlsx
+
+    from andes_app.core.errors import CaseSaveError
+
+    raw, _dyr = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw)
+    target = tmp_path / "case.xlsx"
+
+    # First a good save so there's a prior valid file to protect.
+    w.save_case("xlsx", str(target))
+    good_bytes = target.read_bytes()
+    assert zipfile.is_zipfile(str(target))
+
+    # Now force the writer to blow up; the atomic path must raise + clean up.
+    with patch.object(andes_xlsx, "write", side_effect=RuntimeError("disk full")):
+        with pytest.raises(CaseSaveError):
+            w.save_case("xlsx", str(target))
+
+    # Prior valid file is untouched (os.replace never ran), no temp left behind.
+    assert target.read_bytes() == good_bytes
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name.startswith(".")]
+    assert leftovers == [], f"failed save left temp files: {leftovers}"
+
+
+@pytest.mark.integration
+def test_load_case_empty_file_raises_friendly_error(tmp_path: Path) -> None:
+    """A 0-byte case file fails with an actionable message, not ANDES's raw
+    'File is not a zip file'."""
+    from andes_app.core.errors import CaseLoadError
+
+    empty = tmp_path / "empty.xlsx"
+    empty.touch()  # 0 bytes
+    assert empty.stat().st_size == 0
+    w = Wrapper()
+    with pytest.raises(CaseLoadError) as ei:
+        w.load_case(str(empty))
+    assert "empty or corrupt" in str(ei.value)
 
 
 @pytest.mark.integration

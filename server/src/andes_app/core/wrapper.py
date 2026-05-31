@@ -30,7 +30,10 @@ import contextlib
 import hashlib
 import logging
 import math
+import os
 import re
+import tempfile
+import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -44,6 +47,7 @@ from andes_app.core.disturbance import AlterSpec, DisturbanceSpec, FaultSpec, To
 from andes_app.core.eig_result import ComplexNumber, EigResult
 from andes_app.core.errors import (
     CaseLoadError,
+    CaseSaveError,
     CpfDivergedError,
     CpfPrerequisiteError,
     DisturbanceCommitError,
@@ -120,6 +124,16 @@ _CONTROLLER_MODEL_NAMES: tuple[str, ...] = (
     # model has no PFlow contribution.
     "TimeSeries",
 )
+
+# Per-model ConstService sources that ANDES accepts as an ``Alter`` ``src`` but
+# which are NOT NumParams (so ``alterable_params``' NumParam scan misses them).
+# A PQ load's time-domain power lives in ``Ppf``/``Qpf``; altering ``p0``/``q0``
+# only changes power flow and is a silent no-op in TDS — so a "load increase"
+# disturbance MUST target these services to move the simulation. Conservative
+# whitelist; extend per model as needed.
+_ALTERABLE_SERVICES: dict[str, tuple[str, ...]] = {
+    "PQ": ("Ppf", "Qpf"),
+}
 
 if TYPE_CHECKING:
     from andes.system import System
@@ -335,6 +349,17 @@ class Wrapper:
         if not case_path.exists():
             raise CaseLoadError(str(case_path), "file does not exist")
 
+        # A 0-byte file (e.g. a save that was interrupted before the atomic
+        # write landed) is not a valid case; ANDES would raise a cryptic
+        # "File is not a zip file". Catch it early with an actionable message.
+        with contextlib.suppress(OSError):
+            if case_path.stat().st_size == 0:
+                raise CaseLoadError(
+                    str(case_path),
+                    "the file is empty or corrupt — re-save the case "
+                    "(an interrupted save can leave a 0-byte file)",
+                )
+
         try:
             ss = andes.load(
                 str(case_path),
@@ -345,8 +370,16 @@ class Wrapper:
                 no_output=True,
                 default_config=True,
             )
+        except CaseLoadError:
+            raise
         except Exception as exc:  # noqa: BLE001 — wrap and re-raise
-            raise CaseLoadError(str(case_path), str(exc)) from exc
+            detail = str(exc)
+            if "not a zip" in detail.lower() or "badzipfile" in detail.lower():
+                detail = (
+                    "the file is empty or corrupt — re-save the case "
+                    "(an interrupted save can leave a 0-byte/invalid file)"
+                )
+            raise CaseLoadError(str(case_path), detail) from exc
 
         if ss is None:
             raise CaseLoadError(str(case_path), "andes.load returned None")
@@ -579,12 +612,18 @@ class Wrapper:
             }
             model_name = "Toggle"
         elif isinstance(spec, AlterSpec):
+            # ANDES Alter has NO ``value`` param — the change is driven by
+            # ``method`` (mandatory: one of + - * / =) applied with ``amount``
+            # to the current value of ``src``. The old code passed ``value`` and
+            # every Alter failed at add() with "Mandatory parameter method
+            # missing", so load-increase / parameter-alter were 100% broken.
             kwargs = {
                 "model": spec.model,
                 "dev": spec.dev_idx,
                 "src": spec.src,
                 "t": spec.t,
-                "value": spec.value,
+                "method": spec.method,
+                "amount": spec.amount,
             }
             model_name = "Alter"
         else:  # pragma: no cover — Pydantic discriminator should prevent this
@@ -1080,35 +1119,70 @@ class Wrapper:
         """
         ss = self._require_loaded()
         target = Path(filename)
-        # ANDES's xlsx/json writers call ``confirm_overwrite`` which falls back
-        # to ``input()`` when the file exists and ``overwrite`` is unset — in
-        # the TTY-less worker that raises "EOFError: EOF when reading a line".
-        # The route already guards collisions (409 unless overwrite=true), so
-        # by the time we're here the write is authorised: force ``overwrite``.
+        if format not in ("xlsx", "json", "raw"):  # pragma: no cover — Literal
+            raise ElementValidationError(
+                f"unsupported save format {format!r}; supported: xlsx, json, raw"
+            )
+
+        # ATOMIC WRITE. The ANDES xlsx/json writers are NOT atomic: they create
+        # the target at 0 bytes and only flush content at close(), so any failure
+        # between open and close (ANDES choking on a from-scratch System, a worker
+        # kill, etc.) leaves a 0-byte file that masquerades as a real case and
+        # fails to load with "File is not a zip file". Write to a temp file in the
+        # SAME directory (so os.replace is atomic on one filesystem), validate it
+        # is non-empty + a valid container, then atomically rename onto target.
+        # On any failure the temp is removed and a CaseSaveError (422) is raised;
+        # an existing valid file at ``target`` is never clobbered by a failed write.
+        # The temp file keeps the real ``.{format}`` extension (the ANDES/pandas
+        # xlsx writer validates the extension and rejects e.g. ``.tmp``) but a
+        # leading ``.`` so it is a hidden dotfile — ``list_workspace_files``
+        # excludes names starting with ``.``, so the in-flight temp never shows
+        # up in the case picker even during the sub-millisecond write window.
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{target.stem}.save-", suffix=f".{format}", dir=str(target.parent)
+        )
+        os.close(fd)
+        tmp_path = Path(tmp_name)
         try:
+            # ANDES's writers call ``confirm_overwrite`` → ``input()`` when the
+            # file exists; the temp always exists (mkstemp created it), so force
+            # ``overwrite=True`` to avoid the TTY-less worker raising EOFError.
             if format == "xlsx":
                 from andes.io import xlsx
 
-                xlsx.write(ss, str(target), overwrite=True)
+                xlsx.write(ss, str(tmp_path), overwrite=True)
             elif format == "json":
                 from andes.io import json as andes_json
 
-                andes_json.write(ss, str(target), overwrite=True)
-            elif format == "raw":
+                andes_json.write(ss, str(tmp_path), overwrite=True)
+            else:  # raw
                 from andes_app.core.psse_writer import write_raw
 
-                write_raw(ss, str(target))
-            else:  # pragma: no cover — Literal narrows the type
-                raise ElementValidationError(
-                    f"unsupported save format {format!r}; supported: xlsx, json, raw"
+                write_raw(ss, str(tmp_path))
+
+            # Validate the artifact BEFORE exposing it. A 0-byte or truncated
+            # write must never become a "saved case".
+            if not tmp_path.exists() or tmp_path.stat().st_size == 0:
+                raise CaseSaveError(
+                    f"the {format} writer produced an empty file "
+                    "(the System may be incomplete — add buses/lines/generators "
+                    "and ensure power flow can solve before saving)"
                 )
-        except Exception:
-            # A failed write (e.g. ANDES choking on a from-scratch System) can
-            # leave a 0-byte file behind that then masquerades as a real case
-            # in the workspace listing. Remove it so the listing stays honest.
-            if target.exists() and target.stat().st_size == 0:
-                target.unlink()
+            if format == "xlsx" and not zipfile.is_zipfile(str(tmp_path)):
+                raise CaseSaveError(
+                    "the xlsx writer produced a corrupt (non-zip) file"
+                )
+
+            os.replace(str(tmp_path), str(target))
+        except CaseSaveError:
+            with contextlib.suppress(OSError):
+                tmp_path.unlink()
             raise
+        except Exception as exc:  # noqa: BLE001 — wrap so no raw writer error leaks
+            with contextlib.suppress(OSError):
+                tmp_path.unlink()
+            raise CaseSaveError(_sanitize_message(str(exc))) from exc
         return target
 
     def create_blank(self) -> TopologySnapshot:
@@ -1212,6 +1286,17 @@ class Wrapper:
             if isinstance(param, ExtParam):
                 continue
             out.append(str(name))
+        # ANDES applies time-domain alterations to certain ConstService values,
+        # NOT the NumParam set-points: a PQ load's TDS power is Ppf/Qpf, while
+        # p0/q0 only feed power flow and are silent no-ops in TDS. Those services
+        # are not NumParams so the loop above misses them — surface a small,
+        # conservative whitelist of TDS-relevant services so "increase a load"
+        # offers the source that actually moves the simulation.
+        services: Any = getattr(model_obj, "services", None)
+        if isinstance(services, dict):
+            for svc_name in _ALTERABLE_SERVICES.get(model, ()):  # type: ignore[arg-type]
+                if svc_name in services and svc_name not in out:
+                    out.append(svc_name)
         return out
 
     # ----- runs -----
