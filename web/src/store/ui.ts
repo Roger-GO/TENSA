@@ -18,15 +18,24 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
 /** Variable group selector forwarded by ``RunStream`` to ``start_tds``. */
-export type TdsVarGroup = 'bus_v' | 'gen_state' | 'line_flow';
+export type TdsVarGroup = 'bus_v' | 'gen_state' | 'gen_power' | 'line_flow' | 'load_pq';
 
-export const TDS_VAR_GROUPS: readonly TdsVarGroup[] = ['bus_v', 'gen_state', 'line_flow'] as const;
+export const TDS_VAR_GROUPS: readonly TdsVarGroup[] = [
+  'bus_v',
+  'gen_state',
+  'gen_power',
+  'line_flow',
+  'load_pq',
+] as const;
 
 /**
- * TdsConfigPanel form values. Defaults match the plan ("TdsConfigPanel
- * defaults"): ``tf=10``, ``h=null`` (substrate auto-pick), ``vars=
- * ["bus_v"]`` (gen_state opt-in), ``max_rate_hz=30`` (the UI-side clamp
- * documented in Key Technical Decisions).
+ * TdsConfigPanel form values. Defaults: ``tf=10``, ``h=null`` (substrate
+ * auto-pick), ``vars=["bus_v","gen_state"]`` so voltage AND frequency
+ * (the ``gen_state`` ω = per-unit-speed signal) are always plottable
+ * without re-running; ``max_rate_hz=30`` (the UI-side clamp documented
+ * in Key Technical Decisions). The remaining groups (``gen_power``,
+ * ``line_flow``, ``load_pq``) stay opt-in to keep default memory + plot
+ * clutter low.
  */
 export interface TdsConfig {
   /** Final sim time (seconds). Required. */
@@ -42,7 +51,7 @@ export interface TdsConfig {
 export const DEFAULT_TDS_CONFIG: TdsConfig = {
   tf: 10,
   h: null,
-  vars: ['bus_v'],
+  vars: ['bus_v', 'gen_state'],
   maxRateHz: 30,
 };
 

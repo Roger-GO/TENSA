@@ -52,7 +52,7 @@ import { useRunsStore } from '@/store/runs';
 const log = console;
 
 /** Variable group selector forwarded to ``start_tds``. */
-export type VarGroup = 'bus_v' | 'gen_state' | 'line_flow';
+export type VarGroup = 'bus_v' | 'gen_state' | 'gen_power' | 'line_flow' | 'load_pq';
 
 /** Wire-side integrator value forwarded to the substrate. */
 export type TdsIntegratorWire = 'trapezoidal' | 'qndf';
@@ -63,7 +63,7 @@ export interface TdsArgs {
   tf: number;
   /** Optional fixed step (seconds). Substrate default if omitted. */
   h?: number;
-  /** Variable groups to stream. Defaults to ``["bus_v"]``. */
+  /** Variable groups to stream. Defaults to ``["bus_v", "gen_state"]`` (voltage + frequency). */
   vars?: readonly VarGroup[];
   /**
    * Unit 16 integrator selection. Optional — defaults to ``trapezoidal``

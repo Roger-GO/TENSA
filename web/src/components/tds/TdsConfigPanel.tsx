@@ -29,9 +29,12 @@ import { useRunsStore, MAX_RETENTION_LIMIT } from '@/store/runs';
  * - ``h`` (integration step, sec): optional override. Blank → substrate
  *   chooses adaptively. Default blank.
  * - ``vars`` (variable groups to stream): multi-select of ``bus_v`` /
- *   ``gen_state`` / ``line_flow``. At least one required. Default
- *   ``["bus_v"]`` — ``gen_state`` opt-in keeps default memory + plot
- *   clutter low.
+ *   ``gen_state`` / ``gen_power`` / ``line_flow`` / ``load_pq``. At least
+ *   one required. Default ``["bus_v", "gen_state"]`` so voltage AND
+ *   frequency (``gen_state`` ω) are always plottable without re-running;
+ *   the remaining groups stay opt-in to keep default memory + plot
+ *   clutter low. The set is fixed at run-start — pick groups BEFORE
+ *   clicking Run TDS.
  * - ``max_rate_hz`` (UI clamp): default 30. Power-users only.
  *
  * Persistence: writes through ``useUiStore.setTdsConfig`` so the value
@@ -54,15 +57,19 @@ interface OverrideRow {
 }
 
 const VAR_GROUP_LABELS: Record<TdsVarGroup, string> = {
-  bus_v: 'Bus voltage (|V|)',
-  gen_state: 'Generator state (ω, δ)',
+  bus_v: 'Bus voltage + angle (|V|, θ)',
+  gen_state: 'Generator state (ω freq, δ)',
+  gen_power: 'Generator P/Q power',
   line_flow: 'Line flow (P, Q)',
+  load_pq: 'Load P/Q consumption',
 };
 
 const VAR_GROUP_HINTS: Record<TdsVarGroup, string> = {
-  bus_v: 'One column per bus.',
-  gen_state: 'One column per synchronous generator. Opt-in for transient analysis.',
-  line_flow: 'One column per line. Opt-in for flow studies.',
+  bus_v: 'Voltage magnitude + angle, one column each per bus.',
+  gen_state: 'Rotor speed ω (frequency proxy) + angle δ, per synchronous generator.',
+  gen_power: 'Electrical real + reactive power (MW / MVar) per synchronous generator.',
+  line_flow: 'Real + reactive flow (MW / MVar) per line. Opt-in for flow studies.',
+  load_pq: 'Real + reactive consumption (MW / MVar) per PQ load.',
 };
 
 const INTEGRATOR_OPTIONS: ReadonlyArray<{
@@ -362,6 +369,13 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
         <legend className="text-muted-foreground text-xs font-medium">
           Variable groups to stream
         </legend>
+        <p
+          data-testid="tds-config-vars-fixed-hint"
+          className="text-muted-foreground text-[10px] leading-snug"
+        >
+          Fixed at run-start — pick the groups you want plotted BEFORE clicking Run TDS. Voltage +
+          frequency stream by default.
+        </p>
         {TDS_VAR_GROUPS.map((group) => {
           const id = `tds-config-var-${group}`;
           const checked = tdsConfig.vars.includes(group);

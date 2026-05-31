@@ -8,7 +8,14 @@
  * cascade, findClosestFrameIdx helper).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { findClosestFrameIdx, parseColumnName, usePlotStore } from '@/store/plot';
+import {
+  findClosestFrameIdx,
+  groupAxisLabel,
+  groupLabel,
+  parseColumnName,
+  usePlotStore,
+} from '@/store/plot';
+import type { VarGroup } from '@/store/plot';
 
 function reset(): void {
   usePlotStore.setState({
@@ -116,7 +123,7 @@ describe('plot store — scrubT + playing (v0.2)', () => {
 });
 
 describe('parseColumnName (smoke — full coverage lives in TimeSeriesPlot tests)', () => {
-  it('classifies Bus_<n>_v as bus_v', () => {
+  it('classifies Bus_<n>_v as bus_v (field v)', () => {
     expect(parseColumnName('Bus_5_v')).toEqual({
       name: 'Bus_5_v',
       group: 'bus_v',
@@ -125,8 +132,123 @@ describe('parseColumnName (smoke — full coverage lives in TimeSeriesPlot tests
     });
   });
 
+  it('classifies Bus_<n>_a (angle) into the bus_v group with field a', () => {
+    expect(parseColumnName('Bus_5_a')).toEqual({
+      name: 'Bus_5_a',
+      group: 'bus_v',
+      elementIdx: '5',
+      field: 'a',
+    });
+  });
+
+  it('classifies Gen_<n>_omega / _delta as gen_state', () => {
+    expect(parseColumnName('Gen_1_omega')).toEqual({
+      name: 'Gen_1_omega',
+      group: 'gen_state',
+      elementIdx: '1',
+      field: 'omega',
+    });
+    expect(parseColumnName('Gen_1_delta')).toEqual({
+      name: 'Gen_1_delta',
+      group: 'gen_state',
+      elementIdx: '1',
+      field: 'delta',
+    });
+  });
+
+  it('routes Gen_<n>_Pe / _Qe into the dedicated gen_power group', () => {
+    expect(parseColumnName('Gen_2_Pe')).toEqual({
+      name: 'Gen_2_Pe',
+      group: 'gen_power',
+      elementIdx: '2',
+      field: 'Pe',
+    });
+    expect(parseColumnName('Gen_2_Qe')).toEqual({
+      name: 'Gen_2_Qe',
+      group: 'gen_power',
+      elementIdx: '2',
+      field: 'Qe',
+    });
+  });
+
+  it('classifies Line_<n>_p / _q as line_flow', () => {
+    expect(parseColumnName('Line_3_p')).toEqual({
+      name: 'Line_3_p',
+      group: 'line_flow',
+      elementIdx: '3',
+      field: 'p',
+    });
+    expect(parseColumnName('Line_3_q')).toEqual({
+      name: 'Line_3_q',
+      group: 'line_flow',
+      elementIdx: '3',
+      field: 'q',
+    });
+  });
+
+  it('classifies Load_<n>_p / _q into the load_pq group', () => {
+    expect(parseColumnName('Load_7_p')).toEqual({
+      name: 'Load_7_p',
+      group: 'load_pq',
+      elementIdx: '7',
+      field: 'p',
+    });
+    expect(parseColumnName('Load_7_q')).toEqual({
+      name: 'Load_7_q',
+      group: 'load_pq',
+      elementIdx: '7',
+      field: 'q',
+    });
+  });
+
+  it('handles non-numeric element idxs (e.g. named devices)', () => {
+    expect(parseColumnName('Gen_GENROU_1_Pe')).toEqual({
+      name: 'Gen_GENROU_1_Pe',
+      group: 'gen_power',
+      elementIdx: 'GENROU_1',
+      field: 'Pe',
+    });
+  });
+
   it('returns null for unknown shapes', () => {
     expect(parseColumnName('garbage_column')).toBeNull();
+    // A bus field outside v|a doesn't match.
+    expect(parseColumnName('Bus_5_z')).toBeNull();
+    // A gen field outside the known set doesn't match.
+    expect(parseColumnName('Gen_1_Pm')).toBeNull();
+  });
+});
+
+describe('group labels are exhaustive over VarGroup', () => {
+  const ALL_GROUPS: readonly VarGroup[] = [
+    'bus_v',
+    'gen_state',
+    'gen_power',
+    'line_flow',
+    'load_pq',
+  ];
+
+  it('groupLabel returns a non-empty string for every group', () => {
+    for (const g of ALL_GROUPS) {
+      expect(groupLabel(g)).toBeTruthy();
+      expect(typeof groupLabel(g)).toBe('string');
+    }
+  });
+
+  it('groupAxisLabel returns a non-empty string for every group', () => {
+    for (const g of ALL_GROUPS) {
+      expect(groupAxisLabel(g)).toBeTruthy();
+      expect(typeof groupAxisLabel(g)).toBe('string');
+    }
+  });
+
+  it('labels are distinct per group (no accidental copy-paste collision on names)', () => {
+    const labels = ALL_GROUPS.map(groupLabel);
+    expect(new Set(labels).size).toBe(ALL_GROUPS.length);
+  });
+
+  it('the gen_state axis label flags omega as the frequency signal', () => {
+    expect(groupAxisLabel('gen_state')).toMatch(/freq/i);
   });
 });
 
