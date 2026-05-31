@@ -33,7 +33,8 @@ vi.mock('@/lib/toast', () => ({
 import { LoadSnapshotDialog } from '@/components/snapshot/LoadSnapshotDialog';
 import { useSessionStore } from '@/store/session';
 import { useSnapshotStore } from '@/store/snapshot';
-import { parseSessionId } from '@/api/types';
+import { useCaseStore } from '@/store/case';
+import { parseSessionId, parseWorkspacePath } from '@/api/types';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -56,6 +57,12 @@ beforeEach(() => {
   fetchSpy.mockReset();
   globalThis.fetch = fetchSpy as unknown as typeof globalThis.fetch;
   useSessionStore.setState({ sessionId: parseSessionId('test-session-id') });
+  // ``useListSnapshots`` is gated on a loaded case (the listing endpoint
+  // 409s on a no-case session), so set a case selection here or the
+  // snapshot rows never render.
+  useCaseStore.setState({
+    selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
+  });
   useSnapshotStore.getState().reset();
   toastErrorMock.mockReset();
   toastSuccessMock.mockReset();
@@ -67,6 +74,7 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  useCaseStore.setState({ selection: null, topology: null, layoutSidecar: null });
   cleanup();
 });
 

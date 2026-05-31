@@ -188,7 +188,40 @@ function failJob(tempId: string, err: unknown): void {
       useJobsStore.getState().removeJob(tempId);
       return;
     }
+    // STUCK-PILL FIX: a failed invoke (e.g. a case-load that 422s) leaves a
+    // canonical ``srv-X`` in-flight record stranded when the server coalesces
+    // the failure under a DIFFERENT job_id (or no terminal WS event arrives at
+    // all). The HTTP error body carries no ``job_id`` (``map_worker_error`` →
+    // ``{detail, recovery, ...}``), so we can't re-key it directly. Instead,
+    // when the error carries no job_id, drive any matching CANONICAL in-flight
+    // record (non-``local:`` id, same kind, pending/running, recent) straight
+    // to ``failed`` too — the HTTP error arrives instantly, so this clears the
+    // InFlightChip pill at once without waiting for a (possibly never-arriving)
+    // terminal WS event. Mirrors the kind+recency matching used above for the
+    // ``failed`` race.
+    if (errorJobId(err) === undefined) {
+      const stuck = Object.values(useJobsStore.getState().jobs).find(
+        (j) =>
+          j.id !== tempId &&
+          !j.id.startsWith(LOCAL_ID_PREFIX) &&
+          j.kind === placeholder.kind &&
+          (j.status === 'pending' || j.status === 'running') &&
+          now - j.updated_at < 30,
+      );
+      if (stuck) {
+        useJobsStore.getState().updateJob(stuck.id, problemPatch(err));
+      }
+    }
   }
+  useJobsStore.getState().updateJob(tempId, problemPatch(err));
+}
+
+/**
+ * Build the ``{status:'failed', problem}`` patch carried onto a job record from
+ * a mutation error. Shared by the placeholder-fail path and the stuck-canonical
+ * backstop in ``failJob`` so both surface an identical ProblemDetails envelope.
+ */
+function problemPatch(err: unknown): Partial<JobRecord> {
   const patch: Partial<JobRecord> = { status: 'failed' };
   if (err instanceof ProblemDetailsError) {
     patch.problem = {
@@ -205,7 +238,21 @@ function failJob(tempId: string, err: unknown): void {
   } else if (err instanceof Error) {
     patch.problem = { title: err.name || 'Error', detail: err.message };
   }
-  useJobsStore.getState().updateJob(tempId, patch);
+  return patch;
+}
+
+/**
+ * Pull a substrate ``job_id`` off a mutation ERROR body, if the server embedded
+ * one. Case-load / invoke failures route through ``map_worker_error`` which
+ * carries ``{detail, recovery, ...}`` and NO ``job_id`` — so this returns
+ * undefined for them, which is the signal ``failJob`` uses to fall back to
+ * kind+recency matching against any stranded canonical in-flight record.
+ */
+function errorJobId(err: unknown): string | undefined {
+  if (err instanceof ProblemDetailsError) {
+    return extractJobId(err.rawBody);
+  }
+  return undefined;
 }
 
 /**
@@ -515,9 +562,15 @@ export function useLoadCase(): UseMutationResult<TopologySummary, Error, LoadCas
  * caller is responsible for guarding render until the session exists.
  */
 export function useTopology(sessionId: SessionId | null): UseQueryResult<TopologySummary, Error> {
+  // Gate on a LOADED CASE too: a fresh session with no case loaded has no
+  // topology to fetch, so the auto-fetch 409s (red console noise on the
+  // landing page). The load mutation ``setQueryData``s the topology directly
+  // (see ``useLoadCase``), so the SLD still primes instantly on load without
+  // relying on this auto-fetch.
+  const hasCase = useCaseStore((s) => s.selection !== null);
   return useQuery({
     queryKey: sessionId ? queryKeys.topology(sessionId) : ['topology', 'noop'],
-    enabled: sessionId !== null,
+    enabled: sessionId !== null && hasCase,
     queryFn: async () => {
       if (!sessionId) throw new Error('topology query enabled without a session id');
       return await andesClient.get<TopologySummary>(
@@ -1568,7 +1621,11 @@ export function useRestoreSnapshot(): UseMutationResult<
  */
 export function useListSnapshots(): UseQueryResult<ListSnapshotsResponse, Error> {
   const sessionId = useSessionStore((s) => s.sessionId);
-  const enabled = sessionId !== null;
+  // Gate on a loaded case: snapshots are listed per-case, so on a fresh
+  // session with no case loaded this 409s (landing-page console noise). The
+  // load mutation invalidates this key, so it refetches once a case lands.
+  const hasCase = useCaseStore((s) => s.selection !== null);
+  const enabled = sessionId !== null && hasCase;
   return useQuery({
     queryKey: enabled ? snapshotsKey(sessionId) : ['snapshots', 'noop'],
     enabled,
@@ -2060,7 +2117,11 @@ export function useAddPmu(): UseMutationResult<TopologyEntry, Error, AddPmuVars>
 export function useListPmus(): UseQueryResult<ListPmusResponse, Error> {
   const sessionId = useSessionStore((s) => s.sessionId);
   const queryClient = useQueryClient();
-  const enabled = sessionId !== null;
+  // Gate on a loaded case: PMUs are session+case-scoped, so a fresh session
+  // with no case loaded 409s (landing-page console noise). The placement
+  // mutation invalidates this key, so it refetches once a case lands.
+  const hasCase = useCaseStore((s) => s.selection !== null);
+  const enabled = sessionId !== null && hasCase;
   return useQuery({
     queryKey: enabled ? queryKeys.pmus(sessionId) : ['pmus', 'noop'],
     enabled,
@@ -2333,7 +2394,12 @@ export function useAddProfile(): UseMutationResult<TopologyEntry, Error, AddProf
 export function useListProfiles(): UseQueryResult<ListProfilesResponse, Error> {
   const sessionId = useSessionStore((s) => s.sessionId);
   const queryClient = useQueryClient();
-  const enabled = sessionId !== null;
+  // Gate on a loaded case: profiles are session+case-scoped, so a fresh
+  // session with no case loaded 409s (landing-page console noise). The
+  // add/upload mutations invalidate this key, so it refetches once a case
+  // lands.
+  const hasCase = useCaseStore((s) => s.selection !== null);
+  const enabled = sessionId !== null && hasCase;
   return useQuery({
     queryKey: enabled ? queryKeys.profiles(sessionId) : ['profiles', 'noop'],
     enabled,
@@ -2404,7 +2470,7 @@ export type SweepParamKind =
   | 'disturbance.fault.rf'
   | 'disturbance.toggle.t'
   | 'disturbance.alter.t'
-  | 'disturbance.alter.value';
+  | 'disturbance.alter.amount';
 
 export interface StartSweepVars {
   sessionId: SessionId;
