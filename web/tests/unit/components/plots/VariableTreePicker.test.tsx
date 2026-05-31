@@ -127,9 +127,24 @@ describe('VariableTreePicker', () => {
     expect(screen.getByTestId('variable-tree-picker-leaf-Bus_5_v')).toBeInTheDocument();
   });
 
+  it('auto-selects bus voltages when nothing has been selected yet', () => {
+    // First time a run's columns appear, the picker pre-selects bus voltages
+    // so the plot shows the headline result immediately instead of being empty.
+    seedRun('r1', ['Bus_1_v', 'Bus_1_a', 'Bus_5_v', 'Gen_1_omega']);
+    render(<VariableTreePicker />);
+    const sel = usePlotStore.getState().selectedByRun['r1']!;
+    expect(sel.has('Bus_1_v')).toBe(true);
+    expect(sel.has('Bus_5_v')).toBe(true);
+    // angle + non-voltage columns are NOT auto-selected
+    expect(sel.has('Bus_1_a')).toBe(false);
+    expect(sel.has('Gen_1_omega')).toBe(false);
+  });
+
   it('clicking a leaf checkbox toggles only that series in the plot store', async () => {
     const user = userEvent.setup();
     seedRun('r1', ['Bus_1_v', 'Bus_5_v']);
+    // Opt out of the auto-select default by seeding an explicit empty selection.
+    usePlotStore.getState().setSelection('r1', new Set());
     usePlotStore.getState().toggleExpanded('r1', 'bus_v');
     render(<VariableTreePicker />);
     await user.click(screen.getByTestId('variable-tree-picker-leaf-Bus_5_v'));
@@ -141,6 +156,7 @@ describe('VariableTreePicker', () => {
   it('clicking the group checkbox selects all leaves underneath', async () => {
     const user = userEvent.setup();
     seedRun('r1', ['Bus_1_v', 'Bus_5_v', 'Bus_7_v']);
+    usePlotStore.getState().setSelection('r1', new Set());
     render(<VariableTreePicker />);
     await user.click(screen.getByTestId('variable-tree-picker-group-bus_v'));
     const sel = usePlotStore.getState().selectedByRun['r1']!;

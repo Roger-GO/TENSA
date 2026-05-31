@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useRunsStore } from '@/store/runs';
 import type { RunRecord } from '@/store/runs';
 import { usePlotStore, parseColumnName, groupLabel } from '@/store/plot';
@@ -208,6 +208,24 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
     }
     return buildUnionTree(overlayRuns, filter);
   }, [overlayRuns, filter]);
+
+  // Auto-select bus voltages the first time a run's columns appear, so the
+  // plot shows the headline result immediately instead of an empty chart.
+  // Only fires when nothing has been selected yet (``selected === undefined``)
+  // so it never overrides the user's choices, and caps the count so a large
+  // system doesn't flood the plot.
+  useEffect(() => {
+    if (!effectiveRunId || !run || selected !== undefined) return;
+    const defaults: string[] = [];
+    for (const name of run.columnNames) {
+      const p = parseColumnName(name);
+      if (p && p.group === 'bus_v' && p.field === 'v') {
+        defaults.push(name);
+        if (defaults.length >= 12) break;
+      }
+    }
+    if (defaults.length > 0) setSelection(effectiveRunId, new Set(defaults));
+  }, [effectiveRunId, run, selected, setSelection]);
 
   const selectionSet = selected ?? new Set<string>();
   const expandedSet = expanded ?? new Set<string>();
