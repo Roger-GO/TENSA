@@ -137,7 +137,9 @@ async def test_streaming_tds_end_to_end(live_server: tuple[str, int, str]) -> No
         metadata = json.loads(first)
         assert metadata["type"] == "stream_start"
         assert "var_columns" in metadata["metadata"]
-        assert len(metadata["metadata"]["var_columns"]) == 14  # 14 buses
+        # Default vars = bus_v + gen_state: 14 buses × (v, a) = 28 plus
+        # 5 SynGen × (delta, omega) = 10 → 38 columns.
+        assert len(metadata["metadata"]["var_columns"]) == 28 + 10
 
         # Receive binary frames until "done"
         binary_frames: list[bytes] = []
@@ -171,8 +173,9 @@ async def test_streaming_tds_end_to_end(live_server: tuple[str, int, str]) -> No
     # Read the batch
     batch = reader.read_next_batch()
     assert batch.num_rows == 1
-    # 14 buses + 1 t column = 15 columns
-    assert batch.num_columns == 15
+    # Default vars (bus_v + gen_state): 28 bus columns + 10 gen columns
+    # + 1 t column = 39 columns.
+    assert batch.num_columns == 28 + 10 + 1
 
 
 @pytest.mark.acceptance
@@ -615,12 +618,14 @@ async def test_streaming_resume_after_run_completed_replays_full_run(
 
 
 @pytest.mark.acceptance
-async def test_streaming_vars_default_omitted_matches_v01_wire_format(
+async def test_streaming_vars_default_omitted_is_bus_v_and_gen_state(
     live_server: tuple[str, int, str],
 ) -> None:
-    """v0.2 backward compat: omitting ``vars`` is identical to the v0.1
-    bus-voltage-only wire format. The schema has ``t`` + 14 ``Bus_<idx>_v``
-    columns and nothing else; the metadata advertises only those columns."""
+    """Omitting ``vars`` defaults to ``bus_v`` + ``gen_state`` so voltage,
+    angle, and the omega frequency proxy are always plottable without
+    re-running. Bus_v contributes ``Bus_<idx>_v`` + ``Bus_<idx>_a`` per
+    bus; gen_state contributes ``Gen_<idx>_delta`` + ``Gen_<idx>_omega``
+    per SynGen."""
     token, port, base = live_server
     sid = await _create_session_and_load(token, base)
 
@@ -628,15 +633,21 @@ async def test_streaming_vars_default_omitted_matches_v01_wire_format(
         token, port, sid, tf=0.5, h=1 / 120
     )
     meta = metadata["metadata"]
-    # v0.2 metadata adds ``vars`` (defaulted to ["bus_v"]) but column set
-    # is unchanged.
-    assert meta.get("vars") == ["bus_v"]
-    assert len(meta["var_columns"]) == 14
-    assert all(name.startswith("Bus_") and name.endswith("_v") for name in meta["var_columns"])
+    assert meta.get("vars") == ["bus_v", "gen_state"]
+    var_cols = list(meta["var_columns"])
+    v_cols = [c for c in var_cols if c.startswith("Bus_") and c.endswith("_v")]
+    a_cols = [c for c in var_cols if c.startswith("Bus_") and c.endswith("_a")]
+    delta_cols = [c for c in var_cols if c.startswith("Gen_") and c.endswith("_delta")]
+    omega_cols = [c for c in var_cols if c.startswith("Gen_") and c.endswith("_omega")]
+    assert len(v_cols) == 14
+    assert len(a_cols) == 14
+    assert len(delta_cols) == 5
+    assert len(omega_cols) == 5
+    assert len(var_cols) == 28 + 10
 
     reader = pyarrow.ipc.open_stream(io.BytesIO(binary_frames[0]))
     schema = reader.schema
-    assert schema.names == ["t"] + list(meta["var_columns"])
+    assert schema.names == ["t"] + var_cols
 
 
 @pytest.mark.acceptance
@@ -644,9 +655,9 @@ async def test_streaming_vars_bus_v_and_gen_state_includes_both_groups(
     live_server: tuple[str, int, str],
 ) -> None:
     """``vars: ["bus_v","gen_state"]`` produces frames whose Arrow schema
-    has both bus voltage + generator delta/omega columns. IEEE 14 + the
-    .dyr addfile gives 14 buses + 5 GENROU SynGen members → 14 + 10 = 24
-    state columns plus ``t``."""
+    has both bus voltage/angle + generator delta/omega columns. IEEE 14 +
+    the .dyr addfile gives 14 buses × (v, a) = 28 plus 5 GENROU SynGen ×
+    (delta, omega) = 10 → 38 state columns plus ``t``."""
     token, port, base = live_server
     sid = await _create_session_and_load(token, base)
 
@@ -658,9 +669,12 @@ async def test_streaming_vars_bus_v_and_gen_state_includes_both_groups(
 
     var_cols = list(meta["var_columns"])
     bus_cols = [c for c in var_cols if c.startswith("Bus_")]
+    v_cols = [c for c in bus_cols if c.endswith("_v")]
+    a_cols = [c for c in bus_cols if c.endswith("_a")]
     delta_cols = [c for c in var_cols if c.startswith("Gen_") and c.endswith("_delta")]
     omega_cols = [c for c in var_cols if c.startswith("Gen_") and c.endswith("_omega")]
-    assert len(bus_cols) == 14
+    assert len(v_cols) == 14
+    assert len(a_cols) == 14
     assert len(delta_cols) == 5
     assert len(omega_cols) == 5
     # Layout is canonical: bus_v block then gen_state block.
@@ -672,7 +686,7 @@ async def test_streaming_vars_bus_v_and_gen_state_includes_both_groups(
     schema = reader.schema
     assert schema.names == ["t"] + var_cols
     batch = reader.read_next_batch()
-    assert batch.num_columns == 1 + 14 + 10
+    assert batch.num_columns == 1 + 28 + 10
     # All omega values at t=0 are 1.0 pu (synchronous reference); spot-check.
     for col in omega_cols:
         values = batch.column(col).to_pylist()
@@ -708,9 +722,9 @@ async def test_streaming_vars_metadata_enumerates_all_columns(
     assert n_buses == 14
     assert n_gens == 5
     assert n_lines == 20
-    # Each gen contributes two columns (delta + omega); each line
-    # contributes one (P).
-    assert len(var_cols) == n_buses + 2 * n_gens + n_lines
+    # bus_v contributes two columns per bus (v + a); gen_state two per gen
+    # (delta + omega); line_flow two per line (P + Q).
+    assert len(var_cols) == 2 * n_buses + 2 * n_gens + 2 * n_lines
 
 
 @pytest.mark.acceptance
@@ -805,12 +819,60 @@ async def test_streaming_vars_works_with_decimation_mean(
     assert meta["decimation"]["mode"] == "mean"
     assert meta["vars"] == ["bus_v", "gen_state"]
 
-    # Every batch is one row × (1 + 14 + 10) columns.
-    expected_cols = 1 + 14 + 2 * 5
+    # Every batch is one row × (1 t + 28 bus + 10 gen) columns.
+    expected_cols = 1 + 2 * 14 + 2 * 5
     for frame in binary_frames:
         reader = pyarrow.ipc.open_stream(io.BytesIO(frame))
         batch = reader.read_next_batch()
         assert batch.num_rows == 1
         assert batch.num_columns == expected_cols
+
+    assert done["final_t"] >= 0.49
+
+
+@pytest.mark.acceptance
+async def test_streaming_vars_gen_power_and_load_pq_groups(
+    live_server: tuple[str, int, str],
+) -> None:
+    """The new ``gen_power`` + ``load_pq`` groups stream end-to-end. IEEE 14
+    + dyr has 5 SynGen → 10 Gen power columns (Pe + Qe) and 11 PQ loads →
+    22 Load columns (p + q). The metadata enumerates them in canonical
+    order and the Arrow frames carry physically plausible MW / MVar
+    values (electrical power is not all-zero on a loaded grid)."""
+    token, port, base = live_server
+    sid = await _create_session_and_load(token, base)
+
+    metadata, binary_frames, done = await _drive_streaming_run(
+        token, port, sid, tf=0.5, h=1 / 120, vars_=["gen_power", "load_pq"]
+    )
+    meta = metadata["metadata"]
+    assert meta["vars"] == ["gen_power", "load_pq"]
+
+    var_cols = list(meta["var_columns"])
+    pe_cols = [c for c in var_cols if c.startswith("Gen_") and c.endswith("_Pe")]
+    qe_cols = [c for c in var_cols if c.startswith("Gen_") and c.endswith("_Qe")]
+    load_p_cols = [c for c in var_cols if c.startswith("Load_") and c.endswith("_p")]
+    load_q_cols = [c for c in var_cols if c.startswith("Load_") and c.endswith("_q")]
+    assert len(pe_cols) == 5
+    assert len(qe_cols) == 5
+    assert len(meta["pq_idx_values"]) == 11
+    assert len(load_p_cols) == 11
+    assert len(load_q_cols) == 11
+    # Canonical order: gen_power block precedes load_pq block.
+    assert var_cols.index(pe_cols[-1]) < var_cols.index(load_p_cols[0])
+
+    reader = pyarrow.ipc.open_stream(io.BytesIO(binary_frames[0]))
+    schema = reader.schema
+    assert schema.names == ["t"] + var_cols
+    batch = reader.read_next_batch()
+    assert batch.num_columns == 1 + 10 + 22
+
+    # Electrical power on a loaded grid is nonzero — at least one generator
+    # carries > 1 MW of active power.
+    pe_total = sum(abs(batch.column(c).to_pylist()[0]) for c in pe_cols)
+    assert pe_total > 1.0, f"all Gen Pe ~0 MW; suspicious ({pe_total})"
+    # PQ load consumption is nonzero too.
+    load_total = sum(abs(batch.column(c).to_pylist()[0]) for c in load_p_cols)
+    assert load_total > 1.0, f"all Load p ~0 MW; suspicious ({load_total})"
 
     assert done["final_t"] >= 0.49

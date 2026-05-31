@@ -79,6 +79,7 @@ from andes_app.core.stream import (
     encode_batch,
     line_idx_values_from_system,
     make_combined_schema,
+    pq_idx_values_from_system,
     syngen_idx_values_from_system,
 )
 from andes_app.core.wrapper import Wrapper
@@ -1003,6 +1004,7 @@ def _handle_run_tds(
         bus_idx_values = bus_idx_values_from_system(ss)
         syngen_idx_values = syngen_idx_values_from_system(ss)
         line_idx_values = line_idx_values_from_system(ss)
+        pq_idx_values = pq_idx_values_from_system(ss)
         schema, var_columns = make_combined_schema(var_groups, ss)
 
         # Send the stream-start metadata BEFORE the run begins so the WS
@@ -1025,6 +1027,7 @@ def _handle_run_tds(
                     "bus_idx_values": [str(idx) for idx in bus_idx_values],
                     "syngen_idx_values": [str(idx) for idx in syngen_idx_values],
                     "line_idx_values": [str(idx) for idx in line_idx_values],
+                    "pq_idx_values": [str(idx) for idx in pq_idx_values],
                 },
             }
         )
@@ -1060,6 +1063,7 @@ def _handle_run_tds(
                 var_groups,
                 syngen_idx_values=syngen_idx_values,
                 line_idx_values=line_idx_values,
+                pq_idx_values=pq_idx_values,
             )
             rows = aggregator.push(t, values)
             if rows:

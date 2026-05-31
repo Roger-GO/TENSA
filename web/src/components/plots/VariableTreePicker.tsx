@@ -118,7 +118,7 @@ function buildTree(columnNames: readonly string[], filter: string): GroupBucket[
     else elementMap.set(parsed.elementIdx, [parsed]);
   }
 
-  const groupOrder: VarGroup[] = ['bus_v', 'gen_state', 'line_flow'];
+  const groupOrder: VarGroup[] = ['bus_v', 'gen_state', 'gen_power', 'line_flow', 'load_pq'];
   const out: GroupBucket[] = [];
   for (const g of groupOrder) {
     const elementMap = groupMap.get(g);

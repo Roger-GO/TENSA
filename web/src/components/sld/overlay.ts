@@ -202,7 +202,11 @@ export function getFrameBusOverlay(run: RunRecord, frameIdx: number): BusOverlay
   const out = new Map<string, FrameBusOverlay>();
   for (const name of run.columnNames) {
     const parsed = parseColumnName(name);
-    if (!parsed || parsed.group !== 'bus_v') continue;
+    // The bus_v group now carries BOTH voltage (field 'v') and angle
+    // (field 'a') columns per bus. Only the voltage magnitude drives bus
+    // coloring — skip the angle column, or it would overwrite the band
+    // classification depending on column iteration order.
+    if (!parsed || parsed.group !== 'bus_v' || parsed.field !== 'v') continue;
     const col = run.columns[name];
     if (!col) continue;
     // Defensive: a frame index past the column's logical length would

@@ -50,18 +50,18 @@ describe('useUiStore — TDS config (v0.2 Unit 8)', () => {
     resetUiStore();
   });
 
-  it('defaults match the plan: tf=10, h=null, vars=["bus_v"], max_rate_hz=30', () => {
+  it('defaults: tf=10, h=null, vars=["bus_v","gen_state"] (voltage + freq), max_rate_hz=30', () => {
     expect(DEFAULT_TDS_CONFIG).toEqual({
       tf: 10,
       h: null,
-      vars: ['bus_v'],
+      vars: ['bus_v', 'gen_state'],
       maxRateHz: 30,
     });
     expect(useUiStore.getState().tdsConfig).toEqual(DEFAULT_TDS_CONFIG);
   });
 
-  it('exposes TDS_VAR_GROUPS in canonical order', () => {
-    expect(TDS_VAR_GROUPS).toEqual(['bus_v', 'gen_state', 'line_flow']);
+  it('exposes TDS_VAR_GROUPS in canonical order with the new power/load groups', () => {
+    expect(TDS_VAR_GROUPS).toEqual(['bus_v', 'gen_state', 'gen_power', 'line_flow', 'load_pq']);
   });
 
   it('setTdsConfig merges patches without losing other fields', () => {

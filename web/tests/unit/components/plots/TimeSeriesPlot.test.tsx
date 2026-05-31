@@ -316,7 +316,9 @@ describe('TimeSeriesPlot — multi-run overlay (Unit 9 v2.0)', () => {
     const calls = constructSpy.mock.calls;
     const genStateCall = calls.find((c) => {
       const opts = c[0] as { axes?: { label?: string }[] };
-      return opts.axes?.[1]?.label === 'ω (pu) / δ (rad)';
+      // gen_state's axis label is now "ω freq (pu) / δ (rad)" (the omega
+      // series is the frequency proxy; Pe/Qe split off into gen_power).
+      return opts.axes?.[1]?.label === 'ω freq (pu) / δ (rad)';
     });
     expect(genStateCall).toBeDefined();
     const genOpts = genStateCall![0] as { series: unknown[] };

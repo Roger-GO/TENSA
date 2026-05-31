@@ -16,6 +16,7 @@ import {
   DEFAULT_TDS_CONFIG_OVERRIDES,
   DEFAULT_TDS_INTEGRATOR,
   DEFAULT_TDS_TOLERANCE_OVERRIDES,
+  TDS_VAR_GROUPS,
   useUiStore,
 } from '@/store/ui';
 
@@ -38,15 +39,33 @@ describe('<TdsConfigPanel />', () => {
     resetUi();
   });
 
-  it('renders defaults from useUiStore: tf=10, h blank, vars=[bus_v], max_rate_hz=30', () => {
+  it('renders defaults from useUiStore: tf=10, h blank, vars=[bus_v, gen_state], max_rate_hz=30', () => {
     render(<TdsConfigPanel />);
     expect(screen.getByTestId('field-tds-config-tf')).toHaveValue('10');
     expect(screen.getByTestId('field-tds-config-h')).toHaveValue('');
     expect(screen.getByTestId('field-tds-config-max-rate')).toHaveValue('30');
     const vars = screen.getByTestId('tds-config-vars');
+    // Voltage + frequency (gen_state) stream by default so both are
+    // plottable without re-running.
     expect(within(vars).getByTestId('tds-config-var-bus_v')).toBeChecked();
-    expect(within(vars).getByTestId('tds-config-var-gen_state')).not.toBeChecked();
+    expect(within(vars).getByTestId('tds-config-var-gen_state')).toBeChecked();
+    // The remaining groups are opt-in.
+    expect(within(vars).getByTestId('tds-config-var-gen_power')).not.toBeChecked();
     expect(within(vars).getByTestId('tds-config-var-line_flow')).not.toBeChecked();
+    expect(within(vars).getByTestId('tds-config-var-load_pq')).not.toBeChecked();
+  });
+
+  it('renders a checkbox for every TDS_VAR_GROUPS entry', () => {
+    render(<TdsConfigPanel />);
+    const vars = screen.getByTestId('tds-config-vars');
+    for (const group of TDS_VAR_GROUPS) {
+      expect(within(vars).getByTestId(`tds-config-var-${group}`)).toBeInTheDocument();
+    }
+  });
+
+  it('notes that the variable set is fixed at run-start', () => {
+    render(<TdsConfigPanel />);
+    expect(screen.getByTestId('tds-config-vars-fixed-hint')).toHaveTextContent(/before/i);
   });
 
   it('editing tf writes through to the store', async () => {
@@ -80,11 +99,19 @@ describe('<TdsConfigPanel />', () => {
   it('toggling a variable group adds and removes it from the store', async () => {
     const user = userEvent.setup();
     render(<TdsConfigPanel />);
-    const genStateBox = screen.getByTestId('tds-config-var-gen_state');
-    await user.click(genStateBox);
+    // gen_power is opt-in (not in the default vars), so a click adds it.
+    const genPowerBox = screen.getByTestId('tds-config-var-gen_power');
+    await user.click(genPowerBox);
+    expect(useUiStore.getState().tdsConfig.vars).toEqual(['bus_v', 'gen_state', 'gen_power']);
+    await user.click(genPowerBox);
     expect(useUiStore.getState().tdsConfig.vars).toEqual(['bus_v', 'gen_state']);
-    await user.click(genStateBox);
-    expect(useUiStore.getState().tdsConfig.vars).toEqual(['bus_v']);
+  });
+
+  it('toggling load_pq on adds the load consumption group', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-var-load_pq'));
+    expect(useUiStore.getState().tdsConfig.vars).toContain('load_pq');
   });
 
   it('shows a validation error when tf <= 0', async () => {
@@ -100,7 +127,10 @@ describe('<TdsConfigPanel />', () => {
   it('shows a validation error when no variables are selected', async () => {
     const user = userEvent.setup();
     render(<TdsConfigPanel />);
+    // Both bus_v and gen_state are on by default — deselect both to reach
+    // the empty-vars validation state.
     await user.click(screen.getByTestId('tds-config-var-bus_v'));
+    await user.click(screen.getByTestId('tds-config-var-gen_state'));
     expect(useUiStore.getState().tdsConfig.vars).toEqual([]);
     expect(screen.getByTestId('error-tds-config-vars')).toHaveTextContent(/at least one/i);
   });
@@ -111,9 +141,9 @@ describe('<TdsConfigPanel />', () => {
     const tfInput = screen.getByTestId('field-tds-config-tf');
     await user.clear(tfInput);
     await user.type(tfInput, '42');
-    await user.click(screen.getByTestId('tds-config-var-gen_state'));
+    await user.click(screen.getByTestId('tds-config-var-gen_power'));
     expect(useUiStore.getState().tdsConfig.tf).toBe(42);
-    expect(useUiStore.getState().tdsConfig.vars).toEqual(['bus_v', 'gen_state']);
+    expect(useUiStore.getState().tdsConfig.vars).toEqual(['bus_v', 'gen_state', 'gen_power']);
     await user.click(screen.getByTestId('tds-config-reset'));
     expect(useUiStore.getState().tdsConfig).toEqual(DEFAULT_TDS_CONFIG);
     // Raw text inputs re-sync to the defaults.
