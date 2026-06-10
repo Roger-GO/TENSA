@@ -25,19 +25,21 @@ const SIZE = { width: 1600, height: 900 };
 // ---------------------------------------------------------------------------
 
 // `at` is the canvas drop position (client px) — buses are placed by
-// dragging the Bus tile onto the canvas, so the agent lays out the
-// diagram by hand the way a human would. The panel sits on the right
-// (~420px), so all drops stay in the left ~1150px of the window.
+// dragging the Bus tile onto the canvas, so the agent lays out the diagram
+// by hand the way a human would. Positions trace the canonical WSCC 9-bus
+// one-line: generator buses 2/3 at the top corners, the 230 kV chain
+// 7-8-9 across the middle, 5/6 below, and bus 4 → bus 1 (G1) down the
+// centre. The panel sits on the right (~420px), so drops stay left of ~1130.
 const BUSES = [
-  { idx: '1', name: 'BUS1', Vn: 16.5, at: [430, 180] },
-  { idx: '2', name: 'BUS2', Vn: 18, at: [430, 470] },
-  { idx: '3', name: 'BUS3', Vn: 13.8, at: [950, 470] },
-  { idx: '4', name: 'BUS4', Vn: 230, at: [600, 180] },
-  { idx: '5', name: 'BUS5', Vn: 230, at: [760, 250] },
-  { idx: '6', name: 'BUS6', Vn: 230, at: [760, 400] },
-  { idx: '7', name: 'BUS7', Vn: 230, at: [600, 470] },
-  { idx: '8', name: 'BUS8', Vn: 230, at: [760, 540] },
-  { idx: '9', name: 'BUS9', Vn: 230, at: [950, 250] },
+  { idx: '2', name: 'BUS2', Vn: 18, at: [440, 175] }, // G2, top-left
+  { idx: '3', name: 'BUS3', Vn: 13.8, at: [1040, 175] }, // G3, top-right
+  { idx: '7', name: 'BUS7', Vn: 230, at: [440, 305] },
+  { idx: '8', name: 'BUS8', Vn: 230, at: [740, 305] }, // Load C
+  { idx: '9', name: 'BUS9', Vn: 230, at: [1040, 305] },
+  { idx: '5', name: 'BUS5', Vn: 230, at: [560, 425] }, // Load A
+  { idx: '6', name: 'BUS6', Vn: 230, at: [920, 425] }, // Load B
+  { idx: '4', name: 'BUS4', Vn: 230, at: [740, 470] },
+  { idx: '1', name: 'BUS1', Vn: 16.5, at: [740, 560] }, // G1, bottom-centre
 ];
 
 const TRANSFORMERS = [
@@ -117,9 +119,13 @@ const GOVERNORS = [
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Update the on-screen caption banner (injected once via addInitScript). */
-async function caption(page, title, sub = '') {
-  await page.evaluate(([t, s]) => window.__demoCaption?.(t, s), [title, sub]);
+/**
+ * Update the on-screen caption banner (injected once via addInitScript).
+ * ``pos`` is 'bottom' (default) or 'top' — use 'top' over the results view
+ * so the banner never covers the plot / scrub / variable picker.
+ */
+async function caption(page, title, sub = '', pos = 'bottom') {
+  await page.evaluate(([t, s, p]) => window.__demoCaption?.(t, s, p), [title, sub, pos]);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -221,7 +227,7 @@ async function main() {
 
   // Caption overlay — survives React re-renders (lives on document.body).
   await page.addInitScript(() => {
-    window.__demoCaption = (title, sub) => {
+    window.__demoCaption = (title, sub, pos) => {
       let el = document.getElementById('demo-caption');
       if (!el) {
         el = document.createElement('div');
@@ -229,7 +235,6 @@ async function main() {
         el.style.cssText = [
           'position:fixed',
           'left:50%',
-          'bottom:28px',
           'transform:translateX(-50%)',
           'z-index:99999',
           'max-width:880px',
@@ -245,6 +250,15 @@ async function main() {
           'transition:opacity 200ms',
         ].join(';');
         document.body.appendChild(el);
+      }
+      // Place at the bottom by default, or just under the results header
+      // ('top') so it never covers the plot / scrub / variable picker.
+      if (pos === 'top') {
+        el.style.top = '52px';
+        el.style.bottom = '';
+      } else {
+        el.style.bottom = '28px';
+        el.style.top = '';
       }
       el.innerHTML =
         `<div style="display:flex;align-items:center;gap:10px;justify-content:center">` +
@@ -307,23 +321,48 @@ async function main() {
     await addElement(page, 'Bus', 'Bus', { idx: b.idx, name: b.name, Vn: b.Vn });
   }
 
-  // -- show off the canvas: fit, zoom, and reposition a node ----------------
-  // Short per-action timeouts so a missed control fails fast (default is 30s,
-  // which would stall the video) rather than blocking on retries.
+  // -- arrange the buses into the canonical WSCC 9-bus one-line shape -------
+  // Auto-layout drops new buses in a grid; the agent drags each one into the
+  // textbook arrangement (gen buses 2/3 at the top corners, the 230 kV chain
+  // 7-8-9 across the middle, 5/6 below, 4 → 1 down the centre). Real node
+  // drags persist via the same path a user's drag uses.
+  // Short per-action timeouts so a missed control fails fast (default 30s).
   const tap = (sel) =>
     page
       .locator(sel)
       .click({ timeout: 2500 })
       .catch(() => {});
-  await caption(page, 'The 9 buses are placed', 'Pan, zoom, and drag any node to lay it out');
+  // Close the builder so the canvas reflows to full width before arranging.
+  await page
+    .getByRole('button', { name: /^cancel$/i })
+    .click()
+    .catch(() => {});
+  await sleep(600);
   await tap('button[aria-label="Fit View"]');
-  await sleep(1200);
-  await tap('button[aria-label="Zoom In"]');
-  await tap('button[aria-label="Zoom In"]');
-  await sleep(1100);
-  await caption(page, 'Dragging a bus to tidy the layout', 'Node positions are yours to arrange');
-  await moveNode(page, 'bus-node-5', 820, 300).catch(() => {});
-  await sleep(900);
+  await sleep(1000);
+  await caption(
+    page,
+    'Arranging the buses into the IEEE-9 one-line shape',
+    'Dragging each node into place — the layout is yours to lay out',
+  );
+  // Canonical target positions (client px, panel closed). Keyed by bus idx.
+  const CANON = {
+    2: [480, 175],
+    3: [1075, 175],
+    7: [480, 325],
+    8: [780, 325],
+    9: [1075, 325],
+    5: [610, 445],
+    6: [950, 445],
+    4: [780, 495],
+    1: [780, 575],
+  };
+  for (const idx of [1, 4, 5, 6, 8, 7, 9, 2, 3]) {
+    const [x, y] = CANON[idx];
+    await moveNode(page, `bus-node-${idx}`, x, y).catch(() => {});
+    await sleep(280);
+  }
+  await sleep(600);
   await tap('button[aria-label="Fit View"]');
   await sleep(1100);
 
@@ -394,14 +433,24 @@ async function main() {
     await addElement(page, 'TGOV1', 'TGOV1', g);
   }
 
-  // -- close panel, admire the diagram --------------------------------------
+  // -- close panel, fit the whole diagram into view ------------------------
+  // Close the builder FIRST so Fit View frames the full canvas width (with
+  // the panel open it would fit only the left ~1130px and push the
+  // generators off-screen). Fit twice with a beat between so the second
+  // fit accounts for the reflow after the panel collapses.
   await page
     .getByRole('button', { name: /^cancel$/i })
     .click()
     .catch(() => {});
+  await sleep(700);
   await page
     .locator('button[aria-label="Fit View"]')
-    .click()
+    .click({ timeout: 2500 })
+    .catch(() => {});
+  await sleep(600);
+  await page
+    .locator('button[aria-label="Fit View"]')
+    .click({ timeout: 2500 })
     .catch(() => {});
   await caption(
     page,
@@ -438,6 +487,11 @@ async function main() {
     .click()
     .catch(() => {});
   await sleep(3000);
+  await page
+    .locator('button[aria-label="Fit View"]')
+    .click({ timeout: 2500 })
+    .catch(() => {});
+  await sleep(800);
 
   // -- power flow -----------------------------------------------------------
   await caption(page, 'Running power flow', 'Newton-Raphson on the system we just built');
@@ -486,6 +540,7 @@ async function main() {
     page,
     'Opening the full-screen results view',
     'Bus voltages auto-selected — fault dip and recovery at a glance',
+    'top',
   );
   await page.locator('button[aria-label*="Maximize results"]').click();
   await sleep(4500);
@@ -495,6 +550,7 @@ async function main() {
     page,
     'Resetting the run for small-signal analysis',
     'EIG needs a clean operating point',
+    'top',
   );
   await page.getByRole('button', { name: /reset run/i }).click();
   await sleep(2500);
@@ -515,6 +571,7 @@ async function main() {
     page,
     'Running continuation power flow',
     'Loadability margin of the system we built',
+    'top',
   );
   await page.getByRole('tab', { name: 'CPF' }).click();
   await sleep(800);
@@ -536,6 +593,7 @@ async function main() {
     page,
     'Running eigenvalue analysis',
     'Linearising the DAE — modes, damping, participation factors',
+    'top',
   );
   await page.getByRole('tab', { name: 'EIG' }).click();
   await Promise.all([
@@ -551,6 +609,7 @@ async function main() {
     page,
     'Every mode is stable and well damped',
     '"All modes" widens the scatter filter to the full eigenvalue set',
+    'top',
   );
   await page
     .locator('[data-testid="eig-scatter-filter-toggle"]')
@@ -563,6 +622,7 @@ async function main() {
     page,
     'IEEE 9-bus: built, solved, faulted, simulated, analysed',
     'Everything you just watched is plain HTTP + WebSocket — see /docs, llms.txt, and the MCP server',
+    'top',
   );
   await sleep(4000);
 
