@@ -121,7 +121,7 @@ export const TransformerEdge = memo(function TransformerEdge({
   // we read the overlay for both bucket values.
   const branchIdx = edgeData.idx;
   const overlay = branchIdx ? getLineOverlayState(branchIdx, pflowResult, hideLabels) : null;
-  const stroke = overlay?.has_data ? 'var(--color-foreground)' : 'var(--color-border)';
+  const stroke = overlay?.has_data ? 'var(--color-foreground)' : 'var(--color-muted-foreground)';
   const strokeWidth = overlay?.has_data ? 1.8 : 1.5;
   const dotRadius = 3.5;
   const dotFill = 'var(--color-foreground)';

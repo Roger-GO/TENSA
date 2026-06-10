@@ -95,7 +95,7 @@ export const TopologyEdge = memo(function TopologyEdge({
   // Style: thicker / colored stroke when we have flow data; neutral
   // otherwise. The arrow direction is encoded via the marker plus a
   // small inline glyph in the label (forward vs. reverse).
-  const stroke = overlay?.has_data ? 'var(--color-foreground)' : 'var(--color-border)';
+  const stroke = overlay?.has_data ? 'var(--color-foreground)' : 'var(--color-muted-foreground)';
   const strokeWidth = overlay?.has_data ? 1.8 : 1.5;
 
   // Endpoint dots — explicit visual marker at each bus boundary so the

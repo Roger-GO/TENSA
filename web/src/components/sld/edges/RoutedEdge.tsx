@@ -111,7 +111,7 @@ export const RoutedEdge = memo(function RoutedEdge({
     isLine && lineIdx && pflowResult?.line_flows
       ? Math.abs(pflowResult.line_flows[lineIdx]?.p ?? 0)
       : 0;
-  const stroke = overlay?.has_data ? 'var(--color-foreground)' : 'var(--color-border)';
+  const stroke = overlay?.has_data ? 'var(--color-foreground)' : 'var(--color-muted-foreground)';
   const strokeWidth = overlay?.has_data ? 1.8 : 1.5;
   // Endpoint dots — explicit markers at the polyline's start and end
   // so the reader can tell which lines actually connect to a bus vs.

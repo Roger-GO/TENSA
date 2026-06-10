@@ -23,6 +23,7 @@
  * F-FEAS-2 dual-write resolution. The owner (BottomDrawer) passes the
  * ``onSubTabChange`` callback that performs the dual write.
  */
+import { useState } from 'react';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { cn } from '@/lib/cn';
 import { ANALYSIS_SUB_TABS, type AnalysisSubTab } from '@/store/layout';
@@ -138,18 +139,62 @@ export function AnalysisTab({ activeSubTab, onSubTabChange, className }: Analysi
 
 /**
  * PlotPanelContent — composition extracted from App.tsx (pre-v3 Unit 1).
- * Stacks the uPlot canvas + scrub control + variable picker so the
- * Plot sub-tab mirrors the v0.2 right-dock plot panel layout.
+ * Stacks the uPlot canvas + scrub control + variable picker.
+ *
+ * The variable tree is COLLAPSIBLE and collapsed by default. In a short
+ * container (the bottom drawer is ~35% of the window) an always-open
+ * picker ate the height and squeezed the chart down to a sliver; since
+ * bus voltages auto-select, the plot is useful immediately and the
+ * picker only needs opening to change the selection. Collapsed, the
+ * chart gets the full height; expanded, it scrolls within a capped box.
  */
 function PlotPanelContent() {
+  const [showVars, setShowVars] = useState(false);
   return (
     <div data-testid="plot-panel-content" className="flex h-full min-h-0 flex-col gap-2 p-2">
-      <div className="min-h-0 flex-1">
+      <div className="min-h-[140px] flex-1">
         <TimeSeriesPlot />
       </div>
       <ScrubControl />
-      <div className="border-border max-h-48 overflow-auto rounded border">
-        <VariableTreePicker />
+      <div className="border-border shrink-0 rounded border">
+        <button
+          type="button"
+          onClick={() => setShowVars((v) => !v)}
+          data-testid="plot-variables-toggle"
+          aria-expanded={showVars}
+          className={cn(
+            'text-muted-foreground hover:text-foreground flex w-full items-center justify-between',
+            'px-2.5 py-1.5 text-xs font-medium',
+            'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+          )}
+        >
+          <span>Variables</span>
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            width="12"
+            height="12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={cn('transition-transform', showVars ? 'rotate-180' : '')}
+          >
+            <path d="M4 6l4 4 4-4" />
+          </svg>
+        </button>
+        {/* Keep the picker MOUNTED even while collapsed (just hidden) so its
+            auto-select-bus-voltages effect still runs and the chart isn't
+            empty on first view. */}
+        <div
+          className={cn(
+            'border-border max-h-44 overflow-auto border-t',
+            showVars ? '' : 'hidden',
+          )}
+        >
+          <VariableTreePicker />
+        </div>
       </div>
     </div>
   );

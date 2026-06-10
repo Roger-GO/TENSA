@@ -203,7 +203,7 @@ describe('<TransformerEdge />', () => {
       data: { idx: 'L1' },
     });
     const base = getByTestId('transformer-edge-base');
-    expect(base.getAttribute('data-stroke')).toBe('var(--color-border)');
+    expect(base.getAttribute('data-stroke')).toBe('var(--color-muted-foreground)');
     // Stroke width matches the no-data branch (1.5px).
     expect(base.getAttribute('data-stroke-width')).toBe('1.5');
   });

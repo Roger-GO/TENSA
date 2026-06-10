@@ -51,11 +51,22 @@ describe('<AnalysisTab />', () => {
     expect(screen.getByTestId('analyze-eig-stub')).toBeInTheDocument();
   });
 
-  it('renders the active sub-tab content (Plot)', () => {
+  it('renders the active sub-tab content (Plot)', async () => {
+    const user = userEvent.setup();
     render(<AnalysisTab activeSubTab="plot" onSubTabChange={() => {}} />);
     expect(screen.getByTestId('ts-plot-stub')).toBeInTheDocument();
     expect(screen.getByTestId('scrub-stub')).toBeInTheDocument();
+    // The variable tree stays MOUNTED (so its auto-select effect runs) but
+    // is collapsed by default — its wrapper carries `hidden` until the user
+    // expands the "Variables" toggle, which gives the chart the height.
     expect(screen.getByTestId('var-picker-stub')).toBeInTheDocument();
+    const toggle = screen.getByTestId('plot-variables-toggle');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const pickerWrap = screen.getByTestId('var-picker-stub').parentElement;
+    expect(pickerWrap?.className).toContain('hidden');
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('var-picker-stub').parentElement?.className).not.toContain('hidden');
   });
 
   it('renders TDS sub-tab content (config + status)', () => {
