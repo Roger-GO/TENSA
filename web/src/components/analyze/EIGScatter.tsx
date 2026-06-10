@@ -666,7 +666,15 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
       <svg
         ref={svgRef}
         viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
-        className="h-full w-full touch-none select-none"
+        // Width-bounded with an explicit aspect ratio so the chart never
+        // balloons to `width × viewBoxRatio` in a wide, indefinite-height
+        // parent (the full-screen Results view) — that overflowed the
+        // viewport and clipped the bottom of the scatter. Capping width
+        // keeps the box at the viewBox aspect (so the pointer→data math
+        // below, which assumes a 1:1 viewBox-to-rect mapping, stays exact)
+        // and centres it.
+        className="mx-auto w-full touch-none select-none"
+        style={{ aspectRatio: `${SVG_WIDTH} / ${SVG_HEIGHT}`, maxWidth: 600 }}
         role="img"
         aria-label="Eigenvalue scatter"
         onWheel={handleWheel}

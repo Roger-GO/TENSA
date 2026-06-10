@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { BaseEdge, getStraightPath } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
-import type { Side } from '../graph';
+import { type Side, strideShift } from '../graph';
 
 /**
  * Stub edge — short straight line connecting a non-bus device
@@ -20,17 +20,6 @@ interface StubData {
   bucket?: 'generator' | 'load' | 'shunt';
   busSide?: Side;
   targetStride?: number;
-}
-
-const STRIDE_PIXELS = 14;
-
-function strideShift(side: Side | undefined, stride: number): { dx: number; dy: number } {
-  if (!side || stride === 0) return { dx: 0, dy: 0 };
-  const sign = stride % 2 === 1 ? 1 : -1;
-  const magnitude = Math.ceil(stride / 2);
-  const offset = sign * magnitude * STRIDE_PIXELS;
-  if (side === 'north' || side === 'south') return { dx: offset, dy: 0 };
-  return { dx: 0, dy: offset };
 }
 
 export const StubEdge = memo(function StubEdge({

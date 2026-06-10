@@ -255,7 +255,11 @@ export function SEResidualChart({
 
       <svg
         viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
-        className="h-full w-full"
+        // Width-bounded + explicit aspect ratio so the chart fits the
+        // full-screen Results view instead of ballooning to width×ratio
+        // and clipping at the bottom (see EIGScatter for the rationale).
+        className="mx-auto w-full"
+        style={{ aspectRatio: `${SVG_WIDTH} / ${SVG_HEIGHT}`, maxWidth: 900 }}
         role="img"
         aria-label="SE residual histogram"
       >

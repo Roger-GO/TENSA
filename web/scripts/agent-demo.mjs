@@ -332,6 +332,20 @@ async function main() {
       .locator(sel)
       .click({ timeout: 2500 })
       .catch(() => {});
+  // Re-frame the diagram mid-build: close the open builder so Fit View
+  // sees the full canvas width, fit, then leave the panel closed (the
+  // next dragTile reopens it). This is the visible "rezoom to adjust"
+  // the layout gets as it grows — nothing is left drifting off-screen.
+  const refitView = async (caption2) => {
+    await page
+      .getByRole('button', { name: /^cancel$/i })
+      .click()
+      .catch(() => {});
+    await sleep(450);
+    if (caption2) await caption(page, caption2[0], caption2[1]);
+    await tap('button[aria-label="Fit View"]');
+    await sleep(950);
+  };
   // Close the builder so the canvas reflows to full width before arranging.
   await page
     .getByRole('button', { name: /^cancel$/i })
@@ -346,20 +360,23 @@ async function main() {
     'Dragging each node into place — the layout is yours to lay out',
   );
   // Canonical target positions (client px, panel closed). Keyed by bus idx.
-  // Spaced so the bus blocks (≈130×70 px, plus the generator/load/controller
-  // nodes that hang off them) don't overlap: ≥150 px apart horizontally,
-  // ≥130 px vertically. Bus 4 sits beside the load buses (5/6) rather than
-  // sandwiched between them and bus 1.
+  // Five clearly-separated horizontal rows so no two buses read as "stuck
+  // together" and the generator/load/controller nodes that hang off each
+  // bus have room: gen buses 2/3 at the top corners, the 230 kV ring
+  // 7-8-9 across the upper middle, the load buses 5/6 a full row below
+  // (far apart on the left/right), bus 4 alone on its own row beneath
+  // them, and bus 1 (slack G1) at the bottom centre. Rows are ≥85 px
+  // apart vertically; same-row buses are ≥290 px apart horizontally.
   const CANON = {
-    2: [440, 150],
-    3: [1110, 150],
-    7: [440, 300],
-    8: [775, 290],
-    9: [1110, 300],
-    5: [610, 430],
-    6: [950, 430],
-    4: [775, 440],
-    1: [775, 575],
+    2: [470, 128], // ─ row 1: generator buses, top corners
+    3: [1050, 128],
+    7: [470, 278], // ─ row 2: 230 kV ring (7-8-9)
+    8: [760, 272],
+    9: [1050, 278],
+    5: [575, 398], // ─ row 3: load buses, split left / right
+    6: [945, 398],
+    4: [760, 483], // ─ row 4: bus 4 on its own row
+    1: [760, 565], // ─ row 5: slack G1 at the bottom centre
   };
   for (const idx of [1, 4, 5, 6, 8, 7, 9, 2, 3]) {
     const [x, y] = CANON[idx];
@@ -391,6 +408,10 @@ async function main() {
     const { b, ...rest } = l;
     await addElement(page, 'Line', 'Line', rest, { b });
   }
+  await refitView([
+    'Re-centering the one-line as it grows',
+    'All buses, transformers and lines now connected — the network topology is complete',
+  ]);
 
   // -- loads (drag the Load tile) -------------------------------------------
   for (const d of LOADS) {
@@ -423,6 +444,10 @@ async function main() {
     await sleep(400);
     await addElement(page, 'GENROU', 'GENROU', rest, adv);
   }
+  await refitView([
+    'Re-centering after adding the machines',
+    'Generators and round-rotor models sit on their buses — controllers come next',
+  ]);
   for (const e of EXCITERS) {
     const { kind, ...rest } = e;
     await caption(page, `Attaching exciter ${kind} to ${e.syn}`, 'voltage regulation');
@@ -471,6 +496,14 @@ async function main() {
   await sleep(700);
   await page.locator('[data-testid="save-filename"]').fill('wscc9-built');
   await sleep(500);
+  // Tick "Overwrite if exists" so re-runs (the file persists in the
+  // workspace between recordings) replace it instead of being rejected
+  // with a 409 that leaves the dialog open and stalls the rest of the run.
+  await page
+    .locator('[data-testid="save-overwrite"]')
+    .check()
+    .catch(() => {});
+  await sleep(400);
   await Promise.all([
     page
       .waitForResponse((r) => r.url().includes('/save') && r.request().method() === 'POST', {
@@ -479,7 +512,13 @@ async function main() {
       .catch(() => {}),
     page.locator('[data-testid="save-confirm"]').click(),
   ]);
-  await sleep(2000);
+  await sleep(900);
+  await caption(
+    page,
+    'System saved ✓ — wscc9-built.xlsx is now in the workspace',
+    'It appears in the Saved cases list on the left, ready to reload',
+  );
+  await sleep(2600);
 
   await caption(
     page,

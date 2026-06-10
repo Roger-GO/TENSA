@@ -31,6 +31,46 @@ export const TARGET_HANDLE: Record<Side, string> = {
   west: 'west-target',
 };
 
+/** Pixels per stride step. Tuned to be clearly perceptible at default zoom. */
+export const STRIDE_PIXELS = 14;
+
+/**
+ * Largest inward inset (px) an east/west feeder is fanned along the bar.
+ * The busbar is ~100px wide; capping below the half-width keeps every
+ * tap clearly ON the bar rather than overshooting its centre.
+ */
+const MAX_BAR_INSET = 38;
+
+/**
+ * Lateral offset (canvas px) applied to a branch / stub endpoint so
+ * multiple feeders sharing one bus side don't stack on a single point.
+ *
+ * The bus is drawn as a thin horizontal **busbar**, so the fan direction
+ * is side-dependent:
+ *
+ * - **north / south** feeders tap the bar's long face → fan horizontally
+ *   ALONG the bar (`dx`), symmetric about the tap column.
+ * - **east / west** feeders tap the bar's short END. Offsetting them
+ *   perpendicular (`dy`) — the old behaviour — floated the endpoint off
+ *   the 7px-tall bar (a line read as "not connected"). Instead fan them
+ *   INWARD along the bar (`dx` toward centre), monotonic + clamped so the
+ *   tap always lands on the bar and never runs past its midpoint.
+ */
+export function strideShift(side: Side | undefined, stride: number): { dx: number; dy: number } {
+  if (!side || stride === 0) return { dx: 0, dy: 0 };
+  if (side === 'north' || side === 'south') {
+    // Symmetric fan: stride 1 → +1, stride 2 → -1, stride 3 → +2, ...
+    const sign = stride % 2 === 1 ? 1 : -1;
+    const magnitude = Math.ceil(stride / 2);
+    return { dx: sign * magnitude * STRIDE_PIXELS, dy: 0 };
+  }
+  // east / west: keep the tap on the thin bar by fanning inward (toward
+  // the bar centre) rather than off its edge.
+  const inward = side === 'west' ? 1 : -1;
+  const offset = Math.min(stride * STRIDE_PIXELS, MAX_BAR_INSET);
+  return { dx: inward * offset, dy: 0 };
+}
+
 export interface HandleAssignment {
   sourceSide: Side;
   targetSide: Side;
@@ -828,13 +868,20 @@ export function buildGraph(
         console.warn(`SLD: ${bucket.kind} ${String(entry.idx)} has no parent bus; skipping`);
         continue;
       }
-      const parentCoord = coords[parentIdx];
-      if (!parentCoord) {
+      const baseParentCoord = coords[parentIdx];
+      if (!baseParentCoord) {
         console.warn(
           `SLD: ${bucket.kind} ${String(entry.idx)} references missing bus ${parentIdx}; skipping`,
         );
         continue;
       }
+      // Anchor devices to the bus's *effective* position: when the user
+      // drags a bus, its drag override (not the stale auto-layout coord)
+      // is where the bar now sits, so its generators/loads/shunts must
+      // follow it. Without this, moving a bus strands its devices at the
+      // old grid position — they scatter off-canvas (the device's own
+      // drag override, if any, still wins later in the push-out pass).
+      const parentCoord = branchDragOverrides[parentIdx] ?? baseParentCoord;
       const stackKey = `${parentIdx}|${bucket.kind}`;
       const stackIndex = stackCounts.get(stackKey) ?? 0;
       stackCounts.set(stackKey, stackIndex + 1);
