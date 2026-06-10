@@ -527,7 +527,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Read the SLD layout sidecar JSON adjacent to a case file. */
+        /**
+         * Read the SLD layout sidecar JSON adjacent to a case file.
+         * @description Read the layout sidecar for ``case_path``.
+         *
+         *     A missing sidecar is the normal first-run state for any case, so it is
+         *     NOT an error: the endpoint returns 200 with a JSON ``null`` body (the
+         *     web client already maps "no sidecar" to a null layout; previously this
+         *     was a 404, which browsers log as a console error on every case open).
+         */
         get: operations["getWorkspaceLayout"];
         /** Write the SLD layout sidecar JSON adjacent to a case file. */
         put: operations["putWorkspaceLayout"];
@@ -4838,20 +4846,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SidecarLayout"];
+                    "application/json": components["schemas"]["SidecarLayout"] | null;
                 };
             };
             /** @description Workspace path validation failed. */
             400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Sidecar not found. */
-            404: {
                 headers: {
                     [name: string]: unknown;
                 };
