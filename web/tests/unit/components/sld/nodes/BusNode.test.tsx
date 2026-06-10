@@ -269,15 +269,11 @@ describe('BusNode — Unit 19 voltage transition easing', () => {
     resetStores();
   });
 
-  it('applies a CSS transition on border-color + background-color with the cubic-out easing token', () => {
-    // The transition is the visual carrier of the voltage band change.
-    // We assert the inline-style transition string contains both the
-    // band-color property (border-color) AND the easing token so a future
-    // refactor can't silently drop the easing.
+  it('applies a CSS transition on the busbar fill with the cubic-out easing token', () => {
+    // The band colour now lives on the busbar fill (background-color), so
+    // the transition that carries the voltage-band change sits on the bar.
     const { getByTestId } = render(<BusNode {...nodeProps('1')} />);
-    const node = getByTestId('bus-node-1');
-    const transition = node.style.transition;
-    expect(transition).toContain('border-color');
+    const transition = getByTestId('bus-bar-1').style.transition;
     expect(transition).toContain('background-color');
     expect(transition).toContain('var(--duration-base)');
     expect(transition).toContain('var(--ease-out-quart)');
@@ -293,8 +289,7 @@ describe('BusNode — Unit 19 voltage transition easing', () => {
       .getState()
       .setBusOverlayForRun('run-x', new Map([['1', { band: 'success', voltage: 1.0 }]]));
     const { getByTestId, rerender } = render(<BusNode {...nodeProps('1')} />);
-    const node = getByTestId('bus-node-1');
-    const transitionBefore = node.style.transition;
+    const transitionBefore = getByTestId('bus-bar-1').style.transition;
 
     act(() => {
       useAnimationStore
@@ -302,8 +297,8 @@ describe('BusNode — Unit 19 voltage transition easing', () => {
         .setBusOverlayForRun('run-x', new Map([['1', { band: 'danger', voltage: 0.85 }]]));
     });
     rerender(<BusNode {...nodeProps('1')} />);
-    expect(node.style.transition).toBe(transitionBefore);
-    expect(node).toHaveAttribute('data-band', 'danger');
+    expect(getByTestId('bus-bar-1').style.transition).toBe(transitionBefore);
+    expect(getByTestId('bus-node-1')).toHaveAttribute('data-band', 'danger');
   });
 });
 

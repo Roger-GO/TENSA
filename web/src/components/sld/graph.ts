@@ -361,7 +361,10 @@ export const NODE_FOOTPRINT: Record<
     height: number;
   }
 > = {
-  bus: { width: 90, height: 56 },
+  // Busbar footprint: the bar is ~92px wide; height reserves room for the
+  // bar plus the name/voltage label that hangs below it so stacked buses
+  // don't collide labels.
+  bus: { width: 92, height: 44 },
   generator: { width: 50, height: 46 },
   load: { width: 50, height: 46 },
   shunt: { width: 50, height: 46 },
