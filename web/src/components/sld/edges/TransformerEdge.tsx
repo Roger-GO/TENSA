@@ -145,6 +145,7 @@ export const TransformerEdge = memo(function TransformerEdge({
             position: 'absolute',
             transform: `translate(-50%, -50%) translate(${mid.x}px, ${mid.y}px)`,
             pointerEvents: 'all',
+            zIndex: 20,
           }}
           className="bg-background border-border flex h-7 w-7 items-center justify-center rounded-full border"
         >
