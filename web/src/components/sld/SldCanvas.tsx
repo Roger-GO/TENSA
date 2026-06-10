@@ -321,7 +321,21 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   );
   const baseGraph = useMemo(() => {
     if (!coords) return null;
-    const { branches, stubs } = computeHandleAssignments(topology, coords);
+    // Effective coords = the layout coords with user drag-overrides folded
+    // in for buses. The handle assignment (which side of each bus an edge
+    // leaves from) must be computed against where the bus ACTUALLY sits, or
+    // a moved bus's edges leave from the wrong side and look disconnected.
+    const effectiveCoords =
+      Object.keys(dragOverrides).length === 0
+        ? coords
+        : (() => {
+            const merged: typeof coords = { ...coords };
+            for (const [id, pos] of Object.entries(dragOverrides)) {
+              if (merged[id] !== undefined) merged[id] = pos; // bus coords only
+            }
+            return merged;
+          })();
+    const { branches, stubs } = computeHandleAssignments(topology, effectiveCoords);
     const bendPoints = usingAutoLayout && autoBendPoints ? autoBendPoints : undefined;
     const built = buildGraph(topology, coords, {
       handleAssignments: branches,
