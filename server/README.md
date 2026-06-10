@@ -64,4 +64,4 @@ pytest                   # all of the above
 
 ## License
 
-[MIT](../LICENSE)
+[GNU GPL v3.0](../LICENSE)

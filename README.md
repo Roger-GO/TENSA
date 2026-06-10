@@ -1,13 +1,11 @@
 # ANDES App
 
-**An interactive, web-based workbench for [ANDES](https://github.com/CURENT/andes)** — the open-source Python power-system simulator. Build, edit, simulate, and analyze power systems from your browser, with live-streaming time-domain results, an interactive single-line diagram, and a fully scriptable HTTP API designed for both humans and AI agents.
+**An interactive, web-based workbench for power-system modeling, simulation, and analysis.** Build a system visually, run power flow and dynamic studies with one click, watch results stream in live, and drive everything from a fully scriptable API — all running locally in your browser. ANDES App is built on the [ANDES](https://github.com/CURENT/andes) power-system simulator.
 
-[![Built on ANDES](https://img.shields.io/badge/built%20on-CURENT%2FANDES-2563eb)](https://github.com/CURENT/andes)
+[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue)](./LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776ab)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+[![Built on ANDES](https://img.shields.io/badge/built%20on-CURENT%2FANDES-2563eb)](https://github.com/CURENT/andes)
 [![Agent-ready](https://img.shields.io/badge/agent--ready-llms.txt%20%2B%20MCP-8b5cf6)](./llms.txt)
-
-ANDES App is **not a wrapper around the ANDES CLI**. It is a substrate built on the ANDES Python API that adds capabilities native ANDES does not have: visual model building, live result streaming, session management, clone-on-write parameter editing with undo/redo, and a machine-readable API surface for interoperability with other tools and AI agents.
 
 ![ANDES App — interactive single-line diagram with a solved power flow](docs/img/hero.jpeg)
 
@@ -15,38 +13,24 @@ ANDES App is **not a wrapper around the ANDES CLI**. It is a substrate built on 
 
 An AI agent builds the WSCC 9-bus system **from scratch through the real UI** — placing every bus, line, transformer, machine, exciter, and governor; laying out the one-line; saving the case to a file and reloading it; then running power flow, a three-phase fault + streaming time-domain simulation, continuation power flow, and eigenvalue analysis.
 
-[![Watch the ANDES App demo — building WSCC 9-bus and running every analysis](docs/img/demo.gif)](docs/demo/ieee9-agent-demo.mp4)
+<video src="https://github.com/Roger-GO/ANDES_App/raw/main/docs/demo/ieee9-agent-demo.mp4" poster="docs/img/hero.jpeg" controls autoplay muted loop playsinline width="100%">
+  <a href="https://github.com/Roger-GO/ANDES_App/raw/main/docs/demo/ieee9-agent-demo.mp4"><img src="docs/img/demo.gif" alt="ANDES App demo — building WSCC 9-bus and running every analysis" width="100%"></a>
+</video>
 
-▶ **[Watch the full 2-minute walkthrough (MP4)](docs/demo/ieee9-agent-demo.mp4)** — every step uses the same HTTP API any script or LLM agent can call. You can [record it yourself](#run-the-showcase-demo-yourself).
+▶ **[Watch the full 2-minute walkthrough (MP4)](https://github.com/Roger-GO/ANDES_App/raw/main/docs/demo/ieee9-agent-demo.mp4)** — every step uses the same HTTP API any script or agent can call. You can [record it yourself](#run-the-showcase-demo-yourself).
 
-## Why ANDES App?
+## What you can do
 
-ANDES is a powerful simulation engine. ANDES App turns it into an interactive, shareable, scriptable application.
-
-| | ANDES (CLI / notebook) | **ANDES App** |
-|---|---|---|
-| **Build a system** | Hand-edit `xlsx`/`raw` files | Visual builder — drag buses, lines, machines, exciters, governors onto the canvas |
-| **Run PFlow / TDS / EIG / CPF / SE** | Scripted, batch, blocking | One click; non-blocking jobs with live progress + cancel |
-| **Watch a simulation evolve** | Wait, then plot | Live Apache-Arrow streaming into interactive plots **and** an animated voltage overlay on the diagram |
-| **Add disturbances** | Edit the case file | Faults, breaker toggles, and load/parameter changes added interactively before a run |
-| **Edit parameters safely** | Mutate in place | Clone-on-write editing with **undo/redo** and a diff view |
-| **Visualize the network** | DIY matplotlib | Traditional one-line diagram (busbars, feeders, machines) with per-bus voltage bands |
-| **See the results** | Roll your own | Voltage/angle plots, eigenvalue scatter (zoom/pan), PV nose curves, residual histograms — in a dedicated results view |
-| **Share / reproduce a study** | Zip files manually | One-click reproducibility bundle (case + layout + results) export/import |
-| **Drive it from other tools** | Python imports only | REST + WebSocket API with an OpenAPI schema — usable from curl, Python, MATLAB, or an LLM agent |
-| **Use it from an AI agent** | — | First-class: [`llms.txt`](./llms.txt), worked [examples/](./examples/), and an [MCP server](#for-agents-and-scripts) |
-| **Access remotely** | — | Serve on your LAN; any browser becomes a client |
-
-## Features
-
-- **Visual system builder** — add buses, lines, transformers, generators (static + GENROU), exciters, governors, loads, and shunts from the UI; the diagram lays out automatically and is fully draggable.
-- **Five analyses, one click each** — power flow, time-domain simulation, eigenvalue/small-signal, continuation power flow (PV & QV curves), and state estimation. Each runs as a non-blocking job with progress and cancel.
-- **Live time-domain streaming** — results stream over a WebSocket as Apache Arrow frames into interactive plots while the simulation runs, with a synchronized voltage-band overlay animating on the one-line diagram.
-- **Interactive single-line diagram** — traditional busbar one-line rendering; feeders tap cleanly onto bars; machines/loads sit beside their bus; post-PF voltage and MW/MVAr flow labels; voltage-violation tinting.
-- **Safe, reversible editing** — clone-on-write parameter changes with full undo/redo and a diff view; nothing mutates the loaded case until you commit.
-- **Save / load / reproduce** — write systems back to `xlsx`/`raw`/`json`, reload them, and export a self-contained reproducibility bundle.
-- **Built for automation** — a documented REST + WebSocket API with an OpenAPI schema; everything the UI does, a script or agent can do.
-- **Local-first & private** — runs entirely on your machine, binds to loopback by default, no account, no telemetry.
+- **Build a system visually** — add buses, lines, transformers, generators (static + GENROU), exciters, governors, loads, and shunts from the UI; the one-line diagram lays out automatically and is fully draggable. Build a complete dynamic case without touching a file.
+- **Run five analyses, one click each** — power flow, time-domain simulation, eigenvalue / small-signal, continuation power flow (PV & QV curves), and state estimation. Each runs as a non-blocking job with live progress and cancel.
+- **Watch simulations evolve live** — time-domain results stream over a WebSocket as Apache Arrow frames into interactive plots while the run is in progress, with a synchronized voltage-band overlay animating on the diagram.
+- **Read the network at a glance** — traditional busbar one-line rendering with feeders, machines, and loads placed cleanly around each bus; post-power-flow voltage and MW/MVAr flow labels; voltage-violation tinting.
+- **Add disturbances interactively** — bus faults, breaker toggles, and parameter changes, applied before a run and replayed on reload.
+- **Edit parameters safely** — clone-on-write changes with full undo/redo and a diff view; nothing mutates the loaded case until you commit.
+- **Visualize results** — voltage/angle plots, a zoom-and-pan eigenvalue scatter, PV nose curves, and residual histograms in a dedicated full-screen results view.
+- **Save, reload, and reproduce** — write systems back to `xlsx`/`raw`/`json`, reload them, and export a self-contained reproducibility bundle (case + layout + results).
+- **Automate everything** — a documented REST + WebSocket API with an OpenAPI schema. Anything the UI does, a script or an AI agent can do.
+- **Stay local and private** — runs entirely on your machine, binds to loopback by default, no account, no telemetry.
 
 ## Quick start
 
@@ -77,7 +61,7 @@ Then open **`http://127.0.0.1:8000`**. On first run an empty workspace is auto-s
 
 ## Run the showcase demo yourself
 
-[`web/scripts/agent-demo.mjs`](web/scripts/agent-demo.mjs) records the captioned video at the top of this README by driving the real UI with Playwright — building WSCC 9-bus from scratch, then running every analysis.
+[`web/scripts/agent-demo.mjs`](web/scripts/agent-demo.mjs) records the video at the top of this README by driving the real UI with Playwright — building WSCC 9-bus from scratch, then running every analysis.
 
 ```bash
 # Terminal 1 — serve on a fixed port
@@ -149,20 +133,37 @@ One `andes.System` lives per session in an isolated subprocess, so the API proce
 
 | Path | What's there |
 |---|---|
-| [`server/`](./server) | Python substrate — FastAPI routers, per-session subprocess workers, Arrow streaming, clone-on-write editing, the `andes-app` CLI |
+| [`server/`](./server) | Python backend — FastAPI routers, per-session subprocess workers, Arrow streaming, clone-on-write editing, the `andes-app` CLI |
 | [`web/`](./web) | React 19 + TypeScript UI — interactive SLD (React Flow), uPlot result plots, Radix UI, Tailwind v4, Zustand |
 | [`examples/`](./examples) | curl + Python client walkthroughs for the API |
 | [`llms.txt`](./llms.txt) | LLM-oriented API map |
 | [`docs/`](./docs) | images and the demo video |
 
+## Built on ANDES
+
+ANDES App is built on [**CURENT/ANDES**](https://github.com/CURENT/andes), an open-source hybrid symbolic-numeric framework for power-system modeling and analysis. All power-flow and dynamic computation is performed by ANDES.
+
+If you use ANDES App in academic work, please cite ANDES:
+
+> H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," *IEEE Transactions on Power Systems*, vol. 36, no. 2, pp. 1373–1384, March 2021, doi: [10.1109/TPWRS.2020.3017019](https://doi.org/10.1109/TPWRS.2020.3017019).
+
+```bibtex
+@article{cui2021hybrid,
+  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
+  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {36},
+  number  = {2},
+  pages   = {1373--1384},
+  year    = {2021},
+  doi     = {10.1109/TPWRS.2020.3017019}
+}
+```
+
 ## Contributing
 
-PRs welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, test commands, and conventions. Guidelines for AI coding agents live in [AGENTS.md](./AGENTS.md); changes worth noting are tracked in [CHANGELOG.md](./CHANGELOG.md).
-
-## Acknowledgements
-
-ANDES App is built on top of [**CURENT/ANDES**](https://github.com/CURENT/andes) by Hantao Cui et al. All power-system modeling and numerical simulation is performed by ANDES; this project provides the interactive application layer around it.
+PRs welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, test commands, and conventions. Guidelines for AI coding agents live in [AGENTS.md](./AGENTS.md); notable changes are tracked in [CHANGELOG.md](./CHANGELOG.md).
 
 ## License
 
-[MIT](./LICENSE)
+ANDES App is licensed under the **[GNU General Public License v3.0](./LICENSE)**, the same license as ANDES.
