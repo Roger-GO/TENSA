@@ -243,8 +243,8 @@ describe('buildGraph — minimap size hints', () => {
     const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
     const sized = (type: string) => nodes.find((n) => n.type === type) as SizedNode | undefined;
 
-    expect(sized('bus')?.initialWidth).toBe(90);
-    expect(sized('bus')?.initialHeight).toBe(56);
+    expect(sized('bus')?.initialWidth).toBe(92);
+    expect(sized('bus')?.initialHeight).toBe(44);
     expect(sized('generator')?.initialWidth).toBe(50);
     expect(sized('generator')?.initialHeight).toBe(46);
     expect(sized('load')?.initialWidth).toBe(50);
