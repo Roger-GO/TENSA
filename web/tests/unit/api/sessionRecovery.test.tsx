@@ -580,10 +580,7 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
       return u.includes('/case');
     });
     expect(caseCall).toBeUndefined();
-    expect(errSpy).toHaveBeenCalledWith(
-      'Session expired — blank system lost',
-      expect.anything(),
-    );
+    expect(errSpy).toHaveBeenCalledWith('Session expired — blank system lost', expect.anything());
     errSpy.mockRestore();
   });
 

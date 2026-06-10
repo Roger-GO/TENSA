@@ -25,10 +25,7 @@ import { usePflowStore } from '@/store/pflow';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { parseWorkspacePath } from '@/api/types';
 import type { TopologySummary } from '@/api/types';
-import {
-  controllerSubKindLabel,
-  subKindForControllerClass,
-} from '@/lib/controllers';
+import { controllerSubKindLabel, subKindForControllerClass } from '@/lib/controllers';
 
 function withQueryClient(ui: ReactNode) {
   const client = new QueryClient({
@@ -135,7 +132,12 @@ describe('controller inspection — Properties body', () => {
   it('renders an exciter’s params when its idx is selected', () => {
     seedLoadedCase();
     useCaseStore.setState({
-      selectedElement: { kind: 'controller', subKind: 'exciter', modelClass: 'EXST1', idx: 'EXST1_1' },
+      selectedElement: {
+        kind: 'controller',
+        subKind: 'exciter',
+        modelClass: 'EXST1',
+        idx: 'EXST1_1',
+      },
     });
     render(withQueryClient(<PropertiesAccordion />));
     expect(screen.getByTestId('inspector-properties')).toBeInTheDocument();
@@ -149,7 +151,12 @@ describe('controller inspection — Properties body', () => {
   it('renders a governor’s params when its idx is selected', () => {
     seedLoadedCase();
     useCaseStore.setState({
-      selectedElement: { kind: 'controller', subKind: 'governor', modelClass: 'IEEEG1', idx: 'IEEEG1_1' },
+      selectedElement: {
+        kind: 'controller',
+        subKind: 'governor',
+        modelClass: 'IEEEG1',
+        idx: 'IEEEG1_1',
+      },
     });
     render(withQueryClient(<PropertiesAccordion />));
     expect(screen.getByText('IEEEG1')).toBeInTheDocument();
@@ -160,7 +167,12 @@ describe('controller inspection — Properties body', () => {
   it('renders the empty-params branch for an unknown controller class', () => {
     seedLoadedCase();
     useCaseStore.setState({
-      selectedElement: { kind: 'controller', subKind: 'other', modelClass: 'ZZUNKNOWN', idx: 'MYSTERY_1' },
+      selectedElement: {
+        kind: 'controller',
+        subKind: 'other',
+        modelClass: 'ZZUNKNOWN',
+        idx: 'MYSTERY_1',
+      },
     });
     render(withQueryClient(<PropertiesAccordion />));
     expect(screen.getByText('ZZUNKNOWN')).toBeInTheDocument();
@@ -209,7 +221,12 @@ describe('controller inspection — RightInspector header', () => {
   it('shows the sub-kind eyebrow + entry name for a selected exciter', () => {
     seedLoadedCase();
     useCaseStore.setState({
-      selectedElement: { kind: 'controller', subKind: 'exciter', modelClass: 'EXST1', idx: 'EXST1_1' },
+      selectedElement: {
+        kind: 'controller',
+        subKind: 'exciter',
+        modelClass: 'EXST1',
+        idx: 'EXST1_1',
+      },
     });
     render(withQueryClient(<RightInspector />));
     const header = screen.getByTestId('right-inspector-header');

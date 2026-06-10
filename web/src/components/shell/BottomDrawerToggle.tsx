@@ -42,9 +42,7 @@ export function BottomDrawerToggle({ className }: BottomDrawerToggleProps) {
     if (hasUnread) clearUnread();
   };
 
-  const tooltip = collapsed
-    ? 'Show bottom drawer (⌘J)'
-    : 'Hide bottom drawer (⌘J)';
+  const tooltip = collapsed ? 'Show bottom drawer (⌘J)' : 'Hide bottom drawer (⌘J)';
 
   return (
     <Button

@@ -138,7 +138,9 @@ export function DisturbancesAccordion({ className }: DisturbancesAccordionProps)
             'text-primary border-primary/30 hover:bg-primary/10 border',
           )}
         >
-          <span aria-hidden className="text-base leading-none">+</span>
+          <span aria-hidden className="text-base leading-none">
+            +
+          </span>
           Add
         </Button>
       </div>

@@ -88,7 +88,9 @@ export function HistoryJobRow({ job, onViewError, className }: HistoryJobRowProp
     >
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-center gap-2">
-          <span className="text-foreground truncate text-xs font-medium">{kindLabel(job.kind)}</span>
+          <span className="text-foreground truncate text-xs font-medium">
+            {kindLabel(job.kind)}
+          </span>
           {job.repeated_count > 1 ? (
             <span className="text-muted-foreground text-[10px]">×{job.repeated_count}</span>
           ) : null}

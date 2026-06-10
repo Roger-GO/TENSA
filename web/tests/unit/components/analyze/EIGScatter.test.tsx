@@ -45,7 +45,13 @@ beforeAll(() => {
       PointerEventPolyfill;
   }
 });
-import { EIGScatter, computeViewport, signedLog10 } from '@/components/analyze/EIGScatter';
+import {
+  EIGScatter,
+  computeTicks,
+  computeViewport,
+  dampingBand,
+  signedLog10,
+} from '@/components/analyze/EIGScatter';
 import { DEFAULT_EIG_FILTER, useAnalyzeStore } from '@/store/analyze';
 import { __resetEigViewBus, requestEigLogToggle, requestEigViewReset } from '@/lib/eigViewBus';
 import type { EigResult } from '@/api/types';
@@ -377,6 +383,71 @@ describe('<EIGScatter />', () => {
     });
   });
 
+  describe('axes, ticks + damping colours', () => {
+    it('renders numeric tick labels + gridlines on both axes', () => {
+      useAnalyzeStore.getState().setEigResult(RESULT);
+      const { container } = render(<EIGScatter />);
+      const xTicks = container.querySelectorAll('[data-testid="eig-scatter-tick-x"]');
+      const yTicks = container.querySelectorAll('[data-testid="eig-scatter-tick-y"]');
+      expect(xTicks.length).toBeGreaterThanOrEqual(3);
+      expect(yTicks.length).toBeGreaterThanOrEqual(3);
+      // Each tick group carries a gridline + a numeric label.
+      const first = xTicks[0]!;
+      expect(first.querySelector('line')).not.toBeNull();
+      expect(first.querySelector('text')!.textContent).toMatch(/^-?\d/);
+    });
+
+    it('recomputes ticks from the live view under zoom', () => {
+      useAnalyzeStore.getState().setEigResult(RESULT);
+      const { container } = render(<EIGScatter />);
+      const svg = container.querySelector('svg') as SVGSVGElement;
+      stubSvgRect(svg);
+      const countBefore = container.querySelectorAll('[data-testid="eig-scatter-tick-x"]').length;
+      // Zoom OUT 3× → the x range grows by 1.1³ ≈ 1.33, crossing a
+      // nice-step boundary so the tick set changes.
+      for (let i = 0; i < 3; i++) {
+        fireEvent.wheel(svg, { deltaY: 100, clientX: 160, clientY: 120 });
+      }
+      const countAfter = container.querySelectorAll('[data-testid="eig-scatter-tick-x"]').length;
+      expect(countAfter).not.toBe(countBefore);
+    });
+
+    it('labels the axis ends with units', () => {
+      useAnalyzeStore.getState().setEigResult(RESULT);
+      const { container } = render(<EIGScatter />);
+      const labels = Array.from(container.querySelectorAll('text')).map((t) => t.textContent);
+      expect(labels).toContain('Re [1/s]');
+      expect(labels).toContain('Im [rad/s]');
+    });
+
+    it('colours points by damping band (danger / warning / ok)', () => {
+      useAnalyzeStore.getState().setEigResult(RESULT);
+      // Widen the filter so all four modes (incl. well-damped) render.
+      useAnalyzeStore.getState().setFilter({ dampingMax: 1.5, realAbsMax: 100 });
+      render(<EIGScatter />);
+      // Mode 0: damping 0.05 → warning band; mode 3: 0.025 → danger;
+      // mode 1: 1.0 → ok.
+      const p0 = screen.getByTestId('eig-scatter-point-0');
+      expect(p0).toHaveAttribute('data-damping-band', 'warning');
+      expect(p0.getAttribute('class')).toContain('fill-warning');
+      const p3 = screen.getByTestId('eig-scatter-point-3');
+      expect(p3).toHaveAttribute('data-damping-band', 'danger');
+      expect(p3.getAttribute('class')).toContain('fill-danger');
+      const p1 = screen.getByTestId('eig-scatter-point-1');
+      expect(p1).toHaveAttribute('data-damping-band', 'ok');
+      expect(p1.getAttribute('class')).toContain('fill-success');
+    });
+
+    it('renders the damping legend with the three bands', () => {
+      useAnalyzeStore.getState().setEigResult(RESULT);
+      render(<EIGScatter />);
+      const legend = screen.getByTestId('eig-scatter-legend');
+      expect(legend.textContent).toContain('< 5%');
+      expect(legend.textContent).toContain('5–10%');
+      expect(legend.textContent).toContain('≥ 10% damping');
+    });
+  });
+
   // Plan callout: integration test "zoom state preserved when switching
   // sub-modes and back" doesn't fit cleanly because view state is local
   // to the component and resets on remount. Marked .todo so it stays
@@ -397,6 +468,34 @@ describe('computeViewport', () => {
       yMin: -1,
       yMax: 1,
     });
+  });
+});
+
+describe('computeTicks', () => {
+  it('returns nice ticks spanning the range, including 0 for symmetric views', () => {
+    const ticks = computeTicks(-1, 1);
+    expect(ticks.length).toBeGreaterThanOrEqual(4);
+    expect(ticks.length).toBeLessThanOrEqual(7);
+    expect(ticks).toContain(0);
+    expect(ticks[0]!).toBeGreaterThanOrEqual(-1);
+    expect(ticks[ticks.length - 1]!).toBeLessThanOrEqual(1 + 1e-9);
+  });
+
+  it('returns [] for degenerate or non-finite ranges', () => {
+    expect(computeTicks(1, 1)).toEqual([]);
+    expect(computeTicks(2, 1)).toEqual([]);
+    expect(computeTicks(Number.NaN, 1)).toEqual([]);
+  });
+});
+
+describe('dampingBand', () => {
+  it('maps damping ratios to bands at the 5% / 10% thresholds', () => {
+    expect(dampingBand(0.01)).toBe('danger');
+    expect(dampingBand(0.049)).toBe('danger');
+    expect(dampingBand(0.05)).toBe('warning');
+    expect(dampingBand(0.099)).toBe('warning');
+    expect(dampingBand(0.1)).toBe('ok');
+    expect(dampingBand(0.9)).toBe('ok');
   });
 });
 

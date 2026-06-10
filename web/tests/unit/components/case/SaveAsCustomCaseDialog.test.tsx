@@ -52,7 +52,11 @@ function routeFetch(saveResponse?: Response) {
     }
     return Promise.resolve(
       saveResponse ??
-        makeJsonResponse(201, { name: 'kundur_tuned', files: ['/ws/kundur_tuned.xlsx'], job_id: 'j1' }),
+        makeJsonResponse(201, {
+          name: 'kundur_tuned',
+          files: ['/ws/kundur_tuned.xlsx'],
+          job_id: 'j1',
+        }),
     );
   };
 }

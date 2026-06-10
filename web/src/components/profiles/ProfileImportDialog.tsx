@@ -203,7 +203,8 @@ export function ProfileImportDialog({ open, onOpenChange }: ProfileImportDialogP
           </h3>
           {stagedProfiles.length === 0 ? (
             <p className="text-muted-foreground mt-1 text-xs">
-              No profiles staged on this session yet.
+              Time-series profiles drive loads with CSV data during TDS. Upload a CSV to attach a
+              profile.
             </p>
           ) : (
             <ul data-testid="profiles-staged-list" className="mt-1 flex flex-col gap-1">

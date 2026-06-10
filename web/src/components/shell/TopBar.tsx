@@ -99,6 +99,12 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
           the Export trigger on top of the run controls (clicks on Run PF
           hit Export). When the viewport is too narrow even for collapsed
           spacers, the header (``overflow-x-auto``) scrolls instead. */}
+      {/* Brand block — structural (not slot-injected) so the mark + wordmark
+          always sit at the far left, before whatever the App puts in the
+          ``left`` slot (Workspace / Edit / Run menus). Kept deliberately
+          narrow (~95px) so it never pushes the centred run controls on a
+          1280px window. */}
+      <AppBrand />
       <div
         data-slot="left"
         data-testid="top-bar-left"
@@ -156,6 +162,40 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
     </header>
   );
 });
+
+/**
+ * App brand: busbar-and-sine mark + "ANDES App" wordmark, pinned at the
+ * far left of the top bar. The mark is inlined (rather than an
+ * ``<img src="/logo.svg">``) so the busbar stroke follows the theme via
+ * ``currentColor`` and the wave picks up the ``primary`` token — the
+ * standalone ``public/logo.svg`` carries fixed colors for use outside
+ * the app shell.
+ */
+function AppBrand() {
+  return (
+    <div data-testid="app-brand" className="flex shrink-0 items-center gap-1.5 pr-1 select-none">
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        className="h-[18px] w-[18px] shrink-0"
+        fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        {/* horizontal busbar (theme foreground) */}
+        <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" strokeWidth="3" />
+        {/* one continuous sine cycle through the bar (accent) */}
+        <path
+          d="M3 12 C6 4.5, 9 4.5, 12 12 C15 19.5, 18 19.5, 21 12"
+          className="text-primary"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+      </svg>
+      <span className="text-sm font-semibold tracking-tight whitespace-nowrap">ANDES App</span>
+    </div>
+  );
+}
 
 /**
  * "⌘K" hint button (Unit 9). Mouse affordance for the command palette

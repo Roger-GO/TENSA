@@ -36,9 +36,7 @@ describe('<ResultsViewToggle />', () => {
   it('renders the maximize affordance when results view is off', () => {
     useLayoutStore.setState({ resultsViewActive: false });
     render(<ResultsViewToggle />);
-    expect(
-      screen.getByTestId('top-bar-toggle-results-view-icon-maximize'),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('top-bar-toggle-results-view-icon-maximize')).toBeInTheDocument();
     expect(
       screen.queryByTestId('top-bar-toggle-results-view-icon-minimize'),
     ).not.toBeInTheDocument();
@@ -51,9 +49,7 @@ describe('<ResultsViewToggle />', () => {
   it('renders the minimize affordance when results view is on', () => {
     useLayoutStore.setState({ resultsViewActive: true });
     render(<ResultsViewToggle />);
-    expect(
-      screen.getByTestId('top-bar-toggle-results-view-icon-minimize'),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('top-bar-toggle-results-view-icon-minimize')).toBeInTheDocument();
     expect(
       screen.queryByTestId('top-bar-toggle-results-view-icon-maximize'),
     ).not.toBeInTheDocument();

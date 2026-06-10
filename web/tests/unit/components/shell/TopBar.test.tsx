@@ -74,6 +74,24 @@ describe('<TopBar /> — structural contract', () => {
   });
 });
 
+describe('<TopBar /> — brand block', () => {
+  it('renders the logo mark + "ANDES App" wordmark before the left slot', () => {
+    render(<TopBar left={<span>L</span>} />);
+    const banner = screen.getByTestId('top-bar');
+    const brand = screen.getByTestId('app-brand');
+    expect(banner.contains(brand)).toBe(true);
+    // wordmark text
+    expect(within(brand).getByText('ANDES App')).toBeInTheDocument();
+    // inline SVG mark (decorative, hidden from a11y tree)
+    expect(brand.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    // brand is structural: it sits BEFORE the left slot, not inside it
+    const left = screen.getByTestId('top-bar-left');
+    expect(left.contains(brand)).toBe(false);
+    const children = Array.from(banner.children);
+    expect(children.indexOf(brand)).toBeLessThan(children.indexOf(left));
+  });
+});
+
 describe('<TopBar /> — auto-mounted right-slot anchors', () => {
   it('renders the theme toggle at the rightmost edge', () => {
     render(<TopBar />);
@@ -147,8 +165,6 @@ describe('<TopBar /> — v3 Unit 2 pane toggles', () => {
   it('drawer toggle surfaces the unread dot when drawerHasUnreadResults is set', () => {
     useLayoutStore.setState({ drawerHasUnreadResults: true });
     render(<TopBar />);
-    expect(
-      screen.getByTestId('top-bar-toggle-drawer-unread-dot'),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('top-bar-toggle-drawer-unread-dot')).toBeInTheDocument();
   });
 });

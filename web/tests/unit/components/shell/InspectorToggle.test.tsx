@@ -37,31 +37,17 @@ describe('<InspectorToggle />', () => {
   it('renders the collapse-affordance chevron when inspector is expanded', () => {
     useLayoutStore.setState({ rightInspectorCollapsed: false });
     render(<InspectorToggle />);
-    expect(
-      screen.getByTestId('top-bar-toggle-inspector-icon-collapse'),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('top-bar-toggle-inspector-icon-expand'),
-    ).not.toBeInTheDocument();
-    expect(screen.getByTestId('top-bar-toggle-inspector')).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    expect(screen.getByTestId('top-bar-toggle-inspector-icon-collapse')).toBeInTheDocument();
+    expect(screen.queryByTestId('top-bar-toggle-inspector-icon-expand')).not.toBeInTheDocument();
+    expect(screen.getByTestId('top-bar-toggle-inspector')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('renders the expand-affordance chevron when inspector is collapsed', () => {
     useLayoutStore.setState({ rightInspectorCollapsed: true });
     render(<InspectorToggle />);
-    expect(
-      screen.getByTestId('top-bar-toggle-inspector-icon-expand'),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('top-bar-toggle-inspector-icon-collapse'),
-    ).not.toBeInTheDocument();
-    expect(screen.getByTestId('top-bar-toggle-inspector')).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    );
+    expect(screen.getByTestId('top-bar-toggle-inspector-icon-expand')).toBeInTheDocument();
+    expect(screen.queryByTestId('top-bar-toggle-inspector-icon-collapse')).not.toBeInTheDocument();
+    expect(screen.getByTestId('top-bar-toggle-inspector')).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('clicking flips rightInspectorCollapsed; second click flips it back', async () => {

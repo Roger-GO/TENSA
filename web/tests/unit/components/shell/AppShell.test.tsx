@@ -11,11 +11,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { AppShell } from '@/components/shell/AppShell';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import {
-  DEFAULT_LAYOUT,
-  LAYOUT_STORAGE_KEY,
-  useLayoutStore,
-} from '@/store/layout';
+import { DEFAULT_LAYOUT, LAYOUT_STORAGE_KEY, useLayoutStore } from '@/store/layout';
 import { useSldStore } from '@/store/sld';
 
 /**
@@ -94,14 +90,14 @@ describe('AppShell — structural contract', () => {
     render(
       <AppShell
         topBarLeft={<span>case-name.raw</span>}
-        topBarCenter={<span>ANDES App</span>}
+        topBarCenter={<span>center-title</span>}
         topBarRight={<button type="button">Run PF</button>}
       />,
     );
 
     const banner = screen.getByRole('banner', { name: /top bar/i });
     expect(within(banner).getByText('case-name.raw')).toBeInTheDocument();
-    expect(within(banner).getByText('ANDES App')).toBeInTheDocument();
+    expect(within(banner).getByText('center-title')).toBeInTheDocument();
     expect(within(banner).getByRole('button', { name: 'Run PF' })).toBeInTheDocument();
   });
 
@@ -175,14 +171,11 @@ describe('AppShell — full-space results view (v3.1)', () => {
   it('keeps the TopBar mounted in the results-view branch', () => {
     useLayoutStore.setState({ resultsViewActive: true });
     render(
-      <AppShell
-        topBarCenter={<span>ANDES App</span>}
-        resultsView={<span>results-page</span>}
-      />,
+      <AppShell topBarCenter={<span>center-title</span>} resultsView={<span>results-page</span>} />,
     );
     const banner = screen.getByRole('banner', { name: /top bar/i });
     expect(banner).toBeInTheDocument();
-    expect(within(banner).getByText('ANDES App')).toBeInTheDocument();
+    expect(within(banner).getByText('center-title')).toBeInTheDocument();
   });
 });
 

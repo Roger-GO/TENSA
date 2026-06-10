@@ -292,8 +292,7 @@ export const queryKeys = {
   /** TimeSeries profile assignments, scoped per session (Unit 15). */
   profiles: (id: SessionId) => ['profiles', id] as const,
   /** Clone-vs-original param diff, scoped per (session, model, idx) (Unit 23). */
-  cloneDiff: (id: SessionId, model: string, idx: string) =>
-    ['clone-diff', id, model, idx] as const,
+  cloneDiff: (id: SessionId, model: string, idx: string) => ['clone-diff', id, model, idx] as const,
 } as const;
 
 // ---- QueryClient factory --------------------------------------------------
@@ -1816,7 +1815,9 @@ export function useCpfRun(): UseMutationResult<CpfResult, Error, CpfRunVars> {
         { body, timeoutMs: TIMEOUTS.caseLoad },
       );
     },
-    onMutate: ({ direction }) => ({ jobId: registerJob('cpf', { direction: direction ?? 'load' }) }),
+    onMutate: ({ direction }) => ({
+      jobId: registerJob('cpf', { direction: direction ?? 'load' }),
+    }),
     onSuccess: (data, { sessionId }, ctx) => {
       useAnalyzeStore.getState().setCpfResult(data);
       queryClient.setQueryData(queryKeys.cpf(sessionId), data);
@@ -2678,11 +2679,7 @@ export interface CloneSaveAsVars {
  * as a custom case. On success the workspace-files query is invalidated so the
  * new case appears in ``SavedCasesList`` without a refresh.
  */
-export function useCloneSaveAs(): UseMutationResult<
-  CloneSaveAsResponse,
-  Error,
-  CloneSaveAsVars
-> {
+export function useCloneSaveAs(): UseMutationResult<CloneSaveAsResponse, Error, CloneSaveAsVars> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ sessionId, name, overwrite = false }: CloneSaveAsVars) => {

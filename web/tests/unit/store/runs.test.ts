@@ -133,6 +133,20 @@ describe('runs store — done / error / aborted / connection', () => {
     useRunsStore.getState().markRunDone('r1', 1.0);
     expect(useRunsStore.getState().runs.r1!.state).toBe('done');
     expect(useRunsStore.getState().runs.r1!.tCurrent).toBe(1.0);
+    // No converged flag supplied → unknown.
+    expect(useRunsStore.getState().runs.r1!.converged).toBeNull();
+  });
+
+  it('markRunDone records the done envelope converged flag', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 10, columnNames: [] });
+    expect(useRunsStore.getState().runs.r1!.converged).toBeNull();
+    useRunsStore.getState().markRunDone('r1', 6.34, false);
+    expect(useRunsStore.getState().runs.r1!.state).toBe('done');
+    expect(useRunsStore.getState().runs.r1!.converged).toBe(false);
+
+    useRunsStore.getState().startRun({ runId: 'r2', tf: 10, columnNames: [] });
+    useRunsStore.getState().markRunDone('r2', 10, true);
+    expect(useRunsStore.getState().runs.r2!.converged).toBe(true);
   });
 
   it('markRunError records the reason and flips state', () => {

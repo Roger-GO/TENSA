@@ -82,7 +82,8 @@ export function DynamicContentBadge({ compact = false, className }: DynamicConte
   // TDS/EIG readiness gate). Without this, a from-scratch GENCLS system read
   // as "static-only".
   const dynamicGenCount = useMemo(
-    () => (topology?.generators ?? []).filter((g) => g.kind === 'GENROU' || g.kind === 'GENCLS').length,
+    () =>
+      (topology?.generators ?? []).filter((g) => g.kind === 'GENROU' || g.kind === 'GENCLS').length,
     [topology?.generators],
   );
 
@@ -91,8 +92,7 @@ export function DynamicContentBadge({ compact = false, className }: DynamicConte
   const isDynamic = summary.total > 0 || dynamicGenCount > 0;
   const state: BadgeState = topology === null ? 'loading' : isDynamic ? 'dynamic' : 'static-only';
 
-  const label =
-    state === 'loading' ? 'Loading…' : state === 'dynamic' ? 'Dynamic' : 'Static-only';
+  const label = state === 'loading' ? 'Loading…' : state === 'dynamic' ? 'Dynamic' : 'Static-only';
 
   const present = [
     ...(dynamicGenCount > 0

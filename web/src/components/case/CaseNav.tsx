@@ -202,10 +202,7 @@ export function CaseNav({ className }: CaseNavProps) {
         // the full WorkspaceFilePicker UI here would duplicate the file
         // list. Render a brief inline hint instead — the user finds the
         // canonical loader in the Saved Cases section below.
-        <div
-          data-testid="case-nav-empty"
-          className="text-muted-foreground p-3 text-xs"
-        >
+        <div data-testid="case-nav-empty" className="text-muted-foreground p-3 text-xs">
           No case loaded. Pick a file from <span className="font-medium">Saved cases</span> below or
           drag a component onto the canvas to start a blank system.
         </div>

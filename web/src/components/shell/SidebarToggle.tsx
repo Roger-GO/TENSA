@@ -26,9 +26,7 @@ export function SidebarToggle({ className }: SidebarToggleProps) {
   const collapsed = useLayoutStore((s) => s.leftSidebarCollapsed);
   const toggle = useLayoutStore((s) => s.toggleLeftSidebar);
 
-  const tooltip = collapsed
-    ? 'Show left sidebar (⌘B)'
-    : 'Hide left sidebar (⌘B)';
+  const tooltip = collapsed ? 'Show left sidebar (⌘B)' : 'Hide left sidebar (⌘B)';
 
   return (
     <Button

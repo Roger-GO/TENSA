@@ -191,7 +191,11 @@ function SeGenerateButton({
       onClick={onClick}
       data-testid="analyze-se-generate-measurements"
     >
-      {isPending ? 'Generating…' : hasMeasurements ? 'Re-generate Measurements' : 'Generate Measurements'}
+      {isPending
+        ? 'Generating…'
+        : hasMeasurements
+          ? 'Re-generate Measurements'
+          : 'Generate Measurements'}
     </Button>
   );
 
@@ -474,8 +478,8 @@ export function AnalyzeCpfNoseSubMode() {
 
       {cpfResult !== null ? (
         <span data-testid="cpf-summary" className="text-muted-foreground text-[10px]">
-          {cpfResult.mode === 'qv' ? 'QV-curve' : 'PV-curve'} — {cpfResult.lambdas.length} steps; max{' '}
-          {cpfResult.mode === 'qv' ? 'Q' : 'lambda'} = {cpfResult.max_lam.toFixed(4)}
+          {cpfResult.mode === 'qv' ? 'QV-curve' : 'PV-curve'} — {cpfResult.lambdas.length} steps;
+          max {cpfResult.mode === 'qv' ? 'Q' : 'lambda'} = {cpfResult.max_lam.toFixed(4)}
         </span>
       ) : null}
 
@@ -593,7 +597,9 @@ export function AnalyzeSeSubMode() {
           onClick={onGenerate}
           // PF-readiness reason shows on hover; the noise-seed validation
           // error is an inline form error, so it stays silent here.
-          disabledReason={noiseSeedError !== null || seGenerate.isPending ? null : generateDisabledReason}
+          disabledReason={
+            noiseSeedError !== null || seGenerate.isPending ? null : generateDisabledReason
+          }
         />
         <AnalyzeRunButton
           routine="se"
@@ -631,9 +637,7 @@ export function AnalyzeSeSubMode() {
             onChange={setNoiseSeedText}
             placeholder="substrate default"
             aria-invalid={noiseSeedError ? true : undefined}
-            aria-describedby={
-              noiseSeedError ? 'se-noise-seed-error' : 'se-noise-seed-hint'
-            }
+            aria-describedby={noiseSeedError ? 'se-noise-seed-error' : 'se-noise-seed-hint'}
             className="h-7 font-mono text-xs"
           />
           {noiseSeedError ? (
@@ -646,7 +650,10 @@ export function AnalyzeSeSubMode() {
               {noiseSeedError}
             </span>
           ) : (
-            <span id="se-noise-seed-hint" className="text-muted-foreground text-[10px] leading-snug">
+            <span
+              id="se-noise-seed-hint"
+              className="text-muted-foreground text-[10px] leading-snug"
+            >
               Fix the noise draw for reproducible measurements. Leave blank to let the substrate
               choose.
             </span>

@@ -24,16 +24,20 @@ const SIZE = { width: 1600, height: 900 };
 // WSCC 3-machine, 9-bus test system (Anderson & Fouad), pu on 100 MVA.
 // ---------------------------------------------------------------------------
 
+// `at` is the canvas drop position (client px) — buses are placed by
+// dragging the Bus tile onto the canvas, so the agent lays out the
+// diagram by hand the way a human would. The panel sits on the right
+// (~420px), so all drops stay in the left ~1150px of the window.
 const BUSES = [
-  { idx: '1', name: 'BUS1', Vn: 16.5 },
-  { idx: '2', name: 'BUS2', Vn: 18 },
-  { idx: '3', name: 'BUS3', Vn: 13.8 },
-  { idx: '4', name: 'BUS4', Vn: 230 },
-  { idx: '5', name: 'BUS5', Vn: 230 },
-  { idx: '6', name: 'BUS6', Vn: 230 },
-  { idx: '7', name: 'BUS7', Vn: 230 },
-  { idx: '8', name: 'BUS8', Vn: 230 },
-  { idx: '9', name: 'BUS9', Vn: 230 },
+  { idx: '1', name: 'BUS1', Vn: 16.5, at: [430, 180] },
+  { idx: '2', name: 'BUS2', Vn: 18, at: [430, 470] },
+  { idx: '3', name: 'BUS3', Vn: 13.8, at: [950, 470] },
+  { idx: '4', name: 'BUS4', Vn: 230, at: [600, 180] },
+  { idx: '5', name: 'BUS5', Vn: 230, at: [760, 250] },
+  { idx: '6', name: 'BUS6', Vn: 230, at: [760, 400] },
+  { idx: '7', name: 'BUS7', Vn: 230, at: [600, 470] },
+  { idx: '8', name: 'BUS8', Vn: 230, at: [760, 540] },
+  { idx: '9', name: 'BUS9', Vn: 230, at: [950, 250] },
 ];
 
 const TRANSFORMERS = [
@@ -66,15 +70,33 @@ const MACHINES = [
 
 const GENROUS = [
   {
-    idx: 'GENROU_1', name: 'G1 rotor', bus: '1', gen: '1', Sn: 100, Vn: 16.5, H: 23.64,
+    idx: 'GENROU_1',
+    name: 'G1 rotor',
+    bus: '1',
+    gen: '1',
+    Sn: 100,
+    Vn: 16.5,
+    H: 23.64,
     adv: { D: 2 },
   },
   {
-    idx: 'GENROU_2', name: 'G2 rotor', bus: '2', gen: '2', Sn: 100, Vn: 18, H: 6.4,
+    idx: 'GENROU_2',
+    name: 'G2 rotor',
+    bus: '2',
+    gen: '2',
+    Sn: 100,
+    Vn: 18,
+    H: 6.4,
     adv: { D: 2 },
   },
   {
-    idx: 'GENROU_3', name: 'G3 rotor', bus: '3', gen: '3', Sn: 100, Vn: 13.8, H: 3.01,
+    idx: 'GENROU_3',
+    name: 'G3 rotor',
+    bus: '3',
+    gen: '3',
+    Sn: 100,
+    Vn: 13.8,
+    H: 3.01,
     adv: { D: 2 },
   },
 ];
@@ -97,10 +119,7 @@ const GOVERNORS = [
 
 /** Update the on-screen caption banner (injected once via addInitScript). */
 async function caption(page, title, sub = '') {
-  await page.evaluate(
-    ([t, s]) => window.__demoCaption?.(t, s),
-    [title, sub],
-  );
+  await page.evaluate(([t, s]) => window.__demoCaption?.(t, s), [title, sub]);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -118,9 +137,38 @@ async function fillField(page, name, value) {
 }
 
 /**
- * Add one element via the (already open) add panel: pick the kind, fill
- * required fields, optionally expand "Show advanced" for optional params,
- * submit, and wait for the server to accept it.
+ * Drag a Component-Library tile onto the canvas at (clientX, clientY).
+ * Dispatches the app's synthetic HTML5 DnD payload (Playwright's
+ * mouse-drag fights React Flow's pane panning). The drop opens — or
+ * switches — the Add Element panel to that tile's kind, seeding the bus
+ * drop coordinate. Before any case exists the target is the no-case
+ * drop zone; afterwards it's the live React Flow pane.
+ */
+async function dragTileToCanvas(page, tile, x, y) {
+  await page
+    .locator(`[data-testid="component-library-tile-${tile}"]`)
+    .hover()
+    .catch(() => {});
+  await page.evaluate(
+    ([t, cx, cy]) => {
+      const dt = new DataTransfer();
+      dt.setData('application/andes-component-type', t);
+      const zone =
+        document.querySelector('.react-flow__pane') ||
+        document.querySelector('[data-testid="no-case-drop-zone"]');
+      if (!zone) return;
+      const opts = { dataTransfer: dt, bubbles: true, cancelable: true, clientX: cx, clientY: cy };
+      zone.dispatchEvent(new DragEvent('dragover', opts));
+      zone.dispatchEvent(new DragEvent('drop', opts));
+    },
+    [tile, x, y],
+  );
+}
+
+/**
+ * Fill the (already open) add panel: pick the kind, fill required
+ * fields, optionally expand "Show advanced" for optional params, submit,
+ * and wait for the server to accept it.
  */
 async function addElement(page, kind, submitModel, fields, advFields = null) {
   await page.locator('[data-testid="add-element-kind"]').selectOption(kind);
@@ -146,6 +194,17 @@ async function addElement(page, kind, submitModel, fields, advFields = null) {
   await sleep(120);
 }
 
+/** Drag a React Flow node by its testid to a new client position. */
+async function moveNode(page, testid, toX, toY) {
+  const node = page.locator(`[data-testid="${testid}"]`);
+  const box = await node.boundingBox();
+  if (!box) return;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(toX, toY, { steps: 18 });
+  await page.mouse.up();
+}
+
 // ---------------------------------------------------------------------------
 // The demo
 // ---------------------------------------------------------------------------
@@ -168,11 +227,22 @@ async function main() {
         el = document.createElement('div');
         el.id = 'demo-caption';
         el.style.cssText = [
-          'position:fixed', 'left:50%', 'bottom:28px', 'transform:translateX(-50%)',
-          'z-index:99999', 'max-width:880px', 'padding:14px 22px', 'border-radius:14px',
-          'background:rgba(17,24,39,0.92)', 'color:#f9fafb', 'font:500 15px/1.45 system-ui,sans-serif',
-          'box-shadow:0 8px 32px rgba(0,0,0,0.35)', 'pointer-events:none', 'text-align:center',
-          'backdrop-filter:blur(6px)', 'transition:opacity 200ms',
+          'position:fixed',
+          'left:50%',
+          'bottom:28px',
+          'transform:translateX(-50%)',
+          'z-index:99999',
+          'max-width:880px',
+          'padding:14px 22px',
+          'border-radius:14px',
+          'background:rgba(17,24,39,0.92)',
+          'color:#f9fafb',
+          'font:500 15px/1.45 system-ui,sans-serif',
+          'box-shadow:0 8px 32px rgba(0,0,0,0.35)',
+          'pointer-events:none',
+          'text-align:center',
+          'backdrop-filter:blur(6px)',
+          'transition:opacity 200ms',
         ].join(';');
         document.body.appendChild(el);
       }
@@ -192,96 +262,187 @@ async function main() {
   });
   await page.reload();
   await page.locator('[data-testid="no-case-drop-zone"]').waitFor();
-  await page.locator('[data-testid="first-run-coach-dismiss"]').click().catch(() => {});
+  await page
+    .locator('[data-testid="first-run-coach-dismiss"]')
+    .click()
+    .catch(() => {});
 
-  await caption(page, 'Building the IEEE 9-bus system from scratch',
-    'Every step below uses the same HTTP API any script or LLM agent can call');
+  await caption(
+    page,
+    'Building the IEEE 9-bus system from scratch',
+    'Every step below uses the same HTTP API any script or LLM agent can call',
+  );
   await sleep(2800);
 
-  // -- blank system via drag-and-drop ---------------------------------------
-  await caption(page, 'Dragging a Bus onto the empty canvas',
-    'This starts a blank system and opens the element builder');
+  // -- first bus: drag onto the empty canvas to start the system ------------
+  await caption(
+    page,
+    'Dragging the first Bus onto the empty canvas',
+    'This starts a blank system and opens the element builder',
+  );
   // Session creation is async on boot — the drop handler no-ops until the
-  // session exists, so retry until the panel appears. The drop is dispatched
-  // as a synthetic HTML5 DnD event carrying the app's component MIME type
-  // (Playwright's mouse-based dragAndDrop fights the hover animation here).
+  // session exists, so retry until the panel appears.
   for (let attempt = 0; attempt < 15; attempt++) {
-    await page.locator('[data-testid="component-library-tile-Bus"]').hover().catch(() => {});
-    await page.evaluate(() => {
-      const dt = new DataTransfer();
-      dt.setData('application/andes-component-type', 'Bus');
-      const zone = document.querySelector('[data-testid="no-case-drop-zone"]');
-      if (!zone) return;
-      const opts = { dataTransfer: dt, bubbles: true, cancelable: true, clientX: 700, clientY: 420 };
-      zone.dispatchEvent(new DragEvent('dragover', opts));
-      zone.dispatchEvent(new DragEvent('drop', opts));
-    });
+    await dragTileToCanvas(page, 'Bus', BUSES[0].at[0], BUSES[0].at[1]);
     await sleep(1000);
-    if (await page.locator('[data-testid="add-element-panel"]').isVisible().catch(() => false)) break;
+    if (
+      await page
+        .locator('[data-testid="add-element-panel"]')
+        .isVisible()
+        .catch(() => false)
+    )
+      break;
   }
   await page.locator('[data-testid="add-element-panel"]').waitFor({ timeout: 5_000 });
-  await sleep(800);
+  await sleep(700);
 
-  // -- buses ----------------------------------------------------------------
+  // -- buses: each one dragged to its own spot on the canvas ----------------
   for (const [i, b] of BUSES.entries()) {
-    await caption(page, `Adding buses — ${b.name} (${b.Vn} kV)`, `${i + 1} of 9`);
-    await addElement(page, 'Bus', 'Bus', b);
+    await caption(page, `Placing ${b.name} (${b.Vn} kV) on the canvas`, `bus ${i + 1} of 9`);
+    if (i > 0) {
+      // Switch the open panel to a fresh Bus drop at this position.
+      await dragTileToCanvas(page, 'Bus', b.at[0], b.at[1]);
+      await sleep(500);
+    }
+    await addElement(page, 'Bus', 'Bus', { idx: b.idx, name: b.name, Vn: b.Vn });
   }
 
-  // -- transformers ---------------------------------------------------------
+  // -- show off the canvas: fit, zoom, and reposition a node ----------------
+  await caption(page, 'The 9 buses are placed', 'Pan, zoom, and drag any node to lay it out');
+  await page
+    .locator('button[aria-label="Fit View"]')
+    .click()
+    .catch(() => {});
+  await sleep(1400);
+  await page
+    .locator('button[aria-label="Zoom In"]')
+    .click()
+    .catch(() => {});
+  await page
+    .locator('button[aria-label="Zoom In"]')
+    .click()
+    .catch(() => {});
+  await sleep(1200);
+  await caption(page, 'Dragging a bus to tidy the layout', 'Node positions are yours to arrange');
+  await moveNode(page, 'bus-node-5', 820, 300).catch(() => {});
+  await sleep(900);
+  await page
+    .locator('button[aria-label="Fit View"]')
+    .click()
+    .catch(() => {});
+  await sleep(1200);
+
+  // -- transformers (drag the Transformer tile) -----------------------------
   for (const t of TRANSFORMERS) {
-    await caption(page, `Adding step-up transformer ${t.idx}`,
-      `bus ${t.bus1} → ${t.bus2} · x = ${t.x} pu (Vn bases derived from the buses)`);
+    await caption(
+      page,
+      `Adding step-up transformer ${t.idx}`,
+      `bus ${t.bus1} → ${t.bus2} · x = ${t.x} pu (Vn bases derived from the buses)`,
+    );
+    await dragTileToCanvas(page, 'Transformer', 360, 250);
+    await sleep(450);
     const { tap, ...rest } = t;
     await addElement(page, 'Transformer2W', 'Line', rest, { tap });
   }
 
-  // -- lines ----------------------------------------------------------------
+  // -- lines (drag the Line tile) -------------------------------------------
   for (const l of LINES) {
     await caption(page, `Adding 230 kV line ${l.name}`, `r=${l.r} x=${l.x} b=${l.b} pu`);
+    await dragTileToCanvas(page, 'Line', 360, 250);
+    await sleep(400);
     const { b, ...rest } = l;
     await addElement(page, 'Line', 'Line', rest, { b });
   }
 
-  // -- loads ----------------------------------------------------------------
+  // -- loads (drag the Load tile) -------------------------------------------
   for (const d of LOADS) {
     await caption(page, `Adding load at bus ${d.bus}`, `${d.p0 * 100} MW / ${d.q0 * 100} MVAr`);
+    await dragTileToCanvas(page, 'Load', 360, 250);
+    await sleep(400);
     await addElement(page, 'PQ', 'PQ', d);
   }
 
-  // -- static generators ----------------------------------------------------
+  // -- generators + machines + controllers (drag the Generator tile) --------
   for (const g of MACHINES) {
     const { kind, ...rest } = g;
-    await caption(page, `Adding ${kind === 'Slack' ? 'slack' : 'PV'} generator ${g.name} at bus ${g.bus}`,
-      kind === 'Slack' ? 'V = 1.04 pu reference' : `P = ${rest.p0 * 100} MW, V = ${rest.v0} pu`);
+    await caption(
+      page,
+      `Adding ${kind === 'Slack' ? 'slack' : 'PV'} generator ${g.name} at bus ${g.bus}`,
+      kind === 'Slack' ? 'V = 1.04 pu reference' : `P = ${rest.p0 * 100} MW, V = ${rest.v0} pu`,
+    );
+    await dragTileToCanvas(page, 'Generator', 360, 250);
+    await sleep(400);
     await addElement(page, kind, kind, rest);
   }
-
-  // -- synchronous machines -------------------------------------------------
   for (const m of GENROUS) {
     const { adv, ...rest } = m;
-    await caption(page, `Adding round-rotor model ${m.idx}`,
-      `H = ${m.H} s, D = 2 (UI converts H → M = 2H for ANDES)`);
+    await caption(
+      page,
+      `Adding round-rotor model ${m.idx}`,
+      `H = ${m.H} s, D = 2 (UI converts H → M = 2H for ANDES)`,
+    );
+    await dragTileToCanvas(page, 'Generator', 360, 250);
+    await sleep(400);
     await addElement(page, 'GENROU', 'GENROU', rest, adv);
   }
-
-  // -- exciters + governors -------------------------------------------------
   for (const e of EXCITERS) {
     const { kind, ...rest } = e;
-    await caption(page, `Attaching exciter ${kind} to ${e.syn}`, 'voltage regulation for the machine');
+    await caption(page, `Attaching exciter ${kind} to ${e.syn}`, 'voltage regulation');
+    await dragTileToCanvas(page, 'Generator', 360, 250);
+    await sleep(400);
     await addElement(page, kind, kind, rest);
   }
   for (const g of GOVERNORS) {
     await caption(page, `Attaching governor TGOV1 to ${g.syn}`, 'speed / frequency regulation');
+    await dragTileToCanvas(page, 'Generator', 360, 250);
+    await sleep(400);
     await addElement(page, 'TGOV1', 'TGOV1', g);
   }
 
   // -- close panel, admire the diagram --------------------------------------
-  await page.getByRole('button', { name: /^cancel$/i }).click().catch(() => {});
-  await page.locator('button[aria-label="Fit View"]').click().catch(() => {});
-  await caption(page, '30 elements added — the complete WSCC 9-bus system',
-    '9 buses · 3 transformers · 6 lines · 3 loads · 3 machines · 3 exciters · 3 governors');
-  await sleep(3500);
+  await page
+    .getByRole('button', { name: /^cancel$/i })
+    .click()
+    .catch(() => {});
+  await page
+    .locator('button[aria-label="Fit View"]')
+    .click()
+    .catch(() => {});
+  await caption(
+    page,
+    '30 elements added — the complete WSCC 9-bus system',
+    '9 buses · 3 transformers · 6 lines · 3 loads · 3 machines · 3 exciters · 3 governors',
+  );
+  await sleep(3000);
+
+  // -- save the case to a file, then reload it from the workspace -----------
+  await caption(page, 'Saving the system to a file', 'Workspace → Save system → wscc9-built.xlsx');
+  await page.locator('[data-testid="topbar-menu-workspace-trigger"]').click();
+  await sleep(500);
+  await page.locator('[data-testid="save-system-button"]').click();
+  await sleep(700);
+  await page.locator('[data-testid="save-filename"]').fill('wscc9-built');
+  await sleep(500);
+  await Promise.all([
+    page
+      .waitForResponse((r) => r.url().includes('/save') && r.request().method() === 'POST', {
+        timeout: 30_000,
+      })
+      .catch(() => {}),
+    page.locator('[data-testid="save-confirm"]').click(),
+  ]);
+  await sleep(2000);
+
+  await caption(
+    page,
+    'Reloading the saved case from the workspace',
+    'Round-trips through ANDES — the same system, read back from disk',
+  );
+  await page
+    .locator('[data-testid="saved-cases-row-wscc9-built.xlsx"]')
+    .click()
+    .catch(() => {});
+  await sleep(3000);
 
   // -- power flow -----------------------------------------------------------
   await caption(page, 'Running power flow', 'Newton-Raphson on the system we just built');
@@ -290,33 +451,56 @@ async function main() {
     page.locator('[data-testid="run-pflow-button"]').click(),
   ]);
   await sleep(2500);
-  await caption(page, 'Power flow converged', 'Bus voltages and angles land on the diagram and in the results grid');
+  await caption(
+    page,
+    'Power flow converged',
+    'Bus voltages and angles land on the diagram and in the results grid',
+  );
   await sleep(3000);
 
   // -- fault + TDS ----------------------------------------------------------
-  await caption(page, 'Adding a disturbance', 'Three-phase fault at bus 7, applied t = 1.0 s, cleared t = 1.083 s');
+  await caption(
+    page,
+    'Adding a disturbance',
+    'Three-phase fault at bus 7, applied t = 1.0 s, cleared t = 1.083 s',
+  );
   await page.locator('[data-testid="bus-node-7"]').click();
   await page.locator('[data-testid="right-inspector-section-trigger-disturbances"]').click();
   await page.locator('[data-testid="disturbances-accordion-add"]').click();
   await page.locator('[data-testid="add-event-dialog"]').waitFor();
   // Bus 7 is pre-selected from context; tweak the clearing time (5 cycles).
-  await page.getByLabel(/tc — fault cleared/).fill('1.083').catch(() => {});
+  await page
+    .getByLabel(/tc — fault cleared/)
+    .fill('1.083')
+    .catch(() => {});
   await sleep(900);
   await page.locator('[data-testid="add-event-save"]').click();
   await sleep(1200);
 
-  await caption(page, 'Running time-domain simulation', 'Live Arrow-IPC streaming over WebSocket — watch the run badge');
+  await caption(
+    page,
+    'Running time-domain simulation',
+    'Live Arrow-IPC streaming over WebSocket — watch the run badge',
+  );
   await page.locator('[data-testid="run-tds-button"]').click();
   await page.waitForSelector('text=/Done at t=/', { timeout: 180_000 });
   await sleep(1500);
 
   // -- results view ---------------------------------------------------------
-  await caption(page, 'Opening the full-screen results view', 'Bus voltages auto-selected — fault dip and recovery at a glance');
+  await caption(
+    page,
+    'Opening the full-screen results view',
+    'Bus voltages auto-selected — fault dip and recovery at a glance',
+  );
   await page.locator('button[aria-label*="Maximize results"]').click();
   await sleep(4500);
 
   // -- reset + PF + EIG -----------------------------------------------------
-  await caption(page, 'Resetting the run for small-signal analysis', 'EIG needs a clean operating point');
+  await caption(
+    page,
+    'Resetting the run for small-signal analysis',
+    'EIG needs a clean operating point',
+  );
   await page.getByRole('button', { name: /reset run/i }).click();
   await sleep(2500);
   // The run-mode toggle is still on TDS after the reset — flip back to PF.
@@ -332,7 +516,11 @@ async function main() {
   await sleep(1200);
 
   // -- CPF (before EIG — eigenanalysis mutates the dae) ----------------------
-  await caption(page, 'Running continuation power flow', 'Loadability margin of the system we built');
+  await caption(
+    page,
+    'Running continuation power flow',
+    'Loadability margin of the system we built',
+  );
   await page.getByRole('tab', { name: 'CPF' }).click();
   await sleep(800);
   const cpfRun = page.locator('[data-testid="analyze-run-cpf"]');
@@ -349,7 +537,11 @@ async function main() {
   }
 
   // -- EIG (last — it mutates the linearised dae) -----------------------------
-  await caption(page, 'Running eigenvalue analysis', 'Linearising the DAE — modes, damping, participation factors');
+  await caption(
+    page,
+    'Running eigenvalue analysis',
+    'Linearising the DAE — modes, damping, participation factors',
+  );
   await page.getByRole('tab', { name: 'EIG' }).click();
   await Promise.all([
     page.waitForResponse((r) => r.url().includes('/eig') && r.request().method() === 'POST', {
@@ -360,14 +552,23 @@ async function main() {
   await sleep(2000);
   // Every mode of this well-damped system is hidden by the default
   // "poorly damped only" scatter filter — widen it to show all modes.
-  await caption(page, 'Every mode is stable and well damped',
-    '"All modes" widens the scatter filter to the full eigenvalue set');
-  await page.locator('[data-testid="eig-scatter-filter-toggle"]').click().catch(() => {});
+  await caption(
+    page,
+    'Every mode is stable and well damped',
+    '"All modes" widens the scatter filter to the full eigenvalue set',
+  );
+  await page
+    .locator('[data-testid="eig-scatter-filter-toggle"]')
+    .click()
+    .catch(() => {});
   await sleep(4500);
 
   // -- outro ----------------------------------------------------------------
-  await caption(page, 'IEEE 9-bus: built, solved, faulted, simulated, analysed',
-    'Everything you just watched is plain HTTP + WebSocket — see /docs, llms.txt, and the MCP server');
+  await caption(
+    page,
+    'IEEE 9-bus: built, solved, faulted, simulated, analysed',
+    'Everything you just watched is plain HTTP + WebSocket — see /docs, llms.txt, and the MCP server',
+  );
   await sleep(4000);
 
   await context.close(); // flushes the video
@@ -385,9 +586,13 @@ async function main() {
     console.log(`[demo] video: ${finalWebm}`);
     try {
       const mp4 = join(OUT_DIR, 'ieee9-agent-demo.mp4');
-      execFileSync('ffmpeg', ['-y', '-i', finalWebm, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '22', mp4], {
-        stdio: 'ignore',
-      });
+      execFileSync(
+        'ffmpeg',
+        ['-y', '-i', finalWebm, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '22', mp4],
+        {
+          stdio: 'ignore',
+        },
+      );
       console.log(`[demo] video: ${mp4}`);
     } catch {
       console.log('[demo] ffmpeg not available — webm only');

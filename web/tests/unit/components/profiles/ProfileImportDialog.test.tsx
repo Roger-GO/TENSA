@@ -180,8 +180,8 @@ describe('<ProfileImportDialog />', () => {
     expect(screen.getByTestId('profile-file-input')).toBeInTheDocument();
     expect(screen.getByTestId('profile-stage-submit')).toBeDisabled();
     expect(screen.getByTestId('profile-stage-submit')).toHaveTextContent('Upload a file first');
-    // Empty staged list message.
-    expect(screen.getByText(/No profiles staged/)).toBeInTheDocument();
+    // Empty staged list shows the "what is this + first step" copy.
+    expect(screen.getByText(/Time-series profiles drive loads with CSV data/)).toBeInTheDocument();
     // Mode-1 disclaimer.
     expect(screen.getByTestId('profile-mode-note')).toHaveTextContent(/mode=1/i);
   });

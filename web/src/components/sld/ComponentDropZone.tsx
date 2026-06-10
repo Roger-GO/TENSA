@@ -21,8 +21,10 @@ import { COMPONENT_DND_MIME } from '@/components/shell/ComponentLibrary';
  * ignore the coordinates (a Bus's canvas position is the only
  * user-controllable one, and even that is just a hint).
  */
-export interface ComponentDropZoneProps
-  extends Omit<HTMLAttributes<HTMLDivElement>, 'onDrop' | 'onDragOver' | 'onDragLeave'> {
+export interface ComponentDropZoneProps extends Omit<
+  HTMLAttributes<HTMLDivElement>,
+  'onDrop' | 'onDragOver' | 'onDragLeave'
+> {
   onDropComponent: (kind: string, clientX: number, clientY: number) => void;
   className?: string;
   children?: ReactNode;
@@ -74,7 +76,7 @@ export function ComponentDropZone({
       className={cn(
         'relative transition-colors',
         isOver &&
-          'bg-[color-mix(in_oklch,var(--color-ring)_6%,transparent)] outline-2 outline-offset-[-2px] outline-dashed outline-[var(--color-ring)]',
+          'bg-[color-mix(in_oklch,var(--color-ring)_6%,transparent)] outline-2 outline-offset-[-2px] outline-[var(--color-ring)] outline-dashed',
         className,
       )}
     >

@@ -25,10 +25,7 @@
  */
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { cn } from '@/lib/cn';
-import {
-  ANALYSIS_SUB_TABS,
-  type AnalysisSubTab,
-} from '@/store/layout';
+import { ANALYSIS_SUB_TABS, type AnalysisSubTab } from '@/store/layout';
 import {
   AnalyzeEigSubMode,
   AnalyzeCpfSubMode,
@@ -54,11 +51,7 @@ export interface AnalysisTabProps {
   className?: string;
 }
 
-export function AnalysisTab({
-  activeSubTab,
-  onSubTabChange,
-  className,
-}: AnalysisTabProps) {
+export function AnalysisTab({ activeSubTab, onSubTabChange, className }: AnalysisTabProps) {
   return (
     <TabsPrimitive.Root
       value={activeSubTab}
@@ -150,10 +143,7 @@ export function AnalysisTab({
  */
 function PlotPanelContent() {
   return (
-    <div
-      data-testid="plot-panel-content"
-      className="flex h-full min-h-0 flex-col gap-2 p-2"
-    >
+    <div data-testid="plot-panel-content" className="flex h-full min-h-0 flex-col gap-2 p-2">
       <div className="min-h-0 flex-1">
         <TimeSeriesPlot />
       </div>

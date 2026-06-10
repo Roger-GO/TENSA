@@ -171,10 +171,7 @@ export function RecoveryActionButton({
   // TEXT with no side effect (no button, no click target).
   if (!isKnownRecoveryKind(recovery.kind) || handler === null) {
     return (
-      <span
-        data-testid={`${testId}-text`}
-        className={className ?? 'text-muted-foreground text-xs'}
-      >
+      <span data-testid={`${testId}-text`} className={className ?? 'text-muted-foreground text-xs'}>
         {recovery.label}
       </span>
     );

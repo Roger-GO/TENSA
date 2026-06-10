@@ -273,8 +273,7 @@ export const useLayoutStore = create<LayoutState>()(
       setHistoryKindFilter: (filter) => set({ historyKindFilter: filter }),
 
       setResultsViewActive: (active) => set({ resultsViewActive: active }),
-      toggleResultsView: () =>
-        set((state) => ({ resultsViewActive: !state.resultsViewActive })),
+      toggleResultsView: () => set((state) => ({ resultsViewActive: !state.resultsViewActive })),
     }),
     {
       name: LAYOUT_STORAGE_KEY,

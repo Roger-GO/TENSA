@@ -156,6 +156,66 @@ export function signedLog10(x: number): number {
   return sign * Math.log10(mag);
 }
 
+/** Damping-ratio severity band — drives point colour + the legend. */
+export type DampingBand = 'danger' | 'warning' | 'ok';
+
+/**
+ * Classify a mode's damping ratio: < 5% is poorly damped (danger),
+ * 5–10% is marginal (warning), ≥ 10% is healthy (ok). Thresholds match
+ * the conventional small-signal screening bands used in the EIG filter.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function dampingBand(damping: number): DampingBand {
+  if (damping < 0.05) return 'danger';
+  if (damping < 0.1) return 'warning';
+  return 'ok';
+}
+
+/** Token-backed fill classes per band (no hardcoded hex — see tokens.css). */
+const BAND_FILL_CLASS: Record<DampingBand, string> = {
+  danger: 'fill-danger',
+  warning: 'fill-warning',
+  ok: 'fill-success',
+};
+
+/** Token-backed swatch backgrounds for the legend dots. */
+const BAND_DOT_CLASS: Record<DampingBand, string> = {
+  danger: 'bg-danger',
+  warning: 'bg-warning',
+  ok: 'bg-success',
+};
+
+/**
+ * "Nice" tick values covering ``[min, max]`` — step is the smallest
+ * 1/2/5 × 10^k at or above ``span / target`` so the result lands in
+ * roughly the 4–6 tick range. Computed from the *current* view bounds
+ * (axis space for X) so ticks stay correct under zoom / pan.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function computeTicks(min: number, max: number, target = 5): number[] {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) return [];
+  const span = max - min;
+  const rawStep = span / target;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const norm = rawStep / mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  const first = Math.ceil(min / step) * step;
+  const out: number[] = [];
+  for (let v = first; v <= max + step * 1e-9; v += step) {
+    // Snap float noise so the origin tick renders as "0", not "1.1e-17".
+    out.push(Math.abs(v) < step * 1e-9 ? 0 : v);
+  }
+  return out;
+}
+
+/** Compact tick label: trims float noise, falls back to exponent form. */
+function formatTick(v: number): string {
+  if (v === 0 || Object.is(v, -0)) return '0';
+  const abs = Math.abs(v);
+  if (abs >= 10000 || abs < 0.001) return v.toExponential(0);
+  return String(Number(v.toPrecision(3)));
+}
+
 export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
   const storeResult = useAnalyzeStore((s) => s.eigResult);
   const filter = useAnalyzeStore((s) => s.filter);
@@ -286,6 +346,11 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
     },
     [xAxisMin, xRange, plotW, view.yMax, yRange, plotH, inverseTransformX],
   );
+
+  // Tick values are derived from the live view bounds (axis space for
+  // X) so gridlines + labels track every zoom / pan / log toggle.
+  const xTicks = useMemo(() => computeTicks(xAxisMin, xAxisMax), [xAxisMin, xAxisMax]);
+  const yTicks = useMemo(() => computeTicks(view.yMin, view.yMax), [view.yMin, view.yMax]);
 
   // Modes whose damping is negative (or whose real part is positive)
   // are growing — flag them so the log-scale axis layout is explained.
@@ -571,6 +636,33 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
           </Button>
         </div>
       </div>
+      {/* Damping-band legend — mirrors the per-point colour coding. */}
+      <div
+        data-testid="eig-scatter-legend"
+        className="border-border text-muted-foreground flex items-center gap-3 border-b px-2.5 py-1 text-[10px]"
+      >
+        <span className="flex items-center gap-1">
+          <span
+            aria-hidden="true"
+            className={cn('inline-block h-2 w-2 rounded-full', BAND_DOT_CLASS.danger)}
+          />
+          &lt; 5%
+        </span>
+        <span className="flex items-center gap-1">
+          <span
+            aria-hidden="true"
+            className={cn('inline-block h-2 w-2 rounded-full', BAND_DOT_CLASS.warning)}
+          />
+          5–10%
+        </span>
+        <span className="flex items-center gap-1">
+          <span
+            aria-hidden="true"
+            className={cn('inline-block h-2 w-2 rounded-full', BAND_DOT_CLASS.ok)}
+          />
+          ≥ 10% damping
+        </span>
+      </div>
       <svg
         ref={svgRef}
         viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
@@ -591,6 +683,56 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
             <rect x={PADDING} y={PADDING} width={plotW} height={plotH} />
           </clipPath>
         </defs>
+        {/* gridlines + numeric tick labels — derived from the live view
+            transform so they stay correct under zoom / pan. */}
+        <g data-testid="eig-scatter-grid" aria-hidden="true">
+          {xTicks.map((tick) => {
+            const px = PADDING + ((tick - xAxisMin) / xRange) * plotW;
+            return (
+              <g key={`x-${tick}`} data-testid="eig-scatter-tick-x">
+                <line
+                  x1={px}
+                  y1={PADDING}
+                  x2={px}
+                  y2={PADDING + plotH}
+                  className="stroke-border/60"
+                  strokeWidth={0.5}
+                />
+                <text
+                  x={px}
+                  y={PADDING + plotH + 8}
+                  textAnchor="middle"
+                  className="fill-muted-foreground/80 text-[6px] tabular-nums"
+                >
+                  {formatTick(tick)}
+                </text>
+              </g>
+            );
+          })}
+          {yTicks.map((tick) => {
+            const py = yToPx(tick);
+            return (
+              <g key={`y-${tick}`} data-testid="eig-scatter-tick-y">
+                <line
+                  x1={PADDING}
+                  y1={py}
+                  x2={PADDING + plotW}
+                  y2={py}
+                  className="stroke-border/60"
+                  strokeWidth={0.5}
+                />
+                <text
+                  x={PADDING - 3}
+                  y={py + 2}
+                  textAnchor="end"
+                  className="fill-muted-foreground/80 text-[6px] tabular-nums"
+                >
+                  {formatTick(tick)}
+                </text>
+              </g>
+            );
+          })}
+        </g>
         {/* axes — drawn at the data-space origin if visible, else clamped */}
         <line
           x1={PADDING}
@@ -608,19 +750,17 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
           className="stroke-border"
           strokeWidth={1}
         />
+        {/* axis labels — small + muted, pinned to the plot corners. */}
         <text
-          x={SVG_WIDTH - PADDING + 4}
-          y={clamp(yToPx(0), PADDING, PADDING + plotH) - 4}
-          className="fill-muted-foreground text-[8px]"
+          x={PADDING + plotW}
+          y={SVG_HEIGHT - 4}
+          textAnchor="end"
+          className="fill-muted-foreground text-[6.5px]"
         >
-          {xScale === 'log' ? 'log|Re|' : 'Re'}
+          {xScale === 'log' ? 'log|Re|' : 'Re [1/s]'}
         </text>
-        <text
-          x={clamp(xToPx(0), PADDING, PADDING + plotW) + 4}
-          y={PADDING - 6}
-          className="fill-muted-foreground text-[8px]"
-        >
-          Im
+        <text x={4} y={PADDING - 8} className="fill-muted-foreground text-[6.5px]">
+          Im [rad/s]
         </text>
         {points.length === 0 ? (
           <text
@@ -636,6 +776,7 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
           {points.map((p, listIdx) => {
             const isSelected = selectedModeId === p.idx;
             const isHovered = hoverPointIdx === listIdx;
+            const band = dampingBand(result.damping_ratios[p.idx] ?? 0);
             const cx = xToPx(p.real);
             const cy = yToPx(p.imag);
             // Skip points that have been panned / zoomed clean off the
@@ -668,13 +809,14 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
                   r={isSelected ? 5 : isHovered ? 4 : 3}
                   data-testid={`eig-scatter-point-${p.idx}`}
                   data-selected={isSelected ? 'true' : 'false'}
+                  data-damping-band={band}
                   className={cn(
                     'cursor-pointer transition-[r,fill]',
-                    isSelected
-                      ? 'fill-primary stroke-foreground'
-                      : isHovered
-                        ? 'fill-primary'
-                        : 'fill-foreground/60 hover:fill-primary',
+                    // Colour encodes the damping band (see legend); the
+                    // selection halo + stroke layer on top of it.
+                    BAND_FILL_CLASS[band],
+                    isSelected && 'stroke-foreground',
+                    isHovered && !isSelected && 'opacity-80',
                   )}
                   strokeWidth={isSelected ? 1.5 : 0}
                   onClick={() => handlePointClick(p.idx)}

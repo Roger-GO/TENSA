@@ -50,9 +50,7 @@ export function SynIdxSelect({
         >
           <option>—</option>
         </select>
-        <p className="text-muted-foreground text-[10px]">
-          Add a GENROU/GENCLS machine first.
-        </p>
+        <p className="text-muted-foreground text-[10px]">Add a GENROU/GENCLS machine first.</p>
       </div>
     );
   }

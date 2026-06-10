@@ -41,31 +41,17 @@ describe('<BottomDrawerToggle />', () => {
   it('renders the collapse-affordance chevron when drawer is expanded', () => {
     useLayoutStore.setState({ bottomDrawerCollapsed: false });
     render(<BottomDrawerToggle />);
-    expect(
-      screen.getByTestId('top-bar-toggle-drawer-icon-collapse'),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('top-bar-toggle-drawer-icon-expand'),
-    ).not.toBeInTheDocument();
-    expect(screen.getByTestId('top-bar-toggle-drawer')).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    expect(screen.getByTestId('top-bar-toggle-drawer-icon-collapse')).toBeInTheDocument();
+    expect(screen.queryByTestId('top-bar-toggle-drawer-icon-expand')).not.toBeInTheDocument();
+    expect(screen.getByTestId('top-bar-toggle-drawer')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('renders the expand-affordance chevron when drawer is collapsed', () => {
     useLayoutStore.setState({ bottomDrawerCollapsed: true });
     render(<BottomDrawerToggle />);
-    expect(
-      screen.getByTestId('top-bar-toggle-drawer-icon-expand'),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('top-bar-toggle-drawer-icon-collapse'),
-    ).not.toBeInTheDocument();
-    expect(screen.getByTestId('top-bar-toggle-drawer')).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    );
+    expect(screen.getByTestId('top-bar-toggle-drawer-icon-expand')).toBeInTheDocument();
+    expect(screen.queryByTestId('top-bar-toggle-drawer-icon-collapse')).not.toBeInTheDocument();
+    expect(screen.getByTestId('top-bar-toggle-drawer')).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('clicking flips bottomDrawerCollapsed; second click flips it back', async () => {
@@ -83,25 +69,15 @@ describe('<BottomDrawerToggle />', () => {
   it('does NOT render the unread dot when drawerHasUnreadResults is false', () => {
     useLayoutStore.setState({ drawerHasUnreadResults: false });
     render(<BottomDrawerToggle />);
-    expect(
-      screen.queryByTestId('top-bar-toggle-drawer-unread-dot'),
-    ).not.toBeInTheDocument();
-    expect(screen.getByTestId('top-bar-toggle-drawer')).toHaveAttribute(
-      'data-has-unread',
-      'false',
-    );
+    expect(screen.queryByTestId('top-bar-toggle-drawer-unread-dot')).not.toBeInTheDocument();
+    expect(screen.getByTestId('top-bar-toggle-drawer')).toHaveAttribute('data-has-unread', 'false');
   });
 
   it('renders the unread dot when drawerHasUnreadResults is true', () => {
     useLayoutStore.setState({ drawerHasUnreadResults: true });
     render(<BottomDrawerToggle />);
-    expect(
-      screen.getByTestId('top-bar-toggle-drawer-unread-dot'),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId('top-bar-toggle-drawer')).toHaveAttribute(
-      'data-has-unread',
-      'true',
-    );
+    expect(screen.getByTestId('top-bar-toggle-drawer-unread-dot')).toBeInTheDocument();
+    expect(screen.getByTestId('top-bar-toggle-drawer')).toHaveAttribute('data-has-unread', 'true');
   });
 
   it('clicking the toggle clears drawerHasUnreadResults', async () => {
@@ -111,17 +87,13 @@ describe('<BottomDrawerToggle />', () => {
       bottomDrawerCollapsed: true,
     });
     render(<BottomDrawerToggle />);
-    expect(
-      screen.getByTestId('top-bar-toggle-drawer-unread-dot'),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('top-bar-toggle-drawer-unread-dot')).toBeInTheDocument();
 
     await user.click(screen.getByTestId('top-bar-toggle-drawer'));
 
     expect(useLayoutStore.getState().drawerHasUnreadResults).toBe(false);
     expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(false);
-    expect(
-      screen.queryByTestId('top-bar-toggle-drawer-unread-dot'),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('top-bar-toggle-drawer-unread-dot')).not.toBeInTheDocument();
   });
 
   it('does NOT mutate sidebar / inspector collapse when clicked', async () => {

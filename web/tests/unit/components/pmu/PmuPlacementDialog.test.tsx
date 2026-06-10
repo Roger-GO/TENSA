@@ -135,8 +135,8 @@ describe('<PmuPlacementDialog />', () => {
     expect(screen.getByTestId('pmu-bus-checkbox-1')).toBeInTheDocument();
     expect(screen.getByTestId('pmu-bus-checkbox-5')).toBeInTheDocument();
     expect(screen.getByTestId('pmu-bus-checkbox-9')).toBeInTheDocument();
-    // Empty placed list message.
-    expect(screen.getByText(/No PMUs placed/)).toBeInTheDocument();
+    // Empty placed list shows the "what is this + first step" copy.
+    expect(screen.getByText(/Place phasor measurement units on buses/)).toBeInTheDocument();
     // Submit disabled when no bus checked.
     expect(screen.getByTestId('pmu-place-submit')).toBeDisabled();
   });

@@ -33,7 +33,11 @@ describe('<ControllerNode />', () => {
   afterEach(cleanup);
 
   it('renders the idx label + sub-kind data attribute', () => {
-    render(<ControllerNode {...nodeProps('EXST1_1', 'exciter', { connectorDx: -32, connectorDy: 18 })} />);
+    render(
+      <ControllerNode
+        {...nodeProps('EXST1_1', 'exciter', { connectorDx: -32, connectorDy: 18 })}
+      />,
+    );
     const node = screen.getByTestId('controller-node-EXST1_1');
     expect(node).toBeInTheDocument();
     expect(node).toHaveAttribute('data-sub-kind', 'exciter');
@@ -43,7 +47,9 @@ describe('<ControllerNode />', () => {
 
   it('draws a tether when a non-zero connector vector is present', () => {
     const { container } = render(
-      <ControllerNode {...nodeProps('EXST1_1', 'exciter', { connectorDx: -32, connectorDy: 18 })} />,
+      <ControllerNode
+        {...nodeProps('EXST1_1', 'exciter', { connectorDx: -32, connectorDy: 18 })}
+      />,
     );
     expect(container.querySelector('line')).not.toBeNull();
   });

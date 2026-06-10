@@ -75,9 +75,7 @@ describe('JobStream — happy path', () => {
         }),
       );
       // A live transition for that job.
-      socket.send(
-        JSON.stringify({ type: 'job', job_id: 'srv-1', kind: 'pflow', status: 'done' }),
-      );
+      socket.send(JSON.stringify({ type: 'job', job_id: 'srv-1', kind: 'pflow', status: 'done' }));
     });
 
     const stream = new JobStream(
@@ -121,9 +119,7 @@ describe('JobStream — happy path', () => {
       socket.send(JSON.stringify({ type: 'ready' }));
       socket.send(JSON.stringify({ type: 'snapshot', jobs: [] }));
       // The canonical done event arrives AFTER the placeholder reconciled.
-      socket.send(
-        JSON.stringify({ type: 'job', job_id: 'srv-eig', kind: 'eig', status: 'done' }),
-      );
+      socket.send(JSON.stringify({ type: 'job', job_id: 'srv-eig', kind: 'eig', status: 'done' }));
     });
 
     const stream = new JobStream(
@@ -170,9 +166,7 @@ describe('JobStream — reconnect re-sync', () => {
       socket.close({ code: 1006, reason: 'dropped' });
     });
 
-    const resyncJobs: JobEventEnvelope[] = [
-      { job_id: 'srv-resync', kind: 'cpf', status: 'done' },
-    ];
+    const resyncJobs: JobEventEnvelope[] = [{ job_id: 'srv-resync', kind: 'cpf', status: 'done' }];
     const fetchJobs = vi.fn(async () => resyncJobs);
 
     const stream = new JobStream(
@@ -211,9 +205,7 @@ describe('JobStream — close codes + frame errors', () => {
     server.stop();
   });
 
-  async function runWithClose(
-    closeCode: number,
-  ): Promise<{
+  async function runWithClose(closeCode: number): Promise<{
     onError: ReturnType<typeof vi.fn>;
     fetchJobs: ReturnType<typeof vi.fn>;
     stream: JobStream;
@@ -235,9 +227,7 @@ describe('JobStream — close codes + frame errors', () => {
 
   it('4404 fires session_not_found and does NOT reconnect or re-sync', async () => {
     const { onError, fetchJobs, stream } = await runWithClose(4404);
-    expect(onError).toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'session_not_found' }),
-    );
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'session_not_found' }));
     await tick(10);
     expect(fetchJobs).not.toHaveBeenCalled();
     stream.dispose();
@@ -245,9 +235,7 @@ describe('JobStream — close codes + frame errors', () => {
 
   it('4500 fires internal_error AND still re-syncs', async () => {
     const { onError, fetchJobs, stream } = await runWithClose(4500);
-    expect(onError).toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'internal_error' }),
-    );
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'internal_error' }));
     // 4500 is treated as a transient drop: HTTP re-sync fires.
     for (let i = 0; i < 10 && fetchJobs.mock.calls.length === 0; i += 1) await tick();
     expect(fetchJobs).toHaveBeenCalledWith(SESSION_ID);
@@ -266,9 +254,7 @@ describe('JobStream — close codes + frame errors', () => {
     );
     stream.start();
     for (let i = 0; i < 15 && onError.mock.calls.length === 0; i += 1) await tick();
-    expect(onError).toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'protocol_error' }),
-    );
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'protocol_error' }));
     stream.dispose();
   });
 

@@ -17,11 +17,7 @@ function bus(idx: number | string): TopologyEntry {
 function gen(idx: number | string, busIdx: number | string, kind = 'GENROU'): TopologyEntry {
   return { idx, name: `gen-${idx}`, kind, params: { bus: busIdx } };
 }
-function ctrl(
-  idx: string,
-  kind: string,
-  params: Record<string, number | string>,
-): TopologyEntry {
+function ctrl(idx: string, kind: string, params: Record<string, number | string>): TopologyEntry {
   return { idx, name: `${kind} ${idx}`, kind, params };
 }
 

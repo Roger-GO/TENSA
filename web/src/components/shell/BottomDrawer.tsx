@@ -26,11 +26,7 @@
 import { Fragment, useEffect } from 'react';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { cn } from '@/lib/cn';
-import {
-  BOTTOM_DRAWER_TABS,
-  useLayoutStore,
-  type BottomDrawerTab,
-} from '@/store/layout';
+import { BOTTOM_DRAWER_TABS, useLayoutStore, type BottomDrawerTab } from '@/store/layout';
 import { useAnalyzeStore } from '@/store/analyze';
 import { BusesGrid } from '@/components/data-grid/BusesGrid';
 import { LinesGrid } from '@/components/data-grid/LinesGrid';
@@ -123,7 +119,7 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
               <span
                 aria-hidden="true"
                 data-testid="bottom-drawer-tab-group-divider"
-                className="bg-border my-1.5 ml-1 mr-1 w-px shrink-0 self-stretch"
+                className="bg-border my-1.5 mr-1 ml-1 w-px shrink-0 self-stretch"
               />
             ) : null}
             <TabsPrimitive.Trigger

@@ -97,6 +97,15 @@ export interface RunRecord {
   /** Optional human-facing reason when ``state === "error"``. */
   errorReason: string | null;
   /**
+   * Whether the run's ``done`` envelope reported ``converged: true``.
+   * ``null``/``undefined`` until the run completes (or for legacy
+   * records seeded without the field). ``false`` means the solver
+   * halted early (e.g., numerical instability at ``tCurrent < tf``) —
+   * the run "finished" on the wire but is NOT a clean completion, so
+   * status UI should read it as "Halted" rather than "Done".
+   */
+  converged?: boolean | null;
+  /**
    * Optional researcher-supplied label for this run (Unit 20, v2.0).
    * Surfaced by the ``RunLegendChip`` and any other run-identifying
    * UI when present; falls back to the auto-generated short-id + tf
@@ -197,8 +206,14 @@ export interface RunsState {
   /** Append rows from one decoded Arrow batch. Triggers cap-eviction if needed. */
   appendFrame: (runId: string, payload: AppendFramePayload) => void;
 
-  /** Mark a run done (clean exit). ``finalT`` is from the WS ``done`` message. */
-  markRunDone: (runId: string, finalT: number) => void;
+  /**
+   * Mark a run done (the WS ``done`` envelope arrived). ``finalT`` and
+   * ``converged`` come from the ``done`` message; ``converged: false``
+   * means the solver halted before ``tf`` (the run record keeps
+   * ``state: "done"`` but UI should present it as halted). Omitting
+   * ``converged`` leaves the record's flag as ``null`` (unknown).
+   */
+  markRunDone: (runId: string, finalT: number, converged?: boolean) => void;
 
   /** Mark a run error. ``reason`` is surfaced in the error banner. */
   markRunError: (runId: string, reason: string) => void;
@@ -460,6 +475,7 @@ export const useRunsStore = create<RunsState>((set, get) => ({
       connection: 'connected',
       abortedLocally: false,
       errorReason: null,
+      converged: null,
     };
     // Apply retention AFTER inserting the new run + flipping the active
     // id so the previously-active run (which has just settled into the
@@ -533,7 +549,7 @@ export const useRunsStore = create<RunsState>((set, get) => ({
     });
   },
 
-  markRunDone: (runId, finalT) => {
+  markRunDone: (runId, finalT, converged) => {
     const cur = get().runs[runId];
     if (!cur) return;
     // Apply retention policy on completion: the just-completed run now
@@ -542,7 +558,12 @@ export const useRunsStore = create<RunsState>((set, get) => ({
     const nextRuns = applyRetentionPolicy(
       {
         ...get().runs,
-        [runId]: { ...cur, state: 'done', tCurrent: Math.max(cur.tCurrent, finalT) },
+        [runId]: {
+          ...cur,
+          state: 'done',
+          tCurrent: Math.max(cur.tCurrent, finalT),
+          converged: converged ?? null,
+        },
       },
       get().retentionLimit,
       get().activeRunId,

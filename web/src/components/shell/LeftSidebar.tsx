@@ -81,7 +81,7 @@ function Section({ heading, testId, children }: SectionProps) {
           // Wider tracking + slightly tighter line-height so the eyebrow
           // reads as a section label (not a card title). Letter-spacing
           // is the load-bearing change vs the previous tracking-wider.
-          'text-[10px] font-semibold uppercase leading-none',
+          'text-[10px] leading-none font-semibold uppercase',
           'tracking-[0.12em]',
         )}
       >

@@ -48,9 +48,7 @@ export function findTopologyEntry(
     // controller models, so matching on idx alone could alias to the wrong
     // device (e.g. an exciter vs a governor both at idx 1).
     return (
-      bucket.find(
-        (e) => e.kind === selected.modelClass && String(e.idx) === selected.idx,
-      ) ?? null
+      bucket.find((e) => e.kind === selected.modelClass && String(e.idx) === selected.idx) ?? null
     );
   }
   return bucket.find((e) => String(e.idx) === selected.idx) ?? null;

@@ -24,9 +24,7 @@ const TOPOLOGY: TopologySummary = {
   lines: [],
   transformers: [],
   generators: [],
-  loads: [
-    { idx: '0', name: 'Load0', kind: 'PQ', params: { bus: 3, p0: 90, q0: 30 } },
-  ],
+  loads: [{ idx: '0', name: 'Load0', kind: 'PQ', params: { bus: 3, p0: 90, q0: 30 } }],
 };
 
 beforeEach(() => {
