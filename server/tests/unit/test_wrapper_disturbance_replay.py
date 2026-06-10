@@ -86,3 +86,46 @@ def test_disturbance_specs_are_json_round_trippable() -> None:
         cls = type(spec)
         rebuilt = cls(**as_dict)
         assert rebuilt == spec
+
+
+# ---- idx representation coercion (agent-facing robustness) ------------------
+
+
+class _FakeIdx:
+    def __init__(self, values: list[object]) -> None:
+        self.v = values
+
+
+class _FakeModel:
+    def __init__(self, values: list[object]) -> None:
+        self.idx = _FakeIdx(values)
+
+
+class _FakeSystem:
+    def __init__(self, **models: _FakeModel) -> None:
+        for name, model in models.items():
+            setattr(self, name, model)
+
+
+@pytest.mark.unit
+def test_coerce_existing_idx_matches_string_to_native_int() -> None:
+    """JSON clients send "7"; xlsx cases store 7 — resolve to the native int."""
+    ss = _FakeSystem(Bus=_FakeModel([1, 2, 7, 14]))
+    assert Wrapper._coerce_existing_idx(ss, "Bus", "7") == 7
+
+
+@pytest.mark.unit
+def test_coerce_existing_idx_keeps_exact_match_untouched() -> None:
+    ss = _FakeSystem(Bus=_FakeModel(["B1", "B2"]))
+    assert Wrapper._coerce_existing_idx(ss, "Bus", "B2") == "B2"
+    ss_int = _FakeSystem(Bus=_FakeModel([1, 2]))
+    assert Wrapper._coerce_existing_idx(ss_int, "Bus", 2) == 2
+
+
+@pytest.mark.unit
+def test_coerce_existing_idx_passes_unknown_through() -> None:
+    """Unknown idx stays as-is so ANDES raises its own descriptive error."""
+    ss = _FakeSystem(Bus=_FakeModel([1, 2]))
+    assert Wrapper._coerce_existing_idx(ss, "Bus", "99") == "99"
+    # Unknown model name → unchanged.
+    assert Wrapper._coerce_existing_idx(ss, "Line", "1") == "1"
