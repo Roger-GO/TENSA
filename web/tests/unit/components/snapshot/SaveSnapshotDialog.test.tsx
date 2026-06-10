@@ -227,7 +227,9 @@ describe('<SaveSnapshotDialog /> — Input contract (Unit 5)', () => {
 
 describe('<SaveSnapshotDialog /> — keyboard scoping (Unit 6)', () => {
   it('typing into the name input does not trigger a global hotkey', async () => {
-    const user = userEvent.setup();
+    // delay:null types synchronously — with the default inter-key delay this
+    // test drops keystrokes when the full suite saturates the CPU.
+    const user = userEvent.setup({ delay: null });
     const globalHotkeyCallback = vi.fn();
 
     function TestHarness() {
