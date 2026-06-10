@@ -1,0 +1,101 @@
+# ANDES App — API map for LLM agents
+
+ANDES App is a web workbench + HTTP/WebSocket API around the ANDES power-system
+simulator. Everything the UI does goes through this API, so an agent can do
+everything a human can. No authentication: the server trusts the local user and
+binds to 127.0.0.1 by default.
+
+Base URL: http://127.0.0.1:<port>/api  (all routes below are relative to /api)
+Full machine-readable contract: GET /openapi.json  (Swagger UI at /docs, ReDoc at /redoc)
+Copy-paste examples: examples/ in the repo (curl walkthrough + Python client).
+
+## Golden workflow (order matters)
+
+1. POST /sessions                          → {"session_id": "..."}  (one ANDES System per session, isolated subprocess)
+2. POST /sessions/{id}/case                {"primary_path": "ieee14/ieee14_full.xlsx"}  — path is RELATIVE to the server's --workspace dir; formats: xlsx raw dyr json m; optional "addfiles": ["...dyr"]
+3. (pre-setup only) POST /sessions/{id}/disturbances  — add faults/toggles/alters BEFORE running anything
+4. POST /sessions/{id}/pflow               → converged flag + bus voltages; or POST /sessions/{id}/tds {"tf": 5.0} for time-domain (batch, synchronous)
+5. GET  /sessions/{id}/operating-point     → PflowResult: bus_voltages/bus_angles dicts (keyed by bus idx),
+                                             line_flows, generator_outputs, load_consumption
+6. POST /sessions/{id}/reload              → back to pre-setup state (required to add MORE disturbances after a run)
+7. DELETE /sessions/{id}                   → cleanup
+
+Key state rule: a session is "pre-setup" after case load / reload, and "setup" after the
+first PF/TDS run. Disturbances and topology edits (add/edit/delete elements) are
+REJECTED with 409 once setup has happened — the error's "recovery" field tells you to reload.
+
+## Errors
+
+All errors are RFC-7807 ProblemDetails JSON: {type, title, status, detail, recovery}.
+"recovery" is machine-actionable: {kind: load-case | reload-case | run-pflow | retry |
+add-measurements | wait-for-job | wait-for-sweep | none, label: "..."}. Follow it.
+
+## Route inventory
+
+Sessions:        POST/GET /sessions · GET/DELETE /sessions/{id}
+Case+topology:   POST /sessions/{id}/case · POST /sessions/{id}/reload · GET /sessions/{id}/topology
+                 GET /sessions/{id}/topology/models/{model}/alterable_params · GET /sessions/{id}/connectivity
+Power flow:      POST /sessions/{id}/pflow · GET /sessions/{id}/operating-point
+TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrator, tds_config_overrides)
+                 POST /sessions/{id}/abort  (cooperative abort of a running TDS)
+Disturbances:    POST/GET /sessions/{id}/disturbances
+  FaultSpec:  {"kind":"fault","bus_idx":"7","tf":1.0,"tc":1.1,"xf":0.05,"rf":0}   (3-phase fault at bus, applied tf→tc seconds)
+  ToggleSpec: {"kind":"toggle","model":"Line","dev_idx":"Line_6","t":1.0}          (connect/disconnect a device at t)
+  AlterSpec:  {"kind":"alter","model":"PQ","dev_idx":"PQ_1","src":"p0","t":1.0,"method":"*","amount":1.2}
+              (change parameter at t; method one of + - * / =; use alterable_params to discover valid src names)
+Elements:        GET /topology/schema (every buildable model + typed params) · POST /sessions/{id}/elements (add)
+                 PUT/DELETE /sessions/{id}/elements/{model}/{idx} (edit/delete)
+                 POST /sessions/{id}/blank (start empty system) · POST /sessions/{id}/save (write case file)
+                 POST /sessions/{id}/undo-last-edit
+Jobs:            GET /sessions/{id}/jobs[?kind=&status=] · GET/DELETE /sessions/{id}/jobs/{job_id}
+                 (statuses: pending running done failed cancelled)
+Clone editing:   POST /sessions/{id}/case/clone (start copy-on-write edit)
+                 PUT /sessions/{id}/case/clone/params/{model}/{idx}/{param} (edit one param)
+                 POST .../case/clone/undo · .../case/clone/redo · .../case/clone/reset · .../case/clone/save-as
+                 GET .../case/clone/diff/{model}/{idx}
+Eigenanalysis:   POST /sessions/{id}/eig · GET .../eig/modes/{mode_idx}/participation · GET .../eig/state-matrix.mat
+CPF:             POST /sessions/{id}/cpf · POST /sessions/{id}/cpf/qv
+State estimation:POST /sessions/{id}/se/measurements/generate · POST /sessions/{id}/se
+PMU placement:   POST/GET /sessions/{id}/pmu · DELETE /sessions/{id}/pmu/{pmu_idx} · GET .../pmu/{run_id}/export.csv
+Profiles:        POST /sessions/{id}/profiles/upload · POST/GET/DELETE /sessions/{id}/profiles
+Sweeps:          POST /sessions/{id}/sweep (param sweep over disturbance/sim values; per-iteration TDS results)
+Snapshots:       POST /sessions/{id}/snapshot · POST .../snapshot/restore · GET .../snapshots · DELETE .../snapshot/{name}
+Bundles:         POST /sessions/{id}/bundle/export (zip: case+disturbances+params) · POST .../bundle/import
+Reports:         GET /sessions/{id}/report
+Workspace:       GET /workspace/files · GET/PUT /workspace/layout?case_path=<rel>
+
+## WebSockets (live streaming)
+
+Protocol for all WS endpoints: connect → server sends {"type":"ready"} → client sends its
+first command frame. Close codes: 4404 unknown session, 4500 worker error.
+
+WS /api/ws/{session_id}            — TDS live stream. Send {"type":"start_tds","tf":5.0};
+                                     server replies {"type":"stream_start",...} then BINARY
+                                     Apache Arrow IPC chunks (time-series frames), then {"type":"done",...}.
+                                     Reconnect+resume: {"type":"resume","run_id":"...","last_seq":N}.
+WS /api/ws/{session_id}/jobs/events— job lifecycle feed: "snapshot" then "job" envelopes per transition.
+WS /api/ws/{session_id}/sweep/{id} — sweep progress per iteration.
+
+Prefer batch POST /tds unless you need live data — it returns complete results in one
+response and needs no Arrow decoding.
+
+## Gotchas for agents
+
+- Case paths are workspace-relative; absolute paths and ".." are rejected (400).
+- GENROU machines: ANDES uses M (=2H); the add-element endpoint accepts H and converts.
+- Exciters/governors link to machines via the "syn" parameter (a SynGen idx).
+- Line/Transformer impedances are pu on (Sn, Vn1); the add-element endpoint derives
+  Vn1/Vn2 from the connected buses automatically.
+- TDS batch endpoint is synchronous with a 300 s server-side cap; for long runs use the WS stream.
+- After any run, GET /operating-point reflects the final state (TDS end point, not the initial PF).
+- model names are ANDES model names: Bus, Line, PQ, PV, Slack, Shunt, GENROU, GENCLS,
+  IEEEX1, ESDC2A, EXST1, SEXS, TGOV1, IEEEG1, Fault, Toggle, Alter, ...
+  GET /api/topology/schema lists every model the builder supports with typed params.
+
+## MCP
+
+An MCP (Model Context Protocol) stdio server ships as an optional extra:
+  pip install -e './server[mcp]' && andes-app mcp --workspace ~/andes-cases
+It wraps the golden workflow (create_session, load_case, run_pflow, run_tds,
+add_disturbance, get_topology, get_operating_point, list_workspace_files, ...) so MCP
+clients (Claude Code, etc.) can drive simulations as native tools.
