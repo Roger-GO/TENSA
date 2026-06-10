@@ -439,10 +439,7 @@ export const useJobsStore = create<JobsState>()(
         // placeholder) — the only ambiguity is concurrent same-kind failures,
         // which collapse to one row (acceptable, mirrors the substrate's own
         // failure-signature coalescing).
-        if (
-          !envelope.job_id.startsWith(LOCAL_ID_PREFIX) &&
-          isTerminalStatus(merged.status)
-        ) {
+        if (!envelope.job_id.startsWith(LOCAL_ID_PREFIX) && isTerminalStatus(merged.status)) {
           for (const [id, rec] of Object.entries(prev)) {
             if (
               id !== envelope.job_id &&

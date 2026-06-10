@@ -1,6 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-  <rect width="32" height="32" rx="6" fill="#0b0d12" stroke="none" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <!-- ANDES App favicon: the busbar + sine mark on a dark rounded square
+       so it stays legible at 16px on both light and dark browser chrome. -->
+  <rect width="32" height="32" rx="7" fill="#0b0d12" />
   <line x1="6" y1="16" x2="26" y2="16" stroke="#e7eaf0" stroke-width="3.5" />
-  <line x1="6" y1="12" x2="6" y2="20" stroke="#e7eaf0" />
-  <line x1="26" y1="12" x2="26" y2="20" stroke="#e7eaf0" />
+  <path d="M6 16 C9.3 7, 12.7 7, 16 16 C19.3 25, 22.7 25, 26 16" stroke="#60a5fa" stroke-width="2.5" />
 </svg>

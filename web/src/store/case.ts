@@ -36,13 +36,7 @@ export interface CaseSelection {
  * data grid. Controllers are dynamic devices handled by the separate
  * `'controller'` variant of `SelectedElement` below.
  */
-export type StaticElementKind =
-  | 'bus'
-  | 'line'
-  | 'transformer'
-  | 'generator'
-  | 'load'
-  | 'shunt';
+export type StaticElementKind = 'bus' | 'line' | 'transformer' | 'generator' | 'load' | 'shunt';
 
 /**
  * A handle to one element on the SLD canvas. Written by `SldCanvas`

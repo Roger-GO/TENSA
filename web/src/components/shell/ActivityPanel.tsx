@@ -39,13 +39,7 @@ import {
 } from '@/store/jobs';
 import { useLayoutStore, ACTIVITY_PANEL_TABS, type ActivityPanelTab } from '@/store/layout';
 import { useSessionStore } from '@/store/session';
-import {
-  useCancelJob,
-  useRunPflow,
-  useEigRun,
-  useSeRun,
-  useReloadCase,
-} from '@/api/queries';
+import { useCancelJob, useRunPflow, useEigRun, useSeRun, useReloadCase } from '@/api/queries';
 import { kindLabel } from '@/components/shell/jobLabels';
 
 const STATUS_LABELS: Record<JobStatus, string> = {
@@ -67,9 +61,7 @@ function formatElapsed(seconds: number): string {
 
 /** Elapsed for a terminal row (ended − started) or in-flight (now − started). */
 function elapsedFor(job: JobRecord): number {
-  const end = isTerminalStatus(job.status)
-    ? (job.ended_at ?? job.updated_at)
-    : Date.now() / 1000;
+  const end = isTerminalStatus(job.status) ? (job.ended_at ?? job.updated_at) : Date.now() / 1000;
   return end - job.started_at;
 }
 
@@ -107,7 +99,10 @@ function ActivityRow({ job, actions }: { job: JobRecord; actions: RowActions }) 
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           {failed ? (
-            <span data-testid={`activity-row-error-icon-${job.id}`} className="text-danger shrink-0">
+            <span
+              data-testid={`activity-row-error-icon-${job.id}`}
+              className="text-danger shrink-0"
+            >
               <ErrorIcon />
             </span>
           ) : null}
@@ -121,8 +116,7 @@ function ActivityRow({ job, actions }: { job: JobRecord; actions: RowActions }) 
           className={cn(
             'shrink-0 rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10px] font-medium',
             job.status === 'done' && 'bg-muted text-muted-foreground',
-            (job.status === 'pending' || job.status === 'running') &&
-              'bg-primary/15 text-primary',
+            (job.status === 'pending' || job.status === 'running') && 'bg-primary/15 text-primary',
             job.status === 'failed' && 'bg-danger/15 text-danger',
             job.status === 'cancelled' && 'bg-muted text-muted-foreground',
           )}
@@ -315,7 +309,10 @@ export function ActivityPanel() {
         className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-2"
       >
         {active.length === 0 ? (
-          <div data-testid="activity-panel-active-empty" className="flex flex-1 items-center justify-center">
+          <div
+            data-testid="activity-panel-active-empty"
+            className="flex flex-1 items-center justify-center"
+          >
             <EmptyState
               icon={<InboxIcon />}
               title="No active jobs"
@@ -334,7 +331,10 @@ export function ActivityPanel() {
         className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-2"
       >
         {history.length === 0 ? (
-          <div data-testid="activity-panel-history-empty" className="flex flex-1 items-center justify-center">
+          <div
+            data-testid="activity-panel-history-empty"
+            className="flex flex-1 items-center justify-center"
+          >
             <EmptyState
               icon={<HistoryIcon />}
               title="No history yet"
@@ -343,9 +343,7 @@ export function ActivityPanel() {
             />
           </div>
         ) : (
-          history.map((job) => (
-            <ActivityRow key={job.id} job={job} actions={historyActions(job)} />
-          ))
+          history.map((job) => <ActivityRow key={job.id} job={job} actions={historyActions(job)} />)
         )}
       </TabsPrimitive.Content>
 

@@ -359,8 +359,7 @@ export function useSessionRecovery(): void {
     // "Edits lost" only when there were ACTUAL edits — merely toggling Edit
     // mode initialises a clone (depth 0) with nothing to lose; warning then
     // would be a false alarm.
-    const hadPendingEdits =
-      cloneSnapshot.cloneUndoDepth > 0 || cloneSnapshot.cloneRedoDepth > 0;
+    const hadPendingEdits = cloneSnapshot.cloneUndoDepth > 0 || cloneSnapshot.cloneRedoDepth > 0;
     loadCase.mutate(
       {
         sessionId,

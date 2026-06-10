@@ -194,7 +194,8 @@ export const useUiStore = create<UiState>()(
 
       tdsConfigOverrides: { ...DEFAULT_TDS_CONFIG_OVERRIDES },
       setTdsConfigOverrides: (next) => set({ tdsConfigOverrides: { ...next } }),
-      resetTdsConfigOverrides: () => set({ tdsConfigOverrides: { ...DEFAULT_TDS_CONFIG_OVERRIDES } }),
+      resetTdsConfigOverrides: () =>
+        set({ tdsConfigOverrides: { ...DEFAULT_TDS_CONFIG_OVERRIDES } }),
     }),
     {
       name: 'andes-ui-tds-integrator',

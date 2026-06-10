@@ -110,10 +110,7 @@ describe('<ActivityPanel />', () => {
     await user.click(cancelBtn);
 
     expect(cancelMutate).toHaveBeenCalledTimes(1);
-    expect(cancelMutate).toHaveBeenCalledWith(
-      { sessionId: SID, jobId: 'j2' },
-      expect.anything(),
-    );
+    expect(cancelMutate).toHaveBeenCalledWith({ sessionId: SID, jobId: 'j2' }, expect.anything());
   });
 
   it('does not show Cancel when can_cancel is false', () => {

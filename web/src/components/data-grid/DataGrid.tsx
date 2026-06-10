@@ -116,11 +116,7 @@ interface VirtualRowData<Row> {
   testId?: string;
 }
 
-function VirtualRow<Row>({
-  index,
-  style,
-  data,
-}: ListChildComponentProps<VirtualRowData<Row>>) {
+function VirtualRow<Row>({ index, style, data }: ListChildComponentProps<VirtualRowData<Row>>) {
   const row = data.rows[index];
   if (row === undefined) return null;
   const id = data.rowIdAccessor(row);
@@ -193,9 +189,7 @@ export function DataGrid<Row>({
     const col = columns.find((c) => c.key === sort.column);
     if (!col) return rows;
     const direction = sort.direction;
-    return [...rows].sort((a, b) =>
-      compareValues(col.accessor(a), col.accessor(b), direction),
-    );
+    return [...rows].sort((a, b) => compareValues(col.accessor(a), col.accessor(b), direction));
   }, [rows, columns, sort]);
 
   // Clamp the cursor to the current row range. Without this, a row
@@ -220,15 +214,18 @@ export function DataGrid<Row>({
   // grid's outer div + ``tabIndex={0}`` makes the container focusable.
   // ``enabled`` is left to react-hotkeys-hook's element-scope check
   // (the ref attachment) — we never need to fire these arrows globally.
-  const advanceFocus = useCallback((delta: number) => {
-    setFocusedRowIndex((prev) => {
-      if (sortedRows.length === 0) return 0;
-      const next = prev + delta;
-      if (next < 0) return 0;
-      if (next >= sortedRows.length) return sortedRows.length - 1;
-      return next;
-    });
-  }, [sortedRows.length]);
+  const advanceFocus = useCallback(
+    (delta: number) => {
+      setFocusedRowIndex((prev) => {
+        if (sortedRows.length === 0) return 0;
+        const next = prev + delta;
+        if (next < 0) return 0;
+        if (next >= sortedRows.length) return sortedRows.length - 1;
+        return next;
+      });
+    },
+    [sortedRows.length],
+  );
 
   const arrowDownRef = useHotkeys<HTMLDivElement>(
     'down',
@@ -335,10 +332,7 @@ export function DataGrid<Row>({
     >
       <Header columns={columns} sort={sort} onHeaderClick={onHeaderClick} testId={testId} />
       {useVirtualization ? (
-        <div
-          data-testid={testId ? `${testId}-virtual` : undefined}
-          className="min-h-0 flex-1"
-        >
+        <div data-testid={testId ? `${testId}-virtual` : undefined} className="min-h-0 flex-1">
           <FixedSizeList<VirtualRowData<Row>>
             height={Math.min(VIRTUAL_VIEWPORT_HEIGHT, sortedRows.length * ROW_HEIGHT)}
             itemCount={sortedRows.length}
@@ -447,7 +441,7 @@ function Header<Row>({ columns, sort, onHeaderClick, testId }: HeaderProps<Row>)
             aria-sort={aria}
             style={col.width ? { width: col.width, flex: '0 0 auto' } : undefined}
             className={cn(
-              'select-none px-2 py-1',
+              'px-2 py-1 select-none',
               col.numeric ? 'text-right' : 'text-left',
               !col.width ? 'flex-1' : '',
             )}

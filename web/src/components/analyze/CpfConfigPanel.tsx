@@ -84,7 +84,10 @@ const DIRECTION_OPTIONS: ReadonlyArray<{ value: CpfDirection; label: string; hin
  * has one source of truth.
  */
 // eslint-disable-next-line react-refresh/only-export-components
-export function validateCpfOverrides(stepText: string, maxIterText: string): Record<string, string> {
+export function validateCpfOverrides(
+  stepText: string,
+  maxIterText: string,
+): Record<string, string> {
   const errors: Record<string, string> = {};
   const stepTrim = stepText.trim();
   if (stepTrim.length > 0) {
@@ -307,7 +310,12 @@ function NumberField({ id, label, value, onChange, error, hint, placeholder }: N
         </span>
       ) : null}
       {error ? (
-        <span id={errorId} role="alert" data-testid={`error-${id}`} className="text-danger text-[10px]">
+        <span
+          id={errorId}
+          role="alert"
+          data-testid={`error-${id}`}
+          className="text-danger text-[10px]"
+        >
           {error}
         </span>
       ) : null}

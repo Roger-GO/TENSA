@@ -229,9 +229,7 @@ describe('useCommandRegistry — v3 Unit 2 view commands', () => {
     const { result } = renderHook(() => useCommandRegistry(), { wrapper });
     const sidebar = result.current.find((c) => c.id === 'view.toggleLeftSidebar');
     const drawer = result.current.find((c) => c.id === 'view.toggleBottomDrawer');
-    const inspector = result.current.find(
-      (c) => c.id === 'view.toggleRightInspector',
-    );
+    const inspector = result.current.find((c) => c.id === 'view.toggleRightInspector');
     expect(sidebar?.shortcut).toBe('meta+b, ctrl+b');
     expect(drawer?.shortcut).toBe('meta+j, ctrl+j');
     expect(inspector?.shortcut).toBe('meta+backslash, ctrl+backslash');
@@ -261,9 +259,7 @@ describe('useCommandRegistry — v3 Unit 2 view commands', () => {
 
   it('view.toggleRightInspector action flips the layout slice', () => {
     const { result } = renderHook(() => useCommandRegistry(), { wrapper });
-    const cmd = result.current.find(
-      (c) => c.id === 'view.toggleRightInspector',
-    );
+    const cmd = result.current.find((c) => c.id === 'view.toggleRightInspector');
     expect(useLayoutStore.getState().rightInspectorCollapsed).toBe(false);
     cmd?.action();
     expect(useLayoutStore.getState().rightInspectorCollapsed).toBe(true);

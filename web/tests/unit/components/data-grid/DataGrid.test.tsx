@@ -74,8 +74,8 @@ describe('<DataGrid /> — sort', () => {
         columns={COLUMNS}
         rows={[
           { id: 'a', name: 'Bus_A', v: 0.95 },
-          { id: 'b', name: 'Bus_B', v: 1.10 },
-          { id: 'c', name: 'Bus_C', v: 1.00 },
+          { id: 'b', name: 'Bus_B', v: 1.1 },
+          { id: 'c', name: 'Bus_C', v: 1.0 },
         ]}
         rowIdAccessor={(r) => r.id}
         testId="dg"
@@ -110,7 +110,7 @@ describe('<DataGrid /> — sort', () => {
         columns={COLUMNS}
         rows={[
           { id: 'a', name: 'Bus_A', v: null },
-          { id: 'b', name: 'Bus_B', v: 1.10 },
+          { id: 'b', name: 'Bus_B', v: 1.1 },
         ]}
         rowIdAccessor={(r) => r.id}
         testId="dg"

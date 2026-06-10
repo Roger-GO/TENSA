@@ -38,31 +38,17 @@ describe('<SidebarToggle />', () => {
   it('renders the collapse-affordance chevron when sidebar is expanded', () => {
     useLayoutStore.setState({ leftSidebarCollapsed: false });
     render(<SidebarToggle />);
-    expect(
-      screen.getByTestId('top-bar-toggle-sidebar-icon-collapse'),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('top-bar-toggle-sidebar-icon-expand'),
-    ).not.toBeInTheDocument();
-    expect(screen.getByTestId('top-bar-toggle-sidebar')).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    expect(screen.getByTestId('top-bar-toggle-sidebar-icon-collapse')).toBeInTheDocument();
+    expect(screen.queryByTestId('top-bar-toggle-sidebar-icon-expand')).not.toBeInTheDocument();
+    expect(screen.getByTestId('top-bar-toggle-sidebar')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('renders the expand-affordance chevron when sidebar is collapsed', () => {
     useLayoutStore.setState({ leftSidebarCollapsed: true });
     render(<SidebarToggle />);
-    expect(
-      screen.getByTestId('top-bar-toggle-sidebar-icon-expand'),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('top-bar-toggle-sidebar-icon-collapse'),
-    ).not.toBeInTheDocument();
-    expect(screen.getByTestId('top-bar-toggle-sidebar')).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    );
+    expect(screen.getByTestId('top-bar-toggle-sidebar-icon-expand')).toBeInTheDocument();
+    expect(screen.queryByTestId('top-bar-toggle-sidebar-icon-collapse')).not.toBeInTheDocument();
+    expect(screen.getByTestId('top-bar-toggle-sidebar')).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('clicking flips leftSidebarCollapsed; second click flips it back', async () => {
@@ -80,10 +66,7 @@ describe('<SidebarToggle />', () => {
   it('exposes the collapsed state via data-collapsed', () => {
     useLayoutStore.setState({ leftSidebarCollapsed: true });
     render(<SidebarToggle />);
-    expect(screen.getByTestId('top-bar-toggle-sidebar')).toHaveAttribute(
-      'data-collapsed',
-      'true',
-    );
+    expect(screen.getByTestId('top-bar-toggle-sidebar')).toHaveAttribute('data-collapsed', 'true');
   });
 
   it('does NOT mutate drawerHasUnreadResults when clicked', async () => {

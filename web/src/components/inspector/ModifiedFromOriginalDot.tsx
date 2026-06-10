@@ -15,12 +15,7 @@
 import { useCloneEdit } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import type { CloneDiffPair, ParamValue } from '@/api/types';
-import {
-  Popover,
-  PopoverContent,
-  PopoverPortal,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { Popover, PopoverContent, PopoverPortal, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/cn';
 
 /** Format a diff value for the tooltip ("—" for an absent value). */

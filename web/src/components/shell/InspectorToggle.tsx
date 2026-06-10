@@ -28,9 +28,7 @@ export function InspectorToggle({ className }: InspectorToggleProps) {
   const collapsed = useLayoutStore((s) => s.rightInspectorCollapsed);
   const toggle = useLayoutStore((s) => s.toggleRightInspector);
 
-  const tooltip = collapsed
-    ? 'Show inspector (⌘\\)'
-    : 'Hide inspector (⌘\\)';
+  const tooltip = collapsed ? 'Show inspector (⌘\\)' : 'Hide inspector (⌘\\)';
 
   return (
     <Button

@@ -60,14 +60,7 @@ import { useLayoutStore } from '@/store/layout';
 import { requestEigLogToggle, requestEigViewReset } from '@/lib/eigViewBus';
 import type { RunRoutine } from '@/lib/useRunReadiness';
 
-export type CommandGroup =
-  | 'workspace'
-  | 'edit'
-  | 'run'
-  | 'export'
-  | 'view'
-  | 'navigation'
-  | 'help';
+export type CommandGroup = 'workspace' | 'edit' | 'run' | 'export' | 'view' | 'navigation' | 'help';
 
 /** Stable group ordering — palette renders sections in this order. */
 export const COMMAND_GROUP_ORDER: readonly CommandGroup[] = [
@@ -182,10 +175,7 @@ export function useCommandRegistry(): readonly Command[] {
   const pfConverged = lastPfRun?.converged === true;
 
   return useMemo<readonly Command[]>(() => {
-    const handleSelectRoutine = (
-      routine: RunRoutine,
-      opts?: { cpfSubMode?: 'nose' | 'qv' },
-    ) => {
+    const handleSelectRoutine = (routine: RunRoutine, opts?: { cpfSubMode?: 'nose' | 'qv' }) => {
       setActiveRoutine(routine);
       if (routine === 'eig') {
         setAnalyzeSubMode('eig');
@@ -388,8 +378,7 @@ export function useCommandRegistry(): readonly Command[] {
           if (sessionId !== null) cloneResetMutation.mutate(sessionId);
         },
         // No shortcut — destructive, menu/palette-only per the plan.
-        when: () =>
-          sessionId !== null && cloneInitialized && !cloneResetMutation.isPending,
+        when: () => sessionId !== null && cloneInitialized && !cloneResetMutation.isPending,
       },
 
       // ---- run -----------------------------------------------------------
@@ -551,7 +540,16 @@ export function useCommandRegistry(): readonly Command[] {
         id: 'view.toggle-results-view',
         label: 'Toggle results view',
         group: 'view',
-        keywords: ['results', 'view', 'maximize', 'fullscreen', 'plot', 'analysis', 'page', 'hide diagram'],
+        keywords: [
+          'results',
+          'view',
+          'maximize',
+          'fullscreen',
+          'plot',
+          'analysis',
+          'page',
+          'hide diagram',
+        ],
         action: () => {
           useLayoutStore.getState().toggleResultsView();
         },

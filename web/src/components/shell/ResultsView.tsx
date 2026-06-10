@@ -51,10 +51,7 @@ export function ResultsView({ className }: ResultsViewProps) {
   const hasResults = hasPfResult || hasRuns || hasEig || hasCpf || hasSe;
 
   return (
-    <div
-      data-testid="results-view"
-      className={cn('flex h-full min-h-0 flex-col', className)}
-    >
+    <div data-testid="results-view" className={cn('flex h-full min-h-0 flex-col', className)}>
       {/* Header bar — context label + exit affordance. Mirrors the thin
           TopBar visual family (hairline border, muted background). */}
       <div

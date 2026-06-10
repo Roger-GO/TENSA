@@ -139,9 +139,7 @@ export function GeneratorsGrid({ className }: GeneratorsGridProps) {
         if (selectedIdx === null) return null;
         return rows.find((r) => r.idx === selectedIdx)?.rowId ?? null;
       })()}
-      emptyState={
-        topology ? 'No generators in this case.' : 'Load a case to see generators.'
-      }
+      emptyState={topology ? 'No generators in this case.' : 'Load a case to see generators.'}
       testId="generators-grid"
       className={className}
     />

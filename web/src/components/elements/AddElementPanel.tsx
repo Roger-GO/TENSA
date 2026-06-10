@@ -10,9 +10,9 @@ import { ElementForm } from './ElementForm';
 import { CancelConfirmDialog } from './CancelConfirmDialog';
 
 /**
- * AddElementPanel — slide-over from the right edge of the right dock,
- * occupying ~70% of dock width. The Inspector remains visible at the
- * left ~30% so the user can reference the currently-selected element
+ * AddElementPanel — compact slide-over from the right edge of the dock
+ * (fixed ~420px wide). The canvas and Inspector remain visible to the
+ * left so the user can watch the diagram grow while adding elements
  * (e.g., picking a bus from the dropdown while viewing Bus 1's
  * properties underneath).
  *
@@ -176,10 +176,9 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
           // Required because v3 AppShell's dock-overlay wrapper is
           // ``pointer-events-none`` to avoid blocking chassis clicks.
           'pointer-events-auto absolute inset-y-0 right-0 z-30',
-          // ~70% of the dock width via inline style — the dock itself is
-          // resizable, so a percentage on the panel keeps the inspector
-          // visible behind at the left ~30%.
-          'w-[70%]',
+          // Compact fixed width so the canvas stays visible while the
+          // user adds elements; max-w guards small viewports.
+          'w-[420px] max-w-[90vw]',
           'bg-background border-border border-l shadow-xl',
           'flex flex-col gap-3 overflow-auto p-4',
           className,

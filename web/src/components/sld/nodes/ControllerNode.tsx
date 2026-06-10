@@ -82,9 +82,7 @@ export const ControllerNode = memo(function ControllerNode({ data, selected }: N
           'flex items-center gap-1 px-1.5 py-0.5',
           'bg-background text-foreground',
           'rounded-[var(--radius-sm)] border',
-          selected
-            ? 'border-[var(--color-ring)] ring-2 ring-[var(--color-ring)]'
-            : 'border-border',
+          selected ? 'border-[var(--color-ring)] ring-2 ring-[var(--color-ring)]' : 'border-border',
           d.orphan ? 'border-warning/70 ring-warning/40 ring-1' : '',
           'transition-colors duration-[var(--duration-fast)]',
           'cursor-pointer select-none',

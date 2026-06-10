@@ -72,9 +72,7 @@ describe('<ProblemDetailsErrorSurface />', () => {
     it('renders title + detail', () => {
       render(<ProblemDetailsErrorSurface error={problemShape()} variant="banner" />);
       expect(screen.getByText('Power flow did not converge')).toBeInTheDocument();
-      expect(
-        screen.getByText('The Newton iteration diverged after 30 steps.'),
-      ).toBeInTheDocument();
+      expect(screen.getByText('The Newton iteration diverged after 30 steps.')).toBeInTheDocument();
     });
 
     it('renders an alert role', () => {
@@ -153,7 +151,13 @@ describe('<ProblemDetailsErrorSurface />', () => {
 
     it('reads recovery off a live ProblemDetailsError instance', () => {
       const err = new ProblemDetailsError(
-        { type: 'about:blank', title: 'EIG mutated dae', status: 409, detail: 'reload', instance: null },
+        {
+          type: 'about:blank',
+          title: 'EIG mutated dae',
+          status: 409,
+          detail: 'reload',
+          instance: null,
+        },
         { title: 'EIG mutated dae', status: 409, recovery: RELOAD },
         '/api/sessions/s/pflow',
       );

@@ -99,15 +99,7 @@ vi.mock('@xyflow/react', async () => {
     // v3 Unit 6 — pass the props we assert on (variant, color, gap)
     // through to a DOM stub so the dot-grid + chrome tests can read
     // them. The real component renders an SVG; we only need a probe.
-    Background: ({
-      variant,
-      color,
-      gap,
-    }: {
-      variant?: string;
-      color?: string;
-      gap?: number;
-    }) =>
+    Background: ({ variant, color, gap }: { variant?: string; color?: string; gap?: number }) =>
       React.createElement('div', {
         'data-testid': 'sld-canvas-dot-grid',
         'data-variant': variant,
@@ -345,7 +337,9 @@ describe('SldCanvas', () => {
     const topology: TopologySummary = {
       ...makeTopology([bus(1)]),
       generators: [{ idx: 'GENROU_1', name: 'g1', kind: 'GENROU', params: { bus: 1 } }],
-      controllers: [{ idx: 'EXST1_1', name: 'EXST1 1', kind: 'EXST1', params: { syn: 'GENROU_1' } }],
+      controllers: [
+        { idx: 'EXST1_1', name: 'EXST1 1', kind: 'EXST1', params: { syn: 'GENROU_1' } },
+      ],
     };
     mockTopology = topology;
     act(() => {
@@ -358,9 +352,7 @@ describe('SldCanvas', () => {
     await waitFor(() => {
       expect(screen.getByTestId('controller-node-EXST1_1')).toBeInTheDocument();
     });
-    const wrapper = screen
-      .getByTestId('controller-node-EXST1_1')
-      .closest('[data-rf-node-id]');
+    const wrapper = screen.getByTestId('controller-node-EXST1_1').closest('[data-rf-node-id]');
     expect(wrapper).not.toBeNull();
     await user.click(wrapper as HTMLElement);
     expect(useCaseStore.getState().selectedElement).toEqual({

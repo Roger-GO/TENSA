@@ -26,7 +26,8 @@ import type { SeResult } from '@/api/types';
  *
  * Empty state:
  *
- * - ``result === null`` → "Run SE to see the residual histogram."
+ * - ``result === null`` → one-line "what is this + first step" copy
+ *   (generate measurements from the solved PF, then run SE).
  * - ``residuals.length === 0`` → "SE returned no residuals." (rare)
  *
  * Detail panel (Unit 18):
@@ -189,7 +190,8 @@ export function SEResidualChart({
           className,
         )}
       >
-        Run SE to see the residual histogram.
+        State estimation reconstructs bus voltages from noisy measurements. Generate measurements
+        from the solved power flow, then run SE.
       </div>
     );
   }

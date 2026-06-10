@@ -113,9 +113,7 @@ export interface ControllerSummary {
  * badge (Unit 24) — derived client-side from the existing `controllers`
  * bucket rather than a dedicated substrate field.
  */
-export function summarizeControllers(
-  controllers: readonly { kind: string }[],
-): ControllerSummary {
+export function summarizeControllers(controllers: readonly { kind: string }[]): ControllerSummary {
   const bySubKind: Record<ControllerSubKind, number> = {
     exciter: 0,
     governor: 0,

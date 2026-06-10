@@ -92,12 +92,7 @@ export interface ConnectionStatusEvent {
 
 /** Errors emitted via ``onError``. The codes mirror the v0.2 plan's taxonomy. */
 export interface RunStreamError {
-  code:
-    | 'run_not_found'
-    | 'buffer_evicted'
-    | 'protocol_error'
-    | 'worker_error'
-    | 'max_retries';
+  code: 'run_not_found' | 'buffer_evicted' | 'protocol_error' | 'worker_error' | 'max_retries';
   reason: string;
   /** Server-reported sequence number on ``buffer_evicted``. */
   currentSeq?: number;
@@ -531,7 +526,7 @@ export class RunStream {
       finalT: typeof msg.final_t === 'number' ? msg.final_t : 0,
       callpertCount: typeof msg.callpert_count === 'number' ? msg.callpert_count : 0,
     };
-    useRunsStore.getState().markRunDone(this.runId, event.finalT);
+    useRunsStore.getState().markRunDone(this.runId, event.finalT, event.converged);
     this.opts.onDone?.(event);
     // The server closes the socket cleanly after ``done``; we mark phase
     // here so a subsequent close with code 1000 doesn't try to reconnect.

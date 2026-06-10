@@ -63,7 +63,6 @@ describe('<ModifiedFromOriginalDot />', () => {
     // A real focusable button (keyboard-reachable), with the diff in its name.
     expect(dot.tagName).toBe('BUTTON');
     expect(dot.getAttribute('aria-label')).toMatch(/vrmax modified from original/i);
-
   });
 
   it('popover surfaces "Original: X → Y" on activate', async () => {
@@ -98,9 +97,7 @@ describe('<ModifiedFromOriginalDot />', () => {
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
     const [url, init] = fetchSpy.mock.calls[0]!;
-    expect(String(url)).toContain(
-      '/api/sessions/test-session-id/case/clone/params/IEEEX1/1/Vrmax',
-    );
+    expect(String(url)).toContain('/api/sessions/test-session-id/case/clone/params/IEEEX1/1/Vrmax');
     expect((init as RequestInit).method).toBe('PUT');
     const body = JSON.parse(String((init as RequestInit).body));
     expect(body.value).toBe(1.5);

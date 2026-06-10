@@ -309,7 +309,10 @@ describe('queries hooks', () => {
 
     const { Wrapper } = makeWrapper();
     const { result } = renderHook(() => useLoadCase(), { wrapper: Wrapper });
-    result.current.mutate({ sessionId: 'sess-422' as SessionId, request: { primary_path: 'bad.xlsx' } });
+    result.current.mutate({
+      sessionId: 'sess-422' as SessionId,
+      request: { primary_path: 'bad.xlsx' },
+    });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
 
@@ -340,7 +343,10 @@ describe('queries hooks', () => {
 
     const { Wrapper } = makeWrapper();
     const { result } = renderHook(() => useLoadCase(), { wrapper: Wrapper });
-    result.current.mutate({ sessionId: 'sess-x' as SessionId, request: { primary_path: 'bad.xlsx' } });
+    result.current.mutate({
+      sessionId: 'sess-x' as SessionId,
+      request: { primary_path: 'bad.xlsx' },
+    });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
 

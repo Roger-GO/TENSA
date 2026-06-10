@@ -55,7 +55,7 @@ import { useTheme } from '@/lib/useTheme';
  * - The ``dockOverlay`` slot is positioned absolutely over the right
  *   side's canvas + inspector + drawer column (NOT the old dock — the
  *   dock is gone). AddElementPanel keeps its existing
- *   ``absolute right-0 w-[70%]`` self-positioning per the F-FEAS-4
+ *   ``absolute right-0 w-[420px]`` self-positioning per the F-FEAS-4
  *   resolution.
  * - Modals (RuntimeCrashModal) render via the ``modal`` slot at the end
  *   of the tree so Radix's portal mounts above the shell.
@@ -280,169 +280,169 @@ export function AppShell({
         <div className="relative flex min-h-0 flex-1">
           {/* Outer horizontal split: LeftSidebar | RightSide */}
           <PanelGroup
-          direction="horizontal"
-          autoSaveId="andes-app:layout-v1:outer"
-          className="flex h-full w-full"
-        >
-          <Panel
-            ref={leftSidebarPanelRef}
-            id="app-shell-left-sidebar-panel"
-            order={1}
-            collapsible
-            defaultSize={20}
-            collapsedSize={0}
-            minSize={15}
-            maxSize={40}
-            className="flex min-w-0 flex-col"
+            direction="horizontal"
+            autoSaveId="andes-app:layout-v1:outer"
+            className="flex h-full w-full"
           >
-            <aside
-              aria-label="Case navigation"
-              data-testid="app-shell-left-sidebar"
-              data-collapsed={leftSidebarCollapsed ? 'true' : 'false'}
-              className={cn(
-                'flex h-full min-h-0 min-w-0 flex-col',
-                'border-border bg-background border-r',
-              )}
+            <Panel
+              ref={leftSidebarPanelRef}
+              id="app-shell-left-sidebar-panel"
+              order={1}
+              collapsible
+              defaultSize={20}
+              collapsedSize={0}
+              minSize={15}
+              maxSize={40}
+              className="flex min-w-0 flex-col"
             >
-              {/* Children only render when expanded — spike finding (b):
+              <aside
+                aria-label="Case navigation"
+                data-testid="app-shell-left-sidebar"
+                data-collapsed={leftSidebarCollapsed ? 'true' : 'false'}
+                className={cn(
+                  'flex h-full min-h-0 min-w-0 flex-col',
+                  'border-border bg-background border-r',
+                )}
+              >
+                {/* Children only render when expanded — spike finding (b):
                   the lib does NOT auto-unmount panel children at
                   size=0, so a focus trap would form against any
                   interactive element inside. Gating by collapsed
                   prevents that. */}
-              {!leftSidebarCollapsed ? leftSidebar : null}
-            </aside>
-          </Panel>
+                {!leftSidebarCollapsed ? leftSidebar : null}
+              </aside>
+            </Panel>
 
-          <ResizeHandle direction="horizontal" label="Resize left sidebar" />
+            <ResizeHandle direction="horizontal" label="Resize left sidebar" />
 
-          <Panel
-            id="app-shell-right-side-panel"
-            order={2}
-            defaultSize={80}
-            minSize={60}
-            className="flex min-w-0 flex-col"
-          >
-            {/* Right-side vertical split: TopRow | BottomDrawer */}
-            <PanelGroup
-              direction="vertical"
-              autoSaveId="andes-app:layout-v1:right-side"
-              className="flex h-full w-full"
-              onLayout={(sizes) => {
-                // The drawer is the second panel (index 1). Persist its
-                // size whenever the user drags. The persist middleware
-                // batches writes so this is safe per-pointer-move.
-                const drawerPct = sizes[1];
-                if (typeof drawerPct === 'number' && !bottomDrawerCollapsed) {
-                  setBottomDrawerHeightPct(drawerPct);
-                }
-              }}
+            <Panel
+              id="app-shell-right-side-panel"
+              order={2}
+              defaultSize={80}
+              minSize={60}
+              className="flex min-w-0 flex-col"
             >
-              <Panel
-                id="app-shell-top-row-panel"
-                order={1}
-                defaultSize={100 - bottomDrawerHeightPct}
-                minSize={20}
-                className="flex min-w-0 flex-col"
+              {/* Right-side vertical split: TopRow | BottomDrawer */}
+              <PanelGroup
+                direction="vertical"
+                autoSaveId="andes-app:layout-v1:right-side"
+                className="flex h-full w-full"
+                onLayout={(sizes) => {
+                  // The drawer is the second panel (index 1). Persist its
+                  // size whenever the user drags. The persist middleware
+                  // batches writes so this is safe per-pointer-move.
+                  const drawerPct = sizes[1];
+                  if (typeof drawerPct === 'number' && !bottomDrawerCollapsed) {
+                    setBottomDrawerHeightPct(drawerPct);
+                  }
+                }}
               >
-                {/* Top-row horizontal split: Canvas | RightInspector */}
-                <PanelGroup
-                  direction="horizontal"
-                  autoSaveId="andes-app:layout-v1:top-row"
-                  className="flex h-full w-full"
+                <Panel
+                  id="app-shell-top-row-panel"
+                  order={1}
+                  defaultSize={100 - bottomDrawerHeightPct}
+                  minSize={20}
+                  className="flex min-w-0 flex-col"
                 >
-                  <Panel
-                    id="app-shell-canvas-panel"
-                    order={1}
-                    defaultSize={75}
-                    minSize={30}
-                    className="flex min-w-0 flex-col"
+                  {/* Top-row horizontal split: Canvas | RightInspector */}
+                  <PanelGroup
+                    direction="horizontal"
+                    autoSaveId="andes-app:layout-v1:top-row"
+                    className="flex h-full w-full"
                   >
-                    <main
-                      aria-label="Single-line diagram"
-                      data-testid="app-shell-canvas"
-                      className="bg-background flex h-full min-h-0 min-w-0 flex-1 flex-col"
+                    <Panel
+                      id="app-shell-canvas-panel"
+                      order={1}
+                      defaultSize={75}
+                      minSize={30}
+                      className="flex min-w-0 flex-col"
                     >
-                      {canvas}
-                    </main>
-                  </Panel>
+                      <main
+                        aria-label="Single-line diagram"
+                        data-testid="app-shell-canvas"
+                        className="bg-background flex h-full min-h-0 min-w-0 flex-1 flex-col"
+                      >
+                        {canvas}
+                      </main>
+                    </Panel>
 
-                  <ResizeHandle direction="horizontal" label="Resize canvas and inspector" />
+                    <ResizeHandle direction="horizontal" label="Resize canvas and inspector" />
 
-                  <Panel
-                    ref={rightInspectorPanelRef}
-                    id="app-shell-right-inspector-panel"
-                    order={2}
-                    collapsible
-                    defaultSize={inspectorVisible ? 25 : 0}
-                    collapsedSize={0}
-                    minSize={18}
-                    maxSize={45}
-                    className="flex min-w-0 flex-col"
-                  >
-                    <aside
-                      aria-label="Inspector"
-                      data-testid="app-shell-right-inspector"
-                      data-collapsed={inspectorVisible ? 'false' : 'true'}
-                      className={cn(
-                        'flex h-full min-h-0 min-w-0 flex-col',
-                        'border-border bg-background border-l',
-                      )}
+                    <Panel
+                      ref={rightInspectorPanelRef}
+                      id="app-shell-right-inspector-panel"
+                      order={2}
+                      collapsible
+                      defaultSize={inspectorVisible ? 25 : 0}
+                      collapsedSize={0}
+                      minSize={18}
+                      maxSize={45}
+                      className="flex min-w-0 flex-col"
                     >
-                      {/* Per spike finding (b), gate children behind the
+                      <aside
+                        aria-label="Inspector"
+                        data-testid="app-shell-right-inspector"
+                        data-collapsed={inspectorVisible ? 'false' : 'true'}
+                        className={cn(
+                          'flex h-full min-h-0 min-w-0 flex-col',
+                          'border-border bg-background border-l',
+                        )}
+                      >
+                        {/* Per spike finding (b), gate children behind the
                           visibility predicate. When inspectorVisible is
                           true but no rightInspector content was supplied
                           AND no element is selected, render an
                           EmptyState (the F-DESIGN-2 "manually opened
                           with no selection" case). */}
-                      {inspectorVisible
-                        ? (rightInspector ?? (
-                            <EmptyState
-                              icon={<CursorIcon />}
-                              title="Nothing selected"
-                              description="Select an element on the canvas or a row in the data grid to inspect its properties."
-                              emptyStateKey="app-shell-right-inspector"
-                            />
-                          ))
-                        : null}
-                    </aside>
-                  </Panel>
-                </PanelGroup>
-              </Panel>
+                        {inspectorVisible
+                          ? (rightInspector ?? (
+                              <EmptyState
+                                icon={<CursorIcon />}
+                                title="Nothing selected"
+                                description="Select an element on the canvas or a row in the data grid to inspect its properties."
+                                emptyStateKey="app-shell-right-inspector"
+                              />
+                            ))
+                          : null}
+                      </aside>
+                    </Panel>
+                  </PanelGroup>
+                </Panel>
 
-              <ResizeHandle direction="vertical" label="Resize bottom drawer" />
+                <ResizeHandle direction="vertical" label="Resize bottom drawer" />
 
-              <Panel
-                ref={bottomDrawerPanelRef}
-                id="app-shell-bottom-drawer-panel"
-                order={2}
-                collapsible
-                defaultSize={bottomDrawerHeightPct}
-                // Collapsed size approximates the 32px tab strip Unit 11
-                // will mount; KTD-7 specifies a 32px collapsed bar. As a
-                // % of the right-side vertical group, ~4 covers it on
-                // typical 800-1200px viewports without crowding.
-                collapsedSize={4}
-                minSize={4}
-                maxSize={75}
-                className="flex min-w-0 flex-col"
-              >
-                <section
-                  aria-label="Bottom drawer"
-                  data-testid="app-shell-bottom-drawer"
-                  data-collapsed={bottomDrawerCollapsed ? 'true' : 'false'}
-                  className={cn(
-                    'flex h-full min-h-0 min-w-0 flex-col',
-                    'border-border bg-background border-t',
-                  )}
+                <Panel
+                  ref={bottomDrawerPanelRef}
+                  id="app-shell-bottom-drawer-panel"
+                  order={2}
+                  collapsible
+                  defaultSize={bottomDrawerHeightPct}
+                  // Collapsed size approximates the 32px tab strip Unit 11
+                  // will mount; KTD-7 specifies a 32px collapsed bar. As a
+                  // % of the right-side vertical group, ~4 covers it on
+                  // typical 800-1200px viewports without crowding.
+                  collapsedSize={4}
+                  minSize={4}
+                  maxSize={75}
+                  className="flex min-w-0 flex-col"
                 >
-                  {bottomDrawer}
-                </section>
-              </Panel>
-            </PanelGroup>
-          </Panel>
-        </PanelGroup>
+                  <section
+                    aria-label="Bottom drawer"
+                    data-testid="app-shell-bottom-drawer"
+                    data-collapsed={bottomDrawerCollapsed ? 'true' : 'false'}
+                    className={cn(
+                      'flex h-full min-h-0 min-w-0 flex-col',
+                      'border-border bg-background border-t',
+                    )}
+                  >
+                    {bottomDrawer}
+                  </section>
+                </Panel>
+              </PanelGroup>
+            </Panel>
+          </PanelGroup>
 
-        {/* dockOverlay slot — absolutely positioned over the canvas +
+          {/* dockOverlay slot — absolutely positioned over the canvas +
             inspector + drawer column. The wrapper is
             ``pointer-events-none`` so it never intercepts clicks on the
             chassis surfaces below; each overlay child (AddElementPanel,
@@ -450,14 +450,14 @@ export function AppShell({
             for adding ``pointer-events-auto`` on its own visible panel
             when it actually renders content. Children that return null
             when inactive contribute zero hit-testing surface. */}
-        {dockOverlay ? (
-          <div
-            data-testid="app-shell-dock-overlay"
-            className="pointer-events-none absolute inset-0"
-          >
-            {dockOverlay}
-          </div>
-        ) : null}
+          {dockOverlay ? (
+            <div
+              data-testid="app-shell-dock-overlay"
+              className="pointer-events-none absolute inset-0"
+            >
+              {dockOverlay}
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -532,7 +532,9 @@ function ResizeHandle({ direction, label }: ResizeHandleProps) {
           'block rounded-full',
           // Hover/drag grow the inner pill so the handle "lifts" toward
           // the user — the bar itself remains 4px so layout doesn't shift.
-          direction === 'horizontal' ? 'h-8 w-[2px] group-hover:h-12' : 'h-[2px] w-8 group-hover:w-12',
+          direction === 'horizontal'
+            ? 'h-8 w-[2px] group-hover:h-12'
+            : 'h-[2px] w-8 group-hover:w-12',
           'bg-muted-foreground/30 group-hover:bg-primary-foreground/90',
           'group-data-[resize-handle-state=drag]:bg-primary-foreground',
           'transition-all duration-[var(--duration-fast)]',

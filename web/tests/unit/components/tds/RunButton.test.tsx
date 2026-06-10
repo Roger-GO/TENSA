@@ -401,9 +401,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
       activeRunId: null,
       memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
     });
-    server = new MockServer(
-      `ws://${WS_HOST}/api/ws/${SESSION_ID}`,
-    ) as unknown as MockServerHandle;
+    server = new MockServer(`ws://${WS_HOST}/api/ws/${SESSION_ID}`) as unknown as MockServerHandle;
   });
 
   afterEach(() => {
@@ -799,9 +797,7 @@ describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () =>
       activeRunId: null,
       memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
     });
-    server = new MockServer(
-      `ws://${WS_HOST}/api/ws/${SESSION_ID}`,
-    ) as unknown as MockServerHandle;
+    server = new MockServer(`ws://${WS_HOST}/api/ws/${SESSION_ID}`) as unknown as MockServerHandle;
     const { useUiStore } = await import('@/store/ui');
     useUiStore.getState().setTdsIntegrator('trapezoidal');
     useUiStore.getState().resetTdsToleranceOverrides();
@@ -882,9 +878,7 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
       activeRunId: null,
       memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
     });
-    server = new MockServer(
-      `ws://${WS_HOST}/api/ws/${SESSION_ID}`,
-    ) as unknown as MockServerHandle;
+    server = new MockServer(`ws://${WS_HOST}/api/ws/${SESSION_ID}`) as unknown as MockServerHandle;
   });
 
   afterEach(() => {

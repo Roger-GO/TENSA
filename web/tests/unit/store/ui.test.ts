@@ -7,12 +7,7 @@
  * retired in v3 Unit 15 — the layout slice now owns dock state.)
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  DEFAULT_TDS_CONFIG,
-  TDS_VAR_GROUPS,
-  useUiStore,
-  validateTdsConfig,
-} from '@/store/ui';
+import { DEFAULT_TDS_CONFIG, TDS_VAR_GROUPS, useUiStore, validateTdsConfig } from '@/store/ui';
 import type { TdsConfig } from '@/store/ui';
 
 function resetUiStore() {

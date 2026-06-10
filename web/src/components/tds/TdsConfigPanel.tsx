@@ -466,7 +466,11 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
             </p>
           ) : (
             overrideRows.map((row, idx) => (
-              <div key={idx} className="flex flex-col gap-1" data-testid={`tds-config-override-${idx}`}>
+              <div
+                key={idx}
+                className="flex flex-col gap-1"
+                data-testid={`tds-config-override-${idx}`}
+              >
                 <div className="flex items-center gap-2">
                   <Input
                     list="tds-config-override-keys"

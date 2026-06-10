@@ -78,6 +78,40 @@ describe('<RunStatusBadge />', () => {
     expect(screen.getByTestId('tds-run-status-badge')).toHaveTextContent(/5\.00/);
   });
 
+  it('keeps the success "Done" treatment for converged runs', () => {
+    seedRun({ state: 'done', tCurrent: 10, converged: true });
+    render(<RunStatusBadge />);
+    const badge = screen.getByTestId('tds-run-status-badge');
+    expect(badge).toHaveTextContent(/done at t=10\.00/i);
+    expect(badge.className).toContain('success');
+  });
+
+  it('shows "Halted at t=…" with warning tone when done but not converged', () => {
+    seedRun({ state: 'done', tCurrent: 6.34, tf: 10, converged: false });
+    render(<RunStatusBadge />);
+    const badge = screen.getByTestId('tds-run-status-badge');
+    expect(badge).toHaveTextContent(/halted at t=6\.34/i);
+    expect(badge).not.toHaveTextContent(/done/i);
+    expect(badge.className).toContain('warning');
+    // Default tooltip explains the early stop relative to the requested tf.
+    expect(badge.getAttribute('title')).toContain('tf=10');
+  });
+
+  it('halted badge tooltip prefers the recorded error reason when present', () => {
+    seedRun({
+      state: 'done',
+      tCurrent: 6.34,
+      tf: 10,
+      converged: false,
+      errorReason: 'numerical instability',
+    });
+    render(<RunStatusBadge />);
+    expect(screen.getByTestId('tds-run-status-badge')).toHaveAttribute(
+      'title',
+      'numerical instability',
+    );
+  });
+
   it('shows "Aborted at t=…" when aborted', () => {
     seedRun({ state: 'aborted', tCurrent: 2.5 });
     render(<RunStatusBadge />);

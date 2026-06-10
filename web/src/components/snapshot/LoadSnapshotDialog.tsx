@@ -271,8 +271,8 @@ function LoadSnapshotDialogInner() {
               disabled={isPending}
             />
             <span>
-              Force replay (debug) — always re-converge via replay+PF
-              (sends <code className="font-mono">use_dill_optimization=false</code>).
+              Force replay (debug) — always re-converge via replay+PF (sends{' '}
+              <code className="font-mono">use_dill_optimization=false</code>).
             </span>
           </label>
         </details>

@@ -46,7 +46,13 @@ export interface AddEventDialogProps {
   onSave: (spec: DisturbanceSpec) => void;
 }
 
-export function AddEventDialog({ open, onOpenChange, initialSpec, seedSpec, onSave }: AddEventDialogProps) {
+export function AddEventDialog({
+  open,
+  onOpenChange,
+  initialSpec,
+  seedSpec,
+  onSave,
+}: AddEventDialogProps) {
   const isEdit = initialSpec !== null && initialSpec !== undefined;
   // Local draft owned by the dialog; reset each time the dialog opens so
   // closing+reopening doesn't carry the previous draft over.

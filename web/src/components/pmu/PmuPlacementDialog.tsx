@@ -166,7 +166,8 @@ export function PmuPlacementDialog({ open, onOpenChange }: PmuPlacementDialogPro
           </h3>
           {placedPmus.length === 0 ? (
             <p className="text-muted-foreground mt-1 text-xs">
-              No PMUs placed on this session yet.
+              Place phasor measurement units on buses to evaluate observability. Add a PMU to a bus,
+              then export the placement.
             </p>
           ) : (
             <ul data-testid="pmu-placed-list" className="mt-1 flex flex-wrap gap-1">
