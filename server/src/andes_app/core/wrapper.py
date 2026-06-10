@@ -577,6 +577,33 @@ class Wrapper:
 
     # ----- disturbance management -----
 
+    @staticmethod
+    def _coerce_existing_idx(ss: Any, model_name: str, raw: int | str) -> int | str:
+        """Resolve ``raw`` against a model's actual idx values, tolerating
+        str/int representation differences.
+
+        JSON clients (agents, curl) naturally send idx as strings while xlsx
+        cases commonly carry integer idx — ANDES accepts the mismatched
+        reference at ``add()`` time and only explodes later inside
+        ``setup()`` ("device not exist with idx=7"). Returns the native idx
+        when a stringwise match exists, else ``raw`` unchanged so ANDES
+        produces its own error for genuinely unknown devices.
+        """
+        model = getattr(ss, model_name, None)
+        idx_values = getattr(getattr(model, "idx", None), "v", None)
+        if not idx_values:
+            return raw
+        try:
+            if raw in idx_values:
+                return raw
+        except (TypeError, ValueError):  # pragma: no cover - exotic idx types
+            pass
+        raw_str = str(raw)
+        for candidate in idx_values:
+            if str(candidate) == raw_str:
+                return candidate  # type: ignore[no-any-return]
+        return raw
+
     def add_disturbance(self, spec: DisturbanceSpec) -> int | str:
         """Add a disturbance to the pre-setup System. Returns the assigned
         ANDES idx of the created device.
@@ -597,7 +624,7 @@ class Wrapper:
 
         if isinstance(spec, FaultSpec):
             kwargs = {
-                "bus": spec.bus_idx,
+                "bus": self._coerce_existing_idx(self._ss, "Bus", spec.bus_idx),
                 "tf": spec.tf,
                 "tc": spec.tc,
                 "xf": spec.xf,
@@ -607,7 +634,7 @@ class Wrapper:
         elif isinstance(spec, ToggleSpec):
             kwargs = {
                 "model": spec.model,
-                "dev": spec.dev_idx,
+                "dev": self._coerce_existing_idx(self._ss, spec.model, spec.dev_idx),
                 "t": spec.t,
             }
             model_name = "Toggle"
@@ -619,7 +646,7 @@ class Wrapper:
             # missing", so load-increase / parameter-alter were 100% broken.
             kwargs = {
                 "model": spec.model,
-                "dev": spec.dev_idx,
+                "dev": self._coerce_existing_idx(self._ss, spec.model, spec.dev_idx),
                 "src": spec.src,
                 "t": spec.t,
                 "method": spec.method,
