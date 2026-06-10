@@ -222,7 +222,10 @@ export const DEFAULT_LAYOUT: Pick<
   rightInspectorCollapsed: false,
   rightInspectorWidthPx: 320,
   activeBottomDrawerTab: 'buses',
-  activeAnalysisSubTab: 'eig',
+  // Default to the Plot sub-tab: after a TDS run (the most common reason a
+  // user opens Results), the time-series plots are what they came for —
+  // landing on an empty EIG pane reads as "no results".
+  activeAnalysisSubTab: 'plot',
   drawerHasUnreadResults: false,
   activityPanelTab: 'active',
   activityPanelCollapsed: true,

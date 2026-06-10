@@ -51,7 +51,7 @@ describe('useLayoutStore — defaults', () => {
     expect(state.rightInspectorCollapsed).toBe(false);
     expect(state.rightInspectorWidthPx).toBe(320);
     expect(state.activeBottomDrawerTab).toBe('buses');
-    expect(state.activeAnalysisSubTab).toBe('eig');
+    expect(state.activeAnalysisSubTab).toBe('plot');
     expect(state.drawerHasUnreadResults).toBe(false);
     expect(state.resultsViewActive).toBe(false);
   });

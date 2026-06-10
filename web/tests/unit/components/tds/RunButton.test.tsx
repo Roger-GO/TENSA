@@ -593,6 +593,103 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     expect(wsOpened).toBe(false);
   });
 
+  it('disturbance commit 409 (post-setup) auto-reloads, retries the commit, and runs', async () => {
+    seedReady({ withDisturbances: true });
+
+    let disturbancePosts = 0;
+    let reloadPosts = 0;
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.includes('/disturbances')) {
+        disturbancePosts += 1;
+        if (disturbancePosts === 1) {
+          // First commit lands on a committed System → substrate 409s
+          // with recovery reload-case.
+          return Promise.resolve(
+            jsonResponse(
+              {
+                title: 'Conflict',
+                status: 409,
+                detail: 'cannot modify disturbances after setup() has been committed',
+                recovery: { kind: 'reload-case', label: 'Reload case' },
+              },
+              409,
+            ),
+          );
+        }
+        return Promise.resolve(
+          jsonResponse({ accepted: [{ kind: 'fault', idx: 'Fault_0' }] }, 200),
+        );
+      }
+      if (url.includes('/reload')) {
+        reloadPosts += 1;
+        return Promise.resolve(
+          jsonResponse(
+            {
+              state: 'pre-setup',
+              buses: [],
+              lines: [],
+              transformers: [],
+              generators: [],
+              loads: [],
+              controllers: [],
+            },
+            200,
+          ),
+        );
+      }
+      return Promise.resolve(jsonResponse({}, 200));
+    });
+
+    server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.on('message', (raw: unknown) => {
+        const msg = JSON.parse(String(raw)) as { type: string };
+        if (msg.type === 'start_tds') {
+          socket.send(
+            JSON.stringify({
+              type: 'stream_start',
+              run_id: 'run-tds-retry',
+              metadata: {
+                schema_version: '1.0',
+                decimation: {
+                  algorithm: 'mean',
+                  mode: 'mean',
+                  source_rate_hz: null,
+                  output_rate_hz: 30,
+                  fixed_step: null,
+                },
+                vars: ['bus_v'],
+                var_columns: ['Bus_1_v'],
+              },
+            }),
+          );
+          socket.send(
+            JSON.stringify({
+              type: 'done',
+              run_id: 'run-tds-retry',
+              converged: true,
+              final_t: 5,
+              callpert_count: 0,
+            }),
+          );
+          socket.close({ code: 1000 });
+        }
+      });
+    });
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-tds-retry']?.state).toBe('done');
+    });
+    expect(reloadPosts).toBe(1);
+    expect(disturbancePosts).toBe(2);
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
   it('WS run_not_found (close 4404) shows a non-modal warning toast', async () => {
     seedReady();
     useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });

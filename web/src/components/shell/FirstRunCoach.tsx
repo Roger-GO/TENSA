@@ -68,11 +68,12 @@ const STEP_COPY: Record<Exclude<CoachStep, null>, StepCopy> = {
 };
 
 const ANCHOR_CLASS: Record<StepCopy['anchor'], string> = {
-  // ``left-4 / right-4`` keeps the card from touching the rail edge;
   // ``top-16`` clears the 44 px TopBar plus a few pixels of breathing
   // room. ``max-w-xs`` keeps the card under 320 px so it never
-  // overflows narrow viewports.
-  'top-left': 'top-16 left-4',
+  // overflows narrow viewports. Step 1 ('top-left') sits just RIGHT of
+  // the left rail (~240 px) instead of on top of it — the card must
+  // never cover the Saved-cases list it is pointing the user at.
+  'top-left': 'top-16 left-[260px]',
   'top-center': 'top-16 left-1/2 -translate-x-1/2',
   'top-right': 'top-16 right-4',
 };

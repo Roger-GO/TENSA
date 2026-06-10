@@ -10,6 +10,7 @@ import {
 import {
   useAbortRun,
   useCommitDisturbances,
+  useReloadCase,
   useResetRun,
   useRunPflow,
   loadOperatingPointIntoStore,
@@ -143,6 +144,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
 
   const runPflow = useRunPflow();
   const commitDisturbances = useCommitDisturbances();
+  const reloadCase = useReloadCase();
   const abortRun = useAbortRun();
   const resetRun = useResetRun();
 
@@ -232,12 +234,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     // ``AddDisturbancesRequest`` has ``min_length=1`` so an empty list
     // would 422 — skip the call entirely for free-evolution runs.
     if (disturbances.length > 0) {
-      try {
-        await commitDisturbances.mutateAsync({
-          sessionId,
-          disturbances: disturbances.map((d) => d.spec),
-        });
-      } catch (err) {
+      const reportCommitError = (err: unknown) => {
         setTdsStarting(false);
         if (err instanceof ProblemDetailsError) {
           const detail = err.detail ?? err.title ?? `HTTP ${err.status}`;
@@ -252,7 +249,36 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
             description: err instanceof Error ? err.message : 'Could not commit disturbances.',
           });
         }
-        return;
+      };
+      const commit = () =>
+        commitDisturbances.mutateAsync({
+          sessionId,
+          disturbances: disturbances.map((d) => d.spec),
+        });
+      try {
+        await commit();
+      } catch (err) {
+        // 409 = disturbances were added after a prior run committed
+        // setup(). The substrate's recovery is reload-case — do it for
+        // the user (re-parse to pre-setup, which drops the committed
+        // System), retry the commit once, and keep going. Without this,
+        // the natural "run PF → add fault → run TDS" flow dead-ends.
+        if (err instanceof ProblemDetailsError && err.status === 409) {
+          try {
+            toast.info('Reloading case', {
+              description:
+                'A previous run locked the system — reloading to apply the disturbances.',
+            });
+            await reloadCase.mutateAsync(sessionId);
+            await commit();
+          } catch (retryErr) {
+            reportCommitError(retryErr);
+            return;
+          }
+        } else {
+          reportCommitError(err);
+          return;
+        }
       }
     }
 
