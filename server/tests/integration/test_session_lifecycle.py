@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from andes_app.core.errors import WorkerDiedError
 from andes_app.core.session import (
     SessionExpiredError,
     SessionManager,
@@ -170,6 +171,39 @@ async def test_idle_timeout_reaps_session() -> None:
         assert not mgr.is_alive(session_id), "session was not reaped after idle timeout"
     finally:
         await mgr.shutdown()
+
+
+@pytest.mark.integration
+async def test_killed_worker_invoke_raises_worker_died(
+    manager: SessionManager,
+) -> None:
+    """Part A end-to-end with a REAL worker: kill the subprocess out from under
+    a live session, then ``invoke`` must raise the structured ``WorkerDiedError``
+    (not a raw EOFError), mark the session dead, drop it from the registry, and
+    make a SECOND invoke fast-fail rather than 500 again — the zombie-session
+    fix."""
+    raw, _ = _ieee14_paths()
+    session_id = await manager.create_session()
+    await manager.invoke(session_id, "load_case", {"path": str(raw)})
+
+    # Hard-kill the worker subprocess so the next RPC tears the pipe.
+    sess = manager._sessions[session_id]
+    sess.process.kill()
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, sess.process.join, 5.0)
+
+    with pytest.raises(WorkerDiedError) as exc_info:
+        await manager.invoke(session_id, "run_pflow", {})
+    # Actionable, recoverable message + 503 / reload-case class attrs.
+    assert "worker stopped unexpectedly" in str(exc_info.value)
+    assert WorkerDiedError.http_status == 503
+    assert WorkerDiedError.recovery_kind == "reload-case"
+
+    # Session is dead + dropped: a second call fast-fails as SessionExpired,
+    # NOT another raw error / 500.
+    assert session_id not in manager._sessions
+    with pytest.raises(SessionExpiredError):
+        await manager.invoke(session_id, "topology", {})
 
 
 @pytest.mark.integration

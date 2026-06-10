@@ -40,7 +40,8 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from andes_app.api.error_mapping import WORKER_ERROR_HTTP_MAP
-from andes_app.core.session import WorkerError
+from andes_app.core.errors import WorkerDiedError
+from andes_app.core.session import WORKER_DIED_CATEGORY, WorkerError
 
 if TYPE_CHECKING:
     from andes_app.core.jobs import JobKind, _JobRegistry
@@ -63,6 +64,19 @@ def _internal_error_problem(kind: JobKind, exc: Exception) -> dict[str, Any]:
     category rather than masquerading as a 500 server error. Everything else
     (genuinely unexpected exceptions) keeps the synthesized 500.
     """
+    if isinstance(exc, WorkerDiedError):
+        # The worker subprocess crashed mid-RPC (torn pipe). Stamp the same
+        # ``WorkerDied`` category + 503 + ``reload-case`` recovery the HTTP
+        # handler returns so the activity-panel failure record matches the
+        # response the user sees, rather than masquerading as a generic 500.
+        return {
+            "type": "about:blank",
+            "title": "Service Unavailable",
+            "status": 503,
+            "category": WORKER_DIED_CATEGORY,
+            "detail": exc.detail,
+            "recovery": {"kind": "reload-case", "label": "Reload the case"},
+        }
     if isinstance(exc, WorkerError):
         category = exc.category or WORKER_INTERNAL_CATEGORY
         http_status = WORKER_ERROR_HTTP_MAP.get(category, 500)

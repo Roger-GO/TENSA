@@ -21,6 +21,7 @@ the worker subprocess (~2-5 s each).
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -492,3 +493,69 @@ async def test_snapshot_survives_session_restart(
         json={"name": "persisted"},
     )
     assert resp.status_code == 200, resp.text
+
+
+# ---- Part A: dead-worker -> structured 503 (reload-case) --------------------
+
+
+@pytest.fixture
+async def client_and_manager(
+    workspace: Path,
+) -> AsyncIterator[tuple[httpx.AsyncClient, SessionManager]]:
+    """Like ``client`` but also yields the live ``SessionManager`` so a test can
+    reach in and kill a worker subprocess to exercise the dead-worker path."""
+    app = make_app(
+        workspace=workspace,
+        bind_host="127.0.0.1",
+        bind_port=8000,
+        max_sessions=4,
+        idle_timeout_seconds=180.0,
+    )
+    mgr = SessionManager(
+        max_sessions=4, idle_timeout=180.0, workspace=str(workspace)
+    )
+    await mgr.start()
+    app.state.session_manager = mgr
+    app.state.workspace = workspace
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://127.0.0.1:8000",
+        ) as ac:
+            yield ac, mgr
+    finally:
+        await mgr.shutdown()
+
+
+@pytest.mark.integration
+async def test_dead_worker_route_returns_structured_503(
+    client_and_manager: tuple[httpx.AsyncClient, SessionManager],
+) -> None:
+    """End-to-end Part A: kill the worker, then the next API call returns a
+    structured 503 ``ProblemDetails`` with a ``reload-case`` recovery descriptor
+    — not a bare 500 — and subsequent calls keep failing cleanly (the session is
+    dead, not a zombie spewing 500s)."""
+    client, mgr = client_and_manager
+    sid = await _create_session_with_case(client, addfile=None)
+
+    # Hard-kill the worker subprocess out from under the live session.
+    sess = mgr._sessions[sid]
+    sess.process.kill()
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, sess.process.join, 5.0)
+
+    # The next route that invokes the worker surfaces the structured 503.
+    resp = await client.post(f"/api/sessions/{sid}/pflow", json={})
+    assert resp.status_code == 503, resp.text
+    body = resp.json()
+    assert body["status"] == 503
+    assert "worker stopped unexpectedly" in (body.get("detail") or "")
+    assert body["recovery"] is not None
+    assert body["recovery"]["kind"] == "reload-case"
+
+    # Follow-up call: the session was dropped, so it 404s as gone (not 500).
+    # ``run_pflow`` is wrapped in ``_run_as_job``; an unknown session surfaces
+    # as the routes' SessionExpired mapping. Either way it is NOT a 500.
+    resp2 = await client.post(f"/api/sessions/{sid}/pflow", json={})
+    assert resp2.status_code != 500, resp2.text
