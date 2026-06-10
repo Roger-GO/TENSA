@@ -4,8 +4,9 @@ title: "ANDES App"
 abstract: "An interactive, web-based workbench for power system modeling, simulation, and analysis, built on ANDES."
 type: software
 authors:
-  - family-names: "Gracia"
-    given-names: "Roger"
+  - family-names: "Gracia Otalvaro"
+    given-names: "Rogelio"
+    affiliation: "Embry-Riddle Aeronautical University"
 repository-code: "https://github.com/Roger-GO/ANDES_App"
 url: "https://github.com/Roger-GO/ANDES_App"
 license: GPL-3.0-or-later

@@ -141,7 +141,7 @@ Each session gets its own `andes.System` in a separate subprocess. The API proce
 
 If you use ANDES App in your work, please cite it. GitHub's "Cite this repository" button builds a citation from [CITATION.cff](./CITATION.cff). The short form:
 
-> Gracia, R. (2026). ANDES App: an interactive web workbench for power system simulation. https://github.com/Roger-GO/ANDES_App
+> Gracia Otalvaro, R. (2026). ANDES App: an interactive web workbench for power system simulation. https://github.com/Roger-GO/ANDES_App
 
 ANDES App runs on ANDES, which does the underlying power system computation. If you cite this project, please also credit the authors behind ANDES, the [CURENT/ANDES](https://github.com/CURENT/andes) project by Cui et al.
 
