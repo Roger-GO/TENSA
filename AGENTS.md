@@ -26,18 +26,17 @@ ANDES upgrades are deliberate — never accept an automatic minor bump without r
 - **`PFlow.run()` and `TDS.run()` do NOT auto-call `setup()`.** The wrapper calls `ss.setup()` explicitly first if `not ss.is_setup`. Verified against ANDES 2.0.0; PFlow.run on a non-setup System raises `IndexError`.
 - **HTTP boundary uses ANDES `idx` + `name` directly.** No opaque substrate-ID layer. Researcher persona already knows `idx` from notebooks; abstraction adds friction without protecting against an actual ANDES API change (covered by the version pin).
 - **Apache Arrow IPC over WebSocket for time-series.** N-rows-per-batch default; anti-aliased boxcar mean default with `?decimation=none` opt-out.
-- **WebSocket auth via first-message handshake** (2s deadline → close 4401). Subprotocol-based auth deferred to SaaS phase.
+- **No authentication.** The app trusts the local OS user, binds to loopback by default, and warns loudly on non-loopback binds. WebSocket protocol: connect → server sends `{"type":"ready"}` → client sends its first command frame.
 
 ## Security posture
 
-The trust model lives in the top-level docstring of `server/src/andes_app/__init__.py` (canonical statement). Summary:
+The trust model lives in the top-level docstring of `server/src/andes_app/__init__.py` (canonical statement) and in `SECURITY.md`. Summary:
 
-- **Local OS user is trusted** — case files contain Python expressions evaluated by ANDES at parse time, and the local user is the only authorized actor in v0.1.
-- **Loopback web origins from random browser tabs are NOT trusted** — defended via per-launch token + Host/Origin pure-ASGI middleware + precise CORS allow-list (no wildcards, no `null`, no extension origins).
-- **Browser extensions / processes with filesystem read access** can read the token file (mode `0600` mitigates but does not prevent privileged-process access). Named in R21 explicitly; no further mitigation in v0.1 — this is consistent with "local OS user trusted."
-- **Third-party case files are NOT trusted by the system** but ARE trusted by the user when they choose to load them. ANDES's secondary file reads are logged via `sys.audit` (best-effort, Python-level only — does not catch C-extension reads); kernel-level enforcement is SaaS-phase work.
+- **Local OS user is trusted** — case files contain Python expressions evaluated by ANDES at parse time, and the local user is the only authorized actor.
+- **Loopback web origins from random browser tabs are NOT trusted** — defended via Host/Origin pure-ASGI middleware + precise CORS allow-list (no wildcards, no `null`, no extension origins).
+- **Third-party case files are NOT trusted by the system** but ARE trusted by the user when they choose to load them. ANDES's secondary file reads are logged via `sys.audit` (best-effort, Python-level only — does not catch C-extension reads).
+- **Network exposure is opt-in and unauthenticated** — `--bind 0.0.0.0` exposes the full API; users who need remote access on untrusted networks should front the server with an authenticating proxy or tunnel.
 - **Windows**: workspace boundary is best-effort; warning emitted at startup.
-- **Token is valid until process exit.** No daily rotation in v0.1 (deferred to SaaS).
 
 ## Doing the work
 
@@ -60,29 +59,21 @@ The trust model lives in the top-level docstring of `server/src/andes_app/__init
 - **Styling**: Tailwind v4 utility classes only. Color/type/spacing/motion tokens live in `web/src/styles/tokens.css` (Unit 2 fills it in) and resolve via Tailwind's `@theme`. Never hardcode colors / spacing values in components — always go through tokens.
 - **Radix wrappers** (`web/src/components/ui/*`) forward Radix's behavior unchanged and apply project tokens via Tailwind. Never re-implement Radix logic. Falsification gate (Unit 2): if the project-built component library doesn't out-look stock shadcn-with-tokens, downgrade.
 - **API client**: types are codegen'd from the substrate's `/openapi.json` via `pnpm regen-api-types` into `src/api/generated.ts` (committed). Hand-authored brands (`SessionId`, `RunId`) live in `src/api/types.ts`.
-- **Auth**: per-launch token from the substrate, persisted in `sessionStorage` only (NOT localStorage; persists across same-tab reloads, clears on tab close). Never log token values.
 - **`/api/*` prefix**: the Vite dev proxy strips `/api` and forwards to the substrate's root paths. Production (Unit 10) prefixes the substrate's routers with `/api` so the same client URL works in both modes.
 
 ## What goes where
 
 - `server/src/andes_app/api/` — FastAPI routers, schemas, app factory
 - `server/src/andes_app/core/` — wrapper, worker, session manager, Arrow streaming
-- `server/src/andes_app/security/` — token, paths, ASGI middleware
+- `server/src/andes_app/security/` — workspace path validation, Host/Origin ASGI middleware
 - `server/src/andes_app/cache/` — precomputed `andes prepare` artifacts (built at wheel time; only IEEE 14 ships in the wheel)
-- `server/tests/acceptance/walkthrough.sh` — the curl-only Phase A acceptance test
-- `docs/brainstorms/` — product requirements
-- `docs/plans/` — implementation plans
-- `docs/solutions/` — institutional learnings (e.g., the CLI-Anything architectural-mismatch note)
+- `server/tests/acceptance/walkthrough.sh` — the curl-only end-to-end acceptance test
+- `examples/` — copy-paste API walkthroughs (curl + Python)
+- `llms.txt` — condensed API map for LLM agents (update when routes change)
 
-## What does NOT belong in v0.1 (per Scope Boundaries in the plan)
+## Out of scope (do not add without discussion)
 
-- React UI / SLD canvas / iconography (v0.1 plan)
-- Visual case builder (v1.5)
-- Daily token rotation (SaaS phase)
-- `andes-app warm-cache` subcommand (deferred)
-- Multi-case microbenchmarks across IEEE 39/118/NPCC 140 (deferred)
-- Subprotocol-based WebSocket auth (SaaS phase)
-- Structured access logger with `--log-format` flag (SaaS phase)
-- EIG, contingency, OPF, market sim, EMTP
+- Authentication / multi-user / SaaS features
+- Contingency screening, OPF, market simulation, EMTP
 - CIM/CGMES import
 - Custom user-defined dynamic models authored at runtime

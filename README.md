@@ -1,61 +1,100 @@
 # ANDES App
 
-A web-based GUI for [ANDES](https://github.com/CURENT/andes), the open-source Python power-system simulator. Modern UX vs. legacy commercial tools (PowerWorld, PSS/E, PowerFactory) — free, web-based, cross-platform.
+**An interactive, web-based workbench for [ANDES](https://github.com/CURENT/andes)** — the open-source Python power-system simulator. Build, edit, simulate, and analyze power systems from your browser, with live-streaming time-domain results, an interactive single-line diagram, and a fully scriptable HTTP API designed for both humans and AI agents.
 
-This repo contains **Phase A**: the substrate (Python wrapper around ANDES + FastAPI HTTP/WebSocket surface). The web UI ships as v0.1 in a separate plan.
+ANDES App is **not a wrapper around the ANDES CLI**. It is a substrate built on the ANDES Python API that adds capabilities native ANDES does not have: interactive model building, live result streaming, session management, undo/redo parameter editing, and a machine-readable API surface for interoperability with other tools and frameworks.
 
-## Status
+## What you can do
 
-Pre-1.0. Phase A in active development. See `docs/plans/2026-05-07-001-feat-andes-app-phase-a-substrate-plan.md` for the implementation plan.
+| Capability | ANDES (CLI/notebook) | ANDES App |
+|---|---|---|
+| Build a system from scratch | Hand-edit xlsx/raw files | Visual builder: add buses, lines, machines, exciters, governors from the UI |
+| Run power flow / TDS / EIG / CPF / SE | Scripted, batch | One click, non-blocking jobs with progress + cancel |
+| Watch a simulation evolve | Wait, then plot | Live Arrow-IPC streaming into interactive plots + animated SLD overlay |
+| Disturbances | Edit case files | Add faults, breaker toggles, load/parameter changes interactively |
+| Parameter studies | Write loops yourself | Built-in sweeps with per-iteration results and progress |
+| Edit parameters safely | Mutate in place | Clone-on-write editing with undo/redo and diff view |
+| Share/reproduce a study | Zip things manually | One-click reproducibility bundle export/import |
+| Drive it from other tools | Python imports | REST + WebSocket API with OpenAPI schema; usable from curl, Python, MATLAB, or LLM agents |
+| Remote access | — | Serve on your LAN; any browser becomes a client |
 
-The web UI is on v0.1.y: case load + power-flow + SLD render + element add/edit/delete
-with collision-free placement, persistent non-bus drag positions, and self-healing
-sessions on substrate restart. See
-[`docs/plans/2026-05-08-002-feat-v01y-deletion-layout-prerequisites-plan.md`](docs/plans/2026-05-08-002-feat-v01y-deletion-layout-prerequisites-plan.md)
-for the v0.1.y feature delta.
+## Quick start
 
-The web UI's v0.2 release adds TDS streaming, a disturbance editor with timeline
-markers, an animated SLD overlay, a uPlot-based plot library with scrub control,
-and a per-region panel picker. See
-[`docs/plans/2026-05-07-003-feat-v02-ui-disturbance-tds-streaming-plan.md`](docs/plans/2026-05-07-003-feat-v02-ui-disturbance-tds-streaming-plan.md)
-for the full v0.2 scope.
-
-## Quick Start
-
-You will need Python 3.12+ and ANDES 2.0.x installed.
+Requirements: **Python 3.12+** and **Node 22+ with pnpm** (Node only needed to build the UI once).
 
 ```bash
-# 1. Activate a venv with ANDES installed
-source ~/andes-project/.venv/bin/activate     # or wherever you installed andes
-
-# 2. Install andes-app in editable mode
+# 1. Install the server (pulls in ANDES, FastAPI, pyarrow)
+python -m venv .venv && source .venv/bin/activate
 pip install -e ./server
 
-# 3. Warm the ANDES cache (one-time, ~30 s on first run)
-#    Generates ~/.andes/pycode/ so subsequent andes.load calls skip the
-#    multi-minute cold-start prep. Run again after upgrading ANDES.
+# 2. Build the web UI (one time)
+cd web && pnpm install && pnpm build && cd ..
+
+# 3. Warm the ANDES cache (one time, ~30 s; rerun after upgrading ANDES)
 andes-app warm-cache
 
-# 4. Run the substrate
-andes-app serve --workspace ./tmp
-
-# Reads token file path from stderr; e.g.:
-#   andes-app token file: /home/<user>/.andes-app/run-12345.token
-# In another shell, cat the file to get the token, then drive the API:
-TOKEN=$(cat /home/<user>/.andes-app/run-12345.token)
-
-curl -X POST -H "X-Andes-Token: $TOKEN" http://127.0.0.1:<port>/sessions
-# → {"session_id": "..."}
+# 4. Serve — UI and API on one port
+andes-app serve --workspace ~/andes-cases --port 8000 --open
 ```
 
-The full curl-only walkthrough is in `server/tests/acceptance/walkthrough.sh` (lands in Unit 8) and proves Phase A's R3 acceptance criterion.
+Open `http://127.0.0.1:8000` — load a case from your workspace (or build one from scratch), run a power flow, add a disturbance, and stream a time-domain simulation.
+
+### Development mode
+
+```bash
+# Terminal 1 — backend
+andes-app serve --workspace ~/andes-cases --port 8000
+
+# Terminal 2 — frontend with hot reload
+cd web && VITE_ANDES_PORT=8000 pnpm dev   # → http://localhost:5173
+```
+
+### Access from other machines on your network
+
+```bash
+andes-app serve --workspace ~/andes-cases --port 8000 \
+  --bind 0.0.0.0 --allow-origin http://<your-lan-ip>:8000
+```
+
+> **Security note:** ANDES App has no authentication — it binds to `127.0.0.1` (loopback) by default and trusts the local OS user. Binding to a non-loopback address exposes the API (including case-file parsing, which evaluates expressions) to everyone on that network. Only do this on networks you trust. See [SECURITY.md](./SECURITY.md).
+
+## For agents and scripts
+
+The entire app is driven by a documented HTTP + WebSocket API — everything the UI can do, a script or LLM agent can do.
+
+- **OpenAPI schema:** `GET /openapi.json` — interactive docs at `/docs` (Swagger) and `/redoc`
+- **[llms.txt](./llms.txt)** — a condensed API map written for LLM consumption: endpoints, workflow ordering, enums, and gotchas
+- **[examples/](./examples/)** — curl walkthroughs and a self-contained Python client
+- **MCP server** — expose sessions, case loading, power flow, TDS, and disturbances as [Model Context Protocol](https://modelcontextprotocol.io) tools: `pip install -e './server[mcp]'`, then `andes-app mcp`
+
+Typical programmatic flow:
+
+```
+POST /api/sessions                         → session_id
+POST /api/sessions/{id}/case               → load a case (xlsx/raw/dyr/json/m)
+POST /api/sessions/{id}/disturbances       → add faults/toggles/alters (pre-setup)
+POST /api/sessions/{id}/pflow              → solve power flow
+POST /api/sessions/{id}/tds                → batch TDS (or stream via WS /api/ws/{id})
+GET  /api/sessions/{id}/operating-point    → bus voltages/angles
+```
 
 ## Architecture
 
-- `server/` — Python substrate (FastAPI + ANDES Python API wrapper, per-session subprocess workers, WebSocket streaming via Apache Arrow IPC)
-- `docs/brainstorms/` — product requirements (origin doc)
-- `docs/plans/` — implementation plans
-- `docs/solutions/` — institutional learnings
+```
+┌──────────────┐  REST + WebSocket   ┌───────────────────┐  multiprocessing  ┌──────────────┐
+│ React 19 SPA │ ◄────────────────►  │ FastAPI substrate │ ◄──────────────►  │ ANDES worker │
+│ (or any HTTP │     /api/* + /ws    │  sessions, jobs,  │   data + control  │  one System  │
+│  client)     │                     │  Arrow streaming  │       pipes       │  per session │
+└──────────────┘                     └───────────────────┘                   └──────────────┘
+```
+
+- `server/` — Python substrate: FastAPI routers, per-session subprocess workers, Apache Arrow IPC streaming, clone-on-write editing
+- `web/` — React 19 + TypeScript UI: interactive SLD (React Flow), uPlot result plots, Radix UI, Tailwind v4, Zustand
+- One `andes.System` per session lives in an isolated subprocess; the API process never blocks on a simulation
+
+## Contributing
+
+PRs welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, test commands, and conventions. Conventions for AI coding agents live in [AGENTS.md](./AGENTS.md).
 
 ## License
 
