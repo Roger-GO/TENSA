@@ -4694,6 +4694,20 @@ def _build_cpf_result(
     done_msg = str(getattr(cpf, "done_msg", "") or "")
     events = list(getattr(cpf, "events", None) or [])
 
+    def _finite_prefix_len(series: list[float]) -> int:
+        """Length of the leading run of finite values.
+
+        A CPF that hits max steps without converging leaves NaN in the
+        tail of ``lam`` / ``V`` — those are not JSON-serialisable (the
+        response 500s on ``Out of range float values``). The valid
+        prefix is still a useful partial nose curve, so truncate rather
+        than discard.
+        """
+        for i, x in enumerate(series):
+            if not math.isfinite(x):
+                return i
+        return len(series)
+
     if mode == "qv":
         q_arr = getattr(cpf, "qv_q", None)
         v_arr = getattr(cpf, "qv_v", None)
@@ -4705,6 +4719,9 @@ def _build_cpf_result(
             voltages = [float(x) for x in (v_arr if v_arr is not None else [])]
         except (TypeError, ValueError):
             voltages = []
+        keep = min(_finite_prefix_len(lambdas), _finite_prefix_len(voltages))
+        lambdas = lambdas[:keep]
+        voltages = voltages[:keep]
         bus_label = qv_bus if qv_bus is not None else str(
             getattr(cpf, "qv_bus", "")
         )
@@ -4717,6 +4734,8 @@ def _build_cpf_result(
         # collapse — treat the same way.
         nose_idx = -1
         max_lam = float(getattr(cpf, "max_lam", 0.0) or 0.0)
+        if not math.isfinite(max_lam):
+            max_lam = 0.0
         if lambdas and ok:
             nose_idx = int(_argmax(lambdas))
         truncated = (not ok) or nose_idx < 0
@@ -4765,6 +4784,15 @@ def _build_cpf_result(
                 row = []
             voltages_per_bus[bus_idxes[i]] = row
 
+    # Truncate every series to the common finite prefix — an unconverged
+    # CPF (e.g. "Reached max steps") leaves NaN tails that would 500 the
+    # JSON response; the finite prefix is still a useful partial curve.
+    keep = _finite_prefix_len(lambdas)
+    for row in voltages_per_bus.values():
+        keep = min(keep, _finite_prefix_len(row))
+    lambdas = lambdas[:keep]
+    voltages_per_bus = {k: v[:keep] for k, v in voltages_per_bus.items()}
+
     # Nose detection: a NOSE event in CPF.events tells us the run hit
     # the maximum-loadability point. argmax over the lambda series
     # mirrors what ANDES reports as ``max_lam``.
@@ -4777,6 +4805,8 @@ def _build_cpf_result(
     truncated = (not ok) or (not has_nose_event)
 
     max_lam = float(getattr(cpf, "max_lam", 0.0) or 0.0)
+    if not math.isfinite(max_lam):
+        max_lam = 0.0
     if not max_lam and lambdas:
         max_lam = max(lambdas)
 
