@@ -123,3 +123,47 @@ def test_cpf_result_voltages_per_bus_is_index_aligned_with_lambdas() -> None:
     )
     for bus_key, v in result.voltages_per_bus.items():
         assert len(v) == len(result.lambdas), bus_key
+
+
+# ---- NaN sanitisation in the builder (unconverged CPF) ----------------------
+
+
+def test_build_cpf_result_truncates_nan_tail() -> None:
+    """An unconverged CPF ("Reached max steps") leaves NaN tails in lam/V.
+
+    Those crashed JSON serialisation with HTTP 500. The builder must keep
+    the finite prefix (a useful partial curve) and emit only finite floats.
+    """
+    import math
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from andes_app.core.wrapper import _build_cpf_result
+
+    nan = float("nan")
+    ss = SimpleNamespace(
+        CPF=SimpleNamespace(
+            lam=[0.0, 0.5, 1.0, nan, nan],
+            V=np.array(
+                [
+                    [1.0, 0.98, 0.95, nan, nan],
+                    [1.0, 0.97, 0.93, nan, nan],
+                ]
+            ),
+            done_msg="CPF failed. Reached max steps (500)",
+            events=[],
+            max_lam=nan,
+        ),
+        Bus=SimpleNamespace(idx=SimpleNamespace(v=[1, 2])),
+    )
+
+    result = _build_cpf_result(ss, mode="pv", ok=False)  # type: ignore[arg-type]
+
+    assert result.lambdas == [0.0, 0.5, 1.0]
+    assert result.truncated is True
+    assert math.isfinite(result.max_lam)
+    assert result.max_lam == 1.0
+    for row in result.voltages_per_bus.values():
+        assert len(row) == 3
+        assert all(math.isfinite(x) for x in row)
