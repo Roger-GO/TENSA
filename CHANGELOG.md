@@ -2,6 +2,22 @@
 
 All notable changes to ANDES App are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/), and the project adheres to semantic versioning once 1.0 lands.
 
+## [Unreleased]
+
+### Added
+- First-run example cases: an empty workspace is auto-seeded with IEEE-14, Kundur, and WSCC-9.
+- GENROU exposes its full subtransient reactance + time-constant set, with d/q reactance-ordering validation that names the offending value (prevents textbook transient values silently clashing with unset subtransient defaults).
+- Eigenvalue scatter: numeric axis ticks + gridlines, points colored by damping band with a legend, and an "All modes" filter toggle so a well-damped system isn't an empty plot.
+- Bus data grid now shows net per-bus P/Q computed from the power-flow result.
+- Branding: logo, favicon, and "ANDES App" wordmark.
+
+### Fixed
+- A crashed per-session worker now returns a clean `503` with "reload the case or start a new session" guidance instead of leaving a zombie session that errors on every call; snapshot dill-restore falls back safely instead of crashing the worker.
+- Snapshot/disturbance list and layout-sidecar reads return `200` (empty/null) instead of `404`/`409`, removing browser-console error noise.
+- Run-mode "Add element" panel narrowed so it no longer covers the diagram.
+- TDS run badge distinguishes "Halted at t=X" (non-converged) from "Done at t=X".
+- Continuation power flow no longer 500s when it doesn't converge (NaN tails are truncated to the finite curve).
+
 ## [0.3.0] — 2026-06-09
 
 First public open-source release.

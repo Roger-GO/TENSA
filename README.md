@@ -39,7 +39,17 @@ andes-app warm-cache
 andes-app serve --workspace ~/andes-cases --port 8000 --open
 ```
 
-Open `http://127.0.0.1:8000` — load a case from your workspace (or build one from scratch), run a power flow, add a disturbance, and stream a time-domain simulation.
+Open `http://127.0.0.1:8000` — load a case from your workspace (or build one from scratch), run a power flow, add a disturbance, and stream a time-domain simulation. An empty workspace is auto-seeded with IEEE-14, Kundur, and WSCC-9 example cases so there's something to open on first run.
+
+### Watch an agent build a system end-to-end
+
+`web/scripts/agent-demo.mjs` records a captioned video of an AI agent driving the real UI: dragging each component onto the canvas to build the WSCC 9-bus system from scratch, laying it out, saving it to a file and reloading it, then running power flow, a fault + streaming time-domain simulation, continuation power flow, and eigenvalue analysis — every step through the same API a script or LLM agent would use.
+
+```bash
+andes-app serve --workspace ~/andes-cases --port 18800   # in one terminal
+cd web && node scripts/agent-demo.mjs http://127.0.0.1:18800
+# → demo-video/ieee9-agent-demo.webm
+```
 
 ### Development mode
 
