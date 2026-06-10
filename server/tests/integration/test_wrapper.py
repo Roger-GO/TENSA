@@ -306,9 +306,11 @@ def test_save_case_failed_write_is_atomic_and_raises(tmp_path: Path) -> None:
     assert zipfile.is_zipfile(str(target))
 
     # Now force the writer to blow up; the atomic path must raise + clean up.
-    with patch.object(andes_xlsx, "write", side_effect=RuntimeError("disk full")):
-        with pytest.raises(CaseSaveError):
-            w.save_case("xlsx", str(target))
+    with (
+        patch.object(andes_xlsx, "write", side_effect=RuntimeError("disk full")),
+        pytest.raises(CaseSaveError),
+    ):
+        w.save_case("xlsx", str(target))
 
     # Prior valid file is untouched (os.replace never ran), no temp left behind.
     assert target.read_bytes() == good_bytes

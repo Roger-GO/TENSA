@@ -31,8 +31,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "e" * 64
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -50,7 +48,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
         shutil.copy2(src / name, workspace / name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -60,7 +57,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -77,12 +73,11 @@ async def _create_session_and_load(
     client: httpx.AsyncClient, primary: str = "ieee14.raw"
 ) -> str:
     resp = await client.post(
-        "/api/sessions", headers={"X-Andes-Token": VALID_TOKEN}
+        "/api/sessions"
     )
     sid = str(resp.json()["session_id"])
     await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"primary_path": primary},
     )
     return sid
@@ -105,7 +100,6 @@ async def test_pmu_happy_path_place_list_run_export_csv(
     for bus in ("1", "5", "9"):
         resp = await client.post(
             f"/api/sessions/{sid}/pmu",
-            headers={"X-Andes-Token": VALID_TOKEN},
             json={"bus_idx": bus},
         )
         assert resp.status_code == 201, resp.text
@@ -121,7 +115,7 @@ async def test_pmu_happy_path_place_list_run_export_csv(
 
     # List
     list_resp = await client.get(
-        f"/api/sessions/{sid}/pmu", headers={"X-Andes-Token": VALID_TOKEN}
+        f"/api/sessions/{sid}/pmu"
     )
     assert list_resp.status_code == 200, list_resp.text
     pmus = list_resp.json()["pmus"]
@@ -130,14 +124,12 @@ async def test_pmu_happy_path_place_list_run_export_csv(
     # Run a short TDS so the substrate has data to export.
     pf = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf.status_code == 200, pf.text
 
     tds = await client.post(
         f"/api/sessions/{sid}/tds",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"tf": 0.5},
     )
     assert tds.status_code == 200, tds.text
@@ -145,7 +137,6 @@ async def test_pmu_happy_path_place_list_run_export_csv(
     # Export CSV
     csv_resp = await client.get(
         f"/api/sessions/{sid}/pmu/run-abc123/export.csv",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert csv_resp.status_code == 200, csv_resp.text
     assert csv_resp.headers["content-type"].startswith("text/csv")
@@ -185,7 +176,7 @@ async def test_pmu_list_empty_when_no_pmus_placed(
     an empty array (NOT a 404 / 409)."""
     sid = await _create_session_and_load(client)
     resp = await client.get(
-        f"/api/sessions/{sid}/pmu", headers={"X-Andes-Token": VALID_TOKEN}
+        f"/api/sessions/{sid}/pmu"
     )
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"pmus": []}
@@ -205,7 +196,6 @@ async def test_pmu_add_on_nonexistent_bus_returns_422(
     sid = await _create_session_and_load(client)
     resp = await client.post(
         f"/api/sessions/{sid}/pmu",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"bus_idx": "999"},
     )
     assert resp.status_code == 422, resp.text
@@ -227,14 +217,12 @@ async def test_pmu_add_post_setup_returns_409(
     # Force setup to commit by running PF.
     pf = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf.status_code == 200, pf.text
 
     resp = await client.post(
         f"/api/sessions/{sid}/pmu",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"bus_idx": "1"},
     )
     assert resp.status_code == 409, resp.text
@@ -254,7 +242,6 @@ async def test_pmu_delete_pre_setup_returns_204(
     sid = await _create_session_and_load(client)
     add = await client.post(
         f"/api/sessions/{sid}/pmu",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"bus_idx": "1"},
     )
     assert add.status_code == 201, add.text
@@ -262,13 +249,12 @@ async def test_pmu_delete_pre_setup_returns_204(
 
     delete = await client.delete(
         f"/api/sessions/{sid}/pmu/{pmu_idx}",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert delete.status_code == 204, delete.text
 
     # List confirms the PMU is gone.
     list_resp = await client.get(
-        f"/api/sessions/{sid}/pmu", headers={"X-Andes-Token": VALID_TOKEN}
+        f"/api/sessions/{sid}/pmu"
     )
     assert list_resp.json() == {"pmus": []}
 
@@ -280,7 +266,6 @@ async def test_pmu_delete_unknown_idx_returns_404(
     sid = await _create_session_and_load(client)
     delete = await client.delete(
         f"/api/sessions/{sid}/pmu/PMU_999",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert delete.status_code == 404, delete.text
 
@@ -297,21 +282,18 @@ async def test_pmu_delete_post_setup_returns_409(
     sid = await _create_session_and_load(client)
     add = await client.post(
         f"/api/sessions/{sid}/pmu",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"bus_idx": "1"},
     )
     pmu_idx = str(add.json()["idx"])
 
     pf = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf.status_code == 200
 
     delete = await client.delete(
         f"/api/sessions/{sid}/pmu/{pmu_idx}",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert delete.status_code == 409, delete.text
     detail = delete.json().get("detail") or ""
@@ -337,12 +319,11 @@ async def test_pmu_survives_blank_session_reload_and_replay(
     """
     # Create blank session
     sess_resp = await client.post(
-        "/api/sessions", headers={"X-Andes-Token": VALID_TOKEN}
+        "/api/sessions"
     )
     sid = str(sess_resp.json()["session_id"])
     blank_resp = await client.post(
         f"/api/sessions/{sid}/blank",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert blank_resp.status_code == 201, blank_resp.text
@@ -350,7 +331,6 @@ async def test_pmu_survives_blank_session_reload_and_replay(
     # Add a Bus so the PMU has somewhere to attach.
     add_bus = await client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "model": "Bus",
             "params": {"idx": "1", "name": "B1", "Vn": 110.0},
@@ -360,7 +340,6 @@ async def test_pmu_survives_blank_session_reload_and_replay(
 
     add_pmu = await client.post(
         f"/api/sessions/{sid}/pmu",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"bus_idx": "1", "Ta": 0.07, "Tv": 0.08},
     )
     assert add_pmu.status_code == 201, add_pmu.text
@@ -368,7 +347,6 @@ async def test_pmu_survives_blank_session_reload_and_replay(
 
     reload = await client.post(
         f"/api/sessions/{sid}/reload",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert reload.status_code == 200, reload.text
@@ -376,7 +354,7 @@ async def test_pmu_survives_blank_session_reload_and_replay(
     # Both Bus and PMU should still be there after the reload (the blank-
     # session reload-and-replay path re-applies every recorded add).
     list_resp = await client.get(
-        f"/api/sessions/{sid}/pmu", headers={"X-Andes-Token": VALID_TOKEN}
+        f"/api/sessions/{sid}/pmu"
     )
     assert list_resp.status_code == 200
     pmus = list_resp.json()["pmus"]
@@ -397,7 +375,6 @@ async def test_pmu_add_missing_bus_idx_rejected_at_pydantic(
     sid = await _create_session_and_load(client)
     resp = await client.post(
         f"/api/sessions/{sid}/pmu",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 422, resp.text
@@ -412,7 +389,6 @@ async def test_pmu_add_negative_filter_rejected(
     sid = await _create_session_and_load(client)
     resp = await client.post(
         f"/api/sessions/{sid}/pmu",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"bus_idx": "1", "Ta": -1.0},
     )
     assert resp.status_code == 422, resp.text
@@ -429,7 +405,6 @@ async def test_pmu_unknown_session_returns_404(
     bogus = "00000000-0000-0000-0000-000000000000"
     resp = await client.get(
         f"/api/sessions/{bogus}/pmu",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 404, resp.text
 
@@ -447,19 +422,16 @@ async def test_pmu_export_csv_no_pmus_returns_header_only(
     sid = await _create_session_and_load(client)
     pf = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf.status_code == 200
     tds = await client.post(
         f"/api/sessions/{sid}/tds",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"tf": 0.2},
     )
     assert tds.status_code == 200
     csv_resp = await client.get(
         f"/api/sessions/{sid}/pmu/run-empty/export.csv",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert csv_resp.status_code == 200
     lines = csv_resp.text.strip().split("\n")
@@ -479,7 +451,6 @@ async def test_pmu_export_csv_pre_setup_returns_409(
     sid = await _create_session_and_load(client)
     csv_resp = await client.get(
         f"/api/sessions/{sid}/pmu/run-x/export.csv",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert csv_resp.status_code == 409, csv_resp.text
     detail = csv_resp.json().get("detail") or ""

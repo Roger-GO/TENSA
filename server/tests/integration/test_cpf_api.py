@@ -31,8 +31,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "f" * 64
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -50,7 +48,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
         shutil.copy2(src / name, workspace / name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -60,7 +57,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -78,13 +74,12 @@ async def _create_session_and_load(
     primary: str = "ieee14.raw",
 ) -> str:
     resp = await client.post(
-        "/api/sessions", headers={"X-Andes-Token": VALID_TOKEN}
+        "/api/sessions"
     )
     sid = str(resp.json()["session_id"])
     body: dict[str, object] = {"primary_path": primary}
     await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     return sid
@@ -111,7 +106,6 @@ async def test_cpf_happy_path_returns_lambda_and_bus_voltages(
     sid = await _create_session_and_load(client)
     pf = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf.status_code == 200, pf.text
@@ -119,7 +113,6 @@ async def test_cpf_happy_path_returns_lambda_and_bus_voltages(
 
     resp = await client.post(
         f"/api/sessions/{sid}/cpf",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"direction": "load"},
     )
     assert resp.status_code == 200, resp.text
@@ -167,7 +160,6 @@ async def test_cpf_without_pflow_returns_409(
 
     resp = await client.post(
         f"/api/sessions/{sid}/cpf",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"direction": "load"},
     )
     assert resp.status_code == 409, resp.text
@@ -191,13 +183,11 @@ async def test_cpf_truncated_run_returns_truncated_true(
     sid = await _create_session_and_load(client)
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
 
     resp = await client.post(
         f"/api/sessions/{sid}/cpf",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"direction": "load", "max_iter": 3},
     )
     assert resp.status_code == 200, resp.text
@@ -227,13 +217,11 @@ async def test_cpf_qv_returns_single_bus_trace(
     sid = await _create_session_and_load(client)
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
 
     resp = await client.post(
         f"/api/sessions/{sid}/cpf/qv",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"bus_idx": "5"},
     )
     assert resp.status_code == 200, resp.text
@@ -255,7 +243,6 @@ async def test_cpf_qv_without_pflow_returns_409(
     sid = await _create_session_and_load(client)
     resp = await client.post(
         f"/api/sessions/{sid}/cpf/qv",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"bus_idx": "5"},
     )
     assert resp.status_code == 409, resp.text
@@ -274,13 +261,11 @@ async def test_cpf_qv_against_bus_without_pq_returns_422(
     sid = await _create_session_and_load(client)
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
 
     resp = await client.post(
         f"/api/sessions/{sid}/cpf/qv",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"bus_idx": "1"},
     )
     assert resp.status_code == 422, resp.text
@@ -299,12 +284,10 @@ async def test_cpf_invalid_direction_returns_422(
     sid = await _create_session_and_load(client)
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     resp = await client.post(
         f"/api/sessions/{sid}/cpf",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"direction": "neither"},
     )
     assert resp.status_code == 422, resp.text
@@ -319,7 +302,6 @@ async def test_cpf_unknown_session_returns_404(
 ) -> None:
     resp = await client.post(
         "/api/sessions/does-not-exist/cpf",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"direction": "load"},
     )
     assert resp.status_code == 404, resp.text
@@ -331,7 +313,6 @@ async def test_cpf_qv_unknown_session_returns_404(
 ) -> None:
     resp = await client.post(
         "/api/sessions/does-not-exist/cpf/qv",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"bus_idx": "5"},
     )
     assert resp.status_code == 404, resp.text

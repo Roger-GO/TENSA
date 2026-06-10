@@ -1,17 +1,16 @@
 """FastAPI application factory.
 
-Middleware ordering is load-bearing — both Host/Origin and token-redaction
-are pure ASGI (not BaseHTTPMiddleware), so they apply uniformly to HTTP and
+Middleware ordering is load-bearing — the Host/Origin check is pure ASGI
+(not BaseHTTPMiddleware), so it applies uniformly to HTTP and
 WebSocket-upgrade scopes. The execution order (outermost → innermost) is:
 
     1. Host/Origin check (rejects bad-host before any FastAPI code runs)
-    2. Token redaction (swaps the header value before logs/exceptions see it)
-    3. CORS (FastAPI's middleware — allows preflights and validates origins)
-    4. FastAPI router (auth dependency runs here, reads the captured token
-       from scope state)
+    2. CORS (FastAPI's middleware — allows preflights and validates origins)
+    3. FastAPI router
 
-uvicorn's default access log is disabled at startup; the substrate is
-local-only and the access logger is SaaS-phase work.
+There is no authentication: the server is a local-first tool that binds to
+loopback by default. uvicorn's default access log is disabled at startup;
+the substrate is local-only and the access logger is SaaS-phase work.
 """
 
 from __future__ import annotations
@@ -24,7 +23,6 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.openapi.utils import get_openapi
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
@@ -54,10 +52,7 @@ from andes_app.api.routes.ws import router as ws_router
 from andes_app.api.schemas import JobRecordSchema, ProblemDetails
 from andes_app.core.errors import SessionBusyError
 from andes_app.core.session import SessionManager, SweepInProgressError
-from andes_app.security.middleware import (
-    make_host_origin_middleware,
-    make_token_redaction_middleware,
-)
+from andes_app.security.middleware import make_host_origin_middleware
 
 log = logging.getLogger(__name__)
 
@@ -134,7 +129,6 @@ def _find_spa_dir() -> Path | None:
 
 def make_app(
     *,
-    expected_token: str,
     workspace: Path,
     bind_host: str = "127.0.0.1",
     bind_port: int = 0,
@@ -143,13 +137,11 @@ def make_app(
     extra_allowed_hosts: frozenset[str] = frozenset(),
     extra_allowed_origins: frozenset[str] = frozenset(),
     static_override: Path | None = None,
-    require_auth: bool = True,
 ) -> FastAPI:
     """Build the FastAPI app. Caller is responsible for serving it via
     uvicorn (see ``andes_app.cli``).
 
-    The token is generated and the workspace is created by the CLI before
-    this is called; both are passed in.
+    The workspace is created by the CLI before this is called and passed in.
 
     ``static_override`` lets tests pin the SPA directory to a tmp_path with a
     minimal ``index.html``; production callers leave it ``None`` so the
@@ -167,11 +159,6 @@ def make_app(
         # job-liveness sweeper (10s; KTD-18). ``shutdown`` cancels both.
         await mgr.start()
         app.state.session_manager = mgr
-        app.state.expected_token = expected_token
-        # ``require_auth=False`` (serve --no-auth dev toggle) makes the
-        # ``require_token`` dependency a no-op while leaving it wired on every
-        # route. Default True; the token is still installed either way.
-        app.state.require_auth = require_auth
         app.state.workspace = workspace
         try:
             yield
@@ -179,11 +166,16 @@ def make_app(
             await mgr.shutdown()
 
     app = FastAPI(
-        title="andes-app substrate",
+        title="ANDES App API",
         version=__version__,
         description=(
             "HTTP / WebSocket API for the ANDES power-system simulator. "
-            "Phase A substrate; v0.1+ ships a React UI on top."
+            "Everything the web UI does goes through this API, so scripts and "
+            "LLM agents have full parity. Typical flow: POST /api/sessions → "
+            "POST /api/sessions/{id}/case → (optional) POST .../disturbances → "
+            "POST .../pflow or .../tds → GET .../operating-point. See llms.txt "
+            "in the repository root for a condensed map, and examples/ for "
+            "copy-paste clients."
         ),
         lifespan=_lifespan,
     )
@@ -209,9 +201,6 @@ def make_app(
     # extra so the activity panel can offer wait/cancel instead of freezing.
     app.add_exception_handler(SessionBusyError, _session_busy_to_problem_details)
 
-    # Spec-driven agents discover the per-launch token via this securityScheme.
-    app.openapi = _custom_openapi_factory(app)  # type: ignore[method-assign]
-
     # Build the allow-lists. Hosts are checked against the request's Host
     # header (which is "127.0.0.1:port" or "localhost:port" by default).
     # Origins are checked against the Origin header on cross-origin browser
@@ -234,22 +223,20 @@ def make_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins=sorted(allowed_origins),
-        allow_credentials=False,  # token is in a header, not a cookie
+        allow_credentials=False,  # no cookies; the API is unauthenticated
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["X-Andes-Token", "Content-Type"],
+        allow_headers=["Content-Type"],
     )
 
-    # Pure-ASGI middleware go on the outermost layer. We wrap ``app`` itself
+    # Pure-ASGI middleware goes on the outermost layer. We wrap ``app`` itself
     # rather than using ``add_middleware`` because the latter doesn't support
     # callable factories cleanly with our parameters.
     app.add_middleware(
         _PureASGIWrapper,
-        wrap=lambda inner: make_token_redaction_middleware(
-            make_host_origin_middleware(
-                inner,
-                allowed_hosts=allowed_hosts,
-                allowed_origins=allowed_origins,
-            )
+        wrap=lambda inner: make_host_origin_middleware(
+            inner,
+            allowed_hosts=allowed_hosts,
+            allowed_origins=allowed_origins,
         ),
     )
 
@@ -480,40 +467,6 @@ def _http_reason_phrase(status_code: int) -> str:
         return HTTPStatus(status_code).phrase
     except ValueError:
         return "Error"
-
-
-def _custom_openapi_factory(app: FastAPI):  # type: ignore[no-untyped-def]
-    """Return a closure that lazily builds the OpenAPI schema with a
-    ``securitySchemes`` declaration for the ``X-Andes-Token`` header so
-    spec-driven agent tooling discovers the auth contract.
-    """
-
-    def custom_openapi() -> dict:  # type: ignore[type-arg]
-        if app.openapi_schema:
-            return app.openapi_schema
-        schema = get_openapi(
-            title=app.title,
-            version=app.version,
-            description=app.description,
-            routes=app.routes,
-        )
-        components = schema.setdefault("components", {})
-        components["securitySchemes"] = {
-            "AndesToken": {
-                "type": "apiKey",
-                "in": "header",
-                "name": "X-Andes-Token",
-                "description": (
-                    "Per-launch token. Read from the file path printed to "
-                    "stderr at startup (default ~/.andes-app/run-<pid>.token)."
-                ),
-            }
-        }
-        schema["security"] = [{"AndesToken": []}]
-        app.openapi_schema = schema
-        return schema
-
-    return custom_openapi
 
 
 class _PureASGIWrapper:

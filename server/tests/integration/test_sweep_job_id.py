@@ -27,9 +27,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "s" * 64
-HEADERS = {"X-Andes-Token": VALID_TOKEN}
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -49,7 +46,6 @@ async def client(
         shutil.copy2(src / name, workspace / name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -61,7 +57,6 @@ async def client(
     )
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -77,18 +72,16 @@ async def _seed_session_with_fault_snapshot(
     ac: httpx.AsyncClient, snapshot_name: str
 ) -> str:
     """Create a session, add a Fault disturbance, run PF, save a snapshot."""
-    resp = await ac.post("/api/sessions", headers=HEADERS)
+    resp = await ac.post("/api/sessions")
     assert resp.status_code == 201, resp.text
     sid = str(resp.json()["session_id"])
     resp = await ac.post(
         f"/api/sessions/{sid}/case",
-        headers=HEADERS,
         json={"primary_path": "ieee14.raw"},
     )
     assert resp.status_code in (200, 201), resp.text
     resp = await ac.post(
         f"/api/sessions/{sid}/disturbances",
-        headers=HEADERS,
         json={
             "disturbances": [
                 {
@@ -104,12 +97,11 @@ async def _seed_session_with_fault_snapshot(
     )
     assert resp.status_code == 200, resp.text
     resp = await ac.post(
-        f"/api/sessions/{sid}/pflow", headers=HEADERS, json={}
+        f"/api/sessions/{sid}/pflow", json={}
     )
     assert resp.status_code == 200, resp.text
     resp = await ac.post(
         f"/api/sessions/{sid}/snapshot",
-        headers=HEADERS,
         json={"name": snapshot_name},
     )
     assert resp.status_code == 200, resp.text
@@ -139,7 +131,6 @@ async def test_sweep_returns_sweep_id_and_identical_job_id(
 
     resp = await ac.post(
         f"/api/sessions/{sid}/sweep",
-        headers=HEADERS,
         json={
             "parameter": {
                 "kind": "disturbance.fault.tc",
@@ -163,7 +154,7 @@ async def test_sweep_returns_sweep_id_and_identical_job_id(
     # The sweep is a first-class job in the registry; the record resolves while
     # the sweep is still in flight (the gate is set + the record registered
     # synchronously in ``start_sweep``).
-    rec = await ac.get(f"/api/sessions/{sid}/jobs/{job_id}", headers=HEADERS)
+    rec = await ac.get(f"/api/sessions/{sid}/jobs/{job_id}")
     assert rec.status_code == 200, rec.text
     record = rec.json()
     assert record["id"] == job_id
@@ -177,7 +168,7 @@ async def test_sweep_returns_sweep_id_and_identical_job_id(
 
     # Drain so teardown is fast, then confirm the record reconciled to ``done``.
     await _drain_sweep(mgr, sweep_id)
-    rec2 = await ac.get(f"/api/sessions/{sid}/jobs/{job_id}", headers=HEADERS)
+    rec2 = await ac.get(f"/api/sessions/{sid}/jobs/{job_id}")
     assert rec2.status_code == 200, rec2.text
     assert rec2.json()["status"] == "done"
 
@@ -199,7 +190,6 @@ async def test_delete_cancel_of_live_sweep_aborts_the_task(
 
     resp = await ac.post(
         f"/api/sessions/{sid}/sweep",
-        headers=HEADERS,
         json={
             "parameter": {
                 "kind": "disturbance.fault.tc",
@@ -216,7 +206,7 @@ async def test_delete_cancel_of_live_sweep_aborts_the_task(
     task = mgr._sweep_tasks.get(sweep_id)
     assert task is not None and not task.done()
 
-    resp = await ac.delete(f"/api/sessions/{sid}/jobs/{sweep_id}", headers=HEADERS)
+    resp = await ac.delete(f"/api/sessions/{sid}/jobs/{sweep_id}")
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "cancelled"
 
@@ -232,6 +222,6 @@ async def test_delete_cancel_of_live_sweep_aborts_the_task(
     assert buf.state != "completed"
     # The registry record is terminal ``cancelled`` (the user's intent), not a
     # spinner that would otherwise hang.
-    rec = await ac.get(f"/api/sessions/{sid}/jobs/{sweep_id}", headers=HEADERS)
+    rec = await ac.get(f"/api/sessions/{sid}/jobs/{sweep_id}")
     assert rec.status_code == 200, rec.text
     assert rec.json()["status"] == "cancelled"

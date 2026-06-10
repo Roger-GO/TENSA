@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "andes-app"
-version = "0.1.0.dev0"
+version = "0.3.0"
 description = "Web-based GUI substrate for the ANDES power-system simulator"
 readme = "README.md"
 license = { file = "../LICENSE" }
@@ -43,6 +43,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# MCP (Model Context Protocol) stdio server for LLM agents: `andes-app mcp`
+mcp = [
+    "mcp>=1.2",
+]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",

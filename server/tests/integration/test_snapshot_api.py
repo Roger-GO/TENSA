@@ -31,8 +31,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "e" * 64
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -54,7 +52,6 @@ async def workspace(tmp_path: Path) -> Path:
 @pytest.fixture
 async def client(workspace: Path) -> AsyncIterator[httpx.AsyncClient]:
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -66,7 +63,6 @@ async def client(workspace: Path) -> AsyncIterator[httpx.AsyncClient]:
     )
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -84,7 +80,7 @@ async def _create_session_with_case(
     primary: str = "ieee14.raw",
     addfile: str | None = "ieee14.dyr",
 ) -> str:
-    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions")
     assert resp.status_code == 201, resp.text
     sid = str(resp.json()["session_id"])
     body: dict[str, object] = {"primary_path": primary}
@@ -92,7 +88,6 @@ async def _create_session_with_case(
         body["addfiles"] = [addfile]
     resp = await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     assert resp.status_code in (200, 201), resp.text
@@ -125,7 +120,6 @@ async def test_snapshot_save_then_restore_via_dill_fast_path(
     # Run PF so the snapshot has something interesting to capture.
     resp = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 200, resp.text
@@ -134,7 +128,6 @@ async def test_snapshot_save_then_restore_via_dill_fast_path(
     # Save the snapshot.
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "scenario-A"},
     )
     assert resp.status_code == 200, resp.text
@@ -150,7 +143,6 @@ async def test_snapshot_save_then_restore_via_dill_fast_path(
     # Restore using the default dill optimisation.
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot/restore",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "scenario-A"},
     )
     assert resp.status_code == 200, resp.text
@@ -163,7 +155,6 @@ async def test_snapshot_save_then_restore_via_dill_fast_path(
     assert isinstance(restore_job, str) and restore_job
     job = await client.get(
         f"/api/sessions/{sid}/jobs/{restore_job}",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert job.status_code == 200, job.text
     assert job.json()["kind"] == "snapshot-restore"
@@ -180,21 +171,18 @@ async def test_snapshot_restore_via_slow_path_when_dill_disabled(
     sid = await _create_session_with_case(client)
     resp = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 200, resp.text
 
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "slow-test"},
     )
     assert resp.status_code == 200
 
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot/restore",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "slow-test", "use_dill_optimization": False},
     )
     assert resp.status_code == 200, resp.text
@@ -205,7 +193,6 @@ async def test_snapshot_restore_via_slow_path_when_dill_disabled(
     # left the System in a clean operating-point state.
     resp = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 200, resp.text
@@ -225,7 +212,6 @@ async def test_snapshot_restore_replays_disturbance_log(
     # Add a Fault disturbance pre-PF.
     resp = await client.post(
         f"/api/sessions/{sid}/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "disturbances": [
                 {"kind": "fault", "bus_idx": 5, "tf": 1.0, "tc": 1.1, "xf": 0.0001, "rf": 0.0},
@@ -237,7 +223,6 @@ async def test_snapshot_restore_replays_disturbance_log(
     # Run PF so the snapshot covers the converged operating point.
     resp = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 200, resp.text
@@ -245,7 +230,6 @@ async def test_snapshot_restore_replays_disturbance_log(
     # Save with one disturbance recorded.
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "one-fault"},
     )
     assert resp.status_code == 200, resp.text
@@ -258,7 +242,6 @@ async def test_snapshot_restore_replays_disturbance_log(
     # for the active session must reflect ONLY what was in the snapshot.
     resp = await client.post(
         f"/api/sessions/{sid}/reload",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
 
@@ -266,7 +249,6 @@ async def test_snapshot_restore_replays_disturbance_log(
     # System.
     resp = await client.post(
         f"/api/sessions/{sid}/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "disturbances": [
                 {"kind": "fault", "bus_idx": 7, "tf": 2.0, "tc": 2.1, "xf": 0.0001, "rf": 0.0},
@@ -279,7 +261,6 @@ async def test_snapshot_restore_replays_disturbance_log(
     # (one Fault on bus 5) wins; the second one (bus 7) is wiped.
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot/restore",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "one-fault"},
     )
     assert resp.status_code == 200, resp.text
@@ -288,7 +269,6 @@ async def test_snapshot_restore_replays_disturbance_log(
     # Confirm the disturbance log is the snapshot's, not the post-add one.
     resp = await client.get(
         f"/api/sessions/{sid}/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     listed = resp.json()["disturbances"]
@@ -307,7 +287,6 @@ async def test_list_snapshots_returns_empty_for_fresh_session(
     sid = await _create_session_with_case(client)
     resp = await client.get(
         f"/api/sessions/{sid}/snapshots",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"snapshots": []}
@@ -324,14 +303,12 @@ async def test_list_snapshots_returns_all_saved_for_case(
     for n in ("snap-a", "snap-b", "snap-c"):
         resp = await client.post(
             f"/api/sessions/{sid}/snapshot",
-            headers={"X-Andes-Token": VALID_TOKEN},
             json={"name": n},
         )
         assert resp.status_code == 200, resp.text
 
     resp = await client.get(
         f"/api/sessions/{sid}/snapshots",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200
     snapshots = resp.json()["snapshots"]
@@ -349,20 +326,17 @@ async def test_delete_snapshot_removes_from_listing(
     sid = await _create_session_with_case(client)
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "doomed"},
     )
     assert resp.status_code == 200
 
     resp = await client.delete(
         f"/api/sessions/{sid}/snapshot/doomed",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 204, resp.text
 
     resp = await client.get(
         f"/api/sessions/{sid}/snapshots",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200
     assert resp.json()["snapshots"] == []
@@ -375,7 +349,6 @@ async def test_delete_unknown_snapshot_returns_404(
     sid = await _create_session_with_case(client)
     resp = await client.delete(
         f"/api/sessions/{sid}/snapshot/nonexistent",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 404, resp.text
 
@@ -390,14 +363,12 @@ async def test_snapshot_save_collision_returns_409_by_default(
     sid = await _create_session_with_case(client)
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "scenario-A"},
     )
     assert resp.status_code == 200
 
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "scenario-A"},
     )
     assert resp.status_code == 409, resp.text
@@ -410,14 +381,12 @@ async def test_snapshot_save_collision_with_force_overwrites(
     sid = await _create_session_with_case(client)
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "scenario-A"},
     )
     assert resp.status_code == 200
 
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "scenario-A", "force": True},
     )
     assert resp.status_code == 200, resp.text
@@ -434,7 +403,6 @@ async def test_snapshot_save_invalid_name_returns_422(
     sid = await _create_session_with_case(client)
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "../escape"},
     )
     assert resp.status_code == 422, resp.text
@@ -447,7 +415,6 @@ async def test_snapshot_restore_unknown_name_returns_404(
     sid = await _create_session_with_case(client)
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot/restore",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "ghost"},
     )
     assert resp.status_code == 404, resp.text
@@ -460,38 +427,13 @@ async def test_snapshot_save_without_case_returns_409(
     """Snapshot save needs a loaded System (the dill blob captures the
     System; the JSON metadata captures its log). With no case loaded
     the wrapper rejects with NoCaseLoadedError → 409."""
-    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions")
     sid = str(resp.json()["session_id"])
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "scenario-A"},
     )
     assert resp.status_code == 409, resp.text
-
-
-@pytest.mark.integration
-async def test_snapshot_endpoints_require_token(
-    client: httpx.AsyncClient,
-) -> None:
-    """Every snapshot endpoint guards with the per-launch token."""
-    sid = await _create_session_with_case(client)
-    # save
-    resp = await client.post(
-        f"/api/sessions/{sid}/snapshot", json={"name": "x"}
-    )
-    assert resp.status_code == 401, resp.text
-    # restore
-    resp = await client.post(
-        f"/api/sessions/{sid}/snapshot/restore", json={"name": "x"}
-    )
-    assert resp.status_code == 401, resp.text
-    # list
-    resp = await client.get(f"/api/sessions/{sid}/snapshots")
-    assert resp.status_code == 401, resp.text
-    # delete
-    resp = await client.delete(f"/api/sessions/{sid}/snapshot/x")
-    assert resp.status_code == 401, resp.text
 
 
 # ---- session-restart durability --------------------------------------------
@@ -510,7 +452,6 @@ async def test_snapshot_survives_session_restart(
     sid_a = await _create_session_with_case(client)
     resp = await client.post(
         f"/api/sessions/{sid_a}/snapshot",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "persisted"},
     )
     assert resp.status_code == 200, resp.text
@@ -518,14 +459,12 @@ async def test_snapshot_survives_session_restart(
     # Close session A; the manager reaps the worker subprocess.
     await client.delete(
         f"/api/sessions/{sid_a}",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
 
     # Open session B against the same workspace + case.
     sid_b = await _create_session_with_case(client)
     resp = await client.get(
         f"/api/sessions/{sid_b}/snapshots",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     names = [s["name"] for s in resp.json()["snapshots"]]
@@ -534,7 +473,6 @@ async def test_snapshot_survives_session_restart(
     # Restore from session B works against the snapshot saved in A.
     resp = await client.post(
         f"/api/sessions/{sid_b}/snapshot/restore",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": "persisted"},
     )
     assert resp.status_code == 200, resp.text

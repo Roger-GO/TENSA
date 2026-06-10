@@ -24,7 +24,6 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from andes_app.api._run_as_job import _run_as_job
-from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
     AddElementRequest,
@@ -139,13 +138,10 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
     operation_id="getTopologySchema",
     summary="Per-model parameter metadata for the add/edit forms.",
     response_model=TopologySchema,
-    responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
-    },
 )
-async def topology_schema(_: RequireToken) -> TopologySchema:
+async def topology_schema() -> TopologySchema:
     """Static endpoint — the schema mirrors a compile-time table on the
-    wrapper. Auth-gated only because the rest of the substrate is."""
+    wrapper."""
     models: dict[str, list[TopologyParamMeta]] = {}
     for model_name, metas in _PARAMS_BY_MODEL.items():
         models[model_name] = [
@@ -168,7 +164,6 @@ async def topology_schema(_: RequireToken) -> TopologySchema:
     response_model=ElementCreated,
     status_code=status.HTTP_201_CREATED,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -198,7 +193,6 @@ async def add_element(
     session_id: str,
     body: AddElementRequest,
     request: Request,
-    _: RequireToken,
 ) -> ElementCreated:
     _enforce_body_size(request)
     mgr = _manager(request)
@@ -228,7 +222,6 @@ async def add_element(
     summary="Edit parameters on an existing pre-setup element.",
     response_model=TopologyEntry,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {
             "model": ProblemDetails,
             "description": (
@@ -265,7 +258,6 @@ async def edit_element(
     idx: str,
     body: EditElementRequest,
     request: Request,
-    _: RequireToken,
 ) -> TopologyEntry:
     _enforce_body_size(request)
     mgr = _manager(request)
@@ -297,7 +289,6 @@ async def edit_element(
     response_model=BlankSystemResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -311,7 +302,6 @@ async def edit_element(
 async def create_blank(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> BlankSystemResponse:
     # No body; size cap is moot but we still don't want a giant Content-Length
     # to slip through.
@@ -366,7 +356,6 @@ def _validate_save_filename(workspace: Path, filename: str, format: str) -> Path
     response_model=SaveCaseResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or no case loaded."},
         409: {
             "model": ProblemDetails,
@@ -392,7 +381,6 @@ async def save_case(
     session_id: str,
     body: SaveCaseRequest,
     request: Request,
-    _: RequireToken,
 ) -> SaveCaseResponse:
     _enforce_body_size(request)
     mgr = _manager(request)
@@ -443,7 +431,6 @@ async def save_case(
     summary="Drop the last add() and rebuild the System.",
     response_model=TopologySummary,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -461,7 +448,6 @@ async def save_case(
 async def undo_last_edit(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> TopologySummary:
     _enforce_body_size(request)
     mgr = _manager(request)
@@ -490,7 +476,6 @@ async def undo_last_edit(
     summary="Delete a previously-added pre-setup element.",
     response_model=TopologySummary,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {
             "model": ProblemDetails,
             "description": (
@@ -524,7 +509,6 @@ async def delete_element(
     model: str,
     idx: str,
     request: Request,
-    _: RequireToken,
 ) -> TopologySummary | JSONResponse:
     _enforce_body_size(request)
     mgr = _manager(request)

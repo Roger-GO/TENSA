@@ -21,8 +21,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "d" * 64
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -40,7 +38,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
         shutil.copy2(src / name, workspace / name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -50,7 +47,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -68,14 +64,13 @@ async def _create_session_and_load(
     primary: str = "ieee14.raw",
     addfile: str | None = None,
 ) -> str:
-    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions")
     sid = str(resp.json()["session_id"])
     body: dict[str, object] = {"primary_path": primary}
     if addfile:
         body["addfiles"] = [addfile]
     await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     return sid
@@ -94,7 +89,6 @@ async def test_report_pflow_returns_plain_text_and_structured_tables(
     sid = await _create_session_and_load(client, "ieee14.raw")
     pf = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf.status_code == 200, pf.text
@@ -102,7 +96,6 @@ async def test_report_pflow_returns_plain_text_and_structured_tables(
 
     resp = await client.get(
         f"/api/sessions/{sid}/report",
-        headers={"X-Andes-Token": VALID_TOKEN},
         params={"routine": "pflow"},
     )
     assert resp.status_code == 200, resp.text
@@ -128,12 +121,10 @@ async def test_report_pflow_bus_table_row_count_matches_case(
     sid = await _create_session_and_load(client, "ieee14.raw")
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     resp = await client.get(
         f"/api/sessions/{sid}/report",
-        headers={"X-Andes-Token": VALID_TOKEN},
         params={"routine": "pflow"},
     )
     body = resp.json()
@@ -161,13 +152,11 @@ async def test_report_tds_after_successful_run_returns_summary(
     # ``ss.dae.t > 0`` and trigger the TDS init path.
     tds = await client.post(
         f"/api/sessions/{sid}/tds",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"tf": 0.1},
     )
     assert tds.status_code == 200, tds.text
     resp = await client.get(
         f"/api/sessions/{sid}/report",
-        headers={"X-Andes-Token": VALID_TOKEN},
         params={"routine": "tds"},
     )
     assert resp.status_code == 200, resp.text
@@ -193,7 +182,6 @@ async def test_report_pflow_without_run_returns_409(
     sid = await _create_session_and_load(client, "ieee14.raw")
     resp = await client.get(
         f"/api/sessions/{sid}/report",
-        headers={"X-Andes-Token": VALID_TOKEN},
         params={"routine": "pflow"},
     )
     assert resp.status_code == 409, resp.text
@@ -211,12 +199,10 @@ async def test_report_tds_without_run_returns_409(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     resp = await client.get(
         f"/api/sessions/{sid}/report",
-        headers={"X-Andes-Token": VALID_TOKEN},
         params={"routine": "tds"},
     )
     assert resp.status_code == 409, resp.text
@@ -229,11 +215,10 @@ async def test_report_no_case_loaded_returns_409(
     client: httpx.AsyncClient,
 ) -> None:
     """Edge case: session exists but no case has been loaded → 409."""
-    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions")
     sid = str(resp.json()["session_id"])
     resp = await client.get(
         f"/api/sessions/{sid}/report",
-        headers={"X-Andes-Token": VALID_TOKEN},
         params={"routine": "pflow"},
     )
     assert resp.status_code == 409, resp.text
@@ -255,12 +240,10 @@ async def test_report_eig_without_run_returns_409(
     sid = await _create_session_and_load(client, "ieee14.raw")
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     resp = await client.get(
         f"/api/sessions/{sid}/report",
-        headers={"X-Andes-Token": VALID_TOKEN},
         params={"routine": "eig"},
     )
     assert resp.status_code == 409, resp.text
@@ -277,7 +260,6 @@ async def test_report_unknown_routine_returns_422(
     sid = await _create_session_and_load(client, "ieee14.raw")
     resp = await client.get(
         f"/api/sessions/{sid}/report",
-        headers={"X-Andes-Token": VALID_TOKEN},
         params={"routine": "snapshot"},
     )
     assert resp.status_code == 422, resp.text
@@ -292,22 +274,9 @@ async def test_report_unknown_session_returns_404(
 ) -> None:
     resp = await client.get(
         "/api/sessions/does-not-exist/report",
-        headers={"X-Andes-Token": VALID_TOKEN},
         params={"routine": "pflow"},
     )
     assert resp.status_code == 404, resp.text
-
-
-@pytest.mark.integration
-async def test_report_missing_token_returns_401(
-    client: httpx.AsyncClient,
-) -> None:
-    sid = await _create_session_and_load(client, "ieee14.raw")
-    resp = await client.get(
-        f"/api/sessions/{sid}/report",
-        params={"routine": "pflow"},
-    )
-    assert resp.status_code == 401, resp.text
 
 
 @pytest.mark.integration
@@ -323,12 +292,10 @@ async def test_report_pflow_does_not_pollute_workspace(
     sid = await _create_session_and_load(client, "ieee14.raw")
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     resp = await client.get(
         f"/api/sessions/{sid}/report",
-        headers={"X-Andes-Token": VALID_TOKEN},
         params={"routine": "pflow"},
     )
     assert resp.status_code == 200, resp.text

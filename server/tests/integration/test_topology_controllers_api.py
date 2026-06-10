@@ -30,8 +30,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "e" * 64
-
 
 def _bundled_cases_dir() -> Path:
     pytest.importorskip("andes")
@@ -51,7 +49,6 @@ async def _make_client(tmp_path: Path, files: list[Path]) -> httpx.AsyncClient:
         shutil.copy2(src, workspace / src.name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -61,7 +58,6 @@ async def _make_client(tmp_path: Path, files: list[Path]) -> httpx.AsyncClient:
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     client = httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000")
@@ -77,7 +73,7 @@ async def _create_session_and_load(
     """Create a session, load the case, and return the load-case response
     body (already a TopologySummary). Asserts 200 on both calls.
     """
-    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions")
     assert resp.status_code in (200, 201), resp.text
     sid = str(resp.json()["session_id"])
     body: dict[str, object] = {"primary_path": primary_path}
@@ -85,7 +81,6 @@ async def _create_session_and_load(
         body["addfiles"] = addfiles
     resp = await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     assert resp.status_code == 200, resp.text

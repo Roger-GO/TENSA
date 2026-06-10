@@ -25,7 +25,6 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
 from andes_app.core.session import (
@@ -136,7 +135,6 @@ def _manager(request: Request) -> SessionManager:
     summary="Render a human-readable report from PFlow or TDS results.",
     response_model=ReportResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -165,7 +163,6 @@ def _manager(request: Request) -> SessionManager:
 async def get_report(
     session_id: str,
     request: Request,
-    _: RequireToken,
     routine: ReportRoutineEnum = Query(
         ...,
         description=(

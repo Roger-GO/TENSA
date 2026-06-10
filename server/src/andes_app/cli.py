@@ -2,10 +2,11 @@
 
 Subcommands:
 
-- ``serve`` — start the FastAPI substrate. Generates a per-launch token,
-  writes it to a mode-``0600`` file, prints the path to stderr, then runs
-  uvicorn. uvicorn's default access log is disabled; the substrate emits
-  its own structured stderr lines via ``logging``.
+- ``serve`` — start the FastAPI substrate via uvicorn. Binds to loopback by
+  default; there is no authentication, so non-loopback binds expose the API
+  to the whole network (a stderr warning is emitted). uvicorn's default
+  access log is disabled; the substrate emits its own structured stderr
+  lines via ``logging``.
 - ``warm-cache`` — run ANDES's symbolic-equation code generation
   (``andes.prepare()``) so the cache is populated. Recommended once after
   install: subsequent ``andes.load`` calls skip the multi-minute cold-start
@@ -30,7 +31,6 @@ from fastapi import FastAPI
 
 from andes_app.api.app import make_app
 from andes_app.security.paths import ensure_workspace
-from andes_app.security.token import default_token_path, install_token
 
 app = typer.Typer(
     name="andes-app",
@@ -67,20 +67,12 @@ def serve(
         help="Directory under which case files are stored. Created mode 0700 if missing.",
     ),
     max_sessions: int = typer.Option(
-        4, "--max-sessions", help="Per-token cap on concurrent sessions."
+        4, "--max-sessions", help="Cap on concurrent sessions."
     ),
     idle_timeout_seconds: float = typer.Option(
         180.0,
         "--idle-timeout-seconds",
         help="Sessions with no activity for this long are reaped.",
-    ),
-    token_file: Path | None = typer.Option(
-        None,
-        "--token-file",
-        help=(
-            "Override the default token file location "
-            "(``~/.andes-app/run-<pid>.token``). Used by tests."
-        ),
     ),
     allow_origin: list[str] = typer.Option(
         [],
@@ -97,21 +89,8 @@ def serve(
         False,
         "--open",
         help=(
-            "After the server starts listening, open the user's default browser at "
-            "``http://<host>:<port>/#token=<value>`` so the UI extracts the token "
-            "from the URL fragment on first load (no manual paste). The fragment "
-            "is never sent to the server; the UI clears it from ``location`` on "
-            "boot via ``history.replaceState``."
-        ),
-    ),
-    no_auth: bool = typer.Option(
-        False,
-        "--no-auth",
-        help=(
-            "DEV ONLY: disable X-Andes-Token enforcement. The auth dependency "
-            "stays wired on every route (OpenAPI security scheme unchanged) but "
-            "is bypassed, so local debugging needs no token. Loopback bind + "
-            "Host/Origin checks still apply. Never use off-loopback."
+            "After the server starts listening, open the user's default browser "
+            "at ``http://<host>:<port>/``. Requires a fixed --port."
         ),
     ),
     reload: bool = typer.Option(
@@ -144,19 +123,16 @@ def serve(
     # Non-loopback bind warning (security)
     if bind not in {"127.0.0.1", "localhost", "::1"}:
         log.warning(
-            "Binding to non-loopback interface %s. Per-launch token + Host/Origin "
-            "checks still apply, but this exposes the substrate beyond the local "
-            "machine. Consider whether this is intended.",
+            "Binding to non-loopback interface %s. The API has NO authentication "
+            "— anyone who can reach this interface can drive the simulator and "
+            "read/write the workspace. Host/Origin checks still apply, but they "
+            "do not stop direct (non-browser) clients. Only do this on a network "
+            "you fully trust.",
             bind,
         )
 
     # Resolve workspace + ensure it exists with safe permissions
     canonical_workspace = ensure_workspace(workspace)
-    log.info("workspace: %s", canonical_workspace)
-
-    # Install the per-launch token
-    token = install_token(path=token_file or default_token_path())
-    log.info("andes-app token file: %s", token.path)
 
     # Parse --allow-origin entries into the (host, origin) pair the app
     # factory expects. We split on the URL host:port so the Host header
@@ -195,24 +171,14 @@ def serve(
         extra_hosts.add(host_only)
         log.info("CORS allow-origin: %s (host: %s)", origin, host_only)
 
-    if no_auth:
-        log.warning(
-            "DEV --no-auth: X-Andes-Token enforcement is DISABLED. The auth "
-            "dependency is bypassed (structure preserved); use only on a "
-            "trusted loopback bind for local debugging."
-        )
-
     # ``--reload`` runs uvicorn against an import-string factory so the
     # reloader subprocess can re-import the app on source changes. The factory
     # is called with no args in the worker, so config is threaded through
-    # ``ANDES_APP_RELOAD_*`` env vars set here. With --no-auth there is no token
-    # churn across reloads.
+    # ``ANDES_APP_RELOAD_*`` env vars set here.
     if reload:
         os.environ["ANDES_APP_RELOAD_WORKSPACE"] = str(canonical_workspace)
         os.environ["ANDES_APP_RELOAD_BIND"] = bind
         os.environ["ANDES_APP_RELOAD_PORT"] = str(port)
-        os.environ["ANDES_APP_RELOAD_NO_AUTH"] = "1" if no_auth else "0"
-        os.environ["ANDES_APP_RELOAD_TOKEN"] = token.value
         os.environ["ANDES_APP_RELOAD_ORIGINS"] = ",".join(sorted(extra_origins))
         os.environ["ANDES_APP_RELOAD_HOSTS"] = ",".join(sorted(extra_hosts))
         os.environ["ANDES_APP_RELOAD_MAX_SESSIONS"] = str(max_sessions)
@@ -232,7 +198,6 @@ def serve(
         return
 
     fastapi_app = make_app(
-        expected_token=token.value,
         workspace=canonical_workspace,
         bind_host=bind,
         bind_port=port,
@@ -240,19 +205,23 @@ def serve(
         idle_timeout_seconds=idle_timeout_seconds,
         extra_allowed_hosts=frozenset(extra_hosts),
         extra_allowed_origins=frozenset(extra_origins),
-        require_auth=not no_auth,
+    )
+
+    display_host = "127.0.0.1" if bind in {"0.0.0.0", "::", ""} else bind
+    log.info(
+        "serving http://%s:%s/ (workspace: %s)",
+        display_host,
+        port if port else "<os-assigned-port>",
+        canonical_workspace,
     )
 
     # ``--open`` sentinel: spawn a watcher thread that polls until uvicorn
     # has bound a real port (relevant when ``--port 0`` is used) and then
-    # opens the user's browser at the URL-fragment handoff URL. The fragment
-    # is never sent to the server; the UI extracts the token client-side and
-    # clears the fragment via ``history.replaceState`` on boot.
+    # opens the user's browser at the server root.
     if open_browser:
         _spawn_open_browser_watcher(
             requested_host=bind,
             requested_port=port,
-            token_value=token.value,
             log=log,
         )
 
@@ -278,8 +247,6 @@ def _reload_app_factory() -> FastAPI:
     workspace = Path(os.environ["ANDES_APP_RELOAD_WORKSPACE"])
     bind = os.environ.get("ANDES_APP_RELOAD_BIND", "127.0.0.1")
     port = int(os.environ.get("ANDES_APP_RELOAD_PORT", "0"))
-    no_auth = os.environ.get("ANDES_APP_RELOAD_NO_AUTH") == "1"
-    token = os.environ.get("ANDES_APP_RELOAD_TOKEN", "")
     origins = frozenset(
         o for o in os.environ.get("ANDES_APP_RELOAD_ORIGINS", "").split(",") if o
     )
@@ -289,7 +256,6 @@ def _reload_app_factory() -> FastAPI:
     max_sessions = int(os.environ.get("ANDES_APP_RELOAD_MAX_SESSIONS", "4"))
     idle = float(os.environ.get("ANDES_APP_RELOAD_IDLE", "180.0"))
     return make_app(
-        expected_token=token,
         workspace=ensure_workspace(workspace),
         bind_host=bind,
         bind_port=port,
@@ -297,7 +263,6 @@ def _reload_app_factory() -> FastAPI:
         idle_timeout_seconds=idle,
         extra_allowed_hosts=hosts,
         extra_allowed_origins=origins,
-        require_auth=not no_auth,
     )
 
 
@@ -305,7 +270,6 @@ def _spawn_open_browser_watcher(
     *,
     requested_host: str,
     requested_port: int,
-    token_value: str,
     log: logging.Logger,
 ) -> None:
     """Launch a daemon thread that opens the user's browser once the server
@@ -351,14 +315,49 @@ def _spawn_open_browser_watcher(
         else:
             log.warning("--open: server did not start listening within %.1fs", deadline_seconds)
             return
-        url = f"http://{browser_host}:{bound_port}/#token={token_value}"
-        log.info("opening browser: %s", url.replace(token_value, "<token>"))
+        url = f"http://{browser_host}:{bound_port}/"
+        log.info("opening browser: %s", url)
         try:
             webbrowser.open(url, new=2)
         except Exception as exc:  # pragma: no cover - platform-dependent
             log.warning("--open: webbrowser.open failed: %s", exc)
 
     threading.Thread(target=_watcher, name="andes-app-open", daemon=True).start()
+
+
+@app.command(name="mcp")
+def mcp(
+    url: str | None = typer.Option(
+        None,
+        "--url",
+        help=(
+            "Attach to an already-running andes-app server "
+            "(e.g. http://127.0.0.1:8000)."
+        ),
+    ),
+    workspace: Path | None = typer.Option(
+        None,
+        "--workspace",
+        help=(
+            "Spawn a private andes-app server on an ephemeral loopback port "
+            "serving this workspace for the lifetime of the MCP process."
+        ),
+    ),
+) -> None:
+    """Run the MCP (Model Context Protocol) stdio server for LLM agents.
+
+    Exposes sessions, case loading, disturbances, power flow, TDS, and
+    eigenanalysis as MCP tools. Requires the optional dependency:
+    ``pip install 'andes-app[mcp]'``. Configure your MCP client to launch::
+
+        andes-app mcp --workspace ~/andes-cases
+    """
+    if (url is None) == (workspace is None):
+        raise typer.BadParameter("Provide exactly one of --url or --workspace.")
+
+    from andes_app.mcp_server import run as run_mcp
+
+    run_mcp(url=url, workspace=str(workspace) if workspace is not None else None)
 
 
 @app.command(name="warm-cache")

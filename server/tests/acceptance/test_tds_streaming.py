@@ -3,7 +3,7 @@
 These tests spawn ``andes-app serve`` in a subprocess (the same pattern as
 the Phase A acceptance walkthrough), connect a real WebSocket client via
 the ``websockets`` library, and assert on the wire protocol end-to-end:
-auth handshake, stream-start metadata, Arrow IPC binary frames, and the
+ready handshake, stream-start metadata, Arrow IPC binary frames, and the
 final ``done`` text frame.
 """
 
@@ -52,8 +52,8 @@ def _ieee14_paths() -> tuple[Path, Path]:
 
 
 @pytest.fixture
-async def live_server(tmp_path: Path) -> AsyncIterator[tuple[str, int, str]]:
-    """Spawn ``andes-app serve`` in a subprocess; yield (token, port, base_url).
+async def live_server(tmp_path: Path) -> AsyncIterator[tuple[int, str]]:
+    """Spawn ``andes-app serve`` in a subprocess; yield (port, base_url).
 
     Workspace is seeded with IEEE 14 .raw + .dyr fixtures so the integration
     test can drive a real PF + TDS run."""
@@ -62,7 +62,6 @@ async def live_server(tmp_path: Path) -> AsyncIterator[tuple[str, int, str]]:
     raw, dyr = _ieee14_paths()
     shutil.copy2(raw, workspace / "ieee14.raw")
     shutil.copy2(dyr, workspace / "ieee14.dyr")
-    token_file = tmp_path / "run.token"
     port = _free_port()
 
     proc = subprocess.Popen(
@@ -77,8 +76,6 @@ async def live_server(tmp_path: Path) -> AsyncIterator[tuple[str, int, str]]:
             str(port),
             "--workspace",
             str(workspace),
-            "--token-file",
-            str(token_file),
         ],
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
         stdout=subprocess.PIPE,
@@ -87,8 +84,7 @@ async def live_server(tmp_path: Path) -> AsyncIterator[tuple[str, int, str]]:
     )
     try:
         _wait_for_server(port)
-        token = token_file.read_text().strip()
-        yield token, port, f"http://127.0.0.1:{port}"
+        yield port, f"http://127.0.0.1:{port}"
     finally:
         proc.terminate()
         try:
@@ -99,32 +95,29 @@ async def live_server(tmp_path: Path) -> AsyncIterator[tuple[str, int, str]]:
 
 
 async def _create_session_and_load(
-    token: str, base_url: str, primary: str = "ieee14.raw", addfile: str = "ieee14.dyr"
+    base_url: str, primary: str = "ieee14.raw", addfile: str = "ieee14.dyr"
 ) -> str:
     """Helper: create a session over HTTP and load IEEE 14. Returns session_id."""
     async with httpx.AsyncClient(base_url=base_url) as client:
-        resp = await client.post("/api/sessions", headers={"X-Andes-Token": token})
+        resp = await client.post("/api/sessions")
         sid = str(resp.json()["session_id"])
         await client.post(
             f"/api/sessions/{sid}/case",
-            headers={"X-Andes-Token": token},
             json={"primary_path": primary, "addfiles": [addfile]},
         )
     return sid
 
 
 @pytest.mark.acceptance
-async def test_streaming_tds_end_to_end(live_server: tuple[str, int, str]) -> None:
-    """Load case → open WS → auth → start_tds → receive ≥10 Arrow batches +
+async def test_streaming_tds_end_to_end(live_server: tuple[int, str]) -> None:
+    """Load case → open WS → ready → start_tds → receive ≥10 Arrow batches +
     final done message. Decode the first batch and assert the schema matches
     what the stream_start metadata declared."""
-    token, port, base_url = live_server
-    sid = await _create_session_and_load(token, base_url)
+    port, base_url = live_server
+    sid = await _create_session_and_load(base_url)
 
     ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
     async with websockets.connect(ws_url) as ws:
-        # Auth
-        await ws.send(json.dumps({"type": "auth", "token": token}))
         ready = json.loads(await ws.recv())
         assert ready["type"] == "ready"
 
@@ -179,63 +172,13 @@ async def test_streaming_tds_end_to_end(live_server: tuple[str, int, str]) -> No
 
 
 @pytest.mark.acceptance
-async def test_streaming_tds_bad_token_closes_4401(
-    live_server: tuple[str, int, str],
-) -> None:
-    """First message with the wrong token causes server to close with 4401."""
-    _token, port, _base = live_server
-    ws_url = f"ws://127.0.0.1:{port}/api/ws/some-session-id"
-    async with websockets.connect(ws_url) as ws:
-        await ws.send(json.dumps({"type": "auth", "token": "wrong"}))
-        # Server should send an error text frame, then close with 4401
-        try:
-            text = await ws.recv()
-            err = json.loads(text)
-            assert err.get("type") == "error"
-            assert err.get("code") == 4401
-        except websockets.exceptions.ConnectionClosed as exc:
-            assert exc.code == 4401, f"expected 4401, got {exc.code}"
-            return
-        # Followed by close
-        try:
-            await ws.recv()
-            pytest.fail("expected close after error frame")
-        except websockets.exceptions.ConnectionClosed as exc:
-            assert exc.code == 4401
-
-
-@pytest.mark.acceptance
-async def test_streaming_tds_auth_timeout_closes_4401(
-    live_server: tuple[str, int, str],
-) -> None:
-    """Open WS, never send auth — server closes with 4401 within ~2s."""
-    _token, port, _base = live_server
-    ws_url = f"ws://127.0.0.1:{port}/api/ws/some-session-id"
-    start = time.monotonic()
-    async with websockets.connect(ws_url) as ws:
-        # Don't send anything; wait for the server to close
-        try:
-            while True:
-                msg = await ws.recv()
-                # The server may emit an error text frame before closing
-                if isinstance(msg, str):
-                    err = json.loads(msg)
-                    assert err.get("code") == 4401
-        except websockets.exceptions.ConnectionClosed as exc:
-            elapsed = time.monotonic() - start
-            assert exc.code == 4401, f"expected 4401, got {exc.code}"
-            assert elapsed < 5.0, f"server took too long to close: {elapsed}s"
-
-
-@pytest.mark.acceptance
 async def test_streaming_tds_unknown_session_closes_4404(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
-    """After successful auth, an unknown session_id closes with 4404."""
-    token, port, _base = live_server
+    """An unknown session_id closes with 4404."""
+    port, _base = live_server
     ws_url = f"ws://127.0.0.1:{port}/api/ws/no-such-session"
     async with websockets.connect(ws_url) as ws:
-        await ws.send(json.dumps({"type": "auth", "token": token}))
         # Expect close 4404 (possibly preceded by an error text frame)
         try:
             while True:
@@ -251,7 +194,6 @@ async def test_streaming_tds_unknown_session_closes_4404(
 
 
 async def _drive_streaming_run(
-    token: str,
     port: int,
     sid: str,
     *,
@@ -261,7 +203,7 @@ async def _drive_streaming_run(
     max_rate_hz: float | None = None,
     vars_: list[str] | None = None,
 ) -> tuple[dict[str, object], list[bytes], dict[str, object]]:
-    """Helper: open WS, auth, send start_tds with optional decimation params,
+    """Helper: open WS, await ready, send start_tds with optional decimation params,
     return (stream_start_metadata, list_of_binary_frames, done_message)."""
     ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
     cfg: dict[str, object] = {"type": "start_tds", "tf": tf}
@@ -275,7 +217,6 @@ async def _drive_streaming_run(
         cfg["vars"] = vars_
 
     async with websockets.connect(ws_url) as ws:
-        await ws.send(json.dumps({"type": "auth", "token": token}))
         ready = json.loads(await ws.recv())
         assert ready["type"] == "ready"
         await ws.send(json.dumps(cfg))
@@ -303,16 +244,16 @@ async def _drive_streaming_run(
 
 @pytest.mark.acceptance
 async def test_streaming_decimation_mean_emits_one_row_per_window(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
     """``decimation="mean"`` + ``max_rate_hz=10`` on a 1-second sim emits
     ~10 Arrow batches, each containing one row (the mean of that window's
     source samples). This is the anti-aliased-decimation contract."""
-    token, port, base = live_server
-    sid = await _create_session_and_load(token, base)
+    port, base = live_server
+    sid = await _create_session_and_load(base)
 
     metadata, binary_frames, done = await _drive_streaming_run(
-        token, port, sid, tf=1.0, h=1 / 120, decimation="mean", max_rate_hz=10.0
+        port, sid, tf=1.0, h=1 / 120, decimation="mean", max_rate_hz=10.0
     )
 
     decim = metadata["metadata"]["decimation"]
@@ -339,16 +280,16 @@ async def test_streaming_decimation_mean_emits_one_row_per_window(
 
 @pytest.mark.acceptance
 async def test_streaming_decimation_none_with_max_rate_batches_rows(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
     """``decimation="none"`` + ``max_rate_hz=10`` emits ~10 Arrow batches
     each containing multiple rows (the source steps that fell in that
     window). This is the N-rows-per-batch overhead optimization."""
-    token, port, base = live_server
-    sid = await _create_session_and_load(token, base)
+    port, base = live_server
+    sid = await _create_session_and_load(base)
 
     metadata, binary_frames, done = await _drive_streaming_run(
-        token, port, sid, tf=1.0, h=1 / 120, decimation="none", max_rate_hz=10.0
+        port, sid, tf=1.0, h=1 / 120, decimation="none", max_rate_hz=10.0
     )
 
     decim = metadata["metadata"]["decimation"]
@@ -374,16 +315,15 @@ async def test_streaming_decimation_none_with_max_rate_batches_rows(
 
 @pytest.mark.acceptance
 async def test_streaming_decimation_mean_without_rate_closes_with_error(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
     """``decimation="mean"`` without ``max_rate_hz`` is invalid; the WS
     layer rejects it before any TDS run starts."""
-    token, port, base = live_server
-    sid = await _create_session_and_load(token, base)
+    port, base = live_server
+    sid = await _create_session_and_load(base)
     ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
 
     async with websockets.connect(ws_url) as ws:
-        await ws.send(json.dumps({"type": "auth", "token": token}))
         ready = json.loads(await ws.recv())
         assert ready["type"] == "ready"
         await ws.send(
@@ -404,15 +344,15 @@ async def test_streaming_decimation_mean_without_rate_closes_with_error(
 
 @pytest.mark.acceptance
 async def test_streaming_decimation_default_matches_legacy_behavior(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
     """Omitting ``decimation`` and ``max_rate_hz`` matches the v0.1 baseline:
     every callpert step is its own one-row Arrow batch (no aggregation)."""
-    token, port, base = live_server
-    sid = await _create_session_and_load(token, base)
+    port, base = live_server
+    sid = await _create_session_and_load(base)
 
     metadata, binary_frames, _done = await _drive_streaming_run(
-        token, port, sid, tf=1.0, h=1 / 120
+        port, sid, tf=1.0, h=1 / 120
     )
     decim = metadata["metadata"]["decimation"]
     assert decim["mode"] == "none"
@@ -428,16 +368,15 @@ async def test_streaming_decimation_default_matches_legacy_behavior(
 
 @pytest.mark.acceptance
 async def test_streaming_run_id_in_stream_start_metadata(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
     """The ``stream_start`` text frame carries the server-generated
     ``run_id`` so the client can use it for a later ``resume`` request."""
-    token, port, base = live_server
-    sid = await _create_session_and_load(token, base)
+    port, base = live_server
+    sid = await _create_session_and_load(base)
 
     ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
     async with websockets.connect(ws_url) as ws:
-        await ws.send(json.dumps({"type": "auth", "token": token}))
         json.loads(await ws.recv())  # ready
         await ws.send(json.dumps({"type": "start_tds", "tf": 1.0, "h": 1 / 120}))
 
@@ -457,14 +396,14 @@ async def test_streaming_run_id_in_stream_start_metadata(
 
 @pytest.mark.acceptance
 async def test_streaming_resume_after_disconnect(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
     """The full resume contract: start a TDS, drop the WS mid-run, reconnect
     with ``{"type":"resume","run_id":...,"last_seq":N}``, receive remaining
     frames + the final ``done`` envelope. The run must continue running on
     the server while the client is disconnected."""
-    token, port, base = live_server
-    sid = await _create_session_and_load(token, base)
+    port, base = live_server
+    sid = await _create_session_and_load(base)
 
     ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
 
@@ -475,7 +414,6 @@ async def test_streaming_resume_after_disconnect(
     target_capture = 5
 
     async with websockets.connect(ws_url) as ws:
-        await ws.send(json.dumps({"type": "auth", "token": token}))
         json.loads(await ws.recv())  # ready
         await ws.send(json.dumps({"type": "start_tds", "tf": 2.0, "h": 1 / 120}))
 
@@ -497,7 +435,6 @@ async def test_streaming_resume_after_disconnect(
 
     # ---- Phase 2: reconnect, send resume, receive remaining + done ----
     async with websockets.connect(ws_url) as ws:
-        await ws.send(json.dumps({"type": "auth", "token": token}))
         json.loads(await ws.recv())  # ready
         await ws.send(
             json.dumps(
@@ -532,15 +469,14 @@ async def test_streaming_resume_after_disconnect(
 
 @pytest.mark.acceptance
 async def test_streaming_resume_unknown_run_id_closes_4404(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
     """``resume`` with a run_id the server doesn't know closes WS with 4404."""
-    token, port, base = live_server
-    sid = await _create_session_and_load(token, base)
+    port, base = live_server
+    sid = await _create_session_and_load(base)
 
     ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
     async with websockets.connect(ws_url) as ws:
-        await ws.send(json.dumps({"type": "auth", "token": token}))
         json.loads(await ws.recv())  # ready
         await ws.send(
             json.dumps({"type": "resume", "run_id": "deadbeef" * 4, "last_seq": 0})
@@ -557,22 +493,21 @@ async def test_streaming_resume_unknown_run_id_closes_4404(
 
 @pytest.mark.acceptance
 async def test_streaming_resume_after_run_completed_replays_full_run(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
     """If the run completed while the client was disconnected, a resume with
     ``last_seq=0`` replays the full set of buffered frames + the done event.
 
     Buffer retention is 30 seconds, so a fresh resume right after completion
     sees the whole run."""
-    token, port, base = live_server
-    sid = await _create_session_and_load(token, base)
+    port, base = live_server
+    sid = await _create_session_and_load(base)
 
     ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
 
     # ---- Phase 1: complete a short run, capturing run_id but not frames ----
     run_id: str | None = None
     async with websockets.connect(ws_url) as ws:
-        await ws.send(json.dumps({"type": "auth", "token": token}))
         json.loads(await ws.recv())
         await ws.send(json.dumps({"type": "start_tds", "tf": 1.0, "h": 1 / 120}))
         meta = json.loads(await ws.recv())
@@ -587,7 +522,6 @@ async def test_streaming_resume_after_run_completed_replays_full_run(
 
     # ---- Phase 2: reconnect post-completion, resume from seq 0 ----
     async with websockets.connect(ws_url) as ws:
-        await ws.send(json.dumps({"type": "auth", "token": token}))
         json.loads(await ws.recv())
         await ws.send(
             json.dumps({"type": "resume", "run_id": run_id, "last_seq": 0})
@@ -619,18 +553,18 @@ async def test_streaming_resume_after_run_completed_replays_full_run(
 
 @pytest.mark.acceptance
 async def test_streaming_vars_default_omitted_is_bus_v_and_gen_state(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
     """Omitting ``vars`` defaults to ``bus_v`` + ``gen_state`` so voltage,
     angle, and the omega frequency proxy are always plottable without
     re-running. Bus_v contributes ``Bus_<idx>_v`` + ``Bus_<idx>_a`` per
     bus; gen_state contributes ``Gen_<idx>_delta`` + ``Gen_<idx>_omega``
     per SynGen."""
-    token, port, base = live_server
-    sid = await _create_session_and_load(token, base)
+    port, base = live_server
+    sid = await _create_session_and_load(base)
 
     metadata, binary_frames, _done = await _drive_streaming_run(
-        token, port, sid, tf=0.5, h=1 / 120
+        port, sid, tf=0.5, h=1 / 120
     )
     meta = metadata["metadata"]
     assert meta.get("vars") == ["bus_v", "gen_state"]
@@ -652,17 +586,17 @@ async def test_streaming_vars_default_omitted_is_bus_v_and_gen_state(
 
 @pytest.mark.acceptance
 async def test_streaming_vars_bus_v_and_gen_state_includes_both_groups(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
     """``vars: ["bus_v","gen_state"]`` produces frames whose Arrow schema
     has both bus voltage/angle + generator delta/omega columns. IEEE 14 +
     the .dyr addfile gives 14 buses × (v, a) = 28 plus 5 GENROU SynGen ×
     (delta, omega) = 10 → 38 state columns plus ``t``."""
-    token, port, base = live_server
-    sid = await _create_session_and_load(token, base)
+    port, base = live_server
+    sid = await _create_session_and_load(base)
 
     metadata, binary_frames, _done = await _drive_streaming_run(
-        token, port, sid, tf=0.5, h=1 / 120, vars_=["bus_v", "gen_state"]
+        port, sid, tf=0.5, h=1 / 120, vars_=["bus_v", "gen_state"]
     )
     meta = metadata["metadata"]
     assert meta["vars"] == ["bus_v", "gen_state"]
@@ -696,16 +630,15 @@ async def test_streaming_vars_bus_v_and_gen_state_includes_both_groups(
 
 @pytest.mark.acceptance
 async def test_streaming_vars_metadata_enumerates_all_columns(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
     """The stream-start metadata enumerates every column for the chosen
     ``vars`` set — bus + gen + line — so the client picker tree can be
     populated without re-introspecting the topology."""
-    token, port, base = live_server
-    sid = await _create_session_and_load(token, base)
+    port, base = live_server
+    sid = await _create_session_and_load(base)
 
     metadata, _frames, _done = await _drive_streaming_run(
-        token,
         port,
         sid,
         tf=0.5,
@@ -729,17 +662,16 @@ async def test_streaming_vars_metadata_enumerates_all_columns(
 
 @pytest.mark.acceptance
 async def test_streaming_vars_empty_list_closes_with_error(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
     """``vars=[]`` is rejected with a structured WS error (close 4500 +
     ``{type: "error", code, reason}`` text frame). The server never
     starts the run."""
-    token, port, base = live_server
-    sid = await _create_session_and_load(token, base)
+    port, base = live_server
+    sid = await _create_session_and_load(base)
     ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
 
     async with websockets.connect(ws_url) as ws:
-        await ws.send(json.dumps({"type": "auth", "token": token}))
         ready = json.loads(await ws.recv())
         assert ready["type"] == "ready"
         await ws.send(
@@ -761,16 +693,15 @@ async def test_streaming_vars_empty_list_closes_with_error(
 
 @pytest.mark.acceptance
 async def test_streaming_vars_unknown_group_closes_with_error(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
     """An unknown variable-group name closes the WS with 4500 before any
     run starts."""
-    token, port, base = live_server
-    sid = await _create_session_and_load(token, base)
+    port, base = live_server
+    sid = await _create_session_and_load(base)
     ws_url = f"ws://127.0.0.1:{port}/api/ws/{sid}"
 
     async with websockets.connect(ws_url) as ws:
-        await ws.send(json.dumps({"type": "auth", "token": token}))
         json.loads(await ws.recv())
         await ws.send(
             json.dumps(
@@ -796,17 +727,16 @@ async def test_streaming_vars_unknown_group_closes_with_error(
 
 @pytest.mark.acceptance
 async def test_streaming_vars_works_with_decimation_mean(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
     """Aggregation modes (``decimation="mean"``) work with the extended
     schema — the mean is computed across every column in the multi-
     column rows. Each frame contains exactly one row whose values are
     the per-column window mean."""
-    token, port, base = live_server
-    sid = await _create_session_and_load(token, base)
+    port, base = live_server
+    sid = await _create_session_and_load(base)
 
     metadata, binary_frames, done = await _drive_streaming_run(
-        token,
         port,
         sid,
         tf=0.5,
@@ -832,18 +762,18 @@ async def test_streaming_vars_works_with_decimation_mean(
 
 @pytest.mark.acceptance
 async def test_streaming_vars_gen_power_and_load_pq_groups(
-    live_server: tuple[str, int, str],
+    live_server: tuple[int, str],
 ) -> None:
     """The new ``gen_power`` + ``load_pq`` groups stream end-to-end. IEEE 14
     + dyr has 5 SynGen → 10 Gen power columns (Pe + Qe) and 11 PQ loads →
     22 Load columns (p + q). The metadata enumerates them in canonical
     order and the Arrow frames carry physically plausible MW / MVar
     values (electrical power is not all-zero on a loaded grid)."""
-    token, port, base = live_server
-    sid = await _create_session_and_load(token, base)
+    port, base = live_server
+    sid = await _create_session_and_load(base)
 
     metadata, binary_frames, done = await _drive_streaming_run(
-        token, port, sid, tf=0.5, h=1 / 120, vars_=["gen_power", "load_pq"]
+        port, sid, tf=0.5, h=1 / 120, vars_=["gen_power", "load_pq"]
     )
     meta = metadata["metadata"]
     assert meta["vars"] == ["gen_power", "load_pq"]

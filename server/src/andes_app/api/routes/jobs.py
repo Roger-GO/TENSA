@@ -18,8 +18,8 @@ HTTP surface (all under the ``/api`` prefix):
 
 WebSocket surface:
 
-- ``WS /ws/{id}/jobs/events`` — per-session multiplexed feed. After the shared
-  first-message auth handshake (``require_ws_auth``) the server sends a
+- ``WS /ws/{id}/jobs/events`` — per-session multiplexed feed. After the
+  session is validated the server sends ``{"type":"ready"}``, then a
   ``snapshot`` of the current job list, then one ``{job_id, kind, status,
   progress?, problem?}`` envelope per subsequent transition for ANY job in the
   session. Multiple subscribers each receive every broadcast with no loss.
@@ -38,8 +38,6 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, status
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
-from andes_app.api.auth import RequireToken
-from andes_app.api.routes.ws import require_ws_auth
 from andes_app.api.schemas import (
     JobKindSchema,
     JobRecordSchema,
@@ -89,14 +87,12 @@ def _job_to_schema(record: Any) -> JobRecordSchema:
     summary="List jobs for a session (v3.1 Unit 5a).",
     response_model=list[JobRecordSchema],
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
     },
 )
 async def list_jobs(
     session_id: str,
     request: Request,
-    _: RequireToken,
     kind: JobKindSchema | None = None,
     status_filter: JobStatusSchema | None = Query(
         default=None,
@@ -132,7 +128,6 @@ async def list_jobs(
     summary="Fetch one job by id (v3.1 Unit 5a).",
     response_model=JobRecordSchema,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {
             "model": ProblemDetails,
             "description": "Session or job not found.",
@@ -143,7 +138,6 @@ async def get_job(
     session_id: str,
     job_id: str,
     request: Request,
-    _: RequireToken,
 ) -> JobRecordSchema:
     """Return one job record. 404 when the session or job id is unknown."""
     mgr = _manager(request)
@@ -169,7 +163,6 @@ async def get_job(
     response_model=JobRecordSchema,
     responses={
         200: {"description": "Job cancelled; the updated record is returned."},
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session or job not found."},
         409: {
             "model": ProblemDetails,
@@ -184,7 +177,6 @@ async def cancel_job(
     session_id: str,
     job_id: str,
     request: Request,
-    _: RequireToken,
 ) -> JobRecordSchema:
     """Cancel a job.
 
@@ -240,11 +232,10 @@ async def cancel_job(
 async def ws_job_events(websocket: WebSocket, session_id: str) -> None:
     """Per-session multiplexed job-event feed (v3.1 Unit 5a).
 
-    Auth handshake mirrors the TDS / sweep endpoints via the shared
-    ``require_ws_auth`` helper (first-message token, 2-second deadline, 4401
-    close on failure; skipped when ``require_auth`` is False). After ``ready``,
-    the server sends a ``snapshot`` of the current job list, then one envelope
-    per subsequent transition for ANY job in the session.
+    The server accepts the connection, validates the session (4404 close on
+    unknown session), then sends ``{"type":"ready"}``, a ``snapshot`` of the
+    current job list, and one envelope per subsequent transition for ANY job
+    in the session.
     """
     await websocket.accept()
     mgr = getattr(websocket.app.state, "session_manager", None)
@@ -252,9 +243,6 @@ async def ws_job_events(websocket: WebSocket, session_id: str) -> None:
         await _close_with_error(
             websocket, WS_CLOSE_INTERNAL_ERROR, "server not configured"
         )
-        return
-
-    if not await require_ws_auth(websocket):
         return
 
     if not mgr.is_alive(session_id):

@@ -40,8 +40,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "f" * 64
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -80,7 +78,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
         shutil.copy2(src / name, workspace / name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -92,7 +89,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     )
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -109,12 +105,11 @@ async def _create_session_and_load(
     client: httpx.AsyncClient, primary: str = "ieee14.raw"
 ) -> str:
     resp = await client.post(
-        "/api/sessions", headers={"X-Andes-Token": VALID_TOKEN}
+        "/api/sessions"
     )
     sid = str(resp.json()["session_id"])
     await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"primary_path": primary},
     )
     return sid
@@ -141,7 +136,6 @@ async def test_profile_upload_add_list_run_tds_happy_path(
 
     upload_resp = await client.post(
         f"/api/sessions/{sid}/profiles/upload",
-        headers={"X-Andes-Token": VALID_TOKEN},
         files={"file": ("ramp.xlsx", profile_bytes,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
     )
@@ -152,7 +146,6 @@ async def test_profile_upload_add_list_run_tds_happy_path(
 
     add_resp = await client.post(
         f"/api/sessions/{sid}/profiles",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "profile_path": upload["profile_path"],
             "sheet": "profile",
@@ -179,7 +172,6 @@ async def test_profile_upload_add_list_run_tds_happy_path(
     # List confirms placement.
     list_resp = await client.get(
         f"/api/sessions/{sid}/profiles",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert list_resp.status_code == 200, list_resp.text
     profiles = list_resp.json()["profiles"]
@@ -190,13 +182,11 @@ async def test_profile_upload_add_list_run_tds_happy_path(
     # profile at exact step times (mode=1).
     pf = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf.status_code == 200, pf.text
     tds = await client.post(
         f"/api/sessions/{sid}/tds",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"tf": 0.5},
     )
     assert tds.status_code == 200, tds.text
@@ -216,7 +206,6 @@ async def test_profile_list_empty_when_none_added(
     sid = await _create_session_and_load(client)
     resp = await client.get(
         f"/api/sessions/{sid}/profiles",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"profiles": []}
@@ -235,7 +224,6 @@ async def test_profile_upload_csv_transcoded_to_xlsx(
     csv_text = "t,p0\n0.0,0.5\n0.1,0.55\n0.2,0.6\n"
     upload_resp = await client.post(
         f"/api/sessions/{sid}/profiles/upload",
-        headers={"X-Andes-Token": VALID_TOKEN},
         files={"file": ("ramp.csv", csv_text.encode("utf-8"), "text/csv")},
     )
     assert upload_resp.status_code == 201, upload_resp.text
@@ -265,13 +253,11 @@ async def test_profile_mode_2_rejected_with_actionable_hint(
     profile_bytes = _make_profile_xlsx_bytes([(0.0, 0.5), (0.1, 0.55)])
     upload = (await client.post(
         f"/api/sessions/{sid}/profiles/upload",
-        headers={"X-Andes-Token": VALID_TOKEN},
         files={"file": ("ramp.xlsx", profile_bytes,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
     )).json()
     add_resp = await client.post(
         f"/api/sessions/{sid}/profiles",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "profile_path": upload["profile_path"],
             "sheet": "profile",
@@ -303,7 +289,6 @@ async def test_profile_missing_required_fields_rejected(
     # Missing every required field.
     resp = await client.post(
         f"/api/sessions/{sid}/profiles",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"profile_path": "/tmp/whatever.xlsx"},
     )
     assert resp.status_code == 422, resp.text
@@ -323,13 +308,11 @@ async def test_profile_missing_target_device_returns_422(
     profile_bytes = _make_profile_xlsx_bytes([(0.0, 0.5), (0.1, 0.55)])
     upload = (await client.post(
         f"/api/sessions/{sid}/profiles/upload",
-        headers={"X-Andes-Token": VALID_TOKEN},
         files={"file": ("p.xlsx", profile_bytes,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
     )).json()
     add_resp = await client.post(
         f"/api/sessions/{sid}/profiles",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "profile_path": upload["profile_path"],
             "sheet": "profile",
@@ -358,7 +341,6 @@ async def test_profile_path_does_not_exist_returns_422(
     sid = await _create_session_and_load(client)
     add_resp = await client.post(
         f"/api/sessions/{sid}/profiles",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "profile_path": "/tmp/does-not-exist-anywhere.xlsx",
             "sheet": "profile",
@@ -392,7 +374,6 @@ async def test_profile_path_outside_workspace_rejected(
     outside.write_bytes(_make_profile_xlsx_bytes([(0.0, 0.5)]))
     add_resp = await client.post(
         f"/api/sessions/{sid}/profiles",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "profile_path": str(outside),
             "sheet": "profile",
@@ -422,19 +403,16 @@ async def test_profile_add_post_setup_returns_409(
     profile_bytes = _make_profile_xlsx_bytes([(0.0, 0.5), (0.1, 0.55)])
     upload = (await client.post(
         f"/api/sessions/{sid}/profiles/upload",
-        headers={"X-Andes-Token": VALID_TOKEN},
         files={"file": ("p.xlsx", profile_bytes,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
     )).json()
     pf = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf.status_code == 200
     add_resp = await client.post(
         f"/api/sessions/{sid}/profiles",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "profile_path": upload["profile_path"],
             "sheet": "profile",
@@ -461,13 +439,11 @@ async def test_profile_delete_pre_setup_returns_204(
     profile_bytes = _make_profile_xlsx_bytes([(0.0, 0.5), (0.1, 0.55)])
     upload = (await client.post(
         f"/api/sessions/{sid}/profiles/upload",
-        headers={"X-Andes-Token": VALID_TOKEN},
         files={"file": ("p.xlsx", profile_bytes,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
     )).json()
     add = await client.post(
         f"/api/sessions/{sid}/profiles",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "profile_path": upload["profile_path"],
             "sheet": "profile",
@@ -483,12 +459,10 @@ async def test_profile_delete_pre_setup_returns_204(
     profile_idx = str(add.json()["idx"])
     delete = await client.delete(
         f"/api/sessions/{sid}/profiles/{profile_idx}",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert delete.status_code == 204, delete.text
     list_resp = await client.get(
         f"/api/sessions/{sid}/profiles",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert list_resp.json() == {"profiles": []}
 
@@ -500,7 +474,6 @@ async def test_profile_delete_unknown_idx_returns_404(
     sid = await _create_session_and_load(client)
     delete = await client.delete(
         f"/api/sessions/{sid}/profiles/TimeSeries_999",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert delete.status_code == 404, delete.text
 
@@ -515,7 +488,6 @@ async def test_profile_upload_unsupported_extension_returns_422(
     sid = await _create_session_and_load(client)
     upload_resp = await client.post(
         f"/api/sessions/{sid}/profiles/upload",
-        headers={"X-Andes-Token": VALID_TOKEN},
         files={"file": ("p.json", b'{"hello": "world"}', "application/json")},
     )
     assert upload_resp.status_code == 422, upload_resp.text
@@ -531,6 +503,5 @@ async def test_profile_unknown_session_returns_404(
     bogus = "00000000-0000-0000-0000-000000000000"
     resp = await client.get(
         f"/api/sessions/{bogus}/profiles",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 404, resp.text

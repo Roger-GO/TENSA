@@ -40,7 +40,6 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 
 from andes_app.api._run_as_job import _run_as_job
-from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
     CloneDiffPair,
@@ -145,7 +144,6 @@ def _whitelist_model_or_422(model: str) -> None:
     summary="Initialise the clone-on-write copy of the active case.",
     response_model=CloneInitResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -163,7 +161,6 @@ def _whitelist_model_or_422(model: str) -> None:
 async def init_clone(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> CloneInitResponse:
     _enforce_body_size(request)
     mgr = _manager(request)
@@ -191,7 +188,6 @@ async def init_clone(
     summary="Edit one whitelisted controller param on the clone (write + reload + setup).",
     response_model=CloneEditResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {
             "model": ProblemDetails,
             "description": "Session not found, or no device of the given model+idx exists.",
@@ -221,7 +217,6 @@ async def apply_clone_edit(
     param: str,
     body: CloneEditRequest,
     request: Request,
-    _: RequireToken,
 ) -> CloneEditResponse:
     # Whitelist-first — BEFORE body-size, BEFORE any invoke. Doubles as the
     # path-traversal guard for ``model`` / ``param``.
@@ -252,7 +247,6 @@ async def apply_clone_edit(
     summary="Undo the most recent clone edit (restore prior file state + re-setup).",
     response_model=CloneEditResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {"model": ProblemDetails, "description": "Session busy with an in-flight job."},
         422: {"model": ProblemDetails, "description": "Nothing to undo."},
@@ -261,7 +255,6 @@ async def apply_clone_edit(
 async def undo_clone_edit(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> CloneEditResponse:
     _enforce_body_size(request)
     mgr = _manager(request)
@@ -284,7 +277,6 @@ async def undo_clone_edit(
     summary="Re-apply the most recently undone clone edit.",
     response_model=CloneEditResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {"model": ProblemDetails, "description": "Session busy with an in-flight job."},
         422: {"model": ProblemDetails, "description": "Nothing to redo."},
@@ -293,7 +285,6 @@ async def undo_clone_edit(
 async def redo_clone_edit(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> CloneEditResponse:
     _enforce_body_size(request)
     mgr = _manager(request)
@@ -317,7 +308,6 @@ async def redo_clone_edit(
     response_model=CloneSaveAsResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {"model": ProblemDetails, "description": "Session busy with an in-flight job."},
         413: {"model": ProblemDetails, "description": "Body exceeded the 64 KB cap."},
@@ -335,7 +325,6 @@ async def save_clone_as(
     session_id: str,
     body: CloneSaveAsRequest,
     request: Request,
-    _: RequireToken,
 ) -> CloneSaveAsResponse:
     _enforce_body_size(request)
     mgr = _manager(request)
@@ -364,7 +353,6 @@ async def save_clone_as(
     summary="Discard the clone and revert to the original case files.",
     response_model=CloneResetResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {"model": ProblemDetails, "description": "Session busy with an in-flight job."},
     },
@@ -372,7 +360,6 @@ async def save_clone_as(
 async def reset_clone(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> CloneResetResponse:
     _enforce_body_size(request)
     mgr = _manager(request)
@@ -395,7 +382,6 @@ async def reset_clone(
     summary="Diff the clone-file vs original-file values for one device.",
     response_model=CloneDiffResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {"model": ProblemDetails, "description": "Session busy with an in-flight job."},
         422: {
@@ -411,7 +397,6 @@ async def get_clone_diff(
     model: str,
     idx: str,
     request: Request,
-    _: RequireToken,
 ) -> CloneDiffResponse:
     # Whitelist-first — BEFORE any invoke. Doubles as the path-traversal guard
     # for ``model``. ``idx`` is matched against the loaded device by the

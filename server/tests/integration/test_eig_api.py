@@ -30,8 +30,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "e" * 64
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -49,7 +47,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
         shutil.copy2(src / name, workspace / name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -59,7 +56,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -77,14 +73,13 @@ async def _create_session_and_load(
     primary: str = "ieee14.raw",
     addfile: str | None = None,
 ) -> str:
-    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions")
     sid = str(resp.json()["session_id"])
     body: dict[str, object] = {"primary_path": primary}
     if addfile:
         body["addfiles"] = [addfile]
     await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     return sid
@@ -105,7 +100,6 @@ async def test_eig_happy_path_returns_eigenvalues_and_damping(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     pf = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf.status_code == 200, pf.text
@@ -113,7 +107,6 @@ async def test_eig_happy_path_returns_eigenvalues_and_damping(
 
     resp = await client.post(
         f"/api/sessions/{sid}/eig",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 200, resp.text
@@ -144,14 +137,12 @@ async def test_eig_empty_modes_on_stock_ieee14_no_dyr(
     sid = await _create_session_and_load(client, "ieee14.raw")
     pf = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf.status_code == 200, pf.text
 
     resp = await client.post(
         f"/api/sessions/{sid}/eig",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 200, resp.text
@@ -180,7 +171,6 @@ async def test_eig_without_pflow_returns_409(
 
     resp = await client.post(
         f"/api/sessions/{sid}/eig",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 409, resp.text
@@ -202,12 +192,10 @@ async def test_eig_participation_returns_per_state_row(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     eig_resp = await client.post(
         f"/api/sessions/{sid}/eig",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert eig_resp.status_code == 200
@@ -216,7 +204,6 @@ async def test_eig_participation_returns_per_state_row(
 
     resp = await client.get(
         f"/api/sessions/{sid}/eig/modes/0/participation",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -236,12 +223,10 @@ async def test_eig_participation_out_of_range_mode_idx_returns_404(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     eig_resp = await client.post(
         f"/api/sessions/{sid}/eig",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     mode_count = eig_resp.json()["mode_count"]
@@ -249,7 +234,6 @@ async def test_eig_participation_out_of_range_mode_idx_returns_404(
 
     resp = await client.get(
         f"/api/sessions/{sid}/eig/modes/{out_of_range}/participation",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 404, resp.text
 
@@ -262,12 +246,10 @@ async def test_eig_participation_without_eig_run_returns_409(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     resp = await client.get(
         f"/api/sessions/{sid}/eig/modes/0/participation",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 409, resp.text
 
@@ -285,18 +267,15 @@ async def test_eig_state_matrix_returns_mat_blob(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     await client.post(
         f"/api/sessions/{sid}/eig",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
 
     resp = await client.get(
         f"/api/sessions/{sid}/eig/state-matrix.mat",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"] == "application/octet-stream"
@@ -319,12 +298,10 @@ async def test_eig_state_matrix_without_eig_run_returns_409(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     resp = await client.get(
         f"/api/sessions/{sid}/eig/state-matrix.mat",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 409, resp.text
 
@@ -343,18 +320,15 @@ async def test_report_eig_after_run_returns_plain_text(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     await client.post(
         f"/api/sessions/{sid}/eig",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
 
     resp = await client.get(
         f"/api/sessions/{sid}/report",
-        headers={"X-Andes-Token": VALID_TOKEN},
         params={"routine": "eig"},
     )
     assert resp.status_code == 200, resp.text
@@ -373,7 +347,6 @@ async def test_eig_unknown_session_returns_404(
 ) -> None:
     resp = await client.post(
         "/api/sessions/does-not-exist/eig",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 404, resp.text

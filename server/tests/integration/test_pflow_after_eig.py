@@ -32,8 +32,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "f" * 64
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -51,7 +49,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
         shutil.copy2(src / name, workspace / name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -61,7 +58,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -75,11 +71,10 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
 
 
 async def _create_session_with_dyr(client: httpx.AsyncClient) -> str:
-    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions")
     sid = str(resp.json()["session_id"])
     await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"primary_path": "ieee14.raw", "addfiles": ["ieee14.dyr"]},
     )
     return sid
@@ -97,7 +92,6 @@ async def test_pflow_after_eig_returns_422_with_actionable_detail(
 
     pf1 = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf1.status_code == 200, pf1.text
@@ -105,7 +99,6 @@ async def test_pflow_after_eig_returns_422_with_actionable_detail(
 
     eig = await client.post(
         f"/api/sessions/{sid}/eig",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert eig.status_code == 200, eig.text
@@ -113,7 +106,6 @@ async def test_pflow_after_eig_returns_422_with_actionable_detail(
 
     pf2 = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf2.status_code == 422, pf2.text
@@ -138,25 +130,21 @@ async def test_pflow_after_eig_then_reload_recovers(
 
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     await client.post(
         f"/api/sessions/{sid}/eig",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
 
     # Follow the recovery hint. The /reload endpoint takes no body.
     reload_resp = await client.post(
         f"/api/sessions/{sid}/reload",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert reload_resp.status_code == 200, reload_resp.text
 
     pf_recover = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf_recover.status_code == 200, pf_recover.text

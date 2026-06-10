@@ -18,8 +18,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "c" * 64
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -37,7 +35,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
         shutil.copy2(src / name, workspace / name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -47,7 +44,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -66,7 +62,7 @@ async def _create_session_and_load(
     addfile: str | None = None,
 ) -> str:
     resp = await client.post(
-        "/api/sessions", headers={"X-Andes-Token": VALID_TOKEN}
+        "/api/sessions"
     )
     sid = str(resp.json()["session_id"])
     body: dict[str, object] = {"primary_path": primary}
@@ -74,7 +70,6 @@ async def _create_session_and_load(
         body["addfiles"] = [addfile]
     await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     return sid
@@ -93,7 +88,6 @@ async def test_run_tds_default_integrator_is_unchanged(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp = await client.post(
         f"/api/sessions/{sid}/tds",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"tf": 1.0, "h": 1 / 120},
     )
     assert resp.status_code == 200, resp.text
@@ -110,7 +104,6 @@ async def test_run_tds_explicit_trapezoidal_integrator(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp = await client.post(
         f"/api/sessions/{sid}/tds",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"tf": 1.0, "h": 1 / 120, "integrator": "trapezoidal"},
     )
     assert resp.status_code == 200, resp.text
@@ -137,7 +130,6 @@ async def test_run_tds_qndf_with_auto_preset_completes(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp = await client.post(
         f"/api/sessions/{sid}/tds",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "tf": 1.0,
             "integrator": "qndf",
@@ -169,7 +161,6 @@ async def test_run_tds_freeform_real_config_key_round_trips(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp = await client.post(
         f"/api/sessions/{sid}/tds",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "tf": 1.0,
             "integrator": "qndf",
@@ -197,7 +188,6 @@ async def test_run_tds_unknown_override_key_returns_500(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp = await client.post(
         f"/api/sessions/{sid}/tds",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "tf": 1.0,
             "integrator": "qndf",
@@ -217,7 +207,6 @@ async def test_run_tds_unknown_integrator_returns_422(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp = await client.post(
         f"/api/sessions/{sid}/tds",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"tf": 1.0, "integrator": "rk4"},
     )
     assert resp.status_code == 422, resp.text

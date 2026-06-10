@@ -20,15 +20,12 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "d" * 64
-
 
 @pytest.fixture
 async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     workspace = tmp_path / "ws"
     workspace.mkdir(mode=0o700)
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -38,7 +35,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -116,7 +112,18 @@ async def test_every_route_declares_problem_details_for_4xx(
     client: httpx.AsyncClient,
 ) -> None:
     """Every route should explicitly declare at least one 4xx response
-    referencing ProblemDetails (so MCP / agent clients get typed errors)."""
+    referencing ProblemDetails (so MCP / agent clients get typed errors).
+
+    Routes with no client-triggerable failure modes are exempt: with no
+    authentication on the API, a handful of static / idempotent endpoints
+    cannot return any 4xx at all.
+    """
+    no_4xx_routes = {
+        ("get", "/api/sessions"),           # list — always succeeds
+        ("delete", "/api/sessions/{session_id}"),  # idempotent close
+        ("get", "/api/topology/schema"),    # static compile-time table
+        ("get", "/api/workspace/files"),    # directory listing
+    }
     spec = (await client.get("/openapi.json")).json()
     schemas = spec.get("components", {}).get("schemas", {})
     assert "ProblemDetails" in schemas, "ProblemDetails component missing"
@@ -124,6 +131,8 @@ async def test_every_route_declares_problem_details_for_4xx(
     for path, methods in spec["paths"].items():
         for method, op in methods.items():
             if method.startswith("x-") or method == "parameters":
+                continue
+            if (method, path) in no_4xx_routes:
                 continue
             responses = op.get("responses", {})
             has_4xx_problem = False

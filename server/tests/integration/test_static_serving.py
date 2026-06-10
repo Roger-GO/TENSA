@@ -5,8 +5,8 @@ Asserts the end-to-end shape of Unit 10's wheel-bundling change:
 - ``GET /`` returns the SPA's ``index.html``.
 - ``GET /openapi.json`` still returns the OpenAPI spec (NOT shadowed by
   the StaticFiles mount).
-- ``GET /api/sessions`` reaches the router and returns 401 without a
-  token (the substrate routes are NOT shadowed by the SPA).
+- ``GET /api/sessions`` reaches the router and returns the session list
+  (the substrate routes are NOT shadowed by the SPA).
 - ``GET /<unknown-frontend-path>`` falls back to ``index.html`` so
   client-side routing survives a hard reload (the ``_SpaStaticFiles``
   subclass handles this).
@@ -32,8 +32,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "e" * 64
-
 INDEX_HTML = (
     "<!doctype html><html><head><title>andes-app</title></head>"
     '<body><div id="root">test</div></body></html>'
@@ -50,7 +48,6 @@ async def _make_client(
     ``AsyncIterator``.
     """
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -61,7 +58,6 @@ async def _make_client(
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     client = httpx.AsyncClient(
@@ -132,15 +128,15 @@ async def test_openapi_json_not_shadowed_by_spa(
 
 
 @pytest.mark.integration
-async def test_api_sessions_reaches_router_without_auth_returns_401(
+async def test_api_sessions_reaches_router(
     client_with_static: tuple[httpx.AsyncClient, Path],
 ) -> None:
-    """``GET /api/sessions`` without a token returns 401 — proving the
-    router is not shadowed by the SPA mount and the auth dependency is
-    still enforced."""
+    """``GET /api/sessions`` returns the session list — proving the
+    router is not shadowed by the SPA mount."""
     client, _static = client_with_static
     resp = await client.get("/api/sessions")
-    assert resp.status_code == 401, resp.text
+    assert resp.status_code == 200, resp.text
+    assert isinstance(resp.json().get("sessions"), list), resp.text
 
 
 @pytest.mark.integration
@@ -193,7 +189,7 @@ async def test_app_still_serves_api_when_no_spa_bundle(
         async with client as ac:
             # API still answers
             resp = await ac.get("/api/sessions")
-            assert resp.status_code == 401, resp.text
+            assert resp.status_code == 200, resp.text
             # OpenAPI still answers
             resp = await ac.get("/openapi.json")
             assert resp.status_code == 200, resp.text

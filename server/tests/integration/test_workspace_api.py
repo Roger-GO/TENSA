@@ -12,8 +12,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "c" * 64
-
 
 @pytest.fixture
 async def client_workspace(
@@ -22,7 +20,6 @@ async def client_workspace(
     workspace = tmp_path / "ws"
     workspace.mkdir(mode=0o700)
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -32,7 +29,6 @@ async def client_workspace(
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -69,7 +65,6 @@ async def test_list_files_happy_path(
     (ws / "case.xlsx").write_text("dummy")
     resp = await client.get(
         "/api/workspace/files",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -97,20 +92,10 @@ async def test_list_files_excludes_hidden_and_unknown_extensions(
     (ws / "valid.raw").write_text("ok")
     resp = await client.get(
         "/api/workspace/files",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     names = [f["name"] for f in resp.json()["files"]]
     assert names == ["valid.raw"]
-
-
-@pytest.mark.integration
-async def test_list_files_requires_auth(
-    client_workspace: tuple[httpx.AsyncClient, Path],
-) -> None:
-    client, _ws = client_workspace
-    resp = await client.get("/api/workspace/files")
-    assert resp.status_code == 401, resp.text
 
 
 # ---- layout GET -------------------------------------------------------------
@@ -124,20 +109,8 @@ async def test_get_layout_returns_404_when_absent(
     resp = await client.get(
         "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 404, resp.text
-
-
-@pytest.mark.integration
-async def test_get_layout_requires_auth(
-    client_workspace: tuple[httpx.AsyncClient, Path],
-) -> None:
-    client, _ws = client_workspace
-    resp = await client.get(
-        "/api/workspace/layout", params={"case_path": "ieee14.raw"}
-    )
-    assert resp.status_code == 401, resp.text
 
 
 @pytest.mark.integration
@@ -148,7 +121,6 @@ async def test_get_layout_rejects_traversal(
     resp = await client.get(
         "/api/workspace/layout",
         params={"case_path": "../etc/passwd"},
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 400, resp.text
 
@@ -165,7 +137,7 @@ async def test_put_then_get_roundtrip(
     put = await client.put(
         "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
-        headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
+        headers={"Content-Type": "application/json"},
         json=body,
     )
     assert put.status_code == 204, put.text
@@ -182,7 +154,6 @@ async def test_put_then_get_roundtrip(
     get = await client.get(
         "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert get.status_code == 200, get.text
     parsed = get.json()
@@ -205,7 +176,7 @@ async def test_put_layout_too_large_returns_413(
     resp = await client.put(
         "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
-        headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
+        headers={"Content-Type": "application/json"},
         content=serialized,
     )
     assert resp.status_code == 413, resp.text
@@ -219,7 +190,7 @@ async def test_put_layout_invalid_json_returns_422(
     resp = await client.put(
         "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
-        headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
+        headers={"Content-Type": "application/json"},
         content="{not valid json}",
     )
     assert resp.status_code == 422, resp.text
@@ -235,7 +206,7 @@ async def test_put_layout_extra_fields_rejected(
     resp = await client.put(
         "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
-        headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
+        headers={"Content-Type": "application/json"},
         json=body,
     )
     assert resp.status_code == 422, resp.text
@@ -260,24 +231,10 @@ async def test_put_layout_nan_coordinate_rejected(
     resp = await client.put(
         "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
-        headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
+        headers={"Content-Type": "application/json"},
         content=raw,
     )
     assert resp.status_code == 422, resp.text
-
-
-@pytest.mark.integration
-async def test_put_layout_requires_auth(
-    client_workspace: tuple[httpx.AsyncClient, Path],
-) -> None:
-    client, _ws = client_workspace
-    resp = await client.put(
-        "/api/workspace/layout",
-        params={"case_path": "ieee14.raw"},
-        headers={"Content-Type": "application/json"},
-        json=_layout_body(),
-    )
-    assert resp.status_code == 401, resp.text
 
 
 @pytest.mark.integration
@@ -288,7 +245,7 @@ async def test_put_layout_rejects_traversal(
     resp = await client.put(
         "/api/workspace/layout",
         params={"case_path": "../escape.raw"},
-        headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
+        headers={"Content-Type": "application/json"},
         json=_layout_body(),
     )
     assert resp.status_code == 400, resp.text
@@ -316,14 +273,13 @@ async def test_put_then_get_layout_with_non_bus_coordinates(
     put = await client.put(
         "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
-        headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
+        headers={"Content-Type": "application/json"},
         json=body,
     )
     assert put.status_code == 204, put.text
     get = await client.get(
         "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert get.status_code == 200, get.text
     parsed = get.json()
@@ -347,14 +303,13 @@ async def test_put_layout_without_non_bus_coordinates_reads_as_empty(
     put = await client.put(
         "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
-        headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
+        headers={"Content-Type": "application/json"},
         json=body,
     )
     assert put.status_code == 204, put.text
     get = await client.get(
         "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert get.status_code == 200, get.text
     parsed = get.json()
@@ -377,7 +332,7 @@ async def test_put_layout_non_bus_coordinates_nan_rejected(
     resp = await client.put(
         "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
-        headers={"X-Andes-Token": VALID_TOKEN, "Content-Type": "application/json"},
+        headers={"Content-Type": "application/json"},
         content=raw,
     )
     assert resp.status_code == 422, resp.text

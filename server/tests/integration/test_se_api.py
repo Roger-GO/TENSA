@@ -31,8 +31,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "f" * 64
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -50,7 +48,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
         shutil.copy2(src / name, workspace / name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -60,7 +57,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -78,13 +74,12 @@ async def _create_session_and_load(
     primary: str = "ieee14.raw",
 ) -> str:
     resp = await client.post(
-        "/api/sessions", headers={"X-Andes-Token": VALID_TOKEN}
+        "/api/sessions"
     )
     sid = str(resp.json()["session_id"])
     body: dict[str, object] = {"primary_path": primary}
     await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     return sid
@@ -113,7 +108,6 @@ async def test_se_happy_path_returns_converged_with_residuals(
     sid = await _create_session_and_load(client)
     pf = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf.status_code == 200, pf.text
@@ -121,7 +115,6 @@ async def test_se_happy_path_returns_converged_with_residuals(
 
     gen = await client.post(
         f"/api/sessions/{sid}/se/measurements/generate",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"noise_seed": 42},
     )
     assert gen.status_code == 200, gen.text
@@ -132,7 +125,6 @@ async def test_se_happy_path_returns_converged_with_residuals(
 
     resp = await client.post(
         f"/api/sessions/{sid}/se",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 200, resp.text
@@ -168,7 +160,6 @@ async def test_se_generate_without_pflow_returns_409(
 
     resp = await client.post(
         f"/api/sessions/{sid}/se/measurements/generate",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 409, resp.text
@@ -191,7 +182,6 @@ async def test_se_run_without_pflow_returns_409(
 
     resp = await client.post(
         f"/api/sessions/{sid}/se",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 409, resp.text
@@ -214,14 +204,12 @@ async def test_se_run_without_generate_returns_409(
     sid = await _create_session_and_load(client)
     pf = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf.status_code == 200, pf.text
 
     resp = await client.post(
         f"/api/sessions/{sid}/se",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 409, resp.text
@@ -243,7 +231,6 @@ async def test_se_generate_invalid_noise_seed_returns_422(
 
     resp = await client.post(
         f"/api/sessions/{sid}/se/measurements/generate",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"noise_seed": "not-an-int"},
     )
     assert resp.status_code == 422, resp.text
@@ -261,7 +248,6 @@ async def test_se_generate_negative_noise_seed_returns_422(
 
     resp = await client.post(
         f"/api/sessions/{sid}/se/measurements/generate",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"noise_seed": -5},
     )
     assert resp.status_code == 422, resp.text
@@ -279,7 +265,6 @@ async def test_se_generate_extra_field_returns_422(
 
     resp = await client.post(
         f"/api/sessions/{sid}/se/measurements/generate",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"unknown_field": 42},
     )
     assert resp.status_code == 422, resp.text
@@ -294,7 +279,6 @@ async def test_se_unknown_session_returns_404(
 ) -> None:
     resp = await client.post(
         "/api/sessions/does-not-exist/se",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 404, resp.text
@@ -306,7 +290,6 @@ async def test_se_generate_unknown_session_returns_404(
 ) -> None:
     resp = await client.post(
         "/api/sessions/does-not-exist/se/measurements/generate",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 404, resp.text
@@ -327,28 +310,24 @@ async def test_se_can_be_run_twice_without_regenerating_measurements(
     sid = await _create_session_and_load(client)
     pf = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf.status_code == 200
 
     gen = await client.post(
         f"/api/sessions/{sid}/se/measurements/generate",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"noise_seed": 7},
     )
     assert gen.status_code == 200
 
     first = await client.post(
         f"/api/sessions/{sid}/se",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert first.status_code == 200, first.text
 
     second = await client.post(
         f"/api/sessions/{sid}/se",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert second.status_code == 200, second.text

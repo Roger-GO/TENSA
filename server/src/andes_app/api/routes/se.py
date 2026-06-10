@@ -25,7 +25,6 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api._run_as_job import _run_as_job
-from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
 from andes_app.core.session import (
@@ -260,7 +259,6 @@ def _se_payload_to_response(
     summary="Generate the default SE measurement set from the converged PF solution.",
     response_model=SeMeasurementsGeneratedResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -283,7 +281,6 @@ async def generate_se_measurements(
     session_id: str,
     body: SeGenerateMeasurementsRequest,
     request: Request,
-    _: RequireToken,
 ) -> SeMeasurementsGeneratedResponse:
     """Build the default measurement set and cache it on the worker.
 
@@ -322,7 +319,6 @@ async def generate_se_measurements(
     summary="Run static state estimation against the cached measurement set.",
     response_model=SeResultResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -346,7 +342,6 @@ async def run_se(
     session_id: str,
     body: SeRunRequest,
     request: Request,
-    _: RequireToken,
 ) -> SeResultResponse:
     """Synchronously run ``ss.SE.run()`` against the cached measurement
     set and return the result.

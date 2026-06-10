@@ -22,17 +22,16 @@ pip install -e ".[dev]"
 andes-app serve --workspace ./tmp
 ```
 
-Stderr prints the path to a per-launch token file (mode `0600`). Read the token from that file and pass it in the `X-Andes-Token` header on every HTTP request, or as the first WebSocket message payload (`{"type":"auth","token":"..."}`).
+The server has no authentication: it binds to loopback by default, so only processes on your machine can reach it. Stderr prints the serving URL and workspace path at startup. Interactive API docs are served at `/docs` (Swagger UI) and `/redoc`.
 
 CLI flags:
 
-- `--bind <addr>` — interface to bind. Default `127.0.0.1` (loopback only). Non-loopback emits a stderr warning.
+- `--bind <addr>` — interface to bind. Default `127.0.0.1` (loopback only). Non-loopback emits a stderr warning: there is no authentication, so a non-loopback bind exposes the API to the whole network.
 - `--port <int>` — port. Default OS-assigned ephemeral; printed to stderr.
 - `--workspace <dir>` — case-file workspace root. Default `~/.andes-app/cases`. Created with mode `0700` if missing.
 - `--max-sessions <int>` — session-creation cap. Default `min(4, max(1, cpu_count // 2))`.
 - `--idle-timeout-seconds <int>` — reap idle sessions after this many seconds. Default `180`.
 - `--worker-rss-limit-mb <int>` — per-worker `RLIMIT_AS` (Linux). Default `1500`.
-- `--token-file <path>` — override the per-launch token file location. Useful for CI fixtures.
 
 Windows: the substrate runs but emits a stderr warning about the path-canonicalization limitation (R23 is best-effort on Windows in v0.1).
 
@@ -41,10 +40,10 @@ Windows: the substrate runs but emits a stderr warning about the path-canonicali
 See the top-level docstring in `src/andes_app/__init__.py`. Summary:
 
 - Local OS user is trusted (case-load equals code execution).
-- Loopback web origins from random browser tabs are NOT trusted.
-- Browser extensions / processes with filesystem read access can read the token file.
+- Loopback web origins from random browser tabs are NOT trusted (Host/Origin allow-list + strict CORS).
+- There is no authentication: the server binds to loopback by default, and any local process can reach the API. Non-loopback binds expose the API to the whole network.
 - Third-party case files are not trusted by the system but trusted by the user when they choose to load.
-- Daily token rotation, sandboxed case-file execution, and kernel-level workspace enforcement are deferred to the SaaS phase.
+- Sandboxed case-file execution and kernel-level workspace enforcement are deferred to the SaaS phase.
 
 ## Curl-only walkthrough
 

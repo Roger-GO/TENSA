@@ -16,7 +16,6 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 
-from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
     AbortResponse,
@@ -71,7 +70,6 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
     summary="Run a time-domain simulation (batch mode; streaming lands in Unit 6).",
     response_model=TdsBatchResult,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -87,7 +85,6 @@ async def run_tds(
     session_id: str,
     body: TdsRunRequest,
     request: Request,
-    _: RequireToken,
 ) -> TdsBatchResult:
     mgr = _manager(request)
     # Unit 16: forward integrator + tolerance overrides. The wrapper
@@ -206,14 +203,12 @@ def _broadcast_job(mgr: SessionManager, session_id: str, job_id: str) -> None:
     summary="Signal a cooperative abort of the active TDS run on a session.",
     response_model=AbortResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
     },
 )
 async def abort_run(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> AbortResponse:
     """Set the session's abort event. Cooperatively terminates an active
     streaming or batch ``run_tds`` invocation at the next ``callpert``

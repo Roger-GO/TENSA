@@ -14,7 +14,6 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 
 from andes_app.api._run_as_job import _run_as_job
-from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
     GeneratorOutput,
@@ -111,7 +110,6 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
     summary="Run power flow on the session's loaded case.",
     response_model=PflowResult,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -131,7 +129,6 @@ async def run_pflow(
     session_id: str,
     body: PflowRunRequest,
     request: Request,
-    _: RequireToken,
 ) -> PflowResult:
     mgr = _manager(request)
     try:
@@ -160,7 +157,6 @@ async def run_pflow(
     summary="Read the session's current operating point (bus V/θ) without running.",
     response_model=PflowResult,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -171,7 +167,6 @@ async def run_pflow(
 async def get_operating_point(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> PflowResult:
     """Return the System's current solved bus voltages/angles WITHOUT
     re-running anything. After a TDS run the data grid otherwise sits empty

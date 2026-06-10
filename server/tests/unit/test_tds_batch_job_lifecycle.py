@@ -59,7 +59,7 @@ class _FakeRequest:
 
 def _run_tds_call(mgr: SessionManager, session_id: str = "s1") -> None:
     body = TdsRunRequest(tf=1.0, h=None)
-    asyncio.run(run_tds(session_id, body, _FakeRequest(mgr), _="token"))
+    asyncio.run(run_tds(session_id, body, _FakeRequest(mgr)))
 
 
 def _only_record(mgr: SessionManager, session_id: str = "s1") -> Any:

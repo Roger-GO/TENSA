@@ -24,7 +24,6 @@ from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api._run_as_job import _run_as_job
-from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
 from andes_app.core.disturbance import AlterSpec, FaultSpec, ToggleSpec
@@ -188,7 +187,6 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
                 "Per KTD-5; snapshots are NOT included."
             ),
         },
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -207,7 +205,6 @@ async def export_bundle(
     session_id: str,
     body: BundleExportRequest,
     request: Request,
-    _: RequireToken,
 ) -> Response:
     """Assemble a reproducibility-bundle ``.zip`` and return it as a stream.
 
@@ -303,14 +300,29 @@ class SnapshotMetadataModel(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    andes_version: str
-    andes_app_version: str
-    case_filename: str | None
-    case_sha256: str | None
-    disturbance_log: list[dict[str, Any]] = Field(default_factory=list)
-    saved_at: str
-    has_pflow: bool
-    has_tds: bool
+    andes_version: str = Field(
+        ..., description="ANDES version that produced the snapshot."
+    )
+    andes_app_version: str = Field(
+        ..., description="andes-app version that produced the snapshot."
+    )
+    case_filename: str | None = Field(
+        ..., description="Workspace-relative case filename loaded when the snapshot was saved."
+    )
+    case_sha256: str | None = Field(
+        ..., description="SHA-256 of the case file at save time (drift detection on restore)."
+    )
+    disturbance_log: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Disturbance specs active at save time; replayed on the fallback restore path.",
+    )
+    saved_at: str = Field(..., description="ISO-8601 UTC timestamp of the save.")
+    has_pflow: bool = Field(
+        ..., description="Whether a converged power flow existed at save time."
+    )
+    has_tds: bool = Field(
+        ..., description="Whether a TDS run had completed at save time."
+    )
 
 
 class SaveSnapshotResponse(BaseModel):
@@ -318,8 +330,10 @@ class SaveSnapshotResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str
-    metadata: SnapshotMetadataModel
+    name: str = Field(..., description="Snapshot name as saved (unique per session workspace).")
+    metadata: SnapshotMetadataModel = Field(
+        ..., description="Sidecar metadata written alongside the snapshot."
+    )
     dill_bytes: int = Field(
         ..., description="Size of the dill blob on disk, in bytes."
     )
@@ -381,7 +395,9 @@ class RestoreSnapshotResponse(BaseModel):
             "metadata onto the new System."
         ),
     )
-    metadata: SnapshotMetadataModel
+    metadata: SnapshotMetadataModel = Field(
+        ..., description="Sidecar metadata of the restored snapshot."
+    )
     job_id: str | None = Field(
         default=None,
         description=(
@@ -399,10 +415,14 @@ class SnapshotListEntry(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str
-    saved_at: str
-    has_pflow: bool
-    has_tds: bool
+    name: str = Field(..., description="Snapshot name.")
+    saved_at: str = Field(..., description="ISO-8601 UTC timestamp of the save.")
+    has_pflow: bool = Field(
+        ..., description="Whether a converged power flow existed at save time."
+    )
+    has_tds: bool = Field(
+        ..., description="Whether a TDS run had completed at save time."
+    )
     has_dill: bool = Field(
         ...,
         description=(
@@ -411,8 +431,12 @@ class SnapshotListEntry(BaseModel):
             "snapshot is still restorable via the slow replay path."
         ),
     )
-    andes_version: str
-    disturbance_count: int
+    andes_version: str = Field(
+        ..., description="ANDES version that produced the snapshot."
+    )
+    disturbance_count: int = Field(
+        ..., description="Number of disturbance specs recorded in the snapshot metadata."
+    )
 
 
 class ListSnapshotsResponse(BaseModel):
@@ -420,7 +444,10 @@ class ListSnapshotsResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    snapshots: list[SnapshotListEntry] = Field(default_factory=list)
+    snapshots: list[SnapshotListEntry] = Field(
+        default_factory=list,
+        description="Saved snapshots for this session's case, newest first.",
+    )
 
 
 def _map_snapshot_error(exc: WorkerError) -> HTTPException:
@@ -475,7 +502,6 @@ def _map_snapshot_error(exc: WorkerError) -> HTTPException:
     summary="Save the current operating point as a named snapshot.",
     response_model=SaveSnapshotResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -494,7 +520,6 @@ async def save_snapshot(
     session_id: str,
     body: SaveSnapshotRequest,
     request: Request,
-    _: RequireToken,
 ) -> SaveSnapshotResponse:
     """Save snapshot endpoint — Unit 7.
 
@@ -539,7 +564,6 @@ async def save_snapshot(
     summary="Restore a previously-saved snapshot onto the session.",
     response_model=RestoreSnapshotResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session or snapshot not found."},
         409: {
             "model": ProblemDetails,
@@ -558,7 +582,6 @@ async def restore_snapshot(
     session_id: str,
     body: RestoreSnapshotRequest,
     request: Request,
-    _: RequireToken,
 ) -> RestoreSnapshotResponse:
     """Restore snapshot endpoint — Unit 7.
 
@@ -613,14 +636,12 @@ async def restore_snapshot(
     summary="List snapshots saved against the current case.",
     response_model=ListSnapshotsResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
     },
 )
 async def list_snapshots(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> ListSnapshotsResponse:
     """List snapshots for the current case.
 
@@ -660,7 +681,6 @@ async def list_snapshots(
     summary="Delete a snapshot by name.",
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session or snapshot not found."},
         409: {
             "model": ProblemDetails,
@@ -676,7 +696,6 @@ async def delete_snapshot(
     session_id: str,
     name: str,
     request: Request,
-    _: RequireToken,
 ) -> Response:
     """Delete snapshot endpoint — Unit 7."""
     mgr = _manager(request)

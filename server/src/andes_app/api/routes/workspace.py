@@ -1,6 +1,6 @@
 """Workspace lister + SLD layout sidecar endpoints.
 
-Three endpoints, all auth-gated via ``RequireToken``:
+Three endpoints:
 
 - ``GET /workspace/files`` — enumerate supported case files in the workspace
   root (non-recursive, alphabetical, dotfiles + symlinks excluded).
@@ -26,7 +26,6 @@ from pathlib import Path
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from pydantic import ValidationError
 
-from andes_app.api.auth import RequireToken
 from andes_app.api.schemas import (
     ProblemDetails,
     SidecarLayout,
@@ -105,13 +104,9 @@ def _layout_sidecar_path(workspace: Path, case_path: str) -> Path:
     operation_id="listWorkspaceFiles",
     summary="List supported case files in the workspace root.",
     response_model=WorkspaceFileList,
-    responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
-    },
 )
 async def list_files(
     request: Request,
-    _: RequireToken,
 ) -> WorkspaceFileList:
     """Return a sorted list of files in the workspace root whose extension
     matches the supported set. Non-recursive in v0.1; excludes hidden files
@@ -157,7 +152,6 @@ async def list_files(
             "model": ProblemDetails,
             "description": "Workspace path validation failed.",
         },
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Sidecar not found."},
         422: {
             "model": ProblemDetails,
@@ -167,7 +161,6 @@ async def list_files(
 )
 async def get_layout(
     request: Request,
-    _: RequireToken,
     case_path: str = Query(
         ...,
         description=(
@@ -238,7 +231,6 @@ def _enforce_layout_content_length(request: Request) -> None:
             "model": ProblemDetails,
             "description": "Workspace path validation failed.",
         },
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         413: {
             "model": ProblemDetails,
             "description": "Body exceeds the 256 KB sidecar cap.",
@@ -251,7 +243,6 @@ def _enforce_layout_content_length(request: Request) -> None:
 )
 async def put_layout(
     request: Request,
-    _: RequireToken,
     layout: SidecarLayout = Body(
         ...,
         description=(

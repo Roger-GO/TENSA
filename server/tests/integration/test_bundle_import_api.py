@@ -34,8 +34,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "f" * 64
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -57,7 +55,6 @@ async def workspace(tmp_path: Path) -> Path:
 @pytest.fixture
 async def client(workspace: Path) -> AsyncIterator[httpx.AsyncClient]:
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -69,7 +66,6 @@ async def client(workspace: Path) -> AsyncIterator[httpx.AsyncClient]:
     )
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -84,7 +80,7 @@ async def client(workspace: Path) -> AsyncIterator[httpx.AsyncClient]:
 
 async def _create_session(client: httpx.AsyncClient) -> str:
     resp = await client.post(
-        "/api/sessions", headers={"X-Andes-Token": VALID_TOKEN}
+        "/api/sessions"
     )
     assert resp.status_code == 201, resp.text
     return str(resp.json()["session_id"])
@@ -101,7 +97,6 @@ async def _create_session_and_load(
         body["addfiles"] = [addfile]
     resp = await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     assert resp.status_code in (200, 201), resp.text
@@ -116,7 +111,6 @@ async def _export_bundle(
 ) -> bytes:
     resp = await client.post(
         f"/api/sessions/{session_id}/bundle/export",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body or {},
     )
     assert resp.status_code == 200, resp.text
@@ -141,7 +135,6 @@ def _post_bundle(
         data["use_bundle_case"] = "true" if use_bundle_case else "false"
     return client.post(
         f"/api/sessions/{session_id}/bundle/import",
-        headers={"X-Andes-Token": VALID_TOKEN},
         files=files,
         data=data,
     )
@@ -190,7 +183,6 @@ async def test_import_bundle_round_trip_clean_workspace(
     # the case as part of the import flow).
     topo = await client.get(
         f"/api/sessions/{sid_b}/topology",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert topo.status_code == 200
     assert topo.json()["state"] == "pre-setup"
@@ -448,19 +440,6 @@ async def test_import_bundle_unknown_session_returns_404(
 ) -> None:
     resp = await _post_bundle(client, "does-not-exist", b"PK\x03\x04")
     assert resp.status_code == 404, resp.text
-
-
-@pytest.mark.integration
-async def test_import_bundle_missing_token_returns_401(
-    client: httpx.AsyncClient,
-) -> None:
-    sid = await _create_session(client)
-    files = {"file": ("bundle.zip", b"PK\x03\x04", "application/zip")}
-    resp = await client.post(
-        f"/api/sessions/{sid}/bundle/import",
-        files=files,
-    )
-    assert resp.status_code == 401, resp.text
 
 
 # ---- ANDES version mismatch ------------------------------------------------

@@ -12,10 +12,9 @@ Two surfaces:
   ``SessionManager.invoke``).
 
 - ``WS /api/ws/{session_id}/sweep/{sweep_id}`` — progress channel.
-  The wire protocol mirrors the TDS WS endpoint's auth handshake but
-  ships JSON text envelopes only (no Arrow IPC binary frames):
+  The wire protocol mirrors the TDS WS endpoint but ships JSON text
+  envelopes only (no Arrow IPC binary frames):
 
-      client → server (text)  {"type":"auth","token":"..."}
       server → client (text)  {"type":"ready"}
       server → client (text)  {"type":"snapshot","sweep_id":...,
                                "total":N,"iterations_so_far":[...],
@@ -45,8 +44,6 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, status
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
-from andes_app.api.auth import RequireToken
-from andes_app.api.routes.ws import require_ws_auth
 from andes_app.api.schemas import ProblemDetails
 from andes_app.core.session import (
     SessionExpiredError,
@@ -65,9 +62,7 @@ log = logging.getLogger("andes-app.sweep")
 
 
 # WS close codes — same alphabet as the TDS streaming endpoint so
-# clients can share the close-code translation logic. The auth-failed
-# close (4401) and the 2s auth deadline now live in ``require_ws_auth``
-# (api/routes/ws.py), which this endpoint delegates the handshake to.
+# clients can share the close-code translation logic.
 WS_CLOSE_SESSION_NOT_FOUND = 4404
 WS_CLOSE_INTERNAL_ERROR = 4500
 
@@ -125,7 +120,6 @@ class StartSweepResponse(BaseModel):
     status_code=status.HTTP_202_ACCEPTED,
     responses={
         202: {"description": "Sweep started; subscribe to the WS channel for progress."},
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -147,7 +141,6 @@ async def start_sweep(
     session_id: str,
     body: SweepRequest,
     request: Request,
-    _: RequireToken,
 ) -> StartSweepResponse:
     """Start a sweep. Returns immediately; the WS channel emits progress.
 
@@ -215,10 +208,9 @@ async def ws_sweep_progress(
 ) -> None:
     """WebSocket endpoint for streaming sweep iteration progress.
 
-    Auth handshake mirrors the TDS WS — first text frame must be
-    ``{"type":"auth","token":"..."}`` within 2 seconds. Then ``ready``
-    is sent and the server immediately starts pumping the
-    ``attach_to_sweep`` async iterator.
+    Mirrors the TDS WS: the server accepts the connection, validates the
+    session (4404 close on unknown session), sends ``{"type":"ready"}``,
+    and immediately starts pumping the ``attach_to_sweep`` async iterator.
     """
     await websocket.accept()
     mgr_obj = getattr(websocket.app.state, "session_manager", None)
@@ -228,18 +220,6 @@ async def ws_sweep_progress(
         )
         return
     mgr: SessionManager = mgr_obj
-
-    # ---- AUTH (shared first-message handshake; honors serve --no-auth) ----
-    # Delegate to the same helper the TDS / jobs-events sockets use so this
-    # channel honors ``app.state.require_auth``. The previous inline check
-    # called ``constant_time_eq(expected_token, token)`` UNCONDITIONALLY, which
-    # rejected the empty no-auth token with 4401 and left the sweep progress
-    # stream dead in ``serve --no-auth`` mode — the sweep ran to completion on
-    # the substrate but the UI never received a single iteration. ``require_ws_auth``
-    # closes the socket itself (4401 / internal-error) and returns False on any
-    # failure, mirroring the TDS handler.
-    if not await require_ws_auth(websocket):
-        return
 
     if not mgr.is_alive(session_id):
         await _close_with_error(
