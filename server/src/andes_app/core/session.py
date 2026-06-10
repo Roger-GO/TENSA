@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from andes_app.core.errors import AndesAppError, SessionBusyError
+from andes_app.core.errors import AndesAppError, SessionBusyError, WorkerDiedError
 from andes_app.core.jobs import JobKind, JobRecord, JobStatus, _JobRegistry
 from andes_app.core.worker import worker_main
 
@@ -132,6 +132,11 @@ class _Session:
     seq: int = 0
     last_active: float = field(default_factory=time.monotonic)
     closed: bool = False
+    # Set when the session was closed because its worker subprocess crashed
+    # mid-RPC (torn IPC pipe). Lets ``invoke`` distinguish a crashed worker
+    # from an idle-reaped / never-existed session in the ``SessionExpiredError``
+    # it raises for a follow-up call. ``None`` for a clean / idle close.
+    death_reason: str | None = None
     # Unit 18: sweep gate. When non-None, a sweep is running and the
     # session-scoped routes return 503 + Retry-After. The string holds
     # the sweep_id for the route's error detail. Set inside
@@ -473,6 +478,64 @@ class SessionManager:
 
     # ----- request/response -----
 
+    def _session_expired_error(
+        self, session_id: str, sess: _Session | None
+    ) -> SessionExpiredError:
+        """Build the ``SessionExpiredError`` for a missing / closed session.
+
+        When the session was closed because its worker crashed (``death_reason``
+        set by :meth:`_raise_worker_died`), the message names that cause so the
+        caller is told the case is safe and to reload — distinct from the
+        generic "reaped or never existed" idle / unknown-session case.
+        """
+        if sess is not None and sess.death_reason is not None:
+            return SessionExpiredError(sess.death_reason)
+        return SessionExpiredError(f"session {session_id!r} is not active")
+
+    def _raise_worker_died(
+        self, sess: _Session, exc: BaseException
+    ) -> WorkerDiedError:
+        """Mark a session dead after its worker crashed mid-RPC, then return the
+        :class:`WorkerDiedError` to raise.
+
+        Runs on the executor thread inside ``_rpc`` (the session ``RLock`` is
+        held), so it only touches thread-safe state: flips ``closed`` + stamps
+        ``death_reason``, drops the session from the registry so follow-up
+        ``invoke`` calls fast-fail, and best-effort terminates the worker process
+        + closes the pipes. It deliberately does NOT call the async
+        ``_close_session`` (no event loop here); the idle reaper / shutdown path
+        tolerates an already-dead, already-popped session.
+        """
+        err = WorkerDiedError()
+        sess.closed = True
+        sess.death_reason = err.detail
+        log.warning(
+            "session %s worker died mid-RPC (%s: %s); marking session dead",
+            sess.session_id,
+            type(exc).__name__,
+            exc,
+        )
+        # Drop from the registry so subsequent invoke() calls fast-fail with the
+        # death-reason SessionExpiredError rather than racing on the dead pipe.
+        with self._registry_lock:
+            self._sessions.pop(sess.session_id, None)
+        # Best-effort process teardown — the worker is presumed gone, but if it
+        # is a zombie/half-dead, terminate then kill so no orphan lingers.
+        proc = sess.process
+        if proc is not None:
+            with contextlib.suppress(Exception):
+                if proc.is_alive():
+                    proc.terminate()
+                    proc.join(timeout=1.0)
+                    if proc.is_alive():
+                        proc.kill()
+        for conn in (sess.ctrl, sess.data):
+            with contextlib.suppress(Exception):
+                conn.close()
+        # Clean up the per-session clone scratch dir (mirrors _close_session).
+        self._cleanup_clone_dir(sess.session_id)
+        return err
+
     async def invoke(
         self,
         session_id: str,
@@ -506,7 +569,7 @@ class SessionManager:
         with self._registry_lock:
             sess = self._sessions.get(session_id)
         if sess is None or sess.closed:
-            raise SessionExpiredError(f"session {session_id!r} is not active")
+            raise self._session_expired_error(session_id, sess)
         if not bypass_sweep_gate and sess.sweep_in_progress is not None:
             raise SweepInProgressError(
                 sess.sweep_in_progress,
@@ -531,8 +594,21 @@ class SessionManager:
                 sess.seq += 1
                 sess.last_active = time.monotonic()
                 seq = sess.seq
-                sess.ctrl.send({"op": op, "args": args or {}, "seq": seq})
-                response = sess.data.recv()
+                try:
+                    sess.ctrl.send({"op": op, "args": args or {}, "seq": seq})
+                    response = sess.data.recv()
+                except (
+                    EOFError,
+                    BrokenPipeError,
+                    ConnectionResetError,
+                    OSError,
+                ) as exc:
+                    # The worker subprocess died mid-RPC: the pipe is torn, so
+                    # send/recv raises a raw IPC error. Translate it into a
+                    # structured, recoverable ``WorkerDiedError`` and flag the
+                    # session dead so EVERY subsequent invoke fast-fails as a
+                    # SessionExpiredError instead of re-bubbling a bare 500.
+                    raise self._raise_worker_died(sess, exc) from exc
                 sess.last_active = time.monotonic()
                 return response
             finally:
@@ -576,7 +652,7 @@ class SessionManager:
         with self._registry_lock:
             sess = self._sessions.get(session_id)
         if sess is None or sess.closed:
-            raise SessionExpiredError(f"session {session_id!r} is not active")
+            raise self._session_expired_error(session_id, sess)
 
         loop = asyncio.get_running_loop()
 
@@ -587,13 +663,36 @@ class SessionManager:
             sess.seq += 1
             sess.last_active = time.monotonic()
             seq = sess.seq
-            await loop.run_in_executor(
-                None,
-                lambda: sess.ctrl.send({"op": op, "args": args or {}, "seq": seq}),
-            )
+            try:
+                await loop.run_in_executor(
+                    None,
+                    lambda: sess.ctrl.send(
+                        {"op": op, "args": args or {}, "seq": seq}
+                    ),
+                )
+            except (
+                EOFError,
+                BrokenPipeError,
+                ConnectionResetError,
+                OSError,
+            ) as exc:
+                raise self._raise_worker_died(sess, exc) from exc
 
             async def _read_one() -> dict[str, Any]:
-                msg = await loop.run_in_executor(None, sess.data.recv)
+                try:
+                    msg = await loop.run_in_executor(None, sess.data.recv)
+                except (
+                    EOFError,
+                    BrokenPipeError,
+                    ConnectionResetError,
+                    OSError,
+                ) as exc:
+                    # Same hazard as the batch ``invoke``: a worker that dies
+                    # mid-stream tears the pipe and ``recv`` raises raw. Mark the
+                    # session dead and surface the structured WorkerDiedError so
+                    # the run driver finishes the buffer as a recoverable error
+                    # rather than letting an EOFError escape uncaught.
+                    raise self._raise_worker_died(sess, exc) from exc
                 sess.last_active = time.monotonic()
                 if not isinstance(msg, dict):
                     raise WorkerError("malformed", f"non-dict response: {msg!r}")
@@ -643,7 +742,7 @@ class SessionManager:
         with self._registry_lock:
             sess = self._sessions.get(session_id)
         if sess is None or sess.closed:
-            raise SessionExpiredError(f"session {session_id!r} is not active")
+            raise self._session_expired_error(session_id, sess)
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, sess.abort_event.set)
 
@@ -668,7 +767,7 @@ class SessionManager:
         with self._registry_lock:
             sess = self._sessions.get(session_id)
         if sess is None or sess.closed:
-            raise SessionExpiredError(f"session {session_id!r} is not active")
+            raise self._session_expired_error(session_id, sess)
 
         run_id = uuid.uuid4().hex
         max_rate_hz = args.get("max_rate_hz")
@@ -752,6 +851,14 @@ class SessionManager:
                 on_frame=_on_frame,
                 timeout=300.0,
             )
+        except WorkerDiedError as exc:
+            # The worker crashed mid-stream; ``invoke_streaming`` already marked
+            # the session dead. Finish the buffer as a recoverable error carrying
+            # the ``WorkerDied`` category so the WS terminal frame is actionable.
+            await self._finish_run_buffer(
+                run_buf, "error", error=(WORKER_DIED_CATEGORY, exc.detail)
+            )
+            return
         except SessionExpiredError as exc:
             await self._finish_run_buffer(
                 run_buf, "error", error=("session-expired", str(exc))
@@ -928,7 +1035,7 @@ class SessionManager:
         with self._registry_lock:
             sess = self._sessions.get(session_id)
         if sess is None or sess.closed:
-            raise SessionExpiredError(f"session {session_id!r} is not active")
+            raise self._session_expired_error(session_id, sess)
         if sess.sweep_in_progress is not None:
             raise SweepInProgressError(
                 sess.sweep_in_progress,
@@ -1043,15 +1150,35 @@ class SessionManager:
                 sess.seq += 1
                 sess.last_active = time.monotonic()
                 seq = sess.seq
-                await loop.run_in_executor(
-                    None,
-                    lambda: sess.ctrl.send(
-                        {"op": "run_sweep", "args": sweep_args_with_id, "seq": seq}
-                    ),
-                )
+                try:
+                    await loop.run_in_executor(
+                        None,
+                        lambda: sess.ctrl.send(
+                            {
+                                "op": "run_sweep",
+                                "args": sweep_args_with_id,
+                                "seq": seq,
+                            }
+                        ),
+                    )
+                except (
+                    EOFError,
+                    BrokenPipeError,
+                    ConnectionResetError,
+                    OSError,
+                ) as exc:
+                    raise self._raise_worker_died(sess, exc) from exc
 
                 async def _read_one() -> dict[str, Any]:
-                    msg = await loop.run_in_executor(None, sess.data.recv)
+                    try:
+                        msg = await loop.run_in_executor(None, sess.data.recv)
+                    except (
+                        EOFError,
+                        BrokenPipeError,
+                        ConnectionResetError,
+                        OSError,
+                    ) as exc:
+                        raise self._raise_worker_died(sess, exc) from exc
                     sess.last_active = time.monotonic()
                     if not isinstance(msg, dict):
                         raise WorkerError(
@@ -1096,6 +1223,11 @@ class SessionManager:
                 sess, sweep_buf, "aborted", error=("cancelled", "sweep cancelled")
             )
             raise
+        except WorkerDiedError as exc:
+            # Worker crashed mid-sweep; the session is already marked dead.
+            await self._finish_sweep(
+                sess, sweep_buf, "error", error=(WORKER_DIED_CATEGORY, exc.detail)
+            )
         except SessionExpiredError as exc:
             await self._finish_sweep(
                 sess, sweep_buf, "error", error=("session-expired", str(exc))
@@ -1244,7 +1376,7 @@ class SessionManager:
         with self._registry_lock:
             sess = self._sessions.get(session_id)
         if sess is None or sess.closed:
-            raise SessionExpiredError(f"session {session_id!r} is not active")
+            raise self._session_expired_error(session_id, sess)
         return sess
 
     def session_job_registry(self, session_id: str) -> _JobRegistry:
@@ -1789,6 +1921,7 @@ __all__ = [
     "SessionExpiredError",
     "SessionManager",
     "SweepInProgressError",
+    "WorkerDiedError",
     "WorkerError",
 ]
 

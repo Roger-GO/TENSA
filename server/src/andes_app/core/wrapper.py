@@ -3007,25 +3007,45 @@ class Wrapper:
             # carries the equivalent in its serialised state).
             from andes.utils.snapshot import load_ss
 
+            # Part B (defense in depth): the dill fast-path has been observed to
+            # corrupt the worker's multiprocessing pipe fd — the old System being
+            # GC'd closes a file descriptor that collides with the worker's pipe,
+            # killing the worker with ``OSError: [Errno 9] Bad file descriptor``.
+            # Part A is the real safety net (worker death → clean recoverable
+            # error); here we harden the fast path so ANY exception across the
+            # load, the System swap, AND a post-load sanity access falls back to
+            # the slow replay+PF path instead of leaving the wrapper in a torn
+            # state. The try therefore spans more than ``load_ss`` alone: a
+            # corruption that surfaces only when the swapped-in System is first
+            # touched (or when the old System is dropped) must still fall back.
+            previous_ss = self._ss
             try:
                 ss_loaded = load_ss(str(dill_path))
+                # Swap in the dill-loaded System, then sanity-touch it so a
+                # structurally broken restore surfaces NOW (and falls back)
+                # instead of on the next routine call. ``is_setup`` is a cheap
+                # attribute read that forces the object graph to be at least
+                # walkable. Keeping ``previous_ss`` bound (no ``del``) means the
+                # except arm can always restore it.
+                self._ss = ss_loaded
+                _ = getattr(ss_loaded, "is_setup", None)
+                used_dill = True
             except Exception as exc:  # noqa: BLE001
-                # Defensive: a corrupted dill should fall back, not crash.
+                # Defensive: a corrupted dill (or a torn swap) should fall back,
+                # not crash. Restore the previous System reference so the slow
+                # path below operates on the already-replayed pre-setup System.
                 fallback_reason = (
                     "dill load failed "
                     f"({type(exc).__name__}); falling back to replay+PF"
                 )
-                ss_loaded = None
+                self._ss = previous_ss
+                used_dill = False
                 logging.getLogger("andes-app.wrapper.snapshot").warning(
-                    "snapshot %r dill load failed: %s; "
+                    "snapshot %r dill fast-path failed: %s; "
                     "falling back to slow path",
                     validated,
                     _sanitize_message(str(exc)),
                 )
-
-            if ss_loaded is not None:
-                self._ss = ss_loaded
-                used_dill = True
 
         # Slow path: setup + PF on the post-replay System. PF is
         # idempotent; if the user only wanted the disturbance list back

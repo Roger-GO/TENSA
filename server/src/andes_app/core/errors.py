@@ -321,6 +321,46 @@ class CloneEditError(AndesAppError):
     recovery_kind: str | None = "none"
 
 
+class WorkerDiedError(AndesAppError):
+    """Raised when a session's worker subprocess dies mid-RPC — the parent
+    detects this as a torn IPC pipe (``EOFError`` / ``BrokenPipeError`` /
+    ``ConnectionResetError`` / ``OSError`` while sending the request or
+    receiving the response).
+
+    Distinct from :class:`~andes_app.core.session.WorkerError` (the worker is
+    alive and returned a structured error) and
+    :class:`~andes_app.core.session.SessionExpiredError` (the session was reaped
+    or never existed): here the worker crashed — e.g. it ran out of memory or
+    hit an unsupported ANDES operation (an observed trigger is the snapshot
+    dill-restore corrupting the worker's multiprocessing pipe fd). The session
+    is marked dead and removed from the registry so every subsequent call to it
+    fast-fails as :class:`~andes_app.core.session.SessionExpiredError` instead of
+    repeatedly bubbling a raw 500.
+
+    Surfaced as HTTP 503 (Service Unavailable — the worker is gone, not a client
+    conflict; the condition is transient and recoverable by reloading the case)
+    with a ``reload-case`` recovery CTA. The ``recovery_kind`` / ``http_status``
+    class attributes are the single source of truth the app-level exception
+    handler (mirroring ``SessionBusyError`` / ``SweepInProgressError``) consults.
+
+    The case is safe on disk, so the actionable recovery is to reload it (or
+    start a new session); the default message below says exactly that.
+    """
+
+    recovery_kind: str | None = "reload-case"
+    http_status: int = 503
+
+    _DEFAULT_DETAIL = (
+        "The simulation worker stopped unexpectedly (it may have run out of "
+        "memory or hit an unsupported ANDES operation). Your case is safe on "
+        "disk — reload it to continue, or start a new session."
+    )
+
+    def __init__(self, detail: str | None = None) -> None:
+        super().__init__(detail if detail is not None else self._DEFAULT_DETAIL)
+        self.detail = detail if detail is not None else self._DEFAULT_DETAIL
+
+
 class SessionBusyError(AndesAppError):
     """Raised by ``SessionManager.invoke`` when the per-session lock is
     already held by an in-flight operation (the non-blocking try-acquire

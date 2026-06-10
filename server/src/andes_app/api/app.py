@@ -50,7 +50,7 @@ from andes_app.api.routes.tds import router as tds_router
 from andes_app.api.routes.workspace import router as workspace_router
 from andes_app.api.routes.ws import router as ws_router
 from andes_app.api.schemas import JobRecordSchema, ProblemDetails
-from andes_app.core.errors import SessionBusyError
+from andes_app.core.errors import SessionBusyError, WorkerDiedError
 from andes_app.core.session import SessionManager, SweepInProgressError
 from andes_app.security.middleware import make_host_origin_middleware
 
@@ -200,6 +200,14 @@ def make_app(
     # ``wait-for-job`` recovery CTA and the in-flight job as a ``current_job``
     # extra so the activity panel can offer wait/cancel instead of freezing.
     app.add_exception_handler(SessionBusyError, _session_busy_to_problem_details)
+    # A session's worker subprocess can die mid-RPC (OOM / unsupported ANDES
+    # op). ``SessionManager.invoke`` detects the torn IPC pipe, marks the
+    # session dead, and raises ``WorkerDiedError``. Translate to 503 with a
+    # ``reload-case`` recovery CTA here so EVERY session-scoped route inherits
+    # the structured, recoverable response without per-route catch blocks — the
+    # same global-handler convention as ``SessionBusyError`` /
+    # ``SweepInProgressError`` above.
+    app.add_exception_handler(WorkerDiedError, _worker_died_to_problem_details)
 
     # Build the allow-lists. Hosts are checked against the request's Host
     # header (which is "127.0.0.1:port" or "localhost:port" by default).
@@ -428,6 +436,31 @@ def _session_busy_to_problem_details(
     else:
         body["current_job"] = None
     return JSONResponse(status_code=409, content=body)
+
+
+def _worker_died_to_problem_details(
+    _request: Request, exc: Exception
+) -> JSONResponse:
+    """Translate ``WorkerDiedError`` to ``503 Service Unavailable``.
+
+    503 (not 409) because the worker is GONE, not a client conflict: the
+    condition is transient and recoverable — the case is safe on disk, so the
+    UI reloads it (or starts a new session) per the ``reload-case`` recovery
+    CTA. The session was already marked dead in ``SessionManager.invoke``, so
+    follow-up calls fast-fail as ``SessionExpiredError`` rather than re-bubbling
+    here.
+    """
+    if not isinstance(exc, WorkerDiedError):  # pragma: no cover — defensive
+        raise exc
+    body = ProblemDetails(
+        type="about:blank",
+        title="Service Unavailable",
+        status=503,
+        detail=str(exc),
+        instance=None,
+        recovery=recovery_for(exc),
+    ).model_dump(mode="json")
+    return JSONResponse(status_code=503, content=body)
 
 
 def _request_validation_to_problem_details(
