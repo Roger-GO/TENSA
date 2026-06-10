@@ -23,7 +23,6 @@ import type { ReactNode } from 'react';
 import { SavedCasesList } from '@/components/shell/SavedCasesList';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
-import { useAuthStore } from '@/store/auth';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 
 // ---- mocks ---------------------------------------------------------------
@@ -102,14 +101,12 @@ beforeEach(() => {
     },
   ];
   mockSnapshots = [];
-  useAuthStore.setState({ token: 'a'.repeat(64), persistFailed: false });
   useSessionStore.setState({ sessionId: parseSessionId('test-session') });
   useCaseStore.setState({ selection: null, topology: null, layoutSidecar: null });
 });
 
 afterEach(() => {
   cleanup();
-  useAuthStore.setState({ token: null, persistFailed: false });
 });
 
 describe('<SavedCasesList />', () => {

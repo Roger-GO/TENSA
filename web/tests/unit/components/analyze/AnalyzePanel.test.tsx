@@ -15,12 +15,10 @@ import { AnalyzePanel } from '@/components/analyze/AnalyzePanel';
 import { ANALYZE_SUB_MODES, DEFAULT_EIG_FILTER, useAnalyzeStore } from '@/store/analyze';
 import { DEFAULT_TDS_CONFIG, useUiStore } from '@/store/ui';
 import { usePflowStore } from '@/store/pflow';
-import { useAuthStore } from '@/store/auth';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { useSweepStore } from '@/store/sweep';
 import { useRunModeStore } from '@/store/runMode';
-import { setTokenGetter } from '@/api/client';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { EigResult, PflowResult } from '@/api/types';
 
@@ -51,10 +49,9 @@ function resetStores() {
     error: null,
   });
   // The Run-readiness hook (Unit 4 of the v2.0 polish plan) reads
-  // case + session + auth + sweep slices. Seed all four to a "happy
-  // path" baseline so the per-sub-mode disabled-reason tests start
-  // from a clean state.
-  useAuthStore.setState({ token: 'test-token', persistFailed: false });
+  // case + session + sweep slices. Seed them to a "happy path"
+  // baseline so the per-sub-mode disabled-reason tests start from a
+  // clean state.
   useSessionStore.setState({
     sessionId: parseSessionId('sess-1'),
     recoveryInProgress: false,
@@ -283,7 +280,6 @@ describe('<AnalyzePanel />', () => {
     let fetchSpy: ReturnType<typeof vi.spyOn>;
 
     beforeEach(() => {
-      setTokenGetter(() => 'test-token');
       fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
         typeof vi.spyOn
       >;
@@ -294,7 +290,6 @@ describe('<AnalyzePanel />', () => {
 
     afterEach(() => {
       fetchSpy.mockRestore();
-      setTokenGetter(() => null);
     });
 
     function respondWith(status: number, body: Record<string, unknown>) {
@@ -418,7 +413,6 @@ describe('<AnalyzePanel />', () => {
     let fetchSpy: ReturnType<typeof vi.spyOn>;
 
     beforeEach(() => {
-      setTokenGetter(() => 'test-token');
       fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
         typeof vi.spyOn
       >;
@@ -429,7 +423,6 @@ describe('<AnalyzePanel />', () => {
 
     afterEach(() => {
       fetchSpy.mockRestore();
-      setTokenGetter(() => null);
     });
 
     it('forwards an integer noise_seed to the measurement-generate request', async () => {

@@ -3,23 +3,17 @@
  *
  * Covers:
  *  - Happy path: 200 → Blob with octet-stream MIME
- *  - Token header is set when getter returns a value
  *  - 404 → ProblemDetailsError with the v1.5 stub copy
  *  - Network failure → NetworkError
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProblemDetailsError, NetworkError } from '@/api/client';
-import { fetchEigStateMatrixMat, setMatExportTokenGetter } from '@/components/export/exportToMat';
+import { fetchEigStateMatrixMat } from '@/components/export/exportToMat';
 
 const originalFetch = globalThis.fetch;
 
-beforeEach(() => {
-  setMatExportTokenGetter(() => null);
-});
-
 afterEach(() => {
   globalThis.fetch = originalFetch;
-  setMatExportTokenGetter(() => null);
 });
 
 describe('fetchEigStateMatrixMat', () => {
@@ -42,8 +36,7 @@ describe('fetchEigStateMatrixMat', () => {
     expect((init as RequestInit).method).toBe('GET');
   });
 
-  it('sets X-Andes-Token header from the token getter', async () => {
-    setMatExportTokenGetter(() => 'tok-xyz');
+  it('sends the Accept header and no auth header', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(
       new Response(new Uint8Array([1]), {
         status: 200,
@@ -54,7 +47,7 @@ describe('fetchEigStateMatrixMat', () => {
     await fetchEigStateMatrixMat('sess-1');
     const init = fetchSpy.mock.calls[0]![1] as RequestInit;
     const headers = new Headers(init.headers);
-    expect(headers.get('X-Andes-Token')).toBe('tok-xyz');
+    expect(headers.get('X-Andes-Token')).toBeNull();
     expect(headers.get('Accept')).toBe('application/octet-stream');
   });
 

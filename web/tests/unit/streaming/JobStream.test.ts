@@ -3,7 +3,7 @@
  * ``mock-socket`` — v3.1 Unit 6.
  *
  * Coverage:
- *  - auth → ready → snapshot → job-event flow writes into useJobsStore.
+ *  - ready → snapshot → job-event flow writes into useJobsStore.
  *  - consuming a status event updates the store (upsert by job_id).
  *  - onMutate-before-WS reconciliation: a placeholder added by the mutation
  *    path is reconciled to the canonical id; a subsequent WS event for that
@@ -56,7 +56,7 @@ describe('JobStream — happy path', () => {
     server.stop();
   });
 
-  it('runs auth → ready → snapshot → job-event and writes into the store', async () => {
+  it('runs ready → snapshot → job-event and writes into the store', async () => {
     const onSnapshot = vi.fn();
     const onEvent = vi.fn();
     const onError = vi.fn();
@@ -64,30 +64,25 @@ describe('JobStream — happy path', () => {
 
     server.on('connection', (socket) => {
       socket.on('message', (raw: unknown) => {
-        const text = String(raw);
-        messages.push(text);
-        const msg = JSON.parse(text);
-        if (msg.type === 'auth') {
-          socket.send(JSON.stringify({ type: 'ready' }));
-          // Initial snapshot of one in-flight job.
-          socket.send(
-            JSON.stringify({
-              type: 'snapshot',
-              jobs: [{ job_id: 'srv-1', kind: 'pflow', status: 'running' }],
-            }),
-          );
-          // A live transition for that job.
-          socket.send(
-            JSON.stringify({ type: 'job', job_id: 'srv-1', kind: 'pflow', status: 'done' }),
-          );
-        }
+        messages.push(String(raw));
       });
+      socket.send(JSON.stringify({ type: 'ready' }));
+      // Initial snapshot of one in-flight job.
+      socket.send(
+        JSON.stringify({
+          type: 'snapshot',
+          jobs: [{ job_id: 'srv-1', kind: 'pflow', status: 'running' }],
+        }),
+      );
+      // A live transition for that job.
+      socket.send(
+        JSON.stringify({ type: 'job', job_id: 'srv-1', kind: 'pflow', status: 'done' }),
+      );
     });
 
     const stream = new JobStream(
       {
         sessionId: SESSION_ID,
-        token: 'tok',
         wsUrl: WS_URL,
         onSnapshot,
         onEvent,
@@ -103,8 +98,8 @@ describe('JobStream — happy path', () => {
     expect(onError).not.toHaveBeenCalled();
     expect(onSnapshot).toHaveBeenCalledTimes(1);
     expect(onEvent).toHaveBeenCalledTimes(1);
-    // First wire message is the auth handshake.
-    expect(JSON.parse(messages[0]!).type).toBe('auth');
+    // The client sends no handshake frame in the no-auth protocol.
+    expect(messages).toHaveLength(0);
     // The store reflects the canonical terminal state.
     const rec = useJobsStore.getState().jobs['srv-1']!;
     expect(rec).toBeDefined();
@@ -123,21 +118,16 @@ describe('JobStream — happy path', () => {
     useJobsStore.getState().reconcileJob(tempId, 'srv-eig', { status: 'running' });
 
     server.on('connection', (socket) => {
-      socket.on('message', (raw: unknown) => {
-        const msg = JSON.parse(String(raw));
-        if (msg.type === 'auth') {
-          socket.send(JSON.stringify({ type: 'ready' }));
-          socket.send(JSON.stringify({ type: 'snapshot', jobs: [] }));
-          // The canonical done event arrives AFTER the placeholder reconciled.
-          socket.send(
-            JSON.stringify({ type: 'job', job_id: 'srv-eig', kind: 'eig', status: 'done' }),
-          );
-        }
-      });
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.send(JSON.stringify({ type: 'snapshot', jobs: [] }));
+      // The canonical done event arrives AFTER the placeholder reconciled.
+      socket.send(
+        JSON.stringify({ type: 'job', job_id: 'srv-eig', kind: 'eig', status: 'done' }),
+      );
     });
 
     const stream = new JobStream(
-      { sessionId: SESSION_ID, token: 'tok', wsUrl: WS_URL, autoReconnect: false },
+      { sessionId: SESSION_ID, wsUrl: WS_URL, autoReconnect: false },
       { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
     );
     stream.start();
@@ -174,15 +164,10 @@ describe('JobStream — reconnect re-sync', () => {
     // The server closes the socket abnormally after ready to trigger the
     // reconnect + HTTP re-sync path.
     server.on('connection', (socket) => {
-      socket.on('message', (raw: unknown) => {
-        const msg = JSON.parse(String(raw));
-        if (msg.type === 'auth') {
-          socket.send(JSON.stringify({ type: 'ready' }));
-          socket.send(JSON.stringify({ type: 'snapshot', jobs: [] }));
-          // Abnormal close (not 1000) → HTTP re-sync fires.
-          socket.close({ code: 1006, reason: 'dropped' });
-        }
-      });
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.send(JSON.stringify({ type: 'snapshot', jobs: [] }));
+      // Abnormal close (not 1000) → HTTP re-sync fires.
+      socket.close({ code: 1006, reason: 'dropped' });
     });
 
     const resyncJobs: JobEventEnvelope[] = [
@@ -193,7 +178,6 @@ describe('JobStream — reconnect re-sync', () => {
     const stream = new JobStream(
       {
         sessionId: SESSION_ID,
-        token: 'tok',
         wsUrl: WS_URL,
         // Disable auto-reconnect so the test only exercises the HTTP re-sync
         // (a reconnect would re-open against the same mock server and re-send
@@ -235,35 +219,19 @@ describe('JobStream — close codes + frame errors', () => {
     stream: JobStream;
   }> {
     server.on('connection', (socket) => {
-      socket.on('message', (raw: unknown) => {
-        const msg = JSON.parse(String(raw));
-        if (msg.type === 'auth') {
-          socket.send(JSON.stringify({ type: 'ready' }));
-          socket.close({ code: closeCode, reason: `code-${closeCode}` });
-        }
-      });
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.close({ code: closeCode, reason: `code-${closeCode}` });
     });
     const onError = vi.fn();
     const fetchJobs = vi.fn(async () => [] as JobEventEnvelope[]);
     const stream = new JobStream(
-      { sessionId: SESSION_ID, token: 'tok', wsUrl: WS_URL, onError, autoReconnect: true, reconnectDelayMs: 0 },
+      { sessionId: SESSION_ID, wsUrl: WS_URL, onError, autoReconnect: true, reconnectDelayMs: 0 },
       { webSocketCtor: MockWebSocket as unknown as typeof WebSocket, fetchJobs },
     );
     stream.start();
     for (let i = 0; i < 15 && onError.mock.calls.length === 0; i += 1) await tick();
     return { onError, fetchJobs, stream };
   }
-
-  it('4401 fires auth_failed and does NOT reconnect or re-sync', async () => {
-    const { onError, fetchJobs, stream } = await runWithClose(4401);
-    expect(onError).toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'auth_failed' }),
-    );
-    // No HTTP re-sync, no reconnect for a non-transient auth failure.
-    await tick(10);
-    expect(fetchJobs).not.toHaveBeenCalled();
-    stream.dispose();
-  });
 
   it('4404 fires session_not_found and does NOT reconnect or re-sync', async () => {
     const { onError, fetchJobs, stream } = await runWithClose(4404);
@@ -288,17 +256,12 @@ describe('JobStream — close codes + frame errors', () => {
 
   it('a malformed JSON frame fires a protocol_error', async () => {
     server.on('connection', (socket) => {
-      socket.on('message', (raw: unknown) => {
-        const msg = JSON.parse(String(raw));
-        if (msg.type === 'auth') {
-          socket.send(JSON.stringify({ type: 'ready' }));
-          socket.send('this is not json{');
-        }
-      });
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.send('this is not json{');
     });
     const onError = vi.fn();
     const stream = new JobStream(
-      { sessionId: SESSION_ID, token: 'tok', wsUrl: WS_URL, onError, autoReconnect: false },
+      { sessionId: SESSION_ID, wsUrl: WS_URL, onError, autoReconnect: false },
       { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
     );
     stream.start();
@@ -311,17 +274,12 @@ describe('JobStream — close codes + frame errors', () => {
 
   it('a {type:"error"} frame fires an internal_error with the reason', async () => {
     server.on('connection', (socket) => {
-      socket.on('message', (raw: unknown) => {
-        const msg = JSON.parse(String(raw));
-        if (msg.type === 'auth') {
-          socket.send(JSON.stringify({ type: 'ready' }));
-          socket.send(JSON.stringify({ type: 'error', reason: 'boom' }));
-        }
-      });
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.send(JSON.stringify({ type: 'error', reason: 'boom' }));
     });
     const onError = vi.fn();
     const stream = new JobStream(
-      { sessionId: SESSION_ID, token: 'tok', wsUrl: WS_URL, onError, autoReconnect: false },
+      { sessionId: SESSION_ID, wsUrl: WS_URL, onError, autoReconnect: false },
       { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
     );
     stream.start();

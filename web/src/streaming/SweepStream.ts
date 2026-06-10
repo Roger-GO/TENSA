@@ -19,7 +19,8 @@
  *
  * Responsibilities:
  *
- * 1. Open WS to ``/ws/{sessionId}/sweep/{sweepId}`` with the auth handshake.
+ * 1. Open WS to ``/ws/{sessionId}/sweep/{sweepId}`` and wait for the
+ *    server's unprompted ``{type:'ready'}`` frame.
  * 2. Drain the snapshot envelope (initial buffer state).
  * 3. Forward each iteration event to the sweep store via ``onIteration``.
  * 4. Close cleanly on the terminal ``finished`` event.
@@ -59,14 +60,13 @@ export interface SweepFinishedEvent {
 }
 
 export interface SweepStreamError {
-  code: 'auth_failed' | 'sweep_not_found' | 'protocol_error' | 'worker_error';
+  code: 'sweep_not_found' | 'protocol_error' | 'worker_error';
   reason: string;
 }
 
 export interface SweepStreamOptions {
   sessionId: string;
   sweepId: string;
-  token: string;
   /** Full WS URL prefix. ``buildRunStreamWsUrl()`` returns the right value. */
   wsUrl: string;
   /** Optional resume cursor. Default ``-1`` replays everything from index 0. */
@@ -88,7 +88,7 @@ export class SweepStream {
   private readonly opts: SweepStreamOptions;
   private readonly wsCtor: WebSocketCtor;
   private ws: WebSocketLike | null = null;
-  private phase: 'idle' | 'connecting' | 'authenticating' | 'streaming' | 'closed' = 'idle';
+  private phase: 'idle' | 'connecting' | 'awaiting-ready' | 'streaming' | 'closed' = 'idle';
 
   constructor(opts: SweepStreamOptions, deps: SweepStreamInternalDeps = {}) {
     this.opts = opts;
@@ -129,12 +129,9 @@ export class SweepStream {
     }
 
     this.ws.onopen = () => {
-      this.phase = 'authenticating';
-      try {
-        this.ws?.send(JSON.stringify({ type: 'auth', token: this.opts.token }));
-      } catch (err) {
-        log.warn('SweepStream: auth send failed', err);
-      }
+      // No client-side handshake frame — the server sends
+      // ``{type:'ready'}`` unprompted once the connection is accepted.
+      this.phase = 'awaiting-ready';
     };
 
     this.ws.onmessage = (ev: MessageEvent) => {
@@ -217,9 +214,7 @@ export class SweepStream {
       if (this.phase === 'closed') return;
       const code = ev.code;
       // Substrate WS close codes from ``api/routes/sweep.py``.
-      if (code === 4401) {
-        this.opts.onError?.({ code: 'auth_failed', reason: ev.reason });
-      } else if (code === 4404) {
+      if (code === 4404) {
         this.opts.onError?.({ code: 'sweep_not_found', reason: ev.reason });
       } else if (code === 1000) {
         // Normal close after ``finished`` — already handled above.

@@ -5,8 +5,7 @@
  * answer the same three questions:
  *
  *   1. Is the prerequisite state present? (case loaded, session live,
- *      auth token paste, PF converged when the routine consumes the PF
- *      result, ...).
+ *      PF converged when the routine consumes the PF result, ...).
  *   2. If not, *why* — so we can surface a tooltip instead of a silent
  *      grey button (R20 of the v2.0 plan: every disabled control must
  *      explain itself).
@@ -21,7 +20,6 @@
  *
  *   - "No case loaded."                                   — case.selection === null
  *   - "Connecting to substrate…"                          — sessionId === null
- *   - "Sign in to run."                                   — auth.token === null
  *   - "Run PFlow first; <routine> requires a converged
  *      operating point."                                  — EIG/CPF/SE without PF
  *   - "Running EIG initialised the dynamic state; reload
@@ -41,7 +39,6 @@
 import type { ReactNode } from 'react';
 import type { RecoveryDescriptor } from '@/lib/recovery';
 import { useAnalyzeStore } from '@/store/analyze';
-import { useAuthStore } from '@/store/auth';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useSessionStore } from '@/store/session';
@@ -145,8 +142,6 @@ const DYNAMIC_REQUIRED: ReadonlySet<RunRoutine> = new Set(['tds', 'eig']);
 export function useRunReadiness(routine: RunRoutine): RunReadiness {
   const selection = useCaseStore((s) => s.selection);
   const sessionId = useSessionStore((s) => s.sessionId);
-  const token = useAuthStore((s) => s.token);
-  const authDisabled = useAuthStore((s) => s.authDisabled);
   const pflowLastRun = usePflowStore((s) => s.lastRun);
   const eigResult = useAnalyzeStore((s) => s.eigResult);
   const seMeasurementsCount = useAnalyzeStore((s) => s.seMeasurementsCount);
@@ -160,7 +155,7 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
   const topology = useCaseStore((s) => s.topology);
 
   // Order matters: the most fundamental gate (no case) shadows every
-  // subsequent reason, then session, then auth, then routine-specific
+  // subsequent reason, then session, then routine-specific
   // prerequisites. This mirrors how a user thinks about the workflow
   // — "you can't run anything without a case" is a more useful tooltip
   // than "Run PFlow first" when there's no case in the first place.
@@ -170,15 +165,6 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
   }
   if (sessionId === null) {
     return ready(false, 'Connecting to substrate…', null);
-  }
-  // The TDS branch needs a token to open the WebSocket; PF/EIG/CPF/SE
-  // also require auth at the HTTP layer (the api client refuses without
-  // one). Sweep is HTTP-only so it requires the token too. A `serve
-  // --no-auth` substrate (authDisabled) accepts unauthenticated requests,
-  // so a missing token is fine there — without this, every Run button is
-  // stuck on "Sign in to run." in no-auth dev mode.
-  if (token === null && !authDisabled) {
-    return ready(false, 'Sign in to run.', null);
   }
 
   // Sweep-in-progress shadows every other run: the substrate holds a

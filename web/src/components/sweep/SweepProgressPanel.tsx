@@ -14,7 +14,6 @@
 import { useEffect, useRef } from 'react';
 import { useSweepStore } from '@/store/sweep';
 import { useSessionStore } from '@/store/session';
-import { useAuthStore } from '@/store/auth';
 import { SweepStream } from '@/streaming/SweepStream';
 import { buildRunStreamWsUrl } from '@/streaming/wsUrl';
 import { cn } from '@/lib/cn';
@@ -35,9 +34,6 @@ export function SweepProgressPanel() {
     : (Object.values(sweeps).at(-1) ?? null);
 
   const sessionId = useSessionStore((s) => s.sessionId);
-  const token = useAuthStore((s) => s.token);
-  // No-auth: empty token is accepted by the WS auth frame.
-  const authDisabled = useAuthStore((s) => s.authDisabled);
 
   const appendIteration = useSweepStore((s) => s.appendIteration);
   const markFinished = useSweepStore((s) => s.markSweepFinished);
@@ -48,11 +44,10 @@ export function SweepProgressPanel() {
 
   useEffect(() => {
     if (!sweep || (sweep.state !== 'pending' && sweep.state !== 'running')) return;
-    if (!sessionId || (token === null && !authDisabled)) return;
+    if (!sessionId) return;
     const stream = new SweepStream({
       sessionId,
       sweepId: sweep.sweepId,
-      token: token ?? '',
       wsUrl: buildRunStreamWsUrl(),
       onIteration: (iter) => {
         appendIteration(sweep.sweepId, iter);
@@ -80,7 +75,7 @@ export function SweepProgressPanel() {
     // stream's terminal events drive state changes; we don't want to
     // re-create the stream when state flips from running → completed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sweep?.sweepId, sessionId, token, authDisabled, appendIteration, markFinished]);
+  }, [sweep?.sweepId, sessionId, appendIteration, markFinished]);
 
   if (!sweep) {
     return (

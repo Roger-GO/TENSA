@@ -19,7 +19,6 @@ import { render, screen, cleanup } from '@testing-library/react';
 import { SweepProgressPanel } from '@/components/sweep/SweepProgressPanel';
 import { useSweepStore } from '@/store/sweep';
 import { useSessionStore } from '@/store/session';
-import { useAuthStore } from '@/store/auth';
 import { parseSessionId } from '@/api/types';
 
 // Stub the WebSocket so the panel's stream effect doesn't try to open
@@ -42,7 +41,6 @@ class StubWebSocket {
 beforeEach(() => {
   useSweepStore.setState({ sweeps: {}, activeSweepId: null });
   useSessionStore.setState({ sessionId: parseSessionId('test-session') });
-  useAuthStore.setState({ token: 'test-token' });
   // Replace the global WebSocket so the panel's stream effect doesn't
   // attempt a live connection.
   (globalThis as unknown as { WebSocket: unknown }).WebSocket = StubWebSocket;

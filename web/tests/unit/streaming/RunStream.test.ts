@@ -78,7 +78,7 @@ describe('RunStream — happy path', () => {
     server.stop();
   });
 
-  it('runs the auth → ready → start_tds → stream_start → frames → done flow', async () => {
+  it('runs the ready → start_tds → stream_start → frames → done flow', async () => {
     const onStart = vi.fn();
     const onFrame = vi.fn();
     const onDone = vi.fn();
@@ -89,13 +89,12 @@ describe('RunStream — happy path', () => {
 
     server.on('connection', (socket) => {
       serverSocket = socket;
+      socket.send(JSON.stringify({ type: 'ready' }));
       socket.on('message', (raw: unknown) => {
         const text = String(raw);
         messages.push(text);
         const msg = JSON.parse(text);
-        if (msg.type === 'auth') {
-          socket.send(JSON.stringify({ type: 'ready' }));
-        } else if (msg.type === 'start_tds') {
+        if (msg.type === 'start_tds') {
           socket.send(
             JSON.stringify({
               type: 'stream_start',
@@ -135,7 +134,6 @@ describe('RunStream — happy path', () => {
     const stream = new RunStream(
       {
         sessionId: SESSION_ID,
-        token: 'tok',
         wsUrl: WS_URL,
         tdsArgs: { tf: 0.05, vars: ['bus_v'] },
         onStart,
@@ -171,10 +169,9 @@ describe('RunStream — happy path', () => {
       1.0, 0.999, 0.998, 0.997, 0.996, 0.995,
     ]);
 
-    // First two messages are ``auth`` then ``start_tds`` per the protocol.
-    expect(JSON.parse(messages[0]!).type).toBe('auth');
-    expect(JSON.parse(messages[1]!).type).toBe('start_tds');
-    expect(JSON.parse(messages[1]!)).toMatchObject({
+    // The client's FIRST frame is ``start_tds`` — no auth frame, ever.
+    expect(JSON.parse(messages[0]!).type).toBe('start_tds');
+    expect(JSON.parse(messages[0]!)).toMatchObject({
       tf: 0.05,
       decimation: 'mean',
       max_rate_hz: 30,
@@ -204,11 +201,10 @@ describe('RunStream — edge cases', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
       socket.on('message', (raw: unknown) => {
         const msg = JSON.parse(String(raw));
-        if (msg.type === 'auth') {
-          socket.send(JSON.stringify({ type: 'ready' }));
-        } else if (msg.type === 'start_tds') {
+        if (msg.type === 'start_tds') {
           // Send a binary frame BEFORE stream_start.
           socket.send(batch([0.0], { Bus_1_v: [1.0] }));
           socket.send(
@@ -228,7 +224,6 @@ describe('RunStream — edge cases', () => {
     const stream = new RunStream(
       {
         sessionId: SESSION_ID,
-        token: 'tok',
         wsUrl: WS_URL,
         tdsArgs: { tf: 0.01 },
         onFrame,
@@ -254,10 +249,10 @@ describe('RunStream — edge cases', () => {
     const onConn = vi.fn();
 
     server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
       socket.on('message', (raw: unknown) => {
         const msg = JSON.parse(String(raw));
-        if (msg.type === 'auth') socket.send(JSON.stringify({ type: 'ready' }));
-        else if (msg.type === 'start_tds') {
+        if (msg.type === 'start_tds') {
           socket.send(
             JSON.stringify({
               type: 'stream_start',
@@ -281,7 +276,6 @@ describe('RunStream — edge cases', () => {
     const stream = new RunStream(
       {
         sessionId: SESSION_ID,
-        token: 'tok',
         wsUrl: WS_URL,
         tdsArgs: { tf: 1 },
         onError,
@@ -310,33 +304,6 @@ describe('RunStream — edge cases', () => {
     expect(stream.isClosed).toBe(true);
   });
 
-  it('emits onError({code:"auth_failed"}) on close 4401', async () => {
-    const onError = vi.fn();
-    server.on('connection', (socket) => {
-      socket.on('message', (raw: unknown) => {
-        const msg = JSON.parse(String(raw));
-        if (msg.type === 'auth') {
-          socket.close({ code: 4401, reason: 'invalid token' });
-        }
-      });
-    });
-
-    const stream = new RunStream(
-      {
-        sessionId: SESSION_ID,
-        token: 'tok',
-        wsUrl: WS_URL,
-        tdsArgs: { tf: 1 },
-        onError,
-      },
-      { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
-    );
-    stream.start();
-    for (let i = 0; i < 10 && onError.mock.calls.length === 0; i += 1) await tick();
-
-    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'auth_failed' }));
-  });
-
   it('emits onError({code:"run_not_found"}) on close 4404 after resume', async () => {
     // Two sequential connections to the same URL: the first completes
     // stream_start (so RunStream has a runId) then closes abnormally; the
@@ -346,10 +313,10 @@ describe('RunStream — edge cases', () => {
 
     server.on('connection', (socket) => {
       connectionCount += 1;
+      socket.send(JSON.stringify({ type: 'ready' }));
       socket.on('message', (raw: unknown) => {
         const msg = JSON.parse(String(raw));
-        if (msg.type === 'auth') socket.send(JSON.stringify({ type: 'ready' }));
-        else if (msg.type === 'start_tds' && connectionCount === 1) {
+        if (msg.type === 'start_tds' && connectionCount === 1) {
           socket.send(
             JSON.stringify({
               type: 'stream_start',
@@ -368,7 +335,6 @@ describe('RunStream — edge cases', () => {
     const stream = new RunStream(
       {
         sessionId: SESSION_ID,
-        token: 'tok',
         wsUrl: WS_URL,
         tdsArgs: { tf: 1 },
         onError,
@@ -405,10 +371,10 @@ describe('RunStream — edge cases', () => {
     server.on('connection', (socket) => {
       connectionCount += 1;
       const myConnId = connectionCount;
+      socket.send(JSON.stringify({ type: 'ready' }));
       socket.on('message', (raw: unknown) => {
         const msg = JSON.parse(String(raw));
-        if (msg.type === 'auth') socket.send(JSON.stringify({ type: 'ready' }));
-        else if (msg.type === 'start_tds') {
+        if (msg.type === 'start_tds') {
           socket.send(
             JSON.stringify({
               type: 'stream_start',
@@ -451,7 +417,6 @@ describe('RunStream — edge cases', () => {
     const stream = new RunStream(
       {
         sessionId: SESSION_ID,
-        token: 'tok',
         wsUrl: WS_URL,
         tdsArgs: { tf: 0.03 },
         onFrame,
@@ -487,10 +452,10 @@ describe('RunStream — edge cases', () => {
     server.on('connection', (socket) => {
       connectionCount += 1;
       const isFirst = connectionCount === 1;
+      socket.send(JSON.stringify({ type: 'ready' }));
       socket.on('message', (raw: unknown) => {
         const msg = JSON.parse(String(raw));
-        if (msg.type === 'auth') socket.send(JSON.stringify({ type: 'ready' }));
-        else if (msg.type === 'start_tds' && isFirst) {
+        if (msg.type === 'start_tds' && isFirst) {
           socket.send(
             JSON.stringify({
               type: 'stream_start',
@@ -509,7 +474,6 @@ describe('RunStream — edge cases', () => {
     const stream = new RunStream(
       {
         sessionId: SESSION_ID,
-        token: 'tok',
         wsUrl: WS_URL,
         tdsArgs: { tf: 1 },
         onError,
@@ -547,15 +511,12 @@ describe('RunStream — edge cases', () => {
 
     server.on('connection', (socket) => {
       // Even if we connect, dispose should have stripped handlers.
-      socket.on('message', () => {
-        socket.send(JSON.stringify({ type: 'ready' }));
-      });
+      socket.send(JSON.stringify({ type: 'ready' }));
     });
 
     const stream = new RunStream(
       {
         sessionId: SESSION_ID,
-        token: 'tok',
         wsUrl: WS_URL,
         tdsArgs: { tf: 1 },
         onError,

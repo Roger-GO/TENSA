@@ -44,7 +44,6 @@ const TOPOLOGY_GENCLS_ONLY: TopologySummary = {
 
 import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { useAnalyzeStore, DEFAULT_EIG_FILTER } from '@/store/analyze';
-import { useAuthStore } from '@/store/auth';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useSessionStore } from '@/store/session';
@@ -56,7 +55,6 @@ import type { EigResult, PflowResult } from '@/api/types';
 const ALL_ROUTINES: RunRoutine[] = ['pflow', 'tds', 'eig', 'cpf', 'se', 'sweep'];
 
 function resetStores(): void {
-  useAuthStore.setState({ token: null, persistFailed: false, authDisabled: false });
   useSessionStore.setState({
     sessionId: null,
     recoveryInProgress: false,
@@ -88,9 +86,8 @@ function resetStores(): void {
   useRunsStore.setState({ activeRunId: null });
 }
 
-/** Seed a happy-path "case loaded + session live + token paste" baseline. */
+/** Seed a happy-path "case loaded + session live" baseline. */
 function seedReadyBaseline(): void {
-  useAuthStore.setState({ token: 'test-token', persistFailed: false });
   useSessionStore.setState({
     sessionId: parseSessionId('sess-1'),
     recoveryInProgress: false,
@@ -222,7 +219,6 @@ describe('useRunReadiness — dynamic-content gate (R18, Unit 24)', () => {
     '%s: blocked on a static-only case with the dynamic-content reason',
     (routine) => {
       seedReadyBaseline();
-      useAuthStore.setState({ token: 'test-token', persistFailed: false });
       useSessionStore.setState({
         sessionId: parseSessionId('sess-1'),
         recoveryInProgress: false,
@@ -241,7 +237,6 @@ describe('useRunReadiness — dynamic-content gate (R18, Unit 24)', () => {
     '%s: NOT gated by dynamic content (static analysis)',
     (routine) => {
       seedReadyBaseline();
-      useAuthStore.setState({ token: 'test-token', persistFailed: false });
       useSessionStore.setState({
         sessionId: parseSessionId('sess-1'),
         recoveryInProgress: false,
@@ -260,7 +255,6 @@ describe('useRunReadiness — dynamic-content gate (R18, Unit 24)', () => {
 
   it('tds: ready on a dynamic case (controllers present)', () => {
     seedReadyBaseline();
-    useAuthStore.setState({ token: 'test-token', persistFailed: false });
     useSessionStore.setState({
       sessionId: parseSessionId('sess-1'),
       recoveryInProgress: false,
@@ -274,7 +268,6 @@ describe('useRunReadiness — dynamic-content gate (R18, Unit 24)', () => {
 
   it('tds: not flicker-disabled while the topology is still loading (null)', () => {
     seedReadyBaseline();
-    useAuthStore.setState({ token: 'test-token', persistFailed: false });
     useSessionStore.setState({
       sessionId: parseSessionId('sess-1'),
       recoveryInProgress: false,
@@ -289,7 +282,6 @@ describe('useRunReadiness — dynamic-content gate (R18, Unit 24)', () => {
 
 describe('useRunReadiness — no session', () => {
   it('all routines return "Connecting to substrate…" when sessionId is null but case is loaded', () => {
-    useAuthStore.setState({ token: 't', persistFailed: false });
     useCaseStore.setState({
       selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
       topology: null,
@@ -309,8 +301,8 @@ describe('useRunReadiness — no session', () => {
   });
 });
 
-describe('useRunReadiness — no auth token', () => {
-  it('all routines return "Sign in to run." when token is null', () => {
+describe('useRunReadiness — no auth gate', () => {
+  it('runs are not gated on any sign-in state (auth removed)', () => {
     useSessionStore.setState({
       sessionId: parseSessionId('sess-1'),
       recoveryInProgress: false,
@@ -328,38 +320,11 @@ describe('useRunReadiness — no auth token', () => {
       dragOverrides: {},
       pendingDependents: [],
     });
-    for (const routine of ALL_ROUTINES) {
-      const { result } = renderHook(() => useRunReadiness(routine));
-      expect(result.current.ready).toBe(false);
-      expect(result.current.disabledReason).toBe('Sign in to run.');
-    }
-  });
-
-  it('does NOT block on a no-auth substrate (token null but authDisabled)', () => {
-    // `serve --no-auth`: token stays null, authDisabled is set. Runs must not
-    // be stuck on "Sign in to run." (Unit 25 live-found).
-    useAuthStore.setState({ token: null, authDisabled: true, persistFailed: false });
-    useSessionStore.setState({
-      sessionId: parseSessionId('sess-1'),
-      recoveryInProgress: false,
-      recoveryFailed: false,
-      recoveryAttempts: [],
-    });
-    useCaseStore.setState({
-      selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
-      topology: null,
-      layoutSidecar: null,
-      selectedElement: null,
-      addPanelOpen: false,
-      addPanelKind: null,
-      addPanelDirty: false,
-      dragOverrides: {},
-      pendingDependents: [],
-    });
-    // pflow has no further prerequisites, so it is ready under no-auth.
+    // pflow has no further prerequisites, so it is ready with no token
+    // machinery anywhere in sight.
     const { result } = renderHook(() => useRunReadiness('pflow'));
-    expect(result.current.disabledReason).not.toBe('Sign in to run.');
     expect(result.current.ready).toBe(true);
+    expect(result.current.disabledReason).toBeNull();
   });
 });
 

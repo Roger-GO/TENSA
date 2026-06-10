@@ -12,7 +12,6 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { ConvergenceErrorPanel } from '@/components/pflow/ConvergenceErrorPanel';
 import { makeQueryClient } from '@/api/queries';
-import { setTokenGetter } from '@/api/client';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
 import { parseRunId, parseSessionId } from '@/api/types';
@@ -43,7 +42,6 @@ describe('<ConvergenceErrorPanel />', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    setTokenGetter(() => 'test-token');
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
       typeof vi.spyOn
     >;
@@ -53,7 +51,6 @@ describe('<ConvergenceErrorPanel />', () => {
 
   afterEach(() => {
     fetchSpy.mockRestore();
-    setTokenGetter(() => null);
   });
 
   it('renders nothing when there is no PF result', () => {

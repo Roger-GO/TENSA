@@ -5,7 +5,6 @@
  * recommended pattern for v5). This module's job is the cross-slice
  * cascade:
  *
- * - When `auth` clears, `session`, `case`, and `pflow` clear too.
  * - When `session` clears, `case` and `pflow` clear too.
  * - When `case` changes, `pflow` clears (results don't carry across cases).
  *
@@ -13,11 +12,9 @@
  * importing every other slice (cycles + tangled blast radius).
  *
  * Side effect: this module's import has the side effect of registering
- * the cascade. `App.tsx` imports it once on boot via the auth-store
- * import; tests that exercise cascade behavior should `import './'` to
- * ensure the wiring is live.
+ * the cascade. Tests that exercise cascade behavior should `import './'`
+ * to ensure the wiring is live.
  */
-import { useAuthStore, registerAuthClearCascade } from './auth';
 import { useCaseStore } from './case';
 import { useSessionStore } from './session';
 import { usePflowStore } from './pflow';
@@ -30,15 +27,12 @@ import { useSweepStore } from './sweep';
 import { useJobsStore } from './jobs';
 
 // Re-export slices so consumers have one import surface.
-export { useAuthStore } from './auth';
 export { useSessionStore } from './session';
 export { useCaseStore } from './case';
 export { usePflowStore } from './pflow';
 export { useRunsStore } from './runs';
 export { useLayoutStore, DEFAULT_LAYOUT, LAYOUT_STORAGE_KEY } from './layout';
 export { BOTTOM_DRAWER_TABS, ANALYSIS_SUB_TABS } from './layout';
-export { registerAuthClearCascade, getAuthToken } from './auth';
-export type { AuthState } from './auth';
 export type { SessionState } from './session';
 export type { CaseState, CaseSelection } from './case';
 export type { PflowState } from './pflow';
@@ -57,21 +51,6 @@ let cascadeWired = false;
 export function wireStoreCascade(): void {
   if (cascadeWired) return;
   cascadeWired = true;
-
-  // auth clear → session + case + pflow + runs + animation + connectivity
-  // + pmu + profiles clear.
-  registerAuthClearCascade(() => {
-    useSessionStore.getState().clearSession();
-    useCaseStore.getState().clearCase();
-    usePflowStore.getState().clearPflow();
-    useRunsStore.getState().clearRuns();
-    useAnimationStore.getState().clearAll();
-    useConnectivityStore.getState().clear();
-    usePmuStore.getState().clear();
-    useProfilesStore.getState().clear();
-    useSweepStore.getState().clearSweeps();
-    useJobsStore.getState().clearJobs();
-  });
 
   // session clear → case + pflow + runs clear.
   // Subscribe to `sessionId`; when it transitions to null, cascade —
@@ -126,7 +105,6 @@ export function wireStoreCascade(): void {
  */
 export function __resetCascadeForTests(): void {
   cascadeWired = false;
-  useAuthStore.setState({ token: null, persistFailed: false });
   useSessionStore.setState({
     sessionId: null,
     recoveryInProgress: false,

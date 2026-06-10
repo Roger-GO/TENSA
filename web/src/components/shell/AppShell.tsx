@@ -57,9 +57,8 @@ import { useTheme } from '@/lib/useTheme';
  *   dock is gone). AddElementPanel keeps its existing
  *   ``absolute right-0 w-[70%]`` self-positioning per the F-FEAS-4
  *   resolution.
- * - Modals (TokenPasteModal, RuntimeCrashModal) render via the ``modal``
- *   slot at the end of the tree so Radix's portal mounts above the
- *   shell.
+ * - Modals (RuntimeCrashModal) render via the ``modal`` slot at the end
+ *   of the tree so Radix's portal mounts above the shell.
  *
  * --- Spike-phase findings (v3 Unit 1 placeholder spike, 2026-05-10) ---
  *

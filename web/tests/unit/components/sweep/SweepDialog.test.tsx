@@ -19,7 +19,6 @@ import type { ReactNode } from 'react';
 import { SweepDialog } from '@/components/sweep/SweepDialog';
 import { useSessionStore } from '@/store/session';
 import { useSweepStore } from '@/store/sweep';
-import { useAuthStore } from '@/store/auth';
 import { useCaseStore } from '@/store/case';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 
@@ -58,11 +57,10 @@ beforeEach(() => {
   globalThis.fetch = fetchSpy as unknown as typeof globalThis.fetch;
   useSessionStore.setState({ sessionId: parseSessionId('test-session-id') });
   useSweepStore.setState({ sweeps: {}, activeSweepId: null });
-  // The Run-readiness hook (Unit 4 of v2.0 polish) reads case + auth +
-  // sweep slices. Seed all three to a "happy path" baseline so the
-  // existing dialog tests continue to assert the dialog-local
-  // validation gates rather than tripping the new readiness gate.
-  useAuthStore.setState({ token: 'test-token', persistFailed: false });
+  // The Run-readiness hook (Unit 4 of v2.0 polish) reads case + sweep
+  // slices. Seed them to a "happy path" baseline so the existing dialog
+  // tests continue to assert the dialog-local validation gates rather
+  // than tripping the new readiness gate.
   useCaseStore.setState({
     selection: {
       primaryPath: parseWorkspacePath('ieee14.raw'),
@@ -81,7 +79,6 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
-  useAuthStore.setState({ token: null, persistFailed: false });
   useCaseStore.setState({
     selection: null,
     topology: null,
