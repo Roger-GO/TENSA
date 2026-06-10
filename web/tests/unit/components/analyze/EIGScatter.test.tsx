@@ -412,3 +412,39 @@ describe('signedLog10', () => {
     expect(Number.isFinite(signedLog10(1e-12))).toBe(true);
   });
 });
+
+describe('<EIGScatter /> — "All modes" filter toggle', () => {
+  beforeEach(() => {
+    resetAnalyzeStore();
+  });
+
+  it('widens the filter to show every mode, and toggles back to the default', async () => {
+    const user = userEvent.setup();
+    useAnalyzeStore.setState({ eigResult: RESULT });
+    render(<EIGScatter />);
+
+    // Default filter: 2 of 4 visible.
+    expect(screen.getByText(/2 of 4 visible/)).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('eig-scatter-filter-toggle'));
+    expect(screen.getByText(/4 of 4 visible/)).toBeInTheDocument();
+    expect(screen.getByText(/\(all modes\)/)).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('eig-scatter-filter-toggle'));
+    expect(screen.getByText(/2 of 4 visible/)).toBeInTheDocument();
+    expect(useAnalyzeStore.getState().filter).toEqual(DEFAULT_EIG_FILTER);
+  });
+
+  it('empty-by-filter note points at the All modes control', () => {
+    useAnalyzeStore.setState({
+      eigResult: {
+        ...RESULT,
+        // Every mode well damped → default filter hides everything.
+        damping_ratios: [0.9, 1.0, 0.995, 0.8],
+      },
+    });
+    render(<EIGScatter />);
+    expect(screen.getByText(/0 of 4 visible/)).toBeInTheDocument();
+    expect(screen.getByText(/use “All modes” to show them/)).toBeInTheDocument();
+  });
+});

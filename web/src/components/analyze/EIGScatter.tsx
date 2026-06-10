@@ -159,8 +159,23 @@ export function signedLog10(x: number): number {
 export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
   const storeResult = useAnalyzeStore((s) => s.eigResult);
   const filter = useAnalyzeStore((s) => s.filter);
+  const setFilter = useAnalyzeStore((s) => s.setFilter);
+  const resetFilter = useAnalyzeStore((s) => s.resetFilter);
   const selectedModeId = useAnalyzeStore((s) => s.selectedModeId);
   const setSelectedModeId = useAnalyzeStore((s) => s.setSelectedModeId);
+
+  // "All modes" widens the display filter to show every computed mode —
+  // without this, a healthy well-damped system renders an empty scatter
+  // (the default filter keeps only poorly-damped modes) with no recourse.
+  const showingAll = !Number.isFinite(filter.dampingMax) && !Number.isFinite(filter.realAbsMax);
+  const toggleShowAll = () => {
+    if (showingAll) resetFilter();
+    else
+      setFilter({
+        dampingMax: Number.POSITIVE_INFINITY,
+        realAbsMax: Number.POSITIVE_INFINITY,
+      });
+  };
 
   const result = resultProp !== undefined ? resultProp : storeResult;
 
@@ -491,10 +506,32 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
     >
       <div className="border-border text-muted-foreground flex items-center justify-between gap-3 border-b px-2.5 py-1.5 text-[11px]">
         <span className="tabular-nums">
-          Eigenvalue scatter — {points.length} of {result.mode_count} visible (filter: damping &lt;{' '}
-          {filter.dampingMax}, |Re| &lt; {filter.realAbsMax})
+          Eigenvalue scatter — {points.length} of {result.mode_count} visible{' '}
+          {showingAll ? (
+            '(all modes)'
+          ) : (
+            <>
+              (filter: damping &lt; {filter.dampingMax}, |Re| &lt; {filter.realAbsMax})
+            </>
+          )}
         </span>
         <div className="bg-muted/40 flex items-center gap-0.5 rounded p-0.5">
+          <Button
+            type="button"
+            variant={showingAll ? 'secondary' : 'ghost'}
+            size="sm"
+            className="h-6 px-2 text-[10px] font-medium"
+            data-testid="eig-scatter-filter-toggle"
+            aria-pressed={showingAll}
+            onClick={toggleShowAll}
+            title={
+              showingAll
+                ? 'Show only poorly-damped modes (damping < 0.05, |Re| < 5)'
+                : 'Show every computed mode, including well-damped ones'
+            }
+          >
+            All modes
+          </Button>
           {xScale === 'log' && negativeDampingCount > 0 ? (
             <span
               data-testid="eig-scatter-log-warning"
@@ -592,7 +629,7 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
             textAnchor="middle"
             className="fill-muted-foreground text-[10px]"
           >
-            All modes hidden by current filter.
+            All modes hidden by the poorly-damped filter — use “All modes” to show them.
           </text>
         ) : null}
         <g clipPath="url(#eig-scatter-plot-area)">
