@@ -34,23 +34,33 @@ export interface AddEventDialogProps {
    * If null, opens in add mode with a blank Fault spec.
    */
   initialSpec?: DisturbanceSpec | null;
+  /**
+   * Add-mode prefill (e.g., the currently-selected element's idx). Unlike
+   * ``initialSpec`` this does NOT switch the dialog to edit mode — the
+   * kind picker stays visible and the title remains "Add disturbance".
+   * Callers must keep the reference stable (memoize) while the dialog is
+   * open, or the draft resets on every parent render.
+   */
+  seedSpec?: DisturbanceSpec | null;
   /** Save handler — receives the validated, possibly-edited spec. */
   onSave: (spec: DisturbanceSpec) => void;
 }
 
-export function AddEventDialog({ open, onOpenChange, initialSpec, onSave }: AddEventDialogProps) {
+export function AddEventDialog({ open, onOpenChange, initialSpec, seedSpec, onSave }: AddEventDialogProps) {
   const isEdit = initialSpec !== null && initialSpec !== undefined;
   // Local draft owned by the dialog; reset each time the dialog opens so
   // closing+reopening doesn't carry the previous draft over.
-  const [draft, setDraft] = useState<DisturbanceSpec>(() => initialSpec ?? blankFaultSpec());
+  const [draft, setDraft] = useState<DisturbanceSpec>(
+    () => initialSpec ?? seedSpec ?? blankFaultSpec(),
+  );
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (open) {
-      setDraft(initialSpec ?? blankFaultSpec());
+      setDraft(initialSpec ?? seedSpec ?? blankFaultSpec());
       setErrors({});
     }
-  }, [open, initialSpec]);
+  }, [open, initialSpec, seedSpec]);
 
   const valid = Object.keys(errors).length === 0;
 

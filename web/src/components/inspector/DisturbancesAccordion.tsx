@@ -78,6 +78,22 @@ export function DisturbancesAccordion({ className }: DisturbancesAccordionProps)
     return sortedDisturbances(matching);
   }, [disturbances, selectedElement]);
 
+  // Add-mode prefill: when the dialog opens from a specific element's
+  // accordion, land the user on a spec already pointing at that element
+  // (a bus seeds a Fault on itself; a line/transformer seeds a Toggle).
+  // Memoized so the reference is stable while the dialog is open — the
+  // dialog resets its draft when this changes.
+  const seedSpec = useMemo<DisturbanceSpec | null>(() => {
+    if (!selectedElement) return null;
+    if (selectedElement.kind === 'bus') {
+      return { kind: 'fault', bus_idx: selectedElement.idx, tf: 1.0, tc: 1.1, xf: 0.05, rf: 0.0 };
+    }
+    if (selectedElement.kind === 'line' || selectedElement.kind === 'transformer') {
+      return { kind: 'toggle', model: 'Line', dev_idx: selectedElement.idx, t: 1.0 };
+    }
+    return null;
+  }, [selectedElement]);
+
   if (!selectedElement) {
     return (
       <div data-testid="disturbances-accordion" className={cn('flex flex-col gap-2', className)}>
@@ -193,6 +209,7 @@ export function DisturbancesAccordion({ className }: DisturbancesAccordionProps)
         open={dialog.mode !== 'closed'}
         onOpenChange={closeDialog}
         initialSpec={dialog.mode === 'edit' ? dialog.spec : null}
+        seedSpec={seedSpec}
         onSave={handleSave}
       />
     </div>
