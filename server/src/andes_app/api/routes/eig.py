@@ -29,7 +29,6 @@ from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api._run_as_job import _run_as_job
-from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
 from andes_app.core.session import (
@@ -215,7 +214,6 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
     summary="Run eigenvalue analysis (small-signal stability) on the session.",
     response_model=EigResultResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -238,7 +236,6 @@ async def run_eig(
     session_id: str,
     body: EigRunRequest,
     request: Request,
-    _: RequireToken,
 ) -> EigResultResponse:
     """Synchronously run ``ss.EIG.run()`` and return the result.
 
@@ -292,7 +289,6 @@ async def run_eig(
     summary="Per-mode participation factor row for the given mode index.",
     response_model=EigParticipationResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {
             "model": ProblemDetails,
             "description": (
@@ -312,7 +308,6 @@ async def get_eig_participation(
     session_id: str,
     mode_idx: int,
     request: Request,
-    _: RequireToken,
 ) -> EigParticipationResponse:
     """Slice ``EIG.pfactors[mode_idx]`` and return the per-state row.
 
@@ -381,7 +376,6 @@ async def get_eig_participation(
                 "(Unit 2)."
             ),
         },
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -392,7 +386,6 @@ async def get_eig_participation(
 async def get_eig_state_matrix(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> Response:
     """Return ``EIG.As`` (and ``EIG.mu``) as a ``.mat`` blob.
 

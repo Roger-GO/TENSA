@@ -13,12 +13,11 @@ v0.1 trust model:
   Python expressions evaluated by ANDES at parse time, and the local user is
   the only authorized actor.
 * Loopback web origins from random browser tabs are NOT trusted. Defended via
-  per-launch token + Host/Origin pure-ASGI middleware + precise CORS allow-list
-  (no wildcards, no ``null``, no extension origins).
-* Browser extensions and other processes with read access to the user's
-  filesystem CAN read the token file (mode ``0600`` mitigates but does not
-  prevent privileged-process access). This is consistent with "local OS user
-  trusted" but is named explicitly so users understand the threat model.
+  Host/Origin pure-ASGI middleware + precise CORS allow-list (no wildcards,
+  no ``null``, no extension origins).
+* There is NO authentication. The server binds to loopback by default; any
+  process on the local machine can reach the API. Binding to a non-loopback
+  interface exposes the API to the whole network and emits a stderr warning.
 * Third-party case files are NOT trusted by the system but ARE trusted by the
   user when they choose to load them — analogous to opening an .xlsx in
   Excel. ANDES's secondary file-read machinery (``addfile=``, dynamic-model
@@ -29,8 +28,6 @@ v0.1 trust model:
 * On Windows, path canonicalization is best-effort: the workspace boundary is
   not enforced for ANDES-internal reads, and a stderr warning is emitted at
   startup.
-* The per-launch token is valid until process exit. Daily rotation is deferred
-  to the SaaS phase.
 
 See ``AGENTS.md`` and ``docs/plans/2026-05-07-001-feat-andes-app-phase-a-substrate-plan.md``
 for the full design.

@@ -29,8 +29,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "d" * 64
-
 
 def _bundled_cases_dir() -> Path:
     pytest.importorskip("andes")
@@ -50,7 +48,6 @@ async def _make_client(tmp_path: Path, files: list[Path]) -> httpx.AsyncClient:
         shutil.copy2(src, workspace / src.name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -60,7 +57,6 @@ async def _make_client(tmp_path: Path, files: list[Path]) -> httpx.AsyncClient:
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     client = httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000")
@@ -74,14 +70,13 @@ async def _create_session_and_load(
     primary_path: str,
     addfiles: list[str] | None = None,
 ) -> str:
-    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions")
     sid = str(resp.json()["session_id"])
     body: dict[str, object] = {"primary_path": primary_path}
     if addfiles:
         body["addfiles"] = addfiles
     resp = await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     assert resp.status_code == 200, resp.text
@@ -114,7 +109,6 @@ async def test_alterable_params_ieeeg1(ieee14_dyn_client: httpx.AsyncClient) -> 
     )
     resp = await ieee14_dyn_client.get(
         f"/api/sessions/{sid}/topology/models/IEEEG1/alterable_params",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -141,7 +135,6 @@ async def test_alterable_params_tgov1(ieee14_dyn_client: httpx.AsyncClient) -> N
     )
     resp = await ieee14_dyn_client.get(
         f"/api/sessions/{sid}/topology/models/TGOV1/alterable_params",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     params = resp.json()["params"]
@@ -161,7 +154,6 @@ async def test_alterable_params_ieeest(ieee14_dyn_client: httpx.AsyncClient) -> 
     )
     resp = await ieee14_dyn_client.get(
         f"/api/sessions/{sid}/topology/models/IEEEST/alterable_params",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     params = resp.json()["params"]
@@ -199,7 +191,6 @@ async def test_alterable_params_ieeex1(ieee39_full_client: httpx.AsyncClient) ->
     sid = await _create_session_and_load(ieee39_full_client, "ieee39_full.xlsx")
     resp = await ieee39_full_client.get(
         f"/api/sessions/{sid}/topology/models/IEEEX1/alterable_params",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     params = resp.json()["params"]
@@ -234,7 +225,6 @@ async def test_alterable_params_esdc2a(kundur_esdc2a_client: httpx.AsyncClient) 
     sid = await _create_session_and_load(kundur_esdc2a_client, "kundur_esdc2a.xlsx")
     resp = await kundur_esdc2a_client.get(
         f"/api/sessions/{sid}/topology/models/ESDC2A/alterable_params",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     params = resp.json()["params"]
@@ -268,7 +258,6 @@ async def test_alterable_params_sexs(kundur_sexs_client: httpx.AsyncClient) -> N
     sid = await _create_session_and_load(kundur_sexs_client, "kundur_sexs.xlsx")
     resp = await kundur_sexs_client.get(
         f"/api/sessions/{sid}/topology/models/SEXS/alterable_params",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     params = resp.json()["params"]
@@ -304,7 +293,6 @@ async def test_alterable_params_regca1(
     sid = await _create_session_and_load(ieee14_reecb1_client, "ieee14_reecb1.json")
     resp = await ieee14_reecb1_client.get(
         f"/api/sessions/{sid}/topology/models/REGCA1/alterable_params",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     params = resp.json()["params"]
@@ -341,7 +329,6 @@ async def test_add_element_unknown_dynamic_model_returns_422_with_known_models(
     )
     resp = await ieee14_dyn_client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"model": "REGCA2", "params": {"idx": "X1", "name": "X1"}},
     )
     assert resp.status_code == 422, resp.text

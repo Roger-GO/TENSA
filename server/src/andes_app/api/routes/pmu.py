@@ -37,7 +37,6 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api._run_as_job import _run_as_job
-from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
     ProblemDetails,
@@ -204,7 +203,6 @@ def _entry_from_payload(payload: object) -> TopologyEntry:
     response_model=TopologyEntry,
     status_code=status.HTTP_201_CREATED,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -226,7 +224,6 @@ async def add_pmu(
     session_id: str,
     body: AddPmuRequest,
     request: Request,
-    _: RequireToken,
 ) -> TopologyEntry:
     """Add a PMU instance to the session pre-setup.
 
@@ -265,7 +262,6 @@ async def add_pmu(
     summary="List currently-placed PMU instances on the session.",
     response_model=ListPmusResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -276,7 +272,6 @@ async def add_pmu(
 async def list_pmus(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> ListPmusResponse:
     """Return every PMU currently registered on the session's System.
 
@@ -315,7 +310,6 @@ async def list_pmus(
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {
             "model": ProblemDetails,
             "description": "Session not found OR no PMU with that idx.",
@@ -340,7 +334,6 @@ async def delete_pmu(
     session_id: str,
     pmu_idx: str,
     request: Request,
-    _: RequireToken,
 ) -> Response:
     """Delete a PMU previously added via ``POST /pmu``.
 
@@ -384,7 +377,6 @@ async def delete_pmu(
                 "placed or no TDS step has fired."
             ),
         },
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -399,7 +391,6 @@ async def export_pmu_csv(
     session_id: str,
     run_id: str,  # noqa: ARG001 — opaque client-side run identifier
     request: Request,
-    _: RequireToken,
 ) -> Response:
     """Stream the PMU CSV for the session's most recent TDS run.
 

@@ -31,7 +31,6 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, s
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api._run_as_job import _run_as_job
-from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
 from andes_app.core.bundle import MAX_BUNDLE_BYTES
@@ -52,10 +51,23 @@ class BundleConflictModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["andes-version", "addfile-missing", "sha-mismatch"]
-    severity: Literal["warning", "blocker"]
-    message: str
-    filename: str | None = None
+    kind: Literal["andes-version", "addfile-missing", "sha-mismatch"] = Field(
+        ..., description="Conflict category detected while validating the bundle."
+    )
+    severity: Literal["warning", "blocker"] = Field(
+        ...,
+        description=(
+            "``warning`` conflicts can be overridden with ``force_resolve``; "
+            "``blocker`` conflicts prevent the import entirely."
+        ),
+    )
+    message: str = Field(
+        ..., description="Human-readable explanation of the conflict."
+    )
+    filename: str | None = Field(
+        None,
+        description="Workspace-relative case filename the conflict refers to, when applicable.",
+    )
     bundle_meta: dict[str, Any] | None = Field(
         None,
         description=(
@@ -70,8 +82,14 @@ class BundleConflictModel(BaseModel):
             "case file. Populated for ``sha-mismatch``."
         ),
     )
-    bundle_andes_version: str | None = None
-    current_andes_version: str | None = None
+    bundle_andes_version: str | None = Field(
+        None,
+        description="ANDES version recorded in the bundle manifest. Populated for ``andes-version``.",
+    )
+    current_andes_version: str | None = Field(
+        None,
+        description="ANDES version installed on this server. Populated for ``andes-version``.",
+    )
 
 
 class BundleImportPlanModel(BaseModel):
@@ -79,11 +97,23 @@ class BundleImportPlanModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    manifest: dict[str, Any]
-    case_files: list[str]
-    conflicts: list[BundleConflictModel] = Field(default_factory=list)
-    blocked: bool
-    has_conflicts: bool
+    manifest: dict[str, Any] = Field(
+        ..., description="Parsed ``manifest.json`` from the bundle, echoed verbatim."
+    )
+    case_files: list[str] = Field(
+        ..., description="Case filenames contained in the bundle (workspace-relative)."
+    )
+    conflicts: list[BundleConflictModel] = Field(
+        default_factory=list,
+        description="Conflicts detected between the bundle and this server/workspace.",
+    )
+    blocked: bool = Field(
+        ...,
+        description="``true`` if any conflict has ``blocker`` severity — the import cannot proceed.",
+    )
+    has_conflicts: bool = Field(
+        ..., description="``true`` if ``conflicts`` is non-empty."
+    )
 
 
 class BundleImportResponse(BaseModel):
@@ -99,8 +129,13 @@ class BundleImportResponse(BaseModel):
             "``committed`` = case loaded and disturbances replayed."
         ),
     )
-    plan: BundleImportPlanModel
-    warnings: list[str] = Field(default_factory=list)
+    plan: BundleImportPlanModel = Field(
+        ..., description="The validation plan (conflicts, case files, manifest)."
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Non-blocking warnings emitted during commit (e.g. overridden conflicts).",
+    )
     case_filename: str | None = Field(
         None,
         description=(
@@ -221,7 +256,6 @@ def _coerce_plan(payload: dict[str, Any]) -> BundleImportPlanModel:
             "model": ProblemDetails,
             "description": "Bundle is not a valid ZIP archive.",
         },
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -252,7 +286,6 @@ def _coerce_plan(payload: dict[str, Any]) -> BundleImportPlanModel:
 async def import_bundle(
     session_id: str,
     request: Request,
-    _: RequireToken,
     file: UploadFile = File(
         ...,
         description=(

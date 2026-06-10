@@ -26,9 +26,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "t" * 64
-HEADERS = {"X-Andes-Token": VALID_TOKEN}
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -48,7 +45,6 @@ async def client(
         shutil.copy2(src / name, workspace / name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -60,7 +56,6 @@ async def client(
     )
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -73,7 +68,7 @@ async def client(
 
 
 async def _new_session(ac: httpx.AsyncClient) -> str:
-    resp = await ac.post("/api/sessions", headers=HEADERS)
+    resp = await ac.post("/api/sessions")
     assert resp.status_code == 201, resp.text
     return str(resp.json()["session_id"])
 
@@ -81,7 +76,6 @@ async def _new_session(ac: httpx.AsyncClient) -> str:
 async def _load_case(ac: httpx.AsyncClient, sid: str) -> None:
     resp = await ac.post(
         f"/api/sessions/{sid}/case",
-        headers=HEADERS,
         json={"primary_path": "ieee14.raw", "addfiles": ["ieee14.dyr"]},
     )
     assert resp.status_code in (200, 201), resp.text
@@ -99,7 +93,6 @@ async def test_batch_tds_returns_run_id_and_identical_job_id(
 
     resp = await ac.post(
         f"/api/sessions/{sid}/tds",
-        headers=HEADERS,
         json={"tf": 0.1, "h": None},
     )
     assert resp.status_code == 200, resp.text
@@ -113,7 +106,7 @@ async def test_batch_tds_returns_run_id_and_identical_job_id(
     assert job_id == run_id
 
     # The registry record resolves and reflects the completed batch run.
-    rec = await ac.get(f"/api/sessions/{sid}/jobs/{job_id}", headers=HEADERS)
+    rec = await ac.get(f"/api/sessions/{sid}/jobs/{job_id}")
     assert rec.status_code == 200, rec.text
     record = rec.json()
     assert record["id"] == job_id
@@ -153,7 +146,7 @@ async def test_streaming_start_registers_tds_stream_job_with_aliased_id(
 
     # The job is registered synchronously the instant the run starts; its
     # registry id IS the run_id (aliased, same value).
-    rec = await ac.get(f"/api/sessions/{sid}/jobs/{run_id}", headers=HEADERS)
+    rec = await ac.get(f"/api/sessions/{sid}/jobs/{run_id}")
     assert rec.status_code == 200, rec.text
     record = rec.json()
     assert record["id"] == run_id
@@ -201,7 +194,7 @@ async def test_delete_cancel_of_live_stream_fires_real_abort(
     sess = mgr._sessions[sid]
     assert not sess.abort_event.is_set()
 
-    resp = await ac.delete(f"/api/sessions/{sid}/jobs/{run_id}", headers=HEADERS)
+    resp = await ac.delete(f"/api/sessions/{sid}/jobs/{run_id}")
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "cancelled"
 

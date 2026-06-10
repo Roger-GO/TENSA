@@ -14,7 +14,6 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api._run_as_job import _run_as_job
-from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
     AlterableParamsResponse,
@@ -111,7 +110,6 @@ def _topology_from_payload(payload: dict[str, Any]) -> TopologySummary:
             "model": ProblemDetails,
             "description": "Workspace path validation failed (traversal, absolute path, NUL byte, missing).",
         },
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         422: {
             "model": ProblemDetails,
@@ -123,7 +121,6 @@ async def load_case(
     session_id: str,
     body: LoadCaseRequest,
     request: Request,
-    _: RequireToken,
 ) -> TopologySummary:
     mgr = _manager(request)
     workspace = request.app.state.workspace
@@ -176,7 +173,6 @@ async def load_case(
     summary="Get the current topology view of a session's loaded case.",
     response_model=TopologySummary,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or no case loaded."},
         409: {
             "model": ProblemDetails,
@@ -187,7 +183,6 @@ async def load_case(
 async def get_topology(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> TopologySummary:
     mgr = _manager(request)
     try:
@@ -212,7 +207,6 @@ async def get_topology(
     ),
     response_model=AlterableParamsResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {
             "model": ProblemDetails,
             "description": (
@@ -230,7 +224,6 @@ async def get_alterable_params(
     session_id: str,
     model: str,
     request: Request,
-    _: RequireToken,
 ) -> AlterableParamsResponse:
     """Best-effort introspection of the model's ``params`` ordered dict on
     the loaded ``System``. Filters to ``NumParam`` instances that are not
@@ -279,7 +272,6 @@ async def get_alterable_params(
     summary="Re-load the current case to return to pre-setup state.",
     response_model=TopologySummary,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -290,7 +282,6 @@ async def get_alterable_params(
 async def reload_case(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> TopologySummary:
     """Calls ``andes.load(setup=False)`` again. **Cost is honest** — this is
     a full re-parse, not a fast path. Documented in the OpenAPI summary so
@@ -326,7 +317,6 @@ async def reload_case(
     summary="Compute connected-component island count + per-island bus membership.",
     response_model=ConnectivityResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -344,7 +334,6 @@ async def reload_case(
 async def get_connectivity(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> ConnectivityResponse:
     """Run :meth:`ss.connectivity` on the loaded System and return the
     island summary — Unit 17.

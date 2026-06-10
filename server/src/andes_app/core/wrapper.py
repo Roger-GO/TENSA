@@ -1351,7 +1351,7 @@ class Wrapper:
         # offers the source that actually moves the simulation.
         services: Any = getattr(model_obj, "services", None)
         if isinstance(services, dict):
-            for svc_name in _ALTERABLE_SERVICES.get(model, ()):  # type: ignore[arg-type]
+            for svc_name in _ALTERABLE_SERVICES.get(model, ()):
                 if svc_name in services and svc_name not in out:
                     out.append(svc_name)
         return out
@@ -4313,13 +4313,13 @@ def _reference_angle_drift(ss: System) -> float:
     slack = getattr(ss, "Slack", None)
     # Index of the first ENABLED slack (u != 0). Don't assume row 0 is enabled.
     slack_row: int | None = None
-    if slack is not None and getattr(slack, "n", 0):
+    if slack is not None and (getattr(slack, "n", None) or 0):
         for j, u in enumerate(slack.u.v):
             if float(u) != 0.0:
                 slack_row = j
                 break
 
-    if slack_row is not None:
+    if slack is not None and slack_row is not None:
         slack_bus = slack.bus.v[slack_row]
         for i, idx in enumerate(ss.Bus.idx.v):
             if str(idx) == str(slack_bus):

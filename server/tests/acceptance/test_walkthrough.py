@@ -54,9 +54,9 @@ def test_curl_walkthrough_runs_green(tmp_path: Path) -> None:
     """The full Phase A R3 acceptance scenario:
 
     - Spawn the substrate via ``python -m andes_app serve`` on an ephemeral
-      port with a token-file in tmp_path
+      port
     - Wait for the server to bind
-    - Run ``walkthrough.sh`` with the token + port + workspace env vars set
+    - Run ``walkthrough.sh`` with the port + workspace env vars set
     - Assert exit code 0; on failure surface stdout/stderr from both the
       walkthrough and the server"""
     workspace = tmp_path / "ws"
@@ -65,7 +65,6 @@ def test_curl_walkthrough_runs_green(tmp_path: Path) -> None:
     shutil.copy2(raw, workspace / "ieee14.raw")
     shutil.copy2(dyr, workspace / "ieee14.dyr")
 
-    token_file = tmp_path / "run.token"
     port = _free_port()
 
     server_env = {
@@ -85,8 +84,6 @@ def test_curl_walkthrough_runs_green(tmp_path: Path) -> None:
             str(port),
             "--workspace",
             str(workspace),
-            "--token-file",
-            str(token_file),
         ],
         env=server_env,
         stdout=subprocess.PIPE,
@@ -116,7 +113,6 @@ def test_curl_walkthrough_runs_green(tmp_path: Path) -> None:
             env={
                 **os.environ,
                 "ANDES_APP_PORT": str(port),
-                "ANDES_APP_TOKEN_FILE": str(token_file),
             },
             cwd=str(workspace),
             capture_output=True,

@@ -3,8 +3,7 @@
 Wire protocol (text frames are JSON; binary frames are Arrow IPC stream
 chunks):
 
-  client → server (text)  {"type":"auth","token":"..."}            within 2 s
-  server → client (text)  {"type":"ready"}                          on auth ok
+  server → client (text)  {"type":"ready"}    once the session is validated
 
   --- new run ---
   client → server (text)  {"type":"start_tds","tf":1.0,"h":0.0083}  start the run
@@ -29,15 +28,13 @@ ring buffer holds ~30 seconds of frames at the configured output rate;
 reconnect attempts past that window receive ``{"type":"resync",...}`` and
 must re-fetch via the batch endpoint.
 
-Auth failures close with code 4401. Unknown session id closes with 4404.
-Unknown run_id on resume closes with 4404. Worker / wrapper errors close
-with code 4500 + a JSON ``{"type":"error",...}`` text frame just before
-close.
+Unknown session id closes with 4404. Unknown run_id on resume closes with
+4404. Worker / wrapper errors close with code 4500 + a JSON
+``{"type":"error",...}`` text frame just before close.
 """
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
 import logging
@@ -51,103 +48,18 @@ from andes_app.core.session import (
     SessionManager,
 )
 from andes_app.core.stream import DEFAULT_VARS, VAR_GROUPS
-from andes_app.security.token import constant_time_eq
 
 router = APIRouter()
 log = logging.getLogger("andes-app.ws")
 
 # WS close codes — RFC 6455 §7.4 reserves 4000-4999 for application use.
-WS_CLOSE_AUTH_FAILED = 4401
 WS_CLOSE_SESSION_NOT_FOUND = 4404
 WS_CLOSE_WORKER_ERROR = 4500
 WS_CLOSE_INTERNAL_ERROR = 4500
 
-AUTH_DEADLINE_SECONDS = 2.0
-
-
-def _expected_token(request: Request | WebSocket) -> str | None:
-    return getattr(request.app.state, "expected_token", None)
-
 
 def _manager(request: Request | WebSocket) -> SessionManager | None:
     return getattr(request.app.state, "session_manager", None)
-
-
-async def require_ws_auth(websocket: WebSocket) -> bool:
-    """Shared WebSocket auth handshake (extracted from the TDS handler).
-
-    Contract — the socket MUST already be accepted before this is called:
-
-    - Reads the first text frame within ``AUTH_DEADLINE_SECONDS`` and
-      validates ``{"type":"auth","token":"..."}`` against the app's
-      ``expected_token`` in constant time. On any failure (timeout, malformed
-      JSON, wrong type, bad token) the socket is closed with ``4401`` and
-      ``False`` is returned. On success returns ``True`` *without* consuming
-      any further frames.
-    - Honors ``app.state.require_auth``: when it is ``False`` (the
-      ``serve --no-auth`` dev toggle) the token check is skipped and ``True``
-      is returned immediately, mirroring the HTTP ``require_token`` gate. This
-      keeps ``--no-auth`` dev mode working for WebSockets.
-
-    A clean client disconnect during the handshake returns ``False`` without
-    attempting a close (the socket is already gone).
-
-    Both the TDS streaming handler and the ``/jobs/events`` handler call this
-    at the start of their flow so the handshake has one source of truth.
-    """
-    require_auth = getattr(websocket.app.state, "require_auth", True)
-    if not require_auth:
-        # `serve --no-auth`: skip token VALIDATION, but still CONSUME the
-        # client's `{type:'auth'}` frame so the wire protocol stays aligned
-        # regardless of auth mode. Clients always send the auth frame first;
-        # the caller then reads the NEXT frame as its payload (e.g. the TDS
-        # config). Returning without reading here would leave the auth frame in
-        # the buffer and the caller would misread it as the payload — which
-        # silently stalls the TDS handshake ("Streaming…" forever).
-        # A client that opened without an auth frame is tolerated under no-auth
-        # — proceed and let the caller read the real first frame.
-        with contextlib.suppress(TimeoutError, WebSocketDisconnect):
-            await asyncio.wait_for(
-                websocket.receive_text(), timeout=AUTH_DEADLINE_SECONDS
-            )
-        return True
-
-    expected_token = _expected_token(websocket)
-    if expected_token is None:
-        # Misconfiguration (the CLI installs the token at startup). Surface as
-        # an internal-error close rather than an auth failure.
-        await _close_with_error(
-            websocket, WS_CLOSE_INTERNAL_ERROR, "server not configured"
-        )
-        return False
-
-    try:
-        first = await asyncio.wait_for(
-            websocket.receive_text(), timeout=AUTH_DEADLINE_SECONDS
-        )
-    except TimeoutError:
-        await _close_with_error(
-            websocket, WS_CLOSE_AUTH_FAILED, "auth deadline exceeded"
-        )
-        return False
-    except WebSocketDisconnect:
-        return False
-
-    try:
-        auth_msg = json.loads(first)
-    except json.JSONDecodeError:
-        await _close_with_error(
-            websocket, WS_CLOSE_AUTH_FAILED, "auth message must be JSON"
-        )
-        return False
-
-    if auth_msg.get("type") != "auth" or not constant_time_eq(
-        expected_token, str(auth_msg.get("token", ""))
-    ):
-        await _close_with_error(websocket, WS_CLOSE_AUTH_FAILED, "invalid token")
-        return False
-
-    return True
 
 
 # parity-reviewed: 2026-05-30 — gui-location: run-controls. The TDS "Run"
@@ -157,12 +69,11 @@ async def require_ws_auth(websocket: WebSocket) -> bool:
 async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
     """WebSocket endpoint for streaming TDS results.
 
-    Auth flow: client must send ``{"type":"auth","token":"..."}`` as the first
-    text frame within ``AUTH_DEADLINE_SECONDS``. After auth succeeds, the
-    server sends ``{"type":"ready"}`` and waits for ``start_tds``. While
-    streaming, the worker emits per-step Arrow IPC batches that are forwarded
-    as binary frames; the run ends with a ``done`` text frame and a clean
-    close.
+    Flow: the server accepts the connection, validates the session (4404
+    close on unknown session), then sends ``{"type":"ready"}`` and waits for
+    ``start_tds`` (or ``resume``). While streaming, the worker emits per-step
+    Arrow IPC batches that are forwarded as binary frames; the run ends with
+    a ``done`` text frame and a clean close.
     """
     await websocket.accept()
     mgr = _manager(websocket)
@@ -170,10 +81,6 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         await _close_with_error(
             websocket, WS_CLOSE_INTERNAL_ERROR, "server not configured"
         )
-        return
-
-    # ---- AUTH (shared first-message handshake; 2-second deadline) ----
-    if not await require_ws_auth(websocket):
         return
 
     if not mgr.is_alive(session_id):

@@ -26,7 +26,6 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api._run_as_job import _run_as_job
-from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import ProblemDetails
 from andes_app.core.session import (
@@ -275,7 +274,6 @@ def _payload_to_response(
     summary="Run continuation power flow (PV-curve / nose-curve) on the session.",
     response_model=CpfResultResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -298,7 +296,6 @@ async def run_cpf(
     session_id: str,
     body: CpfRunRequest,
     request: Request,
-    _: RequireToken,
 ) -> CpfResultResponse:
     """Synchronously run ``ss.CPF.run()`` and return the trajectory.
 
@@ -336,7 +333,6 @@ async def run_cpf(
     summary="Run a single-bus QV-curve continuation on the session.",
     response_model=CpfResultResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -359,7 +355,6 @@ async def run_cpf_qv(
     session_id: str,
     body: CpfQvRunRequest,
     request: Request,
-    _: RequireToken,
 ) -> CpfResultResponse:
     """Synchronously run ``ss.CPF.run_qv(bus_idx)`` and return the trace."""
     mgr = _manager(request)

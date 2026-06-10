@@ -44,7 +44,6 @@ from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFil
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api._run_as_job import _run_as_job
-from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
     ProblemDetails,
@@ -281,7 +280,6 @@ def _entry_from_payload(payload: object) -> TopologyEntry:
     response_model=UploadProfileResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -317,7 +315,6 @@ def _entry_from_payload(payload: object) -> TopologyEntry:
 async def upload_profile(
     session_id: str,
     request: Request,
-    _: RequireToken,
     file: UploadFile = File(
         ...,
         description=(
@@ -393,7 +390,6 @@ async def upload_profile(
     response_model=TopologyEntry,
     status_code=status.HTTP_201_CREATED,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -416,7 +412,6 @@ async def add_profile(
     session_id: str,
     body: AddProfileRequest,
     request: Request,
-    _: RequireToken,
 ) -> TopologyEntry:
     """Stage a TimeSeries device pre-setup.
 
@@ -459,7 +454,6 @@ async def add_profile(
     summary="List currently-staged TimeSeries profiles on the session.",
     response_model=ListProfilesResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -470,7 +464,6 @@ async def add_profile(
 async def list_profiles(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> ListProfilesResponse:
     """Return every TimeSeries device currently registered on the
     session's System.
@@ -510,7 +503,6 @@ async def list_profiles(
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {
             "model": ProblemDetails,
             "description": "Session not found OR no TimeSeries with that idx.",
@@ -535,7 +527,6 @@ async def delete_profile(
     session_id: str,
     profile_idx: str,
     request: Request,
-    _: RequireToken,
 ) -> Response:
     """Delete a TimeSeries previously staged via ``POST /profiles``.
 

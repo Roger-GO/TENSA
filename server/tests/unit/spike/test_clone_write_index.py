@@ -25,6 +25,11 @@ _INDEX_PATH = os.path.join(_REPO_ROOT, "docs", "spikes", "2026-05-29-clone-write
 
 @pytest.fixture(scope="module")
 def index() -> dict:
+    if not os.path.exists(_INDEX_PATH):
+        pytest.skip(
+            "clone-write index artifact not present in this checkout "
+            f"({_INDEX_PATH})"
+        )
     with open(_INDEX_PATH) as fh:
         return json.load(fh)
 

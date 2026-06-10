@@ -31,9 +31,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "j" * 64
-HEADERS = {"X-Andes-Token": VALID_TOKEN}
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -51,7 +48,6 @@ async def client(tmp_path: Path) -> AsyncIterator[tuple[httpx.AsyncClient, Sessi
         shutil.copy2(src / name, workspace / name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -63,7 +59,6 @@ async def client(tmp_path: Path) -> AsyncIterator[tuple[httpx.AsyncClient, Sessi
     )
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -76,7 +71,7 @@ async def client(tmp_path: Path) -> AsyncIterator[tuple[httpx.AsyncClient, Sessi
 
 
 async def _new_session(ac: httpx.AsyncClient) -> str:
-    resp = await ac.post("/api/sessions", headers=HEADERS)
+    resp = await ac.post("/api/sessions")
     assert resp.status_code == 201, resp.text
     return str(resp.json()["session_id"])
 
@@ -87,17 +82,17 @@ async def _load_case(
     body: dict[str, object] = {"primary_path": "ieee14.raw"}
     if addfile is not None:
         body["addfiles"] = [addfile]
-    resp = await ac.post(f"/api/sessions/{sid}/case", headers=HEADERS, json=body)
+    resp = await ac.post(f"/api/sessions/{sid}/case", json=body)
     assert resp.status_code in (200, 201), resp.text
 
 
 async def _run_pflow(ac: httpx.AsyncClient, sid: str) -> None:
-    resp = await ac.post(f"/api/sessions/{sid}/pflow", headers=HEADERS, json={})
+    resp = await ac.post(f"/api/sessions/{sid}/pflow", json={})
     assert resp.status_code == 200, resp.text
 
 
 async def _get_job(ac: httpx.AsyncClient, sid: str, job_id: str) -> dict[str, object]:
-    resp = await ac.get(f"/api/sessions/{sid}/jobs/{job_id}", headers=HEADERS)
+    resp = await ac.get(f"/api/sessions/{sid}/jobs/{job_id}")
     assert resp.status_code == 200, resp.text
     return dict(resp.json())
 
@@ -113,7 +108,7 @@ async def test_pflow_response_carries_job_id_and_record_is_done(
     sid = await _new_session(ac)
     await _load_case(ac, sid, addfile=None)
 
-    resp = await ac.post(f"/api/sessions/{sid}/pflow", headers=HEADERS, json={})
+    resp = await ac.post(f"/api/sessions/{sid}/pflow", json={})
     assert resp.status_code == 200, resp.text
     job_id = resp.json()["job_id"]
     assert isinstance(job_id, str) and job_id
@@ -132,10 +127,10 @@ async def test_pflow_error_transitions_record_to_failed(
     ac, _mgr = client
     sid = await _new_session(ac)
 
-    resp = await ac.post(f"/api/sessions/{sid}/pflow", headers=HEADERS, json={})
+    resp = await ac.post(f"/api/sessions/{sid}/pflow", json={})
     assert resp.status_code == 409, resp.text
 
-    jobs = (await ac.get(f"/api/sessions/{sid}/jobs", headers=HEADERS)).json()
+    jobs = (await ac.get(f"/api/sessions/{sid}/jobs")).json()
     pflow_jobs = [j for j in jobs if j["kind"] == "pflow"]
     assert pflow_jobs, "expected a pflow job record after the failed run"
     assert all(j["status"] == "failed" for j in pflow_jobs)
@@ -150,7 +145,7 @@ async def test_eig_response_carries_job_id(
     await _load_case(ac, sid, addfile="ieee14.dyr")
     await _run_pflow(ac, sid)
 
-    resp = await ac.post(f"/api/sessions/{sid}/eig", headers=HEADERS, json={})
+    resp = await ac.post(f"/api/sessions/{sid}/eig", json={})
     assert resp.status_code == 200, resp.text
     job_id = resp.json()["job_id"]
     assert isinstance(job_id, str) and job_id
@@ -171,7 +166,6 @@ async def test_cpf_response_carries_job_id(
 
     resp = await ac.post(
         f"/api/sessions/{sid}/cpf",
-        headers=HEADERS,
         json={"direction": "load", "max_iter": 5},
     )
     assert resp.status_code == 200, resp.text
@@ -193,13 +187,13 @@ async def test_se_measurements_and_run_carry_distinct_job_ids(
     await _run_pflow(ac, sid)
 
     gen = await ac.post(
-        f"/api/sessions/{sid}/se/measurements/generate", headers=HEADERS, json={}
+        f"/api/sessions/{sid}/se/measurements/generate", json={}
     )
     assert gen.status_code == 200, gen.text
     gen_job = gen.json()["job_id"]
     assert (await _get_job(ac, sid, gen_job))["kind"] == "se-measurements"
 
-    run = await ac.post(f"/api/sessions/{sid}/se", headers=HEADERS, json={})
+    run = await ac.post(f"/api/sessions/{sid}/se", json={})
     assert run.status_code == 200, run.text
     run_job = run.json()["job_id"]
     assert run_job != gen_job
@@ -221,7 +215,6 @@ async def test_add_element_carries_job_id(
 
     resp = await ac.post(
         f"/api/sessions/{sid}/elements",
-        headers=HEADERS,
         json={"model": "Bus", "params": {"Vn": 110.0}},
     )
     assert resp.status_code == 201, resp.text
@@ -244,12 +237,11 @@ async def test_add_element_error_transitions_record_to_failed(
     # Unknown model → 422; the record must transition to failed.
     resp = await ac.post(
         f"/api/sessions/{sid}/elements",
-        headers=HEADERS,
         json={"model": "NoSuchModel", "params": {}},
     )
     assert resp.status_code == 422, resp.text
 
-    jobs = (await ac.get(f"/api/sessions/{sid}/jobs", headers=HEADERS)).json()
+    jobs = (await ac.get(f"/api/sessions/{sid}/jobs")).json()
     add_jobs = [j for j in jobs if j["kind"] == "element-add"]
     assert add_jobs
     assert all(j["status"] == "failed" for j in add_jobs)
@@ -265,7 +257,6 @@ async def test_add_disturbances_batch_is_one_job(
 
     resp = await ac.post(
         f"/api/sessions/{sid}/disturbances",
-        headers=HEADERS,
         json={
             "disturbances": [
                 {"kind": "fault", "bus_idx": 4, "tf": 1.0, "tc": 1.1}
@@ -293,7 +284,7 @@ async def test_add_pmu_carries_job_id(
     await _load_case(ac, sid, addfile="ieee14.dyr")
 
     resp = await ac.post(
-        f"/api/sessions/{sid}/pmu", headers=HEADERS, json={"bus_idx": "1"}
+        f"/api/sessions/{sid}/pmu", json={"bus_idx": "1"}
     )
     assert resp.status_code == 201, resp.text
     job_id = resp.json()["job_id"]
@@ -314,11 +305,11 @@ async def test_delete_pmu_surfaces_job_id_header(
     await _load_case(ac, sid, addfile="ieee14.dyr")
 
     added = await ac.post(
-        f"/api/sessions/{sid}/pmu", headers=HEADERS, json={"bus_idx": "1"}
+        f"/api/sessions/{sid}/pmu", json={"bus_idx": "1"}
     )
     pmu_idx = added.json()["idx"]
 
-    resp = await ac.delete(f"/api/sessions/{sid}/pmu/{pmu_idx}", headers=HEADERS)
+    resp = await ac.delete(f"/api/sessions/{sid}/pmu/{pmu_idx}")
     assert resp.status_code == 204, resp.text
     job_id = resp.headers.get("X-Job-Id")
     assert isinstance(job_id, str) and job_id
@@ -340,7 +331,6 @@ async def test_case_load_carries_job_id(
 
     resp = await ac.post(
         f"/api/sessions/{sid}/case",
-        headers=HEADERS,
         json={"primary_path": "ieee14.raw"},
     )
     assert resp.status_code == 200, resp.text
@@ -362,7 +352,7 @@ async def test_save_snapshot_carries_job_id(
     await _run_pflow(ac, sid)
 
     resp = await ac.post(
-        f"/api/sessions/{sid}/snapshot", headers=HEADERS, json={"name": "snap-j"}
+        f"/api/sessions/{sid}/snapshot", json={"name": "snap-j"}
     )
     assert resp.status_code == 200, resp.text
     job_id = resp.json()["job_id"]
@@ -389,13 +379,12 @@ async def test_snapshot_restore_records_in_global_registry(
     await _run_pflow(ac, sid)
 
     save = await ac.post(
-        f"/api/sessions/{sid}/snapshot", headers=HEADERS, json={"name": "restore-me"}
+        f"/api/sessions/{sid}/snapshot", json={"name": "restore-me"}
     )
     assert save.status_code == 200, save.text
 
     restore = await ac.post(
         f"/api/sessions/{sid}/snapshot/restore",
-        headers=HEADERS,
         json={"name": "restore-me"},
     )
     assert restore.status_code == 200, restore.text
@@ -421,7 +410,7 @@ async def test_case_reload_records_in_global_registry(
     await _load_case(ac, sid, addfile=None)
     await _run_pflow(ac, sid)
 
-    resp = await ac.post(f"/api/sessions/{sid}/reload", headers=HEADERS)
+    resp = await ac.post(f"/api/sessions/{sid}/reload")
     assert resp.status_code == 200, resp.text
     job_id = resp.json()["job_id"]
     assert isinstance(job_id, str) and job_id

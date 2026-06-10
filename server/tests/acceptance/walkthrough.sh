@@ -2,8 +2,7 @@
 # Phase A R3 acceptance: curl-only end-to-end walkthrough of the substrate.
 #
 # Required env:
-#   ANDES_APP_PORT       — port the substrate is listening on
-#   ANDES_APP_TOKEN_FILE — path to the per-launch token file written by `serve`
+#   ANDES_APP_PORT — port the substrate is listening on
 #
 # Required workspace state (current dir):
 #   ieee14.raw + ieee14.dyr placed inside the workspace before this runs
@@ -13,13 +12,10 @@
 set -euo pipefail
 
 PORT="${ANDES_APP_PORT:?ANDES_APP_PORT must be set}"
-TOKEN_FILE="${ANDES_APP_TOKEN_FILE:?ANDES_APP_TOKEN_FILE must be set}"
-TOKEN="$(cat "$TOKEN_FILE")"
 BASE="http://127.0.0.1:$PORT"
 
 curl_t() {
   curl --silent --show-error --fail-with-body \
-    -H "X-Andes-Token: $TOKEN" \
     -H "Content-Type: application/json" \
     "$@"
 }
@@ -31,7 +27,6 @@ jget() {
 
 http_status() {
   curl --silent --output /dev/null -w '%{http_code}' \
-    -H "X-Andes-Token: $TOKEN" \
     -H "Content-Type: application/json" \
     "$@"
 }
@@ -99,11 +94,5 @@ echo "    final_t=$FINAL_T (expect ~1.0; abort-on-fault may shorten)"
 echo "==> DELETE /api/sessions/{id}"
 HTTP="$(http_status -X DELETE "$BASE/api/sessions/$SESSION_ID")"
 test "$HTTP" = "204" || { echo "expected 204, got $HTTP"; exit 1; }
-
-# 11. Auth gate — request without token → 401
-echo "==> POST /api/sessions without token (expect 401)"
-HTTP="$(curl --silent --output /dev/null -w '%{http_code}' \
-  -X POST "$BASE/api/sessions")"
-test "$HTTP" = "401" || { echo "expected 401, got $HTTP"; exit 1; }
 
 echo "==> walkthrough OK"

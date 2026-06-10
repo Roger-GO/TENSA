@@ -32,8 +32,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "f" * 64
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -51,7 +49,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
         shutil.copy2(src / name, workspace / name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -61,7 +58,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -75,7 +71,7 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
 
 
 async def _create_session(client: httpx.AsyncClient) -> str:
-    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions")
     assert resp.status_code == 201, resp.text
     return str(resp.json()["session_id"])
 
@@ -91,7 +87,6 @@ async def _create_session_and_load(
         body["addfiles"] = [addfile]
     resp = await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     assert resp.status_code == 200, resp.text
@@ -113,14 +108,12 @@ async def test_connectivity_stock_ieee14_returns_one_island(
     # setup, but PF first matches the realistic UI flow).
     pf = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf.status_code == 200, pf.text
 
     resp = await client.get(
         f"/api/sessions/{sid}/connectivity",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -147,7 +140,6 @@ async def test_connectivity_happy_path_works_without_explicit_pflow(
     sid = await _create_session_and_load(client, "ieee14.raw")
     resp = await client.get(
         f"/api/sessions/{sid}/connectivity",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -174,7 +166,6 @@ async def test_connectivity_after_line_trip_returns_two_islands(
     # Add the trip toggle BEFORE setup (ANDES rejects post-setup adds).
     add_resp = await client.post(
         f"/api/sessions/{sid}/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "disturbances": [
                 {"kind": "toggle", "model": "Line", "dev_idx": "Line_20", "t": 1.0}
@@ -185,7 +176,6 @@ async def test_connectivity_after_line_trip_returns_two_islands(
 
     pf = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert pf.status_code == 200, pf.text
@@ -193,14 +183,12 @@ async def test_connectivity_after_line_trip_returns_two_islands(
     # Run TDS just past the toggle time so the trip actually fires.
     tds = await client.post(
         f"/api/sessions/{sid}/tds",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"tf": 1.5},
     )
     assert tds.status_code == 200, tds.text
 
     resp = await client.get(
         f"/api/sessions/{sid}/connectivity",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -231,7 +219,6 @@ async def test_connectivity_no_case_loaded_returns_409(
     sid = await _create_session(client)
     resp = await client.get(
         f"/api/sessions/{sid}/connectivity",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 409, resp.text
 
@@ -244,16 +231,5 @@ async def test_connectivity_unknown_session_returns_404(
     standard SessionExpiredError mapping)."""
     resp = await client.get(
         "/api/sessions/never-existed/connectivity",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 404, resp.text
-
-
-@pytest.mark.integration
-async def test_connectivity_missing_token_returns_401(
-    client: httpx.AsyncClient,
-) -> None:
-    """No X-Andes-Token header → 401 (auth dependency runs before the
-    route body)."""
-    resp = await client.get("/api/sessions/anything/connectivity")
-    assert resp.status_code == 401, resp.text

@@ -22,8 +22,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "d" * 64
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -41,7 +39,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
         shutil.copy2(src / name, workspace / name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -51,7 +48,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -65,7 +61,7 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
 
 
 async def _create_session(client: httpx.AsyncClient) -> str:
-    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions")
     assert resp.status_code == 201, resp.text
     return str(resp.json()["session_id"])
 
@@ -73,7 +69,6 @@ async def _create_session(client: httpx.AsyncClient) -> str:
 async def _load_ieee14(client: httpx.AsyncClient, sid: str) -> None:
     resp = await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"primary_path": "ieee14.raw"},
     )
     assert resp.status_code == 200, resp.text
@@ -89,7 +84,6 @@ async def test_topology_includes_shunts_bucket(client: httpx.AsyncClient) -> Non
     await _load_ieee14(client, sid)
     resp = await client.get(
         f"/api/sessions/{sid}/topology",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -107,7 +101,6 @@ async def test_topology_splits_lines_and_transformers(
     await _load_ieee14(client, sid)
     resp = await client.get(
         f"/api/sessions/{sid}/topology",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     body = resp.json()
     assert len(body["lines"]) > 0
@@ -131,7 +124,6 @@ async def test_topology_splits_lines_and_transformers(
 async def test_get_topology_schema(client: httpx.AsyncClient) -> None:
     resp = await client.get(
         "/api/topology/schema",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -152,12 +144,6 @@ async def test_get_topology_schema(client: httpx.AsyncClient) -> None:
         assert params["gen"]["kind"] == "gen_idx", f"{dyn}.gen must be a gen_idx picker"
 
 
-@pytest.mark.integration
-async def test_topology_schema_requires_auth(client: httpx.AsyncClient) -> None:
-    resp = await client.get("/api/topology/schema")
-    assert resp.status_code == 401, resp.text
-
-
 # ---- POST /blank -----------------------------------------------------------
 
 
@@ -166,7 +152,6 @@ async def test_create_blank_on_fresh_session(client: httpx.AsyncClient) -> None:
     sid = await _create_session(client)
     resp = await client.post(
         f"/api/sessions/{sid}/blank",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 201, resp.text
     body = resp.json()
@@ -184,16 +169,8 @@ async def test_create_blank_when_case_loaded_returns_409(
     await _load_ieee14(client, sid)
     resp = await client.post(
         f"/api/sessions/{sid}/blank",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 409, resp.text
-
-
-@pytest.mark.integration
-async def test_blank_requires_auth(client: httpx.AsyncClient) -> None:
-    sid = await _create_session(client)
-    resp = await client.post(f"/api/sessions/{sid}/blank")
-    assert resp.status_code == 401, resp.text
 
 
 # ---- POST /elements (add) -------------------------------------------------
@@ -204,11 +181,9 @@ async def test_add_bus_to_blank_session(client: httpx.AsyncClient) -> None:
     sid = await _create_session(client)
     await client.post(
         f"/api/sessions/{sid}/blank",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     resp = await client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "model": "Bus",
             "params": {"idx": "1", "name": "BUS1", "Vn": 100.0},
@@ -225,12 +200,10 @@ async def test_add_line_after_buses_exist(client: httpx.AsyncClient) -> None:
     sid = await _create_session(client)
     await client.post(
         f"/api/sessions/{sid}/blank",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     for bus_idx in ("1", "2"):
         await client.post(
             f"/api/sessions/{sid}/elements",
-            headers={"X-Andes-Token": VALID_TOKEN},
             json={
                 "model": "Bus",
                 "params": {"idx": bus_idx, "name": f"BUS{bus_idx}", "Vn": 100.0},
@@ -238,7 +211,6 @@ async def test_add_line_after_buses_exist(client: httpx.AsyncClient) -> None:
         )
     resp = await client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "model": "Line",
             "params": {
@@ -263,12 +235,10 @@ async def test_add_transformer_via_line_with_tap(
     sid = await _create_session(client)
     await client.post(
         f"/api/sessions/{sid}/blank",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     for bus_idx in ("1", "2"):
         await client.post(
             f"/api/sessions/{sid}/elements",
-            headers={"X-Andes-Token": VALID_TOKEN},
             json={
                 "model": "Bus",
                 "params": {"idx": bus_idx, "name": f"BUS{bus_idx}", "Vn": 100.0},
@@ -276,7 +246,6 @@ async def test_add_transformer_via_line_with_tap(
         )
     await client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "model": "Line",
             "params": {
@@ -292,7 +261,6 @@ async def test_add_transformer_via_line_with_tap(
     )
     topo = (await client.get(
         f"/api/sessions/{sid}/topology",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )).json()
     transformer_idxs = [str(t["idx"]) for t in topo["transformers"]]
     line_idxs = [str(line["idx"]) for line in topo["lines"]]
@@ -307,12 +275,10 @@ async def test_add_element_post_pf_returns_409(client: httpx.AsyncClient) -> Non
     # PF commits setup
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     resp = await client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "model": "Bus",
             "params": {"idx": "99", "name": "BUS99", "Vn": 100.0},
@@ -329,11 +295,9 @@ async def test_add_element_unknown_model_returns_422(
     sid = await _create_session(client)
     await client.post(
         f"/api/sessions/{sid}/blank",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     resp = await client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"model": "NoSuchModel", "params": {}},
     )
     assert resp.status_code == 422, resp.text
@@ -346,11 +310,9 @@ async def test_add_element_unknown_param_keys_returns_422(
     sid = await _create_session(client)
     await client.post(
         f"/api/sessions/{sid}/blank",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     resp = await client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "model": "Bus",
             "params": {"idx": "1", "name": "BUS1", "Vn": 100.0, "made_up": 7},
@@ -368,25 +330,13 @@ async def test_add_element_oversize_body_returns_413(
     sid = await _create_session(client)
     await client.post(
         f"/api/sessions/{sid}/blank",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     huge_name = "X" * (65 * 1024)
     resp = await client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"model": "Bus", "params": {"idx": "1", "name": huge_name, "Vn": 100.0}},
     )
     assert resp.status_code == 413, resp.text
-
-
-@pytest.mark.integration
-async def test_add_element_requires_auth(client: httpx.AsyncClient) -> None:
-    sid = await _create_session(client)
-    resp = await client.post(
-        f"/api/sessions/{sid}/elements",
-        json={"model": "Bus", "params": {"idx": "1", "name": "B", "Vn": 100.0}},
-    )
-    assert resp.status_code == 401, resp.text
 
 
 # ---- PUT /elements/{model}/{idx} (edit) -----------------------------------
@@ -399,7 +349,6 @@ async def test_edit_element_updates_param(client: httpx.AsyncClient) -> None:
     # Edit BUS1's Vn from default to 110
     resp = await client.put(
         f"/api/sessions/{sid}/elements/Bus/1",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"params": {"Vn": 110.0}},
     )
     assert resp.status_code == 200, resp.text
@@ -416,7 +365,6 @@ async def test_edit_element_unknown_idx_returns_404(
     await _load_ieee14(client, sid)
     resp = await client.put(
         f"/api/sessions/{sid}/elements/Bus/999",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"params": {"Vn": 110.0}},
     )
     assert resp.status_code == 404, resp.text
@@ -428,12 +376,10 @@ async def test_edit_element_post_pf_returns_409(client: httpx.AsyncClient) -> No
     await _load_ieee14(client, sid)
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     resp = await client.put(
         f"/api/sessions/{sid}/elements/Bus/1",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"params": {"Vn": 110.0}},
     )
     assert resp.status_code == 409, resp.text
@@ -445,7 +391,6 @@ async def test_edit_element_idx_field_rejected(client: httpx.AsyncClient) -> Non
     await _load_ieee14(client, sid)
     resp = await client.put(
         f"/api/sessions/{sid}/elements/Bus/1",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"params": {"idx": "renamed"}},
     )
     assert resp.status_code == 422, resp.text
@@ -466,7 +411,6 @@ async def test_save_raw_format_round_trips_through_andes_reader(
     await _load_ieee14(client, sid)
     resp = await client.post(
         f"/api/sessions/{sid}/save",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"filename": "round-trip.raw", "format": "raw"},
     )
     assert resp.status_code == 201, resp.text
@@ -476,7 +420,6 @@ async def test_save_raw_format_round_trips_through_andes_reader(
     # test-managed workspace dir, accessible via a fresh GET on the lister.
     list_resp = await client.get(
         "/api/workspace/files",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     files = list_resp.json()["files"]
     assert any(f["name"] == "round-trip.raw" for f in files), files
@@ -505,12 +448,10 @@ async def test_blank_session_reload_replays_adds(
     sid = await _create_session(client)
     await client.post(
         f"/api/sessions/{sid}/blank",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     for bus_idx in ("1", "2", "3"):
         await client.post(
             f"/api/sessions/{sid}/elements",
-            headers={"X-Andes-Token": VALID_TOKEN},
             json={
                 "model": "Bus",
                 "params": {"idx": bus_idx, "name": f"BUS{bus_idx}", "Vn": 100.0},
@@ -519,7 +460,6 @@ async def test_blank_session_reload_replays_adds(
     # Reload the blank session — replay buffer should re-create all 3 buses.
     resp = await client.post(
         f"/api/sessions/{sid}/reload",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     topo = resp.json()
@@ -553,7 +493,6 @@ async def client_ieee39(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     shutil.copy2(src39 / "ieee39.raw", workspace / "ieee39.raw")
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -563,7 +502,6 @@ async def client_ieee39(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     mgr = SessionManager(max_sessions=4, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -581,7 +519,6 @@ async def _add_bus(
 ) -> httpx.Response:
     return await client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "model": "Bus",
             "params": {
@@ -602,14 +539,12 @@ async def test_delete_blank_session_removes_middle_bus(
     sid = await _create_session(client)
     await client.post(
         f"/api/sessions/{sid}/blank",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     for bus_idx in ("1", "2", "3"):
         resp = await _add_bus(client, sid, bus_idx)
         assert resp.status_code == 201, resp.text
     resp = await client.delete(
         f"/api/sessions/{sid}/elements/Bus/2",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     topo = resp.json()
@@ -628,12 +563,10 @@ async def test_delete_added_bus_on_loaded_ieee14(
     assert resp.status_code == 201, resp.text
     topo_resp = await client.get(
         f"/api/sessions/{sid}/topology",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert len(topo_resp.json()["buses"]) == 15
     resp = await client.delete(
         f"/api/sessions/{sid}/elements/Bus/100",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     topo = resp.json()
@@ -650,13 +583,11 @@ async def test_delete_bus_with_line_dependent_returns_422(
     sid = await _create_session(client)
     await client.post(
         f"/api/sessions/{sid}/blank",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     for bus_idx in ("1", "2"):
         assert (await _add_bus(client, sid, bus_idx)).status_code == 201
     line_resp = await client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "model": "Line",
             "params": {
@@ -673,7 +604,6 @@ async def test_delete_bus_with_line_dependent_returns_422(
     # Delete bus 1 -> 422 with the Line dependent.
     resp = await client.delete(
         f"/api/sessions/{sid}/elements/Bus/1",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 422, resp.text
     body = resp.json()
@@ -684,12 +614,10 @@ async def test_delete_bus_with_line_dependent_returns_422(
     # Drop the Line first; Bus 1 deletion should now succeed.
     line_del = await client.delete(
         f"/api/sessions/{sid}/elements/Line/L12",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert line_del.status_code == 200, line_del.text
     bus_del = await client.delete(
         f"/api/sessions/{sid}/elements/Bus/1",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert bus_del.status_code == 200, bus_del.text
 
@@ -703,14 +631,12 @@ async def test_delete_bus_with_multiple_dependents_returns_422(
     sid = await _create_session(client)
     await client.post(
         f"/api/sessions/{sid}/blank",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     for bus_idx in ("1", "2"):
         assert (await _add_bus(client, sid, bus_idx)).status_code == 201
     # Line (refs bus 1 + bus 2 via bus1/bus2)
     await client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "model": "Line",
             "params": {
@@ -726,7 +652,6 @@ async def test_delete_bus_with_multiple_dependents_returns_422(
     # PV generator on bus 1
     await client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "model": "PV",
             "params": {
@@ -743,7 +668,6 @@ async def test_delete_bus_with_multiple_dependents_returns_422(
     # PQ load on bus 1
     await client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "model": "PQ",
             "params": {
@@ -758,7 +682,6 @@ async def test_delete_bus_with_multiple_dependents_returns_422(
     )
     resp = await client.delete(
         f"/api/sessions/{sid}/elements/Bus/1",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 422, resp.text
     body = resp.json()
@@ -775,12 +698,10 @@ async def test_delete_generator_has_no_dependents(
     sid = await _create_session(client)
     await client.post(
         f"/api/sessions/{sid}/blank",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert (await _add_bus(client, sid, "1")).status_code == 201
     await client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "model": "PV",
             "params": {
@@ -796,7 +717,6 @@ async def test_delete_generator_has_no_dependents(
     )
     resp = await client.delete(
         f"/api/sessions/{sid}/elements/PV/G1",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -814,7 +734,6 @@ async def test_delete_case_file_originated_returns_422_with_reload_message(
     # Bus 1 is in the loaded case but never added via the replay buffer.
     resp = await client.delete(
         f"/api/sessions/{sid}/elements/Bus/1",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 422, resp.text
     expected = (
@@ -835,12 +754,10 @@ async def test_delete_after_pf_returns_409(client: httpx.AsyncClient) -> None:
     # Commit setup via PF
     await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     resp = await client.delete(
         f"/api/sessions/{sid}/elements/Bus/100",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 409, resp.text
     assert "/reload" in resp.text
@@ -853,7 +770,6 @@ async def test_delete_unknown_idx_returns_404(client: httpx.AsyncClient) -> None
     await _load_ieee14(client, sid)
     resp = await client.delete(
         f"/api/sessions/{sid}/elements/Bus/999",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 404, resp.text
 
@@ -865,20 +781,9 @@ async def test_delete_unknown_model_returns_422(client: httpx.AsyncClient) -> No
     await _load_ieee14(client, sid)
     resp = await client.delete(
         f"/api/sessions/{sid}/elements/NoSuchModel/1",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 422, resp.text
     assert "unknown model" in resp.text.lower() or "supported models" in resp.text
-
-
-@pytest.mark.integration
-async def test_delete_requires_auth(client: httpx.AsyncClient) -> None:
-    """DELETE without X-Andes-Token -> 401."""
-    sid = await _create_session(client)
-    resp = await client.delete(
-        f"/api/sessions/{sid}/elements/Bus/1",
-    )
-    assert resp.status_code == 401, resp.text
 
 
 @pytest.mark.integration
@@ -941,7 +846,6 @@ async def test_delete_perf_under_one_second_ieee14_and_ieee39(
         sid = await _create_session(client_ieee39)
         load = await client_ieee39.post(
             f"/api/sessions/{sid}/case",
-            headers={"X-Andes-Token": VALID_TOKEN},
             json={"primary_path": primary},
         )
         assert load.status_code == 200, load.text
@@ -950,7 +854,6 @@ async def test_delete_perf_under_one_second_ieee14_and_ieee39(
         t0 = time.perf_counter()
         resp = await client_ieee39.delete(
             f"/api/sessions/{sid}/elements/Bus/9999",
-            headers={"X-Andes-Token": VALID_TOKEN},
         )
         elapsed = time.perf_counter() - t0
         assert resp.status_code == 200, resp.text

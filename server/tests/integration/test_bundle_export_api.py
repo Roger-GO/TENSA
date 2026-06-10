@@ -23,8 +23,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "d" * 64
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -42,7 +40,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
         shutil.copy2(src / name, workspace / name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -52,7 +49,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -70,14 +66,13 @@ async def _create_session_and_load(
     primary: str = "ieee14.raw",
     addfile: str | None = None,
 ) -> str:
-    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions")
     sid = str(resp.json()["session_id"])
     body: dict[str, object] = {"primary_path": primary}
     if addfile:
         body["addfiles"] = [addfile]
     await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     return sid
@@ -92,7 +87,6 @@ async def test_export_bundle_minimal_returns_zip_with_case_and_manifest(
     sid = await _create_session_and_load(client, "ieee14.raw")
     resp = await client.post(
         f"/api/sessions/{sid}/bundle/export",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 200, resp.text
@@ -131,7 +125,6 @@ async def test_export_bundle_includes_disturbances_in_request_body(
     }
     resp = await client.post(
         f"/api/sessions/{sid}/bundle/export",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     assert resp.status_code == 200, resp.text
@@ -170,7 +163,6 @@ async def test_export_bundle_includes_psse_addfile_verbatim(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp = await client.post(
         f"/api/sessions/{sid}/bundle/export",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 200
@@ -201,7 +193,6 @@ async def test_export_bundle_dirty_case_writes_canonical_xlsx(
     # becomes non-empty. This is the substrate's signal for "dirty case".
     add = await client.post(
         f"/api/sessions/{sid}/elements",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "model": "Bus",
             "params": {"idx": 99, "name": "Bus99", "Vn": 13.8},
@@ -210,7 +201,6 @@ async def test_export_bundle_dirty_case_writes_canonical_xlsx(
     assert add.status_code == 201, add.text
     resp = await client.post(
         f"/api/sessions/{sid}/bundle/export",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 200, resp.text
@@ -227,11 +217,10 @@ async def test_export_bundle_no_case_loaded_returns_409(
     client: httpx.AsyncClient,
 ) -> None:
     """Edge case: a session with no case loaded can't be bundled."""
-    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions")
     sid = str(resp.json()["session_id"])
     resp = await client.post(
         f"/api/sessions/{sid}/bundle/export",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 409, resp.text
@@ -243,22 +232,9 @@ async def test_export_bundle_unknown_session_returns_404(
 ) -> None:
     resp = await client.post(
         "/api/sessions/does-not-exist/bundle/export",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 404, resp.text
-
-
-@pytest.mark.integration
-async def test_export_bundle_missing_token_returns_401(
-    client: httpx.AsyncClient,
-) -> None:
-    sid = await _create_session_and_load(client, "ieee14.raw")
-    resp = await client.post(
-        f"/api/sessions/{sid}/bundle/export",
-        json={},
-    )
-    assert resp.status_code == 401, resp.text
 
 
 @pytest.mark.integration
@@ -283,13 +259,11 @@ async def test_export_bundle_round_trips_deterministically_across_two_calls(
     sid_a = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp_a = await client.post(
         f"/api/sessions/{sid_a}/bundle/export",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     sid_b = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp_b = await client.post(
         f"/api/sessions/{sid_b}/bundle/export",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     assert resp_a.status_code == 200
@@ -315,7 +289,6 @@ async def test_export_bundle_omits_results_csv_when_no_run(
     sid = await _create_session_and_load(client, "ieee14.raw")
     resp = await client.post(
         f"/api/sessions/{sid}/bundle/export",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "disturbances": [
                 {"kind": "fault", "bus_idx": 5, "tf": 1.0, "tc": 1.1},

@@ -36,8 +36,6 @@ import pytest
 from andes_app.api.app import make_app
 from andes_app.core.session import SessionManager
 
-VALID_TOKEN = "f" * 64
-
 
 def _bundled_ieee14_dir() -> Path:
     pytest.importorskip("andes")
@@ -59,7 +57,6 @@ async def workspace(tmp_path: Path) -> Path:
 @pytest.fixture
 async def app_with_mgr(workspace: Path):
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -71,7 +68,6 @@ async def app_with_mgr(workspace: Path):
     )
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     try:
         yield app, mgr
@@ -94,7 +90,7 @@ async def _create_session_with_case(
     primary: str = "ieee14.raw",
     addfile: str | None = None,
 ) -> str:
-    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions")
     assert resp.status_code == 201, resp.text
     sid = str(resp.json()["session_id"])
     body: dict[str, object] = {"primary_path": primary}
@@ -102,7 +98,6 @@ async def _create_session_with_case(
         body["addfiles"] = [addfile]
     resp = await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     assert resp.status_code in (200, 201), resp.text
@@ -117,7 +112,6 @@ async def _seed_session_with_fault_snapshot(
     # Add a Fault disturbance pre-PF (substrate gate).
     resp = await client.post(
         f"/api/sessions/{sid}/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "disturbances": [
                 {
@@ -135,14 +129,12 @@ async def _seed_session_with_fault_snapshot(
     # Run PF so the snapshot has converged operating-point state.
     resp = await client.post(
         f"/api/sessions/{sid}/pflow",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={},
     )
     assert resp.status_code == 200, resp.text
     # Save the snapshot.
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={"name": snapshot_name},
     )
     assert resp.status_code == 200, resp.text
@@ -164,7 +156,6 @@ async def test_sweep_happy_path_completes(
 
     resp = await client.post(
         f"/api/sessions/{sid}/sweep",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "parameter": {
                 "kind": "disturbance.fault.tc",
@@ -211,7 +202,6 @@ async def test_sweep_returns_409_when_already_running(
 
     resp = await client.post(
         f"/api/sessions/{sid}/sweep",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "parameter": {
                 "kind": "disturbance.fault.tc",
@@ -227,7 +217,6 @@ async def test_sweep_returns_409_when_already_running(
     # Immediately try a second sweep.
     resp2 = await client.post(
         f"/api/sessions/{sid}/sweep",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "parameter": {
                 "kind": "disturbance.fault.tc",
@@ -262,7 +251,6 @@ async def test_sweep_returns_503_on_other_routes_during_sweep(
 
     resp = await client.post(
         f"/api/sessions/{sid}/sweep",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "parameter": {
                 "kind": "disturbance.fault.tc",
@@ -281,7 +269,6 @@ async def test_sweep_returns_503_on_other_routes_during_sweep(
     # so the next request observes it.
     resp503 = await client.get(
         f"/api/sessions/{sid}/topology",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     # Could land 503 (gate fired) or 200 (gate already cleared if the
     # sweep finished super fast). 503 is the expected case for the
@@ -314,7 +301,6 @@ async def test_sweep_unknown_parameter_kind_returns_422(
     sid = await _seed_session_with_fault_snapshot(client, "sweep-bad-kind")
     resp = await client.post(
         f"/api/sessions/{sid}/sweep",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "parameter": {
                 "kind": "topology.bus.v0",  # not in the allowed set
@@ -341,7 +327,6 @@ async def test_sweep_target_out_of_range_records_per_iteration_errors(
 
     resp = await client.post(
         f"/api/sessions/{sid}/sweep",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "parameter": {
                 "kind": "disturbance.fault.tc",
@@ -385,7 +370,6 @@ def test_sweep_progress_via_websocket(workspace: Path) -> None:
     from starlette.testclient import TestClient
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -401,21 +385,19 @@ def test_sweep_progress_via_websocket(workspace: Path) -> None:
     with TestClient(app) as tc:
         # Create session.
         resp = tc.post(
-            "/api/sessions", headers={"X-Andes-Token": VALID_TOKEN}
+            "/api/sessions"
         )
         assert resp.status_code == 201, resp.text
         sid = str(resp.json()["session_id"])
         # Load case.
         resp = tc.post(
             f"/api/sessions/{sid}/case",
-            headers={"X-Andes-Token": VALID_TOKEN},
             json={"primary_path": "ieee14.raw"},
         )
         assert resp.status_code in (200, 201), resp.text
         # Add disturbance.
         resp = tc.post(
             f"/api/sessions/{sid}/disturbances",
-            headers={"X-Andes-Token": VALID_TOKEN},
             json={
                 "disturbances": [
                     {
@@ -433,21 +415,18 @@ def test_sweep_progress_via_websocket(workspace: Path) -> None:
         # Run PFlow.
         resp = tc.post(
             f"/api/sessions/{sid}/pflow",
-            headers={"X-Andes-Token": VALID_TOKEN},
             json={},
         )
         assert resp.status_code == 200, resp.text
         # Save snapshot.
         resp = tc.post(
             f"/api/sessions/{sid}/snapshot",
-            headers={"X-Andes-Token": VALID_TOKEN},
             json={"name": "sweep-ws"},
         )
         assert resp.status_code == 200, resp.text
         # Start the sweep.
         resp = tc.post(
             f"/api/sessions/{sid}/sweep",
-            headers={"X-Andes-Token": VALID_TOKEN},
             json={
                 "parameter": {
                     "kind": "disturbance.fault.tc",
@@ -464,100 +443,6 @@ def test_sweep_progress_via_websocket(workspace: Path) -> None:
         with tc.websocket_connect(
             f"/api/ws/{sid}/sweep/{sweep_id}"
         ) as ws:
-            ws.send_text(json.dumps({"type": "auth", "token": VALID_TOKEN}))
-            ready = json.loads(ws.receive_text())
-            assert ready["type"] == "ready"
-            snapshot = json.loads(ws.receive_text())
-            assert snapshot["type"] == "snapshot"
-            assert snapshot["total"] == 3
-            finished_state: str | None = None
-            for _ in range(20):
-                msg = json.loads(ws.receive_text())
-                if msg["type"] == "finished":
-                    finished_state = msg.get("state")
-                    break
-            assert finished_state == "completed"
-
-
-def test_sweep_progress_via_websocket_no_auth(workspace: Path) -> None:
-    """Regression: the sweep WS progress channel must work under
-    ``serve --no-auth``.
-
-    The endpoint previously ran its own inline auth handshake that called
-    ``constant_time_eq(expected_token, token)`` UNCONDITIONALLY — it did not
-    honor ``app.state.require_auth``. In ``--no-auth`` mode the browser sends
-    an empty token, so every sweep WS closed with 4401 "invalid token": the
-    sweep ran to completion on the substrate but the UI never received a single
-    iteration (the progress panel sat at 0/N forever). The fix delegates the
-    handshake to the shared ``require_ws_auth`` helper, which skips token
-    validation when ``require_auth`` is False. This test pins that behavior by
-    connecting with an EMPTY token against a ``require_auth=False`` app and
-    asserting the full ready → snapshot → finished flow still streams.
-    """
-    from starlette.testclient import TestClient
-
-    app = make_app(
-        expected_token=VALID_TOKEN,
-        workspace=workspace,
-        bind_host="127.0.0.1",
-        bind_port=8000,
-        max_sessions=4,
-        idle_timeout_seconds=180.0,
-        # The serve --no-auth dev toggle: HTTP + WS token gates become no-ops.
-        require_auth=False,
-        extra_allowed_hosts=frozenset({"testserver"}),
-        extra_allowed_origins=frozenset(
-            {"http://testserver", "http://localhost"}
-        ),
-    )
-    with TestClient(app) as tc:
-        # No X-Andes-Token header anywhere — no-auth mode accepts it.
-        resp = tc.post("/api/sessions")
-        assert resp.status_code == 201, resp.text
-        sid = str(resp.json()["session_id"])
-        resp = tc.post(
-            f"/api/sessions/{sid}/case", json={"primary_path": "ieee14.raw"}
-        )
-        assert resp.status_code in (200, 201), resp.text
-        resp = tc.post(
-            f"/api/sessions/{sid}/disturbances",
-            json={
-                "disturbances": [
-                    {
-                        "kind": "fault",
-                        "bus_idx": 5,
-                        "tf": 1.0,
-                        "tc": 1.1,
-                        "xf": 0.0001,
-                        "rf": 0.0,
-                    }
-                ]
-            },
-        )
-        assert resp.status_code == 200, resp.text
-        resp = tc.post(f"/api/sessions/{sid}/pflow", json={})
-        assert resp.status_code == 200, resp.text
-        resp = tc.post(
-            f"/api/sessions/{sid}/snapshot", json={"name": "sweep-ws-noauth"}
-        )
-        assert resp.status_code == 200, resp.text
-        resp = tc.post(
-            f"/api/sessions/{sid}/sweep",
-            json={
-                "parameter": {
-                    "kind": "disturbance.fault.tc",
-                    "target": 0,
-                    "range": {"start": 1.05, "end": 1.15, "steps": 3},
-                },
-                "sim": {"tf": 0.2, "h": None, "vars": None},
-                "snapshot_name": "sweep-ws-noauth",
-            },
-        )
-        assert resp.status_code == 202, resp.text
-        sweep_id = resp.json()["sweep_id"]
-        with tc.websocket_connect(f"/api/ws/{sid}/sweep/{sweep_id}") as ws:
-            # Empty token — would have been rejected with 4401 before the fix.
-            ws.send_text(json.dumps({"type": "auth", "token": ""}))
             ready = json.loads(ws.receive_text())
             assert ready["type"] == "ready"
             snapshot = json.loads(ws.receive_text())

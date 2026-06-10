@@ -19,7 +19,6 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from andes_app.api._run_as_job import _run_as_job
-from andes_app.api.auth import RequireToken
 from andes_app.api.error_mapping import map_worker_error
 from andes_app.api.schemas import (
     AddDisturbancesRequest,
@@ -91,7 +90,6 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
     summary="Register one or more disturbances on a pre-setup session.",
     response_model=AddDisturbancesResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
         409: {
             "model": ProblemDetails,
@@ -110,7 +108,6 @@ async def add_disturbances(
     session_id: str,
     body: AddDisturbancesRequest,
     request: Request,
-    _: RequireToken,
 ) -> AddDisturbancesResponse:
     mgr = _manager(request)
     accepted: list[DisturbanceAck] = []
@@ -166,14 +163,12 @@ def _spec_from_dict(spec_dict: dict[str, Any]) -> FaultSpec | ToggleSpec | Alter
     summary="List the disturbance specs currently recorded on the session.",
     response_model=ListDisturbancesResponse,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
     },
 )
 async def list_disturbances(
     session_id: str,
     request: Request,
-    _: RequireToken,
 ) -> ListDisturbancesResponse:
     """Return the wrapper's ``_disturbance_log`` for client sync.
 

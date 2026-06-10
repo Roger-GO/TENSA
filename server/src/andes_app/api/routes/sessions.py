@@ -14,7 +14,6 @@ import contextlib
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import ValidationError
 
-from andes_app.api.auth import RequireToken
 from andes_app.api.schemas import (
     CreateSessionRequest,
     ProblemDetails,
@@ -45,7 +44,6 @@ def _manager(request: Request) -> SessionManager:
     response_model=SessionDescriptor,
     status_code=status.HTTP_201_CREATED,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         422: {
             "model": ProblemDetails,
             "description": "Body included a client-supplied session_id (rejected).",
@@ -57,7 +55,7 @@ def _manager(request: Request) -> SessionManager:
     },
 )
 async def create_session(
-    request: Request, _: RequireToken
+    request: Request
 ) -> SessionDescriptor:
     # Reject any non-empty body. ``CreateSessionRequest`` has ``extra="forbid"``,
     # so client-supplied ``session_id`` (or any other field) raises 422.
@@ -92,9 +90,8 @@ async def create_session(
     operation_id="listSessions",
     summary="List currently-active sessions.",
     response_model=SessionList,
-    responses={401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."}},
 )
-async def list_sessions(request: Request, _: RequireToken) -> SessionList:
+async def list_sessions(request: Request) -> SessionList:
     mgr = _manager(request)
     return SessionList(
         sessions=[SessionDescriptor(session_id=sid, state="live") for sid in mgr.list_sessions()]
@@ -111,12 +108,11 @@ async def list_sessions(request: Request, _: RequireToken) -> SessionList:
     summary="Describe a session.",
     response_model=SessionDescriptor,
     responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
     },
 )
 async def get_session(
-    session_id: str, request: Request, _: RequireToken
+    session_id: str, request: Request
 ) -> SessionDescriptor:
     mgr = _manager(request)
     if not mgr.is_alive(session_id):
@@ -133,12 +129,9 @@ async def get_session(
     operation_id="closeSession",
     summary="Close a session and reap its worker subprocess.",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses={
-        401: {"model": ProblemDetails, "description": "Missing or invalid X-Andes-Token."},
-    },
 )
 async def close_session(
-    session_id: str, request: Request, _: RequireToken
+    session_id: str, request: Request
 ) -> None:
     mgr = _manager(request)
     # idempotent: closing an unknown session is a no-op

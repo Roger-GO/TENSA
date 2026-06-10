@@ -32,8 +32,6 @@ from andes_app.core.errors import DisturbanceValidationError
 from andes_app.core.session import SessionManager
 from andes_app.core.wrapper import Wrapper
 
-VALID_TOKEN = "c" * 64
-
 
 def _ieee14_paths() -> tuple[Path, Path]:
     pytest.importorskip("andes")
@@ -184,13 +182,15 @@ def test_add_disturbance_invalid_spec_does_not_pollute_log() -> None:
     w.add_disturbance(FaultSpec(bus_idx=4, tf=1.0, tc=1.1))
     baseline = list(w.list_disturbances())
 
-    with patch.object(w._ss, "add", side_effect=ValueError("ANDES boom")):
-        with pytest.raises(DisturbanceValidationError):
-            w.add_disturbance(
-                AlterSpec(
-                    model="PQ", dev_idx="PQ_0", src="Ppf", t=1.0, method="*", amount=1.2
-                )
+    with (
+        patch.object(w._ss, "add", side_effect=ValueError("ANDES boom")),
+        pytest.raises(DisturbanceValidationError),
+    ):
+        w.add_disturbance(
+            AlterSpec(
+                model="PQ", dev_idx="PQ_0", src="Ppf", t=1.0, method="*", amount=1.2
             )
+        )
 
     # Log is unchanged — no rollback needed because we only append on success.
     assert w.list_disturbances() == baseline
@@ -261,7 +261,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
         shutil.copy2(src / name, workspace / name)
 
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -271,7 +270,6 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     try:
@@ -287,14 +285,13 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
 async def _create_session_and_load(
     client: httpx.AsyncClient, primary: str = "ieee14.raw", addfile: str | None = None
 ) -> str:
-    resp = await client.post("/api/sessions", headers={"X-Andes-Token": VALID_TOKEN})
+    resp = await client.post("/api/sessions")
     sid = str(resp.json()["session_id"])
     body: dict[str, object] = {"primary_path": primary}
     if addfile:
         body["addfiles"] = [addfile]
     await client.post(
         f"/api/sessions/{sid}/case",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=body,
     )
     return sid
@@ -309,7 +306,6 @@ async def test_get_disturbances_empty_on_fresh_session(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp = await client.get(
         f"/api/sessions/{sid}/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"disturbances": []}
@@ -330,14 +326,12 @@ async def test_post_then_get_returns_added_disturbances(
     }
     post = await client.post(
         f"/api/sessions/{sid}/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=post_body,
     )
     assert post.status_code == 200, post.text
 
     get = await client.get(
         f"/api/sessions/{sid}/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert get.status_code == 200, get.text
     payload = get.json()
@@ -358,25 +352,21 @@ async def test_get_returns_empty_after_reload(client: httpx.AsyncClient) -> None
     one = {"disturbances": [{"kind": "fault", "bus_idx": 4, "tf": 1.0, "tc": 1.1}]}
     await client.post(
         f"/api/sessions/{sid}/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=one,
     )
     g1 = await client.get(
         f"/api/sessions/{sid}/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert len(g1.json()["disturbances"]) == 1
 
     # Reload.
     rl = await client.post(
         f"/api/sessions/{sid}/reload",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert rl.status_code == 200
 
     g2 = await client.get(
         f"/api/sessions/{sid}/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert g2.status_code == 200
     assert g2.json()["disturbances"] == []
@@ -384,12 +374,10 @@ async def test_get_returns_empty_after_reload(client: httpx.AsyncClient) -> None
     # Re-POST the same spec — substrate accepts it and GET reflects.
     await client.post(
         f"/api/sessions/{sid}/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json=one,
     )
     g3 = await client.get(
         f"/api/sessions/{sid}/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert len(g3.json()["disturbances"]) == 1
     assert g3.json()["disturbances"][0]["bus_idx"] == 4
@@ -401,16 +389,8 @@ async def test_get_disturbances_unknown_session_returns_404(
 ) -> None:
     resp = await client.get(
         "/api/sessions/does-not-exist/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert resp.status_code == 404, resp.text
-
-
-@pytest.mark.integration
-async def test_get_disturbances_requires_token(client: httpx.AsyncClient) -> None:
-    """No token → 401. Same auth contract as the POST sibling."""
-    resp = await client.get("/api/sessions/anything/disturbances")
-    assert resp.status_code == 401, resp.text
 
 
 @pytest.mark.integration
@@ -426,7 +406,6 @@ async def test_post_invalid_spec_does_not_show_in_get(
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     bad = await client.post(
         f"/api/sessions/{sid}/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
         json={
             "disturbances": [
                 {
@@ -445,7 +424,6 @@ async def test_post_invalid_spec_does_not_show_in_get(
 
     g = await client.get(
         f"/api/sessions/{sid}/disturbances",
-        headers={"X-Andes-Token": VALID_TOKEN},
     )
     assert g.status_code == 200
     # Nothing was accepted — log is empty.

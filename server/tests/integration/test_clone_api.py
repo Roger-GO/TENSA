@@ -22,8 +22,6 @@ from andes_app.core.session import SessionManager
 
 pytestmark = pytest.mark.integration
 
-VALID_TOKEN = "e" * 64
-HDR = {"X-Andes-Token": VALID_TOKEN}
 
 
 def _bundled_cases_dir() -> Path:
@@ -39,7 +37,6 @@ async def _make_client(tmp_path: Path, files: list[Path]) -> httpx.AsyncClient:
     for src in files:
         shutil.copy2(src, workspace / src.name)
     app = make_app(
-        expected_token=VALID_TOKEN,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -51,7 +48,6 @@ async def _make_client(tmp_path: Path, files: list[Path]) -> httpx.AsyncClient:
     )
     await mgr.start()
     app.state.session_manager = mgr
-    app.state.expected_token = VALID_TOKEN
     app.state.workspace = workspace
     transport = httpx.ASGITransport(app=app)
     client = httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000")
@@ -73,12 +69,11 @@ async def kundur_client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
 
 
 async def _new_session_with_kundur(client: httpx.AsyncClient) -> str:
-    resp = await client.post("/api/sessions", headers=HDR)
+    resp = await client.post("/api/sessions")
     assert resp.status_code in (200, 201), resp.text
     sid = str(resp.json()["session_id"])
     resp = await client.post(
         f"/api/sessions/{sid}/case",
-        headers=HDR,
         json={"primary_path": "kundur_full.xlsx"},
     )
     assert resp.status_code == 200, resp.text
@@ -89,14 +84,13 @@ async def test_full_clone_flow_over_http(kundur_client: httpx.AsyncClient) -> No
     sid = await _new_session_with_kundur(kundur_client)
 
     # init
-    resp = await kundur_client.post(f"/api/sessions/{sid}/case/clone", headers=HDR)
+    resp = await kundur_client.post(f"/api/sessions/{sid}/case/clone")
     assert resp.status_code == 200, resp.text
     assert resp.json()["already_initialized"] is False
 
     # edit TGOV1.T1 -> 0.6
     resp = await kundur_client.put(
         f"/api/sessions/{sid}/case/clone/params/TGOV1/1/T1",
-        headers=HDR,
         json={"value": 0.6},
     )
     assert resp.status_code == 200, resp.text
@@ -107,7 +101,7 @@ async def test_full_clone_flow_over_http(kundur_client: httpx.AsyncClient) -> No
 
     # undo
     resp = await kundur_client.post(
-        f"/api/sessions/{sid}/case/clone/undo", headers=HDR
+        f"/api/sessions/{sid}/case/clone/undo"
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["undo_depth"] == 0
@@ -115,7 +109,7 @@ async def test_full_clone_flow_over_http(kundur_client: httpx.AsyncClient) -> No
 
     # redo
     resp = await kundur_client.post(
-        f"/api/sessions/{sid}/case/clone/redo", headers=HDR
+        f"/api/sessions/{sid}/case/clone/redo"
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["redo_depth"] == 0
@@ -123,7 +117,6 @@ async def test_full_clone_flow_over_http(kundur_client: httpx.AsyncClient) -> No
     # save-as
     resp = await kundur_client.post(
         f"/api/sessions/{sid}/case/clone/save-as",
-        headers=HDR,
         json={"name": "kundur_tuned"},
     )
     assert resp.status_code == 201, resp.text
@@ -133,7 +126,7 @@ async def test_full_clone_flow_over_http(kundur_client: httpx.AsyncClient) -> No
 
     # reset deletes the clone dir
     resp = await kundur_client.post(
-        f"/api/sessions/{sid}/case/clone/reset", headers=HDR
+        f"/api/sessions/{sid}/case/clone/reset"
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["reset"] is True
@@ -148,7 +141,6 @@ async def test_whitelist_rejects_non_controller_model(
     # Bus is not a dynamic controller — 422 before any clone work.
     resp = await kundur_client.put(
         f"/api/sessions/{sid}/case/clone/params/Bus/1/Vn",
-        headers=HDR,
         json={"value": 1.0},
     )
     assert resp.status_code == 422, resp.text
@@ -160,7 +152,6 @@ async def test_whitelist_rejects_unknown_param(
     sid = await _new_session_with_kundur(kundur_client)
     resp = await kundur_client.put(
         f"/api/sessions/{sid}/case/clone/params/TGOV1/1/NotAParam",
-        headers=HDR,
         json={"value": 1.0},
     )
     assert resp.status_code == 422, resp.text
@@ -176,7 +167,6 @@ async def test_path_traversal_segment_rejected(
     # writer / the filesystem.
     resp = await kundur_client.put(
         f"/api/sessions/{sid}/case/clone/params/TGOV1/1/..%2F..%2Fetc",
-        headers=HDR,
         json={"value": 1.0},
     )
     assert resp.status_code in (404, 405, 422), resp.text
@@ -194,7 +184,6 @@ async def test_edit_returns_409_when_session_busy(
     try:
         resp = await kundur_client.put(
             f"/api/sessions/{sid}/case/clone/params/TGOV1/1/T1",
-            headers=HDR,
             json={"value": 0.6},
         )
         assert resp.status_code == 409, resp.text
