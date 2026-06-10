@@ -4,6 +4,8 @@
 
 ANDES App is **not a wrapper around the ANDES CLI**. It is a substrate built on the ANDES Python API that adds capabilities native ANDES does not have: interactive model building, live result streaming, session management, undo/redo parameter editing, and a machine-readable API surface for interoperability with other tools and frameworks.
 
+![ANDES App — interactive single-line diagram with a solved power flow](docs/img/hero.jpeg)
+
 ## What you can do
 
 | Capability | ANDES (CLI/notebook) | ANDES App |
