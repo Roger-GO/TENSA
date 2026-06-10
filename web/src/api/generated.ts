@@ -237,7 +237,7 @@ export interface paths {
         /**
          * Per-model parameter metadata for the add/edit forms.
          * @description Static endpoint — the schema mirrors a compile-time table on the
-         *     wrapper. Auth-gated only because the rest of the substrate is.
+         *     wrapper.
          */
         get: operations["getTopologySchema"];
         put?: never;
@@ -1446,17 +1446,25 @@ export interface components {
         BundleConflictModel: {
             /**
              * Kind
+             * @description Conflict category detected while validating the bundle.
              * @enum {string}
              */
             kind: "andes-version" | "addfile-missing" | "sha-mismatch";
             /**
              * Severity
+             * @description ``warning`` conflicts can be overridden with ``force_resolve``; ``blocker`` conflicts prevent the import entirely.
              * @enum {string}
              */
             severity: "warning" | "blocker";
-            /** Message */
+            /**
+             * Message
+             * @description Human-readable explanation of the conflict.
+             */
             message: string;
-            /** Filename */
+            /**
+             * Filename
+             * @description Workspace-relative case filename the conflict refers to, when applicable.
+             */
             filename?: string | null;
             /**
              * Bundle Meta
@@ -1472,9 +1480,15 @@ export interface components {
             workspace_meta?: {
                 [key: string]: unknown;
             } | null;
-            /** Bundle Andes Version */
+            /**
+             * Bundle Andes Version
+             * @description ANDES version recorded in the bundle manifest. Populated for ``andes-version``.
+             */
             bundle_andes_version?: string | null;
-            /** Current Andes Version */
+            /**
+             * Current Andes Version
+             * @description ANDES version installed on this server. Populated for ``andes-version``.
+             */
             current_andes_version?: string | null;
         };
         /**
@@ -1511,17 +1525,32 @@ export interface components {
          * @description ``BundleImportPlan`` shape echoed in both plan and committed responses.
          */
         BundleImportPlanModel: {
-            /** Manifest */
+            /**
+             * Manifest
+             * @description Parsed ``manifest.json`` from the bundle, echoed verbatim.
+             */
             manifest: {
                 [key: string]: unknown;
             };
-            /** Case Files */
+            /**
+             * Case Files
+             * @description Case filenames contained in the bundle (workspace-relative).
+             */
             case_files: string[];
-            /** Conflicts */
+            /**
+             * Conflicts
+             * @description Conflicts detected between the bundle and this server/workspace.
+             */
             conflicts?: components["schemas"]["BundleConflictModel"][];
-            /** Blocked */
+            /**
+             * Blocked
+             * @description ``true`` if any conflict has ``blocker`` severity — the import cannot proceed.
+             */
             blocked: boolean;
-            /** Has Conflicts */
+            /**
+             * Has Conflicts
+             * @description ``true`` if ``conflicts`` is non-empty.
+             */
             has_conflicts: boolean;
         };
         /**
@@ -1535,8 +1564,12 @@ export interface components {
              * @enum {string}
              */
             status: "plan" | "committed";
+            /** @description The validation plan (conflicts, case files, manifest). */
             plan: components["schemas"]["BundleImportPlanModel"];
-            /** Warnings */
+            /**
+             * Warnings
+             * @description Non-blocking warnings emitted during commit (e.g. overridden conflicts).
+             */
             warnings?: string[];
             /**
              * Case Filename
@@ -2306,7 +2339,10 @@ export interface components {
          * @description Response body for ``GET /sessions/{id}/snapshots``.
          */
         ListSnapshotsResponse: {
-            /** Snapshots */
+            /**
+             * Snapshots
+             * @description Saved snapshots for this session's case, newest first.
+             */
             snapshots?: components["schemas"]["SnapshotListEntry"][];
         };
         /**
@@ -2594,6 +2630,7 @@ export interface components {
              * @description Count of disturbance specs re-applied from the snapshot metadata onto the new System.
              */
             disturbances_replayed: number;
+            /** @description Sidecar metadata of the restored snapshot. */
             metadata: components["schemas"]["SnapshotMetadataModel"];
             /**
              * Job Id
@@ -2672,8 +2709,12 @@ export interface components {
          * @description Response body for ``POST /sessions/{id}/snapshot``.
          */
         SaveSnapshotResponse: {
-            /** Name */
+            /**
+             * Name
+             * @description Snapshot name as saved (unique per session workspace).
+             */
             name: string;
+            /** @description Sidecar metadata written alongside the snapshot. */
             metadata: components["schemas"]["SnapshotMetadataModel"];
             /**
              * Dill Bytes
@@ -2850,22 +2891,40 @@ export interface components {
          * @description One entry in the ``GET /sessions/{id}/snapshots`` response.
          */
         SnapshotListEntry: {
-            /** Name */
+            /**
+             * Name
+             * @description Snapshot name.
+             */
             name: string;
-            /** Saved At */
+            /**
+             * Saved At
+             * @description ISO-8601 UTC timestamp of the save.
+             */
             saved_at: string;
-            /** Has Pflow */
+            /**
+             * Has Pflow
+             * @description Whether a converged power flow existed at save time.
+             */
             has_pflow: boolean;
-            /** Has Tds */
+            /**
+             * Has Tds
+             * @description Whether a TDS run had completed at save time.
+             */
             has_tds: boolean;
             /**
              * Has Dill
              * @description Whether the dill blob is present on disk. False when only the sidecar JSON survives (e.g., manual half-delete) — the snapshot is still restorable via the slow replay path.
              */
             has_dill: boolean;
-            /** Andes Version */
+            /**
+             * Andes Version
+             * @description ANDES version that produced the snapshot.
+             */
             andes_version: string;
-            /** Disturbance Count */
+            /**
+             * Disturbance Count
+             * @description Number of disturbance specs recorded in the snapshot metadata.
+             */
             disturbance_count: number;
         };
         /**
@@ -2873,23 +2932,47 @@ export interface components {
          * @description Sidecar JSON metadata shape echoed in save/restore/list responses.
          */
         SnapshotMetadataModel: {
-            /** Andes Version */
+            /**
+             * Andes Version
+             * @description ANDES version that produced the snapshot.
+             */
             andes_version: string;
-            /** Andes App Version */
+            /**
+             * Andes App Version
+             * @description andes-app version that produced the snapshot.
+             */
             andes_app_version: string;
-            /** Case Filename */
+            /**
+             * Case Filename
+             * @description Workspace-relative case filename loaded when the snapshot was saved.
+             */
             case_filename: string | null;
-            /** Case Sha256 */
+            /**
+             * Case Sha256
+             * @description SHA-256 of the case file at save time (drift detection on restore).
+             */
             case_sha256: string | null;
-            /** Disturbance Log */
+            /**
+             * Disturbance Log
+             * @description Disturbance specs active at save time; replayed on the fallback restore path.
+             */
             disturbance_log?: {
                 [key: string]: unknown;
             }[];
-            /** Saved At */
+            /**
+             * Saved At
+             * @description ISO-8601 UTC timestamp of the save.
+             */
             saved_at: string;
-            /** Has Pflow */
+            /**
+             * Has Pflow
+             * @description Whether a converged power flow existed at save time.
+             */
             has_pflow: boolean;
-            /** Has Tds */
+            /**
+             * Has Tds
+             * @description Whether a TDS run had completed at save time.
+             */
             has_tds: boolean;
         } & {
             [key: string]: unknown;
@@ -3339,15 +3422,6 @@ export interface operations {
                     "application/json": components["schemas"]["SessionList"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     createSession: {
@@ -3366,15 +3440,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionDescriptor"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Body included a client-supplied session_id (rejected). */
@@ -3417,15 +3482,6 @@ export interface operations {
                     "application/json": components["schemas"]["SessionDescriptor"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -3463,15 +3519,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
             };
             /** @description Validation Error */
             422: {
@@ -3517,15 +3564,6 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -3564,15 +3602,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TopologySummary"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or no case loaded. */
@@ -3625,15 +3654,6 @@ export interface operations {
                     "application/json": components["schemas"]["AlterableParamsResponse"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed, OR the requested model name is not present on the loaded ``System``. */
             404: {
                 headers: {
@@ -3683,15 +3703,6 @@ export interface operations {
                     "application/json": components["schemas"]["TopologySummary"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -3739,15 +3750,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConnectivityResponse"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -3803,15 +3805,6 @@ export interface operations {
                     "application/json": components["schemas"]["PflowResult"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -3859,15 +3852,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PflowResult"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -3919,15 +3903,6 @@ export interface operations {
                     "application/json": components["schemas"]["ListDisturbancesResponse"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -3970,15 +3945,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AddDisturbancesResponse"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -4028,15 +3994,6 @@ export interface operations {
                     "application/json": components["schemas"]["TopologySchema"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     addElement: {
@@ -4061,15 +4018,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ElementCreated"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -4136,15 +4084,6 @@ export interface operations {
                     "application/json": components["schemas"]["TopologyEntry"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found, or no element of the given model+idx exists in the loaded System. */
             404: {
                 headers: {
@@ -4205,15 +4144,6 @@ export interface operations {
                     "application/json": components["schemas"]["TopologySummary"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found, or no element of the given model+idx exists in the loaded System. */
             404: {
                 headers: {
@@ -4261,15 +4191,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BlankSystemResponse"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -4323,15 +4244,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SaveCaseResponse"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or no case loaded. */
@@ -4392,15 +4304,6 @@ export interface operations {
                     "application/json": components["schemas"]["TopologySummary"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -4448,15 +4351,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CloneInitResponse"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -4513,15 +4407,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CloneEditResponse"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found, or no device of the given model+idx exists. */
@@ -4582,15 +4467,6 @@ export interface operations {
                     "application/json": components["schemas"]["CloneEditResponse"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -4638,15 +4514,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CloneEditResponse"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -4700,15 +4567,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CloneSaveAsResponse"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -4769,15 +4627,6 @@ export interface operations {
                     "application/json": components["schemas"]["CloneResetResponse"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -4827,15 +4676,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CloneDiffResponse"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -4891,15 +4731,6 @@ export interface operations {
                     "application/json": components["schemas"]["TdsBatchResult"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -4949,15 +4780,6 @@ export interface operations {
                     "application/json": components["schemas"]["AbortResponse"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -4996,15 +4818,6 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceFileList"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     getWorkspaceLayout: {
@@ -5030,15 +4843,6 @@ export interface operations {
             };
             /** @description Workspace path validation failed. */
             400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5098,15 +4902,6 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Body exceeds the 256 KB sidecar cap. */
             413: {
                 headers: {
@@ -5149,15 +4944,6 @@ export interface operations {
                 };
                 content: {
                     "application/zip": unknown;
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -5213,15 +4999,6 @@ export interface operations {
                     "application/json": components["schemas"]["SaveSnapshotResponse"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -5275,15 +5052,6 @@ export interface operations {
                     "application/json": components["schemas"]["RestoreSnapshotResponse"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session or snapshot not found. */
             404: {
                 headers: {
@@ -5333,15 +5101,6 @@ export interface operations {
                     "application/json": components["schemas"]["ListSnapshotsResponse"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -5380,15 +5139,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
             };
             /** @description Session or snapshot not found. */
             404: {
@@ -5445,15 +5195,6 @@ export interface operations {
             };
             /** @description Bundle is not a valid ZIP archive. */
             400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5522,15 +5263,6 @@ export interface operations {
                     "application/json": components["schemas"]["ReportResponse"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -5593,15 +5325,6 @@ export interface operations {
                     "application/json": components["schemas"]["EigResultResponse"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -5652,15 +5375,6 @@ export interface operations {
                     "application/json": components["schemas"]["EigParticipationResponse"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found, OR ``mode_idx`` is out of range for the current EIG result. */
             404: {
                 headers: {
@@ -5708,15 +5422,6 @@ export interface operations {
                 };
                 content: {
                     "application/octet-stream": unknown;
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -5772,15 +5477,6 @@ export interface operations {
                     "application/json": components["schemas"]["CpfResultResponse"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -5832,15 +5528,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CpfResultResponse"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -5896,15 +5583,6 @@ export interface operations {
                     "application/json": components["schemas"]["SeMeasurementsGeneratedResponse"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -5958,15 +5636,6 @@ export interface operations {
                     "application/json": components["schemas"]["SeResultResponse"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -6014,15 +5683,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListPmusResponse"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -6078,15 +5738,6 @@ export interface operations {
                     "application/json": components["schemas"]["TopologyEntry"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -6134,15 +5785,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
             };
             /** @description Session not found OR no PMU with that idx. */
             404: {
@@ -6192,15 +5834,6 @@ export interface operations {
                 };
                 content: {
                     "text/csv": unknown;
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -6254,15 +5887,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UploadProfileResponse"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -6332,15 +5956,6 @@ export interface operations {
                     "application/json": components["schemas"]["ListProfilesResponse"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -6394,15 +6009,6 @@ export interface operations {
                     "application/json": components["schemas"]["TopologyEntry"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -6450,15 +6056,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
             };
             /** @description Session not found OR no TimeSeries with that idx. */
             404: {
@@ -6511,15 +6108,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StartSweepResponse"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session not found or already closed. */
@@ -6575,15 +6163,6 @@ export interface operations {
                     "application/json": components["schemas"]["JobRecordSchema"][];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session not found or already closed. */
             404: {
                 headers: {
@@ -6625,15 +6204,6 @@ export interface operations {
                     "application/json": components["schemas"]["JobRecordSchema"];
                 };
             };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Session or job not found. */
             404: {
                 headers: {
@@ -6673,15 +6243,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobRecordSchema"];
-                };
-            };
-            /** @description Missing or invalid X-Andes-Token. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description Session or job not found. */
