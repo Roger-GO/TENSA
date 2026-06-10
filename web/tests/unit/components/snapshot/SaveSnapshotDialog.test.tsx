@@ -250,7 +250,9 @@ describe('<SaveSnapshotDialog /> — keyboard scoping (Unit 6)', () => {
   });
 
   it('a global hotkey opted in via enableOnFormTags DOES fire from inside the input', async () => {
-    const user = userEvent.setup();
+    // delay:null types synchronously — the default inter-key delay drops
+    // keystrokes when the suite saturates the CPU.
+    const user = userEvent.setup({ delay: null });
     const palette = vi.fn();
 
     function TestHarness() {
