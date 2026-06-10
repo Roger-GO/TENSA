@@ -34,7 +34,7 @@ import os
 import re
 import tempfile
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -817,6 +817,19 @@ class Wrapper:
                 params["M"] = 2.0 * float(params.pop("H"))
             except (TypeError, ValueError):
                 params.pop("H", None)
+
+        # GENROU reactance-ordering guard: merge the user's params over the
+        # ANDES defaults and require xd > xd1 > xd2 > xl (and the q-axis
+        # equivalent) BEFORE the device reaches ``ss.add``. ANDES accepts a
+        # violating set silently and the TDS later goes numerically unstable;
+        # rejecting here with an actionable 422 names the silent default that
+        # conflicts with the user's explicit values.
+        if model == "GENROU":
+            genrou_defaults = {
+                name: float(getattr(ss.GENROU, name).default)
+                for name in _GENROU_REACTANCE_NAMES
+            }
+            _validate_genrou_reactances(params, genrou_defaults)
 
         # Snapshot the params for replay BEFORE ANDES gets a chance to
         # mutate the dict in-place — ``ss.add`` pops ``idx`` (and possibly
@@ -3621,6 +3634,19 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         ParamMeta("xq", "number", unit="pu"),
         ParamMeta("xd1", "number", unit="pu"),
         ParamMeta("xq1", "number", unit="pu"),
+        # Subtransient reactances + open-circuit time constants (full
+        # standard GENROU parameter set; names verified against ANDES
+        # ``System().GENROU.params``). Optional — ANDES carries defaults —
+        # but ``add_element`` validates the merged reactance ordering
+        # (xd > xd1 > xd2 > xl and xq > xq1 > xq2 > xl) so a textbook
+        # transient set doesn't silently conflict with subtransient
+        # defaults and destabilise the TDS.
+        ParamMeta("xd2", "number", unit="pu"),
+        ParamMeta("xq2", "number", unit="pu"),
+        ParamMeta("Td10", "number", unit="s"),
+        ParamMeta("Td20", "number", unit="s"),
+        ParamMeta("Tq10", "number", unit="s"),
+        ParamMeta("Tq20", "number", unit="s"),
     ),
     "GENCLS": (
         ParamMeta("idx", "string", required=True),
@@ -4155,6 +4181,78 @@ def param_metadata_for_form(model: str) -> tuple[ParamMeta, ...]:
     polymorphic form generator (Unit 6).
     """
     return _PARAMS_BY_MODEL.get(model, ())
+
+
+# GENROU reactance-ordering chains. Standard round-rotor machine physics:
+# synchronous > transient > subtransient > leakage, on both axes. ANDES does
+# not enforce this at ``ss.add`` time; a violation only surfaces later as a
+# numerically unstable (or outright wrong) TDS.
+_GENROU_REACTANCE_CHAINS: tuple[tuple[str, ...], ...] = (
+    ("xd", "xd1", "xd2", "xl"),
+    ("xq", "xq1", "xq2", "xl"),
+)
+
+# All GENROU reactance params participating in the ordering check.
+_GENROU_REACTANCE_NAMES: tuple[str, ...] = (
+    "xl", "xd", "xq", "xd1", "xq1", "xd2", "xq2",
+)
+
+
+def _validate_genrou_reactances(
+    params: Mapping[str, Any], defaults: Mapping[str, float]
+) -> None:
+    """Validate GENROU reactance ordering on the user+default merged set.
+
+    ``params`` is the user's (whitelisted) add-element payload; ``defaults``
+    maps each reactance name to the ANDES default that applies when the user
+    omitted it. The merged values must satisfy the d-axis chain
+    ``xd > xd1 > xd2 > xl`` and the q-axis chain ``xq > xq1 > xq2 > xl``.
+
+    The danger scenario this protects against: a researcher enters textbook
+    *transient* values (e.g. ``xd1=0.0608``) without the subtransient set, so
+    ANDES's defaults (``xd2=0.3``) silently violate the ordering and the TDS
+    goes numerically unstable. The error message names the offending pair,
+    flags which value is a silent default, and says how to fix it.
+
+    Raises :class:`ElementValidationError` (→ HTTP 422) on violation.
+    """
+    merged: dict[str, float] = {}
+    user_set: set[str] = set()
+    for name in _GENROU_REACTANCE_NAMES:
+        if name in params and params[name] is not None:
+            try:
+                merged[name] = float(params[name])
+            except (TypeError, ValueError) as exc:
+                raise ElementValidationError(
+                    f"GENROU param {name!r} must be a number; "
+                    f"got {params[name]!r}"
+                ) from exc
+            user_set.add(name)
+        else:
+            merged[name] = float(defaults.get(name, 0.0))
+
+    for chain in _GENROU_REACTANCE_CHAINS:
+        for hi, lo in zip(chain, chain[1:], strict=False):
+            if merged[hi] > merged[lo]:
+                continue
+            chain_str = " > ".join(chain)
+            silent_defaults = [n for n in (hi, lo) if n not in user_set]
+            if silent_defaults:
+                origin = (
+                    f" ({' and '.join(silent_defaults)} "
+                    f"{'is the ANDES default' if len(silent_defaults) == 1 else 'are the ANDES defaults'} "
+                    "because you did not set "
+                    f"{'it' if len(silent_defaults) == 1 else 'them'})"
+                )
+            else:
+                origin = ""
+            raise ElementValidationError(
+                f"GENROU reactances must satisfy {chain_str}; "
+                f"got {hi}={merged[hi]:g} <= {lo}={merged[lo]:g}{origin}. "
+                "Set xd2/xq2 (and Td10/Td20/Tq10/Tq20 as needed) explicitly "
+                "to match your machine data, or leave the whole reactance "
+                "set at defaults."
+            )
 
 
 def _coerce_scalar(value: Any) -> ParamValue | None:

@@ -30,6 +30,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from andes_app.api.app import make_app
+from andes_app.core.examples import seed_example_cases
 from andes_app.security.paths import ensure_workspace
 
 app = typer.Typer(
@@ -133,6 +134,13 @@ def serve(
 
     # Resolve workspace + ensure it exists with safe permissions
     canonical_workspace = ensure_workspace(workspace)
+
+    # First-run nicety: an EMPTY workspace (zero supported case files) gets
+    # a small set of bundled ANDES example cases so the file picker isn't
+    # blank. Best-effort — seed_example_cases never raises.
+    seeded = seed_example_cases(canonical_workspace)
+    if seeded:
+        log.info("workspace was empty; seeded example cases: %s", ", ".join(seeded))
 
     # Parse --allow-origin entries into the (host, origin) pair the app
     # factory expects. We split on the URL host:port so the Host header
