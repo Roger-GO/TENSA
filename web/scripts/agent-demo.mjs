@@ -308,29 +308,24 @@ async function main() {
   }
 
   // -- show off the canvas: fit, zoom, and reposition a node ----------------
+  // Short per-action timeouts so a missed control fails fast (default is 30s,
+  // which would stall the video) rather than blocking on retries.
+  const tap = (sel) =>
+    page
+      .locator(sel)
+      .click({ timeout: 2500 })
+      .catch(() => {});
   await caption(page, 'The 9 buses are placed', 'Pan, zoom, and drag any node to lay it out');
-  await page
-    .locator('button[aria-label="Fit View"]')
-    .click()
-    .catch(() => {});
-  await sleep(1400);
-  await page
-    .locator('button[aria-label="Zoom In"]')
-    .click()
-    .catch(() => {});
-  await page
-    .locator('button[aria-label="Zoom In"]')
-    .click()
-    .catch(() => {});
+  await tap('button[aria-label="Fit View"]');
   await sleep(1200);
+  await tap('button[aria-label="Zoom In"]');
+  await tap('button[aria-label="Zoom In"]');
+  await sleep(1100);
   await caption(page, 'Dragging a bus to tidy the layout', 'Node positions are yours to arrange');
   await moveNode(page, 'bus-node-5', 820, 300).catch(() => {});
   await sleep(900);
-  await page
-    .locator('button[aria-label="Fit View"]')
-    .click()
-    .catch(() => {});
-  await sleep(1200);
+  await tap('button[aria-label="Fit View"]');
+  await sleep(1100);
 
   // -- transformers (drag the Transformer tile) -----------------------------
   for (const t of TRANSFORMERS) {
