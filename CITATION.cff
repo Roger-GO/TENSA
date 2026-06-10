@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use ANDES App in your work, please cite it using the metadata below."
+title: "ANDES App"
+abstract: "An interactive, web-based workbench for power system modeling, simulation, and analysis, built on ANDES."
+type: software
+authors:
+  - family-names: "Gracia"
+    given-names: "Roger"
+repository-code: "https://github.com/Roger-GO/ANDES_App"
+url: "https://github.com/Roger-GO/ANDES_App"
+license: GPL-3.0-or-later
+version: "0.3.0"
+date-released: "2026-06-09"
+references:
+  - type: article
+    title: "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis"
+    authors:
+      - family-names: "Cui"
+        given-names: "Hantao"
+      - family-names: "Li"
+        given-names: "Fangxing"
+      - family-names: "Tomsovic"
+        given-names: "Kevin"
+    journal: "IEEE Transactions on Power Systems"
+    volume: 36
+    issue: 2
+    start: 1373
+    end: 1384
+    year: 2021
+    doi: "10.1109/TPWRS.2020.3017019"
