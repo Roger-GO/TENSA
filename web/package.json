@@ -4,7 +4,7 @@
   "private": true,
   "description": "ANDES App v0.1 UI — load case + auto-SLD + run PF + results overlay.",
   "type": "module",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "engines": {
     "node": ">=22",
     "pnpm": ">=9"

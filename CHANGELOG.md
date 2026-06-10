@@ -5,8 +5,11 @@ All notable changes to ANDES App are documented here. The format follows [Keep a
 ## [Unreleased]
 
 ### Added
-- Showcase demo: a captioned video of an agent building WSCC 9-bus from scratch through the UI and running every analysis, embedded in a rewritten, production-ready README with a feature comparison against ANDES alone.
+- Showcase demo: a captioned video of an agent building WSCC 9-bus from scratch through the UI and running every analysis, embedded in a rewritten, production-ready README.
 - First-run example cases: an empty workspace is auto-seeded with IEEE-14, Kundur, and WSCC-9.
+
+### Changed
+- Relicensed from MIT to **GNU GPL v3.0** to match ANDES, which ANDES App is built on. Added an ANDES citation (Cui et al., 2021) to the README.
 - GENROU exposes its full subtransient reactance + time-constant set, with d/q reactance-ordering validation that names the offending value (prevents textbook transient values silently clashing with unset subtransient defaults).
 - Eigenvalue scatter: numeric axis ticks + gridlines, points colored by damping band with a legend, and an "All modes" filter toggle so a well-damped system isn't an empty plot.
 - Bus data grid now shows net per-bus P/Q computed from the power-flow result.
