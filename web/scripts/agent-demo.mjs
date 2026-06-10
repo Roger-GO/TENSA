@@ -346,16 +346,20 @@ async function main() {
     'Dragging each node into place — the layout is yours to lay out',
   );
   // Canonical target positions (client px, panel closed). Keyed by bus idx.
+  // Spaced so the bus blocks (≈130×70 px, plus the generator/load/controller
+  // nodes that hang off them) don't overlap: ≥150 px apart horizontally,
+  // ≥130 px vertically. Bus 4 sits beside the load buses (5/6) rather than
+  // sandwiched between them and bus 1.
   const CANON = {
-    2: [480, 175],
-    3: [1075, 175],
-    7: [480, 325],
-    8: [780, 325],
-    9: [1075, 325],
-    5: [610, 445],
-    6: [950, 445],
-    4: [780, 495],
-    1: [780, 575],
+    2: [440, 150],
+    3: [1110, 150],
+    7: [440, 300],
+    8: [775, 290],
+    9: [1110, 300],
+    5: [610, 430],
+    6: [950, 430],
+    4: [775, 440],
+    1: [775, 575],
   };
   for (const idx of [1, 4, 5, 6, 8, 7, 9, 2, 3]) {
     const [x, y] = CANON[idx];
