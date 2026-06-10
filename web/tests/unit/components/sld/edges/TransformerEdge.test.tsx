@@ -161,7 +161,7 @@ describe('<TransformerEdge />', () => {
     expect(circles[1]?.getAttribute('cx')).toBe('114');
   });
 
-  it('honors stride offsets on east/west sides as vertical shifts', () => {
+  it('fans east/west stride offsets INWARD along the bar (keeps taps on the busbar)', () => {
     const { container } = renderEdge({
       data: {
         sourceSide: 'east',
@@ -171,9 +171,12 @@ describe('<TransformerEdge />', () => {
       },
     });
     const circles = container.querySelectorAll('circle');
-    // east side stride shifts y by +14.
-    expect(circles[0]?.getAttribute('cy')).toBe('14');
-    expect(circles[1]?.getAttribute('cy')).toBe('14');
+    // east side fans inward (−14 px on x); y stays on the bar so the
+    // endpoint doesn't float off a 7px-tall busbar.
+    expect(circles[0]?.getAttribute('cx')).toBe('-14');
+    expect(circles[0]?.getAttribute('cy')).toBe('0');
+    expect(circles[1]?.getAttribute('cx')).toBe('86');
+    expect(circles[1]?.getAttribute('cy')).toBe('0');
   });
 
   it('builds a polyline path when bendPoints are supplied', () => {

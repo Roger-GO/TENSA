@@ -123,14 +123,27 @@ describe('<StubEdge />', () => {
     expect(circle?.getAttribute('cy')).toBe('0');
   });
 
-  it('applies a vertical stride offset on east/west sides', () => {
-    // stride=1, side=east → +14 px on y; cx unchanged, cy shifts.
+  it('fans east/west stubs INWARD along the bar (keeps the tap on the thin busbar)', () => {
+    // stride=1, side=east → the tap fans inward along the bar (toward
+    // centre): cx shifts −14 (leftward, inward from the right end), cy
+    // stays on the bar. The old behaviour offset cy and floated the dot
+    // off a 7px-tall busbar.
     const { container } = renderEdge({
       data: { busSide: 'east', targetStride: 1 },
     });
     const circle = container.querySelector('circle');
-    expect(circle?.getAttribute('cx')).toBe('100');
-    expect(circle?.getAttribute('cy')).toBe('14');
+    expect(circle?.getAttribute('cx')).toBe('86');
+    expect(circle?.getAttribute('cy')).toBe('0');
+  });
+
+  it('fans a west stub inward (rightward) and stays on the bar y', () => {
+    // stride=1, side=west → inward is +14 (rightward from the left end).
+    const { container } = renderEdge({
+      data: { busSide: 'west', targetStride: 1 },
+    });
+    const circle = container.querySelector('circle');
+    expect(circle?.getAttribute('cx')).toBe('114');
+    expect(circle?.getAttribute('cy')).toBe('0');
   });
 
   it('alternates stride direction (even stride flips sign)', () => {

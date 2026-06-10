@@ -4,7 +4,7 @@ import type { EdgeProps } from '@xyflow/react';
 import { iconForModel } from '@/icons/iec60617/manifest';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
-import type { Side } from '../graph';
+import { type Side, strideShift } from '../graph';
 import { getLineOverlayState } from '../overlay';
 
 /**
@@ -32,17 +32,7 @@ interface EdgeData {
   winding?: '2w' | '3w';
 }
 
-const STRIDE_PIXELS = 14;
 const ICON_SIZE = 24;
-
-function strideShift(side: Side | undefined, stride: number): { dx: number; dy: number } {
-  if (!side || stride === 0) return { dx: 0, dy: 0 };
-  const sign = stride % 2 === 1 ? 1 : -1;
-  const magnitude = Math.ceil(stride / 2);
-  const offset = sign * magnitude * STRIDE_PIXELS;
-  if (side === 'north' || side === 'south') return { dx: offset, dy: 0 };
-  return { dx: 0, dy: offset };
-}
 
 function buildPolyline(points: [number, number][]): string {
   if (points.length < 2) return '';

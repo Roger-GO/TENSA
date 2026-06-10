@@ -289,6 +289,7 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
+                data-testid="save-overwrite"
                 checked={overwrite}
                 onChange={(e) => setOverwrite(e.target.checked)}
                 disabled={saveMutation.isPending}

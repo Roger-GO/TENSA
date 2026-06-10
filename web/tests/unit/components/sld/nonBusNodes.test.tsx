@@ -183,6 +183,29 @@ describe('buildGraph — non-bus nodes', () => {
     });
   });
 
+  it('anchors a device to its parent bus DRAG OVERRIDE, not the stale layout coord', () => {
+    // When the user drags a bus, the bus renders at its drag override
+    // (not the auto-layout `coords` position). A generator on that bus
+    // must follow the bar — otherwise moving a bus strands its devices
+    // at the old grid position and they scatter off-canvas.
+    const topology = makeTopology({
+      buses: [bus(1)],
+      generators: [gen('GEN_1', 1)],
+    });
+    const { nodes } = buildGraph(
+      topology,
+      { '1': { x: 0, y: 100 } },
+      { dragOverrides: { '1': { x: 900, y: 500 } } },
+    );
+    const genNode = nodes.find((n) => n.type === 'generator');
+    expect(genNode).toBeDefined();
+    // Generator sits just NORTH of the bus's *moved* position (≈900,500),
+    // not anchored near the original (0,100).
+    expect(Math.abs((genNode?.position.x ?? 0) - 900)).toBeLessThan(45);
+    expect(genNode?.position.y).toBeLessThan(500); // north of the moved bus
+    expect(genNode?.position.y).toBeGreaterThan(380); // …but near it, not at y≈100
+  });
+
   it('honors sidecar non_bus_coordinates overrides', () => {
     const topology = makeTopology({
       buses: [bus(1)],

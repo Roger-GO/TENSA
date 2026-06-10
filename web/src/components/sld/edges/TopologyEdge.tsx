@@ -3,7 +3,7 @@ import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
-import type { Side } from '../graph';
+import { type Side, strideShift } from '../graph';
 import { getLineOverlayState } from '../overlay';
 import { LineFlowArrow } from './LineFlowArrow';
 
@@ -32,26 +32,6 @@ interface EdgeData {
   targetSide?: Side;
   sourceStride?: number;
   targetStride?: number;
-}
-
-/** Pixels per stride step. Tuned to be clearly perceptible at default zoom. */
-const STRIDE_PIXELS = 14;
-
-/**
- * Compute a perpendicular offset (in canvas units) for the given side.
- * stride 0 leaves the endpoint untouched; stride n shifts the endpoint
- * `n * STRIDE_PIXELS` along the side's perpendicular axis. The shift
- * direction (positive vs. negative) alternates per stride so multiple
- * edges fan symmetrically rather than drifting one-sided.
- */
-function strideShift(side: Side | undefined, stride: number): { dx: number; dy: number } {
-  if (!side || stride === 0) return { dx: 0, dy: 0 };
-  // Symmetric fan: stride 1 → +1, stride 2 → -1, stride 3 → +2, ...
-  const sign = stride % 2 === 1 ? 1 : -1;
-  const magnitude = Math.ceil(stride / 2);
-  const offset = sign * magnitude * STRIDE_PIXELS;
-  if (side === 'north' || side === 'south') return { dx: offset, dy: 0 };
-  return { dx: 0, dy: offset };
 }
 
 export const TopologyEdge = memo(function TopologyEdge({
