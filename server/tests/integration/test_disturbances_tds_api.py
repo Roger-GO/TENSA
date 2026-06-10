@@ -73,6 +73,20 @@ async def _create_session_and_load(
 
 
 @pytest.mark.integration
+async def test_list_disturbances_without_case_returns_200_empty(
+    client: httpx.AsyncClient,
+) -> None:
+    """Listing is a read: with no case loaded the truthful answer is an empty
+    list (200), not a 409 — browsers log non-2xx fetches as console errors."""
+    resp = await client.post("/api/sessions")
+    assert resp.status_code == 201, resp.text
+    sid = str(resp.json()["session_id"])
+    resp = await client.get(f"/api/sessions/{sid}/disturbances")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"disturbances": []}
+
+
+@pytest.mark.integration
 async def test_add_fault_pre_setup_returns_idx(client: httpx.AsyncClient) -> None:
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp = await client.post(

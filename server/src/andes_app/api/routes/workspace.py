@@ -5,7 +5,9 @@ Three endpoints:
 - ``GET /workspace/files`` — enumerate supported case files in the workspace
   root (non-recursive, alphabetical, dotfiles + symlinks excluded).
 - ``GET /workspace/layout?case_path=<rel>`` — read the layout sidecar JSON
-  adjacent to the case file (``<case_path>.layout.json``). 404 if absent.
+  adjacent to the case file (``<case_path>.layout.json``). 200 with a JSON
+  ``null`` body when absent (a missing sidecar is the normal first-run
+  state, not an error — a 404 only fills the browser console with noise).
 - ``PUT /workspace/layout?case_path=<rel>`` — write the layout sidecar
   atomically via tempfile + ``os.replace``, mode 0600. 256 KB cap.
 
@@ -146,13 +148,12 @@ async def list_files(
     openapi_extra={"x-andes-app-gui-location": "workspace"},
     operation_id="getWorkspaceLayout",
     summary="Read the SLD layout sidecar JSON adjacent to a case file.",
-    response_model=SidecarLayout,
+    response_model=SidecarLayout | None,
     responses={
         400: {
             "model": ProblemDetails,
             "description": "Workspace path validation failed.",
         },
-        404: {"model": ProblemDetails, "description": "Sidecar not found."},
         422: {
             "model": ProblemDetails,
             "description": "Sidecar exists but does not match the SidecarLayout schema.",
@@ -168,7 +169,14 @@ async def get_layout(
             "with. The sidecar is read from ``<case_path>.layout.json``."
         ),
     ),
-) -> SidecarLayout:
+) -> SidecarLayout | None:
+    """Read the layout sidecar for ``case_path``.
+
+    A missing sidecar is the normal first-run state for any case, so it is
+    NOT an error: the endpoint returns 200 with a JSON ``null`` body (the
+    web client already maps "no sidecar" to a null layout; previously this
+    was a 404, which browsers log as a console error on every case open).
+    """
     workspace = _workspace(request)
     try:
         sidecar = _layout_sidecar_path(workspace, case_path)
@@ -178,10 +186,7 @@ async def get_layout(
             detail=str(exc),
         ) from exc
     if not sidecar.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"layout sidecar does not exist for {case_path!r}",
-        )
+        return None
     try:
         raw = sidecar.read_text(encoding="utf-8")
     except OSError as exc:

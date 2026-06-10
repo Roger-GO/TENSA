@@ -102,15 +102,18 @@ async def test_list_files_excludes_hidden_and_unknown_extensions(
 
 
 @pytest.mark.integration
-async def test_get_layout_returns_404_when_absent(
+async def test_get_layout_returns_200_null_when_absent(
     client_workspace: tuple[httpx.AsyncClient, Path],
 ) -> None:
+    """A missing sidecar is the normal first-run state — 200 with a JSON
+    ``null`` body, NOT a 404 (which browsers log as a console error)."""
     client, _ws = client_workspace
     resp = await client.get(
         "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
     )
-    assert resp.status_code == 404, resp.text
+    assert resp.status_code == 200, resp.text
+    assert resp.json() is None
 
 
 @pytest.mark.integration

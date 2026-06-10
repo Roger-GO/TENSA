@@ -293,6 +293,22 @@ async def test_list_snapshots_returns_empty_for_fresh_session(
 
 
 @pytest.mark.integration
+async def test_list_snapshots_without_case_returns_200_empty(
+    client: httpx.AsyncClient,
+) -> None:
+    """Listing is a read: with no case loaded the truthful answer is an
+    empty list (200, ``{"snapshots": []}``), not a 409 — browsers log
+    non-2xx fetches as console errors. The mutating snapshot endpoints
+    (save/restore/delete) keep their 409s."""
+    resp = await client.post("/api/sessions")
+    assert resp.status_code == 201, resp.text
+    sid = str(resp.json()["session_id"])
+    resp = await client.get(f"/api/sessions/{sid}/snapshots")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"snapshots": []}
+
+
+@pytest.mark.integration
 async def test_list_snapshots_returns_all_saved_for_case(
     client: httpx.AsyncClient,
 ) -> None:

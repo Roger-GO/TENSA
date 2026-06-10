@@ -272,6 +272,82 @@ def test_build_genrou_h_to_m_and_attach_controllers() -> None:
     assert pf.converged
 
 
+def _blank_session_with_genrou_prereqs() -> Wrapper:
+    """A blank session with the Bus + Slack a GENROU needs to attach to."""
+    w = Wrapper()
+    w.create_blank()
+    w.add_element("Bus", {"idx": "1", "name": "B1", "Vn": 16.5})
+    w.add_element(
+        "Slack",
+        {"idx": "1", "name": "S1", "bus": "1", "Sn": 100, "Vn": 16.5, "v0": 1.04},
+    )
+    return w
+
+
+@pytest.mark.integration
+def test_build_genrou_full_parameter_set_accepted() -> None:
+    """The full standard GENROU set (incl. subtransient reactances + OC time
+    constants) is whitelisted, ordering-validated, and lands on the device."""
+    w = _blank_session_with_genrou_prereqs()
+    entry = w.add_element(
+        "GENROU",
+        {
+            "idx": "G", "name": "G", "bus": "1", "gen": "1",
+            "Sn": 100, "Vn": 16.5, "H": 5,
+            "xl": 0.0336, "xd": 0.146, "xq": 0.0975,
+            "xd1": 0.0608, "xq1": 0.0969,
+            "xd2": 0.04, "xq2": 0.06,
+            "Td10": 8.96, "Td20": 0.075, "Tq10": 0.31, "Tq20": 0.06,
+        },
+    )
+    assert entry.kind == "GENROU"
+    g = w._ss.GENROU
+    uid = g.idx2uid("G")
+    assert g.xd2.v[uid] == 0.04
+    assert g.xq2.v[uid] == 0.06
+    assert g.Td10.v[uid] == 8.96
+    assert g.Tq20.v[uid] == 0.06
+
+
+@pytest.mark.integration
+def test_build_genrou_partial_textbook_set_rejected_actionably() -> None:
+    """Textbook transient values WITHOUT the subtransient set violate the
+    merged ordering (ANDES default xd2=0.3 > user xd1=0.0608) → 422 with an
+    actionable message naming the silent default. This is the exact scenario
+    that previously produced a numerically unstable TDS."""
+    from andes_app.core.errors import ElementValidationError
+
+    w = _blank_session_with_genrou_prereqs()
+    with pytest.raises(ElementValidationError) as ei:
+        w.add_element(
+            "GENROU",
+            {
+                "idx": "G", "name": "G", "bus": "1", "gen": "1",
+                "Sn": 100, "Vn": 16.5, "H": 5,
+                "xd": 0.146, "xd1": 0.0608, "xq": 0.0969, "xq1": 0.0969,
+            },
+        )
+    msg = str(ei.value)
+    assert "GENROU reactances must satisfy xd > xd1 > xd2 > xl" in msg
+    assert "got xd1=0.0608 <= xd2=0.3" in msg
+    assert "xd2 is the ANDES default because you did not set it" in msg
+    # Nothing was added — the System has no GENROU device.
+    assert w._ss.GENROU.n == 0
+
+
+@pytest.mark.integration
+def test_build_genrou_untouched_reactance_defaults_accepted() -> None:
+    """Leaving the whole reactance set at ANDES defaults passes validation
+    (the defaults are self-consistent)."""
+    w = _blank_session_with_genrou_prereqs()
+    w.add_element(
+        "GENROU",
+        {"idx": "G", "name": "G", "bus": "1", "gen": "1",
+         "Sn": 100, "Vn": 16.5, "H": 5},
+    )
+    assert w._ss.GENROU.n == 1
+
+
 @pytest.mark.integration
 def test_controller_schema_syn_link_uses_syn_idx() -> None:
     """An exciter/governor's machine link renders as a machine picker."""
