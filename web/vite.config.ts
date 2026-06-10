@@ -17,7 +17,9 @@ export default defineConfig({
     },
   },
   server: {
-    host: '127.0.0.1',
+    // Loopback by default; set VITE_HOST=0.0.0.0 to expose the dev server on
+    // your LAN (pair with `andes-app serve --allow-origin http://<lan-ip>:5173`).
+    host: process.env.VITE_HOST ?? '127.0.0.1',
     port: 5173,
     strictPort: true,
     proxy: {

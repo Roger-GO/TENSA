@@ -56,9 +56,9 @@ dev = [
 andes-app = "andes_app.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/rollerg97/ANDES_App"
-Documentation = "https://github.com/rollerg97/ANDES_App"
-Issues = "https://github.com/rollerg97/ANDES_App/issues"
+Homepage = "https://github.com/Roger-GO/ANDES_App"
+Documentation = "https://github.com/Roger-GO/ANDES_App"
+Issues = "https://github.com/Roger-GO/ANDES_App/issues"
 
 # Hatchling build target — src layout
 [tool.hatch.build.targets.wheel]
