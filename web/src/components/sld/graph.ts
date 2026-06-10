@@ -209,6 +209,68 @@ export interface StubAssignment {
  * entry in the resulting map. Caller treats absence as "fall back to
  * default React Flow handle pick".
  */
+/**
+ * Choose the vertical face (`north` / `south`) each bus's generators and
+ * loads hang off. The face points AWAY from the bus's branch neighbours:
+ * a bus that sits below its neighbours (e.g. the slack bus at the bottom
+ * of the diagram) gets `south`, so its machine hangs below it instead of
+ * shooting back up through the network it feeds. When a bus's branches
+ * are level with it (a purely horizontal tap — the mid-ring buses whose
+ * lines run left/right), the global vertical centroid breaks the tie so
+ * the device points into the more open half of the canvas rather than
+ * colliding with whatever is stacked directly beneath it.
+ *
+ * Used by BOTH `computeHandleAssignments` (to pick the stub's bus face)
+ * and `buildGraph` (to place the device node) — fed the same effective
+ * coords so the device and its stub always agree on the face.
+ *
+ * Only buses with a CLEAR signal get an entry; a bus with no branches
+ * sitting at the diagram centroid (e.g. a lone bus, or any case with no
+ * vertical structure) is omitted so the caller keeps the kind default
+ * (generator → north, load → south).
+ */
+export function computeDeviceVerticalSides(
+  topology: TopologySummary,
+  coords: CoordsByIdx,
+): Map<string, 'north' | 'south'> {
+  const yOf = (idx: string): number | undefined => coords[idx]?.y;
+  const ys = topology.buses
+    .map((b) => yOf(String(b.idx)))
+    .filter((y): y is number => y !== undefined);
+  const centroidY = ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : 0;
+  const neighbors = new Map<string, string[]>();
+  const link = (entry: TopologyEntry) => {
+    const t = entryTerminals(entry);
+    if (!t) return;
+    const a = String(t.from);
+    const b = String(t.to);
+    (neighbors.get(a) ?? neighbors.set(a, []).get(a)!).push(b);
+    (neighbors.get(b) ?? neighbors.set(b, []).get(b)!).push(a);
+  };
+  for (const line of topology.lines) link(line);
+  for (const trafo of topology.transformers) link(trafo);
+  // 12px guard so a near-level branch / near-centroid bus doesn't flip
+  // the side on jitter — below it, there's no clear signal.
+  const GUARD = 12;
+  const sides = new Map<string, 'north' | 'south'>();
+  for (const bus of topology.buses) {
+    const idx = String(bus.idx);
+    const by = yOf(idx);
+    if (by === undefined) continue;
+    const ny = (neighbors.get(idx) ?? []).map(yOf).filter((y): y is number => y !== undefined);
+    const nc = ny.length ? ny.reduce((a, b) => a + b, 0) / ny.length : null;
+    if (nc !== null && Math.abs(by - nc) > GUARD) {
+      // Clear vertical relationship to the branch neighbours.
+      sides.set(idx, by > nc ? 'south' : 'north');
+    } else if (Math.abs(by - centroidY) > GUARD) {
+      // Branches are level (or absent) but the bus is clearly off-centre.
+      sides.set(idx, by >= centroidY ? 'south' : 'north');
+    }
+    // else: no clear signal → omit → caller uses the kind default.
+  }
+  return sides;
+}
+
 export function computeHandleAssignments(
   topology: TopologySummary,
   coords: CoordsByIdx,
@@ -327,15 +389,20 @@ export function computeHandleAssignments(
       kind: 'shunt',
     },
   ];
+  // Generators/loads use the away-facing vertical side (so a bottom bus's
+  // machine hangs below it); shunts keep their fixed west tap.
+  const deviceSides = computeDeviceVerticalSides(topology, coords);
   for (const bucket of nonBusBucketsForStub) {
     for (const entry of bucket.entries) {
       const parentIdx = _busFromParam(entry, bucket.parentKey);
       if (parentIdx === null || !coords[parentIdx]) continue;
+      const busSide =
+        bucket.kind === 'shunt' ? bucket.kindSide : (deviceSides.get(parentIdx) ?? bucket.kindSide);
       const stubId = `stub-${bucket.kind}-${String(entry.idx)}`;
-      const clusterKey = `${parentIdx}|${bucket.kindSide}`;
+      const clusterKey = `${parentIdx}|${busSide}`;
       const stride = counts.get(clusterKey) ?? 0;
       counts.set(clusterKey, stride + 1);
-      stubs.set(stubId, { busSide: bucket.kindSide, stride });
+      stubs.set(stubId, { busSide, stride });
     }
   }
   return { branches, stubs };
@@ -534,9 +601,39 @@ function shiftAwayFrom(
   b: PushOutNode,
   overlap: { dx: number; dy: number },
   bound: CanvasBound | null,
+  parentBus: PushOutNode | null = null,
 ): { x: number; y: number } {
   if (b.kind === 'bus') return { x: b.x, y: b.y }; // Defensive — never push buses.
-  const dir = PUSH_DIR_FOR_KIND[b.kind];
+  // A generator / load overlapping a NON-parent bus: slide it LATERALLY
+  // along its own (horizontal N/S) bus face to dodge the obstacle, rather
+  // than ejecting it perpendicular — a perpendicular push travels PAST the
+  // obstructing bus and leaves a long stub crossing the diagram, whereas a
+  // lateral slide keeps the device at its short offset with a clean
+  // perpendicular stub. Direction = away from the obstacle's centre.
+  if (a.kind === 'bus' && (b.kind === 'generator' || b.kind === 'load')) {
+    const sign = b.x >= a.x ? 1 : -1;
+    const nx = b.x + sign * (overlap.dx + PUSH_OUT_SAFETY_GAP);
+    if (bound !== null && (nx < bound.minX || nx > bound.maxX)) {
+      // No lateral room — fall back to pushing along the stub axis, away
+      // from the parent bus so the device still doesn't cross its own bar.
+      const ySign = parentBus !== null ? (b.y >= parentBus.y ? 1 : -1) : b.y >= a.y ? 1 : -1;
+      return { x: b.x, y: b.y + ySign * (overlap.dy + PUSH_OUT_SAFETY_GAP) };
+    }
+    return { x: nx, y: b.y };
+  }
+  const baseDir = PUSH_DIR_FOR_KIND[b.kind];
+  // Orient a vertical push AWAY from the parent bus. Generators/loads now
+  // hang off whichever face points away from the network (see
+  // `computeDeviceVerticalSides`), so a fixed north/south push could shove
+  // a device straight across the bar it's wired to and into the diagram
+  // (a slack machine on a bottom bus was ejected up through its own
+  // feeder). Pushing away from the bus keeps the device on its side. For
+  // the default placements (north generator / south load) this resolves to
+  // the original sign, so existing layouts are unchanged.
+  const dir: PushDirSpec =
+    baseDir.axis === 'y' && parentBus !== null
+      ? { ...baseDir, sign: b.y >= parentBus.y ? 1 : -1 }
+      : baseDir;
   // Distance to clear the overlap on each axis, including the safety
   // gap. We always shift by enough so the bounding boxes break apart
   // with PUSH_OUT_SAFETY_GAP of clearance between them.
@@ -608,6 +705,7 @@ export function pushOutCollisions(
   // lookup when the caller queries the final position.
   const work: PushOutNode[] = inputs.map((n) => ({ ...n }));
   const buses = work.filter((n) => n.kind === 'bus');
+  const busById = new Map(buses.map((bus) => [bus.id, bus] as const));
   const bound = options.bound ?? computeCanvasBound(buses);
   // Non-bus nodes are the only candidates that move. We iterate every
   // pair (A, B) where B is non-bus and !locked; if (A, B) overlaps and
@@ -625,7 +723,8 @@ export function pushOutCollisions(
         if (a.kind === 'bus' && b.parentBusId === a.id) continue;
         const overlap = overlapAmount(a, b);
         if (overlap.dx === 0 || overlap.dy === 0) continue;
-        const next = shiftAwayFrom(a, b, overlap, bound);
+        const parentBus = b.parentBusId !== null ? (busById.get(b.parentBusId) ?? null) : null;
+        const next = shiftAwayFrom(a, b, overlap, bound, parentBus);
         if (next.x !== b.x || next.y !== b.y) {
           b.x = next.x;
           b.y = next.y;
@@ -656,8 +755,11 @@ export function pushOutCollisions(
  * override (Unit 9).
  */
 export const NON_BUS_OFFSETS = {
-  generator: { x: 0, y: -70, stackDx: 50, stackDy: -45 },
-  load: { x: 0, y: 70, stackDx: 50, stackDy: 45 },
+  // stackDx > footprint width (50) so two devices on one bus fan along the
+  // bar with a real gap — they don't overlap, so the push-out never has to
+  // separate them perpendicular (which would lengthen one machine's stub).
+  generator: { x: 0, y: -70, stackDx: 62, stackDy: -45 },
+  load: { x: 0, y: 70, stackDx: 62, stackDy: 45 },
   shunt: { x: -75, y: 55, stackDx: -50, stackDy: 30 },
 } as const satisfies Record<
   'generator' | 'load' | 'shunt',
@@ -855,6 +957,24 @@ export function buildGraph(
     },
   ];
 
+  // Device placement side (see `computeDeviceVerticalSides`). A generator
+  // / load hangs off the bus on the vertical face pointing AWAY from the
+  // bus's branch neighbours — so the slack machine on a bottom bus sits
+  // BELOW it (not shooting up through the network). Computed against the
+  // SAME effective coords the stub-side pass uses (drag overrides folded
+  // in) so the device and its stub always pick the same face.
+  const effCoords: CoordsByIdx =
+    Object.keys(branchDragOverrides).length === 0
+      ? coords
+      : (() => {
+          const merged: CoordsByIdx = { ...coords };
+          for (const [id, pos] of Object.entries(branchDragOverrides)) {
+            if (merged[id] !== undefined) merged[id] = pos;
+          }
+          return merged;
+        })();
+  const deviceSides = computeDeviceVerticalSides(topology, effCoords);
+
   // Per-(parentBus, kind) stack counter so two generators on the same bus
   // don't render at the same coord.
   const stackCounts = new Map<string, number>();
@@ -896,12 +1016,14 @@ export function buildGraph(
       // map to columns 0, 1, -1, 2 → roughly centered fan.
       const COL_SCHEDULE = [0, 1, -1, 2, -2, 3, -3];
       const colSigned = COL_SCHEDULE[col] ?? col;
-      // Vertical-neighbor stagger: bus rows alternating ±ROW_STAGGER
-      // so two stacked buses' children land on different x columns,
-      // even when both want to sit at busX (col=0). For non-zero
-      // colSigned the stagger is irrelevant; we only stagger col=0.
+      // Vertical-neighbor stagger: bus rows alternating ±ROW_STAGGER so
+      // two stacked buses' children land on different x columns. Applied to
+      // the WHOLE fan (every column), not just col 0 — staggering only col
+      // 0 narrowed the gap to the col-1 device and made the push-out shove
+      // one machine out perpendicular (a long stub). Shifting the whole fan
+      // preserves the inter-device gap while still offsetting solo devices.
       const rowParity = Math.round(parentCoord.y / 100) % 2 === 0 ? 1 : -1;
-      const rowStagger = colSigned === 0 ? rowParity * ROW_STAGGER_PIXELS : 0;
+      const rowStagger = rowParity * ROW_STAGGER_PIXELS;
       // Prefer the exact model-class match (`PV|1`); fall back to the
       // UI-category key (`generator|1`) so a sidecar that was saved
       // before a kind-edit still resolves the dragged coord. The dual-
@@ -909,8 +1031,17 @@ export function buildGraph(
       const modelKey = `${entry.kind}|${String(entry.idx)}`;
       const categoryKey = `${bucket.kind}|${String(entry.idx)}`;
       const sidecar = nonBusCoords.get(modelKey) ?? nonBusCoords.get(categoryKey);
+      // Generators / loads hang off the bus's away-facing side; shunts keep
+      // their fixed west offset. When the smart side flips the device to the
+      // opposite vertical face, mirror the y offset + stack direction so it
+      // (and its stub) stay on that face.
+      const vSide = bucket.kind === 'shunt' ? null : deviceSides.get(parentIdx);
+      const flipY = vSide === 'north' ? -1 : vSide === 'south' ? 1 : null;
+      const offsetY = flipY === null ? offset.y : Math.abs(offset.y) * flipY;
+      const stackDy = flipY === null ? offset.stackDy : Math.abs(offset.stackDy) * flipY;
+      const busSideForDevice = vSide ?? BUS_SIDE_FOR_KIND[bucket.kind];
       const x = sidecar?.x ?? parentCoord.x + offset.x + offset.stackDx * colSigned + rowStagger;
-      const y = sidecar?.y ?? parentCoord.y + offset.y + offset.stackDy * row;
+      const y = sidecar?.y ?? parentCoord.y + offsetY + stackDy * row;
       const nodeId = `${bucket.kind}-${String(entry.idx)}`;
       nodes.push({
         id: nodeId,
@@ -938,12 +1069,12 @@ export function buildGraph(
         source: nodeId,
         sourceHandle: NON_BUS_HANDLE_ID,
         target: parentIdx,
-        targetHandle: TARGET_HANDLE[BUS_SIDE_FOR_KIND[bucket.kind]],
+        targetHandle: TARGET_HANDLE[busSideForDevice],
         type: 'stub',
         data: {
           kind: entry.kind,
           bucket: bucket.kind,
-          busSide: stubAssignment?.busSide ?? BUS_SIDE_FOR_KIND[bucket.kind],
+          busSide: stubAssignment?.busSide ?? busSideForDevice,
           targetStride: stubAssignment?.stride ?? 0,
         },
       });

@@ -206,6 +206,26 @@ describe('buildGraph — non-bus nodes', () => {
     expect(genNode?.position.y).toBeGreaterThan(380); // …but near it, not at y≈100
   });
 
+  it('hangs a generator on the side facing AWAY from the bus branch neighbour', () => {
+    // Bus 1 sits BELOW bus 2 (its only branch neighbour), so its machine
+    // should hang SOUTH (down, away from the network) — not north through
+    // the line it feeds. The mirror bus (2, above its neighbour) keeps its
+    // generator north.
+    const topology = makeTopology({
+      buses: [bus(1), bus(2)],
+      transformers: [trafo('T12', 1, 2)],
+      generators: [gen('G1', 1), gen('G2', 2)],
+    });
+    const { nodes } = buildGraph(topology, {
+      '1': { x: 0, y: 500 }, // bottom bus
+      '2': { x: 0, y: 100 }, // top bus
+    });
+    const g1 = nodes.find((n) => n.id === 'generator-G1');
+    const g2 = nodes.find((n) => n.id === 'generator-G2');
+    expect(g1?.position.y).toBeGreaterThan(500); // south of the bottom bus
+    expect(g2?.position.y).toBeLessThan(100); // north of the top bus
+  });
+
   it('honors sidecar non_bus_coordinates overrides', () => {
     const topology = makeTopology({
       buses: [bus(1)],

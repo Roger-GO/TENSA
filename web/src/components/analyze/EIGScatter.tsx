@@ -662,6 +662,9 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
           />
           ≥ 10% damping
         </span>
+        <span className="text-muted-foreground/70 ml-auto hidden sm:inline">
+          scroll to zoom · drag to pan · double-click to reset
+        </span>
       </div>
       <svg
         ref={svgRef}
@@ -674,7 +677,7 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
         // below, which assumes a 1:1 viewBox-to-rect mapping, stays exact)
         // and centres it.
         className="mx-auto w-full touch-none select-none"
-        style={{ aspectRatio: `${SVG_WIDTH} / ${SVG_HEIGHT}`, maxWidth: 600 }}
+        style={{ aspectRatio: `${SVG_WIDTH} / ${SVG_HEIGHT}`, maxWidth: 720 }}
         role="img"
         aria-label="Eigenvalue scatter"
         onWheel={handleWheel}
@@ -805,7 +808,7 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
                   <circle
                     cx={cx}
                     cy={cy}
-                    r={10}
+                    r={6.5}
                     aria-hidden="true"
                     className="fill-primary/15 stroke-primary/40 pointer-events-none"
                     strokeWidth={1}
@@ -814,7 +817,11 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
                 <circle
                   cx={cx}
                   cy={cy}
-                  r={isSelected ? 5 : isHovered ? 4 : 3}
+                  // Small markers so dense clusters near the imaginary axis
+                  // stay legible (zoom in for detail). A thin background-tone
+                  // ring separates overlapping modes crisply — the technical
+                  // scatter look — and the selection ring layers on top.
+                  r={isSelected ? 3.4 : isHovered ? 2.8 : 2}
                   data-testid={`eig-scatter-point-${p.idx}`}
                   data-selected={isSelected ? 'true' : 'false'}
                   data-damping-band={band}
@@ -823,10 +830,10 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
                     // Colour encodes the damping band (see legend); the
                     // selection halo + stroke layer on top of it.
                     BAND_FILL_CLASS[band],
-                    isSelected && 'stroke-foreground',
+                    isSelected ? 'stroke-foreground' : 'stroke-background',
                     isHovered && !isSelected && 'opacity-80',
                   )}
-                  strokeWidth={isSelected ? 1.5 : 0}
+                  strokeWidth={isSelected ? 1.2 : 0.5}
                   onClick={() => handlePointClick(p.idx)}
                 />
               </g>

@@ -169,8 +169,16 @@ export function busColor(bus: string, theme: ResolvedTheme = 'light'): string {
   for (let i = 0; i < bus.length; i++) {
     h = (h * 31 + bus.charCodeAt(i)) >>> 0;
   }
-  const lightness = theme === 'dark' ? 65 : 45;
-  return `hsl(${h % 360}deg, 65%, ${lightness}%)`;
+  // Spread the hash across the hue circle with the golden angle (137.508°).
+  // A plain `h % 360` collapses single-digit bus names ("1".."9", whose raw
+  // char codes are 49-57) into one narrow yellow band, so every CPF trace
+  // looked identical — the golden-angle multiply maximally separates even
+  // sequential ids. Slight saturation/lightness variation per id adds a
+  // second distinguishing channel for adjacent hues.
+  const hue = (h * 137.508) % 360;
+  const sat = 62 + ((h >>> 3) % 4) * 6; // 62–80%
+  const lightness = (theme === 'dark' ? 62 : 44) + ((h >>> 5) % 3) * 5;
+  return `hsl(${hue.toFixed(0)}deg, ${sat}%, ${lightness}%)`;
 }
 
 /**
@@ -649,6 +657,12 @@ export function CPFCurveChart({
               {sliderClamped.toFixed(3)}
             </span>
           </div>
+          <div className="text-muted-foreground flex items-center justify-between px-0.5 text-[10px]">
+            <span>
+              Per-bus voltage at {result.mode === 'qv' ? 'Q' : 'λ'} = {sliderClamped.toFixed(3)}
+            </span>
+            <span className="text-muted-foreground/70">most-stressed first</span>
+          </div>
           <ul
             data-testid="cpf-lambda-readout"
             className={cn(
@@ -692,8 +706,9 @@ export function CPFCurveChart({
 
       <div
         data-testid="cpf-curve-legend"
-        className="border-border flex flex-wrap gap-1 border-t px-2 py-1 text-[10px]"
+        className="border-border flex flex-wrap items-center gap-1 border-t px-2 py-1 text-[10px]"
       >
+        <span className="text-muted-foreground mr-0.5">Buses (click to toggle):</span>
         {result.bus_idxes.map((bus) => {
           const isVisible = effectiveVisible.includes(bus);
           const isHovered = hoveredBus === bus;
