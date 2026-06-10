@@ -5,6 +5,7 @@ All notable changes to ANDES App are documented here. The format follows [Keep a
 ## [Unreleased]
 
 ### Added
+- Showcase demo: a captioned video of an agent building WSCC 9-bus from scratch through the UI and running every analysis, embedded in a rewritten, production-ready README with a feature comparison against ANDES alone.
 - First-run example cases: an empty workspace is auto-seeded with IEEE-14, Kundur, and WSCC-9.
 - GENROU exposes its full subtransient reactance + time-constant set, with d/q reactance-ordering validation that names the offending value (prevents textbook transient values silently clashing with unset subtransient defaults).
 - Eigenvalue scatter: numeric axis ticks + gridlines, points colored by damping band with a legend, and an "All modes" filter toggle so a well-damped system isn't an empty plot.
@@ -12,6 +13,8 @@ All notable changes to ANDES App are documented here. The format follows [Keep a
 - Branding: logo, favicon, and "ANDES App" wordmark.
 
 ### Fixed
+- Single-line diagram readability: buses render as traditional busbars; branch/feeder taps land on the bar instead of floating off it; each bus's machines and loads sit on the face pointing away from the network (a bottom bus's machine hangs below it, not up through its own feeder) with short, non-crossing stubs; edge flow labels render above bus boxes.
+- Result charts: continuation-power-flow traces now get a distinct colour per bus (single-digit bus names no longer collapse into one band) with a labelled per-λ voltage readout; the eigenvalue scatter uses smaller markers, a larger plot, and a discoverable zoom/pan hint; CPF/EIG/SE charts no longer overflow and clip at the bottom of the full-screen results view.
 - A crashed per-session worker now returns a clean `503` with "reload the case or start a new session" guidance instead of leaving a zombie session that errors on every call; snapshot dill-restore falls back safely instead of crashing the worker.
 - Snapshot/disturbance list and layout-sidecar reads return `200` (empty/null) instead of `404`/`409`, removing browser-console error noise.
 - Run-mode "Add element" panel narrowed so it no longer covers the diagram.
