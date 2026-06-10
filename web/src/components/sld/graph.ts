@@ -737,6 +737,7 @@ export function buildGraph(
   const stubAssignments = opts.stubAssignments ?? new Map<string, StubAssignment>();
   const bends = opts.bendPoints ?? new Map<string, [number, number][]>();
   const nonBusCoords = opts.nonBusCoords ?? new Map<string, BusCoord>();
+  const branchDragOverrides = opts.dragOverrides ?? {};
   const edges: Edge[] = [];
   const seen = new Set<string>();
   const pushBranchEdge = (entry: TopologyEntry, kindLabel: 'line' | 'transformer') => {
@@ -746,7 +747,15 @@ export function buildGraph(
     if (seen.has(id)) return;
     seen.add(id);
     const handleAssignment = handles.get(id);
-    const polyline = bends.get(id);
+    // If either endpoint bus was moved by the user (drag override), the
+    // ELK bend-points are stale — they were computed for the auto-layout
+    // grid position, not where the bus now sits — so a routed polyline
+    // would render disconnected, floating in space. Drop the polyline so
+    // the edge falls back to dynamic routing that follows the live node
+    // positions (and reaches the moved bus's handle).
+    const endpointMoved =
+      branchDragOverrides[t.from] !== undefined || branchDragOverrides[t.to] !== undefined;
+    const polyline = endpointMoved ? undefined : bends.get(id);
     // Transformers always render via TransformerEdge (which carries the
     // 2W/3W icon at the midpoint); routed-or-smooth-step is decided
     // inside that component based on whether bend points are present.
