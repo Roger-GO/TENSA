@@ -3,12 +3,10 @@
  * per-session ``JobStream`` lifecycle.
  *
  * Coverage:
- *  - opens + starts exactly one stream when sessionId set and token present;
- *  - opens for a no-auth backend (authDisabled) with an empty token;
- *  - opens NOTHING when sessionId is null, or when token is null + auth on;
+ *  - opens + starts exactly one stream when sessionId is set;
+ *  - opens NOTHING when sessionId is null;
  *  - a sessionId change disposes the prior stream and creates a fresh one;
- *  - unmount disposes;
- *  - the onError auth_failed callback clears the auth token.
+ *  - unmount disposes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
@@ -40,7 +38,6 @@ vi.mock('@/streaming/JobStream', () => {
 
 import { useJobEventsStream, STALE_SWEEP_INTERVAL_MS } from '@/streaming/useJobEventsStream';
 import { useSessionStore } from '@/store/session';
-import { useAuthStore } from '@/store/auth';
 import { useJobsStore } from '@/store/jobs';
 
 function setSession(id: string | null): void {
@@ -55,47 +52,28 @@ describe('useJobEventsStream', () => {
   beforeEach(() => {
     instances.length = 0;
     useSessionStore.setState({ sessionId: null });
-    useAuthStore.setState({ token: null, authDisabled: false });
   });
 
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it('opens + starts one stream when sessionId set and token present', () => {
+  it('opens + starts one stream when sessionId is set', () => {
     setSession('sess-1');
-    useAuthStore.setState({ token: 't'.repeat(64) });
     renderHook(() => useJobEventsStream());
     expect(instances).toHaveLength(1);
     expect(instances[0]!.start).toHaveBeenCalledTimes(1);
     expect(instances[0]!.opts.sessionId).toBe('sess-1');
   });
 
-  it('opens for a no-auth backend (authDisabled) with an empty token', () => {
-    setSession('sess-noauth');
-    useAuthStore.setState({ token: null, authDisabled: true });
-    renderHook(() => useJobEventsStream());
-    expect(instances).toHaveLength(1);
-    expect(instances[0]!.opts.token).toBe('');
-  });
-
   it('opens nothing when sessionId is null', () => {
     setSession(null);
-    useAuthStore.setState({ token: 't'.repeat(64) });
-    renderHook(() => useJobEventsStream());
-    expect(instances).toHaveLength(0);
-  });
-
-  it('opens nothing when token is null and auth is on', () => {
-    setSession('sess-2');
-    useAuthStore.setState({ token: null, authDisabled: false });
     renderHook(() => useJobEventsStream());
     expect(instances).toHaveLength(0);
   });
 
   it('disposes the prior stream and creates a fresh one on sessionId change', () => {
     setSession('sess-a');
-    useAuthStore.setState({ token: 't'.repeat(64) });
     const { rerender } = renderHook(() => useJobEventsStream());
     expect(instances).toHaveLength(1);
 
@@ -110,22 +88,10 @@ describe('useJobEventsStream', () => {
 
   it('disposes on unmount', () => {
     setSession('sess-x');
-    useAuthStore.setState({ token: 't'.repeat(64) });
     const { unmount } = renderHook(() => useJobEventsStream());
     expect(instances).toHaveLength(1);
     unmount();
     expect(instances[0]!.dispose).toHaveBeenCalled();
-  });
-
-  it('the onError auth_failed callback clears the auth token', () => {
-    setSession('sess-auth');
-    useAuthStore.setState({ token: 't'.repeat(64) });
-    const clearSpy = vi.spyOn(useAuthStore.getState(), 'clearToken');
-    renderHook(() => useJobEventsStream());
-    expect(instances).toHaveLength(1);
-    // Fire the stream's onError with an auth_failed code.
-    instances[0]!.opts.onError?.({ code: 'auth_failed', reason: 'stale' });
-    expect(clearSpy).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -134,7 +100,6 @@ describe('useJobEventsStream — staleness-sweep backstop timer', () => {
     vi.useFakeTimers();
     instances.length = 0;
     useSessionStore.setState({ sessionId: null });
-    useAuthStore.setState({ token: null, authDisabled: false });
     useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
   });
 

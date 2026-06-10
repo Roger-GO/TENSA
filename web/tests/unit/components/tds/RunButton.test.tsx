@@ -32,12 +32,10 @@ vi.mock('@/lib/toast', () => ({
 
 import { RunButton } from '@/components/tds/RunButton';
 import { makeQueryClient } from '@/api/queries';
-import { setTokenGetter } from '@/api/client';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useDisturbanceStore } from '@/store/disturbance';
-import { useAuthStore } from '@/store/auth';
 import { useRunsStore, DEFAULT_MEMORY_BUDGET_BYTES } from '@/store/runs';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { FaultSpec } from '@/api/types';
@@ -123,7 +121,6 @@ function seedReady(opts: { withDisturbances?: boolean } = {}) {
     selectedElement: null,
   });
   useSessionStore.setState({ sessionId: parseSessionId(SESSION_ID) });
-  useAuthStore.setState({ token: 'test-token', persistFailed: false });
   if (opts.withDisturbances) {
     const spec: FaultSpec = {
       kind: 'fault',
@@ -163,7 +160,6 @@ describe('<RunButton /> v0.2 — disabled / enabled', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    setTokenGetter(() => 'test-token');
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
       typeof vi.spyOn
     >;
@@ -176,7 +172,6 @@ describe('<RunButton /> v0.2 — disabled / enabled', () => {
     });
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
     useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
-    useAuthStore.setState({ token: null, persistFailed: false });
     useRunsStore.setState({
       runs: {},
       activeRunId: null,
@@ -186,7 +181,6 @@ describe('<RunButton /> v0.2 — disabled / enabled', () => {
 
   afterEach(() => {
     fetchSpy.mockRestore();
-    setTokenGetter(() => null);
   });
 
   it('is disabled and tooltip explains the cause when no case is loaded', () => {
@@ -196,7 +190,7 @@ describe('<RunButton /> v0.2 — disabled / enabled', () => {
     expect(screen.getByTestId('run-pflow-button')).toBeDisabled();
   });
 
-  it('is enabled in PF mode when case + session + token are present', () => {
+  it('is enabled in PF mode when case + session are present', () => {
     seedReady();
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
@@ -319,7 +313,6 @@ describe('<RunButton /> v0.2 — PF branch (legacy v0.1 flow still works)', () =
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    setTokenGetter(() => 'test-token');
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
       typeof vi.spyOn
     >;
@@ -329,7 +322,6 @@ describe('<RunButton /> v0.2 — PF branch (legacy v0.1 flow still works)', () =
 
   afterEach(() => {
     fetchSpy.mockRestore();
-    setTokenGetter(() => null);
     useSessionStore.setState({ sessionId: null });
     useCaseStore.setState({
       selection: null,
@@ -337,7 +329,6 @@ describe('<RunButton /> v0.2 — PF branch (legacy v0.1 flow still works)', () =
       layoutSidecar: null,
       selectedElement: null,
     });
-    useAuthStore.setState({ token: null, persistFailed: false });
     useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
   });
 
@@ -402,7 +393,6 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
 
   beforeEach(() => {
     installMockWebSocket();
-    setTokenGetter(() => 'test-token');
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
       typeof vi.spyOn
     >;
@@ -419,7 +409,6 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
   afterEach(() => {
     server.stop();
     fetchSpy.mockRestore();
-    setTokenGetter(() => null);
     restoreWebSocket();
     useSessionStore.setState({ sessionId: null });
     useCaseStore.setState({
@@ -428,7 +417,6 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
       layoutSidecar: null,
       selectedElement: null,
     });
-    useAuthStore.setState({ token: null, persistFailed: false });
     useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
     useRunsStore.setState({
       runs: {},
@@ -453,11 +441,10 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     });
 
     server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
       socket.on('message', (raw: unknown) => {
         const msg = JSON.parse(String(raw)) as { type: string };
-        if (msg.type === 'auth') {
-          socket.send(JSON.stringify({ type: 'ready' }));
-        } else if (msg.type === 'start_tds') {
+        if (msg.type === 'start_tds') {
           socket.send(
             JSON.stringify({
               type: 'stream_start',
@@ -524,11 +511,10 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     });
 
     server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
       socket.on('message', (raw: unknown) => {
         const msg = JSON.parse(String(raw)) as { type: string };
-        if (msg.type === 'auth') {
-          socket.send(JSON.stringify({ type: 'ready' }));
-        } else if (msg.type === 'start_tds') {
+        if (msg.type === 'start_tds') {
           socket.send(
             JSON.stringify({
               type: 'stream_start',
@@ -607,40 +593,12 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     expect(wsOpened).toBe(false);
   });
 
-  it('WS auth_failed (close 4401) clears the auth token (cascade reopens TokenPasteModal)', async () => {
-    seedReady();
-    useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
-    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
-    server.on('connection', (socket) => {
-      socket.on('message', (raw: unknown) => {
-        const msg = JSON.parse(String(raw)) as { type: string };
-        if (msg.type === 'auth') {
-          socket.close({ code: 4401, reason: 'invalid token' });
-        }
-      });
-    });
-
-    const { Wrapper } = makeWrapper();
-    render(<RunButton />, { wrapper: Wrapper });
-    await userEvent.click(screen.getByTestId('run-mode-tds'));
-    await userEvent.click(screen.getByTestId('run-tds-button'));
-
-    await waitFor(() => {
-      expect(useAuthStore.getState().token).toBeNull();
-    });
-  });
-
   it('WS run_not_found (close 4404) shows a non-modal warning toast', async () => {
     seedReady();
     useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
     fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
     server.on('connection', (socket) => {
-      socket.on('message', (raw: unknown) => {
-        const msg = JSON.parse(String(raw)) as { type: string };
-        if (msg.type === 'auth') {
-          socket.close({ code: 4404, reason: 'session not found' });
-        }
-      });
+      socket.close({ code: 4404, reason: 'session not found' });
     });
 
     const { Wrapper } = makeWrapper();
@@ -658,11 +616,10 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
     fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
     server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
       socket.on('message', (raw: unknown) => {
         const msg = JSON.parse(String(raw)) as { type: string };
-        if (msg.type === 'auth') {
-          socket.send(JSON.stringify({ type: 'ready' }));
-        } else if (msg.type === 'start_tds') {
+        if (msg.type === 'start_tds') {
           socket.send(
             JSON.stringify({
               type: 'stream_start',
@@ -716,11 +673,10 @@ describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () =>
 
     const captured: { value: unknown; seen: boolean } = { value: undefined, seen: false };
     server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
       socket.on('message', (raw: unknown) => {
         const msg = JSON.parse(String(raw)) as Record<string, unknown>;
-        if (msg.type === 'auth') {
-          socket.send(JSON.stringify({ type: 'ready' }));
-        } else if (msg.type === 'start_tds') {
+        if (msg.type === 'start_tds') {
           captured.value = msg.tds_config_overrides;
           captured.seen = true;
           socket.close({ code: 1000 });
@@ -738,7 +694,6 @@ describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () =>
 
   beforeEach(async () => {
     installMockWebSocket();
-    setTokenGetter(() => 'test-token');
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
       typeof vi.spyOn
     >;
@@ -759,7 +714,6 @@ describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () =>
   afterEach(async () => {
     server.stop();
     fetchSpy.mockRestore();
-    setTokenGetter(() => null);
     restoreWebSocket();
     useSessionStore.setState({ sessionId: null });
     useCaseStore.setState({
@@ -768,7 +722,6 @@ describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () =>
       layoutSidecar: null,
       selectedElement: null,
     });
-    useAuthStore.setState({ token: null, persistFailed: false });
     useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
     useRunsStore.setState({
       runs: {},
@@ -824,7 +777,6 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
 
   beforeEach(() => {
     installMockWebSocket();
-    setTokenGetter(() => 'test-token');
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
       typeof vi.spyOn
     >;
@@ -841,7 +793,6 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
   afterEach(() => {
     server.stop();
     fetchSpy.mockRestore();
-    setTokenGetter(() => null);
     restoreWebSocket();
     useSessionStore.setState({ sessionId: null });
     useCaseStore.setState({
@@ -850,7 +801,6 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
       layoutSidecar: null,
       selectedElement: null,
     });
-    useAuthStore.setState({ token: null, persistFailed: false });
     useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
     useRunsStore.setState({
       runs: {},
@@ -876,11 +826,10 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
     const serverSocketRef: { current: ServerSocket | null } = { current: null };
     server.on('connection', (socket) => {
       serverSocketRef.current = socket;
+      socket.send(JSON.stringify({ type: 'ready' }));
       socket.on('message', (raw: unknown) => {
         const msg = JSON.parse(String(raw)) as { type: string };
-        if (msg.type === 'auth') {
-          socket.send(JSON.stringify({ type: 'ready' }));
-        } else if (msg.type === 'start_tds') {
+        if (msg.type === 'start_tds') {
           socket.send(
             JSON.stringify({
               type: 'stream_start',

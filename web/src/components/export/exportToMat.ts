@@ -15,29 +15,8 @@
  * Endpoint: `GET /sessions/{id}/eig/state-matrix.mat` →
  * `application/octet-stream`. Returns 404 in v1.5 until Unit 6 lands;
  * the Export menu's tooltip explicitly documents that limitation.
- *
- * Auth: uses the same `X-Andes-Token` header path as the JSON client,
- * so we share the token getter via `setTokenGetter` rather than
- * reaching into the auth store directly.
  */
-import { NetworkError, ProblemDetailsError, type TokenGetter } from '@/api/client';
-
-/**
- * Token getter the MAT-fetch path uses. Defaults to a no-op so tests
- * that don't exercise the substrate don't have to wire auth; the
- * production app calls `setMatExportTokenGetter` from `App` boot to
- * point at the same Zustand selector the JSON client uses.
- *
- * (We don't reuse the JSON client's getter directly because it lives
- * inside the `andesClient` module's closure, not exported. Wiring a
- * dedicated getter here keeps that boundary clean and avoids exposing
- * a private internal as part of the API surface.)
- */
-let tokenGetter: TokenGetter = () => null;
-
-export function setMatExportTokenGetter(getter: TokenGetter): void {
-  tokenGetter = getter;
-}
+import { NetworkError, ProblemDetailsError } from '@/api/client';
 
 const API_PREFIX = '/api';
 
@@ -73,8 +52,6 @@ export async function fetchEigStateMatrixMat(
   const { timeoutMs = DEFAULT_TIMEOUT_MS, signal } = options;
   const url = `${API_PREFIX}/sessions/${encodeURIComponent(sessionId)}/eig/state-matrix.mat`;
   const headers = new Headers();
-  const token = tokenGetter();
-  if (token) headers.set('X-Andes-Token', token);
   // Hint to the substrate that we want the binary response. The
   // endpoint always returns octet-stream regardless, but the header
   // makes the intent explicit and helps any future content negotiation.

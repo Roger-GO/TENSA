@@ -9,10 +9,6 @@
  * - Mutations write through to the Zustand stores after a successful
  *   response (sessionId, topology, lastRun). Queries do NOT — components
  *   consume queries directly via `data` and let React reconcile.
- * - 401 handling: the queries layer detects `ProblemDetailsError` with
- *   `status === 401` in the global `QueryCache`/`MutationCache` callbacks
- *   wired in `App.tsx` (see `makeQueryClient` below). The client itself
- *   stays dumb.
  *
  * Cache invalidation rules (per the plan):
  *
@@ -25,7 +21,6 @@
 import { useMutation, useQuery, useQueryClient, QueryClient } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import { andesClient, NetworkError, ProblemDetailsError, TIMEOUTS } from './client';
-import { getAuthToken } from '@/store/auth';
 import { parseSessionId, parseRunId } from './types';
 import type {
   AbortResponse,
@@ -69,7 +64,6 @@ import type {
   WorkspaceFileList,
   WorkspacePath,
 } from './types';
-import { useAuthStore, useAuthReady } from '@/store/auth';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
@@ -305,9 +299,9 @@ export const queryKeys = {
 // ---- QueryClient factory --------------------------------------------------
 
 /**
- * Construct a QueryClient with the project's defaults + the global 401
- * cascade. Exported so tests can mint their own client without the
- * cascade if they want to isolate a single hook.
+ * Construct a QueryClient with the project's defaults. Exported so tests
+ * can mint their own client without the global recovery wiring if they
+ * want to isolate a single hook.
  */
 export function makeQueryClient(): QueryClient {
   return new QueryClient({
@@ -366,15 +360,10 @@ function isSessionScopedPath(path: string | undefined): boolean {
 }
 
 /**
- * Wire global error recovery on the QueryClient's caches. Two distinct
- * paths are handled here:
+ * Wire global error recovery on the QueryClient's caches. One path is
+ * handled here:
  *
- * 1. **401** — clear the auth store, which cascades into a full logout
- *    (session / case / pflow all cleared). The TokenPasteModal re-mounts.
- *    Idempotent against the auth-fast-path race: only clears if the user
- *    thought they were authed.
- *
- * 2. **404 on ``/api/sessions/{id}/...``** — the substrate has forgotten
+ * **404 on ``/api/sessions/{id}/...``** — the substrate has forgotten
  *    our session (worker restart, idle-timeout). Fire
  *    ``useSessionStore.resetSession()`` which clears the id AND raises
  *    the ``recoveryInProgress`` flag. ``useEnsureSession`` (in
@@ -398,28 +387,12 @@ function isSessionScopedPath(path: string | undefined): boolean {
 /**
  * Pure handler invoked by both cache subscribers (and exported for unit
  * tests). Inspects an unknown error; if it's a recognized
- * ``ProblemDetailsError`` shape, mutates the auth or session store as
+ * ``ProblemDetailsError`` shape, mutates the session store as
  * described above. Returns the action it took (or ``'noop'``) for
  * test assertions.
  */
-export function handleGlobalRecoveryError(
-  err: unknown,
-): 'auth-cleared' | 'session-recovery' | 'noop' {
+export function handleGlobalRecoveryError(err: unknown): 'session-recovery' | 'noop' {
   if (!(err instanceof ProblemDetailsError)) return 'noop';
-
-  if (err.status === 401) {
-    // Only clear if the user thought they were authed. A 401 returned
-    // for a request that fired before auth was established (e.g., a
-    // query that mounted on first paint, before the URL-fragment
-    // fast-path persisted the token) would otherwise wipe out the
-    // token the fast-path just set. Idempotent: when the store is
-    // already null, the cascade has already run.
-    if (useAuthStore.getState().token !== null) {
-      useAuthStore.getState().clearToken();
-      return 'auth-cleared';
-    }
-    return 'noop';
-  }
 
   if (err.status === 404 && isSessionScopedPath(err.requestPath)) {
     const now = Date.now();
@@ -471,17 +444,6 @@ export function wireGlobalErrorRecovery(client: QueryClient): void {
     }
   });
 }
-
-/**
- * Backwards-compatible alias for the renamed handler. The function was
- * named ``wireGlobal401Handler`` in v0.1.x; v0.1.y renames to
- * ``wireGlobalErrorRecovery`` because it now also handles 404 stale-session
- * recovery. Kept as a re-export so any out-of-tree consumers don't break;
- * the in-tree call site in ``App.tsx`` uses the new name.
- *
- * @deprecated Use ``wireGlobalErrorRecovery``.
- */
-export const wireGlobal401Handler = wireGlobalErrorRecovery;
 
 // ---- session lifecycle -----------------------------------------------------
 
@@ -729,17 +691,10 @@ export function useReloadCase(): UseMutationResult<TopologySummary, Error, Sessi
 
 // ---- workspace lister -----------------------------------------------------
 
-/** `GET /workspace/files`. Stable across the tab; modest stale time.
- * Gated on `useAuthReady()` (token present OR a no-auth substrate) so the
- * query doesn't fire on first paint before the URL-fragment fast-path has
- * had a chance to land (which would 401, race the fast-path, and wipe the
- * token via the global 401 handler) — while still firing against a
- * `serve --no-auth` backend, where no token is ever set. */
+/** `GET /workspace/files`. Stable across the tab; modest stale time. */
 export function useListWorkspaceFiles(): UseQueryResult<WorkspaceFileList, Error> {
-  const authReady = useAuthReady();
   return useQuery({
     queryKey: queryKeys.workspaceFiles,
-    enabled: authReady,
     queryFn: async () => {
       return await andesClient.get<WorkspaceFileList>('/workspace/files', {
         timeoutMs: TIMEOUTS.workspace,
@@ -810,10 +765,8 @@ export function usePutSidecar(): UseMutationResult<void, Error, PutSidecarVars> 
  * server-side `_PARAMS_BY_MODEL` table; rarely changes — long stale time.
  */
 export function useTopologySchema(): UseQueryResult<TopologySchema, Error> {
-  const authReady = useAuthReady();
   return useQuery({
     queryKey: queryKeys.topologySchema,
-    enabled: authReady,
     staleTime: 24 * 60 * 60 * 1000,
     queryFn: async () => {
       return await andesClient.get<TopologySchema>('/topology/schema', {
@@ -1177,17 +1130,15 @@ export interface ExportBundleVars {
  * The default ``andesClient.post`` parses the response as JSON; the
  * bundle endpoint returns ``application/zip``, so we bypass the
  * client and call ``fetch`` directly. We still honor the project's
- * auth header + ``ProblemDetailsError`` taxonomy so the global 401
- * cascade and the in-dialog error inline path work the same way as
- * every other mutation.
+ * ``ProblemDetailsError`` taxonomy so the global recovery cascade and
+ * the in-dialog error inline path work the same way as every other
+ * mutation.
  */
 export function useExportBundle(): UseMutationResult<Blob, Error, ExportBundleVars> {
   return useMutation({
     mutationFn: async ({ sessionId, body }: ExportBundleVars) => {
       const url = `/api/sessions/${encodeURIComponent(sessionId)}/bundle/export`;
       const headers = new Headers();
-      const token = getAuthToken();
-      if (token) headers.set('X-Andes-Token', token);
       headers.set('Content-Type', 'application/json');
 
       // 60s timeout matches `caseLoad` — bundle assembly does at most one
@@ -1212,7 +1163,7 @@ export function useExportBundle(): UseMutationResult<Blob, Error, ExportBundleVa
 
       if (!response.ok) {
         // Error body is JSON ProblemDetails — read it through the same
-        // path the regular client uses so the global 401 / 404 cascade
+        // path the regular client uses so the global 404 cascade
         // recognises the shape.
         let parsed: unknown = undefined;
         try {
@@ -1373,8 +1324,6 @@ export function useImportBundle(): UseMutationResult<
       }
 
       const headers = new Headers();
-      const token = getAuthToken();
-      if (token) headers.set('X-Andes-Token', token);
       // NOTE: don't set Content-Type — the browser writes the
       // multipart boundary into it automatically when the body is a
       // FormData.
@@ -2204,9 +2153,9 @@ export interface ExportPmuCsvVars {
  *
  * The default ``andesClient.get`` parses JSON; this endpoint returns
  * ``text/csv``, so we bypass the client and call ``fetch`` directly.
- * We still honour the project's auth header + ``ProblemDetailsError``
- * taxonomy so the global 401 cascade and the in-dialog error inline
- * path work the same way as every other mutation.
+ * We still honour the project's ``ProblemDetailsError`` taxonomy so the
+ * global recovery cascade and the in-dialog error inline path work the
+ * same way as every other mutation.
  */
 export function useExportPmuCsv(): UseMutationResult<Blob, Error, ExportPmuCsvVars> {
   return useMutation({
@@ -2215,8 +2164,6 @@ export function useExportPmuCsv(): UseMutationResult<Blob, Error, ExportPmuCsvVa
         `/api/sessions/${encodeURIComponent(sessionId)}/pmu/` +
         `${encodeURIComponent(runId)}/export.csv`;
       const headers = new Headers();
-      const token = getAuthToken();
-      if (token) headers.set('X-Andes-Token', token);
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.workspace);
@@ -2288,8 +2235,6 @@ export function useUploadProfile(): UseMutationResult<
     mutationFn: async ({ sessionId, file }: UploadProfileVars) => {
       const url = `/api/sessions/${encodeURIComponent(sessionId)}/profiles/upload`;
       const headers = new Headers();
-      const token = getAuthToken();
-      if (token) headers.set('X-Andes-Token', token);
       const form = new FormData();
       form.set('file', file, file.name);
 

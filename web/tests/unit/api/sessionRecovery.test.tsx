@@ -1,10 +1,9 @@
 /**
  * Tests for the v0.1.y Unit 5 session-recovery flow.
  *
- * Covers ``wireGlobalErrorRecovery`` (the renamed ``wireGlobal401Handler``)
- * + the ``useSessionStore`` recovery state machine:
+ * Covers ``wireGlobalErrorRecovery`` + the ``useSessionStore`` recovery
+ * state machine:
  *
- * - 401 still clears auth (regression guard for the existing 401 path).
  * - 404 on a session-scoped path raises ``recoveryInProgress`` and clears
  *   the session id.
  * - 404 on a non-session path is left alone.
@@ -28,8 +27,7 @@ import {
   __resetRecoveryDebounceForTests,
   useTopology,
 } from '@/api/queries';
-import { ProblemDetailsError, setTokenGetter } from '@/api/client';
-import { useAuthStore } from '@/store/auth';
+import { ProblemDetailsError } from '@/api/client';
 import { useSessionStore, MAX_RECOVERY_ATTEMPTS, RECOVERY_WINDOW_MS } from '@/store/session';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { ProblemDetails, SessionId } from '@/api/types';
@@ -48,7 +46,6 @@ function makeProblem(status: number, title = 'Error'): ProblemDetails {
 describe('handleGlobalRecoveryError', () => {
   beforeEach(() => {
     __resetRecoveryDebounceForTests();
-    useAuthStore.setState({ token: 'a'.repeat(64), persistFailed: false });
     useSessionStore.setState({
       sessionId: parseSessionId('sess-abc'),
       recoveryInProgress: false,
@@ -59,7 +56,6 @@ describe('handleGlobalRecoveryError', () => {
 
   afterEach(() => {
     __resetRecoveryDebounceForTests();
-    useAuthStore.setState({ token: null, persistFailed: false });
     useSessionStore.setState({
       sessionId: null,
       recoveryInProgress: false,
@@ -68,19 +64,12 @@ describe('handleGlobalRecoveryError', () => {
     });
   });
 
-  it('clears the auth token on a 401 (regression guard)', () => {
+  it('401 is a no-op (no auth machinery to clear)', () => {
     const err = new ProblemDetailsError(
       makeProblem(401, 'Unauthorized'),
       undefined,
-      '/api/sessions/sess-abc/topology',
+      '/api/sessions',
     );
-    expect(handleGlobalRecoveryError(err)).toBe('auth-cleared');
-    expect(useAuthStore.getState().token).toBeNull();
-  });
-
-  it('401 with no auth token is a no-op (auth-fast-path race guard)', () => {
-    useAuthStore.setState({ token: null, persistFailed: false });
-    const err = new ProblemDetailsError(makeProblem(401), undefined, '/api/sessions');
     expect(handleGlobalRecoveryError(err)).toBe('noop');
   });
 
@@ -194,8 +183,6 @@ describe('wireGlobalErrorRecovery — cache subscriber integration', () => {
 
   beforeEach(() => {
     __resetRecoveryDebounceForTests();
-    setTokenGetter(() => 'test-token');
-    useAuthStore.setState({ token: 'a'.repeat(64), persistFailed: false });
     useSessionStore.setState({
       sessionId: parseSessionId('sess-abc'),
       recoveryInProgress: false,
@@ -215,9 +202,7 @@ describe('wireGlobalErrorRecovery — cache subscriber integration', () => {
 
   afterEach(() => {
     fetchSpy.mockRestore();
-    setTokenGetter(() => null);
     __resetRecoveryDebounceForTests();
-    useAuthStore.setState({ token: null, persistFailed: false });
     useSessionStore.setState({
       sessionId: null,
       recoveryInProgress: false,
@@ -384,8 +369,6 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
 
   beforeEach(() => {
     __resetRecoveryDebounceForTests();
-    setTokenGetter(() => 'test-token');
-    useAuthStore.setState({ token: 'a'.repeat(64), persistFailed: false });
     useSessionStore.setState({
       sessionId: null,
       recoveryInProgress: false,
@@ -399,9 +382,7 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
 
   afterEach(() => {
     fetchSpy.mockRestore();
-    setTokenGetter(() => null);
     __resetRecoveryDebounceForTests();
-    useAuthStore.setState({ token: null, authDisabled: false, persistFailed: false });
     useSessionStore.setState({
       sessionId: null,
       recoveryInProgress: false,
@@ -417,7 +398,7 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
     });
   }
 
-  it('fires POST /sessions on first paint when authed and no session exists', async () => {
+  it('fires POST /sessions on first paint when no session exists', async () => {
     let postCalls = 0;
     fetchSpy.mockImplementation((input) => {
       const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
@@ -503,61 +484,6 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
 
     await new Promise((r) => setTimeout(r, 100));
     expect(postCalls).toBe(0);
-  });
-
-  it('does not fire when no token is present (auth-fast-path race guard)', async () => {
-    useAuthStore.setState({ token: null, persistFailed: false });
-    let postCalls = 0;
-    fetchSpy.mockImplementation((input) => {
-      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
-      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
-        postCalls += 1;
-        return Promise.resolve(jsonResponse({ session_id: 'sess-fresh', state: 'live' }, 201));
-      }
-      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
-    });
-
-    const client = makeQueryClient();
-    function Wrapper({ children }: { children: ReactNode }) {
-      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-    }
-    const { useSessionRecovery } = await import('@/api/useSessionRecovery');
-    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
-
-    await new Promise((r) => setTimeout(r, 100));
-    expect(postCalls).toBe(0);
-  });
-
-  it('fires POST /sessions on a no-auth backend (authDisabled, no token)', async () => {
-    // `serve --no-auth`: the boot probe sets authDisabled and never a token.
-    // Auto-create must still fire, or the app has no session and is unusable.
-    useAuthStore.setState({ token: null, authDisabled: true, persistFailed: false });
-    setTokenGetter(() => null);
-    let postCalls = 0;
-    fetchSpy.mockImplementation((input) => {
-      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
-      if (url.endsWith('/api/sessions') && !url.includes('/api/sessions/')) {
-        postCalls += 1;
-        return Promise.resolve(jsonResponse({ session_id: 'sess-noauth', state: 'live' }, 201));
-      }
-      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
-    });
-
-    const client = makeQueryClient();
-    function Wrapper({ children }: { children: ReactNode }) {
-      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-    }
-    const { useSessionRecovery } = await import('@/api/useSessionRecovery');
-    renderHook(() => useSessionRecovery(), { wrapper: Wrapper });
-
-    await waitFor(() => {
-      expect(postCalls).toBe(1);
-    });
-    await waitFor(() => {
-      expect(useSessionStore.getState().sessionId).toBe('sess-noauth');
-    });
-    // Restore for sibling tests (afterEach also resets).
-    useAuthStore.setState({ authDisabled: false });
   });
 
   it('re-issues loadCase against the new session id when a case was loaded pre-recovery', async () => {
@@ -873,8 +799,6 @@ describe('useSessionRecovery — stuck-detection + transition telemetry', () => 
 
   beforeEach(() => {
     __resetRecoveryDebounceForTests();
-    setTokenGetter(() => 'test-token');
-    useAuthStore.setState({ token: 'a'.repeat(64), persistFailed: false });
     useSessionStore.setState({
       sessionId: null,
       recoveryInProgress: false,
@@ -889,9 +813,7 @@ describe('useSessionRecovery — stuck-detection + transition telemetry', () => 
 
   afterEach(() => {
     fetchSpy.mockRestore();
-    setTokenGetter(() => null);
     __resetRecoveryDebounceForTests();
-    useAuthStore.setState({ token: null, persistFailed: false });
     useSessionStore.setState({
       sessionId: null,
       recoveryInProgress: false,

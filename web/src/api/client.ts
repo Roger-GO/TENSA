@@ -3,9 +3,6 @@
  *
  * Responsibilities:
  *
- * - Inject the `X-Andes-Token` header from the auth store on every call.
- *   The token getter is a module-level injection point so tests can swap
- *   it without spinning up a Zustand store.
  * - Resolve all paths against `/api/*` so the Vite dev proxy (or the
  *   production wheel-bundled FastAPI mount) can route to the substrate's
  *   root paths uniformly.
@@ -15,10 +12,6 @@
  *   ad-hoc objects.
  * - Per-call timeouts via `AbortController`. Each endpoint passes its own
  *   timeout (10s default for lifecycle calls; 60s for case load + PF).
- *
- * Per the v0.1 plan: 401 → caller is expected to clear the auth store and
- * reopen the modal. We surface `ProblemDetailsError` with `status === 401`
- * and let the queries layer decide; the client itself is dumb on purpose.
  */
 import type { ProblemDetails } from './types';
 import { parseRecoveryDescriptor, type RecoveryDescriptor } from '@/lib/recovery';
@@ -131,21 +124,6 @@ export class NetworkError extends Error {
     this.name = 'NetworkError';
     this.cause = cause;
   }
-}
-
-// ---- token-getter injection -----------------------------------------------
-
-/**
- * The token-getter the client uses to fetch the current auth token. Wired
- * to the Zustand store at App boot (`web/src/store/auth.ts`); tests
- * override it via `setTokenGetter`.
- */
-export type TokenGetter = () => string | null;
-
-let tokenGetter: TokenGetter = () => null;
-
-export function setTokenGetter(getter: TokenGetter): void {
-  tokenGetter = getter;
 }
 
 // ---- client core ----------------------------------------------------------
@@ -267,8 +245,6 @@ async function request<T>(
   const { body, timeoutMs = DEFAULT_TIMEOUT_MS, signal, query } = options;
   const url = buildUrl(path, query);
   const headers = new Headers();
-  const token = tokenGetter();
-  if (token) headers.set('X-Andes-Token', token);
   if (body !== undefined) headers.set('Content-Type', 'application/json');
 
   const { controller, cleanup, timedOut } = makeAbortController(timeoutMs, signal);

@@ -43,7 +43,6 @@ import { CpfQvCurvePanel } from '@/components/analyze/CpfQvCurvePanel';
 import { useSessionStore } from '@/store/session';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useRunModeStore } from '@/store/runMode';
-import { useAuthStore } from '@/store/auth';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
@@ -100,9 +99,8 @@ beforeEach(() => {
   useAnalyzeStore.setState({ subMode: 'cpf', activeCpfSubMode: 'qv' });
   useRunModeStore.setState({ activeRoutine: 'cpf' });
   // CPF (incl. its QV mode) is PF-dependent. Seed the readiness inputs to a
-  // happy-path baseline (case + auth + converged PF) so the Run button is
+  // happy-path baseline (case + converged PF) so the Run button is
   // gated only by the bus picker; individual tests override as needed.
-  useAuthStore.setState({ token: 'test-token', persistFailed: false });
   useCaseStore.setState({
     selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
     topology: null,

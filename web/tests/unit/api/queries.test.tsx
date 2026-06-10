@@ -28,7 +28,6 @@ import {
   useTopology,
 } from '@/api/queries';
 import { parseSessionId } from '@/api/types';
-import { setTokenGetter } from '@/api/client';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useJobsStore, LOCAL_ID_PREFIX, isTerminalStatus } from '@/store/jobs';
@@ -53,7 +52,6 @@ describe('queries hooks', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    setTokenGetter(() => 'test-token');
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
       typeof vi.spyOn
     >;
@@ -64,7 +62,6 @@ describe('queries hooks', () => {
 
   afterEach(() => {
     fetchSpy.mockRestore();
-    setTokenGetter(() => null);
     useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
     useCaseStore.setState({ selection: null });
   });

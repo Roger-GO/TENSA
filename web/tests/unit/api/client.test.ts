@@ -3,8 +3,7 @@
  *
  * Strategy: stub `globalThis.fetch` per test (vi.spyOn) and assert against
  * the URL, method, headers, body, and the typed-error / typed-success
- * outcomes. The token getter is swapped via `setTokenGetter` so we don't
- * need a Zustand store mounted.
+ * outcomes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -13,7 +12,6 @@ import {
   ProblemDetailsError,
   RateLimitedError,
   ServerError,
-  setTokenGetter,
 } from '@/api/client';
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
@@ -27,7 +25,6 @@ describe('andesClient', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    setTokenGetter(() => 'test-token-value');
     // Cast through unknown so the spy signature stays type-clean.
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
       typeof vi.spyOn
@@ -36,11 +33,10 @@ describe('andesClient', () => {
 
   afterEach(() => {
     fetchSpy.mockRestore();
-    setTokenGetter(() => null);
     vi.useRealTimers();
   });
 
-  it('GET injects X-Andes-Token, prefixes /api, and returns parsed JSON', async () => {
+  it('GET prefixes /api, sends no auth header, and returns parsed JSON', async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ sessions: [] }));
 
     const result = await andesClient.get<{ sessions: unknown[] }>('/sessions');
@@ -51,7 +47,7 @@ describe('andesClient', () => {
     expect(url).toBe('/api/sessions');
     expect(init.method).toBe('GET');
     const headers = new Headers(init.headers);
-    expect(headers.get('X-Andes-Token')).toBe('test-token-value');
+    expect(headers.get('X-Andes-Token')).toBeNull();
   });
 
   it('POST stringifies body and sets Content-Type', async () => {
@@ -78,32 +74,24 @@ describe('andesClient', () => {
     expect(url).toBe('/api/workspace/layout?case_path=foo%2Fbar.xlsx');
   });
 
-  it('skips X-Andes-Token when no token is set', async () => {
-    setTokenGetter(() => null);
-    fetchSpy.mockResolvedValueOnce(jsonResponse({}));
-    await andesClient.get('/sessions');
-    const [, init] = fetchSpy.mock.calls[0]! as [string, RequestInit];
-    expect(new Headers(init.headers).get('X-Andes-Token')).toBeNull();
-  });
-
-  it('401 → ProblemDetailsError with status 401', async () => {
+  it('4xx → ProblemDetailsError with the response status', async () => {
     fetchSpy.mockResolvedValueOnce(
       jsonResponse(
         {
           type: 'about:blank',
-          title: 'Unauthorized',
-          status: 401,
-          detail: 'Missing X-Andes-Token.',
+          title: 'Conflict',
+          status: 409,
+          detail: 'A system is already loaded.',
         },
-        { status: 401 },
+        { status: 409 },
       ),
     );
 
     await expect(andesClient.get('/sessions')).rejects.toMatchObject({
       name: 'ProblemDetailsError',
-      status: 401,
-      title: 'Unauthorized',
-      detail: 'Missing X-Andes-Token.',
+      status: 409,
+      title: 'Conflict',
+      detail: 'A system is already loaded.',
     });
   });
 

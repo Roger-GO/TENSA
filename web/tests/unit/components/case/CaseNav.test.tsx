@@ -15,8 +15,6 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { CaseNav } from '@/components/case/CaseNav';
 import { makeQueryClient } from '@/api/queries';
-import { setTokenGetter } from '@/api/client';
-import { useAuthStore } from '@/store/auth';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
@@ -64,15 +62,9 @@ describe('<CaseNav />', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    setTokenGetter(() => 'test-token');
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
       typeof vi.spyOn
     >;
-    // Seed an auth token so `useListWorkspaceFiles` (now gated on
-    // `auth.token !== null`) actually fires its query. The exact value
-    // doesn't matter — the fetch spy stubs the response and the client
-    // reads the X-Andes-Token header via `setTokenGetter` above.
-    useAuthStore.setState({ token: 'a'.repeat(64), persistFailed: false });
     useSessionStore.setState({ sessionId: null });
     useCaseStore.setState({ selection: null, topology: null, layoutSidecar: null });
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
@@ -80,8 +72,6 @@ describe('<CaseNav />', () => {
 
   afterEach(() => {
     fetchSpy.mockRestore();
-    setTokenGetter(() => null);
-    useAuthStore.setState({ token: null, persistFailed: false });
   });
 
   it('renders an inline empty hint (not the full picker) when no case is loaded', () => {

@@ -28,11 +28,9 @@ vi.mock('@/lib/toast', () => ({
 
 import { RunButton } from '@/components/pflow/RunButton';
 import { makeQueryClient } from '@/api/queries';
-import { setTokenGetter } from '@/api/client';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
-import { useAuthStore } from '@/store/auth';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useSweepStore } from '@/store/sweep';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
@@ -76,7 +74,6 @@ describe('<RunButton />', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    setTokenGetter(() => 'test-token');
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
       typeof vi.spyOn
     >;
@@ -88,11 +85,10 @@ describe('<RunButton />', () => {
       selectedElement: null,
     });
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
-    // The Run-readiness hook (Unit 4) reads the auth store + analyze
-    // store + sweep store. Seed them to a "happy path" baseline so the
-    // existing PF tests assert the PF-specific gates without tripping
-    // the hook's other reasons.
-    useAuthStore.setState({ token: 'test-token', persistFailed: false });
+    // The Run-readiness hook (Unit 4) reads the analyze store + sweep
+    // store. Seed them to a "happy path" baseline so the existing PF
+    // tests assert the PF-specific gates without tripping the hook's
+    // other reasons.
     useAnalyzeStore.setState({
       eigResult: null,
       cpfResult: null,
@@ -108,8 +104,6 @@ describe('<RunButton />', () => {
 
   afterEach(() => {
     fetchSpy.mockRestore();
-    setTokenGetter(() => null);
-    useAuthStore.setState({ token: null, persistFailed: false });
     useAnalyzeStore.setState({ eigResult: null });
     useSweepStore.setState({ activeSweepId: null, sweeps: {} });
   });

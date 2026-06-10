@@ -7,8 +7,8 @@
  * Generalises the original ``SweepStream`` JSON-WS consumer:
  *
  * 1. Open WS to ``/api/ws/{sessionId}/jobs/events`` with the shared
- *    first-message token auth handshake (``{type:'auth', token}`` then
- *    server ``{type:'ready'}``) — identical to ``SweepStream`` / ``RunStream``.
+ *    handshake (server sends ``{type:'ready'}`` unprompted on connect) —
+ *    identical to ``SweepStream`` / ``RunStream``.
  * 2. Drain the initial ``snapshot`` envelope (full job list) into the store
  *    via ``syncJobs``.
  * 3. For each subsequent ``job`` envelope, ``upsertJob`` into the store.
@@ -29,13 +29,12 @@ import type { JobEventEnvelope } from '@/store/jobs';
 const log = console;
 
 export interface JobStreamError {
-  code: 'auth_failed' | 'session_not_found' | 'protocol_error' | 'internal_error';
+  code: 'session_not_found' | 'protocol_error' | 'internal_error';
   reason: string;
 }
 
 export interface JobStreamOptions {
   sessionId: string;
-  token: string;
   /** Full WS URL prefix. ``buildRunStreamWsUrl()`` returns the right value. */
   wsUrl: string;
   /** Fired on every status event AFTER it is written to the store. */
@@ -69,7 +68,6 @@ export interface JobStreamInternalDeps {
 // Substrate WS close codes — shared alphabet with TDS / sweep (see
 // ``api/routes/jobs.py``).
 const WS_CLOSE_NORMAL = 1000;
-const WS_CLOSE_AUTH_FAILED = 4401;
 const WS_CLOSE_SESSION_NOT_FOUND = 4404;
 const WS_CLOSE_INTERNAL_ERROR = 4500;
 
@@ -121,7 +119,7 @@ export class JobStream {
   private readonly wsCtor: WebSocketCtor;
   private readonly fetchJobs: (sessionId: string) => Promise<JobEventEnvelope[]>;
   private ws: WebSocketLike | null = null;
-  private phase: 'idle' | 'connecting' | 'authenticating' | 'streaming' | 'closed' = 'idle';
+  private phase: 'idle' | 'connecting' | 'awaiting-ready' | 'streaming' | 'closed' = 'idle';
   private disposed = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -171,12 +169,9 @@ export class JobStream {
 
     ws.onopen = () => {
       if (this.disposed) return;
-      this.phase = 'authenticating';
-      try {
-        ws.send(JSON.stringify({ type: 'auth', token: this.opts.token }));
-      } catch (err) {
-        log.warn('JobStream: auth send failed', err);
-      }
+      // No client-side handshake frame — the server sends
+      // ``{type:'ready'}`` unprompted once the connection is accepted.
+      this.phase = 'awaiting-ready';
     };
 
     ws.onmessage = (ev: MessageEvent) => {
@@ -239,12 +234,6 @@ export class JobStream {
       return;
     }
     const code = ev.code;
-    if (code === WS_CLOSE_AUTH_FAILED) {
-      this.opts.onError?.({ code: 'auth_failed', reason: ev.reason });
-      this.phase = 'closed';
-      // Auth failure is not transient — do not reconnect.
-      return;
-    }
     if (code === WS_CLOSE_SESSION_NOT_FOUND) {
       this.opts.onError?.({ code: 'session_not_found', reason: ev.reason });
       this.phase = 'closed';
@@ -290,7 +279,7 @@ export class JobStream {
     }, delay);
   }
 
-  /** True once the auth handshake has completed and events are flowing. */
+  /** True once the ready handshake has completed and events are flowing. */
   get isStreaming(): boolean {
     return this.phase === 'streaming';
   }

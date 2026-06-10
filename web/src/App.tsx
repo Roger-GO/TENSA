@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from '@/components/shell/AppShell';
-import { TokenPasteModal } from '@/components/auth/TokenPasteModal';
 import { LeftSidebar } from '@/components/shell/LeftSidebar';
 // v0.2 RunButton replaces the v0.1 PF-only one — handles BOTH PF and TDS,
 // branches on a UI mode toggle that defaults to TDS when the disturbance
@@ -33,30 +32,21 @@ import { useJobEventsStream } from '@/streaming/useJobEventsStream';
 import { useSldFrameOverlay } from '@/components/sld/overlay';
 import { RecoveryBadge } from '@/components/shell/RecoveryBadge';
 import { JobAnnouncer } from '@/components/shell/JobAnnouncer';
-import { setTokenGetter, ProblemDetailsError } from '@/api/client';
-import { getAuthToken } from '@/store';
-import { useAuthStore } from '@/store/auth';
+import { ProblemDetailsError } from '@/api/client';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { ComponentDropZone } from '@/components/sld/ComponentDropZone';
 import { SaveSnapshotDialog } from '@/components/snapshot/SaveSnapshotDialog';
 import { LoadSnapshotDialog } from '@/components/snapshot/LoadSnapshotDialog';
 
-// Wire the API client's token-getter to the auth store. This runs once at
-// module load (the App.tsx import is the entry point); `getAuthToken`
-// reads from the Zustand store via `getState()` so it doesn't need a
-// React context.
-setTokenGetter(getAuthToken);
-
 /**
  * Root component. Wraps the AppShell with the cross-cutting providers
- * (QueryClientProvider + global 401 cascade) and assembles the v3 IDE
+ * (QueryClientProvider + global error recovery) and assembles the v3 IDE
  * layout slot composition: top bar with grouped menus + Run controls;
  * left sidebar with case nav (Unit 3 will replace with the unified case
  * + library + saved sidebar); canvas with SldCanvas; right inspector +
  * bottom drawer placeholders (Units 7-14 will populate); dock overlay
- * for AddElementPanel + transient banners; modals for token-paste +
- * runtime crash.
+ * for AddElementPanel + transient banners; modal for runtime crash.
  *
  * v3 Unit 1: this is the chassis-only commit. The right inspector and
  * bottom drawer slots intentionally render placeholder content — Units
@@ -71,39 +61,6 @@ setTokenGetter(getAuthToken);
  * - Runtime crash (5xx) → RuntimeCrashModal as the one allowed
  *   non-destructive modal.
  */
-/**
- * Dev-mode no-auth detection. When no token is present at boot, probe the
- * substrate once: a 200 means it was started with `serve --no-auth`, so the
- * token gate is skipped (the API client sends no header and the no-auth
- * backend accepts it); a 401 leaves the TokenPasteModal to handle auth. The
- * probe is one-shot (StrictMode-safe via a ref) and never aborts — it's an
- * idempotent GET. `authProbeDone` keeps the modal hidden until this resolves
- * so a no-auth backend never flashes the paste modal.
- */
-function useNoAuthProbe(): void {
-  const setAuthDisabled = useAuthStore((s) => s.setAuthDisabled);
-  const markAuthProbeDone = useAuthStore((s) => s.markAuthProbeDone);
-  const probedRef = useRef(false);
-  useEffect(() => {
-    if (probedRef.current) return;
-    probedRef.current = true;
-    if (getAuthToken() !== null) {
-      markAuthProbeDone();
-      return;
-    }
-    void (async () => {
-      try {
-        const res = await fetch('/api/sessions');
-        if (res.status === 200) setAuthDisabled();
-      } catch {
-        // Substrate unreachable — leave the TokenPasteModal to surface it.
-      } finally {
-        markAuthProbeDone();
-      }
-    })();
-  }, [setAuthDisabled, markAuthProbeDone]);
-}
-
 /**
  * Mirror the topology query into the case store on every change. The store
  * holds a synchronous `topology` mirror that non-query consumers read (the
@@ -132,15 +89,12 @@ function AppInner({ children }: { children: React.ReactNode }) {
   // deferred). One WS per active session feeds canonical job events into
   // ``useJobsStore`` REGARDLESS of whether the Activity panel is open, so
   // the TopBar in-flight chip + the panel history stay live. Disposes on
-  // session change / token loss / unmount.
+  // session change / unmount.
   useJobEventsStream();
   // Keep the case-store topology mirror in sync with the topology query so the
   // dynamic-content badge + run-readiness gate (Unit 24) reflect the loaded
   // case even when the query is served from cache.
   useSyncTopologyMirror();
-  // Dev-mode: detect a `serve --no-auth` substrate so the token gate is
-  // skipped without a paste modal (no-op against an auth-on substrate).
-  useNoAuthProbe();
   // v0.2 Unit 5: SINGLE rAF loop driving the SLD streaming overlay.
   // Mounted once at the App root so all BusNodes share one tick source
   // (avoids N-rAF-loops-for-N-buses at NPCC scale). The hook is a
@@ -266,7 +220,6 @@ export function App() {
           }
           modal={
             <>
-              <TokenPasteModal />
               <RuntimeCrashModal />
               {/* Snapshot save/load dialogs are store-driven (saveDialogOpen /
                   loadDialogOpen) and self-gate to null when closed. They were

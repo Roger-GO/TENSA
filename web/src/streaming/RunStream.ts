@@ -4,18 +4,17 @@
  * Responsibilities:
  *
  * 1. Open WS to ``/api/ws/{sessionId}`` (``binaryType = "arraybuffer"``).
- * 2. Send ``{type: "auth", token}`` within the substrate's 2-second deadline.
- * 3. Wait for ``{type: "ready"}``.
- * 4. Send ``{type: "start_tds", tf, h, decimation: "mean", max_rate_hz: 30, vars}``
+ * 2. Wait for ``{type: "ready"}`` (the server sends it unprompted on connect).
+ * 3. Send ``{type: "start_tds", tf, h, decimation: "mean", max_rate_hz: 30, vars}``
  *    OR (on resume) ``{type: "resume", run_id, last_seq}``.
- * 5. Wait for ``{type: "stream_start", run_id, metadata}`` — capture
+ * 4. Wait for ``{type: "stream_start", run_id, metadata}`` — capture
  *    ``run_id`` and ``metadata.var_columns`` from the substrate.
- * 6. For each WS binary message: decode the Arrow batch, append to the
+ * 5. For each WS binary message: decode the Arrow batch, append to the
  *    runs store, emit ``onFrame``.
- * 7. On ``{type: "done", ...}``: emit ``onDone``, mark store, close cleanly.
- * 8. On ``{type: "resync", ...}``: emit ``onError({code: "buffer_evicted"})``,
+ * 6. On ``{type: "done", ...}``: emit ``onDone``, mark store, close cleanly.
+ * 7. On ``{type: "resync", ...}``: emit ``onError({code: "buffer_evicted"})``,
  *    tear down. **Terminal — does NOT auto-reconnect.**
- * 9. On ``WebSocket.onclose`` (code != 1000) mid-stream: schedule a
+ * 8. On ``WebSocket.onclose`` (code != 1000) mid-stream: schedule a
  *    reconnect attempt with exponential backoff, then send ``resume``.
  *
  * **`last_seq` accounting** (per the v0.2 plan): the WS wire format does
@@ -27,8 +26,7 @@
  *
  * **Run-not-found** (close 4404 after resume): the server may have
  * restarted, or the retention window elapsed. Emits
- * ``onError({code: "run_not_found"})``. **Distinguished from 4401** —
- * which means the auth token is invalid/stale and the UI must clear it.
+ * ``onError({code: "run_not_found"})``.
  *
  * **Resync** (server sends ``{type: "resync", ...}`` then closes): the
  * client's ``last_seq`` fell out of the substrate's ring buffer. Emits
@@ -95,7 +93,6 @@ export interface ConnectionStatusEvent {
 /** Errors emitted via ``onError``. The codes mirror the v0.2 plan's taxonomy. */
 export interface RunStreamError {
   code:
-    | 'auth_failed'
     | 'run_not_found'
     | 'buffer_evicted'
     | 'protocol_error'
@@ -140,8 +137,6 @@ export interface DoneEvent {
 export interface RunStreamOptions {
   /** Session id from the substrate (URL-safe). */
   sessionId: string;
-  /** Auth token (sent in the first WS text frame). */
-  token: string;
   /**
    * Full WS URL prefix (e.g., ``"ws://localhost:43511"``). The session
    * path segment is appended by ``RunStream``. Exposed as a config so
@@ -179,7 +174,7 @@ export interface RunStreamOptions {
 type Phase =
   | 'idle'
   | 'connecting'
-  | 'authenticating'
+  | 'awaiting-ready'
   | 'awaiting-stream-start'
   | 'streaming'
   | 'reconnecting'
@@ -203,7 +198,6 @@ export interface RunStreamInternalDeps {
 }
 
 /** WS protocol close codes (mirrors ``server/api/routes/ws.py``). */
-const WS_CLOSE_AUTH_FAILED = 4401;
 const WS_CLOSE_RUN_NOT_FOUND = 4404;
 const WS_CLOSE_WORKER_ERROR = 4500;
 const WS_CLOSE_NORMAL = 1000;
@@ -247,7 +241,7 @@ export class RunStream {
   }
 
   /**
-   * Open the WebSocket and run the auth + start_tds handshake. Idempotent
+   * Open the WebSocket and run the ready → start_tds handshake. Idempotent
    * within a single ``RunStream`` instance — repeated calls after the
    * first are no-ops.
    */
@@ -310,12 +304,9 @@ export class RunStream {
     }
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
-    this.phase = 'authenticating';
-
-    ws.onopen = (): void => {
-      if (this.disposed) return;
-      this.send({ type: 'auth', token: this.opts.token });
-    };
+    // The server sends ``{type: "ready"}`` unprompted once the connection
+    // is accepted; the client's first frame is the command that follows it.
+    this.phase = 'awaiting-ready';
 
     ws.onmessage = (ev: MessageEvent): void => {
       if (this.disposed) return;
@@ -571,12 +562,6 @@ export class RunStream {
     if (this.phase === 'closed') return;
     const code = ev.code;
 
-    if (code === WS_CLOSE_AUTH_FAILED) {
-      this.emitError({ code: 'auth_failed', reason: ev.reason || 'invalid token' });
-      this.phase = 'closed';
-      this.disposed = true;
-      return;
-    }
     if (code === WS_CLOSE_RUN_NOT_FOUND) {
       // 4404 BEFORE stream_start = unknown session; AFTER stream_start (so
       // we have a runId and were resuming) = run no longer exists on the
@@ -659,7 +644,7 @@ export class RunStream {
 
   private emitError(err: RunStreamError): void {
     this.opts.onError?.(err);
-    if (this.runId !== null && err.code !== 'auth_failed') {
+    if (this.runId !== null) {
       useRunsStore.getState().markRunError(this.runId, err.reason);
     }
   }

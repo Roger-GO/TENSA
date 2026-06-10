@@ -43,8 +43,6 @@ import { cn } from '@/lib/cn';
  * - 5xx → kept as a typed `ServerError`; surfaced inline as a recovery
  *   prompt (Unit 9 will hook the runtime-crash modal). For Unit 7 we
  *   show a banner with "Reload page" copy + the underlying detail.
- * - 401 → handled globally by `wireGlobal401Handler` from Unit 5; we do
- *   not surface it locally.
  */
 
 type PrimaryFormat = 'xlsx' | 'raw' | 'json' | 'm';

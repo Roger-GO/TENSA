@@ -16,7 +16,6 @@ import {
 } from '@/api/queries';
 import { ProblemDetailsError, ServerError } from '@/api/client';
 import { useSessionStore } from '@/store/session';
-import { useAuthStore } from '@/store/auth';
 import { usePflowStore } from '@/store/pflow';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { useRunsStore } from '@/store/runs';
@@ -58,9 +57,6 @@ import { cn } from '@/lib/cn';
  *
  * Error routing (per the v0.2 plan's R8 taxonomy):
  *
- * - WS ``auth_failed`` (close 4401) → cascade-clears the auth token
- *   (``useAuthStore.clearToken``) which re-opens ``TokenPasteModal`` via
- *   the existing v0.1 path — no new modal owned here.
  * - WS ``run_not_found`` (close 4404) → non-modal warning toast inviting
  *   the user to Reset and re-run.
  * - WS ``buffer_evicted`` (resync) → non-modal warning toast.
@@ -124,10 +120,6 @@ function Spinner() {
 
 export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunButtonProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
-  const token = useAuthStore((s) => s.token);
-  // A `serve --no-auth` substrate accepts an empty token (the WS auth frame
-  // `{type:'auth', token:''}` passes), so a missing token is fine there.
-  const authDisabled = useAuthStore((s) => s.authDisabled);
   const isPfRunning = usePflowStore((s) => s.isRunning);
   const disturbances = useDisturbanceStore((s) => s.disturbances);
   // TDS args are owned by ``TdsConfigPanel`` (Unit 8) and live in
@@ -221,7 +213,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
 
   // The Run-readiness hook (Unit 4 of the v2.0 polish plan) is the
   // single source of truth for "why is this Run button disabled". The
-  // hook subscribes to the case + session + auth stores plus the
+  // hook subscribes to the case + session stores plus the
   // routine-specific prerequisites (sweep-in-progress for any routine,
   // EIG-mutated dae for PF). We pass the active mode so the same
   // button surface reuses the right gate as the user toggles between
@@ -233,10 +225,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   // ---- TDS start flow -----------------------------------------------------
 
   const startTds = async () => {
-    // No-auth: token may be null but the run is still allowed (empty token
-    // accepted by the WS handshake). Without this, Run TDS is a silent no-op
-    // in `serve --no-auth` even though the button is enabled.
-    if (!sessionId || (token === null && !authDisabled)) return;
+    if (!sessionId) return;
     setTdsStarting(true);
 
     // Step 1: commit disturbances if non-empty. The substrate's
@@ -313,7 +302,6 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
 
     const stream = new RunStream({
       sessionId,
-      token: token ?? '',
       wsUrl: buildRunStreamWsUrl(),
       tdsArgs,
       maxRateHz: tdsConfig.maxRateHz,
@@ -335,11 +323,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       },
       onError: (err: RunStreamError) => {
         setTdsStarting(false);
-        if (err.code === 'auth_failed') {
-          // Token is stale; cascade-clears reopens TokenPasteModal via
-          // the v0.1 path. No need to surface a separate toast.
-          useAuthStore.getState().clearToken();
-        } else if (err.code === 'run_not_found') {
+        if (err.code === 'run_not_found') {
           toast.warning(
             'Run no longer available on the substrate (it may have been restarted). Reset and re-run.',
           );

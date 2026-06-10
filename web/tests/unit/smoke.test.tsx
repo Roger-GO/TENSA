@@ -1,17 +1,9 @@
 import { render, screen, act } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '@/App';
-import { useAuthStore } from '@/store/auth';
 import { useSnapshotStore } from '@/store/snapshot';
 
 describe('App scaffold', () => {
-  beforeEach(() => {
-    // Unit 5 introduced an auth-paste modal that locks the app behind a
-    // token entry. The smoke test asserts on the AppShell behind it, so
-    // pre-seed the auth store with a synthetic token before render.
-    useAuthStore.setState({ token: 'test-token-' + 'a'.repeat(53), persistFailed: false });
-  });
-
   afterEach(() => {
     useSnapshotStore.getState().closeDialogs();
   });

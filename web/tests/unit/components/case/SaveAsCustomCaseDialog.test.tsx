@@ -16,7 +16,6 @@ import type { ReactNode } from 'react';
 
 import { SaveAsCustomCaseDialog } from '@/components/case/SaveAsCustomCaseDialog';
 import { useSessionStore } from '@/store/session';
-import { useAuthStore } from '@/store/auth';
 import { parseSessionId } from '@/api/types';
 
 const fetchSpy = vi.fn();
@@ -62,9 +61,6 @@ beforeEach(() => {
   fetchSpy.mockReset();
   globalThis.fetch = fetchSpy as unknown as typeof globalThis.fetch;
   useSessionStore.setState({ sessionId: parseSessionId('test-session-id') });
-  // Mark auth disabled so the workspace-files query (gated on useAuthReady)
-  // fires under a no-auth test backend.
-  useAuthStore.setState({ authDisabled: true });
 });
 
 afterEach(() => {
