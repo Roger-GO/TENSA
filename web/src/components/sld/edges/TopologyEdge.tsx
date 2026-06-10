@@ -134,8 +134,9 @@ export const TopologyEdge = memo(function TopologyEdge({
               position: 'absolute',
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
               pointerEvents: 'none',
+              zIndex: 20,
             }}
-            className="bg-background/80 text-foreground border-border rounded-[var(--radius-sm)] border px-1.5 py-0.5 font-mono text-[10px] leading-tight shadow-sm"
+            className="bg-background text-foreground border-border rounded-[var(--radius-sm)] border px-1.5 py-0.5 font-mono text-[10px] leading-tight shadow-sm"
           >
             <div className="flex items-center gap-1">
               <span aria-hidden="true">
