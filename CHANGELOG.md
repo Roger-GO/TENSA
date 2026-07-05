@@ -45,4 +45,5 @@ First public open-source release.
 ### Changed
 - Removed the per-launch token auth system. The server now trusts the local OS user, binds to loopback by default, and keeps Host/Origin allow-list checks. Network exposure is explicit (`--bind`) and documented in SECURITY.md.
 
+[0.4.0]: https://github.com/Roger-GO/TENSA/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Roger-GO/TENSA/releases/tag/v0.3.0
