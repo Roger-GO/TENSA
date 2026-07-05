@@ -32,7 +32,17 @@ The clip above is sped up. [Watch the full 2-minute walkthrough (MP4)](https://g
 
 ## Quick start
 
-You need Python 3.12 or newer, and Node 22 with [pnpm](https://pnpm.io/). Node is only used to build the UI once.
+The fastest path — the package on PyPI ships with the UI already built, so this is all you need:
+
+```bash
+pip install tensa
+tensa warm-cache                                   # one time, about 30 s
+tensa serve --workspace ~/tensa-cases --port 8000 --open
+```
+
+### From source
+
+For development, or to build the UI yourself, you need Python 3.12 or newer and Node 22 with [pnpm](https://pnpm.io/). Node is only used to build the UI once.
 
 ```bash
 # 0. Clone

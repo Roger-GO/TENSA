@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "tensa"
 version = "0.4.0"
-description = "Web-based GUI substrate for the ANDES power-system simulator"
+description = "TENSA: an interactive web workbench for power system simulation, built on ANDES"
 readme = "README.md"
 license = { file = "../LICENSE" }
 requires-python = ">=3.12"
