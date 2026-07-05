@@ -1,0 +1,322 @@
+[
+  {
+    "converged": true,
+    "pair": [
+      "Line_27",
+      "Line_38"
+    ],
+    "severity": 8.975624
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_29",
+      "Line_38"
+    ],
+    "severity": 3.27345
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_23",
+      "Line_38"
+    ],
+    "severity": 4.113781
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_25",
+      "Line_38"
+    ],
+    "severity": 1.649994
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_21",
+      "Line_38"
+    ],
+    "severity": 2.846662
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_20",
+      "Line_38"
+    ],
+    "severity": 7.302035
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_38",
+      "Line_6"
+    ],
+    "severity": 0.711042
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_38",
+      "Line_5"
+    ],
+    "severity": 0.637767
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_26",
+      "Line_38"
+    ],
+    "severity": 0.236932
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_28",
+      "Line_38"
+    ],
+    "severity": 0.236932
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_31",
+      "Line_38"
+    ],
+    "severity": 2.598357
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_10",
+      "Line_38"
+    ],
+    "severity": 0.55979
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_20",
+      "Line_27"
+    ],
+    "severity": 15.347477
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_21",
+      "Line_27"
+    ],
+    "severity": 11.557271
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_25",
+      "Line_27"
+    ],
+    "severity": 10.251671
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_27",
+      "Line_31"
+    ],
+    "severity": 11.593211
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_27",
+      "Line_5"
+    ],
+    "severity": 9.273864
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_27",
+      "Line_6"
+    ],
+    "severity": 9.301061
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_20",
+      "Line_23"
+    ],
+    "severity": 10.74273
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_20",
+      "Line_29"
+    ],
+    "severity": 9.923977
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_20",
+      "Line_31"
+    ],
+    "severity": 7.397086
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_23",
+      "Line_31"
+    ],
+    "severity": 6.317783
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_21",
+      "Line_29"
+    ],
+    "severity": 5.693343
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_25",
+      "Line_29"
+    ],
+    "severity": 4.442221
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_29",
+      "Line_31"
+    ],
+    "severity": 5.401363
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_27",
+      "Line_4"
+    ],
+    "severity": 17.491614
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_27",
+      "Line_3"
+    ],
+    "severity": 18.991327
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_27",
+      "Line_8"
+    ],
+    "severity": 10.049929
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_27",
+      "Line_30"
+    ],
+    "severity": 8.837509
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_19",
+      "Line_27"
+    ],
+    "severity": 8.959079
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_27",
+      "Line_34"
+    ],
+    "severity": 9.682667
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_27",
+      "Line_32"
+    ],
+    "severity": 8.934578
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_11",
+      "Line_27"
+    ],
+    "severity": 11.193987
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_27",
+      "Line_9"
+    ],
+    "severity": 9.037156
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_1",
+      "Line_27"
+    ],
+    "severity": 11.536865
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_15",
+      "Line_27"
+    ],
+    "severity": 8.617499
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_16",
+      "Line_27"
+    ],
+    "severity": 11.726561
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_10",
+      "Line_27"
+    ],
+    "severity": 8.991319
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_20",
+      "Line_25"
+    ],
+    "severity": 13.219754
+  },
+  {
+    "converged": true,
+    "pair": [
+      "Line_20",
+      "Line_3"
+    ],
+    "severity": 14.795664
+  }
+]

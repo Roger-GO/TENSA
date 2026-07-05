@@ -1,0 +1,2580 @@
+{
+  "branches": {
+    "Line_1": {
+      "base_loading_pct": 74.4,
+      "base_mva": 297.612,
+      "bus1": "1",
+      "bus2": "2",
+      "rate_mva": 400.0
+    },
+    "Line_10": {
+      "base_loading_pct": 74.9,
+      "base_mva": 486.605,
+      "bus1": "5",
+      "bus2": "8",
+      "rate_mva": 650.0
+    },
+    "Line_11": {
+      "base_loading_pct": 73.8,
+      "base_mva": 738.284,
+      "bus1": "6",
+      "bus2": "7",
+      "rate_mva": 1000.0
+    },
+    "Line_12": {
+      "base_loading_pct": 75.2,
+      "base_mva": 413.726,
+      "bus1": "6",
+      "bus2": "11",
+      "rate_mva": 550.0
+    },
+    "Line_13": {
+      "base_loading_pct": 73.9,
+      "base_mva": 369.682,
+      "bus1": "7",
+      "bus2": "8",
+      "rate_mva": 500.0
+    },
+    "Line_14": {
+      "base_loading_pct": 64.9,
+      "base_mva": 194.769,
+      "bus1": "8",
+      "bus2": "9",
+      "rate_mva": 300.0
+    },
+    "Line_15": {
+      "base_loading_pct": 69.2,
+      "base_mva": 172.999,
+      "bus1": "9",
+      "bus2": "39",
+      "rate_mva": 250.0
+    },
+    "Line_16": {
+      "base_loading_pct": 72.4,
+      "base_mva": 470.585,
+      "bus1": "10",
+      "bus2": "11",
+      "rate_mva": 650.0
+    },
+    "Line_17": {
+      "base_loading_pct": 68.5,
+      "base_mva": 308.297,
+      "bus1": "10",
+      "bus2": "13",
+      "rate_mva": 450.0
+    },
+    "Line_18": {
+      "base_loading_pct": 68.2,
+      "base_mva": 238.768,
+      "bus1": "13",
+      "bus2": "14",
+      "rate_mva": 350.0
+    },
+    "Line_19": {
+      "base_loading_pct": 70.4,
+      "base_mva": 70.371,
+      "bus1": "14",
+      "bus2": "15",
+      "rate_mva": 100.0
+    },
+    "Line_2": {
+      "base_loading_pct": 74.4,
+      "base_mva": 297.612,
+      "bus1": "1",
+      "bus2": "39",
+      "rate_mva": 400.0
+    },
+    "Line_20": {
+      "base_loading_pct": 71.7,
+      "base_mva": 394.519,
+      "bus1": "15",
+      "bus2": "16",
+      "rate_mva": 550.0
+    },
+    "Line_21": {
+      "base_loading_pct": 72.9,
+      "base_mva": 255.267,
+      "bus1": "16",
+      "bus2": "17",
+      "rate_mva": 350.0
+    },
+    "Line_22": {
+      "base_loading_pct": 74.1,
+      "base_mva": 630.11,
+      "bus1": "16",
+      "bus2": "19",
+      "rate_mva": 850.0
+    },
+    "Line_23": {
+      "base_loading_pct": 75.0,
+      "base_mva": 337.625,
+      "bus1": "16",
+      "bus2": "21",
+      "rate_mva": 450.0
+    },
+    "Line_24": {
+      "base_loading_pct": 64.6,
+      "base_mva": 161.444,
+      "bus1": "16",
+      "bus2": "24",
+      "rate_mva": 250.0
+    },
+    "Line_25": {
+      "base_loading_pct": 76.7,
+      "base_mva": 306.689,
+      "bus1": "17",
+      "bus2": "18",
+      "rate_mva": 400.0
+    },
+    "Line_26": {
+      "base_loading_pct": 59.9,
+      "base_mva": 59.915,
+      "bus1": "17",
+      "bus2": "27",
+      "rate_mva": 100.0
+    },
+    "Line_27": {
+      "base_loading_pct": 74.2,
+      "base_mva": 630.446,
+      "bus1": "21",
+      "bus2": "22",
+      "rate_mva": 850.0
+    },
+    "Line_28": {
+      "base_loading_pct": 63.9,
+      "base_mva": 63.922,
+      "bus1": "22",
+      "bus2": "23",
+      "rate_mva": 100.0
+    },
+    "Line_29": {
+      "base_loading_pct": 72.0,
+      "base_mva": 359.817,
+      "bus1": "23",
+      "bus2": "24",
+      "rate_mva": 500.0
+    },
+    "Line_3": {
+      "base_loading_pct": 73.8,
+      "base_mva": 590.264,
+      "bus1": "2",
+      "bus2": "3",
+      "rate_mva": 800.0
+    },
+    "Line_30": {
+      "base_loading_pct": 72.8,
+      "base_mva": 145.687,
+      "bus1": "25",
+      "bus2": "26",
+      "rate_mva": 200.0
+    },
+    "Line_31": {
+      "base_loading_pct": 74.9,
+      "base_mva": 337.078,
+      "bus1": "26",
+      "bus2": "27",
+      "rate_mva": 450.0
+    },
+    "Line_32": {
+      "base_loading_pct": 74.1,
+      "base_mva": 148.204,
+      "bus1": "26",
+      "bus2": "28",
+      "rate_mva": 200.0
+    },
+    "Line_33": {
+      "base_loading_pct": 65.3,
+      "base_mva": 195.942,
+      "bus1": "26",
+      "bus2": "29",
+      "rate_mva": 300.0
+    },
+    "Line_34": {
+      "base_loading_pct": 69.5,
+      "base_mva": 347.728,
+      "bus1": "28",
+      "bus2": "29",
+      "rate_mva": 500.0
+    },
+    "Line_35": {
+      "base_loading_pct": 73.6,
+      "base_mva": 441.488,
+      "bus1": "2",
+      "bus2": "30",
+      "rate_mva": 600.0
+    },
+    "Line_36": {
+      "base_loading_pct": 75.7,
+      "base_mva": 945.777,
+      "bus1": "31",
+      "bus2": "6",
+      "rate_mva": 1250.0
+    },
+    "Line_37": {
+      "base_loading_pct": 74.5,
+      "base_mva": 670.691,
+      "bus1": "10",
+      "bus2": "32",
+      "rate_mva": 900.0
+    },
+    "Line_38": {
+      "base_loading_pct": 53.9,
+      "base_mva": 53.86,
+      "bus1": "12",
+      "bus2": "11",
+      "rate_mva": 100.0
+    },
+    "Line_39": {
+      "base_loading_pct": 69.9,
+      "base_mva": 69.858,
+      "bus1": "12",
+      "bus2": "13",
+      "rate_mva": 100.0
+    },
+    "Line_4": {
+      "base_loading_pct": 76.1,
+      "base_mva": 532.457,
+      "bus1": "2",
+      "bus2": "25",
+      "rate_mva": 700.0
+    },
+    "Line_40": {
+      "base_loading_pct": 74.1,
+      "base_mva": 148.184,
+      "bus1": "19",
+      "bus2": "20",
+      "rate_mva": 200.0
+    },
+    "Line_41": {
+      "base_loading_pct": 74.9,
+      "base_mva": 636.674,
+      "bus1": "19",
+      "bus2": "33",
+      "rate_mva": 850.0
+    },
+    "Line_42": {
+      "base_loading_pct": 72.6,
+      "base_mva": 508.025,
+      "bus1": "20",
+      "bus2": "34",
+      "rate_mva": 700.0
+    },
+    "Line_43": {
+      "base_loading_pct": 73.6,
+      "base_mva": 698.739,
+      "bus1": "22",
+      "bus2": "35",
+      "rate_mva": 950.0
+    },
+    "Line_44": {
+      "base_loading_pct": 75.3,
+      "base_mva": 564.634,
+      "bus1": "23",
+      "bus2": "36",
+      "rate_mva": 750.0
+    },
+    "Line_45": {
+      "base_loading_pct": 74.8,
+      "base_mva": 560.793,
+      "bus1": "25",
+      "bus2": "37",
+      "rate_mva": 750.0
+    },
+    "Line_46": {
+      "base_loading_pct": 75.4,
+      "base_mva": 829.044,
+      "bus1": "29",
+      "bus2": "38",
+      "rate_mva": 1100.0
+    },
+    "Line_5": {
+      "base_loading_pct": 70.9,
+      "base_mva": 106.382,
+      "bus1": "3",
+      "bus2": "4",
+      "rate_mva": 150.0
+    },
+    "Line_6": {
+      "base_loading_pct": 75.9,
+      "base_mva": 151.71,
+      "bus1": "3",
+      "bus2": "18",
+      "rate_mva": 200.0
+    },
+    "Line_7": {
+      "base_loading_pct": 52.6,
+      "base_mva": 78.949,
+      "bus1": "4",
+      "bus2": "5",
+      "rate_mva": 150.0
+    },
+    "Line_8": {
+      "base_loading_pct": 73.6,
+      "base_mva": 294.325,
+      "bus1": "4",
+      "bus2": "14",
+      "rate_mva": 400.0
+    },
+    "Line_9": {
+      "base_loading_pct": 71.7,
+      "base_mva": 465.962,
+      "bus1": "5",
+      "bus2": "6",
+      "rate_mva": 650.0
+    }
+  },
+  "budget": 40,
+  "candidates": [
+    [
+      "Line_1",
+      "Line_10"
+    ],
+    [
+      "Line_1",
+      "Line_11"
+    ],
+    [
+      "Line_1",
+      "Line_12"
+    ],
+    [
+      "Line_1",
+      "Line_13"
+    ],
+    [
+      "Line_1",
+      "Line_16"
+    ],
+    [
+      "Line_1",
+      "Line_17"
+    ],
+    [
+      "Line_1",
+      "Line_18"
+    ],
+    [
+      "Line_1",
+      "Line_19"
+    ],
+    [
+      "Line_1",
+      "Line_20"
+    ],
+    [
+      "Line_1",
+      "Line_21"
+    ],
+    [
+      "Line_1",
+      "Line_23"
+    ],
+    [
+      "Line_1",
+      "Line_24"
+    ],
+    [
+      "Line_1",
+      "Line_25"
+    ],
+    [
+      "Line_1",
+      "Line_26"
+    ],
+    [
+      "Line_1",
+      "Line_27"
+    ],
+    [
+      "Line_1",
+      "Line_28"
+    ],
+    [
+      "Line_1",
+      "Line_29"
+    ],
+    [
+      "Line_1",
+      "Line_3"
+    ],
+    [
+      "Line_1",
+      "Line_30"
+    ],
+    [
+      "Line_1",
+      "Line_31"
+    ],
+    [
+      "Line_1",
+      "Line_32"
+    ],
+    [
+      "Line_1",
+      "Line_33"
+    ],
+    [
+      "Line_1",
+      "Line_34"
+    ],
+    [
+      "Line_1",
+      "Line_38"
+    ],
+    [
+      "Line_1",
+      "Line_39"
+    ],
+    [
+      "Line_1",
+      "Line_4"
+    ],
+    [
+      "Line_1",
+      "Line_5"
+    ],
+    [
+      "Line_1",
+      "Line_6"
+    ],
+    [
+      "Line_1",
+      "Line_7"
+    ],
+    [
+      "Line_1",
+      "Line_8"
+    ],
+    [
+      "Line_1",
+      "Line_9"
+    ],
+    [
+      "Line_10",
+      "Line_11"
+    ],
+    [
+      "Line_10",
+      "Line_12"
+    ],
+    [
+      "Line_10",
+      "Line_13"
+    ],
+    [
+      "Line_10",
+      "Line_14"
+    ],
+    [
+      "Line_10",
+      "Line_15"
+    ],
+    [
+      "Line_10",
+      "Line_16"
+    ],
+    [
+      "Line_10",
+      "Line_17"
+    ],
+    [
+      "Line_10",
+      "Line_18"
+    ],
+    [
+      "Line_10",
+      "Line_19"
+    ],
+    [
+      "Line_10",
+      "Line_2"
+    ],
+    [
+      "Line_10",
+      "Line_20"
+    ],
+    [
+      "Line_10",
+      "Line_21"
+    ],
+    [
+      "Line_10",
+      "Line_23"
+    ],
+    [
+      "Line_10",
+      "Line_24"
+    ],
+    [
+      "Line_10",
+      "Line_25"
+    ],
+    [
+      "Line_10",
+      "Line_26"
+    ],
+    [
+      "Line_10",
+      "Line_27"
+    ],
+    [
+      "Line_10",
+      "Line_28"
+    ],
+    [
+      "Line_10",
+      "Line_29"
+    ],
+    [
+      "Line_10",
+      "Line_3"
+    ],
+    [
+      "Line_10",
+      "Line_30"
+    ],
+    [
+      "Line_10",
+      "Line_31"
+    ],
+    [
+      "Line_10",
+      "Line_32"
+    ],
+    [
+      "Line_10",
+      "Line_33"
+    ],
+    [
+      "Line_10",
+      "Line_34"
+    ],
+    [
+      "Line_10",
+      "Line_38"
+    ],
+    [
+      "Line_10",
+      "Line_39"
+    ],
+    [
+      "Line_10",
+      "Line_4"
+    ],
+    [
+      "Line_10",
+      "Line_5"
+    ],
+    [
+      "Line_10",
+      "Line_6"
+    ],
+    [
+      "Line_10",
+      "Line_7"
+    ],
+    [
+      "Line_10",
+      "Line_8"
+    ],
+    [
+      "Line_10",
+      "Line_9"
+    ],
+    [
+      "Line_11",
+      "Line_12"
+    ],
+    [
+      "Line_11",
+      "Line_14"
+    ],
+    [
+      "Line_11",
+      "Line_15"
+    ],
+    [
+      "Line_11",
+      "Line_16"
+    ],
+    [
+      "Line_11",
+      "Line_17"
+    ],
+    [
+      "Line_11",
+      "Line_18"
+    ],
+    [
+      "Line_11",
+      "Line_19"
+    ],
+    [
+      "Line_11",
+      "Line_2"
+    ],
+    [
+      "Line_11",
+      "Line_20"
+    ],
+    [
+      "Line_11",
+      "Line_21"
+    ],
+    [
+      "Line_11",
+      "Line_23"
+    ],
+    [
+      "Line_11",
+      "Line_24"
+    ],
+    [
+      "Line_11",
+      "Line_25"
+    ],
+    [
+      "Line_11",
+      "Line_26"
+    ],
+    [
+      "Line_11",
+      "Line_27"
+    ],
+    [
+      "Line_11",
+      "Line_28"
+    ],
+    [
+      "Line_11",
+      "Line_29"
+    ],
+    [
+      "Line_11",
+      "Line_3"
+    ],
+    [
+      "Line_11",
+      "Line_30"
+    ],
+    [
+      "Line_11",
+      "Line_31"
+    ],
+    [
+      "Line_11",
+      "Line_32"
+    ],
+    [
+      "Line_11",
+      "Line_33"
+    ],
+    [
+      "Line_11",
+      "Line_34"
+    ],
+    [
+      "Line_11",
+      "Line_38"
+    ],
+    [
+      "Line_11",
+      "Line_39"
+    ],
+    [
+      "Line_11",
+      "Line_4"
+    ],
+    [
+      "Line_11",
+      "Line_5"
+    ],
+    [
+      "Line_11",
+      "Line_6"
+    ],
+    [
+      "Line_11",
+      "Line_7"
+    ],
+    [
+      "Line_11",
+      "Line_8"
+    ],
+    [
+      "Line_11",
+      "Line_9"
+    ],
+    [
+      "Line_12",
+      "Line_13"
+    ],
+    [
+      "Line_12",
+      "Line_14"
+    ],
+    [
+      "Line_12",
+      "Line_15"
+    ],
+    [
+      "Line_12",
+      "Line_16"
+    ],
+    [
+      "Line_12",
+      "Line_17"
+    ],
+    [
+      "Line_12",
+      "Line_19"
+    ],
+    [
+      "Line_12",
+      "Line_2"
+    ],
+    [
+      "Line_12",
+      "Line_20"
+    ],
+    [
+      "Line_12",
+      "Line_21"
+    ],
+    [
+      "Line_12",
+      "Line_23"
+    ],
+    [
+      "Line_12",
+      "Line_24"
+    ],
+    [
+      "Line_12",
+      "Line_25"
+    ],
+    [
+      "Line_12",
+      "Line_26"
+    ],
+    [
+      "Line_12",
+      "Line_27"
+    ],
+    [
+      "Line_12",
+      "Line_28"
+    ],
+    [
+      "Line_12",
+      "Line_29"
+    ],
+    [
+      "Line_12",
+      "Line_3"
+    ],
+    [
+      "Line_12",
+      "Line_30"
+    ],
+    [
+      "Line_12",
+      "Line_31"
+    ],
+    [
+      "Line_12",
+      "Line_32"
+    ],
+    [
+      "Line_12",
+      "Line_33"
+    ],
+    [
+      "Line_12",
+      "Line_34"
+    ],
+    [
+      "Line_12",
+      "Line_38"
+    ],
+    [
+      "Line_12",
+      "Line_39"
+    ],
+    [
+      "Line_12",
+      "Line_4"
+    ],
+    [
+      "Line_12",
+      "Line_5"
+    ],
+    [
+      "Line_12",
+      "Line_6"
+    ],
+    [
+      "Line_12",
+      "Line_7"
+    ],
+    [
+      "Line_12",
+      "Line_8"
+    ],
+    [
+      "Line_12",
+      "Line_9"
+    ],
+    [
+      "Line_13",
+      "Line_14"
+    ],
+    [
+      "Line_13",
+      "Line_15"
+    ],
+    [
+      "Line_13",
+      "Line_16"
+    ],
+    [
+      "Line_13",
+      "Line_17"
+    ],
+    [
+      "Line_13",
+      "Line_18"
+    ],
+    [
+      "Line_13",
+      "Line_19"
+    ],
+    [
+      "Line_13",
+      "Line_2"
+    ],
+    [
+      "Line_13",
+      "Line_20"
+    ],
+    [
+      "Line_13",
+      "Line_21"
+    ],
+    [
+      "Line_13",
+      "Line_23"
+    ],
+    [
+      "Line_13",
+      "Line_24"
+    ],
+    [
+      "Line_13",
+      "Line_25"
+    ],
+    [
+      "Line_13",
+      "Line_26"
+    ],
+    [
+      "Line_13",
+      "Line_27"
+    ],
+    [
+      "Line_13",
+      "Line_28"
+    ],
+    [
+      "Line_13",
+      "Line_29"
+    ],
+    [
+      "Line_13",
+      "Line_3"
+    ],
+    [
+      "Line_13",
+      "Line_30"
+    ],
+    [
+      "Line_13",
+      "Line_31"
+    ],
+    [
+      "Line_13",
+      "Line_32"
+    ],
+    [
+      "Line_13",
+      "Line_33"
+    ],
+    [
+      "Line_13",
+      "Line_34"
+    ],
+    [
+      "Line_13",
+      "Line_38"
+    ],
+    [
+      "Line_13",
+      "Line_39"
+    ],
+    [
+      "Line_13",
+      "Line_4"
+    ],
+    [
+      "Line_13",
+      "Line_5"
+    ],
+    [
+      "Line_13",
+      "Line_6"
+    ],
+    [
+      "Line_13",
+      "Line_7"
+    ],
+    [
+      "Line_13",
+      "Line_8"
+    ],
+    [
+      "Line_13",
+      "Line_9"
+    ],
+    [
+      "Line_14",
+      "Line_16"
+    ],
+    [
+      "Line_14",
+      "Line_17"
+    ],
+    [
+      "Line_14",
+      "Line_18"
+    ],
+    [
+      "Line_14",
+      "Line_19"
+    ],
+    [
+      "Line_14",
+      "Line_20"
+    ],
+    [
+      "Line_14",
+      "Line_21"
+    ],
+    [
+      "Line_14",
+      "Line_23"
+    ],
+    [
+      "Line_14",
+      "Line_24"
+    ],
+    [
+      "Line_14",
+      "Line_25"
+    ],
+    [
+      "Line_14",
+      "Line_26"
+    ],
+    [
+      "Line_14",
+      "Line_27"
+    ],
+    [
+      "Line_14",
+      "Line_28"
+    ],
+    [
+      "Line_14",
+      "Line_29"
+    ],
+    [
+      "Line_14",
+      "Line_3"
+    ],
+    [
+      "Line_14",
+      "Line_30"
+    ],
+    [
+      "Line_14",
+      "Line_31"
+    ],
+    [
+      "Line_14",
+      "Line_32"
+    ],
+    [
+      "Line_14",
+      "Line_33"
+    ],
+    [
+      "Line_14",
+      "Line_34"
+    ],
+    [
+      "Line_14",
+      "Line_38"
+    ],
+    [
+      "Line_14",
+      "Line_39"
+    ],
+    [
+      "Line_14",
+      "Line_4"
+    ],
+    [
+      "Line_14",
+      "Line_5"
+    ],
+    [
+      "Line_14",
+      "Line_6"
+    ],
+    [
+      "Line_14",
+      "Line_7"
+    ],
+    [
+      "Line_14",
+      "Line_8"
+    ],
+    [
+      "Line_14",
+      "Line_9"
+    ],
+    [
+      "Line_15",
+      "Line_16"
+    ],
+    [
+      "Line_15",
+      "Line_17"
+    ],
+    [
+      "Line_15",
+      "Line_18"
+    ],
+    [
+      "Line_15",
+      "Line_19"
+    ],
+    [
+      "Line_15",
+      "Line_20"
+    ],
+    [
+      "Line_15",
+      "Line_21"
+    ],
+    [
+      "Line_15",
+      "Line_23"
+    ],
+    [
+      "Line_15",
+      "Line_24"
+    ],
+    [
+      "Line_15",
+      "Line_25"
+    ],
+    [
+      "Line_15",
+      "Line_26"
+    ],
+    [
+      "Line_15",
+      "Line_27"
+    ],
+    [
+      "Line_15",
+      "Line_28"
+    ],
+    [
+      "Line_15",
+      "Line_29"
+    ],
+    [
+      "Line_15",
+      "Line_3"
+    ],
+    [
+      "Line_15",
+      "Line_30"
+    ],
+    [
+      "Line_15",
+      "Line_31"
+    ],
+    [
+      "Line_15",
+      "Line_32"
+    ],
+    [
+      "Line_15",
+      "Line_33"
+    ],
+    [
+      "Line_15",
+      "Line_34"
+    ],
+    [
+      "Line_15",
+      "Line_38"
+    ],
+    [
+      "Line_15",
+      "Line_39"
+    ],
+    [
+      "Line_15",
+      "Line_4"
+    ],
+    [
+      "Line_15",
+      "Line_5"
+    ],
+    [
+      "Line_15",
+      "Line_6"
+    ],
+    [
+      "Line_15",
+      "Line_7"
+    ],
+    [
+      "Line_15",
+      "Line_8"
+    ],
+    [
+      "Line_15",
+      "Line_9"
+    ],
+    [
+      "Line_16",
+      "Line_18"
+    ],
+    [
+      "Line_16",
+      "Line_19"
+    ],
+    [
+      "Line_16",
+      "Line_2"
+    ],
+    [
+      "Line_16",
+      "Line_20"
+    ],
+    [
+      "Line_16",
+      "Line_21"
+    ],
+    [
+      "Line_16",
+      "Line_23"
+    ],
+    [
+      "Line_16",
+      "Line_24"
+    ],
+    [
+      "Line_16",
+      "Line_25"
+    ],
+    [
+      "Line_16",
+      "Line_26"
+    ],
+    [
+      "Line_16",
+      "Line_27"
+    ],
+    [
+      "Line_16",
+      "Line_28"
+    ],
+    [
+      "Line_16",
+      "Line_29"
+    ],
+    [
+      "Line_16",
+      "Line_3"
+    ],
+    [
+      "Line_16",
+      "Line_30"
+    ],
+    [
+      "Line_16",
+      "Line_31"
+    ],
+    [
+      "Line_16",
+      "Line_32"
+    ],
+    [
+      "Line_16",
+      "Line_33"
+    ],
+    [
+      "Line_16",
+      "Line_34"
+    ],
+    [
+      "Line_16",
+      "Line_38"
+    ],
+    [
+      "Line_16",
+      "Line_39"
+    ],
+    [
+      "Line_16",
+      "Line_4"
+    ],
+    [
+      "Line_16",
+      "Line_5"
+    ],
+    [
+      "Line_16",
+      "Line_6"
+    ],
+    [
+      "Line_16",
+      "Line_7"
+    ],
+    [
+      "Line_16",
+      "Line_8"
+    ],
+    [
+      "Line_16",
+      "Line_9"
+    ],
+    [
+      "Line_17",
+      "Line_18"
+    ],
+    [
+      "Line_17",
+      "Line_19"
+    ],
+    [
+      "Line_17",
+      "Line_2"
+    ],
+    [
+      "Line_17",
+      "Line_20"
+    ],
+    [
+      "Line_17",
+      "Line_21"
+    ],
+    [
+      "Line_17",
+      "Line_23"
+    ],
+    [
+      "Line_17",
+      "Line_24"
+    ],
+    [
+      "Line_17",
+      "Line_25"
+    ],
+    [
+      "Line_17",
+      "Line_26"
+    ],
+    [
+      "Line_17",
+      "Line_27"
+    ],
+    [
+      "Line_17",
+      "Line_28"
+    ],
+    [
+      "Line_17",
+      "Line_29"
+    ],
+    [
+      "Line_17",
+      "Line_3"
+    ],
+    [
+      "Line_17",
+      "Line_30"
+    ],
+    [
+      "Line_17",
+      "Line_31"
+    ],
+    [
+      "Line_17",
+      "Line_32"
+    ],
+    [
+      "Line_17",
+      "Line_33"
+    ],
+    [
+      "Line_17",
+      "Line_34"
+    ],
+    [
+      "Line_17",
+      "Line_38"
+    ],
+    [
+      "Line_17",
+      "Line_39"
+    ],
+    [
+      "Line_17",
+      "Line_4"
+    ],
+    [
+      "Line_17",
+      "Line_5"
+    ],
+    [
+      "Line_17",
+      "Line_6"
+    ],
+    [
+      "Line_17",
+      "Line_7"
+    ],
+    [
+      "Line_17",
+      "Line_8"
+    ],
+    [
+      "Line_17",
+      "Line_9"
+    ],
+    [
+      "Line_18",
+      "Line_19"
+    ],
+    [
+      "Line_18",
+      "Line_2"
+    ],
+    [
+      "Line_18",
+      "Line_20"
+    ],
+    [
+      "Line_18",
+      "Line_21"
+    ],
+    [
+      "Line_18",
+      "Line_23"
+    ],
+    [
+      "Line_18",
+      "Line_24"
+    ],
+    [
+      "Line_18",
+      "Line_25"
+    ],
+    [
+      "Line_18",
+      "Line_26"
+    ],
+    [
+      "Line_18",
+      "Line_27"
+    ],
+    [
+      "Line_18",
+      "Line_28"
+    ],
+    [
+      "Line_18",
+      "Line_29"
+    ],
+    [
+      "Line_18",
+      "Line_3"
+    ],
+    [
+      "Line_18",
+      "Line_30"
+    ],
+    [
+      "Line_18",
+      "Line_31"
+    ],
+    [
+      "Line_18",
+      "Line_32"
+    ],
+    [
+      "Line_18",
+      "Line_33"
+    ],
+    [
+      "Line_18",
+      "Line_34"
+    ],
+    [
+      "Line_18",
+      "Line_38"
+    ],
+    [
+      "Line_18",
+      "Line_39"
+    ],
+    [
+      "Line_18",
+      "Line_4"
+    ],
+    [
+      "Line_18",
+      "Line_5"
+    ],
+    [
+      "Line_18",
+      "Line_6"
+    ],
+    [
+      "Line_18",
+      "Line_7"
+    ],
+    [
+      "Line_18",
+      "Line_8"
+    ],
+    [
+      "Line_18",
+      "Line_9"
+    ],
+    [
+      "Line_19",
+      "Line_2"
+    ],
+    [
+      "Line_19",
+      "Line_23"
+    ],
+    [
+      "Line_19",
+      "Line_24"
+    ],
+    [
+      "Line_19",
+      "Line_25"
+    ],
+    [
+      "Line_19",
+      "Line_26"
+    ],
+    [
+      "Line_19",
+      "Line_27"
+    ],
+    [
+      "Line_19",
+      "Line_28"
+    ],
+    [
+      "Line_19",
+      "Line_29"
+    ],
+    [
+      "Line_19",
+      "Line_3"
+    ],
+    [
+      "Line_19",
+      "Line_30"
+    ],
+    [
+      "Line_19",
+      "Line_31"
+    ],
+    [
+      "Line_19",
+      "Line_32"
+    ],
+    [
+      "Line_19",
+      "Line_33"
+    ],
+    [
+      "Line_19",
+      "Line_34"
+    ],
+    [
+      "Line_19",
+      "Line_38"
+    ],
+    [
+      "Line_19",
+      "Line_39"
+    ],
+    [
+      "Line_19",
+      "Line_4"
+    ],
+    [
+      "Line_19",
+      "Line_5"
+    ],
+    [
+      "Line_19",
+      "Line_6"
+    ],
+    [
+      "Line_19",
+      "Line_7"
+    ],
+    [
+      "Line_19",
+      "Line_8"
+    ],
+    [
+      "Line_19",
+      "Line_9"
+    ],
+    [
+      "Line_2",
+      "Line_20"
+    ],
+    [
+      "Line_2",
+      "Line_21"
+    ],
+    [
+      "Line_2",
+      "Line_23"
+    ],
+    [
+      "Line_2",
+      "Line_24"
+    ],
+    [
+      "Line_2",
+      "Line_25"
+    ],
+    [
+      "Line_2",
+      "Line_26"
+    ],
+    [
+      "Line_2",
+      "Line_27"
+    ],
+    [
+      "Line_2",
+      "Line_28"
+    ],
+    [
+      "Line_2",
+      "Line_29"
+    ],
+    [
+      "Line_2",
+      "Line_3"
+    ],
+    [
+      "Line_2",
+      "Line_30"
+    ],
+    [
+      "Line_2",
+      "Line_31"
+    ],
+    [
+      "Line_2",
+      "Line_32"
+    ],
+    [
+      "Line_2",
+      "Line_33"
+    ],
+    [
+      "Line_2",
+      "Line_34"
+    ],
+    [
+      "Line_2",
+      "Line_38"
+    ],
+    [
+      "Line_2",
+      "Line_39"
+    ],
+    [
+      "Line_2",
+      "Line_4"
+    ],
+    [
+      "Line_2",
+      "Line_5"
+    ],
+    [
+      "Line_2",
+      "Line_6"
+    ],
+    [
+      "Line_2",
+      "Line_7"
+    ],
+    [
+      "Line_2",
+      "Line_8"
+    ],
+    [
+      "Line_2",
+      "Line_9"
+    ],
+    [
+      "Line_20",
+      "Line_23"
+    ],
+    [
+      "Line_20",
+      "Line_24"
+    ],
+    [
+      "Line_20",
+      "Line_25"
+    ],
+    [
+      "Line_20",
+      "Line_26"
+    ],
+    [
+      "Line_20",
+      "Line_27"
+    ],
+    [
+      "Line_20",
+      "Line_28"
+    ],
+    [
+      "Line_20",
+      "Line_29"
+    ],
+    [
+      "Line_20",
+      "Line_3"
+    ],
+    [
+      "Line_20",
+      "Line_30"
+    ],
+    [
+      "Line_20",
+      "Line_31"
+    ],
+    [
+      "Line_20",
+      "Line_32"
+    ],
+    [
+      "Line_20",
+      "Line_33"
+    ],
+    [
+      "Line_20",
+      "Line_34"
+    ],
+    [
+      "Line_20",
+      "Line_38"
+    ],
+    [
+      "Line_20",
+      "Line_39"
+    ],
+    [
+      "Line_20",
+      "Line_4"
+    ],
+    [
+      "Line_20",
+      "Line_5"
+    ],
+    [
+      "Line_20",
+      "Line_6"
+    ],
+    [
+      "Line_20",
+      "Line_7"
+    ],
+    [
+      "Line_20",
+      "Line_8"
+    ],
+    [
+      "Line_20",
+      "Line_9"
+    ],
+    [
+      "Line_21",
+      "Line_23"
+    ],
+    [
+      "Line_21",
+      "Line_24"
+    ],
+    [
+      "Line_21",
+      "Line_25"
+    ],
+    [
+      "Line_21",
+      "Line_26"
+    ],
+    [
+      "Line_21",
+      "Line_27"
+    ],
+    [
+      "Line_21",
+      "Line_28"
+    ],
+    [
+      "Line_21",
+      "Line_29"
+    ],
+    [
+      "Line_21",
+      "Line_3"
+    ],
+    [
+      "Line_21",
+      "Line_30"
+    ],
+    [
+      "Line_21",
+      "Line_31"
+    ],
+    [
+      "Line_21",
+      "Line_32"
+    ],
+    [
+      "Line_21",
+      "Line_33"
+    ],
+    [
+      "Line_21",
+      "Line_34"
+    ],
+    [
+      "Line_21",
+      "Line_38"
+    ],
+    [
+      "Line_21",
+      "Line_39"
+    ],
+    [
+      "Line_21",
+      "Line_4"
+    ],
+    [
+      "Line_21",
+      "Line_5"
+    ],
+    [
+      "Line_21",
+      "Line_6"
+    ],
+    [
+      "Line_21",
+      "Line_7"
+    ],
+    [
+      "Line_21",
+      "Line_8"
+    ],
+    [
+      "Line_21",
+      "Line_9"
+    ],
+    [
+      "Line_23",
+      "Line_25"
+    ],
+    [
+      "Line_23",
+      "Line_26"
+    ],
+    [
+      "Line_23",
+      "Line_3"
+    ],
+    [
+      "Line_23",
+      "Line_30"
+    ],
+    [
+      "Line_23",
+      "Line_31"
+    ],
+    [
+      "Line_23",
+      "Line_32"
+    ],
+    [
+      "Line_23",
+      "Line_33"
+    ],
+    [
+      "Line_23",
+      "Line_34"
+    ],
+    [
+      "Line_23",
+      "Line_38"
+    ],
+    [
+      "Line_23",
+      "Line_39"
+    ],
+    [
+      "Line_23",
+      "Line_4"
+    ],
+    [
+      "Line_23",
+      "Line_5"
+    ],
+    [
+      "Line_23",
+      "Line_6"
+    ],
+    [
+      "Line_23",
+      "Line_7"
+    ],
+    [
+      "Line_23",
+      "Line_8"
+    ],
+    [
+      "Line_23",
+      "Line_9"
+    ],
+    [
+      "Line_24",
+      "Line_25"
+    ],
+    [
+      "Line_24",
+      "Line_26"
+    ],
+    [
+      "Line_24",
+      "Line_3"
+    ],
+    [
+      "Line_24",
+      "Line_30"
+    ],
+    [
+      "Line_24",
+      "Line_31"
+    ],
+    [
+      "Line_24",
+      "Line_32"
+    ],
+    [
+      "Line_24",
+      "Line_33"
+    ],
+    [
+      "Line_24",
+      "Line_34"
+    ],
+    [
+      "Line_24",
+      "Line_38"
+    ],
+    [
+      "Line_24",
+      "Line_39"
+    ],
+    [
+      "Line_24",
+      "Line_4"
+    ],
+    [
+      "Line_24",
+      "Line_5"
+    ],
+    [
+      "Line_24",
+      "Line_6"
+    ],
+    [
+      "Line_24",
+      "Line_7"
+    ],
+    [
+      "Line_24",
+      "Line_8"
+    ],
+    [
+      "Line_24",
+      "Line_9"
+    ],
+    [
+      "Line_25",
+      "Line_26"
+    ],
+    [
+      "Line_25",
+      "Line_27"
+    ],
+    [
+      "Line_25",
+      "Line_28"
+    ],
+    [
+      "Line_25",
+      "Line_29"
+    ],
+    [
+      "Line_25",
+      "Line_3"
+    ],
+    [
+      "Line_25",
+      "Line_30"
+    ],
+    [
+      "Line_25",
+      "Line_31"
+    ],
+    [
+      "Line_25",
+      "Line_32"
+    ],
+    [
+      "Line_25",
+      "Line_33"
+    ],
+    [
+      "Line_25",
+      "Line_34"
+    ],
+    [
+      "Line_25",
+      "Line_38"
+    ],
+    [
+      "Line_25",
+      "Line_39"
+    ],
+    [
+      "Line_25",
+      "Line_4"
+    ],
+    [
+      "Line_25",
+      "Line_5"
+    ],
+    [
+      "Line_25",
+      "Line_7"
+    ],
+    [
+      "Line_25",
+      "Line_8"
+    ],
+    [
+      "Line_25",
+      "Line_9"
+    ],
+    [
+      "Line_26",
+      "Line_27"
+    ],
+    [
+      "Line_26",
+      "Line_28"
+    ],
+    [
+      "Line_26",
+      "Line_29"
+    ],
+    [
+      "Line_26",
+      "Line_3"
+    ],
+    [
+      "Line_26",
+      "Line_32"
+    ],
+    [
+      "Line_26",
+      "Line_33"
+    ],
+    [
+      "Line_26",
+      "Line_34"
+    ],
+    [
+      "Line_26",
+      "Line_38"
+    ],
+    [
+      "Line_26",
+      "Line_39"
+    ],
+    [
+      "Line_26",
+      "Line_5"
+    ],
+    [
+      "Line_26",
+      "Line_6"
+    ],
+    [
+      "Line_26",
+      "Line_7"
+    ],
+    [
+      "Line_26",
+      "Line_8"
+    ],
+    [
+      "Line_26",
+      "Line_9"
+    ],
+    [
+      "Line_27",
+      "Line_3"
+    ],
+    [
+      "Line_27",
+      "Line_30"
+    ],
+    [
+      "Line_27",
+      "Line_31"
+    ],
+    [
+      "Line_27",
+      "Line_32"
+    ],
+    [
+      "Line_27",
+      "Line_33"
+    ],
+    [
+      "Line_27",
+      "Line_34"
+    ],
+    [
+      "Line_27",
+      "Line_38"
+    ],
+    [
+      "Line_27",
+      "Line_39"
+    ],
+    [
+      "Line_27",
+      "Line_4"
+    ],
+    [
+      "Line_27",
+      "Line_5"
+    ],
+    [
+      "Line_27",
+      "Line_6"
+    ],
+    [
+      "Line_27",
+      "Line_7"
+    ],
+    [
+      "Line_27",
+      "Line_8"
+    ],
+    [
+      "Line_27",
+      "Line_9"
+    ],
+    [
+      "Line_28",
+      "Line_3"
+    ],
+    [
+      "Line_28",
+      "Line_30"
+    ],
+    [
+      "Line_28",
+      "Line_31"
+    ],
+    [
+      "Line_28",
+      "Line_32"
+    ],
+    [
+      "Line_28",
+      "Line_33"
+    ],
+    [
+      "Line_28",
+      "Line_34"
+    ],
+    [
+      "Line_28",
+      "Line_38"
+    ],
+    [
+      "Line_28",
+      "Line_39"
+    ],
+    [
+      "Line_28",
+      "Line_4"
+    ],
+    [
+      "Line_28",
+      "Line_5"
+    ],
+    [
+      "Line_28",
+      "Line_6"
+    ],
+    [
+      "Line_28",
+      "Line_7"
+    ],
+    [
+      "Line_28",
+      "Line_8"
+    ],
+    [
+      "Line_28",
+      "Line_9"
+    ],
+    [
+      "Line_29",
+      "Line_3"
+    ],
+    [
+      "Line_29",
+      "Line_30"
+    ],
+    [
+      "Line_29",
+      "Line_31"
+    ],
+    [
+      "Line_29",
+      "Line_32"
+    ],
+    [
+      "Line_29",
+      "Line_33"
+    ],
+    [
+      "Line_29",
+      "Line_34"
+    ],
+    [
+      "Line_29",
+      "Line_38"
+    ],
+    [
+      "Line_29",
+      "Line_39"
+    ],
+    [
+      "Line_29",
+      "Line_4"
+    ],
+    [
+      "Line_29",
+      "Line_5"
+    ],
+    [
+      "Line_29",
+      "Line_6"
+    ],
+    [
+      "Line_29",
+      "Line_7"
+    ],
+    [
+      "Line_29",
+      "Line_8"
+    ],
+    [
+      "Line_29",
+      "Line_9"
+    ],
+    [
+      "Line_3",
+      "Line_30"
+    ],
+    [
+      "Line_3",
+      "Line_31"
+    ],
+    [
+      "Line_3",
+      "Line_32"
+    ],
+    [
+      "Line_3",
+      "Line_33"
+    ],
+    [
+      "Line_3",
+      "Line_34"
+    ],
+    [
+      "Line_3",
+      "Line_38"
+    ],
+    [
+      "Line_3",
+      "Line_39"
+    ],
+    [
+      "Line_3",
+      "Line_4"
+    ],
+    [
+      "Line_3",
+      "Line_5"
+    ],
+    [
+      "Line_3",
+      "Line_6"
+    ],
+    [
+      "Line_3",
+      "Line_7"
+    ],
+    [
+      "Line_3",
+      "Line_8"
+    ],
+    [
+      "Line_3",
+      "Line_9"
+    ],
+    [
+      "Line_30",
+      "Line_32"
+    ],
+    [
+      "Line_30",
+      "Line_33"
+    ],
+    [
+      "Line_30",
+      "Line_34"
+    ],
+    [
+      "Line_30",
+      "Line_38"
+    ],
+    [
+      "Line_30",
+      "Line_39"
+    ],
+    [
+      "Line_30",
+      "Line_5"
+    ],
+    [
+      "Line_30",
+      "Line_6"
+    ],
+    [
+      "Line_30",
+      "Line_7"
+    ],
+    [
+      "Line_30",
+      "Line_8"
+    ],
+    [
+      "Line_30",
+      "Line_9"
+    ],
+    [
+      "Line_31",
+      "Line_32"
+    ],
+    [
+      "Line_31",
+      "Line_33"
+    ],
+    [
+      "Line_31",
+      "Line_34"
+    ],
+    [
+      "Line_31",
+      "Line_38"
+    ],
+    [
+      "Line_31",
+      "Line_39"
+    ],
+    [
+      "Line_31",
+      "Line_5"
+    ],
+    [
+      "Line_31",
+      "Line_6"
+    ],
+    [
+      "Line_31",
+      "Line_7"
+    ],
+    [
+      "Line_31",
+      "Line_8"
+    ],
+    [
+      "Line_31",
+      "Line_9"
+    ],
+    [
+      "Line_32",
+      "Line_38"
+    ],
+    [
+      "Line_32",
+      "Line_39"
+    ],
+    [
+      "Line_32",
+      "Line_4"
+    ],
+    [
+      "Line_32",
+      "Line_5"
+    ],
+    [
+      "Line_32",
+      "Line_6"
+    ],
+    [
+      "Line_32",
+      "Line_7"
+    ],
+    [
+      "Line_32",
+      "Line_8"
+    ],
+    [
+      "Line_32",
+      "Line_9"
+    ],
+    [
+      "Line_33",
+      "Line_38"
+    ],
+    [
+      "Line_33",
+      "Line_39"
+    ],
+    [
+      "Line_33",
+      "Line_4"
+    ],
+    [
+      "Line_33",
+      "Line_5"
+    ],
+    [
+      "Line_33",
+      "Line_6"
+    ],
+    [
+      "Line_33",
+      "Line_7"
+    ],
+    [
+      "Line_33",
+      "Line_8"
+    ],
+    [
+      "Line_33",
+      "Line_9"
+    ],
+    [
+      "Line_34",
+      "Line_38"
+    ],
+    [
+      "Line_34",
+      "Line_39"
+    ],
+    [
+      "Line_34",
+      "Line_4"
+    ],
+    [
+      "Line_34",
+      "Line_5"
+    ],
+    [
+      "Line_34",
+      "Line_6"
+    ],
+    [
+      "Line_34",
+      "Line_7"
+    ],
+    [
+      "Line_34",
+      "Line_8"
+    ],
+    [
+      "Line_34",
+      "Line_9"
+    ],
+    [
+      "Line_38",
+      "Line_4"
+    ],
+    [
+      "Line_38",
+      "Line_5"
+    ],
+    [
+      "Line_38",
+      "Line_6"
+    ],
+    [
+      "Line_38",
+      "Line_7"
+    ],
+    [
+      "Line_38",
+      "Line_8"
+    ],
+    [
+      "Line_38",
+      "Line_9"
+    ],
+    [
+      "Line_39",
+      "Line_4"
+    ],
+    [
+      "Line_39",
+      "Line_5"
+    ],
+    [
+      "Line_39",
+      "Line_6"
+    ],
+    [
+      "Line_39",
+      "Line_7"
+    ],
+    [
+      "Line_39",
+      "Line_8"
+    ],
+    [
+      "Line_39",
+      "Line_9"
+    ],
+    [
+      "Line_4",
+      "Line_5"
+    ],
+    [
+      "Line_4",
+      "Line_6"
+    ],
+    [
+      "Line_4",
+      "Line_7"
+    ],
+    [
+      "Line_4",
+      "Line_8"
+    ],
+    [
+      "Line_4",
+      "Line_9"
+    ],
+    [
+      "Line_5",
+      "Line_6"
+    ],
+    [
+      "Line_5",
+      "Line_7"
+    ],
+    [
+      "Line_5",
+      "Line_8"
+    ],
+    [
+      "Line_5",
+      "Line_9"
+    ],
+    [
+      "Line_6",
+      "Line_7"
+    ],
+    [
+      "Line_6",
+      "Line_8"
+    ],
+    [
+      "Line_6",
+      "Line_9"
+    ],
+    [
+      "Line_7",
+      "Line_8"
+    ],
+    [
+      "Line_7",
+      "Line_9"
+    ],
+    [
+      "Line_8",
+      "Line_9"
+    ]
+  ],
+  "case": "ieee39.xlsx",
+  "protocol": "Validate at most `budget` candidate pairs via the TENSA API (reload -> u=0 on both branches -> AC power flow -> flows). Submit a ranked list of `report_k` pairs believed to have the highest post-contingency thermal severity. Severity of a pair is the sum over in-service branches of max(0, S/rate - 1); non-converged AC cases rank above all converged ones.",
+  "report_k": 20
+}

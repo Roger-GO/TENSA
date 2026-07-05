@@ -358,6 +358,28 @@ async def test_edit_element_updates_param(client: httpx.AsyncClient) -> None:
 
 
 @pytest.mark.integration
+async def test_edit_line_u_outage_solves_with_zero_flow(
+    client: httpx.AsyncClient,
+) -> None:
+    """Line connection status ``u`` is editable, and an outaged line
+    solves to zero flow — the contract the bundled contingency-screening
+    study (examples/contingency_screening) depends on."""
+    sid = await _create_session(client)
+    await _load_ieee14(client, sid)
+    topo = (await client.get(f"/api/sessions/{sid}/topology")).json()
+    line_idx = str(topo["lines"][0]["idx"])
+    resp = await client.put(
+        f"/api/sessions/{sid}/elements/Line/{line_idx}",
+        json={"params": {"u": 0}},
+    )
+    assert resp.status_code == 200, resp.text
+    pf = (await client.post(f"/api/sessions/{sid}/pflow", json={})).json()
+    assert pf["converged"] is True
+    flow = pf["line_flows"][line_idx]
+    assert abs(flow["p"]) < 1e-9 and abs(flow["q"]) < 1e-9
+
+
+@pytest.mark.integration
 async def test_edit_element_unknown_idx_returns_404(
     client: httpx.AsyncClient,
 ) -> None:

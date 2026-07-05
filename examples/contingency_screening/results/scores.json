@@ -1,0 +1,20 @@
+{
+  "claude_opus_4.8": {
+    "budget_used": 40,
+    "evidence_backed": 1.0,
+    "found_recall": 0.25,
+    "recall_at_k": 0.25
+  },
+  "greedy_stress": {
+    "budget_used": 40,
+    "evidence_backed": 1.0,
+    "found_recall": 0.25,
+    "recall_at_k": 0.25
+  },
+  "random": {
+    "budget_used": 40,
+    "evidence_backed": 1.0,
+    "found_recall": 0.1,
+    "recall_at_k": 0.1
+  }
+}

@@ -3607,6 +3607,10 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         ParamMeta("g", "number", unit="pu"),
         ParamMeta("tap", "number"),
         ParamMeta("phi", "number", unit="rad"),
+        # Connection status (1 = in service, 0 = out of service). Editable so
+        # contingency studies can outage a branch through the API / inspector
+        # and re-run PF, instead of faking an open line with huge impedance.
+        ParamMeta("u", "number"),
     ),
     "PV": (
         ParamMeta("idx", "string", required=True),
