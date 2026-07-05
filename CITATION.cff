@@ -6,6 +6,7 @@ type: software
 authors:
   - family-names: "Gracia Otalvaro"
     given-names: "Rogelio"
+    orcid: "https://orcid.org/0009-0001-7331-1745"
     affiliation: "Embry-Riddle Aeronautical University"
 repository-code: "https://github.com/Roger-GO/TENSA"
 url: "https://github.com/Roger-GO/TENSA"

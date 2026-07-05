@@ -9,8 +9,8 @@ tags:
   - AI agents
 authors:
   - name: Rogelio Gracia Otalvaro
+    orcid: 0009-0001-7331-1745
     corresponding: true
-    # TODO before submission: add your ORCID here, e.g.  orcid: 0000-0000-0000-0000
     affiliation: 1
 affiliations:
   - name: Embry-Riddle Aeronautical University, United States
