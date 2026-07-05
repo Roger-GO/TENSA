@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from andes_app.security.paths import (
+from tensa.security.paths import (
     WorkspacePathError,
     ensure_workspace,
     list_workspace_files,

@@ -6,7 +6,7 @@ import dataclasses
 
 import pytest
 
-from andes_app.core.cpf_result import CpfResult
+from tensa.core.cpf_result import CpfResult
 
 
 def test_cpf_result_construction_holds_field_values() -> None:
@@ -139,7 +139,7 @@ def test_build_cpf_result_truncates_nan_tail() -> None:
 
     import numpy as np
 
-    from andes_app.core.wrapper import _build_cpf_result
+    from tensa.core.wrapper import _build_cpf_result
 
     nan = float("nan")
     ss = SimpleNamespace(

@@ -21,9 +21,9 @@ from __future__ import annotations
 
 import pytest
 
-from andes_app.core.disturbance import AlterSpec, FaultSpec, ToggleSpec
-from andes_app.core.errors import NoCaseLoadedError
-from andes_app.core.wrapper import Wrapper
+from tensa.core.disturbance import AlterSpec, FaultSpec, ToggleSpec
+from tensa.core.errors import NoCaseLoadedError
+from tensa.core.wrapper import Wrapper
 
 
 @pytest.mark.unit

@@ -5,18 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <title>ANDES App</title>
+    <title>TENSA</title>
   </head>
   <body class="bg-background text-foreground antialiased">
     <script>
       // Theme no-flash bootstrap (Unit 12). Reads the persisted
-      // `andes-app:theme-preference` from localStorage and applies the
+      // `tensa:theme-preference` from localStorage and applies the
       // `.dark` class to <html> synchronously, BEFORE React mounts —
       // otherwise dark-mode users would see a flash of the light-mode
       // background. The store + hook in src/ mirror this logic.
       (function () {
         try {
-          var pref = localStorage.getItem('andes-app:theme-preference') || 'system';
+          var pref = localStorage.getItem('tensa:theme-preference') || 'system';
           var dark =
             pref === 'dark' ||
             (pref === 'system' &&

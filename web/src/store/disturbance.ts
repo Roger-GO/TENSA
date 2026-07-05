@@ -4,7 +4,7 @@
  * Holds the local list of disturbances the user is composing in the
  * timeline editor. The shape mirrors the substrate's
  * ``FaultSpec | ToggleSpec | AlterSpec`` discriminated union — see
- * ``server/src/andes_app/core/disturbance.py``. The discriminator is
+ * ``server/src/tensa/core/disturbance.py``. The discriminator is
  * ``kind`` (NOT ``type``), and the field names match the substrate
  * (``bus_idx`` / ``tf`` / ``tc`` for faults; ``dev_idx`` for toggle and
  * alter). The pseudo-code in the plan's prose uses different field names
@@ -92,7 +92,7 @@ export function blankToggleSpec(): ToggleSpec {
  * ANDES's ``Alter`` model has no ``value`` parameter — the new value is
  * ``v_new = v_current <method> amount``. ``method`` defaults to ``'='``
  * (absolute set) so a fresh row reads as "set to amount"; ``amount``
- * defaults to 0.0. See ``server/src/andes_app/core/disturbance.py``.
+ * defaults to 0.0. See ``server/src/tensa/core/disturbance.py``.
  */
 export function blankAlterSpec(): AlterSpec {
   return {

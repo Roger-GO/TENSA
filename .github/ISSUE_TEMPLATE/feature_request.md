@@ -6,7 +6,7 @@ labels: enhancement
 
 **What problem are you trying to solve?**
 
-**What would you like ANDES App to do?**
+**What would you like TENSA to do?**
 
 **Workaround today (if any)**
 e.g., "I script it against the API", "I edit the xlsx by hand", "not possible".

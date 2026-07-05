@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from andes_app.core.wrapper import Wrapper
+from tensa.core.wrapper import Wrapper
 
 pytestmark = pytest.mark.integration
 

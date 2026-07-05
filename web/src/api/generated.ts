@@ -1505,7 +1505,7 @@ export interface components {
          *
          *     All fields are optional — the substrate happily exports a minimal
          *     bundle (case + manifest only) when none are present. The substrate
-         *     contributes the case file, the ANDES + ``andes_app`` versions, and
+         *     contributes the case file, the ANDES + ``tensa`` versions, and
          *     the manifest; this body carries the substrate-external state that
          *     lives in the frontend's runs / disturbance / ui slices today.
          */
@@ -1850,7 +1850,7 @@ export interface components {
          * ConnectivityResponse
          * @description Wire shape of ``GET /sessions/{id}/connectivity`` (Unit 17).
          *
-         *     Mirrors :class:`andes_app.core.connectivity_result.ConnectivityResult`
+         *     Mirrors :class:`tensa.core.connectivity_result.ConnectivityResult`
          *     1:1. Bus idxes are stringified for stable JSON keying — case-file
          *     formats may carry int or str idx values, but the SLD always stringifies
          *     when keying nodes, so the wire payload normalises here.
@@ -1893,7 +1893,7 @@ export interface components {
          * @description Wire shape of ``POST /sessions/{id}/cpf`` and
          *     ``POST /sessions/{id}/cpf/qv``.
          *
-         *     Field semantics mirror :class:`andes_app.core.cpf_result.CpfResult`
+         *     Field semantics mirror :class:`tensa.core.cpf_result.CpfResult`
          *     1:1; see that class for prose.
          */
         CpfResultResponse: {
@@ -2212,7 +2212,7 @@ export interface components {
             id: string;
             /**
              * Kind
-             * @description Discriminator for the routine kind (``pflow``, ``tds-stream``, ``eig``, ``cpf``, ``cpf-qv``, ``se``, ``sweep``, ``snapshot-*``, ``bundle-*``, ``element-*``, ``clone-*``, etc.). The full enum lives in ``andes_app.core.jobs.JobKind``.
+             * @description Discriminator for the routine kind (``pflow``, ``tds-stream``, ``eig``, ``cpf``, ``cpf-qv``, ``se``, ``sweep``, ``snapshot-*``, ``bundle-*``, ``element-*``, ``clone-*``, etc.). The full enum lives in ``tensa.core.jobs.JobKind``.
              * @enum {string}
              */
             kind: "pflow" | "tds-batch" | "tds-stream" | "eig" | "cpf" | "cpf-qv" | "se" | "se-measurements" | "sweep" | "snapshot-save" | "snapshot-restore" | "snapshot-delete" | "bundle-export" | "bundle-import" | "case-load" | "case-reload" | "case-save" | "element-add" | "element-edit" | "element-delete" | "element-undo" | "disturbance-commit" | "pmu-add" | "pmu-delete" | "profile-upload" | "profile-add" | "profile-delete" | "clone-init" | "clone-edit" | "clone-undo" | "clone-redo" | "clone-save-as" | "clone-reset";
@@ -2579,7 +2579,7 @@ export interface components {
          * ReportTableModel
          * @description One tabular block of a routine's report.
          *
-         *     Matches :class:`andes_app.core.report.ReportTable` 1:1. Each row's
+         *     Matches :class:`tensa.core.report.ReportTable` 1:1. Each row's
          *     length always matches ``headers`` — the wrapper-side parser pads /
          *     truncates so the frontend's renderer doesn't have to think about
          *     ragged rows.
@@ -2775,7 +2775,7 @@ export interface components {
          * SeResultResponse
          * @description Wire shape of ``POST /sessions/{id}/se``.
          *
-         *     Field semantics mirror :class:`andes_app.core.se_result.SeResult`
+         *     Field semantics mirror :class:`tensa.core.se_result.SeResult`
          *     1:1; see that class for prose.
          */
         SeResultResponse: {
@@ -2946,10 +2946,10 @@ export interface components {
              */
             andes_version: string;
             /**
-             * Andes App Version
-             * @description andes-app version that produced the snapshot.
+             * Tensa Version
+             * @description tensa version that produced the snapshot.
              */
-            andes_app_version: string;
+            tensa_version: string;
             /**
              * Case Filename
              * @description Workspace-relative case filename loaded when the snapshot was saved.

@@ -1228,7 +1228,7 @@ export interface BundleConflict {
 /** Bundle manifest body echoed in the import-plan response. */
 export interface BundleManifest {
   andes_version: string;
-  andes_app_version: string;
+  tensa_version: string;
   case_filename: string | null;
   case_sha256: string | null;
   case_canonical_export?: boolean;
@@ -1417,7 +1417,7 @@ export function useImportBundle(): UseMutationResult<
 /** Sidecar-JSON shape echoed in save/restore/list responses. */
 export interface SnapshotMetadata {
   andes_version: string;
-  andes_app_version: string;
+  tensa_version: string;
   case_filename: string | null;
   case_sha256: string | null;
   disturbance_log: readonly Record<string, unknown>[];

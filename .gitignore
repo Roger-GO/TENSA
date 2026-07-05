@@ -48,8 +48,8 @@ env/
 .DS_Store
 
 # Runtime artifacts (never commit)
-server/src/andes_app/workspace/
-~/.andes-app/
+server/src/tensa/workspace/
+~/.tensa/
 *.token
 
 # Distribution
@@ -65,3 +65,4 @@ Thumbs.db
 
 # Type stubs (generated)
 *.pyi
+paper/paper-preview.pdf

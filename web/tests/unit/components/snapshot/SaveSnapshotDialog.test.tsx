@@ -98,7 +98,7 @@ describe('<SaveSnapshotDialog /> — confirm flow', () => {
         name: 'scenario-A',
         metadata: {
           andes_version: '2.0.0',
-          andes_app_version: '0.1.0',
+          tensa_version: '0.1.0',
           case_filename: 'ieee14.raw',
           case_sha256: null,
           disturbance_log: [],
@@ -138,7 +138,7 @@ describe('<SaveSnapshotDialog /> — confirm flow', () => {
         name: 'scenario-A',
         metadata: {
           andes_version: '2.0.0',
-          andes_app_version: '0.1.0',
+          tensa_version: '0.1.0',
           case_filename: null,
           case_sha256: null,
           disturbance_log: [],

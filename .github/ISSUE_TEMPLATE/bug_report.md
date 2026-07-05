@@ -16,7 +16,7 @@ labels: bug
 If the UI showed an error card or the API returned a `ProblemDetails` JSON body, paste it here.
 
 **Environment**
-- ANDES App version / commit:
+- TENSA version / commit:
 - ANDES version (`pip show andes`):
 - Python version:
 - OS + browser:

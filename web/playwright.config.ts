@@ -5,7 +5,7 @@ import { defineConfig, devices } from '@playwright/test';
  *
  * The flagship test (`tests/e2e/load-pf-flow.spec.ts`, lands in Unit 9)
  * exercises: paste token → load IEEE 14 → run PF → assert overlays + table.
- * Requires the substrate to be running; orchestration of `andes-app serve`
+ * Requires the substrate to be running; orchestration of `tensa serve`
  * happens in CI (`.github/workflows/web.yml`) — locally, the developer
  * starts the substrate manually before running e2e.
  */

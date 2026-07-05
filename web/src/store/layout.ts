@@ -2,7 +2,7 @@
  * Layout slice (v3 Unit 1).
  *
  * Persists the v3 IDE-style 4-pane chassis layout state to ``localStorage``
- * under the ``andes-app:layout-v1`` key. New slice (NOT extended onto
+ * under the ``tensa:layout-v1`` key. New slice (NOT extended onto
  * ``useUiStore``) per the v3 plan's F-FEAS-1 resolution: ``useUiStore``
  * already binds ``zustand/middleware/persist`` against ``sessionStorage``
  * with a ``partialize`` whitelist scoped to the TDS integrator + tolerance
@@ -10,7 +10,7 @@
  * mounting a second backend on the same store.
  *
  * The ``-v1`` suffix on the storage key matches the existing
- * ``andes-app:theme-preference`` / ``andes-app:first-run-coach-v1``
+ * ``tensa:theme-preference`` / ``tensa:first-run-coach-v1``
  * convention from the v2.0 polish work and lets us bump for breaking
  * layout changes without surprising users with bad state. Hydration via
  * ``zustand/middleware/persist`` is forgiving — unknown keys in the
@@ -234,7 +234,7 @@ export const DEFAULT_LAYOUT: Pick<
   resultsViewActive: false,
 };
 
-export const LAYOUT_STORAGE_KEY = 'andes-app:layout-v1';
+export const LAYOUT_STORAGE_KEY = 'tensa:layout-v1';
 
 export const useLayoutStore = create<LayoutState>()(
   persist(

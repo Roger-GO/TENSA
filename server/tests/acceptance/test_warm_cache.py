@@ -1,4 +1,4 @@
-"""Acceptance test for ``andes-app warm-cache``.
+"""Acceptance test for ``tensa warm-cache``.
 
 Verifies the subcommand runs end-to-end against the installed ANDES, and
 that ``~/.andes/pycode/`` exists afterwards (the cache that subsequent
@@ -17,7 +17,7 @@ import pytest
 
 @pytest.mark.acceptance
 def test_warm_cache_runs_green_and_populates_cache_dir() -> None:
-    """``python -m andes_app warm-cache --quick --incremental`` exits 0 and
+    """``python -m tensa warm-cache --quick --incremental`` exits 0 and
     leaves ``~/.andes/pycode/`` populated with at least one file.
 
     Uses ``--quick --incremental`` to keep the test fast even on a cold
@@ -27,7 +27,7 @@ def test_warm_cache_runs_green_and_populates_cache_dir() -> None:
     pytest.importorskip("andes")
 
     result = subprocess.run(
-        [sys.executable, "-m", "andes_app", "warm-cache", "--quick", "--incremental"],
+        [sys.executable, "-m", "tensa", "warm-cache", "--quick", "--incremental"],
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
         capture_output=True,
         text=True,

@@ -29,11 +29,11 @@ from pathlib import Path
 import httpx
 import pytest
 
-from andes_app.api.app import make_app
-from andes_app.core.session import SessionManager
+from tensa.api.app import make_app
+from tensa.core.session import SessionManager
 
 INDEX_HTML = (
-    "<!doctype html><html><head><title>andes-app</title></head>"
+    "<!doctype html><html><head><title>tensa</title></head>"
     '<body><div id="root">test</div></body></html>'
 )
 
@@ -180,7 +180,7 @@ async def test_app_still_serves_api_when_no_spa_bundle(
     the warning log)."""
     # Force ``_find_spa_dir`` to return None so the no-mount branch fires.
     monkeypatch.setattr(
-        "andes_app.api.app._find_spa_dir", lambda: None
+        "tensa.api.app._find_spa_dir", lambda: None
     )
     workspace = tmp_path / "ws"
     workspace.mkdir(mode=0o700)

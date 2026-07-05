@@ -1,6 +1,6 @@
 """Integration tests for the ANDES-driven streaming collectors.
 
-These exercise ``andes_app.core.stream``'s per-tick value collectors against
+These exercise ``tensa.core.stream``'s per-tick value collectors against
 ANDES's bundled IEEE 14 case (with the .dyr addfile so SynGen members exist).
 They are the numeric ground-truth checks the unit schema tests can't make:
 that the streamed line P/Q match ``wrapper._extract_line_flows``, the load
@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from andes_app.core import stream as S
-from andes_app.core.wrapper import _extract_line_flows, _extract_load_consumption
+from tensa.core import stream as S
+from tensa.core.wrapper import _extract_line_flows, _extract_load_consumption
 
 
 def _ieee14_paths() -> tuple[Path, Path]:

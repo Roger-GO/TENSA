@@ -1,6 +1,6 @@
 """Integration tests for TDS streaming over WebSocket + Arrow IPC.
 
-These tests spawn ``andes-app serve`` in a subprocess (the same pattern as
+These tests spawn ``tensa serve`` in a subprocess (the same pattern as
 the Phase A acceptance walkthrough), connect a real WebSocket client via
 the ``websockets`` library, and assert on the wire protocol end-to-end:
 ready handshake, stream-start metadata, Arrow IPC binary frames, and the
@@ -53,7 +53,7 @@ def _ieee14_paths() -> tuple[Path, Path]:
 
 @pytest.fixture
 async def live_server(tmp_path: Path) -> AsyncIterator[tuple[int, str]]:
-    """Spawn ``andes-app serve`` in a subprocess; yield (port, base_url).
+    """Spawn ``tensa serve`` in a subprocess; yield (port, base_url).
 
     Workspace is seeded with IEEE 14 .raw + .dyr fixtures so the integration
     test can drive a real PF + TDS run."""
@@ -68,7 +68,7 @@ async def live_server(tmp_path: Path) -> AsyncIterator[tuple[int, str]]:
         [
             sys.executable,
             "-m",
-            "andes_app",
+            "tensa",
             "serve",
             "--bind",
             "127.0.0.1",

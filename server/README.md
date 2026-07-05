@@ -1,4 +1,4 @@
-# andes-app (server)
+# tensa (server)
 
 Phase A substrate: Python wrapper around ANDES + FastAPI HTTP/WebSocket surface. The substrate is independently usable — agents, SDKs, and curl can drive ANDES through it without any UI.
 
@@ -12,14 +12,14 @@ source ~/andes-project/.venv/bin/activate
 pip install --upgrade pip
 pip install andes  # >=2.0,<3.0
 
-# Install andes-app in editable mode with dev dependencies
+# Install tensa in editable mode with dev dependencies
 pip install -e ".[dev]"
 ```
 
 ## Run
 
 ```bash
-andes-app serve --workspace ./tmp
+tensa serve --workspace ./tmp
 ```
 
 The server has no authentication: it binds to loopback by default, so only processes on your machine can reach it. Stderr prints the serving URL and workspace path at startup. Interactive API docs are served at `/docs` (Swagger UI) and `/redoc`.
@@ -28,7 +28,7 @@ CLI flags:
 
 - `--bind <addr>` — interface to bind. Default `127.0.0.1` (loopback only). Non-loopback emits a stderr warning: there is no authentication, so a non-loopback bind exposes the API to the whole network.
 - `--port <int>` — port. Default OS-assigned ephemeral; printed to stderr.
-- `--workspace <dir>` — case-file workspace root. Default `~/.andes-app/cases`. Created with mode `0700` if missing.
+- `--workspace <dir>` — case-file workspace root. Default `~/.tensa/cases`. Created with mode `0700` if missing.
 - `--max-sessions <int>` — session-creation cap. Default `min(4, max(1, cpu_count // 2))`.
 - `--idle-timeout-seconds <int>` — reap idle sessions after this many seconds. Default `180`.
 - `--worker-rss-limit-mb <int>` — per-worker `RLIMIT_AS` (Linux). Default `1500`.
@@ -37,7 +37,7 @@ Windows: the substrate runs but emits a stderr warning about the path-canonicali
 
 ## Trust model
 
-See the top-level docstring in `src/andes_app/__init__.py`. Summary:
+See the top-level docstring in `src/tensa/__init__.py`. Summary:
 
 - Local OS user is trusted (case-load equals code execution).
 - Loopback web origins from random browser tabs are NOT trusted (Host/Origin allow-list + strict CORS).

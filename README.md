@@ -1,21 +1,21 @@
-# ANDES App
+# TENSA
 
-An interactive, web-based workbench for power system modeling, simulation, and analysis. You build a system visually, run power flow and dynamic studies with one click, watch the results stream in live, and drive the whole thing from a scriptable API. It runs locally in your browser. ANDES App is built on the [ANDES](https://github.com/CURENT/andes) power system simulator.
+**T**ransients, **E**igenvalues & **N**etwork **S**imulation **A**pplication — an interactive, web-based workbench for power system modeling, simulation, and analysis. You build a system visually, run power flow and dynamic studies with one click, watch the results stream in live, and drive the whole thing from a scriptable API. It runs locally in your browser. TENSA is built on the [ANDES](https://github.com/CURENT/andes) power system simulator. (This project was briefly shared as "ANDES App" during its beta; same tool, new name.)
 
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue)](./LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776ab)](https://www.python.org/)
 [![Built on ANDES](https://img.shields.io/badge/built%20on-CURENT%2FANDES-2563eb)](https://github.com/CURENT/andes)
 [![Agent-ready](https://img.shields.io/badge/agent--ready-llms.txt%20%2B%20MCP-8b5cf6)](./llms.txt)
 
-![ANDES App showing an interactive single-line diagram with a solved power flow](docs/img/hero.jpeg)
+![TENSA showing an interactive single-line diagram with a solved power flow](docs/img/hero.jpeg)
 
 ## See it in action
 
 An AI agent builds the WSCC 9-bus system from scratch through the real UI. It places every bus, line, transformer, machine, exciter, and governor, lays out the one-line, saves the case to a file and reloads it, then runs power flow, a three-phase fault with a streaming time-domain simulation, continuation power flow, and eigenvalue analysis.
 
-[![Demo: an agent builds WSCC 9-bus and runs every analysis](docs/img/demo.gif)](https://github.com/Roger-GO/ANDES_App/raw/main/docs/demo/ieee9-agent-demo.mp4)
+[![Demo: an agent builds WSCC 9-bus and runs every analysis](docs/img/demo.gif)](https://github.com/Roger-GO/TENSA/raw/main/docs/demo/ieee9-agent-demo.mp4)
 
-The clip above is sped up. [Watch the full 2-minute walkthrough (MP4)](https://github.com/Roger-GO/ANDES_App/raw/main/docs/demo/ieee9-agent-demo.mp4). Every step uses the same HTTP API any script or agent can call, and you can [record it yourself](#run-the-demo-yourself).
+The clip above is sped up. [Watch the full 2-minute walkthrough (MP4)](https://github.com/Roger-GO/TENSA/raw/main/docs/demo/ieee9-agent-demo.mp4). Every step uses the same HTTP API any script or agent can call, and you can [record it yourself](#run-the-demo-yourself).
 
 ## What you can do
 
@@ -36,8 +36,8 @@ You need Python 3.12 or newer, and Node 22 with [pnpm](https://pnpm.io/). Node i
 
 ```bash
 # 0. Clone
-git clone https://github.com/Roger-GO/ANDES_App.git
-cd ANDES_App
+git clone https://github.com/Roger-GO/TENSA.git
+cd TENSA
 
 # 1. Install the server (pulls in ANDES, FastAPI, pyarrow)
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
@@ -47,10 +47,10 @@ pip install -e ./server
 cd web && pnpm install && pnpm build && cd ..
 
 # 3. Warm the ANDES symbolic cache (one time, about 30 s; rerun after upgrading ANDES)
-andes-app warm-cache
+tensa warm-cache
 
 # 4. Serve the UI and API on one port, then open the browser
-andes-app serve --workspace ~/andes-cases --port 8000 --open
+tensa serve --workspace ~/andes-cases --port 8000 --open
 ```
 
 Open `http://127.0.0.1:8000`. On first run an empty workspace is seeded with three example cases (IEEE-14, Kundur, and WSCC-9) so there is something to open right away. Load a case or build one from scratch, run a power flow, add a disturbance, and stream a time-domain simulation.
@@ -63,7 +63,7 @@ To use your own cases, drop any `.xlsx`, `.raw`, `.dyr`, or `.json` file into th
 
 ```bash
 # Terminal 1: serve on a fixed port
-andes-app serve --workspace ~/andes-cases --port 18800
+tensa serve --workspace ~/andes-cases --port 18800
 
 # Terminal 2: record (writes demo-video/ieee9-agent-demo.webm)
 cd web && pnpm exec playwright install chromium   # one time
@@ -80,7 +80,7 @@ The whole app is driven by a documented HTTP and WebSocket API. Anything the UI 
 - The MCP server exposes sessions, case loading, power flow, TDS, and disturbances as [Model Context Protocol](https://modelcontextprotocol.io) tools, so an assistant like Claude can run simulations directly:
   ```bash
   pip install -e './server[mcp]'
-  andes-app mcp --workspace ~/andes-cases
+  tensa mcp --workspace ~/andes-cases
   ```
 
 A typical programmatic flow:
@@ -98,7 +98,7 @@ GET  /api/sessions/{id}/operating-point    -> bus voltages and angles
 
 ```bash
 # Terminal 1: backend
-andes-app serve --workspace ~/andes-cases --port 8000
+tensa serve --workspace ~/andes-cases --port 8000
 
 # Terminal 2: frontend with hot reload
 cd web && VITE_ANDES_PORT=8000 pnpm dev    # -> http://localhost:5173
@@ -109,11 +109,11 @@ cd web && VITE_ANDES_PORT=8000 pnpm dev    # -> http://localhost:5173
 To reach the app from another machine on your network:
 
 ```bash
-andes-app serve --workspace ~/andes-cases --port 8000 \
+tensa serve --workspace ~/andes-cases --port 8000 \
   --bind 0.0.0.0 --allow-origin http://<your-lan-ip>:8000
 ```
 
-Security note: ANDES App has no authentication. It binds to `127.0.0.1` (loopback) by default and trusts the local OS user. Binding to a non-loopback address opens the API to everyone who can reach that interface, including case-file parsing, which evaluates expressions. Only do this on a network you trust, and do not load untrusted case files in that mode. See [SECURITY.md](./SECURITY.md) for details.
+Security note: TENSA has no authentication. It binds to `127.0.0.1` (loopback) by default and trusts the local OS user. Binding to a non-loopback address opens the API to everyone who can reach that interface, including case-file parsing, which evaluates expressions. Only do this on a network you trust, and do not load untrusted case files in that mode. See [SECURITY.md](./SECURITY.md) for details.
 
 ## Architecture
 
@@ -131,7 +131,7 @@ Each session gets its own `andes.System` in a separate subprocess. The API proce
 
 | Path | What is there |
 |---|---|
-| [`server/`](./server) | Python backend. FastAPI routers, per-session subprocess workers, Arrow streaming, clone-on-write editing, and the `andes-app` CLI. |
+| [`server/`](./server) | Python backend. FastAPI routers, per-session subprocess workers, Arrow streaming, clone-on-write editing, and the `tensa` CLI. |
 | [`web/`](./web) | React 19 and TypeScript UI. Interactive SLD (React Flow), uPlot result plots, Radix UI, Tailwind v4, Zustand. |
 | [`examples/`](./examples) | curl and Python client walkthroughs for the API. |
 | [`llms.txt`](./llms.txt) | API map written for LLMs. |
@@ -139,11 +139,11 @@ Each session gets its own `andes.System` in a separate subprocess. The API proce
 
 ## Citation
 
-If you use ANDES App in your work, please cite it. GitHub's "Cite this repository" button builds a citation from [CITATION.cff](./CITATION.cff). The short form:
+If you use TENSA in your work, please cite it. GitHub's "Cite this repository" button builds a citation from [CITATION.cff](./CITATION.cff). The short form:
 
-> Gracia Otalvaro, R. (2026). ANDES App: an interactive web workbench for power system simulation. https://github.com/Roger-GO/ANDES_App
+> Gracia Otalvaro, R. (2026). TENSA: an interactive web workbench for power system simulation. https://github.com/Roger-GO/TENSA
 
-ANDES App runs on ANDES, which does the underlying power system computation. If you cite this project, please also credit the authors behind ANDES, the [CURENT/ANDES](https://github.com/CURENT/andes) project by Cui et al.
+TENSA runs on ANDES, which does the underlying power system computation. If you cite this project, please also credit the authors behind ANDES, the [CURENT/ANDES](https://github.com/CURENT/andes) project by Cui et al.
 
 ## Contributing
 
@@ -151,4 +151,4 @@ PRs are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, test comman
 
 ## License
 
-ANDES App is licensed under the [GNU General Public License v3.0](./LICENSE), the same license as ANDES.
+TENSA is licensed under the [GNU General Public License v3.0](./LICENSE), the same license as ANDES.

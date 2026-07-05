@@ -1,6 +1,6 @@
-# Contributing to ANDES App
+# Contributing to TENSA
 
-Thanks for your interest in improving ANDES App! This guide covers everything you need to get a development environment running and land a PR.
+Thanks for your interest in improving TENSA! This guide covers everything you need to get a development environment running and land a PR.
 
 ## Development setup
 
@@ -13,7 +13,7 @@ The repo holds two independent packages:
 # Server
 python -m venv .venv && source .venv/bin/activate
 pip install -e './server[dev]'
-andes-app warm-cache          # one-time ANDES code-gen cache (~30 s)
+tensa warm-cache          # one-time ANDES code-gen cache (~30 s)
 
 # Web
 cd web
@@ -23,7 +23,7 @@ pnpm install
 Run the app in dev mode:
 
 ```bash
-andes-app serve --workspace ~/andes-cases --port 8000        # terminal 1
+tensa serve --workspace ~/andes-cases --port 8000        # terminal 1
 cd web && VITE_ANDES_PORT=8000 pnpm dev                       # terminal 2 → :5173
 ```
 

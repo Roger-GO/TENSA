@@ -48,7 +48,7 @@ function makeCommittedResponse() {
     plan: {
       manifest: {
         andes_version: '2.0.0',
-        andes_app_version: '0.1.0.dev0',
+        tensa_version: '0.1.0.dev0',
         case_filename: 'ieee14.raw',
         case_sha256: 'abc',
         disturbance_count: 0,
@@ -75,7 +75,7 @@ function makePlanResponse() {
     plan: {
       manifest: {
         andes_version: '2.0.0',
-        andes_app_version: '0.1.0.dev0',
+        tensa_version: '0.1.0.dev0',
         case_filename: 'ieee14.raw',
         case_sha256: 'sha-bundle',
         disturbance_count: 0,

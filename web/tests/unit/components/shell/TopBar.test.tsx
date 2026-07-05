@@ -75,13 +75,13 @@ describe('<TopBar /> — structural contract', () => {
 });
 
 describe('<TopBar /> — brand block', () => {
-  it('renders the logo mark + "ANDES App" wordmark before the left slot', () => {
+  it('renders the logo mark + "TENSA" wordmark before the left slot', () => {
     render(<TopBar left={<span>L</span>} />);
     const banner = screen.getByTestId('top-bar');
     const brand = screen.getByTestId('app-brand');
     expect(banner.contains(brand)).toBe(true);
     // wordmark text
-    expect(within(brand).getByText('ANDES App')).toBeInTheDocument();
+    expect(within(brand).getByText('TENSA')).toBeInTheDocument();
     // inline SVG mark (decorative, hidden from a11y tree)
     expect(brand.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
     // brand is structural: it sits BEFORE the left slot, not inside it

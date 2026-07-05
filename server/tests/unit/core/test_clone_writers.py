@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook, load_workbook
 
-from andes_app.core.clone_writers import (
+from tensa.core.clone_writers import (
     DyrLocator,
     apply_edit,
     dyr_writer,
@@ -30,7 +30,7 @@ from andes_app.core.clone_writers import (
     raw_writer,
     xlsx_writer,
 )
-from andes_app.core.errors import CloneEditError
+from tensa.core.errors import CloneEditError
 
 
 def _bundled_cases_dir() -> Path:
@@ -245,7 +245,7 @@ def test_apply_edit_raw_routes_to_raw_writer(tmp_path: Path) -> None:
 
 def test_index_file_is_packaged() -> None:
     """The index ships inside the package (wheel-safe), not just in docs/."""
-    import andes_app.core.clone_writers as pkg
+    import tensa.core.clone_writers as pkg
 
     pkg_dir = Path(pkg.__file__).parent
     assert (pkg_dir / "clone_write_index.json").exists()

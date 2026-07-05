@@ -2,13 +2,13 @@
 # regenerate-api-types.sh — regenerate src/api/generated.ts from a live
 # substrate's /openapi.json.
 #
-# Strategy: spawn `andes-app serve` with a temp workspace on an ephemeral
+# Strategy: spawn `tensa serve` with a temp workspace on an ephemeral
 # port (8765 by default; override via PORT env). Wait for the OpenAPI
 # endpoint to respond, fetch the spec, run `pnpm exec openapi-typescript`
 # against it, then kill the substrate.
 #
 # Pre-reqs:
-# - The andes-app virtualenv is activated (or its `andes-app` is on PATH).
+# - The tensa virtualenv is activated (or its `tensa` is on PATH).
 #   The default expectation matches AGENTS.md: `~/andes-project/.venv`.
 # - `pnpm install` has already run in `web/`.
 #
@@ -16,11 +16,11 @@
 #   ./web/scripts/regenerate-api-types.sh
 #
 # Override the substrate binary or port:
-#   ANDES_APP=/path/to/andes-app PORT=8800 ./web/scripts/regenerate-api-types.sh
+#   ANDES_APP=/path/to/tensa PORT=8800 ./web/scripts/regenerate-api-types.sh
 set -euo pipefail
 
 PORT="${PORT:-8765}"
-ANDES_APP="${ANDES_APP:-andes-app}"
+ANDES_APP="${ANDES_APP:-tensa}"
 
 # Resolve the web/ dir relative to this script so the script works from
 # any cwd.

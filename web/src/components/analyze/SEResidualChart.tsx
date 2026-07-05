@@ -14,7 +14,7 @@ import type { SeResult } from '@/api/types';
  * underlying measurements are in ``flagged_indices``) are drawn in a
  * destructive accent so 3-sigma outliers stand out.
  *
- * Wire-shape (per :class:`andes_app.core.se_result.SeResult`):
+ * Wire-shape (per :class:`tensa.core.se_result.SeResult`):
  *
  * - ``residuals`` — per-measurement residuals ``z - h(x_est)``.
  * - ``flagged_indices`` — indices into ``residuals`` whose normalised

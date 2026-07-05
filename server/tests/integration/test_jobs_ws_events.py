@@ -20,8 +20,8 @@ import json
 import pytest
 from starlette.testclient import TestClient
 
-from andes_app.api.app import make_app
-from andes_app.core.session import SessionManager, _Session
+from tensa.api.app import make_app
+from tensa.core.session import SessionManager, _Session
 
 
 class _FakeProcess:

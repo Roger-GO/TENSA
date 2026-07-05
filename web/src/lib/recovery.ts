@@ -9,7 +9,7 @@
  * 2. **Post-error recoveries** (`ProblemDetailsError.recovery`) — the
  *    substrate attaches a typed `{kind, label}` descriptor to every 4xx/5xx
  *    ProblemDetails body so the client can offer the exact recovery CTA
- *    (`server/src/andes_app/api/schemas.py::RecoveryDescriptor`).
+ *    (`server/src/tensa/api/schemas.py::RecoveryDescriptor`).
  *
  * Before Unit 7 these were two divergent local unions
  * (`useRunReadiness.RecoveryAction` vs the wire's `RecoveryKind`). Sharing
@@ -26,7 +26,7 @@
 
 /**
  * Machine-readable discriminator for a recovery call-to-action. Mirrors
- * `andes_app.api.schemas.RecoveryKind` exactly.
+ * `tensa.api.schemas.RecoveryKind` exactly.
  *
  * - `load-case` — no case loaded; focus the case picker.
  * - `reload-case` — re-parse the case (clears EIG-induced dae mutation,
@@ -41,7 +41,7 @@
  * - `wait-for-sweep` — a sweep holds the session lock; focus the Activity
  *   panel.
  *
- * The first eight kinds mirror `andes_app.api.schemas.RecoveryKind` 1:1
+ * The first eight kinds mirror `tensa.api.schemas.RecoveryKind` 1:1
  * (the wire shape attached to post-error ProblemDetails bodies). `open-pf`
  * is a READINESS-ONLY kind the substrate never emits — `useRunReadiness`
  * surfaces it proactively for the "Run PFlow first" precondition; the

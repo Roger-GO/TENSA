@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <!-- ANDES App mark: horizontal busbar with one sine cycle through it.
+  <!-- TENSA mark: horizontal busbar with one sine cycle through it.
        Two fixed colors chosen to read on both light and dark backgrounds:
        mid-slate bar + blue accent wave. -->
   <line x1="3" y1="12" x2="21" y2="12" stroke="#64748b" stroke-width="3" />

@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`andes_app.core.report`.
+"""Unit tests for :mod:`tensa.core.report`.
 
 These tests exercise the structured-table parser and the routine
 pre-condition gates without spinning up a real ``ss.PFlow.report()``
@@ -18,8 +18,8 @@ from typing import Any
 
 import pytest
 
-from andes_app.core.errors import AndesAppError, NoCaseLoadedError
-from andes_app.core.report import (
+from tensa.core.errors import AndesAppError, NoCaseLoadedError
+from tensa.core.report import (
     PflowNotConvergedError,
     ReportGenerationError,
     ReportPayload,
@@ -291,7 +291,7 @@ def test_generate_report_tds_raises_when_no_steps_have_run() -> None:
 
 
 @pytest.mark.unit
-def test_generate_report_unknown_routine_raises_andes_app_error() -> None:
+def test_generate_report_unknown_routine_raises_tensa_error() -> None:
     fake_ss = SimpleNamespace(PFlow=SimpleNamespace(converged=True))
     with pytest.raises(AndesAppError) as exc_info:
         generate_report(fake_ss, "bogus")  # type: ignore[arg-type]

@@ -121,7 +121,7 @@ describe('<FirstRunCoach />', () => {
     await userEvent.click(screen.getByTestId('first-run-coach-dismiss'));
     expect(screen.queryByTestId('first-run-coach')).toBeNull();
     expect(useFirstRunStore.getState().coachDismissed).toBe(true);
-    expect(localStorage.getItem('andes-app:first-run-coach-v1')).toBe('dismissed');
+    expect(localStorage.getItem('tensa:first-run-coach-v1')).toBe('dismissed');
   });
 
   it('clicking Done on step 3 dismisses and persists', async () => {
@@ -137,11 +137,11 @@ describe('<FirstRunCoach />', () => {
     await userEvent.click(screen.getByTestId('first-run-coach-cta'));
     expect(screen.queryByTestId('first-run-coach')).toBeNull();
     expect(useFirstRunStore.getState().coachDismissed).toBe(true);
-    expect(localStorage.getItem('andes-app:first-run-coach-v1')).toBe('dismissed');
+    expect(localStorage.getItem('tensa:first-run-coach-v1')).toBe('dismissed');
   });
 
   it('renders nothing when the persisted dismissal is set on first mount', async () => {
-    localStorage.setItem('andes-app:first-run-coach-v1', 'dismissed');
+    localStorage.setItem('tensa:first-run-coach-v1', 'dismissed');
     const { FirstRunCoach } = await import('@/components/shell/FirstRunCoach');
     render(<FirstRunCoach />);
     expect(screen.queryByTestId('first-run-coach')).toBeNull();
@@ -159,7 +159,7 @@ describe('<FirstRunCoach />', () => {
     }
     // Second lifecycle: clear storage + re-import. The slice's
     // bootstrap reads the now-empty storage and re-arms at step 1.
-    localStorage.removeItem('andes-app:first-run-coach-v1');
+    localStorage.removeItem('tensa:first-run-coach-v1');
     vi.resetModules();
     const { FirstRunCoach } = await import('@/components/shell/FirstRunCoach');
     render(<FirstRunCoach />);

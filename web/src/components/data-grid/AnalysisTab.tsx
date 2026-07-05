@@ -188,10 +188,7 @@ function PlotPanelContent() {
             auto-select-bus-voltages effect still runs and the chart isn't
             empty on first view. */}
         <div
-          className={cn(
-            'border-border max-h-44 overflow-auto border-t',
-            showVars ? '' : 'hidden',
-          )}
+          className={cn('border-border max-h-44 overflow-auto border-t', showVars ? '' : 'hidden')}
         >
           <VariableTreePicker />
         </div>

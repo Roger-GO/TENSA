@@ -16,8 +16,8 @@ import pytest
 
 pytest.importorskip("andes")
 
-from andes_app.core.errors import SetupFailedError
-from andes_app.core.wrapper import Wrapper
+from tensa.core.errors import SetupFailedError
+from tensa.core.wrapper import Wrapper
 
 
 def _ieee14_raw() -> Path:

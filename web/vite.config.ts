@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import path from 'node:path';
 
 // Default substrate port. Override with VITE_ANDES_PORT env var when running
-// `andes-app serve --port <N>` so dev proxy targets the right backend.
+// `tensa serve --port <N>` so dev proxy targets the right backend.
 const ANDES_PORT = process.env.VITE_ANDES_PORT ?? '8000';
 const ANDES_HOST = process.env.VITE_ANDES_HOST ?? '127.0.0.1';
 const ANDES_TARGET = `http://${ANDES_HOST}:${ANDES_PORT}`;
@@ -18,7 +18,7 @@ export default defineConfig({
   },
   server: {
     // Loopback by default; set VITE_HOST=0.0.0.0 to expose the dev server on
-    // your LAN (pair with `andes-app serve --allow-origin http://<lan-ip>:5173`).
+    // your LAN (pair with `tensa serve --allow-origin http://<lan-ip>:5173`).
     host: process.env.VITE_HOST ?? '127.0.0.1',
     port: 5173,
     strictPort: true,

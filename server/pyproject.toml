@@ -3,8 +3,8 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "andes-app"
-version = "0.3.0"
+name = "tensa"
+version = "0.4.0"
 description = "Web-based GUI substrate for the ANDES power-system simulator"
 readme = "README.md"
 license = { file = "../LICENSE" }
@@ -12,7 +12,7 @@ requires-python = ">=3.12"
 authors = [
     { name = "Roger Gracia", email = "rollerg97@gmail.com" },
 ]
-keywords = ["power-systems", "andes", "simulation", "fastapi", "websocket"]
+keywords = ["tensa", "power-systems", "andes", "simulation", "fastapi", "websocket"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Science/Research",
@@ -43,7 +43,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# MCP (Model Context Protocol) stdio server for LLM agents: `andes-app mcp`
+# MCP (Model Context Protocol) stdio server for LLM agents: `tensa mcp`
 mcp = [
     "mcp>=1.2",
 ]
@@ -57,26 +57,26 @@ dev = [
 ]
 
 [project.scripts]
-andes-app = "andes_app.cli:app"
+tensa = "tensa.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/Roger-GO/ANDES_App"
-Documentation = "https://github.com/Roger-GO/ANDES_App"
-Issues = "https://github.com/Roger-GO/ANDES_App/issues"
+Homepage = "https://github.com/Roger-GO/TENSA"
+Documentation = "https://github.com/Roger-GO/TENSA"
+Issues = "https://github.com/Roger-GO/TENSA/issues"
 
 # Hatchling build target — src layout
 [tool.hatch.build.targets.wheel]
-packages = ["src/andes_app"]
-# Bundle the built SPA into the wheel under ``andes_app/static/``. The
+packages = ["src/tensa"]
+# Bundle the built SPA into the wheel under ``tensa/static/``. The
 # wheel-build step expects ``../web/dist`` to exist; CI runs ``pnpm build``
 # in ``web/`` before ``python -m build`` to populate it. If the directory
 # is missing at build time, hatch fails loudly — that's the intended
 # behavior so we never ship a wheel without the UI bundle.
-force-include = { "../web/dist" = "andes_app/static" }
+force-include = { "../web/dist" = "tensa/static" }
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "src/andes_app",
+    "src/tensa",
     "README.md",
     "ANDES_VERSIONS.md",
 ]

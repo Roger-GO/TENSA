@@ -58,13 +58,13 @@ describe('theme store', () => {
   });
 
   it('boots from localStorage when a valid value is persisted', async () => {
-    localStorage.setItem('andes-app:theme-preference', 'dark');
+    localStorage.setItem('tensa:theme-preference', 'dark');
     const { useThemeStore } = await import('@/store/theme');
     expect(useThemeStore.getState().themePreference).toBe('dark');
   });
 
   it('falls back to "system" when localStorage holds garbage', async () => {
-    localStorage.setItem('andes-app:theme-preference', 'maroon');
+    localStorage.setItem('tensa:theme-preference', 'maroon');
     const { useThemeStore } = await import('@/store/theme');
     expect(useThemeStore.getState().themePreference).toBe('system');
   });
@@ -74,11 +74,11 @@ describe('theme store', () => {
     useThemeStore.getState().setThemePreference('dark');
     expect(useThemeStore.getState().themePreference).toBe('dark');
     expect(useThemeStore.getState().resolvedTheme).toBe('dark');
-    expect(localStorage.getItem('andes-app:theme-preference')).toBe('dark');
+    expect(localStorage.getItem('tensa:theme-preference')).toBe('dark');
 
     useThemeStore.getState().setThemePreference('light');
     expect(useThemeStore.getState().resolvedTheme).toBe('light');
-    expect(localStorage.getItem('andes-app:theme-preference')).toBe('light');
+    expect(localStorage.getItem('tensa:theme-preference')).toBe('light');
   });
 
   it('cycleTheme rotates light → dark → system → light', async () => {

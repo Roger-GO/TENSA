@@ -9,9 +9,9 @@ It does two passes:
 
 1. **OpenAPI surface.** Build the app, call ``app.openapi()``, and walk
    ``schema["paths"][path][method]``. Every operation MUST carry
-   ``x-andes-app-gui-location`` (injected per-route via ``openapi_extra`` on
+   ``x-tensa-gui-location`` (injected per-route via ``openapi_extra`` on
    the ``@router.<verb>`` decorator). An operation tagged ``"none"`` MUST also
-   carry ``x-andes-app-parity-deferred`` with a non-empty reason. A missing
+   carry ``x-tensa-parity-deferred`` with a non-empty reason. A missing
    tag — or a ``"none"`` with no deferral — fails the check (exit 1). This is
    what catches a *new* route that lands untagged.
 
@@ -75,10 +75,10 @@ if SERVER_SRC.is_dir() and str(SERVER_SRC) not in sys.path:
 from fastapi.routing import APIRoute  # noqa: E402
 from starlette.routing import Mount, Route, WebSocketRoute  # noqa: E402
 
-from andes_app.api.app import make_app  # noqa: E402
+from tensa.api.app import make_app  # noqa: E402
 
-GUI_LOCATION_KEY = "x-andes-app-gui-location"
-DEFERRAL_KEY = "x-andes-app-parity-deferred"
+GUI_LOCATION_KEY = "x-tensa-gui-location"
+DEFERRAL_KEY = "x-tensa-parity-deferred"
 LEDGER_PATH = REPO_ROOT / "docs" / "gui-parity-ledger.md"
 
 # A ``# parity-reviewed: YYYY-MM-DD`` marker in the route's source file.
@@ -97,11 +97,10 @@ _FRAMEWORK_DOC_PATHS = frozenset(
 
 
 def _build_app() -> Any:
-    """Build the app with a dummy token. No socket bind, no worker spawn."""
+    """Build the app against a throwaway workspace. No socket bind, no worker spawn."""
     workspace = Path(tempfile.mkdtemp(prefix="parity-")) / "ws"
     workspace.mkdir(mode=0o700)
     return make_app(
-        expected_token="d" * 64,
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
@@ -213,7 +212,7 @@ def main() -> int:
         elif isinstance(route, Mount):
             # The SPA static mount. Its reviewer marker lives in app.py
             # (the make_app factory that registers the mount).
-            src_file = REPO_ROOT / "server" / "src" / "andes_app" / "api" / "app.py"
+            src_file = REPO_ROOT / "server" / "src" / "tensa" / "api" / "app.py"
             reviewed = _source_has_parity_marker(src_file)
             name = route.name or "<mount>"
             mount_path = route.path or "/"

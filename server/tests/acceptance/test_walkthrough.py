@@ -1,4 +1,4 @@
-"""Phase A R3 acceptance: spawn ``andes-app serve`` in a subprocess and
+"""Phase A R3 acceptance: spawn ``tensa serve`` in a subprocess and
 run the curl-only walkthrough script against it.
 
 This is the load-bearing acceptance test for Phase A. It proves the
@@ -53,7 +53,7 @@ def _ieee14_paths() -> tuple[Path, Path]:
 def test_curl_walkthrough_runs_green(tmp_path: Path) -> None:
     """The full Phase A R3 acceptance scenario:
 
-    - Spawn the substrate via ``python -m andes_app serve`` on an ephemeral
+    - Spawn the substrate via ``python -m tensa serve`` on an ephemeral
       port
     - Wait for the server to bind
     - Run ``walkthrough.sh`` with the port + workspace env vars set
@@ -76,7 +76,7 @@ def test_curl_walkthrough_runs_green(tmp_path: Path) -> None:
         [
             sys.executable,
             "-m",
-            "andes_app",
+            "tensa",
             "serve",
             "--bind",
             "127.0.0.1",

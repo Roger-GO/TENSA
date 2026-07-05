@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# End-to-end ANDES App API walkthrough in plain curl.
+# End-to-end TENSA API walkthrough in plain curl.
 #
-# Prereqs: a running server (`andes-app serve --workspace <dir> --port 8000`)
+# Prereqs: a running server (`tensa serve --workspace <dir> --port 8000`)
 # and a case file inside that workspace (this script assumes ANDES's bundled
 # ieee14 xlsx has been copied in as `ieee14_full.xlsx` — adjust CASE below).
 set -euo pipefail

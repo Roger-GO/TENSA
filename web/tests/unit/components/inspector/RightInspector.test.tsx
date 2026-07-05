@@ -8,7 +8,7 @@
  *   - Clicking a section trigger toggles its open state.
  *   - Per-element-kind open-state persists across selections via
  *     localStorage under
- *     ``andes-app:layout-v1:rightInspector:openSections:<kind>``.
+ *     ``tensa:layout-v1:rightInspector:openSections:<kind>``.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
@@ -134,7 +134,7 @@ describe('<RightInspector />', () => {
     const { unmount } = render(withQueryClient(<RightInspector />));
     await user.click(screen.getByTestId('right-inspector-section-trigger-plots'));
     expect(
-      window.localStorage.getItem('andes-app:layout-v1:rightInspector:openSections:bus'),
+      window.localStorage.getItem('tensa:layout-v1:rightInspector:openSections:bus'),
     ).toContain('plots');
     unmount();
 

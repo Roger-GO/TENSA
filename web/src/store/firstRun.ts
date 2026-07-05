@@ -9,7 +9,7 @@
  *
  * - The dismissal flag (``coachDismissed``) is persisted to
  *   ``localStorage`` under the versioned key
- *   ``andes-app:first-run-coach-v1`` so a returning user never sees the
+ *   ``tensa:first-run-coach-v1`` so a returning user never sees the
  *   coach again. Bumping the suffix (``-v2``) is the migration knob for
  *   future major releases that want to re-introduce the coach.
  * - The current step is intentionally NOT persisted — restarting the
@@ -36,7 +36,7 @@
  */
 import { create } from 'zustand';
 
-export const FIRST_RUN_STORAGE_KEY = 'andes-app:first-run-coach-v1';
+export const FIRST_RUN_STORAGE_KEY = 'tensa:first-run-coach-v1';
 
 /** Coach step. ``null`` means the coach is not visible. */
 export type CoachStep = 1 | 2 | 3 | null;

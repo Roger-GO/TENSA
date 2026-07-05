@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from andes_app.core.wrapper import Wrapper
+from tensa.core.wrapper import Wrapper
 
 pytestmark = pytest.mark.integration
 
@@ -96,7 +96,7 @@ def test_diff_unknown_idx_is_empty(kundur_wrapper: Wrapper) -> None:
 
 
 def test_diff_rejects_non_controller_model(kundur_wrapper: Wrapper) -> None:
-    from andes_app.core.errors import ElementValidationError
+    from tensa.core.errors import ElementValidationError
 
     w = kundur_wrapper
     w.init_clone()

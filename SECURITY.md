@@ -2,7 +2,7 @@
 
 ## Trust model
 
-ANDES App is a **local-first research tool**. Its security model is deliberately simple:
+TENSA is a **local-first research tool**. Its security model is deliberately simple:
 
 - **No authentication.** The server binds to `127.0.0.1` (loopback) by default. The local OS user is the only intended actor.
 - **Host/Origin checking.** A pure-ASGI middleware rejects requests whose `Host`/`Origin` headers are not on the allow-list, which defends against DNS-rebinding and random browser tabs poking at the loopback port. Extend the allow-list with `--allow-origin`.

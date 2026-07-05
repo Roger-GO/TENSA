@@ -30,7 +30,7 @@ ANDES upgrades are deliberate — never accept an automatic minor bump without r
 
 ## Security posture
 
-The trust model lives in the top-level docstring of `server/src/andes_app/__init__.py` (canonical statement) and in `SECURITY.md`. Summary:
+The trust model lives in the top-level docstring of `server/src/tensa/__init__.py` (canonical statement) and in `SECURITY.md`. Summary:
 
 - **Local OS user is trusted** — case files contain Python expressions evaluated by ANDES at parse time, and the local user is the only authorized actor.
 - **Loopback web origins from random browser tabs are NOT trusted** — defended via Host/Origin pure-ASGI middleware + precise CORS allow-list (no wildcards, no `null`, no extension origins).
@@ -63,10 +63,10 @@ The trust model lives in the top-level docstring of `server/src/andes_app/__init
 
 ## What goes where
 
-- `server/src/andes_app/api/` — FastAPI routers, schemas, app factory
-- `server/src/andes_app/core/` — wrapper, worker, session manager, Arrow streaming
-- `server/src/andes_app/security/` — workspace path validation, Host/Origin ASGI middleware
-- `server/src/andes_app/cache/` — precomputed `andes prepare` artifacts (built at wheel time; only IEEE 14 ships in the wheel)
+- `server/src/tensa/api/` — FastAPI routers, schemas, app factory
+- `server/src/tensa/core/` — wrapper, worker, session manager, Arrow streaming
+- `server/src/tensa/security/` — workspace path validation, Host/Origin ASGI middleware
+- `server/src/tensa/cache/` — precomputed `andes prepare` artifacts (built at wheel time; only IEEE 14 ships in the wheel)
 - `server/tests/acceptance/walkthrough.sh` — the curl-only end-to-end acceptance test
 - `examples/` — copy-paste API walkthroughs (curl + Python)
 - `llms.txt` — condensed API map for LLM agents (update when routes change)

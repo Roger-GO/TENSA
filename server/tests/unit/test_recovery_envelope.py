@@ -31,14 +31,14 @@ from pydantic import ValidationError
 # completeness test below. ``__subclasses__()`` only sees classes whose
 # defining module has already been imported, so this import set is
 # load-bearing: drop a module and the sweep silently stops guarding it.
-from andes_app.api.schemas import (
+from tensa.api.schemas import (
     RECOVERY_DEFAULT_LABELS,
     ProblemDetails,
     RecoveryDescriptor,
     RecoveryKind,
 )
-from andes_app.core import bundle, errors, report, session, snapshot, sweep
-from andes_app.core.errors import (
+from tensa.core import bundle, errors, report, session, snapshot, sweep
+from tensa.core.errors import (
     AndesAppError,
     CaseLoadError,
     CpfDivergedError,
@@ -59,8 +59,8 @@ from andes_app.core.errors import (
     SeUnderDeterminedError,
     SystemAlreadyLoadedError,
 )
-from andes_app.core.session import SweepInProgressError
-from andes_app.security import paths
+from tensa.core.session import SweepInProgressError
+from tensa.security import paths
 
 # Keep the module imports referenced so linters don't strip them — they are
 # load-bearing for the reflection sweep below: each one registers the

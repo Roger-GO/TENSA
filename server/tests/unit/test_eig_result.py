@@ -7,7 +7,7 @@ import math
 
 import pytest
 
-from andes_app.core.eig_result import ComplexNumber, EigResult
+from tensa.core.eig_result import ComplexNumber, EigResult
 
 
 def test_complex_number_from_complex_round_trips() -> None:

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from andes_app.core.session import (
+from tensa.core.session import (
     SessionManager,
     _RunBuffer,
     _Session,

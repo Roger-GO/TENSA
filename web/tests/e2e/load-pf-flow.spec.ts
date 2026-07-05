@@ -3,11 +3,11 @@
  *
  *   paste token → load IEEE 14 → run PF → assert overlays + table.
  *
- * Requires a running `andes-app serve` substrate AND a Vite dev server
+ * Requires a running `tensa serve` substrate AND a Vite dev server
  * — the Playwright config's `webServer` block starts the Vite dev
  * server, but the substrate must be running independently (typically
  * on `http://127.0.0.1:8765`). Set `ANDES_TEST_TOKEN` to the value
- * from `~/.andes-app/run-<pid>.token` before running.
+ * from `~/.tensa/run-<pid>.token` before running.
  *
  * The test is `test.fixme()` by default so CI runs it as expected-fail
  * until the operational glue (substrate orchestration in a fixture
@@ -18,9 +18,9 @@
  *
  *   1. cp ~/andes-project/.venv/lib/python3.12/site-packages/andes/cases/ieee14/ieee14.raw \
  *        web/tests/e2e/fixtures/
- *   2. andes-app serve --workspace web/tests/e2e/fixtures \
+ *   2. tensa serve --workspace web/tests/e2e/fixtures \
  *        --bind-port 8765 --bind-host 127.0.0.1
- *   3. ANDES_TEST_TOKEN=$(cat ~/.andes-app/run-<pid>.token) \
+ *   3. ANDES_TEST_TOKEN=$(cat ~/.tensa/run-<pid>.token) \
  *        E2E_NO_WEBSERVER=1 pnpm test:e2e
  *   4. Remove the `.fixme` qualifier on the test below.
  */

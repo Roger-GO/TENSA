@@ -22,7 +22,7 @@ import { EditModeToggle } from './EditModeToggle';
  * Open-state persistence: per-element-kind (so a generator selection
  * remembers the user's preferred section split independent of a bus
  * selection's). Stored in localStorage under
- * ``andes-app:layout-v1:rightInspector:openSections:<kind>`` as a JSON
+ * ``tensa:layout-v1:rightInspector:openSections:<kind>`` as a JSON
  * ``string[]`` of section ids.
  *
  * Empty branch: when no element is selected, renders an EmptyState
@@ -36,7 +36,7 @@ import { EditModeToggle } from './EditModeToggle';
  * ``<Kind> <idx>`` when the topology hasn't resolved a name).
  */
 
-const STORAGE_PREFIX = 'andes-app:layout-v1:rightInspector:openSections';
+const STORAGE_PREFIX = 'tensa:layout-v1:rightInspector:openSections';
 
 const SECTION_IDS = ['properties', 'plots', 'disturbances'] as const;
 type SectionId = (typeof SECTION_IDS)[number];

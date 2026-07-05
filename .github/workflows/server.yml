@@ -51,7 +51,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
-      - name: Install andes-app with dev dependencies
+      - name: Install tensa with dev dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e "./server[dev]"
@@ -60,7 +60,7 @@ jobs:
         run: bash ./scripts/ci-matrix.sh
 
       # GUI-parity ledger (v3.1 Unit 16, KTD-12). Fails when a new route lands
-      # without an x-andes-app-gui-location tag, when a 'none'-tagged route has
+      # without an x-tensa-gui-location tag, when a 'none'-tagged route has
       # no deferral reason, or when a WS route / static mount lacks a
       # '# parity-reviewed: <date>' marker. Runs after the install step so the
       # app (and its OpenAPI schema) imports cleanly.

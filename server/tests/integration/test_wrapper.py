@@ -14,13 +14,13 @@ from pathlib import Path
 
 import pytest
 
-from andes_app.core.disturbance import FaultSpec
-from andes_app.core.errors import (
+from tensa.core.disturbance import FaultSpec
+from tensa.core.errors import (
     CaseLoadError,
     DisturbanceCommitError,
     NoCaseLoadedError,
 )
-from andes_app.core.wrapper import Wrapper
+from tensa.core.wrapper import Wrapper
 
 
 def _ieee14_paths() -> tuple[Path, Path]:
@@ -315,7 +315,7 @@ def test_build_genrou_partial_textbook_set_rejected_actionably() -> None:
     merged ordering (ANDES default xd2=0.3 > user xd1=0.0608) → 422 with an
     actionable message naming the silent default. This is the exact scenario
     that previously produced a numerically unstable TDS."""
-    from andes_app.core.errors import ElementValidationError
+    from tensa.core.errors import ElementValidationError
 
     w = _blank_session_with_genrou_prereqs()
     with pytest.raises(ElementValidationError) as ei:
@@ -351,7 +351,7 @@ def test_build_genrou_untouched_reactance_defaults_accepted() -> None:
 @pytest.mark.integration
 def test_controller_schema_syn_link_uses_syn_idx() -> None:
     """An exciter/governor's machine link renders as a machine picker."""
-    from andes_app.core.wrapper import _PARAMS_BY_MODEL
+    from tensa.core.wrapper import _PARAMS_BY_MODEL
 
     for model in ("TGOV1", "IEEEG1", "SEXS", "IEEEX1", "ESDC2A", "EXST1"):
         metas = _PARAMS_BY_MODEL[model]
@@ -369,7 +369,7 @@ def test_save_case_failed_write_is_atomic_and_raises(tmp_path: Path) -> None:
 
     from andes.io import xlsx as andes_xlsx
 
-    from andes_app.core.errors import CaseSaveError
+    from tensa.core.errors import CaseSaveError
 
     raw, _dyr = _ieee14_paths()
     w = Wrapper()
@@ -398,7 +398,7 @@ def test_save_case_failed_write_is_atomic_and_raises(tmp_path: Path) -> None:
 def test_load_case_empty_file_raises_friendly_error(tmp_path: Path) -> None:
     """A 0-byte case file fails with an actionable message, not ANDES's raw
     'File is not a zip file'."""
-    from andes_app.core.errors import CaseLoadError
+    from tensa.core.errors import CaseLoadError
 
     empty = tmp_path / "empty.xlsx"
     empty.touch()  # 0 bytes

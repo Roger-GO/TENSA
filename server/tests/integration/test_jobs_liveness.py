@@ -17,7 +17,7 @@ import asyncio
 
 import pytest
 
-from andes_app.core.session import (
+from tensa.core.session import (
     WORKER_DIED_CATEGORY,
     SessionManager,
     _Session,
@@ -141,7 +141,7 @@ def test_liveness_loop_fires_within_short_tick(monkeypatch: pytest.MonkeyPatch) 
     interval."""
 
     async def _run() -> None:
-        import andes_app.core.session as session_mod
+        import tensa.core.session as session_mod
 
         monkeypatch.setattr(session_mod, "JOB_LIVENESS_TICK", 0.05)
         mgr = SessionManager()

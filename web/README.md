@@ -1,7 +1,7 @@
-# andes-app web (v0.2)
+# tensa web (v0.2)
 
 Vite 6 + React 19 + TypeScript + Tailwind v4 + Radix Primitives. Talks to the
-`andes-app` substrate over HTTP (`/api/*`) and WebSocket (`/ws/*`).
+`tensa` substrate over HTTP (`/api/*`) and WebSocket (`/ws/*`).
 
 ## What's in v0.2
 
@@ -75,7 +75,7 @@ Full scope and rationale:
 - Node 22 LTS (or newer; this scaffold works on Node 25). Install via
   [`nvm`](https://github.com/nvm-sh/nvm) or your platform package manager.
 - `pnpm` 9+. Install with `npm install -g pnpm` or `corepack enable`.
-- The substrate running locally (`andes-app serve` from the `server/`
+- The substrate running locally (`tensa serve` from the `server/`
   package — see the repo root README).
 
 ## Quick start
@@ -87,7 +87,7 @@ pnpm install
 # 2. Start the substrate (from a separate shell, in the repo root)
 #    Use --port to pick a stable port the dev proxy can target, and
 #    --allow-origin to admit Vite's dev server through Host/Origin + CORS.
-andes-app serve --port 8000 --allow-origin http://127.0.0.1:5173 --open
+tensa serve --port 8000 --allow-origin http://127.0.0.1:5173 --open
 
 # 3. Start the Vite dev server
 pnpm dev
@@ -113,7 +113,7 @@ VITE_ANDES_PORT=8123 pnpm dev
 - `pnpm dev` — Vite dev server with proxy to the substrate.
 - `pnpm build` — type-check + production build to `dist/`. The wheel-bundling
   unit (Unit 10) wires `dist/` into the Python wheel so a single
-  `pip install andes-app` ships the UI.
+  `pip install tensa` ships the UI.
 - `pnpm typecheck` — TypeScript project-references check; `pnpm build` runs
   this implicitly.
 - `pnpm lint` — ESLint with `--max-warnings 0`. CI fails on any warning.

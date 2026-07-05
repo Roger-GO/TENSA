@@ -1,6 +1,6 @@
 """Unit 4a — shared error-mapping module + recovery plumbing.
 
-Pure-unit coverage of ``andes_app.api.error_mapping`` and the new
+Pure-unit coverage of ``tensa.api.error_mapping`` and the new
 ``app.py`` exception handlers. This env has NO ``httpx`` / NO ``andes``
 (PEP-668 blocks installs), so ``TestClient`` / ``httpx`` integration tests
 cannot run here. Instead we:
@@ -25,7 +25,7 @@ from starlette.requests import Request
 
 # --- multipart shim (lean-env only) -----------------------------------------
 #
-# Importing ``andes_app.api.app`` eagerly imports every router, and the bundle
+# Importing ``tensa.api.app`` eagerly imports every router, and the bundle
 # router declares ``UploadFile`` / ``Form`` params that make FastAPI call
 # ``ensure_multipart_is_installed()`` at decoration time. ``python_multipart``
 # is genuinely absent in this lean PYTHONPATH=src env (PEP-668 blocks installs;
@@ -48,18 +48,18 @@ if "python_multipart" not in sys.modules:
         sys.modules["multipart"] = _legacy
         sys.modules["multipart.multipart"] = _legacy_inner
 
-from andes_app.api.error_mapping import (
+from tensa.api.error_mapping import (
     WORKER_ERROR_HTTP_MAP,
     map_worker_error,
     recovery_for,
 )
-from andes_app.api.schemas import RECOVERY_DEFAULT_LABELS, RecoveryDescriptor
-from andes_app.core.errors import (
+from tensa.api.schemas import RECOVERY_DEFAULT_LABELS, RecoveryDescriptor
+from tensa.core.errors import (
     EigPrerequisiteError,
     SessionBusyError,
 )
-from andes_app.core.jobs import _JobRegistry
-from andes_app.core.session import SweepInProgressError, WorkerError
+from tensa.core.jobs import _JobRegistry
+from tensa.core.session import SweepInProgressError, WorkerError
 
 # --- recovery_for (pure helper) ---------------------------------------------
 
@@ -213,7 +213,7 @@ def test_map_worker_error_setup_failed_canonical_status_is_422() -> None:
     assert WORKER_ERROR_HTTP_MAP["SetupFailedError"] == 422
 
 
-def test_map_worker_error_bare_andes_app_error_category_falls_to_500() -> None:
+def test_map_worker_error_bare_tensa_error_category_falls_to_500() -> None:
     """The bare ``AndesAppError`` category (snapshot-export 422 override is
     route-local, NOT in the shared map) must fall through to the 500 default —
     documenting that the snapshot override lives at the call site, not here."""
@@ -240,7 +240,7 @@ def _make_request() -> Request:
 
 
 def _handle_busy(exc: SessionBusyError) -> tuple[int, dict[str, object]]:
-    from andes_app.api.app import _session_busy_to_problem_details
+    from tensa.api.app import _session_busy_to_problem_details
 
     response = _session_busy_to_problem_details(_make_request(), exc)
     body = json.loads(response.body)
@@ -283,7 +283,7 @@ def test_problem_details_handler_plumbs_recovery_from_dict_detail() -> None:
     """When a route raises ``HTTPException(detail={...})`` carrying a
     ``recovery`` field (the shape ``map_worker_error`` produces), the
     ProblemDetails handler surfaces it on the envelope."""
-    from andes_app.api.app import _problem_details_handler
+    from tensa.api.app import _problem_details_handler
 
     http = map_worker_error(WorkerError("EigPrerequisiteError", "run pflow first"))
     response = _problem_details_handler(_make_request(), http)
@@ -296,7 +296,7 @@ def test_problem_details_handler_string_detail_emits_null_recovery() -> None:
     """A plain string-detail ``HTTPException`` (the ``elif`` branch the Unit 4a
     edit also covers) must emit ``recovery: null`` — the recovery lift only fires
     on the dict-detail branch, and the string path must not raise."""
-    from andes_app.api.app import _problem_details_handler
+    from tensa.api.app import _problem_details_handler
 
     response = _problem_details_handler(
         _make_request(), HTTPException(status_code=409, detail="plain string")
@@ -311,7 +311,7 @@ def test_problem_details_handler_dict_without_recovery_spreads_extras() -> None:
     """A dict-detail lacking a ``recovery`` key still spreads its other fields as
     extras while emitting ``recovery: null`` — and ``recovery`` must NOT leak into
     the spread extras (it is in the excluded-key set)."""
-    from andes_app.api.app import _problem_details_handler
+    from tensa.api.app import _problem_details_handler
 
     http = HTTPException(
         status_code=422,
@@ -326,7 +326,7 @@ def test_problem_details_handler_dict_without_recovery_spreads_extras() -> None:
 
 
 def test_sweep_in_progress_handler_plumbs_wait_for_sweep_recovery() -> None:
-    from andes_app.api.app import _sweep_in_progress_to_problem_details
+    from tensa.api.app import _sweep_in_progress_to_problem_details
 
     exc = SweepInProgressError("sw-1", iter_done=2, iter_total=10)
     response = _sweep_in_progress_to_problem_details(_make_request(), exc)

@@ -1,6 +1,6 @@
-# ANDES App — API map for LLM agents
+# TENSA — API map for LLM agents
 
-ANDES App is a web workbench + HTTP/WebSocket API around the ANDES power-system
+TENSA is a web workbench + HTTP/WebSocket API around the ANDES power-system
 simulator. Everything the UI does goes through this API, so an agent can do
 everything a human can. No authentication: the server trusts the local user and
 binds to 127.0.0.1 by default.
@@ -95,7 +95,7 @@ response and needs no Arrow decoding.
 ## MCP
 
 An MCP (Model Context Protocol) stdio server ships as an optional extra:
-  pip install -e './server[mcp]' && andes-app mcp --workspace ~/andes-cases
+  pip install -e './server[mcp]' && tensa mcp --workspace ~/andes-cases
 It wraps the golden workflow (create_session, load_case, run_pflow, run_tds,
 add_disturbance, get_topology, get_operating_point, list_workspace_files, ...) so MCP
 clients (Claude Code, etc.) can drive simulations as native tools.

@@ -12,7 +12,7 @@ import { cn } from '@/lib/cn';
  * Floating, non-blocking 3-step coach that walks a brand-new user
  * through producing their first PF result. Visible exactly once per
  * browser profile (dismissal persisted to ``localStorage`` under
- * ``andes-app:first-run-coach-v1``).
+ * ``tensa:first-run-coach-v1``).
  *
  * Design constraints (from the plan):
  *

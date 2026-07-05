@@ -11,10 +11,10 @@ import pytest
 
 @pytest.mark.unit
 def test_package_imports() -> None:
-    import andes_app
+    import tensa
 
-    assert isinstance(andes_app.__version__, str)
-    assert andes_app.__version__  # non-empty
+    assert isinstance(tensa.__version__, str)
+    assert tensa.__version__  # non-empty
 
 
 @pytest.mark.unit
@@ -24,7 +24,7 @@ def test_trust_model_docstring_present() -> None:
     AGENTS.md references it. If the docstring is gone or empty, future contributors
     have nowhere to land when they touch security-related code.
     """
-    import andes_app
+    import tensa
 
-    assert andes_app.__doc__ is not None
-    assert "trust model" in andes_app.__doc__.lower()
+    assert tensa.__doc__ is not None
+    assert "trust model" in tensa.__doc__.lower()

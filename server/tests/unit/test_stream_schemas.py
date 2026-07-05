@@ -24,7 +24,7 @@ import pyarrow as pa
 import pyarrow.ipc
 import pytest
 
-from andes_app.core.stream import (
+from tensa.core.stream import (
     DEFAULT_VARS,
     VAR_GROUPS,
     encode_batch,

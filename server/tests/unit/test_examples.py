@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from andes_app.core import examples
-from andes_app.core.examples import seed_example_cases
+from tensa.core import examples
+from tensa.core.examples import seed_example_cases
 
 
 @pytest.fixture
@@ -96,7 +96,7 @@ def test_missing_andes_cases_dir_is_a_warning_not_a_crash(
 ) -> None:
     """When andes's bundled cases can't be located, seeding logs and skips."""
     monkeypatch.setattr(examples, "_andes_cases_dir", lambda: None)
-    with caplog.at_level("WARNING", logger="andes-app.examples"):
+    with caplog.at_level("WARNING", logger="tensa.examples"):
         assert seed_example_cases(workspace) == []
     assert any("skipping example-case seeding" in r.message for r in caplog.records)
     assert list(workspace.iterdir()) == []
@@ -110,7 +110,7 @@ def test_partial_bundle_copies_what_exists(
     """A missing individual bundled case is skipped with a warning; the
     remaining cases are still seeded."""
     (fake_cases_dir / "wscc9" / "wscc9.xlsx").unlink()
-    with caplog.at_level("WARNING", logger="andes-app.examples"):
+    with caplog.at_level("WARNING", logger="tensa.examples"):
         copied = seed_example_cases(workspace)
     assert sorted(copied) == ["ieee14_full.xlsx", "kundur_full.xlsx"]
     assert any("bundled example case missing" in r.message for r in caplog.records)

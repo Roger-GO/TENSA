@@ -32,7 +32,7 @@ import { toast } from '@/lib/toast';
 
 /**
  * Mirror of the substrate's ``ReportTable`` shape (defined in
- * ``server/src/andes_app/api/routes/reports.py``). Defined locally to
+ * ``server/src/tensa/api/routes/reports.py``). Defined locally to
  * avoid coupling the LatexCopyButton to the generated OpenAPI types
  * — those regenerate out-of-band and the component should keep
  * working through the regen window.

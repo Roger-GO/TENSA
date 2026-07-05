@@ -5,7 +5,7 @@ import { cn } from '@/lib/cn';
 
 /**
  * ToggleSpecForm — fields for the substrate's ``ToggleSpec`` shape (see
- * ``server/src/andes_app/core/disturbance.py``):
+ * ``server/src/tensa/core/disturbance.py``):
  *
  * - ``model``: ANDES model class name (Line, GENROU, GENCLS, PV, Slack,
  *   PQ, ZIP, Shunt). Picker uses a fixed whitelist that matches the

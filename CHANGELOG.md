@@ -1,19 +1,22 @@
 # Changelog
 
-All notable changes to ANDES App are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/), and the project adheres to semantic versioning once 1.0 lands.
+All notable changes to TENSA are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/), and the project adheres to semantic versioning once 1.0 lands.
 
-## [Unreleased]
+## [0.4.0] — 2026-07-05
+
+### Changed
+- **Renamed the project from "ANDES App" to TENSA** (Transients, Eigenvalues & Network Simulation Application). The Python package, CLI command (`tensa serve`), MCP server, default workspace directory (`~/.tensa/cases`), and repository (github.com/Roger-GO/TENSA) all follow. ANDES remains the simulation engine and is credited unchanged; only this project's own identity changed. Existing installs: reinstall with `pip install -e ./server` and move cases from `~/.andes-app/` if you used the default workspace.
 
 ### Added
 - Showcase demo: a captioned video of an agent building WSCC 9-bus from scratch through the UI and running every analysis, embedded in a rewritten, production-ready README.
 - First-run example cases: an empty workspace is auto-seeded with IEEE-14, Kundur, and WSCC-9.
 
 ### Changed
-- Relicensed from MIT to **GNU GPL v3.0** to match ANDES, which ANDES App is built on. Added an ANDES citation (Cui et al., 2021) to the README.
+- Relicensed from MIT to **GNU GPL v3.0** to match ANDES, which TENSA is built on. Added an ANDES citation (Cui et al., 2021) to the README.
 - GENROU exposes its full subtransient reactance + time-constant set, with d/q reactance-ordering validation that names the offending value (prevents textbook transient values silently clashing with unset subtransient defaults).
 - Eigenvalue scatter: numeric axis ticks + gridlines, points colored by damping band with a legend, and an "All modes" filter toggle so a well-damped system isn't an empty plot.
 - Bus data grid now shows net per-bus P/Q computed from the power-flow result.
-- Branding: logo, favicon, and "ANDES App" wordmark.
+- Branding: logo, favicon, and "TENSA" wordmark.
 
 ### Fixed
 - Single-line diagram readability: buses render as traditional busbars; branch/feeder taps land on the bar instead of floating off it; each bus's machines and loads sit on the face pointing away from the network (a bottom bus's machine hangs below it, not up through its own feeder) with short, non-crossing stubs; edge flow labels render above bus boxes.
@@ -37,9 +40,9 @@ First public open-source release.
 - Clone-on-write parameter editing with undo/redo, diff view, and save-as (xlsx/raw/dyr writers).
 - Reproducibility bundles (export/import a zip of case + disturbances + sim params).
 - Snapshots: save/restore named in-session system states.
-- Agent/automation surface: OpenAPI at `/openapi.json`, Swagger UI at `/docs`, `llms.txt` API map, `examples/` (curl + Python client), and an optional MCP server (`andes-app mcp`).
+- Agent/automation surface: OpenAPI at `/openapi.json`, Swagger UI at `/docs`, `llms.txt` API map, `examples/` (curl + Python client), and an optional MCP server (`tensa mcp`).
 
 ### Changed
 - Removed the per-launch token auth system. The server now trusts the local OS user, binds to loopback by default, and keeps Host/Origin allow-list checks. Network exposure is explicit (`--bind`) and documented in SECURITY.md.
 
-[0.3.0]: https://github.com/Roger-GO/ANDES_App/releases/tag/v0.3.0
+[0.3.0]: https://github.com/Roger-GO/TENSA/releases/tag/v0.3.0

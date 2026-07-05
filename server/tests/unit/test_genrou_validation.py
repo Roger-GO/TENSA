@@ -11,8 +11,8 @@ from typing import Any
 
 import pytest
 
-from andes_app.core.errors import ElementValidationError
-from andes_app.core.wrapper import _validate_genrou_reactances
+from tensa.core.errors import ElementValidationError
+from tensa.core.wrapper import _validate_genrou_reactances
 
 # ANDES 2.x GENROU defaults (verified against ``System().GENROU.params``).
 _ANDES_DEFAULTS: dict[str, float] = {

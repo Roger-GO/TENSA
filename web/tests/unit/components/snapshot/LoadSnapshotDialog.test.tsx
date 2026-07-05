@@ -151,7 +151,7 @@ describe('<LoadSnapshotDialog /> — listing + restore', () => {
         disturbances_replayed: 1,
         metadata: {
           andes_version: '2.0.0',
-          andes_app_version: '0.1.0',
+          tensa_version: '0.1.0',
           case_filename: 'ieee14.raw',
           case_sha256: null,
           disturbance_log: [],
@@ -200,7 +200,7 @@ describe('<LoadSnapshotDialog /> — listing + restore', () => {
         disturbances_replayed: 0,
         metadata: {
           andes_version: '2.0.0',
-          andes_app_version: '0.1.0',
+          tensa_version: '0.1.0',
           case_filename: 'ieee14.raw',
           case_sha256: null,
           disturbance_log: [],

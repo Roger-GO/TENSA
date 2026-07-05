@@ -1,6 +1,6 @@
 """Unit tests for the bundle assembler.
 
-These tests exercise :mod:`andes_app.core.bundle` directly without spinning
+These tests exercise :mod:`tensa.core.bundle` directly without spinning
 up a worker subprocess or touching ANDES — the assembler is a pure
 function over `BundleInputs` so the round-trip / determinism / file-list
 properties can be verified in isolation.
@@ -15,7 +15,7 @@ import zipfile
 
 import pytest
 
-from andes_app.core.bundle import (
+from tensa.core.bundle import (
     BundleInputs,
     assemble_bundle,
     build_manifest,
@@ -36,7 +36,7 @@ def _minimal_inputs(**overrides: object) -> BundleInputs:
         "results_csv": None,
         "run_id": None,
         "andes_version": "2.0.0",
-        "andes_app_version": "0.1.0.dev0",
+        "tensa_version": "0.1.0.dev0",
     }
     base.update(overrides)
     return BundleInputs(**base)  # type: ignore[arg-type]
@@ -113,7 +113,7 @@ def test_manifest_records_case_sha256_and_filename() -> None:
     assert manifest["case_filename"] == "ieee14.raw"
     assert manifest["case_sha256"] == hashlib.sha256(case_bytes).hexdigest()
     assert manifest["andes_version"] == "2.0.0"
-    assert manifest["andes_app_version"] == "0.1.0.dev0"
+    assert manifest["tensa_version"] == "0.1.0.dev0"
     assert manifest["disturbance_count"] == 0
     assert manifest["case_canonical_export"] is False
     assert manifest["files"] == ["case/ieee14.raw", "manifest.json"]

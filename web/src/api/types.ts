@@ -78,7 +78,7 @@ export type DisturbanceAck = components['schemas']['DisturbanceAck'];
  * Response body for ``POST /sessions/{id}/abort`` (Unit 1b endpoint).
  *
  * The substrate-side ``AbortResponse`` schema is defined in
- * ``server/src/andes_app/api/schemas.py`` but the web ``generated.ts`` was
+ * ``server/src/tensa/api/schemas.py`` but the web ``generated.ts`` was
  * regenerated before Unit 7 landed. Hand-authored here so Unit 7 doesn't
  * block on a codegen sweep; the field shape is identical and a one-to-one
  * alias substitution will work when codegen is re-run.
@@ -96,7 +96,7 @@ export interface AbortResponse {
 // ---- disturbance specs (Unit 6 — mirrors substrate's discriminated union) --
 
 /**
- * Substrate's ``FaultSpec`` (``server/src/andes_app/core/disturbance.py``).
+ * Substrate's ``FaultSpec`` (``server/src/tensa/core/disturbance.py``).
  * Re-exported under a stable name so consumers don't have to dig into the
  * generated tree. The generated type is the canonical shape; this is a
  * named alias only.
@@ -112,7 +112,7 @@ export type DisturbanceSpec = FaultSpec | ToggleSpec | AlterSpec;
  * (Unit 1b endpoint).
  *
  * The OpenAPI spec on the substrate side already defines this (see
- * ``server/src/andes_app/api/schemas.py:AlterableParamsResponse``), but the
+ * ``server/src/tensa/api/schemas.py:AlterableParamsResponse``), but the
  * web ``generated.ts`` is regenerated out-of-band. Defined here as a
  * hand-authored type so Unit 6 can land before the next codegen sweep
  * without blocking on the regen step. When ``generated.ts`` is regenerated
@@ -134,7 +134,7 @@ export interface AlterableParamsResponse {
 
 /**
  * JSON-friendly complex number ``{real, imag}``. Mirrors the substrate's
- * :class:`andes_app.core.eig_result.ComplexNumber` 1:1. Each ANDES
+ * :class:`tensa.core.eig_result.ComplexNumber` 1:1. Each ANDES
  * eigenvalue (``EIG.mu[i]``) is split this way for transport so the
  * JSON payload doesn't need an out-of-band complex encoding.
  */
@@ -194,7 +194,7 @@ export interface EigParticipationResponse {
  * CPF (continuation power flow) result returned by
  * ``POST /sessions/{id}/cpf`` and ``POST /sessions/{id}/cpf/qv``.
  *
- * Mirrors :class:`andes_app.core.cpf_result.CpfResult` 1:1.
+ * Mirrors :class:`tensa.core.cpf_result.CpfResult` 1:1.
  *
  * Field semantics (per Unit 1a spike):
  *
@@ -234,7 +234,7 @@ export interface CpfResult {
 /**
  * SE (state estimation) result returned by ``POST /sessions/{id}/se``.
  *
- * Mirrors :class:`andes_app.core.se_result.SeResult` 1:1.
+ * Mirrors :class:`tensa.core.se_result.SeResult` 1:1.
  *
  * Field semantics (per Unit 1a spike + ANDES SE.run output):
  *
@@ -318,7 +318,7 @@ export type ListProfilesResponse = components['schemas']['ListProfilesResponse']
  * Connectivity / island-detection result returned by
  * ``GET /sessions/{id}/connectivity``.
  *
- * Mirrors :class:`andes_app.core.connectivity_result.ConnectivityResult`
+ * Mirrors :class:`tensa.core.connectivity_result.ConnectivityResult`
  * 1:1.
  *
  * Field semantics (per Unit 17 — see ``andes/core/connman.py`` for ANDES

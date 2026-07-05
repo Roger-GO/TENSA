@@ -29,8 +29,8 @@ from typing import Any
 
 import pytest
 
-from andes_app.core.errors import WorkerDiedError
-from andes_app.core.session import SessionExpiredError, SessionManager, _Session
+from tensa.core.errors import WorkerDiedError
+from tensa.core.session import SessionExpiredError, SessionManager, _Session
 
 # --- fakes -------------------------------------------------------------------
 

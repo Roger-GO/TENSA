@@ -1,4 +1,4 @@
-"""Unit tests for ``andes_app.core.clone_manager.CloneManager`` (Unit 21).
+"""Unit tests for ``tensa.core.clone_manager.CloneManager`` (Unit 21).
 
 Covers, per the plan's Test scenarios:
 
@@ -23,9 +23,9 @@ from typing import Any
 import pytest
 from openpyxl import Workbook, load_workbook
 
-from andes_app.core.clone_manager import UNDO_STACK_CAP, CloneManager
-from andes_app.core.errors import CloneEditError, ElementValidationError
-from andes_app.core.wrapper import Wrapper
+from tensa.core.clone_manager import UNDO_STACK_CAP, CloneManager
+from tensa.core.errors import CloneEditError, ElementValidationError
+from tensa.core.wrapper import Wrapper
 
 pytestmark = pytest.mark.integration  # uses a real ANDES System
 
@@ -86,7 +86,7 @@ def test_init_clone_is_idempotent(loaded_wrapper: Wrapper) -> None:
 def test_init_clone_blank_session_rejected(tmp_path: Path) -> None:
     w = Wrapper(workspace=tmp_path, session_id="s")
     w.create_blank()
-    from andes_app.core.errors import NoCaseLoadedError
+    from tensa.core.errors import NoCaseLoadedError
 
     with pytest.raises(NoCaseLoadedError):
         w.init_clone()

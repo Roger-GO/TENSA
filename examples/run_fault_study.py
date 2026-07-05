@@ -2,7 +2,7 @@
 
 Run with a server already serving a workspace that contains ieee14_full.xlsx:
 
-    andes-app serve --workspace ~/andes-cases --port 8000
+    tensa serve --workspace ~/andes-cases --port 8000
     python examples/run_fault_study.py [case_filename]
 """
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 
-from andes_client import AndesApp
+from tensa_client import AndesApp
 
 CASE = sys.argv[1] if len(sys.argv) > 1 else "ieee14_full.xlsx"
 

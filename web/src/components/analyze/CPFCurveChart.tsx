@@ -18,7 +18,7 @@ import type { ResolvedTheme } from '@/store/theme';
  * the visible-set at 8 buses (top-overlap + user-selected) so the
  * legend doesn't scroll.
  *
- * Wire-shape (per :class:`andes_app.core.cpf_result.CpfResult`):
+ * Wire-shape (per :class:`tensa.core.cpf_result.CpfResult`):
  *
  * - X-axis = ``lambdas`` (continuation parameter values).
  * - Y-axis = bus voltage (each bus contributes one polyline).

@@ -22,9 +22,9 @@
  *
  *   1. cp ~/andes-project/.venv/lib/python3.12/site-packages/andes/cases/{ieee14,kundur}/* \
  *        web/tests/e2e/fixtures/
- *   2. andes-app serve --workspace web/tests/e2e/fixtures \
+ *   2. tensa serve --workspace web/tests/e2e/fixtures \
  *        --bind-port 8765 --bind-host 127.0.0.1
- *   3. ANDES_TEST_TOKEN=$(cat ~/.andes-app/run-<pid>.token) \
+ *   3. ANDES_TEST_TOKEN=$(cat ~/.tensa/run-<pid>.token) \
  *        E2E_NO_WEBSERVER=1 pnpm test:e2e tests/e2e/case-change.spec.ts
  *   4. Remove the ``.fixme`` qualifier on the test below.
  */

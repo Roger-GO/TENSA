@@ -31,8 +31,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-from andes_app.api.app import make_app
-from andes_app.core.session import SessionManager
+from tensa.api.app import make_app
+from tensa.core.session import SessionManager
 
 
 def _bundled_ieee14_dir() -> Path:
@@ -372,7 +372,7 @@ async def test_import_bundle_manifest_references_missing_addfile_returns_422(
     sha = hashlib.sha256(case_bytes).hexdigest()
     manifest = {
         "andes_version": "2.0.0",
-        "andes_app_version": "0.1.0.dev0",
+        "tensa_version": "0.1.0.dev0",
         "case_filename": "ieee14.raw",
         "case_sha256": sha,
         "case_canonical_export": False,
@@ -418,7 +418,7 @@ async def test_import_bundle_force_resolve_on_blocked_plan_returns_422(
     sha = hashlib.sha256(case_bytes).hexdigest()
     manifest = {
         "andes_version": "2.0.0",
-        "andes_app_version": "0.1.0.dev0",
+        "tensa_version": "0.1.0.dev0",
         "case_filename": "ieee14.raw",
         "case_sha256": sha,
         "case_canonical_export": False,
@@ -461,7 +461,7 @@ async def test_import_bundle_andes_version_mismatch_returns_warning_in_plan(
     sha = hashlib.sha256(case_bytes).hexdigest()
     manifest = {
         "andes_version": "99.0.0",
-        "andes_app_version": "0.1.0.dev0",
+        "tensa_version": "0.1.0.dev0",
         "case_filename": "ieee14.raw",
         "case_sha256": sha,
         "case_canonical_export": False,

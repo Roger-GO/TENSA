@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <!-- ANDES App favicon: the busbar + sine mark on a dark rounded square
+  <!-- TENSA favicon: the busbar + sine mark on a dark rounded square
        so it stays legible at 16px on both light and dark browser chrome. -->
   <rect width="32" height="32" rx="7" fill="#0b0d12" />
   <line x1="6" y1="16" x2="26" y2="16" stroke="#e7eaf0" stroke-width="3.5" />

@@ -12,7 +12,7 @@ import threading
 
 import pytest
 
-from andes_app.core.jobs import (
+from tensa.core.jobs import (
     MAX_FAILED_DISTINCT,
     MAX_SUCCESSFUL,
     MAX_TOTAL,

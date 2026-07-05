@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from andes_app.core.errors import CloneEditError
-from andes_app.core.wrapper import Wrapper
+from tensa.core.errors import CloneEditError
+from tensa.core.wrapper import Wrapper
 
 pytestmark = pytest.mark.integration
 

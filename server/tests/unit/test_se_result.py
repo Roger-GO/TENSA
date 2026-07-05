@@ -6,7 +6,7 @@ import dataclasses
 
 import pytest
 
-from andes_app.core.se_result import MeasurementsGenerated, SeResult
+from tensa.core.se_result import MeasurementsGenerated, SeResult
 
 
 def test_measurements_generated_construction_holds_count() -> None:

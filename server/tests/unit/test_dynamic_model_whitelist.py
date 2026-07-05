@@ -15,7 +15,7 @@ import andes
 import pytest
 from andes.core.param import ExtParam
 
-from andes_app.core.wrapper import (
+from tensa.core.wrapper import (
     _CONTROLLER_MODEL_NAMES,
     _PARAMS_BY_MODEL,
     _REFERENCE_ATTRS,

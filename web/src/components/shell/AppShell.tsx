@@ -281,7 +281,7 @@ export function AppShell({
           {/* Outer horizontal split: LeftSidebar | RightSide */}
           <PanelGroup
             direction="horizontal"
-            autoSaveId="andes-app:layout-v1:outer"
+            autoSaveId="tensa:layout-v1:outer"
             className="flex h-full w-full"
           >
             <Panel
@@ -325,7 +325,7 @@ export function AppShell({
               {/* Right-side vertical split: TopRow | BottomDrawer */}
               <PanelGroup
                 direction="vertical"
-                autoSaveId="andes-app:layout-v1:right-side"
+                autoSaveId="tensa:layout-v1:right-side"
                 className="flex h-full w-full"
                 onLayout={(sizes) => {
                   // The drawer is the second panel (index 1). Persist its
@@ -347,7 +347,7 @@ export function AppShell({
                   {/* Top-row horizontal split: Canvas | RightInspector */}
                   <PanelGroup
                     direction="horizontal"
-                    autoSaveId="andes-app:layout-v1:top-row"
+                    autoSaveId="tensa:layout-v1:top-row"
                     className="flex h-full w-full"
                   >
                     <Panel

@@ -316,7 +316,7 @@ describe('HistoryDrawer', () => {
     await user.selectOptions(screen.getByTestId('history-drawer-kind-filter'), 'all');
 
     expect(useLayoutStore.getState().historyKindFilter).toBe('all');
-    const persisted = localStorage.getItem('andes-app:layout-v1');
+    const persisted = localStorage.getItem('tensa:layout-v1');
     expect(persisted).not.toBeNull();
     expect(JSON.parse(persisted!).state.historyKindFilter).toBe('all');
   });

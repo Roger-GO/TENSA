@@ -17,7 +17,7 @@ import andes
 import pytest
 import yaml
 
-from andes_app.core.wrapper import _CONTROLLER_MODEL_NAMES, _PARAMS_BY_MODEL
+from tensa.core.wrapper import _CONTROLLER_MODEL_NAMES, _PARAMS_BY_MODEL
 
 _REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 _INDEX_PATH = os.path.join(_REPO_ROOT, "docs", "spikes", "2026-05-29-clone-write-index.json")

@@ -24,10 +24,10 @@ from typing import Any
 
 import pytest
 
-from andes_app.api.routes.tds import run_tds
-from andes_app.api.schemas import TdsRunRequest
-from andes_app.core.errors import SessionBusyError
-from andes_app.core.session import SessionManager, SweepInProgressError, _Session
+from tensa.api.routes.tds import run_tds
+from tensa.api.schemas import TdsRunRequest
+from tensa.core.errors import SessionBusyError
+from tensa.core.session import SessionManager, SweepInProgressError, _Session
 
 
 class _FakeCtrl:

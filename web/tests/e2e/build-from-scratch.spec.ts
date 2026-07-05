@@ -17,10 +17,10 @@
  *
  *   1. mkdir -p /tmp/andes-build-test && touch /tmp/andes-build-test/.keep
  *      (the workspace can be empty — this test never loads a file)
- *   2. andes-app serve --workspace /tmp/andes-build-test \
+ *   2. tensa serve --workspace /tmp/andes-build-test \
  *        --bind-port 8765 --bind-host 127.0.0.1 \
  *        --allow-origin http://127.0.0.1:5173
- *   3. ANDES_TEST_TOKEN=$(cat ~/.andes-app/run-<pid>.token) \
+ *   3. ANDES_TEST_TOKEN=$(cat ~/.tensa/run-<pid>.token) \
  *        VITE_ANDES_PORT=8765 E2E_NO_WEBSERVER=1 pnpm test:e2e \
  *        tests/e2e/build-from-scratch.spec.ts
  *   4. Remove the `.fixme` qualifier on the test below to exercise it.

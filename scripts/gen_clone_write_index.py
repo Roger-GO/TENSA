@@ -25,7 +25,7 @@ import os
 import andes
 import yaml
 
-from andes_app.core.wrapper import _CONTROLLER_MODEL_NAMES, _PARAMS_BY_MODEL
+from tensa.core.wrapper import _CONTROLLER_MODEL_NAMES, _PARAMS_BY_MODEL
 
 ANDES_DIR = os.path.dirname(andes.__file__)
 DYR_YAML = os.path.join(ANDES_DIR, "io", "psse-dyr.yaml")

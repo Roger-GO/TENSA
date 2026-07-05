@@ -26,7 +26,7 @@
  */
 import { create } from 'zustand';
 
-export const STORAGE_KEY = 'andes-app:theme-preference';
+export const STORAGE_KEY = 'tensa:theme-preference';
 
 /** User-selected preference. ``"system"`` follows the OS. */
 export type ThemePreference = 'light' | 'dark' | 'system';

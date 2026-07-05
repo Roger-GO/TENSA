@@ -1,6 +1,6 @@
 """Acceptance tests for ``POST /sessions/{id}/abort`` (Unit 1b of v0.2).
 
-These tests spawn ``andes-app serve`` in a subprocess (mirroring the
+These tests spawn ``tensa serve`` in a subprocess (mirroring the
 existing TDS streaming acceptance suite), open a real WebSocket against
 the substrate, fire a streaming TDS, and verify that an out-of-band
 ``POST /abort`` from a separate HTTP client cooperatively terminates the
@@ -63,7 +63,7 @@ def _ieee14_paths() -> tuple[Path, Path]:
 
 @pytest.fixture
 async def live_server(tmp_path: Path) -> AsyncIterator[tuple[int, str]]:
-    """Spawn ``andes-app serve``; yield (port, base_url) with IEEE 14
+    """Spawn ``tensa serve``; yield (port, base_url) with IEEE 14
     seeded into the workspace so the tests can drive a real TDS run."""
     workspace = tmp_path / "ws"
     workspace.mkdir(mode=0o700)
@@ -76,7 +76,7 @@ async def live_server(tmp_path: Path) -> AsyncIterator[tuple[int, str]]:
         [
             sys.executable,
             "-m",
-            "andes_app",
+            "tensa",
             "serve",
             "--bind",
             "127.0.0.1",

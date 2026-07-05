@@ -4,7 +4,7 @@
  * flow, a fault + time-domain simulation, eigenvalue analysis, and CPF.
  *
  * Prereqs: a running server with the built SPA, e.g.
- *   andes-app serve --port 18800 --workspace /tmp/oss-ws
+ *   tensa serve --port 18800 --workspace /tmp/oss-ws
  *
  * Run:
  *   cd web && node scripts/agent-demo.mjs [baseUrl]

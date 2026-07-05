@@ -27,8 +27,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-from andes_app.api.app import make_app
-from andes_app.core.session import SessionManager
+from tensa.api.app import make_app
+from tensa.core.session import SessionManager
 
 
 def _bundled_ieee14_dir() -> Path:

@@ -26,11 +26,11 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from andes_app.api.app import make_app
-from andes_app.core.disturbance import AlterSpec, FaultSpec
-from andes_app.core.errors import DisturbanceValidationError
-from andes_app.core.session import SessionManager
-from andes_app.core.wrapper import Wrapper
+from tensa.api.app import make_app
+from tensa.core.disturbance import AlterSpec, FaultSpec
+from tensa.core.errors import DisturbanceValidationError
+from tensa.core.session import SessionManager
+from tensa.core.wrapper import Wrapper
 
 
 def _ieee14_paths() -> tuple[Path, Path]:
@@ -157,7 +157,7 @@ def test_replay_disturbances_post_setup_no_op_with_warning(
     w.add_disturbance(FaultSpec(bus_idx=4, tf=1.0, tc=1.1))
     w.run_pflow()  # commits setup
 
-    with caplog.at_level(logging.WARNING, logger="andes-app.wrapper.disturbance-replay"):
+    with caplog.at_level(logging.WARNING, logger="tensa.wrapper.disturbance-replay"):
         n = w.replay_disturbances()
     assert n == 0
     assert any("post-setup" in rec.message for rec in caplog.records)

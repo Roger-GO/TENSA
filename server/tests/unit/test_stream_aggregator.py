@@ -8,7 +8,7 @@ import io
 import pyarrow.ipc
 import pytest
 
-from andes_app.core.stream import (
+from tensa.core.stream import (
     StreamAggregator,
     encode_batch,
     make_bus_voltage_schema,

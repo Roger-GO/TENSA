@@ -7,7 +7,7 @@ import { cn } from '@/lib/cn';
 
 /**
  * FaultSpecForm — fields for the substrate's ``FaultSpec`` shape (see
- * ``server/src/andes_app/core/disturbance.py``):
+ * ``server/src/tensa/core/disturbance.py``):
  *
  * - ``bus_idx``: bus dropdown from the active topology.
  * - ``tf``: fault-applied time (seconds).

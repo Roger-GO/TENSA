@@ -55,14 +55,14 @@ describe('firstRun store', () => {
   });
 
   it('boots dismissed (coachStep=null) when localStorage holds the dismissal sentinel', async () => {
-    localStorage.setItem('andes-app:first-run-coach-v1', 'dismissed');
+    localStorage.setItem('tensa:first-run-coach-v1', 'dismissed');
     const { useFirstRunStore } = await import('@/store/firstRun');
     expect(useFirstRunStore.getState().coachStep).toBeNull();
     expect(useFirstRunStore.getState().coachDismissed).toBe(true);
   });
 
   it('treats unknown stored values as not-dismissed (defensive)', async () => {
-    localStorage.setItem('andes-app:first-run-coach-v1', 'maybe');
+    localStorage.setItem('tensa:first-run-coach-v1', 'maybe');
     const { useFirstRunStore } = await import('@/store/firstRun');
     expect(useFirstRunStore.getState().coachStep).toBe(1);
     expect(useFirstRunStore.getState().coachDismissed).toBe(false);
@@ -78,7 +78,7 @@ describe('firstRun store', () => {
     useFirstRunStore.getState().nextStep();
     expect(useFirstRunStore.getState().coachStep).toBeNull();
     expect(useFirstRunStore.getState().coachDismissed).toBe(true);
-    expect(localStorage.getItem('andes-app:first-run-coach-v1')).toBe('dismissed');
+    expect(localStorage.getItem('tensa:first-run-coach-v1')).toBe('dismissed');
   });
 
   it('nextStep is a no-op once dismissed', async () => {
@@ -94,7 +94,7 @@ describe('firstRun store', () => {
     useFirstRunStore.getState().dismissCoach();
     expect(useFirstRunStore.getState().coachStep).toBeNull();
     expect(useFirstRunStore.getState().coachDismissed).toBe(true);
-    expect(localStorage.getItem('andes-app:first-run-coach-v1')).toBe('dismissed');
+    expect(localStorage.getItem('tensa:first-run-coach-v1')).toBe('dismissed');
   });
 
   it('persistFailed=true when localStorage.setItem throws; in-memory still updates', async () => {
@@ -120,12 +120,12 @@ describe('firstRun store', () => {
   });
 
   it('__resetForTests with clearStorage wipes the persisted flag and re-boots at step 1', async () => {
-    localStorage.setItem('andes-app:first-run-coach-v1', 'dismissed');
+    localStorage.setItem('tensa:first-run-coach-v1', 'dismissed');
     const { useFirstRunStore } = await import('@/store/firstRun');
     expect(useFirstRunStore.getState().coachStep).toBeNull();
     useFirstRunStore.getState().__resetForTests({ clearStorage: true });
     expect(useFirstRunStore.getState().coachStep).toBe(1);
     expect(useFirstRunStore.getState().coachDismissed).toBe(false);
-    expect(localStorage.getItem('andes-app:first-run-coach-v1')).toBeNull();
+    expect(localStorage.getItem('tensa:first-run-coach-v1')).toBeNull();
   });
 });

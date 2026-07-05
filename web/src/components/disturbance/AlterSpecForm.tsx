@@ -5,7 +5,7 @@ import { cn } from '@/lib/cn';
 
 /**
  * AlterSpecForm — fields for the substrate's ``AlterSpec`` shape (see
- * ``server/src/andes_app/core/disturbance.py``):
+ * ``server/src/tensa/core/disturbance.py``):
  *
  * - ``model``: ANDES model class name.
  * - ``dev_idx``: device idx, filtered from topology.

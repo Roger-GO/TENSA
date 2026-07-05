@@ -19,8 +19,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-from andes_app.api.app import make_app
-from andes_app.core.session import SessionManager
+from tensa.api.app import make_app
+from tensa.core.session import SessionManager
 
 
 def _bundled_ieee14_dir() -> Path:
@@ -803,9 +803,9 @@ async def test_delete_atomicity_replay_failure_preserves_state(
     both to the pre-call snapshots.
     """
     pytest.importorskip("andes")
-    from andes_app.core import wrapper as wrapper_mod
-    from andes_app.core.errors import ElementValidationError
-    from andes_app.core.wrapper import Wrapper
+    from tensa.core import wrapper as wrapper_mod
+    from tensa.core.errors import ElementValidationError
+    from tensa.core.wrapper import Wrapper
 
     w = Wrapper()
     w.create_blank()
@@ -874,7 +874,7 @@ async def test_find_dependents_covers_every_whitelisted_model() -> None:
     rather than an entry in ``_REFERENCE_ATTRS``.
     """
     pytest.importorskip("andes")
-    from andes_app.core.wrapper import _PARAMS_BY_MODEL, _REFERENCE_ATTRS
+    from tensa.core.wrapper import _PARAMS_BY_MODEL, _REFERENCE_ATTRS
 
     expected_models = set(_PARAMS_BY_MODEL.keys()) - {"Bus"}
     covered_models = set(_REFERENCE_ATTRS.keys())

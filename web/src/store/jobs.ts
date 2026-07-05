@@ -3,7 +3,7 @@
  *
  * Aggregates + indexes every routine / streaming / sweep / state-op / edit
  * invocation under a single ``JobRecord`` map keyed by ``job_id``, mirroring
- * the substrate ``_JobRegistry`` (``server/src/andes_app/core/jobs.py``). This
+ * the substrate ``_JobRegistry`` (``server/src/tensa/core/jobs.py``). This
  * slice is the canonical client-side view that powers the Activity panel
  * (Unit 11) and lets ``SessionBusy`` be tracked as a job *state* rather than
  * surfacing as unhandled boot-409 console noise.
@@ -36,7 +36,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
 /**
- * Routine / op discriminator. Mirrors ``andes_app.core.jobs.JobKind`` 1:1
+ * Routine / op discriminator. Mirrors ``tensa.core.jobs.JobKind`` 1:1
  * so a substrate event's ``kind`` round-trips without translation. Kept as
  * a string-literal union (forward-compat: an unknown future kind from the
  * wire still stores; the union narrows known kinds for exhaustive UI
@@ -81,7 +81,7 @@ export type JobKind =
   | 'clone-save-as'
   | 'clone-reset';
 
-/** Lifecycle state. Mirrors ``andes_app.core.jobs.JobStatus``. */
+/** Lifecycle state. Mirrors ``tensa.core.jobs.JobStatus``. */
 export type JobStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 
 /**
@@ -153,7 +153,7 @@ export interface JobRecord {
 
 /**
  * Cap on retained TERMINAL records. Mirrors the substrate's ``MAX_TOTAL``
- * ring-buffer cap (``andes_app.core.jobs.MAX_TOTAL``). In-flight records are
+ * ring-buffer cap (``tensa.core.jobs.MAX_TOTAL``). In-flight records are
  * never counted against this cap and never evicted.
  */
 export const MAX_TERMINAL = 100;
@@ -378,7 +378,7 @@ function mergeEnvelope(envelope: JobEventEnvelope, existing?: JobRecord): JobRec
   return next;
 }
 
-export const JOBS_STORAGE_KEY = 'andes-app:activity-v1';
+export const JOBS_STORAGE_KEY = 'tensa:activity-v1';
 
 export const useJobsStore = create<JobsState>()(
   persist(

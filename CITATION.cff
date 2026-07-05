@@ -1,17 +1,17 @@
 cff-version: 1.2.0
-message: "If you use ANDES App in your work, please cite it using the metadata below."
-title: "ANDES App"
+message: "If you use TENSA in your work, please cite it using the metadata below."
+title: "TENSA"
 abstract: "An interactive, web-based workbench for power system modeling, simulation, and analysis, built on ANDES."
 type: software
 authors:
   - family-names: "Gracia Otalvaro"
     given-names: "Rogelio"
     affiliation: "Embry-Riddle Aeronautical University"
-repository-code: "https://github.com/Roger-GO/ANDES_App"
-url: "https://github.com/Roger-GO/ANDES_App"
+repository-code: "https://github.com/Roger-GO/TENSA"
+url: "https://github.com/Roger-GO/TENSA"
 license: GPL-3.0-or-later
-version: "0.3.0"
-date-released: "2026-06-09"
+version: "0.4.0"
+date-released: "2026-07-05"
 references:
   - type: article
     title: "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis"

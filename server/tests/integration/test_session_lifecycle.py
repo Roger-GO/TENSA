@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from andes_app.core.errors import WorkerDiedError
-from andes_app.core.session import (
+from tensa.core.errors import WorkerDiedError
+from tensa.core.session import (
     SessionExpiredError,
     SessionManager,
     WorkerError,

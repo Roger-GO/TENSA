@@ -24,9 +24,9 @@ from typing import Any
 
 import pytest
 
-from andes_app.core.errors import SessionBusyError
-from andes_app.core.jobs import _JobRegistry
-from andes_app.core.session import SessionManager, _current_inflight_job, _Session
+from tensa.core.errors import SessionBusyError
+from tensa.core.jobs import _JobRegistry
+from tensa.core.session import SessionManager, _current_inflight_job, _Session
 
 # --- fakes -------------------------------------------------------------------
 

@@ -164,7 +164,7 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
 });
 
 /**
- * App brand: busbar-and-sine mark + "ANDES App" wordmark, pinned at the
+ * App brand: busbar-and-sine mark + "TENSA" wordmark, pinned at the
  * far left of the top bar. The mark is inlined (rather than an
  * ``<img src="/logo.svg">``) so the busbar stroke follows the theme via
  * ``currentColor`` and the wave picks up the ``primary`` token — the
@@ -192,7 +192,7 @@ function AppBrand() {
           strokeWidth="2"
         />
       </svg>
-      <span className="text-sm font-semibold tracking-tight whitespace-nowrap">ANDES App</span>
+      <span className="text-sm font-semibold tracking-tight whitespace-nowrap">TENSA</span>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-"""Unit tests for ``andes_app.core.snapshot`` (Unit 7 of the v2.0 plan).
+"""Unit tests for ``tensa.core.snapshot`` (Unit 7 of the v2.0 plan).
 
 These tests exercise the pure helpers in the snapshot module — name
 validation, version-stamp comparison, on-disk layout, listing-on-disk,
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from andes_app.core.snapshot import (
+from tensa.core.snapshot import (
     SnapshotCollisionError,
     SnapshotEntry,
     SnapshotMetadata,
@@ -106,7 +106,7 @@ def test_snapshot_metadata_round_trips_through_json() -> None:
     re-reading a sidecar across a session restart."""
     meta = SnapshotMetadata(
         andes_version="2.0.0",
-        andes_app_version="0.1.0.dev0",
+        tensa_version="0.1.0.dev0",
         case_filename="ieee14.raw",
         case_sha256="0" * 64,
         disturbance_log=[
@@ -135,7 +135,7 @@ def test_snapshot_metadata_from_dict_rejects_missing_versions() -> None:
 def test_snapshot_metadata_from_dict_tolerates_missing_optionals() -> None:
     """Optional fields default to None / empty / False."""
     meta = SnapshotMetadata.from_dict(
-        {"andes_version": "2.0.0", "andes_app_version": "0.1.0"}
+        {"andes_version": "2.0.0", "tensa_version": "0.1.0"}
     )
     assert meta.case_filename is None
     assert meta.case_sha256 is None
@@ -151,7 +151,7 @@ def test_snapshot_metadata_rejects_non_list_disturbance_log() -> None:
         SnapshotMetadata.from_dict(
             {
                 "andes_version": "2.0.0",
-                "andes_app_version": "0.1.0",
+                "tensa_version": "0.1.0",
                 "disturbance_log": "not-a-list",
             }
         )
@@ -201,7 +201,7 @@ def test_write_snapshot_files_writes_both(tmp_path: Path) -> None:
     json_path = target / "scenario-A.json"
     meta = SnapshotMetadata(
         andes_version="2.0.0",
-        andes_app_version="0.1.0.dev0",
+        tensa_version="0.1.0.dev0",
         case_filename="ieee14.raw",
         case_sha256=None,
         disturbance_log=[],
@@ -265,7 +265,7 @@ def test_list_snapshots_on_disk_returns_one_per_json(tmp_path: Path) -> None:
     target = snapshot_dir(tmp_path, "ieee14.raw")
     meta = SnapshotMetadata(
         andes_version="2.0.0",
-        andes_app_version="0.1.0",
+        tensa_version="0.1.0",
         case_filename="ieee14.raw",
         case_sha256=None,
         disturbance_log=[{"kind": "fault", "bus_idx": 5, "tf": 1.0, "tc": 1.1}],
@@ -307,7 +307,7 @@ def test_list_snapshots_on_disk_skips_corrupted_json(tmp_path: Path) -> None:
     (target / "broken.json").write_text("{not valid")
     meta = SnapshotMetadata(
         andes_version="2.0.0",
-        andes_app_version="0.1.0",
+        tensa_version="0.1.0",
         case_filename=None,
         case_sha256=None,
         disturbance_log=[],
@@ -334,7 +334,7 @@ def test_delete_snapshot_files_removes_both(tmp_path: Path) -> None:
     target = snapshot_dir(tmp_path, "ieee14.raw")
     meta = SnapshotMetadata(
         andes_version="2.0.0",
-        andes_app_version="0.1.0",
+        tensa_version="0.1.0",
         case_filename=None,
         case_sha256=None,
         disturbance_log=[],
@@ -370,11 +370,11 @@ def test_delete_snapshot_files_validates_name(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_snapshot_error_subclasses_inherit_from_andes_app_error() -> None:
+def test_snapshot_error_subclasses_inherit_from_tensa_error() -> None:
     """Worker forwards exception class names as ``category``; the routes
     layer relies on the subclass identity to map to the right HTTP status.
     """
-    from andes_app.core.errors import AndesAppError
+    from tensa.core.errors import AndesAppError
 
     assert issubclass(SnapshotNotFoundError, AndesAppError)
     assert issubclass(SnapshotCollisionError, AndesAppError)
