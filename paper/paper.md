@@ -49,7 +49,7 @@ Agent access is held to the same standard as the interface, and that parity is c
 
 # Research impact statement
 
-TENSA is early in its public life, and this section reports only what has already happened. The tool supports the author's research on power infrastructure resilience, where interactive fault placement and streamed time-domain response shorten the loop between question and simulation. The scripted end-to-end walkthrough above doubles as a reproducibility artifact: the bundled script regenerates the complete build-and-analyze demonstration against a local server. A bundled study also reimplements the budgeted N-2 screening protocol of PowerAgentBench-SS [@mylonas2026powerbenchss] natively on TENSA: on the IEEE 39-bus case, a hidden oracle over all 562 connectivity-safe double outages is computed through the same public API in under three minutes, and with a budget of 40 validations an LLM agent (Claude Opus 4.8, driving the API with an audited log) and a scripted greedy baseline each recover 25% of the hidden top-20 with fully evidence-backed submissions, 2.5 times the random baseline. Because the environment is AC where the original is DC, scores are not comparable across the two; the study's role is to exercise the agent surface under a published protocol. Preparing it surfaced a missing API capability, editable branch service status, which is now fixed.
+TENSA is a new tool, so this section reports only what can be checked in the repository today rather than anticipated adoption. Its realized outputs are two reproducible artifacts. The first is an end-to-end walkthrough: a script drives the released interface to build the WSCC 9-bus system from an empty canvas and run every analysis, and its recording is the project's demo video. The second reimplements the budgeted N-2 contingency-screening protocol of PowerAgentBench-SS [@mylonas2026powerbenchss] natively on TENSA. On the IEEE 39-bus case, a hidden oracle over all 562 connectivity-safe double outages is computed through the same public API in under three minutes, and within a budget of 40 validations an LLM agent (Claude Opus 4.8, driving the API with an audited log) and a scripted greedy baseline each recover 0.25 of the hidden top-20 ranking with fully evidence-backed submissions, against 0.10 for a random baseline. That environment is AC while the original benchmark is DC, so the scores are not comparable across the two; the study's purpose is to exercise the agent surface under a published protocol, and preparing it surfaced and fixed a missing API capability, editable branch service status. Both artifacts regenerate from a fresh checkout.
 
 # AI usage disclosure
 
@@ -57,6 +57,6 @@ Substantial portions of the implementation were written with an AI coding agent 
 
 # Acknowledgements
 
-The author thanks the developers of ANDES for making the simulator openly available. All simulation capability described here rests on the work of the ANDES developers.
+TENSA is built on ANDES; the author thanks its developers for making a validated, open-source power-system simulator freely available. All simulation capability described here is provided by ANDES.
 
 # References
