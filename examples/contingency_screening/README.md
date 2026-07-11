@@ -74,7 +74,7 @@ tensa serve --workspace <dir-with-ieee39.xlsx> --port 18800
 python build_task.py    # public task data (results/task.json)
 python baselines.py     # scripted agents
 python validate_cli.py Line_a,Line_b ...   # interactive/LLM agent turns
-python oracle.py        # exhaustive ground truth (~5 min, 562 AC PFs)
+python oracle.py        # exhaustive ground truth (~3 min, 562 AC PFs)
 python score.py         # metrics for every submission_*.json
 ```
 
