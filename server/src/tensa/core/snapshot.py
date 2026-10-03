@@ -382,7 +382,10 @@ def list_snapshots_on_disk(
     Returns an empty list when the directory doesn't exist (no snapshots
     have ever been saved against this case). Skips JSON files that fail
     to parse, logging a warning — a half-corrupt snapshot shouldn't
-    block the listing of intact ones.
+    block the listing of intact ones. Also skips a name that restore and
+    delete would refuse (see :func:`validate_existing_snapshot_name`), so
+    the list never offers an entry the UI cannot act on, and a file named
+    like a Windows device is never opened.
     """
     base = workspace / "snapshots" / _case_basename(case_filename)
     if not base.exists():
@@ -390,6 +393,7 @@ def list_snapshots_on_disk(
     entries: list[SnapshotEntry] = []
     for json_path in sorted(base.glob("*.json")):
         try:
+            validate_existing_snapshot_name(json_path.stem)
             meta = read_snapshot_metadata(json_path)
         except SnapshotError as exc:
             log.warning(

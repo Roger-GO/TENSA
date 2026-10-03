@@ -13,6 +13,7 @@ ANDES System) lives in ``tests/integration/test_snapshot_api.py``.
 from __future__ import annotations
 
 import json
+import sys
 import types
 from pathlib import Path
 
@@ -426,12 +427,14 @@ def test_delete_snapshot_files_missing_raises_not_found(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows cannot hold these as plain files")
 @pytest.mark.parametrize("name", _LEGACY_SNAPSHOT_NAMES)
 def test_delete_snapshot_files_removes_legacy_reserved_names(
-    tmp_path: Path, name: str
+    tmp_path: Path, name: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A snapshot whose name is now refused on save is still listed, so it must
     stay deletable; otherwise the UI shows an entry it cannot act on."""
+    monkeypatch.setattr(security_names, "sys", types.SimpleNamespace(platform="linux"))
     target = snapshot_dir(tmp_path, "ieee14.raw")
     meta = SnapshotMetadata(
         andes_version="2.0.0",
@@ -452,6 +455,56 @@ def test_delete_snapshot_files_removes_legacy_reserved_names(
     assert name in [e.name for e in list_snapshots_on_disk(tmp_path, "ieee14.raw")]
     assert delete_snapshot_files(tmp_path, "ieee14.raw", name) is True
     assert list_snapshots_on_disk(tmp_path, "ieee14.raw") == []
+
+
+def _save_dummy_snapshot(workspace: Path, name: str) -> None:
+    target = snapshot_dir(workspace, "ieee14.raw")
+    meta = SnapshotMetadata(
+        andes_version="2.0.0",
+        tensa_version="0.1.0",
+        case_filename=None,
+        case_sha256=None,
+        disturbance_log=[],
+        saved_at="",
+        has_pflow=False,
+        has_tds=False,
+    )
+    write_snapshot_files(
+        dill_path=target / f"{name}.dill",
+        json_path=target / f"{name}.json",
+        dill_writer=_write_dummy_dill,
+        metadata=meta,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows cannot hold these as plain files")
+@pytest.mark.parametrize("name", ["aux", "con.v2", "snap."])
+def test_listing_skips_a_name_that_restore_and_delete_refuse(
+    tmp_path: Path, name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On Windows the legacy exemption is off, so a file left under such a name
+    (a workspace copied over from Linux, or a Windows build that lets it be
+    created) would be listed yet refuse restore and delete. It is not listed."""
+    _save_dummy_snapshot(tmp_path, name)
+    _save_dummy_snapshot(tmp_path, "ordinary")
+    monkeypatch.setattr(security_names, "sys", types.SimpleNamespace(platform="win32"))
+    assert [e.name for e in list_snapshots_on_disk(tmp_path, "ieee14.raw")] == ["ordinary"]
+    with pytest.raises(SnapshotMetadataError, match="invalid snapshot name"):
+        delete_snapshot_files(tmp_path, "ieee14.raw", name)
+    assert (snapshot_dir(tmp_path, "ieee14.raw") / f"{name}.json").exists()
+
+
+@pytest.mark.unit
+def test_listing_skips_a_file_whose_name_is_path_unsafe(tmp_path: Path) -> None:
+    """A hand-placed ``.hidden.json`` fails the shape rule restore applies, so it
+    is not offered either."""
+    _save_dummy_snapshot(tmp_path, "ordinary")
+    target = snapshot_dir(tmp_path, "ieee14.raw")
+    (target / ".hidden.json").write_text(
+        (target / "ordinary.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    assert [e.name for e in list_snapshots_on_disk(tmp_path, "ieee14.raw")] == ["ordinary"]
 
 
 @pytest.mark.unit
