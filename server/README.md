@@ -20,6 +20,7 @@ pip install -e ".[dev]"
 
 ```bash
 tensa serve --workspace ./tmp
+tensa --version   # tensa and ANDES versions
 ```
 
 The server has no authentication: it binds to loopback by default, so only processes on your machine can reach it. Stderr prints the serving URL and workspace path at startup. Interactive API docs are served at `/docs` (Swagger UI) and `/redoc`.

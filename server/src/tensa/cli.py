@@ -7,6 +7,7 @@ Subcommands:
   to the whole network (a stderr warning is emitted). uvicorn's default
   access log is disabled; the substrate emits its own structured stderr
   lines via ``logging``.
+- ``--version`` — print the tensa and ANDES versions and exit.
 - ``warm-cache`` — run ANDES's symbolic-equation code generation
   (``andes.prepare()``) so the cache is populated. Recommended once after
   install: subsequent ``andes.load`` calls skip the multi-minute cold-start
@@ -16,6 +17,7 @@ Subcommands:
 
 from __future__ import annotations
 
+import importlib.metadata
 import logging
 import os
 import socket
@@ -31,6 +33,7 @@ import typer
 import uvicorn
 from fastapi import FastAPI
 
+from tensa import __version__
 from tensa.api.app import make_app
 from tensa.core.examples import seed_example_cases
 from tensa.security.paths import ensure_workspace
@@ -51,11 +54,39 @@ _STARTUP_FAILURE = 3
 _WILDCARD_BINDS = frozenset({"0.0.0.0", "::", ""})
 
 
+def _andes_version() -> str:
+    """Installed ANDES version from package metadata.
+
+    Deliberately avoids ``import andes`` (seconds of import time) so
+    ``tensa --version`` stays instant.
+    """
+    try:
+        return importlib.metadata.version("andes")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"tensa {__version__}")
+        typer.echo(f"andes {_andes_version()}")
+        raise typer.Exit()
+
+
 @app.callback()
-def _root() -> None:
-    """No-op callback. Forces Typer into subcommand mode so ``serve`` is
-    required as an explicit argument (rather than being collapsed into the
-    default-command form when there's only one command)."""
+def _root(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Print the tensa and ANDES versions and exit.",
+    ),
+) -> None:
+    """Forces Typer into subcommand mode so ``serve`` is required as an
+    explicit argument (rather than being collapsed into the default-command
+    form when there's only one command). Also hosts the eager ``--version``
+    flag."""
 
 
 @app.command()

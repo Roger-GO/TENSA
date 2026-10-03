@@ -5,6 +5,7 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 ## [Unreleased]
 
 ### Added
+- `tensa --version` prints the tensa and ANDES versions.
 - Agent-evaluation example: a PowerAgentBench-SS-style budgeted N-2 screening study on IEEE 39-bus (`examples/contingency_screening/`) with an exhaustive API-computed oracle, scripted baselines, an audited LLM-agent run, and scoring. Line elements now accept edits to the connection-status parameter `u`, so contingency studies can outage a branch through the API or inspector.
 
 ### Fixed
