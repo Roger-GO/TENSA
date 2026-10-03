@@ -298,18 +298,23 @@ async def test_a_raising_on_row_propagates_and_stops_handing_out_iterations() ->
 
 
 async def test_cancelling_the_run_cancels_every_worker_loop() -> None:
-    blocked = threading.Event()
+    entered = threading.Semaphore(0)
     release = threading.Event()
 
     def hold() -> None:
-        blocked.set()
+        entered.release()
         release.wait(10)
 
-    workers = [FakeWorker(before={0: hold}), FakeWorker(before={0: hold})]
+    def both_entered() -> bool:
+        return entered.acquire(timeout=10) and entered.acquire(timeout=10)
+
+    # Whichever worker is handed iteration 0, the other is handed 1, so each is held
+    # inside its first call and neither can run on while the cancel is on its way.
+    workers = [FakeWorker(before={0: hold, 1: hold}), FakeWorker(before={0: hold, 1: hold})]
     task = asyncio.ensure_future(_run(workers, 10, Collector()))
     try:
         loop = asyncio.get_running_loop()
-        assert await loop.run_in_executor(None, blocked.wait, 10)
+        assert await loop.run_in_executor(None, both_entered)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -317,8 +322,8 @@ async def test_cancelling_the_run_cancels_every_worker_loop() -> None:
         release.set()
     await asyncio.sleep(0.05)
     # Nothing keeps handing out iterations once the run is cancelled: each worker
-    # that was inside iteration 0 or 1 finishes that call and takes no more.
-    assert sum(len(w.ran) for w in workers) <= 2
+    # finishes the call it was in and takes no more.
+    assert sorted(i for w in workers for i in w.ran) == [0, 1]
 
 
 # ---- PipeAbortEvent ----------------------------------------------------------
