@@ -30,6 +30,7 @@ devmode-*.png
 .coverage
 .coverage.*
 htmlcov/
+coverage.xml
 .tox/
 .nox/
 

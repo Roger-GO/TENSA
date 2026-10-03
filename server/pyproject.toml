@@ -55,6 +55,9 @@ mcp = [
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
+    "pytest-cov>=6",
+    # ``[tool.coverage.run]`` below uses ``patch`` and ``core``, which need coverage 7.10.
+    "coverage>=7.10",
     "httpx>=0.27",
     # Capped at the next minor: [tool.ruff.lint] runs in preview mode, whose
     # behavior may change between ruff releases.
@@ -156,6 +159,7 @@ asyncio_mode = "auto"
 markers = [
     "acceptance: end-to-end acceptance tests (require running server + ANDES)",
     "integration: tests that spawn subprocesses or hit ANDES",
+    "smoke: cross-platform smoke test, run on every OS in the CI matrix (pytest -m smoke)",
     "unit: pure-unit tests with no I/O",
 ]
 addopts = [
@@ -163,3 +167,17 @@ addopts = [
     "--strict-markers",
     "--strict-config",
 ]
+
+[tool.coverage.run]
+source_pkgs = ["tensa"]
+# Most of the ANDES-facing code (core/worker.py, core/wrapper.py) runs in
+# worker processes the session manager spawns, so measure subprocesses too.
+patch = ["subprocess"]
+# Line coverage through sys.monitoring costs about 10% on a worker-heavy test
+# file; the default tracer doubled the run time once workers were measured too.
+# (Needs Python 3.12+ and offers no branch coverage before 3.14, which is fine
+# for line coverage.)
+core = "sysmon"
+
+[tool.coverage.report]
+skip_empty = true
