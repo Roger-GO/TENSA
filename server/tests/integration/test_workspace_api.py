@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+import os
+import sys
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import httpx
@@ -248,6 +250,52 @@ async def test_put_layout_rejects_traversal(
     resp = await client.put(
         "/api/workspace/layout",
         params={"case_path": "../escape.raw"},
+        headers={"Content-Type": "application/json"},
+        json=_layout_body(),
+    )
+    assert resp.status_code == 400, resp.text
+
+
+@pytest.fixture
+def unsearchable_ancestor(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+) -> Iterator[str]:
+    """A ``case_path`` whose parent sits under a directory the server cannot
+    search, so ``Path.exists`` raises EACCES instead of answering False."""
+    if sys.platform == "win32" or os.geteuid() == 0:
+        pytest.skip("needs POSIX permission bits and a non-root user")
+    _client, ws = client_workspace
+    locked = ws / "locked"
+    (locked / "inner").mkdir(parents=True)
+    locked.chmod(0o000)
+    try:
+        yield "locked/inner/ieee14.raw"
+    finally:
+        locked.chmod(0o700)
+
+
+@pytest.mark.integration
+async def test_get_layout_unreadable_path_returns_400_not_500(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+    unsearchable_ancestor: str,
+) -> None:
+    client, _ws = client_workspace
+    resp = await client.get(
+        "/api/workspace/layout",
+        params={"case_path": unsearchable_ancestor},
+    )
+    assert resp.status_code == 400, resp.text
+
+
+@pytest.mark.integration
+async def test_put_layout_unreadable_path_returns_400_not_500(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+    unsearchable_ancestor: str,
+) -> None:
+    client, _ws = client_workspace
+    resp = await client.put(
+        "/api/workspace/layout",
+        params={"case_path": unsearchable_ancestor},
         headers={"Content-Type": "application/json"},
         json=_layout_body(),
     )

@@ -38,6 +38,7 @@ from tensa.security.paths import (
     WorkspacePathError,
     _check_within_workspace,
     _reject_unsafe_input,
+    canonical_directory,
     list_workspace_files,
     open_workspace_file_for_write,
 )
@@ -87,15 +88,23 @@ def _layout_sidecar_path(workspace: Path, case_path: str) -> Path:
     candidate = (workspace / case_path).expanduser()
     sidecar_name = candidate.name + ".layout.json"
     parent = candidate.parent
-    if not parent.exists():
+    try:
+        parent_exists = parent.exists()
+        parent_is_symlink = parent.is_symlink()
+    except OSError as exc:
+        # e.g. permission denied on an ancestor: a client error, not a 500.
+        raise WorkspacePathError(
+            f"path rejected (cannot resolve): {case_path!r}: {exc}"
+        ) from exc
+    if not parent_exists:
         raise WorkspacePathError(
             f"parent directory does not exist: {case_path!r}"
         )
-    if parent.is_symlink():
+    if parent_is_symlink:
         raise WorkspacePathError(
             f"refusing to read under a symlinked parent directory: {case_path!r}"
         )
-    canonical_parent = parent.resolve(strict=True)
+    canonical_parent = canonical_directory(parent)
     _check_within_workspace(workspace, canonical_parent)
     return canonical_parent / sidecar_name
 

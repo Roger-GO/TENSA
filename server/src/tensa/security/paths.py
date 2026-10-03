@@ -13,11 +13,23 @@ string to pick the format reader, and fd-paths have no extension.
 POSIX-only (Linux + macOS). On Windows, we fall back to ``Path.resolve()``
 with no symlink-race protection — see the trust-model docstring (R23 is
 best-effort on Windows in v0.1).
+
+macOS volumes are normally case- and Unicode-normalization-insensitive, and
+``Path.resolve()`` keeps whatever spelling the caller typed. Directories
+(the workspace root, parents of write targets) are therefore canonicalized
+with the same ``fcntl(F_GETPATH)`` mechanism as files, so ``--workspace
+~/Cases`` on a directory stored as ``~/cases`` still matches the paths the
+kernel reports for the files inside it.
+
+Every resolution failure (missing path, permission denied, Windows
+``WinError 123`` invalid names) surfaces as ``WorkspacePathError``, never a
+bare ``OSError``, so routes answer 4xx.
 """
 
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import sys
 from collections.abc import Iterator
@@ -44,10 +56,39 @@ def ensure_workspace(directory: Path) -> Path:
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         with contextlib.suppress(OSError):  # Windows / non-POSIX has no chmod
             os.chmod(directory, 0o700)
-    canonical = directory.resolve(strict=True)
+    canonical = canonical_directory(directory)
     if not canonical.is_dir():
         raise WorkspacePathError(f"workspace path is not a directory: {canonical}")
     return canonical
+
+
+def canonical_directory(directory: Path) -> Path:
+    """Canonical absolute form of an existing directory, symlinks resolved.
+
+    macOS: opens the directory and asks the kernel for its on-disk spelling
+    via ``fcntl(F_GETPATH)`` (see ``_canonical_path_from_fd``), the same way
+    file paths are canonicalized. Elsewhere ``Path.resolve(strict=True)`` is
+    already canonical.
+
+    Raises ``WorkspacePathError`` when the directory is missing, is not a
+    directory, or cannot be resolved (permissions, Windows ``WinError 123``).
+    """
+    try:
+        if sys.platform == "darwin":
+            fd = os.open(directory, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY)
+            try:
+                return _canonical_path_from_fd(fd)
+            finally:
+                os.close(fd)
+        return directory.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise WorkspacePathError(f"directory does not exist: {directory!s}") from exc
+    except NotADirectoryError as exc:
+        raise WorkspacePathError(f"path is not a directory: {directory!s}") from exc
+    except OSError as exc:
+        raise WorkspacePathError(
+            f"cannot resolve directory {directory!s}: {exc}"
+        ) from exc
 
 
 def _reject_unsafe_input(client_path: str) -> None:
@@ -83,7 +124,17 @@ def open_workspace_file_for_andes(
     if sys.platform == "win32":
         # Windows: best-effort. resolve() follows symlinks but has no
         # O_NOFOLLOW equivalent. Trust-model docstring names this gap.
-        canonical = candidate.resolve(strict=True)
+        try:
+            canonical = candidate.resolve(strict=True)
+        except FileNotFoundError as exc:
+            raise WorkspacePathError(
+                f"workspace file does not exist: {client_path!r}"
+            ) from exc
+        except OSError as exc:
+            # e.g. WinError 123 (invalid file name) for reserved characters.
+            raise WorkspacePathError(
+                f"path rejected (cannot resolve): {client_path!r}: {exc}"
+            ) from exc
         _check_within_workspace(workspace, canonical)
         yield canonical
         return
@@ -104,7 +155,12 @@ def open_workspace_file_for_andes(
             f"path rejected (symlink at leaf or open error): {client_path!r}: {exc}"
         ) from exc
     try:
-        canonical = _canonical_path_from_fd(fd)
+        try:
+            canonical = _canonical_path_from_fd(fd)
+        except OSError as exc:
+            raise WorkspacePathError(
+                f"path rejected (cannot canonicalize): {client_path!r}: {exc}"
+            ) from exc
         _check_within_workspace(workspace, canonical)
         yield canonical
     finally:
@@ -115,7 +171,8 @@ def _canonical_path_from_fd(fd: int) -> Path:
     """Resolve the canonical path of an open file descriptor.
 
     Linux: ``os.readlink('/proc/self/fd/<n>')``.
-    macOS: ``fcntl(F_GETPATH)`` via ctypes (no Python builtin).
+    macOS: ``fcntl.fcntl(fd, F_GETPATH, ...)``, which also reports the
+    on-disk case and Unicode normalization of every component.
     """
     if sys.platform == "linux":
         target = os.readlink(f"/proc/self/fd/{fd}")
@@ -127,21 +184,30 @@ def _canonical_path_from_fd(fd: int) -> Path:
     return Path(target).resolve(strict=True)
 
 
-def _macos_fcntl_getpath(fd: int) -> Path:  # pragma: no cover — macOS only
-    import ctypes
+_MACOS_PATH_MAX = 1024  # <sys/syslimits.h>; F_GETPATH needs a buffer this large
+_MACOS_F_GETPATH = 50  # <fcntl.h>; only used if ``fcntl`` lacks the constant
 
-    F_GETPATH = 50  # macOS fcntl.h
-    PATH_MAX = 1024
-    libc = ctypes.CDLL("libc.dylib", use_errno=True)
-    buf = ctypes.create_string_buffer(PATH_MAX)
-    if libc.fcntl(fd, F_GETPATH, buf) == -1:
-        err = ctypes.get_errno()
-        raise OSError(err, f"fcntl F_GETPATH failed: {os.strerror(err)}")
-    return Path(os.fsdecode(buf.value)).resolve(strict=True)
+
+def _macos_fcntl_getpath(fd: int) -> Path:
+    """Return the on-disk path of ``fd`` via ``fcntl(F_GETPATH)``.
+
+    Uses the stdlib ``fcntl`` module on purpose: libc's ``fcntl`` is variadic,
+    and calling it through ctypes without a prototype puts the third argument
+    where the callee does not look on arm64 macOS (Apple passes variadic
+    arguments on the stack), so the buffer pointer was garbage there.
+    """
+    import fcntl
+
+    cmd = getattr(fcntl, "F_GETPATH", _MACOS_F_GETPATH)
+    raw = fcntl.fcntl(fd, cmd, bytes(_MACOS_PATH_MAX))
+    path = raw.split(b"\0", 1)[0]
+    if not path:
+        raise OSError(errno.ENOENT, "fcntl F_GETPATH returned an empty path")
+    return Path(os.fsdecode(path)).resolve(strict=True)
 
 
 def _check_within_workspace(workspace: Path, canonical: Path) -> None:
-    workspace = workspace.resolve(strict=True)
+    workspace = canonical_directory(workspace)
     try:
         canonical.relative_to(workspace)
     except ValueError as exc:
@@ -168,7 +234,7 @@ def list_workspace_files(
     entries should include the leading dot (e.g., ``frozenset({".xlsx",
     ".raw"})``); comparison is case-insensitive on the suffix.
     """
-    workspace = workspace.resolve(strict=True)
+    workspace = canonical_directory(workspace)
     if not workspace.is_dir():
         raise WorkspacePathError(f"workspace path is not a directory: {workspace!s}")
     results: list[Path] = []
@@ -212,10 +278,25 @@ def open_workspace_file_for_write(
 
     The target file itself MAY be missing (this is a write — the file is
     being created or replaced). If it exists, it must not be a symlink.
+
+    Any failure to resolve the path (permissions, invalid names) is raised as
+    ``WorkspacePathError``, never a bare ``OSError``.
     """
+    try:
+        target = _resolve_write_target(workspace, client_path)
+    except OSError as exc:
+        # Permission denied on an ancestor, WinError 123, a path component
+        # that is a file: a client error, not a server fault.
+        raise WorkspacePathError(
+            f"path rejected (cannot resolve): {client_path!r}: {exc}"
+        ) from exc
+    yield target
+
+
+def _resolve_write_target(workspace: Path, client_path: str) -> Path:
     _reject_unsafe_input(client_path)
 
-    workspace = workspace.resolve(strict=True)
+    workspace = canonical_directory(workspace)
     candidate = (workspace / client_path).expanduser()
     parent = candidate.parent
 
@@ -231,7 +312,7 @@ def open_workspace_file_for_write(
             f"refusing to write under a symlinked parent directory: {client_path!r}"
         )
 
-    canonical_parent = parent.resolve(strict=True)
+    canonical_parent = canonical_directory(parent)
     _check_within_workspace(workspace, canonical_parent)
 
     if candidate.exists() and candidate.is_symlink():
@@ -244,8 +325,7 @@ def open_workspace_file_for_write(
     if candidate.exists():
         canonical_target = candidate.resolve(strict=True)
         _check_within_workspace(workspace, canonical_target)
-        yield canonical_target
-    else:
-        # File does not yet exist — return the canonical-parent + name so the
-        # caller can write atomically.
-        yield canonical_parent / candidate.name
+        return canonical_target
+    # File does not yet exist — return the canonical-parent + name so the
+    # caller can write atomically.
+    return canonical_parent / candidate.name

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import sys
+import types
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
+from tensa.security import paths
 from tensa.security.paths import (
     WorkspacePathError,
     ensure_workspace,
@@ -297,3 +301,278 @@ def test_open_workspace_file_for_write_atomic_rollback(tmp_path: Path) -> None:
     # No leftover temp files (caller cleaned up in the except branch above).
     leftovers = [p.name for p in workspace.iterdir() if p.name != target_rel]
     assert leftovers == []
+
+
+# ---- macOS F_GETPATH + workspace-root canonicalization ------------------------
+#
+# The macOS branches cannot run for real on Linux, so these tests swap in a
+# fake ``fcntl`` module (whose F_GETPATH answers come from /proc/self/fd, with
+# an optional "on-disk spelling" rewrite) and make the module believe it is on
+# darwin. They pin the call shape handed to the stdlib and the decisions made
+# on its answers.
+
+_PATH_MAX = 1024
+_linux_only = pytest.mark.skipif(
+    sys.platform != "linux", reason="fake F_GETPATH reads /proc/self/fd"
+)
+
+
+class _FakeMacos:
+    """Stand-in macOS: ``paths.sys.platform == 'darwin'`` plus a fake ``fcntl``."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, respell: Callable[[str], str]) -> None:
+        self.calls: list[tuple[int, int, int]] = []
+        self._respell = respell
+        fake_fcntl = types.SimpleNamespace(F_GETPATH=50, fcntl=self._fcntl)
+        monkeypatch.setitem(sys.modules, "fcntl", fake_fcntl)
+        monkeypatch.setattr(paths, "sys", types.SimpleNamespace(platform="darwin"))
+
+    def _fcntl(self, fd: int, cmd: int, buf: bytes) -> bytes:
+        self.calls.append((fd, cmd, len(buf)))
+        real = os.readlink(f"/proc/self/fd/{fd}")
+        return self._respell(real).encode().ljust(len(buf), b"\0")
+
+
+@pytest.fixture
+def fake_macos(monkeypatch: pytest.MonkeyPatch) -> Callable[..., _FakeMacos]:
+    def install(respell: Callable[[str], str] = lambda p: p) -> _FakeMacos:
+        return _FakeMacos(monkeypatch, respell)
+
+    return install
+
+
+@pytest.mark.unit
+@_linux_only
+def test_macos_getpath_goes_through_stdlib_fcntl(
+    tmp_path: Path, fake_macos: Callable[..., _FakeMacos]
+) -> None:
+    """The old ctypes call into variadic libc ``fcntl`` is gone: the stdlib
+    ``fcntl.fcntl(fd, F_GETPATH, <PATH_MAX-byte buffer>)`` is used, and the
+    NUL padding the kernel leaves in the buffer is stripped."""
+    target = tmp_path / "ieee14.raw"
+    target.write_text("x", encoding="utf-8")
+    fake = fake_macos()
+    fd = os.open(target, os.O_RDONLY)
+    try:
+        result = paths._macos_fcntl_getpath(fd)
+    finally:
+        os.close(fd)
+    assert result == target.resolve()
+    assert fake.calls == [(fd, 50, _PATH_MAX)]
+
+
+@pytest.mark.unit
+@_linux_only
+def test_macos_getpath_empty_answer_is_an_oserror(
+    tmp_path: Path, fake_macos: Callable[..., _FakeMacos]
+) -> None:
+    fake_macos(respell=lambda _p: "")
+    fd = os.open(tmp_path, os.O_RDONLY)
+    try:
+        with pytest.raises(OSError, match="empty path"):
+            paths._macos_fcntl_getpath(fd)
+    finally:
+        os.close(fd)
+
+
+def _two_spellings(tmp_path: Path) -> tuple[Path, Path, Callable[[str], str]]:
+    """Two real directories standing in for one case-insensitive directory:
+    the spelling the user typed and the spelling the kernel reports."""
+    typed = tmp_path / "Cases"
+    on_disk = tmp_path / "cases_on_disk"
+    for d in (typed, on_disk):
+        d.mkdir()
+        (d / "ieee14.raw").write_text("x", encoding="utf-8")
+        (d / "sub").mkdir()
+
+    def respell(path: str) -> str:
+        return path.replace(str(typed), str(on_disk))
+
+    return typed, on_disk, respell
+
+
+@pytest.mark.unit
+@_linux_only
+def test_ensure_workspace_returns_the_on_disk_spelling_on_macos(
+    tmp_path: Path, fake_macos: Callable[..., _FakeMacos]
+) -> None:
+    """``--workspace ~/Cases`` for a directory stored as ``~/cases``: the
+    canonical workspace must carry the stored spelling, otherwise every file
+    (reported in the stored spelling) falls outside it."""
+    typed, on_disk, respell = _two_spellings(tmp_path)
+    fake_macos(respell)
+    workspace = ensure_workspace(typed)
+    assert workspace == on_disk
+    with open_workspace_file_for_andes(workspace, "ieee14.raw") as canonical:
+        assert canonical == on_disk / "ieee14.raw"
+
+
+@pytest.mark.unit
+@_linux_only
+def test_open_file_accepts_a_workspace_spelled_differently_on_macos(
+    tmp_path: Path, fake_macos: Callable[..., _FakeMacos]
+) -> None:
+    """Callers that skip ``ensure_workspace`` still match: the boundary check
+    canonicalizes the workspace the same way it canonicalizes the file."""
+    typed, on_disk, respell = _two_spellings(tmp_path)
+    fake_macos(respell)
+    with open_workspace_file_for_andes(typed, "ieee14.raw") as canonical:
+        assert canonical == on_disk / "ieee14.raw"
+
+
+@pytest.mark.unit
+@_linux_only
+def test_macos_still_rejects_files_outside_the_workspace(
+    tmp_path: Path, fake_macos: Callable[..., _FakeMacos]
+) -> None:
+    typed, _on_disk, respell = _two_spellings(tmp_path)
+    (tmp_path / "outside.raw").write_text("x", encoding="utf-8")
+    fake_macos(respell)
+    with (
+        pytest.raises(WorkspacePathError, match="outside the workspace"),
+        open_workspace_file_for_andes(typed, "../outside.raw"),
+    ):
+        pass
+
+
+@pytest.mark.unit
+@_linux_only
+def test_write_target_uses_the_on_disk_spelling_on_macos(
+    tmp_path: Path, fake_macos: Callable[..., _FakeMacos]
+) -> None:
+    typed, on_disk, respell = _two_spellings(tmp_path)
+    fake_macos(respell)
+    with open_workspace_file_for_write(typed, "sub/ieee14.layout.json") as target:
+        assert target == on_disk / "sub" / "ieee14.layout.json"
+
+
+@pytest.mark.unit
+@_linux_only
+def test_layout_sidecar_path_uses_the_on_disk_spelling_on_macos(
+    tmp_path: Path, fake_macos: Callable[..., _FakeMacos]
+) -> None:
+    from tensa.api.routes.workspace import _layout_sidecar_path
+
+    typed, on_disk, respell = _two_spellings(tmp_path)
+    fake_macos(respell)
+    assert _layout_sidecar_path(typed, "sub/ieee14.raw") == (
+        on_disk / "sub" / "ieee14.raw.layout.json"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform != "darwin", reason="real F_GETPATH needs macOS")
+def test_real_macos_canonical_directory_reports_the_stored_spelling(tmp_path: Path) -> None:
+    stored = tmp_path / "MixedCase"
+    stored.mkdir()
+    typed = tmp_path / "mixedcase"
+    if not typed.exists():
+        pytest.skip("volume is case-sensitive")
+    assert paths.canonical_directory(typed) == stored.resolve()
+    assert paths.canonical_directory(stored) == stored.resolve()
+
+
+# ---- resolution failures are WorkspacePathError, not OSError -------------------
+
+
+@pytest.mark.unit
+def test_canonical_directory_wraps_missing_directory(tmp_path: Path) -> None:
+    with pytest.raises(WorkspacePathError, match="does not exist"):
+        paths.canonical_directory(tmp_path / "nope")
+
+
+@pytest.mark.unit
+def test_canonical_directory_wraps_os_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(self: Path, strict: bool = False) -> Path:
+        raise OSError(errno.EINVAL, "invalid name (WinError 123 on Windows)")
+
+    monkeypatch.setattr(Path, "resolve", boom)
+    with pytest.raises(WorkspacePathError, match="cannot resolve directory"):
+        paths.canonical_directory(tmp_path)
+
+
+@pytest.mark.unit
+def test_open_workspace_file_windows_branch_wraps_missing_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows resolves with ``Path.resolve(strict=True)``; a missing file
+    raised a bare FileNotFoundError (a 500) instead of WorkspacePathError."""
+    workspace = ensure_workspace(tmp_path / "ws")
+    monkeypatch.setattr(paths, "sys", types.SimpleNamespace(platform="win32"))
+    with (
+        pytest.raises(WorkspacePathError, match="does not exist"),
+        open_workspace_file_for_andes(workspace, "missing.xlsx"),
+    ):
+        pass
+
+
+@pytest.mark.unit
+def test_open_workspace_file_windows_branch_wraps_invalid_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """WinError 123 (invalid file name) from ``resolve`` is an OSError that is
+    not FileNotFoundError."""
+    workspace = ensure_workspace(tmp_path / "ws")
+    real_resolve = Path.resolve
+
+    def resolve(self: Path, strict: bool = False) -> Path:
+        if self.name == "bad<name>.raw":
+            raise OSError(errno.EINVAL, "invalid file name", str(self))
+        return real_resolve(self, strict=strict)
+
+    monkeypatch.setattr(paths, "sys", types.SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(Path, "resolve", resolve)
+    with (
+        pytest.raises(WorkspacePathError, match="cannot resolve"),
+        open_workspace_file_for_andes(workspace, "bad<name>.raw"),
+    ):
+        pass
+
+
+@pytest.mark.unit
+def test_open_workspace_file_wraps_canonicalization_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fd was opened, but resolving its path then failed (file removed
+    mid-flight, /proc unavailable): still a WorkspacePathError, and the fd is
+    closed."""
+    workspace = ensure_workspace(tmp_path / "ws")
+    (workspace / "ieee14.raw").write_text("x", encoding="utf-8")
+    seen_fds: list[int] = []
+
+    def boom(fd: int) -> Path:
+        seen_fds.append(fd)
+        raise FileNotFoundError(errno.ENOENT, "gone")
+
+    monkeypatch.setattr(paths, "_canonical_path_from_fd", boom)
+    with (
+        pytest.raises(WorkspacePathError, match="cannot canonicalize"),
+        open_workspace_file_for_andes(workspace, "ieee14.raw"),
+    ):
+        pass
+    with pytest.raises(OSError):  # EBADF: the fd was closed
+        os.fstat(seen_fds[0])
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(
+    sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX permission bits and a non-root user",
+)
+def test_write_under_unsearchable_ancestor_is_workspace_path_error(tmp_path: Path) -> None:
+    """``Path.exists`` re-raises EACCES; the write validator must turn that
+    into WorkspacePathError so routes answer 4xx, not 500."""
+    workspace = ensure_workspace(tmp_path / "ws")
+    locked = workspace / "locked"
+    (locked / "inner").mkdir(parents=True)
+    locked.chmod(0o000)
+    try:
+        with (
+            pytest.raises(WorkspacePathError, match="cannot resolve"),
+            open_workspace_file_for_write(workspace, "locked/inner/ieee14.layout.json"),
+        ):
+            pass
+    finally:
+        locked.chmod(0o700)
