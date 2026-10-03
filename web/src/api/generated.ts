@@ -3086,7 +3086,7 @@ export interface components {
             tf: number;
             /**
              * H
-             * @description Fixed integration step (seconds). ``None`` to use the wrapper default (currently 1/120 s).
+             * @description Fixed integration step (seconds) for every iteration, as for ``POST /tds``. ``None`` keeps the ANDES default (1/30 s).
              */
             h?: number | null;
             /**
@@ -3146,7 +3146,7 @@ export interface components {
             tf: number;
             /**
              * H
-             * @description Initial integration step size, in seconds. ``None`` lets ANDES use its case-default step size (typically 1/120 s).
+             * @description Integration step size, in seconds, applied as ANDES ``TDS.config.tstep``. With the default ``trapezoidal`` integrator this is the fixed step; ``None`` keeps the ANDES default (1/30 s). The ``qndf`` integrator picks its own step and ignores it; bound its step with ``tds_config_overrides.max_step`` instead.
              */
             h?: number | null;
             /**

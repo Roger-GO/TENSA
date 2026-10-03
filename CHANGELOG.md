@@ -7,6 +7,9 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 ### Added
 - Agent-evaluation example: a PowerAgentBench-SS-style budgeted N-2 screening study on IEEE 39-bus (`examples/contingency_screening/`) with an exhaustive API-computed oracle, scripted baselines, an audited LLM-agent run, and scoring. Line elements now accept edits to the connection-status parameter `u`, so contingency studies can outage a branch through the API or inspector.
 
+### Fixed
+- The time-domain step size `h` was silently ignored: it was written to `TDS.config.h`, which ANDES never reads, so every run used the 1/30 s default. `h` now sets `TDS.config.tstep`, and the trapezoidal integrator steps at exactly the requested size in batch runs, streaming runs, and sweeps. The TDS report now shows the step actually used. The QNDF integrator still chooses its own step (ANDES ignores `tstep` there), so bound it with `max_step`. The API and UI wording for `h` now says so and no longer claims a 1/120 s default.
+
 ## [0.4.0] — 2026-07-05
 
 ### Changed

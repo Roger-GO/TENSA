@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from tensa.core.disturbance import FaultSpec
@@ -82,6 +83,87 @@ def test_run_tds_with_dynamics_no_disturbance() -> None:
     assert result.callpert_count >= 10, (
         f"expected callpert to fire at least 10 times on a 1s sim, got {result.callpert_count}"
     )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("h", [0.005, 0.02])
+def test_run_tds_honors_requested_fixed_step(h: float) -> None:
+    """``h`` must reach ANDES's ``TDS.config.tstep``: the trapezoidal
+    integrator then steps at exactly ``h`` instead of the 1/30 s default.
+
+    Regression for the wrapper writing ``config.h`` (a field ANDES 2.0.0
+    never reads), which silently ignored every requested step size.
+    ``tf`` stays below IEEE 14's first event so no step is clipped to a
+    switching time."""
+    raw, dyr = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw, addfiles=[dyr])
+
+    times: list[float] = []
+    result = w.run_tds(tf=0.5, h=h, on_step=lambda t, _ss: times.append(float(t)))
+
+    dt = np.diff(times)
+    # ANDES can emit sub-microsecond tail steps at ``tf`` (float residue);
+    # they are not integration steps.
+    dt = dt[dt > 1e-6]
+    assert np.allclose(dt, h, atol=1e-9), f"steps deviate from h={h}: {np.unique(np.round(dt, 9))}"
+    assert len(dt) == round(0.5 / h)
+    assert result.converged
+    assert result.final_t == pytest.approx(0.5)
+
+
+@pytest.mark.integration
+def test_run_tds_qndf_with_h_stays_variable_step() -> None:
+    """Supplying ``h`` on the QNDF path must not turn it into a fixed-step
+    run: ``fixt`` stays 0 and the step still adapts. (ANDES 2.0.0 takes the
+    QNDF initial step from ``min(1/30, tf/100)``, not from ``tstep``.)"""
+    raw, dyr = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw, addfiles=[dyr])
+
+    times: list[float] = []
+    result = w.run_tds(
+        tf=2.0,
+        h=0.005,
+        integrator="qndf",
+        on_step=lambda t, _ss: times.append(float(t)),
+    )
+    assert result.converged
+    assert result.final_t == pytest.approx(2.0)
+    assert int(w._require_loaded().TDS.config.fixt) == 0  # noqa: SLF001
+
+    dt = np.diff(times)
+    dt = dt[dt > 1e-6]
+    assert np.ptp(dt) > 1e-3, "QNDF step sizes should vary across the run"
+
+
+@pytest.mark.integration
+def test_run_sweep_forwards_step_size_to_tds(tmp_path: Path) -> None:
+    """A sweep's ``h`` rides through ``run_tds`` to ANDES: every iteration
+    integrates with the requested fixed step (0.2 s / 0.01 s = 20 steps)
+    instead of the 1/30 s default."""
+    raw, dyr = _ieee14_paths()
+    ws = tmp_path / "ws"
+    ws.mkdir(mode=0o700)
+    w = Wrapper(workspace=ws)
+    w.load_case(raw, addfiles=[dyr])
+    w.add_disturbance(FaultSpec(bus_idx=5, tf=1.0, tc=1.1))
+    w.run_pflow()
+    w.save_snapshot("sweep-h")
+
+    result = w.run_sweep(
+        snapshot_name="sweep-h",
+        parameter_kind="disturbance.fault.tc",
+        parameter_target=0,
+        values=[1.05],
+        tf=0.2,
+        h=0.01,
+    )
+    (iteration,) = result["iterations"]
+    assert iteration["error"] is None
+    assert iteration["converged"]
+    # One callpert per step plus the t=0 call; the 1/30 s default gives ~66.
+    assert iteration["callpert_count"] == 21
 
 
 @pytest.mark.integration

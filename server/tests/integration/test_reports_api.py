@@ -170,6 +170,29 @@ async def test_report_tds_after_successful_run_returns_summary(
     assert "TDS Summary" in titles
 
 
+@pytest.mark.integration
+async def test_report_tds_reflects_requested_step_size(
+    client: httpx.AsyncClient,
+) -> None:
+    """``h`` on ``POST /tds`` must reach ANDES end to end (route -> worker
+    -> wrapper): the report echoes ``config.tstep``, which stayed at the
+    1/30 s default while the wrapper wrote an ignored ``config.h``."""
+    sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
+    tds = await client.post(
+        f"/api/sessions/{sid}/tds",
+        json={"tf": 0.1, "h": 0.01},
+    )
+    assert tds.status_code == 200, tds.text
+    resp = await client.get(
+        f"/api/sessions/{sid}/report",
+        params={"routine": "tds"},
+    )
+    assert resp.status_code == 200, resp.text
+    plain_text = resp.json()["plain_text"]
+    assert "Configured step (tstep): 0.010000 s" in plain_text
+    assert "Configured step (tstep): 0.033333 s" not in plain_text
+
+
 # ---- edge cases: pre-condition failures ----------------------------------
 
 

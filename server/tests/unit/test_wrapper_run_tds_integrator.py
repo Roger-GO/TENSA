@@ -146,3 +146,55 @@ def test_run_tds_trapezoidal_does_not_force_fixt(loaded_wrapper: Wrapper) -> Non
     fixt_before = int(ss.TDS.config.fixt)
     w.run_tds(tf=0.1, h=1 / 120, integrator="trapezoidal")
     assert int(ss.TDS.config.fixt) == fixt_before
+
+
+# ---- step size (h -> ss.TDS.config.tstep) --------------------------------
+#
+# ANDES 2.0.0 reads the integration step from ``TDS.config.tstep``. ``Config``
+# accepts any attribute name silently, so the wrapper once wrote ``config.h``
+# (never read) and every requested step was ignored. The real-integration
+# check lives in tests/integration/test_wrapper.py.
+
+
+def test_run_tds_h_sets_andes_tstep(loaded_wrapper: Wrapper) -> None:
+    """``h`` lands on ``config.tstep`` and no stray ``config.h`` is created."""
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    w.run_tds(tf=0.1, h=0.005)
+    assert float(ss.TDS.config.tstep) == pytest.approx(0.005)
+    assert "h" not in ss.TDS.config.as_dict(refresh=True)
+
+
+def test_run_tds_without_h_keeps_andes_default_step(loaded_wrapper: Wrapper) -> None:
+    """``h=None`` must not touch ``tstep`` (ANDES default, 1/30 s)."""
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    tstep_before = float(ss.TDS.config.tstep)
+    w.run_tds(tf=0.1)
+    assert float(ss.TDS.config.tstep) == pytest.approx(tstep_before)
+    assert tstep_before == pytest.approx(1 / 30)
+
+
+def test_run_tds_qndf_with_h_sets_tstep_and_keeps_variable_step(
+    loaded_wrapper: Wrapper,
+) -> None:
+    """The QNDF path records ``h`` the same way and still forces ``fixt=0``."""
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    w.run_tds(tf=0.1, h=0.005, integrator="qndf")
+    assert float(ss.TDS.config.tstep) == pytest.approx(0.005)
+    assert ss.TDS.config.method == "qndf"
+    assert int(ss.TDS.config.fixt) == 0
+
+
+def test_run_tds_missing_tstep_field_raises(loaded_wrapper: Wrapper) -> None:
+    """If a future ANDES drops ``tstep`` the wrapper must fail loudly rather
+    than silently writing a field ANDES never reads."""
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    delattr(ss.TDS.config, "tstep")
+    with pytest.raises(SetupFailedError, match="tstep"):
+        w.run_tds(tf=0.1, h=0.005)
+    assert not hasattr(ss.TDS.config, "tstep")
+    # Without ``h`` the field is never consulted, so the run still proceeds.
+    w.run_tds(tf=0.1)

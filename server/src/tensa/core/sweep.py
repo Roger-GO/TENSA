@@ -192,8 +192,8 @@ class SweepSimParams(BaseModel):
     h: float | None = Field(
         None,
         description=(
-            "Fixed integration step (seconds). ``None`` to use the "
-            "wrapper default (currently 1/120 s)."
+            "Fixed integration step (seconds) for every iteration, as for "
+            "``POST /tds``. ``None`` keeps the ANDES default (1/30 s)."
         ),
     )
     vars: list[str] | None = Field(

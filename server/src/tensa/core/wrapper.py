@@ -1522,6 +1522,13 @@ class Wrapper:
         to set ``ss.TDS.busted = True`` on the next callpert invocation,
         cleanly terminating the integration loop within ~2 steps.
 
+        ``h`` (seconds) is written to ``ss.TDS.config.tstep``, the field
+        ANDES 2.0.0 reads. With the trapezoidal integrator it is the fixed
+        step (steps are still clipped at event times and at ``tf``);
+        ``None`` keeps the ANDES default of 1/30 s. The QNDF integrator
+        picks its own initial step (``min(1/30, tf/100)``) and ignores it;
+        bound QNDF steps with the ``max_step`` override instead.
+
         ``integrator`` selects the DAE solution method:
         - ``"trapezoidal"`` (default) — fixed-step Implicit Trapezoidal
           Method. Maps to ANDES ``ss.TDS.config.method = "trapezoid"``.
@@ -1544,6 +1551,8 @@ class Wrapper:
           the live config object (``hasattr``) and ``setattr`` directly.
           This is what the GUI's free-form override editor forwards.
 
+        Overrides are applied after ``h``, so an explicit ``tstep`` key wins.
+
         A key that is neither a canonical alias nor a real ``ss.TDS.config``
         field raises ``SetupFailedError`` (the wrapper stays a strict
         gatekeeper — it never sets an attribute that does not exist). The
@@ -1564,10 +1573,19 @@ class Wrapper:
                     "power flow did not converge; TDS cannot begin"
                 )
 
-        # Configure the TDS endpoint and step size
+        # Configure the TDS endpoint and step size. ANDES 2.0.0 reads the
+        # step from ``config.tstep`` (fixed step for trapezoid; QNDF ignores
+        # it for the initial step). ``Config`` accepts any attribute name
+        # silently, so a write to a name ANDES never reads (the old
+        # ``config.h``) went unnoticed; guard the field exists instead.
         ss.TDS.config.tf = tf
         if h is not None:
-            ss.TDS.config.h = h
+            if not hasattr(ss.TDS.config, "tstep"):
+                raise SetupFailedError(
+                    "ss.TDS.config has no 'tstep' field; cannot apply the "
+                    "requested step size (unsupported ANDES version?)"
+                )
+            ss.TDS.config.tstep = h
 
         # Integrator selection. ANDES ``method`` strings: ``"trapezoid"``
         # (fixed-step ITM) and ``"qndf"`` (variable-step NDF). The QNDF

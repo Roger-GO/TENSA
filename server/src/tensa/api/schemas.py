@@ -1090,8 +1090,12 @@ class TdsRunRequest(BaseModel):
     h: float | None = Field(
         None,
         description=(
-            "Initial integration step size, in seconds. ``None`` lets ANDES "
-            "use its case-default step size (typically 1/120 s)."
+            "Integration step size, in seconds, applied as ANDES "
+            "``TDS.config.tstep``. With the default ``trapezoidal`` "
+            "integrator this is the fixed step; ``None`` keeps the ANDES "
+            "default (1/30 s). The ``qndf`` integrator picks its own step "
+            "and ignores it; bound its step with "
+            "``tds_config_overrides.max_step`` instead."
         ),
         gt=0.0,
     )
