@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 import sys
 import threading
 import time
 import webbrowser
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -38,6 +40,15 @@ app = typer.Typer(
     help="Substrate for the ANDES power-system simulator GUI.",
     no_args_is_help=True,
 )
+
+
+# uvicorn's exit status for a server that never started listening; kept so
+# scripts that check for it keep working now that ``serve`` binds the socket
+# itself.
+_STARTUP_FAILURE = 3
+
+# Bind addresses that listen everywhere but are not valid URL hosts.
+_WILDCARD_BINDS = frozenset({"0.0.0.0", "::", ""})
 
 
 @app.callback()
@@ -59,7 +70,8 @@ def serve(
         "--port",
         help=(
             "Port to listen on. ``0`` (default) lets the OS choose; the chosen "
-            "port is printed to stderr."
+            "port is bound before the app is built (so the Host/Origin "
+            "allow-list matches it) and printed to stderr."
         ),
     ),
     workspace: Path = typer.Option(
@@ -91,7 +103,8 @@ def serve(
         "--open",
         help=(
             "After the server starts listening, open the user's default browser "
-            "at ``http://<host>:<port>/``. Requires a fixed --port."
+            "at ``http://<host>:<port>/``. Works with any --port, including the "
+            "default OS-assigned one."
         ),
     ),
     reload: bool = typer.Option(
@@ -99,7 +112,8 @@ def serve(
         "--reload",
         help=(
             "DEV ONLY: auto-reload the server when files in the tensa "
-            "package change (uvicorn reload). Requires a fixed --port."
+            "package change (uvicorn reload). With the default --port 0 a "
+            "free port is picked up front and reused across reloads."
         ),
     ),
 ) -> None:
@@ -179,69 +193,173 @@ def serve(
         extra_hosts.add(host_only)
         log.info("CORS allow-origin: %s (host: %s)", origin, host_only)
 
+    browser_host = "127.0.0.1" if bind in _WILDCARD_BINDS else bind
+    url_host = f"[{browser_host}]" if ":" in browser_host else browser_host
+
     # ``--reload`` runs uvicorn against an import-string factory so the
     # reloader subprocess can re-import the app on source changes. The factory
     # is called with no args in the worker, so config is threaded through
     # ``ANDES_APP_RELOAD_*`` env vars set here.
     if reload:
+        # uvicorn's reloader binds its own socket, so ours can't be handed
+        # over; reserve a concrete port number for the factory instead (the
+        # Host/Origin allow-list needs the real port). Dev only: there is a
+        # small window in which another process could take the port.
+        try:
+            reload_port = port or _pick_free_port(bind)
+        except OSError as exc:
+            log.error("cannot bind %s:%s: %s", bind, port, exc)
+            raise typer.Exit(code=_STARTUP_FAILURE) from exc
         os.environ["ANDES_APP_RELOAD_WORKSPACE"] = str(canonical_workspace)
         os.environ["ANDES_APP_RELOAD_BIND"] = bind
-        os.environ["ANDES_APP_RELOAD_PORT"] = str(port)
+        os.environ["ANDES_APP_RELOAD_PORT"] = str(reload_port)
         os.environ["ANDES_APP_RELOAD_ORIGINS"] = ",".join(sorted(extra_origins))
         os.environ["ANDES_APP_RELOAD_HOSTS"] = ",".join(sorted(extra_hosts))
         os.environ["ANDES_APP_RELOAD_MAX_SESSIONS"] = str(max_sessions)
         os.environ["ANDES_APP_RELOAD_IDLE"] = str(idle_timeout_seconds)
         watch_dir = Path(__file__).resolve().parent  # the tensa package
         log.info("dev --reload: watching %s for changes", watch_dir)
+        log.info(
+            "serving http://%s:%s/ (workspace: %s)",
+            url_host,
+            reload_port,
+            canonical_workspace,
+        )
+        if open_browser:
+            # The reloader owns the server, so there is no handle to ask; probe
+            # the port instead.
+            _spawn_open_browser_watcher(
+                url=f"http://{url_host}:{reload_port}/",
+                is_ready=lambda: _accepts_connections(browser_host, reload_port),
+                log=log,
+            )
         uvicorn.run(
             "tensa.cli:_reload_app_factory",
             factory=True,
             reload=True,
             reload_dirs=[str(watch_dir)],
             host=bind,
-            port=port,
+            port=reload_port,
             log_level="info",
             access_log=False,
         )
         return
 
+    # Bind the listening socket BEFORE building the app. With ``--port 0`` the
+    # real port only exists once the socket is bound, and ``make_app`` needs it
+    # to build the Host/Origin allow-list (the SPA sends
+    # ``Origin: http://127.0.0.1:<real port>``). uvicorn then serves on this
+    # very socket, so the port cannot change underneath the app.
+    try:
+        sock = _bind_listen_socket(bind, port)
+    except OSError as exc:
+        log.error("cannot bind %s:%s: %s", bind, port, exc)
+        raise typer.Exit(code=_STARTUP_FAILURE) from exc
+    bound_port = int(sock.getsockname()[1])
+
     fastapi_app = make_app(
         workspace=canonical_workspace,
         bind_host=bind,
-        bind_port=port,
+        bind_port=bound_port,
         max_sessions=max_sessions,
         idle_timeout_seconds=idle_timeout_seconds,
         extra_allowed_hosts=frozenset(extra_hosts),
         extra_allowed_origins=frozenset(extra_origins),
     )
 
-    display_host = "127.0.0.1" if bind in {"0.0.0.0", "::", ""} else bind
+    # ``access_log=False`` disables uvicorn's default access logger (per the
+    # trust-model docstring; the structured logger is SaaS-phase work).
+    server = uvicorn.Server(
+        uvicorn.Config(
+            fastapi_app,
+            host=bind,
+            port=bound_port,
+            log_level="info",
+            access_log=False,
+        )
+    )
+
+    # uvicorn stays quiet about the address when handed a ready-made socket,
+    # so this line is the one place the real URL is printed.
     log.info(
         "serving http://%s:%s/ (workspace: %s)",
-        display_host,
-        port if port else "<os-assigned-port>",
+        url_host,
+        bound_port,
         canonical_workspace,
     )
 
-    # ``--open`` sentinel: spawn a watcher thread that polls until uvicorn
-    # has bound a real port (relevant when ``--port 0`` is used) and then
-    # opens the user's browser at the server root.
     if open_browser:
         _spawn_open_browser_watcher(
-            requested_host=bind,
-            requested_port=port,
+            url=f"http://{url_host}:{bound_port}/",
+            is_ready=lambda: server.started,
             log=log,
         )
 
-    # Serve. ``access_log=False`` disables uvicorn's default access logger
-    # (per the trust-model docstring; the structured logger is SaaS-phase work).
-    uvicorn.run(
-        fastapi_app,
-        host=bind,
-        port=port,
-        log_level="info",
-        access_log=False,
-    )
+    try:
+        server.run(sockets=[sock])
+    except KeyboardInterrupt:  # pragma: no cover - interactive Ctrl+C
+        pass
+    finally:
+        sock.close()
+    if not server.started:
+        # Mirror ``uvicorn.run``: a server that never came up is a failure.
+        raise typer.Exit(code=_STARTUP_FAILURE)
+
+
+def _bind_listen_socket(host: str, port: int) -> socket.socket:
+    """Create a TCP socket bound to ``(host, port)``; ``port=0`` lets the OS
+    pick. The socket is not yet listening: uvicorn starts the listen when
+    handed it via ``Server.run(sockets=[...])``, so the port is reserved from
+    here on but no connection is accepted until the app is ready.
+
+    Raises ``OSError`` if the address cannot be bound.
+    """
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        _apply_bind_options(sock)
+        sock.bind((host, port))
+    except OSError:
+        sock.close()
+        raise
+    return sock
+
+
+def _apply_bind_options(sock: socket.socket, *, platform: str = sys.platform) -> None:
+    """Set the address-reuse option appropriate to the platform.
+
+    POSIX: ``SO_REUSEADDR`` lets a restarted server rebind a port still in
+    ``TIME_WAIT``. Windows: ``SO_REUSEADDR`` means something different and lets
+    another process bind the same port while we are listening, so ask for
+    ``SO_EXCLUSIVEADDRUSE`` instead (when the platform exposes it).
+    """
+    if platform == "win32":
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if exclusive is not None:
+            sock.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+    else:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+
+def _pick_free_port(host: str) -> int:
+    """Ask the OS for a free port on ``host`` (bind to 0, read it back,
+    release). Only used by ``--reload``, where the socket cannot be handed to
+    the server; the caller must tolerate the small window before it is
+    re-bound."""
+    sock = _bind_listen_socket(host, 0)
+    try:
+        return int(sock.getsockname()[1])
+    finally:
+        sock.close()
+
+
+def _accepts_connections(host: str, port: int) -> bool:
+    """True when something is accepting TCP connections on ``(host, port)``."""
+    try:
+        with socket.create_connection((host, port), timeout=0.2):
+            return True
+    except OSError:
+        return False
 
 
 def _reload_app_factory() -> FastAPI:
@@ -276,61 +394,40 @@ def _reload_app_factory() -> FastAPI:
 
 def _spawn_open_browser_watcher(
     *,
-    requested_host: str,
-    requested_port: int,
+    url: str,
+    is_ready: Callable[[], bool],
     log: logging.Logger,
-) -> None:
-    """Launch a daemon thread that opens the user's browser once the server
-    is listening on a real port.
+    deadline_seconds: float = 30.0,
+    poll_interval: float = 0.05,
+) -> threading.Thread:
+    """Launch a daemon thread that opens the user's browser at ``url`` once
+    ``is_ready()`` turns true.
 
-    When ``--port 0`` was passed, the actual port is OS-assigned at bind
-    time and exposed via ``app.state.bound_port`` (set by uvicorn after
-    ``startup``). We poll briefly with a deadline so a server that fails to
-    bind doesn't leave the watcher hung forever.
+    The port is already known when this runs (``serve`` binds before building
+    the app), so only readiness needs waiting for: opening the browser earlier
+    would make the first request fail. A deadline keeps a server that never
+    comes up from leaving the watcher polling forever.
     """
 
-    deadline_seconds = 5.0
-    poll_interval = 0.05
-
     def _watcher() -> None:
-        # Pick a host the browser can navigate to. ``0.0.0.0`` binds all
-        # interfaces but isn't a valid URL host; use 127.0.0.1 in that case.
-        browser_host = (
-            "127.0.0.1" if requested_host in {"0.0.0.0", "::", ""} else requested_host
-        )
         deadline = time.monotonic() + deadline_seconds
-        bound_port = requested_port
-        # If the user passed --port 0, wait for uvicorn to bind. uvicorn
-        # publishes the chosen port via the server.servers[].sockets list,
-        # but we don't have a handle to ``server`` here — fall back to a
-        # short sleep so the user's terminal is unlikely to scroll past
-        # the "listening on" line.
-        if bound_port == 0:
-            log.warning(
-                "--open with --port 0: cannot reliably reconstruct the bound port; "
-                "browser will not open automatically. Pass --port <N> to use --open."
-            )
-            return
-        # Poll a TCP probe so we don't open the browser before the listener
-        # is ready (the first request would otherwise 5xx).
-        import socket
-        while time.monotonic() < deadline:
-            try:
-                with socket.create_connection((browser_host, bound_port), timeout=0.2):
-                    break
-            except OSError:
-                time.sleep(poll_interval)
-        else:
-            log.warning("--open: server did not start listening within %.1fs", deadline_seconds)
-            return
-        url = f"http://{browser_host}:{bound_port}/"
+        while not is_ready():
+            if time.monotonic() >= deadline:
+                log.warning(
+                    "--open: server did not start listening within %.0fs",
+                    deadline_seconds,
+                )
+                return
+            time.sleep(poll_interval)
         log.info("opening browser: %s", url)
         try:
             webbrowser.open(url, new=2)
         except Exception as exc:  # pragma: no cover - platform-dependent
             log.warning("--open: webbrowser.open failed: %s", exc)
 
-    threading.Thread(target=_watcher, name="tensa-open", daemon=True).start()
+    thread = threading.Thread(target=_watcher, name="tensa-open", daemon=True)
+    thread.start()
+    return thread
 
 
 @app.command(name="mcp")
