@@ -7,14 +7,14 @@ name = "tensa"
 version = "0.4.0"
 description = "TENSA: an interactive web workbench for power system simulation, built on ANDES"
 readme = "README.md"
-license = { file = "../LICENSE" }
+license = { file = "LICENSE" }
 requires-python = ">=3.12"
 authors = [
     { name = "Roger Gracia", email = "rollerg97@gmail.com" },
 ]
 keywords = ["tensa", "power-systems", "andes", "simulation", "fastapi", "websocket"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Programming Language :: Python :: 3",
@@ -65,6 +65,11 @@ dev = [
     "ruff>=0.6,<0.17",
     "mypy>=1.11",
     "websockets>=13",
+    # tests/unit/test_packaging.py and tests/integration/test_packaging.py drive
+    # the build hook and the build backend directly (``editables`` is what the
+    # backend needs to build an editable wheel).
+    "hatchling>=1.25",
+    "editables>=0.5",
 ]
 
 [project.scripts]
@@ -75,22 +80,28 @@ Homepage = "https://github.com/Roger-GO/TENSA"
 Documentation = "https://github.com/Roger-GO/TENSA"
 Issues = "https://github.com/Roger-GO/TENSA/issues"
 
-# Hatchling build target — src layout
+# Hatchling build targets. The built web UI (``../web/dist``) is bundled by the
+# hook in hatch_build.py, not by a ``force-include`` table: the wheel is built
+# both from the repository and from the sdist, and only the hook can tell which
+# one it is in. It fails the build when there is no UI, so we never ship a
+# package without one. Run ``pnpm build`` in ``web/`` before ``python -m build``.
+[tool.hatch.build.hooks.custom]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/tensa"]
-# Bundle the built SPA into the wheel under ``tensa/static/``. The
-# wheel-build step expects ``../web/dist`` to exist; CI runs ``pnpm build``
-# in ``web/`` before ``python -m build`` to populate it. If the directory
-# is missing at build time, hatch fails loudly — that's the intended
-# behavior so we never ship a wheel without the UI bundle.
-force-include = { "../web/dist" = "tensa/static" }
+# The hook skips ``*.map`` when it copies the UI; this keeps source maps out of
+# the wheel if a copy of the UI is already in the source tree.
+exclude = ["*.map"]
 
 [tool.hatch.build.targets.sdist]
 include = [
     "src/tensa",
     "README.md",
+    "LICENSE",
     "ANDES_VERSIONS.md",
+    "hatch_build.py",
 ]
+exclude = ["*.map"]
 
 # ============================================================================
 # Tooling

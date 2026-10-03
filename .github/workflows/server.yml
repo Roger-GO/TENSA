@@ -20,10 +20,10 @@ permissions:
   contents: read
 
 jobs:
-  # The server's pyproject.toml force-includes ../web/dist into the wheel, so the
-  # SPA bundle must exist before `pip install -e ./server[dev]` runs. Without it
-  # hatchling fails with "Forced include not found". Build it once here and hand
-  # it to every test leg instead of rebuilding it six times.
+  # An editable install no longer needs the UI, but a checkout serves the SPA
+  # from ../web/dist, so the real `tensa serve` in the smoke test serves a page
+  # instead of warning that there is none. Build it once here and hand it to
+  # every test leg instead of rebuilding it six times.
   web-dist:
     name: build web/dist
     runs-on: ubuntu-latest

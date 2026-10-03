@@ -104,7 +104,8 @@ def _find_spa_dir() -> Path | None:
     Two locations are considered, in order:
 
     1. ``tensa/static/`` next to the package (wheel-installed location;
-       hatch ``force-include`` copies ``web/dist/`` here at build time).
+       the build hook in ``server/hatch_build.py`` copies ``web/dist/`` here
+       at build time).
     2. ``../../web/dist/`` relative to the package (dev mode where the
        source tree is editable-installed alongside ``web/``).
 

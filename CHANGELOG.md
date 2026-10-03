@@ -16,6 +16,8 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 - Python 3.13 is now a declared and tested version (trove classifier added, covered by the CI matrix).
 - `vitest` and `@vitest/ui` moved from 3.2.4 to 3.2.7, because the new coverage provider has to match the test runner's version.
 - Snapshot names and save-as names are now checked by one shared rule on the server, and the Save snapshot and Save as custom case dialogs apply the same reserved-name and trailing-dot checks as you type, instead of waiting for the server to answer 422.
+- The PyPI classifier is now `Development Status :: 4 - Beta` (it was Pre-Alpha).
+- The `dev` extra now includes `hatchling` and `editables`, which the packaging tests use to run the real build backend.
 
 ### Fixed
 - The Import bundle dialog left its auto-close timer running after the dialog went away. Closing the dialog by hand within 800 ms of a successful import and opening it again let the old timer close the new dialog, and a test run that finished inside that window hit an unhandled error after teardown. The timer is now cancelled when the dialog closes.
@@ -40,6 +42,8 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 - A layout path that runs through a file, such as `case_path=ieee14.raw/x.raw`, answered 500 on Linux and Windows (macOS already answered 400). Anything that is not a directory is now rejected with a 400.
 - Exporting a bundle no longer writes case files that import would refuse. A workspace file such as `con.raw`, `case_12:30.raw`, or `.hidden.raw` loads on Linux and macOS, but the bundle holding it failed import everywhere, and an edited case named `con.raw` exported as `con.xlsx`. Export now answers 422 with the name of the file and asks for a rename, and also answers 422 when the case has more than 16 case files, the most an import accepts.
 - On Windows, restoring or deleting a snapshot whose name Windows reads as a device (`aux`, `con.v2`) is now refused like a new save. Such a snapshot cannot exist there, so the exemption for older snapshots only reopened device-name access; Linux and macOS are unchanged. The layout exemption for existing case files and the snapshot exemption now follow the same platform rule.
+- The sdist could not be built into a wheel, so `python -m build` (which builds the wheel from the sdist) and any install from the sdist failed with `License file does not exist: ../LICENSE`. `server/pyproject.toml` read the license from `../LICENSE` and force-included `../web/dist`, and an unpacked sdist has neither. `server/LICENSE` is now a copy of the license (a test keeps the two identical), and a small build hook, `server/hatch_build.py`, replaces the `force-include` table. The sdist now carries the built UI as `src/tensa/static`, so a wheel built from it serves the UI too, and a build with no UI at all still fails with a message that says to run `pnpm build`, instead of producing a package that answers 404 at `/`. The hook also lets `pip install -e ./server` work before `pnpm build` has run, and it no longer leaves a copy of the UI in site-packages that the app never read and that went stale after the next UI build.
+- The wheel shipped the UI's source maps, about 10 MB uncompressed that a browser only fetches when its developer tools are open. The wheel and the sdist now leave out every `*.map` file.
 
 ## [0.4.0] — 2026-07-05
 
