@@ -409,8 +409,13 @@ class SessionManager:
         self._sweep_tasks.clear()
         self._sweeps.clear()
 
+        # Take the sessions out of the registry, as ``close_session`` does. A reaped
+        # session left in it would keep its worker handle and its abort Event (five
+        # POSIX semaphores) alive for as long as the manager is, which can be long
+        # after the shutdown when something else still points at the manager.
         with self._registry_lock:
             sessions = list(self._sessions.values())
+            self._sessions.clear()
         for sess in sessions:
             await self._close_session(sess, reason="shutdown")
 

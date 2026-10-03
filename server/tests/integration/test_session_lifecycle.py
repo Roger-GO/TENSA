@@ -81,13 +81,15 @@ async def test_post_setup_add_disturbance_returns_structured_error(
     await manager.invoke(session_id, "load_case", {"path": str(raw)})
     await manager.invoke(session_id, "run_pflow", {})  # commits setup
 
-    with pytest.raises(WorkerError) as exc_info:
+    # No ``as exc_info``: a test frame that holds its own exception is a reference
+    # cycle, and it would keep this session's worker handles until the cycle
+    # collector runs. The message starts with the category.
+    with pytest.raises(WorkerError, match=r"^disturbance-commit:"):
         await manager.invoke(
             session_id,
             "add_disturbance",
             {"spec": {"kind": "fault", "bus_idx": 4, "tf": 1.0, "tc": 1.1}},
         )
-    assert exc_info.value.category == "disturbance-commit"
 
 
 @pytest.mark.integration
