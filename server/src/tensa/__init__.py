@@ -33,4 +33,27 @@ See ``AGENTS.md`` and ``docs/plans/2026-05-07-001-feat-tensa-phase-a-substrate-p
 for the full design.
 """
 
-__version__ = "0.1.0.dev0"
+from importlib import metadata as _metadata
+
+# Reported when tensa is not installed (e.g. run from a bare source tree with
+# ``PYTHONPATH``): a valid PEP 440 local version that sorts below any release.
+_FALLBACK_VERSION = "0+unknown"
+
+
+def _resolve_version() -> str:
+    """The installed distribution's version, or ``_FALLBACK_VERSION``.
+
+    ``server/pyproject.toml`` is the single source of the version; the
+    package metadata written at install time carries it here. An editable
+    install keeps the version it was installed with, so re-run
+    ``pip install -e server`` after a version bump.
+    """
+    try:
+        return _metadata.version("tensa") or _FALLBACK_VERSION
+    except _metadata.PackageNotFoundError:
+        return _FALLBACK_VERSION
+
+
+# Feeds the OpenAPI ``info.version`` and the ``tensa_version`` stamp on
+# bundle manifests and snapshot sidecars.
+__version__ = _resolve_version()

@@ -48,6 +48,7 @@ All of these must pass before a PR is merged (CI enforces them):
 - **Python**: ruff + `mypy --strict`. Every Pydantic schema field carries a `description` (the OpenAPI schema is a first-class product for API consumers and agents).
 - **TypeScript**: ESLint with `--max-warnings 0`, strict TS with `noUncheckedIndexedAccess`. Named exports only for components. Tailwind v4 tokens (`web/src/styles/tokens.css`) — never hardcode colors/spacing.
 - **API types are codegen'd**: after changing server schemas/routes, run `cd web && pnpm regen-api-types` (boots a throwaway server, fetches `/openapi.json`, regenerates `web/src/api/generated.ts`). Never hand-edit `generated.ts`.
+- **Version** is set in one place, `server/pyproject.toml`. `tensa.__version__`, the OpenAPI version, and the `tensa_version` stamped on bundles and snapshots read it from the installed package metadata, so re-run `pip install -e './server[dev]'` after a bump. `web/package.json` and `CITATION.cff` carry copies; `server/tests/unit/test_version.py` fails if any of them drift.
 - **Stage files explicitly** — no `git add .`.
 
 ## Making changes that touch the API surface

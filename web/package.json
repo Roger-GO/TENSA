@@ -1,6 +1,6 @@
 {
   "name": "tensa-web",
-  "version": "0.0.1",
+  "version": "0.4.0",
   "private": true,
   "description": "TENSA v0.1 UI — load case + auto-SLD + run PF + results overlay.",
   "type": "module",

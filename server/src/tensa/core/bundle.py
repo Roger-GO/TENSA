@@ -575,7 +575,7 @@ def _major_minor(version: str) -> tuple[int, int] | None:
     """Parse a SemVer-like string and return ``(major, minor)`` or ``None``.
 
     Tolerates the various shapes ANDES + tensa emit:
-    ``2.0.0``, ``2.0.0a1``, ``0.1.0.dev0``, ``unknown``. ``None`` means
+    ``2.0.0``, ``2.0.0a1``, ``0.4.0``, ``0+unknown``, ``unknown``. ``None`` means
     "couldn't parse"; the caller must treat that as "version mismatch
     indeterminate" rather than as "match".
     """

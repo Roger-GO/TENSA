@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+import tensa
 from tensa.core.snapshot import (
     SnapshotCollisionError,
     SnapshotEntry,
@@ -146,7 +147,7 @@ def test_snapshot_metadata_round_trips_through_json() -> None:
     re-reading a sidecar across a session restart."""
     meta = SnapshotMetadata(
         andes_version="2.0.0",
-        tensa_version="0.1.0.dev0",
+        tensa_version=tensa.__version__,
         case_filename="ieee14.raw",
         case_sha256="0" * 64,
         disturbance_log=[
@@ -241,7 +242,7 @@ def test_write_snapshot_files_writes_both(tmp_path: Path) -> None:
     json_path = target / "scenario-A.json"
     meta = SnapshotMetadata(
         andes_version="2.0.0",
-        tensa_version="0.1.0.dev0",
+        tensa_version=tensa.__version__,
         case_filename="ieee14.raw",
         case_sha256=None,
         disturbance_log=[],

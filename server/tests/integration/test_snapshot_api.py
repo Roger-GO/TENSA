@@ -29,6 +29,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+import tensa
 from tensa.api.app import make_app
 from tensa.core.session import SessionManager
 
@@ -138,6 +139,8 @@ async def test_snapshot_save_then_restore_via_dill_fast_path(
     assert payload["metadata_bytes"] > 0
     meta = payload["metadata"]
     assert meta["andes_version"]  # non-empty string
+    # Stamped by the worker subprocess from the package metadata.
+    assert meta["tensa_version"] == tensa.__version__
     assert meta["case_filename"] == "ieee14.raw"
     assert meta["has_pflow"] is True
 

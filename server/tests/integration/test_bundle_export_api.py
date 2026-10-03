@@ -20,6 +20,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+import tensa
 from tensa.api.app import make_app
 from tensa.core.session import SessionManager
 
@@ -94,11 +95,14 @@ async def test_export_bundle_minimal_returns_zip_with_case_and_manifest(
     assert "attachment" in resp.headers.get("content-disposition", "")
     with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
         names = zf.namelist()
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
     assert "case/ieee14.raw" in names
     assert "manifest.json" in names
     assert "disturbances.json" not in names
     assert "sim_params.json" not in names
     assert "results.csv" not in names
+    # Stamped by the worker subprocess from the package metadata.
+    assert manifest["tensa_version"] == tensa.__version__
 
 
 @pytest.mark.integration

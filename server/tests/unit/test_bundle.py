@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 
+import tensa
 from tensa.core.bundle import (
     BundleImportPlan,
     BundleInputs,
@@ -44,7 +45,7 @@ def _minimal_inputs(**overrides: object) -> BundleInputs:
         "results_csv": None,
         "run_id": None,
         "andes_version": "2.0.0",
-        "tensa_version": "0.1.0.dev0",
+        "tensa_version": tensa.__version__,
     }
     base.update(overrides)
     return BundleInputs(**base)  # type: ignore[arg-type]
@@ -121,7 +122,7 @@ def test_manifest_records_case_sha256_and_filename() -> None:
     assert manifest["case_filename"] == "ieee14.raw"
     assert manifest["case_sha256"] == hashlib.sha256(case_bytes).hexdigest()
     assert manifest["andes_version"] == "2.0.0"
-    assert manifest["tensa_version"] == "0.1.0.dev0"
+    assert manifest["tensa_version"] == tensa.__version__
     assert manifest["disturbance_count"] == 0
     assert manifest["case_canonical_export"] is False
     assert manifest["files"] == ["case/ieee14.raw", "manifest.json"]
