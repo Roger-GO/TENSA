@@ -2,8 +2,9 @@
 
 Several tests read ``server/pyproject.toml``, the workflows, ``scripts/`` or the
 web package files directly. They share the locations and the loaders here, and
-skip when the tests run away from a checkout (an sdist carries ``tests/`` but not
-``scripts/`` or ``.github/``).
+skip when a file they read is missing, as it is when ``server/`` is copied out of
+the checkout. (The sdist does not carry ``tests/`` at all, so the suite runs from
+a checkout only.)
 """
 
 from __future__ import annotations
