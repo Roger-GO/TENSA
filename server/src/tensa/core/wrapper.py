@@ -139,6 +139,7 @@ if TYPE_CHECKING:
     from andes.system import System
 
     from tensa.core.clone_manager import CloneManager
+    from tensa.core.snapshot import SnapshotMetadata
 
 
 @dataclass
@@ -246,6 +247,17 @@ class TdsBatchResult:
     converged: bool
     final_t: float
     callpert_count: int  # how many times the per-step hook fired
+
+
+@dataclass(frozen=True)
+class _SnapshotRecord:
+    """A snapshot's sidecar read and validated: the disturbance specs are parsed
+    and the log is within its cap, so nothing here can fail later."""
+
+    name: str
+    dill_path: Path
+    metadata: SnapshotMetadata
+    specs: list[DisturbanceSpec]
 
 
 class Wrapper:
@@ -2970,42 +2982,21 @@ class Wrapper:
             "metadata_bytes": json_bytes,
         }
 
-    def restore_snapshot(
-        self, name: str, *, use_dill_optimization: bool = False
-    ) -> dict[str, Any]:
-        """Restore a previously-saved snapshot — Unit 7.
+    def _read_snapshot_record(self, name: str) -> _SnapshotRecord:
+        """Read a snapshot's sidecar JSON without touching the System.
 
-        Replay-first restore:
-
-        1. Read the sidecar JSON. With ``use_dill_optimization`` and an
-           ANDES major.minor that differs from the current install (or no
-           dill blob on disk), the dill path is skipped and
-           ``fallback_reason`` is recorded for the response.
-        2. Default path (replay): ``reload_case`` (drops ``is_setup`` and
-           clears the in-memory ``_disturbance_log``) → re-add the JSON's
-           recorded disturbances → ``_ensure_setup`` + ``run_pflow`` (when
-           the snapshot was taken after a converged PF) to re-converge to
-           the same operating point. Works on any ANDES version.
-        3. Opt-in path (``use_dill_optimization=True``, version OK, dill
-           present): ``andes.utils.snapshot.load_ss`` substitutes a System
-           with the captured PF / TDS state, so nothing is reloaded or
-           replayed and ``_ensure_setup`` + ``run_pflow`` are skipped. The
-           JSON's disturbance log becomes the wrapper's ``_disturbance_log``
-           (the blob already carries those disturbances). Any failure along
-           the way falls back to the default path.
-
-        Raises :class:`SnapshotNotFoundError` (404) when the named
-        snapshot does not exist; :class:`SnapshotMetadataError` (422)
-        on a corrupted sidecar.
+        Validates the name, locates the files under the loaded case's snapshot
+        directory, bounds the disturbance log and rebuilds its specs through the
+        discriminated union so ``add_disturbance`` accepts them. Raises
+        :class:`SnapshotNotFoundError` / :class:`SnapshotMetadataError` as
+        :meth:`restore_snapshot` documents.
         """
         from tensa.core.snapshot import (
             DISTURBANCE_LOG_CAP,
-            RestoreSnapshotResult,
             SnapshotMetadataError,
             read_snapshot_metadata,
             snapshot_paths,
             validate_existing_snapshot_name,
-            versions_compatible,
         )
 
         if self._workspace is None:
@@ -3034,6 +3025,63 @@ class Wrapper:
                 f"{DISTURBANCE_LOG_CAP}"
             )
 
+        def _spec_from_dict(d: dict[str, Any]) -> DisturbanceSpec:
+            kind = d.get("kind")
+            if kind == "fault":
+                return FaultSpec(**d)
+            if kind == "toggle":
+                return ToggleSpec(**d)
+            if kind == "alter":
+                return AlterSpec(**d)
+            raise SnapshotMetadataError(
+                f"snapshot disturbance has unknown kind: {kind!r}"
+            )
+
+        return _SnapshotRecord(
+            name=validated,
+            dill_path=dill_path,
+            metadata=metadata,
+            specs=[_spec_from_dict(raw) for raw in metadata.disturbance_log],
+        )
+
+    def restore_snapshot(
+        self, name: str, *, use_dill_optimization: bool = False
+    ) -> dict[str, Any]:
+        """Restore a previously-saved snapshot — Unit 7.
+
+        Replay-first restore:
+
+        1. Read the sidecar JSON. With ``use_dill_optimization`` and an
+           ANDES major.minor that differs from the current install (or no
+           dill blob on disk), the dill path is skipped and
+           ``fallback_reason`` is recorded for the response.
+        2. Default path (replay): ``reload_case`` (drops ``is_setup`` and
+           clears the in-memory ``_disturbance_log``) → re-add the JSON's
+           recorded disturbances → ``_ensure_setup`` + ``run_pflow`` (when
+           the snapshot was taken after a converged PF) to re-converge to
+           the same operating point. Works on any ANDES version.
+        3. Opt-in path (``use_dill_optimization=True``, version OK, dill
+           present): ``andes.utils.snapshot.load_ss`` substitutes a System
+           with the captured PF / TDS state, so nothing is reloaded or
+           replayed and ``_ensure_setup`` + ``run_pflow`` are skipped. The
+           JSON's disturbance log becomes the wrapper's ``_disturbance_log``
+           (the blob already carries those disturbances). Any failure along
+           the way falls back to the default path.
+
+        Raises :class:`SnapshotNotFoundError` (404) when the named
+        snapshot does not exist; :class:`SnapshotMetadataError` (422)
+        on a corrupted sidecar.
+        """
+        from tensa.core.snapshot import RestoreSnapshotResult, versions_compatible
+
+        # Read, bounded and parsed up front so a malformed log is refused
+        # before the live System is touched.
+        record = self._read_snapshot_record(name)
+        validated = record.name
+        dill_path = record.dill_path
+        metadata = record.metadata
+        specs = record.specs
+
         import andes
 
         current_version = str(getattr(andes, "__version__", "unknown"))
@@ -3056,30 +3104,6 @@ class Wrapper:
                 f"{current_version} — dill format is version-locked, "
                 "falling back to replay+PF"
             )
-
-        # Disturbance specs come back as plain dicts; rebuild via the
-        # discriminated union so wrapper.add_disturbance accepts them.
-        # Parsed up front so a malformed log is refused before the live
-        # System is touched.
-        from tensa.core.disturbance import (
-            AlterSpec,
-            FaultSpec,
-            ToggleSpec,
-        )
-
-        def _spec_from_dict(d: dict[str, Any]) -> DisturbanceSpec:
-            kind = d.get("kind")
-            if kind == "fault":
-                return FaultSpec(**d)
-            if kind == "toggle":
-                return ToggleSpec(**d)
-            if kind == "alter":
-                return AlterSpec(**d)
-            raise SnapshotMetadataError(
-                f"snapshot disturbance has unknown kind: {kind!r}"
-            )
-
-        specs = [_spec_from_dict(raw) for raw in metadata.disturbance_log]
 
         if use_dill_optimization and version_ok and dill_available:
             # Opt-in path: load_ss builds the whole System, so the live one is
@@ -3227,19 +3251,22 @@ class Wrapper:
     ) -> dict[str, Any]:
         """Run a sensitivity sweep — Unit 18.
 
-        For each value in ``values``:
+        The named snapshot's recorded ``disturbance_log`` is read once,
+        before the loop; it cannot change while the sweep holds the
+        session. For each value in ``values``:
 
-        1. Restore the named snapshot via the always-works replay+PF
-           path (``use_dill_optimization=False``). This sidesteps the
-           ANDES post-iteration cleanup gap by always returning to a
-           pre-setup System with the snapshot's recorded
-           ``disturbance_log``.
-        2. Override the target disturbance spec's field with the
-           current iteration's value (the disturbance log was just
-           re-built inside the wrapper by ``restore_snapshot``; we
-           re-replay with the override).
-        3. Run TDS with the requested ``tf`` / ``h``.
+        1. Reload the case. This sidesteps the ANDES post-iteration
+           cleanup gap by always returning to a pre-setup System.
+        2. Re-add the snapshot's disturbances with the target spec's
+           field overridden by the current iteration's value.
+        3. Run TDS with the requested ``tf`` / ``h``. ``run_tds`` commits
+           setup and solves the power flow itself, so the iteration needs
+           no restore of the snapshot's operating point.
         4. Record the iteration result.
+
+        A snapshot that cannot be used (missing, corrupt, target index
+        past its log, wrong disturbance kind) fails every iteration with
+        the same ``error``; nothing is reloaded or run for them.
 
         Diverging or otherwise-failing iterations are recorded with
         ``error`` set and the sweep continues. Aborts (via
@@ -3270,10 +3297,32 @@ class Wrapper:
 
         expected_kind, spec_field = parse_sweep_target(parameter_kind)
         # A bad ``h`` would otherwise be recorded as a per-iteration error
-        # N times over; refuse it before the first snapshot restore.
+        # N times over; refuse it before the snapshot is read.
         h = validate_step_size(h)
 
         log = logging.getLogger("tensa.wrapper.sweep")
+
+        # The snapshot is read once, not per iteration. A failure here is kept
+        # and recorded against every iteration (raised inside the per-iteration
+        # ``try`` below), so the sweep still reports one result per value.
+        snap_log: list[DisturbanceSpec] = []
+        snapshot_error: Exception | None = None
+        try:
+            snap_log = self._read_snapshot_record(snapshot_name).specs
+            if parameter_target >= len(snap_log):
+                raise SweepValidationError(
+                    f"sweep target index {parameter_target} out of range; "
+                    f"snapshot recorded {len(snap_log)} disturbance(s)"
+                )
+            if snap_log[parameter_target].kind != expected_kind:
+                raise SweepValidationError(
+                    f"sweep kind {parameter_kind!r} expects "
+                    f"{expected_kind!r} disturbance at target "
+                    f"{parameter_target}, found "
+                    f"{snap_log[parameter_target].kind!r}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            snapshot_error = exc
 
         iterations_out: list[dict[str, Any]] = []
         truncated = False
@@ -3293,54 +3342,30 @@ class Wrapper:
             callpert_count = 0
 
             try:
-                # 1. Restore snapshot via the always-works slow path so
-                #    every iteration starts from an identical pre-setup
-                #    System with the recorded disturbance log replayed.
-                #    After this: ``self._disturbance_log`` is populated
-                #    from the snapshot's sidecar JSON; the System is
-                #    post-setup (when has_pflow=True at save time).
-                self.restore_snapshot(
-                    snapshot_name, use_dill_optimization=False
-                )
+                if snapshot_error is not None:
+                    raise snapshot_error
 
-                # 2. Capture the snapshot's disturbance log BEFORE we
-                #    reload_case (which clears the log). The capture is
-                #    the source of truth for what the sweep iterates
-                #    over.
-                snap_log = list(self._disturbance_log)  # noqa: SLF001
-                if parameter_target >= len(snap_log):
-                    raise SweepValidationError(
-                        f"sweep target index {parameter_target} out of range; "
-                        f"snapshot recorded {len(snap_log)} disturbance(s)"
-                    )
-                target_spec = snap_log[parameter_target]
-                # 3. reload_case() returns to a clean pre-setup System
-                #    + clears the wrapper's log so we can re-add the
-                #    mutated spec via ``add_disturbance`` (ANDES rejects
-                #    post-setup add() — the only escape is reload).
+                # 1. reload_case() returns to a clean pre-setup System and
+                #    clears the wrapper's log so we can re-add the mutated
+                #    spec via ``add_disturbance`` (ANDES rejects post-setup
+                #    add(); the only escape is reload).
                 self.reload_case()
-                snap_log_after = snap_log
-                # Validate the kind matches what the snapshot has.
-                if target_spec.kind != expected_kind:
-                    raise SweepValidationError(
-                        f"sweep kind {parameter_kind!r} expects "
-                        f"{expected_kind!r} disturbance at target "
-                        f"{parameter_target}, found {target_spec.kind!r}"
-                    )
                 # Build a new spec with the override applied via
                 # Pydantic's ``model_copy`` — preserves the discriminator
                 # and any unrelated fields, only the target field is
                 # replaced. ``model_copy(update={...})`` is Pydantic v2's
                 # immutable update API.
-                mutated = target_spec.model_copy(update={spec_field: float(value)})
-                # Replace the entry in our reload's log + re-add to the
-                # System. We rebuild the wrapper's log from scratch so
-                # the in-memory state matches what we're about to
-                # commit.
+                mutated = snap_log[parameter_target].model_copy(
+                    update={spec_field: float(value)}
+                )
+                # 2. Re-add the snapshot's disturbances with the target
+                #    replaced. ``reload_case`` clears the log for a case
+                #    file but not for a blank session, so reset it here to
+                #    keep the in-memory state matching what we're about to
+                #    commit.
                 self._disturbance_log = []
-                for j, spec in enumerate(snap_log_after):
-                    out_spec = mutated if j == parameter_target else spec
-                    self.add_disturbance(out_spec)
+                for j, spec in enumerate(snap_log):
+                    self.add_disturbance(mutated if j == parameter_target else spec)
 
                 # 3. Run TDS. The wrapper's ``run_tds`` invokes
                 #    ``_ensure_setup`` + ``ss.PFlow.run`` itself. The

@@ -1,9 +1,10 @@
 """Sensitivity sweep orchestrator (Unit 18 of the v2.0 plan).
 
-A sweep iterates a single parameter through a numeric range, restoring a
-named snapshot at each step (Unit 7), mutating the parameter override on
-the snapshot's recorded disturbance log (Unit 6.5 ``replay_disturbances``
-semantics), and running TDS (Unit 6) to record one result per step.
+A sweep iterates a single parameter through a numeric range. It reads a
+named snapshot's recorded disturbance log once (Unit 7), then at each step
+reloads the case, re-adds that log with the parameter override applied
+(Unit 6.5 ``replay_disturbances`` semantics), and runs TDS (Unit 6) to record
+one result per step.
 
 Concurrency model (KTD-9 + Unit 18 spec):
 
@@ -33,10 +34,11 @@ in v2.0. Topology-parameter sweeps would require pre-setup wrapper
 mutation between iterations and are out of scope.
 
 Snapshot prerequisite: the caller MUST have saved a snapshot before
-starting the sweep (the sweep's first action is ``restore_snapshot`` on
-the named snapshot). This keeps each iteration deterministic — the same
-operating point every time — and avoids subtle drift across iterations
-when ANDES post-iteration cleanup is incomplete.
+starting the sweep (the sweep's first action is to read the named
+snapshot's disturbance log). Every iteration then starts from a freshly
+loaded System, so it solves the same operating point every time and no
+state drifts across iterations when ANDES post-iteration cleanup is
+incomplete.
 """
 
 from __future__ import annotations
