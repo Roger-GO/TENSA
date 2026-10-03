@@ -23,6 +23,7 @@ from tensa.core.sweep_pool import (
     SweepWorkerDiedError,
     SweepWorkerError,
     SweepWorkersLostError,
+    SweepWorkersUnavailableError,
     run_iterations,
 )
 
@@ -278,6 +279,46 @@ async def test_a_worker_that_cannot_take_the_case_is_left_out() -> None:
     assert got.indices == [0, 1, 2, 3]
     assert broken.ran == []
     assert steady.ran == [0, 1, 2, 3]
+
+
+async def test_when_no_worker_can_take_the_case_nothing_runs_and_the_caller_is_told() -> None:
+    """Workers that die before they adopt the case (a crash at import, an unpickling
+    failure) ran nothing, so the sweep is not failed as if workers had been lost
+    mid-run: the caller can still run it somewhere else."""
+    workers = [
+        FakeWorker(adopt_error=SweepWorkerDiedError("gone")),
+        FakeWorker(adopt_error=SweepWorkerError("internal-error", "cannot unpickle")),
+    ]
+    got = Collector()
+
+    with pytest.raises(SweepWorkersUnavailableError, match="none of the 2 sweep workers"):
+        await _run(workers, 4, got)
+
+    assert not isinstance(SweepWorkersUnavailableError("x"), SweepWorkersLostError)
+    assert got.indices == []
+    assert all(w.ran == [] for w in workers)
+
+
+async def test_a_stop_while_no_worker_has_the_case_is_not_an_unavailable_pool() -> None:
+    """The sweep was told to stop, so there is nothing to fall back to."""
+    workers = [FakeWorker(adopt_error=SweepWorkerDiedError("gone"))]
+
+    done = await _run(workers, 4, Collector(), should_stop=lambda: True)
+
+    assert done == 0
+
+
+async def test_one_worker_that_took_the_case_is_enough_to_run_the_sweep() -> None:
+    broken = FakeWorker(adopt_error=SweepWorkerDiedError("gone"))
+    steady = FakeWorker(dies_on_run=2)
+    got = Collector()
+
+    # The steady worker dies with the second iteration it is given: that is a lost
+    # worker (the sweep fails), not an unavailable one, because it did take the case.
+    with pytest.raises(SweepWorkersLostError):
+        await _run([broken, steady], 6, got)
+
+    assert got.indices == [0, 1]
 
 
 async def test_a_raising_on_row_propagates_and_stops_handing_out_iterations() -> None:

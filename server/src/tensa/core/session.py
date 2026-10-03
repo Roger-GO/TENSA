@@ -44,7 +44,11 @@ from tensa.core.errors import AndesAppError, SessionBusyError, WorkerDiedError
 from tensa.core.jobs import JobKind, JobRecord, JobStatus, _JobRegistry
 from tensa.core.session_dirs import SESSIONS_DIRNAME, remove_tree, sweep_stale_session_dirs
 from tensa.core.sweep import default_sweep_workers, sweep_worker_count
-from tensa.core.sweep_pool import SweepWorkerPool, SweepWorkersLostError
+from tensa.core.sweep_pool import (
+    SweepWorkerPool,
+    SweepWorkersLostError,
+    SweepWorkersUnavailableError,
+)
 from tensa.core.worker import worker_main
 from tensa.core.worker_spawn import attach_kill_on_close_job, worker_spawn_env
 
@@ -1387,14 +1391,14 @@ class SessionManager:
         """Run the sweep's iterations on ``workers`` freshly spawned sub-workers.
 
         Returns the sweep's result (``truncated`` and the counts), or ``None``
-        when the sub-workers could not be started, so that the caller runs the
-        sweep on the session's worker instead. The session's own worker is not
-        involved, so its System is left as it was. The session's abort event is
-        watched here and forwarded to the sub-workers, so an abort (or closing the
-        session) stops them all; the event is cleared once they have exited, which
-        is what the worker does at the end of a sweep it runs itself. The
-        sub-workers are stopped whatever happens, including when this task is
-        cancelled. The caller holds the session lock.
+        when the sub-workers could not be started or none of them could take the
+        case, so that the caller runs the sweep on the session's worker instead.
+        The session's own worker is not involved, so its System is left as it was.
+        The session's abort event is watched here and forwarded to the sub-workers,
+        so an abort (or closing the session) stops them all; the event is cleared
+        once they have exited, which is what the worker does at the end of a sweep
+        it runs itself. The sub-workers are stopped whatever happens, including
+        when this task is cancelled. The caller holds the session lock.
         """
         tasks = [
             {
@@ -1446,9 +1450,22 @@ class SessionManager:
                     {"iteration": index, "value": row["parameter_value"], "result": row}
                 )
 
-            reported = await pool.run(
-                tasks, source=plan["source"], on_row=_on_row, should_stop=_should_stop
-            )
+            try:
+                reported = await pool.run(
+                    tasks, source=plan["source"], on_row=_on_row, should_stop=_should_stop
+                )
+            except SweepWorkersUnavailableError:
+                log.warning(
+                    "no worker could take the case for sweep %s; running it on the "
+                    "session's worker instead",
+                    sweep_buf.sweep_id,
+                    exc_info=True,
+                )
+                # The abort event is not cleared (as when the workers cannot start):
+                # an abort that lands while these workers are being stopped must
+                # still reach the sweep that now runs on the session's worker.
+                started = False
+                return None
             truncated = reported < len(tasks) or bool(sess.abort_event.is_set())
             graceful = True
         finally:

@@ -39,7 +39,9 @@ pipe holds no such state: writing to a dead worker's pipe just fails.
 
 A sub-worker that dies loses only the iteration it was running, which is recorded
 as a failed iteration like one that diverged. The sweep carries on with the
-others, and fails only when none is left.
+others, and fails only when none is left. If no worker could take the case at all
+(they died while starting, say), nothing ran, and the caller is told so with
+:class:`SweepWorkersUnavailableError` so that it can run the sweep elsewhere.
 """
 
 from __future__ import annotations
@@ -84,6 +86,10 @@ class SweepWorkerError(AndesAppError):
 
 class SweepWorkersLostError(AndesAppError):
     """Every sub-worker is gone and the sweep still has iterations to run."""
+
+
+class SweepWorkersUnavailableError(AndesAppError):
+    """No sub-worker could take the sweep's case, so no iteration was handed out."""
 
 
 class SweepWorker(Protocol):
@@ -176,8 +182,10 @@ async def run_iterations(
     handed out. The blocking worker calls run on ``executor``.
 
     Returns how many rows were reported. That is ``len(tasks)`` unless
-    ``should_stop`` ended the run early. Raises :class:`SweepWorkersLostError` when
-    every worker died with iterations left and nothing asked to stop.
+    ``should_stop`` ended the run early. Raises :class:`SweepWorkersUnavailableError`
+    when no worker could adopt ``source``, so that nothing was run, and
+    :class:`SweepWorkersLostError` when workers took it but every one died with
+    iterations left and nothing asked to stop.
     """
     loop = asyncio.get_running_loop()
     pending: deque[int] = deque(range(len(tasks)))
@@ -185,6 +193,7 @@ async def run_iterations(
     finished: dict[int, dict[str, Any] | None] = {}
     cursor = 0
     gap = False  # a skipped iteration ends the run of rows that can be reported
+    adopted = 0  # workers that took the case
     release_lock = asyncio.Lock()
 
     async def release() -> None:
@@ -199,6 +208,7 @@ async def run_iterations(
                 cursor += 1
 
     async def drive(worker: SweepWorker) -> None:
+        nonlocal adopted
         try:
             await loop.run_in_executor(
                 executor, worker.call, "adopt_sweep_source", {"source": source}
@@ -206,6 +216,7 @@ async def run_iterations(
         except (SweepWorkerDiedError, SweepWorkerError) as exc:
             log.warning("a sweep worker could not take the case and is not used: %s", exc)
             return
+        adopted += 1
         while pending and not should_stop():
             idx = pending.popleft()
             try:
@@ -240,6 +251,10 @@ async def run_iterations(
         raise
 
     if pending and not should_stop():
+        if not adopted:
+            raise SweepWorkersUnavailableError(
+                f"none of the {len(workers)} sweep workers could take the case"
+            )
         raise SweepWorkersLostError(
             f"every sweep worker exited with {len(pending)} of {len(tasks)} "
             "iterations still to run"

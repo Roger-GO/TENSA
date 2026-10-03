@@ -278,6 +278,38 @@ async def test_a_pool_that_cannot_start_falls_back_to_the_session_worker(
     assert _sub_workers() == []
 
 
+async def test_workers_that_die_before_taking_the_case_fall_back_to_the_session_worker(
+    manager: SessionManager, workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The processes start but are gone before the sweep reaches them (a crash at
+    import, a kill by the OS), so no iteration ever runs on them. That is not a
+    sweep that lost its workers: the session's own worker runs it."""
+    sid = await _seed(manager, workspace)
+    real_pool = session_module.SweepWorkerPool
+
+    class _DiesOnStart(real_pool):  # type: ignore[valid-type, misc]
+        async def start(self) -> None:
+            await super().start()
+            for worker in self._workers:
+                worker.process.kill()
+                worker.process.join()
+
+    monkeypatch.setattr(session_module, "SweepWorkerPool", _DiesOnStart)
+
+    sweep_id = await manager.start_sweep(sid, _sweep_args(QUICK_VALUES[:4], QUICK_SIM))
+    buf = await _finished(manager, sweep_id)
+
+    assert buf.state == "completed", buf.error
+    assert buf.truncated is False
+    assert [r["parameter_value"] for r in buf.iterations] == QUICK_VALUES[:4]
+    assert all(r["error"] is None for r in buf.iterations)
+    assert _sub_workers() == []
+    # The session's own worker ran it: it ends on the last value's reload.
+    log = await manager.invoke(sid, "list_disturbances", {})
+    assert [spec["tc"] for spec in log] == [QUICK_VALUES[3]]
+    assert not manager._sessions[sid].abort_event.is_set()
+
+
 async def test_a_blank_session_sweeps_in_parallel_from_its_recorded_additions(
     manager: SessionManager, workspace: Path
 ) -> None:
