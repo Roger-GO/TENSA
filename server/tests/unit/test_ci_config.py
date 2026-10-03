@@ -170,3 +170,57 @@ def test_publish_uploads_what_the_build_job_checked() -> None:
     publish = [s for s in jobs["publish"]["steps"] if "pypi-publish" in s.get("uses", "")]
     assert len(publish) == 1
     assert publish[0]["with"]["packages-dir"] == downloaded[0]["with"]["path"]
+
+
+_DEPENDABOT = _REPO_ROOT / ".github" / "dependabot.yml"
+
+
+def _load_required(path: Path) -> dict[str, Any]:
+    """Like ``_load``, but a missing file fails when the other workflows are here.
+
+    Away from a checkout there is nothing to read and the test skips. In a
+    checkout, deleting the file must not turn its tests into silent skips.
+    """
+    if _WORKFLOW.is_file():
+        assert path.is_file(), f"{path.relative_to(_REPO_ROOT)} is missing"
+    return _load(path)
+
+
+def test_dependabot_watches_every_manifest_weekly() -> None:
+    """Python, web, and workflow dependencies each have an update entry that points at real files."""
+    updates = _load_required(_DEPENDABOT)["updates"]
+    manifests = {
+        "pip": ("/server", "pyproject.toml"),
+        "npm": ("/web", "package.json"),
+        "github-actions": ("/", ".github/workflows/server.yml"),
+    }
+    assert {u["package-ecosystem"] for u in updates} == set(manifests)
+    for update in updates:
+        directory, manifest = manifests[update["package-ecosystem"]]
+        assert update["directory"] == directory
+        assert (_REPO_ROOT / directory.lstrip("/") / manifest).is_file(), update
+        assert update["schedule"]["interval"] == "weekly"
+
+
+def test_dependabot_leaves_andes_minor_and_major_upgrades_to_a_person() -> None:
+    """AGENTS.md: ANDES upgrades are deliberate, never an automatic minor bump."""
+    updates = _load_required(_DEPENDABOT)["updates"]
+    (pip,) = [u for u in updates if u["package-ecosystem"] == "pip"]
+    (andes,) = [i for i in pip["ignore"] if i["dependency-name"] == "andes"]
+    assert set(andes["update-types"]) == {
+        "version-update:semver-major",
+        "version-update:semver-minor",
+    }
+
+
+def test_audit_workflow_checks_both_halves_on_a_schedule() -> None:
+    """Advisories appear without a commit, so the audit also runs weekly and on demand."""
+    workflow = _load_required(_WORKFLOWS / "audit.yml")
+    triggers = _triggers(workflow)
+    assert "schedule" in triggers
+    assert "workflow_dispatch" in triggers
+    jobs = workflow["jobs"]
+    assert "pip-audit" in _run_text(jobs["python"])
+    assert "pnpm audit --prod" in _run_text(jobs["web"])
+    # The audited packages are what a user installs, so the mcp extra is in.
+    assert '"./server[mcp]"' in _run_text(jobs["python"])
