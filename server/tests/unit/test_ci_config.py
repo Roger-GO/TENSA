@@ -178,6 +178,32 @@ def test_the_web_workflow_runs_the_e2e_suite_against_a_started_substrate() -> No
         assert "server/**" in _triggers(workflow)[event]["paths"], event
 
 
+@pytest.mark.parametrize(
+    ("workflow_file", "job", "first_server_step"),
+    [
+        ("server.yml", "test", "ci-matrix.sh"),
+        ("server.yml", "acceptance", "ci-matrix.sh acceptance"),
+        ("web.yml", "e2e", "tensa serve"),
+    ],
+)
+def test_a_job_that_restores_the_andes_cache_stamps_it_before_a_server_starts(
+    workflow_file: str, job: str, first_server_step: str
+) -> None:
+    """``tensa serve`` checks an unstamped cache in a background process, which would
+    compete with the tests for a runner's cores. A cache hit is never saved again,
+    so a restored entry only gets its stamp from a step that runs after the restore."""
+    steps = _load(_WORKFLOWS / workflow_file)["jobs"][job]["steps"]
+    (restore,) = [
+        i
+        for i, step in enumerate(steps)
+        if str(step.get("uses", "")).startswith("actions/cache@")
+        and step["with"]["path"] == "~/.andes/pycode"
+    ]
+    warm = _step_index(steps, "tensa warm-cache")
+    first_server = min(i for i, step in enumerate(steps) if first_server_step in step.get("run", ""))
+    assert restore < warm < first_server
+
+
 def _read_required(path: Path) -> str:
     """Text of a repository file; a missing one fails in a checkout."""
     if not _WORKFLOW.is_file():

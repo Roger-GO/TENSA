@@ -158,6 +158,14 @@ jobs:
           path: ~/.andes/pycode
           key: andes-pycode-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-andes${{ steps.andes.outputs.version }}
 
+      # Generates the code on a cache miss, and on a hit checks it and leaves the
+      # stamp `tensa serve` reads (a hit is never saved again, so an entry from
+      # before the stamp only gets one here). Without this, every `tensa serve` a
+      # test starts would run the same check in a background process, competing
+      # with the test for a runner's two to four cores.
+      - name: Check ANDES generated code
+        run: tensa warm-cache --quick --incremental
+
       - name: Full suite with coverage
         if: runner.os == 'Linux' && matrix.coverage
         run: >
@@ -242,6 +250,10 @@ jobs:
         with:
           path: ~/.andes/pycode
           key: andes-pycode-${{ runner.os }}-${{ runner.arch }}-py3.12-andes${{ steps.andes.outputs.version }}
+
+      # As in the test job: stamps the cache so no server a test starts checks it.
+      - name: Check ANDES generated code
+        run: tensa warm-cache --quick --incremental
 
       - name: Acceptance tests
         run: bash ./scripts/ci-matrix.sh acceptance

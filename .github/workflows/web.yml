@@ -122,6 +122,11 @@ jobs:
           path: ~/.andes/pycode
           key: andes-pycode-${{ runner.os }}-${{ runner.arch }}-py3.12-andes${{ steps.andes.outputs.version }}
 
+      # As in the server workflow: stamps the cache so the server started below
+      # does not check it in the background while the first spec loads a case.
+      - name: Check ANDES generated code
+        run: tensa warm-cache --quick --incremental
+
       - name: Install Chromium
         working-directory: web
         run: pnpm exec playwright install --with-deps chromium
