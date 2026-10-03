@@ -30,7 +30,7 @@ from tensa.core.wrapper import _CONTROLLER_MODEL_NAMES, _PARAMS_BY_MODEL
 ANDES_DIR = os.path.dirname(andes.__file__)
 DYR_YAML = os.path.join(ANDES_DIR, "io", "psse-dyr.yaml")
 
-with open(DYR_YAML) as fh:
+with open(DYR_YAML, encoding="utf-8") as fh:
     DYR = yaml.safe_load(fh)
 
 
@@ -104,7 +104,7 @@ if __name__ == "__main__":
         os.path.dirname(__file__), "..", "docs", "spikes", "2026-05-29-clone-write-index.json"
     )
     out = os.path.normpath(out)
-    with open(out, "w") as fh:
+    with open(out, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(idx, fh, indent=2, sort_keys=False)
         fh.write("\n")
     # Console summary

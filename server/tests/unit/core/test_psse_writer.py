@@ -106,13 +106,23 @@ def test_write_raw_ignores_the_platform_default_encoding(tmp_path: Path) -> None
     assert _NON_ASCII_NAME in target.read_bytes().decode("utf-8")
 
 
-def test_write_raw_non_ascii_bus_name_round_trips_through_andes(tmp_path: Path) -> None:
+# One non-ASCII character is the hard case for chardet: before version 6 it took
+# a UTF-8 file with a single accented letter for Latin-1 or MacRoman. The two
+# multibyte characters in ``_NON_ASCII_NAME`` were enough to hide that.
+@pytest.mark.parametrize(
+    "name",
+    ["Peña", "Müller", "São Paulo", "Ω", "東京", _NON_ASCII_NAME],
+)
+def test_write_raw_non_ascii_bus_name_round_trips_through_andes(
+    tmp_path: Path, name: str
+) -> None:
     """ANDES sniffs the encoding with chardet; the UTF-8 file must read back
-    with the name intact."""
+    with the name intact. A failure with a single accented letter means the
+    installed chardet is older than the ``chardet>=6`` the package requires."""
     import andes
 
     target = tmp_path / "out.raw"
-    write_raw(_load_ieee14(_NON_ASCII_NAME), target)
+    write_raw(_load_ieee14(name), target)
 
     ss = andes.load(str(target), setup=True, no_output=True, default_config=True)
-    assert ss.Bus.name.v[0].strip() == _NON_ASCII_NAME
+    assert ss.Bus.name.v[0].strip() == name

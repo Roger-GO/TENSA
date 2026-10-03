@@ -26,10 +26,12 @@ file ends with a single ``Q`` line per PSS/E convention.
 
 The file is written as UTF-8 with LF line endings on every platform, never
 in the platform default. ANDES reads ``.raw`` files by sniffing the encoding
-with chardet (there is no fixed one) and that sniffer identifies UTF-8
-reliably, while a cp1252 file can be misread as a Central European code
-page. The only non-ASCII text is a bus name, so a typical file is plain
-ASCII, which is the same bytes in every encoding.
+with chardet (there is no fixed one). chardet 6 and later identifies UTF-8
+reliably, even when one accented letter in a bus name is the only non-ASCII
+text; earlier versions took that for Latin-1 or MacRoman, which is why
+``pyproject.toml`` requires ``chardet>=6``. The only non-ASCII text is a bus
+name, so a typical file is plain ASCII, which is the same bytes in every
+encoding.
 """
 
 from __future__ import annotations

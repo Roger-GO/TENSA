@@ -40,6 +40,11 @@ dependencies = [
     # on the profile upload route.
     "openpyxl>=3.1",
     "python-multipart>=0.0.9",
+    # ANDES (which only requires a bare ``chardet``) sniffs the encoding of a
+    # .raw file with it. Before chardet 6 a UTF-8 file whose only non-ASCII text
+    # is a single accented letter was detected as Latin-1 or MacRoman, so a bus
+    # name written by ``write_raw`` came back as mojibake.
+    "chardet>=6",
 ]
 
 [project.optional-dependencies]
@@ -51,7 +56,9 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "httpx>=0.27",
-    "ruff>=0.6",
+    # Capped at the next minor: [tool.ruff.lint] runs in preview mode, whose
+    # behavior may change between ruff releases.
+    "ruff>=0.6,<0.17",
     "mypy>=1.11",
     "websockets>=13",
 ]
@@ -91,8 +98,12 @@ target-version = "py312"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-# PLW1514 is still a preview rule. ``explicit-preview-rules`` keeps every other
-# preview rule off, so only the rule named in ``select`` is turned on.
+# PLW1514 is still a preview rule and ruff cannot enable one preview rule on its
+# own: ``preview = true`` also switches the selected stable rules (E, W, F, I, B,
+# UP, SIM, C4) to their preview behavior. ``explicit-preview-rules`` only stops
+# the prefixes below from selecting other preview rules, so PLW1514 is the one
+# new rule. ruff is capped in the [dev] extra for the same reason; once PLW1514
+# is stable, drop both settings and the cap.
 preview = true
 explicit-preview-rules = true
 select = [
