@@ -10,41 +10,45 @@
  * Unit 9 (v2.0) extends with multi-run overlay scenarios.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, screen } from '@testing-library/react';
+import { render, cleanup, screen, act } from '@testing-library/react';
 
-const { constructSpy, setDataSpy, setCursorSpy, valToPosSpy, FakeUPlot } = vi.hoisted(() => {
-  const constructSpy = vi.fn();
-  const setDataSpy = vi.fn();
-  const setCursorSpy = vi.fn();
-  const valToPosSpy = vi.fn();
-  class FakeUPlot {
-    root: HTMLElement;
-    constructor(opts: unknown, data: unknown, target: HTMLElement) {
-      constructSpy(opts, data, target);
-      this.root = document.createElement('div');
-      target.appendChild(this.root);
+const { constructSpy, destroySpy, setDataSpy, setCursorSpy, valToPosSpy, FakeUPlot } = vi.hoisted(
+  () => {
+    const constructSpy = vi.fn();
+    const destroySpy = vi.fn();
+    const setDataSpy = vi.fn();
+    const setCursorSpy = vi.fn();
+    const valToPosSpy = vi.fn();
+    class FakeUPlot {
+      root: HTMLElement;
+      constructor(opts: unknown, data: unknown, target: HTMLElement) {
+        constructSpy(opts, data, target);
+        this.root = document.createElement('div');
+        target.appendChild(this.root);
+      }
+      setData(data: unknown) {
+        setDataSpy(data);
+      }
+      setCursor(opts: unknown, fireHook?: boolean) {
+        setCursorSpy(opts, fireHook);
+      }
+      valToPos(val: number, scaleKey: string): number {
+        valToPosSpy(val, scaleKey);
+        // Stub a deterministic mapping: 1 px per simulation second.
+        // (The wrapper only consumes the value as a left coordinate; the
+        // exact mapping doesn't matter for the assertion that setCursor
+        // was called with the right idx-derived t.)
+        return val * 100;
+      }
+      setSize() {}
+      destroy() {
+        destroySpy();
+        this.root.remove();
+      }
     }
-    setData(data: unknown) {
-      setDataSpy(data);
-    }
-    setCursor(opts: unknown, fireHook?: boolean) {
-      setCursorSpy(opts, fireHook);
-    }
-    valToPos(val: number, scaleKey: string): number {
-      valToPosSpy(val, scaleKey);
-      // Stub a deterministic mapping: 1 px per simulation second.
-      // (The wrapper only consumes the value as a left coordinate; the
-      // exact mapping doesn't matter for the assertion that setCursor
-      // was called with the right idx-derived t.)
-      return val * 100;
-    }
-    setSize() {}
-    destroy() {
-      this.root.remove();
-    }
-  }
-  return { constructSpy, setDataSpy, setCursorSpy, valToPosSpy, FakeUPlot };
-});
+    return { constructSpy, destroySpy, setDataSpy, setCursorSpy, valToPosSpy, FakeUPlot };
+  },
+);
 
 vi.mock('uplot', () => ({
   default: FakeUPlot,
@@ -55,6 +59,7 @@ vi.mock('uplot/dist/uPlot.min.css', () => ({}));
 import { TimeSeriesPlot } from '@/components/plots/TimeSeriesPlot';
 import { useRunsStore } from '@/store/runs';
 import { usePlotStore } from '@/store/plot';
+import { useThemeStore } from '@/store/theme';
 
 function seedRun(runId: string, columnNames: string[], tf = 10) {
   useRunsStore.getState().startRun({ runId, tf, columnNames });
@@ -70,6 +75,7 @@ function appendRows(runId: string, t: number[], cols: Record<string, number[]>) 
 describe('TimeSeriesPlot', () => {
   beforeEach(() => {
     constructSpy.mockClear();
+    destroySpy.mockClear();
     setDataSpy.mockClear();
     setCursorSpy.mockClear();
     valToPosSpy.mockClear();
@@ -209,6 +215,7 @@ describe('TimeSeriesPlot', () => {
 describe('TimeSeriesPlot — multi-run overlay (Unit 9 v2.0)', () => {
   beforeEach(() => {
     constructSpy.mockClear();
+    destroySpy.mockClear();
     setDataSpy.mockClear();
     setCursorSpy.mockClear();
     valToPosSpy.mockClear();
@@ -347,5 +354,138 @@ describe('TimeSeriesPlot — multi-run overlay (Unit 9 v2.0)', () => {
     // Only r1 → series count = 1 (t) + 1 (Bus_1_v on r1) = 2.
     const opts = constructSpy.mock.calls[0]?.[0] as { series: unknown[] };
     expect(opts.series).toHaveLength(2);
+  });
+});
+
+describe('TimeSeriesPlot — streaming frames do not rebuild the charts', () => {
+  beforeEach(() => {
+    constructSpy.mockClear();
+    destroySpy.mockClear();
+    setDataSpy.mockClear();
+    setCursorSpy.mockClear();
+    valToPosSpy.mockClear();
+    useRunsStore.setState({
+      runs: {},
+      activeRunId: null,
+      overlayRunIds: new Set(),
+    });
+    usePlotStore.setState({
+      selectedByRun: {},
+      filterByRun: {},
+      expandedByRun: {},
+      scrubByRun: {},
+      playingByRun: {},
+    });
+    useThemeStore.setState({ themePreference: 'light', resolvedTheme: 'light' });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useThemeStore.setState({ themePreference: 'light', resolvedTheme: 'light' });
+  });
+
+  /** Append ``count`` single-row frames the way the stream does, one store update each. */
+  function streamFrames(runId: string, from: number, count: number, columns: string[]) {
+    for (let i = from; i < from + count; i += 1) {
+      const cols: Record<string, number[]> = {};
+      for (const name of columns) cols[name] = [1 + i / 1000];
+      act(() => appendRows(runId, [i * 0.033], cols));
+    }
+  }
+
+  /** The labels of the series a construct call was given, without the time series. */
+  function seriesLabels(callIdx: number): string[] {
+    const opts = constructSpy.mock.calls[callIdx]?.[0] as { series: { label: string }[] };
+    return opts.series.slice(1).map((s) => s.label);
+  }
+
+  it('builds each stacked chart once while frames stream in', () => {
+    // The real flow: the run starts, the plot mounts on an empty run, then
+    // frames arrive at up to 30 Hz.
+    seedRun('r1', ['Bus_1_v', 'Gen_1_omega']);
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v', 'Gen_1_omega']));
+    render(<TimeSeriesPlot />);
+    expect(constructSpy).toHaveBeenCalledTimes(2);
+
+    streamFrames('r1', 0, 30, ['Bus_1_v', 'Gen_1_omega']);
+
+    expect(constructSpy).toHaveBeenCalledTimes(2);
+    expect(destroySpy).not.toHaveBeenCalled();
+    // The data still reaches both charts: the last push to each carries all 30 rows.
+    const lastPushes = setDataSpy.mock.calls.slice(-2).map((c) => (c[0] as Float64Array[])[0]);
+    expect(lastPushes.map((t) => t?.length)).toEqual([30, 30]);
+  });
+
+  it('builds the chart once while frames stream into a pinned run in overlay mode', () => {
+    seedRun('r1', ['Bus_1_v']);
+    appendRows('r1', [0, 1, 2], { Bus_1_v: [1.0, 1.0, 1.0] });
+    seedRun('r2', ['Bus_1_v']);
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+    usePlotStore.getState().setSelection('r2', new Set(['Bus_1_v']));
+    render(<TimeSeriesPlot />);
+    expect(constructSpy).toHaveBeenCalledTimes(1);
+
+    streamFrames('r2', 0, 20, ['Bus_1_v']);
+
+    expect(constructSpy).toHaveBeenCalledTimes(1);
+    expect(destroySpy).not.toHaveBeenCalled();
+    // r2's rows land on the shared time axis, whose union grows with them.
+    const t = (setDataSpy.mock.calls.at(-1)?.[0] as Float64Array[])[0];
+    expect(t?.length).toBeGreaterThan(20);
+  });
+
+  it('rebuilds only the group whose series set changed', () => {
+    seedRun('r1', ['Bus_1_v', 'Bus_5_v', 'Gen_1_omega']);
+    appendRows('r1', [0, 0.1], {
+      Bus_1_v: [1, 1],
+      Bus_5_v: [0.99, 0.98],
+      Gen_1_omega: [1, 1.001],
+    });
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v', 'Gen_1_omega']));
+    render(<TimeSeriesPlot />);
+    expect(constructSpy).toHaveBeenCalledTimes(2);
+
+    act(() =>
+      usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v', 'Bus_5_v', 'Gen_1_omega'])),
+    );
+
+    // The bus_v chart gained a series and was rebuilt once; gen_state was left alone.
+    expect(constructSpy).toHaveBeenCalledTimes(3);
+    expect(destroySpy).toHaveBeenCalledTimes(1);
+    expect(seriesLabels(2)).toEqual(['Bus_1_v', 'Bus_5_v']);
+  });
+
+  it('rebuilds with the other palette when the theme changes', () => {
+    seedRun('r1', ['Bus_1_v']);
+    appendRows('r1', [0, 0.1], { Bus_1_v: [1, 1] });
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v']));
+    render(<TimeSeriesPlot />);
+    const stroke = (callIdx: number) =>
+      (constructSpy.mock.calls[callIdx]?.[0] as { series: { stroke?: string }[] }).series[1]
+        ?.stroke;
+    const lightStroke = stroke(0);
+
+    act(() => useThemeStore.setState({ themePreference: 'dark', resolvedTheme: 'dark' }));
+
+    expect(constructSpy).toHaveBeenCalledTimes(2);
+    expect(destroySpy).toHaveBeenCalledTimes(1);
+    expect(stroke(1)).not.toBe(lightStroke);
+  });
+
+  it('rebuilds with the new stroke when a pinned run gets a colour override', () => {
+    seedRun('r1', ['Bus_1_v']);
+    appendRows('r1', [0, 1], { Bus_1_v: [1, 1] });
+    seedRun('r2', ['Bus_1_v']);
+    appendRows('r2', [0, 1], { Bus_1_v: [0.9, 0.9] });
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+    usePlotStore.getState().setSelection('r2', new Set(['Bus_1_v']));
+    render(<TimeSeriesPlot />);
+    expect(constructSpy).toHaveBeenCalledTimes(1);
+
+    act(() => useRunsStore.getState().setRunColorOverride('r2', '#ff00ff'));
+
+    expect(constructSpy).toHaveBeenCalledTimes(2);
+    const opts = constructSpy.mock.calls[1]?.[0] as { series: { stroke?: string }[] };
+    expect(opts.series[2]?.stroke).toBe('#ff00ff');
   });
 });

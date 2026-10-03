@@ -30,8 +30,8 @@ const { setDataSpy, setSizeSpy, destroySpy, constructSpy, FakeUPlot } = vi.hoist
       this.root.setAttribute('data-uplot-root', 'true');
       target.appendChild(this.root);
     }
-    setData(data: unknown) {
-      setDataSpy(data);
+    setData(data: unknown, resetScales?: boolean) {
+      setDataSpy(data, resetScales);
     }
     setSize(size: { width: number; height: number }) {
       setSizeSpy(size);
@@ -108,6 +108,34 @@ describe('UPlot wrapper', () => {
     expect(lastCall?.[0]).toBe(data2);
     // No reconstruction.
     expect(constructSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('pushes new data with scale reset so the axes and the canvas follow it', () => {
+    // uPlot's setData(data, false) skips both the scale update and the
+    // redraw: a chart fed that way keeps showing what it was built with.
+    // Streaming data therefore has to go in with the scales reset, which
+    // is also what lets the x axis grow with the time column.
+    const options = {
+      width: 600,
+      height: 200,
+      series: [{ label: 't' }, { label: 'y' }],
+    };
+    const frame = (n: number): [Float64Array, Float64Array] => [
+      new Float64Array(Array.from({ length: n }, (_, i) => i)),
+      new Float64Array(Array.from({ length: n }, (_, i) => i / 10)),
+    ];
+    const { rerender } = render(<UPlot options={options} data={frame(2)} />);
+    setDataSpy.mockClear();
+    for (let n = 3; n <= 6; n += 1) {
+      rerender(<UPlot options={options} data={frame(n)} />);
+    }
+    expect(setDataSpy).toHaveBeenCalledTimes(4);
+    for (const call of setDataSpy.mock.calls) {
+      // ``undefined`` is uPlot's own default (reset); only ``false`` is wrong.
+      expect(call[1]).not.toBe(false);
+    }
+    expect(constructSpy).toHaveBeenCalledTimes(1);
+    expect(destroySpy).not.toHaveBeenCalled();
   });
 
   it('reconstructs when the options reference changes', () => {

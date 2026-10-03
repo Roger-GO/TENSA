@@ -49,7 +49,8 @@ import { cn } from '@/lib/cn';
  * we pass freshly-sliced typed arrays into ``<UPlot>`` whose data
  * effect calls ``setData`` — uPlot handles redraw efficiently from
  * there. We intentionally do NOT re-create the uPlot instance on data
- * change (only on series-set change).
+ * change (only when the options change: the series set, a series
+ * colour, the theme or the sync key; see ``useStableOptions``).
  */
 export interface TimeSeriesPlotProps {
   /**
@@ -312,6 +313,28 @@ function EmptyState({ message }: { message: string }) {
 }
 
 /**
+ * Keep returning the first of a run of structurally identical values.
+ *
+ * ``buildGroupChart`` and ``buildMultiRunGroupChart`` make a fresh
+ * ``options`` object on every call, and a frame append makes every call
+ * a new one. ``<UPlot>`` rebuilds its instance whenever the ``options``
+ * reference changes, so passing those objects straight through destroys
+ * and recreates the chart at the frame rate. The options only describe
+ * the chart (series labels and colours, scales, axes, the sync key), so
+ * comparing their JSON is enough to tell "same chart, new data" from "the
+ * series set, theme or sync key changed". Options must stay plain data
+ * (no formatter functions) for this to be a faithful comparison.
+ */
+function useStableOptions(options: uPlot.Options): uPlot.Options {
+  const stable = useRef<{ key: string; options: uPlot.Options } | null>(null);
+  const key = JSON.stringify(options);
+  if (stable.current === null || stable.current.key !== key) {
+    stable.current = { key, options };
+  }
+  return stable.current.options;
+}
+
+/**
  * One chart in the stacked uPlot column. Wraps ``<UPlot>`` and drives
  * the underlying uPlot instance's cursor imperatively when ``scrubT``
  * is set: the cursor's index is the closest frame index for the run
@@ -333,6 +356,7 @@ function GroupChart({
   scrubT: number | null;
 }) {
   const uplotRef = useRef<uPlot | null>(null);
+  const stableOptions = useStableOptions(options);
 
   useEffect(() => {
     const inst = uplotRef.current;
@@ -381,7 +405,7 @@ function GroupChart({
         {groupLabel(group)}
       </div>
       <div className="h-[calc(100%-1.75rem)]">
-        <UPlot options={options} data={data} uplotRef={uplotRef} />
+        <UPlot options={stableOptions} data={data} uplotRef={uplotRef} />
       </div>
     </div>
   );
@@ -509,9 +533,11 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
 
   const caseName = primaryPath ? deriveCaseName(primaryPath) : 'case';
 
-  // Build per-group chart props. ``useMemo`` keys on the runs + selection
-  // so the construction effect inside <UPlot /> only re-fires when
-  // the series-set actually changes; data updates flow through the
+  // Build per-group chart props. The ``options`` made here are a new
+  // object on every pass; ``GroupChart`` hands <UPlot /> the same one
+  // while they stay structurally equal, so the construction effect
+  // inside <UPlot /> only re-fires when the series set, a series colour,
+  // the theme or the sync key changes. Data updates flow through the
   // data prop and trigger uPlot.setData inside the wrapper.
   const charts = useMemo(() => {
     if (overlayRuns.length === 0) return [];
@@ -530,7 +556,8 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
     // ``overlayRuns`` reference changes every frame append (Zustand
     // returns a new object), so this memo recomputes each frame —
     // that's the intended hot path; the memo's role here is just
-    // structuring.
+    // structuring. Building the options again is cheap; what must not
+    // happen is ``<UPlot />`` seeing a new options object each time.
   }, [overlayRuns, isMultiRun, primaryRun, groupedSelections, syncKey, colorMode, resolvedTheme]);
 
   if (!effectiveRunId || overlayRuns.length === 0) {

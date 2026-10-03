@@ -8,14 +8,20 @@ import { cn } from '@/lib/cn';
  *
  * Lifecycle:
  *  - On mount: construct one ``uPlot`` instance into the wrapper div.
- *  - On ``data`` change (same shape): call ``setData(data, false)``
- *    to push new column values without resetting scales — this is the
- *    fast streaming path (no DOM re-mount; uPlot redraws to the
- *    existing canvas in <2 ms for typical sizes).
- *  - On ``options`` change OR series-count change: destroy + recreate.
- *    uPlot has ``addSeries`` / ``delSeries`` but recreating is simpler
- *    and the cost is acceptable when toggling a series in the picker
- *    (a deliberate, low-frequency action).
+ *  - On ``data`` change: call ``setData(data)`` to push the new column
+ *    values and let uPlot re-range both axes, so the x axis follows a
+ *    growing time column. This is the fast streaming path (no DOM
+ *    re-mount; uPlot redraws to the existing canvas). ``setData(data,
+ *    false)`` would NOT do: it skips the scale update AND the redraw, so
+ *    the chart would stay as it was drawn. It also drops any zoom, the
+ *    same as the rebuild this path replaced.
+ *  - On ``options`` reference change: destroy + recreate. uPlot has
+ *    ``addSeries`` / ``delSeries`` but recreating is simpler and the
+ *    cost is acceptable when toggling a series in the picker (a
+ *    deliberate, low-frequency action). The reference is the only thing
+ *    compared, so a caller that builds ``options`` on every render must
+ *    hand back the same object while the chart is unchanged, or it is
+ *    rebuilt on every render.
  *  - On unmount: ``destroy()`` to release listeners and the canvas.
  *
  * Sizing: a ``ResizeObserver`` watches the wrapper div; on each
@@ -70,8 +76,8 @@ export function UPlot({ options, data, className, emptyFallback, uplotRef }: UPl
   const showFallback = emptyFallback !== undefined && xLen === 0;
 
   // Construction effect. Runs on mount + whenever ``options`` identity
-  // changes OR series count changes. We do NOT depend on ``data`` here
-  // — the data-update effect below handles incremental updates.
+  // changes. We do NOT depend on ``data`` here — the data-update effect
+  // below handles incremental updates.
   useEffect(() => {
     if (showFallback) return undefined;
     const container = containerRef.current;
@@ -97,23 +103,22 @@ export function UPlot({ options, data, className, emptyFallback, uplotRef }: UPl
       instanceRef.current = null;
       if (uplotRef) uplotRef.current = null;
     };
-    // We intentionally key construction on the options reference + the
-    // series count. Data updates flow through the next effect.
+    // We intentionally key construction on the options reference only.
+    // Data updates flow through the next effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [options, showFallback]);
 
   // Data-update effect. Runs on every render where the data prop
   // changes; pushes the new aligned data into the existing instance.
-  // Skips when the construction effect just (re)created the instance
-  // because the constructor already received this data.
+  // It also runs right after the construction effect, which already
+  // handed the constructor this data; uPlot coalesces the two redraws.
   useEffect(() => {
     const instance = instanceRef.current;
     if (!instance) return;
-    // ``setData(data, false)`` keeps the user's current scale (zoom).
-    // For a fresh run with monotonically growing t, we still want the
-    // x-axis to expand — uPlot's scale-auto handles this when the
-    // current scale's max equals the prior data tail.
-    instance.setData(data, false);
+    // Reset scales (the default, spelled out): the x axis has to grow
+    // with a streaming t column, and ``false`` would skip the redraw
+    // altogether. See the lifecycle note at the top of the file.
+    instance.setData(data, true);
   }, [data]);
 
   // Resize observer. Re-runs ``setSize`` whenever the wrapper resizes.
