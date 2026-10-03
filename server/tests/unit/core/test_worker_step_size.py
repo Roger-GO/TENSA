@@ -19,22 +19,27 @@ pytest.importorskip("andes")
 from tensa.core import worker
 from tensa.core.errors import SetupFailedError
 
+# An int too large for a float: ``float()`` raises OverflowError, not ValueError.
+_HUGE_INT = pytest.param(10**400, id="int-too-large-for-float")
+
 
 @pytest.fixture
 def abort_event() -> threading.Event:
-    """Set at teardown so the abort-bridge thread a handler starts can exit."""
-    event = threading.Event()
-    yield event
-    event.set()
+    return threading.Event()
 
 
-@pytest.mark.parametrize("bad", [0, -0.01, float("nan"), float("inf"), "abc", True])
+def _bridge_threads() -> set[threading.Thread]:
+    return {t for t in threading.enumerate() if t.name.endswith("abort-bridge")}
+
+
+@pytest.mark.parametrize("bad", [0, -0.01, float("nan"), float("inf"), "abc", True, _HUGE_INT])
 @pytest.mark.parametrize("stream", [False, True])
 def test_run_tds_handler_refuses_a_bad_step(
     abort_event: threading.Event, bad: Any, stream: bool
 ) -> None:
     wrapper = MagicMock()
     data_pipe = MagicMock()
+    bridges_before = _bridge_threads()
     with pytest.raises(SetupFailedError, match="step size 'h'"):
         worker._handle_run_tds(
             wrapper,
@@ -43,9 +48,11 @@ def test_run_tds_handler_refuses_a_bad_step(
             data_pipe,
             seq=1,
         )
-    # Nothing ran and no stream-start frame went out ahead of the failure.
+    # Nothing ran and no stream-start frame went out ahead of the failure, and
+    # no abort-bridge thread was left polling (a refusal never sets abort_flag).
     wrapper.run_tds.assert_not_called()
     data_pipe.send.assert_not_called()
+    assert _bridge_threads() <= bridges_before
 
 
 def test_run_tds_handler_passes_a_valid_step_through_as_a_float(
@@ -56,7 +63,7 @@ def test_run_tds_handler_passes_a_valid_step_through_as_a_float(
     assert wrapper.run_tds.call_args.kwargs["h"] == 0.005
 
 
-@pytest.mark.parametrize("bad", [0, -1.0, float("nan"), float("inf"), "abc", True])
+@pytest.mark.parametrize("bad", [0, -1.0, float("nan"), float("inf"), "abc", True, _HUGE_INT])
 def test_run_sweep_handler_refuses_a_bad_step(
     abort_event: threading.Event, bad: Any
 ) -> None:
@@ -70,6 +77,8 @@ def test_run_sweep_handler_refuses_a_bad_step(
         "h": bad,
         "sweep_id": "sw1",
     }
+    bridges_before = _bridge_threads()
     with pytest.raises(SetupFailedError, match="step size 'h'"):
         worker._handle_run_sweep(wrapper, args, abort_event)
     wrapper.run_sweep.assert_not_called()
+    assert _bridge_threads() <= bridges_before

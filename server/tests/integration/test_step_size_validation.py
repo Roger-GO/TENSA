@@ -32,9 +32,11 @@ class _FakeProcess:
         return True
 
 
-def _make_client() -> tuple[TestClient, SessionManager]:
+def _make_client(tmp_path: Path) -> tuple[TestClient, SessionManager]:
+    workspace = tmp_path / "ws"
+    workspace.mkdir(mode=0o700)
     app = make_app(
-        workspace=Path("/tmp"),
+        workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
         extra_allowed_hosts=frozenset({"testserver"}),
@@ -58,8 +60,8 @@ _BAD_H_LITERALS = ["0", "-0.01", "Infinity", "-Infinity", "NaN"]
 
 @pytest.mark.integration
 @pytest.mark.parametrize("h", _BAD_H_LITERALS)
-def test_rest_tds_rejects_a_bad_step_size(h: str) -> None:
-    client, mgr = _make_client()
+def test_rest_tds_rejects_a_bad_step_size(h: str, tmp_path: Path) -> None:
+    client, mgr = _make_client(tmp_path)
     with client:
         client.app.state.session_manager = mgr
         resp = client.post(
@@ -73,8 +75,8 @@ def test_rest_tds_rejects_a_bad_step_size(h: str) -> None:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("h", _BAD_H_LITERALS)
-def test_rest_sweep_rejects_a_bad_step_size(h: str) -> None:
-    client, mgr = _make_client()
+def test_rest_sweep_rejects_a_bad_step_size(h: str, tmp_path: Path) -> None:
+    client, mgr = _make_client(tmp_path)
     body = (
         '{"parameter": {"kind": "disturbance.fault.tc", "target": 0,'
         ' "range": {"start": 1.05, "end": 1.15, "steps": 3}},'
@@ -105,8 +107,8 @@ def _record_start_streaming_run(mgr: SessionManager) -> list[dict[str, Any]]:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("h", [0, -0.01, "abc", True, [0.01], {"v": 1}])
-def test_ws_start_tds_rejects_a_bad_step_size(h: object) -> None:
-    client, mgr = _make_client()
+def test_ws_start_tds_rejects_a_bad_step_size(h: object, tmp_path: Path) -> None:
+    client, mgr = _make_client(tmp_path)
     calls = _record_start_streaming_run(mgr)
     with client:
         client.app.state.session_manager = mgr
@@ -125,8 +127,8 @@ def test_ws_start_tds_rejects_a_bad_step_size(h: object) -> None:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
-def test_ws_start_tds_rejects_non_finite_step_size(literal: str) -> None:
-    client, mgr = _make_client()
+def test_ws_start_tds_rejects_non_finite_step_size(literal: str, tmp_path: Path) -> None:
+    client, mgr = _make_client(tmp_path)
     calls = _record_start_streaming_run(mgr)
     with client:
         client.app.state.session_manager = mgr
@@ -140,14 +142,32 @@ def test_ws_start_tds_rejects_non_finite_step_size(literal: str) -> None:
 
 
 @pytest.mark.integration
+def test_ws_start_tds_rejects_an_integer_too_large_for_a_float(tmp_path: Path) -> None:
+    """A 400-digit integer literal is valid JSON, but ``float()`` overflows on
+    it; that must come back as the same error frame, not escape the handler."""
+    client, mgr = _make_client(tmp_path)
+    calls = _record_start_streaming_run(mgr)
+    with client:
+        client.app.state.session_manager = mgr
+        with client.websocket_connect("/api/ws/s1") as ws:
+            assert json.loads(ws.receive_text())["type"] == "ready"
+            ws.send_text(f'{{"type": "start_tds", "tf": 1.0, "h": 1{"0" * 400}}}')
+            frame = json.loads(ws.receive_text())
+            assert frame["type"] == "error"
+            assert frame["code"] == WS_CLOSE_INTERNAL_ERROR
+            assert "step size 'h'" in frame["reason"]
+    assert calls == []
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("sent", "forwarded"),
     [(0.005, 0.005), (1, 1.0), ("0.02", 0.02), (None, None)],
 )
 def test_ws_start_tds_forwards_a_valid_step_size_as_a_float(
-    sent: object, forwarded: float | None
+    sent: object, forwarded: float | None, tmp_path: Path
 ) -> None:
-    client, mgr = _make_client()
+    client, mgr = _make_client(tmp_path)
     calls = _record_start_streaming_run(mgr)
     with client:
         client.app.state.session_manager = mgr

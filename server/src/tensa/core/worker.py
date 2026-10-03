@@ -886,6 +886,10 @@ def _handle_run_sweep(
         - ``h``: float | None
         - ``sweep_id``: str (route-assigned)
     """
+    # Checked before the abort bridge starts: a refusal sets no ``abort_flag``,
+    # so a bridge started first would keep polling until the session's next abort.
+    h = validate_step_size(args.get("h"))
+
     abort_flag = threading.Event()
     if abort_event.is_set():
         abort_flag.set()
@@ -926,7 +930,6 @@ def _handle_run_sweep(
     if not isinstance(tf_raw, (int, float)) or tf_raw <= 0:
         raise AndesAppError("'tf' must be a positive number")
     tf = float(tf_raw)
-    h = validate_step_size(args.get("h"))
     sweep_id = args.get("sweep_id") or ""
 
     total = len(values)
@@ -989,6 +992,12 @@ def _handle_run_tds(
     ``{"type": "stream_start", ...}`` message carrying the schema metadata.
     The final ``{"type": "result", ...}`` message lands as usual at end of run.
     """
+    # Checked before the abort bridge starts and before any stream metadata goes
+    # out: the route layers validate ``h`` too, but a bad value must not start a
+    # stream the run then aborts, nor leave a bridge thread polling (a refusal
+    # sets no ``abort_flag``).
+    h = validate_step_size(args.get("h"))
+
     abort_flag = threading.Event()
     if abort_event.is_set():
         abort_flag.set()
@@ -1001,10 +1010,6 @@ def _handle_run_tds(
 
     bridge_thread = threading.Thread(target=_bridge, name="abort-bridge", daemon=True)
     bridge_thread.start()
-
-    # Checked before any stream metadata goes out: the route layers validate
-    # ``h`` too, but a bad value must not start a stream the run then aborts.
-    h = validate_step_size(args.get("h"))
 
     stream = bool(args.get("stream"))
     on_step: Callable[[float, Any], None] | None = None

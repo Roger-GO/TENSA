@@ -312,7 +312,21 @@ def test_validate_step_size_accepts_positive_finite_numbers(
 
 @pytest.mark.parametrize(
     "bad",
-    [0, 0.0, -0.01, float("nan"), float("inf"), float("-inf"), True, "abc", "", "nan", [], {}],
+    [
+        0,
+        0.0,
+        -0.01,
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        True,
+        "abc",
+        "",
+        "nan",
+        [],
+        {},
+        pytest.param(10**400, id="int-too-large-for-float"),  # OverflowError, not ValueError
+    ],
 )
 def test_validate_step_size_rejects_everything_else(bad: object) -> None:
     with pytest.raises(SetupFailedError, match="step size 'h'"):

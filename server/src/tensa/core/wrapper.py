@@ -4520,7 +4520,7 @@ def validate_step_size(h: object) -> float | None:
         raise SetupFailedError(message)
     try:
         value = float(h)
-    except ValueError:
+    except (ValueError, OverflowError):  # OverflowError: an int too large for a float
         raise SetupFailedError(message) from None
     if not math.isfinite(value) or value <= 0.0:
         raise SetupFailedError(message)
