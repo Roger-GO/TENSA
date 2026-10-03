@@ -121,7 +121,7 @@ async def list_files(
     request: Request,
 ) -> WorkspaceFileList:
     """Return a sorted list of files in the workspace root whose extension
-    matches the supported set. Non-recursive in v0.1; excludes hidden files
+    matches the supported set. Non-recursive; excludes hidden files
     and symlinks.
     """
     workspace = _workspace(request)

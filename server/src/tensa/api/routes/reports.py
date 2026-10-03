@@ -40,10 +40,7 @@ router = APIRouter()
 
 
 class ReportRoutineEnum(StrEnum):
-    """Routines that can be reported. ``eig`` was added in Unit 6 once
-    the EIG analysis routine itself shipped — earlier Phase 1 builds
-    accepted ``eig`` at the wire layer but rejected with 422; that stub
-    is gone now."""
+    """Routines that can be reported."""
 
     PFLOW = "pflow"
     TDS = "tds"
@@ -169,13 +166,13 @@ async def get_report(
             "Which routine to report on. ``pflow`` requires a converged "
             "power-flow result; ``tds`` requires a completed TDS run; "
             "``eig`` requires ``EIG.run()`` to have populated the "
-            "eigenvalue vector (Unit 6)."
+            "eigenvalue vector."
         ),
     ),
 ) -> ReportResponse:
     """Produce a routine report and return ``{plain_text, structured}``.
 
-    Routines: ``pflow``, ``tds``, ``eig`` (Unit 6 widened the enum).
+    Routines: ``pflow``, ``tds``, ``eig``.
     """
     mgr = _manager(request)
     args: dict[str, Any] = {"routine": routine.value}

@@ -1,8 +1,8 @@
 """Time-domain simulation endpoint (batch mode).
 
 POST /sessions/{id}/tds runs TDS synchronously and returns a summary on
-completion. Streaming mode (``?stream=ws``) lands in Unit 6 with the Arrow
-IPC + WebSocket pipeline.
+completion. Streaming runs use the WebSocket at ``/ws/{session_id}`` instead,
+which sends Arrow IPC frames while the run is in progress.
 
 The wrapper (``run_tds``) calls ``ss.setup()`` first if not yet committed,
 runs PF first if not yet converged (TDS requires PF), then ``ss.TDS.run()``
@@ -71,7 +71,7 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
         "x-tensa-parity-deferred": "Batch (synchronous) TDS; the GUI runs TDS exclusively through the streaming WS channel (/ws/{session_id}) for live plotting. The batch POST is retained for CLI/agent/scripted use.",
     },
     operation_id="runTds",
-    summary="Run a time-domain simulation (batch mode; streaming lands in Unit 6).",
+    summary="Run a time-domain simulation (batch mode; stream live frames over the /ws/{session_id} WebSocket).",
     response_model=TdsBatchResult,
     responses={
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},

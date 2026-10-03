@@ -23,8 +23,8 @@ class FaultSpec(BaseModel):
     """3-phase-to-ground fault on a bus.
 
     Maps to ``ss.add('Fault', bus=..., tf=..., tc=..., xf=..., rf=...)``.
-    Single-phase faults are not natively supported by ANDES and are not in
-    scope (per Phase A plan).
+    Single-phase faults are not natively supported by ANDES and are not
+    supported here either.
     """
 
     kind: Literal["fault"] = Field(

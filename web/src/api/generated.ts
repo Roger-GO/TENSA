@@ -462,7 +462,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Run a time-domain simulation (batch mode; streaming lands in Unit 6). */
+        /** Run a time-domain simulation (batch mode; stream live frames over the /ws/{session_id} WebSocket). */
         post: operations["runTds"];
         delete?: never;
         options?: never;
@@ -508,7 +508,7 @@ export interface paths {
         /**
          * List supported case files in the workspace root.
          * @description Return a sorted list of files in the workspace root whose extension
-         *     matches the supported set. Non-recursive in v0.1; excludes hidden files
+         *     matches the supported set. Non-recursive; excludes hidden files
          *     and symlinks.
          */
         get: operations["listWorkspaceFiles"];
@@ -712,7 +712,7 @@ export interface paths {
          * Render a human-readable report from PFlow or TDS results.
          * @description Produce a routine report and return ``{plain_text, structured}``.
          *
-         *     Routines: ``pflow``, ``tds``, ``eig`` (Unit 6 widened the enum).
+         *     Routines: ``pflow``, ``tds``, ``eig``.
          */
         get: operations["getReport"];
         put?: never;
@@ -1216,7 +1216,7 @@ export interface components {
         AddElementRequest: {
             /**
              * Model
-             * @description ANDES model class name. Supported in v0.1.x: ``Bus``, ``Line``, ``PV``, ``Slack``, ``GENROU``, ``GENCLS``, ``PQ``, ``ZIP``, ``Shunt``. Unknown models are rejected with 422.
+             * @description ANDES model class name. It must be one of the buildable models listed by ``GET /api/topology/schema`` (buses, lines, generators, loads, shunts, exciters, governors, and other controllers). Unknown models are rejected with 422.
              */
             model: string;
             /**
@@ -2123,8 +2123,8 @@ export interface components {
          * @description 3-phase-to-ground fault on a bus.
          *
          *     Maps to ``ss.add('Fault', bus=..., tf=..., tc=..., xf=..., rf=...)``.
-         *     Single-phase faults are not natively supported by ANDES and are not in
-         *     scope (per Phase A plan).
+         *     Single-phase faults are not natively supported by ANDES and are not
+         *     supported here either.
          */
         FaultSpec: {
             /**
@@ -2413,7 +2413,7 @@ export interface components {
         PflowResult: {
             /**
              * Run Id
-             * @description Server-generated identifier for this PF run. Use it with GET /sessions/{id}/pflow/{run_id} to fetch the result later.
+             * @description Server-generated identifier for this PF run. Results are not stored under it: read the solved state again with GET /sessions/{id}/operating-point.
              */
             run_id: string;
             /**
@@ -2474,8 +2474,8 @@ export interface components {
         };
         /**
          * PflowRunRequest
-         * @description Request body for ``POST /sessions/{id}/pflow``. Empty for v0.1; PF
-         *     parameters are taken from the loaded case's defaults.
+         * @description Request body for ``POST /sessions/{id}/pflow``. Empty: PF parameters
+         *     are taken from the loaded case's defaults.
          */
         PflowRunRequest: Record<string, never>;
         /**
@@ -2554,10 +2554,7 @@ export interface components {
         };
         /**
          * ReportRoutineEnum
-         * @description Routines that can be reported. ``eig`` was added in Unit 6 once
-         *     the EIG analysis routine itself shipped — earlier Phase 1 builds
-         *     accepted ``eig`` at the wire layer but rejected with 422; that stub
-         *     is gone now.
+         * @description Routines that can be reported.
          * @enum {string}
          */
         ReportRoutineEnum: "pflow" | "tds" | "eig";
@@ -2650,8 +2647,8 @@ export interface components {
          *
          *     ``filename`` is workspace-relative; the substrate canonicalizes it
          *     through the workspace path validator (rejects traversal). ``format``
-         *     decides which writer ANDES uses — only xlsx and json are supported
-         *     in v0.1.x because ANDES 2.0 has no PSS/E ``.raw`` writer.
+         *     selects the writer: ANDES's own for xlsx and json, and the substrate's
+         *     PSS/E v33 writer for raw (ANDES 2.0 has none).
          */
         SaveCaseRequest: {
             /**
@@ -3097,10 +3094,11 @@ export interface components {
          * TdsBatchResult
          * @description Result of a batch TDS run (post-completion delivery).
          *
-         *     Streaming TDS uses a different code path (Unit 6) that emits Arrow IPC
-         *     frames per integration step. Batch mode blocks until completion and
-         *     returns a summary; the per-step state values are NOT returned in batch
-         *     mode (use streaming mode if you need them).
+         *     Streaming TDS uses a different code path (the WebSocket at
+         *     ``/ws/{session_id}``) that emits Arrow IPC frames per integration step.
+         *     Batch mode blocks until completion and returns a summary; the per-step
+         *     state values are NOT returned in batch mode (use streaming mode if you
+         *     need them).
          */
         TdsBatchResult: {
             /**
@@ -3133,8 +3131,8 @@ export interface components {
          * TdsRunRequest
          * @description Request body for ``POST /sessions/{id}/tds`` (batch mode).
          *
-         *     Streaming mode lands in Unit 6 and uses a separate ``?stream=ws`` query
-         *     parameter; this schema is the batch-only surface for v0.1.
+         *     Streaming runs use the WebSocket at ``/ws/{session_id}`` and are started
+         *     by its ``start_tds`` frame; this schema is the batch-only surface.
          */
         TdsRunRequest: {
             /**
@@ -3149,7 +3147,7 @@ export interface components {
             h?: number | null;
             /**
              * Vars
-             * @description Optional selector for which variable groups appear as columns in each per-step Arrow record batch on the streaming path. ``bus_v`` covers bus voltage magnitudes (the v0.1 default); ``gen_state`` adds generator rotor angle ``delta`` and per-unit speed ``omega`` for every member of the ANDES ``SynGen`` group (GENROU / GENCLS / PLBVFU1); ``line_flow`` adds active power ``Line_<idx>_p`` (MW) at each line's bus1 terminal. Unknown values are rejected with 422; an empty list is rejected with 422. The batch path (``POST /tds``) ignores this field at runtime — the streamed-only state values are not surfaced in batch responses — but it is accepted on the OpenAPI surface for symmetry with the WebSocket ``start_tds`` config so generated clients can share one request shape. Defaults to ``["bus_v"]`` when omitted.
+             * @description Optional selector for which variable groups appear as columns in each per-step Arrow record batch on the streaming path. ``bus_v`` covers bus voltage magnitudes (the default); ``gen_state`` adds generator rotor angle ``delta`` and per-unit speed ``omega`` for every member of the ANDES ``SynGen`` group (GENROU / GENCLS / PLBVFU1); ``line_flow`` adds active power ``Line_<idx>_p`` (MW) at each line's bus1 terminal. Unknown values are rejected with 422; an empty list is rejected with 422. The batch path (``POST /tds``) ignores this field at runtime — the streamed-only state values are not surfaced in batch responses — but it is accepted on the OpenAPI surface for symmetry with the WebSocket ``start_tds`` config so generated clients can share one request shape. Defaults to ``["bus_v"]`` when omitted.
              */
             vars?: ("bus_v" | "gen_state" | "line_flow")[] | null;
             /**
@@ -3374,7 +3372,7 @@ export interface components {
         WorkspaceFile: {
             /**
              * Name
-             * @description File name relative to the workspace root (no directory components in v0.1; the lister does not recurse).
+             * @description File name relative to the workspace root (no directory components; the lister does not recurse).
              */
             name: string;
             /**
@@ -3401,7 +3399,7 @@ export interface components {
         WorkspaceFileList: {
             /**
              * Files
-             * @description Workspace files matching the supported extensions, sorted alphabetically by ``name``. Hidden files (dotfiles) and symlinks are excluded; subdirectories are not recursed in v0.1.
+             * @description Workspace files matching the supported extensions, sorted alphabetically by ``name``. Hidden files (dotfiles) and symlinks are excluded; subdirectories are not recursed.
              */
             files: components["schemas"]["WorkspaceFile"][];
         };
@@ -5244,7 +5242,7 @@ export interface operations {
     getReport: {
         parameters: {
             query: {
-                /** @description Which routine to report on. ``pflow`` requires a converged power-flow result; ``tds`` requires a completed TDS run; ``eig`` requires ``EIG.run()`` to have populated the eigenvalue vector (Unit 6). */
+                /** @description Which routine to report on. ``pflow`` requires a converged power-flow result; ``tds`` requires a completed TDS run; ``eig`` requires ``EIG.run()`` to have populated the eigenvalue vector. */
                 routine: components["schemas"]["ReportRoutineEnum"];
             };
             header?: never;

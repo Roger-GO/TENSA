@@ -358,8 +358,7 @@ async def get_eig_participation(
         "x-tensa-gui-location": "none",
         "x-tensa-parity-deferred": (
             "The EIG state-matrix .mat export client (web exportToMat.ts) is "
-            "shipped but not yet wired into any ExportMenu mount, and "
-            "setMatExportTokenGetter is not called at app boot. Until the "
+            "shipped but not yet wired into any ExportMenu mount. Until the "
             "Export-menu MAT entry lands (formats={['mat']}+onExportMat on the "
             "analysis/EIG ExportMenu), this download is CLI/agent-only."
         ),

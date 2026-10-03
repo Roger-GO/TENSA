@@ -479,8 +479,9 @@ class PflowResult(BaseModel):
     run_id: str = Field(
         ...,
         description=(
-            "Server-generated identifier for this PF run. Use it with "
-            "GET /sessions/{id}/pflow/{run_id} to fetch the result later."
+            "Server-generated identifier for this PF run. Results are not "
+            "stored under it: read the solved state again with "
+            "GET /sessions/{id}/operating-point."
         ),
     )
     converged: bool = Field(
@@ -554,8 +555,8 @@ class PflowResult(BaseModel):
 
 
 class PflowRunRequest(BaseModel):
-    """Request body for ``POST /sessions/{id}/pflow``. Empty for v0.1; PF
-    parameters are taken from the loaded case's defaults."""
+    """Request body for ``POST /sessions/{id}/pflow``. Empty: PF parameters
+    are taken from the loaded case's defaults."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -644,9 +645,10 @@ class AddElementRequest(BaseModel):
     model: str = Field(
         ...,
         description=(
-            "ANDES model class name. Supported in v0.1.x: ``Bus``, ``Line``, "
-            "``PV``, ``Slack``, ``GENROU``, ``GENCLS``, ``PQ``, ``ZIP``, "
-            "``Shunt``. Unknown models are rejected with 422."
+            "ANDES model class name. It must be one of the buildable models "
+            "listed by ``GET /api/topology/schema`` (buses, lines, "
+            "generators, loads, shunts, exciters, governors, and other "
+            "controllers). Unknown models are rejected with 422."
         ),
         min_length=1,
     )
@@ -957,8 +959,8 @@ class SaveCaseRequest(BaseModel):
 
     ``filename`` is workspace-relative; the substrate canonicalizes it
     through the workspace path validator (rejects traversal). ``format``
-    decides which writer ANDES uses — only xlsx and json are supported
-    in v0.1.x because ANDES 2.0 has no PSS/E ``.raw`` writer.
+    selects the writer: ANDES's own for xlsx and json, and the substrate's
+    PSS/E v33 writer for raw (ANDES 2.0 has none).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1078,8 +1080,8 @@ class TopologySchema(BaseModel):
 class TdsRunRequest(BaseModel):
     """Request body for ``POST /sessions/{id}/tds`` (batch mode).
 
-    Streaming mode lands in Unit 6 and uses a separate ``?stream=ws`` query
-    parameter; this schema is the batch-only surface for v0.1.
+    Streaming runs use the WebSocket at ``/ws/{session_id}`` and are started
+    by its ``start_tds`` frame; this schema is the batch-only surface.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1107,7 +1109,7 @@ class TdsRunRequest(BaseModel):
         description=(
             "Optional selector for which variable groups appear as columns "
             "in each per-step Arrow record batch on the streaming path. "
-            "``bus_v`` covers bus voltage magnitudes (the v0.1 default); "
+            "``bus_v`` covers bus voltage magnitudes (the default); "
             "``gen_state`` adds generator rotor angle ``delta`` and per-"
             "unit speed ``omega`` for every member of the ANDES ``SynGen`` "
             "group (GENROU / GENCLS / PLBVFU1); ``line_flow`` adds active "
@@ -1152,10 +1154,11 @@ class TdsRunRequest(BaseModel):
 class TdsBatchResult(BaseModel):
     """Result of a batch TDS run (post-completion delivery).
 
-    Streaming TDS uses a different code path (Unit 6) that emits Arrow IPC
-    frames per integration step. Batch mode blocks until completion and
-    returns a summary; the per-step state values are NOT returned in batch
-    mode (use streaming mode if you need them).
+    Streaming TDS uses a different code path (the WebSocket at
+    ``/ws/{session_id}``) that emits Arrow IPC frames per integration step.
+    Batch mode blocks until completion and returns a summary; the per-step
+    state values are NOT returned in batch mode (use streaming mode if you
+    need them).
     """
 
     run_id: str = Field(
@@ -1269,7 +1272,7 @@ class WorkspaceFile(BaseModel):
         ...,
         description=(
             "File name relative to the workspace root (no directory "
-            "components in v0.1; the lister does not recurse)."
+            "components; the lister does not recurse)."
         ),
     )
     size_bytes: int = Field(
@@ -1302,7 +1305,7 @@ class WorkspaceFileList(BaseModel):
         description=(
             "Workspace files matching the supported extensions, sorted "
             "alphabetically by ``name``. Hidden files (dotfiles) and "
-            "symlinks are excluded; subdirectories are not recursed in v0.1."
+            "symlinks are excluded; subdirectories are not recursed."
         ),
     )
 
