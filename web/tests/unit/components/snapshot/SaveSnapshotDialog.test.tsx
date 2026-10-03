@@ -20,6 +20,7 @@ import { useSessionStore } from '@/store/session';
 import { useSnapshotStore } from '@/store/snapshot';
 import { parseSessionId } from '@/api/types';
 import { useHotkeys as useHotkeysWrapper } from '@/lib/useHotkeys';
+import { startBeatClock } from '../../helpers/beatClock';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -348,19 +349,12 @@ describe('<SaveSnapshotDialog /> — auto-close beat', () => {
     metadata_bytes: 256,
   };
 
-  // Fake timers drive the 600 ms beat; the clock still ticks on its own so
-  // waitFor and userEvent keep working.
-  function useBeatClock() {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    return userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
-  }
-
   afterEach(() => {
     vi.useRealTimers();
   });
 
   it('closes by itself after a save', async () => {
-    const user = useBeatClock();
+    const user = startBeatClock();
     fetchSpy.mockResolvedValue(makeJsonResponse(200, saved));
     render(withQueryClient(<SaveSnapshotDialog />));
     await user.type(await screen.findByTestId('save-snapshot-name-input'), 'scenario-A');
@@ -375,7 +369,7 @@ describe('<SaveSnapshotDialog /> — auto-close beat', () => {
   });
 
   it('does not close a re-opened dialog when the previous one auto-closes', async () => {
-    const user = useBeatClock();
+    const user = startBeatClock();
     fetchSpy.mockResolvedValue(makeJsonResponse(200, saved));
     render(withQueryClient(<SaveSnapshotDialog />));
     await user.type(await screen.findByTestId('save-snapshot-name-input'), 'scenario-A');
@@ -399,7 +393,7 @@ describe('<SaveSnapshotDialog /> — auto-close beat', () => {
   it('does not close the next dialog when the previous one unmounted inside the beat', async () => {
     // What a test cleanup does to a dialog that has just saved: the unmount
     // lands inside the 600 ms beat, and its timer must not outlive it.
-    const user = useBeatClock();
+    const user = startBeatClock();
     fetchSpy.mockResolvedValue(makeJsonResponse(200, saved));
     const first = render(withQueryClient(<SaveSnapshotDialog />));
     await user.type(await screen.findByTestId('save-snapshot-name-input'), 'scenario-A');
@@ -418,7 +412,7 @@ describe('<SaveSnapshotDialog /> — auto-close beat', () => {
   });
 
   it('starts no beat when the dialog was dismissed before the save answered', async () => {
-    const user = useBeatClock();
+    const user = startBeatClock();
     let answer: (response: Response) => void = () => {};
     fetchSpy.mockReturnValue(
       new Promise<Response>((resolve) => {

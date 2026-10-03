@@ -35,6 +35,7 @@ import { useSessionStore } from '@/store/session';
 import { useSnapshotStore } from '@/store/snapshot';
 import { useCaseStore } from '@/store/case';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
+import { startBeatClock } from '../../helpers/beatClock';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -361,19 +362,12 @@ describe('<LoadSnapshotDialog /> — timers', () => {
     );
   }
 
-  // Fake timers drive the beats; the clock still ticks on its own so waitFor
-  // and userEvent keep working.
-  function useBeatClock() {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-  }
-
   afterEach(() => {
     vi.useRealTimers();
   });
 
   it('closes by itself after a restore', async () => {
-    const user = useBeatClock();
+    const user = startBeatClock();
     routeFetch(() => Promise.resolve(makeJsonResponse(200, restored)));
     render(withQueryClient(<LoadSnapshotDialog />));
     await user.click(await screen.findByTestId('load-snapshot-select-snap-a'));
@@ -388,7 +382,7 @@ describe('<LoadSnapshotDialog /> — timers', () => {
   });
 
   it('does not close a re-opened dialog when the previous one auto-closes', async () => {
-    const user = useBeatClock();
+    const user = startBeatClock();
     routeFetch(() => Promise.resolve(makeJsonResponse(200, restored)));
     render(withQueryClient(<LoadSnapshotDialog />));
     await user.click(await screen.findByTestId('load-snapshot-select-snap-a'));
@@ -410,7 +404,7 @@ describe('<LoadSnapshotDialog /> — timers', () => {
   });
 
   it('starts no beat when the dialog was dismissed before the restore answered', async () => {
-    const user = useBeatClock();
+    const user = startBeatClock();
     let answer: (response: Response) => void = () => {};
     routeFetch(
       () =>
@@ -443,7 +437,7 @@ describe('<LoadSnapshotDialog /> — timers', () => {
   });
 
   it('disarms an armed delete after three seconds', async () => {
-    const user = useBeatClock();
+    const user = startBeatClock();
     routeFetch(() => Promise.resolve(makeJsonResponse(200, restored)));
     render(withQueryClient(<LoadSnapshotDialog />));
     await user.click(await screen.findByTestId('load-snapshot-delete-snap-a'));

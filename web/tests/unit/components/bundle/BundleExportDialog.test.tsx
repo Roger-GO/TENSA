@@ -27,6 +27,7 @@ import { useDisturbanceStore } from '@/store/disturbance';
 import { useRunsStore } from '@/store/runs';
 import { useBundleStore } from '@/store/bundle';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
+import { startBeatClock } from '../../helpers/beatClock';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -246,15 +247,8 @@ describe('<BundleExportDialog /> — auto-close beat', () => {
     vi.restoreAllMocks();
   });
 
-  // Fake timers drive the 800 ms beat; the clock still ticks on its own so
-  // waitFor and userEvent keep working.
-  function useBeatClock() {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-  }
-
   it('closes by itself after a successful export', async () => {
-    const user = useBeatClock();
+    const user = startBeatClock();
     fetchSpy.mockResolvedValue(makeZipResponse());
     useBundleStore.getState().openDialog();
     render(withQueryClient(<BundleExportDialog />));
@@ -269,7 +263,7 @@ describe('<BundleExportDialog /> — auto-close beat', () => {
   });
 
   it('does not close a re-opened dialog when the previous one auto-closes', async () => {
-    const user = useBeatClock();
+    const user = startBeatClock();
     fetchSpy.mockResolvedValue(makeZipResponse());
     useBundleStore.getState().openDialog();
     render(withQueryClient(<BundleExportDialog />));
@@ -291,7 +285,7 @@ describe('<BundleExportDialog /> — auto-close beat', () => {
   });
 
   it('starts no beat when the dialog was dismissed before the export answered', async () => {
-    const user = useBeatClock();
+    const user = startBeatClock();
     let answer: (response: Response) => void = () => {};
     fetchSpy.mockReturnValue(
       new Promise<Response>((resolve) => {

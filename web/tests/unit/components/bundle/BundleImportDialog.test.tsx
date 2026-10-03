@@ -24,6 +24,7 @@ import { BundleImportButton } from '@/components/bundle/BundleImportDialog';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { parseSessionId } from '@/api/types';
+import { startBeatClock } from '../../helpers/beatClock';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -199,10 +200,8 @@ describe('<BundleImportDialog /> — auto-close beat', () => {
   });
 
   it('does not close a re-opened dialog when the previous one auto-closes', async () => {
-    // Fake timers drive the 800 ms beat; the clock still ticks on its own so
-    // waitFor and userEvent keep working.
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    // Fake timers drive the 800 ms beat.
+    const user = startBeatClock();
     fetchSpy.mockResolvedValue(makeCommittedResponse());
     render(withQueryClient(<BundleImportButton />));
     await user.click(screen.getByTestId('bundle-import-button'));
@@ -226,8 +225,7 @@ describe('<BundleImportDialog /> — auto-close beat', () => {
   });
 
   it('closes by itself after a committed import', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = startBeatClock();
     fetchSpy.mockResolvedValue(makeCommittedResponse());
     render(withQueryClient(<BundleImportButton />));
     await user.click(screen.getByTestId('bundle-import-button'));
@@ -244,8 +242,7 @@ describe('<BundleImportDialog /> — auto-close beat', () => {
   });
 
   it('starts no beat when the dialog was dismissed before the import answered', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = startBeatClock();
     let answer: (response: Response) => void = () => {};
     fetchSpy.mockReturnValue(
       new Promise<Response>((resolve) => {
