@@ -666,6 +666,10 @@ def test_open_workspace_file_windows_branch_wraps_invalid_names(
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows canonicalizes through Path.resolve, with no fd to resolve",
+)
 def test_open_workspace_file_wraps_canonicalization_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
