@@ -241,3 +241,7 @@ def test_package_metadata_and_workflows_carry_no_stale_planning_text() -> None:
     for workflow in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
         text = workflow.read_text(encoding="utf-8")
         assert not re.search(r"\beventual\b|\blands when\b", text), workflow.name
+        # Plan-provenance tags (a "Unit 16" or "KTD-12" note) and a version in the workflow's
+        # name, which is what the checks are listed under on a pull request.
+        tag = re.search(r"\bKTD-\d+|\bUnit\s+\d+|^name:.*\bv\d+\.\d+", text, re.MULTILINE)
+        assert tag is None, f"{workflow.name} mentions {tag and tag.group(0)!r}"

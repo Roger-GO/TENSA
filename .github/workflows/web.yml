@@ -1,4 +1,4 @@
-name: web (v0.1+ UI)
+name: web
 
 on:
   push:

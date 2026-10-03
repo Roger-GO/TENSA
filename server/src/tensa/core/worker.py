@@ -1001,10 +1001,10 @@ def _handle_run_tds(
     h = validate_step_size(args.get("h"))
 
     # Unit 16: integrator selection + adaptive-tolerance overrides.
-    # ``integrator`` defaults to ``"trapezoidal"`` so existing callers
-    # (and the streaming WS path which doesn't yet pipe these args)
-    # see no behaviour change. Validation of the literal value lives in
-    # the wrapper; we only normalise the wire shape here.
+    # ``integrator`` defaults to ``"trapezoidal"`` so a caller that names
+    # none (the REST route and the WS ``start_tds`` frame both pass it on
+    # when given) sees no behaviour change. Validation of the literal value
+    # lives in the wrapper; we only normalise the wire shape here.
     integrator_raw = args.get("integrator", "trapezoidal")
     if integrator_raw not in ("trapezoidal", "qndf"):
         raise AndesAppError(
