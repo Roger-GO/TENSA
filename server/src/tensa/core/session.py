@@ -9,7 +9,8 @@ pool.
 
 Concurrency model:
 
-- One ``multiprocessing.Process`` per session.
+- One ``multiprocessing.Process`` per session. A long sensitivity sweep also
+  spawns short-lived sub-workers for its duration (``core/sweep_pool.py``).
 - One ``Lock`` per session — only one in-flight ``invoke`` at a time per
   session (per-session run-cap is also enforced at the API layer).
 - A background reaper task scans for idle sessions every ``IDLE_REAP_TICK``
@@ -42,6 +43,8 @@ from typing import Any, Literal
 from tensa.core.errors import AndesAppError, SessionBusyError, WorkerDiedError
 from tensa.core.jobs import JobKind, JobRecord, JobStatus, _JobRegistry
 from tensa.core.session_dirs import SESSIONS_DIRNAME, remove_tree, sweep_stale_session_dirs
+from tensa.core.sweep import default_sweep_workers, sweep_worker_count
+from tensa.core.sweep_pool import SweepWorkerPool, SweepWorkersLostError
 from tensa.core.worker import worker_main
 from tensa.core.worker_spawn import attach_kill_on_close_job, worker_spawn_env
 
@@ -288,10 +291,16 @@ class SessionManager:
         idle_timeout: float = 180.0,
         spawn_method: str = "spawn",
         workspace: str | None = None,
+        sweep_workers: int | None = None,
     ) -> None:
+        if sweep_workers is not None and sweep_workers < 1:
+            raise ValueError(f"sweep_workers must be at least 1, got {sweep_workers}")
         self._max_sessions = max_sessions
         self._idle_timeout = idle_timeout
         self._workspace = workspace  # for the worker's strict-fs audit hook
+        # The most sub-workers one sweep may spread its iterations over (see
+        # ``sweep_worker_count``); 1 runs every sweep on the session's own worker.
+        self._sweep_workers = default_sweep_workers() if sweep_workers is None else sweep_workers
         self._sessions: dict[str, _Session] = {}
         self._registry_lock = threading.Lock()
         self._reaper_task: asyncio.Task[None] | None = None
@@ -1152,16 +1161,16 @@ class SessionManager:
         sweep_buf: _SweepBuffer,
         sweep_args: dict[str, Any],
     ) -> None:
-        """Background task: pumps sweep_progress events from the worker
-        pipe into the sweep buffer + connected consumers.
+        """Background task: pumps per-iteration progress into the sweep buffer +
+        connected consumers.
 
-        Lifecycle parity with ``_drive_streaming_run``: send the op +
-        loop on data_pipe.recv. Per-iteration ``sweep_progress`` events
-        update the buffer's iteration list and any attached consumer
-        queues. The terminal ``result`` envelope flips state to
+        A sweep long enough to share runs its iterations on sub-workers
+        (``_run_sweep_in_parallel``); any other, or one whose sub-workers cannot be
+        used, runs on the session's own worker (``_run_sweep_on_session_worker``).
+        Both feed ``_on_progress`` the same way, so the buffer, its WS events, and
+        the job record cannot tell them apart. The terminal result flips state to
         ``completed`` + clears the session gate.
         """
-        loop = asyncio.get_running_loop()
 
         async def _on_progress(envelope: dict[str, Any]) -> None:
             iteration = int(envelope.get("iteration", 0))
@@ -1195,83 +1204,23 @@ class SessionManager:
                 if progressed is not None:
                     self.broadcast_job_event(sess.session_id, progressed)
 
-        # Send the request from the executor (Pipe.send is sync), then
-        # loop on Pipe.recv for sweep_progress envelopes + the final
-        # result envelope.
-        sweep_args_with_id = {**sweep_args, "sweep_id": sweep_buf.sweep_id}
         try:
             with sess.lock:
-                sess.seq += 1
-                sess.last_active = time.monotonic()
-                seq = sess.seq
-                try:
-                    await loop.run_in_executor(
-                        None,
-                        lambda: sess.ctrl.send(
-                            {
-                                "op": "run_sweep",
-                                "args": sweep_args_with_id,
-                                "seq": seq,
-                            }
-                        ),
-                    )
-                except (
-                    EOFError,
-                    BrokenPipeError,
-                    ConnectionResetError,
-                    OSError,
-                ) as exc:
-                    raise self._raise_worker_died(sess, exc) from exc
-
-                async def _read_one() -> dict[str, Any]:
-                    try:
-                        msg = await loop.run_in_executor(None, sess.data.recv)
-                    except (
-                        EOFError,
-                        BrokenPipeError,
-                        ConnectionResetError,
-                        OSError,
-                    ) as exc:
-                        raise self._raise_worker_died(sess, exc) from exc
-                    sess.last_active = time.monotonic()
-                    if not isinstance(msg, dict):
-                        raise WorkerError(
-                            "malformed", f"non-dict response: {msg!r}"
+                workers = sweep_worker_count(self._sweep_workers, sweep_buf.total)
+                if workers:
+                    plan = await self._plan_parallel_sweep(sess, sweep_args)
+                    if plan is not None:
+                        result = await self._run_sweep_in_parallel(
+                            sess, sweep_buf, sweep_args, plan, workers, _on_progress
                         )
-                    return msg
-
-                while True:
-                    msg = await _read_one()
-                    msg_type = msg.get("type")
-                    if msg_type == "sweep_progress":
-                        await _on_progress(msg)
-                        continue
-                    if msg_type == "result":
-                        result = msg.get("payload") or {}
-                        await self._finish_sweep(
-                            sess, sweep_buf, "completed", result=result
-                        )
-                        return
-                    if msg_type == "error":
-                        await self._finish_sweep(
-                            sess,
-                            sweep_buf,
-                            "error",
-                            error=(
-                                str(msg.get("category", "unknown")),
-                                str(msg.get("detail", "")),
-                            ),
-                        )
-                        return
-                    # Unknown message type — surface as an error so the
-                    # WS client sees it rather than silently hanging.
-                    await self._finish_sweep(
-                        sess,
-                        sweep_buf,
-                        "error",
-                        error=("malformed", f"unexpected message type: {msg_type!r}"),
-                    )
-                    return
+                        if result is not None:
+                            await self._finish_sweep(
+                                sess, sweep_buf, "completed", result=result
+                            )
+                            return
+                await self._run_sweep_on_session_worker(
+                    sess, sweep_buf, sweep_args, _on_progress
+                )
         except asyncio.CancelledError:
             await self._finish_sweep(
                 sess, sweep_buf, "aborted", error=("cancelled", "sweep cancelled")
@@ -1290,10 +1239,225 @@ class SessionManager:
             await self._finish_sweep(
                 sess, sweep_buf, "error", error=(exc.category, exc.detail)
             )
+        except SweepWorkersLostError as exc:
+            await self._finish_sweep(
+                sess, sweep_buf, "error", error=(WORKER_DIED_CATEGORY, str(exc))
+            )
         except Exception as exc:  # noqa: BLE001
             await self._finish_sweep(
                 sess, sweep_buf, "error", error=("internal-error", str(exc))
             )
+
+    async def _run_sweep_on_session_worker(
+        self,
+        sess: _Session,
+        sweep_buf: _SweepBuffer,
+        sweep_args: dict[str, Any],
+        on_progress: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None:
+        """Run the whole sweep as one ``run_sweep`` op on the session's worker.
+
+        Sends the request from the executor (Pipe.send is sync), then loops on
+        Pipe.recv for ``sweep_progress`` envelopes and the final result envelope.
+        The caller holds the session lock.
+        """
+        loop = asyncio.get_running_loop()
+        sweep_args_with_id = {**sweep_args, "sweep_id": sweep_buf.sweep_id}
+        sess.seq += 1
+        sess.last_active = time.monotonic()
+        seq = sess.seq
+        try:
+            await loop.run_in_executor(
+                None,
+                lambda: sess.ctrl.send(
+                    {
+                        "op": "run_sweep",
+                        "args": sweep_args_with_id,
+                        "seq": seq,
+                    }
+                ),
+            )
+        except (
+            EOFError,
+            BrokenPipeError,
+            ConnectionResetError,
+            OSError,
+        ) as exc:
+            raise self._raise_worker_died(sess, exc) from exc
+
+        async def _read_one() -> dict[str, Any]:
+            try:
+                msg = await loop.run_in_executor(None, sess.data.recv)
+            except (
+                EOFError,
+                BrokenPipeError,
+                ConnectionResetError,
+                OSError,
+            ) as exc:
+                raise self._raise_worker_died(sess, exc) from exc
+            sess.last_active = time.monotonic()
+            if not isinstance(msg, dict):
+                raise WorkerError("malformed", f"non-dict response: {msg!r}")
+            return msg
+
+        while True:
+            msg = await _read_one()
+            msg_type = msg.get("type")
+            if msg_type == "sweep_progress":
+                await on_progress(msg)
+                continue
+            if msg_type == "result":
+                result = msg.get("payload") or {}
+                await self._finish_sweep(sess, sweep_buf, "completed", result=result)
+                return
+            if msg_type == "error":
+                await self._finish_sweep(
+                    sess,
+                    sweep_buf,
+                    "error",
+                    error=(
+                        str(msg.get("category", "unknown")),
+                        str(msg.get("detail", "")),
+                    ),
+                )
+                return
+            # Unknown message type — surface as an error so the
+            # WS client sees it rather than silently hanging.
+            await self._finish_sweep(
+                sess,
+                sweep_buf,
+                "error",
+                error=("malformed", f"unexpected message type: {msg_type!r}"),
+            )
+            return
+
+    async def _plan_parallel_sweep(
+        self, sess: _Session, sweep_args: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Have the session's worker read and check the sweep's snapshot.
+
+        Returns the plan the sub-workers run from (see ``Wrapper.sweep_plan``), or
+        ``None`` when the worker refuses it: a missing or corrupt snapshot, a bad
+        target, no case. The sweep then runs on the session's worker, where every
+        iteration reports that same problem, instead of starting workers that
+        could do nothing. The caller holds the session lock.
+        """
+        loop = asyncio.get_running_loop()
+        sess.seq += 1
+        sess.last_active = time.monotonic()
+        request = {
+            "op": "sweep_plan",
+            "args": {
+                key: sweep_args[key]
+                for key in ("snapshot_name", "parameter_kind", "parameter_target")
+            },
+            "seq": sess.seq,
+        }
+
+        def _rpc() -> Any:
+            sess.ctrl.send(request)
+            return sess.data.recv()
+
+        try:
+            response = await loop.run_in_executor(None, _rpc)
+        except (EOFError, BrokenPipeError, ConnectionResetError, OSError) as exc:
+            raise self._raise_worker_died(sess, exc) from exc
+        sess.last_active = time.monotonic()
+        if isinstance(response, dict) and response.get("type") == "result":
+            plan = response.get("payload")
+            if isinstance(plan, dict):
+                return plan
+        detail = response.get("detail") if isinstance(response, dict) else response
+        log.info(
+            "sweep on session %s runs on the session's worker: its plan was refused (%s)",
+            sess.session_id,
+            detail,
+        )
+        return None
+
+    async def _run_sweep_in_parallel(
+        self,
+        sess: _Session,
+        sweep_buf: _SweepBuffer,
+        sweep_args: dict[str, Any],
+        plan: dict[str, Any],
+        workers: int,
+        on_progress: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> dict[str, Any] | None:
+        """Run the sweep's iterations on ``workers`` freshly spawned sub-workers.
+
+        Returns the sweep's result (``truncated`` and the counts), or ``None``
+        when the sub-workers could not be started, so that the caller runs the
+        sweep on the session's worker instead. The session's own worker is not
+        involved, so its System is left as it was. The session's abort event is
+        watched here and forwarded to the sub-workers, so an abort (or closing the
+        session) stops them all; the event is cleared once they have exited, which
+        is what the worker does at the end of a sweep it runs itself. The
+        sub-workers are stopped whatever happens, including when this task is
+        cancelled. The caller holds the session lock.
+        """
+        tasks = [
+            {
+                "index": index,
+                "value": float(value),
+                "specs": plan["specs"],
+                "parameter_kind": sweep_args["parameter_kind"],
+                "parameter_target": sweep_args["parameter_target"],
+                "tf": sweep_args["tf"],
+                "h": sweep_args["h"],
+            }
+            for index, value in enumerate(sweep_args["values"])
+        ]
+        pool = SweepWorkerPool(
+            ctx=self._spawn_ctx,
+            size=workers,
+            workspace=self._workspace,
+            owner_pid=os.getpid(),
+            name=f"andes-sweep-{sweep_buf.sweep_id[:8]}",
+        )
+        started = False
+        graceful = False
+        truncated = False
+        try:
+            try:
+                await pool.start()
+            except Exception:  # noqa: BLE001 — fall back rather than fail the sweep
+                log.warning(
+                    "could not start the workers for sweep %s; running it on the "
+                    "session's worker instead",
+                    sweep_buf.sweep_id,
+                    exc_info=True,
+                )
+                return None
+            started = True
+            log.info(
+                "sweep %s: %d iterations on %d workers",
+                sweep_buf.sweep_id,
+                len(tasks),
+                workers,
+            )
+
+            def _should_stop() -> bool:
+                return sess.closed or bool(sess.abort_event.is_set())
+
+            async def _on_row(index: int, row: dict[str, Any]) -> None:
+                sess.last_active = time.monotonic()
+                await on_progress(
+                    {"iteration": index, "value": row["parameter_value"], "result": row}
+                )
+
+            reported = await pool.run(
+                tasks, source=plan["source"], on_row=_on_row, should_stop=_should_stop
+            )
+            truncated = reported < len(tasks) or bool(sess.abort_event.is_set())
+            graceful = True
+        finally:
+            await pool.close(graceful=graceful)
+            if started:
+                sess.abort_event.clear()
+        if sess.closed:
+            raise self._session_expired_error(sess.session_id, sess)
+        return {"truncated": truncated, "total_requested": len(tasks), "workers": workers}
 
     async def _finish_sweep(
         self,

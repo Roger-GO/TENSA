@@ -135,6 +135,7 @@ def make_app(
     bind_port: int = 0,
     max_sessions: int = 4,
     idle_timeout_seconds: float = 180.0,
+    sweep_workers: int | None = None,
     extra_allowed_hosts: frozenset[str] = frozenset(),
     extra_allowed_origins: frozenset[str] = frozenset(),
     static_override: Path | None = None,
@@ -143,6 +144,10 @@ def make_app(
     uvicorn (see ``tensa.cli``).
 
     The workspace is created by the CLI before this is called and passed in.
+
+    ``sweep_workers`` bounds how many worker processes one sensitivity sweep
+    spreads its iterations over; ``None`` means ``min(4, usable CPUs)`` and ``1``
+    runs every sweep on the session's own worker.
 
     ``static_override`` lets tests pin the SPA directory to a tmp_path with a
     minimal ``index.html``; production callers leave it ``None`` so the
@@ -155,6 +160,7 @@ def make_app(
             max_sessions=max_sessions,
             idle_timeout=idle_timeout_seconds,
             workspace=str(workspace),
+            sweep_workers=sweep_workers,
         )
         # ``start`` launches BOTH the idle-session reaper AND the v3.1 Unit 5a
         # job-liveness sweeper (10s; KTD-18). ``shutdown`` cancels both.

@@ -36,6 +36,7 @@ The server has no authentication: it binds to loopback by default, so only proce
 - `--workspace <dir>`: case-file workspace root. Default `~/.tensa/cases`. Created with mode `0700` if missing.
 - `--max-sessions <int>`: session-creation cap. Default `4`.
 - `--idle-timeout-seconds <float>`: reap idle sessions after this many seconds. Default `180`.
+- `--sweep-workers <int>`: the most worker processes one sensitivity sweep may spread its iterations over. Default: the smaller of `4` and the number of CPUs. A sweep with four or more values runs on several extra workers, each given at least two values, and leaves the session's own System as it was. `1` runs every sweep on the session's own worker, one value after another.
 - `--allow-origin <url>`: extra browser origin to accept, for example `http://127.0.0.1:5173` for the Vite dev server. Repeatable.
 - `--reload`: development only. Restart the server when the package changes.
 

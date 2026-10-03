@@ -8,7 +8,11 @@ one result per step.
 
 Concurrency model (KTD-9 + Unit 18 spec):
 
-- The sweep runs as ONE long ``invoke`` on the per-session worker. The
+- A sweep of up to three values, or any sweep when ``--sweep-workers`` is 1,
+  runs as ONE long ``invoke`` on the per-session worker. A larger sweep runs
+  its iterations on sub-workers the server spawns for it (see
+  :func:`sweep_worker_count` and ``tensa.core.sweep_pool``) and leaves the
+  session's own worker, and so its System, untouched. Either way the
   per-session ``threading.Lock`` (in ``SessionManager._Session.lock``) is
   held for the entire sweep duration. This keeps all other session-scoped
   endpoints out — they observe a "sweep in progress" flag (also kept on
@@ -20,13 +24,19 @@ Concurrency model (KTD-9 + Unit 18 spec):
   ``SessionManager.start_sweep`` background task forwards into a
   ``_SweepBuffer`` (analogous to ``_RunBuffer`` for streaming TDS). The
   WS endpoint ``/api/ws/{session_id}/sweep/{sweep_id}`` consumes the
-  buffer and forwards events to the client.
+  buffer and forwards events to the client. A parallel sweep feeds the
+  same buffer from the server: iterations finish in any order on the
+  sub-workers, but each is released only after every lower index, so the
+  buffer, the WS events, and the progress fraction read exactly as they do
+  for a sequential sweep.
 
 - Cancellation: the existing ``signal_abort`` mechanism sets the worker's
   ``abort_event``. The orchestrator checks the event between iterations
   AND at the start of each per-iteration TDS. ``run_tds`` honours the
   flag mid-integration via its existing callpert hook. On abort, the
-  sweep returns the iterations completed so far + a truncated flag.
+  sweep returns the iterations completed so far + a truncated flag. The
+  sub-workers of a parallel sweep share the session's event, so one abort
+  stops them all.
 
 The sweep ONLY supports parameter overrides on disturbance specs
 (Fault.tc, Fault.tf, Fault.xf, Fault.rf, Toggle.t, Alter.t, Alter.amount)
@@ -43,6 +53,7 @@ incomplete.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -56,6 +67,46 @@ class SweepValidationError(AndesAppError):
 
     The route layer maps this to HTTP 422.
     """
+
+
+# ---- parallel execution -----------------------------------------------------
+
+# A sub-worker costs a process start and an ANDES import (about a second)
+# before its first iteration, so it has to be given at least this many
+# iterations to pay for itself.
+MIN_ITERATIONS_PER_SWEEP_WORKER = 2
+
+# The ceiling of the default: more workers than this rarely help ANDES, whose
+# step loop is single-threaded, and cost a full System in memory each.
+DEFAULT_SWEEP_WORKERS_CAP = 4
+
+
+def default_sweep_workers() -> int:
+    """The sweep worker setting when none is given: ``min(4, usable CPUs)``.
+
+    Counts the CPUs this process may run on (the affinity mask, which honours
+    ``taskset`` and container CPU sets) where the OS reports it, and all CPUs
+    elsewhere.
+    """
+    try:
+        cpus = len(os.sched_getaffinity(0))
+    except AttributeError:  # macOS and Windows have no affinity call
+        cpus = os.cpu_count() or 1
+    return max(1, min(DEFAULT_SWEEP_WORKERS_CAP, cpus))
+
+
+def sweep_worker_count(setting: int, iterations: int) -> int:
+    """How many sub-workers a sweep of ``iterations`` iterations runs on.
+
+    ``setting`` is the configured bound. A sweep is spread over at most
+    ``setting`` workers, and over fewer when it is short, so that each gets
+    :data:`MIN_ITERATIONS_PER_SWEEP_WORKER` iterations or more. ``0`` means no
+    sub-workers: the sweep runs one iteration after another on the session's
+    own worker, which is what a setting of ``1`` asks for and what a sweep too
+    short to share does anyway.
+    """
+    workers = min(setting, iterations // MIN_ITERATIONS_PER_SWEEP_WORKER)
+    return workers if workers >= 2 else 0
 
 
 # ---- request shape (mirrors the wire format) -------------------------------
@@ -279,6 +330,8 @@ class SweepResult:
 
 
 __all__ = [
+    "DEFAULT_SWEEP_WORKERS_CAP",
+    "MIN_ITERATIONS_PER_SWEEP_WORKER",
     "SweepIterationResult",
     "SweepParameter",
     "SweepParamKind",
@@ -287,5 +340,7 @@ __all__ = [
     "SweepResult",
     "SweepSimParams",
     "SweepValidationError",
+    "default_sweep_workers",
     "parse_sweep_target",
+    "sweep_worker_count",
 ]

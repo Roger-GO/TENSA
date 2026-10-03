@@ -118,6 +118,16 @@ def serve(
         "--idle-timeout-seconds",
         help="Sessions with no activity for this long are reaped.",
     ),
+    sweep_workers: int | None = typer.Option(
+        None,
+        "--sweep-workers",
+        min=1,
+        help=(
+            "Most worker processes one sensitivity sweep may spread its iterations "
+            "over. Default: the smaller of 4 and the number of CPUs. 1 runs every "
+            "sweep on the session's own worker, one iteration after another."
+        ),
+    ),
     allow_origin: list[str] = typer.Option(
         [],
         "--allow-origin",
@@ -247,6 +257,10 @@ def serve(
         os.environ["ANDES_APP_RELOAD_HOSTS"] = ",".join(sorted(extra_hosts))
         os.environ["ANDES_APP_RELOAD_MAX_SESSIONS"] = str(max_sessions)
         os.environ["ANDES_APP_RELOAD_IDLE"] = str(idle_timeout_seconds)
+        if sweep_workers is not None:
+            os.environ["ANDES_APP_RELOAD_SWEEP_WORKERS"] = str(sweep_workers)
+        else:
+            os.environ.pop("ANDES_APP_RELOAD_SWEEP_WORKERS", None)
         watch_dir = Path(__file__).resolve().parent  # the tensa package
         log.info("dev --reload: watching %s for changes", watch_dir)
         log.info(
@@ -293,6 +307,7 @@ def serve(
         bind_port=bound_port,
         max_sessions=max_sessions,
         idle_timeout_seconds=idle_timeout_seconds,
+        sweep_workers=sweep_workers,
         extra_allowed_hosts=frozenset(extra_hosts),
         extra_allowed_origins=frozenset(extra_origins),
     )
@@ -411,12 +426,14 @@ def _reload_app_factory() -> FastAPI:
     )
     max_sessions = int(os.environ.get("ANDES_APP_RELOAD_MAX_SESSIONS", "4"))
     idle = float(os.environ.get("ANDES_APP_RELOAD_IDLE", "180.0"))
+    sweep_workers_env = os.environ.get("ANDES_APP_RELOAD_SWEEP_WORKERS")
     return make_app(
         workspace=ensure_workspace(workspace),
         bind_host=bind,
         bind_port=port,
         max_sessions=max_sessions,
         idle_timeout_seconds=idle,
+        sweep_workers=int(sweep_workers_env) if sweep_workers_env else None,
         extra_allowed_hosts=hosts,
         extra_allowed_origins=origins,
     )

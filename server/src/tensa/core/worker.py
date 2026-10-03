@@ -984,6 +984,121 @@ def _handle_run_sweep(
     return result
 
 
+def _handle_sweep_plan(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Read and check a sweep's snapshot, for a sweep the server runs in parallel.
+
+    Takes the first three arguments of ``run_sweep`` and returns what the
+    sub-workers need (see ``Wrapper.sweep_plan``). Any problem raises, and the
+    server then runs the sweep on this worker instead.
+    """
+    snapshot_name = args.get("snapshot_name")
+    if not isinstance(snapshot_name, str):
+        raise AndesAppError("'snapshot_name' must be a string")
+    parameter_kind = args.get("parameter_kind")
+    if not isinstance(parameter_kind, str):
+        raise AndesAppError("'parameter_kind' must be a string")
+    parameter_target = args.get("parameter_target")
+    if not isinstance(parameter_target, int) or parameter_target < 0:
+        raise AndesAppError("'parameter_target' must be a non-negative int")
+    return wrapper.sweep_plan(
+        snapshot_name=snapshot_name,
+        parameter_kind=parameter_kind,
+        parameter_target=parameter_target,
+    )
+
+
+def _handle_adopt_sweep_source(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Point a sub-worker of a parallel sweep at the session's case."""
+    source = args.get("source")
+    if not isinstance(source, dict):
+        raise AndesAppError("'source' must be a dict")
+    wrapper.adopt_sweep_source(source)
+    return None
+
+
+def _handle_run_sweep_iteration(
+    wrapper: Wrapper,
+    args: dict[str, Any],
+    abort_event: EventType,
+) -> Any:
+    """Run ONE iteration of a parallel sweep on a sub-worker.
+
+    Args (built by the server from the session's ``sweep_plan``):
+        - ``index``: int, the iteration's position in the sweep
+        - ``value``: float, the swept parameter's value
+        - ``specs``: list of disturbance spec dicts (the snapshot's log)
+        - ``parameter_kind``: str, ``parameter_target``: int
+        - ``tf``: float, ``h``: float | None
+
+    Returns the iteration's result dict (what ``run_sweep`` records), or
+    ``{"skipped": True}`` when the abort event was already set, so nothing ran.
+
+    A sub-worker's ``abort_event`` is not a ``multiprocessing.Event`` but a
+    ``PipeAbortEvent`` (see ``core/sweep_pool.py``): the server sends on its pipe
+    to stop the sweep. Only ``is_set`` and ``wait`` exist on it, and unlike
+    ``_handle_run_sweep`` this never clears it, because once the sweep is aborted
+    the server stops handing this worker iterations.
+    """
+    # Checked before the abort bridge starts: a refusal sets no ``abort_flag``,
+    # so a bridge started first would keep polling until the session's next abort.
+    h = validate_step_size(args.get("h"))
+
+    index = args.get("index")
+    if not isinstance(index, int) or index < 0:
+        raise AndesAppError("'index' must be a non-negative int")
+    parameter_kind = args.get("parameter_kind")
+    if not isinstance(parameter_kind, str):
+        raise AndesAppError("'parameter_kind' must be a string")
+    parameter_target = args.get("parameter_target")
+    if not isinstance(parameter_target, int) or parameter_target < 0:
+        raise AndesAppError("'parameter_target' must be a non-negative int")
+    try:
+        value = float(args["value"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AndesAppError("'value' must be a float-coercible scalar") from exc
+    tf_raw = args.get("tf")
+    if not isinstance(tf_raw, (int, float)) or tf_raw <= 0:
+        raise AndesAppError("'tf' must be a positive number")
+    specs_raw = args.get("specs")
+    if not isinstance(specs_raw, list):
+        raise AndesAppError("'specs' must be a list of disturbance specs")
+    try:
+        specs = [_disturbance_from_dict(raw) for raw in specs_raw]
+    except (AttributeError, TypeError, ValueError) as exc:  # a pydantic error is a ValueError
+        raise AndesAppError(f"'specs' holds a disturbance that cannot be read: {exc}") from exc
+
+    if abort_event.is_set():
+        return {"skipped": True}
+
+    abort_flag = threading.Event()
+
+    def _bridge() -> None:
+        # Same pattern as run_tds: a daemon thread mirrors the abort event into a
+        # thread-local Event, so the abort check in each TDS step is cheap.
+        while not abort_flag.is_set():
+            if abort_event.wait(timeout=0.1):
+                abort_flag.set()
+                return
+
+    bridge_thread = threading.Thread(
+        target=_bridge, name="sweep-abort-bridge", daemon=True
+    )
+    bridge_thread.start()
+    try:
+        return wrapper.run_sweep_iteration(
+            index=index,
+            value=value,
+            specs=specs,
+            parameter_kind=parameter_kind,
+            parameter_target=parameter_target,
+            tf=float(tf_raw),
+            h=h,
+            abort_flag=abort_flag,
+        )
+    finally:
+        abort_flag.set()
+
+
 def _handle_run_tds(
     wrapper: Wrapper,
     args: dict[str, Any],
@@ -1294,6 +1409,11 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "restore_snapshot": _handle_restore_snapshot,
     "list_snapshots": _handle_list_snapshots,
     "delete_snapshot": _handle_delete_snapshot,
+    # Parallel sweeps: the session's worker answers ``sweep_plan``; the sub-workers
+    # the server spawns for the sweep answer ``adopt_sweep_source`` and (special-cased
+    # below, it needs the abort event) ``run_sweep_iteration``.
+    "sweep_plan": _handle_sweep_plan,
+    "adopt_sweep_source": _handle_adopt_sweep_source,
     # run_tds is special-cased — it needs the abort_event. Dispatched separately.
 }
 
@@ -1324,6 +1444,11 @@ def worker_main(
     ``owner_pid`` is the parent server's pid. It goes into the scratch dir's
     owner marker so a later server can tell the dir was abandoned (see
     ``core/session_dirs.py``).
+
+    ``abort_event`` is the session's ``multiprocessing.Event``. A sub-worker of
+    a parallel sweep gets a ``PipeAbortEvent`` instead, which has only the
+    ``is_set`` and ``wait`` that ``run_sweep_iteration`` uses (see
+    ``core/sweep_pool.py`` for why it is not an ``Event``).
 
     Returns the process exit code (0 = clean shutdown).
     """
@@ -1362,6 +1487,8 @@ def worker_main(
                 # progress events + needs the abort event for
                 # cancellation. Same special-cased dispatch as run_tds.
                 payload = _handle_run_sweep(wrapper, args, abort_event, data, seq)
+            elif op == "run_sweep_iteration":
+                payload = _handle_run_sweep_iteration(wrapper, args, abort_event)
             else:
                 handler = HANDLERS.get(op)
                 if handler is None:

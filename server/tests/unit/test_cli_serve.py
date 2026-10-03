@@ -286,6 +286,72 @@ def test_serve_prints_the_real_url(
     assert "os-assigned" not in caplog.text
 
 
+# ------------------------------------------------------------ sweep workers
+
+
+def test_serve_passes_the_sweep_worker_bound_to_the_app(
+    tmp_path: Path,
+    fake_server: type[_FakeServer],
+    built_apps: list[dict[str, Any]],
+) -> None:
+    result = runner.invoke(
+        cli.app,
+        ["serve", "--workspace", str(tmp_path / "ws"), "--sweep-workers", "3"],
+    )
+    assert result.exit_code == 0, result.output
+    assert built_apps[0]["kwargs"]["sweep_workers"] == 3
+
+
+def test_serve_leaves_the_sweep_worker_bound_to_the_default_unless_asked(
+    tmp_path: Path,
+    fake_server: type[_FakeServer],
+    built_apps: list[dict[str, Any]],
+) -> None:
+    result = runner.invoke(cli.app, ["serve", "--workspace", str(tmp_path / "ws")])
+    assert result.exit_code == 0, result.output
+    # ``None`` is "the smaller of 4 and the CPU count", worked out by the manager.
+    assert built_apps[0]["kwargs"]["sweep_workers"] is None
+
+
+@pytest.mark.parametrize("bad", ["0", "-2"])
+def test_serve_refuses_fewer_than_one_sweep_worker(
+    tmp_path: Path,
+    fake_server: type[_FakeServer],
+    built_apps: list[dict[str, Any]],
+    bad: str,
+) -> None:
+    result = runner.invoke(
+        cli.app, ["serve", "--workspace", str(tmp_path / "ws"), "--sweep-workers", bad]
+    )
+    assert result.exit_code == 2
+    assert built_apps == []
+    assert fake_server.instances == []
+
+
+def test_serve_reload_hands_the_sweep_worker_bound_to_the_app_factory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+    built_apps: list[dict[str, Any]],
+) -> None:
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **kw: None)
+    with mock.patch.dict(os.environ):
+        # A value left over from an earlier ``serve --reload`` in this process must
+        # not leak into one that did not ask for it.
+        os.environ["ANDES_APP_RELOAD_SWEEP_WORKERS"] = "7"
+        args = ["serve", "--workspace", str(tmp_path / "ws"), "--reload"]
+
+        assert runner.invoke(cli.app, [*args, "--sweep-workers", "2"]).exit_code == 0
+        assert os.environ["ANDES_APP_RELOAD_SWEEP_WORKERS"] == "2"
+        cli._reload_app_factory()
+        assert built_apps[-1]["kwargs"]["sweep_workers"] == 2
+
+        assert runner.invoke(cli.app, args).exit_code == 0
+        assert "ANDES_APP_RELOAD_SWEEP_WORKERS" not in os.environ
+        cli._reload_app_factory()
+        assert built_apps[-1]["kwargs"]["sweep_workers"] is None
+
+
 # ------------------------------------------------------------ open watcher
 
 

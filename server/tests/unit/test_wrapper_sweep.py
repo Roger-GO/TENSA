@@ -300,3 +300,236 @@ def test_sweep_resets_the_log_a_blank_session_reload_leaves_behind(
 
     assert w.list_disturbances() == [FaultSpec(bus_idx=5, tf=1.0, tc=1.15)]
     assert [len(added) for added in rec.added] == [1, 1]
+
+
+# ---- the pieces a parallel sweep runs on --------------------------------------
+
+
+def test_the_plan_is_the_checked_snapshot_log_and_the_case_to_reload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    w, rec = _stubbed_wrapper(tmp_path, monkeypatch)
+    ws = tmp_path / "ws"
+    w._addfiles = [ws / "case.dyr"]  # noqa: SLF001
+    keep = FaultSpec(bus_idx=3, tf=0.5, tc=0.6)
+    target = FaultSpec(bus_idx=5, tf=1.0, tc=1.1)
+    _save_snapshot(ws, [keep, target])
+
+    plan = w.sweep_plan(snapshot_name="base", parameter_kind=FAULT_TC, parameter_target=1)
+
+    assert plan == {
+        "source": {
+            "case_path": str(ws / "case.raw"),
+            "addfiles": [str(ws / "case.dyr")],
+            "replay": [],
+        },
+        "specs": [keep.model_dump(), target.model_dump()],
+    }
+    # Planning only reads: nothing is reloaded, added or run.
+    assert rec.reloads == 0
+    assert rec.tds_calls == []
+    assert rec.metadata_reads == 1
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "parameter_kind", "parameter_target", "error", "message"),
+    [
+        ("base", FAULT_TC, 4, "SweepValidationError", "target index 4 out of range"),
+        ("base", "disturbance.toggle.t", 0, "SweepValidationError", "expects 'toggle'"),
+        ("nope", FAULT_TC, 0, "SnapshotNotFoundError", ""),
+        ("base", "disturbance.fault.bogus", 0, "SweepValidationError", "unknown sweep parameter"),
+    ],
+)
+def test_the_plan_refuses_what_a_sweep_would_record_against_every_iteration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot: str,
+    parameter_kind: str,
+    parameter_target: int,
+    error: str,
+    message: str,
+) -> None:
+    """The server runs such a sweep on the session's worker instead, so that the
+    error shows up on every iteration exactly as it always has."""
+    w, _ = _stubbed_wrapper(tmp_path, monkeypatch)
+    _save_snapshot(tmp_path / "ws", [FaultSpec(bus_idx=5, tf=1.0, tc=1.1)])
+
+    with pytest.raises(Exception, match=message or None) as caught:
+        w.sweep_plan(
+            snapshot_name=snapshot,
+            parameter_kind=parameter_kind,
+            parameter_target=parameter_target,
+        )
+
+    assert type(caught.value).__name__ == error
+
+
+def test_the_plan_needs_a_workspace() -> None:
+    from tensa.core.errors import NoCaseLoadedError
+
+    with pytest.raises(NoCaseLoadedError, match="requires a workspace"):
+        Wrapper().sweep_plan(snapshot_name="base", parameter_kind=FAULT_TC, parameter_target=0)
+
+
+def test_a_case_file_session_is_its_path_and_add_on_files(tmp_path: Path) -> None:
+    w = Wrapper(workspace=tmp_path)
+    w._case_path = tmp_path / "case.raw"  # noqa: SLF001
+    w._addfiles = [tmp_path / "a.dyr", tmp_path / "b.dyr"]  # noqa: SLF001
+
+    assert w.sweep_source() == {
+        "case_path": str(tmp_path / "case.raw"),
+        "addfiles": [str(tmp_path / "a.dyr"), str(tmp_path / "b.dyr")],
+        "replay": [],
+    }
+
+
+def test_a_blank_session_is_the_additions_that_rebuild_it(tmp_path: Path) -> None:
+    w = Wrapper(workspace=tmp_path)
+    w._replay_buffer = [("Bus", {"idx": "1", "Vn": 110}), ("PQ", {"bus": "1", "p0": 0.5})]  # noqa: SLF001
+
+    source = w.sweep_source()
+
+    assert source == {
+        "case_path": None,
+        "addfiles": None,
+        "replay": [("Bus", {"idx": "1", "Vn": 110}), ("PQ", {"bus": "1", "p0": 0.5})],
+    }
+    # A copy: editing the session afterwards cannot reach a source already handed out.
+    w._replay_buffer[0][1]["Vn"] = 220  # noqa: SLF001
+    assert source["replay"][0][1]["Vn"] == 110
+
+
+def test_a_session_with_no_case_has_no_source(tmp_path: Path) -> None:
+    from tensa.core.errors import NoCaseLoadedError
+
+    with pytest.raises(NoCaseLoadedError, match="no case has been loaded"):
+        Wrapper(workspace=tmp_path).sweep_source()
+
+
+def test_adopting_a_case_file_source_makes_reload_load_that_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loads: list[tuple[Path, list[str] | None]] = []
+
+    def _load_case(self: Wrapper, path: Any, addfiles: Any = None) -> None:
+        loads.append((Path(path), addfiles))
+
+    monkeypatch.setattr(Wrapper, "load_case", _load_case)
+    original = Wrapper(workspace=tmp_path)
+    original._case_path = tmp_path / "case.raw"  # noqa: SLF001
+    original._addfiles = [tmp_path / "case.dyr"]  # noqa: SLF001
+    original.reload_case()
+
+    sub = Wrapper(workspace=tmp_path)
+    sub.adopt_sweep_source(original.sweep_source())
+    sub.reload_case()
+
+    assert len(loads) == 2
+    assert loads[0] == loads[1] == (tmp_path / "case.raw", [str(tmp_path / "case.dyr")])
+
+
+def test_adopting_a_source_forgets_the_wrapper_s_previous_system(tmp_path: Path) -> None:
+    sub = Wrapper(workspace=tmp_path)
+    sub._ss = MagicMock()  # noqa: SLF001
+    sub._setup_failed = True  # noqa: SLF001
+    sub._disturbance_log = [FaultSpec(bus_idx=1, tf=1.0, tc=1.1)]  # noqa: SLF001
+
+    sub.adopt_sweep_source({"case_path": str(tmp_path / "case.raw"), "addfiles": None, "replay": []})
+
+    assert sub._ss is None  # noqa: SLF001
+    assert sub._setup_failed is False  # noqa: SLF001
+    assert sub.list_disturbances() == []
+    assert sub._case_path == tmp_path / "case.raw"  # noqa: SLF001
+    assert sub._addfiles is None  # noqa: SLF001
+
+
+def test_a_sub_worker_iteration_records_what_the_sweep_records_for_that_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``run_sweep_iteration`` is the unit of work a sub-worker is handed. For the
+    same value it must produce the dict ``run_sweep`` records, built from specs
+    that arrived over a pipe as plain dicts."""
+    w, rec = _stubbed_wrapper(tmp_path, monkeypatch)
+    keep = FaultSpec(bus_idx=3, tf=0.5, tc=0.6)
+    target = FaultSpec(bus_idx=5, tf=1.0, tc=1.1)
+    _save_snapshot(tmp_path / "ws", [keep, target])
+    values = [1.05, 1.1, 1.2]
+    whole = w.run_sweep(
+        snapshot_name="base",
+        parameter_kind=FAULT_TC,
+        parameter_target=1,
+        values=values,
+        tf=0.2,
+        h=0.01,
+    )
+    rec.added.clear()
+    rec.tds_calls.clear()
+    reads = rec.metadata_reads
+
+    plan = w.sweep_plan(snapshot_name="base", parameter_kind=FAULT_TC, parameter_target=1)
+    specs = [FaultSpec(**d) for d in plan["specs"]]
+    pieces = [
+        w.run_sweep_iteration(
+            index=i,
+            value=v,
+            specs=specs,
+            parameter_kind=FAULT_TC,
+            parameter_target=1,
+            tf=0.2,
+            h=0.01,
+        )
+        for i, v in enumerate(values)
+    ]
+
+    assert pieces == whole["iterations"]
+    # The snapshot was read by the plan, once, and by no iteration.
+    assert rec.metadata_reads == reads + 1
+    for added, value in zip(rec.added, values, strict=True):
+        assert added == [keep, target.model_copy(update={"tc": value})]
+
+
+def test_a_sub_worker_iteration_that_fails_is_recorded_not_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    w, _ = _stubbed_wrapper(tmp_path, monkeypatch)
+
+    def _diverge(**_kwargs: Any) -> TdsBatchResult:
+        raise RuntimeError("did not converge")
+
+    monkeypatch.setattr(w, "run_tds", _diverge)
+
+    result = w.run_sweep_iteration(
+        index=4,
+        value=1.2,
+        specs=[FaultSpec(bus_idx=5, tf=1.0, tc=1.1)],
+        parameter_kind=FAULT_TC,
+        parameter_target=0,
+        tf=0.2,
+    )
+
+    assert result["iteration"] == 4
+    assert result["parameter_value"] == 1.2
+    assert result["converged"] is False
+    assert result["error"] == "RuntimeError: did not converge"
+
+
+@pytest.mark.parametrize("bad", [0, -1.0, float("nan"), float("inf")])
+def test_a_sub_worker_iteration_refuses_a_bad_step_instead_of_recording_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: float
+) -> None:
+    from tensa.core.errors import SetupFailedError
+
+    w, rec = _stubbed_wrapper(tmp_path, monkeypatch)
+
+    with pytest.raises(SetupFailedError, match="step size 'h'"):
+        w.run_sweep_iteration(
+            index=0,
+            value=1.0,
+            specs=[FaultSpec(bus_idx=5, tf=1.0, tc=1.1)],
+            parameter_kind=FAULT_TC,
+            parameter_target=0,
+            tf=0.2,
+            h=bad,
+        )
+
+    assert rec.reloads == 0

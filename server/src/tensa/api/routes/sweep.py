@@ -9,7 +9,9 @@ Two surfaces:
   ``sweep_in_progress`` flag is set and other session-scoped routes
   return ``503 Service Unavailable`` via the ``SweepInProgressError``
   → 503 mapping in their own ``invoke()`` calls (see
-  ``SessionManager.invoke``).
+  ``SessionManager.invoke``). A sweep of four or more values runs its
+  iterations on extra worker processes (``tensa serve --sweep-workers``);
+  the endpoints and events below are the same either way.
 
 - ``WS /api/ws/{session_id}/sweep/{sweep_id}`` — progress channel.
   The wire protocol mirrors the TDS WS endpoint but ships JSON text
