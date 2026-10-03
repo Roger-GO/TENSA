@@ -194,10 +194,10 @@ async def test_killed_worker_invoke_raises_worker_died(
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, sess.process.join, 5.0)
 
-    with pytest.raises(WorkerDiedError) as exc_info:
+    # Actionable, recoverable message + 503 / reload-case class attrs. No ``as
+    # exc_info``: a test frame that holds its own exception is a reference cycle.
+    with pytest.raises(WorkerDiedError, match="worker stopped unexpectedly"):
         await manager.invoke(session_id, "run_pflow", {})
-    # Actionable, recoverable message + 503 / reload-case class attrs.
-    assert "worker stopped unexpectedly" in str(exc_info.value)
     assert WorkerDiedError.http_status == 503
     assert WorkerDiedError.recovery_kind == "reload-case"
 
