@@ -70,6 +70,7 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 - On Windows, the warning for case files that read outside the workspace logged a line for a path that contains a NUL byte, which no file can have and whose open fails anyway. POSIX already skipped it; the check no longer depends on the platform.
 - The first test of the abort acceptance suite failed on a fresh CI runner with a read timeout. It loads IEEE 14 with httpx's default 5 s limit, and ANDES generates its Python code for the models on the first load on a machine, which takes longer. The acceptance helpers now allow that first load up to 180 s.
 - The Save snapshot dialog test that fills the name field through the native setter no longer waits on a timer, and a new test covers a dialog that unmounts inside its auto-close beat. That case is what made the old test fail on a loaded CI runner, before the timer fix under the dialogs bullet above.
+- Streamed frames that batched several steps carried the wrong times. ANDES hands the per-step hook one array for the time and updates it in place, and the stream kept that array instead of its value, so every row of a frame sent with `decimation: "none"` and a `max_rate_hz` had the time of the step that closed the window, and a boxcar-mean row was stamped with that step's time instead of the mean time of its window (up to a step late). The time is now copied when the row is buffered.
 
 ## [0.4.0] — 2026-07-05
 

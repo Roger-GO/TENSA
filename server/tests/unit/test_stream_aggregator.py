@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 
+import numpy as np
 import pyarrow.ipc
 import pytest
 
@@ -153,6 +154,46 @@ def test_flush_returns_none_when_buffer_empty() -> None:
     # decimation=none + no rate → push always emits, never buffers
     agg.push(0.001, [1.0])
     assert agg.flush() is None
+
+
+# ---- the step time is copied when a row is buffered ---------------------------
+
+
+@pytest.mark.unit
+def test_buffered_rows_keep_the_time_their_step_had() -> None:
+    """ANDES calls ``callpert`` with the same mutable 0-d array (``dae.t``) at
+    every step. Rows that kept that reference all read as the newest step's
+    time once the window closed, so every row of a batch carried one ``t``."""
+    clock = np.array(0.0)
+    agg = StreamAggregator(decimation="none", max_rate_hz=10.0)
+    for i in range(1, 10):
+        clock[...] = i * 0.01
+        assert agg.push(clock, [float(i)]) is None  # type: ignore[arg-type]
+
+    clock[...] = 0.10
+    rows = agg.push(clock, [10.0])  # type: ignore[arg-type]
+    assert rows is not None
+    assert [t for t, _ in rows] == pytest.approx([i * 0.01 for i in range(1, 10)])
+    tail = agg.flush()
+    assert tail is not None
+    assert [t for t, _ in tail] == pytest.approx([0.10])
+
+
+@pytest.mark.unit
+def test_mean_row_time_is_the_window_mean_of_the_step_times() -> None:
+    """The mean row's ``t`` averages the times of the steps in the window,
+    ``0.05`` here, not the time of the sample that closed the window."""
+    clock = np.array(0.0)
+    agg = StreamAggregator(decimation="mean", max_rate_hz=10.0)
+    for i in range(1, 10):
+        clock[...] = i * 0.01
+        agg.push(clock, [float(i)])  # type: ignore[arg-type]
+
+    clock[...] = 0.10
+    rows = agg.push(clock, [10.0])  # type: ignore[arg-type]
+    assert rows is not None
+    assert len(rows) == 1
+    assert rows[0][0] == pytest.approx(0.05)
 
 
 # ---- encode_batch round-trip ------------------------------------------------

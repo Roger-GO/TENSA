@@ -695,6 +695,10 @@ class StreamAggregator:
         rows emit.
         """
         assert self._buffer is not None  # set in __post_init__
+        # ANDES calls ``callpert`` with the same mutable 0-d array (``dae.t``)
+        # every step, so a buffered row that kept the reference would read as
+        # the newest step's time once emitted. Take the value now.
+        t = float(t)
         window = self.aggregation_window
 
         if window is None:
