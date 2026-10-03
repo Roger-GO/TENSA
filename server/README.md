@@ -1,30 +1,32 @@
-# tensa (server)
+# TENSA
 
-The TENSA server: a Python wrapper around ANDES with a FastAPI HTTP and WebSocket surface, plus the web UI it serves. The API is independently usable: agents, SDKs, and curl can drive ANDES through it without the UI.
+TENSA (Transients, Eigenvalues & Network Simulation Application) is an interactive, web-based workbench for power system modeling, simulation, and analysis, built on the [ANDES](https://github.com/CURENT/andes) simulator. You build a system in the browser, run power flow and dynamic studies with one click, watch time-domain results stream in while the run is still going, and drive the same operations from a documented HTTP and WebSocket API. It runs on your machine.
+
+This package is the TENSA server, and it ships with the web UI already built, so `pip install tensa` is all you need. The API is independently usable: agents, SDKs, and curl can drive ANDES through it without the UI.
 
 Requires Python 3.12 or newer. Windows on ARM is not supported, because `kvxopt` (through ANDES) and `pyarrow` publish no wheels for it.
 
-## Install (development)
-
-From this directory:
+## Quick start
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate        # PowerShell: .venv\Scripts\Activate.ps1
-pip install -e ".[dev]"          # add the MCP server with ".[dev,mcp]"
-```
-
-This pulls in ANDES (`>=2.0,<3.0`) and everything else the server needs. An editable install does not need the UI built first. `tensa serve` serves the UI from `../web/dist` when you have built it (`pnpm build` in `web/`) and runs API-only otherwise.
-
-## Run
-
-```bash
-tensa warm-cache                  # one time: precompute the ANDES symbolic cache
-tensa serve --workspace ./tmp
+pip install tensa
+tensa warm-cache                  # one time: precompute the ANDES symbolic cache (about 30 s)
+tensa serve --workspace ~/tensa-cases --port 8000 --open
 tensa --version                   # tensa and ANDES versions
 ```
 
-The server has no authentication: it binds to loopback by default, so only processes on your machine can reach it. Stderr prints the serving URL and workspace path at startup. Interactive API docs are served at `/docs` (Swagger UI) and `/redoc`.
+Open the address `tensa serve` prints (`http://127.0.0.1:8000` above). On first run an empty workspace is seeded with three example cases (IEEE-14, Kundur, and WSCC-9). To use your own cases, drop any `.xlsx`, `.raw`, `.dyr`, or `.json` file into the workspace directory and it shows up in the file picker.
+
+The optional MCP server exposes sessions, case loading, power flow, time-domain simulation, and disturbances as [Model Context Protocol](https://modelcontextprotocol.io) tools, so an assistant such as Claude can run simulations directly:
+
+```bash
+pip install "tensa[mcp]"
+tensa mcp --workspace ~/tensa-cases
+```
+
+## Running the server
+
+The server has no authentication: it binds to loopback by default, so only processes on your machine can reach it. Stderr prints the serving URL and workspace path at startup. Interactive API docs are served at `/docs` (Swagger UI) and `/redoc`, and the OpenAPI schema at `/openapi.json`.
 
 `tensa serve` flags:
 
@@ -39,9 +41,16 @@ The server has no authentication: it binds to loopback by default, so only proce
 
 Windows: the server runs, but the workspace boundary is best-effort there (ANDES can read files outside the workspace), and `serve` logs a warning about it at startup. Do not load untrusted case files on Windows.
 
+## Using the API
+
+Anything the UI does, a script can do. A request with a JSON body needs a `Content-Type: application/json` header (with curl, `-H 'Content-Type: application/json' -d '{...}'`), or the server answers 422.
+
+- The [llms.txt](https://github.com/Roger-GO/TENSA/blob/main/llms.txt) API map lists the endpoints, the order they are used in, the enums, and the gotchas.
+- The [examples](https://github.com/Roger-GO/TENSA/tree/main/examples) folder has a curl walkthrough and a self-contained Python client.
+
 ## Trust model
 
-See the top-level docstring in `src/tensa/__init__.py`. Summary:
+The canonical statement is the top-level docstring of [`tensa/__init__.py`](https://github.com/Roger-GO/TENSA/blob/main/server/src/tensa/__init__.py), and the [security policy](https://github.com/Roger-GO/TENSA/blob/main/SECURITY.md) summarizes it. In short:
 
 - Local OS user is trusted (case-load equals code execution).
 - Loopback web origins from random browser tabs are NOT trusted (Host/Origin allow-list + strict CORS).
@@ -49,15 +58,21 @@ See the top-level docstring in `src/tensa/__init__.py`. Summary:
 - Third-party case files are not trusted by the system but trusted by the user when they choose to load.
 - Sandboxed case-file execution and kernel-level workspace enforcement are not implemented.
 
-## Curl-only walkthrough
+## More
 
-`tests/acceptance/walkthrough.sh` exercises the full end-to-end flow with curl alone, no UI. `tests/acceptance/test_walkthrough.py` starts a server and runs it, and CI runs it in the `acceptance` job.
+The [project README](https://github.com/Roger-GO/TENSA#readme) has the feature tour and the demo video, and the [changelog](https://github.com/Roger-GO/TENSA/blob/main/CHANGELOG.md) lists what changed in each release. Report problems on the [issue tracker](https://github.com/Roger-GO/TENSA/issues).
 
-## ANDES version coverage
+## Development
 
-See `ANDES_VERSIONS.md` for the seven API contracts the server depends on and the verification matrix per ANDES version.
+Work on the server from a source checkout, in the `server/` directory:
 
-## Tests
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate        # PowerShell: .venv\Scripts\Activate.ps1
+pip install -e ".[dev]"          # add the MCP server with ".[dev,mcp]"
+```
+
+This pulls in ANDES (`>=2.0,<3.0`) and everything else the server needs. An editable install does not need the UI built first. `tensa serve` serves the UI from `../web/dist` when you have built it (`pnpm build` in `web/`) and runs API-only otherwise.
 
 ```bash
 pytest -m "unit"         # fast, no I/O
@@ -67,6 +82,10 @@ pytest -m "acceptance"   # full end-to-end (each test starts its own server)
 pytest                   # all of the above
 ```
 
+`tests/acceptance/walkthrough.sh` exercises the full end-to-end flow with curl alone, no UI. `tests/acceptance/test_walkthrough.py` starts a server and runs it, and CI runs it in the `acceptance` job.
+
+`ANDES_VERSIONS.md` lists the seven API contracts the server depends on and the verification matrix per ANDES version.
+
 ## License
 
-[GNU GPL v3.0](../LICENSE)
+[GNU GPL v3.0](https://github.com/Roger-GO/TENSA/blob/main/LICENSE)

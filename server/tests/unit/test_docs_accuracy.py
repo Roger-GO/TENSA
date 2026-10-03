@@ -20,7 +20,7 @@ import typer
 
 from tensa import cli
 from tensa.api.app import make_app
-from tests._repo import REPO_ROOT
+from tests._repo import REPO_ROOT, pyproject
 
 pytestmark = pytest.mark.unit
 
@@ -104,6 +104,20 @@ def test_readmes_say_windows_on_arm_is_unsupported() -> None:
     for document in ("README.md", "server/README.md", "CONTRIBUTING.md"):
         text = _read(document)
         assert "Windows on ARM is not supported" in text, document
+
+
+def test_server_readme_reads_on_pypi() -> None:
+    """``server/README.md`` is the package's long description, so it is written for a
+    reader who has not cloned anything: it opens with how to install, and every link is
+    absolute because PyPI does not resolve relative ones."""
+    assert pyproject()["project"]["readme"] == "README.md"
+    text = _read("server/README.md")
+    assert "pip install tensa" in text
+    assert text.index("pip install tensa") < text.index("pip install -e")
+    targets = re.findall(r"\]\(([^)\s]+)\)", text)
+    assert targets, "no links found in server/README.md"
+    relative = [t for t in targets if not t.startswith(("https://", "http://"))]
+    assert not relative, f"relative links do not resolve on PyPI: {relative}"
 
 
 def test_readme_gives_powershell_equivalents_for_the_posix_only_commands() -> None:
