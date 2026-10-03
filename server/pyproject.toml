@@ -28,7 +28,13 @@ classifiers = [
 # ANDES upgrades are deliberate; never accept an automatic minor bump
 # without re-running the curl walkthrough in CI.
 dependencies = [
-    "fastapi>=0.119,<0.120",
+    # FastAPI can break callers in a minor release, so it is capped at the next
+    # minor after the newest one the suite passed on (0.142), and 0.133 is the
+    # oldest that allows Starlette 1.x. Starlette is declared here because
+    # FastAPI no longer caps it and every release below 1.3.1 has a published
+    # advisory (the UI is served through StaticFiles).
+    "fastapi>=0.133,<0.143",
+    "starlette>=1.3.1,<2",
     "uvicorn[standard]>=0.30",
     "pyarrow>=17",
     "pydantic>=2,<3",
@@ -38,9 +44,10 @@ dependencies = [
     # ANDES transitive dep but the substrate uses it directly for the
     # CSV→XLSX transcoding path, so pin it explicitly. python-multipart
     # is required by FastAPI to parse the ``UploadFile`` multipart body
-    # on the profile upload route.
+    # on the profile upload route. 0.0.31 is the first release past its
+    # published advisories.
     "openpyxl>=3.1",
-    "python-multipart>=0.0.9",
+    "python-multipart>=0.0.31",
     # ANDES (which only requires a bare ``chardet``) sniffs the encoding of a
     # .raw file with it. Before chardet 6 a UTF-8 file whose only non-ASCII text
     # is a single accented letter was detected as Latin-1 or MacRoman, so a bus
@@ -49,9 +56,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# MCP (Model Context Protocol) stdio server for LLM agents: `tensa mcp`
+# MCP (Model Context Protocol) stdio server for LLM agents: `tensa mcp`.
+# mcp 2.x renamed FastMCP, which tensa.mcp_server imports, and releases before
+# 1.28.1 have published advisories.
 mcp = [
-    "mcp>=1.2",
+    "mcp>=1.28.1,<2",
 ]
 dev = [
     "pytest>=8",

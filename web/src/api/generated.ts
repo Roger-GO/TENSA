@@ -1415,7 +1415,6 @@ export interface components {
         Body_importBundle: {
             /**
              * File
-             * Format: binary
              * @description Reproducibility bundle ``.zip`` (the same format produced by ``POST /api/sessions/{id}/bundle/export``).
              */
             file: string;
@@ -1442,7 +1441,6 @@ export interface components {
         Body_uploadProfile: {
             /**
              * File
-             * Format: binary
              * @description CSV or XLSX file. CSV inputs are transcoded to xlsx (single sheet named ``profile``) for uniformity with ANDES's preferred input format.
              */
             file: string;
@@ -3364,6 +3362,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
         /**
          * WorkspaceFile
