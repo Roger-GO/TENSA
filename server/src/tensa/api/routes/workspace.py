@@ -292,7 +292,8 @@ def _atomic_write_json(target: Path, layout: SidecarLayout) -> None:
 
     Uses ``tempfile.NamedTemporaryFile`` in the same directory (so
     ``os.replace`` is a same-filesystem rename) and chmods the temp file via
-    its fd before flush. On any exception the temp file is unlinked.
+    its fd before flush where the platform has ``fchmod``. On any exception the
+    temp file is unlinked.
     """
     parent = target.parent
     serialized = layout.model_dump_json(indent=2)
@@ -306,10 +307,13 @@ def _atomic_write_json(target: Path, layout: SidecarLayout) -> None:
     )
     tmp_path = Path(tmp.name)
     try:
-        # Windows or unusual filesystems may not support fchmod; fall back to
-        # post-close chmod.
-        with contextlib.suppress(OSError):
-            os.fchmod(tmp.fileno(), 0o600)
+        # ``os.fchmod`` does not exist at all on Windows before Python 3.13 (an
+        # AttributeError, not an OSError), and unusual filesystems may refuse it;
+        # either way the post-close chmod below still applies the mode.
+        fchmod = getattr(os, "fchmod", None)
+        if fchmod is not None:
+            with contextlib.suppress(OSError):
+                fchmod(tmp.fileno(), 0o600)
         tmp.write(serialized)
         tmp.flush()
         os.fsync(tmp.fileno())

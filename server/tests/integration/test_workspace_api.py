@@ -167,6 +167,31 @@ async def test_put_then_get_roundtrip(
 
 
 @pytest.mark.integration
+async def test_put_layout_succeeds_where_os_has_no_fchmod(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``os.fchmod`` does not exist on Windows before Python 3.13. The missing
+    attribute raised AttributeError (not the OSError the code suppressed), so
+    saving a layout answered 500 there."""
+    monkeypatch.delattr(os, "fchmod", raising=False)
+    client, ws = client_workspace
+    put = await client.put(
+        "/api/workspace/layout",
+        params={"case_path": "ieee14.raw"},
+        headers={"Content-Type": "application/json"},
+        json=_layout_body(),
+    )
+    assert put.status_code == 204, put.text
+    sidecar = ws / "ieee14.raw.layout.json"
+    assert json.loads(sidecar.read_text(encoding="utf-8"))["schema_version"] == "1.0"
+    if sys.platform != "win32":
+        # The post-close chmod still applies the mode without fchmod.
+        assert sidecar.stat().st_mode & 0o777 == 0o600
+    assert [p.name for p in ws.iterdir()] == ["ieee14.raw.layout.json"]  # no temp file left
+
+
+@pytest.mark.integration
 async def test_put_layout_too_large_returns_413(
     client_workspace: tuple[httpx.AsyncClient, Path],
 ) -> None:
