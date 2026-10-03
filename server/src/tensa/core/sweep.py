@@ -34,9 +34,10 @@ Concurrency model (KTD-9 + Unit 18 spec):
   ``abort_event``. The orchestrator checks the event between iterations
   AND at the start of each per-iteration TDS. ``run_tds`` honours the
   flag mid-integration via its existing callpert hook. On abort, the
-  sweep returns the iterations completed so far + a truncated flag. The
-  sub-workers of a parallel sweep share the session's event, so one abort
-  stops them all.
+  sweep returns the iterations completed so far + a truncated flag. A
+  parallel sweep watches the session's event and forwards an abort to each
+  sub-worker over a pipe of its own (see ``tensa.core.sweep_pool``), so one
+  abort stops them all.
 
 The sweep ONLY supports parameter overrides on disturbance specs
 (Fault.tc, Fault.tf, Fault.xf, Fault.rf, Toggle.t, Alter.t, Alter.amount)

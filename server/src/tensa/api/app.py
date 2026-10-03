@@ -147,7 +147,8 @@ def make_app(
 
     ``sweep_workers`` bounds how many worker processes one sensitivity sweep
     spreads its iterations over; ``None`` means ``min(4, usable CPUs)`` and ``1``
-    runs every sweep on the session's own worker.
+    runs every sweep on the session's own worker. The bound is per sweep, so sweeps
+    in several sessions at once add up.
 
     ``static_override`` lets tests pin the SPA directory to a tmp_path with a
     minimal ``index.html``; production callers leave it ``None`` so the

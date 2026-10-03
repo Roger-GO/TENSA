@@ -304,6 +304,7 @@ class SessionManager:
         self._workspace = workspace  # for the worker's strict-fs audit hook
         # The most sub-workers one sweep may spread its iterations over (see
         # ``sweep_worker_count``); 1 runs every sweep on the session's own worker.
+        # It is per sweep: sweeps in several sessions at once add up.
         self._sweep_workers = default_sweep_workers() if sweep_workers is None else sweep_workers
         self._sessions: dict[str, _Session] = {}
         self._registry_lock = threading.Lock()

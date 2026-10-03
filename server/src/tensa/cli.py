@@ -125,7 +125,9 @@ def serve(
         help=(
             "Most worker processes one sensitivity sweep may spread its iterations "
             "over. Default: the smaller of 4 and the number of CPUs. 1 runs every "
-            "sweep on the session's own worker, one iteration after another."
+            "sweep on the session's own worker, one iteration after another. The "
+            "bound is per sweep: sessions sweeping at once use that many times as "
+            "many workers."
         ),
     ),
     allow_origin: list[str] = typer.Option(
