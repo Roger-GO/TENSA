@@ -50,11 +50,15 @@ git clone https://github.com/Roger-GO/TENSA.git
 cd TENSA
 
 # 1. Install the server (pulls in ANDES, FastAPI, pyarrow)
-python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -e ./server
 
 # 2. Build the web UI (one time)
-cd web && pnpm install && pnpm build && cd ..
+cd web
+pnpm install
+pnpm build
+cd ..
 
 # 3. Warm the ANDES symbolic cache (one time, about 30 s; rerun after upgrading ANDES)
 tensa warm-cache
@@ -63,9 +67,44 @@ tensa warm-cache
 tensa serve --workspace ~/andes-cases --port 8000 --open
 ```
 
+On Windows, run the same steps in PowerShell:
+
+```powershell
+# 0. Clone
+git clone https://github.com/Roger-GO/TENSA.git
+cd TENSA
+
+# 1. Install the server
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e ./server
+
+# 2. Build the web UI (one time)
+cd web
+pnpm install
+pnpm build
+cd ..
+
+# 3. Warm the ANDES symbolic cache
+tensa warm-cache
+
+# 4. Serve the UI and API on one port, then open the browser
+tensa serve --workspace "$HOME\andes-cases" --port 8000 --open
+```
+
+If PowerShell refuses to run `Activate.ps1`, allow scripts for that window only with `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned`, then activate again. In `cmd.exe`, activate with `.venv\Scripts\activate.bat`.
+
+The editable install does not need the UI, so steps 1 and 2 can run in either order. `tensa serve` serves the UI from `web/dist`; without a build it starts with the API only and logs a warning. Building a wheel or sdist (`python -m build server`) does need the UI built first, and fails with a message that says so when it is missing.
+
 Open `http://127.0.0.1:8000`. On first run an empty workspace is seeded with three example cases (IEEE-14, Kundur, and WSCC-9) so there is something to open right away. Load a case or build one from scratch, run a power flow, add a disturbance, and stream a time-domain simulation.
 
 To use your own cases, drop any `.xlsx`, `.raw`, `.dyr`, or `.json` file into the `--workspace` directory and it shows up in the file picker.
+
+### Platforms
+
+CI runs the server on Linux, macOS (Apple silicon), and Windows with Python 3.12 and 3.13. The commands in this README are shown for a POSIX shell, with a PowerShell version where they differ. `~` in a `--workspace` path works in PowerShell and `cmd.exe` too, because the server expands it itself.
+
+Windows on ARM is not supported. TENSA needs `kvxopt` (through ANDES) and `pyarrow`, and neither publishes wheels for Windows ARM64, so `pip` would have to build them from source, which is not practical. A 64-bit x86 Python on a Windows ARM machine, which runs under emulation, has not been tested.
 
 ## Run the demo yourself
 
@@ -76,9 +115,12 @@ To use your own cases, drop any `.xlsx`, `.raw`, `.dyr`, or `.json` file into th
 tensa serve --workspace ~/andes-cases --port 18800
 
 # Terminal 2: record (writes demo-video/ieee9-agent-demo.webm)
-cd web && pnpm exec playwright install chromium   # one time
+cd web
+pnpm exec playwright install chromium   # one time
 node scripts/agent-demo.mjs http://127.0.0.1:18800
 ```
+
+In PowerShell the commands are the same, with `--workspace "$HOME\andes-cases"` for the server.
 
 ## For agents and scripts
 
@@ -86,10 +128,10 @@ The whole app is driven by a documented HTTP and WebSocket API. Anything the UI 
 
 - The OpenAPI schema is at `GET /openapi.json`, with interactive docs at `/docs` (Swagger) and `/redoc`.
 - [llms.txt](./llms.txt) is a condensed API map written for LLM consumption: endpoints, workflow ordering, enums, and the gotchas worth knowing.
-- [examples/](./examples/) has curl walkthroughs and a self-contained Python client.
+- [examples/](./examples/) has a curl walkthrough (a bash script) and a self-contained Python client.
 - The MCP server exposes sessions, case loading, power flow, TDS, and disturbances as [Model Context Protocol](https://modelcontextprotocol.io) tools, so an assistant like Claude can run simulations directly:
   ```bash
-  pip install -e './server[mcp]'
+  pip install "tensa[mcp]"          # from a source checkout: pip install -e "./server[mcp]"
   tensa mcp --workspace ~/andes-cases
   ```
 
@@ -107,11 +149,21 @@ GET  /api/sessions/{id}/operating-point    -> bus voltages and angles
 ## Development mode
 
 ```bash
-# Terminal 1: backend
-tensa serve --workspace ~/andes-cases --port 8000
+# Terminal 1: backend (--allow-origin admits the Vite dev server's origin)
+tensa serve --workspace ~/andes-cases --port 8000 --allow-origin http://127.0.0.1:5173
 
 # Terminal 2: frontend with hot reload
-cd web && VITE_ANDES_PORT=8000 pnpm dev    # -> http://localhost:5173
+cd web
+VITE_ANDES_PORT=8000 pnpm dev    # -> http://127.0.0.1:5173
+```
+
+Open the UI at `http://127.0.0.1:5173`, not `localhost:5173`: the server only accepts the origin it was told about, and a different spelling gets a 400. In PowerShell, set the variable on its own line (`VITE_ANDES_PORT=8000 pnpm dev` is POSIX-only):
+
+```powershell
+# Terminal 2: frontend with hot reload
+cd web
+$env:VITE_ANDES_PORT = "8000"
+pnpm dev
 ```
 
 ## Network access and security
@@ -119,8 +171,7 @@ cd web && VITE_ANDES_PORT=8000 pnpm dev    # -> http://localhost:5173
 To reach the app from another machine on your network:
 
 ```bash
-tensa serve --workspace ~/andes-cases --port 8000 \
-  --bind 0.0.0.0 --allow-origin http://<your-lan-ip>:8000
+tensa serve --workspace ~/andes-cases --port 8000 --bind 0.0.0.0 --allow-origin http://<your-lan-ip>:8000
 ```
 
 Security note: TENSA has no authentication. It binds to `127.0.0.1` (loopback) by default and trusts the local OS user. Binding to a non-loopback address opens the API to everyone who can reach that interface, including case-file parsing, which evaluates expressions. Only do this on a network you trust, and do not load untrusted case files in that mode. See [SECURITY.md](./SECURITY.md) for details.

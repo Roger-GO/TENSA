@@ -45,7 +45,7 @@ Disturbances:    POST/GET /sessions/{id}/disturbances
               (change parameter at t; method one of + - * / =; use alterable_params to discover valid src names)
 Elements:        GET /topology/schema (every buildable model + typed params) · POST /sessions/{id}/elements (add)
                  PUT/DELETE /sessions/{id}/elements/{model}/{idx} (edit/delete)
-                 POST /sessions/{id}/blank (start empty system) · POST /sessions/{id}/save (write case file)
+                 POST /sessions/{id}/blank (start empty system) · POST /sessions/{id}/save (write case file; format xlsx, json or raw)
                  POST /sessions/{id}/undo-last-edit
 Jobs:            GET /sessions/{id}/jobs[?kind=&status=] · GET/DELETE /sessions/{id}/jobs/{job_id}
                  (statuses: pending running done failed cancelled)
