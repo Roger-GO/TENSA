@@ -17,11 +17,13 @@ import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from tensa.core import session_dirs
+from tensa.core.clone_manager import CloneManager
 from tensa.core.session import SessionManager
 from tensa.core.session_dirs import (
     OWNER_MARKER_NAME,
@@ -550,3 +552,63 @@ def test_closing_a_session_removes_a_dir_with_read_only_files(
     SessionManager(workspace=str(tmp_path))._cleanup_clone_dir(session_id)
     assert not root.exists()
     assert refused
+
+
+class _FakeWrapper(SimpleNamespace):
+    """The three things ``CloneManager`` reads from a ``Wrapper``."""
+
+    reloads: int = 0
+
+    def reload_case(self) -> None:
+        self.reloads += 1
+
+
+def _clone_manager(workspace: Path, session_id: str) -> tuple[CloneManager, _FakeWrapper]:
+    """A ``CloneManager`` over a read-only case file. ``shutil.copy2`` carries the
+    read-only bit into the clone, as it does on Windows."""
+    case = workspace / "case.raw"
+    if not case.exists():
+        case.write_text("case\n", encoding="utf-8")
+        case.chmod(0o444)
+    wrapper = _FakeWrapper(_case_path=case, _addfiles=[])
+    mgr = CloneManager(wrapper=wrapper, workspace=workspace, session_id=session_id)  # type: ignore[arg-type]
+    return mgr, wrapper
+
+
+def test_init_clone_replaces_a_leftover_clone_of_a_read_only_case_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fresh manager (the worker was respawned) finds the previous clone dir,
+    whose copy of the case file is read-only, and has to remove it first."""
+    refused = _windows_like_unlink(monkeypatch)
+    session_id = uuid.uuid4().hex
+    first, _ = _clone_manager(tmp_path, session_id)
+    first.init_clone()
+    assert first.clone_dir is not None
+    (first.clone_dir / "leftover.txt").write_text("from the first clone\n", encoding="utf-8")
+
+    second, _ = _clone_manager(tmp_path, session_id)
+    result = second.init_clone()
+
+    assert result.already_initialized is False
+    assert refused, "the read-only file was never refused, so the handler was not exercised"
+    assert second.clone_dir is not None
+    assert sorted(p.name for p in second.clone_dir.iterdir()) == ["case.raw"]
+
+
+def test_reset_clone_deletes_a_clone_of_a_read_only_case_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    refused = _windows_like_unlink(monkeypatch)
+    mgr, wrapper = _clone_manager(tmp_path, uuid.uuid4().hex)
+    mgr.init_clone()
+    clone_dir = mgr.clone_dir
+    assert clone_dir is not None and clone_dir.is_dir()
+
+    mgr.reset_clone()
+
+    assert not clone_dir.exists()
+    assert refused, "the read-only file was never refused, so the handler was not exercised"
+    assert mgr.clone_dir is None
+    assert not mgr.is_initialized
+    assert wrapper.reloads == 1
