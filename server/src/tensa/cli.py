@@ -157,13 +157,12 @@ def serve(
     log = logging.getLogger("tensa.serve")
 
     # Windows: emit the trust-model caveat (workspace boundary is best-effort
-    # on Windows in v0.1).
+    # on Windows).
     if sys.platform == "win32":
         log.warning(
             "Windows detected: workspace path canonicalization is best-effort. "
             "ANDES secondary file reads may bypass the workspace boundary; "
-            "do not load untrusted case files until kernel-level enforcement "
-            "lands in a future plan."
+            "do not load untrusted case files on Windows."
         )
 
     # Non-loopback bind warning (security)

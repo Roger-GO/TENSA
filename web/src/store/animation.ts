@@ -27,7 +27,7 @@
  * crosses a threshold actually re-render — which is the make-or-break
  * optimization at 14 → 39 → 140-bus scale.
  *
- * Lifecycle: cleared on auth clear (cross-slice cascade in
+ * Lifecycle: cleared when the session clears (cross-slice cascade in
  * ``store/index.ts`` — added there to keep the cascade complete).
  * Cleared per-run on ``clearOverlayForRun``.
  */
@@ -70,7 +70,7 @@ export interface AnimationState {
    */
   clearOverlayForRun: (runId: string) => void;
 
-  /** Clear every run's overlay (auth/session cascade). */
+  /** Clear every run's overlay (session cascade). */
   clearAll: () => void;
 }
 

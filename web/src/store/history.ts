@@ -11,8 +11,8 @@
  * later; the basic version landed in Unit 9 only owns drawer
  * open/close + a transient toast message.
  *
- * Lifecycle: not persisted across sessions. Closes on session change /
- * auth clear (the drawer is meaningless against a vanished session).
+ * Lifecycle: not persisted across sessions. Closes on session change (the
+ * drawer is meaningless against a vanished session).
  */
 import { create } from 'zustand';
 
@@ -32,7 +32,7 @@ export interface HistoryState {
   closeDrawer: () => void;
   /** Set or clear the inline toast message. */
   setToast: (message: string | null) => void;
-  /** Reset every transient field (used on session change / auth clear). */
+  /** Reset every transient field (used on session change). */
   reset: () => void;
 }
 

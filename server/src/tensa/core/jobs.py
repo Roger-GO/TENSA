@@ -24,8 +24,8 @@ mutation). All reads return defensive copies so callers can't mutate
 internal state through a returned reference.
 
 This module is read-only with respect to the rest of the substrate: no
-worker, no FastAPI, no ANDES. Unit 5a (Phase 2) adds the ``/jobs`` routes
-that expose the registry over HTTP + WS.
+worker, no FastAPI, no ANDES. The ``/jobs`` routes in
+``tensa.api.routes.jobs`` expose the registry over HTTP + WS.
 """
 
 from __future__ import annotations

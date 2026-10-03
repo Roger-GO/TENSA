@@ -2,8 +2,9 @@
  * Session slice. Tracks the active substrate session (the worker subprocess
  * the substrate spawned on `POST /sessions`).
  *
- * Lifecycle: cleared when auth clears (cross-slice cascade in
- * `store/index.ts`). Cleared when the user explicitly closes the session.
+ * Lifecycle: clearing the id cascades to the case, power-flow, run and other
+ * session-scoped slices (cross-slice cascade in `store/index.ts`). Cleared
+ * when the user explicitly closes the session.
  * On a 404 from a session-scoped endpoint, the queries layer is expected
  * to call `resetSession()` (Unit 5) which clears the id AND raises the
  * `recoveryInProgress` flag — the WorkspaceFilePicker's `useEnsureSession`
@@ -11,7 +12,7 @@
  *
  * NOT persisted — the session id is only valid for the current substrate
  * process; persisting it across reloads would just produce a 404 on the
- * first request. The auth token is the only thing worth persisting.
+ * first request.
  *
  * v2.0 polish Unit 2 — recovery state machine + stuck detection. The
  * surface state machine is:

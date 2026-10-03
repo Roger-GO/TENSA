@@ -24,8 +24,8 @@ WebSocket surface:
   progress?, problem?}`` envelope per subsequent transition for ANY job in the
   session. Multiple subscribers each receive every broadcast with no loss.
 
-Routine routes are untouched in this unit — the registry has read-only
-consumers here plus the cancel transition; population lands in Unit 5b.
+The routine routes and the session manager fill the registry; this module
+only reads it and drives the cancel transition.
 """
 
 from __future__ import annotations

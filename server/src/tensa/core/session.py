@@ -1,11 +1,11 @@
 """SessionManager: spawns one worker subprocess per session, marshals
-request/response over Pipes, owns idle-timeout reaping and watchdog
+request/response over Pipes, owns idle-timeout reaping and the shutdown
 escalation.
 
 The SessionManager runs in the FastAPI parent process. It is the only place
-where worker subprocesses are spawned. The FastAPI routers (Unit 4+) call its
-async methods; the SessionManager handles the synchronous Pipe IPC via a
-thread pool.
+where worker subprocesses are spawned. The FastAPI routers call its async
+methods; the SessionManager handles the synchronous Pipe IPC via a thread
+pool.
 
 Concurrency model:
 
@@ -16,10 +16,10 @@ Concurrency model:
   seconds and calls ``close()`` on any session whose ``last_active`` is
   older than ``idle_timeout``.
 
-Watchdog escalation for streaming TDS lands in Unit 6 alongside the
-WebSocket plumbing — Phase A's Unit 2 gives us the foundation: clean spawn,
-batch RPC, abort, and reap. That's enough to satisfy Units 4-5 (PF + TDS
-batch) directly.
+A running TDS (batch or streaming) is stopped cooperatively: ``signal_abort``
+sets an event the worker checks on every ``callpert`` step. Closing a session
+escalates: a ``shutdown`` request, then ``terminate()``, then ``kill()`` if the
+worker is still alive.
 """
 
 from __future__ import annotations

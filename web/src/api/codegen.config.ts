@@ -8,7 +8,7 @@
  *
  * The flow lives in `web/scripts/regenerate-api-types.sh`:
  *
- * 1. Boot a temp substrate with a tmp token + workspace.
+ * 1. Boot a temp substrate with a temporary workspace.
  * 2. Wait for `/openapi.json`.
  * 3. `pnpm exec openapi-typescript /tmp/andes-openapi.json -o
  *    src/api/generated.ts`.

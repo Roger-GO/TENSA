@@ -14,9 +14,8 @@
  * the run history drawer) without coupling each call site to a Zustand
  * subscribe.
  *
- * Lifecycle: not persisted across sessions. Closes on session change /
- * auth clear because the dialog can't meaningfully re-open against a
- * vanished session.
+ * Lifecycle: not persisted across sessions. Closes on session change
+ * because the dialog can't meaningfully re-open against a vanished session.
  */
 import { create } from 'zustand';
 
@@ -53,7 +52,7 @@ export interface BundleState {
   markSuccess: (filename: string, previewFiles: readonly BundlePreviewFile[]) => void;
   /** Mark the export as failed; the ``message`` is rendered inline. */
   markError: (message: string) => void;
-  /** Reset everything (used on session change / auth clear via the cascade). */
+  /** Reset everything (used on session change via the cascade). */
   reset: () => void;
 }
 

@@ -7,8 +7,8 @@
 /**
  * ReportDialog (Unit 4 of the v2.0 plan).
  *
- * Modal that renders human-readable reports from ``PFlow.report()``
- * and ``TDS.summary()`` (the EIG variant lands in Unit 6). The dialog
+ * Modal that renders human-readable reports from ``PFlow.report()``,
+ * ``TDS.summary()`` and ``EIG.report()``. The dialog
  * has a tab strip per routine; each tab shows the verbatim plain-text
  * body plus a :class:`LatexCopyButton` that serialises the structured
  * tables for paste into a paper.

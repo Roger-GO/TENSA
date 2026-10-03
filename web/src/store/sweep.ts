@@ -14,8 +14,8 @@
  * variables × 120 Hz; the sweep is a coarse-grained sensitivity tool,
  * not a full per-iteration time-series store.
  *
- * Lifecycle: not persisted across sessions. Cleared on session change /
- * auth clear via the cross-slice cascade in ``src/store/index.ts``.
+ * Lifecycle: not persisted across sessions. Cleared on session change via
+ * the cross-slice cascade in ``src/store/index.ts``.
  */
 import { create } from 'zustand';
 
@@ -98,7 +98,7 @@ export interface SweepStoreState {
    * the History drawer's per-sweep "Reset" button.
    */
   resetSweep: (sweepId: string) => void;
-  /** Clear every sweep (called by the auth-clear cascade in store/index.ts). */
+  /** Clear every sweep (called by the session-clear cascade in store/index.ts). */
   clearSweeps: () => void;
   /**
    * Set the active sweep id directly. Used when the user clicks a

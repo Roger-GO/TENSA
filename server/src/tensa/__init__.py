@@ -1,13 +1,11 @@
 """tensa — web-based GUI substrate for the ANDES power-system simulator.
 
-This is Phase A: the Python wrapper around ANDES + FastAPI HTTP/WebSocket
-surface. The substrate is independently usable — agents, SDKs, and curl can
-drive ANDES through it without any UI. v0.1+ adds a React UI in a separate
-plan; this package is the foundation it sits on.
+The package is a Python wrapper around ANDES plus the FastAPI HTTP/WebSocket
+surface and the React UI it serves. The substrate is independently usable:
+agents, SDKs, and curl can drive ANDES through it without any UI.
 
 Trust model (canonical statement; AGENTS.md links here)
 -------------------------------------------------------
-v0.1 trust model:
 
 * The local OS user is trusted to execute arbitrary code. Case files contain
   Python expressions evaluated by ANDES at parse time, and the local user is
@@ -24,13 +22,12 @@ v0.1 trust model:
   ``path=``) is logged via ``sys.audit`` as best-effort visibility (Python-level
   only — does not catch C-extension reads from numpy/pandas/openpyxl). For
   actual workspace enforcement, kernel-level controls (Linux seccomp,
-  Landlock) are required and are deferred to the SaaS phase.
+  Landlock) are required, and they are not implemented.
 * On Windows, path canonicalization is best-effort: the workspace boundary is
   not enforced for ANDES-internal reads, and a stderr warning is emitted at
   startup.
 
-See ``AGENTS.md`` and ``docs/plans/2026-05-07-001-feat-tensa-phase-a-substrate-plan.md``
-for the full design.
+See ``AGENTS.md`` and ``SECURITY.md``.
 """
 
 from importlib import metadata as _metadata

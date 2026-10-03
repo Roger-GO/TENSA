@@ -2,10 +2,9 @@
  * MAT (Matlab v5) export client.
  *
  * The substrate handles the actual file format — `scipy.io.savemat`
- * over the EIG state matrix is the v2.0 plan choice (Unit 6's EIG
- * routine ships the endpoint; this module is the client side that
- * Unit 2 lands so the Export menu can wire MAT today and the route
- * goes live as soon as Unit 6 lands).
+ * over the EIG state matrix is the v2.0 plan choice (the EIG routine
+ * serves the endpoint; this module is the client side the Export menu
+ * calls).
  *
  * The JS MAT-writer ecosystem has no MIT-licensed option (verified by
  * the v2.0 plan's KTD-2 auto-fix: `mat-for-js` is GPL-3 + read-only).
@@ -13,8 +12,8 @@
  * format authoritative.
  *
  * Endpoint: `GET /sessions/{id}/eig/state-matrix.mat` →
- * `application/octet-stream`. Returns 404 in v1.5 until Unit 6 lands;
- * the Export menu's tooltip explicitly documents that limitation.
+ * `application/octet-stream`. Returns 409 when EIG has not been run on the
+ * session (404 when the session itself is gone).
  */
 import { NetworkError, ProblemDetailsError } from '@/api/client';
 
@@ -97,9 +96,8 @@ export async function fetchEigStateMatrixMat(
     try {
       body = await response.clone().json();
     } catch {
-      // Empty / non-JSON body — substrate may emit a plain text error
-      // for the 404-stub before Unit 6 lands. Fall through with a
-      // synthesised ProblemDetails.
+      // Empty / non-JSON body — substrate may emit a plain text error.
+      // Fall through with a synthesised ProblemDetails.
     }
     const obj = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
     throw new ProblemDetailsError(

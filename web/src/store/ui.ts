@@ -1,6 +1,6 @@
 /**
  * UI slice. Tracks ephemeral display preferences that don't belong on
- * any of the other slices (auth/session/case/pflow). v0.2 extended this
+ * any of the other slices (session/case/pflow). v0.2 extended this
  * slice with the ``TdsConfigPanel`` form values (tf, h override, vars,
  * max_rate_hz). v3 Unit 15 retired the ``activeRightDockTopPanel``
  * field — the layout slice (``useLayoutStore``) now owns dock state

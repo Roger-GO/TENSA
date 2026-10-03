@@ -26,8 +26,9 @@ import { cn } from '@/lib/cn';
  *
  * - Filename input (workspace-relative; extension auto-derived from
  *   format).
- * - Format radio: xlsx (ANDES native) or json. PSS/E .raw write is NOT
- *   supported by ANDES 2.0 — the modal explains the constraint.
+ * - Format radio: xlsx (ANDES native), raw, or json. ANDES 2.0 has no PSS/E
+ *   writer, so .raw comes from the substrate's own v33 writer
+ *   (`server/src/tensa/core/psse_writer.py`).
  * - Submit fires `useSaveCase()`. On 409 (file exists) the modal flips
  *   to an "Overwrite?" confirmation.
  */

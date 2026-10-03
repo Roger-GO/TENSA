@@ -11,8 +11,8 @@ The canonical real path (with extension) is what we hand to ANDES — *not*
 string to pick the format reader, and fd-paths have no extension.
 
 POSIX-only (Linux + macOS). On Windows, we fall back to ``Path.resolve()``
-with no symlink-race protection — see the trust-model docstring (R23 is
-best-effort on Windows in v0.1).
+with no symlink-race protection — see the trust-model docstring (the
+workspace boundary is best-effort on Windows).
 
 macOS volumes are normally case- and Unicode-normalization-insensitive, and
 ``Path.resolve()`` keeps whatever spelling the caller typed. Directories
@@ -230,7 +230,7 @@ def list_workspace_files(
 ) -> list[Path]:
     """Enumerate workspace files matching ``allowed_extensions``.
 
-    Non-recursive (workspace root only in v0.1). Excludes:
+    Non-recursive (workspace root only). Excludes:
 
     - hidden files (names starting with ``.``)
     - symlinks (``entry.is_symlink()`` true)

@@ -6,8 +6,7 @@
  * ``WS /ws/{id}/jobs/events``) but never mounted it. This hook is that
  * owner: for the CURRENT active session it opens exactly one ``JobStream``,
  * writes every transition into ``useJobsStore`` (the stream does that
- * internally), and disposes the stream on session change / token loss /
- * unmount.
+ * internally), and disposes the stream on session change / unmount.
  *
  * Mounted ONCE at the app root (``App.tsx`` ``AppInner``, beside
  * ``useSessionRecovery``) and NOT gated on whether the Activity panel is

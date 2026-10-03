@@ -250,11 +250,7 @@ function errorJobId(err: unknown): string | undefined {
 }
 
 /**
- * Routine name accepted by ``GET /sessions/{id}/report``. Phase 1
- * (Unit 4) ships ``pflow`` + ``tds``; the substrate accepts ``eig``
- * at the schema level but rejects with 422 until Unit 6 lands. The
- * frontend type widens here so the dialog tab strip can ship the EIG
- * tab in disabled form pre-Unit-6 if the design ever wants it.
+ * Routine name accepted by ``GET /sessions/{id}/report``.
  *
  * Declared at module top so the ``queryKeys`` block (below) can
  * reference it for the ``report`` key factory.
@@ -272,8 +268,7 @@ export const queryKeys = {
   topologySchema: ['topology-schema'] as const,
   /** Alterable-params lookup, scoped per (session, model). */
   alterableParams: (id: SessionId, model: string) => ['alterable-params', id, model] as const,
-  /** Report payload, scoped per (session, routine). Phase 1 (Unit 4) ships
-   *  ``pflow`` + ``tds``; ``eig`` widens in Unit 6. */
+  /** Report payload, scoped per (session, routine). */
   report: (id: SessionId, routine: ReportRoutine) => ['report', id, routine] as const,
   /** EIG result, scoped per session (Unit 6). */
   eig: (id: SessionId) => ['eig', id] as const,

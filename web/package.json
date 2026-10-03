@@ -2,7 +2,7 @@
   "name": "tensa-web",
   "version": "0.4.0",
   "private": true,
-  "description": "TENSA v0.1 UI — load case + auto-SLD + run PF + results overlay.",
+  "description": "TENSA web UI: build and edit a power system, run power flow, TDS, eigenvalue, CPF and state estimation, and read the results.",
   "type": "module",
   "license": "GPL-3.0-or-later",
   "engines": {

@@ -78,7 +78,7 @@ export interface PlotState {
   setPlaying: (runId: string, value: boolean) => void;
   /** Drop a run's plot state entirely (called when a run is reset). */
   resetRun: (runId: string) => void;
-  /** Clear every run's plot state (auth/session cascade). */
+  /** Clear every run's plot state (session cascade). */
   clearAll: () => void;
 }
 

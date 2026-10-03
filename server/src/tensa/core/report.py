@@ -23,8 +23,8 @@ TDS.summary() writes only to a logger; we capture by attaching a
 ``logging.Handler`` to the ``andes.routines.tds`` logger for the
 duration of the call.
 
-EIG report variant lands in Unit 6; the routines literal here will
-widen to ``"eig"`` then.
+``ss.EIG.report()`` is captured the same way as the PFlow report (see
+``_generate_eig_report``).
 """
 
 from __future__ import annotations
@@ -39,10 +39,8 @@ from typing import Literal
 
 from tensa.core.errors import AndesAppError, NoCaseLoadedError
 
-# Public Routine type — Phase 1 (Unit 4) shipped ``pflow`` + ``tds``;
-# Unit 6 widens to include ``eig`` (the EIG report variant). Routes
-# layer enforces this with a 422 for unknown routines so an early-call
-# client gets a polite rejection.
+# Public Routine type. The routes layer enforces it with a 422 for unknown
+# routines so an early-call client gets a polite rejection.
 ReportRoutine = Literal["pflow", "tds", "eig"]
 
 # Maximum characters of plain text we'll buffer in memory. ANDES reports

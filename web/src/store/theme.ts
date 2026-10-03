@@ -2,10 +2,9 @@
  * Theme slice. Owns the user's light / dark / system preference and the
  * derived resolved theme that is actually applied to the DOM.
  *
- * Persistence: ``localStorage`` (NOT ``sessionStorage`` — auth uses
- * sessionStorage because tokens are per-launch; the theme is a UX
- * preference the user expects to survive a tab close + reopen, just
- * like every other web app's dark-mode toggle).
+ * Persistence: ``localStorage`` (NOT ``sessionStorage``): the theme is a UX
+ * preference the user expects to survive a tab close + reopen, just like
+ * every other web app's dark-mode toggle.
  *
  * Mechanism: this slice is the source of truth for the *preference*.
  * The ``useTheme`` hook bridges the slice to the DOM by toggling the

@@ -9,8 +9,8 @@
  * user re-opens it), and last-error / last-fallback messages for
  * inline display.
  *
- * Lifecycle: not persisted across sessions. Resets on session change /
- * auth clear via the cross-slice cascade in ``src/store/index.ts``.
+ * Lifecycle: not persisted across sessions. Resets on session change via
+ * the cross-slice cascade in ``src/store/index.ts``.
  */
 import { create } from 'zustand';
 
