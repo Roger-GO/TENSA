@@ -87,7 +87,7 @@ from tensa.core.stream import (
     pq_idx_values_from_system,
     syngen_idx_values_from_system,
 )
-from tensa.core.wrapper import Wrapper, validate_step_size
+from tensa.core.wrapper import Wrapper, tds_fixed_step, validate_step_size
 
 
 def _set_parent_death_signal() -> None:
@@ -992,24 +992,56 @@ def _handle_run_tds(
     ``{"type": "stream_start", ...}`` message carrying the schema metadata.
     The final ``{"type": "result", ...}`` message lands as usual at end of run.
     """
-    # Checked before the abort bridge starts and before any stream metadata goes
-    # out: the route layers validate ``h`` too, but a bad value must not start a
-    # stream the run then aborts, nor leave a bridge thread polling (a refusal
-    # sets no ``abort_flag``).
+    # Everything the run would refuse for reasons known from the request and the
+    # System's state is checked here, before any stream metadata goes out and
+    # before the abort bridge starts: a refused run must not start a stream the
+    # client then sees fail, nor leave a bridge thread polling (a refusal sets
+    # no ``abort_flag``). The route layers validate ``h`` and the integrator
+    # too; the worker does not rely on that.
     h = validate_step_size(args.get("h"))
+
+    # Unit 16: integrator selection + adaptive-tolerance overrides.
+    # ``integrator`` defaults to ``"trapezoidal"`` so existing callers
+    # (and the streaming WS path which doesn't yet pipe these args)
+    # see no behaviour change. Validation of the literal value lives in
+    # the wrapper; we only normalise the wire shape here.
+    integrator_raw = args.get("integrator", "trapezoidal")
+    if integrator_raw not in ("trapezoidal", "qndf"):
+        raise AndesAppError(
+            f"unknown integrator {integrator_raw!r}; "
+            "expected 'trapezoidal' or 'qndf'"
+        )
+
+    overrides_raw = args.get("tds_config_overrides")
+    tds_config_overrides: dict[str, float] | None = None
+    if overrides_raw is not None:
+        if not isinstance(overrides_raw, dict):
+            raise AndesAppError(
+                "'tds_config_overrides' must be a dict of "
+                "{string → float}; keys are canonical aliases "
+                "(rtol/atol/max_step) or real ss.TDS.config field names"
+            )
+        coerced: dict[str, float] = {}
+        for key, value in overrides_raw.items():
+            if not isinstance(key, str):
+                raise AndesAppError(
+                    f"'tds_config_overrides' keys must be strings, got {type(key).__name__}"
+                )
+            try:
+                coerced[key] = float(value)
+            except (TypeError, ValueError) as exc:
+                raise AndesAppError(
+                    f"'tds_config_overrides[{key!r}]' must be a float-coercible value"
+                ) from exc
+        tds_config_overrides = coerced
+
+    # QNDF on a System that already ran trapezoidally, or an unknown override
+    # key: the same refusals ``Wrapper.run_tds`` raises, asked for up front.
+    wrapper.check_tds_request(integrator_raw, tds_config_overrides)
 
     abort_flag = threading.Event()
     if abort_event.is_set():
         abort_flag.set()
-
-    def _bridge() -> None:
-        while not abort_flag.is_set():
-            if abort_event.wait(timeout=0.1):
-                abort_flag.set()
-                return
-
-    bridge_thread = threading.Thread(target=_bridge, name="abort-bridge", daemon=True)
-    bridge_thread.start()
 
     stream = bool(args.get("stream"))
     on_step: Callable[[float, Any], None] | None = None
@@ -1075,9 +1107,11 @@ def _handle_run_tds(
         if not bool(getattr(ss.PFlow, "converged", False)):
             ss.PFlow.run()
 
-        # Read the integrator config so the algorithm label can be honest:
-        # boxcar mean over adaptive-step samples is best-effort.
-        fixed_step = bool(getattr(ss.TDS.config, "fixt", False))
+        # Whether the run steps at a fixed size, so the algorithm label can be
+        # honest: boxcar mean over adaptive-step samples is best-effort. Read
+        # from the request, not from ``ss.TDS.config.fixt``, which ``run_tds``
+        # has not set yet and which still holds an earlier run's value.
+        fixed_step = tds_fixed_step(integrator_raw, tds_config_overrides)
 
         try:
             aggregator = StreamAggregator(
@@ -1161,40 +1195,17 @@ def _handle_run_tds(
 
         on_step = _emit
 
-    # Unit 16: integrator selection + adaptive-tolerance overrides.
-    # ``integrator`` defaults to ``"trapezoidal"`` so existing callers
-    # (and the streaming WS path which doesn't yet pipe these args)
-    # see no behaviour change. Validation of the literal value lives in
-    # the wrapper; we only normalise the wire shape here.
-    integrator_raw = args.get("integrator", "trapezoidal")
-    if integrator_raw not in ("trapezoidal", "qndf"):
-        raise AndesAppError(
-            f"unknown integrator {integrator_raw!r}; "
-            "expected 'trapezoidal' or 'qndf'"
-        )
+    # Started last, once nothing ahead of the run can refuse: only the run's
+    # ``finally`` below sets ``abort_flag``, so a bridge started any earlier
+    # would keep polling after a refusal.
+    def _bridge() -> None:
+        while not abort_flag.is_set():
+            if abort_event.wait(timeout=0.1):
+                abort_flag.set()
+                return
 
-    overrides_raw = args.get("tds_config_overrides")
-    tds_config_overrides: dict[str, float] | None = None
-    if overrides_raw is not None:
-        if not isinstance(overrides_raw, dict):
-            raise AndesAppError(
-                "'tds_config_overrides' must be a dict of "
-                "{string → float}; keys are canonical aliases "
-                "(rtol/atol/max_step) or real ss.TDS.config field names"
-            )
-        coerced: dict[str, float] = {}
-        for key, value in overrides_raw.items():
-            if not isinstance(key, str):
-                raise AndesAppError(
-                    f"'tds_config_overrides' keys must be strings, got {type(key).__name__}"
-                )
-            try:
-                coerced[key] = float(value)
-            except (TypeError, ValueError) as exc:
-                raise AndesAppError(
-                    f"'tds_config_overrides[{key!r}]' must be a float-coercible value"
-                ) from exc
-        tds_config_overrides = coerced
+    bridge_thread = threading.Thread(target=_bridge, name="abort-bridge", daemon=True)
+    bridge_thread.start()
 
     try:
         result = wrapper.run_tds(

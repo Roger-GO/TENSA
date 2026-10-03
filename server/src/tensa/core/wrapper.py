@@ -1511,6 +1511,45 @@ class Wrapper:
             bus_angles=bus_angles,
         )
 
+    def check_tds_request(
+        self,
+        integrator: Literal["trapezoidal", "qndf"] = "trapezoidal",
+        tds_config_overrides: dict[str, float] | None = None,
+    ) -> None:
+        """Raise ``SetupFailedError`` if :meth:`run_tds` would refuse this request.
+
+        Covers the refusals that follow from the request and the System's
+        state: QNDF on a System that already ran trapezoidally, and an override
+        key that is neither a canonical alias nor a real ``ss.TDS.config``
+        field. ``run_tds`` calls it before any config write. A caller that
+        sends something ahead of the run (the streaming handler's stream-start
+        frame) calls it first, so a refused run never opens a stream. It writes
+        nothing, so a refusal leaves the System as it was.
+        """
+        ss = self._require_loaded()
+
+        # ANDES builds its integrator object once, in ``TDS.init()``, and a
+        # System that has already run keeps it. QNDF also needs the history
+        # cache ``init()`` builds, so it cannot be swapped in afterwards: refuse
+        # rather than run with the trapezoidal object under a QNDF request.
+        if (
+            integrator == "qndf"
+            and bool(getattr(ss.TDS, "initialized", False))
+            and not bool(getattr(ss.TDS.method, "requires_variable_step", False))
+        ):
+            raise SetupFailedError(
+                "QNDF cannot replace the trapezoidal integrator of a System that "
+                "has already run a time-domain simulation"
+            )
+
+        for key in tds_config_overrides or {}:
+            if not hasattr(ss.TDS.config, _TDS_OVERRIDE_ALIASES.get(key, key)):
+                raise SetupFailedError(
+                    f"unknown TDS override key {key!r}; expected a "
+                    f"wrapper-canonical alias {list(_TDS_OVERRIDE_ALIASES)!r} or "
+                    f"a real ss.TDS.config field name"
+                )
+
     def run_tds(
         self,
         tf: float,
@@ -1576,21 +1615,9 @@ class Wrapper:
         ss = self._require_loaded()
         self._ensure_setup()
 
-        # ANDES builds its integrator object once, in ``TDS.init()``, and a
-        # System that has already run keeps it. QNDF also needs the history
-        # cache ``init()`` builds, so it cannot be swapped in afterwards: refuse
-        # rather than run with the trapezoidal object under a QNDF request.
-        # This comes before any config write so a refusal leaves the System
-        # as it was.
-        if (
-            integrator == "qndf"
-            and bool(getattr(ss.TDS, "initialized", False))
-            and not bool(getattr(ss.TDS.method, "requires_variable_step", False))
-        ):
-            raise SetupFailedError(
-                "QNDF cannot replace the trapezoidal integrator of a System that "
-                "has already run a time-domain simulation; reload the case first"
-            )
+        # Refusals that depend only on the request and the System's state. They
+        # come before any config write, so a refusal leaves the System as it was.
+        self.check_tds_request(integrator, tds_config_overrides)
 
         # ANDES TDS requires a converged power-flow solution as initial conditions.
         # Run PF first if it hasn't been solved (idempotent — re-running converged
@@ -1648,25 +1675,13 @@ class Wrapper:
         # aliases (``rtol`` / ``atol`` / ``max_step``) that map to the
         # ANDES field names ``reltol`` / ``abstol`` / ``dtmax``. Any other
         # key is treated as a literal ``ss.TDS.config`` field name and is
-        # set directly after validating it exists on the live config — this
-        # is what the GUI free-form override editor forwards (e.g. ``tol``,
-        # ``max_iter``). A key that is neither a canonical alias nor a real
-        # config field raises (the wrapper never sets a non-existent attr).
+        # set directly — this is what the GUI free-form override editor
+        # forwards (e.g. ``tol``, ``max_iter``). ``check_tds_request`` has
+        # already refused a key that is neither a canonical alias nor a real
+        # config field (the wrapper never sets a non-existent attr).
         if tds_config_overrides:
-            _OVERRIDE_MAP = {
-                "rtol": "reltol",
-                "atol": "abstol",
-                "max_step": "dtmax",
-            }
             for key, value in tds_config_overrides.items():
-                andes_field = _OVERRIDE_MAP.get(key, key)
-                if not hasattr(ss.TDS.config, andes_field):
-                    raise SetupFailedError(
-                        f"unknown TDS override key {key!r}; expected a "
-                        f"wrapper-canonical alias {list(_OVERRIDE_MAP)!r} or "
-                        f"a real ss.TDS.config field name"
-                    )
-                setattr(ss.TDS.config, andes_field, value)
+                setattr(ss.TDS.config, _TDS_OVERRIDE_ALIASES.get(key, key), value)
 
         callpert_count = 0
 
@@ -4496,6 +4511,37 @@ def _sanitize_message(message: str) -> str:
     install-tree details. Replaces matches with ``<path>``.
     """
     return _PATH_PATTERN.sub("<path>", message)
+
+
+# Wrapper-canonical names for the common adaptive knobs in
+# ``run_tds(tds_config_overrides=...)``, mapped to the ``ss.TDS.config`` fields
+# ANDES reads. Any other key must already be a real ``ss.TDS.config`` field.
+_TDS_OVERRIDE_ALIASES: dict[str, str] = {
+    "rtol": "reltol",
+    "atol": "abstol",
+    "max_step": "dtmax",
+}
+
+
+def tds_fixed_step(
+    integrator: Literal["trapezoidal", "qndf"] = "trapezoidal",
+    tds_config_overrides: dict[str, float] | None = None,
+) -> bool:
+    """Whether :meth:`Wrapper.run_tds` steps at a fixed size for this request.
+
+    Read from the request, not from ``ss.TDS.config.fixt``: ``run_tds`` sets
+    ``fixt`` per run, so before it runs the config holds whatever an earlier
+    run (or ANDES's default of 1) left there. QNDF needs variable step, and
+    ANDES sets ``fixt = 0`` for it. A trapezoidal run is fixed-step unless a
+    ``fixt`` override, applied after the wrapper's own, says otherwise, or a
+    ``tstep`` override is not positive, which ANDES turns into variable step.
+    """
+    if integrator == "qndf":
+        return False
+    overrides = tds_config_overrides or {}
+    if not overrides.get("fixt", 1):
+        return False
+    return not (overrides.get("tstep", 1.0) <= 0.0)
 
 
 def validate_step_size(h: object) -> float | None:

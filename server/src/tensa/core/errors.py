@@ -98,8 +98,11 @@ class SetupFailedError(AndesAppError):
 
     recovery_kind: str | None = "reload-case"
 
+    # Ends every message; routes that name an endpoint instead strip it.
+    RECOVERY_HINT = "; call reload_case() to recover"
+
     def __init__(self, detail: str) -> None:
-        super().__init__(f"ANDES setup() failed: {detail}; call reload_case() to recover")
+        super().__init__(f"ANDES setup() failed: {detail}{self.RECOVERY_HINT}")
         self.detail = detail
 
 

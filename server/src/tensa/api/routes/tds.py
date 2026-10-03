@@ -23,6 +23,7 @@ from tensa.api.schemas import (
     TdsBatchResult,
     TdsRunRequest,
 )
+from tensa.core.errors import SetupFailedError
 from tensa.core.session import (
     SessionExpiredError,
     SessionManager,
@@ -51,11 +52,14 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
 
     The shared mapper owns the canonical category→status table (``no-case-loaded``
     → 409, ``SetupFailedError`` → 422), recovery, and the body shape. This route
-    only appends the documented "reload to recover" hint to ``SetupFailedError``.
+    only swaps the hint ``SetupFailedError`` ends with (``reload_case()``, the
+    Python API's wording) for the documented "reload to recover" endpoint, so
+    the caller reads one hint, not both.
     """
     if exc.category == "SetupFailedError":
+        message = exc.detail.removesuffix(SetupFailedError.RECOVERY_HINT)
         exc.detail = (
-            f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
+            f"{message} — call POST /api/sessions/{{id}}/reload to recover."
         )
     return map_worker_error(exc)
 

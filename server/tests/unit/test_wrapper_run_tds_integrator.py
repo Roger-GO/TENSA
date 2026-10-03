@@ -16,8 +16,8 @@ import pytest
 
 pytest.importorskip("andes")
 
-from tensa.core.errors import SetupFailedError
-from tensa.core.wrapper import Wrapper, validate_step_size
+from tensa.core.errors import NoCaseLoadedError, SetupFailedError
+from tensa.core.wrapper import Wrapper, tds_fixed_step, validate_step_size
 
 
 def _ieee14_raw() -> Path:
@@ -220,7 +220,7 @@ def test_run_tds_qndf_refuses_a_system_that_already_ran_trapezoidally(
         return (cfg.method, int(cfg.fixt), float(cfg.tstep), float(cfg.tf))
 
     before = _config()
-    with pytest.raises(SetupFailedError, match="reload the case"):
+    with pytest.raises(SetupFailedError, match="cannot replace the trapezoidal integrator"):
         w.run_tds(tf=0.3, h=0.005, integrator="qndf")
     assert _config() == before
     assert type(ss.TDS.method).__name__ == "Trapezoid"
@@ -238,6 +238,116 @@ def test_run_tds_qndf_continues_a_system_that_already_runs_qndf(
     w.run_tds(tf=0.3, integrator="qndf")
     assert type(ss.TDS.method).__name__ == "QNDF"
     ss.TDS.run.assert_called_once()  # type: ignore[attr-defined]
+
+
+def _tds_config(w: Wrapper) -> tuple[object, ...]:
+    cfg = w._require_loaded().TDS.config  # noqa: SLF001
+    return (cfg.method, int(cfg.fixt), float(cfg.tstep), float(cfg.tf))
+
+
+# ---- check_tds_request: the refusals a caller can ask for up front -----------
+#
+# The streaming handler sends its stream-start frame before ``run_tds`` runs, so
+# it asks the wrapper whether the run would be refused first.
+
+
+def test_check_tds_request_refuses_qndf_on_a_system_that_ran_trapezoidally(
+    loaded_wrapper: Wrapper,
+) -> None:
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    ss.TDS.initialized = True  # as after a completed run; the object is Trapezoid
+    before = _tds_config(w)
+    with pytest.raises(SetupFailedError, match="cannot replace the trapezoidal integrator"):
+        w.check_tds_request("qndf")
+    assert _tds_config(w) == before
+
+
+def test_check_tds_request_refuses_an_unknown_override_key(
+    loaded_wrapper: Wrapper,
+) -> None:
+    w = loaded_wrapper
+    before = _tds_config(w)
+    with pytest.raises(SetupFailedError, match="unknown TDS override key 'bogus'"):
+        w.check_tds_request("trapezoidal", {"rtol": 1e-3, "bogus": 1.0})
+    assert _tds_config(w) == before
+
+
+def test_check_tds_request_accepts_every_runnable_request(
+    loaded_wrapper: Wrapper,
+) -> None:
+    """Nothing the wrapper would carry out is refused, and checking writes
+    nothing: the same request still runs afterwards."""
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    overrides = {"rtol": 1e-3, "atol": 1e-6, "max_step": 0.05, "fixt": 0, "tol": 1e-5}
+    before = _tds_config(w)
+
+    # A System that has not run yet takes either integrator.
+    w.check_tds_request("trapezoidal")
+    w.check_tds_request("qndf", overrides)
+    assert _tds_config(w) == before
+
+    # One that already runs QNDF keeps it, and can go back to trapezoidal.
+    ss.TDS.set_method("qndf")
+    ss.TDS.initialized = True
+    w.check_tds_request("qndf")
+    w.check_tds_request("trapezoidal", overrides)
+
+    # So does one that ran trapezoidally and stays on it.
+    ss.TDS.set_method("trapezoid")
+    w.check_tds_request("trapezoidal")
+
+
+def test_check_tds_request_needs_a_loaded_case() -> None:
+    with pytest.raises(NoCaseLoadedError):
+        Wrapper().check_tds_request("trapezoidal")
+
+
+def test_run_tds_unknown_override_key_leaves_the_system_untouched(
+    loaded_wrapper: Wrapper,
+) -> None:
+    """The refusal comes before the step size, integrator, and ``tf`` are
+    written, so a rejected request cannot change the next run's configuration."""
+    w = loaded_wrapper
+    before = _tds_config(w)
+    with pytest.raises(SetupFailedError, match="unknown TDS override key"):
+        w.run_tds(
+            tf=0.7,
+            h=0.005,
+            integrator="qndf",
+            tds_config_overrides={"bogus": 1.0},
+        )
+    assert _tds_config(w) == before
+
+
+# ---- tds_fixed_step: what a request will do, read from the request ----------
+
+
+@pytest.mark.parametrize(
+    ("integrator", "overrides", "expected"),
+    [
+        ("trapezoidal", None, True),
+        ("trapezoidal", {}, True),
+        ("trapezoidal", {"rtol": 1e-3, "max_step": 0.05}, True),
+        ("trapezoidal", {"fixt": 1}, True),
+        ("trapezoidal", {"tstep": 0.002}, True),
+        # An explicit ``fixt`` override is applied after the wrapper's own.
+        ("trapezoidal", {"fixt": 0}, False),
+        ("trapezoidal", {"fixt": 0.0}, False),
+        # ANDES turns a non-positive ``tstep`` into variable-step.
+        ("trapezoidal", {"tstep": 0.0}, False),
+        ("trapezoidal", {"tstep": -0.01}, False),
+        # QNDF needs variable step: ANDES sets ``fixt = 0`` for it.
+        ("qndf", None, False),
+        ("qndf", {"fixt": 1}, False),
+        ("qndf", {"max_step": 0.05}, False),
+    ],
+)
+def test_tds_fixed_step_follows_the_request(
+    integrator: str, overrides: dict[str, float] | None, expected: bool
+) -> None:
+    assert tds_fixed_step(integrator, overrides) is expected  # type: ignore[arg-type]
 
 
 # ---- step size (h -> ss.TDS.config.tstep) --------------------------------

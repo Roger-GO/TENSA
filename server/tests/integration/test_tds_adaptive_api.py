@@ -216,7 +216,8 @@ async def test_run_tds_qndf_after_a_trapezoidal_run_asks_for_a_reload(
         f"/api/sessions/{sid}/tds", json={"tf": 1.0, "integrator": "qndf"}
     )
     assert refused.status_code == 422, refused.text
-    assert "reload" in refused.json()["detail"].lower()
+    # One hint to reload, not the wrapper's plus the route's.
+    assert refused.json()["detail"].lower().count("reload") == 1, refused.text
 
     reload_resp = await client.post(f"/api/sessions/{sid}/reload")
     assert reload_resp.status_code == 200, reload_resp.text
