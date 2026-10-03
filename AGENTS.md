@@ -9,7 +9,7 @@ This file is for any agent (human or AI) working in this repo. Read it before to
 
 ## Pinned versions
 
-- **Python**: 3.12+ (development on 3.12; CI matrix may extend later)
+- **Python**: 3.12+ (development on 3.12; CI runs 3.12 and 3.13 on Linux, macOS arm64, and Windows)
 - **FastAPI**: `>=0.119,<0.120`
 - **ANDES**: `>=2.0,<3.0` (2.0.0 is the verified-against version; `server/ANDES_VERSIONS.md` tracks the seven API contracts the substrate depends on)
 - **pyarrow**: latest stable (pinned in pyproject.toml at install time)
@@ -45,6 +45,7 @@ The trust model lives in the top-level docstring of `server/src/tensa/__init__.p
 - **Tests live alongside the package**:
   - `server/tests/{unit,integration,acceptance}/` — Python; acceptance tests run only with `pytest -m acceptance`.
   - `web/tests/{unit,e2e}/` — TypeScript; `pnpm test` (Vitest) for unit, `pnpm test:e2e` (Playwright) for e2e. The e2e suite spawns its own dev server but expects the substrate to be running.
+  - `scripts/ci-matrix.sh [all|lint|unit|smoke|full]` runs the CI stages locally. The `smoke` marker tags the one cross-platform test (real server, worker, PF, short TDS) that macOS and Windows run besides the unit tests. Coverage: `pytest --cov` in `server/`, `pnpm test:coverage` in `web/`.
 - **Style**:
   - Python: `ruff check` (lint) and `mypy --strict` (types) on `server/src/`. Both must pass before commit.
   - TypeScript: `pnpm lint` (ESLint, `--max-warnings 0`) and `pnpm typecheck` (TS strict + `noUncheckedIndexedAccess`) on `web/`. `pnpm format:check` (Prettier) must pass.

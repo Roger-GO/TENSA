@@ -36,11 +36,16 @@ All of these must pass before a PR is merged (CI enforces them):
 | Server lint | `ruff check server/src server/tests` |
 | Server types | `mypy --strict server/src` |
 | Server tests | `cd server && PYTHONPATH=src pytest tests/unit tests/integration` |
+| Server smoke test | `cd server && pytest -m smoke tests/integration` (starts a real server and worker; macOS and Windows CI run it alongside the unit tests) |
+| Server coverage | `cd server && pytest -m "not acceptance" --cov --cov-report=html` (report in `server/htmlcov`) |
 | Server acceptance | `cd server && PYTHONPATH=src pytest tests/acceptance -m acceptance` (slow; runs real ANDES sims) |
 | Web types | `cd web && pnpm typecheck` |
 | Web lint/format | `cd web && pnpm lint && pnpm format:check` |
 | Web tests | `cd web && pnpm test` |
+| Web coverage | `cd web && pnpm test:coverage` (report in `web/coverage`) |
 | Web build | `cd web && pnpm build` |
+
+CI runs the server tests on Linux, macOS (Apple silicon), and Windows with Python 3.12 and 3.13. `scripts/ci-matrix.sh [all|lint|unit|smoke|full]` runs the same stages locally.
 
 ## Conventions
 
