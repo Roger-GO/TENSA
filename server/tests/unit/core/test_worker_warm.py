@@ -141,13 +141,18 @@ class _FakeConnection:
 @pytest.fixture
 def events(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Run ``worker_main`` in this process without its process-wide side effects
-    (the SIGINT handler, the parent-death signal, the macOS orphan thread), and
-    record when the warm-up runs."""
+    (the SIGINT handler, the parent-death signal, the macOS orphan thread, the
+    audit hook), and record when the warm-up runs and when the hook would go in."""
     recorded: list[str] = []
     monkeypatch.setattr(worker, "_ignore_sigint", lambda: None)
     monkeypatch.setattr(worker, "_set_parent_death_signal", lambda: None)
     monkeypatch.setattr(worker, "_spawn_orphan_detector", lambda: None)
     monkeypatch.setattr(worker, "_warm_andes", lambda: recorded.append("warm"))
+    # The real hook does nothing without a workspace, and ``_run`` passes none, so
+    # only a recorder can tell where in the start-up it is installed.
+    monkeypatch.setattr(
+        worker, "_install_strict_fs_audit_hook", lambda _workspace: recorded.append("hook")
+    )
     return recorded
 
 
@@ -160,8 +165,17 @@ def test_the_worker_warms_up_before_it_reads_its_first_command(events: list[str]
     ctrl = _FakeConnection(events, [shutdown], waiting=False)
     assert _run(ctrl, _FakeConnection(events, [])) == 0
     assert events.index("warm") < events.index("recv")
-    # It looked for a waiting command first, then warmed up, then served.
-    assert events[:3] == ["poll", "warm", "recv"]
+    # It looked for a waiting command first, then warmed up, installed the audit
+    # hook, then served.
+    assert events[:4] == ["poll", "warm", "hook", "recv"]
+
+
+def test_the_worker_warms_up_before_the_audit_hook_is_installed(events: list[str]) -> None:
+    """The hook would log the library files the warm-up reads (the system's
+    ``mime.types``, say) as strays, so the imports have to come first."""
+    ctrl = _FakeConnection(events, [{"op": "shutdown", "seq": 1}], waiting=False)
+    assert _run(ctrl, _FakeConnection(events, [])) == 0
+    assert events.index("warm") < events.index("hook")
 
 
 def test_a_command_that_is_already_waiting_is_not_delayed_by_the_warm_up(
