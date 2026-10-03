@@ -1545,8 +1545,9 @@ class Wrapper:
         ``fixt`` is set on every run (1 for trapezoidal, 0 for QNDF), and a
         trapezoidal run replaces a QNDF integrator left by an earlier run on
         the same System. The reverse switch is not possible once a run has
-        happened, because ANDES builds the QNDF history in ``TDS.init()``:
-        reload the case first.
+        happened, because ANDES builds the QNDF history in ``TDS.init()``: a
+        QNDF request on a System that already ran trapezoidally raises
+        ``SetupFailedError``, and the caller must reload the case first.
 
         ``tds_config_overrides`` (optional) is a dict of TDS config
         field names → values. Two key flavours are accepted:
@@ -1574,6 +1575,22 @@ class Wrapper:
         h = validate_step_size(h)
         ss = self._require_loaded()
         self._ensure_setup()
+
+        # ANDES builds its integrator object once, in ``TDS.init()``, and a
+        # System that has already run keeps it. QNDF also needs the history
+        # cache ``init()`` builds, so it cannot be swapped in afterwards: refuse
+        # rather than run with the trapezoidal object under a QNDF request.
+        # This comes before any config write so a refusal leaves the System
+        # as it was.
+        if (
+            integrator == "qndf"
+            and bool(getattr(ss.TDS, "initialized", False))
+            and not bool(getattr(ss.TDS.method, "requires_variable_step", False))
+        ):
+            raise SetupFailedError(
+                "QNDF cannot replace the trapezoidal integrator of a System that "
+                "has already run a time-domain simulation; reload the case first"
+            )
 
         # ANDES TDS requires a converged power-flow solution as initial conditions.
         # Run PF first if it hasn't been solved (idempotent — re-running converged

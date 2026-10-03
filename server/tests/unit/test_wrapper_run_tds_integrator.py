@@ -203,6 +203,43 @@ def test_run_tds_leaves_the_method_object_to_init_before_the_first_run(
     assert ss.TDS.config.method == "trapezoid"
 
 
+def test_run_tds_qndf_refuses_a_system_that_already_ran_trapezoidally(
+    loaded_wrapper: Wrapper,
+) -> None:
+    """QNDF needs the history cache ``TDS.init()`` builds, and a System that has
+    already run skips ``init()``. Carrying the request out would step with the
+    trapezoidal object under a QNDF config, so the wrapper refuses, before any
+    config write."""
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    ss.TDS.initialized = True  # as after a completed run; the object is Trapezoid
+    assert type(ss.TDS.method).__name__ == "Trapezoid"
+
+    def _config() -> tuple[object, ...]:
+        cfg = ss.TDS.config
+        return (cfg.method, int(cfg.fixt), float(cfg.tstep), float(cfg.tf))
+
+    before = _config()
+    with pytest.raises(SetupFailedError, match="reload the case"):
+        w.run_tds(tf=0.3, h=0.005, integrator="qndf")
+    assert _config() == before
+    assert type(ss.TDS.method).__name__ == "Trapezoid"
+    ss.TDS.run.assert_not_called()  # type: ignore[attr-defined]
+
+
+def test_run_tds_qndf_continues_a_system_that_already_runs_qndf(
+    loaded_wrapper: Wrapper,
+) -> None:
+    """The refusal is about the integrator object, not about a second run."""
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    ss.TDS.set_method("qndf")
+    ss.TDS.initialized = True
+    w.run_tds(tf=0.3, integrator="qndf")
+    assert type(ss.TDS.method).__name__ == "QNDF"
+    ss.TDS.run.assert_called_once()  # type: ignore[attr-defined]
+
+
 # ---- step size (h -> ss.TDS.config.tstep) --------------------------------
 #
 # ANDES 2.0.0 reads the integration step from ``TDS.config.tstep``. ``Config``

@@ -200,6 +200,34 @@ async def test_run_tds_unknown_override_key_returns_500(
 
 
 @pytest.mark.integration
+async def test_run_tds_qndf_after_a_trapezoidal_run_asks_for_a_reload(
+    client: httpx.AsyncClient,
+) -> None:
+    """A System that already ran trapezoidally cannot switch to QNDF in place.
+    The request gets a 422 that says so (not a silent trapezoidal run), and a
+    reload makes the same request succeed."""
+    sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
+    first = await client.post(
+        f"/api/sessions/{sid}/tds", json={"tf": 0.5, "h": 1 / 120}
+    )
+    assert first.status_code == 200, first.text
+
+    refused = await client.post(
+        f"/api/sessions/{sid}/tds", json={"tf": 1.0, "integrator": "qndf"}
+    )
+    assert refused.status_code == 422, refused.text
+    assert "reload" in refused.json()["detail"].lower()
+
+    reload_resp = await client.post(f"/api/sessions/{sid}/reload")
+    assert reload_resp.status_code == 200, reload_resp.text
+    retried = await client.post(
+        f"/api/sessions/{sid}/tds", json={"tf": 1.0, "integrator": "qndf"}
+    )
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["converged"] is True
+
+
+@pytest.mark.integration
 async def test_run_tds_unknown_integrator_returns_422(
     client: httpx.AsyncClient,
 ) -> None:
