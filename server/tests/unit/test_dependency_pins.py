@@ -16,27 +16,19 @@ from __future__ import annotations
 
 import json
 import re
-import tomllib
-from pathlib import Path
 from typing import Any
 
 import pytest
 from packaging.requirements import Requirement
 from packaging.version import Version
 
-pytestmark = pytest.mark.unit
+from tests._repo import WEB_DIR, pyproject
 
-# server/tests/unit/test_dependency_pins.py -> server/ and the repository root.
-_SERVER_DIR = Path(__file__).resolve().parents[2]
-_REPO_ROOT = _SERVER_DIR.parent
-_WEB_DIR = _REPO_ROOT / "web"
+pytestmark = pytest.mark.unit
 
 
 def _requirements(extra: str | None = None) -> dict[str, Requirement]:
-    pyproject = _SERVER_DIR / "pyproject.toml"
-    if not pyproject.is_file():
-        pytest.skip("server/pyproject.toml is not next to the tests")
-    project = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]
+    project = pyproject()["project"]
     lines = project["dependencies"] if extra is None else project["optional-dependencies"][extra]
     parsed = (Requirement(line) for line in lines)
     return {r.name.lower().replace("_", "-"): r for r in parsed}
@@ -89,7 +81,7 @@ def test_mcp_extra_excludes_the_incompatible_major_and_the_advisories() -> None:
 
 
 def _package_json() -> dict[str, Any]:
-    path = _WEB_DIR / "package.json"
+    path = WEB_DIR / "package.json"
     if not path.is_file():
         pytest.skip("web/package.json is not next to the tests")
     loaded = json.loads(path.read_text(encoding="utf-8"))
@@ -125,7 +117,7 @@ def test_pnpm_build_permissions_are_declared_once() -> None:
     """
     yaml = pytest.importorskip("yaml")
     assert "pnpm" not in _package_json()
-    workspace = _WEB_DIR / "pnpm-workspace.yaml"
+    workspace = WEB_DIR / "pnpm-workspace.yaml"
     assert workspace.is_file(), "web/pnpm-workspace.yaml is missing"
     settings = yaml.safe_load(workspace.read_text(encoding="utf-8"))
     assert settings["allowBuilds"]["esbuild"] is True

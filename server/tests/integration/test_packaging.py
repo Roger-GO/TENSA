@@ -14,7 +14,6 @@ nothing is downloaded.
 
 from __future__ import annotations
 
-import importlib.util
 import shutil
 import subprocess
 import sys
@@ -25,14 +24,11 @@ from pathlib import Path
 
 import pytest
 
+from tests._repo import REPO_ROOT, SCRIPTS_DIR, SERVER_DIR, load_module
+
 pytest.importorskip("hatchling")
 
 pytestmark = pytest.mark.integration
-
-# server/tests/integration/test_packaging.py -> server/ and the repository root.
-_SERVER_DIR = Path(__file__).resolve().parents[2]
-_REPO_ROOT = _SERVER_DIR.parent
-_CHECK_DIST = _REPO_ROOT / "scripts" / "check_dist.py"
 
 _UI = {
     "index.html": "<!doctype html><title>stub</title>",
@@ -59,18 +55,18 @@ def _repository(root: Path, *, built_ui: bool = True) -> Path:
     server = root / "server"
     server.mkdir(parents=True)
     for name in ("pyproject.toml", "hatch_build.py", "LICENSE", "README.md", "ANDES_VERSIONS.md"):
-        if not (_SERVER_DIR / name).is_file():
+        if not (SERVER_DIR / name).is_file():
             pytest.skip(f"server/{name} is not next to the tests")
-        shutil.copy2(_SERVER_DIR / name, server / name)
+        shutil.copy2(SERVER_DIR / name, server / name)
     _write(server / "src" / "tensa" / "__init__.py", '"""Stand-in package."""\n')
     _write(server / "src" / "tensa" / "py.typed", "")
     # Hatchling reads the repository's .gitignore, and the sdist carries it into
     # the wheel build, so use the real one.
-    if (_REPO_ROOT / ".gitignore").is_file():
-        shutil.copy2(_REPO_ROOT / ".gitignore", root / ".gitignore")
+    if (REPO_ROOT / ".gitignore").is_file():
+        shutil.copy2(REPO_ROOT / ".gitignore", root / ".gitignore")
     # The repository's own LICENSE sits next to server/, as in a checkout. Nothing
     # may rely on it: the wheel is built from an unpacked sdist, which has none.
-    shutil.copy2(_SERVER_DIR / "LICENSE", root / "LICENSE")
+    shutil.copy2(SERVER_DIR / "LICENSE", root / "LICENSE")
     if built_ui:
         for name, text in _UI.items():
             _write(root / "web" / "dist" / name, text)
@@ -155,12 +151,7 @@ def test_the_wheel_records_the_license(built: Built) -> None:
 
 
 def test_the_release_checks_pass_on_what_was_built(built: Built) -> None:
-    if not _CHECK_DIST.is_file():
-        pytest.skip("scripts/check_dist.py is not next to the tests")
-    spec = importlib.util.spec_from_file_location("check_dist", _CHECK_DIST)
-    assert spec is not None and spec.loader is not None
-    check_dist = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(check_dist)
+    check_dist = load_module("check_dist", SCRIPTS_DIR / "check_dist.py")
     assert check_dist.check(built.out) == []
 
 

@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import re
-import tomllib
 from pathlib import Path
 
 import pytest
@@ -19,19 +18,13 @@ from packaging.version import Version
 
 import tensa
 from tensa.api.app import make_app
+from tests._repo import REPO_ROOT, pyproject
 
 pytestmark = pytest.mark.unit
 
-# server/tests/unit/test_version.py -> server/ and the repository root.
-_SERVER_DIR = Path(__file__).resolve().parents[2]
-_REPO_ROOT = _SERVER_DIR.parent
-
 
 def _pyproject_version() -> str:
-    pyproject = _SERVER_DIR / "pyproject.toml"
-    if not pyproject.is_file():
-        pytest.skip("server/pyproject.toml is not next to the tests")
-    project = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]
+    project = pyproject()["project"]
     assert project["name"] == "tensa"
     return str(project["version"])
 
@@ -108,12 +101,12 @@ def test_web_package_and_citation_versions_match_pyproject() -> None:
     """The copies of the version outside Python stay in step with pyproject."""
     declared = _pyproject_version()
 
-    package_json = _REPO_ROOT / "web" / "package.json"
+    package_json = REPO_ROOT / "web" / "package.json"
     if package_json.is_file():
         web = json.loads(package_json.read_text(encoding="utf-8"))["version"]
         assert web == declared, f"web/package.json is {web}, pyproject.toml is {declared}"
 
-    citation = _REPO_ROOT / "CITATION.cff"
+    citation = REPO_ROOT / "CITATION.cff"
     if citation.is_file():
         match = re.search(
             r'^version:\s*"?([^"\s]+)"?\s*$',

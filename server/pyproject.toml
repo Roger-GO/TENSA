@@ -146,6 +146,11 @@ ignore = [
     "B008",  # function calls in argument defaults — Typer's idiomatic pattern
 ]
 
+[tool.ruff.lint.isort]
+# ``tests`` is a package (``from tests._repo import ...``), but ``src`` above only
+# makes the directories inside it first party.
+known-first-party = ["tensa", "tests"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

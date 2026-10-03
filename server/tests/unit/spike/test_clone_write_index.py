@@ -18,9 +18,9 @@ import pytest
 import yaml
 
 from tensa.core.wrapper import _CONTROLLER_MODEL_NAMES, _PARAMS_BY_MODEL
+from tests._repo import REPO_ROOT
 
-_REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-_INDEX_PATH = os.path.join(_REPO_ROOT, "docs", "spikes", "2026-05-29-clone-write-index.json")
+_INDEX_PATH = os.path.join(REPO_ROOT, "docs", "spikes", "2026-05-29-clone-write-index.json")
 
 
 @pytest.fixture(scope="module")

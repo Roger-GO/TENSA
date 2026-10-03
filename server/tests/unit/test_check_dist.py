@@ -8,7 +8,6 @@ from a checkout.
 
 from __future__ import annotations
 
-import importlib.util
 import io
 import tarfile
 import zipfile
@@ -17,21 +16,13 @@ from types import ModuleType
 
 import pytest
 
-pytestmark = pytest.mark.unit
+from tests._repo import SCRIPTS_DIR, load_module
 
-# server/tests/unit/test_check_dist.py -> server/ and the repository root.
-_SERVER_DIR = Path(__file__).resolve().parents[2]
-_SCRIPT = _SERVER_DIR.parent / "scripts" / "check_dist.py"
+pytestmark = pytest.mark.unit
 
 
 def _script() -> ModuleType:
-    if not _SCRIPT.is_file():
-        pytest.skip("scripts/check_dist.py is not next to the tests")
-    spec = importlib.util.spec_from_file_location("check_dist", _SCRIPT)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_module("check_dist", SCRIPTS_DIR / "check_dist.py")
 
 
 def _metadata(version: str, name: str = "tensa") -> str:

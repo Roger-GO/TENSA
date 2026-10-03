@@ -14,22 +14,20 @@ the repository files directly, so they skip when the tests run away from a check
 from __future__ import annotations
 
 import re
-import tomllib
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from tests._repo import REPO_ROOT, pyproject
+
 pytestmark = pytest.mark.unit
 
-# server/tests/unit/test_ci_config.py -> server/ and the repository root.
-_SERVER_DIR = Path(__file__).resolve().parents[2]
-_REPO_ROOT = _SERVER_DIR.parent
-_WORKFLOWS = _REPO_ROOT / ".github" / "workflows"
+_WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 _WORKFLOW = _WORKFLOWS / "server.yml"
-_SCRIPT = _REPO_ROOT / "scripts" / "ci-matrix.sh"
-_E2E_DIR = _REPO_ROOT / "web" / "tests" / "e2e"
-_PLAYWRIGHT_CONFIG = _REPO_ROOT / "web" / "playwright.config.ts"
+_SCRIPT = REPO_ROOT / "scripts" / "ci-matrix.sh"
+_E2E_DIR = REPO_ROOT / "web" / "tests" / "e2e"
+_PLAYWRIGHT_CONFIG = REPO_ROOT / "web" / "playwright.config.ts"
 
 _REQUIRED_OSES = {"ubuntu-latest", "macos-14", "windows-latest"}
 
@@ -58,18 +56,11 @@ def _run_text(job: dict[str, Any]) -> str:
     return "\n".join(step["run"] for step in job["steps"] if "run" in step)
 
 
-def _pyproject() -> dict[str, Any]:
-    pyproject = _SERVER_DIR / "pyproject.toml"
-    if not pyproject.is_file():
-        pytest.skip("server/pyproject.toml is not next to the tests")
-    return tomllib.loads(pyproject.read_text(encoding="utf-8"))
-
-
 def _classifier_pythons() -> set[str]:
     prefix = "Programming Language :: Python :: "
     return {
         c.removeprefix(prefix)
-        for c in _pyproject()["project"]["classifiers"]
+        for c in pyproject()["project"]["classifiers"]
         if re.fullmatch(re.escape(prefix) + r"3\.\d+", c)
     }
 
@@ -96,11 +87,11 @@ def test_test_matrix_pythons_match_the_package_classifiers() -> None:
 
 
 def test_dev_extra_carries_the_coverage_tooling() -> None:
-    dev = " ".join(_pyproject()["project"]["optional-dependencies"]["dev"])
+    dev = " ".join(pyproject()["project"]["optional-dependencies"]["dev"])
     assert "pytest-cov" in dev
     # [tool.coverage.run] patch = ["subprocess"] is rejected by older coverage.
     assert "coverage>=7.10" in dev
-    assert _pyproject()["tool"]["coverage"]["run"]["patch"] == ["subprocess"]
+    assert pyproject()["tool"]["coverage"]["run"]["patch"] == ["subprocess"]
 
 
 def test_every_stage_the_workflow_asks_for_exists_in_the_script() -> None:
@@ -180,7 +171,7 @@ def _read_required(path: Path) -> str:
     """Text of a repository file; a missing one fails in a checkout."""
     if not _WORKFLOW.is_file():
         pytest.skip("the repository files are not next to the tests")
-    assert path.is_file(), f"{path.relative_to(_REPO_ROOT)} is missing"
+    assert path.is_file(), f"{path.relative_to(REPO_ROOT)} is missing"
     return path.read_text(encoding="utf-8")
 
 
@@ -251,7 +242,7 @@ def test_publish_uploads_what_the_build_job_checked() -> None:
     assert publish[0]["with"]["packages-dir"] == downloaded[0]["with"]["path"]
 
 
-_DEPENDABOT = _REPO_ROOT / ".github" / "dependabot.yml"
+_DEPENDABOT = REPO_ROOT / ".github" / "dependabot.yml"
 
 
 def _load_required(path: Path) -> dict[str, Any]:
@@ -261,7 +252,7 @@ def _load_required(path: Path) -> dict[str, Any]:
     checkout, deleting the file must not turn its tests into silent skips.
     """
     if _WORKFLOW.is_file():
-        assert path.is_file(), f"{path.relative_to(_REPO_ROOT)} is missing"
+        assert path.is_file(), f"{path.relative_to(REPO_ROOT)} is missing"
     return _load(path)
 
 
@@ -277,7 +268,7 @@ def test_dependabot_watches_every_manifest_weekly() -> None:
     for update in updates:
         directory, manifest = manifests[update["package-ecosystem"]]
         assert update["directory"] == directory
-        assert (_REPO_ROOT / directory.lstrip("/") / manifest).is_file(), update
+        assert (REPO_ROOT / directory.lstrip("/") / manifest).is_file(), update
         assert update["schedule"]["interval"] == "weekly"
 
 

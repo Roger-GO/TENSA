@@ -11,7 +11,6 @@ tests run away from a checkout.
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -20,12 +19,9 @@ from fastapi import APIRouter, FastAPI, WebSocket
 from starlette.routing import BaseRoute, Route, WebSocketRoute
 
 from tensa.api.app import make_app
+from tests._repo import SCRIPTS_DIR, load_module
 
 pytestmark = pytest.mark.unit
-
-# server/tests/unit/test_check_gui_parity.py -> server/ and the repository root.
-_SERVER_DIR = Path(__file__).resolve().parents[2]
-_SCRIPT = _SERVER_DIR.parent / "scripts" / "check_gui_parity.py"
 
 _APP_WEBSOCKETS = {
     "/api/ws/{session_id}",
@@ -36,13 +32,7 @@ _APP_WEBSOCKETS = {
 
 @pytest.fixture(scope="module")
 def script() -> ModuleType:
-    if not _SCRIPT.is_file():
-        pytest.skip("scripts/check_gui_parity.py is not next to the tests")
-    spec = importlib.util.spec_from_file_location("check_gui_parity", _SCRIPT)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_module("check_gui_parity", SCRIPTS_DIR / "check_gui_parity.py")
 
 
 async def _socket(websocket: WebSocket) -> None:

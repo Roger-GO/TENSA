@@ -20,16 +20,13 @@ import typer
 
 from tensa import cli
 from tensa.api.app import make_app
+from tests._repo import REPO_ROOT
 
 pytestmark = pytest.mark.unit
 
-# server/tests/unit/test_docs_accuracy.py -> server/ and the repository root.
-_SERVER_DIR = Path(__file__).resolve().parents[2]
-_REPO_ROOT = _SERVER_DIR.parent
-
 
 def _read(relative: str) -> str:
-    path = _REPO_ROOT / relative
+    path = REPO_ROOT / relative
     if not path.is_file():
         pytest.skip(f"{relative} is not next to the tests")
     return path.read_text(encoding="utf-8")
@@ -227,6 +224,6 @@ def test_package_metadata_and_workflows_carry_no_stale_planning_text() -> None:
     description = json.loads(_read("web/package.json"))["description"]
     assert not re.search(r"\bv\d+\.\d+|\bUnit\s+\d", description), description
     # publish.yml exists, so a note about an "eventual" publish workflow is stale.
-    for workflow in sorted((_REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+    for workflow in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
         text = workflow.read_text(encoding="utf-8")
         assert not re.search(r"\beventual\b|\blands when\b", text), workflow.name

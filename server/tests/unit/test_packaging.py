@@ -10,38 +10,20 @@ a checkout or without hatchling.
 
 from __future__ import annotations
 
-import importlib.util
-import tomllib
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 import pytest
 
-pytestmark = pytest.mark.unit
+from tests._repo import REPO_ROOT, SERVER_DIR, load_module, pyproject
 
-# server/tests/unit/test_packaging.py -> server/ and the repository root.
-_SERVER_DIR = Path(__file__).resolve().parents[2]
-_REPO_ROOT = _SERVER_DIR.parent
+pytestmark = pytest.mark.unit
 
 
 def _hook_module() -> ModuleType:
     pytest.importorskip("hatchling")
-    path = _SERVER_DIR / "hatch_build.py"
-    if not path.is_file():
-        pytest.skip("server/hatch_build.py is not next to the tests")
-    spec = importlib.util.spec_from_file_location("tensa_hatch_build", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def _pyproject() -> dict[str, Any]:
-    pyproject = _SERVER_DIR / "pyproject.toml"
-    if not pyproject.is_file():
-        pytest.skip("server/pyproject.toml is not next to the tests")
-    return tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    return load_module("tensa_hatch_build", SERVER_DIR / "hatch_build.py")
 
 
 def _write(path: Path, text: str = "x") -> None:
@@ -85,21 +67,21 @@ def _targets(forced: dict[str, str]) -> set[str]:
 
 def test_license_copy_matches_the_repository_license() -> None:
     """``server/LICENSE`` exists so the sdist is self-contained; it must not drift."""
-    top = _REPO_ROOT / "LICENSE"
+    top = REPO_ROOT / "LICENSE"
     if not top.is_file():
         pytest.skip("LICENSE is not next to the tests")
-    assert (_SERVER_DIR / "LICENSE").read_bytes() == top.read_bytes()
+    assert (SERVER_DIR / "LICENSE").read_bytes() == top.read_bytes()
 
 
 def test_the_package_metadata_and_build_config_stay_inside_the_server_directory() -> None:
     """An sdist unpacks to a tree with nothing next to it, so no path may leave it."""
-    pyproject = _pyproject()
-    license_file = pyproject["project"]["license"]["file"]
+    config = pyproject()
+    license_file = config["project"]["license"]["file"]
     assert not Path(license_file).is_absolute()
     assert ".." not in Path(license_file).parts
-    assert (_SERVER_DIR / license_file).is_file()
+    assert (SERVER_DIR / license_file).is_file()
 
-    targets = pyproject["tool"]["hatch"]["build"]["targets"]
+    targets = config["tool"]["hatch"]["build"]["targets"]
     for name, target in targets.items():
         for source in target.get("force-include", {}):
             assert ".." not in Path(source).parts, f"{name} force-includes {source}"
@@ -108,14 +90,14 @@ def test_the_package_metadata_and_build_config_stay_inside_the_server_directory(
 
 
 def test_the_ui_hook_is_enabled_and_exists() -> None:
-    hooks = _pyproject()["tool"]["hatch"]["build"]["hooks"]
+    hooks = pyproject()["tool"]["hatch"]["build"]["hooks"]
     assert "custom" in hooks
     assert "path" not in hooks["custom"], "the default path (hatch_build.py) is what ships"
-    assert (_SERVER_DIR / "hatch_build.py").is_file()
+    assert (SERVER_DIR / "hatch_build.py").is_file()
 
 
 def test_development_status_is_beta() -> None:
-    assert "Development Status :: 4 - Beta" in _pyproject()["project"]["classifiers"]
+    assert "Development Status :: 4 - Beta" in pyproject()["project"]["classifiers"]
 
 
 def test_ui_files_are_listed_one_by_one_without_source_maps(tmp_path: Path) -> None:
