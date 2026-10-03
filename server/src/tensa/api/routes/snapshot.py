@@ -196,7 +196,10 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
             "model": ProblemDetails,
             "description": (
                 "The substrate could not produce a canonical xlsx export "
-                "for the dirty case (elements ANDES can't roundtrip)."
+                "for the dirty case (elements ANDES can't roundtrip), or a "
+                "case file has a name the importer would refuse (a Windows "
+                "device name such as CON, a ':', a leading dot, a trailing "
+                "dot or space); the message names the file."
             ),
         },
     },

@@ -720,6 +720,7 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
         BundleInputs,
         assemble_bundle,
         case_files_from_workspace,
+        check_exportable_case_files,
     )
 
     # _replay_buffer is the only substrate-side signal of "case has been
@@ -761,6 +762,11 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
         # Pristine session: ship the original case file (and any addfiles)
         # verbatim. ``case_canonical_export=False`` in the manifest.
         case_files = case_files_from_workspace(case_path, addfiles)
+
+    # Import refuses names that are not portable file names (a device name,
+    # ``:``, a leading dot). Say so now, naming the file, instead of handing
+    # back a bundle that cannot be opened.
+    check_exportable_case_files(case_files)
 
     raw_disturbances = args.get("disturbances") or []
     if not isinstance(raw_disturbances, list):

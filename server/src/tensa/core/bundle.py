@@ -223,6 +223,52 @@ def case_files_from_workspace(
     return tuple(out)
 
 
+def case_entry_name_problem(name: str) -> str | None:
+    """Why ``name`` cannot be a ``case/<name>`` bundle entry, or ``None``.
+
+    The one rule both directions use: import refuses such an entry
+    (:func:`_case_entries`) and export refuses to write one
+    (:func:`check_exportable_case_files`), so a bundle this server produces is
+    one it can read back. The return value reads after "the name ".
+    """
+    if "/" in name or "\\" in name:
+        return "contains a path separator, but case/ holds flat files only"
+    if name == ".." or name.startswith("."):
+        return "starts with a dot"
+    return portable_name_problem(name)
+
+
+def check_exportable_case_files(case_files: tuple[tuple[str, bytes], ...]) -> None:
+    """Refuse to bundle case files the import side would reject.
+
+    A workspace file named ``CON.raw`` or ``case:1.raw`` loads fine on Linux or
+    macOS, but a bundle holding it fails import on every platform. Raising here
+    names the file while the user can still rename it, rather than handing back
+    an archive that cannot be opened later. Raises :class:`BundleValidationError`
+    (``unportable-name``, or ``too-many-case-files``), which the route reports
+    as a 422.
+    """
+    for name, _data in case_files:
+        problem = case_entry_name_problem(name)
+        if problem is not None:
+            raise BundleValidationError(
+                "unportable-name",
+                (
+                    f"cannot bundle case file {name!r}: the name {problem}, "
+                    "so the bundle could not be imported. Rename the file in "
+                    "the workspace, reload the case, and export again."
+                ),
+            )
+    if len(case_files) > _MAX_CASE_ENTRIES:
+        raise BundleValidationError(
+            "too-many-case-files",
+            (
+                f"cannot bundle {len(case_files)} case files; a bundle holds "
+                f"at most {_MAX_CASE_ENTRIES}"
+            ),
+        )
+
+
 # ---- import side (Unit 10) -------------------------------------------------
 
 
@@ -376,7 +422,9 @@ class BundleValidationError(_AndesAppError):
       workspace: its target resolves outside it, or is a symlink).
 
     A case entry whose name is not portable (Windows device name, ``:``,
-    trailing dot or space) is rejected as ``manifest-malformed``.
+    trailing dot or space) is rejected as ``manifest-malformed``. Export
+    reports the same names as ``unportable-name`` (→ 422), naming the
+    workspace file that would not survive a round trip.
     """
 
     def __init__(
@@ -451,14 +499,12 @@ def _read_manifest_or_raise(zf: zipfile.ZipFile) -> dict[str, Any]:
 def _case_entries(zf: zipfile.ZipFile) -> tuple[str, ...]:
     """Return the basenames of every ``case/<...>`` entry in archive order.
 
-    Filters out directory entries and rejects path components that would
-    escape the workspace (``..`` segments) or collide with subdirectories
-    (a single nested level is allowed; deeper structure is rejected to
-    keep the extraction one-deep). Names that are not portable file names
-    are rejected too (see :func:`tensa.security.names.portable_name_problem`):
-    a bundle is built on one OS and imported on another, so ``CON.raw``,
-    ``C:x.raw`` or ``case.raw:stream`` must fail everywhere, not only where
-    Windows would misread them.
+    Filters out directory entries and rejects every name that
+    :func:`case_entry_name_problem` refuses: nested paths and ``..`` segments
+    (extraction is one level deep), hidden files, and names that are not
+    portable file names. A bundle is built on one OS and imported on another,
+    so ``CON.raw``, ``C:x.raw`` or ``case.raw:stream`` must fail everywhere,
+    not only where Windows would misread them.
     """
     out: list[str] = []
     for name in zf.namelist():
@@ -473,20 +519,7 @@ def _case_entries(zf: zipfile.ZipFile) -> tuple[str, ...]:
         rel = name[len("case/") :]
         if not rel:
             continue
-        if "/" in rel or "\\" in rel:
-            raise BundleValidationError(
-                "manifest-malformed",
-                (
-                    f"bundle has nested case entry {name!r}; "
-                    "case/ should contain flat files only"
-                ),
-            )
-        if rel in ("..",) or rel.startswith("."):
-            raise BundleValidationError(
-                "manifest-malformed",
-                f"bundle case entry has unsafe name: {rel!r}",
-            )
-        problem = portable_name_problem(rel)
+        problem = case_entry_name_problem(rel)
         if problem is not None:
             raise BundleValidationError(
                 "manifest-malformed",

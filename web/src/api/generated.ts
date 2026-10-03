@@ -4963,7 +4963,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The substrate could not produce a canonical xlsx export for the dirty case (elements ANDES can't roundtrip). */
+            /** @description The substrate could not produce a canonical xlsx export for the dirty case (elements ANDES can't roundtrip), or a case file has a name the importer would refuse (a Windows device name such as CON, a ':', a leading dot, a trailing dot or space); the message names the file. */
             422: {
                 headers: {
                     [name: string]: unknown;

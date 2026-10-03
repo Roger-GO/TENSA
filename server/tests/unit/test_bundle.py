@@ -26,7 +26,9 @@ from tensa.core.bundle import (
     BundleValidationError,
     assemble_bundle,
     build_manifest,
+    case_entry_name_problem,
     case_files_from_workspace,
+    check_exportable_case_files,
     extract_bundle,
     list_bundle_entries,
     read_bundle_manifest,
@@ -311,6 +313,64 @@ def test_validate_bundle_names_the_windows_problem(tmp_path: Path) -> None:
     zip_bytes = assemble_bundle(_minimal_inputs(case_files=(("C:evil.raw", b"x"),)))
     with pytest.raises(BundleValidationError, match="drive prefix"):
         _validate(zip_bytes, tmp_path)
+
+
+# ---- export side: refuse what import would refuse --------------------------
+
+_ORDINARY_CASE_NAMES = ["ieee14.raw", "console.raw", "Kundur two-area (v2).dyr", "a.b.c", "naïve.raw"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", _UNSAFE_CASE_NAMES)
+def test_export_refuses_a_case_file_the_import_would_reject(name: str) -> None:
+    with pytest.raises(BundleValidationError) as excinfo:
+        check_exportable_case_files(((name, b"BUS 1\n"),))
+    assert excinfo.value.category == "unportable-name"
+    assert repr(name) in excinfo.value.detail
+    assert "Rename the file" in excinfo.value.detail
+
+
+@pytest.mark.unit
+def test_export_names_an_unsafe_addfile_not_the_primary() -> None:
+    with pytest.raises(BundleValidationError) as excinfo:
+        check_exportable_case_files((("ieee14.raw", b"BUS 1\n"), ("aux.dyr", b"GEN 1\n")))
+    assert "'aux.dyr'" in excinfo.value.detail
+    assert "ieee14.raw" not in excinfo.value.detail
+    assert "reserved Windows device name" in excinfo.value.detail
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", _ORDINARY_CASE_NAMES)
+def test_export_accepts_ordinary_case_names(name: str) -> None:
+    check_exportable_case_files(((name, b"BUS 1\n"),))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", [*_UNSAFE_CASE_NAMES, *_ORDINARY_CASE_NAMES])
+def test_export_and_import_agree_on_every_case_name(name: str, tmp_path: Path) -> None:
+    """One rule behind both directions: a bundle the exporter writes is one the
+    importer reads, and the other way round."""
+    zip_bytes = assemble_bundle(_minimal_inputs(case_files=((name, b"BUS 1\n"),)))
+    try:
+        _validate(zip_bytes, tmp_path)
+        import_ok = True
+    except BundleValidationError:
+        import_ok = False
+    try:
+        check_exportable_case_files(((name, b"BUS 1\n"),))
+        export_ok = True
+    except BundleValidationError:
+        export_ok = False
+    assert export_ok == import_ok == (case_entry_name_problem(name) is None)
+
+
+@pytest.mark.unit
+def test_export_refuses_more_case_files_than_import_accepts() -> None:
+    too_many = tuple((f"part{i}.raw", b"x") for i in range(17))
+    with pytest.raises(BundleValidationError) as excinfo:
+        check_exportable_case_files(too_many)
+    assert excinfo.value.category == "too-many-case-files"
+    check_exportable_case_files(too_many[:16])
 
 
 @pytest.mark.unit

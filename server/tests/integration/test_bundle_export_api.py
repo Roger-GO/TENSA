@@ -13,6 +13,7 @@ from __future__ import annotations
 import io
 import json
 import shutil
+import sys
 import zipfile
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -214,6 +215,48 @@ async def test_export_bundle_dirty_case_writes_canonical_xlsx(
     # Canonical export uses the original stem with .xlsx.
     assert any(n.endswith(".xlsx") for n in names if n.startswith("case/"))
     assert manifest["case_canonical_export"] is True
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows cannot hold these as plain files")
+@pytest.mark.parametrize("name", ["con.raw", "case_12:30.raw", ".hidden.raw"])
+async def test_export_bundle_refuses_a_case_file_the_import_would_reject(
+    client: httpx.AsyncClient, tmp_path: Path, name: str
+) -> None:
+    """A workspace file with a non-portable name loads on Linux and macOS, but
+    a bundle holding it fails import everywhere. Export says so, naming the
+    file, rather than returning a zip that cannot be opened."""
+    workspace = tmp_path / "ws"
+    shutil.copy2(workspace / "ieee14.raw", workspace / name)
+    sid = await _create_session_and_load(client, name)
+    resp = await client.post(
+        f"/api/sessions/{sid}/bundle/export",
+        json={},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.headers["content-type"].startswith("application/json")
+    assert repr(name) in resp.json()["detail"], resp.text
+    assert "Rename the file" in resp.json()["detail"]
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows cannot hold these as plain files")
+async def test_export_bundle_refuses_an_unportable_stem_on_the_canonical_export(
+    client: httpx.AsyncClient, tmp_path: Path
+) -> None:
+    """An edited case ships as ``<stem>.xlsx``; a stem such as ``con`` makes
+    that a device name, so the export refuses it too."""
+    workspace = tmp_path / "ws"
+    shutil.copy2(workspace / "ieee14.raw", workspace / "con.raw")
+    sid = await _create_session_and_load(client, "con.raw")
+    edited = await client.post(
+        f"/api/sessions/{sid}/elements",
+        json={"model": "Bus", "params": {"idx": 99, "name": "NEW", "Vn": 138.0}},
+    )
+    assert edited.status_code in (200, 201), edited.text
+    resp = await client.post(f"/api/sessions/{sid}/bundle/export", json={})
+    assert resp.status_code == 422, resp.text
+    assert "'con.xlsx'" in resp.json()["detail"], resp.text
 
 
 @pytest.mark.integration
