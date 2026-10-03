@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import signal
 import subprocess
 import sys
 import threading
@@ -131,12 +132,22 @@ class BackgroundWarm:
                 time.monotonic() - self._started,
             )
             return
-        tail = "\n".join(stderr.decode("utf-8", errors="replace").strip().splitlines()[-10:])
+        lines = stderr.decode("utf-8", errors="replace").strip().splitlines()
+        if _was_interrupted(code, lines):
+            # Ctrl+C reaches the child with the server, ahead of the server's own
+            # shutdown, and so can a service manager's SIGTERM. Someone stopped it
+            # on purpose, which is not a failure to warn about.
+            self._log.info(
+                "the background ANDES code generation was interrupted (exit code %s); "
+                "the first case load will generate the code instead",
+                code,
+            )
+            return
         self._log.warning(
             "the background ANDES code generation stopped with exit code %s; "
             "the first case load will generate the code instead.\n%s",
             code,
-            tail,
+            "\n".join(lines[-10:]),
         )
 
     def stop(self) -> None:
@@ -151,6 +162,17 @@ class BackgroundWarm:
             with contextlib.suppress(OSError):
                 self._process.kill()
             self._watcher.join(self._STOP_GRACE_SECONDS)
+
+
+def _was_interrupted(code: int | None, stderr_lines: Sequence[str]) -> bool:
+    """Whether a child that exited with ``code`` was ended by Ctrl+C or SIGTERM.
+
+    On POSIX that is a death by the signal (a negative code); the traceback's last
+    line covers Windows, where Ctrl+C gives an ordinary exit code.
+    """
+    if code in (-signal.SIGINT, -signal.SIGTERM):
+        return True
+    return bool(stderr_lines) and stderr_lines[-1].strip().startswith("KeyboardInterrupt")
 
 
 def start_background_warm(

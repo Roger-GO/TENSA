@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import signal
 import subprocess
 import sys
 import types
@@ -189,6 +190,65 @@ def test_a_child_that_fails_is_reported_with_the_end_of_its_stderr(
     assert "noise 29" in message
     # Only the tail, not the whole transcript.
     assert "noise 0" not in message
+
+
+def test_a_child_ended_by_ctrl_c_is_not_reported_as_a_failure(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ctrl+C reaches the child with the server, before the server stops it itself.
+    The traceback it leaves ends in ``KeyboardInterrupt`` on every platform."""
+    with caplog.at_level(logging.INFO, logger=log.name):
+        warm = start_background_warm(
+            "2.0.0",
+            log,
+            directory=_cache(tmp_path),
+            command=[_PYTHON, "-c", "raise KeyboardInterrupt"],
+        )
+        assert warm is not None
+        _finished(warm)
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+    assert "was interrupted" in caplog.text
+    assert "is ready" not in caplog.text
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+@pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM], ids=["SIGINT", "SIGTERM"])
+def test_a_child_that_a_signal_ended_is_not_reported_as_a_failure(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, sig: signal.Signals
+) -> None:
+    with caplog.at_level(logging.INFO, logger=log.name):
+        warm = start_background_warm(
+            "2.0.0",
+            log,
+            directory=_cache(tmp_path),
+            command=[_PYTHON, "-c", "import time; time.sleep(120)"],
+        )
+        assert warm is not None
+        os.kill(warm._process.pid, sig)
+        _finished(warm)
+    assert warm._process.returncode == -sig
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+    assert "was interrupted" in caplog.text
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_a_child_that_was_killed_is_still_reported(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Only the signals a person sends on purpose are let through: a child the
+    kernel killed (out of memory) is worth a warning."""
+    with caplog.at_level(logging.INFO, logger=log.name):
+        warm = start_background_warm(
+            "2.0.0",
+            log,
+            directory=_cache(tmp_path),
+            command=[_PYTHON, "-c", "import time; time.sleep(120)"],
+        )
+        assert warm is not None
+        os.kill(warm._process.pid, signal.SIGKILL)
+        _finished(warm)
+    (failure,) = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert "exit code -9" in failure.getMessage()
 
 
 def test_stopping_ends_a_running_child_without_reporting_a_failure(
