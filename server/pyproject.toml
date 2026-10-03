@@ -91,6 +91,10 @@ target-version = "py312"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
+# PLW1514 is still a preview rule. ``explicit-preview-rules`` keeps every other
+# preview rule off, so only the rule named in ``select`` is turned on.
+preview = true
+explicit-preview-rules = true
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -100,6 +104,7 @@ select = [
     "UP",  # pyupgrade
     "SIM", # flake8-simplify
     "C4",  # flake8-comprehensions
+    "PLW1514",  # open()/read_text()/write_text() without encoding= (preview rule)
 ]
 ignore = [
     "E501",  # line length — handled by formatter

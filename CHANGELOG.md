@@ -6,6 +6,8 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 
 ### Added
 - `tensa --version` prints the tensa and ANDES versions.
+- `.gitattributes` keeps text files LF in every checkout, so a Windows checkout with `core.autocrlf` no longer turns sources into CRLF and fails `pnpm format:check`, and marks images, video, and archives as binary. Nothing in the repository changes, since every tracked text file was already LF.
+- Ruff now flags any `open()`, `read_text()`, or `write_text()` without an explicit `encoding=` (rule `PLW1514`), so the platform default cannot creep back in.
 - Agent-evaluation example: a PowerAgentBench-SS-style budgeted N-2 screening study on IEEE 39-bus (`examples/contingency_screening/`) with an exhaustive API-computed oracle, scripted baselines, an audited LLM-agent run, and scoring. Line elements now accept edits to the connection-status parameter `u`, so contingency studies can outage a branch through the API or inspector.
 
 ### Fixed

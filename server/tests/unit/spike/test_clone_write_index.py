@@ -30,14 +30,14 @@ def index() -> dict:
             "clone-write index artifact not present in this checkout "
             f"({_INDEX_PATH})"
         )
-    with open(_INDEX_PATH) as fh:
+    with open(_INDEX_PATH, encoding="utf-8") as fh:
         return json.load(fh)
 
 
 @pytest.fixture(scope="module")
 def dyr_yaml() -> dict:
     path = os.path.join(os.path.dirname(andes.__file__), "io", "psse-dyr.yaml")
-    with open(path) as fh:
+    with open(path, encoding="utf-8") as fh:
         return yaml.safe_load(fh)
 
 

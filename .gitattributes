@@ -1,0 +1,23 @@
+# Keep text files LF in the repository and in every checkout. Without this, a
+# Windows checkout with core.autocrlf=true turns sources into CRLF, which breaks
+# `pnpm format:check` (Prettier expects LF) and shell scripts, and makes byte-exact
+# fixtures differ between platforms. Every tracked text file is already LF, so
+# adding this rewrites nothing.
+* text=auto eol=lf
+
+# Binary assets: never normalized, never diffed as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.mp4 binary
+*.webm binary
+*.mov binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.xlsx binary
+*.zip binary
+*.dill binary
