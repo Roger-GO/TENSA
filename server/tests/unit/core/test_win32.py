@@ -70,8 +70,10 @@ def test_every_prototype_either_caller_needs_is_declared(fake_windows: list[Any]
     kernel32 = win32.load_kernel32()
     for name in _USED_BY_SESSION_DIRS | _USED_BY_WORKER_SPAWN:
         function = getattr(kernel32, name)
+        # The fake DLL is a MagicMock, so an attribute nobody assigned reads back as
+        # a MagicMock, never as None: test for that rather than for ``is not None``.
         assert isinstance(function.argtypes, list), f"{name} has no argtypes"
-        assert function.restype is not None, f"{name} has no restype"
+        assert not isinstance(function.restype, MagicMock), f"{name} has no restype"
     # A HANDLE is pointer-sized; the default int conversion would truncate it.
     assert kernel32.OpenProcess.restype is ctypes.c_void_p
     assert kernel32.CreateJobObjectW.restype is ctypes.c_void_p
