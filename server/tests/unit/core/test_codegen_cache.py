@@ -38,13 +38,14 @@ log = logging.getLogger("tensa.test-codegen-cache")
 _PYTHON = sys.executable
 
 
-def _cache(tmp_path: Path, *, code: bool = True, stamp: str | None = None) -> Path:
+def _cache(tmp_path: Path, *, code: bool = True, stamped: str | None = None) -> Path:
+    """A cache directory; ``stamped`` is the ANDES version ``warm-cache`` checked it for."""
     directory = tmp_path / "pycode"
     directory.mkdir()
     if code:
         (directory / "__init__.py").write_text("__version__ = '2.0.0'\n", encoding="utf-8")
-    if stamp is not None:
-        (directory / STAMP_NAME).write_text(stamp, encoding="utf-8")
+    if stamped is not None:
+        mark_cache_checked(stamped, directory)
     return directory
 
 
@@ -78,11 +79,11 @@ def test_code_without_a_stamp_is_unchecked(tmp_path: Path) -> None:
 
 
 def test_a_stamp_for_another_andes_version_is_unchecked(tmp_path: Path) -> None:
-    assert cache_state("2.0.1", _cache(tmp_path, stamp="2.0.0\n")) == "unchecked"
+    assert cache_state("2.0.1", _cache(tmp_path, stamped="2.0.0")) == "unchecked"
 
 
 def test_a_stamp_for_the_installed_version_is_ready(tmp_path: Path) -> None:
-    assert cache_state("2.0.0", _cache(tmp_path, stamp="2.0.0\n")) == "ready"
+    assert cache_state("2.0.0", _cache(tmp_path, stamped="2.0.0")) == "ready"
 
 
 def test_a_stamp_that_cannot_be_read_is_unchecked(tmp_path: Path) -> None:
@@ -101,6 +102,39 @@ def test_a_stamp_written_by_mark_cache_checked_makes_the_cache_ready(tmp_path: P
     assert cache_state("2.0.1", directory) == "unchecked"
 
 
+def test_a_stamp_that_names_only_a_version_is_unchecked(tmp_path: Path) -> None:
+    """The stamp an earlier build wrote says nothing about which code it checked."""
+    directory = _cache(tmp_path)
+    (directory / STAMP_NAME).write_text("2.0.0\n", encoding="utf-8")
+    assert cache_state("2.0.0", directory) == "unchecked"
+
+
+def test_code_that_was_rewritten_after_the_stamp_is_unchecked(tmp_path: Path) -> None:
+    """The directory is shared by every ANDES on the machine; one that regenerates
+    code rewrites ``__init__.py``, and the stamp then no longer vouches for it."""
+    directory = _cache(tmp_path, stamped="2.0.0")
+    init = directory / "__init__.py"
+    assert cache_state("2.0.0", directory) == "ready"
+
+    # A different ANDES wrote a different file.
+    init.write_text("__version__ = '2.1.0'\n\nfrom . import Bus  # NOQA\n", encoding="utf-8")
+    assert cache_state("2.0.0", directory) == "unchecked"
+
+    # The same bytes written again at another moment: still not what was checked.
+    mark_cache_checked("2.0.0", directory)
+    assert cache_state("2.0.0", directory) == "ready"
+    before = init.stat().st_mtime_ns
+    os.utime(init, ns=(before + 5_000_000_000, before + 5_000_000_000))
+    assert cache_state("2.0.0", directory) == "unchecked"
+
+
+def test_marking_a_directory_without_code_leaves_it_unstamped(tmp_path: Path) -> None:
+    directory = _cache(tmp_path, code=False)
+    mark_cache_checked("2.0.0", directory)
+    assert not (directory / STAMP_NAME).exists()
+    assert cache_state("2.0.0", directory) == "missing"
+
+
 def test_marking_a_directory_that_cannot_be_written_is_not_an_error(tmp_path: Path) -> None:
     mark_cache_checked("2.0.0", tmp_path / "does-not-exist")
 
@@ -111,7 +145,7 @@ def test_marking_a_directory_that_cannot_be_written_is_not_an_error(tmp_path: Pa
 def test_nothing_starts_for_a_cache_that_is_ready(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    directory = _cache(tmp_path, stamp="2.0.0\n")
+    directory = _cache(tmp_path, stamped="2.0.0")
     with caplog.at_level(logging.INFO, logger=log.name):
         # The command would fail loudly if it ran.
         warm = start_background_warm(

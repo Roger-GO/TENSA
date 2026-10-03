@@ -17,7 +17,11 @@ checked, so the next start skips it.
 
 The stamp is ours, not ANDES's. ANDES writes its version into ``__init__.py``
 too, but only when it regenerates something, so after an ANDES patch release
-that changes no model that file would look out of date forever.
+that changes no model that file would look out of date forever. The stamp also
+records which ``__init__.py`` it was written for (its mtime and size). The
+directory is shared by every Python environment on the machine, and any ANDES
+that regenerates code rewrites that file, so a stamp whose file has changed no
+longer vouches for anything.
 
 A session that loads a case before the child finishes does not wait for it: its
 worker generates the code itself, as it always has. Both write the same files.
@@ -38,8 +42,8 @@ from typing import Literal
 from tensa.core.worker_spawn import attach_kill_on_close_job, worker_spawn_env
 
 # Written into the cache directory by ``tensa warm-cache``: the ANDES version
-# whose code was last checked. It lives beside the code, so deleting the cache
-# deletes the stamp with it.
+# whose code was last checked, then which ``__init__.py`` it was checked for. It
+# lives beside the code, so deleting the cache deletes the stamp with it.
 STAMP_NAME = ".tensa-warm"
 
 CacheState = Literal["ready", "unchecked", "missing"]
@@ -50,12 +54,26 @@ def pycode_dir() -> Path:
     return Path.home() / ".andes" / "pycode"
 
 
+def _init_fingerprint(directory: Path) -> str | None:
+    """Which ``__init__.py`` the cache holds, as its mtime and size.
+
+    ANDES rewrites the file whenever it generates code, so a change means some
+    ANDES touched the cache. ``None`` when it cannot be read.
+    """
+    try:
+        stat = (directory / "__init__.py").stat()
+    except OSError:
+        return None
+    return f"{stat.st_mtime_ns}:{stat.st_size}"
+
+
 def cache_state(andes_version: str, directory: Path | None = None) -> CacheState:
     """Whether the cache in ``directory`` (default: ANDES's) is ready to use.
 
     ``missing``: ANDES has generated nothing. ``unchecked``: there is code, but no
-    stamp for ``andes_version``, so ANDES may have upgraded since it was written.
-    ``ready``: stamped for ``andes_version``.
+    stamp for ``andes_version`` and this ``__init__.py``, so ANDES may have
+    upgraded, or another ANDES regenerated the code, since it was checked.
+    ``ready``: stamped for both.
     """
     directory = pycode_dir() if directory is None else directory
     try:
@@ -65,21 +83,24 @@ def cache_state(andes_version: str, directory: Path | None = None) -> CacheState
     if not has_code:
         return "missing"
     try:
-        stamped = (directory / STAMP_NAME).read_text(encoding="utf-8").strip()
+        stamped = (directory / STAMP_NAME).read_text(encoding="utf-8").split()
     except (OSError, ValueError):
         return "unchecked"
-    return "ready" if stamped == andes_version else "unchecked"
+    return "ready" if stamped == [andes_version, _init_fingerprint(directory)] else "unchecked"
 
 
 def mark_cache_checked(andes_version: str, directory: Path | None = None) -> None:
     """Record that the cache in ``directory`` was checked against ``andes_version``.
 
-    A directory that cannot be written leaves the cache unstamped, so the next
-    start checks again.
+    A directory without generated code, or one that cannot be written, is left
+    unstamped, so the next start checks again.
     """
     directory = pycode_dir() if directory is None else directory
+    fingerprint = _init_fingerprint(directory)
+    if fingerprint is None:
+        return
     with contextlib.suppress(OSError):
-        (directory / STAMP_NAME).write_text(f"{andes_version}\n", encoding="utf-8")
+        (directory / STAMP_NAME).write_text(f"{andes_version}\n{fingerprint}\n", encoding="utf-8")
 
 
 class BackgroundWarm:
