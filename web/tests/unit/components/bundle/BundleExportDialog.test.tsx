@@ -197,6 +197,21 @@ describe('<BundleExportDialog /> — confirm flow', () => {
     await waitFor(() => expect(useBundleStore.getState().status).toBe('success'));
   });
 
+  it('sends the request body labelled as JSON', async () => {
+    // The export bypasses the shared client (it needs the Blob back), so the header
+    // is set here. The server answers 422 to a JSON body without it.
+    const user = userEvent.setup();
+    fetchSpy.mockResolvedValue(makeZipResponse());
+    useBundleStore.getState().openDialog();
+    render(withQueryClient(<BundleExportDialog />));
+
+    await user.click(await screen.findByTestId('bundle-export-confirm'));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
+    expect(JSON.parse(String(init.body))).toHaveProperty('disturbances');
+  });
+
   it('error response surfaces inline and re-enables the confirm button', async () => {
     const user = userEvent.setup();
     fetchSpy.mockResolvedValue(makeProblemResponse(409, 'no case loaded'));
