@@ -87,7 +87,7 @@ from tensa.core.stream import (
     pq_idx_values_from_system,
     syngen_idx_values_from_system,
 )
-from tensa.core.wrapper import Wrapper
+from tensa.core.wrapper import Wrapper, validate_step_size
 
 
 def _set_parent_death_signal() -> None:
@@ -920,8 +920,7 @@ def _handle_run_sweep(
     if not isinstance(tf_raw, (int, float)) or tf_raw <= 0:
         raise AndesAppError("'tf' must be a positive number")
     tf = float(tf_raw)
-    h_raw = args.get("h")
-    h = float(h_raw) if h_raw is not None else None
+    h = validate_step_size(args.get("h"))
     sweep_id = args.get("sweep_id") or ""
 
     total = len(values)
@@ -996,6 +995,10 @@ def _handle_run_tds(
 
     bridge_thread = threading.Thread(target=_bridge, name="abort-bridge", daemon=True)
     bridge_thread.start()
+
+    # Checked before any stream metadata goes out: the route layers validate
+    # ``h`` too, but a bad value must not start a stream the run then aborts.
+    h = validate_step_size(args.get("h"))
 
     stream = bool(args.get("stream"))
     on_step: Callable[[float, Any], None] | None = None
@@ -1185,7 +1188,7 @@ def _handle_run_tds(
     try:
         result = wrapper.run_tds(
             tf=args["tf"],
-            h=args.get("h"),
+            h=h,
             on_step=on_step,
             abort_flag=abort_flag,
             integrator=integrator_raw,

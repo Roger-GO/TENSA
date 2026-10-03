@@ -138,6 +138,38 @@ def test_run_tds_qndf_with_h_stays_variable_step() -> None:
 
 
 @pytest.mark.integration
+def test_run_tds_trapezoidal_after_qndf_honors_requested_step() -> None:
+    """A trapezoidal run that follows QNDF on the same System must still step
+    at ``h``. QNDF leaves ``fixt = 0`` on the config and ANDES keeps the QNDF
+    integrator object across a resumed run, so before the wrapper reset both
+    the second run ignored ``h`` and kept taking QNDF-sized steps."""
+    raw, dyr = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw, addfiles=[dyr])
+
+    first = w.run_tds(tf=0.5, integrator="qndf")
+    assert first.converged
+
+    h = 0.004
+    times: list[float] = []
+    second = w.run_tds(
+        tf=1.0,
+        h=h,
+        integrator="trapezoidal",
+        on_step=lambda t, _ss: times.append(float(t)),
+    )
+    assert second.converged
+    assert second.final_t == pytest.approx(1.0)
+
+    dt = np.diff(times)
+    dt = dt[dt > 1e-6]
+    assert dt.max() <= h + 1e-9, f"a step exceeds h={h}: {np.unique(np.round(dt, 9))}"
+    # 0.5 s at 0.004 s is 125 steps; ANDES clips a few to switching times.
+    assert len(dt) >= 120, f"only {len(dt)} steps for h={h}"
+    assert int(w._require_loaded().TDS.config.fixt) == 1  # noqa: SLF001
+
+
+@pytest.mark.integration
 def test_run_sweep_forwards_step_size_to_tds(tmp_path: Path) -> None:
     """A sweep's ``h`` rides through ``run_tds`` to ANDES: every iteration
     integrates with the requested fixed step (0.2 s / 0.01 s = 20 steps)

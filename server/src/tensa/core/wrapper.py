@@ -1542,6 +1542,12 @@ class Wrapper:
           Maps to ANDES ``ss.TDS.config.method = "qndf"``. Requires
           ``ss.TDS.config.fixt = 0`` (which the wrapper sets explicitly).
 
+        ``fixt`` is set on every run (1 for trapezoidal, 0 for QNDF), and a
+        trapezoidal run replaces a QNDF integrator left by an earlier run on
+        the same System. The reverse switch is not possible once a run has
+        happened, because ANDES builds the QNDF history in ``TDS.init()``:
+        reload the case first.
+
         ``tds_config_overrides`` (optional) is a dict of TDS config
         field names → values. Two key flavours are accepted:
 
@@ -1565,6 +1571,7 @@ class Wrapper:
         caller's responsibility to set; this method does NOT inject
         defaults.
         """
+        h = validate_step_size(h)
         ss = self._require_loaded()
         self._ensure_setup()
 
@@ -1595,12 +1602,26 @@ class Wrapper:
         # Integrator selection. ANDES ``method`` strings: ``"trapezoid"``
         # (fixed-step ITM) and ``"qndf"`` (variable-step NDF). The QNDF
         # path also needs ``fixt = 0`` so ANDES enables LTE-driven step
-        # control (verified at andes/routines/tds.py:1278).
+        # control (verified at andes/routines/tds.py:1278). ``fixt`` is set
+        # on every run for both integrators: it lives on the System's
+        # config, so leaving it alone would carry a QNDF run's ``fixt = 0``
+        # into a later trapezoidal run and silently void its ``h``.
         if integrator == "qndf":
             ss.TDS.config.method = "qndf"
             ss.TDS.config.fixt = 0
         elif integrator == "trapezoidal":
             ss.TDS.config.method = "trapezoid"
+            ss.TDS.config.fixt = 1
+            # ANDES builds the integrator object once, in ``TDS.init()``;
+            # a resumed run ignores ``config.method``. Without this a
+            # trapezoidal run that follows QNDF on the same System would
+            # keep stepping with QNDF. (The reverse switch cannot be done
+            # here: QNDF needs the history cache ``init()`` builds, so a
+            # System that has already run needs ``reload_case`` first.)
+            if bool(getattr(ss.TDS, "initialized", False)) and bool(
+                getattr(ss.TDS.method, "requires_variable_step", False)
+            ):
+                ss.TDS.set_method("trapezoid")
         else:  # pragma: no cover — guarded by Literal type
             raise SetupFailedError(
                 f"unknown integrator {integrator!r}; expected 'trapezoidal' or 'qndf'"
@@ -3195,6 +3216,9 @@ class Wrapper:
             )
 
         expected_kind, spec_field = parse_sweep_target(parameter_kind)
+        # A bad ``h`` would otherwise be recorded as a per-iteration error
+        # N times over; refuse it before the first snapshot restore.
+        h = validate_step_size(h)
 
         log = logging.getLogger("tensa.wrapper.sweep")
 
@@ -4455,6 +4479,35 @@ def _sanitize_message(message: str) -> str:
     install-tree details. Replaces matches with ``<path>``.
     """
     return _PATH_PATTERN.sub("<path>", message)
+
+
+def validate_step_size(h: object) -> float | None:
+    """Return ``h`` as a float, or ``None`` when no step size was requested.
+
+    A TDS step size has to be a finite number greater than zero. ANDES does
+    not reject anything else: ``TDS._calc_h_first`` logs a warning for
+    ``tstep <= 0`` and quietly flips ``config.fixt`` to variable-step on the
+    live System, and NaN or infinity reach the integrator unchecked. The REST
+    bodies carry the same rule as a field constraint; the WebSocket start frame,
+    the worker's run handlers, sweeps, and ``run_tds`` itself call this, so a bad
+    value is refused before it can touch the System.
+
+    Raises:
+        SetupFailedError: ``h`` is not a finite number greater than zero.
+    """
+    if h is None:
+        return None
+    message = f"step size 'h' must be a finite number greater than 0, got {h!r}"
+    # ``bool`` is an ``int`` subclass; ``true`` is not a step size.
+    if isinstance(h, bool) or not isinstance(h, int | float | str):
+        raise SetupFailedError(message)
+    try:
+        value = float(h)
+    except ValueError:
+        raise SetupFailedError(message) from None
+    if not math.isfinite(value) or value <= 0.0:
+        raise SetupFailedError(message)
+    return value
 
 
 def _reference_angle_drift(ss: System) -> float:

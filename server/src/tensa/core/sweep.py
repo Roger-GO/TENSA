@@ -195,6 +195,8 @@ class SweepSimParams(BaseModel):
             "Fixed integration step (seconds) for every iteration, as for "
             "``POST /tds``. ``None`` keeps the ANDES default (1/30 s)."
         ),
+        gt=0.0,
+        allow_inf_nan=False,
     )
     vars: list[str] | None = Field(
         None,

@@ -17,7 +17,7 @@ import pytest
 pytest.importorskip("andes")
 
 from tensa.core.errors import SetupFailedError
-from tensa.core.wrapper import Wrapper
+from tensa.core.wrapper import Wrapper, validate_step_size
 
 
 def _ieee14_raw() -> Path:
@@ -135,17 +135,72 @@ def test_run_tds_freeform_real_andes_config_key_applies(
     assert int(ss.TDS.config.max_iter) == 25
 
 
-def test_run_tds_trapezoidal_does_not_force_fixt(loaded_wrapper: Wrapper) -> None:
-    """Trapezoidal selection should NOT alter ``fixt`` from ANDES default.
-
-    Only the QNDF branch flips ``fixt=0``; trapezoidal-fixed-step is the
-    ANDES default with ``fixt=1`` and the wrapper preserves that.
-    """
+def test_run_tds_trapezoidal_sets_fixed_step(loaded_wrapper: Wrapper) -> None:
+    """Trapezoidal selection sets ``fixt = 1`` on every run, not just on the
+    first one, so ``h`` is a fixed step whatever the System ran before."""
     w = loaded_wrapper
     ss = w._require_loaded()  # noqa: SLF001
-    fixt_before = int(ss.TDS.config.fixt)
     w.run_tds(tf=0.1, h=1 / 120, integrator="trapezoidal")
-    assert int(ss.TDS.config.fixt) == fixt_before
+    assert int(ss.TDS.config.fixt) == 1
+
+
+def test_run_tds_trapezoidal_restores_fixt_after_qndf(
+    loaded_wrapper: Wrapper,
+) -> None:
+    """QNDF leaves ``fixt = 0`` on the System's config. A later trapezoidal
+    run must put it back, or ANDES ignores ``h`` (``_calc_h_first`` only
+    reads ``tstep`` when ``fixt`` is set)."""
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    w.run_tds(tf=0.1, integrator="qndf")
+    assert int(ss.TDS.config.fixt) == 0
+    w.run_tds(tf=0.1, h=0.005, integrator="trapezoidal")
+    assert int(ss.TDS.config.fixt) == 1
+    assert float(ss.TDS.config.tstep) == pytest.approx(0.005)
+    assert ss.TDS.config.method == "trapezoid"
+
+
+def test_run_tds_fixt_override_still_wins(loaded_wrapper: Wrapper) -> None:
+    """Overrides are applied after the integrator, so an explicit ``fixt``
+    from the free-form editor is not clobbered by the per-run default."""
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    w.run_tds(
+        tf=0.1,
+        integrator="trapezoidal",
+        tds_config_overrides={"fixt": 0},
+    )
+    assert int(ss.TDS.config.fixt) == 0
+
+
+def test_run_tds_trapezoidal_replaces_a_live_qndf_method(
+    loaded_wrapper: Wrapper,
+) -> None:
+    """ANDES builds its integrator object in ``TDS.init()`` only, so on a
+    System that has already run, ``config.method`` alone changes nothing and
+    a trapezoidal run after QNDF would keep stepping with QNDF. The wrapper
+    swaps the object itself."""
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    ss.TDS.set_method("qndf")
+    ss.TDS.initialized = True  # as after a completed run
+    w.run_tds(tf=0.1, h=0.005, integrator="trapezoidal")
+    assert type(ss.TDS.method).__name__ == "Trapezoid"
+    assert bool(ss.TDS.method.requires_variable_step) is False
+
+
+def test_run_tds_leaves_the_method_object_to_init_before_the_first_run(
+    loaded_wrapper: Wrapper,
+) -> None:
+    """Before ``TDS.init()`` ANDES builds the integrator from
+    ``config.method``; the wrapper must not pre-empt that."""
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    ss.TDS.set_method("qndf")
+    assert not bool(ss.TDS.initialized)
+    w.run_tds(tf=0.1, integrator="trapezoidal")
+    assert type(ss.TDS.method).__name__ == "QNDF"
+    assert ss.TDS.config.method == "trapezoid"
 
 
 # ---- step size (h -> ss.TDS.config.tstep) --------------------------------
@@ -198,3 +253,66 @@ def test_run_tds_missing_tstep_field_raises(loaded_wrapper: Wrapper) -> None:
     assert not hasattr(ss.TDS.config, "tstep")
     # Without ``h`` the field is never consulted, so the run still proceeds.
     w.run_tds(tf=0.1)
+
+
+# ---- step size validation --------------------------------------------------
+#
+# ANDES does not reject a bad step. ``_calc_h_first`` logs a warning for
+# ``tstep <= 0`` and flips ``config.fixt`` to variable-step on the live System,
+# and NaN or infinity reach the integrator unchecked. The wrapper refuses them
+# before touching the System.
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(None, None), (0.005, 0.005), (1, 1.0), ("0.01", 0.01), (1e-9, 1e-9)],
+)
+def test_validate_step_size_accepts_positive_finite_numbers(
+    raw: object, expected: float | None
+) -> None:
+    assert validate_step_size(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [0, 0.0, -0.01, float("nan"), float("inf"), float("-inf"), True, "abc", "", "nan", [], {}],
+)
+def test_validate_step_size_rejects_everything_else(bad: object) -> None:
+    with pytest.raises(SetupFailedError, match="step size 'h'"):
+        validate_step_size(bad)
+
+
+@pytest.mark.parametrize("bad", [0.0, -0.005, float("nan"), float("inf")])
+def test_run_tds_rejects_a_bad_step_without_touching_the_system(
+    loaded_wrapper: Wrapper, bad: float
+) -> None:
+    """The refusal comes before any config write, so a rejected request cannot
+    leave ``fixt`` or ``tstep`` altered for the next run."""
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    before = (float(ss.TDS.config.tstep), int(ss.TDS.config.fixt), float(ss.TDS.config.tf))
+    with pytest.raises(SetupFailedError, match="step size 'h'"):
+        w.run_tds(tf=0.3, h=bad, integrator="qndf")
+    after = (float(ss.TDS.config.tstep), int(ss.TDS.config.fixt), float(ss.TDS.config.tf))
+    assert after == before
+    ss.TDS.run.assert_not_called()  # type: ignore[attr-defined]
+
+
+def test_run_sweep_rejects_a_bad_step_before_the_first_iteration(tmp_path: Path) -> None:
+    """Without the up-front check every iteration would fail on its own and be
+    recorded as an iteration error."""
+    ws = tmp_path / "ws"
+    ws.mkdir(mode=0o700)
+    w = Wrapper(workspace=ws)
+    seen: list[int] = []
+    with pytest.raises(SetupFailedError, match="step size 'h'"):
+        w.run_sweep(
+            snapshot_name="whatever",
+            parameter_kind="disturbance.fault.tc",
+            parameter_target=0,
+            values=[1.0, 1.1],
+            tf=0.2,
+            h=-0.01,
+            on_iteration=lambda idx, _value, _result: seen.append(idx),
+        )
+    assert seen == []

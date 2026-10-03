@@ -1100,6 +1100,7 @@ class TdsRunRequest(BaseModel):
             "``tds_config_overrides.max_step`` instead."
         ),
         gt=0.0,
+        allow_inf_nan=False,
     )
     vars: list[Literal["bus_v", "gen_state", "line_flow"]] | None = Field(
         None,

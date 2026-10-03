@@ -43,11 +43,13 @@ from typing import Any
 from fastapi import APIRouter, Request, WebSocket, status
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
+from tensa.core.errors import SetupFailedError
 from tensa.core.session import (
     SessionExpiredError,
     SessionManager,
 )
 from tensa.core.stream import DEFAULT_VARS, VAR_GROUPS
+from tensa.core.wrapper import validate_step_size
 
 router = APIRouter()
 log = logging.getLogger("tensa.ws")
@@ -122,8 +124,11 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
     except (KeyError, TypeError, ValueError):
         await _close_with_error(websocket, WS_CLOSE_INTERNAL_ERROR, "missing or invalid 'tf'")
         return
-    h_raw = cfg.get("h")
-    h = float(h_raw) if h_raw is not None else None
+    try:
+        h = validate_step_size(cfg.get("h"))
+    except SetupFailedError as exc:
+        await _close_with_error(websocket, WS_CLOSE_INTERNAL_ERROR, str(exc))
+        return
 
     # Optional decimation controls. Defaults match the v0.1 baseline: every
     # callpert step is one row in its own one-row Arrow batch (algorithm
