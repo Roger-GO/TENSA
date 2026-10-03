@@ -15,7 +15,7 @@
  * - Error path surfaces the inline error and re-enables the confirm button.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { act, render, screen, waitFor, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -217,5 +217,93 @@ describe('<BundleExportDialog /> — confirm flow', () => {
     await user.click(await screen.findByTestId('bundle-export-cancel'));
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(useBundleStore.getState().dialogOpen).toBe(false);
+  });
+});
+
+describe('<BundleExportDialog /> — auto-close beat', () => {
+  beforeEach(() => {
+    // The download link click would make jsdom log "navigation not implemented".
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  // Fake timers drive the 800 ms beat; the clock still ticks on its own so
+  // waitFor and userEvent keep working.
+  function useBeatClock() {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  }
+
+  it('closes by itself after a successful export', async () => {
+    const user = useBeatClock();
+    fetchSpy.mockResolvedValue(makeZipResponse());
+    useBundleStore.getState().openDialog();
+    render(withQueryClient(<BundleExportDialog />));
+    await user.click(await screen.findByTestId('bundle-export-confirm'));
+    await screen.findByTestId('bundle-export-success');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    await waitFor(() => expect(screen.queryByTestId('bundle-export-dialog')).toBeNull());
+    expect(useBundleStore.getState().dialogOpen).toBe(false);
+  });
+
+  it('does not close a re-opened dialog when the previous one auto-closes', async () => {
+    const user = useBeatClock();
+    fetchSpy.mockResolvedValue(makeZipResponse());
+    useBundleStore.getState().openDialog();
+    render(withQueryClient(<BundleExportDialog />));
+    await user.click(await screen.findByTestId('bundle-export-confirm'));
+    await screen.findByTestId('bundle-export-success');
+
+    // Close by hand inside the beat, then open the dialog again.
+    await user.click(screen.getByTestId('bundle-export-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('bundle-export-dialog')).toBeNull());
+    act(() => useBundleStore.getState().openDialog());
+    expect(await screen.findByTestId('bundle-export-dialog')).toBeInTheDocument();
+
+    // The first dialog's timer would fire inside this window.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(useBundleStore.getState().dialogOpen).toBe(true);
+    expect(screen.getByTestId('bundle-export-dialog')).toBeInTheDocument();
+  });
+
+  it('starts no beat when the dialog was dismissed before the export answered', async () => {
+    const user = useBeatClock();
+    let answer: (response: Response) => void = () => {};
+    fetchSpy.mockReturnValue(
+      new Promise<Response>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    useBundleStore.getState().openDialog();
+    render(withQueryClient(<BundleExportDialog />));
+    await user.click(await screen.findByTestId('bundle-export-confirm'));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+
+    // Escape is not blocked while the export is in flight. Open it again.
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('bundle-export-dialog')).toBeNull());
+    act(() => useBundleStore.getState().openDialog());
+    expect(await screen.findByTestId('bundle-export-dialog')).toBeInTheDocument();
+
+    // The export answers now; the dialog it belonged to is gone.
+    await act(async () => {
+      answer(makeZipResponse());
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalled());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(useBundleStore.getState().dialogOpen).toBe(true);
+    expect(screen.getByTestId('bundle-export-dialog')).toBeInTheDocument();
   });
 });

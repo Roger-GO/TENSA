@@ -45,6 +45,7 @@ import { useRunsStore } from '@/store/runs';
 import { useUiStore } from '@/store/ui';
 import { ProblemDetailsError } from '@/api/client';
 import { cn } from '@/lib/cn';
+import { useSafeTimeout } from '@/lib/useSafeTimeout';
 
 /**
  * Compute the list of files that will land in the bundle, given the
@@ -145,6 +146,7 @@ function BundleExportDialogInner() {
   const markError = useBundleStore((s) => s.markError);
 
   const exportMutation = useExportBundle();
+  const schedule = useSafeTimeout();
 
   // Resolve the user-visible case filename + addfiles from the case
   // store. ``primaryPath`` is workspace-relative; we display the basename.
@@ -232,7 +234,7 @@ function BundleExportDialogInner() {
       markSuccess(filename, previewFiles);
       // Auto-close after a brief beat so the user sees the success
       // state. The 800ms matches the SaveSystemButton's auto-dismiss.
-      setTimeout(() => closeDialog(), 800);
+      schedule(() => closeDialog(), 800);
     } catch (err) {
       const detail =
         err instanceof ProblemDetailsError

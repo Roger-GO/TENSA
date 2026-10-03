@@ -33,6 +33,7 @@ import { useSessionStore } from '@/store/session';
 import { ProblemDetailsError } from '@/api/client';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
+import { useSafeTimeout } from '@/lib/useSafeTimeout';
 
 export function LoadSnapshotDialog() {
   const dialogOpen = useSnapshotStore((s) => s.loadDialogOpen);
@@ -77,6 +78,7 @@ function LoadSnapshotDialogInner() {
   const listQuery = useListSnapshots();
   const restoreMutation = useRestoreSnapshot();
   const deleteMutation = useDeleteSnapshot();
+  const schedule = useSafeTimeout();
 
   // Local state for which row the user has selected for restore + which
   // row's delete button has been "armed" (clicked once; second click
@@ -112,7 +114,7 @@ function LoadSnapshotDialogInner() {
       });
       // Close after a short beat so the user reads the success toast
       // (especially when fallback_reason is non-null).
-      setTimeout(() => closeDialogs(), 1200);
+      schedule(() => closeDialogs(), 1200);
     } catch (err) {
       const detail =
         err instanceof ProblemDetailsError
@@ -132,7 +134,7 @@ function LoadSnapshotDialogInner() {
       // First click — arm. Auto-disarm after 3s so a stale prompt
       // doesn't surprise the user.
       setArmedDeleteName(name);
-      setTimeout(() => setArmedDeleteName((prev) => (prev === name ? null : prev)), 3000);
+      schedule(() => setArmedDeleteName((prev) => (prev === name ? null : prev)), 3000);
       return;
     }
     setArmedDeleteName(null);

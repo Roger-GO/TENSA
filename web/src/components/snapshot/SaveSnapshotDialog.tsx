@@ -33,6 +33,7 @@ import { useSessionStore } from '@/store/session';
 import { ProblemDetailsError } from '@/api/client';
 import { cn } from '@/lib/cn';
 import { userNameProblem } from '@/lib/fileName';
+import { useSafeTimeout } from '@/lib/useSafeTimeout';
 
 function validateName(name: string): string | null {
   if (name.length === 0) return 'Name is required.';
@@ -66,6 +67,7 @@ function SaveSnapshotDialogInner() {
   const markError = useSnapshotStore((s) => s.markSaveError);
 
   const saveMutation = useSaveSnapshot();
+  const schedule = useSafeTimeout();
   const [collisionName, setCollisionName] = useState<string | null>(null);
 
   const validation = validateName(pendingName);
@@ -79,7 +81,7 @@ function SaveSnapshotDialogInner() {
       markSuccess();
       setCollisionName(null);
       // Auto-close after a short beat so the user sees success.
-      setTimeout(() => closeDialogs(), 600);
+      schedule(() => closeDialogs(), 600);
     } catch (err) {
       if (err instanceof ProblemDetailsError && err.status === 409) {
         // Surface an inline overwrite confirm rather than a hard error.

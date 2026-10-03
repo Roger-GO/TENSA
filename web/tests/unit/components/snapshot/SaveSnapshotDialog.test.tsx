@@ -10,7 +10,7 @@
  * - Cancel closes without firing the mutation.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, cleanup } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -323,5 +323,103 @@ describe('<SaveSnapshotDialog /> — keyboard scoping (Unit 6)', () => {
     // active element when Esc was pressed; the wrapper's default
     // `enableOnFormTags: false` swallows it).
     expect(globalEscape).not.toHaveBeenCalled();
+  });
+});
+
+describe('<SaveSnapshotDialog /> — auto-close beat', () => {
+  const saved = {
+    name: 'scenario-A',
+    metadata: {
+      andes_version: '2.0.0',
+      tensa_version: '0.1.0',
+      case_filename: 'ieee14.raw',
+      case_sha256: null,
+      disturbance_log: [],
+      saved_at: 'now',
+      has_pflow: false,
+      has_tds: false,
+    },
+    dill_bytes: 1024,
+    metadata_bytes: 256,
+  };
+
+  // Fake timers drive the 600 ms beat; the clock still ticks on its own so
+  // waitFor and userEvent keep working.
+  function useBeatClock() {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    return userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('closes by itself after a save', async () => {
+    const user = useBeatClock();
+    fetchSpy.mockResolvedValue(makeJsonResponse(200, saved));
+    render(withQueryClient(<SaveSnapshotDialog />));
+    await user.type(await screen.findByTestId('save-snapshot-name-input'), 'scenario-A');
+    await user.click(screen.getByTestId('save-snapshot-confirm'));
+    await screen.findByTestId('save-snapshot-success');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    await waitFor(() => expect(screen.queryByTestId('save-snapshot-dialog')).toBeNull());
+    expect(useSnapshotStore.getState().saveDialogOpen).toBe(false);
+  });
+
+  it('does not close a re-opened dialog when the previous one auto-closes', async () => {
+    const user = useBeatClock();
+    fetchSpy.mockResolvedValue(makeJsonResponse(200, saved));
+    render(withQueryClient(<SaveSnapshotDialog />));
+    await user.type(await screen.findByTestId('save-snapshot-name-input'), 'scenario-A');
+    await user.click(screen.getByTestId('save-snapshot-confirm'));
+    await screen.findByTestId('save-snapshot-success');
+
+    // Close by hand inside the beat, then open the dialog again.
+    await user.click(screen.getByTestId('save-snapshot-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('save-snapshot-dialog')).toBeNull());
+    act(() => useSnapshotStore.getState().openSaveDialog());
+    expect(await screen.findByTestId('save-snapshot-dialog')).toBeInTheDocument();
+
+    // The first dialog's timer would fire inside this window.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(useSnapshotStore.getState().saveDialogOpen).toBe(true);
+    expect(screen.getByTestId('save-snapshot-dialog')).toBeInTheDocument();
+  });
+
+  it('starts no beat when the dialog was dismissed before the save answered', async () => {
+    const user = useBeatClock();
+    let answer: (response: Response) => void = () => {};
+    fetchSpy.mockReturnValue(
+      new Promise<Response>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    render(withQueryClient(<SaveSnapshotDialog />));
+    await user.type(await screen.findByTestId('save-snapshot-name-input'), 'scenario-A');
+    await user.click(screen.getByTestId('save-snapshot-confirm'));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+
+    // Escape is not blocked while the save is in flight. Open it again.
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('save-snapshot-dialog')).toBeNull());
+    act(() => useSnapshotStore.getState().openSaveDialog());
+    expect(await screen.findByTestId('save-snapshot-dialog')).toBeInTheDocument();
+
+    // The save answers now; the dialog it belonged to is gone.
+    await act(async () => {
+      answer(makeJsonResponse(200, saved));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await waitFor(() => expect(useSnapshotStore.getState().saveStatus).toBe('success'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(useSnapshotStore.getState().saveDialogOpen).toBe(true);
+    expect(screen.getByTestId('save-snapshot-dialog')).toBeInTheDocument();
   });
 });

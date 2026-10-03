@@ -28,7 +28,7 @@
  * itself lives in queries.ts (``useImportBundle``) so other call
  * sites (e.g., a future "Import from URL" affordance) can re-use it.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -46,6 +46,7 @@ import { ProblemDetailsError } from '@/api/client';
 import { parseWorkspacePath } from '@/api/types';
 import { BundleConflictResolver } from './BundleConflictResolver';
 import { cn } from '@/lib/cn';
+import { useSafeTimeout } from '@/lib/useSafeTimeout';
 
 export interface BundleImportButtonProps {
   /**
@@ -100,15 +101,9 @@ function BundleImportDialogInner({ onClose }: BundleImportDialogInnerProps) {
   const isPending = importMutation.isPending;
 
   // The auto-close beat after a committed import must not outlive the dialog:
-  // closing it by hand inside the beat (or unmounting it) would otherwise let
-  // the timer shut a dialog that was re-opened since.
-  const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (autoCloseTimer.current !== null) clearTimeout(autoCloseTimer.current);
-    },
-    [],
-  );
+  // closing it by hand inside the beat (or before the import answered) would
+  // otherwise let the timer shut a dialog that was re-opened since.
+  const schedule = useSafeTimeout();
 
   const reset = () => {
     setFile(null);
@@ -146,7 +141,7 @@ function BundleImportDialogInner({ onClose }: BundleImportDialogInnerProps) {
         } replayed.`,
       );
       // Auto-close after a brief beat (mirrors BundleExportDialog).
-      autoCloseTimer.current = setTimeout(() => {
+      schedule(() => {
         reset();
         onClose();
       }, 800);

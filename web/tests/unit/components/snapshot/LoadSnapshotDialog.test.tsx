@@ -10,7 +10,7 @@
  * - Delete arms + confirms (two-click pattern).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { act, render, screen, waitFor, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -319,5 +319,143 @@ describe('<LoadSnapshotDialog /> — delete', () => {
     });
     expect(deleteCall).toBeDefined();
     expect(String(deleteCall![0])).toContain('/api/sessions/test-session-id/snapshot/snap-a');
+  });
+});
+
+describe('<LoadSnapshotDialog /> — timers', () => {
+  const listing = {
+    snapshots: [
+      {
+        name: 'snap-a',
+        saved_at: 'now',
+        has_pflow: true,
+        has_tds: false,
+        has_dill: true,
+        andes_version: '2.0.0',
+        disturbance_count: 0,
+      },
+    ],
+  };
+  const restored = {
+    used_dill: true,
+    fallback_reason: null,
+    disturbances_replayed: 0,
+    metadata: {
+      andes_version: '2.0.0',
+      tensa_version: '0.1.0',
+      case_filename: 'ieee14.raw',
+      case_sha256: null,
+      disturbance_log: [],
+      saved_at: 'now',
+      has_pflow: true,
+      has_tds: false,
+    },
+  };
+
+  /** Answer the listing GET at once; hand the restore POST to the caller. */
+  function routeFetch(restore: () => Promise<Response>) {
+    fetchSpy.mockImplementation((url: unknown, init?: RequestInit) =>
+      String(url).endsWith('/snapshot/restore') && init?.method === 'POST'
+        ? restore()
+        : Promise.resolve(makeJsonResponse(200, listing)),
+    );
+  }
+
+  // Fake timers drive the beats; the clock still ticks on its own so waitFor
+  // and userEvent keep working.
+  function useBeatClock() {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('closes by itself after a restore', async () => {
+    const user = useBeatClock();
+    routeFetch(() => Promise.resolve(makeJsonResponse(200, restored)));
+    render(withQueryClient(<LoadSnapshotDialog />));
+    await user.click(await screen.findByTestId('load-snapshot-select-snap-a'));
+    await user.click(screen.getByTestId('load-snapshot-confirm'));
+    await screen.findByTestId('load-snapshot-success');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    await waitFor(() => expect(screen.queryByTestId('load-snapshot-dialog')).toBeNull());
+    expect(useSnapshotStore.getState().loadDialogOpen).toBe(false);
+  });
+
+  it('does not close a re-opened dialog when the previous one auto-closes', async () => {
+    const user = useBeatClock();
+    routeFetch(() => Promise.resolve(makeJsonResponse(200, restored)));
+    render(withQueryClient(<LoadSnapshotDialog />));
+    await user.click(await screen.findByTestId('load-snapshot-select-snap-a'));
+    await user.click(screen.getByTestId('load-snapshot-confirm'));
+    await screen.findByTestId('load-snapshot-success');
+
+    // Close by hand inside the beat, then open the dialog again.
+    await user.click(screen.getByTestId('load-snapshot-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('load-snapshot-dialog')).toBeNull());
+    act(() => useSnapshotStore.getState().openLoadDialog());
+    expect(await screen.findByTestId('load-snapshot-dialog')).toBeInTheDocument();
+
+    // The first dialog's timer would fire inside this window.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(useSnapshotStore.getState().loadDialogOpen).toBe(true);
+    expect(screen.getByTestId('load-snapshot-dialog')).toBeInTheDocument();
+  });
+
+  it('starts no beat when the dialog was dismissed before the restore answered', async () => {
+    const user = useBeatClock();
+    let answer: (response: Response) => void = () => {};
+    routeFetch(
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    render(withQueryClient(<LoadSnapshotDialog />));
+    await user.click(await screen.findByTestId('load-snapshot-select-snap-a'));
+    await user.click(screen.getByTestId('load-snapshot-confirm'));
+    await waitFor(() => expect(useSnapshotStore.getState().restoreStatus).toBe('pending'));
+
+    // Escape is not blocked while the restore is in flight. Open it again.
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('load-snapshot-dialog')).toBeNull());
+    act(() => useSnapshotStore.getState().openLoadDialog());
+    expect(await screen.findByTestId('load-snapshot-dialog')).toBeInTheDocument();
+
+    // The restore answers now; the dialog it belonged to is gone.
+    await act(async () => {
+      answer(makeJsonResponse(200, restored));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await waitFor(() => expect(useSnapshotStore.getState().restoreStatus).toBe('success'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(useSnapshotStore.getState().loadDialogOpen).toBe(true);
+    expect(screen.getByTestId('load-snapshot-dialog')).toBeInTheDocument();
+  });
+
+  it('disarms an armed delete after three seconds', async () => {
+    const user = useBeatClock();
+    routeFetch(() => Promise.resolve(makeJsonResponse(200, restored)));
+    render(withQueryClient(<LoadSnapshotDialog />));
+    await user.click(await screen.findByTestId('load-snapshot-delete-snap-a'));
+    expect(screen.getByTestId('load-snapshot-delete-snap-a')).toHaveTextContent(/Confirm delete/);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2900);
+    });
+    expect(screen.getByTestId('load-snapshot-delete-snap-a')).toHaveTextContent(/Confirm delete/);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(screen.getByTestId('load-snapshot-delete-snap-a')).toHaveTextContent(/^Delete$/);
   });
 });

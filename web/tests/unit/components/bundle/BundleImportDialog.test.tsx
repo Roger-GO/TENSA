@@ -242,6 +242,41 @@ describe('<BundleImportDialog /> — auto-close beat', () => {
     });
     await waitFor(() => expect(screen.queryByTestId('bundle-import-dialog')).toBeNull());
   });
+
+  it('starts no beat when the dialog was dismissed before the import answered', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let answer: (response: Response) => void = () => {};
+    fetchSpy.mockReturnValue(
+      new Promise<Response>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    render(withQueryClient(<BundleImportButton />));
+    await user.click(screen.getByTestId('bundle-import-button'));
+
+    const input = (await screen.findByTestId('bundle-import-file-input')) as HTMLInputElement;
+    await user.upload(input, new File([new Uint8Array([0x50, 0x4b])], 'bundle.zip'));
+    await user.click(screen.getByTestId('bundle-import-validate'));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+
+    // Cancel is disabled while the import is in flight, Escape is not. Open it again.
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('bundle-import-dialog')).toBeNull());
+    await user.click(screen.getByTestId('bundle-import-button'));
+    expect(await screen.findByTestId('bundle-import-dialog')).toBeInTheDocument();
+
+    // The import answers now; the dialog it belonged to is gone.
+    await act(async () => {
+      answer(makeCommittedResponse());
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await waitFor(() => expect(useCaseStore.getState().selection).not.toBeNull());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(screen.getByTestId('bundle-import-dialog')).toBeInTheDocument();
+  });
 });
 
 describe('<BundleImportDialog /> — conflict path', () => {
