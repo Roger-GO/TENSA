@@ -163,5 +163,33 @@ def test_serve_load_pflow_tds(tmp_path: Path) -> None:
         assert tds["final_t"] == pytest.approx(0.5, abs=0.02)
         assert tds["callpert_count"] > 0
 
+        # A sweep of four values runs on sub-workers the server spawns (two on any
+        # machine with two CPUs or more, the session's own worker on one), so
+        # this is where their start, their pipes and their shutdown meet each
+        # operating system. The sweep ends "done" and frees the session.
+        resp = client.post(f"/sessions/{sid}/snapshot", json={"name": "smoke"})
+        assert resp.status_code == 200, resp.text
+        resp = client.post(
+            f"/sessions/{sid}/sweep",
+            json={
+                "parameter": {
+                    "kind": "disturbance.fault.tc",
+                    "target": 0,
+                    "range": {"start": 0.15, "end": 0.25, "steps": 4},
+                },
+                "sim": {"tf": 0.3, "h": 0.02, "vars": None},
+                "snapshot_name": "smoke",
+            },
+        )
+        assert resp.status_code == 202, resp.text
+        assert resp.json()["total"] == 4
+        job_url = f"/sessions/{sid}/jobs/{resp.json()['job_id']}"
+        deadline = time.monotonic() + _REQUEST_TIMEOUT_S
+        while (record := client.get(job_url).json())["status"] in {"pending", "running"}:
+            assert time.monotonic() < deadline, f"the sweep never finished: {record}"
+            time.sleep(0.25)
+        assert record["status"] == "done", record
+        assert client.get(f"/sessions/{sid}/topology").status_code == 200
+
         # Closing the session stops the worker.
         assert client.delete(f"/sessions/{sid}").status_code == 204
