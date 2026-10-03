@@ -37,6 +37,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from tensa.core.win32 import FileTime, last_error, load_kernel32
+
+# ``_load_kernel32`` and ``_last_error`` stay module names so tests (and callers
+# that inject fakes) can replace them here.
+_load_kernel32 = load_kernel32
+_last_error = last_error
+
 log = logging.getLogger("tensa.session_dirs")
 
 # The scratch root inside the workspace, and the file in each session dir that
@@ -70,12 +77,6 @@ _SESSION_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _WIN_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _WIN_STILL_ACTIVE = 259
 _WIN_ERROR_ACCESS_DENIED = 5
-
-
-class _FileTime(ctypes.Structure):
-    """``FILETIME``: 100 ns ticks since 1601, as two 32-bit halves."""
-
-    _fields_ = [("dwLowDateTime", ctypes.c_uint32), ("dwHighDateTime", ctypes.c_uint32)]
 
 
 # ---- owner marker -----------------------------------------------------------
@@ -133,7 +134,7 @@ def _windows_process_start_time(pid: int, kernel32: Any) -> str | None:
     if not handle:
         return None
     try:
-        created, exited, kernel, user = (_FileTime() for _ in range(4))
+        created, exited, kernel, user = (FileTime() for _ in range(4))
         if not kernel32.GetProcessTimes(
             handle,
             ctypes.byref(created),
@@ -225,32 +226,6 @@ def read_owner_pid(session_root: Path) -> int | None:
 
 
 # ---- process liveness -------------------------------------------------------
-
-
-def _load_kernel32() -> Any:
-    """``kernel32`` with the prototypes ``pid_is_alive`` and ``process_start_time``
-    need (Windows only)."""
-    if sys.platform != "win32":
-        raise OSError("kernel32 is only available on Windows")
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
-    kernel32.OpenProcess.restype = ctypes.c_void_p
-    kernel32.GetExitCodeProcess.argtypes = [
-        ctypes.c_void_p,
-        ctypes.POINTER(ctypes.c_uint32),
-    ]
-    kernel32.GetExitCodeProcess.restype = ctypes.c_int
-    kernel32.GetProcessTimes.argtypes = [ctypes.c_void_p, *[ctypes.POINTER(_FileTime)] * 4]
-    kernel32.GetProcessTimes.restype = ctypes.c_int
-    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
-    kernel32.CloseHandle.restype = ctypes.c_int
-    return kernel32
-
-
-def _last_error() -> int:
-    if sys.platform != "win32":
-        return 0
-    return int(ctypes.get_last_error())
 
 
 def _windows_pid_is_alive(

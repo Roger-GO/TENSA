@@ -56,6 +56,13 @@ import threading
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
+from tensa.core.win32 import last_error, load_kernel32
+
+# ``_load_kernel32`` and ``_last_error`` stay module names so tests (and callers
+# that inject fakes) can replace them here.
+_load_kernel32 = load_kernel32
+_last_error = last_error
+
 log = logging.getLogger("tensa.worker_spawn")
 
 THREAD_ENV_VARS = (
@@ -189,39 +196,6 @@ class _JobObjectExtendedLimitInformation(ctypes.Structure):
         ("PeakProcessMemoryUsed", ctypes.c_size_t),
         ("PeakJobMemoryUsed", ctypes.c_size_t),
     ]
-
-
-def _load_kernel32() -> Any:
-    """``kernel32`` with the prototypes the Job Object calls need (Windows only).
-
-    The prototypes matter: a HANDLE is pointer-sized, and ctypes would pass and
-    return it as a 32-bit int by default.
-    """
-    if sys.platform != "win32":
-        raise OSError("Job Objects are only available on Windows")
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
-    kernel32.CreateJobObjectW.restype = ctypes.c_void_p
-    kernel32.SetInformationJobObject.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_int,
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-    ]
-    kernel32.SetInformationJobObject.restype = ctypes.c_int
-    kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
-    kernel32.OpenProcess.restype = ctypes.c_void_p
-    kernel32.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-    kernel32.AssignProcessToJobObject.restype = ctypes.c_int
-    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
-    kernel32.CloseHandle.restype = ctypes.c_int
-    return kernel32
-
-
-def _last_error() -> int:
-    if sys.platform != "win32":
-        return 0
-    return int(ctypes.get_last_error())
 
 
 class KillOnCloseJob:
