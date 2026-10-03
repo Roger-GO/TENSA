@@ -94,17 +94,25 @@ async def live_server(tmp_path: Path) -> AsyncIterator[tuple[int, str]]:
             proc.wait()
 
 
+# The first load on a machine without ``~/.andes/pycode`` makes ANDES generate
+# Python for the models in the case, far longer than httpx's default 5 s.
+_COLD_LOAD_TIMEOUT = 180.0
+
+
 async def _create_session_and_load(
     base_url: str, primary: str = "ieee14.raw", addfile: str = "ieee14.dyr"
 ) -> str:
     """Helper: create a session over HTTP and load IEEE 14. Returns session_id."""
     async with httpx.AsyncClient(base_url=base_url) as client:
         resp = await client.post("/api/sessions")
+        assert resp.status_code == 201, resp.text
         sid = str(resp.json()["session_id"])
-        await client.post(
+        load_resp = await client.post(
             f"/api/sessions/{sid}/case",
             json={"primary_path": primary, "addfiles": [addfile]},
+            timeout=_COLD_LOAD_TIMEOUT,
         )
+        assert load_resp.status_code == 200, load_resp.text
     return sid
 
 

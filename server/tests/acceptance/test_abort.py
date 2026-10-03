@@ -102,6 +102,13 @@ async def live_server(tmp_path: Path) -> AsyncIterator[tuple[int, str]]:
             proc.wait()
 
 
+# The first load on a machine without ``~/.andes/pycode`` (a fresh CI runner, a new
+# user) makes ANDES generate Python for the models in the case, which takes much
+# longer than httpx's default 5 s. Later loads are fast; only the first test to
+# run pays this, so it must not be the one that decides whether abort works.
+_COLD_LOAD_TIMEOUT = 180.0
+
+
 async def _create_session_and_load(
     base_url: str, primary: str = "ieee14.raw", addfile: str = "ieee14.dyr"
 ) -> str:
@@ -113,6 +120,7 @@ async def _create_session_and_load(
         load_resp = await client.post(
             f"/api/sessions/{sid}/case",
             json={"primary_path": primary, "addfiles": [addfile]},
+            timeout=_COLD_LOAD_TIMEOUT,
         )
         assert load_resp.status_code == 200, load_resp.text
     return sid
