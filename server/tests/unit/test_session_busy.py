@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import types
 from typing import Any
 
 import pytest
@@ -150,6 +151,27 @@ def test_current_inflight_job_returns_most_recently_updated_within_bucket() -> N
     job = _current_inflight_job(sess)
     assert job is not None
     assert job.id == middle  # most-recently-updated, not insertion first/last
+
+
+def test_current_inflight_job_tie_break_survives_a_clock_that_does_not_tick(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows' monotonic clock ticks about every 16 ms, so back-to-back updates
+    can read the same value. The most-recently-updated job must still win."""
+    from tensa.core import jobs
+
+    monkeypatch.setattr(jobs, "time", types.SimpleNamespace(monotonic=lambda: 100.0))
+    sess = _make_session()
+    reg = sess.job_registry
+    first = reg.register_job(kind="pflow", can_cancel=False)
+    middle = reg.register_job(kind="eig", can_cancel=False)
+    last = reg.register_job(kind="cpf", can_cancel=False)
+    reg.mark_running(first)
+    reg.mark_running(last)
+    reg.mark_running(middle)
+    job = _current_inflight_job(sess)
+    assert job is not None
+    assert job.id == middle
 
 
 # --- RLock re-entrancy (bypass_session_gate relies on it) --------------------

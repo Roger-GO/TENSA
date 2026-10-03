@@ -9,9 +9,11 @@ behaves correctly across happy paths, edge cases, and concurrent access.
 from __future__ import annotations
 
 import threading
+import types
 
 import pytest
 
+from tensa.core import jobs
 from tensa.core.jobs import (
     MAX_FAILED_DISTINCT,
     MAX_SUCCESSFUL,
@@ -113,6 +115,50 @@ def test_update_progress_clamps_to_unit_interval(registry: _JobRegistry) -> None
 
     registry.update_progress(job_id, 2.5)
     assert registry.get_job(job_id).progress == 1.0  # type: ignore[union-attr]
+
+
+# ---- timestamps on a coarse clock ------------------------------------------
+
+
+@pytest.fixture
+def frozen_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A monotonic clock that never ticks, the limit of Windows' ~16 ms resolution."""
+    monkeypatch.setattr(jobs, "time", types.SimpleNamespace(monotonic=lambda: 100.0))
+
+
+def test_timestamps_stay_distinct_and_ordered_on_a_clock_that_does_not_tick(
+    registry: _JobRegistry, frozen_clock: None
+) -> None:
+    first = registry.register_job(kind="pflow", can_cancel=False)
+    second = registry.register_job(kind="eig", can_cancel=False)
+    a, b = registry.get_job(first), registry.get_job(second)
+    assert a is not None and b is not None
+    assert a.started_at < b.started_at
+
+    registry.mark_running(first)
+    registry.update_progress(first, 0.5)
+    updated = registry.get_job(first)
+    assert updated is not None
+    assert updated.updated_at > b.updated_at
+
+    registry.mark_done(first)
+    done = registry.get_job(first)
+    assert done is not None
+    assert done.ended_at is not None
+    assert done.ended_at > updated.updated_at
+    assert done.ended_at == done.updated_at
+
+
+def test_timestamps_stay_ordered_when_the_clock_steps_backwards(
+    registry: _JobRegistry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    readings = iter([50.0, 40.0, 60.0])
+    monkeypatch.setattr(jobs, "time", types.SimpleNamespace(monotonic=lambda: next(readings)))
+    monkeypatch.setattr(jobs, "_last_stamp", 0.0)
+    stamps = [jobs._stamp() for _ in range(3)]
+    assert stamps == sorted(set(stamps))
+    assert stamps[0] == 50.0
+    assert stamps[2] == 60.0
 
 
 # ---- idempotency ------------------------------------------------------------

@@ -30,6 +30,7 @@ worker, no FastAPI, no ANDES. The ``/jobs`` routes in
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 import uuid
@@ -87,6 +88,27 @@ JobStatus = Literal["pending", "running", "done", "failed", "cancelled"]
 MAX_FAILED_DISTINCT: int = 20
 MAX_SUCCESSFUL: int = 50
 MAX_TOTAL: int = 100
+
+_stamp_lock = threading.Lock()
+_last_stamp = 0.0
+
+
+def _stamp() -> float:
+    """``time.monotonic()``, but never equal to a stamp handed out before.
+
+    ``updated_at`` decides which in-flight job is the most recently updated, and
+    ``started_at`` how the activity panel orders jobs. The monotonic clock ticks
+    about every 16 ms on Windows, so two transitions in a row can read the same
+    value and the order would silently fall back to insertion order. Bumping a
+    repeated reading by one float step keeps every stamp distinct and ordered.
+    """
+    global _last_stamp
+    with _stamp_lock:
+        now = time.monotonic()
+        if now <= _last_stamp:
+            now = math.nextafter(_last_stamp, math.inf)
+        _last_stamp = now
+        return now
 
 
 @dataclass
@@ -165,7 +187,7 @@ class _JobRegistry:
         (session-mutating jobs) so the per-session HTTP surface can filter the
         shared registry to its own session.
         """
-        now = time.monotonic()
+        now = _stamp()
         if job_id is None:
             job_id = str(uuid.uuid4())
         with self._lock:
@@ -190,14 +212,14 @@ class _JobRegistry:
             if record is None or record.status != "pending":
                 return
             record.status = "running"
-            record.updated_at = time.monotonic()
+            record.updated_at = _stamp()
 
     def mark_done(self, job_id: str, *, result_ref: str | None = None) -> None:
         with self._lock:
             record = self._records.get(job_id)
             if record is None or record.status in ("done", "failed", "cancelled"):
                 return
-            now = time.monotonic()
+            now = _stamp()
             record.status = "done"
             record.result_ref = result_ref
             record.updated_at = now
@@ -237,7 +259,7 @@ class _JobRegistry:
                 # ``mark_done`` / ``mark_cancelled``; closes the race where a
                 # late driver error flips a ``cancelled`` record to ``failed``.
                 return job_id
-            now = time.monotonic()
+            now = _stamp()
             record.problem = dict(problem)
             record.status = "failed"
             record.updated_at = now
@@ -264,7 +286,7 @@ class _JobRegistry:
             record = self._records.get(job_id)
             if record is None or record.status in ("done", "failed", "cancelled"):
                 return
-            now = time.monotonic()
+            now = _stamp()
             record.status = "cancelled"
             record.updated_at = now
             record.ended_at = now
@@ -279,7 +301,7 @@ class _JobRegistry:
             if record is None or record.status not in ("pending", "running"):
                 return
             record.progress = clamped
-            record.updated_at = time.monotonic()
+            record.updated_at = _stamp()
 
     def get_job(self, job_id: str) -> JobRecord | None:
         with self._lock:
