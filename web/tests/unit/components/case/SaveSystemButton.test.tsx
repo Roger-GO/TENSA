@@ -10,9 +10,11 @@
  *   overwrite; toggling and re-submitting passes overwrite=true.
  * - sidecar auto-write fires PUT /workspace/layout when there are
  *   drag overrides.
+ * - the modal closes itself a beat after a save, and that beat never
+ *   closes a modal opened since.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -22,6 +24,7 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { parseSessionId } from '@/api/types';
 import type { ProblemDetails, TopologySummary } from '@/api/types';
+import { startBeatClock } from '../../helpers/beatClock';
 
 const postSpy = vi.fn();
 const putSpy = vi.fn();
@@ -257,5 +260,95 @@ describe('<SaveSystemButton />', () => {
         generator: { '1': { x: 50, y: 60 } },
       },
     });
+  });
+});
+
+describe('<SaveSystemButton /> — auto-close beat', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Click Save and wait for the confirmation line. */
+  async function saveAndConfirm(user: ReturnType<typeof startBeatClock>) {
+    await user.click(screen.getByTestId('save-system-button'));
+    await user.click(screen.getByTestId('save-confirm'));
+    await screen.findByText(/Wrote 1024 bytes/);
+  }
+
+  it('closes by itself after a successful save', async () => {
+    const user = startBeatClock();
+    render(withQueryClient(<SaveSystemButton />));
+    await saveAndConfirm(user);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('does not close a re-opened modal when the previous one auto-closes', async () => {
+    const user = startBeatClock();
+    render(withQueryClient(<SaveSystemButton />));
+    await saveAndConfirm(user);
+
+    // Close by hand inside the beat, then open the modal again.
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await user.click(screen.getByTestId('save-system-button'));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+
+    // The first modal's timer would fire inside this window.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('starts no beat when the modal was dismissed before the save answered', async () => {
+    const user = startBeatClock();
+    // A layout to write: the sidecar belongs to the file, not to the modal.
+    useCaseStore.setState({ dragOverrides: { '1': { x: 10, y: 20 } } });
+    let answer: (value: unknown) => void = () => {};
+    nextPost = () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      });
+    render(withQueryClient(<SaveSystemButton />));
+    await user.click(screen.getByTestId('save-system-button'));
+    await user.click(screen.getByTestId('save-confirm'));
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1));
+
+    // Escape is not blocked while the save is in flight. Open it again.
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await user.click(screen.getByTestId('save-system-button'));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+
+    // The save answers now; the modal it belonged to is gone.
+    await act(async () => {
+      answer({ filename: 'my-system.xlsx', bytes_written: 1024 });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByText(/Wrote 1024 bytes/)).toBeNull();
+  });
+
+  it('keeps an answer to the open modal: a failed save stays on screen', async () => {
+    const user = startBeatClock();
+    const { ProblemDetailsError } = await import('@/api/client');
+    nextPost = () => Promise.reject(new ProblemDetailsError(makeProblemDetails(500, 'disk full')));
+    render(withQueryClient(<SaveSystemButton />));
+    await user.click(screen.getByTestId('save-system-button'));
+    await user.click(screen.getByTestId('save-confirm'));
+    expect(await screen.findByTestId('save-error')).toHaveTextContent('disk full');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 });

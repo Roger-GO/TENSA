@@ -10,10 +10,14 @@
  * ``schedule(callback, delayMs)`` starts a timer. Every pending timer is
  * cleared when the component unmounts, and a call made after unmount (a
  * request that resolved after the dialog was dismissed) starts nothing.
+ *
+ * It returns a function that cancels that one timer. A component that stays
+ * mounted while its dialog opens and closes (so the unmount cleanup never
+ * runs) uses it to drop a beat that belongs to a dialog the user has left.
  */
 import { useCallback, useEffect, useRef } from 'react';
 
-export function useSafeTimeout(): (callback: () => void, delayMs: number) => void {
+export function useSafeTimeout(): (callback: () => void, delayMs: number) => () => void {
   const pending = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const mounted = useRef(true);
 
@@ -30,11 +34,15 @@ export function useSafeTimeout(): (callback: () => void, delayMs: number) => voi
   }, []);
 
   return useCallback((callback, delayMs) => {
-    if (!mounted.current) return;
+    if (!mounted.current) return () => {};
     const timer = setTimeout(() => {
       pending.current.delete(timer);
       callback();
     }, delayMs);
     pending.current.add(timer);
+    return () => {
+      clearTimeout(timer);
+      pending.current.delete(timer);
+    };
   }, []);
 }

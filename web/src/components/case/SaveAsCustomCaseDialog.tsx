@@ -34,6 +34,7 @@ import { subscribePaletteDialog } from '@/lib/commands';
 import { ProblemDetailsError } from '@/api/client';
 import { cn } from '@/lib/cn';
 import { userNameProblem } from '@/lib/fileName';
+import { useSafeTimeout } from '@/lib/useSafeTimeout';
 
 /** Strip a trailing extension so collision compares stem-to-stem. */
 function stemOf(name: string): string {
@@ -88,6 +89,10 @@ function SaveAsCustomCaseDialogInner({ onClose }: { onClose: () => void }) {
 
   const saveAs = useCloneSaveAs();
   const filesQuery = useListWorkspaceFiles();
+  // The auto-close beat after a save must not outlive this body: dismissing
+  // the dialog inside the beat (or before the save answered) and opening it
+  // again would otherwise let the old timer close the new dialog.
+  const schedule = useSafeTimeout();
 
   const existingStems = new Set(
     (filesQuery.data?.files ?? []).map((f) => stemOf(f.name).toLowerCase()),
@@ -107,7 +112,7 @@ function SaveAsCustomCaseDialogInner({ onClose }: { onClose: () => void }) {
       {
         onSuccess: () => {
           setSaved(true);
-          setTimeout(onClose, 600);
+          schedule(onClose, 600);
         },
         onError: (err) => {
           const detail =

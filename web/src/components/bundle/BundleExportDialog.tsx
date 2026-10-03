@@ -233,7 +233,7 @@ function BundleExportDialogInner() {
       downloadBlob(zipBlob, filename);
       markSuccess(filename, previewFiles);
       // Auto-close after a brief beat so the user sees the success
-      // state. The 800ms matches the SaveSystemButton's auto-dismiss.
+      // state. The 800ms is the same beat as BundleImportDialog's.
       schedule(() => closeDialog(), 800);
     } catch (err) {
       const detail =

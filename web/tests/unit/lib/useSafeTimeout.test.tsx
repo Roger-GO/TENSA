@@ -1,6 +1,6 @@
 /**
  * Tests for `useSafeTimeout`: a timer that is cleared when the component
- * unmounts, and never starts once it has.
+ * unmounts, never starts once it has, and can be cancelled on its own.
  */
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -93,6 +93,39 @@ describe('useSafeTimeout', () => {
     expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(1000);
     expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('returns a function that cancels just that timer', () => {
+    const { schedule } = mountProbe();
+    const cancelled = vi.fn();
+    const kept = vi.fn();
+    const cancel = schedule(cancelled, 100);
+    schedule(kept, 100);
+
+    cancel();
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(1000);
+    expect(cancelled).not.toHaveBeenCalled();
+    expect(kept).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancelling a timer that already fired, or twice, does nothing', () => {
+    const { schedule } = mountProbe();
+    const callback = vi.fn();
+    const cancel = schedule(callback, 100);
+
+    vi.advanceTimersByTime(100);
+    cancel();
+    cancel();
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands back a harmless cancel when called after the component unmounted', () => {
+    const { schedule, unmount } = mountProbe();
+    unmount();
+
+    const cancel = schedule(vi.fn(), 100);
+    expect(() => cancel()).not.toThrow();
   });
 
   it('hands out the same function on every render', () => {

@@ -7,9 +7,11 @@
  *   error + disabled confirm.
  * - Confirm fires the clone save-as POST and flips to the success state.
  * - Cancel closes without firing the mutation.
+ * - The dialog closes itself a beat after a save, and that beat never closes
+ *   a dialog opened since.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { act, render, screen, waitFor, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -17,6 +19,8 @@ import type { ReactNode } from 'react';
 import { SaveAsCustomCaseDialog } from '@/components/case/SaveAsCustomCaseDialog';
 import { useSessionStore } from '@/store/session';
 import { parseSessionId } from '@/api/types';
+import { __requestPaletteDialog } from '@/lib/commands';
+import { startBeatClock } from '../../helpers/beatClock';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -158,5 +162,116 @@ describe('<SaveAsCustomCaseDialog /> — confirm flow', () => {
     // No save-as POST fired (only the workspace-files GET may have).
     const saveCall = fetchSpy.mock.calls.find(([u]) => String(u).includes('/case/clone/save-as'));
     expect(saveCall).toBeUndefined();
+  });
+});
+
+describe('<SaveAsCustomCaseDialog /> — auto-close beat', () => {
+  const SAVED = {
+    name: 'kundur_tuned',
+    files: ['/ws/kundur_tuned.xlsx'],
+    job_id: 'j1',
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Open the self-managed dialog the way the command palette does. */
+  function openFromPalette() {
+    act(() => __requestPaletteDialog('save-as-custom'));
+  }
+
+  async function fillAndSave(user: ReturnType<typeof startBeatClock>) {
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    await user.type(await screen.findByTestId('save-as-custom-name-input'), 'kundur_tuned');
+    await user.click(screen.getByTestId('save-as-custom-confirm'));
+  }
+
+  it('closes by itself after a save', async () => {
+    const user = startBeatClock();
+    fetchSpy.mockImplementation(routeFetch());
+    render(withQueryClient(<SaveAsCustomCaseDialog />));
+    openFromPalette();
+    await fillAndSave(user);
+    await screen.findByTestId('save-as-custom-success');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    await waitFor(() => expect(screen.queryByTestId('save-as-custom-case-dialog')).toBeNull());
+  });
+
+  it('does not close a re-opened dialog when the previous one auto-closes', async () => {
+    const user = startBeatClock();
+    fetchSpy.mockImplementation(routeFetch());
+    render(withQueryClient(<SaveAsCustomCaseDialog />));
+    openFromPalette();
+    await fillAndSave(user);
+    await screen.findByTestId('save-as-custom-success');
+
+    // Close by hand inside the beat, then open the dialog again.
+    await user.click(screen.getByTestId('save-as-custom-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('save-as-custom-case-dialog')).toBeNull());
+    openFromPalette();
+    expect(await screen.findByTestId('save-as-custom-case-dialog')).toBeInTheDocument();
+
+    // The first dialog's timer would fire inside this window.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(screen.getByTestId('save-as-custom-case-dialog')).toBeInTheDocument();
+  });
+
+  it('does not call back into its parent when it unmounted inside the beat', async () => {
+    const user = startBeatClock();
+    const onOpenChange = vi.fn();
+    fetchSpy.mockImplementation(routeFetch());
+    const view = render(
+      withQueryClient(<SaveAsCustomCaseDialog open onOpenChange={onOpenChange} />),
+    );
+    await fillAndSave(user);
+    await screen.findByTestId('save-as-custom-success');
+
+    view.unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('starts no beat when the dialog was dismissed before the save answered', async () => {
+    const user = startBeatClock();
+    let answer: (response: Response) => void = () => {};
+    fetchSpy.mockImplementation((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes('/case/clone/save-as') && init?.method === 'POST'
+        ? new Promise<Response>((resolve) => {
+            answer = resolve;
+          })
+        : routeFetch()(input, init),
+    );
+    render(withQueryClient(<SaveAsCustomCaseDialog />));
+    openFromPalette();
+    await fillAndSave(user);
+    await waitFor(() =>
+      expect(fetchSpy.mock.calls.some(([u]) => String(u).includes('/case/clone/save-as'))).toBe(
+        true,
+      ),
+    );
+
+    // Cancel is disabled while the save is in flight, Escape is not. Open it again.
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('save-as-custom-case-dialog')).toBeNull());
+    openFromPalette();
+    expect(await screen.findByTestId('save-as-custom-case-dialog')).toBeInTheDocument();
+
+    // The save answers now; the dialog it belonged to is gone.
+    await act(async () => {
+      answer(makeJsonResponse(201, SAVED));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(screen.getByTestId('save-as-custom-case-dialog')).toBeInTheDocument();
   });
 });

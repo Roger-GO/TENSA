@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -18,6 +18,7 @@ import {
   type NonBusOverride,
 } from '@/components/sld/sidecar';
 import { cn } from '@/lib/cn';
+import { useSafeTimeout } from '@/lib/useSafeTimeout';
 
 /**
  * "Save system" button + format-picker modal.
@@ -73,6 +74,22 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
   const [overwrite, setOverwrite] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // This component stays mounted while the modal opens and closes, so the
+  // unmount cleanup of ``useSafeTimeout`` alone would not stop the auto-close
+  // beat of one opening from closing the next. Opening or closing the modal
+  // cancels a pending beat and bumps ``modalEpoch``; a save that answers after
+  // the modal it started in was left must not touch the one open now.
+  const schedule = useSafeTimeout();
+  const cancelAutoClose = useRef<(() => void) | null>(null);
+  const modalEpoch = useRef(0);
+
+  const setModalState = (next: boolean) => {
+    modalEpoch.current += 1;
+    cancelAutoClose.current?.();
+    cancelAutoClose.current = null;
+    setModalOpen(next);
+  };
 
   const enabled = sessionId !== null && topology !== null;
 
@@ -173,6 +190,7 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
       setError('Pick a non-empty filename.');
       return;
     }
+    const epoch = modalEpoch.current;
     saveMutation.mutate(
       {
         sessionId,
@@ -181,12 +199,15 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
       {
         onSuccess: (resp) => {
           // Auto-save the layout sidecar alongside the case file so
-          // reload preserves the user's drag positions (Unit 13a).
+          // reload preserves the user's drag positions (Unit 13a). The file
+          // is on disk whether or not the modal is still the one that saved.
           writeSidecarAlongside(resp.filename);
+          if (modalEpoch.current !== epoch) return;
           setSuccess(`Wrote ${resp.bytes_written} bytes to ${resp.filename}`);
-          setTimeout(() => setModalOpen(false), 1200);
+          cancelAutoClose.current = schedule(() => setModalState(false), 1200);
         },
         onError: (err) => {
+          if (modalEpoch.current !== epoch) return;
           if (err instanceof ProblemDetailsError) {
             if (err.status === 409 && !overwrite) {
               setError('A file by that name already exists. Tick "Overwrite" to replace it.');
@@ -209,7 +230,7 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
         size="sm"
         disabled={!enabled}
         onClick={() => {
-          setModalOpen(true);
+          setModalState(true);
           setError(null);
           setSuccess(null);
         }}
@@ -221,7 +242,7 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
       <Dialog
         open={modalOpen}
         onOpenChange={(next) => {
-          if (!next) setModalOpen(false);
+          if (!next) setModalState(false);
         }}
       >
         <DialogContent>
@@ -326,7 +347,7 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
               type="button"
               variant="ghost"
               size="sm"
-              onClick={() => setModalOpen(false)}
+              onClick={() => setModalState(false)}
               disabled={saveMutation.isPending}
             >
               Cancel
