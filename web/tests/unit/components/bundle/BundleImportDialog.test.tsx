@@ -15,7 +15,7 @@
  *   re-issues with ``force_resolve=true``.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { act, render, screen, waitFor, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -190,6 +190,57 @@ describe('<BundleImportDialog /> — happy path', () => {
     );
     // Mutation hook mirrors the case selection into the case slice.
     await waitFor(() => expect(useCaseStore.getState().selection).not.toBeNull());
+  });
+});
+
+describe('<BundleImportDialog /> — auto-close beat', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('does not close a re-opened dialog when the previous one auto-closes', async () => {
+    // Fake timers drive the 800 ms beat; the clock still ticks on its own so
+    // waitFor and userEvent keep working.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    fetchSpy.mockResolvedValue(makeCommittedResponse());
+    render(withQueryClient(<BundleImportButton />));
+    await user.click(screen.getByTestId('bundle-import-button'));
+
+    const input = (await screen.findByTestId('bundle-import-file-input')) as HTMLInputElement;
+    await user.upload(input, new File([new Uint8Array([0x50, 0x4b])], 'bundle.zip'));
+    await user.click(screen.getByTestId('bundle-import-validate'));
+    await screen.findByTestId('bundle-import-success');
+
+    // Close by hand inside the beat, then open the dialog again.
+    await user.click(screen.getByTestId('bundle-import-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('bundle-import-dialog')).toBeNull());
+    await user.click(screen.getByTestId('bundle-import-button'));
+    expect(await screen.findByTestId('bundle-import-dialog')).toBeInTheDocument();
+
+    // The first dialog's timer would fire inside this window.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(screen.getByTestId('bundle-import-dialog')).toBeInTheDocument();
+  });
+
+  it('closes by itself after a committed import', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    fetchSpy.mockResolvedValue(makeCommittedResponse());
+    render(withQueryClient(<BundleImportButton />));
+    await user.click(screen.getByTestId('bundle-import-button'));
+
+    const input = (await screen.findByTestId('bundle-import-file-input')) as HTMLInputElement;
+    await user.upload(input, new File([new Uint8Array([0x50, 0x4b])], 'bundle.zip'));
+    await user.click(screen.getByTestId('bundle-import-validate'));
+    await screen.findByTestId('bundle-import-success');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    await waitFor(() => expect(screen.queryByTestId('bundle-import-dialog')).toBeNull());
   });
 });
 

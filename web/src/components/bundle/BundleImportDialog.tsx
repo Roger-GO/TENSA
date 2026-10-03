@@ -28,7 +28,7 @@
  * itself lives in queries.ts (``useImportBundle``) so other call
  * sites (e.g., a future "Import from URL" affordance) can re-use it.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -99,6 +99,17 @@ function BundleImportDialogInner({ onClose }: BundleImportDialogInnerProps) {
   const importMutation = useImportBundle();
   const isPending = importMutation.isPending;
 
+  // The auto-close beat after a committed import must not outlive the dialog:
+  // closing it by hand inside the beat (or unmounting it) would otherwise let
+  // the timer shut a dialog that was re-opened since.
+  const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (autoCloseTimer.current !== null) clearTimeout(autoCloseTimer.current);
+    },
+    [],
+  );
+
   const reset = () => {
     setFile(null);
     setPlan(null);
@@ -135,7 +146,7 @@ function BundleImportDialogInner({ onClose }: BundleImportDialogInnerProps) {
         } replayed.`,
       );
       // Auto-close after a brief beat (mirrors BundleExportDialog).
-      setTimeout(() => {
+      autoCloseTimer.current = setTimeout(() => {
         reset();
         onClose();
       }, 800);
