@@ -285,9 +285,7 @@ def encode_batch(
     columns: list[pa.Array] = [t_array, *var_arrays]
     batch = pa.RecordBatch.from_arrays(columns, schema=schema)
     sink = io.BytesIO()
-    # pyarrow ships partial stubs; new_stream is untyped in the published type
-    # information but is a stable API.
-    with pa.ipc.new_stream(sink, schema) as writer:  # type: ignore[no-untyped-call]
+    with pa.ipc.new_stream(sink, schema) as writer:
         writer.write_batch(batch)
     return sink.getvalue()
 
