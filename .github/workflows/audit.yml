@@ -1,0 +1,91 @@
+# Known-vulnerability audit of what a user gets: the Python packages that
+# `pip install "tensa[mcp]"` pulls in (pip-audit) and the production packages
+# bundled into the web UI (pnpm audit). New advisories appear without any
+# commit, so besides the pushes and pull requests that touch a dependency file
+# it runs once a week.
+#
+# Non-blocking for now: both audit steps set continue-on-error, so a finding
+# shows as a failed step with its table in the log while the workflow stays
+# green. Once the reports have been read and the baseline is clean, drop
+# continue-on-error to make a new advisory fail the build.
+name: audit
+
+on:
+  push:
+    branches: [main, "improve/**"]
+    paths:
+      - "server/pyproject.toml"
+      - "web/package.json"
+      - "web/pnpm-lock.yaml"
+      - ".github/workflows/audit.yml"
+  pull_request:
+    paths:
+      - "server/pyproject.toml"
+      - "web/package.json"
+      - "web/pnpm-lock.yaml"
+      - ".github/workflows/audit.yml"
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: pip-audit (tensa and the mcp extra)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # A fresh environment holds only the runtime dependencies and the mcp
+      # extra, each at the newest version pyproject.toml allows: what a new
+      # install resolves to. Keeping pip-audit and the dev tools out of it
+      # keeps their own packages out of the report, and upgrading pip first
+      # keeps the bundled copy from being reported as a dependency. An editable
+      # install does not need the built UI.
+      - name: Install tensa into a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/target"
+          "$RUNNER_TEMP/target/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/target/bin/python" -m pip install -e "./server[mcp]"
+
+      - name: Install pip-audit
+        run: python -m pip install pip-audit
+
+      - name: pip-audit
+        continue-on-error: true
+        run: |
+          site="$("$RUNNER_TEMP/target/bin/python" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+          pip-audit --path "$site" --skip-editable --desc
+
+  web:
+    name: pnpm audit (production dependencies)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Reads web/pnpm-lock.yaml, so nothing is installed first. Development
+      # tools (the test runner, the linters) never reach a user and are left
+      # out.
+      - name: pnpm audit
+        continue-on-error: true
+        run: pnpm audit --prod

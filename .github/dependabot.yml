@@ -1,0 +1,49 @@
+# Weekly dependency updates for the three things that carry dependencies: the
+# Python package (server/pyproject.toml), the web UI (web/pnpm-lock.yaml), and
+# the workflows themselves. CI runs on every one of these pull requests, so a
+# bump that breaks the tests never lands unnoticed. The security audit is a
+# separate workflow (audit.yml) because advisories appear without any commit.
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /server
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    # FastAPI documents that a minor release can break callers, which is why
+    # pyproject.toml caps it at the next minor after the newest one the suite
+    # ran against. FastAPI and Starlette move together, so one pull request
+    # raises both.
+    groups:
+      web-framework:
+        patterns:
+          - fastapi
+          - starlette
+    ignore:
+      # ANDES upgrades are deliberate (AGENTS.md): a new minor or major needs
+      # the curl walkthrough re-run by hand, so only patch releases are proposed.
+      - dependency-name: andes
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci(deps)"
