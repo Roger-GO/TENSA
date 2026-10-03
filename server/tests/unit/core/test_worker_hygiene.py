@@ -73,12 +73,22 @@ def test_case_differences_do_not_matter_where_the_platform_ignores_case(
     assert _verdict(opened, layout["cases"]) is None
 
 
-def test_paths_on_a_different_drive_or_relative_are_not_inside() -> None:
-    assert worker._is_within("relative/x", "/abs") is False
-    assert worker._is_within("/abs/x", "/abs") is True
-    assert worker._is_within("/absolute", "/abs") is False
-    assert worker._is_within("/abs", "/abs") is True
-    assert worker._is_within("/anything", "/") is True
+def test_is_within_compares_whole_components_of_normalized_paths(
+    layout: dict[str, Path],
+) -> None:
+    root = _root(layout["cases"])
+    assert worker._is_within(_root(layout["cases"] / "x"), root) is True
+    assert worker._is_within(_root(layout["cases2"]), root) is False
+    assert worker._is_within(root, root) is True
+    assert worker._is_within(_root(layout["other"]), _root(Path(layout["other"].anchor))) is True
+    assert worker._is_within("relative/x", root) is False
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="drive letters exist only on Windows")
+def test_a_path_on_another_drive_is_not_inside(layout: dict[str, Path]) -> None:
+    here = _root(layout["cases"])
+    other_drive = "z:" if not here.lower().startswith("z:") else "y:"
+    assert worker._is_within(other_drive + "\\cases\\x", here) is False
 
 
 def test_the_interpreters_own_tree_is_fine_but_not_its_neighbours(
@@ -110,6 +120,22 @@ def test_a_bytes_path_is_checked_like_a_str_path(layout: dict[str, Path]) -> Non
 
 def test_a_path_that_cannot_be_resolved_is_ignored(layout: dict[str, Path]) -> None:
     assert _verdict("bad\0path", layout["cases"]) is None
+    assert _verdict(b"bad\0path", layout["cases"]) is None
+    assert _verdict(layout["other"] / "bad\0path", layout["cases"]) is None
+
+
+def test_a_nul_is_refused_before_resolving_the_path(
+    layout: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows' ``realpath`` keeps an embedded NUL where POSIX raises, so the
+    check cannot rely on the platform to reject it."""
+
+    def keep_the_nul(path: str) -> str:
+        return path
+
+    monkeypatch.setattr(os.path, "realpath", keep_the_nul)
+    assert _verdict("bad\0path", layout["cases"]) is None
+    assert _verdict(layout["other"] / "ok.dat", layout["cases"]) is not None
 
 
 def test_the_interpreter_roots_cover_this_interpreter() -> None:

@@ -208,7 +208,13 @@ def _out_of_workspace_open(
     if not isinstance(path, (str, bytes, os.PathLike)):
         return None
     try:
-        real = os.path.realpath(os.fsdecode(path))
+        text = os.fsdecode(path)
+        # No file name holds a NUL, and the open itself fails on one. On POSIX
+        # ``realpath`` raises ValueError for it; on Windows it returns the path
+        # unchanged, so refuse it here to answer the same everywhere.
+        if "\0" in text:
+            return None
+        real = os.path.realpath(text)
     except (OSError, ValueError):
         return None
     key = os.path.normcase(real)
