@@ -35,12 +35,12 @@ raised and returned to idle), so the dead-worker check never fires.
 from __future__ import annotations
 
 import contextlib
-import time
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from tensa.api.error_mapping import WORKER_ERROR_HTTP_MAP
 from tensa.core.errors import WorkerDiedError
+from tensa.core.jobs import _stamp
 from tensa.core.session import WORKER_DIED_CATEGORY, WorkerError
 
 if TYPE_CHECKING:
@@ -180,7 +180,7 @@ async def _run_as_job(
         if survivor_id != job_id and pre is not None:
             pre.status = "failed"
             pre.problem = problem
-            pre.ended_at = pre.updated_at = time.monotonic()
+            pre.ended_at = pre.updated_at = _stamp()
             mgr.broadcast_job_event(session_id, pre)
         _broadcast(mgr, session_id, registry, survivor_id)
         raise
