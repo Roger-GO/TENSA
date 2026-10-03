@@ -1,8 +1,8 @@
 """Integration tests for worker hygiene (unit 1.7) against real worker processes.
 
 - A worker ignores Ctrl+C (SIGINT) and stays up and responsive.
-- The clone scratch dir records the server's pid, so a later server can tell it
-  was abandoned, and closing the session removes it.
+- The clone scratch dir records the server (pid, pid space, start time), so a later
+  server can tell it was abandoned, and closing the session removes it.
 """
 
 from __future__ import annotations
@@ -18,7 +18,13 @@ from pathlib import Path
 import pytest
 
 from tensa.core.session import SessionManager
-from tensa.core.session_dirs import OWNER_MARKER_NAME, SESSIONS_DIRNAME, read_owner_pid
+from tensa.core.session_dirs import (
+    OWNER_MARKER_NAME,
+    SESSIONS_DIRNAME,
+    pid_space,
+    process_start_time,
+    read_owner_marker,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -67,8 +73,14 @@ async def test_the_clone_dir_records_the_server_as_its_owner(
     await manager.invoke(sid, "init_clone", {})
 
     session_root = tmp_path / "ws" / SESSIONS_DIRNAME / sid
-    # The worker wrote the marker, but it names this process (the server).
-    assert read_owner_pid(session_root) == os.getpid()
+    # The worker wrote the marker, but it names this process (the server), with
+    # the pid space and start time a later server needs to tell it from a stranger
+    # that happens to have the same pid.
+    marker = read_owner_marker(session_root)
+    assert marker is not None
+    assert marker.pid == os.getpid()
+    assert marker.space == pid_space()
+    assert marker.start == process_start_time(os.getpid())
     # It sits beside ``clone/``, so resetting the clone does not delete it.
     assert (session_root / OWNER_MARKER_NAME).is_file()
     await manager.invoke(sid, "reset_clone", {})

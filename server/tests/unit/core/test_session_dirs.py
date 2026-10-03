@@ -28,7 +28,11 @@ from tensa.core.session import SessionManager
 from tensa.core.session_dirs import (
     OWNER_MARKER_NAME,
     SESSIONS_DIRNAME,
+    OwnerMarker,
     pid_is_alive,
+    pid_space,
+    process_start_time,
+    read_owner_marker,
     read_owner_pid,
     remove_tree,
     sweep_stale_session_dirs,
@@ -41,13 +45,20 @@ DAY = 24 * 60 * 60
 # ---- helpers ----------------------------------------------------------------
 
 
-def _session_dir(workspace: Path, owner: int | str | None = None) -> Path:
-    """Create ``<workspace>/.sessions/<id>/clone/x.raw``, optionally marked."""
+def _session_dir(
+    workspace: Path, owner: int | str | None = None, *, fields: tuple[str, ...] = ()
+) -> Path:
+    """Create ``<workspace>/.sessions/<id>/clone/x.raw``, optionally marked.
+
+    ``owner`` alone writes the bare-pid marker of the first format; ``fields`` are
+    the ``key=value`` lines of the current one.
+    """
     path = workspace / SESSIONS_DIRNAME / uuid.uuid4().hex
     (path / "clone").mkdir(parents=True)
     (path / "clone" / "x.raw").write_text("case\n", encoding="utf-8")
     if owner is not None:
-        (path / OWNER_MARKER_NAME).write_text(f"{owner}\n", encoding="utf-8")
+        text = "".join(f"{line}\n" for line in (str(owner), *fields))
+        (path / OWNER_MARKER_NAME).write_text(text, encoding="utf-8")
     return path
 
 
@@ -83,13 +94,63 @@ def live_pid() -> Iterator[int]:
 
 def test_marker_round_trips_the_pid(tmp_path: Path) -> None:
     write_owner_marker(tmp_path, 4242)
-    assert (tmp_path / OWNER_MARKER_NAME).read_text(encoding="utf-8") == "4242\n"
+    first_line = (tmp_path / OWNER_MARKER_NAME).read_text(encoding="utf-8").splitlines()[0]
+    assert first_line == "4242"
     assert read_owner_pid(tmp_path) == 4242
 
 
 def test_marker_defaults_to_this_process(tmp_path: Path) -> None:
     write_owner_marker(tmp_path)
     assert read_owner_pid(tmp_path) == os.getpid()
+
+
+def test_marker_records_where_the_owner_runs_and_when_it_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(session_dirs, "pid_space", lambda: "box pid:[4026531836]")
+    monkeypatch.setattr(session_dirs, "process_start_time", lambda pid: f"t{pid}")
+    write_owner_marker(tmp_path, 4242)
+    assert (tmp_path / OWNER_MARKER_NAME).read_text(encoding="utf-8") == (
+        "4242\nspace=box pid:[4026531836]\nstart=t4242\n"
+    )
+    assert read_owner_marker(tmp_path) == OwnerMarker(4242, "box pid:[4026531836]", "t4242")
+
+
+def test_marker_omits_what_the_os_cannot_tell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(session_dirs, "pid_space", lambda: None)
+    monkeypatch.setattr(session_dirs, "process_start_time", lambda pid: None)
+    write_owner_marker(tmp_path, 4242)
+    assert (tmp_path / OWNER_MARKER_NAME).read_text(encoding="utf-8") == "4242\n"
+    assert read_owner_marker(tmp_path) == OwnerMarker(4242, None, None)
+
+
+def test_a_marker_that_holds_only_a_pid_still_reads(tmp_path: Path) -> None:
+    """The first format: a bare pid, with or without the newline."""
+    (tmp_path / OWNER_MARKER_NAME).write_text("4242", encoding="utf-8")
+    assert read_owner_marker(tmp_path) == OwnerMarker(4242, None, None)
+    (tmp_path / OWNER_MARKER_NAME).write_text("4242\n", encoding="utf-8")
+    assert read_owner_marker(tmp_path) == OwnerMarker(4242, None, None)
+
+
+def test_marker_ignores_lines_it_does_not_understand(tmp_path: Path) -> None:
+    (tmp_path / OWNER_MARKER_NAME).write_text(
+        "4242\nfuture=thing\nspace=\nnot a field\nstart=99\n", encoding="utf-8"
+    )
+    # An empty value counts as absent.
+    assert read_owner_marker(tmp_path) == OwnerMarker(4242, None, "99")
+
+
+@pytest.mark.parametrize("first_line", ["", "start=99", "0", "-7", "1e3", str(2**31)])
+def test_a_marker_without_a_plausible_pid_first_reads_as_no_owner(
+    tmp_path: Path, first_line: str
+) -> None:
+    (tmp_path / OWNER_MARKER_NAME).write_text(
+        f"{first_line}\nspace=box\nstart=99\n", encoding="utf-8"
+    )
+    assert read_owner_marker(tmp_path) is None
+    assert read_owner_pid(tmp_path) is None
 
 
 @pytest.mark.parametrize(
@@ -231,6 +292,147 @@ def test_windows_probe_failure_errs_towards_alive(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(session_dirs, "_load_kernel32", boom)
     assert pid_is_alive(4242, platform="win32")
+
+
+# ---- process identity -------------------------------------------------------
+
+linux_only = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc")
+
+
+@linux_only
+def test_a_process_has_a_stable_start_time() -> None:
+    first = process_start_time(os.getpid())
+    assert first is not None and first.isdigit()
+    assert process_start_time(os.getpid()) == first
+
+
+@linux_only
+def test_two_processes_have_different_start_times(live_pid: int) -> None:
+    assert process_start_time(live_pid) != process_start_time(os.getpid())
+
+
+@linux_only
+def test_a_gone_process_has_no_start_time(dead_pid: int) -> None:
+    assert process_start_time(dead_pid) is None
+
+
+@pytest.mark.parametrize("pid", [0, -1])
+def test_a_non_positive_pid_has_no_start_time(pid: int) -> None:
+    assert process_start_time(pid) is None
+
+
+def test_the_start_time_is_the_22nd_field_whatever_the_command_name(tmp_path: Path) -> None:
+    """The name sits in parentheses and can hold both spaces and parentheses."""
+    # Fields 3 to 24; the 20th of these (field 22) is the start time.
+    tail = "S 1 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 987654 1000 10 4096"
+    for number, name in enumerate(["python", "my (odd) proc", "a) b ("]):
+        proc = tmp_path / str(5000 + number)
+        proc.mkdir()
+        (proc / "stat").write_text(f"{5000 + number} ({name}) {tail}\n", encoding="utf-8")
+        assert session_dirs._linux_process_start_time(5000 + number, str(tmp_path)) == "987654"
+
+
+def test_a_stat_file_that_does_not_parse_gives_no_start_time(tmp_path: Path) -> None:
+    bad = {
+        1: "garbage",
+        2: "2 (x) S 1 2",  # too few fields
+        3: "3 (x) S " + "0 " * 18 + "soon",  # a start time that is not a number
+    }
+    for pid, text in bad.items():
+        (tmp_path / str(pid)).mkdir()
+        (tmp_path / str(pid) / "stat").write_text(text, encoding="utf-8")
+        assert session_dirs._linux_process_start_time(pid, str(tmp_path)) is None
+    assert session_dirs._linux_process_start_time(4, str(tmp_path)) is None  # no such process
+
+
+def test_macos_has_no_start_time_to_read() -> None:
+    assert process_start_time(os.getpid(), platform="darwin") is None
+
+
+class _FakeTimesKernel32:
+    """Just enough of ``kernel32`` for ``process_start_time``."""
+
+    def __init__(self, *, open_ok: bool = True, times_ok: bool = True) -> None:
+        self.open_ok = open_ok
+        self.times_ok = times_ok
+        self.opened: list[tuple[int, bool, int]] = []
+        self.closed: list[int] = []
+
+    def OpenProcess(self, access: int, inherit: bool, pid: int) -> int | None:
+        self.opened.append((access, inherit, pid))
+        return 0xBEEF if self.open_ok else None
+
+    def GetProcessTimes(
+        self, handle: int, created: Any, exited: Any, kernel: Any, user: Any
+    ) -> int:
+        if not self.times_ok:
+            return 0
+        created._obj.dwLowDateTime = 0x89ABCDEF
+        created._obj.dwHighDateTime = 0x01234567
+        return 1
+
+    def CloseHandle(self, handle: int) -> int:
+        self.closed.append(handle)
+        return 1
+
+
+def test_windows_start_time_is_the_creation_filetime() -> None:
+    fake = _FakeTimesKernel32()
+    assert process_start_time(4242, kernel32=fake, platform="win32") == str(0x0123456789ABCDEF)
+    assert fake.opened == [(0x1000, False, 4242)]  # PROCESS_QUERY_LIMITED_INFORMATION
+    assert fake.closed == [0xBEEF]
+
+
+def test_windows_start_time_needs_a_process_it_can_open() -> None:
+    fake = _FakeTimesKernel32(open_ok=False)
+    assert process_start_time(4242, kernel32=fake, platform="win32") is None
+    assert fake.closed == []
+
+
+def test_windows_start_time_closes_the_handle_when_the_times_cannot_be_read() -> None:
+    fake = _FakeTimesKernel32(times_ok=False)
+    assert process_start_time(4242, kernel32=fake, platform="win32") is None
+    assert fake.closed == [0xBEEF]
+
+
+def test_windows_start_time_failure_is_no_start_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom() -> Any:
+        raise OSError("no kernel32")
+
+    monkeypatch.setattr(session_dirs, "_load_kernel32", boom)
+    assert process_start_time(4242, platform="win32") is None
+
+
+def test_the_pid_space_names_the_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(session_dirs.socket, "gethostname", lambda: "boxy")
+    space = pid_space()
+    assert space is not None and space.startswith("boxy")
+
+
+@linux_only
+def test_the_pid_space_includes_the_pid_namespace_on_linux() -> None:
+    space = pid_space()
+    assert space is not None
+    assert os.readlink("/proc/self/ns/pid") in space
+
+
+def test_the_pid_space_is_the_bare_host_without_proc(monkeypatch: pytest.MonkeyPatch) -> None:
+    def no_proc(path: str) -> str:
+        raise FileNotFoundError(errno.ENOENT, "no /proc", path)
+
+    monkeypatch.setattr(session_dirs.socket, "gethostname", lambda: "boxy")
+    monkeypatch.setattr(os, "readlink", no_proc)
+    assert pid_space() == "boxy"
+
+
+def test_the_pid_space_is_unknown_when_there_is_no_hostname(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def no_name() -> str:
+        raise OSError("no hostname")
+
+    monkeypatch.setattr(session_dirs.socket, "gethostname", no_name)
+    assert pid_space() is None
 
 
 # ---- read-only-aware removal ------------------------------------------------
@@ -477,6 +679,138 @@ def test_sweep_uses_the_injected_liveness_probe(tmp_path: Path) -> None:
     assert dir_a.exists()
 
 
+# ---- startup sweep: whose pid is it? ---------------------------------------
+
+HERE = "box pid:[4026531836]"
+
+
+def _sweep(
+    workspace: Path,
+    *,
+    alive: bool = True,
+    here: str | None = HERE,
+    now_start: str | None = "100",
+) -> list[str]:
+    """The sweep with the pid probe, this process's pid space and the owner's
+    current start time all set by hand."""
+    return sweep_stale_session_dirs(
+        workspace,
+        pid_alive=lambda pid: alive,
+        local_space=lambda: here,
+        start_time=lambda pid: now_start,
+    )
+
+
+def test_sweep_keeps_a_live_owner_that_started_when_the_marker_says(tmp_path: Path) -> None:
+    theirs = _session_dir(tmp_path, owner=7, fields=(f"space={HERE}", "start=100"))
+    assert _sweep(tmp_path) == []
+    assert theirs.exists()
+
+
+def test_sweep_removes_a_dir_whose_pid_now_belongs_to_another_process(tmp_path: Path) -> None:
+    """A container restarted, or Windows handed the pid out again: something with
+    that pid is alive, but it is not the server that made the dir."""
+    reused = _session_dir(tmp_path, owner=1, fields=(f"space={HERE}", "start=100"))
+    assert _sweep(tmp_path, now_start="250") == [reused.name]
+    assert not reused.exists()
+
+
+def test_sweep_keeps_a_dir_when_the_current_start_time_cannot_be_read(tmp_path: Path) -> None:
+    theirs = _session_dir(tmp_path, owner=7, fields=(f"space={HERE}", "start=100"))
+    assert _sweep(tmp_path, now_start=None) == []
+    assert theirs.exists()
+
+
+def test_sweep_keeps_a_live_owner_whose_marker_has_no_start_time(tmp_path: Path) -> None:
+    theirs = _session_dir(tmp_path, owner=7, fields=(f"space={HERE}",))
+    assert _sweep(tmp_path, now_start="250") == []
+    assert theirs.exists()
+
+
+def test_sweep_removes_a_dead_owner_in_the_same_pid_space(tmp_path: Path) -> None:
+    gone = _session_dir(tmp_path, owner=7, fields=(f"space={HERE}", "start=100"))
+    assert _sweep(tmp_path, alive=False) == [gone.name]
+
+
+def test_sweep_does_not_probe_a_pid_from_another_host(tmp_path: Path) -> None:
+    """The pid is meaningless here, so it is neither a reason to keep the dir (the
+    probe may find some other process) nor to delete it (it may find nothing)."""
+    theirs = _session_dir(tmp_path, owner=7, fields=("space=otherhost pid:[4026531836]", "start=1"))
+
+    def probe(pid: int) -> bool:
+        pytest.fail("a pid from another host must not be probed")
+
+    removed = sweep_stale_session_dirs(
+        tmp_path, pid_alive=probe, local_space=lambda: HERE, start_time=lambda pid: "250"
+    )
+    assert removed == []
+    assert theirs.exists()
+
+
+def test_sweep_does_not_probe_a_pid_from_another_pid_namespace(tmp_path: Path) -> None:
+    """Two containers on a shared volume, both on the host's network and so both
+    named after the host."""
+    theirs = _session_dir(tmp_path, owner=1, fields=("space=box pid:[4026532999]",))
+    assert _sweep(tmp_path, alive=False) == []
+    assert theirs.exists()
+
+
+def test_a_dir_from_another_host_falls_back_to_the_age_rule(tmp_path: Path) -> None:
+    recent = _session_dir(tmp_path, owner=7, fields=("space=otherhost",))
+    _age(recent, DAY / 2)
+    old = _session_dir(tmp_path, owner=7, fields=("space=otherhost",))
+    _age(old, 2 * DAY)
+    assert _sweep(tmp_path, alive=False) == [old.name]
+    assert recent.exists()
+
+
+def test_a_recently_touched_file_keeps_a_dir_from_another_host(tmp_path: Path) -> None:
+    busy = _session_dir(tmp_path, owner=7, fields=("space=otherhost",))
+    _age(busy, 5 * DAY)
+    recent = time.time() - 3600
+    os.utime(busy / "clone" / "x.raw", (recent, recent))
+    assert _sweep(tmp_path, alive=False) == []
+    assert busy.exists()
+
+
+def test_sweep_probes_the_pid_when_this_servers_own_space_is_unknown(tmp_path: Path) -> None:
+    theirs = _session_dir(tmp_path, owner=7, fields=("space=otherhost",))
+    assert _sweep(tmp_path, here=None) == []
+    assert _sweep(tmp_path, here=None, alive=False) == [theirs.name]
+
+
+def test_sweep_probes_a_pid_from_a_marker_that_names_no_space(tmp_path: Path) -> None:
+    """A marker of the first format has only a pid."""
+    old_format = _session_dir(tmp_path, owner=7)
+    assert _sweep(tmp_path) == []
+    assert _sweep(tmp_path, alive=False) == [old_format.name]
+
+
+def test_a_server_marker_survives_the_real_sweep(tmp_path: Path, live_pid: int) -> None:
+    """Marker written by ``write_owner_marker`` for a live process, judged with
+    nothing injected: the pid, host and start time all read back as they were."""
+    theirs = _session_dir(tmp_path)
+    write_owner_marker(theirs, live_pid)
+    assert sweep_stale_session_dirs(tmp_path) == []
+    assert theirs.exists()
+
+
+@linux_only
+def test_a_reused_pid_is_caught_with_real_start_times(tmp_path: Path, live_pid: int) -> None:
+    """The same marker, but the process now holding the pid started at another
+    time than the one the marker names."""
+    reused = _session_dir(tmp_path)
+    write_owner_marker(reused, live_pid)
+    text = (reused / OWNER_MARKER_NAME).read_text(encoding="utf-8")
+    assert "start=" in text
+    started = process_start_time(live_pid)
+    assert started is not None
+    (reused / OWNER_MARKER_NAME).write_text(
+        text.replace(f"start={started}", f"start={int(started) + 500}"), encoding="utf-8"
+    )
+    assert sweep_stale_session_dirs(tmp_path) == [reused.name]
+
+
 # ---- SessionManager wiring --------------------------------------------------
 
 
@@ -571,7 +905,11 @@ def _clone_manager(workspace: Path, session_id: str) -> tuple[CloneManager, _Fak
         case.write_text("case\n", encoding="utf-8")
         case.chmod(0o444)
     wrapper = _FakeWrapper(_case_path=case, _addfiles=[])
-    mgr = CloneManager(wrapper=wrapper, workspace=workspace, session_id=session_id)  # type: ignore[arg-type]
+    mgr = CloneManager(
+        wrapper=wrapper,  # type: ignore[arg-type]
+        workspace=workspace,
+        session_id=session_id,
+    )
     return mgr, wrapper
 
 

@@ -7,10 +7,13 @@ leaves it behind. This module holds the bookkeeping that lets the next server
 clean up after it without touching a directory a live server is still using:
 
 - **Owner marker.** ``owner.pid`` in the session root, written when the
-  directory is created, names the server process that owns it.
+  directory is created, names the server process that owns it: its pid, the
+  machine and pid namespace the pid belongs to, and when it started. A bare pid
+  means nothing to a server on another host or in another container sharing the
+  workspace, and the same pid comes back after a container restart.
 - **Startup sweep.** ``sweep_stale_session_dirs`` removes a directory only when
-  its recorded owner is gone, or (no usable marker) when nothing in it has
-  changed for a day.
+  its recorded owner is gone, or (no usable marker, or one this server cannot
+  check) when nothing in it has changed for a day.
 - **Robust removal.** ``remove_tree`` is ``shutil.rmtree`` that clears the
   read-only bit Windows refuses to delete through.
 
@@ -25,10 +28,12 @@ import logging
 import os
 import re
 import shutil
+import socket
 import stat
 import sys
 import time
 from collections.abc import Callable, Collection
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -39,10 +44,18 @@ log = logging.getLogger("tensa.session_dirs")
 SESSIONS_DIRNAME = ".sessions"
 OWNER_MARKER_NAME = "owner.pid"
 
-# A directory with no usable owner marker (made before markers existed, or the
-# marker could not be written) is only removed once nothing in it has changed
-# for this long.
+# A directory with no owner marker this server can check (made before markers
+# existed, the marker could not be written, or it was written on another host or
+# in another pid namespace) is only removed once nothing in it has changed for
+# this long.
 UNMARKED_MAX_AGE_SECONDS = 24 * 60 * 60
+
+# Keys after the pid on the marker's first line. Unknown keys are ignored, so
+# the marker can grow.
+_SPACE_KEY = "space"
+_START_KEY = "start"
+# More than the longest hostname plus the namespace and start-time fields.
+_MARKER_MAX_BYTES = 1024
 
 # Largest pid a marker may name: ``os.kill`` takes a C int, and no OS hands out
 # pids anywhere near this. A bigger number is a damaged marker, not an owner.
@@ -53,47 +66,170 @@ _MAX_PID = 2**31 - 1
 # user dropped into ``.sessions`` is never deleted.
 _SESSION_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
-# Windows API values used by ``pid_is_alive``.
+# Windows API values used by ``pid_is_alive`` and ``process_start_time``.
 _WIN_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _WIN_STILL_ACTIVE = 259
 _WIN_ERROR_ACCESS_DENIED = 5
 
 
+class _FileTime(ctypes.Structure):
+    """``FILETIME``: 100 ns ticks since 1601, as two 32-bit halves."""
+
+    _fields_ = [("dwLowDateTime", ctypes.c_uint32), ("dwHighDateTime", ctypes.c_uint32)]
+
+
 # ---- owner marker -----------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class OwnerMarker:
+    """What ``owner.pid`` says about the server that owns a session dir.
+
+    ``space`` and ``start`` are ``None`` for a marker written before they were
+    recorded, or when this OS could not provide them. A ``None`` is never held
+    against the owner: it only means that check is skipped.
+    """
+
+    pid: int
+    space: str | None = None
+    start: str | None = None
+
+
+def pid_space() -> str | None:
+    """Names the set of pids this process shares with the processes that can see
+    its pid: the hostname, plus on Linux the id of the pid namespace.
+
+    Two servers on different hosts, or in different containers on a shared
+    volume, each have a pid that means nothing in the other's table, so one may
+    only probe a pid recorded in the same space. ``None`` when the OS will not
+    say.
+    """
+    try:
+        host = socket.gethostname()
+    except OSError:
+        return None
+    try:
+        namespace = os.readlink("/proc/self/ns/pid")  # e.g. ``pid:[4026531836]``
+    except OSError:
+        return host
+    return f"{host} {namespace}"
+
+
+def _linux_process_start_time(pid: int, proc_root: str = "/proc") -> str | None:
+    """Field 22 of ``/proc/<pid>/stat``: start time in clock ticks after boot."""
+    try:
+        with open(f"{proc_root}/{pid}/stat", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+        # The command name (field 2) sits in parentheses and may hold spaces and
+        # parentheses of its own, so split after the last one: field 3 comes next.
+        ticks = text.rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        return None
+    return ticks if ticks.isdigit() else None
+
+
+def _windows_process_start_time(pid: int, kernel32: Any) -> str | None:
+    handle = kernel32.OpenProcess(_WIN_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        created, exited, kernel, user = (_FileTime() for _ in range(4))
+        if not kernel32.GetProcessTimes(
+            handle,
+            ctypes.byref(created),
+            ctypes.byref(exited),
+            ctypes.byref(kernel),
+            ctypes.byref(user),
+        ):
+            return None
+        return str((created.dwHighDateTime << 32) | created.dwLowDateTime)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def process_start_time(
+    pid: int, *, kernel32: Any = None, platform: str | None = None
+) -> str | None:
+    """When the process ``pid`` started, as an opaque string that is equal for
+    the same process and (all but certainly) different for a later process that
+    reuses the pid. ``None`` where the OS gives no way to read it (macOS) or the
+    read fails.
+
+    Windows reuses pids quickly, and a server restarted in the same container is
+    pid 1 again, so a pid alone can name the wrong process.
+    """
+    if pid <= 0:
+        return None
+    system = platform or sys.platform
+    if system.startswith("linux"):
+        return _linux_process_start_time(pid)
+    if system == "win32":
+        try:
+            if kernel32 is None:
+                kernel32 = _load_kernel32()
+            return _windows_process_start_time(pid, kernel32)
+        except Exception as exc:  # noqa: BLE001 — unknown means no check
+            log.debug("could not read the start time of pid %s: %s", pid, exc)
+    return None
 
 
 def write_owner_marker(session_root: Path, owner_pid: int | None = None) -> None:
     """Record which server process owns ``session_root`` (best effort).
 
     ``owner_pid`` is the server's pid; the worker is handed it at spawn so the
-    marker names the server, not the worker. Defaults to this process. A failed
-    write only means the directory falls back to the age rule in the sweep, so
-    it is logged rather than raised.
+    marker names the server, not the worker. Defaults to this process. The first
+    line is the pid; ``space=`` and ``start=`` lines follow when they could be
+    read. A failed write only means the directory falls back to the age rule in
+    the sweep, so it is logged rather than raised.
     """
     pid = os.getpid() if owner_pid is None else owner_pid
+    lines = [str(pid)]
+    space = pid_space()
+    if space is not None:
+        lines.append(f"{_SPACE_KEY}={space}")
+    start = process_start_time(pid)
+    if start is not None:
+        lines.append(f"{_START_KEY}={start}")
     try:
-        (session_root / OWNER_MARKER_NAME).write_text(f"{pid}\n", encoding="utf-8")
+        (session_root / OWNER_MARKER_NAME).write_text("\n".join(lines) + "\n", encoding="utf-8")
     except OSError as exc:
         log.warning("could not write the owner marker in %s: %s", session_root, exc)
 
 
-def read_owner_pid(session_root: Path) -> int | None:
-    """The pid recorded in ``session_root``'s marker, or ``None`` when the
-    marker is missing, unreadable, or not a plausible pid."""
+def read_owner_marker(session_root: Path) -> OwnerMarker | None:
+    """The marker in ``session_root``, or ``None`` when it is missing,
+    unreadable, or does not start with a plausible pid. A marker that holds only
+    a pid (the first format) reads with no ``space`` and no ``start``."""
     try:
         with open(session_root / OWNER_MARKER_NAME, encoding="utf-8") as fh:
-            text = fh.read(32)
-        pid = int(text.strip())
+            text = fh.read(_MARKER_MAX_BYTES)
+        first, *rest = text.splitlines() or [""]
+        pid = int(first.strip())
     except (OSError, ValueError):  # ValueError covers bad UTF-8 and bad int
         return None
-    return pid if 0 < pid <= _MAX_PID else None
+    if not 0 < pid <= _MAX_PID:
+        return None
+    fields: dict[str, str] = {}
+    for line in rest:
+        key, sep, value = line.partition("=")
+        if sep and value:
+            fields[key.strip()] = value.strip()
+    return OwnerMarker(pid, fields.get(_SPACE_KEY), fields.get(_START_KEY))
+
+
+def read_owner_pid(session_root: Path) -> int | None:
+    """The pid recorded in ``session_root``'s marker, or ``None`` (see
+    ``read_owner_marker``)."""
+    marker = read_owner_marker(session_root)
+    return None if marker is None else marker.pid
 
 
 # ---- process liveness -------------------------------------------------------
 
 
 def _load_kernel32() -> Any:
-    """``kernel32`` with the prototypes ``pid_is_alive`` needs (Windows only)."""
+    """``kernel32`` with the prototypes ``pid_is_alive`` and ``process_start_time``
+    need (Windows only)."""
     if sys.platform != "win32":
         raise OSError("kernel32 is only available on Windows")
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -104,6 +240,8 @@ def _load_kernel32() -> Any:
         ctypes.POINTER(ctypes.c_uint32),
     ]
     kernel32.GetExitCodeProcess.restype = ctypes.c_int
+    kernel32.GetProcessTimes.argtypes = [ctypes.c_void_p, *[ctypes.POINTER(_FileTime)] * 4]
+    kernel32.GetProcessTimes.restype = ctypes.c_int
     kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
     kernel32.CloseHandle.restype = ctypes.c_int
     return kernel32
@@ -217,13 +355,24 @@ def _is_stale(
     now: float,
     max_unmarked_age: float,
     pid_alive: Callable[[int], bool],
+    local_space: str | None,
+    start_time: Callable[[int], str | None],
 ) -> bool:
-    owner = read_owner_pid(path)
-    if owner is not None:
-        # A live owner keeps the directory, this process included: two servers
-        # in different containers can both be pid 1, so a matching pid is no
-        # proof of staleness. A reused pid only delays cleanup to a later start.
-        return not pid_alive(owner)
+    marker = read_owner_marker(path)
+    if marker is not None and (
+        marker.space is None or local_space is None or marker.space == local_space
+    ):
+        # The pid is meaningful here. A live owner keeps the directory, this
+        # process's own pid included, unless the pid has since been reused by a
+        # different process (a server restarted in a container is pid 1 again).
+        if not pid_alive(marker.pid):
+            return True
+        if marker.start is None:
+            return False
+        current = start_time(marker.pid)
+        return current is not None and current != marker.start
+    # No marker, or one from another host or pid namespace: its pid proves
+    # nothing here, so only a long-untouched directory is taken to be abandoned.
     return now - _newest_mtime(path) > max_unmarked_age
 
 
@@ -234,19 +383,25 @@ def sweep_stale_session_dirs(
     now: float | None = None,
     max_unmarked_age: float = UNMARKED_MAX_AGE_SECONDS,
     pid_alive: Callable[[int], bool] = pid_is_alive,
+    local_space: Callable[[], str | None] = pid_space,
+    start_time: Callable[[int], str | None] = process_start_time,
 ) -> list[str]:
     """Remove session scratch dirs left behind by a server that is gone.
 
     A directory under ``<workspace>/.sessions/`` is removed when its owner
-    marker names a dead process, or when it has no usable marker and nothing in
-    it has changed for ``max_unmarked_age`` seconds. A directory whose owner is
-    alive, a name in ``keep``, anything not named like a session id, and
-    anything that is not a plain directory (a symlink is never followed) are
-    left alone. Returns the names removed.
+    marker names a process on this host that is dead, or whose pid a different
+    process has since taken over (the recorded start time no longer matches).
+    When it has no usable marker, or the marker was written on another host or
+    in another pid namespace (so its pid cannot be probed here), it is removed
+    only if nothing in it has changed for ``max_unmarked_age`` seconds. A
+    directory whose owner is alive, a name in ``keep``, anything not named like a
+    session id, and anything that is not a plain directory (a symlink is never
+    followed) are left alone. Returns the names removed.
 
     Call it once at startup, before this server creates a session: a directory
     that is live right now but missing from ``keep`` is judged by its marker
     alone. One that cannot be removed is logged and skipped, never raised.
+    ``pid_alive``, ``local_space`` and ``start_time`` exist for tests.
     """
     root = Path(workspace) / SESSIONS_DIRNAME
     if root.is_symlink():
@@ -256,6 +411,7 @@ def sweep_stale_session_dirs(
     except OSError:  # no .sessions yet, or unreadable
         return []
     current = time.time() if now is None else now
+    space = local_space()
     removed: list[str] = []
     for entry in entries:
         if entry.name in keep or not _SESSION_ID_RE.match(entry.name):
@@ -267,7 +423,12 @@ def sweep_stale_session_dirs(
             ):
                 continue
             if not _is_stale(
-                path, now=current, max_unmarked_age=max_unmarked_age, pid_alive=pid_alive
+                path,
+                now=current,
+                max_unmarked_age=max_unmarked_age,
+                pid_alive=pid_alive,
+                local_space=space,
+                start_time=start_time,
             ):
                 continue
             remove_tree(path)
