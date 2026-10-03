@@ -239,11 +239,16 @@ describe('<SaveSnapshotDialog /> — Input contract (Unit 5)', () => {
     render(withQueryClient(<SaveSnapshotDialog />));
     const input = (await screen.findByTestId('save-snapshot-name-input')) as HTMLInputElement;
 
+    // Inside act, so React has handled the event and re-rendered when it returns:
+    // the assertions below do not wait on a timer, which a loaded runner can stretch.
     const desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-    desc!.set!.call(input, 'scenario-A');
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+    act(() => {
+      desc!.set!.call(input, 'scenario-A');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
 
-    await waitFor(() => expect(useSnapshotStore.getState().pendingName).toBe('scenario-A'));
+    expect(useSnapshotStore.getState().pendingName).toBe('scenario-A');
+    expect(input).toHaveValue('scenario-A');
     expect(screen.getByTestId('save-snapshot-confirm')).toBeEnabled();
   });
 });
@@ -384,6 +389,27 @@ describe('<SaveSnapshotDialog /> — auto-close beat', () => {
     expect(await screen.findByTestId('save-snapshot-dialog')).toBeInTheDocument();
 
     // The first dialog's timer would fire inside this window.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(useSnapshotStore.getState().saveDialogOpen).toBe(true);
+    expect(screen.getByTestId('save-snapshot-dialog')).toBeInTheDocument();
+  });
+
+  it('does not close the next dialog when the previous one unmounted inside the beat', async () => {
+    // What a test cleanup does to a dialog that has just saved: the unmount
+    // lands inside the 600 ms beat, and its timer must not outlive it.
+    const user = useBeatClock();
+    fetchSpy.mockResolvedValue(makeJsonResponse(200, saved));
+    const first = render(withQueryClient(<SaveSnapshotDialog />));
+    await user.type(await screen.findByTestId('save-snapshot-name-input'), 'scenario-A');
+    await user.click(screen.getByTestId('save-snapshot-confirm'));
+    await screen.findByTestId('save-snapshot-success');
+
+    first.unmount();
+    render(withQueryClient(<SaveSnapshotDialog />));
+    expect(await screen.findByTestId('save-snapshot-dialog')).toBeInTheDocument();
+
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1500);
     });
