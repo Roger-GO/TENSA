@@ -70,8 +70,10 @@ Protocol for all WS endpoints: connect → server sends {"type":"ready"} → cli
 first command frame. Close codes: 4404 unknown session, 4500 worker error.
 
 WS /api/ws/{session_id}            — TDS live stream. Send {"type":"start_tds","tf":5.0};
-                                     server replies {"type":"stream_start",...} then BINARY
-                                     Apache Arrow IPC chunks (time-series frames), then {"type":"done",...}.
+                                     server replies {"type":"stream_start",...} (metadata.var_columns
+                                     names the columns once) then BINARY Apache Arrow IPC chunks, one
+                                     per frame, each with a "t" column and a "v" list column holding
+                                     the row's values in var_columns order, then {"type":"done",...}.
                                      Reconnect+resume: {"type":"resume","run_id":"...","last_seq":N}.
 WS /api/ws/{session_id}/jobs/events— job lifecycle feed: "snapshot" then "job" envelopes per transition.
 WS /api/ws/{session_id}/sweep/{id} — sweep progress per iteration.

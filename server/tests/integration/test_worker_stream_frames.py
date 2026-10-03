@@ -9,15 +9,15 @@ Markers: ``integration``.
 
 from __future__ import annotations
 
-import io
 import threading
 from pathlib import Path
 from typing import Any
 
-import pyarrow.ipc
+import numpy as np
 import pytest
 
 from tensa.core import worker
+from tensa.core.stream import decode_batch
 from tensa.core.wrapper import Wrapper
 
 
@@ -45,6 +45,11 @@ class _RecordingPipe:
     def frames(self) -> list[dict[str, Any]]:
         return [m for m in self.sent if m["type"] == "stream_frame"]
 
+    def metadata(self) -> dict[str, Any]:
+        (start,) = (m for m in self.sent if m["type"] == "stream_start")
+        metadata: dict[str, Any] = start["metadata"]
+        return metadata
+
 
 @pytest.fixture
 def wrapper() -> Wrapper:
@@ -62,8 +67,8 @@ def _stream(w: Wrapper, **args: Any) -> _RecordingPipe:
 
 
 def _times(frame: dict[str, Any]) -> list[float]:
-    table = pyarrow.ipc.open_stream(io.BytesIO(frame["payload"])).read_all()
-    return [float(t) for t in table.column("t").to_pylist()]
+    t, _values = decode_batch(frame["payload"])
+    return [float(x) for x in t]
 
 
 @pytest.mark.integration
@@ -95,3 +100,49 @@ def test_mean_frame_time_lies_inside_its_window(wrapper: Wrapper) -> None:
     for k, frame in enumerate(closed, start=1):
         (t,) = _times(frame)
         assert (k - 1) * 0.1 <= t < k * 0.1, f"frame {k}: t={t}"
+
+
+@pytest.mark.integration
+def test_frames_carry_the_values_of_the_columns_stream_start_names(wrapper: Wrapper) -> None:
+    """The frames name no columns; position in the row is the only link to the
+    names announced once in ``stream_start``. Bus 1's voltage and angle must sit
+    where ``var_columns`` says they do, and every row must be as wide as the
+    list."""
+    pipe = _stream(wrapper, tf=0.2, vars=["bus_v", "gen_state"])
+    metadata = pipe.metadata()
+    columns: list[str] = metadata["var_columns"]
+    assert metadata["schema_version"] == "2.0"
+    assert columns[:2] == ["Bus_1_v", "Bus_1_a"]
+
+    ss = wrapper._require_loaded()  # noqa: SLF001
+    v1, a1 = float(ss.Bus.v.v[0]), float(ss.Bus.a.v[0])
+    frames = pipe.frames()
+    assert frames
+    for frame in frames:
+        _t, values = decode_batch(frame["payload"])
+        assert values.shape == (frame["row_count"], len(columns))
+    _t, first = decode_batch(frames[0]["payload"])
+    # Early in a fault-free run the bus is still at its power-flow solution.
+    assert first[0, 0] == pytest.approx(v1, abs=0.01)
+    assert first[0, 1] == pytest.approx(a1, abs=0.01)
+    omega = [i for i, name in enumerate(columns) if name.endswith("_omega")]
+    assert omega
+    assert np.allclose(first[0, omega], 1.0, atol=0.01)
+
+
+@pytest.mark.integration
+def test_a_frame_is_far_smaller_than_the_one_column_per_variable_layout(
+    wrapper: Wrapper,
+) -> None:
+    """Every variable group on IEEE 14 is 110 columns, 880 bytes of values. A
+    frame came to about 12 KB, with each name repeated in its schema."""
+    pipe = _stream(
+        wrapper,
+        tf=0.1,
+        vars=["bus_v", "gen_state", "gen_power", "line_flow", "load_pq"],
+    )
+    n_columns = len(pipe.metadata()["var_columns"])
+    assert n_columns == 110
+
+    sizes = [len(f["payload"]) for f in pipe.frames()]
+    assert max(sizes) <= 8 * (n_columns + 1) + 1024

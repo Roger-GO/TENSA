@@ -1,28 +1,30 @@
 /**
- * Arrow IPC stream-chunk decoder for `RunStream`.
+ * Arrow IPC frame decoder for `RunStream`.
  *
- * Each WebSocket binary message from the substrate is one Arrow IPC stream
- * chunk: schema preamble + one (or more) RecordBatch with one or more
- * rows. The schema is ``t: float64`` plus one ``Float64`` column per
- * variable selected at ``start_tds`` time (e.g., ``Bus_1_v``,
- * ``Gen_2_omega``, ``Line_4_5_p`` ...).
+ * The substrate names the run's columns once, in ``stream_start``
+ * (``metadata.var_columns``, ``t`` excluded). After that every WebSocket binary
+ * message is one frame: a self-contained Arrow IPC stream holding a record
+ * batch of one or more rows with two columns,
  *
- * The decoder uses ``apache-arrow``'s ``RecordBatchStreamReader`` (or
- * ``tableFromIPC`` — equivalent under the hood) to materialize each batch.
- * For each row, columns are pushed into ``DecodedFrame.columns`` keyed by
- * column name, and the ``t`` column is split out separately.
+ * - ``t``: ``Float64``, the simulated time of each row;
+ * - ``v``: ``FixedSizeList<Float64>[ncols]``, each row's values in
+ *   ``var_columns`` order.
  *
- * **Forward-compat**: any column the substrate adds in the future (beyond
- * the v0.2 ``bus_v``/``gen_state``/``line_flow`` set) is preserved in
- * ``columns`` exactly as named — the decoder is schema-agnostic. Unknown
- * columns flow through to the runs slice so a future plot kind can read
- * them without a decoder change.
+ * A frame's schema is two fields wide however many variables are streamed, so
+ * decoding costs what the values cost. The decoder takes the column names from
+ * the caller and reads the values by position: for a single-row frame (the
+ * common case, one row per decimation window) each column is a ``Float64Array``
+ * view over the frame's one values buffer, with no copy.
+ *
+ * A run whose ``vars`` selection has no members on the loaded case has no
+ * columns; its frames carry ``t`` alone and decode to an empty ``columns``.
  *
  * **NaN handling**: NaN values are preserved (Arrow's Float64 representation
  * is the same as JS Number, so ``NaN`` round-trips). uPlot draws NaN as
  * gaps, which is the desired UI behavior when a worker emits a sentinel.
  */
 import { tableFromIPC } from 'apache-arrow';
+import type { Table } from 'apache-arrow';
 
 /** A single decoded frame (= one Arrow record batch worth of rows). */
 export interface DecodedFrame {
@@ -30,39 +32,68 @@ export interface DecodedFrame {
   numRows: number;
   /**
    * Time column, one entry per row, monotonically non-decreasing within
-   * one stream. Always present — the schema guarantees a ``t`` field.
+   * one stream. Always present.
    */
   t: Float64Array;
   /**
-   * All variable columns keyed by the Arrow field name (e.g.,
-   * ``"Bus_1_v"``). The ``t`` column is split out separately; this dict
-   * holds only the variable columns. Order is preserved from the schema
-   * for any caller that needs to walk columns in declaration order.
+   * All variable columns keyed by name (e.g., ``"Bus_1_v"``), each parallel
+   * to ``t``. The ``t`` column is split out separately; this dict holds only
+   * the variable columns.
    */
   columns: Record<string, Float64Array>;
   /**
-   * Column names in schema order, ``t`` excluded. Useful when a caller
-   * needs deterministic ordering (e.g., merging into the runs store
-   * without iterating the unordered ``columns`` dict).
+   * Column names in stream order, ``t`` excluded: the ``columnNames`` the frame
+   * was decoded with. Useful when a caller needs deterministic ordering (e.g.,
+   * merging into the runs store without iterating the unordered ``columns``
+   * dict).
    */
   columnNames: readonly string[];
 }
 
+/** Read one column of a decoded table as a ``Float64Array``. */
+function float64Column(table: Table, name: string): Float64Array {
+  const vec = table.getChild(name);
+  if (vec === null) {
+    throw new Error(`Arrow frame missing required '${name}' column`);
+  }
+  const arr = vec.toArray();
+  // The substrate sends ``Float64``; ``toArray`` returns the underlying typed
+  // array for a single chunk (and concatenates a multi-chunk column).
+  return arr instanceof Float64Array ? arr : Float64Array.from(arr as ArrayLike<number>);
+}
+
+/** Values per row of the frame's ``v`` column: 0 when the frame has none. */
+function valuesPerRow(table: Table): number {
+  const list = table.getChild('v');
+  return list === null ? 0 : (list.type as { listSize: number }).listSize;
+}
+
 /**
- * Decode one Arrow IPC stream chunk (one WS binary message) into a
- * ``DecodedFrame``.
- *
- * The substrate sends each WS binary message as a self-contained Arrow
- * IPC stream — schema preamble + one RecordBatch with one or more rows.
- * In rare cases the worker may emit more than one batch in a single
- * message (e.g., decimation flush-tail); this decoder concatenates rows
- * across all batches in the message into a single ``DecodedFrame``.
+ * The values of every row, one row after the other: ``rows * columns`` numbers.
+ * Reads the list column's child directly, so the rows are not materialized one
+ * list at a time.
  */
-export function decodeArrowBatch(buffer: ArrayBuffer): DecodedFrame {
-  // ``tableFromIPC`` accepts a ``Uint8Array`` or an iterable of them and
-  // returns a ``Table`` that has materialized all RecordBatches in the
-  // input. For one-batch-per-message (the common case) this is a single
-  // batch; for multi-batch messages the rows are concatenated.
+function flatValues(table: Table): Float64Array {
+  const child = table.getChild('v')?.getChildAt(0);
+  if (child === null || child === undefined) {
+    throw new Error("Arrow frame's 'v' column has no values");
+  }
+  const flat = child.toArray();
+  return flat instanceof Float64Array ? flat : Float64Array.from(flat as ArrayLike<number>);
+}
+
+/**
+ * Decode one frame (one WS binary message). ``columnNames`` are the names
+ * ``stream_start`` announced; the frame's values are matched to them by
+ * position, and a frame whose rows are not exactly that wide is an error.
+ *
+ * A message holding more than one batch (not something the substrate sends
+ * today) decodes to one frame with the rows concatenated.
+ */
+export function decodeArrowBatch(
+  buffer: ArrayBuffer,
+  columnNames: readonly string[],
+): DecodedFrame {
   const table = tableFromIPC(new Uint8Array(buffer));
 
   if (table.numRows === 0) {
@@ -71,47 +102,43 @@ export function decodeArrowBatch(buffer: ArrayBuffer): DecodedFrame {
     return { numRows: 0, t: new Float64Array(0), columns: {}, columnNames: [] };
   }
 
-  // ``table.schema.fields`` preserves the on-wire column order.
-  const fields = table.schema.fields;
-  const tField = fields.find((f) => f.name === 't');
-  if (!tField) {
-    throw new Error("Arrow batch missing required 't' column");
+  const numRows = table.numRows;
+  const numColumns = columnNames.length;
+  const width = valuesPerRow(table);
+  if (width !== numColumns) {
+    throw new Error(
+      `Arrow frame has ${width} values per row but stream_start named ${numColumns} columns`,
+    );
+  }
+  const t = float64Column(table, 't');
+  const columns: Record<string, Float64Array> = {};
+  if (numColumns === 0) {
+    return { numRows, t, columns, columnNames };
   }
 
-  // Materialize each column to a contiguous ``Float64Array``. The Arrow
-  // ``Vector#toArray`` API returns the underlying typed array when the
-  // column is a single chunk — which it almost always is for one-batch
-  // messages. If the column is multi-chunked, ``toArray`` concatenates
-  // for us, paying one O(n) copy.
-  let tArr: Float64Array | null = null;
-  const columns: Record<string, Float64Array> = {};
-  const columnNames: string[] = [];
-
-  for (const field of fields) {
-    const vec = table.getChild(field.name);
-    if (vec === null) continue;
-    const arr = vec.toArray();
-    // The substrate schema is exclusively ``Float64`` for ``t`` and every
-    // variable column. ``toArray`` returns a ``Float64Array`` directly in
-    // that case — no copy needed beyond what Arrow already did.
-    const f64: Float64Array =
-      arr instanceof Float64Array ? arr : Float64Array.from(arr as ArrayLike<number>);
-    if (field.name === 't') {
-      tArr = f64;
-    } else {
-      columns[field.name] = f64;
-      columnNames.push(field.name);
+  const flat = flatValues(table);
+  if (flat.length !== numRows * numColumns) {
+    throw new Error(
+      `Arrow frame holds ${flat.length} values for ${numRows} rows of ${numColumns} columns`,
+    );
+  }
+  if (numRows === 1) {
+    // One row: column j is the single value at offset j, a view with no copy.
+    for (let j = 0; j < numColumns; j += 1) {
+      columns[columnNames[j]!] = flat.subarray(j, j + 1);
+    }
+  } else {
+    // Several rows: gather each column's strided values into its own array.
+    const gathered = columnNames.map(() => new Float64Array(numRows));
+    for (let row = 0; row < numRows; row += 1) {
+      const base = row * numColumns;
+      for (let j = 0; j < numColumns; j += 1) {
+        gathered[j]![row] = flat[base + j]!;
+      }
+    }
+    for (let j = 0; j < numColumns; j += 1) {
+      columns[columnNames[j]!] = gathered[j]!;
     }
   }
-
-  if (tArr === null) {
-    throw new Error("Arrow batch 't' column failed to materialize");
-  }
-
-  return {
-    numRows: table.numRows,
-    t: tArr,
-    columns,
-    columnNames,
-  };
+  return { numRows, t, columns, columnNames };
 }

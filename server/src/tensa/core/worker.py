@@ -995,7 +995,8 @@ def _handle_run_tds(
     each per-step state snapshot is encoded as an Arrow IPC batch and sent on
     the data Pipe as ``{"type": "stream_frame", "seq": <run_seq>, "payload":
     <bytes>}``. The first frame of a run is preceded by a JSON-text-shaped
-    ``{"type": "stream_start", ...}`` message carrying the schema metadata.
+    ``{"type": "stream_start", ...}`` message carrying the column names, which
+    the frames leave out (see ``tensa.core.stream`` for the frame layout).
     The final ``{"type": "result", ...}`` message lands as usual at end of run.
     """
     # Everything the run would refuse for reasons known from the request and the
@@ -1144,7 +1145,7 @@ def _handle_run_tds(
                 "type": "stream_start",
                 "seq": seq,
                 "metadata": {
-                    "schema_version": "1.0",
+                    "schema_version": "2.0",
                     "decimation": {
                         "algorithm": aggregator.algorithm,
                         "mode": aggregator.decimation,

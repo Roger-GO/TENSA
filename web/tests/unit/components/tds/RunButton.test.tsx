@@ -13,7 +13,6 @@ import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { Server as MockServer, WebSocket as MockWebSocket } from 'mock-socket';
-import { tableFromArrays, tableToIPC } from 'apache-arrow';
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -39,6 +38,7 @@ import { useDisturbanceStore } from '@/store/disturbance';
 import { useRunsStore, DEFAULT_MEMORY_BUDGET_BYTES } from '@/store/runs';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { FaultSpec } from '@/api/types';
+import { arrowFrame } from '../../helpers/frames';
 
 const SESSION_ID = 'sess-1';
 const WS_HOST = 'localhost:9876';
@@ -72,15 +72,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function arrowBatch(t: number[], cols: Record<string, number[]>): ArrayBuffer {
-  const arrays: Record<string, Float64Array> = { t: new Float64Array(t) };
-  for (const name of Object.keys(cols)) {
-    arrays[name] = new Float64Array(cols[name]!);
-  }
-  const table = tableFromArrays(arrays);
-  const bytes = tableToIPC(table, 'stream');
-  const out = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(out).set(bytes);
-  return out;
+  return arrowFrame(t, cols);
 }
 
 interface ServerSocket {
@@ -448,7 +440,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
               type: 'stream_start',
               run_id: 'run-tds-1',
               metadata: {
-                schema_version: '1.0',
+                schema_version: '2.0',
                 decimation: {
                   algorithm: 'mean',
                   mode: 'mean',
@@ -518,7 +510,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
               type: 'stream_start',
               run_id: 'run-free',
               metadata: {
-                schema_version: '1.0',
+                schema_version: '2.0',
                 decimation: {
                   algorithm: 'mean',
                   mode: 'mean',
@@ -649,7 +641,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
               type: 'stream_start',
               run_id: 'run-tds-retry',
               metadata: {
-                schema_version: '1.0',
+                schema_version: '2.0',
                 decimation: {
                   algorithm: 'mean',
                   mode: 'mean',
@@ -720,7 +712,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
               type: 'stream_start',
               run_id: 'run-resync',
               metadata: {
-                schema_version: '1.0',
+                schema_version: '2.0',
                 vars: ['bus_v'],
                 var_columns: ['Bus_1_v'],
               },
@@ -926,7 +918,7 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
               type: 'stream_start',
               run_id: 'run-abort',
               metadata: {
-                schema_version: '1.0',
+                schema_version: '2.0',
                 vars: ['bus_v'],
                 var_columns: ['Bus_1_v'],
               },

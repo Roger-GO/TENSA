@@ -1,10 +1,23 @@
 """Arrow IPC encoder + decimation aggregator for TDS streaming.
 
-Each emitted Arrow batch is a self-contained IPC stream chunk (schema
-header + one RecordBatch with one or more rows). The schema is ``t:
-float64`` plus one float64 column per selected state variable; the
-WebSocket ``start_tds`` config's ``vars`` list selects which variable
-groups are included in each frame.
+A run names its columns once, in ``stream_start.metadata.var_columns`` (one
+name per selected state variable, ``t`` excluded), and then sends one frame
+per emitted batch. A frame is a self-contained Arrow IPC stream holding one
+RecordBatch of one or more rows with two columns:
+
+- ``t``: float64, the simulated time of each row.
+- ``v``: ``fixed_size_list<float64>[ncols]``, each row's values in
+  ``var_columns`` order.
+
+The names are never repeated and the frame's schema is two fields wide
+however many variables are streamed, so a frame costs 8 bytes per value plus
+a fixed few hundred bytes, and encoding or decoding one costs the same per
+value. (One Arrow column per variable repeated every name in each frame's
+schema and carried a field node and buffer descriptors per column, which on a
+1209-column case was a 134 KB frame for 9.7 KB of values.) A run that selects
+variables with no members on the loaded case has no columns and its frames
+carry ``t`` alone. The WebSocket ``start_tds`` config's ``vars`` list selects
+which variable groups are included in each frame.
 
 The variable groups (and the columns each contributes, in canonical
 order) are:
@@ -45,15 +58,17 @@ and emits whatever rows the aggregator returns as one Arrow batch.
 
 from __future__ import annotations
 
-import io
 import logging
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import TYPE_CHECKING, Literal
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.ipc
+from numpy.typing import NDArray
 
 if TYPE_CHECKING:
     from andes.system import System
@@ -209,16 +224,18 @@ def make_combined_schema(
     var_groups: list[VarGroup] | tuple[VarGroup, ...],
     system: System,
 ) -> tuple[pa.Schema, list[str]]:
-    """Build a unified Arrow schema for the requested variable groups.
+    """Build a unified column schema for the requested variable groups.
 
     ``var_groups`` is an ordered, deduplicated subset of :data:`VAR_GROUPS`.
     The returned schema has ``t`` as its first column followed by, for
     each requested group in canonical :data:`VAR_GROUPS` order, the
-    columns that group contributes (sourced live from ``system``). The
-    second tuple element is the column-name list (excluding ``t``) — the
-    same list ``stream_start.metadata.var_columns`` advertises to the
-    client so the picker tree can be wired without the client having to
-    re-introspect the topology.
+    columns that group contributes (sourced live from ``system``). It
+    fixes the column order and count but is not what goes on the wire:
+    :func:`encode_batch` packs the values into one list column and the names
+    travel once, as the second tuple element. That is the column-name list
+    (excluding ``t``), the same list ``stream_start.metadata.var_columns``
+    advertises to the client so the picker tree can be wired without the
+    client having to re-introspect the topology.
     """
     if not var_groups:
         raise ValueError("var_groups must be a non-empty subset of VAR_GROUPS")
@@ -256,38 +273,71 @@ def make_combined_schema(
 # ---- encoding ---------------------------------------------------------------
 
 
+@lru_cache(maxsize=16)
+def _frame_schema(n_columns: int) -> pa.Schema:
+    """The wire schema of a frame carrying ``n_columns`` values per row."""
+    fields = [pa.field("t", pa.float64())]
+    if n_columns:
+        fields.append(pa.field("v", pa.list_(pa.float64(), n_columns)))
+    return pa.schema(fields)
+
+
 def encode_batch(
     schema: pa.Schema,
     rows: Iterable[tuple[float, list[float]]],
 ) -> bytes:
-    """Encode one or more rows into a self-contained Arrow IPC stream chunk.
+    """Encode one or more rows into a frame: a self-contained Arrow IPC
+    stream chunk (see the module docstring for the layout).
 
-    ``rows`` is an iterable of ``(t, values)`` tuples. Each value list must
-    match the schema's variable columns in order. ``t`` and each variable
-    value may arrive as numpy scalars or 0-d ndarrays (ANDES's ``dae.t`` is a
-    numpy scalar); we coerce to ``float`` so pyarrow's array constructor
-    doesn't need to introspect the wrapper type.
+    ``schema`` is the column schema from :func:`make_combined_schema`; it
+    says how many values a row carries. ``rows`` is an iterable of
+    ``(t, values)`` tuples, each value list matching the schema's variable
+    columns in order, and a row of any other length raises ``ValueError``.
+    ``t`` and each value may arrive as numpy scalars or 0-d ndarrays
+    (ANDES's ``dae.t`` is a numpy scalar); numpy coerces them to float64.
     """
     rows_list = list(rows)
     if not rows_list:
         # Empty batch is meaningless; signal up to caller.
         raise ValueError("encode_batch called with no rows")
 
-    n_vars = len(rows_list[0][1])
-    t_array = pa.array([float(t) for t, _ in rows_list], type=pa.float64())
-    var_arrays = [
-        pa.array(
-            [float(row_values[i]) for _t, row_values in rows_list],
-            type=pa.float64(),
+    n_columns = len(schema) - 1
+    t = np.array([row_t for row_t, _ in rows_list], dtype=np.float64)
+    values = np.array([row_values for _, row_values in rows_list], dtype=np.float64)
+    if values.shape != (len(rows_list), n_columns):
+        raise ValueError(
+            f"every row must carry {n_columns} values (the schema's columns); "
+            f"got an array of shape {values.shape}"
         )
-        for i in range(n_vars)
-    ]
-    columns: list[pa.Array] = [t_array, *var_arrays]
-    batch = pa.RecordBatch.from_arrays(columns, schema=schema)
-    sink = io.BytesIO()
-    with pa.ipc.new_stream(sink, schema) as writer:
+
+    wire_schema = _frame_schema(n_columns)
+    columns: list[pa.Array] = [pa.array(t)]
+    if n_columns:
+        columns.append(
+            pa.FixedSizeListArray.from_arrays(pa.array(values.reshape(-1)), n_columns)
+        )
+    batch = pa.RecordBatch.from_arrays(columns, schema=wire_schema)
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, wire_schema) as writer:
         writer.write_batch(batch)
-    return sink.getvalue()
+    return bytes(sink.getvalue())
+
+
+def decode_batch(payload: bytes) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Decode a frame written by :func:`encode_batch` into ``(t, values)``.
+
+    ``t`` has one entry per row and ``values`` has shape ``(rows, columns)``,
+    its columns in ``stream_start.metadata.var_columns`` order (shape
+    ``(rows, 0)`` when the run has no columns). The server never decodes
+    frames; this is the reference reader for tests and Python clients.
+    """
+    table = pa.ipc.open_stream(pa.py_buffer(payload)).read_all()
+    t = np.asarray(table.column("t").to_numpy(), dtype=np.float64)
+    if "v" not in table.column_names:
+        return t, np.empty((len(t), 0), dtype=np.float64)
+    column = table.column("v").combine_chunks()
+    flat = np.asarray(column.flatten().to_numpy(), dtype=np.float64)
+    return t, flat.reshape(len(t), column.type.list_size)
 
 
 # ---- ANDES wiring -----------------------------------------------------------
@@ -767,6 +817,7 @@ __all__ = [
     "collect_generator_state",
     "collect_line_active_power",
     "collect_load_consumption",
+    "decode_batch",
     "encode_batch",
     "line_idx_values_from_system",
     "make_bus_voltage_schema",

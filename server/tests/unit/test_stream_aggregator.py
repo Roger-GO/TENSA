@@ -3,17 +3,10 @@ emission and anti-aliased decimation."""
 
 from __future__ import annotations
 
-import io
-
 import numpy as np
-import pyarrow.ipc
 import pytest
 
-from tensa.core.stream import (
-    StreamAggregator,
-    encode_batch,
-    make_bus_voltage_schema,
-)
+from tensa.core.stream import StreamAggregator
 
 # ---- StreamAggregator -------------------------------------------------------
 
@@ -194,47 +187,3 @@ def test_mean_row_time_is_the_window_mean_of_the_step_times() -> None:
     assert rows is not None
     assert len(rows) == 1
     assert rows[0][0] == pytest.approx(0.05)
-
-
-# ---- encode_batch round-trip ------------------------------------------------
-
-
-@pytest.mark.unit
-def test_encode_batch_round_trip_through_arrow_ipc() -> None:
-    """The bytes emitted by ``encode_batch`` decode back through pyarrow's
-    standard IPC stream reader. Round-trip is byte-stable for fixed input.
-
-    The bus_v schema now emits ``Bus_<idx>_v`` then ``Bus_<idx>_a`` per
-    bus, so each row carries two values per bus interleaved
-    ``[v_0, a_0, v_1, a_1, ...]``."""
-    schema = make_bus_voltage_schema([1, 2, 3])
-    rows = [
-        (0.0, [1.0, 0.0, 1.04, -0.03, 1.05, -0.06]),
-        (0.01, [1.001, 0.001, 1.039, -0.031, 1.049, -0.061]),
-        (0.02, [1.002, 0.002, 1.038, -0.032, 1.048, -0.062]),
-    ]
-    payload = encode_batch(schema, rows)
-
-    reader = pyarrow.ipc.open_stream(io.BytesIO(payload))
-    decoded_schema = reader.schema
-    assert decoded_schema.names == [
-        "t",
-        "Bus_1_v", "Bus_1_a",
-        "Bus_2_v", "Bus_2_a",
-        "Bus_3_v", "Bus_3_a",
-    ]
-
-    batch = reader.read_next_batch()
-    assert batch.num_rows == 3
-    assert batch.num_columns == 7
-    t_col = batch.column("t").to_pylist()
-    assert t_col == [0.0, 0.01, 0.02]
-    assert batch.column("Bus_1_v").to_pylist() == [1.0, 1.001, 1.002]
-    assert batch.column("Bus_1_a").to_pylist() == [0.0, 0.001, 0.002]
-
-
-@pytest.mark.unit
-def test_encode_batch_with_no_rows_raises() -> None:
-    schema = make_bus_voltage_schema([1])
-    with pytest.raises(ValueError, match="no rows"):
-        encode_batch(schema, [])

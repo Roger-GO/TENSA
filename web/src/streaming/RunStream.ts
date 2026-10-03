@@ -8,9 +8,10 @@
  * 3. Send ``{type: "start_tds", tf, h, decimation: "mean", max_rate_hz: 30, vars}``
  *    OR (on resume) ``{type: "resume", run_id, last_seq}``.
  * 4. Wait for ``{type: "stream_start", run_id, metadata}`` — capture
- *    ``run_id`` and ``metadata.var_columns`` from the substrate.
- * 5. For each WS binary message: decode the Arrow batch, append to the
- *    runs store, emit ``onFrame``.
+ *    ``run_id`` and ``metadata.var_columns`` from the substrate. The column
+ *    names are sent only here; binary frames carry the values alone.
+ * 5. For each WS binary message: decode the Arrow batch (its values matched to
+ *    ``var_columns`` by position), append to the runs store, emit ``onFrame``.
  * 6. On ``{type: "done", ...}``: emit ``onDone``, mark store, close cleanly.
  * 7. On ``{type: "resync", ...}``: emit ``onError({code: "buffer_evicted"})``,
  *    tear down. **Terminal — does NOT auto-reconnect.**
@@ -206,6 +207,11 @@ export class RunStream {
   private runId: string | null = null;
   /** Logical row count appended since ``stream_start``. Used as ``last_seq``. */
   private rowCount = 0;
+  /**
+   * Column names announced by ``stream_start`` (``metadata.var_columns``). Binary
+   * frames name no columns, so every frame is decoded against this list.
+   */
+  private columnNames: readonly string[] = [];
   /** Reconnect attempt counter (0-indexed). Reset on each successful frame. */
   private reconnectAttempt = 0;
   /** Pending reconnect timer handle. */
@@ -459,12 +465,13 @@ export class RunStream {
     const isResume = this.runId !== null;
     if (!isResume) {
       // First-run path: register the run in the runs store with the
-      // metadata's column list. Resume path: store already has the run;
-      // re-emitted stream_start is just so the JS Arrow decoder rebuilds
-      // its schema (which it does per-batch anyway, so no work here).
+      // metadata's column list, which is also what every binary frame is
+      // decoded against. Resume path: the store and the decoder already have
+      // the run and its columns; the re-emitted stream_start repeats them.
       this.runId = runId;
       this.rowCount = 0;
       const columnNames = Array.isArray(metadata?.var_columns) ? metadata.var_columns : [];
+      this.columnNames = columnNames;
       useRunsStore.getState().startRun({
         runId,
         tf: this.opts.tdsArgs.tf,
@@ -494,7 +501,7 @@ export class RunStream {
     if (this.runId === null) return;
     let decoded: DecodedFrame;
     try {
-      decoded = decodeArrowBatch(buffer);
+      decoded = decodeArrowBatch(buffer, this.columnNames);
     } catch (err) {
       this.emitError({
         code: 'protocol_error',

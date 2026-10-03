@@ -9,29 +9,17 @@
 // gives the imports an ``any`` shape that we narrow at the use sites.
 import { Server as MockServer, WebSocket as MockWebSocket } from 'mock-socket';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { tableFromArrays, tableToIPC } from 'apache-arrow';
 import { RunStream } from '@/streaming/RunStream';
 import { useRunsStore, DEFAULT_MEMORY_BUDGET_BYTES } from '@/store/runs';
+import { arrowFrame } from '../helpers/frames';
 
 const WS_URL = 'ws://localhost:1234';
 const SESSION_ID = 'sess-abc';
 const FULL_URL = `${WS_URL}/api/ws/${SESSION_ID}`;
 
-/** Build one Arrow IPC stream chunk (= one WS binary message). */
+/** Build one frame (= one WS binary message): ``t`` plus the values, by position. */
 function batch(t: number[], cols: Record<string, number[]>): ArrayBuffer {
-  const arrays: Record<string, Float64Array> = {
-    t: new Float64Array(t),
-  };
-  for (const name of Object.keys(cols)) {
-    arrays[name] = new Float64Array(cols[name]!);
-  }
-  const table = tableFromArrays(arrays);
-  const bytes = tableToIPC(table, 'stream');
-  // Copy into a fresh ``ArrayBuffer`` so the wire frame is the concrete
-  // ``ArrayBuffer`` shape ``mock-socket`` and the decoder both expect.
-  const out = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(out).set(bytes);
-  return out;
+  return arrowFrame(t, cols);
 }
 
 interface ServerSocket {
@@ -100,7 +88,7 @@ describe('RunStream — happy path', () => {
               type: 'stream_start',
               run_id: 'run-xyz',
               metadata: {
-                schema_version: '1.0',
+                schema_version: '2.0',
                 decimation: {
                   algorithm: 'mean',
                   mode: 'mean',
@@ -184,6 +172,96 @@ describe('RunStream — happy path', () => {
   });
 });
 
+describe('RunStream — frames name no columns', () => {
+  let server: MockServerHandle;
+
+  beforeEach(() => {
+    resetStore();
+    server = freshServer();
+  });
+
+  afterEach(() => {
+    server.stop();
+  });
+
+  /** Serve one run: ``stream_start`` naming ``columns``, then ``frames``, then done. */
+  function serveRun(columns: string[], frames: ArrayBuffer[]): void {
+    server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.on('message', (raw: unknown) => {
+        if (JSON.parse(String(raw)).type !== 'start_tds') return;
+        socket.send(
+          JSON.stringify({
+            type: 'stream_start',
+            run_id: 'r1',
+            metadata: { schema_version: '2.0', vars: ['bus_v'], var_columns: columns },
+          }),
+        );
+        for (const frame of frames) socket.send(frame);
+        socket.send(JSON.stringify({ type: 'done', converged: true, final_t: 0.2 }));
+        socket.close({ code: 1000 });
+      });
+    });
+  }
+
+  it('reads each frame against the var_columns stream_start announced', async () => {
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    // The values of a frame sit in the order var_columns lists them. Frames
+    // of one row and of several rows both land under the right names.
+    serveRun(
+      ['Bus_1_v', 'Bus_1_a', 'Gen_1_omega'],
+      [
+        batch([0.0], { Bus_1_v: [1.0], Bus_1_a: [0.0], Gen_1_omega: [1.0] }),
+        batch([0.1, 0.2], {
+          Bus_1_v: [0.99, 0.98],
+          Bus_1_a: [-0.1, -0.2],
+          Gen_1_omega: [1.001, 1.002],
+        }),
+      ],
+    );
+
+    const stream = new RunStream(
+      { sessionId: SESSION_ID, wsUrl: WS_URL, tdsArgs: { tf: 0.2 }, onDone, onError },
+      { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
+    );
+    stream.start();
+    for (let i = 0; i < 10 && onDone.mock.calls.length === 0; i += 1) await tick();
+
+    expect(onError).not.toHaveBeenCalled();
+    const r = useRunsStore.getState().runs.r1!;
+    expect(r.seqCount).toBe(3);
+    expect(Array.from(r.t.subarray(0, 3))).toEqual([0.0, 0.1, 0.2]);
+    expect(Array.from(r.columns.Bus_1_v!.subarray(0, 3))).toEqual([1.0, 0.99, 0.98]);
+    expect(Array.from(r.columns.Bus_1_a!.subarray(0, 3))).toEqual([0.0, -0.1, -0.2]);
+    expect(Array.from(r.columns.Gen_1_omega!.subarray(0, 3))).toEqual([1.0, 1.001, 1.002]);
+  });
+
+  it('reports a protocol error for a frame that is not as wide as var_columns', async () => {
+    const onError = vi.fn();
+    // stream_start names one column; the frame carries two values per row, so
+    // the second would land under the wrong name if it were accepted.
+    serveRun(['Bus_1_v'], [batch([0.0], { Bus_1_v: [1.0], Bus_2_v: [1.01] })]);
+
+    const stream = new RunStream(
+      { sessionId: SESSION_ID, wsUrl: WS_URL, tdsArgs: { tf: 0.2 }, onError },
+      { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
+    );
+    stream.start();
+    for (let i = 0; i < 10 && onError.mock.calls.length === 0; i += 1) await tick();
+
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: 'protocol_error',
+        reason: expect.stringMatching(/arrow decode failed: .*2 values per row.*named 1 columns/),
+      }),
+    );
+    const r = useRunsStore.getState().runs.r1!;
+    expect(r.errorReason).toMatch(/arrow decode failed/);
+    expect(r.seqCount).toBe(0);
+  });
+});
+
 describe('RunStream — edge cases', () => {
   let server: MockServerHandle;
 
@@ -211,7 +289,7 @@ describe('RunStream — edge cases', () => {
             JSON.stringify({
               type: 'stream_start',
               run_id: 'r1',
-              metadata: { schema_version: '1.0', vars: ['bus_v'], var_columns: ['Bus_1_v'] },
+              metadata: { schema_version: '2.0', vars: ['bus_v'], var_columns: ['Bus_1_v'] },
             }),
           );
           socket.send(batch([0.01], { Bus_1_v: [0.999] }));
@@ -257,7 +335,7 @@ describe('RunStream — edge cases', () => {
             JSON.stringify({
               type: 'stream_start',
               run_id: 'r1',
-              metadata: { schema_version: '1.0', vars: ['bus_v'], var_columns: [] },
+              metadata: { schema_version: '2.0', vars: ['bus_v'], var_columns: [] },
             }),
           );
           socket.send(
@@ -321,7 +399,7 @@ describe('RunStream — edge cases', () => {
             JSON.stringify({
               type: 'stream_start',
               run_id: 'r1',
-              metadata: { schema_version: '1.0', vars: ['bus_v'], var_columns: [] },
+              metadata: { schema_version: '2.0', vars: ['bus_v'], var_columns: [] },
             }),
           );
           // Abnormal close to trigger reconnect.
@@ -380,7 +458,7 @@ describe('RunStream — edge cases', () => {
               type: 'stream_start',
               run_id: 'r1',
               metadata: {
-                schema_version: '1.0',
+                schema_version: '2.0',
                 vars: ['bus_v'],
                 var_columns: ['Bus_1_v'],
               },
@@ -397,7 +475,7 @@ describe('RunStream — edge cases', () => {
               type: 'stream_start',
               run_id: 'r1',
               metadata: {
-                schema_version: '1.0',
+                schema_version: '2.0',
                 vars: ['bus_v'],
                 var_columns: ['Bus_1_v'],
               },
@@ -460,7 +538,7 @@ describe('RunStream — edge cases', () => {
             JSON.stringify({
               type: 'stream_start',
               run_id: 'r1',
-              metadata: { schema_version: '1.0', vars: ['bus_v'], var_columns: [] },
+              metadata: { schema_version: '2.0', vars: ['bus_v'], var_columns: [] },
             }),
           );
           socket.close({ code: 1006 });

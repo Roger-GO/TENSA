@@ -17,16 +17,15 @@ The streaming-variable contract each group contributes (per idx):
 
 from __future__ import annotations
 
-import io
 from types import SimpleNamespace
 
 import pyarrow as pa
-import pyarrow.ipc
 import pytest
 
 from tensa.core.stream import (
     DEFAULT_VARS,
     VAR_GROUPS,
+    decode_batch,
     encode_batch,
     make_bus_voltage_schema,
     make_combined_schema,
@@ -356,12 +355,12 @@ def test_combined_schema_dedupe_collapses_repeats() -> None:
 
 
 @pytest.mark.unit
-def test_combined_schema_round_trips_through_arrow_ipc() -> None:
-    """A combined-schema batch encodes + decodes through pyarrow's
-    standard IPC stream reader without losing column names or values.
-    The row layout follows ``collect_combined_values`` ordering: [v, a]
-    per bus, then [delta, omega] per gen, then [Pe, Qe] per gen, then
-    [p, q] per line, then [p, q] per load."""
+def test_combined_schema_round_trips_through_encode_and_decode() -> None:
+    """A combined-schema batch encodes and decodes without losing a value or
+    moving it to another column. The row layout follows
+    ``collect_combined_values`` ordering: [v, a] per bus, then [delta, omega]
+    per gen, then [Pe, Qe] per gen, then [p, q] per line, then [p, q] per
+    load; ``var_columns`` names those positions."""
     system = _fake_system(
         bus_idxes=[1, 2],
         syngen_idxes=["GENROU_1"],
@@ -379,24 +378,25 @@ def test_combined_schema_round_trips_through_arrow_ipc() -> None:
         "Line_Line_1_p", "Line_Line_1_q",
         "Load_PQ_1_p", "Load_PQ_1_q",
     ]
+    # var_columns matches the metadata advertised to the client (no t).
+    assert var_columns == expected_cols
     # values match expected_cols order, one row per timestep.
     rows = [
         (0.0, [1.04, -0.01, 1.03, -0.05, 0.5, 1.0, 81.4, -21.6, 12.5, 3.1, 21.7, 12.7]),
         (0.01, [1.041, -0.011, 1.029, -0.051, 0.501, 1.0001, 81.5, -21.5, 12.6, 3.2, 21.7, 12.7]),
     ]
-    payload = encode_batch(schema, rows)
+    t, values = decode_batch(encode_batch(schema, rows))
 
-    reader = pyarrow.ipc.open_stream(io.BytesIO(payload))
-    decoded = reader.schema
-    assert decoded.names == ["t", *expected_cols]
-    batch = reader.read_next_batch()
-    assert batch.num_rows == 2
-    assert batch.column("Bus_1_v").to_pylist() == [1.04, 1.041]
-    assert batch.column("Bus_1_a").to_pylist() == [-0.01, -0.011]
-    assert batch.column("Gen_GENROU_1_omega").to_pylist() == [1.0, 1.0001]
-    assert batch.column("Gen_GENROU_1_Pe").to_pylist() == [81.4, 81.5]
-    assert batch.column("Line_Line_1_p").to_pylist() == [12.5, 12.6]
-    assert batch.column("Line_Line_1_q").to_pylist() == [3.1, 3.2]
-    assert batch.column("Load_PQ_1_p").to_pylist() == [21.7, 21.7]
-    # var_columns matches the metadata advertised to the client (no t).
-    assert var_columns == expected_cols
+    assert t.tolist() == [0.0, 0.01]
+    assert values.shape == (2, len(expected_cols))
+
+    def column(name: str) -> list[float]:
+        return values[:, var_columns.index(name)].tolist()
+
+    assert column("Bus_1_v") == [1.04, 1.041]
+    assert column("Bus_1_a") == [-0.01, -0.011]
+    assert column("Gen_GENROU_1_omega") == [1.0, 1.0001]
+    assert column("Gen_GENROU_1_Pe") == [81.4, 81.5]
+    assert column("Line_Line_1_p") == [12.5, 12.6]
+    assert column("Line_Line_1_q") == [3.1, 3.2]
+    assert column("Load_PQ_1_p") == [21.7, 21.7]

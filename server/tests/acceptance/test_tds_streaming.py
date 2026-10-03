@@ -9,7 +9,6 @@ final ``done`` text frame.
 
 from __future__ import annotations
 
-import io
 import json
 import os
 import shutil
@@ -21,9 +20,10 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 import httpx
-import pyarrow.ipc
 import pytest
 import websockets
+
+from tensa.core.stream import decode_batch
 
 
 def _free_port() -> int:
@@ -164,19 +164,12 @@ async def test_streaming_tds_end_to_end(live_server: tuple[int, str]) -> None:
             f"expected ≥ 10 Arrow batches, got {len(binary_frames)}"
         )
 
-    # Decode the first batch and assert schema
-    reader = pyarrow.ipc.open_stream(io.BytesIO(binary_frames[0]))
-    schema = reader.schema
-    assert schema.field("t").type == pyarrow.float64()
-    expected_columns = ["t"] + metadata["metadata"]["var_columns"]
-    assert schema.names == expected_columns
-
-    # Read the batch
-    batch = reader.read_next_batch()
-    assert batch.num_rows == 1
-    # Default vars (bus_v + gen_state): 28 bus columns + 10 gen columns
-    # + 1 t column = 39 columns.
-    assert batch.num_columns == 28 + 10 + 1
+    # Decode the first frame: one row, one value per column stream_start named.
+    t, values = decode_batch(binary_frames[0])
+    assert t.shape == (1,)
+    # Default vars (bus_v + gen_state): 28 bus columns + 10 gen columns.
+    assert values.shape == (1, 28 + 10)
+    assert values.shape[1] == len(metadata["metadata"]["var_columns"])
 
 
 @pytest.mark.acceptance
@@ -277,11 +270,8 @@ async def test_streaming_decimation_mean_emits_one_row_per_window(
 
     # Each batch contains exactly one row (the mean over that window).
     for frame in binary_frames:
-        reader = pyarrow.ipc.open_stream(io.BytesIO(frame))
-        batch = reader.read_next_batch()
-        assert batch.num_rows == 1, (
-            f"mean mode emits 1 row per batch; got {batch.num_rows}"
-        )
+        t, _values = decode_batch(frame)
+        assert len(t) == 1, f"mean mode emits 1 row per batch; got {len(t)}"
 
     assert done["final_t"] >= 0.99
 
@@ -308,11 +298,7 @@ async def test_streaming_decimation_none_with_max_rate_batches_rows(
 
     # Most batches should contain MORE than one row. Allow up to 2 single-row
     # outliers (the tail flush, or windows with very few source samples).
-    multi_row = sum(
-        1
-        for frame in binary_frames
-        if pyarrow.ipc.open_stream(io.BytesIO(frame)).read_next_batch().num_rows > 1
-    )
+    multi_row = sum(1 for frame in binary_frames if len(decode_batch(frame)[0]) > 1)
     assert multi_row >= len(binary_frames) - 2, (
         "most batches should contain multiple rows under N-rows-per-batch; "
         f"got {multi_row}/{len(binary_frames)} multi-row batches"
@@ -366,9 +352,7 @@ async def test_streaming_decimation_default_matches_legacy_behavior(
     assert decim["mode"] == "none"
     assert decim["output_rate_hz"] is None
     for frame in binary_frames:
-        reader = pyarrow.ipc.open_stream(io.BytesIO(frame))
-        batch = reader.read_next_batch()
-        assert batch.num_rows == 1
+        assert len(decode_batch(frame)[0]) == 1
 
 
 # ---- resume / reconnect ----------------------------------------------------
@@ -587,9 +571,8 @@ async def test_streaming_vars_default_omitted_is_bus_v_and_gen_state(
     assert len(omega_cols) == 5
     assert len(var_cols) == 28 + 10
 
-    reader = pyarrow.ipc.open_stream(io.BytesIO(binary_frames[0]))
-    schema = reader.schema
-    assert schema.names == ["t"] + var_cols
+    _t, values = decode_batch(binary_frames[0])
+    assert values.shape[1] == len(var_cols)
 
 
 @pytest.mark.acceptance
@@ -624,15 +607,11 @@ async def test_streaming_vars_bus_v_and_gen_state_includes_both_groups(
     gen_start = var_cols.index(delta_cols[0])
     assert gen_start == bus_end + 1
 
-    reader = pyarrow.ipc.open_stream(io.BytesIO(binary_frames[0]))
-    schema = reader.schema
-    assert schema.names == ["t"] + var_cols
-    batch = reader.read_next_batch()
-    assert batch.num_columns == 1 + 28 + 10
+    _t, values = decode_batch(binary_frames[0])
+    assert values.shape[1] == 28 + 10
     # All omega values at t=0 are 1.0 pu (synchronous reference); spot-check.
     for col in omega_cols:
-        values = batch.column(col).to_pylist()
-        for v in values:
+        for v in values[:, var_cols.index(col)]:
             assert 0.5 < v < 1.5, f"omega {col}={v} out of physical range"
 
 
@@ -757,13 +736,12 @@ async def test_streaming_vars_works_with_decimation_mean(
     assert meta["decimation"]["mode"] == "mean"
     assert meta["vars"] == ["bus_v", "gen_state"]
 
-    # Every batch is one row × (1 t + 28 bus + 10 gen) columns.
-    expected_cols = 1 + 2 * 14 + 2 * 5
+    # Every batch is one row × (28 bus + 10 gen) values.
+    expected_cols = 2 * 14 + 2 * 5
     for frame in binary_frames:
-        reader = pyarrow.ipc.open_stream(io.BytesIO(frame))
-        batch = reader.read_next_batch()
-        assert batch.num_rows == 1
-        assert batch.num_columns == expected_cols
+        t, values = decode_batch(frame)
+        assert len(t) == 1
+        assert values.shape == (1, expected_cols)
 
     assert done["final_t"] >= 0.49
 
@@ -799,18 +777,15 @@ async def test_streaming_vars_gen_power_and_load_pq_groups(
     # Canonical order: gen_power block precedes load_pq block.
     assert var_cols.index(pe_cols[-1]) < var_cols.index(load_p_cols[0])
 
-    reader = pyarrow.ipc.open_stream(io.BytesIO(binary_frames[0]))
-    schema = reader.schema
-    assert schema.names == ["t"] + var_cols
-    batch = reader.read_next_batch()
-    assert batch.num_columns == 1 + 10 + 22
+    _t, values = decode_batch(binary_frames[0])
+    assert values.shape[1] == 10 + 22
 
     # Electrical power on a loaded grid is nonzero — at least one generator
     # carries > 1 MW of active power.
-    pe_total = sum(abs(batch.column(c).to_pylist()[0]) for c in pe_cols)
+    pe_total = sum(abs(values[0, var_cols.index(c)]) for c in pe_cols)
     assert pe_total > 1.0, f"all Gen Pe ~0 MW; suspicious ({pe_total})"
     # PQ load consumption is nonzero too.
-    load_total = sum(abs(batch.column(c).to_pylist()[0]) for c in load_p_cols)
+    load_total = sum(abs(values[0, var_cols.index(c)]) for c in load_p_cols)
     assert load_total > 1.0, f"all Load p ~0 MW; suspicious ({load_total})"
 
     assert done["final_t"] >= 0.49

@@ -1,7 +1,9 @@
 """WebSocket route for TDS streaming.
 
 Wire protocol (text frames are JSON; binary frames are Arrow IPC stream
-chunks):
+chunks, each holding the ``t`` column and one ``v`` list column of the row's
+values in ``metadata.var_columns`` order; the column names are sent only in
+``stream_start``, see ``tensa.core.stream``):
 
   server → client (text)  {"type":"ready"}    once the session is validated
 
