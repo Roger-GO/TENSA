@@ -233,7 +233,7 @@ def case_entry_name_problem(name: str) -> str | None:
     """
     if "/" in name or "\\" in name:
         return "contains a path separator, but case/ holds flat files only"
-    if name == ".." or name.startswith("."):
+    if name.startswith("."):
         return "starts with a dot"
     return portable_name_problem(name)
 

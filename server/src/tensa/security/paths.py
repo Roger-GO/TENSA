@@ -58,10 +58,7 @@ def ensure_workspace(directory: Path) -> Path:
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         with contextlib.suppress(OSError):  # Windows / non-POSIX has no chmod
             os.chmod(directory, 0o700)
-    canonical = canonical_directory(directory)
-    if not canonical.is_dir():
-        raise WorkspacePathError(f"workspace path is not a directory: {canonical}")
-    return canonical
+    return canonical_directory(directory)
 
 
 def canonical_directory(directory: Path) -> Path:
