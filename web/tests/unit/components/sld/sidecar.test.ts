@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   parseSidecar,
   mergeWithDrift,
+  sidecarCoversBuses,
   buildSidecarLayout,
   buildNonBusCoordinates,
   nonBusCoordsAsMap,
@@ -297,6 +298,34 @@ describe('mergeWithDrift', () => {
     const topology = makeTopology([bus(1)]);
     const result = mergeWithDrift(null, topology, {});
     expect(result.coords['1']).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe('sidecarCoversBuses', () => {
+  const stored = (idxs: Array<number | string>): SidecarLayout => ({
+    schema_version: '1',
+    andes_version: '2.0.x',
+    last_modified: '2026-05-07T00:00:00Z',
+    coordinates: Object.fromEntries(idxs.map((i) => [String(i), { x: 1, y: 1 }])),
+  });
+
+  it('is true when every bus has a stored coordinate, extras included', () => {
+    expect(sidecarCoversBuses(stored([1, 2]), makeTopology([bus(1), bus(2)]))).toBe(true);
+    expect(sidecarCoversBuses(stored([1, 2, 99]), makeTopology([bus(1), bus(2)]))).toBe(true);
+  });
+
+  it('is false when a bus has none', () => {
+    expect(sidecarCoversBuses(stored([1, 2]), makeTopology([bus(1), bus(2), bus(3)]))).toBe(false);
+  });
+
+  it('matches a numeric bus idx with its string key', () => {
+    expect(sidecarCoversBuses(stored(['1', '2']), makeTopology([bus(1), bus(2)]))).toBe(true);
+    expect(sidecarCoversBuses(stored([1, 2]), makeTopology([bus('1'), bus('2')]))).toBe(true);
+  });
+
+  it('is false without a stored layout, even for an empty topology', () => {
+    expect(sidecarCoversBuses(null, makeTopology([bus(1)]))).toBe(false);
+    expect(sidecarCoversBuses(null, makeTopology([]))).toBe(false);
   });
 });
 

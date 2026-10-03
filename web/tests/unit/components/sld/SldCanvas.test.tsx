@@ -137,31 +137,29 @@ vi.mock('@xyflow/react', async () => {
   };
 });
 
-// Stub ELK to a deterministic identity layout — every bus gets a
-// distinct (10*i, 20*i) coord. Avoids the elkjs worker spin-up cost in
-// tests and makes assertions stable.
-vi.mock('elkjs/lib/elk.bundled.js', () => {
-  class ElkStub {
-    async layout(graph: { children?: { id: string }[] }) {
-      const children = (graph.children ?? []).map((c, i) => ({
-        id: c.id,
-        x: 10 * i,
-        y: 20 * i,
-      }));
-      return { children };
-    }
-  }
-  return { default: ElkStub };
-});
+// Stub the ELK worker client to a deterministic identity layout — every
+// bus gets a distinct (10*i, 20*i) coord. Avoids a real worker (jsdom has
+// none) and makes assertions stable. `vi.fn` so tests can count the passes.
+vi.mock('@/components/sld/elkClient', () => ({
+  elkLayout: vi.fn(async (graph: { children?: { id: string }[] }) => {
+    const children = (graph.children ?? []).map((c, i) => ({
+      id: c.id,
+      x: 10 * i,
+      y: 20 * i,
+    }));
+    return { children };
+  }),
+}));
 
 import { SldCanvas } from '@/components/sld/SldCanvas';
 import { buildGraph } from '@/components/sld/graph';
+import { elkLayout } from '@/components/sld/elkClient';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { useConnectivityStore } from '@/store/connectivity';
 import { __resetCascadeForTests, wireStoreCascade } from '@/store';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
-import type { TopologySummary, TopologyEntry } from '@/api/types';
+import type { TopologySummary, TopologyEntry, SidecarLayout } from '@/api/types';
 
 function bus(idx: number | string, name = `b${idx}`): TopologyEntry {
   return { idx, name, kind: 'Bus', params: {} };
@@ -194,6 +192,8 @@ function withQueryClient(ui: ReactNode) {
 // (matching the previous `useCaseStore.setState({ topology })` pattern
 // before topology moved to a TanStack Query hook).
 let mockTopology: TopologySummary | null = null;
+// The stored layout sidecar the canvas reads (null: none saved for the case).
+let mockSidecar: SidecarLayout | null = null;
 // Spy on ``useConnectivity``'s ``refetch`` so the recompute-button test
 // can assert it fired without spinning up a real fetch. Each test
 // overrides ``mockConnectivityRefetch`` for its scenario.
@@ -205,7 +205,7 @@ vi.mock('@/api/queries', async () => {
   return {
     ...actual,
     useGetSidecar: () => ({
-      data: null,
+      data: mockSidecar,
       isLoading: false,
       isError: false,
       error: null,
@@ -253,6 +253,8 @@ describe('buildGraph', () => {
 describe('SldCanvas', () => {
   beforeEach(() => {
     mockTopology = null;
+    mockSidecar = null;
+    vi.mocked(elkLayout).mockClear();
     mockConnectivityIsFetching = false;
     mockConnectivityIsError = false;
     mockConnectivityRefetch = vi.fn(() => Promise.resolve({ data: null }));
@@ -268,6 +270,7 @@ describe('SldCanvas', () => {
   });
   afterEach(() => {
     mockTopology = null;
+    mockSidecar = null;
     cleanup();
     __resetCascadeForTests();
     useConnectivityStore.setState({
@@ -403,6 +406,110 @@ describe('SldCanvas', () => {
       expect(screen.getByTestId('bus-node-1')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('sld-large-banner')).not.toBeInTheDocument();
+  });
+
+  // ---- ELK runs only when it can change the drawing -------------------------
+
+  /** ELK passes per layout: one for coords, one for edge bend points. */
+  const ELK_PASSES = 2;
+
+  function selectCase(path: string) {
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath(path), addfiles: [] },
+      });
+    });
+  }
+
+  function sidecarFor(busIdxs: number[]): SidecarLayout {
+    return {
+      schema_version: '1',
+      andes_version: '2.0.0',
+      last_modified: '2026-01-01T00:00:00Z',
+      coordinates: Object.fromEntries(busIdxs.map((i) => [String(i), { x: 100 * i, y: 50 }])),
+      non_bus_coordinates: {},
+    };
+  }
+
+  it('does not lay out again when the topology refetches with the same shape', async () => {
+    mockTopology = makeTopology([bus(1), bus(2)], [line(1, 1, 2)]);
+    selectCase('synthetic.raw');
+    const view = render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('bus-node-1')).toBeInTheDocument();
+    });
+    expect(elkLayout).toHaveBeenCalledTimes(ELK_PASSES);
+
+    // What a power-flow run or a parameter edit does: a new topology object,
+    // another state, the same buses and branch terminals.
+    mockTopology = { ...makeTopology([bus(1), bus(2)], [line(1, 1, 2)]), state: 'committed' };
+    view.rerender(withQueryClient(<SldCanvas />));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(screen.queryByTestId('sld-layout-skeleton')).not.toBeInTheDocument();
+    expect(screen.getByTestId('bus-node-2')).toBeInTheDocument();
+    expect(elkLayout).toHaveBeenCalledTimes(ELK_PASSES);
+  });
+
+  it('lays out again when a bus is added to the case', async () => {
+    mockTopology = makeTopology([bus(1), bus(2)], [line(1, 1, 2)]);
+    selectCase('synthetic.raw');
+    const view = render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('bus-node-2')).toBeInTheDocument();
+    });
+
+    mockTopology = makeTopology([bus(1), bus(2), bus(3)], [line(1, 1, 2), line(2, 2, 3)]);
+    view.rerender(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('bus-node-3')).toBeInTheDocument();
+    });
+    expect(elkLayout).toHaveBeenCalledTimes(2 * ELK_PASSES);
+  });
+
+  it('skips ELK when the saved layout places every bus', async () => {
+    mockTopology = makeTopology([bus(1), bus(2)], [line(1, 1, 2)]);
+    mockSidecar = sidecarFor([1, 2]);
+    selectCase('synthetic.raw');
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('bus-node-1')).toBeInTheDocument();
+      expect(screen.getByTestId('bus-node-2')).toBeInTheDocument();
+    });
+    expect(elkLayout).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('sld-drift-banner')).not.toBeInTheDocument();
+  });
+
+  it('runs ELK, and shows the drift banner, when the saved layout misses a bus', async () => {
+    mockTopology = makeTopology([bus(1), bus(2), bus(3)], [line(1, 1, 2)]);
+    mockSidecar = sidecarFor([1, 2]);
+    selectCase('synthetic.raw');
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('bus-node-3')).toBeInTheDocument();
+    });
+    expect(elkLayout).toHaveBeenCalled();
+    expect(screen.getByTestId('sld-drift-banner')).toBeInTheDocument();
+  });
+
+  it('skips ELK for a curated case whose layout places every bus', async () => {
+    mockTopology = makeTopology(Array.from({ length: 39 }, (_, i) => bus(i + 1)));
+    selectCase('ieee39.raw');
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('bus-node-39')).toBeInTheDocument();
+    });
+    expect(elkLayout).not.toHaveBeenCalled();
+  });
+
+  it('runs ELK for a curated case that has a bus the curated layout lacks', async () => {
+    mockTopology = makeTopology(Array.from({ length: 40 }, (_, i) => bus(i + 1)));
+    selectCase('ieee39.raw');
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('bus-node-40')).toBeInTheDocument();
+    });
+    expect(elkLayout).toHaveBeenCalled();
   });
 
   // ---- Unit 17 — connectivity overlay -------------------------------------

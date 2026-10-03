@@ -79,20 +79,18 @@ vi.mock('@xyflow/react', async () => {
 });
 
 // ELK identity stub — every bus gets a deterministic (10*i, 20*i)
-// position. Avoids elkjs spin-up + makes coords predictable.
-vi.mock('elkjs/lib/elk.bundled.js', () => {
-  class ElkStub {
-    async layout(graph: { children?: { id: string }[] }) {
-      const children = (graph.children ?? []).map((c, i) => ({
-        id: c.id,
-        x: 10 * i,
-        y: 20 * i,
-      }));
-      return { children };
-    }
-  }
-  return { default: ElkStub };
-});
+// position. Replaces the worker client (jsdom has no Worker) and makes
+// coords predictable.
+vi.mock('@/components/sld/elkClient', () => ({
+  elkLayout: async (graph: { children?: { id: string }[] }) => {
+    const children = (graph.children ?? []).map((c, i) => ({
+      id: c.id,
+      x: 10 * i,
+      y: 20 * i,
+    }));
+    return { children };
+  },
+}));
 
 import { SldCanvas } from '@/components/sld/SldCanvas';
 import { useCaseStore } from '@/store/case';

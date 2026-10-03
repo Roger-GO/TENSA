@@ -197,6 +197,19 @@ export function mergeWithDrift(
 }
 
 /**
+ * True when `stored` places every bus of the topology, so `mergeWithDrift`
+ * never reads an auto-layout coordinate and running ELK would be wasted
+ * work. `null` (no stored or curated layout) never covers.
+ */
+export function sidecarCoversBuses(
+  stored: SidecarLayout | null,
+  topology: TopologySummary,
+): boolean {
+  if (stored === null) return false;
+  return topology.buses.every((bus) => Boolean(stored.coordinates[String(bus.idx)]));
+}
+
+/**
  * One non-bus drag override the writer needs to persist. The drag
  * override map keyed by React Flow node id (`${uiCategory}-${idx}`) does
  * NOT carry the ANDES model class on its own — the caller (e.g.,

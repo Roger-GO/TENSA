@@ -28,26 +28,18 @@
  *   =80` gives buses room to render their IEC 60617 icons + name
  *   labels without overlap, while still fitting IEEE 39 in a single
  *   viewport at default zoom.
- * - Fallback: if ELK throws on either pass (rare; bundle problem or
- *   pathological graph), fall back to a plain sqrt(n)-wide grid + warn
- *   and skip bend points. The canvas still renders — just less
- *   prettily — so the user is never left staring at a blank pane.
+ * - ELK runs in a Web Worker (see `elkClient.ts`), so a layout never
+ *   blocks the UI thread and the engine is not part of the main chunk.
+ * - Fallback: if ELK throws on either pass (rare; the worker failing to
+ *   load, or a pathological graph), fall back to a plain sqrt(n)-wide
+ *   grid + warn and skip bend points. The canvas still renders — just
+ *   less prettily — so the user is never left staring at a blank pane.
  */
-import ELK from 'elkjs/lib/elk.bundled.js';
 import type { ElkNode, LayoutOptions } from 'elkjs/lib/elk-api';
 import type { TopologySummary } from '@/api/types';
 import type { CoordsByIdx } from './sidecar';
 import { computeHandleAssignments, type Side } from './graph';
-
-/** Lazy ELK instance — `elkjs` reads `Worker` on construction in some bundles. */
-let elkInstance: InstanceType<typeof ELK> | null = null;
-
-function getElk(): InstanceType<typeof ELK> {
-  if (!elkInstance) {
-    elkInstance = new ELK();
-  }
-  return elkInstance;
-}
+import { elkLayout } from './elkClient';
 
 /**
  * Tunable layout options. Exported so tests can vary spacing without
@@ -129,6 +121,22 @@ function collectBranches(topology: TopologySummary): CollectedBranch[] {
   return branches;
 }
 
+/**
+ * Fingerprint of everything `autoLayout` reads from a topology: the bus
+ * idx values and each branch's id and terminals, in order. Two topologies
+ * with the same signature lay out identically, so a caller can skip a
+ * layout when only other fields changed (a power-flow run flips `state`
+ * and rewrites parameter values; none of that moves a bus). It is the
+ * exact serialization rather than a short hash, so two different graphs
+ * can never share a key.
+ */
+export function layoutSignature(topology: TopologySummary): string {
+  return JSON.stringify([
+    topology.buses.map((b) => String(b.idx)),
+    collectBranches(topology).map((b) => [b.id, b.from, b.to]),
+  ]);
+}
+
 interface ElkLayoutResult {
   children?: Array<{
     id: string;
@@ -199,7 +207,7 @@ export async function autoLayout(
 
   let coords: CoordsByIdx;
   try {
-    const result = (await getElk().layout(pass1Graph)) as ElkLayoutResult;
+    const result = (await elkLayout(pass1Graph)) as ElkLayoutResult;
     coords = {};
     for (const child of result.children ?? []) {
       coords[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
@@ -259,7 +267,7 @@ export async function autoLayout(
   const bendPoints = new Map<string, [number, number][]>();
   let pass2Coords: CoordsByIdx | null = null;
   try {
-    const result = (await getElk().layout(pass2Graph)) as ElkLayoutResult;
+    const result = (await elkLayout(pass2Graph)) as ElkLayoutResult;
     pass2Coords = {};
     for (const child of result.children ?? []) {
       pass2Coords[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };

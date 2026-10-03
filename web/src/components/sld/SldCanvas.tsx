@@ -48,7 +48,7 @@ import { TransformerEdge } from './edges/TransformerEdge';
 import { StubEdge } from './edges/StubEdge';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
 import { SldEmptySystem } from './SldEmptySystem';
-import { autoLayout } from './layout';
+import { useAutoLayout } from './useAutoLayout';
 import {
   buildSidecarLayout,
   buildNonBusCoordinates,
@@ -227,17 +227,9 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
     { enableOnFormTags: ['INPUT', 'TEXTAREA'] },
     [],
   );
-  const [autoCoords, setAutoCoords] = useState<CoordsByIdx | null>(null);
-  const [autoBendPoints, setAutoBendPoints] = useState<Map<string, [number, number][]> | null>(
-    null,
-  );
   const [coords, setCoords] = useState<CoordsByIdx | null>(null);
   const [showLargeBanner, setShowLargeBanner] = useState<boolean>(false);
   const [showDriftBanner, setShowDriftBanner] = useState<boolean>(false);
-  // Track the latest topology -> ignore stale ELK resolutions for a
-  // prior topology when the user changes case mid-flight.
-  const topologyRef = useRef(topology);
-  topologyRef.current = topology;
 
   // Curated layout takes precedence over auto-layout. Computed once
   // per primaryPath; the result is folded into mergeWithDrift below.
@@ -247,29 +239,22 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
     [primaryPath],
   );
 
-  // Run ELK on mount + topology change. Curated layouts skip the ELK
-  // fallback when ALL buses are covered, but we still run ELK so any
-  // bus the curated layout missed gets an auto-position.
-  useEffect(() => {
-    let cancelled = false;
-    setAutoCoords(null);
-    setAutoBendPoints(null);
-    void autoLayout(topology).then((computed) => {
-      if (cancelled) return;
-      if (topologyRef.current !== topology) return;
-      setAutoCoords(computed.coords);
-      setAutoBendPoints(computed.bendPoints);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [topology]);
+  // Run ELK (in a worker) when the graph's shape changes, not on every new
+  // topology object, and not at all when the stored or curated layout
+  // already places every bus. A layout that misses a bus still runs ELK so
+  // that bus gets an auto-position.
+  const baseSidecar = storedSidecar ?? curated;
+  const {
+    coords: autoCoords,
+    bendPoints: autoBendPoints,
+    needed: autoLayoutNeeded,
+  } = useAutoLayout(topology, baseSidecar);
 
-  // Compose the final coordinate map once auto-layout resolves.
+  // Compose the final coordinate map once auto-layout resolves (at once
+  // when it is not needed).
   useEffect(() => {
-    if (autoCoords === null) return;
-    const baseSidecar = storedSidecar ?? curated ?? null;
-    const merged = mergeWithDrift(baseSidecar, topology, autoCoords);
+    if (autoLayoutNeeded && autoCoords === null) return;
+    const merged = mergeWithDrift(baseSidecar, topology, autoCoords ?? {});
     setCoords(merged.coords);
     setShowDriftBanner(merged.hasDrift);
     // >30-bus banner: only when there's no curated layout AND no
@@ -279,7 +264,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
       curated === null &&
       storedSidecar === null;
     setShowLargeBanner(isLarge);
-  }, [autoCoords, storedSidecar, curated, topology]);
+  }, [autoCoords, autoLayoutNeeded, baseSidecar, storedSidecar, curated, topology]);
 
   // React Flow's controlled state. Maintained in `nodes`/`edges` so we
   // can mutate node positions on drag without losing other props.
