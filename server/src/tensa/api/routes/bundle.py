@@ -194,6 +194,7 @@ _BUNDLE_VALIDATION_STATUS: dict[str, int] = {
     "too-many-case-files": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "disturbances-malformed": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "bundle-blocked": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "unsafe-path": status.HTTP_422_UNPROCESSABLE_ENTITY,
 }
 
 
@@ -276,9 +277,11 @@ def _coerce_plan(payload: dict[str, Any]) -> BundleImportPlanModel:
             "model": ProblemDetails,
             "description": (
                 "Manifest malformed (missing required fields, not a JSON "
-                "object, references a case file the zip doesn't have); "
-                "OR disturbances.json malformed; OR caller forced "
-                "resolution on a bundle with blocker conflicts."
+                "object, references a case file the zip doesn't have, or "
+                "names one with a file name Windows would misread such as "
+                "``CON.raw``); OR disturbances.json malformed; OR caller "
+                "forced resolution on a bundle with blocker conflicts; OR a "
+                "case file cannot be written inside the workspace."
             ),
         },
     },

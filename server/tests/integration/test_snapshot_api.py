@@ -426,6 +426,26 @@ async def test_snapshot_save_invalid_name_returns_422(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("name", ["con", "NUL", "com1.v2", "snap."])
+async def test_snapshot_save_windows_unsafe_name_returns_422(
+    client: httpx.AsyncClient,
+    workspace: Path,
+    name: str,
+) -> None:
+    """``con.dill`` is the console device on Windows and ``snap.`` aliases
+    ``snap`` there, so those names are refused on every platform."""
+    sid = await _create_session_with_case(client)
+    resp = await client.post(
+        f"/api/sessions/{sid}/snapshot",
+        json={"name": name},
+    )
+    assert resp.status_code == 422, resp.text
+    assert not (workspace / "snapshots").exists() or not any(
+        (workspace / "snapshots").rglob("*.dill")
+    )
+
+
+@pytest.mark.integration
 async def test_snapshot_restore_unknown_name_returns_404(
     client: httpx.AsyncClient,
 ) -> None:

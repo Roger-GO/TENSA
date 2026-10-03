@@ -192,7 +192,23 @@ def test_save_as_writes_to_workspace(
     assert rows[1][t1_col] == pytest.approx(0.6)
 
 
-@pytest.mark.parametrize("bad", ["../escape", "a/b", "with space", ".hidden", ""])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "../escape",
+        "a/b",
+        "with space",
+        ".hidden",
+        "",
+        "con",  # Windows device names, any case / extension
+        "NUL",
+        "aux.v2",
+        "com1",
+        "lpt9",
+        "name.",  # trailing dot
+        "name\n",  # trailing newline slips past the regex's ``$``
+    ],
+)
 def test_save_as_rejects_unsafe_names(loaded_wrapper: Wrapper, bad: str) -> None:
     mgr = loaded_wrapper._clone_mgr()
     mgr.init_clone()

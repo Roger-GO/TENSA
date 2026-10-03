@@ -11,17 +11,25 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import sys
 import zipfile
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from tensa.core.bundle import (
+    BundleImportPlan,
     BundleInputs,
+    BundleResolveChoices,
+    BundleValidationError,
     assemble_bundle,
     build_manifest,
     case_files_from_workspace,
+    extract_bundle,
     list_bundle_entries,
     read_bundle_manifest,
+    validate_bundle,
 )
 
 
@@ -225,3 +233,185 @@ def test_disturbances_json_is_sorted_for_diff_friendliness() -> None:
         body = zf.read("disturbances.json").decode("utf-8")
     # sort_keys=True sorts inside each object
     assert body.index('"bus_idx"') < body.index('"kind"') < body.index('"tc"') < body.index('"tf"')
+
+
+# ---- import side: portable names + write-target containment ---------------
+
+
+def _validate(zip_bytes: bytes, workspace: Path) -> BundleImportPlan:
+    return validate_bundle(zip_bytes, workspace=workspace, current_andes_version="2.0.0")
+
+
+def _extract(
+    zip_bytes: bytes,
+    workspace: Path,
+    *,
+    use_bundle_case: bool = True,
+) -> dict[str, Any]:
+    plan = _validate(zip_bytes, workspace)
+    return extract_bundle(
+        zip_bytes,
+        workspace=workspace,
+        resolve=BundleResolveChoices(use_bundle_case=use_bundle_case),
+        plan=plan,
+    )
+
+
+# Names that are fine on Linux but misread by Windows (device, drive prefix,
+# alternate data stream, stripped trailing dot/space), plus the older structural
+# rejections (traversal, nesting, hidden files). Each must fail validation on
+# EVERY platform, because a bundle is built on one OS and imported on another.
+_UNSAFE_CASE_NAMES = [
+    "CON.raw",
+    "nul",
+    "Aux.dyr",
+    "COM1.raw",
+    "lpt9.xlsx",
+    "C:evil.raw",
+    "case.raw:stream",
+    "ieee14.raw.",
+    "ieee14.raw ",
+    "a?b.raw",
+    "a*b.raw",
+    "../evil.raw",
+    "sub/ieee14.raw",
+    "sub\\ieee14.raw",
+    ".hidden.raw",
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", _UNSAFE_CASE_NAMES)
+def test_validate_bundle_rejects_unsafe_primary_case_name(name: str, tmp_path: Path) -> None:
+    zip_bytes = assemble_bundle(_minimal_inputs(case_files=((name, b"BUS 1\n"),)))
+    with pytest.raises(BundleValidationError) as excinfo:
+        _validate(zip_bytes, tmp_path)
+    assert excinfo.value.category == "manifest-malformed"
+    assert "unsafe name" in excinfo.value.detail or "nested case entry" in excinfo.value.detail
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", _UNSAFE_CASE_NAMES)
+def test_validate_bundle_rejects_unsafe_addfile_name(name: str, tmp_path: Path) -> None:
+    inputs = _minimal_inputs(
+        case_files=(("ieee14.raw", b"BUS 1\n"), (name, b"GEN 1\n")),
+    )
+    with pytest.raises(BundleValidationError) as excinfo:
+        _validate(assemble_bundle(inputs), tmp_path)
+    assert excinfo.value.category == "manifest-malformed"
+
+
+@pytest.mark.unit
+def test_validate_bundle_names_the_windows_problem(tmp_path: Path) -> None:
+    zip_bytes = assemble_bundle(_minimal_inputs(case_files=(("CON.raw", b"x"),)))
+    with pytest.raises(BundleValidationError, match="reserved Windows device name"):
+        _validate(zip_bytes, tmp_path)
+    zip_bytes = assemble_bundle(_minimal_inputs(case_files=(("C:evil.raw", b"x"),)))
+    with pytest.raises(BundleValidationError, match="drive prefix"):
+        _validate(zip_bytes, tmp_path)
+
+
+@pytest.mark.unit
+def test_validate_and_extract_accept_ordinary_names(tmp_path: Path) -> None:
+    inputs = _minimal_inputs(
+        case_files=(
+            ("console.raw", b"BUS 1\n"),  # device name is only a prefix
+            ("Kundur two-area (v2).dyr", b"GEN 1\n"),
+        ),
+    )
+    zip_bytes = assemble_bundle(inputs)
+    plan = _validate(zip_bytes, tmp_path)
+    assert plan.case_files == ("console.raw", "Kundur two-area (v2).dyr")
+    result = _extract(zip_bytes, tmp_path)
+    assert Path(result["primary_path"]).read_bytes() == b"BUS 1\n"
+    assert [Path(p).name for p in result["addfile_paths"]] == ["Kundur two-area (v2).dyr"]
+    assert (tmp_path / "Kundur two-area (v2).dyr").read_bytes() == b"GEN 1\n"
+
+
+@pytest.mark.unit
+def test_extract_bundle_refuses_names_the_validator_would_have_caught(tmp_path: Path) -> None:
+    """Defence in depth: ``extract_bundle`` re-checks every destination, so a
+    plan that skipped (or outlived) validation still cannot write a device name."""
+    zip_bytes = assemble_bundle(_minimal_inputs(case_files=(("CON.raw", b"x"),)))
+    plan = BundleImportPlan(
+        manifest={"case_filename": "CON.raw"},
+        case_files=("CON.raw",),
+    )
+    with pytest.raises(BundleValidationError) as excinfo:
+        extract_bundle(
+            zip_bytes,
+            workspace=tmp_path,
+            resolve=BundleResolveChoices(),
+            plan=plan,
+        )
+    assert excinfo.value.category == "unsafe-path"
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_extract_bundle_refuses_symlink_that_escapes_the_workspace(tmp_path: Path) -> None:
+    """An addfile name that is a symlink to a file outside the workspace must not
+    be written through, and nothing else may be extracted first."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    outside = tmp_path / "outside.dyr"
+    outside.write_bytes(b"precious")
+    (workspace / "ieee14.dyr").symlink_to(outside)
+    inputs = _minimal_inputs(
+        case_files=(("ieee14.raw", b"BUS 1\n"), ("ieee14.dyr", b"GEN 1\n")),
+    )
+    zip_bytes = assemble_bundle(inputs)
+    with pytest.raises(BundleValidationError) as excinfo:
+        _extract(zip_bytes, workspace)
+    assert excinfo.value.category == "unsafe-path"
+    assert outside.read_bytes() == b"precious"
+    assert not (workspace / "ieee14.raw").exists(), "partial extraction left a primary behind"
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_extract_bundle_refuses_symlinked_primary(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    outside = tmp_path / "outside.raw"
+    outside.write_bytes(b"precious")
+    (workspace / "ieee14.raw").symlink_to(outside)
+    zip_bytes = assemble_bundle(_minimal_inputs())
+    with pytest.raises(BundleValidationError) as excinfo:
+        _extract(zip_bytes, workspace)
+    assert excinfo.value.category == "unsafe-path"
+    assert outside.read_bytes() == b"precious"
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_extract_bundle_refuses_symlinked_from_bundle_sibling(tmp_path: Path) -> None:
+    """keep-my-file mode writes ``<case>.from-bundle`` beside the original; that
+    sibling is a write target too."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "ieee14.raw").write_bytes(b"workspace copy")  # sha differs: conflict
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"precious")
+    (workspace / "ieee14.raw.from-bundle").symlink_to(outside)
+    zip_bytes = assemble_bundle(_minimal_inputs())
+    with pytest.raises(BundleValidationError) as excinfo:
+        _extract(zip_bytes, workspace, use_bundle_case=False)
+    assert excinfo.value.category == "unsafe-path"
+    assert outside.read_bytes() == b"precious"
+    assert (workspace / "ieee14.raw").read_bytes() == b"workspace copy"
+
+
+@pytest.mark.unit
+def test_extract_bundle_keep_workspace_copy_writes_sibling(tmp_path: Path) -> None:
+    (tmp_path / "ieee14.raw").write_bytes(b"workspace copy")
+    zip_bytes = assemble_bundle(_minimal_inputs())
+    result = _extract(zip_bytes, tmp_path, use_bundle_case=False)
+    assert (tmp_path / "ieee14.raw").read_bytes() == b"workspace copy"
+    assert (tmp_path / "ieee14.raw.from-bundle").read_bytes() == b"BUS 1\nLINE 1 2\n"
+    assert Path(result["primary_path"]).name == "ieee14.raw"
+    assert result["warnings"] == [
+        "workspace 'ieee14.raw' preserved; bundle copy saved to ieee14.raw.from-bundle for comparison"
+    ]

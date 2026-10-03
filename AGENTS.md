@@ -65,7 +65,7 @@ The trust model lives in the top-level docstring of `server/src/tensa/__init__.p
 
 - `server/src/tensa/api/` — FastAPI routers, schemas, app factory
 - `server/src/tensa/core/` — wrapper, worker, session manager, Arrow streaming
-- `server/src/tensa/security/` — workspace path validation, Host/Origin ASGI middleware
+- `server/src/tensa/security/` — workspace path validation, portable file-name validation (`names.py`: use it for any client-supplied name that becomes a file name), Host/Origin ASGI middleware
 - `server/src/tensa/cache/` — precomputed `andes prepare` artifacts (built at wheel time; only IEEE 14 ships in the wheel)
 - `server/tests/acceptance/walkthrough.sh` — the curl-only end-to-end acceptance test
 - `examples/` — copy-paste API walkthroughs (curl + Python)

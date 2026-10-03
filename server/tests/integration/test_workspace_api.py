@@ -192,6 +192,23 @@ async def test_put_layout_succeeds_where_os_has_no_fchmod(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("case_path", ["CON", "nul.raw", "ieee14.raw:stream", "a?b.raw"])
+async def test_put_layout_rejects_names_windows_would_misread(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+    case_path: str,
+) -> None:
+    client, ws = client_workspace
+    resp = await client.put(
+        "/api/workspace/layout",
+        params={"case_path": case_path},
+        headers={"Content-Type": "application/json"},
+        json=_layout_body(),
+    )
+    assert resp.status_code == 400, resp.text
+    assert list(ws.iterdir()) == []
+
+
+@pytest.mark.integration
 async def test_put_layout_too_large_returns_413(
     client_workspace: tuple[httpx.AsyncClient, Path],
 ) -> None:

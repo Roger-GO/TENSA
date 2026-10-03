@@ -42,6 +42,7 @@ from tensa.core.wrapper import (
     _CONTROLLER_MODEL_NAMES,
     allowed_param_names,
 )
+from tensa.security.names import portable_name_problem
 
 if TYPE_CHECKING:
     from tensa.core.wrapper import Wrapper
@@ -492,6 +493,11 @@ class CloneManager:
                 "[A-Za-z0-9._-] starting with an alphanumeric (no path "
                 "separators or traversal)"
             )
+        # Same portable-name rules as snapshots: no Windows device names
+        # (``con.xlsx`` is the console there), no trailing dot or newline.
+        problem = portable_name_problem(name)
+        if problem is not None:
+            raise CloneEditError(f"invalid save-as name {name!r}; the name {problem}")
         return name
 
     def _assert_within_workspace(self, dest: Path) -> None:

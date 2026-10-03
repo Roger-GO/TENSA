@@ -31,12 +31,14 @@ from __future__ import annotations
 import contextlib
 import errno
 import os
+import re
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 from tensa.core.errors import AndesAppError
+from tensa.security.names import portable_name_problem
 
 
 class WorkspacePathError(AndesAppError):
@@ -272,6 +274,11 @@ def open_workspace_file_for_write(
     Validation:
 
     - ``_reject_unsafe_input`` — refuses absolute paths and NUL bytes.
+    - The file name (last component) must be portable: no Windows device
+      names (``CON``, ``nul.txt``), ``:`` (drive prefix / NTFS stream),
+      trailing dot or space, or other characters Windows rejects. Enforced
+      on every platform so a workspace stays usable when it is copied to
+      Windows.
     - The target's parent directory must exist and not be a symlink (so a
       symlink-races attack at the directory level is defeated).
     - The resolved target must be inside the workspace.
@@ -293,8 +300,20 @@ def open_workspace_file_for_write(
     yield target
 
 
+def _reject_unportable_leaf(client_path: str) -> None:
+    # Validate the RAW last component: on Windows ``Path("C:x.raw").name`` is
+    # ``x.raw``, which would hide the drive prefix that must be refused.
+    leaf = re.split(r"[\\/]", client_path)[-1]
+    problem = portable_name_problem(leaf)
+    if problem is not None:
+        raise WorkspacePathError(
+            f"unsafe file name in {client_path!r}: the name {problem}"
+        )
+
+
 def _resolve_write_target(workspace: Path, client_path: str) -> Path:
     _reject_unsafe_input(client_path)
+    _reject_unportable_leaf(client_path)
 
     workspace = canonical_directory(workspace)
     candidate = (workspace / client_path).expanduser()

@@ -223,6 +223,50 @@ def test_open_workspace_file_for_write_rejects_nul(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "client_path",
+    [
+        "CON.xlsx",  # DOS device, any extension
+        "nul.json",
+        "Aux",
+        "com1.raw",
+        "sub/LPT3.raw",  # only the leaf matters, whichever separator is used
+        "sub\\prn.raw",
+        "C:evil.xlsx",  # drive-relative on Windows
+        "case.xlsx:stream",  # NTFS alternate data stream
+        "a:b.xlsx",
+        "ieee14.raw.",  # Windows strips trailing dots and spaces
+        "ieee14.raw ",
+        "a?b.json",
+        "a*b.json",
+        "sub/",  # no file name at all
+    ],
+)
+def test_open_workspace_file_for_write_rejects_unportable_file_names(
+    tmp_path: Path, client_path: str
+) -> None:
+    """The write choke point refuses names Windows would misread, on every platform,
+    so a workspace saved on Linux/macOS stays usable when copied to Windows."""
+    workspace = ensure_workspace(tmp_path / "ws")
+    (workspace / "sub").mkdir()
+    with (
+        pytest.raises(WorkspacePathError, match="unsafe file name"),
+        open_workspace_file_for_write(workspace, client_path),
+    ):
+        pass
+    assert not any(p.name != "sub" for p in workspace.iterdir())
+
+
+@pytest.mark.unit
+def test_open_workspace_file_for_write_still_accepts_ordinary_names(tmp_path: Path) -> None:
+    workspace = ensure_workspace(tmp_path / "ws")
+    (workspace / "sub").mkdir()
+    for client_path in ("My Case (v2).xlsx", "console.raw", "sub/ieee14.raw.layout.json"):
+        with open_workspace_file_for_write(workspace, client_path) as target:
+            assert target.parent in (workspace, workspace / "sub")
+
+
+@pytest.mark.unit
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only symlink test")
 def test_open_workspace_file_for_write_rejects_symlinked_parent(tmp_path: Path) -> None:
     """If the parent directory itself is a symlink (e.g., a malicious user

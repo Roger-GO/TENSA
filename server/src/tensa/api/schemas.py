@@ -968,7 +968,9 @@ class SaveCaseRequest(BaseModel):
         description=(
             "Workspace-relative output filename. Extension must match "
             "``format`` (``.xlsx`` for xlsx, ``.json`` for json, "
-            "``.raw`` for raw)."
+            "``.raw`` for raw). The file name must be portable to "
+            "Windows: no ``:``, trailing dot or space, or device names "
+            "such as ``CON`` or ``nul.xlsx``."
         ),
         min_length=1,
     )

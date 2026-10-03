@@ -362,6 +362,41 @@ async def test_import_bundle_manifest_missing_required_fields_returns_422(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("name", ["CON.raw", "C:evil.raw", "ieee14.raw."])
+async def test_import_bundle_with_unportable_case_name_returns_422(
+    client: httpx.AsyncClient,
+    workspace: Path,
+    name: str,
+) -> None:
+    """A bundle whose case entry Windows would misread (device name, drive
+    prefix, stripped trailing dot) is rejected on every platform and writes
+    nothing into the workspace."""
+    case_bytes = b"BUS 1\n"
+    manifest = {
+        "andes_version": "2.0.0",
+        "tensa_version": "0.1.0.dev0",
+        "case_filename": name,
+        "case_sha256": hashlib.sha256(case_bytes).hexdigest(),
+        "case_canonical_export": False,
+        "disturbance_count": 0,
+        "exported_at": "2026-05-09T00:00:00+00:00",
+        "files": [f"case/{name}", "manifest.json"],
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w") as zf:
+        zf.writestr("manifest.json", json.dumps(manifest))
+        zf.writestr(f"case/{name}", case_bytes)
+    before = sorted(p.name for p in workspace.iterdir())
+    sid = await _create_session(client)
+    resp = await _post_bundle(client, sid, buf.getvalue(), force_resolve=True)
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    assert body.get("category") == "manifest-malformed"
+    assert "unsafe name" in (body.get("detail") or "")
+    assert sorted(p.name for p in workspace.iterdir()) == before
+
+
+@pytest.mark.integration
 async def test_import_bundle_manifest_references_missing_addfile_returns_422(
     client: httpx.AsyncClient,
 ) -> None:

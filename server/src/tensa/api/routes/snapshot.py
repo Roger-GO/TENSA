@@ -281,8 +281,9 @@ class SaveSnapshotRequest(BaseModel):
         ...,
         description=(
             "Snapshot name. 1-64 chars of [A-Za-z0-9._-] starting with "
-            "an alphanumeric. Names are unique per case; collisions return "
-            "409 unless ``force=true``."
+            "an alphanumeric, not ending in a dot, and not a Windows "
+            "device name (CON, NUL, COM1, ...). Names are unique per "
+            "case; collisions return 409 unless ``force=true``."
         ),
     )
     force: bool = Field(

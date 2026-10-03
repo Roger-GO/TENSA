@@ -47,6 +47,10 @@ from tensa.core.snapshot import (
         "a.b.c",
         "ABC123",
         "x" * 64,
+        "console",  # device names only count as a whole (or before the first dot)
+        "com10",
+        "nullable",
+        "my.con",
     ],
 )
 def test_validate_snapshot_name_accepts_safe_names(name: str) -> None:
@@ -68,10 +72,24 @@ def test_validate_snapshot_name_accepts_safe_names(name: str) -> None:
         "name\x00null",
         "-leadingdash",  # we require leading alphanumeric
         "_leadingunderscore",
+        "snap\n",  # the regex's ``$`` alone lets a trailing newline through
+        "snap.",  # Windows strips trailing dots
     ],
 )
 def test_validate_snapshot_name_rejects_unsafe_names(name: str) -> None:
     with pytest.raises(SnapshotMetadataError):
+        validate_snapshot_name(name)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "name",
+    ["con", "CON", "nul", "Aux", "prn", "com1", "COM9", "lpt1", "LPT9", "con.v2", "nul.backup.1"],
+)
+def test_validate_snapshot_name_rejects_windows_device_names(name: str) -> None:
+    """``con.dill`` / ``con.json`` open the console on Windows, so the name is
+    refused on every platform (snapshots move between machines with the workspace)."""
+    with pytest.raises(SnapshotMetadataError, match="reserved Windows device name"):
         validate_snapshot_name(name)
 
 

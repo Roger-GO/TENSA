@@ -47,6 +47,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from tensa.core.errors import AndesAppError as _AndesAppError
+from tensa.security.names import portable_name_problem
+from tensa.security.paths import WorkspacePathError, open_workspace_file_for_write
 
 
 @dataclass(frozen=True)
@@ -370,6 +372,11 @@ class BundleValidationError(_AndesAppError):
       that's not in the zip).
     - ``bundle-blocked`` → 422 (extract called on a plan with
       blocker conflicts unresolved).
+    - ``unsafe-path`` → 422 (a case file cannot be written inside the
+      workspace: its target resolves outside it, or is a symlink).
+
+    A case entry whose name is not portable (Windows device name, ``:``,
+    trailing dot or space) is rejected as ``manifest-malformed``.
     """
 
     def __init__(
@@ -447,7 +454,11 @@ def _case_entries(zf: zipfile.ZipFile) -> tuple[str, ...]:
     Filters out directory entries and rejects path components that would
     escape the workspace (``..`` segments) or collide with subdirectories
     (a single nested level is allowed; deeper structure is rejected to
-    keep the extraction one-deep).
+    keep the extraction one-deep). Names that are not portable file names
+    are rejected too (see :func:`tensa.security.names.portable_name_problem`):
+    a bundle is built on one OS and imported on another, so ``CON.raw``,
+    ``C:x.raw`` or ``case.raw:stream`` must fail everywhere, not only where
+    Windows would misread them.
     """
     out: list[str] = []
     for name in zf.namelist():
@@ -474,6 +485,12 @@ def _case_entries(zf: zipfile.ZipFile) -> tuple[str, ...]:
             raise BundleValidationError(
                 "manifest-malformed",
                 f"bundle case entry has unsafe name: {rel!r}",
+            )
+        problem = portable_name_problem(rel)
+        if problem is not None:
+            raise BundleValidationError(
+                "manifest-malformed",
+                f"bundle case entry has unsafe name {rel!r}: the name {problem}",
             )
         out.append(rel)
     if len(out) > _MAX_CASE_ENTRIES:
@@ -735,6 +752,25 @@ def validate_bundle(
     )
 
 
+def _checked_write_target(workspace: Path, name: str) -> Path:
+    """Canonical path to write ``name`` under ``workspace``, or raise.
+
+    Defence in depth behind :func:`_case_entries`: the destination is resolved
+    on disk, so a symlink in the workspace cannot redirect a bundle entry
+    outside it, and the shared workspace write check also refuses a symlink
+    target. A :class:`WorkspacePathError` is converted here because the worker
+    boundary only knows how to report :class:`BundleValidationError` as a 4xx.
+    """
+    try:
+        with open_workspace_file_for_write(workspace, name) as target:
+            return target
+    except WorkspacePathError as exc:
+        raise BundleValidationError(
+            "unsafe-path",
+            f"cannot extract bundle case file {name!r} into the workspace: {exc}",
+        ) from exc
+
+
 def extract_bundle(
     zip_bytes: bytes,
     *,
@@ -773,7 +809,7 @@ def extract_bundle(
         )
 
     warnings: list[str] = []
-    primary_target = workspace / primary
+    primary_target = _checked_write_target(workspace, primary)
 
     # Re-open the zip on the commit side so the validate→extract two-step
     # doesn't leak file handles across the round-trip.
@@ -782,36 +818,41 @@ def extract_bundle(
         sha_conflict = next(
             (c for c in plan.conflicts if c.kind == "sha-mismatch"), None
         )
-        if sha_conflict is not None and not resolve.use_bundle_case:
-            # Preserve the workspace copy; write the bundle to a sibling
-            # path with a marker suffix.
-            sibling = workspace / f"{primary}.from-bundle"
-            sibling.write_bytes(primary_bytes)
+        # sha-mismatch + "keep my file": preserve the workspace copy and write the
+        # bundle's bytes to a sibling path with a marker suffix instead.
+        keep_workspace_copy = sha_conflict is not None and not resolve.use_bundle_case
+        # Resolve and check EVERY destination before writing any, so a target
+        # that escapes the workspace (or is a symlink) cannot leave the
+        # workspace half-extracted.
+        primary_write = (
+            _checked_write_target(workspace, f"{primary}.from-bundle")
+            if keep_workspace_copy
+            else primary_target
+        )
+        # Addfiles are always overwritten — the bundle's copy is the
+        # canonical one for reproducing the result. The plan-divergence
+        # note above explains why: the manifest doesn't track addfile
+        # sha256 separately, so the user's existing addfile may or may
+        # not match. Defaulting to overwrite avoids running the case
+        # against a stale .dyr.
+        addfiles = [
+            (_checked_write_target(workspace, name), _read_case_bytes(zf, name))
+            for name in plan.case_files
+            if name != primary
+        ]
+
+        primary_write.write_bytes(primary_bytes)
+        if keep_workspace_copy:
             warnings.append(
                 f"workspace {primary!r} preserved; bundle copy "
-                f"saved to {sibling.name} for comparison"
+                f"saved to {primary_write.name} for comparison"
             )
-            primary_path = primary_target
-        else:
-            primary_target.write_bytes(primary_bytes)
-            if sha_conflict is not None:
-                warnings.append(
-                    f"workspace {primary!r} overwritten with bundle copy"
-                )
-            primary_path = primary_target
+        elif sha_conflict is not None:
+            warnings.append(f"workspace {primary!r} overwritten with bundle copy")
+        primary_path = primary_target
 
         addfile_paths: list[Path] = []
-        for name in plan.case_files:
-            if name == primary:
-                continue
-            data = _read_case_bytes(zf, name)
-            target = workspace / name
-            # Addfiles are always overwritten — the bundle's copy is the
-            # canonical one for reproducing the result. The plan-divergence
-            # note above explains why: the manifest doesn't track addfile
-            # sha256 separately, so the user's existing addfile may or may
-            # not match. Defaulting to overwrite avoids running the case
-            # against a stale .dyr.
+        for target, data in addfiles:
             target.write_bytes(data)
             addfile_paths.append(target)
 

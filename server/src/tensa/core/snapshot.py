@@ -52,6 +52,7 @@ from pathlib import Path
 from typing import Any
 
 from tensa.core.errors import AndesAppError
+from tensa.security.names import portable_name_problem
 
 log = logging.getLogger("tensa.snapshot")
 
@@ -211,7 +212,9 @@ def validate_snapshot_name(name: str) -> str:
     """Validate a user-supplied snapshot name.
 
     Allowed: alphanumerics + ``.``, ``_``, ``-``. 1-64 chars. Must not
-    start with a dot (avoids hidden files). Returns the name on success;
+    start with a dot (avoids hidden files), end with a dot, or be a
+    Windows device name (``CON``, ``nul``, ``COM1``: ``con.dill`` opens the
+    console there, whatever the extension). Returns the name on success;
     raises :class:`SnapshotMetadataError` (mapped to 422) otherwise.
 
     The regex bans ``/``, ``\\``, ``..``, NUL, and every other path-
@@ -224,6 +227,11 @@ def validate_snapshot_name(name: str) -> str:
             "names must be 1-64 chars of [A-Za-z0-9._-] starting with "
             "an alphanumeric"
         )
+    # The regex alone lets through a trailing newline (``$`` matches before it),
+    # trailing dots, and device names; the shared portable-name rules do not.
+    problem = portable_name_problem(name)
+    if problem is not None:
+        raise SnapshotMetadataError(f"invalid snapshot name {name!r}; the name {problem}")
     return name
 
 

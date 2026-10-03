@@ -464,6 +464,32 @@ async def test_save_raw_format_round_trips_through_andes_reader(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("filename", "fmt"),
+    [
+        ("CON.xlsx", "xlsx"),
+        ("nul.raw", "raw"),
+        ("copy:of.xlsx", "xlsx"),  # drive prefix / NTFS stream on Windows
+    ],
+)
+async def test_save_rejects_names_windows_would_misread(
+    client: httpx.AsyncClient,
+    tmp_path: Path,
+    filename: str,
+    fmt: str,
+) -> None:
+    sid = await _create_session(client)
+    await _load_ieee14(client, sid)
+    resp = await client.post(
+        f"/api/sessions/{sid}/save",
+        json={"filename": filename, "format": fmt},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "unsafe file name" in resp.json()["detail"]
+    assert sorted(p.name for p in (tmp_path / "ws").iterdir()) == ["ieee14.dyr", "ieee14.raw"]
+
+
+@pytest.mark.integration
 async def test_blank_session_reload_replays_adds(
     client: httpx.AsyncClient,
 ) -> None:

@@ -2658,7 +2658,7 @@ export interface components {
         SaveCaseRequest: {
             /**
              * Filename
-             * @description Workspace-relative output filename. Extension must match ``format`` (``.xlsx`` for xlsx, ``.json`` for json, ``.raw`` for raw).
+             * @description Workspace-relative output filename. Extension must match ``format`` (``.xlsx`` for xlsx, ``.json`` for json, ``.raw`` for raw). The file name must be portable to Windows: no ``:``, trailing dot or space, or device names such as ``CON`` or ``nul.xlsx``.
              */
             filename: string;
             /**
@@ -2702,7 +2702,7 @@ export interface components {
         SaveSnapshotRequest: {
             /**
              * Name
-             * @description Snapshot name. 1-64 chars of [A-Za-z0-9._-] starting with an alphanumeric. Names are unique per case; collisions return 409 unless ``force=true``.
+             * @description Snapshot name. 1-64 chars of [A-Za-z0-9._-] starting with an alphanumeric, not ending in a dot, and not a Windows device name (CON, NUL, COM1, ...). Names are unique per case; collisions return 409 unless ``force=true``.
              */
             name: string;
             /**
@@ -5228,7 +5228,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Manifest malformed (missing required fields, not a JSON object, references a case file the zip doesn't have); OR disturbances.json malformed; OR caller forced resolution on a bundle with blocker conflicts. */
+            /** @description Manifest malformed (missing required fields, not a JSON object, references a case file the zip doesn't have, or names one with a file name Windows would misread such as ``CON.raw``); OR disturbances.json malformed; OR caller forced resolution on a bundle with blocker conflicts; OR a case file cannot be written inside the workspace. */
             422: {
                 headers: {
                     [name: string]: unknown;
