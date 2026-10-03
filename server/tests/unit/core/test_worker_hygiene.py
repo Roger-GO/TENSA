@@ -1,5 +1,5 @@
-"""Unit tests for the worker-side hygiene helpers in ``tensa.core.worker``
-(unit 1.7): the path test behind the ``sys.audit`` hook and SIGINT handling.
+"""Unit tests for the worker-side hygiene helpers in ``tensa.core.worker``:
+the path test behind the ``sys.audit`` hook and SIGINT handling.
 """
 
 from __future__ import annotations

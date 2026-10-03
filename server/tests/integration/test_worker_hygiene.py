@@ -1,4 +1,4 @@
-"""Integration tests for worker hygiene (unit 1.7) against real worker processes.
+"""Integration tests for worker hygiene against real worker processes.
 
 - A worker ignores Ctrl+C (SIGINT) and stays up and responsive.
 - The clone scratch dir records the server (pid, pid space, start time), so a later

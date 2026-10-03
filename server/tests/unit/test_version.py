@@ -99,7 +99,7 @@ def test_version_matches_pyproject() -> None:
         pytest.skip("tensa is not installed")
     assert installed == declared, (
         f"installed metadata says {installed} but pyproject.toml says {declared}; "
-        "re-run `pip install -e server`"
+        "re-run `pip install -e ./server`"
     )
     assert tensa.__version__ == declared
 

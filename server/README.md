@@ -29,7 +29,7 @@ CLI flags:
 
 - `--bind <addr>` — interface to bind. Default `127.0.0.1` (loopback only). Non-loopback emits a stderr warning: there is no authentication, so a non-loopback bind exposes the API to the whole network.
 - `--port <int>` — port. Default OS-assigned ephemeral; printed to stderr.
-- `--open`: once the server is listening, open the default browser at the served URL. Works with the default OS-assigned port too.
+- `--open` opens the default browser at the served URL once the server is listening. It works with the default OS-assigned port too.
 - `--workspace <dir>` — case-file workspace root. Default `~/.tensa/cases`. Created with mode `0700` if missing.
 - `--max-sessions <int>` — session-creation cap. Default `min(4, max(1, cpu_count // 2))`.
 - `--idle-timeout-seconds <int>` — reap idle sessions after this many seconds. Default `180`.

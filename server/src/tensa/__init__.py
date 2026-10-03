@@ -46,7 +46,7 @@ def _resolve_version() -> str:
     ``server/pyproject.toml`` is the single source of the version; the
     package metadata written at install time carries it here. An editable
     install keeps the version it was installed with, so re-run
-    ``pip install -e server`` after a version bump.
+    ``pip install -e ./server`` after a version bump.
     """
     try:
         return _metadata.version("tensa") or _FALLBACK_VERSION

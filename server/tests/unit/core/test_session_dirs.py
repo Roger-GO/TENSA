@@ -1,4 +1,4 @@
-"""Unit tests for ``tensa.core.session_dirs`` (unit 1.7, worker hygiene).
+"""Unit tests for ``tensa.core.session_dirs`` (worker hygiene).
 
 Covers the owner marker, the process-liveness probe (the Windows branch through a
 fake ``kernel32``), the read-only-aware removal Windows needs, the startup sweep of

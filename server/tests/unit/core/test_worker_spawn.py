@@ -1,4 +1,4 @@
-"""Unit tests for ``tensa.core.worker_spawn`` (unit 1.7, worker hygiene).
+"""Unit tests for ``tensa.core.worker_spawn`` (worker hygiene).
 
 Thread caps for the worker's BLAS, and the Windows Job Object that ties a worker's
 life to the server's. The Job Object calls cannot run on this OS, so the call
