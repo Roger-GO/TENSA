@@ -335,7 +335,7 @@ async def upload_profile(
     content = await file.read(_MAX_PROFILE_BYTES + 1)
     if len(content) > _MAX_PROFILE_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=(
                 f"profile upload exceeds {_MAX_PROFILE_BYTES} bytes; "
                 "split the profile into a smaller window."

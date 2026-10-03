@@ -90,7 +90,7 @@ def _enforce_body_size(request: Request) -> None:
         return
     if size > BODY_SIZE_LIMIT:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=(
                 f"request body exceeds the {BODY_SIZE_LIMIT}-byte cap on "
                 "topology mutation endpoints"
@@ -332,7 +332,7 @@ def _validate_save_filename(workspace: Path, filename: str, format: str) -> Path
     expected_ext = {"xlsx": ".xlsx", "json": ".json", "raw": ".raw"}[format]
     if not filename.endswith(expected_ext):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"filename {filename!r} does not match format {format!r}; "
                 f"expected extension {expected_ext}"
@@ -343,7 +343,7 @@ def _validate_save_filename(workspace: Path, filename: str, format: str) -> Path
             return canonical
     except WorkspacePathError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
 
@@ -542,7 +542,7 @@ async def delete_element(
             dependents = [TopologyEntry(**d) for d in dependents_raw]
             body = DeleteBlockedResponse(dependents=dependents, total=total)
             return JSONResponse(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 content=body.model_dump(),
             )
         raise _to_http_error(exc) from exc

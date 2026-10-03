@@ -208,7 +208,7 @@ async def get_layout(
         return SidecarLayout.model_validate_json(raw)
     except ValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"sidecar is malformed: {exc.errors()}",
         ) from exc
 
@@ -227,7 +227,7 @@ def _enforce_layout_content_length(request: Request) -> None:
         content_length = -1
     if content_length > _MAX_LAYOUT_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=(
                 f"layout body exceeds {_MAX_LAYOUT_BYTES} bytes "
                 f"(got Content-Length={content_length})"

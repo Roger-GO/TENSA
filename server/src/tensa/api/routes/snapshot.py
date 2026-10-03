@@ -159,7 +159,7 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
             # the shared mapper's "unmapped category" error log. ``AndesAppError``'s
             # ``recovery_kind`` is the base ``None`` → no CTA, matching the original.
             return HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail={"detail": exc.detail, "recovery": None},
             )
         # ElementValidationError / CaseLoadError already resolve to 422 in the
@@ -486,7 +486,7 @@ def _map_snapshot_error(exc: WorkerError) -> HTTPException:
         "DisturbanceValidationError",
     }:
         return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=exc.detail,
         )
     if exc.category == "no-case-loaded":

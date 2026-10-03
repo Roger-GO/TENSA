@@ -364,7 +364,7 @@ async def get_connectivity(
         # ``map_worker_error`` (no-case-loaded → 409, fallback → 500).
         if exc.category == "SetupFailedError":
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=(
                     f"{exc.detail} — call POST /api/sessions/{{id}}/reload to recover."
                 ),

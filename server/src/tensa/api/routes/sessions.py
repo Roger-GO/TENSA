@@ -65,7 +65,7 @@ async def create_session(
             CreateSessionRequest.model_validate_json(raw)
         except ValidationError as exc:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=(
                     "POST /sessions does not accept any body fields. "
                     "session_id is server-generated. "

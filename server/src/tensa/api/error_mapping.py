@@ -115,21 +115,21 @@ WORKER_ERROR_HTTP_MAP: dict[str, int] = {
     "ElementNotFoundError": status.HTTP_404_NOT_FOUND,
     "SnapshotNotFoundError": status.HTTP_404_NOT_FOUND,
     # --- 422 Unprocessable Content (validation / dirty-state) ---
-    "SetupFailedError": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "EigDirtyDaeError": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "EigComputationError": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "CpfDivergedError": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "SeNonConvergentError": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "SeUnderDeterminedError": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "ElementValidationError": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "ElementHasDependentsError": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "CloneEditError": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "DisturbanceValidationError": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "CaseLoadError": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "CaseSaveError": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "SnapshotMetadataError": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "SnapshotVersionMismatchError": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "SweepValidationError": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "SetupFailedError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "EigDirtyDaeError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "EigComputationError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "CpfDivergedError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "SeNonConvergentError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "SeUnderDeterminedError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "ElementValidationError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "ElementHasDependentsError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "CloneEditError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "DisturbanceValidationError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "CaseLoadError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "CaseSaveError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "SnapshotMetadataError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "SnapshotVersionMismatchError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "SweepValidationError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     # --- 500 Internal Server Error ---
     "ReportGenerationError": status.HTTP_500_INTERNAL_SERVER_ERROR,
 }
@@ -211,7 +211,7 @@ def map_worker_error(
         # validation failure (422) — Unit 4b's bundle route keeps its own
         # sub-category table. Everything else unknown -> 500 + log.
         if category.startswith("BundleValidationError:"):
-            http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+            http_status = status.HTTP_422_UNPROCESSABLE_CONTENT
         else:
             log.error(
                 "map_worker_error: unmapped worker error category %r "

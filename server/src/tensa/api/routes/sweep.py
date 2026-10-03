@@ -158,7 +158,7 @@ async def start_sweep(
         parse_sweep_target(body.parameter.kind)
     except SweepValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
     values = body.parameter.range.values()

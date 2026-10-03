@@ -89,7 +89,7 @@ def _enforce_body_size(request: Request) -> None:
         return
     if size > BODY_SIZE_LIMIT:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=(
                 f"request body exceeds the {BODY_SIZE_LIMIT}-byte cap on "
                 "clone-edit endpoints"
@@ -110,7 +110,7 @@ def _whitelist_or_422(model: str, param: str) -> None:
         p.name for p in _PARAMS_BY_MODEL.get(model, ())
     }:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"{model}.{param} is not an editable dynamic-controller "
                 "parameter; clone editing is restricted to the whitelisted "
@@ -129,7 +129,7 @@ def _whitelist_model_or_422(model: str) -> None:
     """
     if model not in _CONTROLLER_MODEL_SET:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"{model} is not a dynamic-controller model; clone diffing is "
                 "restricted to the whitelisted controller models."

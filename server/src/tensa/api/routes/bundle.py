@@ -187,14 +187,14 @@ def _manager(request: Request) -> SessionManager:
 # Mapping of BundleValidationError sub-category → HTTP status.
 _BUNDLE_VALIDATION_STATUS: dict[str, int] = {
     "corrupt-zip": status.HTTP_400_BAD_REQUEST,
-    "oversize": status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-    "manifest-missing": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "manifest-malformed": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "case-entry-missing": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "too-many-case-files": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "disturbances-malformed": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "bundle-blocked": status.HTTP_422_UNPROCESSABLE_ENTITY,
-    "unsafe-path": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "oversize": status.HTTP_413_CONTENT_TOO_LARGE,
+    "manifest-missing": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "manifest-malformed": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "case-entry-missing": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "too-many-case-files": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "disturbances-malformed": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "bundle-blocked": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "unsafe-path": status.HTTP_422_UNPROCESSABLE_CONTENT,
 }
 
 
@@ -216,7 +216,7 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
     if category.startswith("BundleValidationError:"):
         sub = category.split(":", 1)[1]
         http_status = _BUNDLE_VALIDATION_STATUS.get(
-            sub, status.HTTP_422_UNPROCESSABLE_ENTITY
+            sub, status.HTTP_422_UNPROCESSABLE_CONTENT
         )
         extras: dict[str, Any] = {"category": sub}
         missing = exc.extra.get("missing_fields") if exc.extra else None
@@ -343,7 +343,7 @@ async def import_bundle(
     content = await file.read(MAX_BUNDLE_BYTES + 1)
     if len(content) > MAX_BUNDLE_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=(
                 f"bundle upload exceeds {MAX_BUNDLE_BYTES} bytes; "
                 "split the run into a smaller window."
