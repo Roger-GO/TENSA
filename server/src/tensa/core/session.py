@@ -26,9 +26,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 import multiprocessing as mp
-import shutil
+import os
 import threading
 import time
 import uuid
@@ -40,7 +41,9 @@ from typing import Any, Literal
 
 from tensa.core.errors import AndesAppError, SessionBusyError, WorkerDiedError
 from tensa.core.jobs import JobKind, JobRecord, JobStatus, _JobRegistry
+from tensa.core.session_dirs import SESSIONS_DIRNAME, remove_tree, sweep_stale_session_dirs
 from tensa.core.worker import worker_main
+from tensa.core.worker_spawn import attach_kill_on_close_job, worker_spawn_env
 
 log = logging.getLogger("tensa.session")
 
@@ -296,6 +299,8 @@ class SessionManager:
         # the reaper in ``start`` and cancelled in ``shutdown``.
         self._liveness_task: asyncio.Task[None] | None = None
         self._closed = False
+        # The startup sweep of abandoned ``.sessions/`` dirs runs once, in ``start``.
+        self._scratch_swept = False
         # v3.1 Unit 5a (KTD-20): registry for *session-mutating* jobs whose
         # lifecycle spans more than one worker session (snapshot restore,
         # bundle import, case reload). A per-session registry would be lost
@@ -326,7 +331,11 @@ class SessionManager:
     # ----- lifecycle -----
 
     async def start(self) -> None:
-        """Start the background reaper + job-liveness sweeper tasks. Idempotent."""
+        """Clear abandoned scratch dirs, then start the background reaper +
+        job-liveness sweeper tasks. Idempotent."""
+        if not self._scratch_swept:
+            self._scratch_swept = True
+            await self._sweep_stale_scratch_dirs()
         if self._reaper_task is None or self._reaper_task.done():
             self._reaper_task = asyncio.create_task(
                 self._reap_loop(), name="session-reaper"
@@ -334,6 +343,34 @@ class SessionManager:
         if self._liveness_task is None or self._liveness_task.done():
             self._liveness_task = asyncio.create_task(
                 self._liveness_loop(), name="job-liveness-sweeper"
+            )
+
+    async def _sweep_stale_scratch_dirs(self) -> None:
+        """Remove ``<workspace>/.sessions/<id>/`` dirs a killed server left behind.
+
+        Only dirs whose recorded owner process is gone (or, with no marker, that
+        have sat untouched for a day) go; a live server sharing the workspace keeps
+        its own. Runs before any session exists, so ``keep`` is just a guard.
+        Never raises: a failed sweep must not stop the server from starting.
+        """
+        if self._workspace is None:
+            return
+        with self._registry_lock:
+            keep = set(self._sessions)
+        loop = asyncio.get_running_loop()
+        try:
+            removed = await loop.run_in_executor(
+                None,
+                functools.partial(sweep_stale_session_dirs, self._workspace, keep=keep),
+            )
+        except Exception:  # noqa: BLE001 — startup must not fail on housekeeping
+            log.warning("could not sweep stale session dirs", exc_info=True)
+            return
+        if removed:
+            log.info(
+                "removed %d abandoned session scratch dir(s) from %s",
+                len(removed),
+                Path(self._workspace) / SESSIONS_DIRNAME,
             )
 
     async def shutdown(self) -> None:
@@ -403,11 +440,23 @@ class SessionManager:
 
         process = self._spawn_ctx.Process(
             target=worker_main,
-            args=(child_ctrl, child_data, abort_event, self._workspace, session_id),
+            args=(
+                child_ctrl,
+                child_data,
+                abort_event,
+                self._workspace,
+                session_id,
+                os.getpid(),
+            ),
             name=f"andes-worker-{session_id[:8]}",
             daemon=False,
         )
-        process.start()
+        # The thread caps must be in the environment before the child loads numpy.
+        with worker_spawn_env():
+            process.start()
+        # Windows only: tie the worker's life to the server's. No-op elsewhere.
+        if process.pid is not None:
+            attach_kill_on_close_job(process.pid)
 
         # Close the child ends in the parent — the parent only writes to ``parent_ctrl``
         # and reads from ``parent_data``.
@@ -471,10 +520,10 @@ class SessionManager:
         """Remove the per-session clone scratch dir, if any (Unit 21)."""
         if self._workspace is None:
             return
-        clone_root = Path(self._workspace) / ".sessions" / session_id
+        clone_root = Path(self._workspace) / SESSIONS_DIRNAME / session_id
         if clone_root.exists():
             with contextlib.suppress(OSError):
-                shutil.rmtree(clone_root)
+                remove_tree(clone_root)
 
     # ----- request/response -----
 

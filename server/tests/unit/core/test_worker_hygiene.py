@@ -1,0 +1,191 @@
+"""Unit tests for the worker-side hygiene helpers in ``tensa.core.worker``
+(unit 1.7): the path test behind the ``sys.audit`` hook and SIGINT handling.
+"""
+
+from __future__ import annotations
+
+import os
+import signal
+import sys
+import threading
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from tensa.core import worker
+
+# ---- the open() audit hook's path test --------------------------------------
+
+
+def _root(path: Path) -> str:
+    return worker._normalized_path(str(path))
+
+
+def _verdict(
+    path: Any, workspace: Path, interpreter_roots: tuple[str, ...] = ()
+) -> str | None:
+    return worker._out_of_workspace_open(path, _root(workspace), interpreter_roots)
+
+
+@pytest.fixture
+def layout(tmp_path: Path) -> dict[str, Path]:
+    """``cases`` is the workspace; ``cases2`` shares its name as a prefix."""
+    dirs = {name: tmp_path / name for name in ("cases", "cases2", "venv", "venv2", "other")}
+    for path in dirs.values():
+        path.mkdir()
+    return dirs
+
+
+def test_a_file_inside_the_workspace_is_fine(layout: dict[str, Path]) -> None:
+    assert _verdict(layout["cases"] / "ieee14.raw", layout["cases"]) is None
+    assert _verdict(layout["cases"] / "deep" / "er" / "x.dat", layout["cases"]) is None
+    assert _verdict(layout["cases"], layout["cases"]) is None
+
+
+def test_a_sibling_that_shares_the_workspace_name_as_a_prefix_is_outside(
+    layout: dict[str, Path],
+) -> None:
+    """``startswith`` called ``cases2`` part of ``cases``."""
+    target = layout["cases2"] / "secret.dat"
+    assert _verdict(target, layout["cases"]) == os.path.realpath(target)
+
+
+def test_dot_dot_out_of_the_workspace_is_outside(layout: dict[str, Path]) -> None:
+    target = layout["cases"] / ".." / "other" / "x.dat"
+    assert _verdict(target, layout["cases"]) == os.path.realpath(target)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="creating symlinks needs privileges there")
+def test_a_symlink_that_leaves_the_workspace_is_outside(layout: dict[str, Path]) -> None:
+    secret = layout["other"] / "secret.dat"
+    secret.write_text("x", encoding="utf-8")
+    link = layout["cases"] / "innocent.dat"
+    link.symlink_to(secret)
+    assert _verdict(link, layout["cases"]) == os.path.realpath(secret)
+
+
+def test_case_differences_do_not_matter_where_the_platform_ignores_case(
+    layout: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(os.path, "normcase", str.lower)
+    opened = Path(str(layout["cases"] / "X.RAW").upper())
+    assert _verdict(opened, layout["cases"]) is None
+
+
+def test_paths_on_a_different_drive_or_relative_are_not_inside() -> None:
+    assert worker._is_within("relative/x", "/abs") is False
+    assert worker._is_within("/abs/x", "/abs") is True
+    assert worker._is_within("/absolute", "/abs") is False
+    assert worker._is_within("/abs", "/abs") is True
+    assert worker._is_within("/anything", "/") is True
+
+
+def test_the_interpreters_own_tree_is_fine_but_not_its_neighbours(
+    layout: dict[str, Path],
+) -> None:
+    roots = (_root(layout["venv"]),)
+    assert _verdict(layout["venv"] / "lib" / "andes" / "data.json", layout["cases"], roots) is None
+    target = layout["venv2"] / "data.json"
+    assert _verdict(target, layout["cases"], roots) == os.path.realpath(target)
+
+
+def test_python_code_is_never_worth_a_warning(layout: dict[str, Path]) -> None:
+    for name in ("mod.py", "mod.pyc", "ext.so", "ext.pyd", "x.pth"):
+        assert _verdict(layout["other"] / name, layout["cases"]) is None
+    assert _verdict(layout["other"] / "mod.json", layout["cases"]) is not None
+
+
+def test_an_fd_or_a_non_path_is_ignored(layout: dict[str, Path]) -> None:
+    assert _verdict(3, layout["cases"]) is None
+    assert _verdict(None, layout["cases"]) is None
+    assert _verdict(1.5, layout["cases"]) is None
+
+
+def test_a_bytes_path_is_checked_like_a_str_path(layout: dict[str, Path]) -> None:
+    target = layout["other"] / "x.dat"
+    assert _verdict(os.fsencode(target), layout["cases"]) == os.path.realpath(target)
+    assert _verdict(os.fsencode(layout["cases"] / "x.dat"), layout["cases"]) is None
+
+
+def test_a_path_that_cannot_be_resolved_is_ignored(layout: dict[str, Path]) -> None:
+    assert _verdict("bad\0path", layout["cases"]) is None
+
+
+def test_the_interpreter_roots_cover_this_interpreter() -> None:
+    import sysconfig
+
+    roots = worker._interpreter_roots()
+    prefix = worker._normalized_path(sys.prefix)
+    assert any(worker._is_within(prefix, root) for root in roots)
+    purelib = worker._normalized_path(sysconfig.get_paths()["purelib"])
+    assert any(worker._is_within(purelib, root) for root in roots)
+    assert roots == tuple(sorted(set(roots)))
+
+
+def test_a_filesystem_root_is_never_a_trusted_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    anchor = Path(sys.prefix).anchor
+    monkeypatch.setattr(sys, "prefix", anchor)
+    monkeypatch.setattr(sys, "exec_prefix", anchor)
+    monkeypatch.setattr(sys, "base_prefix", anchor)
+    monkeypatch.setattr(sys, "base_exec_prefix", anchor)
+    roots = worker._interpreter_roots()
+    assert worker._normalized_path(anchor) not in roots
+    assert all(os.path.dirname(r) != r for r in roots)
+
+
+def test_the_installed_hook_logs_only_opens_outside_the_workspace(
+    layout: dict[str, Path], monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Wire the real installer to a captured hook (a real one cannot be removed)."""
+    hooks: list[Any] = []
+    monkeypatch.setattr(sys, "addaudithook", hooks.append)
+    caplog.set_level("WARNING", logger="tensa.worker.audit")
+
+    worker._install_strict_fs_audit_hook(None)
+    assert hooks == []
+
+    worker._install_strict_fs_audit_hook(str(layout["cases"]))
+    assert len(hooks) == 1
+    hook = hooks[0]
+
+    hook("open", (str(layout["cases"] / "ieee14.raw"), "r", 0))
+    hook("open", (str(layout["cases2"] / "stolen.dat"), "r", 0))
+    hook("socket.connect", (str(layout["cases2"] / "ignored.dat"),))
+    hook("open", ())
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert len(messages) == 1
+    assert "stolen.dat" in messages[0]
+
+
+# ---- SIGINT -----------------------------------------------------------------
+
+
+@pytest.fixture
+def restore_sigint() -> Any:
+    previous = signal.getsignal(signal.SIGINT)
+    yield
+    signal.signal(signal.SIGINT, previous)
+
+
+def test_ctrl_c_is_ignored(restore_sigint: None) -> None:
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    worker._ignore_sigint()
+    assert signal.getsignal(signal.SIGINT) == signal.SIG_IGN
+
+
+def test_ignoring_ctrl_c_off_the_main_thread_is_harmless(restore_sigint: None) -> None:
+    """``signal.signal`` raises ``ValueError`` outside the main thread."""
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            worker._ignore_sigint()
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    thread.join()
+    assert errors == []

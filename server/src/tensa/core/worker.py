@@ -23,6 +23,9 @@ Threading model inside the worker:
   ``os.kill(os.getpid(), SIGTERM)``. On Linux this thread is unnecessary
   because ``PR_SET_PDEATHSIG(SIGTERM)`` is set at entry.
 
+The worker ignores SIGINT: a terminal sends Ctrl+C to every process in the
+foreground group, and the parent alone decides when workers stop.
+
 Wire protocol on the control Pipe (parent → worker):
 
     {"op": "load_case", "args": {"path": ..., "addfiles": [...]}, "seq": N}
@@ -49,10 +52,12 @@ import contextlib
 import dataclasses
 import os
 import signal
+import site
 import sys
+import sysconfig
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from multiprocessing.connection import Connection
 from multiprocessing.synchronize import Event as EventType
 from typing import Any
@@ -122,6 +127,100 @@ def _spawn_orphan_detector() -> None:
     t.start()
 
 
+def _ignore_sigint() -> None:
+    """Leave Ctrl+C to the parent.
+
+    A terminal delivers SIGINT to every process in the foreground group, workers
+    included. The server stops its workers itself (a ``shutdown`` command, then
+    SIGTERM), and a worker that raised ``KeyboardInterrupt`` instead would only
+    print a traceback and die before the server asked it to. A TDS run is aborted
+    through ``abort_event``, never by a signal.
+
+    This runs when ``worker_main`` starts, so a Ctrl+C in the first seconds, while
+    the child is still importing numpy and ANDES, is not covered.
+    """
+    # ValueError: not the main thread. OSError: the platform refuses.
+    with contextlib.suppress(ValueError, OSError):
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
+def _normalized_path(path: str) -> str:
+    """``realpath`` plus ``normcase``: two spellings of one location (symlinks,
+    and on Windows letter case and slashes) compare equal."""
+    return os.path.normcase(os.path.realpath(path))
+
+
+def _is_within(path: str, root: str) -> bool:
+    """Whether ``path`` is ``root`` or lies beneath it; both normalized.
+
+    Compares whole path components, so ``/ws/cases2`` is not within ``/ws/cases``.
+    """
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:
+        # Different drives on Windows, or one path relative and the other not.
+        return False
+
+
+def _interpreter_roots() -> tuple[str, ...]:
+    """Directories that hold the interpreter's own files, normalized.
+
+    ANDES reads data files from its install tree and the standard library reads
+    its own, so opens there are not worth a warning. Built from the interpreter's
+    own idea of its layout (prefixes, ``sysconfig``, site directories) instead of
+    a path pattern, so it holds for a venv, conda, Homebrew, python.org on Windows
+    and a distro package alike. On a system-wide interpreter a prefix is a shared
+    tree such as ``/usr``; the hook only logs, so a quiet open there costs nothing.
+    """
+    paths = sysconfig.get_paths()
+    candidates = [
+        sys.prefix,
+        sys.exec_prefix,
+        sys.base_prefix,
+        sys.base_exec_prefix,
+        *(paths.get(key, "") for key in ("stdlib", "platstdlib", "purelib", "platlib")),
+        site.getusersitepackages(),
+    ]
+    # Very old virtualenv releases ship a ``site`` without ``getsitepackages``.
+    with contextlib.suppress(AttributeError):
+        candidates.extend(site.getsitepackages())
+    roots = {_normalized_path(c) for c in candidates if c}
+    # A filesystem root would trust every path.
+    return tuple(sorted(r for r in roots if os.path.dirname(r) != r))
+
+
+# Opens of these are the import system reading the interpreter's own code; not
+# worth a log line wherever the file lives.
+_QUIET_OPEN_SUFFIXES = (".py", ".pyc", ".so", ".pyd", ".pth")
+
+
+def _out_of_workspace_open(
+    path: object, workspace_root: str, interpreter_roots: Sequence[str]
+) -> str | None:
+    """The resolved path to warn about for an ``open`` audit event, or ``None``
+    when the open is inside the workspace, inside the interpreter's own tree, a
+    code file, or not a filesystem path at all (an fd).
+
+    ``workspace_root`` and ``interpreter_roots`` are normalized.
+    """
+    # PEP 578 'open' event args: (path, mode, flags). path may be a str, bytes,
+    # int (fd), or PathLike. Only string-like paths matter for the boundary.
+    if not isinstance(path, (str, bytes, os.PathLike)):
+        return None
+    try:
+        real = os.path.realpath(os.fsdecode(path))
+    except (OSError, ValueError):
+        return None
+    key = os.path.normcase(real)
+    if _is_within(key, workspace_root):
+        return None
+    if key.endswith(_QUIET_OPEN_SUFFIXES):
+        return None
+    if any(_is_within(key, root) for root in interpreter_roots):
+        return None
+    return real
+
+
 def _install_strict_fs_audit_hook(workspace: str | None) -> None:
     """Install a Python ``sys.audit`` hook (PEP 578, Python 3.8+) that logs
     file opens occurring outside the configured workspace.
@@ -138,38 +237,15 @@ def _install_strict_fs_audit_hook(workspace: str | None) -> None:
     import logging
 
     log = logging.getLogger("tensa.worker.audit")
-    workspace_str = os.path.realpath(workspace)
+    workspace_root = _normalized_path(workspace)
+    interpreter_roots = _interpreter_roots()
 
     def _hook(event: str, args: tuple[Any, ...]) -> None:
-        if event != "open":
+        if event != "open" or not args:
             return
-        # PEP 578 'open' event args: (path, mode, flags). path may be a
-        # str, bytes, int (fd), or PathLike. We only care about string-like
-        # paths for the workspace boundary check.
-        if not args:
-            return
-        path = args[0]
-        if not isinstance(path, (str, bytes, os.PathLike)):
-            return
-        try:
-            real = os.path.realpath(os.fsdecode(path))
-        except (OSError, ValueError):
-            return
-        # Allow opens inside the workspace and ANDES's own install tree
-        if real.startswith(workspace_str):
-            return
-        # Allow Python stdlib + site-packages (the ANDES code itself reads many
-        # files from its own install tree). We only want to *log* opens from
-        # case-file-driven secondary reads, not every stdlib import.
-        # Heuristic: ignore .py / .pyc / .so / .pyd / .pth / .json (in
-        # site-packages) opens.
-        if any(
-            real.endswith(ext) for ext in (".py", ".pyc", ".so", ".pyd", ".pth")
-        ):
-            return
-        if "site-packages" in real or real.startswith("/usr/lib/python"):
-            return
-        log.warning("strict-fs: out-of-workspace open: %s", real)
+        real = _out_of_workspace_open(args[0], workspace_root, interpreter_roots)
+        if real is not None:
+            log.warning("strict-fs: out-of-workspace open: %s", real)
 
     sys.addaudithook(_hook)
 
@@ -1197,6 +1273,7 @@ def worker_main(
     abort_event: EventType,
     workspace: str | None = None,
     session_id: str | None = None,
+    owner_pid: int | None = None,
 ) -> int:
     """Subprocess entry. Runs until a ``shutdown`` command arrives, the parent
     dies, or an unrecoverable error occurs.
@@ -1210,8 +1287,13 @@ def worker_main(
     ``<workspace>/.sessions/<session_id>/clone/`` — the same id the parent
     SessionManager uses to clean up the dir on session reap.
 
+    ``owner_pid`` is the parent server's pid. It goes into the scratch dir's
+    owner marker so a later server can tell the dir was abandoned (see
+    ``core/session_dirs.py``).
+
     Returns the process exit code (0 = clean shutdown).
     """
+    _ignore_sigint()
     _set_parent_death_signal()
     _spawn_orphan_detector()
     _install_strict_fs_audit_hook(workspace)
@@ -1220,7 +1302,7 @@ def worker_main(
     # (Unit 7) can resolve ``<workspace>/snapshots/<case>/<name>.{dill,json}``
     # without re-deriving the directory from the FastAPI app state (which
     # the worker subprocess can't read).
-    wrapper = Wrapper(workspace=workspace, session_id=session_id)
+    wrapper = Wrapper(workspace=workspace, session_id=session_id, owner_pid=owner_pid)
 
     while True:
         try:

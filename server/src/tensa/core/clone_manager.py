@@ -38,6 +38,11 @@ from tensa.core.errors import (
     ElementValidationError,
     NoCaseLoadedError,
 )
+from tensa.core.session_dirs import (
+    SESSIONS_DIRNAME,
+    remove_tree,
+    write_owner_marker,
+)
 from tensa.core.wrapper import (
     _CONTROLLER_MODEL_NAMES,
     allowed_param_names,
@@ -140,10 +145,12 @@ class CloneManager:
         wrapper: Wrapper,
         workspace: Path | None,
         session_id: str | None,
+        owner_pid: int | None = None,
     ) -> None:
         self._wrapper = wrapper
         self._workspace = workspace
         self._session_id = session_id
+        self._owner_pid = owner_pid
         self.original_paths: list[Path] = []
         self.clone_dir: Path | None = None
         self.clone_paths: list[Path] = []
@@ -170,7 +177,7 @@ class CloneManager:
                 "clone editing requires a session id; the substrate was "
                 "launched without one"
             )
-        return self._workspace / ".sessions" / self._session_id
+        return self._workspace / SESSIONS_DIRNAME / self._session_id
 
     # ----- init -----
 
@@ -196,11 +203,15 @@ class CloneManager:
                 "from a file (blank sessions cannot be cloned)"
             )
 
-        clone_dir = self._session_root() / "clone"
+        session_root = self._session_root()
+        clone_dir = session_root / "clone"
         # Fresh dir — drop any stale clone from a prior (reset) session.
         if clone_dir.exists():
-            shutil.rmtree(clone_dir)
+            remove_tree(clone_dir)
         clone_dir.mkdir(parents=True, exist_ok=True)
+        # Name the owning server so a later server's startup sweep can tell this
+        # dir was abandoned (core/session_dirs.py).
+        write_owner_marker(session_root, self._owner_pid)
 
         clone_paths: list[Path] = []
         for original in originals:
@@ -519,7 +530,7 @@ class CloneManager:
         no-op beyond clearing the stacks.
         """
         if self.clone_dir is not None and self.clone_dir.exists():
-            shutil.rmtree(self.clone_dir)
+            remove_tree(self.clone_dir)
         self.clone_dir = None
         self.clone_paths = []
         self.original_paths = []

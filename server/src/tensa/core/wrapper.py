@@ -262,6 +262,7 @@ class Wrapper:
         *,
         workspace: str | Path | None = None,
         session_id: str | None = None,
+        owner_pid: int | None = None,
     ) -> None:
         self._ss: System | None = None
         self._case_path: Path | None = None
@@ -307,6 +308,9 @@ class Wrapper:
         # unit tests that don't exercise the clone surface — the clone
         # manager is constructed lazily and 409s without a workspace.
         self._session_id: str | None = session_id
+        # ``_owner_pid`` is the parent server's pid, recorded in the clone scratch
+        # dir's owner marker so a later server can tell the dir was abandoned.
+        self._owner_pid: int | None = owner_pid
         # The clone-on-write manager (KTD-9) is created lazily on first
         # ``init_clone`` so a session that never edits pays nothing. It holds
         # the per-session clone files + undo/redo stacks.
@@ -324,6 +328,7 @@ class Wrapper:
                 wrapper=self,
                 workspace=self._workspace,
                 session_id=self._session_id,
+                owner_pid=self._owner_pid,
             )
         return self._clone_manager
 

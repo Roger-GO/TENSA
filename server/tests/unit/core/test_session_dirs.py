@@ -1,0 +1,552 @@
+"""Unit tests for ``tensa.core.session_dirs`` (unit 1.7, worker hygiene).
+
+Covers the owner marker, the process-liveness probe (the Windows branch through a
+fake ``kernel32``), the read-only-aware removal Windows needs, the startup sweep of
+abandoned ``.sessions/`` dirs, and how ``SessionManager`` uses them.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import errno
+import os
+import stat
+import subprocess
+import sys
+import time
+import uuid
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from tensa.core import session_dirs
+from tensa.core.session import SessionManager
+from tensa.core.session_dirs import (
+    OWNER_MARKER_NAME,
+    SESSIONS_DIRNAME,
+    pid_is_alive,
+    read_owner_pid,
+    remove_tree,
+    sweep_stale_session_dirs,
+    write_owner_marker,
+)
+
+DAY = 24 * 60 * 60
+
+
+# ---- helpers ----------------------------------------------------------------
+
+
+def _session_dir(workspace: Path, owner: int | str | None = None) -> Path:
+    """Create ``<workspace>/.sessions/<id>/clone/x.raw``, optionally marked."""
+    path = workspace / SESSIONS_DIRNAME / uuid.uuid4().hex
+    (path / "clone").mkdir(parents=True)
+    (path / "clone" / "x.raw").write_text("case\n", encoding="utf-8")
+    if owner is not None:
+        (path / OWNER_MARKER_NAME).write_text(f"{owner}\n", encoding="utf-8")
+    return path
+
+
+def _age(path: Path, seconds: float) -> None:
+    """Backdate ``path`` and everything under it by ``seconds``."""
+    when = time.time() - seconds
+    for dirpath, dirnames, filenames in os.walk(path, topdown=False):
+        for name in (*filenames, *dirnames):
+            os.utime(os.path.join(dirpath, name), (when, when))
+    os.utime(path, (when, when))
+
+
+@pytest.fixture
+def dead_pid() -> int:
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    return proc.pid
+
+
+@pytest.fixture
+def live_pid() -> Iterator[int]:
+    """The pid of another process that stays alive for the test."""
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        yield proc.pid
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+# ---- owner marker -----------------------------------------------------------
+
+
+def test_marker_round_trips_the_pid(tmp_path: Path) -> None:
+    write_owner_marker(tmp_path, 4242)
+    assert (tmp_path / OWNER_MARKER_NAME).read_text(encoding="utf-8") == "4242\n"
+    assert read_owner_pid(tmp_path) == 4242
+
+
+def test_marker_defaults_to_this_process(tmp_path: Path) -> None:
+    write_owner_marker(tmp_path)
+    assert read_owner_pid(tmp_path) == os.getpid()
+
+
+@pytest.mark.parametrize(
+    "content", ["", "not a pid", "0", "-7", "12 34", "1e3", "99999999999999999999", str(2**31)]
+)
+def test_unusable_marker_reads_as_no_owner(tmp_path: Path, content: str) -> None:
+    (tmp_path / OWNER_MARKER_NAME).write_text(content, encoding="utf-8")
+    assert read_owner_pid(tmp_path) is None
+
+
+def test_binary_marker_reads_as_no_owner(tmp_path: Path) -> None:
+    (tmp_path / OWNER_MARKER_NAME).write_bytes(b"\xff\xfe\x00\x80")
+    assert read_owner_pid(tmp_path) is None
+
+
+def test_missing_marker_reads_as_no_owner(tmp_path: Path) -> None:
+    assert read_owner_pid(tmp_path) is None
+
+
+def test_marker_failure_is_logged_not_raised(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level("WARNING", logger="tensa.session_dirs")
+    write_owner_marker(tmp_path / "no-such-dir", 1)  # parent missing -> OSError
+    assert "could not write the owner marker" in caplog.text
+
+
+# ---- process liveness -------------------------------------------------------
+
+
+def test_this_process_is_alive() -> None:
+    assert pid_is_alive(os.getpid())
+
+
+def test_another_live_process_is_alive(live_pid: int) -> None:
+    assert pid_is_alive(live_pid)
+
+
+def test_a_reaped_process_is_dead(dead_pid: int) -> None:
+    assert not pid_is_alive(dead_pid)
+
+
+@pytest.mark.parametrize("pid", [0, -1])
+def test_non_positive_pid_is_never_probed(pid: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    # os.kill(0, 0) would signal the whole process group.
+    monkeypatch.setattr(os, "kill", lambda *a: pytest.fail("os.kill must not run"))
+    assert not pid_is_alive(pid)
+
+
+def test_a_pid_too_large_to_exist_is_dead() -> None:
+    assert not pid_is_alive(10**30, platform="linux")
+
+
+def test_a_pid_owned_by_another_user_counts_as_alive(monkeypatch: pytest.MonkeyPatch) -> None:
+    def deny(pid: int, sig: int) -> None:
+        raise PermissionError(errno.EPERM, "not permitted")
+
+    monkeypatch.setattr(os, "kill", deny)
+    assert pid_is_alive(4242, platform="linux")
+
+
+class _FakeKernel32:
+    """Just enough of ``kernel32`` for ``pid_is_alive``."""
+
+    def __init__(
+        self,
+        *,
+        open_ok: bool = True,
+        exit_code: int | None = 259,
+        last_error: int = 0,
+    ) -> None:
+        self.open_ok = open_ok
+        self.exit_code = exit_code
+        self.last_error = last_error
+        self.opened: list[tuple[int, bool, int]] = []
+        self.closed: list[int] = []
+
+    def OpenProcess(self, access: int, inherit: bool, pid: int) -> int | None:
+        self.opened.append((access, inherit, pid))
+        return 0xBEEF if self.open_ok else None
+
+    def GetExitCodeProcess(self, handle: int, out: Any) -> int:
+        if self.exit_code is None:
+            return 0
+        out._obj.value = self.exit_code
+        return 1
+
+    def CloseHandle(self, handle: int) -> int:
+        self.closed.append(handle)
+        return 1
+
+    def get_last_error(self) -> int:
+        return self.last_error
+
+
+def _windows_alive(fake: _FakeKernel32, monkeypatch: pytest.MonkeyPatch) -> bool:
+    # os.kill terminates the target on Windows, so the branch must never reach it.
+    monkeypatch.setattr(os, "kill", lambda *a: pytest.fail("os.kill must not run on Windows"))
+    return pid_is_alive(
+        4242, kernel32=fake, get_last_error=fake.get_last_error, platform="win32"
+    )
+
+
+def test_windows_running_process_is_alive(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeKernel32(exit_code=259)  # STILL_ACTIVE
+    assert _windows_alive(fake, monkeypatch)
+    assert fake.opened == [(0x1000, False, 4242)]  # PROCESS_QUERY_LIMITED_INFORMATION
+    assert fake.closed == [0xBEEF]
+
+
+def test_windows_exited_process_is_dead(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeKernel32(exit_code=0)
+    assert not _windows_alive(fake, monkeypatch)
+    assert fake.closed == [0xBEEF]
+
+
+def test_windows_no_such_process_is_dead(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeKernel32(open_ok=False, last_error=87)  # ERROR_INVALID_PARAMETER
+    assert not _windows_alive(fake, monkeypatch)
+    assert fake.closed == []
+
+
+def test_windows_access_denied_means_it_exists(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeKernel32(open_ok=False, last_error=5)  # ERROR_ACCESS_DENIED
+    assert _windows_alive(fake, monkeypatch)
+
+
+def test_windows_unreadable_exit_code_errs_towards_alive(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeKernel32(exit_code=None)
+    assert _windows_alive(fake, monkeypatch)
+    assert fake.closed == [0xBEEF]
+
+
+def test_windows_probe_failure_errs_towards_alive(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "kill", lambda *a: pytest.fail("os.kill must not run on Windows"))
+
+    def boom() -> Any:
+        raise OSError("no kernel32")
+
+    monkeypatch.setattr(session_dirs, "_load_kernel32", boom)
+    assert pid_is_alive(4242, platform="win32")
+
+
+# ---- read-only-aware removal ------------------------------------------------
+
+
+def _windows_like_unlink(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Make ``os.unlink`` refuse read-only files, as Windows does.
+
+    Returns the paths it refused.
+    """
+    real_unlink = os.unlink
+    refused: list[str] = []
+
+    def unlink(path: str, *, dir_fd: int | None = None) -> None:
+        mode = os.stat(path, dir_fd=dir_fd, follow_symlinks=False).st_mode
+        if not mode & stat.S_IWUSR:
+            refused.append(str(path))
+            raise PermissionError(errno.EACCES, "read-only file", str(path))
+        real_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "unlink", unlink)
+    return refused
+
+
+def _tree_with_read_only_file(root: Path) -> Path:
+    victim = root / "tree"
+    (victim / "clone").mkdir(parents=True)
+    locked = victim / "clone" / "locked.raw"
+    locked.write_text("case\n", encoding="utf-8")
+    locked.chmod(0o444)
+    (victim / "plain.txt").write_text("x\n", encoding="utf-8")
+    return victim
+
+
+def test_remove_tree_deletes_a_read_only_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    refused = _windows_like_unlink(monkeypatch)
+    victim = _tree_with_read_only_file(tmp_path)
+    remove_tree(victim)
+    assert not victim.exists()
+    assert refused, "the read-only file was never refused, so the handler was not exercised"
+
+
+def test_plain_rmtree_fails_on_the_same_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control: the behaviour remove_tree exists to fix."""
+    import shutil
+
+    _windows_like_unlink(monkeypatch)
+    victim = _tree_with_read_only_file(tmp_path)
+    with pytest.raises(PermissionError):
+        shutil.rmtree(victim)
+    assert victim.exists()
+
+
+def test_handler_clears_the_bit_then_retries(tmp_path: Path) -> None:
+    target = tmp_path / "f"
+    target.write_text("x", encoding="utf-8")
+    target.chmod(0o444)
+    seen: list[int] = []
+
+    def retry(path: str) -> None:
+        seen.append(os.stat(path).st_mode & stat.S_IWUSR)
+
+    session_dirs._clear_readonly_and_retry(retry, str(target), PermissionError())
+    assert seen == [stat.S_IWUSR]
+
+
+def test_handler_re_raises_anything_but_a_permission_error(tmp_path: Path) -> None:
+    def retry(path: str) -> None:
+        pytest.fail("must not retry")
+
+    boom = FileNotFoundError(errno.ENOENT, "gone")
+    with pytest.raises(FileNotFoundError):
+        session_dirs._clear_readonly_and_retry(retry, str(tmp_path / "x"), boom)
+
+
+def test_handler_raises_the_original_error_when_chmod_fails(tmp_path: Path) -> None:
+    original = PermissionError(errno.EACCES, "denied")
+
+    def retry(path: str) -> None:
+        pytest.fail("must not retry")
+
+    with pytest.raises(PermissionError) as info:
+        session_dirs._clear_readonly_and_retry(retry, str(tmp_path / "missing"), original)
+    assert info.value is original
+
+
+def test_handler_lets_a_failing_retry_propagate(tmp_path: Path) -> None:
+    target = tmp_path / "f"
+    target.write_text("x", encoding="utf-8")
+
+    def retry(path: str) -> None:
+        raise PermissionError(errno.EACCES, "still locked")
+
+    with pytest.raises(PermissionError, match="still locked"):
+        session_dirs._clear_readonly_and_retry(retry, str(target), PermissionError())
+
+
+# ---- startup sweep ----------------------------------------------------------
+
+
+def test_sweep_removes_a_dir_whose_owner_is_dead(tmp_path: Path, dead_pid: int) -> None:
+    stale = _session_dir(tmp_path, owner=dead_pid)
+    assert sweep_stale_session_dirs(tmp_path) == [stale.name]
+    assert not stale.exists()
+
+
+def test_sweep_keeps_a_dir_whose_owner_is_alive(tmp_path: Path, live_pid: int) -> None:
+    """Another server sharing the workspace: even an old dir is its own."""
+    theirs = _session_dir(tmp_path, owner=live_pid)
+    _age(theirs, 10 * DAY)
+    assert sweep_stale_session_dirs(tmp_path) == []
+    assert (theirs / "clone" / "x.raw").exists()
+
+
+def test_sweep_keeps_a_dir_owned_by_this_process(tmp_path: Path) -> None:
+    mine = _session_dir(tmp_path, owner=os.getpid())
+    assert sweep_stale_session_dirs(tmp_path) == []
+    assert mine.exists()
+
+
+def test_sweep_keeps_the_sessions_it_is_told_about(tmp_path: Path, dead_pid: int) -> None:
+    kept = _session_dir(tmp_path, owner=dead_pid)
+    gone = _session_dir(tmp_path, owner=dead_pid)
+    assert sweep_stale_session_dirs(tmp_path, keep={kept.name}) == [gone.name]
+    assert kept.exists()
+    assert not gone.exists()
+
+
+def test_sweep_keeps_a_recent_dir_with_no_marker(tmp_path: Path) -> None:
+    fresh = _session_dir(tmp_path)
+    _age(fresh, DAY / 2)
+    assert sweep_stale_session_dirs(tmp_path) == []
+    assert fresh.exists()
+
+
+def test_sweep_removes_an_old_dir_with_no_marker(tmp_path: Path) -> None:
+    old = _session_dir(tmp_path)
+    _age(old, DAY + 60)
+    assert sweep_stale_session_dirs(tmp_path) == [old.name]
+    assert not old.exists()
+
+
+def test_a_recently_touched_file_keeps_an_unmarked_dir(tmp_path: Path) -> None:
+    """The dir's own mtime is old, but a file inside was written an hour ago."""
+    busy = _session_dir(tmp_path)
+    _age(busy, 5 * DAY)
+    recent = time.time() - 3600
+    os.utime(busy / "clone" / "x.raw", (recent, recent))
+    assert sweep_stale_session_dirs(tmp_path) == []
+    assert busy.exists()
+
+
+def test_an_unusable_marker_falls_back_to_the_age_rule(tmp_path: Path) -> None:
+    fresh = _session_dir(tmp_path, owner="garbage")
+    old = _session_dir(tmp_path, owner="-3")
+    _age(old, 2 * DAY)
+    assert sweep_stale_session_dirs(tmp_path) == [old.name]
+    assert fresh.exists()
+
+
+def test_sweep_ignores_names_that_are_not_session_ids(tmp_path: Path, dead_pid: int) -> None:
+    sessions = tmp_path / SESSIONS_DIRNAME
+    notes = sessions / "my-notes"
+    notes.mkdir(parents=True)
+    (notes / OWNER_MARKER_NAME).write_text(f"{dead_pid}\n", encoding="utf-8")
+    upper = sessions / uuid.uuid4().hex.upper()
+    upper.mkdir()
+    (sessions / "stray-file").write_text("x", encoding="utf-8")
+    assert sweep_stale_session_dirs(tmp_path, now=time.time() + 30 * DAY) == []
+    assert notes.exists()
+    assert upper.exists()
+    assert (sessions / "stray-file").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="creating symlinks needs privileges there")
+def test_sweep_never_follows_a_symlink(tmp_path: Path, dead_pid: int) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "precious.txt").write_text("keep", encoding="utf-8")
+    (outside / OWNER_MARKER_NAME).write_text(f"{dead_pid}\n", encoding="utf-8")
+    sessions = tmp_path / "ws" / SESSIONS_DIRNAME
+    sessions.mkdir(parents=True)
+    (sessions / uuid.uuid4().hex).symlink_to(outside, target_is_directory=True)
+    assert sweep_stale_session_dirs(tmp_path / "ws") == []
+    assert (outside / "precious.txt").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="creating symlinks needs privileges there")
+def test_sweep_skips_a_symlinked_sessions_root(tmp_path: Path, dead_pid: int) -> None:
+    stale = _session_dir(tmp_path / "elsewhere", owner=dead_pid)  # elsewhere/.sessions/<id>
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / SESSIONS_DIRNAME).symlink_to(stale.parent, target_is_directory=True)
+    assert sweep_stale_session_dirs(ws) == []
+    assert stale.exists()
+
+
+def test_sweep_without_a_sessions_dir_is_a_no_op(tmp_path: Path) -> None:
+    assert sweep_stale_session_dirs(tmp_path) == []
+    assert sweep_stale_session_dirs(tmp_path / "does-not-exist") == []
+
+
+def test_sweep_survives_a_dir_it_cannot_remove(
+    tmp_path: Path, dead_pid: int, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level("WARNING", logger="tensa.session_dirs")
+    stuck = _session_dir(tmp_path, owner=dead_pid)
+    fine = _session_dir(tmp_path, owner=dead_pid)
+    real_remove = session_dirs.remove_tree
+
+    def remove(path: Any) -> None:
+        if Path(path) == stuck:
+            raise PermissionError(errno.EACCES, "in use")
+        real_remove(path)
+
+    monkeypatch.setattr(session_dirs, "remove_tree", remove)
+    assert sweep_stale_session_dirs(tmp_path) == [fine.name]
+    assert stuck.exists()
+    assert "could not remove stale session dir" in caplog.text
+
+
+def test_sweep_survives_a_probe_that_raises(tmp_path: Path) -> None:
+    broken = _session_dir(tmp_path, owner=111)
+    fine = _session_dir(tmp_path, owner=222)
+
+    def probe(pid: int) -> bool:
+        if pid == 111:
+            raise RuntimeError("probe failed")
+        return False
+
+    assert sweep_stale_session_dirs(tmp_path, pid_alive=probe) == [fine.name]
+    assert broken.exists()
+
+
+def test_sweep_uses_the_injected_liveness_probe(tmp_path: Path) -> None:
+    dir_a = _session_dir(tmp_path, owner=111)
+    dir_b = _session_dir(tmp_path, owner=222)
+    removed = sweep_stale_session_dirs(tmp_path, pid_alive=lambda pid: pid == 111)
+    assert removed == [dir_b.name]
+    assert dir_a.exists()
+
+
+# ---- SessionManager wiring --------------------------------------------------
+
+
+def test_manager_start_sweeps_abandoned_dirs(tmp_path: Path, dead_pid: int, live_pid: int) -> None:
+    abandoned = _session_dir(tmp_path, owner=dead_pid)
+    shared = _session_dir(tmp_path, owner=live_pid)
+
+    async def run() -> None:
+        mgr = SessionManager(workspace=str(tmp_path))
+        await mgr.start()
+        await mgr.shutdown()
+
+    asyncio.run(run())
+    assert not abandoned.exists()
+    assert shared.exists()
+
+
+def test_manager_start_sweeps_only_once(tmp_path: Path, dead_pid: int) -> None:
+    async def run() -> None:
+        mgr = SessionManager(workspace=str(tmp_path))
+        await mgr.start()
+        late = _session_dir(tmp_path, owner=dead_pid)
+        await mgr.start()  # idempotent: must not sweep again
+        assert late.exists()
+        await mgr.shutdown()
+
+    asyncio.run(run())
+
+
+def test_manager_without_a_workspace_has_nothing_to_sweep() -> None:
+    async def run() -> None:
+        mgr = SessionManager()
+        await mgr.start()
+        await mgr.shutdown()
+
+    asyncio.run(run())
+
+
+def test_a_failing_sweep_does_not_stop_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from tensa.core import session
+
+    def boom(*args: Any, **kwargs: Any) -> list[str]:
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr(session, "sweep_stale_session_dirs", boom)
+    caplog.set_level("WARNING", logger="tensa.session")
+
+    async def run() -> bool:
+        mgr = SessionManager(workspace=str(tmp_path))
+        await mgr.start()
+        started = mgr._reaper_task is not None
+        await mgr.shutdown()
+        return started
+
+    assert asyncio.run(run())
+    assert "could not sweep stale session dirs" in caplog.text
+
+
+def test_closing_a_session_removes_a_dir_with_read_only_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On Windows the clone of a read-only case file blocked the cleanup, and the
+    error was swallowed, so the dir leaked."""
+    refused = _windows_like_unlink(monkeypatch)
+    session_id = uuid.uuid4().hex
+    root = tmp_path / SESSIONS_DIRNAME / session_id
+    (root / "clone").mkdir(parents=True)
+    locked = root / "clone" / "case.raw"
+    locked.write_text("case\n", encoding="utf-8")
+    locked.chmod(0o444)
+    SessionManager(workspace=str(tmp_path))._cleanup_clone_dir(session_id)
+    assert not root.exists()
+    assert refused
