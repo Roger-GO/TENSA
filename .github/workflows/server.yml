@@ -2,38 +2,35 @@ name: server
 
 on:
   push:
-    branches: [main]
+    branches: [main, "improve/**"]
     paths:
       - "server/**"
       - "web/**"
       - ".github/workflows/server.yml"
-      - "scripts/ci-matrix.sh"
+      - "scripts/**"
   pull_request:
     paths:
       - "server/**"
       - "web/**"
       - ".github/workflows/server.yml"
-      - "scripts/ci-matrix.sh"
+      - "scripts/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  lint-and-test:
-    name: lint + types + tests (Python ${{ matrix.python }})
+  # The server's pyproject.toml force-includes ../web/dist into the wheel, so the
+  # SPA bundle must exist before `pip install -e ./server[dev]` runs. Without it
+  # hatchling fails with "Forced include not found". Build it once here and hand
+  # it to every test leg instead of rebuilding it six times.
+  web-dist:
+    name: build web/dist
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.12"]
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-
-      # The server's pyproject.toml force-includes ../web/dist into the wheel,
-      # so the SPA bundle must exist before `pip install -e ./server[dev]` runs.
-      # Without this step hatchling fails with "Forced include not found".
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: web/package.json
@@ -45,19 +42,51 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      - name: Build web/dist (required by server force-include)
+      - name: Build web/dist
         working-directory: web
         run: |
           pnpm install --frozen-lockfile
           pnpm build
+
+      - name: Upload web/dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 1
+          if-no-files-found: error
+
+  # Static checks run once, on one interpreter (mypy's python_version is pinned
+  # to 3.12 in pyproject.toml anyway), so a lint failure does not hide the
+  # results of the test legs and the other way round.
+  lint:
+    name: lint + types + GUI parity
+    needs: web-dist
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/pyproject.toml
+
+      - name: Download web/dist
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
 
       - name: Install tensa with dev dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e "./server[dev]"
 
-      - name: ci-matrix.sh
-        run: bash ./scripts/ci-matrix.sh
+      - name: ruff + mypy
+        run: bash ./scripts/ci-matrix.sh lint
 
       # GUI-parity ledger (v3.1 Unit 16, KTD-12). Fails when a new route lands
       # without an x-tensa-gui-location tag, when a 'none'-tagged route has
@@ -68,13 +97,114 @@ jobs:
         working-directory: server
         run: PYTHONPATH=src python ../scripts/check_gui_parity.py
 
+  # Linux runs the whole unit + integration suite. macOS (Apple silicon) and
+  # Windows run the unit tests plus the smoke test (real `tensa serve`, real
+  # worker, IEEE 14 PF and a short TDS), which is the path where the operating
+  # systems differ. Coverage is measured on one Linux leg only; it goes to the
+  # job summary and an artifact, nowhere else.
+  test:
+    name: tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    needs: web-dist
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+        python: ["3.12", "3.13"]
+        include:
+          - os: ubuntu-latest
+            python: "3.12"
+            coverage: true
+    defaults:
+      run:
+        # Git Bash on Windows, so one set of commands serves every leg.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: server/pyproject.toml
+
+      - name: Download web/dist
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+
+      - name: Install tensa with dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "./server[dev]"
+
+      # ANDES generates Python for every model on first use (about 2 MB under
+      # ~/.andes/pycode). Keyed on the resolved ANDES version because
+      # pyproject.toml only pins a range.
+      - name: Resolve ANDES version
+        id: andes
+        run: |
+          version="$(python -c "from importlib.metadata import version; print(version('andes'))")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache ANDES generated code
+        uses: actions/cache@v4
+        with:
+          path: ~/.andes/pycode
+          key: andes-pycode-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-andes${{ steps.andes.outputs.version }}
+
+      - name: Full suite with coverage
+        if: runner.os == 'Linux' && matrix.coverage
+        run: >
+          bash ./scripts/ci-matrix.sh full
+          --cov --cov-report=term:skip-covered --cov-report=xml --cov-report=html
+
+      - name: Full suite
+        if: runner.os == 'Linux' && !matrix.coverage
+        run: bash ./scripts/ci-matrix.sh full
+
+      - name: Unit tests
+        if: runner.os != 'Linux'
+        run: bash ./scripts/ci-matrix.sh unit
+
+      - name: Smoke test
+        if: runner.os != 'Linux'
+        run: bash ./scripts/ci-matrix.sh smoke
+
+      - name: Coverage summary
+        if: matrix.coverage
+        working-directory: server
+        run: |
+          # A worker or server process that exits after pytest-cov has combined
+          # its data leaves one more file; fold it in before reporting.
+          coverage combine --append --quiet >/dev/null 2>&1 || true
+          {
+            echo "### Server coverage (Linux, Python ${{ matrix.python }})"
+            echo
+            coverage report --format=markdown --skip-covered
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage report
+        if: matrix.coverage && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-coverage
+          path: |
+            server/coverage.xml
+            server/htmlcov
+          retention-days: 14
+          if-no-files-found: ignore
+
   acceptance:
     name: curl walkthrough (Phase A R3)
     runs-on: ubuntu-latest
     # Acceptance tests are mandatory but separate from the lint/type/unit job.
     # They land as Unit 8; until then this job is a no-op placeholder so the
     # workflow file can be reviewed and merged ahead of the test infrastructure.
-    needs: lint-and-test
+    needs: [lint, test]
     steps:
       - uses: actions/checkout@v4
       - name: Placeholder

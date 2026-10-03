@@ -2,7 +2,7 @@ name: web (v0.1+ UI)
 
 on:
   push:
-    branches: [main, "feat/**"]
+    branches: [main, "feat/**", "improve/**"]
     paths:
       - "web/**"
       - ".github/workflows/web.yml"
@@ -10,6 +10,10 @@ on:
     paths:
       - "web/**"
       - ".github/workflows/web.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   check:
@@ -43,8 +47,19 @@ jobs:
       - name: pnpm format:check
         run: pnpm format:check
 
-      - name: pnpm test
-        run: pnpm test
+      # Vitest with the v8 coverage provider: the summary lands in this log and
+      # coverage/ (HTML + lcov) is uploaded below. No external service.
+      - name: pnpm test (with coverage)
+        run: pnpm test:coverage
+
+      - name: Upload coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-coverage
+          path: web/coverage
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: pnpm build
         run: pnpm build
