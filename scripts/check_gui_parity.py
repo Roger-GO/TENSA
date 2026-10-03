@@ -18,22 +18,24 @@ It does two passes:
 2. **Non-OpenAPI surface (adversarial F7 — fail-closed).** The OpenAPI spec
    only captures ``@router.get/.post/.put/.delete`` operations. Raw Starlette
    constructs — ``@router.websocket(...)`` routes and ``app.mount(...)`` static
-   mounts — are invisible to ``app.openapi()``. Those are enumerated directly
-   off ``app.router.routes`` and each MUST carry a ``# parity-reviewed: <date>``
-   marker in its defining source file. A WS route or mount with no such marker
-   fails the check. This prevents fail-OPEN on capabilities that live outside
-   the documented HTTP surface (the TDS / jobs / sweep WS channels + the SPA
-   mount).
+   mounts — are invisible to ``app.openapi()``. Those are enumerated by walking
+   the router, including the routers it includes, and each MUST carry a
+   ``# parity-reviewed: <date>`` marker in its defining source file. A WS route
+   or mount with no such marker fails the check. This prevents fail-OPEN on
+   capabilities that live outside the documented HTTP surface (the TDS / jobs /
+   sweep WS channels + the SPA mount).
 
 2b. **Schema-invisible HTTP routes (fail-closed).** ``app.openapi()`` only
    reports routes with ``include_in_schema=True``. A future app route
    registered with ``include_in_schema=False`` would be a Starlette
    ``Route``/``APIRoute`` (not a ``WebSocketRoute``/``Mount``), so it would
    slip past *both* Pass 1 (absent from the spec) and Pass 2 (not a WS/mount).
-   Pass 1b walks ``app.router.routes`` directly and fails closed on any
-   HTTP route whose path is absent from the OpenAPI spec and is not one of
-   FastAPI's own docs endpoints (``/openapi.json`` ``/docs`` ``/redoc``
-   ``/docs/oauth2-redirect``).
+   Pass 1b walks the router directly and fails closed on any HTTP route whose
+   path is absent from the OpenAPI spec and is not one of FastAPI's own docs
+   endpoints (``/openapi.json`` ``/docs`` ``/redoc`` ``/docs/oauth2-redirect``).
+   A route of a kind the walk does not recognise also fails the check, so a
+   FastAPI release that changes how routers are stored cannot turn the passes
+   into no-ops.
 
 On success: prints a one-line ledger summary for CI logs, writes the full
 ledger to ``docs/gui-parity-ledger.md``, and exits 0.
@@ -58,6 +60,7 @@ import re
 import sys
 import tempfile
 from collections import Counter
+from collections.abc import Iterator, Sequence
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -107,6 +110,33 @@ def _build_app() -> Any:
     )
 
 
+def _iter_routes(routes: Sequence[Any]) -> Iterator[tuple[Any, str]]:
+    """Yield ``(route, path)`` for every route reachable from ``routes``.
+
+    ``route`` is the route as its module defined it (its type says what kind it
+    is and its ``endpoint`` points at the source file); ``path`` is the path it
+    answers on, with any ``include_router`` prefix applied.
+
+    Through FastAPI 0.136, ``include_router`` copied each route into the
+    including router, so ``app.router.routes`` listed all of them. From 0.137
+    that list holds one placeholder per ``include_router`` call and the routes
+    stay inside the included router, so a walk of the top level finds none of
+    them. The placeholder's ``effective_route_contexts()`` flattens it.
+    """
+    for route in routes:
+        effective_contexts = getattr(route, "effective_route_contexts", None)
+        if effective_contexts is None:
+            yield route, getattr(route, "path", "")
+            continue
+        for context in effective_contexts():
+            # An API route keeps its prefixed path on the context. For the other
+            # kinds (WebSocket routes, mounts, plain routes) FastAPI builds a
+            # Starlette route with the prefix applied and the context's own
+            # path stays empty.
+            built = context.starlette_route
+            yield context.original_route, (built if built is not None else context).path
+
+
 def _source_has_parity_marker(path: Path) -> bool:
     try:
         text = path.read_text(encoding="utf-8")
@@ -122,9 +152,12 @@ def _rel(path: Path) -> str:
         return str(path)
 
 
-def main() -> int:
-    app = _build_app()
+def _check(
+    app: Any,
+) -> tuple[list[str], list[tuple[str, str, str, str]], list[tuple[str, str, str, bool]]]:
+    """Run every pass against ``app``: ``(failures, openapi rows, manual rows)``."""
     failures: list[str] = []
+    routes = list(_iter_routes(app.router.routes))
 
     # --- Pass 1: OpenAPI operations -------------------------------------
     spec = app.openapi()
@@ -166,12 +199,17 @@ def main() -> int:
     # not a WebSocketRoute/Mount (Pass 2 skips it). Walk the router directly
     # and fail closed on any such route that isn't a framework docs endpoint.
     spec_paths = set(spec.get("paths", {}).keys())
-    for route in app.router.routes:
+    for route, path in routes:
         if isinstance(route, (Mount, WebSocketRoute)):
             continue
         if not isinstance(route, (Route, APIRoute)):
+            failures.append(
+                f"UNKNOWN-ROUTE {type(route).__name__} {path or '?'}: not a kind of "
+                f"route this check knows how to review, so it would go "
+                f"unchecked. Teach scripts/check_gui_parity.py about it (a new "
+                f"FastAPI release may have changed how routers are stored)."
+            )
             continue
-        path = getattr(route, "path", "")
         if path in spec_paths or path in _FRAMEWORK_DOC_PATHS:
             continue
         endpoint = getattr(route, "endpoint", None)
@@ -190,7 +228,7 @@ def main() -> int:
     # --- Pass 2: non-OpenAPI routes (WS + mounts) -----------------------
     # manual-review row: (kind, path-or-name, source-file, reviewed-flag)
     manual_rows: list[tuple[str, str, str, bool]] = []
-    for route in app.router.routes:
+    for route, path in routes:
         if isinstance(route, WebSocketRoute):
             endpoint = route.endpoint
             module = getattr(endpoint, "__module__", "")
@@ -201,10 +239,10 @@ def main() -> int:
             except TypeError:
                 src_file = Path()
             reviewed = bool(src_file) and _source_has_parity_marker(src_file)
-            manual_rows.append(("websocket", route.path, _rel(src_file), reviewed))
+            manual_rows.append(("websocket", path, _rel(src_file), reviewed))
             if not reviewed:
                 failures.append(
-                    f"MANUAL-REVIEW websocket {route.path}: no "
+                    f"MANUAL-REVIEW websocket {path}: no "
                     f"'# parity-reviewed: <date>' marker in "
                     f"{_rel(src_file)} (WS routes are invisible to OpenAPI; "
                     f"add the marker above the @router.websocket decorator)"
@@ -215,7 +253,7 @@ def main() -> int:
             src_file = REPO_ROOT / "server" / "src" / "tensa" / "api" / "app.py"
             reviewed = _source_has_parity_marker(src_file)
             name = route.name or "<mount>"
-            mount_path = route.path or "/"
+            mount_path = path or "/"
             manual_rows.append(("mount", f"{name} ({mount_path})", _rel(src_file), reviewed))
             if not reviewed:
                 failures.append(
@@ -223,6 +261,11 @@ def main() -> int:
                     f"'# parity-reviewed: <date>' marker in {_rel(src_file)}"
                 )
 
+    return failures, openapi_rows, manual_rows
+
+
+def main() -> int:
+    failures, openapi_rows, manual_rows = _check(_build_app())
     if failures:
         print("GUI-parity check FAILED:", file=sys.stderr)
         for f in failures:
