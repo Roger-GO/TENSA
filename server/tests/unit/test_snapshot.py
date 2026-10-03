@@ -103,8 +103,18 @@ _LEGACY_SNAPSHOT_NAMES = ["aux", "con", "nul", "com1", "LPT9", "con.v2", "snap."
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("name", [*_LEGACY_SNAPSHOT_NAMES, "snap1", "a.b.c", "x" * 64])
-def test_validate_existing_snapshot_name_accepts_legacy_names(name: str) -> None:
+@pytest.mark.parametrize("name", ["snap1", "a.b.c", "x" * 64])
+def test_validate_existing_snapshot_name_accepts_ordinary_names(name: str) -> None:
+    assert validate_existing_snapshot_name(name) == name
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", _LEGACY_SNAPSHOT_NAMES)
+def test_validate_existing_snapshot_name_accepts_legacy_names(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pinned to a non-Windows platform: the exemption is off on win32 (next test)."""
+    monkeypatch.setattr(security_names, "sys", types.SimpleNamespace(platform="linux"))
     assert validate_existing_snapshot_name(name) == name
 
 
