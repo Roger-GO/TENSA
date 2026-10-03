@@ -405,6 +405,59 @@ def test_extract_bundle_refuses_symlinked_from_bundle_sibling(tmp_path: Path) ->
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_extract_bundle_refuses_dangling_symlinked_addfile(tmp_path: Path) -> None:
+    """The link's target does not exist yet, so ``exists()`` is False and only an
+    ``lstat``-based check sees the symlink. ``write_bytes`` would otherwise create
+    the file outside the workspace."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    planted = outside / "planted.dyr"
+    (workspace / "ieee14.dyr").symlink_to(planted)  # dangling
+    inputs = _minimal_inputs(
+        case_files=(("ieee14.raw", b"BUS 1\n"), ("ieee14.dyr", b"GEN 1\n")),
+    )
+    zip_bytes = assemble_bundle(inputs)
+    with pytest.raises(BundleValidationError) as excinfo:
+        _extract(zip_bytes, workspace)
+    assert excinfo.value.category == "unsafe-path"
+    assert not planted.exists(), "a dangling symlink redirected a write outside the workspace"
+    assert not (workspace / "ieee14.raw").exists(), "partial extraction left a primary behind"
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_extract_bundle_refuses_dangling_symlinked_primary(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    planted = tmp_path / "planted.raw"
+    (workspace / "ieee14.raw").symlink_to(planted)  # dangling
+    zip_bytes = assemble_bundle(_minimal_inputs())
+    with pytest.raises(BundleValidationError) as excinfo:
+        _extract(zip_bytes, workspace)
+    assert excinfo.value.category == "unsafe-path"
+    assert not planted.exists()
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_extract_bundle_refuses_dangling_symlinked_from_bundle_sibling(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "ieee14.raw").write_bytes(b"workspace copy")  # sha differs: conflict
+    planted = tmp_path / "planted"
+    (workspace / "ieee14.raw.from-bundle").symlink_to(planted)  # dangling
+    zip_bytes = assemble_bundle(_minimal_inputs())
+    with pytest.raises(BundleValidationError) as excinfo:
+        _extract(zip_bytes, workspace, use_bundle_case=False)
+    assert excinfo.value.category == "unsafe-path"
+    assert not planted.exists()
+    assert (workspace / "ieee14.raw").read_bytes() == b"workspace copy"
+
+
+@pytest.mark.unit
 def test_extract_bundle_keep_workspace_copy_writes_sibling(tmp_path: Path) -> None:
     (tmp_path / "ieee14.raw").write_bytes(b"workspace copy")
     zip_bytes = assemble_bundle(_minimal_inputs())

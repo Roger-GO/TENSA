@@ -209,6 +209,51 @@ async def test_put_layout_rejects_names_windows_would_misread(
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows cannot hold these as plain files")
+@pytest.mark.parametrize("name", ["case_12:30.raw", "what?.raw", "con.raw"])
+async def test_put_layout_keeps_working_for_an_existing_case_with_an_unportable_name(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+    name: str,
+) -> None:
+    """These names are legal on Linux and macOS, so such a case file still lists
+    and loads; its layout sidecar must not start answering 400. The name check is
+    for names the client picks, not for ones already in the workspace."""
+    client, ws = client_workspace
+    (ws / name).write_text("dummy")
+    resp = await client.put(
+        "/api/workspace/layout",
+        params={"case_path": name},
+        headers={"Content-Type": "application/json"},
+        json=_layout_body(),
+    )
+    assert resp.status_code == 204, resp.text
+    assert (ws / f"{name}.layout.json").is_file()
+    got = await client.get("/api/workspace/layout", params={"case_path": name})
+    assert got.status_code == 200, got.text
+    assert got.json()["schema_version"] == "1.0"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+async def test_put_layout_for_existing_unportable_case_still_refuses_symlinked_sidecar(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+    tmp_path: Path,
+) -> None:
+    """Skipping the name check for an existing case keeps every other write check."""
+    client, ws = client_workspace
+    (ws / "case:1.raw").write_text("dummy")
+    (ws / "case:1.raw.layout.json").symlink_to(tmp_path / "planted.json")  # dangling
+    resp = await client.put(
+        "/api/workspace/layout",
+        params={"case_path": "case:1.raw"},
+        headers={"Content-Type": "application/json"},
+        json=_layout_body(),
+    )
+    assert resp.status_code == 400, resp.text
+    assert not (tmp_path / "planted.json").exists()
+
+
+@pytest.mark.integration
 async def test_put_layout_too_large_returns_413(
     client_workspace: tuple[httpx.AsyncClient, Path],
 ) -> None:

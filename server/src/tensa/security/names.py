@@ -55,5 +55,8 @@ def portable_name_problem(name: str) -> str | None:
     if name[-1] in ". ":
         return "ends with a dot or space, which Windows strips"
     if is_windows_reserved_name(name):
-        return "is a reserved Windows device name (CON, PRN, AUX, NUL, COM0-9, LPT0-9)"
+        return (
+            "is a reserved Windows device name "
+            "(CON, PRN, AUX, NUL, CONIN$, CONOUT$, COM0-9, LPT0-9 and their superscript forms)"
+        )
     return None

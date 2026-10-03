@@ -265,6 +265,8 @@ def list_workspace_files(
 def open_workspace_file_for_write(
     workspace: Path,
     client_path: str,
+    *,
+    require_portable_name: bool = True,
 ) -> Iterator[Path]:
     """Validate ``client_path`` for a write operation under ``workspace`` and
     yield the canonical target Path. The caller is responsible for the actual
@@ -278,19 +280,24 @@ def open_workspace_file_for_write(
       names (``CON``, ``nul.txt``), ``:`` (drive prefix / NTFS stream),
       trailing dot or space, or other characters Windows rejects. Enforced
       on every platform so a workspace stays usable when it is copied to
-      Windows.
+      Windows. ``require_portable_name=False`` waives only this check, for a
+      file named after one already in the workspace (the layout sidecar of an
+      existing case); every other check below still applies.
     - The target's parent directory must exist and not be a symlink (so a
       symlink-races attack at the directory level is defeated).
     - The resolved target must be inside the workspace.
 
     The target file itself MAY be missing (this is a write — the file is
-    being created or replaced). If it exists, it must not be a symlink.
+    being created or replaced). It must not be a symlink, including one whose
+    destination does not exist yet.
 
     Any failure to resolve the path (permissions, invalid names) is raised as
     ``WorkspacePathError``, never a bare ``OSError``.
     """
     try:
-        target = _resolve_write_target(workspace, client_path)
+        target = _resolve_write_target(
+            workspace, client_path, require_portable_name=require_portable_name
+        )
     except OSError as exc:
         # Permission denied on an ancestor, WinError 123, a path component
         # that is a file: a client error, not a server fault.
@@ -311,9 +318,12 @@ def _reject_unportable_leaf(client_path: str) -> None:
         )
 
 
-def _resolve_write_target(workspace: Path, client_path: str) -> Path:
+def _resolve_write_target(
+    workspace: Path, client_path: str, *, require_portable_name: bool = True
+) -> Path:
     _reject_unsafe_input(client_path)
-    _reject_unportable_leaf(client_path)
+    if require_portable_name:
+        _reject_unportable_leaf(client_path)
 
     workspace = canonical_directory(workspace)
     candidate = (workspace / client_path).expanduser()
@@ -334,7 +344,10 @@ def _resolve_write_target(workspace: Path, client_path: str) -> Path:
     canonical_parent = canonical_directory(parent)
     _check_within_workspace(workspace, canonical_parent)
 
-    if candidate.exists() and candidate.is_symlink():
+    # ``is_symlink`` uses ``lstat``, so it also catches a dangling link, whose
+    # ``exists()`` is False because that follows the link. A write through it
+    # would create the file wherever it points, outside the workspace or not.
+    if candidate.is_symlink():
         raise WorkspacePathError(
             f"refusing to overwrite a symlink: {client_path!r}"
         )

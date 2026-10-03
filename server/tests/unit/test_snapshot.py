@@ -28,6 +28,7 @@ from tensa.core.snapshot import (
     read_snapshot_metadata,
     snapshot_dir,
     snapshot_paths,
+    validate_existing_snapshot_name,
     validate_snapshot_name,
     versions_compatible,
     write_snapshot_files,
@@ -91,6 +92,27 @@ def test_validate_snapshot_name_rejects_windows_device_names(name: str) -> None:
     refused on every platform (snapshots move between machines with the workspace)."""
     with pytest.raises(SnapshotMetadataError, match="reserved Windows device name"):
         validate_snapshot_name(name)
+
+
+# Snapshots saved before the portable-name rules (the listing still shows them)
+# stay restorable and deletable: only new names get the strict check.
+_LEGACY_SNAPSHOT_NAMES = ["aux", "con", "nul", "com1", "LPT9", "con.v2", "snap."]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", [*_LEGACY_SNAPSHOT_NAMES, "snap1", "a.b.c", "x" * 64])
+def test_validate_existing_snapshot_name_accepts_legacy_names(name: str) -> None:
+    assert validate_existing_snapshot_name(name) == name
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "name",
+    ["", ".hidden", "../traversal", "a/b", "a\\b", "x" * 65, "name\x00null", "snap\n", "-lead"],
+)
+def test_validate_existing_snapshot_name_still_rejects_path_unsafe_names(name: str) -> None:
+    with pytest.raises(SnapshotMetadataError):
+        validate_existing_snapshot_name(name)
 
 
 # ---- version compatibility -------------------------------------------------
@@ -375,6 +397,35 @@ def test_delete_snapshot_files_removes_both(tmp_path: Path) -> None:
 def test_delete_snapshot_files_missing_raises_not_found(tmp_path: Path) -> None:
     with pytest.raises(SnapshotNotFoundError):
         delete_snapshot_files(tmp_path, "ieee14.raw", "ghost")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", _LEGACY_SNAPSHOT_NAMES)
+def test_delete_snapshot_files_removes_legacy_reserved_names(
+    tmp_path: Path, name: str
+) -> None:
+    """A snapshot whose name is now refused on save is still listed, so it must
+    stay deletable; otherwise the UI shows an entry it cannot act on."""
+    target = snapshot_dir(tmp_path, "ieee14.raw")
+    meta = SnapshotMetadata(
+        andes_version="2.0.0",
+        tensa_version="0.1.0",
+        case_filename=None,
+        case_sha256=None,
+        disturbance_log=[],
+        saved_at="",
+        has_pflow=False,
+        has_tds=False,
+    )
+    write_snapshot_files(
+        dill_path=target / f"{name}.dill",
+        json_path=target / f"{name}.json",
+        dill_writer=_write_dummy_dill,
+        metadata=meta,
+    )
+    assert name in [e.name for e in list_snapshots_on_disk(tmp_path, "ieee14.raw")]
+    assert delete_snapshot_files(tmp_path, "ieee14.raw", name) is True
+    assert list_snapshots_on_disk(tmp_path, "ieee14.raw") == []
 
 
 @pytest.mark.unit

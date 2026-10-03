@@ -204,12 +204,22 @@ class SnapshotEntry:
 # ---- name validation --------------------------------------------------------
 
 
-# Snapshot names must be filesystem-safe (no slashes, no traversal).
-_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$")
+# Snapshot names must be filesystem-safe (no slashes, no traversal). Matched with
+# ``fullmatch``: a ``$`` anchor would also accept a trailing newline.
+_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._\-]{0,63}")
+
+
+def _require_name_shape(name: str) -> None:
+    if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
+        raise SnapshotMetadataError(
+            f"invalid snapshot name {name!r}; "
+            "names must be 1-64 chars of [A-Za-z0-9._-] starting with "
+            "an alphanumeric"
+        )
 
 
 def validate_snapshot_name(name: str) -> str:
-    """Validate a user-supplied snapshot name.
+    """Validate a user-supplied name for a NEW snapshot.
 
     Allowed: alphanumerics + ``.``, ``_``, ``-``. 1-64 chars. Must not
     start with a dot (avoids hidden files), end with a dot, or be a
@@ -221,17 +231,25 @@ def validate_snapshot_name(name: str) -> str:
     traversal vector; the route layer can therefore concatenate
     ``<workspace>/snapshots/<case>/<name>.dill`` without further checks.
     """
-    if not isinstance(name, str) or not _NAME_RE.match(name):
-        raise SnapshotMetadataError(
-            f"invalid snapshot name {name!r}; "
-            "names must be 1-64 chars of [A-Za-z0-9._-] starting with "
-            "an alphanumeric"
-        )
-    # The regex alone lets through a trailing newline (``$`` matches before it),
-    # trailing dots, and device names; the shared portable-name rules do not.
+    _require_name_shape(name)
+    # The regex alone lets through trailing dots and device names; the shared
+    # portable-name rules do not.
     problem = portable_name_problem(name)
     if problem is not None:
         raise SnapshotMetadataError(f"invalid snapshot name {name!r}; the name {problem}")
+    return name
+
+
+def validate_existing_snapshot_name(name: str) -> str:
+    """Validate the name of a snapshot that is already on disk (restore, delete).
+
+    Applies only the path-safety regex, not the portable-name rules of
+    :func:`validate_snapshot_name`. Snapshots saved before those rules existed
+    can carry a name such as ``aux`` or ``con.v2``, and the listing still shows
+    them, so they must stay restorable and deletable. Nothing new can be saved
+    under such a name.
+    """
+    _require_name_shape(name)
     return name
 
 
@@ -414,7 +432,7 @@ def delete_snapshot_files(
     delete). Raises :class:`SnapshotNotFoundError` if NEITHER file
     exists — the routes layer maps that to 404.
     """
-    validate_snapshot_name(name)
+    validate_existing_snapshot_name(name)
     dill_path, json_path = snapshot_paths(workspace, case_filename, name)
     removed = False
     for p in (dill_path, json_path):
@@ -464,6 +482,7 @@ __all__ = [
     "read_snapshot_metadata",
     "snapshot_dir",
     "snapshot_paths",
+    "validate_existing_snapshot_name",
     "validate_snapshot_name",
     "versions_compatible",
     "write_snapshot_files",

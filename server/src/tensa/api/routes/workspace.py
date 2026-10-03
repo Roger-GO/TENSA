@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -276,7 +277,13 @@ async def put_layout(
     workspace = _workspace(request)
     sidecar_rel = case_path + ".layout.json"
     try:
-        with open_workspace_file_for_write(workspace, sidecar_rel) as target:
+        with open_workspace_file_for_write(
+            workspace,
+            sidecar_rel,
+            # The portable-name rule guards names the client picks; the sidecar
+            # of a case file that is already in the workspace inherits its name.
+            require_portable_name=not _is_existing_case_file(workspace, case_path),
+        ) as target:
             _atomic_write_json(target, layout)
     except WorkspacePathError as exc:
         raise HTTPException(
@@ -285,6 +292,23 @@ async def put_layout(
         ) from exc
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _is_existing_case_file(workspace: Path, case_path: str) -> bool:
+    """True when ``case_path`` already names a regular file in the workspace.
+
+    Used only to decide which file-name rules the layout sidecar gets: a case
+    whose name is legal on Linux and macOS but not portable (``case_12:30.raw``)
+    still lists and loads, so its layout must stay savable. Windows cannot hold
+    such a name as a plain file (``:`` would be a stream), so there the name
+    check always applies. The sidecar path still passes every containment check.
+    """
+    if sys.platform == "win32":
+        return False
+    try:
+        return (workspace / case_path).is_file()
+    except (OSError, ValueError):
+        return False
 
 
 def _atomic_write_json(target: Path, layout: SidecarLayout) -> None:

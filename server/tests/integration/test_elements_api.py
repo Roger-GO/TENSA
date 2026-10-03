@@ -12,6 +12,7 @@ bottom of this file.
 from __future__ import annotations
 
 import shutil
+import sys
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -487,6 +488,30 @@ async def test_save_rejects_names_windows_would_misread(
     assert resp.status_code == 422, resp.text
     assert "unsafe file name" in resp.json()["detail"]
     assert sorted(p.name for p in (tmp_path / "ws").iterdir()) == ["ieee14.dyr", "ieee14.raw"]
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.parametrize("overwrite", [False, True])
+async def test_save_refuses_dangling_symlink_to_outside_the_workspace(
+    client: httpx.AsyncClient,
+    tmp_path: Path,
+    overwrite: bool,
+) -> None:
+    """The link's destination does not exist, so ``exists()`` is False and only an
+    ``lstat``-based check sees it; ANDES would write through it, outside the workspace."""
+    sid = await _create_session(client)
+    await _load_ieee14(client, sid)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (tmp_path / "ws" / "out.xlsx").symlink_to(outside / "planted.xlsx")
+    resp = await client.post(
+        f"/api/sessions/{sid}/save",
+        json={"filename": "out.xlsx", "format": "xlsx", "overwrite": overwrite},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "symlink" in resp.json()["detail"]
+    assert list(outside.iterdir()) == []
 
 
 @pytest.mark.integration

@@ -446,6 +446,40 @@ async def test_snapshot_save_windows_unsafe_name_returns_422(
 
 
 @pytest.mark.integration
+async def test_snapshot_saved_under_a_now_refused_name_stays_restorable_and_deletable(
+    client: httpx.AsyncClient,
+    workspace: Path,
+) -> None:
+    """Snapshots written before device names were refused on save still appear in
+    the listing, so restore and delete must keep working for them."""
+    sid = await _create_session_with_case(client)
+    resp = await client.post(f"/api/sessions/{sid}/snapshot", json={"name": "before"})
+    assert resp.status_code == 200, resp.text
+    # Rename the files on disk: this is what a pre-rule save of "aux" left behind.
+    for json_path in (workspace / "snapshots").rglob("before.json"):
+        for ext in (".json", ".dill"):
+            (json_path.with_suffix(ext)).rename(json_path.with_name(f"aux{ext}"))
+
+    resp = await client.get(f"/api/sessions/{sid}/snapshots")
+    assert [e["name"] for e in resp.json()["snapshots"]] == ["aux"]
+
+    resp = await client.post(
+        f"/api/sessions/{sid}/snapshot/restore",
+        json={"name": "aux", "use_dill_optimization": False},
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.delete(f"/api/sessions/{sid}/snapshot/aux")
+    assert resp.status_code == 204, resp.text
+    resp = await client.get(f"/api/sessions/{sid}/snapshots")
+    assert resp.json()["snapshots"] == []
+
+    # A new save under the same name is still refused.
+    resp = await client.post(f"/api/sessions/{sid}/snapshot", json={"name": "aux"})
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.integration
 async def test_snapshot_restore_unknown_name_returns_404(
     client: httpx.AsyncClient,
 ) -> None:

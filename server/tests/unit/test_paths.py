@@ -267,6 +267,32 @@ def test_open_workspace_file_for_write_still_accepts_ordinary_names(tmp_path: Pa
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows cannot hold these as plain files")
+def test_open_workspace_file_for_write_can_skip_only_the_portable_name_check(
+    tmp_path: Path,
+) -> None:
+    """A sidecar derived from a case file already in the workspace inherits that
+    file's name, so the caller may waive the name rule; containment still holds."""
+    workspace = ensure_workspace(tmp_path / "ws")
+    leaf = "case_12:30.raw.layout.json"
+    with (
+        pytest.raises(WorkspacePathError, match="unsafe file name"),
+        open_workspace_file_for_write(workspace, leaf),
+    ):
+        pass
+    with open_workspace_file_for_write(
+        workspace, leaf, require_portable_name=False
+    ) as target:
+        assert target == workspace / leaf
+    for escape in ("../outside:1.json", "/abs:1.json"):
+        with (
+            pytest.raises(WorkspacePathError),
+            open_workspace_file_for_write(workspace, escape, require_portable_name=False),
+        ):
+            pass
+
+
+@pytest.mark.unit
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only symlink test")
 def test_open_workspace_file_for_write_rejects_symlinked_parent(tmp_path: Path) -> None:
     """If the parent directory itself is a symlink (e.g., a malicious user
@@ -299,6 +325,27 @@ def test_open_workspace_file_for_write_rejects_existing_symlink_target(
         open_workspace_file_for_write(workspace, "ieee14.layout.json"),
     ):
         pass
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only symlink test")
+@pytest.mark.parametrize("target", ["../outside/pwned.dyr", "not-yet.dyr"])
+def test_open_workspace_file_for_write_rejects_dangling_symlink_target(
+    tmp_path: Path, target: str
+) -> None:
+    """A symlink whose target does not exist yet is still a symlink: ``exists()``
+    follows it and reports False, so it must be caught with ``lstat``.
+    Otherwise a write through it would create the file wherever it points."""
+    workspace = ensure_workspace(tmp_path / "ws")
+    (tmp_path / "outside").mkdir()
+    (workspace / "ieee14.dyr").symlink_to(target)
+    with (
+        pytest.raises(WorkspacePathError, match="symlink"),
+        open_workspace_file_for_write(workspace, "ieee14.dyr"),
+    ):
+        pass
+    assert not (tmp_path / "outside" / "pwned.dyr").exists()
+    assert not (workspace / "not-yet.dyr").exists()
 
 
 @pytest.mark.unit
