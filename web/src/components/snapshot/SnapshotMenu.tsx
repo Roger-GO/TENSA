@@ -87,9 +87,9 @@ export function SnapshotMenu() {
             Load snapshot…
           </button>
           <p className="text-muted-foreground mt-2 px-2 text-[10px] leading-snug">
-            Snapshots capture the converged operating point + disturbance log. Composable with ANDES
-            upgrades (slow-path replay always works); the dill optimisation kicks in when versions
-            match.
+            Snapshots capture the converged operating point + disturbance log and restore by replay,
+            so they survive ANDES upgrades. Saving the solver state as well lets a restore on the
+            same ANDES version skip the power-flow re-solve.
           </p>
         </PopoverContent>
       </Popover>

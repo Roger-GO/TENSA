@@ -16,6 +16,10 @@
  * ``force=true``. The dialog catches the 409 and shows a "Snapshot
  * already exists — overwrite?" inline confirm; clicking re-issues the
  * mutation with ``force=true``.
+ *
+ * A snapshot is the disturbance log plus metadata by default, and restores by
+ * replay. The "Also save the solver state" checkbox (off by default) adds the
+ * dill blob, which costs a couple of seconds and a few MB on save.
  */
 import { useState } from 'react';
 import {
@@ -69,6 +73,7 @@ function SaveSnapshotDialogInner() {
   const saveMutation = useSaveSnapshot();
   const schedule = useSafeTimeout();
   const [collisionName, setCollisionName] = useState<string | null>(null);
+  const [includeDill, setIncludeDill] = useState(false);
 
   const validation = validateName(pendingName);
   const isPending = status === 'pending';
@@ -77,7 +82,7 @@ function SaveSnapshotDialogInner() {
     if (sessionId === null || validation !== null) return;
     markPending();
     try {
-      await saveMutation.mutateAsync({ sessionId, name: pendingName, force });
+      await saveMutation.mutateAsync({ sessionId, name: pendingName, force, includeDill });
       markSuccess();
       setCollisionName(null);
       // Auto-close after a short beat so the user sees success.
@@ -104,8 +109,8 @@ function SaveSnapshotDialogInner() {
       <DialogTitle>Save snapshot</DialogTitle>
       <DialogDescription className="mt-2">
         Capture the current operating point + disturbance log as a named snapshot. Snapshots live
-        under the workspace and survive across sessions; the dill optimisation kicks in when the
-        ANDES version matches.
+        under the workspace and survive across sessions; a restore replays the log and re-solves the
+        power flow.
       </DialogDescription>
 
       <div className="mt-4 flex flex-col gap-3">
@@ -133,6 +138,20 @@ function SaveSnapshotDialogInner() {
             {validation}
           </p>
         ) : null}
+        <label className="flex items-start gap-2 text-xs">
+          <input
+            type="checkbox"
+            data-testid="save-snapshot-include-dill"
+            className="mt-0.5"
+            checked={includeDill}
+            onChange={(e) => setIncludeDill(e.target.checked)}
+            disabled={isPending}
+          />
+          <span>
+            Also save the solver state. Slower to save and a few MB larger; lets a restore on the
+            same ANDES version skip the power-flow re-solve.
+          </span>
+        </label>
         {error !== null && collisionName === null ? (
           <div
             role="alert"

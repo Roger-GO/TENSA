@@ -6,8 +6,8 @@
  *    expected testids when a case is loaded.
  *  - Workspace-file row click fires the loadCase mutation with the
  *    parsed primary path + null addfiles.
- *  - Snapshot row click fires the restoreSnapshot mutation with the
- *    dill fast path enabled.
+ *  - Snapshot row click fires the restoreSnapshot mutation without the
+ *    dill opt-in, so the restore replays (the default).
  *  - Same-file no-op guard: clicking a row that matches the
  *    currently-loaded case does NOT fire loadCase.
  *  - No-case-loaded hides the snapshot section entirely.
@@ -186,7 +186,7 @@ describe('<SavedCasesList />', () => {
     expect(loadCaseMutate).not.toHaveBeenCalled();
   });
 
-  it('clicking a snapshot row fires restoreSnapshot with dill fast path enabled', async () => {
+  it('clicking a snapshot row fires restoreSnapshot without the dill opt-in', async () => {
     const user = userEvent.setup();
     useCaseStore.setState({
       selection: { primaryPath: parseWorkspacePath('kundur.raw'), addfiles: [] },
@@ -210,10 +210,11 @@ describe('<SavedCasesList />', () => {
     render(withClient(<SavedCasesList />));
     await user.click(screen.getByTestId('saved-cases-row-snapshot-baseline'));
     expect(restoreMutateAsync).toHaveBeenCalledTimes(1);
+    // No ``useDillOptimization``: the hook's default is the replay restore,
+    // even for a snapshot that carries a solver-state blob.
     expect(restoreMutateAsync).toHaveBeenCalledWith({
       sessionId: 'test-session',
       name: 'baseline',
-      useDillOptimization: true,
     });
   });
 

@@ -32,8 +32,9 @@ import { cn } from '@/lib/cn';
  *    no-op rather than a destructive reload.
  *  - **Snapshots** — only renders when a case is loaded. Lists the
  *    substrate's snapshot listing for the active session. Click a row
- *    to restore via ``useRestoreSnapshot`` (uses the dill fast path by
- *    default; same as ``LoadSnapshotDialog`` Restore button).
+ *    to restore via ``useRestoreSnapshot`` (replays the snapshot's
+ *    disturbances and re-solves the power flow; same as the
+ *    ``LoadSnapshotDialog`` Restore button with its default options).
  *
  * Empty states use the canonical ``<EmptyState />`` component (per the
  * v3 plan IA spec). The two sections render their own empty state so
@@ -143,7 +144,7 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
 
   /**
    * Click handler for a snapshot row. Mirrors ``LoadSnapshotDialog``'s
-   * submitRestore path: defaults to the dill fast path; surfaces
+   * submitRestore path: defaults to the replay restore; surfaces
    * success / failure via the global toast (the dialog's inline
    * success card is dialog-scoped — out of place inside the sidebar).
    */
@@ -152,11 +153,7 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
       if (!sessionId) return;
       markRestorePending();
       try {
-        const result = await restoreSnapshot.mutateAsync({
-          sessionId,
-          name,
-          useDillOptimization: true,
-        });
+        const result = await restoreSnapshot.mutateAsync({ sessionId, name });
         markRestoreSuccess({
           used_dill: result.used_dill,
           fallback_reason: result.fallback_reason,

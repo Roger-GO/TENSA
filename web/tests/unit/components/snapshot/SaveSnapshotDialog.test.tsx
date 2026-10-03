@@ -4,6 +4,8 @@
  * Covers:
  * - Validation: empty / invalid name disables the confirm button.
  * - Confirm fires the substrate mutation and flips status to success.
+ * - The solver-state (dill) blob is opt-in: ``include_dill=false`` by default,
+ *   ``true`` once the checkbox is ticked, including on the overwrite re-issue.
  * - 409 collision surfaces an inline overwrite confirm; second click
  *   re-issues with ``force=true``.
  * - Generic error response surfaces inline.
@@ -114,6 +116,22 @@ describe('<SaveSnapshotDialog /> — name validation', () => {
   });
 });
 
+const savedBody = {
+  name: 'scenario-A',
+  metadata: {
+    andes_version: '2.0.0',
+    tensa_version: '0.1.0',
+    case_filename: 'ieee14.raw',
+    case_sha256: null,
+    disturbance_log: [],
+    saved_at: 'now',
+    has_pflow: false,
+    has_tds: false,
+  },
+  dill_bytes: 0,
+  metadata_bytes: 256,
+};
+
 describe('<SaveSnapshotDialog /> — confirm flow', () => {
   it('confirm fires the substrate mutation and flips status to success', async () => {
     const user = userEvent.setup({ delay: null });
@@ -141,7 +159,31 @@ describe('<SaveSnapshotDialog /> — confirm flow', () => {
     const [url, init] = fetchSpy.mock.calls[0]!;
     expect(String(url)).toContain('/api/sessions/test-session-id/snapshot');
     expect((init as RequestInit).method).toBe('POST');
+    // The solver-state blob is opt-in, so a plain save does not ask for it.
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      name: 'scenario-A',
+      force: false,
+      include_dill: false,
+    });
     await waitFor(() => expect(useSnapshotStore.getState().saveStatus).toBe('success'));
+  });
+
+  it('ticking "Also save the solver state" sends include_dill=true', async () => {
+    const user = userEvent.setup({ delay: null });
+    fetchSpy.mockResolvedValue(makeJsonResponse(200, savedBody));
+    render(withQueryClient(<SaveSnapshotDialog />));
+    const checkbox = screen.getByTestId('save-snapshot-include-dill');
+    expect(checkbox).not.toBeChecked();
+    await user.type(screen.getByTestId('save-snapshot-name-input'), 'scenario-A');
+    await user.click(checkbox);
+    expect(checkbox).toBeChecked();
+    await user.click(screen.getByTestId('save-snapshot-confirm'));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(String((fetchSpy.mock.calls[0]![1] as RequestInit).body))).toEqual({
+      name: 'scenario-A',
+      force: false,
+      include_dill: true,
+    });
   });
 
   it('409 collision surfaces an inline overwrite confirm', async () => {
@@ -178,6 +220,25 @@ describe('<SaveSnapshotDialog /> — confirm flow', () => {
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
     const secondCallBody = JSON.parse(String((fetchSpy.mock.calls[1]![1] as RequestInit).body));
     expect(secondCallBody.force).toBe(true);
+  });
+
+  it('the overwrite re-issue keeps the solver-state choice', async () => {
+    const user = userEvent.setup({ delay: null });
+    fetchSpy.mockResolvedValueOnce(makeProblemResponse(409, 'snapshot already exists'));
+    render(withQueryClient(<SaveSnapshotDialog />));
+    await user.type(screen.getByTestId('save-snapshot-name-input'), 'scenario-A');
+    await user.click(screen.getByTestId('save-snapshot-include-dill'));
+    await user.click(screen.getByTestId('save-snapshot-confirm'));
+    await screen.findByTestId('save-snapshot-collision');
+
+    fetchSpy.mockResolvedValueOnce(makeJsonResponse(200, savedBody));
+    await user.click(screen.getByTestId('save-snapshot-confirm-overwrite'));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(String((fetchSpy.mock.calls[1]![1] as RequestInit).body))).toEqual({
+      name: 'scenario-A',
+      force: true,
+      include_dill: true,
+    });
   });
 
   it('422 error surfaces an inline error', async () => {

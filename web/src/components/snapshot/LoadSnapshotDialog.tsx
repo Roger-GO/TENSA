@@ -7,11 +7,12 @@
  * QueryClientProvider stay green.
  *
  * Restore flow: ``useRestoreSnapshot`` POSTs to
- * ``/api/sessions/{id}/snapshot/restore``. On success the response's
- * ``used_dill`` flag drives an inline toast: when False (the slow
- * always-works path was taken because of a version mismatch or missing
- * dill), the toast surfaces ``fallback_reason`` so the user understands
- * why a re-converge happened.
+ * ``/api/sessions/{id}/snapshot/restore``. The default restore replays
+ * the snapshot's disturbances and re-solves the power flow. A snapshot
+ * saved with its solver state (``has_dill``) can opt in to the dill
+ * path through the checkbox; when that path was asked for but not taken
+ * (version mismatch, load failure), the outcome surfaces
+ * ``fallback_reason`` so the user understands why a re-converge happened.
  *
  * Delete flow: each row has a small "Delete" button; confirmation is
  * inline (a second click within 3 s). The listing refetches on success.
@@ -85,15 +86,13 @@ function LoadSnapshotDialogInner() {
   // confirms).
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [armedDeleteName, setArmedDeleteName] = useState<string | null>(null);
-  const [useDillOpt, setUseDillOpt] = useState(true);
-  // Unit 14 — "Force replay (debug)" toggle behind an Advanced
-  // disclosure (collapsed by default). When ON it forces the
-  // always-works replay+PF path by sending ``use_dill_optimization=false``
-  // regardless of the dill checkbox above. Default OFF keeps behaviour
-  // unchanged.
-  const [forceReplay, setForceReplay] = useState(false);
+  // Opt-in: replay is the default restore. The dill path is only offered for a
+  // snapshot that has a solver-state blob (see ``dillAvailable`` below).
+  const [useDillOpt, setUseDillOpt] = useState(false);
 
   const isPending = status === 'pending';
+  const dillAvailable =
+    listQuery.data?.snapshots.find((s) => s.name === selectedName)?.has_dill === true;
 
   const submitRestore = async () => {
     if (sessionId === null || selectedName === null) return;
@@ -102,9 +101,7 @@ function LoadSnapshotDialogInner() {
       const result = await restoreMutation.mutateAsync({
         sessionId,
         name: selectedName,
-        // Force-replay (debug) wins: when ON the dill fast path is
-        // bypassed regardless of the checkbox above.
-        useDillOptimization: forceReplay ? false : useDillOpt,
+        useDillOptimization: useDillOpt && dillAvailable,
       });
       markSuccess({
         used_dill: result.used_dill,
@@ -161,8 +158,9 @@ function LoadSnapshotDialogInner() {
     <DialogContent data-testid="load-snapshot-dialog" className="max-w-2xl">
       <DialogTitle>Load snapshot</DialogTitle>
       <DialogDescription className="mt-2">
-        Restore a previously-saved operating point. The dill optimisation skips the PF re-solve when
-        the ANDES version matches; otherwise the always-works replay+PF path takes over.
+        Restore a previously-saved operating point by replaying its disturbances and re-solving the
+        power flow. A snapshot saved with its solver state can skip the re-solve when the ANDES
+        version matches.
       </DialogDescription>
 
       <div className="mt-4 flex flex-col gap-3">
@@ -225,7 +223,7 @@ function LoadSnapshotDialogInner() {
                             s.disturbance_count === 1 ? '' : 's'
                           }`
                         : ''}
-                      {s.has_dill ? '' : ' · dill missing'}
+                      {s.has_dill ? ' · solver state' : ''}
                     </span>
                   </button>
                   <Button
@@ -248,36 +246,16 @@ function LoadSnapshotDialogInner() {
           <input
             type="checkbox"
             data-testid="load-snapshot-use-dill"
-            checked={forceReplay ? false : useDillOpt}
+            checked={useDillOpt && dillAvailable}
             onChange={(e) => setUseDillOpt(e.target.checked)}
-            disabled={isPending || forceReplay}
+            disabled={isPending || !dillAvailable}
           />
-          <span>Use dill optimisation (skips PF re-solve when ANDES version matches)</span>
+          <span>
+            Use the saved solver state (skips the power-flow re-solve when the ANDES version
+            matches)
+            {selectedName !== null && !dillAvailable ? '; this snapshot was saved without it' : ''}
+          </span>
         </label>
-
-        <details className="group" data-testid="load-snapshot-advanced">
-          <summary
-            className={cn(
-              'text-muted-foreground hover:text-foreground cursor-pointer text-[11px] font-medium',
-              'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
-            )}
-          >
-            Advanced
-          </summary>
-          <label className="mt-2 flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              data-testid="load-snapshot-force-replay"
-              checked={forceReplay}
-              onChange={(e) => setForceReplay(e.target.checked)}
-              disabled={isPending}
-            />
-            <span>
-              Force replay (debug) — always re-converge via replay+PF (sends{' '}
-              <code className="font-mono">use_dill_optimization=false</code>).
-            </span>
-          </label>
-        </details>
 
         {/* Error rendering moved to the global toast surface — see
             `surfaceErrorToast` above + `@/lib/toast`. */}

@@ -24,7 +24,9 @@ import {
   useListProfiles,
   useListSnapshots,
   useLoadCase,
+  useRestoreSnapshot,
   useRunPflow,
+  useSaveSnapshot,
   useTopology,
 } from '@/api/queries';
 import { parseSessionId } from '@/api/types';
@@ -131,6 +133,56 @@ describe('queries hooks', () => {
       expect(result.current.isSuccess).toBe(true);
     });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['snapshots', sessionId] });
+  });
+
+  it('snapshot hooks leave the solver-state (dill) blob opt-in', async () => {
+    // A save writes no blob and a restore replays unless the caller opts in.
+    const sessionId = 'sess-dill' as SessionId;
+    const metadata = {
+      andes_version: '2.0.0',
+      tensa_version: '0.1.0',
+      case_filename: 'ieee14.raw',
+      case_sha256: null,
+      disturbance_log: [],
+      saved_at: 'now',
+      has_pflow: true,
+      has_tds: false,
+    };
+    const bodies = (): unknown[] =>
+      fetchSpy.mock.calls.map((c) => JSON.parse(String((c[1] as RequestInit).body)));
+
+    // A fresh Response per call: a body can be read only once.
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(
+        jsonResponse({
+          name: 'a',
+          metadata,
+          dill_bytes: 0,
+          metadata_bytes: 1,
+          used_dill: false,
+          fallback_reason: null,
+          disturbances_replayed: 0,
+        }),
+      ),
+    );
+    const { Wrapper } = makeWrapper();
+    const save = renderHook(() => useSaveSnapshot(), { wrapper: Wrapper });
+    const restore = renderHook(() => useRestoreSnapshot(), { wrapper: Wrapper });
+
+    await save.result.current.mutateAsync({ sessionId, name: 'a' });
+    await restore.result.current.mutateAsync({ sessionId, name: 'a' });
+    expect(bodies()).toEqual([
+      { name: 'a', force: false, include_dill: false },
+      { name: 'a', use_dill_optimization: false },
+    ]);
+
+    fetchSpy.mockClear();
+    await save.result.current.mutateAsync({ sessionId, name: 'a', includeDill: true });
+    await restore.result.current.mutateAsync({ sessionId, name: 'a', useDillOptimization: true });
+    expect(bodies()).toEqual([
+      { name: 'a', force: false, include_dill: true },
+      { name: 'a', use_dill_optimization: true },
+    ]);
   });
 
   it('useAlterableParams hits the substrate path scoped to (session, model)', async () => {

@@ -1458,12 +1458,16 @@ export interface SaveSnapshotVars {
   name: string;
   /** When True, overwrite an existing snapshot under the same name. */
   force?: boolean;
+  /** When True, also write the solver-state (dill) blob, which costs a couple
+   *  of seconds and a few MB. Default False saves the metadata only. */
+  includeDill?: boolean;
 }
 
 export interface RestoreSnapshotVars {
   sessionId: SessionId;
   name: string;
-  /** When True (default), use the dill fast path. */
+  /** When True, try the dill blob first and skip the replay and PF re-solve.
+   *  Default False restores by replaying the snapshot's disturbances. */
   useDillOptimization?: boolean;
 }
 
@@ -1491,11 +1495,11 @@ export function useSaveSnapshot(): UseMutationResult<
 > {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ sessionId, name, force }: SaveSnapshotVars) => {
+    mutationFn: async ({ sessionId, name, force, includeDill }: SaveSnapshotVars) => {
       return await andesClient.post<SaveSnapshotResponse>(
         `/sessions/${encodeURIComponent(sessionId)}/snapshot`,
         {
-          body: { name, force: force ?? false },
+          body: { name, force: force ?? false, include_dill: includeDill ?? false },
           timeoutMs: TIMEOUTS.caseLoad,
         },
       );
@@ -1531,7 +1535,7 @@ export function useRestoreSnapshot(): UseMutationResult<
         {
           body: {
             name,
-            use_dill_optimization: useDillOptimization ?? true,
+            use_dill_optimization: useDillOptimization ?? false,
           },
           timeoutMs: TIMEOUTS.caseLoad,
         },
