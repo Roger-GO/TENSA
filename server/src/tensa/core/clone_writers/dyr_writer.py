@@ -15,10 +15,16 @@ the quoted model name between BUS and ID, so the file token for ``inputs[k]``
 (k >= 1) is at file-token index ``k + 1`` (``inputs[0] == BUS`` is token 0).
 ``field_index`` in the spike index is the position in ``inputs``; the file
 token to splice is therefore at ``field_index + 1``.
+
+Bytes outside the spliced token are never re-encoded: the file is decoded with
+``surrogateescape`` and written back as bytes, so a ``.dyr`` saved in the
+Windows ANSI code page (cp1252), a UTF-8 BOM, and CRLF line endings all come
+back exactly as they were.
 """
 
 from __future__ import annotations
 
+import codecs
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,12 +51,32 @@ class _Record:
     tokens: list[_Token]
 
 
+def _decode(raw: bytes) -> str:
+    """Decode ``.dyr`` bytes losslessly, whatever their encoding.
+
+    PSS/E writes ``.dyr`` files in the Windows ANSI code page, so a comment
+    naming a plant ``Peña`` is a lone cp1252 byte that strict UTF-8 rejects,
+    and ANDES itself sniffs the encoding with chardet. Only an ASCII number is
+    ever spliced in, so there is nothing to guess: ``surrogateescape`` decodes
+    UTF-8 where it can and keeps every other byte as a lone surrogate that
+    :func:`_encode` turns back into the same byte.
+    """
+    return raw.decode("utf-8", errors="surrogateescape")
+
+
+def _encode(text: str) -> bytes:
+    return text.encode("utf-8", errors="surrogateescape")
+
+
 def _split_records(text: str) -> list[_Record]:
     """Split the file text into records on the ``/`` terminator.
 
     Tokens carry absolute character offsets so the caller can splice a single
     token without disturbing surrounding whitespace / sibling records. The
-    ``/`` itself is not a token — it only closes the current record.
+    ``/`` itself is not a token — it only closes the current record, and the
+    rest of its line is a comment (ANDES drops everything after the first
+    ``/`` on a line, so the writer must too, or a trailing comment would shift
+    the next record's tokens).
     """
     records: list[_Record] = []
     current: list[_Token] = []
@@ -62,6 +88,8 @@ def _split_records(text: str) -> list[_Record]:
             records.append(_Record(tokens=current))
             current = []
             pos += 1
+            while pos < n and text[pos] not in "\r\n":
+                pos += 1
             continue
         if ch.isspace():
             pos += 1
@@ -147,11 +175,15 @@ def apply_edit(
     file_token_index = field_index + 1
 
     try:
-        text = path.read_text(encoding="utf-8")
+        raw = path.read_bytes()
     except OSError as exc:
         raise CloneEditError(
             f"could not read clone file {path.name!r}: {exc}"
         ) from exc
+
+    # A UTF-8 BOM is not part of the first token; set it aside and put it back.
+    bom = codecs.BOM_UTF8 if raw.startswith(codecs.BOM_UTF8) else b""
+    text = _decode(raw[len(bom) :])
 
     records = _split_records(text)
     bus_str = str(locator.bus)
@@ -193,7 +225,7 @@ def apply_edit(
     new_text = text[: token.start] + new_token + text[token.end :]
 
     try:
-        path.write_text(new_text, encoding="utf-8")
+        path.write_bytes(bom + _encode(new_text))
     except OSError as exc:  # pragma: no cover — fs failure
         raise CloneEditError(
             f"could not write clone file {path.name!r}: {exc}"

@@ -206,6 +206,126 @@ def test_dyr_writer_requires_locator(tmp_path: Path) -> None:
         dyr_writer.apply_edit(dst, "TGOV1", "TGOV1_1", "T1", 0.6, locator=None)
 
 
+# ---- dyr writer: encoding and line endings ----------------------------------
+
+
+def _changed_span(before: bytes, after: bytes) -> tuple[bytes, bytes]:
+    """The one span that differs, with the common prefix and suffix stripped."""
+    limit = min(len(before), len(after))
+    head = 0
+    while head < limit and before[head] == after[head]:
+        head += 1
+    tail = 0
+    while tail < limit - head and before[-1 - tail] == after[-1 - tail]:
+        tail += 1
+    return before[head : len(before) - tail], after[head : len(after) - tail]
+
+
+def _bundled_dyr_bytes() -> bytes:
+    return (_bundled_cases_dir() / "ieee14" / "ieee14.dyr").read_bytes()
+
+
+def _edit_st2cut_t3_bus1(path: Path) -> None:
+    dyr_writer.apply_edit(
+        path, "ST2CUT", "ST2CUT_2", "T3", 99.5, locator=DyrLocator(bus="1.0", id="1")
+    )
+
+
+def test_dyr_writer_edits_a_cp1252_file_byte_for_byte(tmp_path: Path) -> None:
+    """A .dyr saved in the Windows ANSI code page (an accented plant name in a
+    trailing comment) is a lone 0xF1 byte that strict UTF-8 rejects. The edit
+    must succeed, change only the target token, and leave that byte alone."""
+    before = _bundled_dyr_bytes().replace(
+        b"/\n", "/ Central Pe\u00f1a\n".encode("cp1252"), 1
+    )
+    assert b"\xf1" in before
+    with pytest.raises(UnicodeDecodeError):
+        before.decode("utf-8")
+    dst = tmp_path / "ieee14.dyr"
+    dst.write_bytes(before)
+
+    _edit_st2cut_t3_bus1(dst)
+
+    after = dst.read_bytes()
+    assert _changed_span(before, after) == (b"30.000", b"99.5")
+    assert after.count(b"\xf1") == 1
+
+
+def test_dyr_writer_edited_cp1252_file_still_loads_in_andes(tmp_path: Path) -> None:
+    pytest.importorskip("andes")
+    import andes
+
+    cases = _bundled_cases_dir()
+    dst = tmp_path / "ieee14.dyr"
+    dst.write_bytes(
+        _bundled_dyr_bytes().replace(b"/\n", "/ Central Pe\u00f1a\n".encode("cp1252"), 1)
+    )
+    _edit_st2cut_t3_bus1(dst)
+
+    ss = andes.load(
+        str(cases / "ieee14" / "ieee14.raw"),
+        addfile=str(dst),
+        setup=True,
+        no_output=True,
+        default_config=True,
+    )
+    assert len(ss.ST2CUT.idx.v) == 2
+    i_bus1 = next(i for i, b in enumerate(ss.ST2CUT.bus.v) if int(b) == 1)
+    assert ss.ST2CUT.T3.v[i_bus1] == pytest.approx(99.5)
+
+
+def test_dyr_writer_preserves_crlf_line_endings(tmp_path: Path) -> None:
+    """Reading in text mode folded CRLF to LF, so a Windows file came back with
+    different line endings (and an LF file came back CRLF when written on Windows)."""
+    before = _bundled_dyr_bytes().replace(b"\n", b"\r\n")
+    dst = tmp_path / "ieee14.dyr"
+    dst.write_bytes(before)
+
+    _edit_st2cut_t3_bus1(dst)
+
+    after = dst.read_bytes()
+    assert _changed_span(before, after) == (b"30.000", b"99.5")
+    assert after.count(b"\n") == after.count(b"\r\n") == before.count(b"\r\n")
+
+
+def test_dyr_writer_preserves_lf_line_endings(tmp_path: Path) -> None:
+    before = _bundled_dyr_bytes()
+    assert b"\r" not in before
+    dst = tmp_path / "ieee14.dyr"
+    dst.write_bytes(before)
+
+    _edit_st2cut_t3_bus1(dst)
+
+    assert b"\r" not in dst.read_bytes()
+
+
+def test_dyr_writer_keeps_a_utf8_bom_out_of_the_first_token(tmp_path: Path) -> None:
+    """With the BOM left in, the first record's BUS token reads as U+FEFF + 1
+    and never matches; the BOM must still be present after the edit."""
+    before = b"\xef\xbb\xbf" + b"   1 'TGOV1' 1  0.05  0.4  /\n"
+    dst = tmp_path / "x.dyr"
+    dst.write_bytes(before)
+
+    dyr_writer.apply_edit(
+        dst, "TGOV1", "TGOV1_1", "R", 0.07, locator=DyrLocator(bus="1", id="1")
+    )
+
+    assert dst.read_bytes() == before.replace(b"0.05", b"0.07")
+
+
+def test_dyr_writer_ignores_a_comment_after_the_record_terminator(tmp_path: Path) -> None:
+    """ANDES drops everything after the first ``/`` on a line. The writer must
+    too, or the comment's words become the first tokens of the next record and
+    that record can no longer be found."""
+    before = _bundled_dyr_bytes().replace(b"/\n", b"/ main unit 1 'X'\n", 1)
+    dst = tmp_path / "ieee14.dyr"
+    dst.write_bytes(before)
+
+    _edit_st2cut_t3_bus1(dst)
+
+    assert _changed_span(before, dst.read_bytes()) == (b"30.000", b"99.5")
+
+
 # ---- raw writer -------------------------------------------------------------
 
 
