@@ -51,6 +51,9 @@ function makeProblemResponse(status: number, detail: string): Response {
   );
 }
 
+// Every test types with `delay: null`. With user-event's default inter-key
+// delay, keystrokes get dropped and focus moves between key down and key up
+// when a coverage run saturates the CPU.
 beforeEach(() => {
   fetchSpy.mockReset();
   globalThis.fetch = fetchSpy as unknown as typeof globalThis.fetch;
@@ -75,7 +78,7 @@ describe('<SaveSnapshotDialog /> — name validation', () => {
   });
 
   it('shows a validation message for invalid characters', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(withQueryClient(<SaveSnapshotDialog />));
     await user.type(screen.getByTestId('save-snapshot-name-input'), '../bad');
     expect(await screen.findByTestId('save-snapshot-validation-error')).toBeInTheDocument();
@@ -83,14 +86,14 @@ describe('<SaveSnapshotDialog /> — name validation', () => {
   });
 
   it('enables confirm for a valid name', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(withQueryClient(<SaveSnapshotDialog />));
     await user.type(screen.getByTestId('save-snapshot-name-input'), 'scenario-A');
     expect(screen.getByTestId('save-snapshot-confirm')).toBeEnabled();
   });
 
   it.each(['con', 'aux.v2', 'COM1'])('rejects the Windows device name %s', async (name) => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(withQueryClient(<SaveSnapshotDialog />));
     await user.type(screen.getByTestId('save-snapshot-name-input'), name);
     expect(await screen.findByTestId('save-snapshot-validation-error')).toHaveTextContent(
@@ -100,7 +103,7 @@ describe('<SaveSnapshotDialog /> — name validation', () => {
   });
 
   it('rejects a trailing dot', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(withQueryClient(<SaveSnapshotDialog />));
     await user.type(screen.getByTestId('save-snapshot-name-input'), 'scenario.');
     expect(await screen.findByTestId('save-snapshot-validation-error')).toHaveTextContent(
@@ -112,7 +115,7 @@ describe('<SaveSnapshotDialog /> — name validation', () => {
 
 describe('<SaveSnapshotDialog /> — confirm flow', () => {
   it('confirm fires the substrate mutation and flips status to success', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     fetchSpy.mockResolvedValue(
       makeJsonResponse(200, {
         name: 'scenario-A',
@@ -141,7 +144,7 @@ describe('<SaveSnapshotDialog /> — confirm flow', () => {
   });
 
   it('409 collision surfaces an inline overwrite confirm', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     fetchSpy.mockResolvedValueOnce(makeProblemResponse(409, 'snapshot already exists'));
     render(withQueryClient(<SaveSnapshotDialog />));
     await user.type(screen.getByTestId('save-snapshot-name-input'), 'scenario-A');
@@ -177,7 +180,7 @@ describe('<SaveSnapshotDialog /> — confirm flow', () => {
   });
 
   it('422 error surfaces an inline error', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     fetchSpy.mockResolvedValue(makeProblemResponse(422, 'invalid name'));
     render(withQueryClient(<SaveSnapshotDialog />));
     await user.type(screen.getByTestId('save-snapshot-name-input'), 'scenario-A');
@@ -187,7 +190,7 @@ describe('<SaveSnapshotDialog /> — confirm flow', () => {
   });
 
   it('cancel closes the dialog without firing the mutation', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(withQueryClient(<SaveSnapshotDialog />));
     await user.click(screen.getByTestId('save-snapshot-cancel'));
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -295,7 +298,7 @@ describe('<SaveSnapshotDialog /> — keyboard scoping (Unit 6)', () => {
   });
 
   it('Escape closes the dialog (Radix default) without firing global hotkeys', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const globalEscape = vi.fn();
 
     function TestHarness() {
