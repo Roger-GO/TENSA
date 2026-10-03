@@ -14,7 +14,7 @@ The repo holds two independent packages:
 python -m venv .venv
 source .venv/bin/activate
 pip install -e "./server[dev]"
-tensa warm-cache          # one-time ANDES code-gen cache (~30 s)
+tensa warm-cache          # optional ANDES code-gen cache (~30 s); serve does it in the background
 
 # Web
 cd web

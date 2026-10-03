@@ -2,7 +2,8 @@
 
 Verifies the subcommand runs end-to-end against the installed ANDES, and
 that ``~/.andes/pycode/`` exists afterwards (the cache that subsequent
-``andes.load`` calls reuse to skip the cold-start prep).
+``andes.load`` calls reuse to skip the cold-start prep) and carries the stamp
+``tensa serve`` reads.
 """
 
 from __future__ import annotations
@@ -13,6 +14,9 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from tensa.cli import _andes_version
+from tensa.core.codegen_cache import cache_state
 
 
 @pytest.mark.acceptance
@@ -51,3 +55,7 @@ def test_warm_cache_runs_green_and_populates_cache_dir() -> None:
     assert "cache ready" in result.stderr, (
         f"expected 'cache ready' line in stderr; got:\n{result.stderr}"
     )
+
+    # It also records that the cache was checked against this ANDES, which is what
+    # lets ``tensa serve`` skip its background check on the next start.
+    assert cache_state(_andes_version()) == "ready"

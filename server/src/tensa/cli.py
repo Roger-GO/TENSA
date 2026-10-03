@@ -6,17 +6,20 @@ Subcommands:
   default; there is no authentication, so non-loopback binds expose the API
   to the whole network (a stderr warning is emitted). uvicorn's default
   access log is disabled; the substrate emits its own structured stderr
-  lines via ``logging``.
+  lines via ``logging``. When ANDES's generated code is missing or unchecked,
+  it is generated in a background process while the server runs (see
+  ``core/codegen_cache.py``).
 - ``--version`` — print the tensa and ANDES versions and exit.
 - ``warm-cache`` — run ANDES's symbolic-equation code generation
-  (``andes.prepare()``) so the cache is populated. Recommended once after
-  install: subsequent ``andes.load`` calls skip the multi-minute cold-start
-  prep. The cache lives at ``~/.andes/pycode/`` (~1.5 MB) and is shared
-  across all ANDES cases.
+  (``andes.prepare()``) so the cache is populated; ``serve`` runs it in the
+  background when the cache needs it, so running it by hand is optional.
+  Subsequent ``andes.load`` calls skip the cold-start prep. The cache lives at
+  ``~/.andes/pycode/`` (~1.5 MB) and is shared across all ANDES cases.
 """
 
 from __future__ import annotations
 
+import contextlib
 import importlib.metadata
 import logging
 import os
@@ -25,7 +28,7 @@ import sys
 import threading
 import time
 import webbrowser
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -35,6 +38,12 @@ from fastapi import FastAPI
 
 from tensa import __version__
 from tensa.api.app import make_app
+from tensa.core.codegen_cache import (
+    BackgroundWarm,
+    mark_cache_checked,
+    pycode_dir,
+    start_background_warm,
+)
 from tensa.core.examples import seed_example_cases
 from tensa.security.paths import ensure_workspace
 
@@ -148,6 +157,16 @@ def serve(
             "After the server starts listening, open the user's default browser "
             "at ``http://<host>:<port>/``. Works with any --port, including the "
             "default OS-assigned one."
+        ),
+    ),
+    no_warm_cache: bool = typer.Option(
+        False,
+        "--no-warm-cache",
+        help=(
+            "Do not check ANDES's generated code at startup. By default, when it "
+            "is missing or has not been checked against the installed ANDES, the "
+            "server runs ``tensa warm-cache`` in a background process, so the "
+            "first case you load does not wait for the generation."
         ),
     ),
     reload: bool = typer.Option(
@@ -279,16 +298,17 @@ def serve(
                 is_ready=lambda: _accepts_connections(browser_host, reload_port),
                 log=log,
             )
-        uvicorn.run(
-            "tensa.cli:_reload_app_factory",
-            factory=True,
-            reload=True,
-            reload_dirs=[str(watch_dir)],
-            host=bind,
-            port=reload_port,
-            log_level="info",
-            access_log=False,
-        )
+        with _background_codegen_warmup(enabled=not no_warm_cache, log=log):
+            uvicorn.run(
+                "tensa.cli:_reload_app_factory",
+                factory=True,
+                reload=True,
+                reload_dirs=[str(watch_dir)],
+                host=bind,
+                port=reload_port,
+                log_level="info",
+                access_log=False,
+            )
         return
 
     # Bind the listening socket BEFORE building the app. With ``--port 0`` the
@@ -343,7 +363,8 @@ def serve(
         )
 
     try:
-        server.run(sockets=[sock])
+        with _background_codegen_warmup(enabled=not no_warm_cache, log=log):
+            server.run(sockets=[sock])
     except KeyboardInterrupt:  # pragma: no cover - interactive Ctrl+C
         pass
     finally:
@@ -351,6 +372,27 @@ def serve(
     if not server.started:
         # Mirror ``uvicorn.run``: a server that never came up is a failure.
         raise typer.Exit(code=_STARTUP_FAILURE)
+
+
+@contextlib.contextmanager
+def _background_codegen_warmup(*, enabled: bool, log: logging.Logger) -> Iterator[None]:
+    """Generate ANDES's code in a child process while the server runs, if it needs
+    it, and end the child when the server stops.
+
+    Never stops the server: a warm-up that cannot start is logged and skipped.
+    """
+    warm: BackgroundWarm | None = None
+    version = _andes_version()
+    if enabled and version != "unknown":
+        try:
+            warm = start_background_warm(version, log)
+        except Exception as exc:  # noqa: BLE001 — an optimisation must not stop the server
+            log.warning("could not warm the ANDES generated code: %s", exc)
+    try:
+        yield
+    finally:
+        if warm is not None:
+            warm.stop()
 
 
 def _bind_listen_socket(host: str, port: int) -> socket.socket:
@@ -540,17 +582,18 @@ def warm_cache(
     and are shared across all ANDES cases; subsequent ``andes.load``
     calls skip the cold-start prep.
 
-    The brainstorm's 5-minute first-result success criterion assumes this
-    has been run; without it, the first PF after a fresh install pays the
-    multi-minute prep cost. We recommend running this once during install:
+    Running this by hand is optional. Without a warm cache, the first case
+    you load pays the multi-minute prep cost, so ``tensa serve`` starts this
+    command in a background process when the cache is missing or has not been
+    checked against the installed ANDES (``--no-warm-cache`` skips that). Run
+    it yourself to have the cache ready before the server starts:
 
         pip install tensa
         tensa warm-cache
         tensa serve
 
-    The cache is rebuilt automatically when ANDES is upgraded — but only
-    on the next ``andes.load``. Run ``warm-cache`` again after upgrading
-    to keep the first-result latency low.
+    After an ANDES upgrade ANDES regenerates the stale code on the next
+    ``andes.load``; the check at startup, or this command, does it ahead of time.
     """
     logging.basicConfig(
         level=logging.INFO,
@@ -569,8 +612,10 @@ def warm_cache(
     andes.prepare(quick=quick, incremental=incremental)
     elapsed = _time.monotonic() - started
 
-    cache_dir = Path.home() / ".andes" / "pycode"
+    cache_dir = pycode_dir()
     if cache_dir.exists():
+        # ``tensa serve`` skips its background check for a cache stamped like this.
+        mark_cache_checked(_andes_version(), cache_dir)
         n_files = sum(1 for _ in cache_dir.iterdir() if _.is_file())
         size_bytes = sum(p.stat().st_size for p in cache_dir.iterdir() if p.is_file())
         log.info(

@@ -49,6 +49,8 @@ def test_default_port_zero_accepts_the_real_origin(tmp_path: Path) -> None:
             "127.0.0.1",
             "--workspace",
             str(workspace),
+            # No ANDES here, so no need to check its generated code.
+            "--no-warm-cache",
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,

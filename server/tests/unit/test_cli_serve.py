@@ -55,8 +55,34 @@ class _FakeServer:
         self.started = type(self).start_ok
 
 
+class _FakeWarm:
+    """Stands in for the background ``warm-cache`` child: records ``stop``."""
+
+    def __init__(self) -> None:
+        self.stopped = False
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
 @pytest.fixture
-def fake_server(monkeypatch: pytest.MonkeyPatch) -> type[_FakeServer]:
+def warm_starts(monkeypatch: pytest.MonkeyPatch) -> list[_FakeWarm]:
+    """Replace the background warm-up, which would start a real process, with a
+    recorder: one ``_FakeWarm`` per start."""
+    started: list[_FakeWarm] = []
+
+    def _start(andes_version: str, log: Any) -> _FakeWarm:
+        started.append(_FakeWarm())
+        return started[-1]
+
+    monkeypatch.setattr(cli, "start_background_warm", _start)
+    return started
+
+
+@pytest.fixture
+def fake_server(
+    monkeypatch: pytest.MonkeyPatch, warm_starts: list[_FakeWarm]
+) -> type[_FakeServer]:
     _FakeServer.instances = []
     _FakeServer.start_ok = True
     monkeypatch.setattr(cli.uvicorn, "Server", _FakeServer)
@@ -284,6 +310,116 @@ def test_serve_prints_the_real_url(
     port = fake_server.instances[0].bound_port_during_run
     assert f"serving http://127.0.0.1:{port}/" in caplog.text
     assert "os-assigned" not in caplog.text
+
+
+# ------------------------------------------------------ generated-code warm-up
+
+
+def test_serve_warms_the_generated_code_while_the_server_runs_and_stops_it_after(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+    warm_starts: list[_FakeWarm],
+) -> None:
+    during_run: list[bool] = []
+    run = fake_server.run
+
+    def _run(self: _FakeServer, sockets: list[socket.socket] | None = None) -> None:
+        during_run.extend(w.stopped for w in warm_starts)
+        run(self, sockets)
+
+    monkeypatch.setattr(fake_server, "run", _run)
+    result = runner.invoke(cli.app, ["serve", "--workspace", str(tmp_path / "ws")])
+    assert result.exit_code == 0, result.output
+    # Started before the server ran, and still running while it did.
+    assert during_run == [False]
+    (warm,) = warm_starts
+    assert warm.stopped
+
+
+def test_serve_ends_the_warm_up_child_when_the_server_dies(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+    warm_starts: list[_FakeWarm],
+) -> None:
+    def _crash(self: _FakeServer, sockets: list[socket.socket] | None = None) -> None:
+        raise RuntimeError("the server crashed")
+
+    monkeypatch.setattr(fake_server, "run", _crash)
+    result = runner.invoke(cli.app, ["serve", "--workspace", str(tmp_path / "ws")])
+    assert result.exit_code == 1
+    (warm,) = warm_starts
+    assert warm.stopped
+
+
+def test_serve_checks_the_cache_against_the_installed_andes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+) -> None:
+    versions: list[str] = []
+    monkeypatch.setattr(cli, "_andes_version", lambda: "9.9.9")
+    monkeypatch.setattr(cli, "start_background_warm", lambda v, log: versions.append(v))
+    assert runner.invoke(cli.app, ["serve", "--workspace", str(tmp_path / "ws")]).exit_code == 0
+    assert versions == ["9.9.9"]
+
+
+def test_serve_with_no_warm_cache_starts_no_child(
+    tmp_path: Path, fake_server: type[_FakeServer], warm_starts: list[_FakeWarm]
+) -> None:
+    result = runner.invoke(
+        cli.app, ["serve", "--workspace", str(tmp_path / "ws"), "--no-warm-cache"]
+    )
+    assert result.exit_code == 0, result.output
+    assert warm_starts == []
+
+
+def test_serve_does_not_warm_an_andes_it_cannot_find(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+    warm_starts: list[_FakeWarm],
+) -> None:
+    monkeypatch.setattr(cli, "_andes_version", lambda: "unknown")
+    assert runner.invoke(cli.app, ["serve", "--workspace", str(tmp_path / "ws")]).exit_code == 0
+    assert warm_starts == []
+
+
+def test_a_warm_up_that_cannot_start_does_not_stop_the_server(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def _boom(andes_version: str, log: Any) -> None:
+        raise PermissionError("cannot read the cache directory")
+
+    monkeypatch.setattr(cli, "start_background_warm", _boom)
+    with caplog.at_level("WARNING", logger="tensa.serve"):
+        result = runner.invoke(cli.app, ["serve", "--workspace", str(tmp_path / "ws")])
+    assert result.exit_code == 0, result.output
+    assert fake_server.instances[0].started
+    assert "cannot read the cache directory" in caplog.text
+
+
+def test_serve_reload_warms_the_generated_code_around_the_reloader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+    warm_starts: list[_FakeWarm],
+) -> None:
+    during_run: list[bool] = []
+    monkeypatch.setattr(
+        cli.uvicorn, "run", lambda *a, **kw: during_run.extend(w.stopped for w in warm_starts)
+    )
+    with mock.patch.dict(os.environ):
+        result = runner.invoke(
+            cli.app, ["serve", "--workspace", str(tmp_path / "ws"), "--reload"]
+        )
+    assert result.exit_code == 0, result.output
+    assert during_run == [False]
+    assert warm_starts[0].stopped
 
 
 # ------------------------------------------------------------ sweep workers

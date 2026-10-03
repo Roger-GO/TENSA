@@ -36,7 +36,7 @@ The fastest path — the package on PyPI ships with the UI already built, so thi
 
 ```bash
 pip install tensa
-tensa warm-cache                                   # one time, about 30 s
+tensa warm-cache                                   # optional, about 30 s (serve does it in the background if skipped)
 tensa serve --workspace ~/tensa-cases --port 8000 --open
 ```
 
@@ -60,7 +60,8 @@ pnpm install
 pnpm build
 cd ..
 
-# 3. Warm the ANDES symbolic cache (one time, about 30 s; rerun after upgrading ANDES)
+# 3. Warm the ANDES symbolic cache (optional, about 30 s; serve does it in the background
+#    when it is missing, and again after an ANDES upgrade)
 tensa warm-cache
 
 # 4. Serve the UI and API on one port, then open the browser
@@ -85,7 +86,7 @@ pnpm install
 pnpm build
 cd ..
 
-# 3. Warm the ANDES symbolic cache
+# 3. Warm the ANDES symbolic cache (optional, as above)
 tensa warm-cache
 
 # 4. Serve the UI and API on one port, then open the browser
