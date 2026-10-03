@@ -144,6 +144,64 @@ def _ignore_sigint() -> None:
         signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
+def _warm_andes() -> None:
+    """Import what the first case load would otherwise import, while the worker
+    has nothing else to do.
+
+    A fresh worker has not imported ANDES, so its first ``load_case`` pays for
+    ``import andes``, for every model module the System builds, and for pandas,
+    scipy and openpyxl, which the case readers pull in: about 1.0 s for IEEE 14,
+    against 0.2 s for the same load once they are in. The web UI opens a session
+    when the page loads, seconds before anyone picks a case, so imports done here
+    cost the user nothing.
+
+    The generated code in ``~/.andes/pycode`` is left alone on purpose. ANDES
+    reloads it for every System it builds, so importing it here saves nothing.
+
+    Best effort: a failure only means the first load imports whatever is missing,
+    and reports the real error itself if there is one.
+    """
+    import importlib
+    import logging
+
+    try:
+        import andes.models
+        import andes.routines
+
+        # The modules ``System()`` imports to build its models and routines: the two
+        # lists ANDES's own registry walks (a test fails if an upgrade renames them).
+        for module_name, _classes in andes.models.file_classes:
+            importlib.import_module(f"andes.models.{module_name}")
+        for module_name in andes.routines.all_routines:
+            importlib.import_module(f"andes.routines.{module_name}")
+    except Exception as exc:  # noqa: BLE001 — warming is an optimisation, never a failure
+        logging.getLogger("tensa.worker").warning(
+            "could not pre-import ANDES (%s: %s); the first case load will import it",
+            exc.__class__.__name__,
+            exc,
+        )
+        return
+    for name in ("pandas", "scipy.sparse.linalg", "openpyxl"):
+        with contextlib.suppress(ImportError):
+            importlib.import_module(name)
+
+
+def _warm_up_if_idle(ctrl: Connection) -> None:
+    """Run :func:`_warm_andes`, unless a command is already waiting.
+
+    A command that arrives before the worker is up (a script that creates a
+    session and loads a case at once) pulls in what it needs itself, and a warm-up
+    first would only delay it. Called before the first ``recv``, so a command
+    that arrives during the warm-up waits for it, at most a second.
+    """
+    try:
+        if ctrl.poll(0):
+            return
+    except (EOFError, OSError):
+        return
+    _warm_andes()
+
+
 def _normalized_path(path: str) -> str:
     """``realpath`` plus ``normcase``: two spellings of one location (symlinks,
     and on Windows letter case and slashes) compare equal."""
@@ -1445,6 +1503,9 @@ def worker_main(
     owner marker so a later server can tell the dir was abandoned (see
     ``core/session_dirs.py``).
 
+    Unless a command is already waiting, the worker imports ANDES before it reads
+    the first one (``_warm_andes``), so the first case load does not pay for it.
+
     ``abort_event`` is the session's ``multiprocessing.Event``. A sub-worker of
     a parallel sweep gets a ``PipeAbortEvent`` instead, which has only the
     ``is_set`` and ``wait`` that ``run_sweep_iteration`` uses (see
@@ -1455,6 +1516,10 @@ def worker_main(
     _ignore_sigint()
     _set_parent_death_signal()
     _spawn_orphan_detector()
+    # Import ANDES now, before the first ``recv``, so the first load does not. This
+    # runs ahead of the audit hook on purpose: it reads only library files, and the
+    # hook would log some of them (the system's ``mime.types``) as strays.
+    _warm_up_if_idle(ctrl)
     _install_strict_fs_audit_hook(workspace)
 
     # ``workspace`` is forwarded so the wrapper's snapshot methods
