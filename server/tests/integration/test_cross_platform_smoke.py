@@ -1,12 +1,13 @@
 """Cross-platform smoke test: the shortest real path through the whole stack.
 
 Starts an actual ``tensa serve`` process, lets it spawn an actual worker, loads
-IEEE 14, runs a power flow and a short time-domain simulation over HTTP, then
-closes the session. CI runs it (``pytest -m smoke``) on Linux, macOS and
-Windows alongside the unit tests; the full integration suite only runs on
-Linux. Everything that differs between operating systems sits on this path:
-the CLI entry point and socket bind, worker process creation and shutdown,
-ANDES code generation on first use, and the numerical stack under ANDES.
+IEEE 14, runs a power flow and a short time-domain simulation over HTTP, runs a
+sensitivity sweep on sub-workers, then closes the session. CI runs it
+(``pytest -m smoke``) on Linux, macOS and Windows alongside the unit tests; the
+full integration suite only runs on Linux. Everything that differs between
+operating systems sits on this path: the CLI entry point and socket bind, worker
+and sub-worker process creation and shutdown, ANDES code generation on first use,
+and the numerical stack under ANDES.
 
 The assertions are deliberately few and loose. They say "the pipeline works
 here", not "the numbers match to the last digit"; numerical behaviour is
@@ -15,6 +16,7 @@ covered by the rest of the suite.
 
 from __future__ import annotations
 
+import json
 import os
 import queue
 import re
@@ -26,9 +28,11 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
+from websockets.sync.client import connect
 
 pytestmark = [pytest.mark.integration, pytest.mark.smoke]
 
@@ -42,8 +46,11 @@ _REQUEST_TIMEOUT_S = 600.0
 
 
 @contextmanager
-def _running_server(workspace: Path, cwd: Path) -> Iterator[str]:
-    """Run ``python -m tensa serve`` on an OS-assigned port; yield its base URL."""
+def _running_server(workspace: Path, cwd: Path, *serve_args: str) -> Iterator[str]:
+    """Run ``python -m tensa serve`` on an OS-assigned port; yield its base URL.
+
+    ``serve_args`` are further options for ``tensa serve``.
+    """
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -54,6 +61,7 @@ def _running_server(workspace: Path, cwd: Path) -> Iterator[str]:
             "127.0.0.1",
             "--workspace",
             str(workspace),
+            *serve_args,
         ],
         # The server logs to stderr. Windows would otherwise decode the pipe
         # with the ANSI code page.
@@ -118,6 +126,21 @@ def _ieee14_files() -> tuple[Path, Path]:
     return cases / "ieee14.raw", cases / "ieee14.dyr"
 
 
+def _sweep_rows(base: str, sid: str, sweep_id: str) -> list[dict[str, Any]]:
+    """The rows of a finished sweep, as its WebSocket replays them."""
+    url = base.replace("http://", "ws://", 1) + f"/api/ws/{sid}/sweep/{sweep_id}"
+    rows: list[dict[str, Any]] = []
+    with connect(url, open_timeout=30) as ws:
+        while True:
+            event = json.loads(ws.recv(timeout=30))
+            assert event["type"] != "error", event
+            if event["type"] == "iteration":
+                rows.append(event["result"])
+            elif event["type"] == "finished":
+                assert event["state"] == "completed", event
+                return rows
+
+
 def test_serve_load_pflow_tds(tmp_path: Path) -> None:
     pytest.importorskip("andes")
     workspace = tmp_path / "ws"
@@ -126,7 +149,9 @@ def test_serve_load_pflow_tds(tmp_path: Path) -> None:
         shutil.copy2(src, workspace / src.name)
 
     with (
-        _running_server(workspace, cwd=tmp_path) as base,
+        # Two sweep workers whatever the CPU count: the default is one on a
+        # one-CPU machine, which would run the sweep below on the session's worker.
+        _running_server(workspace, tmp_path, "--sweep-workers", "2") as base,
         httpx.Client(base_url=f"{base}/api", timeout=_REQUEST_TIMEOUT_S) as client,
     ):
         resp = client.post("/sessions")
@@ -163,10 +188,12 @@ def test_serve_load_pflow_tds(tmp_path: Path) -> None:
         assert tds["final_t"] == pytest.approx(0.5, abs=0.02)
         assert tds["callpert_count"] > 0
 
-        # A sweep of four values runs on sub-workers the server spawns (two on any
-        # machine with two CPUs or more, the session's own worker on one), so
-        # this is where their start, their pipes and their shutdown meet each
-        # operating system. The sweep ends "done" and frees the session.
+        # A sweep of four values runs on two sub-workers the server spawns, so this
+        # is where their start, their pipes and their shutdown meet each operating
+        # system. The server falls back to the session's own worker when it cannot
+        # start them and records a worker's failure as an error row, so a sweep that
+        # ends "done" proves neither. Every row must be clean, and the session's own
+        # System untouched: a sweep run on its worker ends on the last value.
         resp = client.post(f"/sessions/{sid}/snapshot", json={"name": "smoke"})
         assert resp.status_code == 200, resp.text
         resp = client.post(
@@ -183,12 +210,21 @@ def test_serve_load_pflow_tds(tmp_path: Path) -> None:
         )
         assert resp.status_code == 202, resp.text
         assert resp.json()["total"] == 4
+        sweep_id = resp.json()["sweep_id"]
         job_url = f"/sessions/{sid}/jobs/{resp.json()['job_id']}"
         deadline = time.monotonic() + _REQUEST_TIMEOUT_S
         while (record := client.get(job_url).json())["status"] in {"pending", "running"}:
             assert time.monotonic() < deadline, f"the sweep never finished: {record}"
             time.sleep(0.25)
         assert record["status"] == "done", record
+        rows = _sweep_rows(base, sid, sweep_id)
+        assert [row["iteration"] for row in rows] == [0, 1, 2, 3]
+        assert rows[-1]["parameter_value"] == pytest.approx(0.25)
+        assert [row["error"] for row in rows] == [None] * 4, rows
+        assert all(row["converged"] for row in rows), rows
+        resp = client.get(f"/sessions/{sid}/disturbances")
+        assert resp.status_code == 200, resp.text
+        assert [d["tc"] for d in resp.json()["disturbances"]] == [0.2]
         assert client.get(f"/sessions/{sid}/topology").status_code == 200
 
         # Closing the session stops the worker.
