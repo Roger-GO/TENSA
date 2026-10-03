@@ -6,9 +6,9 @@ dropped from the matrix while its trove classifier stayed, or if the workflow
 asked ``scripts/ci-matrix.sh`` for a stage the script does not have. The release
 workflow (``publish.yml``) is checked the same way: it must wait for the test
 workflows and must build, check, and smoke-test the packages before uploading
-them. The acceptance job is checked for being real (a placeholder that only echoed
-once passed as green). These tests read the repository files directly, so they skip
-when the tests run away from a checkout.
+them. The acceptance job and the web workflow's end-to-end job are checked for
+being real (a placeholder that only echoed once passed as green). These tests read
+the repository files directly, so they skip when the tests run away from a checkout.
 """
 
 from __future__ import annotations
@@ -28,6 +28,8 @@ _REPO_ROOT = _SERVER_DIR.parent
 _WORKFLOWS = _REPO_ROOT / ".github" / "workflows"
 _WORKFLOW = _WORKFLOWS / "server.yml"
 _SCRIPT = _REPO_ROOT / "scripts" / "ci-matrix.sh"
+_E2E_DIR = _REPO_ROOT / "web" / "tests" / "e2e"
+_PLAYWRIGHT_CONFIG = _REPO_ROOT / "web" / "playwright.config.ts"
 
 _REQUIRED_OSES = {"ubuntu-latest", "macos-14", "windows-latest"}
 
@@ -146,6 +148,58 @@ def test_the_acceptance_stage_selects_the_acceptance_marker() -> None:
     all_stage = re.search(r"^\s*all\)\n(.*?)^\s*;;", script, re.MULTILINE | re.DOTALL)
     assert all_stage is not None
     assert "acceptance" not in all_stage.group(1)
+
+
+def _step_index(steps: list[dict[str, Any]], needle: str) -> int:
+    """Position of the one step whose command contains ``needle``."""
+    (index,) = [i for i, step in enumerate(steps) if needle in step.get("run", "")]
+    return index
+
+
+def test_the_web_workflow_runs_the_e2e_suite_against_a_started_substrate() -> None:
+    workflow = _load(_WORKFLOWS / "web.yml")
+    steps = workflow["jobs"]["e2e"]["steps"]
+    run = "\n".join(step["run"] for step in steps if "run" in step)
+    assert "playwright install" in run
+    # The substrate looks for web/dist when it starts, so the UI is built first,
+    # and the tests only run once the server is up.
+    build = _step_index(steps, "pnpm build")
+    serve = _step_index(steps, "tensa serve")
+    tests = _step_index(steps, "pnpm test:e2e")
+    assert build < serve < tests
+    # The tests use the UI the substrate serves, not a Vite dev server.
+    env = steps[tests]["env"]
+    assert env["E2E_NO_WEBSERVER"] == "1"
+    assert env["E2E_BASE_URL"].startswith("http://127.0.0.1:")
+    # The suite drives the real server, so a server-only change must run it.
+    for event in ("push", "pull_request"):
+        assert "server/**" in _triggers(workflow)[event]["paths"], event
+
+
+def _read_required(path: Path) -> str:
+    """Text of a repository file; a missing one fails in a checkout."""
+    if not _WORKFLOW.is_file():
+        pytest.skip("the repository files are not next to the tests")
+    assert path.is_file(), f"{path.relative_to(_REPO_ROOT)} is missing"
+    return path.read_text(encoding="utf-8")
+
+
+def test_no_e2e_file_depends_on_the_removed_auth_token() -> None:
+    """The app has no authentication, so ``ANDES_TEST_TOKEN`` and ``#token=`` lead nowhere."""
+    _read_required(_PLAYWRIGHT_CONFIG)
+    specs = sorted(_E2E_DIR.glob("*.spec.ts"))
+    assert specs, "no Playwright specs found"
+    for path in [_PLAYWRIGHT_CONFIG, *specs]:
+        text = path.read_text(encoding="utf-8")
+        assert "ANDES_TEST_TOKEN" not in text, path.name
+        assert "#token=" not in text, path.name
+
+
+def test_the_flagship_e2e_spec_is_not_skipped() -> None:
+    spec = _read_required(_E2E_DIR / "load-pf-flow.spec.ts")
+    assert re.search(r"^test\(", spec, re.MULTILINE)
+    assert "test.fixme" not in spec
+    assert "test.skip" not in spec
 
 
 def test_the_test_workflows_can_be_called_from_the_release_workflow() -> None:

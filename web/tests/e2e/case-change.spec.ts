@@ -3,9 +3,9 @@
  *
  * Encodes the Phase 1 smoke Issue 2 reproducer:
  *
- *   paste token → load IEEE 14 → click Change case → confirm → pick
- *   kundur → click Load → assert substrate's topology now reflects
- *   kundur (different bus count from IEEE 14).
+ *   load IEEE 14 → click Change case → confirm → pick kundur → click
+ *   Load → assert substrate's topology now reflects kundur (different bus
+ *   count from IEEE 14).
  *
  * The bug it guards against: pre-fix, the picker held its own
  * ``useCreateSession`` instance (separate from the one ``CaseNav`` fired
@@ -15,29 +15,21 @@
  * loser, so the next ``POST /case`` 404'd silently. The fix
  * consolidates session creation to a single App-level driver.
  *
- * Like the other e2e specs, this runs against a real substrate + Vite
- * dev server. The Playwright config's ``webServer`` block starts Vite;
- * the substrate must be running independently with the
- * ``ANDES_TEST_TOKEN`` env var set. To run locally:
+ * Like the other e2e specs, this runs against a real substrate. A fresh
+ * workspace is seeded with ``ieee14_full.xlsx`` and ``kundur_full.xlsx``.
  *
- *   1. cp ~/andes-project/.venv/lib/python3.12/site-packages/andes/cases/{ieee14,kundur}/* \
- *        web/tests/e2e/fixtures/
- *   2. tensa serve --workspace web/tests/e2e/fixtures \
- *        --bind-port 8765 --bind-host 127.0.0.1
- *   3. ANDES_TEST_TOKEN=$(cat ~/.tensa/run-<pid>.token) \
- *        E2E_NO_WEBSERVER=1 pnpm test:e2e tests/e2e/case-change.spec.ts
- *   4. Remove the ``.fixme`` qualifier on the test below.
+ * Skipped with ``test.fixme`` until it is ported. It was written against the
+ * first UI (an auth-token modal and a file-picker form). The UI has no
+ * authentication now and loads cases from the "Saved cases" list, so the
+ * selectors below no longer match. ``load-pf-flow.spec.ts`` shows the current
+ * way to open a case, and ``playwright.config.ts`` how to start the substrate.
  */
 import { test, expect } from '@playwright/test';
 
 test.fixme('change-case: load IEEE 14 → change to kundur → substrate sees kundur', async ({
   page,
 }) => {
-  const token = process.env.ANDES_TEST_TOKEN;
-  if (!token) throw new Error('Set ANDES_TEST_TOKEN before running this test');
-
-  await page.goto(`/#token=${token}`);
-  await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 10_000 });
+  await page.goto('/');
 
   // ---- Step 1: load IEEE 14 ---------------------------------------------
   await page.getByRole('option', { name: 'ieee14.raw' }).click();
@@ -82,11 +74,7 @@ test.fixme('change-case: load IEEE 14 → change to kundur → substrate sees ku
 test.fixme('change-case: re-picking the same file is a no-op (no spurious POST)', async ({
   page,
 }) => {
-  const token = process.env.ANDES_TEST_TOKEN;
-  if (!token) throw new Error('Set ANDES_TEST_TOKEN before running this test');
-
-  await page.goto(`/#token=${token}`);
-  await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 10_000 });
+  await page.goto('/');
 
   // Load IEEE 14 once.
   await page.getByRole('option', { name: 'ieee14.raw' }).click();

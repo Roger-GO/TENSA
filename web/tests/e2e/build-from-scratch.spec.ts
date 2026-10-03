@@ -1,29 +1,18 @@
 /**
- * Flagship v0.1.x e2e test (Unit 8). Encodes the new wedge-demo
- * critical path:
+ * Build-from-scratch e2e test. Encodes this critical path:
  *
- *   paste token → New system → add Bus 1, 2, 3 → add Lines 1-2, 2-3
+ *   New system → add Bus 1, 2, 3 → add Lines 1-2, 2-3
  *     → add Slack on Bus 1, PV on Bus 2, PQ load on Bus 3
  *     → Run PF → assert overlays + 3-row table.
  *
- * Like `load-pf-flow.spec.ts`, this runs against a real substrate +
- * Vite dev server. The Playwright config's `webServer` block starts
- * Vite; the substrate must be running independently with the
- * `ANDES_TEST_TOKEN` env var pointing at its token.
+ * Like `load-pf-flow.spec.ts`, it runs against a real substrate. The workspace
+ * can be empty, since the test never loads a file.
  *
- * The test is `test.fixme()` by default so CI runs it as expected-fail
- * until substrate orchestration in a fixture workspace lands. To run
- * locally:
- *
- *   1. mkdir -p /tmp/andes-build-test && touch /tmp/andes-build-test/.keep
- *      (the workspace can be empty — this test never loads a file)
- *   2. tensa serve --workspace /tmp/andes-build-test \
- *        --bind-port 8765 --bind-host 127.0.0.1 \
- *        --allow-origin http://127.0.0.1:5173
- *   3. ANDES_TEST_TOKEN=$(cat ~/.tensa/run-<pid>.token) \
- *        VITE_ANDES_PORT=8765 E2E_NO_WEBSERVER=1 pnpm test:e2e \
- *        tests/e2e/build-from-scratch.spec.ts
- *   4. Remove the `.fixme` qualifier on the test below to exercise it.
+ * Skipped with `test.fixme()` until it is ported. It was written against the
+ * first UI (an auth-token modal and an add-element panel with its own
+ * selectors). The UI has no authentication now, so the first steps and the
+ * selectors below need updating. `playwright.config.ts` says how to start the
+ * substrate.
  */
 import { test, expect, type Page } from '@playwright/test';
 
@@ -64,12 +53,7 @@ async function addElement(
 }
 
 test.fixme('flagship: build a 3-bus system from scratch + run PF', async ({ page }) => {
-  const token = process.env.ANDES_TEST_TOKEN;
-  if (!token) throw new Error('Set ANDES_TEST_TOKEN before running this test');
-
-  // URL-fragment auto-auth.
-  await page.goto(`/#token=${token}`);
-  await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 10_000 });
+  await page.goto('/');
 
   // Click "+ New system".
   await page.getByTestId('new-system-button').click();

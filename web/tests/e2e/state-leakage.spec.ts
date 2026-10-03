@@ -21,28 +21,21 @@
  *  6. Close the dialog (Esc); focus returns to the trigger.
  *
  * Like the other e2e specs in this directory, the test runs against a
- * real substrate + Vite dev server. Mark as ``.fixme`` so CI skips
- * it until ANDES_TEST_TOKEN is wired (mirrors `case-change.spec.ts`'s
- * convention). To run locally:
+ * real substrate.
  *
- *   1. cp ~/andes-project/.venv/lib/python3.12/site-packages/andes/cases/ieee14/* \
- *        web/tests/e2e/fixtures/
- *   2. tensa serve --workspace web/tests/e2e/fixtures \
- *        --bind-port 8765 --bind-host 127.0.0.1
- *   3. ANDES_TEST_TOKEN=$(cat ~/.tensa/run-<pid>.token) \
- *        E2E_NO_WEBSERVER=1 pnpm test:e2e tests/e2e/state-leakage.spec.ts
- *   4. Remove the ``.fixme`` qualifier on the tests below.
+ * Skipped with ``test.fixme`` until they are ported. They were written
+ * against the first UI (an auth-token modal and a file-picker form). The UI
+ * has no authentication now and loads cases from the "Saved cases" list, so
+ * the selectors below no longer match. ``load-pf-flow.spec.ts`` shows the
+ * current way to open a case, and ``playwright.config.ts`` how to start the
+ * substrate.
  */
 import { test, expect } from '@playwright/test';
 
 test.fixme('state-leakage: typing in snapshot-name input does not contaminate the bus filter', async ({
   page,
 }) => {
-  const token = process.env.ANDES_TEST_TOKEN;
-  if (!token) throw new Error('Set ANDES_TEST_TOKEN before running this test');
-
-  await page.goto(`/#token=${token}`);
-  await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 10_000 });
+  await page.goto('/');
 
   // Load IEEE 14 so the SLD + bus filter are present.
   await page.getByRole('option', { name: 'ieee14.raw' }).click();
@@ -75,11 +68,7 @@ test.fixme('state-leakage: typing in snapshot-name input does not contaminate th
 });
 
 test.fixme('state-leakage: ? key inside dialog does not open cheatsheet', async ({ page }) => {
-  const token = process.env.ANDES_TEST_TOKEN;
-  if (!token) throw new Error('Set ANDES_TEST_TOKEN before running this test');
-
-  await page.goto(`/#token=${token}`);
-  await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 10_000 });
+  await page.goto('/');
 
   // Load IEEE 14 (any case will do; we just need the topbar's
   // snapshot button enabled).
@@ -104,11 +93,7 @@ test.fixme('state-leakage: ? key inside dialog does not open cheatsheet', async 
 });
 
 test.fixme('state-leakage: focus trap returns focus to the trigger on close', async ({ page }) => {
-  const token = process.env.ANDES_TEST_TOKEN;
-  if (!token) throw new Error('Set ANDES_TEST_TOKEN before running this test');
-
-  await page.goto(`/#token=${token}`);
-  await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 10_000 });
+  await page.goto('/');
 
   await page.getByRole('option', { name: 'ieee14.raw' }).click();
   await page.getByRole('button', { name: /^Load$/ }).click();

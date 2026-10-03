@@ -2,35 +2,24 @@
  * Flagship v0.2 e2e test (Unit 8). Encodes the wedge-demo critical path
  * for TDS streaming:
  *
- *   paste token → load IEEE 14 → switch to DisturbancePanel → add a
- *   fault → switch to TdsConfigPanel → set tf=2 + vars=[bus_v,
- *   gen_state] → click Run TDS → watch frames stream into the plot →
- *   click abort mid-run → verify aborted state.
+ *   load IEEE 14 → switch to DisturbancePanel → add a fault → switch to
+ *   TdsConfigPanel → set tf=2 + vars=[bus_v, gen_state] → click Run TDS →
+ *   watch frames stream into the plot → click abort mid-run → verify
+ *   aborted state.
  *
- * Requires a running ``tensa serve`` substrate AND a Vite dev
- * server. The Playwright config's ``webServer`` block starts the Vite
- * dev server, but the substrate must be running independently
- * (typically on ``http://127.0.0.1:8765``). Set ``ANDES_TEST_TOKEN`` to
- * the value from ``~/.tensa/run-<pid>.token`` before running.
+ * It runs against a real substrate. The unit tests in
+ * ``tests/unit/components/{tds,plots,disturbance,shell}/`` cover the same
+ * surfaces in isolation; this test exists to verify the integration
+ * end-to-end.
  *
- * The test is ``test.fixme()`` by default so CI runs it as expected-fail
- * until the operational glue (substrate orchestration in a fixture
- * workspace containing ``ieee14.raw``) is in place. The unit tests in
- * ``tests/unit/components/{tds,plots,disturbance,shell}/`` cover the
- * same surfaces in isolation; this test exists to verify the
- * integration end-to-end on a real substrate. To run locally:
+ * Skipped with ``test.fixme`` until it is ported. It was written against the
+ * first UI (an auth-token modal and a file-picker form). The UI has no
+ * authentication now and loads cases from the "Saved cases" list, so the
+ * selectors below no longer match. ``load-pf-flow.spec.ts`` shows the current
+ * way to open a case, and ``playwright.config.ts`` how to start the substrate.
  *
- *   1. cp ~/andes-project/.venv/lib/python3.12/site-packages/andes/cases/ieee14/ieee14.raw \
- *        web/tests/e2e/fixtures/
- *   2. tensa serve --workspace web/tests/e2e/fixtures \
- *        --bind-port 8765 --bind-host 127.0.0.1
- *   3. ANDES_TEST_TOKEN=$(cat ~/.tensa/run-<pid>.token) \
- *        E2E_NO_WEBSERVER=1 pnpm test:e2e
- *   4. Remove the ``.fixme`` qualifier on the test below.
- *
- * Manual smoke equivalent (when Playwright orchestration isn't
- * available): walk the same steps in the dev UI; assert that the run
- * status badge shows "Aborted at t=…" and the plot panel retains the
+ * Manual smoke equivalent: walk the same steps in the UI; assert that the
+ * run status badge shows "Aborted at t=…" and the plot panel retains the
  * partial trace.
  */
 import { test, expect } from '@playwright/test';
@@ -38,12 +27,7 @@ import { test, expect } from '@playwright/test';
 test.fixme('flagship: load IEEE 14 → fault at t=1 → run TDS → abort mid-run → verify aborted state', async ({
   page,
 }) => {
-  const token = process.env.ANDES_TEST_TOKEN;
-  if (!token) throw new Error('Set ANDES_TEST_TOKEN before running this test');
-
-  // URL-fragment fast path so the auth modal autosubmits.
-  await page.goto(`/#token=${token}`);
-  await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 10_000 });
+  await page.goto('/');
 
   // Load IEEE 14 from the workspace.
   await page.getByRole('option', { name: 'ieee14.raw' }).click();

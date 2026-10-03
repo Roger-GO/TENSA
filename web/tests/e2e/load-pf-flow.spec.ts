@@ -1,61 +1,92 @@
 /**
- * Flagship v0.1 e2e test (Unit 9). Encodes the wedge-demo critical path:
+ * Flagship e2e test: the shortest path from an empty workspace to a result.
  *
- *   paste token → load IEEE 14 → run PF → assert overlays + table.
+ *   open the app -> load IEEE 14 -> run PF -> SLD overlay + Buses table
  *
- * Requires a running `tensa serve` substrate AND a Vite dev server
- * — the Playwright config's `webServer` block starts the Vite dev
- * server, but the substrate must be running independently (typically
- * on `http://127.0.0.1:8765`). Set `ANDES_TEST_TOKEN` to the value
- * from `~/.tensa/run-<pid>.token` before running.
- *
- * The test is `test.fixme()` by default so CI runs it as expected-fail
- * until the operational glue (substrate orchestration in a fixture
- * workspace containing `ieee14.raw`) is in place. The unit tests in
- * `tests/unit/components/{inspector,pflow,sld}/` cover the same
- * surfaces in isolation; this test exists to verify the integration
- * end-to-end on a real substrate. To run locally:
- *
- *   1. cp ~/andes-project/.venv/lib/python3.12/site-packages/andes/cases/ieee14/ieee14.raw \
- *        web/tests/e2e/fixtures/
- *   2. tensa serve --workspace web/tests/e2e/fixtures \
- *        --bind-port 8765 --bind-host 127.0.0.1
- *   3. ANDES_TEST_TOKEN=$(cat ~/.tensa/run-<pid>.token) \
- *        E2E_NO_WEBSERVER=1 pnpm test:e2e
- *   4. Remove the `.fixme` qualifier on the test below.
+ * It drives the real UI against a real `tensa serve` (nothing is mocked), so it
+ * is the one test that checks the UI, the HTTP API, the worker process and ANDES
+ * agree with each other. `playwright.config.ts` says how to start the substrate.
+ * There is no authentication to set up. A fresh workspace is seeded with
+ * `ieee14_full.xlsx` when the server starts, so the test needs no fixtures. The
+ * unit tests under `tests/unit/` cover the same components in isolation.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
-test.fixme('flagship: load IEEE 14 → run PF → annotated SLD + 14-row table', async ({ page }) => {
-  const token = process.env.ANDES_TEST_TOKEN;
-  if (!token) throw new Error('Set ANDES_TEST_TOKEN before running this test');
+const CASE_FILE = 'ieee14_full.xlsx';
+const BUS_COUNT = 14;
 
-  // Use the URL-fragment fast path so the modal autosubmits.
-  await page.goto(`/#token=${token}`);
+/** Key under which the UI remembers that the first-run coach was dismissed. */
+const FIRST_RUN_COACH_KEY = 'tensa:first-run-coach-v1';
 
-  // The modal should disappear after the smoke check resolves.
-  await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 10_000 });
+/** The V (pu) column is the third cell of a Buses table row (idx, name, V, ...). */
+function busVoltageCell(page: Page, busIdx: number) {
+  return page.getByTestId(`buses-grid-row-${busIdx}`).getByRole('cell').nth(2);
+}
 
-  // Pick the workspace file and click Load.
-  await page.getByRole('option', { name: 'ieee14.raw' }).click();
-  await page.getByRole('button', { name: /^Load$/ }).click();
+test.beforeEach(async ({ page }) => {
+  // A fresh browser profile gets a floating coach card next to the case list.
+  // Dismiss it up front so every run starts from the same screen.
+  await page.addInitScript((key) => {
+    try {
+      window.localStorage.setItem(key, 'dismissed');
+    } catch {
+      // Storage unavailable: the coach shows, which does not block the test.
+    }
+  }, FIRST_RUN_COACH_KEY);
+});
 
-  // SLD canvas mounts; bus 1 should be visible.
-  await expect(page.getByTestId('bus-node-1')).toBeVisible({ timeout: 30_000 });
-  // 14-bus topology — a few sample assertions.
-  for (const idx of ['1', '7', '14']) {
-    await expect(page.getByTestId(`bus-node-${idx}`)).toBeVisible();
+test('flagship: load IEEE 14 -> run PF -> annotated SLD + 14-row buses table', async ({ page }) => {
+  const uncaughtErrors: string[] = [];
+  page.on('pageerror', (error) => uncaughtErrors.push(error.message));
+
+  await page.goto('/');
+
+  // Nothing is loaded yet, so there is nothing to run.
+  const runPf = page.getByTestId('run-pflow-button');
+  await expect(runPf).toBeDisabled();
+
+  // ---- load the case ------------------------------------------------------
+  // The UI opens its session in the background after the first paint, and a
+  // click on a case before that does nothing. Click until the case request
+  // actually goes out (a click that did nothing times out and tries again).
+  const caseRow = page.getByTestId(`saved-cases-row-${CASE_FILE}`);
+  await expect(caseRow).toBeVisible();
+  await expect(async () => {
+    await Promise.all([
+      page.waitForRequest(
+        (request) =>
+          request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/case'),
+        { timeout: 2_000 },
+      ),
+      caseRow.click(),
+    ]);
+  }).toPass({ timeout: 30_000 });
+
+  // The first load generates ANDES code for the models in the case, which is
+  // slow on a cold cache.
+  await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(BUS_COUNT, { timeout: 90_000 });
+  await expect(runPf).toBeEnabled();
+
+  // Before PF the table lists every bus but has no voltages to show.
+  await expect(page.getByTestId(/^buses-grid-row-/)).toHaveCount(BUS_COUNT);
+  await expect(busVoltageCell(page, 1)).toHaveText('—');
+
+  // ---- run the power flow -------------------------------------------------
+  await runPf.click();
+  await expect(
+    page.locator('[data-sonner-toast]').filter({ hasText: /PF converged in \d+ iterations/ }),
+  ).toBeVisible({ timeout: 90_000 });
+
+  // Every bus now has a plausible per-unit voltage in the table, and the
+  // single-line diagram shows the same number next to the bus.
+  for (let idx = 1; idx <= BUS_COUNT; idx += 1) {
+    const cell = busVoltageCell(page, idx);
+    await expect(cell).toHaveText(/^\d\.\d{3}$/);
+    const volts = Number(await cell.textContent());
+    expect(volts).toBeGreaterThan(0.9);
+    expect(volts).toBeLessThan(1.1);
+    await expect(page.getByTestId(`bus-voltage-${idx}`)).toHaveText(`${volts.toFixed(3)} pu`);
   }
 
-  // Run PF.
-  await page.getByTestId('run-pflow-button').click();
-
-  // Success toast appears.
-  await expect(page.getByTestId('pflow-success-toast')).toBeVisible({ timeout: 30_000 });
-  // Overlay populated: bus voltage label visible on bus 1.
-  await expect(page.getByTestId('bus-voltage-1')).toBeVisible();
-
-  // Results table populated: 14 rows on the Buses tab.
-  const buses = page.getByTestId(/^results-row-bus-/);
-  await expect(buses).toHaveCount(14);
+  expect(uncaughtErrors).toEqual([]);
 });

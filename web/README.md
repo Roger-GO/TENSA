@@ -120,8 +120,9 @@ VITE_ANDES_PORT=8123 pnpm dev
 - `pnpm format` / `pnpm format:check` — Prettier (with the Tailwind plugin
   for class-name sorting). Run `pnpm format` before committing.
 - `pnpm test` — Vitest unit tests in `tests/unit/`.
-- `pnpm test:e2e` — Playwright e2e tests in `tests/e2e/`. Requires the
-  substrate to be running.
+- `pnpm test:e2e` — Playwright e2e tests in `tests/e2e/`. They drive the real
+  UI against a real substrate, so one has to be running; the comment at the top
+  of `playwright.config.ts` has the commands for both ways to run them.
 - `pnpm regen-api-types` — regenerate `src/api/generated.ts` from the
   substrate's `/openapi.json`. Run after any substrate API change.
 
