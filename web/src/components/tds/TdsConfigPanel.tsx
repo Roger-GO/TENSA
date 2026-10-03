@@ -26,8 +26,8 @@ import { useRunsStore, MAX_RETENTION_LIMIT } from '@/store/runs';
  *
  * Owned fields (per the v0.2 plan, Unit 8):
  * - ``tf`` (final time, sec): required, > 0. Default 10.
- * - ``h`` (integration step, sec): optional override. Blank → substrate
- *   chooses adaptively. Default blank.
+ * - ``h`` (integration step, sec): optional override of the trapezoidal
+ *   fixed step. Blank → ANDES default (1/30 s). QNDF ignores it. Default blank.
  * - ``vars`` (variable groups to stream): multi-select of ``bus_v`` /
  *   ``gen_state`` / ``gen_power`` / ``line_flow`` / ``load_pq``. At least
  *   one required. Default ``["bus_v", "gen_state"]`` so voltage AND
@@ -285,8 +285,8 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
         value={hText}
         onChange={setHValue}
         error={errors.h}
-        hint="Leave blank to let the substrate pick adaptively."
-        placeholder="adaptive"
+        hint="Leave blank for the ANDES default (1/30 s). QNDF ignores h; use max_step."
+        placeholder="1/30 (default)"
       />
 
       <fieldset className="flex flex-col gap-1.5" data-testid="tds-config-integrator">

@@ -289,8 +289,8 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
 
     const tf = defaultTf ?? tdsConfig.tf;
     const vars = defaultVars ?? tdsConfig.vars;
-    // ``h`` is special: ``null`` from the store means "let substrate
-    // pick adaptively" → omit from the wire payload entirely. The
+    // ``h`` is special: ``null`` from the store means "use the ANDES
+    // default step" → omit from the wire payload entirely. The
     // ``defaultH`` prop overrides only when explicitly set.
     const h = defaultH !== undefined ? defaultH : (tdsConfig.h ?? undefined);
     // Unit 16: derive wire-side integrator + override payload from the
