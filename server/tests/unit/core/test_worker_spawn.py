@@ -59,10 +59,47 @@ def test_the_default_is_four_threads_for_every_library() -> None:
 
 
 def test_a_value_the_user_already_set_is_left_alone() -> None:
-    env = {"OMP_NUM_THREADS": "2", "MKL_NUM_THREADS": "1"}
+    env = {"OPENBLAS_NUM_THREADS": "2", "MKL_NUM_THREADS": "1"}
     assert worker_thread_env(env) == {
         name: "4" for name in THREAD_ENV_VARS if name not in env
     }
+
+
+@pytest.mark.parametrize("omp", ["1", "2", "8", "16"])
+def test_the_libraries_follow_the_openmp_count_the_user_set(omp: str) -> None:
+    """OpenBLAS, MKL and numexpr fall back to ``OMP_NUM_THREADS`` only while their
+    own variable is unset, so filling them with 4 would override a user who set
+    just ``OMP_NUM_THREADS``, a higher count included."""
+    assert worker_thread_env({"OMP_NUM_THREADS": omp}) == {
+        name: omp for name in THREAD_ENV_VARS if name != "OMP_NUM_THREADS"
+    }
+
+
+def test_a_variable_set_beside_omp_keeps_its_own_value() -> None:
+    env = {"OMP_NUM_THREADS": "2", "MKL_NUM_THREADS": "6"}
+    added = worker_thread_env(env)
+    assert "MKL_NUM_THREADS" not in added
+    assert added["OPENBLAS_NUM_THREADS"] == "2"
+
+
+@pytest.mark.parametrize(
+    ("omp", "expected"),
+    [("2,1", "2"), (" 3", "3"), ("", "4"), ("auto", "4"), ("0", "4"), ("-2", "4")],
+)
+def test_an_openmp_value_that_is_not_a_count_falls_back_to_the_default(
+    omp: str, expected: str
+) -> None:
+    added = worker_thread_env({"OMP_NUM_THREADS": omp})
+    assert added["OPENBLAS_NUM_THREADS"] == expected
+
+
+def test_a_legacy_goto_count_is_left_for_openblas_to_resolve() -> None:
+    """OpenBLAS reads GOTO_NUM_THREADS ahead of OMP_NUM_THREADS, so an
+    OPENBLAS_NUM_THREADS of ours would override it."""
+    added = worker_thread_env({"GOTO_NUM_THREADS": "1"})
+    assert "OPENBLAS_NUM_THREADS" not in added
+    assert added["OMP_NUM_THREADS"] == "4"
+    assert added["MKL_NUM_THREADS"] == "4"
 
 
 def test_every_variable_set_means_nothing_to_add() -> None:
@@ -88,6 +125,10 @@ def test_a_bad_override_still_respects_what_the_user_set() -> None:
     added = worker_thread_env(env)
     assert "OPENBLAS_NUM_THREADS" not in added
     assert added["OMP_NUM_THREADS"] == "4"
+
+
+def test_an_openmp_style_list_is_not_a_valid_override() -> None:
+    assert worker_thread_env({WORKER_THREADS_ENV: "2,1"}) == _caps(4)
 
 
 # ---- worker_spawn_env -------------------------------------------------------
@@ -125,12 +166,17 @@ def _report_thread_env(conn: Any) -> None:
     ("parent_env", "expected"),
     [
         ({}, _caps(4)),
-        ({"OMP_NUM_THREADS": "8"}, {**_caps(4), "OMP_NUM_THREADS": "8"}),
+        ({"OMP_NUM_THREADS": "1"}, _caps(1)),
+        ({"OMP_NUM_THREADS": "8"}, _caps(8)),
+        ({"OMP_NUM_THREADS": "2", "MKL_NUM_THREADS": "6"}, {**_caps(2), "MKL_NUM_THREADS": "6"}),
+        ({"GOTO_NUM_THREADS": "1"}, {**_caps(4), "OPENBLAS_NUM_THREADS": None}),
         ({WORKER_THREADS_ENV: "2", "MKL_NUM_THREADS": "8"}, _caps(2)),
     ],
 )
 def test_a_spawned_child_starts_with_the_caps(
-    monkeypatch: pytest.MonkeyPatch, parent_env: dict[str, str], expected: dict[str, str]
+    monkeypatch: pytest.MonkeyPatch,
+    parent_env: dict[str, str],
+    expected: dict[str, str | None],
 ) -> None:
     """The real mechanism: ``spawn`` copies ``os.environ`` at ``start()``, which is
     before the child can import numpy."""

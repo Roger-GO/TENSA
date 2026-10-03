@@ -21,7 +21,28 @@ Capping threads
 Each of ``OMP_NUM_THREADS``, ``OPENBLAS_NUM_THREADS``, ``MKL_NUM_THREADS``,
 ``VECLIB_MAXIMUM_THREADS`` and ``NUMEXPR_NUM_THREADS`` defaults to 4 in the
 worker. A variable already set in the server's environment is left as it is.
+The libraries do not read these independently: OpenBLAS, MKL and numexpr each
+prefer their own variable but fall back to ``OMP_NUM_THREADS``, so a user who set
+only ``OMP_NUM_THREADS=1`` has pinned all of them. The variables left unset
+therefore take that value (a positive integer) instead of 4. OpenBLAS also
+honours the legacy ``GOTO_NUM_THREADS`` ahead of ``OMP_NUM_THREADS``, so when it
+is set ``OPENBLAS_NUM_THREADS`` is left for OpenBLAS to resolve itself.
 ``TENSA_WORKER_THREADS=N`` sets all five to ``N`` whatever else is set.
+
+The environment is edited process-wide
+--------------------------------------
+``multiprocessing`` gives a spawned child the parent's environment and offers no
+per-child hook, so ``worker_spawn_env`` edits ``os.environ`` around
+``Process.start()`` and restores it afterwards. For that moment the server's own
+environment carries the caps. Two consequences: the lock only keeps worker spawns
+from interleaving, so a subprocess another thread launches in the window inherits
+the caps; and glibc's ``setenv`` is not safe against a concurrent ``getenv`` in
+another thread. CPython itself reads ``os.environ``, not ``getenv``, and the window
+lasts only as long as ``start()`` takes, so the risk is small. A bootstrap target
+that sets the variables before numpy loads would not avoid it: under ``spawn`` the
+child re-imports the parent's ``__main__`` (the ``tensa`` entry point, which
+imports numpy) before it unpickles the target, so the variables must already be in
+the environment the child is exec'd with.
 """
 
 from __future__ import annotations
@@ -51,31 +72,54 @@ WORKER_THREADS_ENV = "TENSA_WORKER_THREADS"
 _spawn_env_lock = threading.Lock()
 
 
+def _positive_int(raw: str | None) -> int | None:
+    """``raw`` as a positive integer, or ``None``."""
+    if raw is None:
+        return None
+    try:
+        count = int(raw)
+    except ValueError:
+        return None
+    return count if count >= 1 else None
+
+
+def _omp_threads(raw: str | None) -> int | None:
+    """The count in ``OMP_NUM_THREADS``, or ``None`` when it holds none.
+
+    OpenMP lets the variable hold a comma-separated list, one count per nesting
+    level. The first is the outermost level, and the one OpenBLAS reads.
+    """
+    return None if raw is None else _positive_int(raw.split(",")[0])
+
+
 def worker_thread_env(environ: Mapping[str, str]) -> dict[str, str]:
     """The variables to add to ``environ`` for a new worker.
 
     ``TENSA_WORKER_THREADS`` (a positive integer) wins over everything and
     returns all five variables. Without it, only the variables ``environ`` does
-    not already set get the default. A bad ``TENSA_WORKER_THREADS`` is logged and
-    ignored.
+    not already set are added, each with the count from ``OMP_NUM_THREADS`` when
+    that is set to a positive integer (the other libraries follow it, so the user
+    has already chosen their count) and with the default otherwise. A bad
+    ``TENSA_WORKER_THREADS`` is logged and ignored.
     """
     raw = environ.get(WORKER_THREADS_ENV)
     if raw is not None:
-        try:
-            threads = int(raw)
-        except ValueError:
-            threads = 0
-        if threads >= 1:
+        threads = _positive_int(raw)
+        if threads is not None:
             return dict.fromkeys(THREAD_ENV_VARS, str(threads))
         log.warning(
-            "ignoring %s=%r: expected a positive integer; using the default of %d",
+            "ignoring %s=%r: expected a positive integer",
             WORKER_THREADS_ENV,
             raw,
-            DEFAULT_WORKER_THREADS,
         )
-    return {
-        name: str(DEFAULT_WORKER_THREADS) for name in THREAD_ENV_VARS if name not in environ
-    }
+    inherited = _omp_threads(environ.get("OMP_NUM_THREADS"))
+    fill = str(inherited if inherited is not None else DEFAULT_WORKER_THREADS)
+    added = {name: fill for name in THREAD_ENV_VARS if name not in environ}
+    if "GOTO_NUM_THREADS" in environ:
+        # OpenBLAS reads this before OMP_NUM_THREADS; an OPENBLAS_NUM_THREADS of
+        # ours would override the user's choice.
+        added.pop("OPENBLAS_NUM_THREADS", None)
+    return added
 
 
 @contextlib.contextmanager
