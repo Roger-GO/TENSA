@@ -209,6 +209,27 @@ async def test_put_layout_rejects_names_windows_would_misread(
 
 
 @pytest.mark.integration
+async def test_layout_below_a_regular_file_is_a_client_error(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """``case_path=ieee14.raw/x.raw`` names a path under a file. It answered
+    500 (NotADirectoryError from the temp file) on Linux and Windows while
+    macOS answered 400."""
+    client, ws = client_workspace
+    (ws / "ieee14.raw").write_text("dummy")
+    put = await client.put(
+        "/api/workspace/layout",
+        params={"case_path": "ieee14.raw/x.raw"},
+        headers={"Content-Type": "application/json"},
+        json=_layout_body(),
+    )
+    assert put.status_code == 400, put.text
+    got = await client.get("/api/workspace/layout", params={"case_path": "ieee14.raw/x.raw"})
+    assert got.status_code == 400, got.text
+    assert [p.name for p in ws.iterdir()] == ["ieee14.raw"]
+
+
+@pytest.mark.integration
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows cannot hold these as plain files")
 @pytest.mark.parametrize("name", ["case_12:30.raw", "what?.raw", "con.raw"])
 async def test_put_layout_keeps_working_for_an_existing_case_with_an_unportable_name(

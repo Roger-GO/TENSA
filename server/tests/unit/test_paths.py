@@ -573,6 +573,49 @@ def test_canonical_directory_wraps_missing_directory(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_canonical_directory_rejects_a_regular_file(tmp_path: Path) -> None:
+    """``Path.resolve(strict=True)`` is content with a file (macOS refuses it
+    through ``O_DIRECTORY``); the check must hold on every platform."""
+    a_file = tmp_path / "ieee14.raw"
+    a_file.write_text("dummy")
+    with pytest.raises(WorkspacePathError, match="not a directory"):
+        paths.canonical_directory(a_file)
+
+
+@pytest.mark.unit
+def test_ensure_workspace_rejects_a_regular_file(tmp_path: Path) -> None:
+    a_file = tmp_path / "ws"
+    a_file.write_text("dummy")
+    with pytest.raises(WorkspacePathError, match="not a directory"):
+        ensure_workspace(a_file)
+
+
+@pytest.mark.unit
+def test_write_target_below_a_regular_file_is_a_path_error(tmp_path: Path) -> None:
+    """``case.raw/x.raw`` made ``case.raw`` the 'parent directory', which the
+    old check accepted; the write then failed with a bare NotADirectoryError."""
+    workspace = ensure_workspace(tmp_path / "ws")
+    (workspace / "ieee14.raw").write_text("dummy")
+    with (
+        pytest.raises(WorkspacePathError, match="not a directory"),
+        open_workspace_file_for_write(workspace, "ieee14.raw/x.raw"),
+    ):
+        pass
+    assert [p.name for p in workspace.iterdir()] == ["ieee14.raw"]
+
+
+@pytest.mark.unit
+def test_read_below_a_regular_file_is_a_path_error(tmp_path: Path) -> None:
+    workspace = ensure_workspace(tmp_path / "ws")
+    (workspace / "ieee14.raw").write_text("dummy")
+    with (
+        pytest.raises(WorkspacePathError),
+        open_workspace_file_for_andes(workspace, "ieee14.raw/x.raw"),
+    ):
+        pass
+
+
+@pytest.mark.unit
 def test_canonical_directory_wraps_os_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

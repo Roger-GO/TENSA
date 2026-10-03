@@ -82,7 +82,15 @@ def canonical_directory(directory: Path) -> Path:
                 return _canonical_path_from_fd(fd)
             finally:
                 os.close(fd)
-        return directory.resolve(strict=True)
+        resolved = directory.resolve(strict=True)
+        if not resolved.is_dir():
+            # ``resolve`` is content with a regular file (macOS refuses it
+            # above through ``O_DIRECTORY``), so ``case.raw/x.raw`` would pass
+            # as a path under a directory and only fail later at the write.
+            raise NotADirectoryError(
+                errno.ENOTDIR, os.strerror(errno.ENOTDIR), str(directory)
+            )
+        return resolved
     except FileNotFoundError as exc:
         raise WorkspacePathError(f"directory does not exist: {directory!s}") from exc
     except NotADirectoryError as exc:
