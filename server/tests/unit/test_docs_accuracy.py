@@ -120,6 +120,13 @@ def test_server_readme_reads_on_pypi() -> None:
     assert not relative, f"relative links do not resolve on PyPI: {relative}"
 
 
+@pytest.mark.parametrize("document", ["llms.txt", "server/README.md"])
+def test_api_docs_tell_callers_to_label_json_bodies(document: str) -> None:
+    # FastAPI 0.133+ answers 422 to a JSON body without this header, which is what a
+    # hand-built request (curl -d, requests' data=) sends.
+    assert "Content-Type: application/json" in _read(document)
+
+
 def test_readme_gives_powershell_equivalents_for_the_posix_only_commands() -> None:
     readme = _read("README.md")
     fences = re.findall(r"```(\w+)\n(.*?)```", readme, flags=re.DOTALL)

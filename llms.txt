@@ -82,6 +82,9 @@ response and needs no Arrow decoding.
 ## Gotchas for agents
 
 - Case paths are workspace-relative; absolute paths and ".." are rejected (400).
+- A request with a JSON body must send "Content-Type: application/json": the json= argument of
+  httpx and requests does, but curl -d and requests' data= do not. Without it the body is not
+  parsed and the route answers 422.
 - GENROU machines: ANDES uses M (=2H); the add-element endpoint accepts H and converts.
 - Exciters/governors link to machines via the "syn" parameter (a SynGen idx).
 - Line/Transformer impedances are pu on (Sn, Vn1); the add-element endpoint derives
