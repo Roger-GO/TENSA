@@ -48,7 +48,7 @@ The trust model lives in the top-level docstring of `server/src/tensa/__init__.p
 - **Tests live alongside the package**:
   - `server/tests/{unit,integration,acceptance}/` — Python; acceptance tests run only with `pytest -m acceptance`.
   - `web/tests/{unit,e2e}/` — TypeScript; `pnpm test` (Vitest) for unit, `pnpm test:e2e` (Playwright) for e2e. The e2e suite spawns its own dev server but expects the substrate to be running.
-  - `scripts/ci-matrix.sh [all|lint|unit|smoke|full]` runs the CI stages locally. The `smoke` marker tags the one cross-platform test (real server, worker, PF, short TDS) that macOS and Windows run besides the unit tests. Coverage: `pytest --cov` in `server/`, `pnpm test:coverage` in `web/`.
+  - `scripts/ci-matrix.sh [all|lint|unit|smoke|full|acceptance]` runs the CI stages locally (`acceptance` is the slow end-to-end suite and is not part of `all`). The `smoke` marker tags the one cross-platform test (real server, worker, PF, short TDS) that macOS and Windows run besides the unit tests. Coverage: `pytest --cov` in `server/`, `pnpm test:coverage` in `web/`.
 - **Style**:
   - Python: `ruff check` (lint) and `mypy --strict` (types) on `server/src/`. Both must pass before commit.
   - TypeScript: `pnpm lint` (ESLint, `--max-warnings 0`) and `pnpm typecheck` (TS strict + `noUncheckedIndexedAccess`) on `web/`. `pnpm format:check` (Prettier) must pass.

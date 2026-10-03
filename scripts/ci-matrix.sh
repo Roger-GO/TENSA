@@ -9,10 +9,15 @@
 #   unit    tests/unit (every operating system in the CI matrix runs this)
 #   smoke   the cross-platform smoke test: serve, load IEEE 14, PF, short TDS
 #   full    unit and integration tests together (everything but acceptance)
+#   acceptance
+#           the end-to-end suite: each test starts its own `tensa serve` and
+#           drives it over HTTP and WebSocket (slow; real ANDES simulations)
 #
 # Extra arguments go to pytest, e.g. `ci-matrix.sh full --cov`. In CI the lint
-# job runs `lint`, the Linux test legs run `full`, and the macOS and Windows
-# legs run `unit` and then `smoke`. Locally, `all` is the whole gate.
+# job runs `lint`, the Linux test legs run `full`, the macOS and Windows legs
+# run `unit` and then `smoke`, and one Linux job runs `acceptance`. Locally,
+# `all` is the whole gate except `acceptance`, which you run when you touch the
+# API surface or the worker.
 
 set -euo pipefail
 
@@ -55,8 +60,12 @@ case "$stage" in
   full)
     full "$@"
     ;;
+  acceptance)
+    echo "==> pytest -m acceptance"
+    pytest -m acceptance tests/acceptance "$@"
+    ;;
   *)
-    echo "usage: $0 [all|lint|unit|smoke|full] [PYTEST_ARGS...]" >&2
+    echo "usage: $0 [all|lint|unit|smoke|full|acceptance] [PYTEST_ARGS...]" >&2
     exit 2
     ;;
 esac

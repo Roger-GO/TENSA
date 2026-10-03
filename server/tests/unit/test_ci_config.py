@@ -6,8 +6,9 @@ dropped from the matrix while its trove classifier stayed, or if the workflow
 asked ``scripts/ci-matrix.sh`` for a stage the script does not have. The release
 workflow (``publish.yml``) is checked the same way: it must wait for the test
 workflows and must build, check, and smoke-test the packages before uploading
-them. These tests read the repository files directly, so they skip when the
-tests run away from a checkout.
+them. The acceptance job is checked for being real (a placeholder that only echoed
+once passed as green). These tests read the repository files directly, so they skip
+when the tests run away from a checkout.
 """
 
 from __future__ import annotations
@@ -116,11 +117,35 @@ def test_every_stage_the_workflow_asks_for_exists_in_the_script() -> None:
         for match in re.finditer(r"ci-matrix\.sh\s+(\w+)", step["run"])
     }
     # Guards the regex: the workflow does call the script.
-    assert requested.issuperset({"lint", "unit", "smoke", "full"})
+    assert requested.issuperset({"lint", "unit", "smoke", "full", "acceptance"})
     for stage in requested:
         assert re.search(rf"^\s*{stage}\)", script, re.MULTILINE), (
             f"scripts/ci-matrix.sh has no {stage!r} stage"
         )
+
+
+def test_the_acceptance_job_runs_the_acceptance_suite() -> None:
+    """The job was an ``echo`` placeholder, so its green check meant nothing."""
+    steps = _workflow()["jobs"]["acceptance"]["steps"]
+    run = "\n".join(step["run"] for step in steps if "run" in step)
+    assert re.search(r"ci-matrix\.sh\s+acceptance\b", run)
+    # The suite needs httpx and websockets, which only the dev extra carries.
+    assert 'pip install -e "./server[dev]"' in run
+    names = " ".join(str(step.get("name", "")) for step in steps).lower()
+    assert "placeholder" not in names
+
+
+def test_the_acceptance_stage_selects_the_acceptance_marker() -> None:
+    if not _SCRIPT.is_file():
+        pytest.skip("scripts/ci-matrix.sh is not next to the tests")
+    script = _SCRIPT.read_text(encoding="utf-8")
+    stage = re.search(r"^\s*acceptance\)\n(.*?)^\s*;;", script, re.MULTILINE | re.DOTALL)
+    assert stage is not None, "scripts/ci-matrix.sh has no acceptance stage"
+    assert "pytest -m acceptance" in stage.group(1)
+    # The default stage stays fast: acceptance is something you ask for.
+    all_stage = re.search(r"^\s*all\)\n(.*?)^\s*;;", script, re.MULTILINE | re.DOTALL)
+    assert all_stage is not None
+    assert "acceptance" not in all_stage.group(1)
 
 
 def test_the_test_workflows_can_be_called_from_the_release_workflow() -> None:

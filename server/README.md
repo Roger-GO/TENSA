@@ -49,7 +49,7 @@ See the top-level docstring in `src/tensa/__init__.py`. Summary:
 
 ## Curl-only walkthrough
 
-The Phase A acceptance test is `tests/acceptance/walkthrough.sh`. It exercises the full end-to-end flow with curl and websocat — no UI. Land in Unit 8.
+The Phase A acceptance test is `tests/acceptance/walkthrough.sh`. It exercises the full end-to-end flow with curl alone, no UI. `tests/acceptance/test_walkthrough.py` starts a server and runs it, and CI runs it in the `acceptance` job.
 
 ## ANDES version coverage
 
@@ -60,7 +60,7 @@ See `ANDES_VERSIONS.md` for the seven API contracts the substrate depends on and
 ```bash
 pytest -m "unit"         # fast, no I/O
 pytest -m "integration"  # spawns subprocesses, hits ANDES
-pytest -m "acceptance"   # full end-to-end (requires running server)
+pytest -m "acceptance"   # full end-to-end (each test starts its own server)
 pytest                   # all of the above
 ```
 

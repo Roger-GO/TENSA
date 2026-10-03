@@ -200,14 +200,45 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # The acceptance suite is end to end: every test starts its own `tensa serve`
+  # on a free port with a throwaway workspace and talks to it over HTTP and
+  # WebSocket (streaming TDS, abort, the OpenAPI descriptions), and
+  # `walkthrough.sh` drives the whole flow with curl alone. There is nothing to
+  # start here. It runs real ANDES simulations and is slow, so it stays on one
+  # Linux leg (the smoke test above covers the operating-system differences),
+  # and it does not wait for the other jobs: it needs neither the UI bundle nor
+  # their results.
   acceptance:
-    name: curl walkthrough (Phase A R3)
+    name: acceptance (real server, Linux)
     runs-on: ubuntu-latest
-    # Acceptance tests are mandatory but separate from the lint/type/unit job.
-    # They land as Unit 8; until then this job is a no-op placeholder so the
-    # workflow file can be reviewed and merged ahead of the test infrastructure.
-    needs: [lint, test]
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Placeholder
-        run: echo "Acceptance suite lands in Unit 8."
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/pyproject.toml
+
+      - name: Install tensa with dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "./server[dev]"
+
+      # Same key as the Linux Python 3.12 test leg, so the two share one entry.
+      - name: Resolve ANDES version
+        id: andes
+        run: |
+          version="$(python -c "from importlib.metadata import version; print(version('andes'))")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache ANDES generated code
+        uses: actions/cache@v4
+        with:
+          path: ~/.andes/pycode
+          key: andes-pycode-${{ runner.os }}-${{ runner.arch }}-py3.12-andes${{ steps.andes.outputs.version }}
+
+      - name: Acceptance tests
+        run: bash ./scripts/ci-matrix.sh acceptance
