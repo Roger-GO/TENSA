@@ -47,6 +47,8 @@ All of these must pass before a PR is merged (CI enforces them):
 
 CI runs the server tests on Linux, macOS (Apple silicon), and Windows with Python 3.12 and 3.13. `scripts/ci-matrix.sh [all|lint|unit|smoke|full]` runs the same stages locally.
 
+Dependencies are kept current by weekly Dependabot pull requests (`.github/dependabot.yml`), and `.github/workflows/audit.yml` runs `pip-audit` on a fresh install of the server (with the `mcp` extra) and `pnpm audit --prod` on the web lockfile every Monday and whenever a dependency file changes. A failed audit step is a finding to read, not a broken build, until the baseline is clean. Before raising a range in `server/pyproject.toml`, run the full suite in an environment that holds the new version: `fastapi` is capped at the next minor after the newest release the suite passed on, because FastAPI can break callers in a minor release.
+
 ## Conventions
 
 - **Commits** are conventional: `feat(scope): ...`, `fix(scope): ...`, `refactor:`, `chore:`, `docs:`, `test:`.

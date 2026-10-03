@@ -10,12 +10,15 @@ This file is for any agent (human or AI) working in this repo. Read it before to
 ## Pinned versions
 
 - **Python**: 3.12+ (development on 3.12; CI runs 3.12 and 3.13 on Linux, macOS arm64, and Windows)
-- **FastAPI**: `>=0.119,<0.120`
+- **FastAPI**: `>=0.133,<0.143`. FastAPI can break callers in a minor release, so the cap is the next minor after the newest one the suite ran against; raising it means running the whole suite in an environment that holds the new release.
+- **Starlette**: `>=1.3.1,<2`, declared directly. FastAPI no longer caps it, and the floor is what keeps the published advisories (the `FileResponse` range DoS, the Windows `StaticFiles` path lookup, Host header and form limits) out of a fresh install.
 - **ANDES**: `>=2.0,<3.0` (2.0.0 is the verified-against version; `server/ANDES_VERSIONS.md` tracks the seven API contracts the substrate depends on)
 - **pyarrow**: latest stable (pinned in pyproject.toml at install time)
 - **pydantic**: v2
 
 ANDES upgrades are deliberate — never accept an automatic minor bump without re-running the curl walkthrough in CI.
+
+Other updates arrive as weekly Dependabot pull requests (`.github/dependabot.yml`, which proposes only patch releases of ANDES). `.github/workflows/audit.yml` runs `pip-audit` on a fresh install of the server with its `mcp` extra and `pnpm audit --prod` on the web lockfile every week and whenever a dependency file changes; both only report for now.
 
 ## Architectural decisions (do not relitigate without a plan revision)
 
