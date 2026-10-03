@@ -826,14 +826,16 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
 def _handle_save_snapshot(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     """Wire ``Wrapper.save_snapshot`` for Unit 7.
 
-    Args: ``{"name": str, "force": bool}``. Returns the metadata dict +
-    file sizes so the route layer can echo them in the success response.
+    Args: ``{"name": str, "force": bool, "include_dill": bool}``. Returns
+    the metadata dict + file sizes so the route layer can echo them in the
+    success response.
     """
     name = args.get("name")
     if not isinstance(name, str):
         raise AndesAppError("'name' must be a string")
     force = bool(args.get("force", False))
-    return wrapper.save_snapshot(name, force=force)
+    include_dill = bool(args.get("include_dill", False))
+    return wrapper.save_snapshot(name, force=force, include_dill=include_dill)
 
 
 def _handle_restore_snapshot(wrapper: Wrapper, args: dict[str, Any]) -> Any:
@@ -846,7 +848,7 @@ def _handle_restore_snapshot(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     name = args.get("name")
     if not isinstance(name, str):
         raise AndesAppError("'name' must be a string")
-    use_dill = bool(args.get("use_dill_optimization", True))
+    use_dill = bool(args.get("use_dill_optimization", False))
     return wrapper.restore_snapshot(name, use_dill_optimization=use_dill)
 
 

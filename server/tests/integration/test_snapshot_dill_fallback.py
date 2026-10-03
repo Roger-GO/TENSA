@@ -1,15 +1,16 @@
-"""Part B regression — dill fast-path failures fall back, never crash.
+"""Part B regression — failures on the opt-in dill path fall back, never crash.
 
-The dill fast-path in ``Wrapper.restore_snapshot`` has been observed to
+The dill path in ``Wrapper.restore_snapshot`` (``use_dill_optimization=True``,
+for a snapshot saved with ``include_dill=True``) has been observed to
 destabilise the worker: ANDES's ``andes.utils.snapshot.load_ss`` either raises
 mid-load (e.g. ``IndexError: index 0 is out of bounds`` on a case with dynamic
 models — reproduced live on kundur) or, worse, the old System being GC'd closes
 a file descriptor that collides with the worker's multiprocessing pipe.
 
-The hardened fast path wraps ``load_ss`` + the System swap + a post-load sanity
+The hardened path wraps ``load_ss`` + the System swap + a post-load sanity
 access in a single try/except that, on ANY exception, restores the previous
-System and falls back to the always-works replay+PF slow path. These tests pin
-that behaviour:
+System and falls back to the default replay+PF path. These tests pin that
+behaviour:
 
 - A ``load_ss`` that raises does NOT propagate; restore returns ``used_dill``
   False with a ``fallback_reason``, and the wrapper's System stays usable.
@@ -65,7 +66,7 @@ def test_load_ss_raising_falls_back_cleanly(
     ``fallback_reason`` is recorded."""
     w, _ = ieee14_wrapper
     w.run_pflow()
-    w.save_snapshot("snap")
+    w.save_snapshot("snap", include_dill=True)
 
     ss_before = w._ss  # the live, converged System
 
@@ -98,7 +99,7 @@ def test_load_ss_success_but_broken_system_falls_back(
     rather than leaving the wrapper holding the broken object."""
     w, _ = ieee14_wrapper
     w.run_pflow()
-    w.save_snapshot("snap")
+    w.save_snapshot("snap", include_dill=True)
 
     class _Broken:
         @property

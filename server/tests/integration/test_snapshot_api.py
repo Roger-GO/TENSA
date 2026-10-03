@@ -5,7 +5,8 @@ End-to-end coverage that drives the FastAPI app over an httpx
 full save → list → restore → delete lifecycle plus the corner cases the
 plan calls out:
 
-- Snapshot saved post-PF and restored cleanly via the dill fast path.
+- Snapshot saved post-PF and restored by replay (the default), or via the
+  opt-in dill path when the snapshot was saved with ``include_dill``.
 - Restore re-applies the disturbance log from the sidecar JSON, even
   when intervening disturbances were added after the save.
 - Multiple snapshots per case coexist; list returns them all; delete
@@ -100,21 +101,20 @@ async def _create_session_with_case(
 
 
 @pytest.mark.integration
-async def test_snapshot_save_then_restore_via_dill_fast_path(
+async def test_snapshot_save_then_restore_via_opt_in_dill_path(
     client: httpx.AsyncClient,
+    workspace: Path,
 ) -> None:
-    """Plan's primary scenario (truncated): save snapshot pre-disturbance,
-    restore via dill optimisation, confirm same operating point.
-
-    This is the dill-fast-path acceptance: ``used_dill=true``, no
-    ``fallback_reason``, restored System has converged PF state.
+    """Opt-in dill path: save with ``include_dill``, restore with
+    ``use_dill_optimization``, confirm ``used_dill=true`` and no
+    ``fallback_reason``.
 
     Note: ANDES 2.0 ``load_ss`` has a known issue with cases that include
-    a ``.dyr`` addfile (``set_var_arrays`` raises IndexError on the
-    dynamic-state view arrays). The substrate's restore flow falls back
-    to the slow path automatically; this test verifies the dill path on
-    the static-only case (no ``.dyr``) where ANDES's ``load_ss`` round-
-    trips cleanly.
+    a ``.dyr`` addfile saved before the TDS is initialised
+    (``set_var_arrays`` raises IndexError on the dynamic-state view arrays).
+    The substrate's restore flow falls back to replay automatically; this
+    test verifies the dill path on the static-only case (no ``.dyr``) where
+    ANDES's ``load_ss`` round-trips cleanly.
     """
     # Static-only IEEE 14 — addfile=None — for the dill round-trip path.
     sid = await _create_session_with_case(client, addfile=None)
@@ -127,16 +127,17 @@ async def test_snapshot_save_then_restore_via_dill_fast_path(
     assert resp.status_code == 200, resp.text
     assert resp.json()["converged"] is True
 
-    # Save the snapshot.
+    # Save the snapshot, asking for the dill blob.
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot",
-        json={"name": "scenario-A"},
+        json={"name": "scenario-A", "include_dill": True},
     )
     assert resp.status_code == 200, resp.text
     payload = resp.json()
     assert payload["name"] == "scenario-A"
     assert payload["dill_bytes"] > 0
     assert payload["metadata_bytes"] > 0
+    assert len(list((workspace / "snapshots").rglob("scenario-A.dill"))) == 1
     meta = payload["metadata"]
     assert meta["andes_version"]  # non-empty string
     # Stamped by the worker subprocess from the package metadata.
@@ -144,10 +145,14 @@ async def test_snapshot_save_then_restore_via_dill_fast_path(
     assert meta["case_filename"] == "ieee14.raw"
     assert meta["has_pflow"] is True
 
-    # Restore using the default dill optimisation.
+    resp = await client.get(f"/api/sessions/{sid}/snapshots")
+    assert resp.status_code == 200, resp.text
+    assert [e["has_dill"] for e in resp.json()["snapshots"]] == [True]
+
+    # Restore, opting in to the dill path.
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot/restore",
-        json={"name": "scenario-A"},
+        json={"name": "scenario-A", "use_dill_optimization": True},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -166,12 +171,14 @@ async def test_snapshot_save_then_restore_via_dill_fast_path(
 
 
 @pytest.mark.integration
-async def test_snapshot_restore_via_slow_path_when_dill_disabled(
+async def test_snapshot_save_and_restore_default_to_the_replay_path(
     client: httpx.AsyncClient,
+    workspace: Path,
 ) -> None:
-    """Plan's edge case: restore with ``use_dill_optimization=false``
-    forces the always-works replay+PF path. ``used_dill`` is False;
-    the System still ends up at a converged PF state."""
+    """With no flags a save writes only the sidecar JSON (no dill blob, so no
+    ``save_ss`` cost) and a restore replays + re-runs PF: ``used_dill`` is
+    False, and that is not a fallback, so ``fallback_reason`` is null. The
+    System still ends up at a converged PF state."""
     sid = await _create_session_with_case(client)
     resp = await client.post(
         f"/api/sessions/{sid}/pflow",
@@ -183,17 +190,26 @@ async def test_snapshot_restore_via_slow_path_when_dill_disabled(
         f"/api/sessions/{sid}/snapshot",
         json={"name": "slow-test"},
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["dill_bytes"] == 0
+    assert resp.json()["metadata_bytes"] > 0
+    assert list((workspace / "snapshots").rglob("slow-test.json"))
+    assert not list((workspace / "snapshots").rglob("*.dill"))
+
+    resp = await client.get(f"/api/sessions/{sid}/snapshots")
+    assert resp.status_code == 200, resp.text
+    assert [e["has_dill"] for e in resp.json()["snapshots"]] == [False]
 
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot/restore",
-        json={"name": "slow-test", "use_dill_optimization": False},
+        json={"name": "slow-test"},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["used_dill"] is False
+    assert body["fallback_reason"] is None
 
-    # Re-run PF after restore; converged result confirms the slow path
+    # Re-run PF after restore; converged result confirms the replay path
     # left the System in a clean operating-point state.
     resp = await client.post(
         f"/api/sessions/{sid}/pflow",
@@ -201,6 +217,26 @@ async def test_snapshot_restore_via_slow_path_when_dill_disabled(
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["converged"] is True
+
+
+@pytest.mark.integration
+async def test_snapshot_dill_restore_without_a_blob_reports_the_fallback(
+    client: httpx.AsyncClient,
+) -> None:
+    """Asking for the dill path on a snapshot saved without a blob is not an
+    error: the restore replays and says why in ``fallback_reason``."""
+    sid = await _create_session_with_case(client)
+    resp = await client.post(f"/api/sessions/{sid}/snapshot", json={"name": "no-blob"})
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.post(
+        f"/api/sessions/{sid}/snapshot/restore",
+        json={"name": "no-blob", "use_dill_optimization": True},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["used_dill"] is False
+    assert "not found" in body["fallback_reason"]
 
 
 @pytest.mark.integration
@@ -461,14 +497,16 @@ async def test_snapshot_saved_under_a_now_refused_name_stays_restorable_and_dele
     # Rename the files on disk: this is what a pre-rule save of "aux" left behind.
     for json_path in (workspace / "snapshots").rglob("before.json"):
         for ext in (".json", ".dill"):
-            (json_path.with_suffix(ext)).rename(json_path.with_name(f"aux{ext}"))
+            old_file = json_path.with_suffix(ext)
+            if old_file.exists():
+                old_file.rename(json_path.with_name(f"aux{ext}"))
 
     resp = await client.get(f"/api/sessions/{sid}/snapshots")
     assert [e["name"] for e in resp.json()["snapshots"]] == ["aux"]
 
     resp = await client.post(
         f"/api/sessions/{sid}/snapshot/restore",
-        json={"name": "aux", "use_dill_optimization": False},
+        json={"name": "aux"},
     )
     assert resp.status_code == 200, resp.text
 

@@ -298,6 +298,19 @@ class SaveSnapshotRequest(BaseModel):
             "can prompt the user."
         ),
     )
+    include_dill: bool = Field(
+        False,
+        description=(
+            "When True, also write the full System state as a dill blob "
+            "(``andes.utils.snapshot.save_ss``) beside the metadata, so a "
+            "later restore can opt in to ``use_dill_optimization``. Costs a "
+            "couple of seconds and 2-3 MB per save, and the blob only loads "
+            "on the same ANDES major.minor. A snapshot saved after the power "
+            "flow but before the TDS was initialised on a case with dynamic "
+            "models cannot be loaded by ANDES 2.0; its restore falls back to "
+            "replay. Default False writes the metadata only."
+        ),
+    )
 
 
 class SnapshotMetadataModel(BaseModel):
@@ -340,7 +353,11 @@ class SaveSnapshotResponse(BaseModel):
         ..., description="Sidecar metadata written alongside the snapshot."
     )
     dill_bytes: int = Field(
-        ..., description="Size of the dill blob on disk, in bytes."
+        ...,
+        description=(
+            "Size of the dill blob on disk, in bytes. 0 when the snapshot "
+            "was saved without one (``include_dill=false``)."
+        ),
     )
     metadata_bytes: int = Field(
         ..., description="Size of the sidecar JSON on disk, in bytes."
@@ -361,12 +378,15 @@ class RestoreSnapshotRequest(BaseModel):
 
     name: str = Field(..., description="Snapshot name to restore.")
     use_dill_optimization: bool = Field(
-        True,
+        False,
         description=(
-            "When True (default), attempt to skip the PF re-solve by "
-            "loading the dill blob via ``andes.utils.snapshot.load_ss``. "
-            "Falls back to the always-works replay+PF path on ANDES "
-            "version mismatch or a missing dill blob; the response's "
+            "Default False restores by reloading the case, re-adding the "
+            "recorded disturbances, and re-running setup and the power flow, "
+            "which works on any ANDES version. When True, try the dill blob "
+            "first (``andes.utils.snapshot.load_ss``) and skip all of that. "
+            "Falls back to the replay path on ANDES version mismatch, a "
+            "missing dill blob (the snapshot was saved without "
+            "``include_dill``), or a load failure; the response's "
             "``fallback_reason`` carries the explanation."
         ),
     )
@@ -381,8 +401,8 @@ class RestoreSnapshotResponse(BaseModel):
         ...,
         description=(
             "True when the dill optimisation succeeded. False means the "
-            "always-works replay+PF path was taken; ``fallback_reason`` "
-            "is non-null."
+            "replay+PF path was taken (the default, or a fallback when "
+            "``use_dill_optimization`` was requested)."
         ),
     )
     fallback_reason: str | None = Field(
@@ -396,8 +416,9 @@ class RestoreSnapshotResponse(BaseModel):
     disturbances_replayed: int = Field(
         ...,
         description=(
-            "Count of disturbance specs re-applied from the snapshot "
-            "metadata onto the new System."
+            "Count of disturbance specs from the snapshot metadata that the "
+            "restored System carries (re-applied on the replay path, already "
+            "inside the dill blob on the dill path)."
         ),
     )
     metadata: SnapshotMetadataModel = Field(
@@ -431,9 +452,10 @@ class SnapshotListEntry(BaseModel):
     has_dill: bool = Field(
         ...,
         description=(
-            "Whether the dill blob is present on disk. False when only "
-            "the sidecar JSON survives (e.g., manual half-delete) — the "
-            "snapshot is still restorable via the slow replay path."
+            "Whether the optional dill blob is present on disk. False for a "
+            "snapshot saved without ``include_dill`` or when only the "
+            "sidecar JSON survives (e.g., manual half-delete); the "
+            "snapshot is still restorable via the replay path."
         ),
     )
     andes_version: str = Field(
@@ -528,9 +550,10 @@ async def save_snapshot(
 ) -> SaveSnapshotResponse:
     """Save snapshot endpoint — Unit 7.
 
-    Composes ANDES's ``andes.utils.snapshot.save_ss`` (dill blob) plus
-    sidecar JSON metadata under
-    ``<workspace>/snapshots/<case_basename>/<name>.{dill,json}``.
+    Writes sidecar JSON metadata under
+    ``<workspace>/snapshots/<case_basename>/<name>.json`` and, when
+    ``include_dill`` is true, ANDES's ``andes.utils.snapshot.save_ss`` blob
+    beside it as ``<name>.dill``.
     """
     mgr = _manager(request)
     try:
@@ -540,7 +563,11 @@ async def save_snapshot(
             payload = await mgr.invoke(
                 session_id,
                 "save_snapshot",
-                {"name": body.name, "force": body.force},
+                {
+                    "name": body.name,
+                    "force": body.force,
+                    "include_dill": body.include_dill,
+                },
                 timeout=60.0,
             )
     except SessionExpiredError as exc:
@@ -590,10 +617,11 @@ async def restore_snapshot(
 ) -> RestoreSnapshotResponse:
     """Restore snapshot endpoint — Unit 7.
 
-    Always replays the snapshot's ``disturbance_log`` from the sidecar
-    JSON; either substitutes the dill-loaded System (fast path, when the
-    ANDES version matches) or re-runs ``setup`` + ``PFlow.run`` (slow
-    path, the always-works fallback).
+    By default reloads the case, replays the snapshot's
+    ``disturbance_log`` from the sidecar JSON, and re-runs ``setup`` +
+    ``PFlow.run``. With ``use_dill_optimization`` it first tries to
+    substitute the dill-loaded System (when the snapshot has a blob and
+    the ANDES version matches) and falls back to the replay otherwise.
     """
     mgr = _manager(request)
     try:

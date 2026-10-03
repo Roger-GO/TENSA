@@ -2840,24 +2840,28 @@ class Wrapper:
     # ----- snapshot (Unit 7) -----
 
     def save_snapshot(
-        self, name: str, *, force: bool = False
+        self, name: str, *, force: bool = False, include_dill: bool = False
     ) -> dict[str, Any]:
         """Save the current System state as a snapshot — Unit 7.
 
-        Composes two artefacts on disk:
+        Composes up to two artefacts on disk:
 
-        - ``<name>.dill`` — ANDES's ``andes.utils.snapshot.save_ss`` blob.
-          Carries the complete System state (DAE arrays, PF / TDS state).
-          Version-locked to the current ANDES install.
         - ``<name>.json`` — sidecar metadata: ANDES + tensa versions,
           case filename + sha256, recorded ``_disturbance_log``,
           ``has_pflow`` / ``has_tds`` flags. The disturbance log is the
-          always-works restore path's source of truth (Unit 6.5).
+          default restore path's source of truth (Unit 6.5).
+        - ``<name>.dill`` — ANDES's ``andes.utils.snapshot.save_ss`` blob,
+          only when ``include_dill=True``. Carries the complete System
+          state (DAE arrays, PF / TDS state) for the opt-in dill restore.
+          Version-locked to the current ANDES install, and costly: a couple
+          of seconds and 2-3 MB per save, which is why it is not written
+          by default.
 
         ``force=False`` (default) refuses to overwrite an existing
         snapshot under the same name, raising
         :class:`SnapshotCollisionError` (mapped to HTTP 409 by the route
-        layer). ``force=True`` overwrites silently.
+        layer). ``force=True`` overwrites silently, and drops the dill blob
+        of the snapshot it replaces when ``include_dill`` is false.
         """
         from tensa import __version__ as tensa_version
         from tensa.core.snapshot import (
@@ -2880,7 +2884,7 @@ class Wrapper:
         case_filename = (
             self._case_path.name if self._case_path is not None else None
         )
-        # Ensure the directory exists before the dill writer touches it.
+        # Ensure the directory exists before the snapshot files are written.
         snapshot_dir(self._workspace, case_filename)
         dill_path, json_path = snapshot_paths(
             self._workspace, case_filename, validated
@@ -2904,18 +2908,26 @@ class Wrapper:
                 # audit just won't have a hash to compare against.
                 case_sha256 = None
 
-        # Capture state flags BEFORE save_ss runs so we record the System's
+        # Capture state flags BEFORE any save runs so we record the System's
         # current truth, not whatever side effect the save touches.
         has_pflow = bool(getattr(ss.PFlow, "converged", False))
         tds = getattr(ss, "TDS", None)
         has_tds = bool(getattr(tds, "initialized", False))
 
-        # ANDES's save_ss is dill-based; lazy-import keeps the wrapper's
-        # own import cost paid only by callers that hit the snapshot path.
         import andes
-        from andes.utils.snapshot import save_ss
 
         andes_version = str(getattr(andes, "__version__", "unknown"))
+
+        dill_writer: Callable[[str], None] | None = None
+        if include_dill:
+            # ANDES's save_ss is dill-based; lazy-import keeps the wrapper's
+            # own import cost paid only by callers that ask for the blob.
+            from andes.utils.snapshot import save_ss
+
+            def _save_dill(path: str) -> None:
+                save_ss(path, ss)
+
+            dill_writer = _save_dill
 
         try:
             saved_at = datetime.now(UTC).isoformat()
@@ -2932,13 +2944,10 @@ class Wrapper:
                 has_tds=has_tds,
             )
 
-            def _writer(path: str) -> None:
-                save_ss(path, ss)
-
             dill_bytes, json_bytes = write_snapshot_files(
                 dill_path=dill_path,
                 json_path=json_path,
-                dill_writer=_writer,
+                dill_writer=dill_writer,
                 metadata=metadata,
             )
         except SnapshotCollisionError:
@@ -2962,31 +2971,32 @@ class Wrapper:
         }
 
     def restore_snapshot(
-        self, name: str, *, use_dill_optimization: bool = True
+        self, name: str, *, use_dill_optimization: bool = False
     ) -> dict[str, Any]:
         """Restore a previously-saved snapshot — Unit 7.
 
-        Two-tier restore:
+        Replay-first restore:
 
-        1. Read the sidecar JSON; validate the version stamp. If the
-           ANDES major.minor differs from the current install, the dill
-           optimisation is forcibly disabled and ``fallback_reason`` is
-           recorded for the response.
-        2. Always-works path: ``reload_case`` (drops ``is_setup`` and
-           clears the in-memory ``_disturbance_log``) →
-           ``replay_disturbances()`` from the JSON's recorded log.
-        3. Fast path (dill optimisation enabled and version OK):
-           ``andes.utils.snapshot.load_ss`` substitutes a fresh System
-           with the captured PF / TDS state. ``_ensure_setup`` +
-           ``run_pflow`` are skipped.
-        4. Slow path (otherwise): ``_ensure_setup`` + ``run_pflow`` to
-           re-converge to the same operating point.
+        1. Read the sidecar JSON. With ``use_dill_optimization`` and an
+           ANDES major.minor that differs from the current install (or no
+           dill blob on disk), the dill path is skipped and
+           ``fallback_reason`` is recorded for the response.
+        2. Default path (replay): ``reload_case`` (drops ``is_setup`` and
+           clears the in-memory ``_disturbance_log``) → re-add the JSON's
+           recorded disturbances → ``_ensure_setup`` + ``run_pflow`` (when
+           the snapshot was taken after a converged PF) to re-converge to
+           the same operating point. Works on any ANDES version.
+        3. Opt-in path (``use_dill_optimization=True``, version OK, dill
+           present): ``andes.utils.snapshot.load_ss`` substitutes a System
+           with the captured PF / TDS state, so nothing is reloaded or
+           replayed and ``_ensure_setup`` + ``run_pflow`` are skipped. The
+           JSON's disturbance log becomes the wrapper's ``_disturbance_log``
+           (the blob already carries those disturbances). Any failure along
+           the way falls back to the default path.
 
         Raises :class:`SnapshotNotFoundError` (404) when the named
         snapshot does not exist; :class:`SnapshotMetadataError` (422)
-        on a corrupted sidecar; :class:`SnapshotVersionMismatchError`
-        (422) if the caller forced ``use_dill_optimization=True``
-        explicitly AND the dill version-check failed.
+        on a corrupted sidecar.
         """
         from tensa.core.snapshot import (
             DISTURBANCE_LOG_CAP,
@@ -3036,7 +3046,8 @@ class Wrapper:
         if use_dill_optimization and not dill_available:
             fallback_reason = (
                 f"dill blob {dill_path.name} not found alongside the "
-                "metadata; falling back to replay+PF"
+                "metadata (the snapshot was saved without one); "
+                "falling back to replay+PF"
             )
         elif use_dill_optimization and not version_ok:
             fallback_reason = (
@@ -3048,6 +3059,8 @@ class Wrapper:
 
         # Disturbance specs come back as plain dicts; rebuild via the
         # discriminated union so wrapper.add_disturbance accepts them.
+        # Parsed up front so a malformed log is refused before the live
+        # System is touched.
         from tensa.core.disturbance import (
             AlterSpec,
             FaultSpec,
@@ -3066,31 +3079,23 @@ class Wrapper:
                 f"snapshot disturbance has unknown kind: {kind!r}"
             )
 
-        # Reload (clears ``_disturbance_log`` + ``is_setup``); replay the
-        # snapshot's disturbances onto the fresh pre-setup System.
-        self.reload_case()
-        replayed = 0
-        for raw_spec in metadata.disturbance_log:
-            spec = _spec_from_dict(raw_spec)
-            self.add_disturbance(spec)
-            replayed += 1
+        specs = [_spec_from_dict(raw) for raw in metadata.disturbance_log]
 
         if use_dill_optimization and version_ok and dill_available:
-            # Fast path: load_ss replaces the System entirely. After this
-            # the wrapper's ``_ss`` reference must point at the dill-loaded
-            # System; the just-replayed disturbances on the previous
-            # pre-setup System are dropped on the floor (the dill blob
-            # carries the equivalent in its serialised state).
+            # Opt-in path: load_ss builds the whole System, so the live one is
+            # simply replaced. Nothing is reloaded or replayed beforehand; if
+            # the load fails the live System is still in place and the replay
+            # path below starts from it as usual.
             from andes.utils.snapshot import load_ss
 
-            # Part B (defense in depth): the dill fast-path has been observed to
+            # Part B (defense in depth): the dill path has been observed to
             # corrupt the worker's multiprocessing pipe fd — the old System being
             # GC'd closes a file descriptor that collides with the worker's pipe,
             # killing the worker with ``OSError: [Errno 9] Bad file descriptor``.
             # Part A is the real safety net (worker death → clean recoverable
-            # error); here we harden the fast path so ANY exception across the
-            # load, the System swap, AND a post-load sanity access falls back to
-            # the slow replay+PF path instead of leaving the wrapper in a torn
+            # error); here we harden the path so ANY exception across the
+            # load, the System swap, AND a post-load sanity access falls back
+            # to the replay path instead of leaving the wrapper in a torn
             # state. The try therefore spans more than ``load_ss`` alone: a
             # corruption that surfaces only when the swapped-in System is first
             # touched (or when the old System is dropped) must still fall back.
@@ -3108,8 +3113,8 @@ class Wrapper:
                 used_dill = True
             except Exception as exc:  # noqa: BLE001
                 # Defensive: a corrupted dill (or a torn swap) should fall back,
-                # not crash. Restore the previous System reference so the slow
-                # path below operates on the already-replayed pre-setup System.
+                # not crash. Put the previous System back so the replay path
+                # below starts from a consistent wrapper.
                 fallback_reason = (
                     "dill load failed "
                     f"({type(exc).__name__}); falling back to replay+PF"
@@ -3117,20 +3122,36 @@ class Wrapper:
                 self._ss = previous_ss
                 used_dill = False
                 logging.getLogger("tensa.wrapper.snapshot").warning(
-                    "snapshot %r dill fast-path failed: %s; "
-                    "falling back to slow path",
+                    "snapshot %r dill path failed: %s; "
+                    "falling back to replay+PF",
                     validated,
                     _sanitize_message(str(exc)),
                 )
 
-        # Slow path: setup + PF on the post-replay System. PF is
-        # idempotent; if the user only wanted the disturbance list back
-        # (snapshot was saved pre-setup) the meta's has_pflow=False
-        # tells us to stop here.
-        if not used_dill and metadata.has_pflow:
-            self._ensure_setup()
-            ss = self._require_loaded()
-            ss.PFlow.run()
+            if used_dill:
+                # Same bookkeeping ``load_case`` does for a new System, with
+                # the recorded disturbances adopted as the log: the blob
+                # already holds them, so re-adding them would double them up.
+                self._setup_failed = False
+                self._se_measurements = None
+                if self._case_path is not None:
+                    self._replay_buffer = []
+                self._disturbance_log = list(specs)
+
+        replayed = len(specs)
+        if not used_dill:
+            # Default path: reload (clears ``_disturbance_log`` + ``is_setup``),
+            # replay the snapshot's disturbances onto the fresh pre-setup
+            # System, then setup + PF. PF is idempotent; if the user only
+            # wanted the disturbance list back (snapshot was saved pre-PF) the
+            # meta's has_pflow=False tells us to stop before setup.
+            self.reload_case()
+            for spec in specs:
+                self.add_disturbance(spec)
+            if metadata.has_pflow:
+                self._ensure_setup()
+                ss = self._require_loaded()
+                ss.PFlow.run()
 
         return RestoreSnapshotResult(
             used_dill=used_dill,

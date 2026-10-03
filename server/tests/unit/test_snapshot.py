@@ -292,6 +292,69 @@ def test_write_snapshot_files_writes_both(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_write_snapshot_files_without_a_writer_writes_only_the_json(
+    tmp_path: Path,
+) -> None:
+    """No dill writer (the default save) means no blob and ``dill_bytes == 0``."""
+    target = snapshot_dir(tmp_path, "ieee14.raw")
+    dill_path = target / "scenario-A.dill"
+    json_path = target / "scenario-A.json"
+    meta = SnapshotMetadata(
+        andes_version="2.0.0",
+        tensa_version=tensa.__version__,
+        case_filename="ieee14.raw",
+        case_sha256=None,
+        disturbance_log=[],
+        saved_at="2026-05-09T00:00:00+00:00",
+        has_pflow=False,
+        has_tds=False,
+    )
+    dill_bytes, json_bytes = write_snapshot_files(
+        dill_path=dill_path,
+        json_path=json_path,
+        dill_writer=None,
+        metadata=meta,
+    )
+    assert dill_bytes == 0
+    assert json_bytes > 0
+    assert not dill_path.exists()
+    assert read_snapshot_metadata(json_path) == meta
+
+
+@pytest.mark.unit
+def test_write_snapshot_files_without_a_writer_removes_a_stale_blob(
+    tmp_path: Path,
+) -> None:
+    """Overwriting a snapshot that had a blob, without asking for a new one,
+    must not leave the old blob next to the new JSON."""
+    target = snapshot_dir(tmp_path, "ieee14.raw")
+    dill_path = target / "scenario-A.dill"
+    json_path = target / "scenario-A.json"
+    meta = SnapshotMetadata(
+        andes_version="2.0.0",
+        tensa_version=tensa.__version__,
+        case_filename="ieee14.raw",
+        case_sha256=None,
+        disturbance_log=[],
+        saved_at="2026-05-09T00:00:00+00:00",
+        has_pflow=False,
+        has_tds=False,
+    )
+    write_snapshot_files(
+        dill_path=dill_path,
+        json_path=json_path,
+        dill_writer=_write_dummy_dill,
+        metadata=meta,
+    )
+    assert dill_path.exists()
+    write_snapshot_files(
+        dill_path=dill_path, json_path=json_path, dill_writer=None, metadata=meta
+    )
+    assert not dill_path.exists()
+    assert json_path.exists()
+
+
+@pytest.mark.unit
 def test_read_snapshot_metadata_missing_file_raises_not_found(tmp_path: Path) -> None:
     with pytest.raises(SnapshotNotFoundError):
         read_snapshot_metadata(tmp_path / "missing.json")

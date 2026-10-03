@@ -1,35 +1,37 @@
 """Snapshot save/load orchestrator (Unit 7 of the v2.0 plan).
 
-Snapshots compose two pieces, per the plan's KTD-4 contract:
+Snapshots compose up to two pieces, per the plan's KTD-4 contract:
 
-- ``<name>.dill`` — ANDES's own ``andes.utils.snapshot.save_ss`` output. The
-  dill payload carries the complete ``System`` state (DAE arrays, PF state,
-  TDS state when post-TDS). It is **version-locked** to the ANDES version
-  that produced it; ANDES exposes no runtime version check, so the substrate
-  enforces one (refuses ``load_ss`` on minor-version mismatch and falls
-  back to the always-works replay path).
-- ``<name>.json`` — sidecar metadata that lives independently of the dill
-  blob. Carries the recorded ``_disturbance_log`` (Unit 6.5) plus the
-  manifest fields needed for the version check + integrity audit
-  (``andes_version``, ``tensa_version``, ``case_filename``,
-  ``case_sha256``, ``saved_at``, ``has_pflow``, ``has_tds``).
+- ``<name>.json`` - sidecar metadata, always written. Carries the recorded
+  ``_disturbance_log`` (Unit 6.5) plus the manifest fields needed for the
+  version check + integrity audit (``andes_version``, ``tensa_version``,
+  ``case_filename``, ``case_sha256``, ``saved_at``, ``has_pflow``,
+  ``has_tds``). It is the source of truth for the default restore.
+- ``<name>.dill`` - ANDES's own ``andes.utils.snapshot.save_ss`` output, written
+  only when the caller asks for it (``include_dill=True``). The dill payload
+  carries the complete ``System`` state (DAE arrays, PF state, TDS state when
+  post-TDS). It costs a couple of seconds and 2-3 MB per save, it is
+  **version-locked** to the ANDES version that produced it (ANDES exposes no
+  runtime version check, so the substrate enforces one and refuses ``load_ss``
+  on a minor-version mismatch), and ANDES 2.0 cannot load a blob saved after
+  the power flow but before the TDS was initialised on a case with dynamic
+  models.
 
-The restore flow is two-tier:
+The restore flow is replay-first:
 
-1. **Always-works (slow path):** ``wrapper.reload_case`` →
-   ``wrapper.replay_disturbances`` (from the JSON's log) →
-   ``wrapper._ensure_setup`` + ``wrapper.run_pflow``. Reaches the same
-   converged operating point through the same code paths the user
-   would walk by hand.
-2. **Optimisation (fast path):** if the JSON's ``andes_version`` matches
-   the current install AND the dill file exists AND the caller passed
-   ``use_dill_optimization=True``, swap in ``andes.utils.snapshot.load_ss``
-   to skip the PF re-solve. The disturbance log is still replayed so the
-   substrate's in-memory ``_disturbance_log`` stays consistent.
+1. **Default (replay):** ``wrapper.reload_case`` -> re-add the JSON's
+   disturbance log -> ``wrapper._ensure_setup`` + ``PFlow.run``. Reaches the
+   same converged operating point through the same code paths the user would
+   walk by hand, on any ANDES version.
+2. **Opt-in (dill):** if the caller passed ``use_dill_optimization=True``, the
+   JSON's ``andes_version`` matches the current install, and the dill file
+   exists, ``andes.utils.snapshot.load_ss`` is tried FIRST, without reloading
+   or replaying anything, and the JSON's disturbance log is adopted as the
+   substrate's ``_disturbance_log``. Any failure falls back to the replay path.
 
 Snapshot directory layout (per plan):
 
-    <workspace>/snapshots/<case_basename>/<name>.{dill,json}
+    <workspace>/snapshots/<case_basename>/<name>.{json,dill}
 
 ``<case_basename>`` is the loaded case file's stem (e.g., ``ieee14`` for
 ``ieee14.raw``). Snapshots from different cases never collide. Snapshots
@@ -46,6 +48,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -187,8 +190,9 @@ class SnapshotEntry:
 
     The listing endpoint returns one entry per ``<name>.json`` found
     under ``<workspace>/snapshots/<case_basename>/``. ``has_dill``
-    reflects whether the dill blob is also present (it should be, but
-    a half-deleted snapshot directory shouldn't crash the listing).
+    reflects whether the optional dill blob is present (only snapshots
+    saved with ``include_dill`` have one, and a half-deleted snapshot
+    directory shouldn't crash the listing).
     """
 
     name: str
@@ -329,23 +333,31 @@ def write_snapshot_files(
     *,
     dill_path: Path,
     json_path: Path,
-    dill_writer: Any,  # callable: (path: str) -> None — andes.utils.snapshot.save_ss
+    dill_writer: Callable[[str], None] | None,
     metadata: SnapshotMetadata,
 ) -> tuple[int, int]:
-    """Write the dill blob + sidecar JSON atomically (writer first, then
-    JSON; the JSON's existence is what the listing endpoint keys on).
+    """Write the sidecar JSON, preceded by the dill blob when one is wanted
+    (writer first, then JSON; the JSON's existence is what the listing
+    endpoint keys on).
 
     ``dill_writer`` is injected to keep this module ANDES-free at import
     time. The wrapper passes ``andes.utils.snapshot.save_ss`` bound to
-    the live System.
+    the live System, or ``None`` when the caller did not ask for a dill
+    blob. With ``None`` no blob is written and any blob left by an earlier
+    save under the same name is removed, so the new JSON is never paired
+    with the old System state.
 
     Returns ``(dill_bytes, metadata_bytes)`` for the route layer's
-    response.
+    response; ``dill_bytes`` is 0 when no blob was written.
     """
     # Write dill first; on failure the sidecar JSON never lands and the
     # listing won't surface a half-saved snapshot.
-    dill_writer(str(dill_path))
-    dill_bytes = dill_path.stat().st_size if dill_path.exists() else 0
+    if dill_writer is not None:
+        dill_writer(str(dill_path))
+        dill_bytes = dill_path.stat().st_size if dill_path.exists() else 0
+    else:
+        dill_path.unlink(missing_ok=True)
+        dill_bytes = 0
 
     json_payload = json.dumps(metadata.to_dict(), indent=2, sort_keys=True)
     json_path.write_text(json_payload, encoding="utf-8")
@@ -442,8 +454,8 @@ class RestoreSnapshotResult:
     """Return shape of :func:`restore_snapshot`.
 
     Tells the route layer (and the UI via the response body) which restore
-    path was actually taken — the fast dill path or the slow replay path —
-    so the success toast can call out the version-mismatch fallback.
+    path was actually taken - the opt-in dill path or the default replay
+    path - so the success toast can call out a fallback from the dill path.
     """
 
     used_dill: bool

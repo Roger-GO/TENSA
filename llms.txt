@@ -93,6 +93,9 @@ response and needs no Arrow decoding.
   Vn1/Vn2 from the connected buses automatically.
 - TDS batch endpoint is synchronous with a 300 s server-side cap; for long runs use the WS stream.
 - After any run, GET /operating-point reflects the final state (TDS end point, not the initial PF).
+- Snapshots restore by replay (reload the case, re-add the recorded disturbances, setup, PF). The
+  ANDES solver-state blob is opt-in on both ends: "include_dill": true on POST .../snapshot writes it
+  and "use_dill_optimization": true on POST .../snapshot/restore tries it first.
 - model names are ANDES model names: Bus, Line, PQ, PV, Slack, Shunt, GENROU, GENCLS,
   IEEEX1, ESDC2A, EXST1, SEXS, TGOV1, IEEEG1, Fault, Toggle, Alter, ...
   GET /api/topology/schema lists every model the builder supports with typed params.
