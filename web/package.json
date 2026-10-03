@@ -7,14 +7,9 @@
   "license": "GPL-3.0-or-later",
   "engines": {
     "node": ">=22",
-    "pnpm": ">=9"
+    "pnpm": ">=11"
   },
   "packageManager": "pnpm@11.0.8",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
-  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -62,7 +57,7 @@
   "devDependencies": {
     "@eslint/js": "^9.17.0",
     "@playwright/test": "^1.49.1",
-    "@tailwindcss/vite": "^4.0.0-beta.7",
+    "@tailwindcss/vite": "^4.2.4",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",
@@ -83,7 +78,7 @@
     "openapi-typescript": "^7.5.0",
     "prettier": "^3.4.2",
     "prettier-plugin-tailwindcss": "^0.6.9",
-    "tailwindcss": "^4.0.0-beta.7",
+    "tailwindcss": "^4.2.4",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.19.1",
     "vite": "^6.0.7",
