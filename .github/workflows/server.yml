@@ -15,6 +15,8 @@ on:
       - ".github/workflows/server.yml"
       - "scripts/**"
   workflow_dispatch:
+  # publish.yml runs this whole workflow before it uploads a release.
+  workflow_call:
 
 permissions:
   contents: read

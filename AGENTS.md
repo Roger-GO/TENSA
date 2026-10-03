@@ -70,6 +70,7 @@ The trust model lives in the top-level docstring of `server/src/tensa/__init__.p
 - `server/src/tensa/cache/` — precomputed `andes prepare` artifacts (built at wheel time; only IEEE 14 ships in the wheel)
 - `server/tests/acceptance/walkthrough.sh` — the curl-only end-to-end acceptance test
 - `server/hatch_build.py`: the hatch build hook that bundles the built UI (`web/dist`) into the sdist and the wheel without source maps, skips it for editable installs, and fails the build when there is no UI; `server/LICENSE` is a copy of the root license so the sdist builds on its own (a test keeps them identical)
+- `scripts/check_dist.py`: the checks `publish.yml` runs on the built sdist and wheel (tag equals version, UI bundled, no source maps, license included)
 - `examples/` — copy-paste API walkthroughs (curl + Python)
 - `llms.txt` — condensed API map for LLM agents (update when routes change)
 

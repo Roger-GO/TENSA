@@ -56,6 +56,14 @@ CI runs the server tests on Linux, macOS (Apple silicon), and Windows with Pytho
 - **Version** is set in one place, `server/pyproject.toml`. `tensa.__version__`, the OpenAPI version, and the `tensa_version` stamped on bundles and snapshots read it from the installed package metadata, so re-run `pip install -e ./server` after a bump. `web/package.json` and `CITATION.cff` carry copies; `server/tests/unit/test_version.py` fails if any of them drift.
 - **Stage files explicitly** — no `git add .`.
 
+## Releasing
+
+1. Set the new version in `server/pyproject.toml`, `web/package.json`, and `CITATION.cff` (`server/tests/unit/test_version.py` fails if they differ), and move the `[Unreleased]` changelog entries under it.
+2. Tag the commit `vX.Y.Z` (the tag must name the package version) and publish a GitHub release for it.
+3. `.github/workflows/publish.yml` runs the server and web test workflows, builds the UI, the sdist, and the wheel from that sdist, checks them (`scripts/check_dist.py`: tag equals version, UI bundled, no source maps, license included), installs the wheel into a clean environment, and uploads it to PyPI with Trusted Publishing. It publishes nothing if any step fails.
+
+To build the same packages locally, build the UI first and then run the build: `cd web && pnpm install && pnpm build`, then `pip install build && python -m build server`. `python scripts/check_dist.py server/dist` runs the same checks. The build fails when `web/dist` is missing, so a package never ships without the UI. An editable install (`pip install -e ./server`) does not need the UI built first.
+
 ## Making changes that touch the API surface
 
 1. Change the server (routes/schemas) with tests.

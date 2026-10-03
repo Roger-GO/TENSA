@@ -3,9 +3,11 @@
 ``.github/workflows/server.yml`` is where the supported operating systems and
 Python versions are listed. Nothing else would notice if a Python version were
 dropped from the matrix while its trove classifier stayed, or if the workflow
-asked ``scripts/ci-matrix.sh`` for a stage the script does not have. These
-tests read the repository files directly, so they skip when the tests run away
-from a checkout.
+asked ``scripts/ci-matrix.sh`` for a stage the script does not have. The release
+workflow (``publish.yml``) is checked the same way: it must wait for the test
+workflows and must build, check, and smoke-test the packages before uploading
+them. These tests read the repository files directly, so they skip when the
+tests run away from a checkout.
 """
 
 from __future__ import annotations
@@ -22,19 +24,35 @@ pytestmark = pytest.mark.unit
 # server/tests/unit/test_ci_config.py -> server/ and the repository root.
 _SERVER_DIR = Path(__file__).resolve().parents[2]
 _REPO_ROOT = _SERVER_DIR.parent
-_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "server.yml"
+_WORKFLOWS = _REPO_ROOT / ".github" / "workflows"
+_WORKFLOW = _WORKFLOWS / "server.yml"
 _SCRIPT = _REPO_ROOT / "scripts" / "ci-matrix.sh"
 
 _REQUIRED_OSES = {"ubuntu-latest", "macos-14", "windows-latest"}
 
 
-def _workflow() -> dict[str, Any]:
+def _load(path: Path) -> dict[str, Any]:
     yaml = pytest.importorskip("yaml")
-    if not _WORKFLOW.is_file():
-        pytest.skip(".github/workflows/server.yml is not next to the tests")
-    loaded = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
+    if not path.is_file():
+        pytest.skip(f".github/workflows/{path.name} is not next to the tests")
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)
     return loaded
+
+
+def _workflow() -> dict[str, Any]:
+    return _load(_WORKFLOW)
+
+
+def _triggers(workflow: dict[str, Any]) -> dict[str, Any]:
+    # PyYAML follows YAML 1.1, where a bare ``on`` key loads as ``True``.
+    triggers = workflow.get("on", workflow.get(True))
+    assert isinstance(triggers, dict)
+    return triggers
+
+
+def _run_text(job: dict[str, Any]) -> str:
+    return "\n".join(step["run"] for step in job["steps"] if "run" in step)
 
 
 def _pyproject() -> dict[str, Any]:
@@ -54,10 +72,7 @@ def _classifier_pythons() -> set[str]:
 
 
 def test_workflow_triggers_cover_main_improve_branches_pull_requests_and_manual_runs() -> None:
-    workflow = _workflow()
-    # PyYAML follows YAML 1.1, where a bare ``on`` key loads as ``True``.
-    triggers = workflow.get("on", workflow.get(True))
-    assert triggers is not None
+    triggers = _triggers(_workflow())
     assert set(triggers["push"]["branches"]).issuperset({"main", "improve/**"})
     assert "pull_request" in triggers
     assert "workflow_dispatch" in triggers
@@ -106,3 +121,52 @@ def test_every_stage_the_workflow_asks_for_exists_in_the_script() -> None:
         assert re.search(rf"^\s*{stage}\)", script, re.MULTILINE), (
             f"scripts/ci-matrix.sh has no {stage!r} stage"
         )
+
+
+def test_the_test_workflows_can_be_called_from_the_release_workflow() -> None:
+    for name in ("server.yml", "web.yml"):
+        assert "workflow_call" in _triggers(_load(_WORKFLOWS / name)), name
+
+
+def test_publish_waits_for_the_test_workflows_and_the_build() -> None:
+    jobs = _load(_WORKFLOWS / "publish.yml")["jobs"]
+    assert jobs["server-tests"]["uses"] == "./.github/workflows/server.yml"
+    assert jobs["web-tests"]["uses"] == "./.github/workflows/web.yml"
+    assert set(jobs["publish"]["needs"]) == {"server-tests", "web-tests", "build"}
+
+
+def test_only_the_publish_job_can_mint_an_oidc_token() -> None:
+    workflow = _load(_WORKFLOWS / "publish.yml")
+    assert "id-token" not in workflow["permissions"]
+    for name, job in workflow["jobs"].items():
+        granted = job.get("permissions", {}).get("id-token")
+        assert (granted == "write") == (name == "publish"), name
+
+
+def test_publish_builds_the_wheel_from_the_sdist_and_checks_what_it_built() -> None:
+    build = _load(_WORKFLOWS / "publish.yml")["jobs"]["build"]
+    run = _run_text(build)
+    # Neither --sdist nor --wheel: build then makes the wheel from the sdist.
+    (command,) = [line for line in run.splitlines() if "-m build" in line]
+    assert "--sdist" not in command
+    assert "--wheel" not in command
+    # The tag must be the package version, and only a tag run may get that far.
+    assert "GITHUB_REF_TYPE" in run
+    assert re.search(r'scripts/check_dist\.py\s+server/dist\s+--tag\s+"\$GITHUB_REF_NAME"', run)
+    assert "twine check --strict" in run
+    # A clean environment installs the wheel and runs it.
+    assert 'bin/tensa" --help' in run
+    assert 'bin/tensa" --version' in run
+    assert "static" in run
+    assert "index.html" in run
+
+
+def test_publish_uploads_what_the_build_job_checked() -> None:
+    jobs = _load(_WORKFLOWS / "publish.yml")["jobs"]
+    uploaded = [s for s in jobs["build"]["steps"] if "upload-artifact" in s.get("uses", "")]
+    downloaded = [s for s in jobs["publish"]["steps"] if "download-artifact" in s.get("uses", "")]
+    assert len(uploaded) == len(downloaded) == 1
+    assert uploaded[0]["with"]["name"] == downloaded[0]["with"]["name"]
+    publish = [s for s in jobs["publish"]["steps"] if "pypi-publish" in s.get("uses", "")]
+    assert len(publish) == 1
+    assert publish[0]["with"]["packages-dir"] == downloaded[0]["with"]["path"]

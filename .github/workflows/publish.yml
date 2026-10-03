@@ -3,12 +3,23 @@
 # No API token is stored anywhere: PyPI's pending-publisher registration for
 # this repository (owner Roger-GO, repo TENSA, workflow publish.yml) accepts
 # GitHub's identity claim directly. Runs on every published release, plus a
-# manual trigger for one-off publishes.
+# manual trigger. Both must run on a tag whose name is the package version
+# (v0.5.0 for version 0.5.0); the build job refuses anything else.
 #
-# The web SPA is built FIRST so hatch's force-include bundles ``web/dist``
-# into the wheel as ``tensa/static`` (the wheel serves the UI standalone).
-# Note: the sdist cannot carry ``../web/dist`` (outside the package root),
-# so source installs still build the UI per the README quick start.
+# Three jobs run side by side, and ``publish`` waits for all of them:
+#
+# * ``server-tests`` and ``web-tests`` are the workflows CI runs on every push
+#   (server.yml and web.yml), called as reusable workflows. A release does not
+#   go out while either is red.
+# * ``build`` builds the web UI, then the sdist, then the wheel FROM that sdist,
+#   so the wheel that ships is the one a source install gets and the sdist is
+#   known to be buildable. It checks both archives and the tag (see
+#   scripts/check_dist.py), checks the metadata with twine, and installs the
+#   wheel into a clean environment. A packaging or tag problem therefore shows
+#   up in minutes instead of after the whole test matrix.
+#
+# Only ``publish`` gets the OIDC token, and it uploads exactly the files
+# ``build`` checked.
 name: publish
 
 on:
@@ -16,13 +27,20 @@ on:
     types: [published]
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 jobs:
-  publish:
+  server-tests:
+    uses: ./.github/workflows/server.yml
+
+  web-tests:
+    uses: ./.github/workflows/web.yml
+
+  build:
+    name: build and check the distributions
     runs-on: ubuntu-latest
-    permissions:
-      # Required for PyPI Trusted Publishing (OIDC token exchange).
-      id-token: write
-      contents: read
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -36,7 +54,9 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      - name: Build the web UI (bundled into the wheel)
+      # The build hook (server/hatch_build.py) bundles web/dist into the sdist
+      # and the wheel, and fails the build when it is missing.
+      - name: Build the web UI (bundled into the packages)
         working-directory: web
         run: |
           pnpm install --frozen-lockfile
@@ -46,13 +66,63 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build sdist + wheel
+      # With neither --sdist nor --wheel, build makes the sdist and then builds
+      # the wheel from the unpacked sdist, where ../web/dist and ../LICENSE
+      # do not exist.
+      - name: Build the sdist, then the wheel from the sdist
         working-directory: server
         run: |
-          python -m pip install --upgrade build
-          python -m build --sdist --wheel -o dist .
+          python -m pip install --upgrade build twine
+          python -m build --outdir dist .
+
+      - name: Check the tag, the UI, the source maps, and the licenses
+        run: |
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "::error::Publish from a tag (publish a release, or run this workflow on a tag), not from $GITHUB_REF_TYPE $GITHUB_REF_NAME."
+            exit 1
+          fi
+          python scripts/check_dist.py server/dist --tag "$GITHUB_REF_NAME"
+          twine check --strict server/dist/*
+
+      - name: Smoke-test the wheel in a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/smoke"
+          "$RUNNER_TEMP/smoke/bin/python" -m pip install --quiet server/dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/smoke/bin/tensa" --help
+          "$RUNNER_TEMP/smoke/bin/tensa" --version
+          "$RUNNER_TEMP/smoke/bin/python" - <<'PY'
+          from importlib.resources import files
+
+          index = files("tensa") / "static" / "index.html"
+          assert index.is_file(), f"{index} is missing from the installed wheel"
+          print("UI bundled at", index)
+          PY
+
+      - name: Upload the distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: server/dist/*
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    name: publish to PyPI
+    needs: [server-tests, web-tests, build]
+    runs-on: ubuntu-latest
+    permissions:
+      # Required for PyPI Trusted Publishing (OIDC token exchange).
+      id-token: write
+      contents: read
+    steps:
+      - name: Download the distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: server/dist
+          packages-dir: dist
