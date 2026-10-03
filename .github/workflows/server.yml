@@ -172,8 +172,11 @@ jobs:
         if: runner.os != 'Linux'
         run: bash ./scripts/ci-matrix.sh unit
 
+      # `!cancelled()` keeps this step from inheriting the implicit success()
+      # check: a failing unit test must not hide whether the real server, worker
+      # and simulation path works on this operating system.
       - name: Smoke test
-        if: runner.os != 'Linux'
+        if: runner.os != 'Linux' && !cancelled()
         run: bash ./scripts/ci-matrix.sh smoke
 
       - name: Coverage summary

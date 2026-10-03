@@ -117,6 +117,17 @@ def test_every_stage_the_workflow_asks_for_exists_in_the_script() -> None:
         )
 
 
+def test_the_smoke_test_runs_even_when_the_unit_tests_fail() -> None:
+    """An ``if:`` without a status function carries an implicit ``success()``, so
+    the smoke step was skipped on macOS and Windows exactly when the unit tests
+    failed there, which is when its answer is most needed."""
+    steps = _workflow()["jobs"]["test"]["steps"]
+    smoke = [s for s in steps if "ci-matrix.sh smoke" in s.get("run", "")]
+    assert len(smoke) == 1
+    condition = str(smoke[0]["if"])
+    assert "!cancelled()" in condition or "always()" in condition
+
+
 def test_the_acceptance_job_runs_the_acceptance_suite() -> None:
     """The job was an ``echo`` placeholder, so its green check meant nothing."""
     steps = _workflow()["jobs"]["acceptance"]["steps"]
