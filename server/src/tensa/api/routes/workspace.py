@@ -21,7 +21,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,6 +34,7 @@ from tensa.api.schemas import (
     WorkspaceFile,
     WorkspaceFileList,
 )
+from tensa.security.names import legacy_names_possible
 from tensa.security.paths import (
     WorkspacePathError,
     _check_within_workspace,
@@ -301,9 +301,11 @@ def _is_existing_case_file(workspace: Path, case_path: str) -> bool:
     whose name is legal on Linux and macOS but not portable (``case_12:30.raw``)
     still lists and loads, so its layout must stay savable. Windows cannot hold
     such a name as a plain file (``:`` would be a stream), so there the name
-    check always applies. The sidecar path still passes every containment check.
+    check always applies, the same answer snapshot restore gets from
+    ``legacy_names_possible``. The sidecar path still passes every containment
+    check.
     """
-    if sys.platform == "win32":
+    if not legacy_names_possible():
         return False
     try:
         return (workspace / case_path).is_file()

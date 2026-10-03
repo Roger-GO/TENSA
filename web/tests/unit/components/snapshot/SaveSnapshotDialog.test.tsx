@@ -88,6 +88,26 @@ describe('<SaveSnapshotDialog /> — name validation', () => {
     await user.type(screen.getByTestId('save-snapshot-name-input'), 'scenario-A');
     expect(screen.getByTestId('save-snapshot-confirm')).toBeEnabled();
   });
+
+  it.each(['con', 'aux.v2', 'COM1'])('rejects the Windows device name %s', async (name) => {
+    const user = userEvent.setup();
+    render(withQueryClient(<SaveSnapshotDialog />));
+    await user.type(screen.getByTestId('save-snapshot-name-input'), name);
+    expect(await screen.findByTestId('save-snapshot-validation-error')).toHaveTextContent(
+      /reserved Windows device name/i,
+    );
+    expect(screen.getByTestId('save-snapshot-confirm')).toBeDisabled();
+  });
+
+  it('rejects a trailing dot', async () => {
+    const user = userEvent.setup();
+    render(withQueryClient(<SaveSnapshotDialog />));
+    await user.type(screen.getByTestId('save-snapshot-name-input'), 'scenario.');
+    expect(await screen.findByTestId('save-snapshot-validation-error')).toHaveTextContent(
+      /end with a dot/i,
+    );
+    expect(screen.getByTestId('save-snapshot-confirm')).toBeDisabled();
+  });
 });
 
 describe('<SaveSnapshotDialog /> — confirm flow', () => {

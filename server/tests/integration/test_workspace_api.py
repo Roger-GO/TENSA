@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import types
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
@@ -12,7 +13,9 @@ import httpx
 import pytest
 
 from tensa.api.app import make_app
+from tensa.api.routes import workspace as workspace_routes
 from tensa.core.session import SessionManager
+from tensa.security import names as security_names
 
 
 @pytest.fixture
@@ -227,6 +230,20 @@ async def test_layout_below_a_regular_file_is_a_client_error(
     got = await client.get("/api/workspace/layout", params={"case_path": "ieee14.raw/x.raw"})
     assert got.status_code == 400, got.text
     assert [p.name for p in ws.iterdir()] == ["ieee14.raw"]
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows cannot hold these as plain files")
+def test_existing_case_file_exemption_follows_the_shared_platform_rule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sidecar exemption and snapshot restore ask the same question
+    (``legacy_names_possible``), so on Windows both switch the exemption off."""
+    (tmp_path / "case_12:30.raw").write_text("dummy")
+    assert workspace_routes._is_existing_case_file(tmp_path, "case_12:30.raw")  # noqa: SLF001
+    assert not workspace_routes._is_existing_case_file(tmp_path, "missing.raw")  # noqa: SLF001
+    monkeypatch.setattr(security_names, "sys", types.SimpleNamespace(platform="win32"))
+    assert not workspace_routes._is_existing_case_file(tmp_path, "case_12:30.raw")  # noqa: SLF001
 
 
 @pytest.mark.integration

@@ -89,6 +89,28 @@ describe('<SaveAsCustomCaseDialog /> — validation', () => {
     expect(screen.getByTestId('save-as-custom-confirm')).toBeDisabled();
   });
 
+  it.each(['con', 'aux.v2', 'COM1'])('rejects the Windows device name %s', async (name) => {
+    const user = userEvent.setup();
+    fetchSpy.mockImplementation(routeFetch());
+    render(withQueryClient(<SaveAsCustomCaseDialog open onOpenChange={() => {}} />));
+    await user.type(screen.getByTestId('save-as-custom-name-input'), name);
+    expect(await screen.findByTestId('save-as-custom-validation-error')).toHaveTextContent(
+      /reserved Windows device name/i,
+    );
+    expect(screen.getByTestId('save-as-custom-confirm')).toBeDisabled();
+  });
+
+  it('rejects a trailing dot', async () => {
+    const user = userEvent.setup();
+    fetchSpy.mockImplementation(routeFetch());
+    render(withQueryClient(<SaveAsCustomCaseDialog open onOpenChange={() => {}} />));
+    await user.type(screen.getByTestId('save-as-custom-name-input'), 'tuned.');
+    expect(await screen.findByTestId('save-as-custom-validation-error')).toHaveTextContent(
+      /end with a dot/i,
+    );
+    expect(screen.getByTestId('save-as-custom-confirm')).toBeDisabled();
+  });
+
   it('rejects a name colliding with an existing workspace file (case-insensitive)', async () => {
     const user = userEvent.setup();
     fetchSpy.mockImplementation(routeFetch());

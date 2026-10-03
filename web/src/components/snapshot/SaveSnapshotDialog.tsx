@@ -7,9 +7,10 @@
  * is only rendered when ``saveDialogOpen`` is true so unit-test
  * renderings of the menu without a QueryClientProvider stay green.
  *
- * Validation is client-side (1-64 chars of [A-Za-z0-9._-] starting with
- * an alphanumeric — same regex the substrate enforces). The substrate
- * gets the final say; a 422 from a name we didn't catch surfaces inline.
+ * Validation is client-side and mirrors the substrate (`userNameProblem`:
+ * 1-64 chars of [A-Za-z0-9._-] starting with an alphanumeric, no trailing
+ * dot, no Windows device name). The substrate gets the final say; a 422 from a
+ * name we didn't catch surfaces inline.
  *
  * Collision policy: the substrate returns 409 on name reuse unless
  * ``force=true``. The dialog catches the 409 and shows a "Snapshot
@@ -31,13 +32,11 @@ import { useSnapshotStore } from '@/store/snapshot';
 import { useSessionStore } from '@/store/session';
 import { ProblemDetailsError } from '@/api/client';
 import { cn } from '@/lib/cn';
-
-const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+import { userNameProblem } from '@/lib/fileName';
 
 function validateName(name: string): string | null {
   if (name.length === 0) return 'Name is required.';
-  if (!NAME_RE.test(name)) return 'Use 1-64 chars of letters, digits, dot, underscore, or dash.';
-  return null;
+  return userNameProblem(name);
 }
 
 export function SaveSnapshotDialog() {

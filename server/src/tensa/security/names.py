@@ -10,9 +10,15 @@ trailing dot or space so ``case.raw.`` silently aliases ``case.raw``.
 accepted here is a plain file name wherever the file ends up. It checks ONE path
 component; separators are rejected, not interpreted, and containment inside the
 workspace is the job of ``security.paths``.
+
+``user_name_problem`` adds the shape rule for names a user types into a dialog
+(snapshots, save-as clones) and is the one validator behind both.
 """
 
 from __future__ import annotations
+
+import re
+import sys
 
 # Characters Windows refuses in a file name (``/`` and ``\`` are separators).
 _WINDOWS_INVALID_CHARS = frozenset('<>:"/\\|?*')
@@ -60,3 +66,41 @@ def portable_name_problem(name: str) -> str | None:
             "(CON, PRN, AUX, NUL, CONIN$, CONOUT$, COM0-9, LPT0-9 and their superscript forms)"
         )
     return None
+
+
+# A name the user picks for something stored as ``<name>.<ext>``. Matched with
+# ``fullmatch``: a ``$`` anchor would also accept a trailing newline.
+_USER_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._\-]{0,63}")
+
+USER_NAME_RULE = "1-64 chars of [A-Za-z0-9._-] starting with an alphanumeric"
+
+
+def legacy_names_possible() -> bool:
+    """True where a name that predates the portable-name rules can exist on disk.
+
+    A workspace created before those rules may hold ``aux.dill`` or
+    ``case:1.raw`` on Linux and macOS, so such names stay readable there.
+    Windows cannot store either as a plain file (a DOS device, an NTFS stream),
+    so no exemption applies there. Every legacy-name exemption asks this one
+    question so they cannot disagree.
+    """
+    return sys.platform != "win32"
+
+
+def user_name_problem(name: object, *, legacy: bool = False) -> str | None:
+    """Why ``name`` is not an acceptable user-chosen name, or ``None``.
+
+    The return value reads after "the name ", like ``portable_name_problem``.
+    Two layers: the shape (:data:`USER_NAME_RULE`, which already excludes
+    separators and traversal) and then the portable-name rules.
+
+    ``legacy=True`` is for a name that is already stored, on restore or delete:
+    it keeps the shape check and waives the portable-name rules wherever
+    :func:`legacy_names_possible` says an older name can exist. Nothing new may
+    be created under such a name.
+    """
+    if not isinstance(name, str) or not _USER_NAME_RE.fullmatch(name):
+        return f"must be {USER_NAME_RULE}"
+    if legacy and legacy_names_possible():
+        return None
+    return portable_name_problem(name)

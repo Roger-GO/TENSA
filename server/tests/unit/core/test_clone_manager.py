@@ -216,6 +216,44 @@ def test_save_as_rejects_unsafe_names(loaded_wrapper: Wrapper, bad: str) -> None
         mgr.save_as(bad)
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "kundur_tuned",
+        "a.b.c",
+        "x" * 64,
+        "x" * 65,
+        "../escape",
+        "a/b",
+        ".hidden",
+        "",
+        "con",
+        "NUL.v2",
+        "name.",
+        "name\n",
+        "naïve",
+    ],
+)
+def test_save_as_and_snapshot_names_follow_one_rule(name: str) -> None:
+    """Save-as and snapshot names share a single validator, so the two cannot
+    drift: whatever one accepts the other accepts, with the same reason."""
+    from unittest.mock import MagicMock
+
+    from tensa.core.errors import AndesAppError
+    from tensa.core.snapshot import validate_snapshot_name
+
+    mgr = CloneManager(wrapper=MagicMock(), workspace=None, session_id=None)
+
+    def outcome(check: Any) -> str | None:
+        try:
+            check(name)
+        except AndesAppError as exc:
+            return str(exc).split("; ", 1)[1]
+        return None
+
+    assert outcome(mgr._validate_save_as_name) == outcome(validate_snapshot_name)  # noqa: SLF001
+
+
 def test_save_as_without_clone_raises(loaded_wrapper: Wrapper) -> None:
     mgr = loaded_wrapper._clone_mgr()
     with pytest.raises(CloneEditError, match="no clone"):

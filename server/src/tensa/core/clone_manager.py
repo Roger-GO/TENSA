@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import contextlib
 import math
-import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,7 +46,7 @@ from tensa.core.wrapper import (
     _CONTROLLER_MODEL_NAMES,
     allowed_param_names,
 )
-from tensa.security.names import portable_name_problem
+from tensa.security.names import user_name_problem
 
 if TYPE_CHECKING:
     from tensa.core.wrapper import Wrapper
@@ -55,12 +54,6 @@ if TYPE_CHECKING:
 # Undo/redo stack cap (KTD-10). Beyond this the oldest entry is evicted (LRU);
 # an evicted edit can no longer be recovered via undo.
 UNDO_STACK_CAP = 50
-
-# Save-as target name: filesystem-safe, no separators / traversal. Mirrors the
-# snapshot-name policy (``core/snapshot.validate_snapshot_name``) — 1-64 chars
-# of ``[A-Za-z0-9._-]`` starting with an alphanumeric. The user supplies the
-# stem only; the manager appends each clone file's extension.
-_SAVE_AS_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$")
 
 _CONTROLLER_MODEL_SET = frozenset(_CONTROLLER_MODEL_NAMES)
 
@@ -498,15 +491,11 @@ class CloneManager:
         return CloneSaveAsResult(name=safe, files=written)
 
     def _validate_save_as_name(self, name: str) -> str:
-        if not isinstance(name, str) or not _SAVE_AS_NAME_RE.match(name):
-            raise CloneEditError(
-                f"invalid save-as name {name!r}; names must be 1-64 chars of "
-                "[A-Za-z0-9._-] starting with an alphanumeric (no path "
-                "separators or traversal)"
-            )
-        # Same portable-name rules as snapshots: no Windows device names
-        # (``con.xlsx`` is the console there), no trailing dot or newline.
-        problem = portable_name_problem(name)
+        # The user supplies the stem only; the manager appends each clone
+        # file's extension. Same rules as snapshot names: filesystem-safe, no
+        # separators or traversal, no Windows device names (``con.xlsx`` is
+        # the console there), no trailing dot or newline.
+        problem = user_name_problem(name)
         if problem is not None:
             raise CloneEditError(f"invalid save-as name {name!r}; the name {problem}")
         return name

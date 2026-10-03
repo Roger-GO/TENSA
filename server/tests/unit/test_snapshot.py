@@ -13,6 +13,7 @@ ANDES System) lives in ``tests/integration/test_snapshot_api.py``.
 from __future__ import annotations
 
 import json
+import types
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,7 @@ from tensa.core.snapshot import (
     versions_compatible,
     write_snapshot_files,
 )
+from tensa.security import names as security_names
 
 # ---- name validation -------------------------------------------------------
 
@@ -104,6 +106,19 @@ _LEGACY_SNAPSHOT_NAMES = ["aux", "con", "nul", "com1", "LPT9", "con.v2", "snap."
 @pytest.mark.parametrize("name", [*_LEGACY_SNAPSHOT_NAMES, "snap1", "a.b.c", "x" * 64])
 def test_validate_existing_snapshot_name_accepts_legacy_names(name: str) -> None:
     assert validate_existing_snapshot_name(name) == name
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", _LEGACY_SNAPSHOT_NAMES)
+def test_validate_existing_snapshot_name_has_no_legacy_exemption_on_windows(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The layout-sidecar exemption is off on Windows, which cannot hold a
+    device-named file; restore and delete must agree rather than reopen
+    ``aux.dill`` / ``con.json`` there."""
+    monkeypatch.setattr(security_names, "sys", types.SimpleNamespace(platform="win32"))
+    with pytest.raises(SnapshotMetadataError, match="invalid snapshot name"):
+        validate_existing_snapshot_name(name)
 
 
 @pytest.mark.unit

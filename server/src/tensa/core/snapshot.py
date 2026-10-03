@@ -46,13 +46,12 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from tensa.core.errors import AndesAppError
-from tensa.security.names import portable_name_problem
+from tensa.security.names import user_name_problem
 
 log = logging.getLogger("tensa.snapshot")
 
@@ -204,20 +203,6 @@ class SnapshotEntry:
 # ---- name validation --------------------------------------------------------
 
 
-# Snapshot names must be filesystem-safe (no slashes, no traversal). Matched with
-# ``fullmatch``: a ``$`` anchor would also accept a trailing newline.
-_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._\-]{0,63}")
-
-
-def _require_name_shape(name: str) -> None:
-    if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
-        raise SnapshotMetadataError(
-            f"invalid snapshot name {name!r}; "
-            "names must be 1-64 chars of [A-Za-z0-9._-] starting with "
-            "an alphanumeric"
-        )
-
-
 def validate_snapshot_name(name: str) -> str:
     """Validate a user-supplied name for a NEW snapshot.
 
@@ -227,14 +212,13 @@ def validate_snapshot_name(name: str) -> str:
     console there, whatever the extension). Returns the name on success;
     raises :class:`SnapshotMetadataError` (mapped to 422) otherwise.
 
-    The regex bans ``/``, ``\\``, ``..``, NUL, and every other path-
+    The shape rule bans ``/``, ``\\``, ``..``, NUL, and every other path-
     traversal vector; the route layer can therefore concatenate
     ``<workspace>/snapshots/<case>/<name>.dill`` without further checks.
+    The rules are shared with save-as names
+    (:func:`tensa.security.names.user_name_problem`).
     """
-    _require_name_shape(name)
-    # The regex alone lets through trailing dots and device names; the shared
-    # portable-name rules do not.
-    problem = portable_name_problem(name)
+    problem = user_name_problem(name)
     if problem is not None:
         raise SnapshotMetadataError(f"invalid snapshot name {name!r}; the name {problem}")
     return name
@@ -243,13 +227,16 @@ def validate_snapshot_name(name: str) -> str:
 def validate_existing_snapshot_name(name: str) -> str:
     """Validate the name of a snapshot that is already on disk (restore, delete).
 
-    Applies only the path-safety regex, not the portable-name rules of
+    Applies only the path-safety shape rule, not the portable-name rules of
     :func:`validate_snapshot_name`. Snapshots saved before those rules existed
     can carry a name such as ``aux`` or ``con.v2``, and the listing still shows
     them, so they must stay restorable and deletable. Nothing new can be saved
-    under such a name.
+    under such a name. On Windows, which cannot hold such a name as a plain
+    file, the full rules apply (see ``legacy_names_possible``).
     """
-    _require_name_shape(name)
+    problem = user_name_problem(name, legacy=True)
+    if problem is not None:
+        raise SnapshotMetadataError(f"invalid snapshot name {name!r}; the name {problem}")
     return name
 
 

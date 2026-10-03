@@ -8,8 +8,9 @@
  * is open so unit-test renderings without a QueryClientProvider stay green.
  *
  * Validation:
- *  - name shape: 1-64 chars of ``[A-Za-z0-9._-]`` starting with an alphanumeric
- *    (the same regex the substrate enforces).
+ *  - name rule: ``userNameProblem`` (1-64 chars of ``[A-Za-z0-9._-]`` starting
+ *    with an alphanumeric, no trailing dot, no Windows device name), the same
+ *    rule the substrate enforces.
  *  - collision: case-insensitive comparison of the stem against existing
  *    workspace files. A collision is a hard inline error ("Name already in
  *    use…") — unlike snapshots, save-as has no force-overwrite affordance here.
@@ -32,8 +33,7 @@ import { useSessionStore } from '@/store/session';
 import { subscribePaletteDialog } from '@/lib/commands';
 import { ProblemDetailsError } from '@/api/client';
 import { cn } from '@/lib/cn';
-
-const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+import { userNameProblem } from '@/lib/fileName';
 
 /** Strip a trailing extension so collision compares stem-to-stem. */
 function stemOf(name: string): string {
@@ -93,12 +93,7 @@ function SaveAsCustomCaseDialogInner({ onClose }: { onClose: () => void }) {
     (filesQuery.data?.files ?? []).map((f) => stemOf(f.name).toLowerCase()),
   );
 
-  const shapeError =
-    name.length === 0
-      ? null
-      : NAME_RE.test(name)
-        ? null
-        : 'Use 1-64 chars of letters, digits, dot, underscore, or dash (start with a letter or digit).';
+  const shapeError = name.length === 0 ? null : userNameProblem(name);
   const collision = name.length > 0 && existingStems.has(name.toLowerCase());
   const validation =
     shapeError ?? (collision ? 'Name already in use; pick a different name.' : null);
