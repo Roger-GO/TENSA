@@ -2,8 +2,9 @@
 ``warm-cache`` child that ``tensa serve`` starts when the cache needs it.
 
 The child is exercised for real (a short Python command stands in for
-``tensa warm-cache``), so the pipe handling, the report and ``stop`` are the real
-ones on every platform. ANDES itself is faked where ``warm-cache`` runs.
+``tensa warm-cache``), so the pipe handling, the report, ``stop`` and the marker
+that tells a loading worker to wait are the real ones on every platform. ANDES
+itself is faked where ``warm-cache`` runs.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 import types
 from pathlib import Path
 from typing import Any
@@ -22,15 +24,21 @@ from typer.testing import CliRunner
 
 from tensa import cli
 from tensa.core import codegen_cache
+from tensa.core import wrapper as wrapper_module
 from tensa.core.codegen_cache import (
     STAMP_NAME,
     BackgroundWarm,
+    background_warm_running,
     cache_state,
     mark_cache_checked,
     pycode_dir,
+    running_marker,
     start_background_warm,
+    wait_for_background_warm,
 )
+from tensa.core.errors import CaseLoadError
 from tensa.core.worker_spawn import DEFAULT_WORKER_THREADS
+from tensa.core.wrapper import Wrapper
 
 pytestmark = pytest.mark.unit
 
@@ -299,6 +307,222 @@ def test_a_child_that_cannot_start_is_logged_and_skipped(
         )
     assert warm is None
     assert "could not start the background ANDES code generation" in caplog.text
+
+
+# ---- a loading worker waits for the child ------------------------------------
+
+
+_SLEEP = [_PYTHON, "-c", "import time; time.sleep(120)"]
+
+
+def test_the_marker_is_there_before_the_child_starts_and_gone_after_it_ends(
+    tmp_path: Path,
+) -> None:
+    directory = _cache(tmp_path)
+    marker = running_marker(directory)
+    # Beside the cache directory, which may not exist yet.
+    assert marker.parent == directory.parent
+    # The child checks for the marker as its first act: a case loaded while it
+    # starts up must already be told to wait.
+    script = "import pathlib, sys; sys.exit(0 if pathlib.Path(sys.argv[1]).exists() else 4)"
+    warm = start_background_warm(
+        "2.0.0", log, directory=directory, command=[_PYTHON, "-c", script, str(marker)]
+    )
+    assert warm is not None
+    _finished(warm)
+    assert warm._process.returncode == 0
+    assert not marker.exists()
+    assert not background_warm_running(directory)
+
+
+def test_the_marker_is_cleared_when_the_child_fails_and_when_it_cannot_start(
+    tmp_path: Path,
+) -> None:
+    directory = _cache(tmp_path)
+    warm = start_background_warm(
+        "2.0.0", log, directory=directory, command=[_PYTHON, "-c", "raise SystemExit(3)"]
+    )
+    assert warm is not None
+    _finished(warm)
+    assert not running_marker(directory).exists()
+
+    assert (
+        start_background_warm(
+            "2.0.0", log, directory=directory, command=[str(tmp_path / "no-such-python")]
+        )
+        is None
+    )
+    assert not running_marker(directory).exists()
+
+
+def test_stopping_clears_the_marker_of_a_running_child(tmp_path: Path) -> None:
+    directory = _cache(tmp_path)
+    warm = start_background_warm("2.0.0", log, directory=directory, command=_SLEEP)
+    assert warm is not None
+    assert background_warm_running(directory)
+    warm.stop()
+    assert not background_warm_running(directory)
+    assert not running_marker(directory).exists()
+
+
+def test_a_child_that_cannot_make_its_marker_still_runs(tmp_path: Path) -> None:
+    """No marker means nobody waits for it, which is the cost of an unwritable home."""
+    directory = _cache(tmp_path)
+    running_marker(directory).mkdir()  # touching a directory raises OSError
+    warm = start_background_warm(
+        "2.0.0", log, directory=directory, command=[_PYTHON, "-c", "pass"]
+    )
+    assert warm is not None
+    _finished(warm)
+    assert warm._process.returncode == 0
+
+
+def test_the_marker_stays_fresh_while_the_child_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(BackgroundWarm, "_HEARTBEAT_SECONDS", 0.05)
+    monkeypatch.setattr(codegen_cache, "MARKER_STALE_SECONDS", 0.5)
+    directory = _cache(tmp_path)
+    warm = start_background_warm("2.0.0", log, directory=directory, command=_SLEEP)
+    assert warm is not None
+    try:
+        # Twice as long as a marker may go untouched.
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            assert background_warm_running(directory)
+            time.sleep(0.05)
+    finally:
+        warm.stop()
+    assert not background_warm_running(directory)
+
+
+def test_a_marker_that_nobody_refreshes_is_a_leftover(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A server that was killed cannot clear its marker; it just stops touching it."""
+    monkeypatch.setattr(codegen_cache, "MARKER_STALE_SECONDS", 0.5)
+    directory = _cache(tmp_path)
+    marker = running_marker(directory)
+    marker.touch()
+    assert background_warm_running(directory)
+    old = time.time() - 3600
+    os.utime(marker, (old, old))
+    assert not background_warm_running(directory)
+    assert wait_for_background_warm(directory, timeout=30.0) == 0.0
+
+
+def test_there_is_nothing_to_wait_for_without_a_marker(tmp_path: Path) -> None:
+    started = time.monotonic()
+    assert wait_for_background_warm(_cache(tmp_path), timeout=30.0) == 0.0
+    assert time.monotonic() - started < 1.0
+
+
+def test_waiting_lasts_until_the_child_is_done(tmp_path: Path) -> None:
+    directory = _cache(tmp_path)
+    warm = start_background_warm(
+        "2.0.0",
+        log,
+        directory=directory,
+        command=[_PYTHON, "-c", "import time; time.sleep(1.0)"],
+    )
+    assert warm is not None
+    waited = wait_for_background_warm(directory, timeout=60.0, poll=0.05)
+    assert waited > 0.3
+    # The caller can now go on: the child is over and the marker gone.
+    assert warm._process.poll() is not None
+    assert not running_marker(directory).exists()
+    _finished(warm)
+
+
+def test_waiting_gives_up_after_the_bound_and_says_so(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    directory = _cache(tmp_path)
+    warm = start_background_warm("2.0.0", log, directory=directory, command=_SLEEP)
+    assert warm is not None
+    try:
+        with caplog.at_level(logging.WARNING, logger="tensa.codegen_cache"):
+            waited = wait_for_background_warm(directory, timeout=0.3, poll=0.05)
+        # The child still runs; the caller generates the code itself.
+        assert 0.3 <= waited < 10.0
+        assert warm._process.poll() is None
+        assert "still running" in caplog.text
+    finally:
+        warm.stop()
+
+
+def test_a_missing_home_directory_is_nothing_to_wait_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def no_home() -> Path:
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "home", no_home)
+    assert wait_for_background_warm() == 0.0
+
+
+# ---- the wrapper waits before it builds a System --------------------------------
+
+
+class _StopBuilding(Exception):
+    """Raised by the fake ANDES entry points once the wait has been observed."""
+
+
+@pytest.fixture
+def waits(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record ``wait`` and each ANDES call that builds a System, in order."""
+    import andes
+
+    events: list[str] = []
+
+    def wait() -> float:
+        events.append("wait")
+        return 0.0
+
+    def build(*_args: Any, **_kwargs: Any) -> Any:
+        events.append("build")
+        raise _StopBuilding
+
+    monkeypatch.setattr(wrapper_module, "wait_for_background_warm", wait)
+    monkeypatch.setattr(andes, "load", build)
+    monkeypatch.setattr(andes, "System", build)
+    return events
+
+
+def test_loading_a_case_waits_for_the_background_generation_first(
+    tmp_path: Path, waits: list[str]
+) -> None:
+    case = tmp_path / "case.xlsx"
+    case.write_bytes(b"not empty")
+    with pytest.raises(CaseLoadError):
+        Wrapper().load_case(case)
+    assert waits == ["wait", "build"]
+
+
+def test_a_case_that_cannot_be_loaded_at_all_does_not_wait(
+    tmp_path: Path, waits: list[str]
+) -> None:
+    with pytest.raises(CaseLoadError, match="does not exist"):
+        Wrapper().load_case(tmp_path / "missing.xlsx")
+    assert waits == []
+
+
+def test_creating_a_blank_system_waits_for_the_background_generation_first(
+    waits: list[str],
+) -> None:
+    with pytest.raises(_StopBuilding):
+        Wrapper().create_blank()
+    assert waits == ["wait", "build"]
+
+
+def test_reloading_a_blank_system_waits_for_the_background_generation_first(
+    waits: list[str],
+) -> None:
+    wrapper = Wrapper()
+    wrapper._replay_buffer = [("Bus", {"idx": 1})]
+    with pytest.raises(_StopBuilding):
+        wrapper.reload_case()
+    assert waits == ["wait", "build"]
 
 
 def test_the_default_child_is_a_quick_incremental_warm_cache(

@@ -165,8 +165,9 @@ def serve(
         help=(
             "Do not check ANDES's generated code at startup. By default, when it "
             "is missing or has not been checked against the installed ANDES, the "
-            "server runs ``tensa warm-cache`` in a background process, so the "
-            "first case you load does not wait for the generation."
+            "server runs ``tensa warm-cache`` in a background process. A case "
+            "loaded while it runs waits for it; one loaded later does not wait "
+            "for any generation."
         ),
     ),
     reload: bool = typer.Option(

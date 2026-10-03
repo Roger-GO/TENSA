@@ -41,6 +41,7 @@ from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING, Any, Literal
 
+from tensa.core.codegen_cache import wait_for_background_warm
 from tensa.core.connectivity_result import ConnectivityResult
 from tensa.core.cpf_result import CpfResult
 from tensa.core.disturbance import AlterSpec, DisturbanceSpec, FaultSpec, ToggleSpec
@@ -377,6 +378,9 @@ class Wrapper:
                     "(an interrupted save can leave a 0-byte file)",
                 )
 
+        # Building the System is what makes ANDES generate code it lacks, so wait for
+        # the server's background generation instead of running a second one.
+        wait_for_background_warm()
         try:
             ss = andes.load(
                 str(case_path),
@@ -450,6 +454,7 @@ class Wrapper:
         import andes  # heavy import — kept lazy
 
         log = logging.getLogger("tensa.wrapper.replay")
+        wait_for_background_warm()
         ss = andes.System()
         replay = list(self._replay_buffer)  # snapshot — replays may mutate
         self._ss = ss
@@ -1313,6 +1318,7 @@ class Wrapper:
             )
         import andes  # heavy import — kept lazy
 
+        wait_for_background_warm()
         self._ss = andes.System()
         self._case_path = None
         self._addfiles = None
