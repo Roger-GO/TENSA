@@ -168,6 +168,19 @@ describe('<BottomDrawer />', () => {
     expect(screen.getByTestId('bottom-drawer-tab-content-buses')).toBeInTheDocument();
   });
 
+  it('mounts the element tables (a lazily loaded chunk) when one is the active tab', async () => {
+    useLayoutStore.setState({ activeBottomDrawerTab: 'buses', bottomDrawerCollapsed: false });
+    const { unmount } = render(<BottomDrawer />, { wrapper });
+    // The wrapper is there at once; the table arrives with its chunk.
+    expect(screen.getByTestId('bottom-drawer-tab-content-buses')).toBeInTheDocument();
+    expect(await screen.findByTestId('buses-grid-empty')).toBeInTheDocument();
+    unmount();
+
+    useLayoutStore.setState({ activeBottomDrawerTab: 'shunts' });
+    render(<BottomDrawer />, { wrapper });
+    expect(await screen.findByTestId('shunts-grid-empty')).toBeInTheDocument();
+  });
+
   it('mounts the analysis tab (a lazily loaded chunk) when it is the active tab', async () => {
     useLayoutStore.setState({ activeBottomDrawerTab: 'analysis', bottomDrawerCollapsed: false });
     render(<BottomDrawer />, { wrapper });

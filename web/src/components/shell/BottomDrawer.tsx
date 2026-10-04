@@ -28,11 +28,7 @@ import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { cn } from '@/lib/cn';
 import { BOTTOM_DRAWER_TABS, useLayoutStore, type BottomDrawerTab } from '@/store/layout';
 import { useAnalyzeStore } from '@/store/analyze';
-import { BusesGrid } from '@/components/data-grid/BusesGrid';
-import { LinesGrid } from '@/components/data-grid/LinesGrid';
-import { GeneratorsGrid } from '@/components/data-grid/GeneratorsGrid';
-import { LoadsGrid } from '@/components/data-grid/LoadsGrid';
-import { ShuntsGrid } from '@/components/data-grid/ShuntsGrid';
+import { LazyGrid } from '@/components/data-grid/LazyGrid';
 import { LazyAnalysisTab } from '@/components/data-grid/LazyAnalysisTab';
 import { ActivityPanel } from '@/components/shell/ActivityPanel';
 
@@ -154,35 +150,35 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
             data-testid="bottom-drawer-tab-content-buses"
             className="flex min-h-0 flex-1 flex-col"
           >
-            <BusesGrid />
+            <LazyGrid tab="buses" />
           </TabsPrimitive.Content>
           <TabsPrimitive.Content
             value="lines"
             data-testid="bottom-drawer-tab-content-lines"
             className="flex min-h-0 flex-1 flex-col"
           >
-            <LinesGrid />
+            <LazyGrid tab="lines" />
           </TabsPrimitive.Content>
           <TabsPrimitive.Content
             value="generators"
             data-testid="bottom-drawer-tab-content-generators"
             className="flex min-h-0 flex-1 flex-col"
           >
-            <GeneratorsGrid />
+            <LazyGrid tab="generators" />
           </TabsPrimitive.Content>
           <TabsPrimitive.Content
             value="loads"
             data-testid="bottom-drawer-tab-content-loads"
             className="flex min-h-0 flex-1 flex-col"
           >
-            <LoadsGrid />
+            <LazyGrid tab="loads" />
           </TabsPrimitive.Content>
           <TabsPrimitive.Content
             value="shunts"
             data-testid="bottom-drawer-tab-content-shunts"
             className="flex min-h-0 flex-1 flex-col"
           >
-            <ShuntsGrid />
+            <LazyGrid tab="shunts" />
           </TabsPrimitive.Content>
           <TabsPrimitive.Content
             value="analysis"

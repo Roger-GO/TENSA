@@ -74,6 +74,12 @@ function reachableFromEntry(includeDynamic: boolean): Reach {
 /** Modules that must stay out of the entry chunk. */
 const LAZY_MODULES = [
   'components/data-grid/AnalysisTab.tsx',
+  'components/data-grid/DataGrid.tsx',
+  'components/data-grid/BusesGrid.tsx',
+  'components/data-grid/LinesGrid.tsx',
+  'components/data-grid/GeneratorsGrid.tsx',
+  'components/data-grid/LoadsGrid.tsx',
+  'components/data-grid/ShuntsGrid.tsx',
   'components/analyze/AnalyzePanel.tsx',
   'components/plots/TimeSeriesPlot.tsx',
   'components/sld/SldCanvas.tsx',
@@ -92,7 +98,15 @@ const LAZY_MODULES = [
 ];
 
 /** Heavy packages whose only importers are lazy modules. */
-const LAZY_PACKAGES = ['apache-arrow', 'uplot', 'html-to-image', 'cmdk', '@xyflow/react', 'elkjs'];
+const LAZY_PACKAGES = [
+  'apache-arrow',
+  'uplot',
+  'html-to-image',
+  'cmdk',
+  '@xyflow/react',
+  'elkjs',
+  'react-window',
+];
 
 describe('code splitting', () => {
   const eager = reachableFromEntry(false);

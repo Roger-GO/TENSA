@@ -10,6 +10,9 @@
  * - the diagram's chunk arrives when a case is loaded and the Analysis tab's
  *   when that tab is opened, and the views inside the tab (EIG, CPF, SE) wait
  *   for their own sub-tab;
+ * - the element tables load as their drawer tab is shown: the Buses table is the
+ *   tab that is open from the start, so it follows the first paint, and the
+ *   other four wait for their tab;
  * - every asset comes with `Cache-Control: immutable` (its name has a hash in
  *   it), and the large scripts come gzipped.
  *
@@ -78,9 +81,21 @@ test('the first load fetches the entry chunks; the diagram and the Analysis tab 
 
   // ---- first load: the shell and React, nothing that comes later -----------
   expect([...assets.keys()]).toEqual(expect.arrayContaining(['index', 'vendor-react']));
-  for (const later of ['SldCanvas', 'AnalysisTab', 'AnalyzePanel', 'arrow', 'CommandPalette']) {
+  for (const later of [
+    'SldCanvas',
+    'AnalysisTab',
+    'AnalyzePanel',
+    'arrow',
+    'CommandPalette',
+    'LinesGrid',
+    'GeneratorsGrid',
+    'LoadsGrid',
+    'ShuntsGrid',
+  ]) {
     expect(assets.has(later), `${later} was fetched before it was needed`).toBe(false);
   }
+  // The drawer opens on the Buses table, which follows the entry chunk.
+  await expect.poll(() => assets.has('BusesGrid')).toBe(true);
 
   // ---- load a case: the diagram's chunk arrives ----------------------------
   // The UI opens its session in the background after the first paint, and a
@@ -99,6 +114,11 @@ test('the first load fetches the entry chunks; the diagram and the Analysis tab 
   await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(BUS_COUNT, { timeout: 90_000 });
   expect(assets.has('SldCanvas')).toBe(true);
   expect(assets.has('AnalysisTab')).toBe(false);
+
+  // ---- open another table: its chunk arrives ---------------------------------
+  await page.getByTestId('bottom-drawer-tab-lines').click();
+  await expect.poll(() => assets.has('LinesGrid')).toBe(true);
+  expect(assets.has('ShuntsGrid')).toBe(false);
 
   // ---- open the Analysis tab: its chunk arrives, the views inside wait ------
   await page.getByTestId('bottom-drawer-tab-analysis').click();
