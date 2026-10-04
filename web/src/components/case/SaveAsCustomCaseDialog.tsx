@@ -1,8 +1,11 @@
 /**
- * SaveAsCustomCaseDialog (v3.1 Unit 22).
+ * SaveAsCustomCaseDialog (v3.1 Unit 22): "Save parameter edits as case".
  *
- * Modal that captures a name and writes the current clone-on-write case to the
- * workspace as a custom case via ``POST /sessions/{id}/case/clone/save-as``.
+ * Modal that captures a name and writes the current clone-on-write case (the
+ * case files with the controller parameter edits made in Edit mode, in the
+ * format of the case that was opened) to the workspace as a custom case via
+ * ``POST /sessions/{id}/case/clone/save-as``. Save system as is the other way
+ * to write a new file: the whole system, in a format chosen there.
  * Mirrors ``SaveSnapshotDialog``'s deferred-mount pattern: the inner body (which
  * uses ``useMutation`` + the workspace-files query) only renders when the dialog
  * is open so unit-test renderings without a QueryClientProvider stay green.
@@ -129,10 +132,11 @@ function SaveAsCustomCaseDialogInner({ onClose }: { onClose: () => void }) {
 
   return (
     <DialogContent data-testid="save-as-custom-case-dialog">
-      <DialogTitle>Save as custom case</DialogTitle>
+      <DialogTitle>Save parameter edits as case</DialogTitle>
       <DialogDescription className="mt-2">
-        Write the current edited case to your workspace as a new case file. The original case is
-        never modified; the saved case carries all of your parameter edits.
+        Write the current edited case to your workspace as a new case file, in the format of the
+        case you opened. The original case is never modified; the saved case carries all of your
+        controller parameter edits.
       </DialogDescription>
 
       <div className="mt-4 flex flex-col gap-3">

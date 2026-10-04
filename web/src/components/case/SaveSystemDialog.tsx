@@ -7,21 +7,21 @@ import {
   DialogFooter,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useCurrentTopology, usePutSidecar, useSaveCase } from '@/api/queries';
+import { useSaveCase } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
+import { useEditJournalStore } from '@/store/editJournal';
 import { ProblemDetailsError } from '@/api/client';
-import { parseWorkspacePath, type SidecarLayout } from '@/api/types';
-import {
-  SIDECAR_SCHEMA_VERSION,
-  buildNonBusCoordinates,
-  type NonBusOverride,
-} from '@/components/sld/sidecar';
 import { cn } from '@/lib/cn';
+import { saveInPlaceTarget } from '@/lib/saveInPlace';
 import { useSafeTimeout } from '@/lib/useSafeTimeout';
+import { useWriteLayoutSidecar } from '@/lib/useSaveOpenCase';
 
 /**
- * "Save system" format-picker modal.
+ * "Save system as" format-picker modal: the whole system, written to a new file
+ * in the workspace in a format of the user's choosing. (Save, Ctrl/Cmd+S, writes
+ * the open file back instead where that is safe, and asks for this modal where it
+ * is not; the modal then says why.)
  *
  * Controlled, so whoever owns an always-mounted copy can open it from anywhere:
  * the Workspace menu keeps one for its menu item, the palette command and
@@ -60,19 +60,13 @@ function ensureExtension(filename: string, format: Format): string {
 
 export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDialogProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
-  const topology = useCurrentTopology();
-  // Drag overrides are read lazily inside ``writeSidecarAlongside`` (Save
-  // click handler) via ``useCaseStore.getState().dragOverrides``. We do
-  // NOT subscribe to ``dragOverrides`` at the top of the component
-  // because doing so caused a setState-during-render warning under
-  // StrictMode dev: SldCanvas's prune-effect calls ``setDragOverrides``
-  // synchronously inside its useEffect, and the notification chain
-  // would schedule a SaveSystemDialog re-render in the same tick that
-  // SldCanvasInner was still rendering. Dropping the subscription
-  // breaks the chain — SaveSystemDialog only needs the override map at
-  // click time, not on every render.
   const saveMutation = useSaveCase();
-  const sidecarMutation = usePutSidecar();
+  // Writes the dragged positions beside the case file (reading them at click time).
+  const writeSidecarAlongside = useWriteLayoutSidecar();
+  // Why Save did not write the open file, when this dialog is open because it could not.
+  const selection = useCaseStore((s) => s.selection);
+  const cloneInitialized = useCaseStore((s) => s.cloneInitialized);
+  const replaced = useEditJournalStore((s) => s.replaced);
   const [filename, setFilename] = useState('my-system');
   const [format, setFormat] = useState<Format>('xlsx');
   const [overwrite, setOverwrite] = useState(false);
@@ -109,93 +103,13 @@ export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDi
     }
   }, [modalOpen]);
 
-  const writeSidecarAlongside = (caseFilename: string) => {
-    // Build a sidecar carrying the current drag positions. Bus
-    // entries land under `coordinates`; generator/load/shunt entries
-    // land under `non_bus_coordinates` with the dual-key shape
-    // (model_class + ui_category) so a kind-edit between sessions
-    // still resolves the dragged coord on read (Unit 4, v0.1.y).
-    const coordinates: Record<string, { x: number; y: number }> = {};
-    const nonBusOverrides: NonBusOverride[] = [];
-    // Build a quick lookup from `${uiCategory}-${idx}` → model class
-    // by scanning the live topology buckets. Drag overrides for
-    // elements that no longer exist (deleted between drag + save)
-    // get a `null` model class and only land under the UI-category
-    // layer; that's still a valid (if orphaned) entry which the next
-    // load will resolve via fallback.
-    const modelByCategoryIdx = new Map<string, string>();
-    if (topology) {
-      for (const e of topology.generators ?? []) {
-        modelByCategoryIdx.set(`generator-${String(e.idx)}`, e.kind);
-      }
-      for (const e of topology.loads ?? []) {
-        modelByCategoryIdx.set(`load-${String(e.idx)}`, e.kind);
-      }
-      for (const e of topology.shunts ?? []) {
-        modelByCategoryIdx.set(`shunt-${String(e.idx)}`, e.kind);
-      }
-    }
-    const dragOverrides = useCaseStore.getState().dragOverrides;
-    for (const [nodeId, coord] of Object.entries(dragOverrides)) {
-      // Bus nodes use the bus idx as React Flow node id (no kind
-      // prefix); non-bus nodes are `${kind}-${idx}`. Partition by
-      // prefix and route accordingly.
-      if (nodeId.startsWith('generator-')) {
-        const idx = nodeId.slice('generator-'.length);
-        nonBusOverrides.push({
-          uiCategory: 'generator',
-          idx,
-          modelClass: modelByCategoryIdx.get(nodeId) ?? null,
-          coord,
-        });
-        continue;
-      }
-      if (nodeId.startsWith('load-')) {
-        const idx = nodeId.slice('load-'.length);
-        nonBusOverrides.push({
-          uiCategory: 'load',
-          idx,
-          modelClass: modelByCategoryIdx.get(nodeId) ?? null,
-          coord,
-        });
-        continue;
-      }
-      if (nodeId.startsWith('shunt-')) {
-        const idx = nodeId.slice('shunt-'.length);
-        nonBusOverrides.push({
-          uiCategory: 'shunt',
-          idx,
-          modelClass: modelByCategoryIdx.get(nodeId) ?? null,
-          coord,
-        });
-        continue;
-      }
-      coordinates[nodeId] = coord;
-    }
-    if (Object.keys(coordinates).length === 0 && nonBusOverrides.length === 0) {
-      // Nothing to persist — buses fell back to defaults / curated /
-      // auto-layout coords AND no non-bus drags happened. Skip
-      // silently.
-      return;
-    }
-    const sidecar: SidecarLayout = {
-      schema_version: SIDECAR_SCHEMA_VERSION,
-      andes_version: 'unknown',
-      coordinates,
-      non_bus_coordinates: buildNonBusCoordinates(nonBusOverrides),
-      last_modified: new Date().toISOString(),
-    };
-    try {
-      sidecarMutation.mutate({
-        casePath: parseWorkspacePath(caseFilename),
-        layout: sidecar,
-      });
-    } catch {
-      // Workspace-path parse error — only happens if filename has
-      // traversal segments, which the substrate already rejected.
-      // Silent because the case file itself wrote successfully.
-    }
-  };
+  // A system built here has no file for Save to write, which needs no explaining; an
+  // opened file that Save cannot write back does.
+  const saveTarget = saveInPlaceTarget(selection, { cloneInitialized, replaced });
+  const whySaveAsks =
+    !saveTarget.ok && selection?.primaryPath != null && selection.blank !== true
+      ? saveTarget.reason
+      : null;
 
   const submit = () => {
     if (!sessionId) return;
@@ -247,12 +161,21 @@ export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDi
         }}
       >
         <DialogContent>
-          <DialogTitle>Save system</DialogTitle>
+          <DialogTitle>Save system as</DialogTitle>
           <DialogDescription className="mt-2">
-            Write the current topology to the workspace as a file you can re-load later. The current
-            layout (drag positions) saves automatically alongside the case file as
+            Write the current topology to the workspace as a new file you can re-load later. The
+            case you opened is left as it is. The current layout (drag positions) saves
+            automatically alongside the case file as
             <code> &lt;filename&gt;.layout.json</code>.
           </DialogDescription>
+          {whySaveAsks !== null ? (
+            <p
+              data-testid="save-system-why-new-file"
+              className="text-muted-foreground mt-2 text-xs"
+            >
+              {whySaveAsks}
+            </p>
+          ) : null}
           <div className="mt-4 flex flex-col gap-3">
             <label className="flex flex-col gap-1">
               <span className="text-muted-foreground text-xs font-medium">

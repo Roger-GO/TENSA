@@ -91,6 +91,9 @@ beforeEach(() => {
     addPanelDirty: false,
     dragOverrides: {},
     pendingDependents: [],
+    cloneInitialized: false,
+    cloneUndoDepth: 0,
+    cloneRedoDepth: 0,
   });
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
   window.localStorage.clear();
@@ -471,7 +474,7 @@ describe('useCommandRegistry: keys the browser keeps', () => {
   });
 });
 
-describe('useCommandRegistry: Open case, Save system and Abort run', () => {
+describe('useCommandRegistry: Open case, Save and Abort run', () => {
   afterEach(() => {
     useCommandPaletteStore.setState({ open: false, page: 'commands' });
     useRunsStore.getState().clearRuns();
@@ -500,9 +503,64 @@ describe('useCommandRegistry: Open case, Save system and Abort run', () => {
     expect(keepers).toEqual(['workspace.open-case']);
   });
 
-  it('Save system carries Ctrl/Cmd+S', () => {
+  it('Save carries Ctrl/Cmd+S, and Save system as has no key of its own', () => {
     const { result } = renderHook(() => useCommandRegistry(), { wrapper });
-    expect(find(result.current, 'workspace.save-system')?.shortcut).toBe('meta+s, ctrl+s');
+    const save = find(result.current, 'workspace.save');
+    expect(save?.label).toBe('Save');
+    expect(save?.group).toBe('workspace');
+    expect(save?.shortcut).toBe('meta+s, ctrl+s');
+    const saveAs = find(result.current, 'workspace.save-system');
+    expect(saveAs?.label).toBe('Save system as…');
+    expect(saveAs?.shortcut).toBeUndefined();
+  });
+
+  it('names the controller parameter save for what it saves, and keeps its key', () => {
+    act(() => {
+      useCaseStore.setState({ cloneInitialized: true });
+    });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = find(result.current, 'clone.save-as');
+    expect(cmd?.label).toBe('Save parameter edits as case…');
+    expect(cmd?.shortcut).toBe('ctrl+shift+s, meta+shift+s');
+    expect(cmd?.description).toMatch(/format of the case you opened/);
+  });
+
+  it('Save and Save system as are offered together, and only with a case to save', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(result.current, 'workspace.save')).toBeDefined();
+    expect(find(result.current, 'workspace.save-system')).toBeDefined();
+
+    MOCK_TOPOLOGY = null;
+    const none = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(none.result.current, 'workspace.save')).toBeUndefined();
+    expect(find(none.result.current, 'workspace.save-system')).toBeUndefined();
+  });
+
+  it('Save asks for a name, through the Save system as dialog, for a case it cannot write back', () => {
+    // The selection of these tests is a raw case.
+    const seen: string[] = [];
+    const off = subscribePaletteDialog((key) => seen.push(key));
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const save = find(result.current, 'workspace.save');
+    expect(save?.description).toMatch(/Asks for a name and format/);
+    expect(save?.description).toMatch(/ieee14\.raw is a \.raw case/);
+
+    act(() => save?.action());
+    off();
+
+    expect(seen).toEqual(['save-system']);
+  });
+
+  it('Save says it replaces the file where it can write the case back', () => {
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('cases/ieee14.xlsx'), addfiles: [] },
+      });
+    });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(result.current, 'workspace.save')?.description).toBe(
+      'Writes the system back to cases/ieee14.xlsx, replacing it.',
+    );
   });
 
   it('Abort run (Esc) is offered only while a run can be stopped', () => {

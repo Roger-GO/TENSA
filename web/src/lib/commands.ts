@@ -61,6 +61,7 @@ import { useThemeStore } from '@/store/theme';
 import { useLayoutStore } from '@/store/layout';
 import { requestEigLogToggle, requestEigViewReset } from '@/lib/eigViewBus';
 import { reportAbortError } from '@/lib/abortRun';
+import { useSaveOpenCase } from '@/lib/useSaveOpenCase';
 import { SHORTCUTS } from '@/lib/shortcuts';
 import type { RunRoutine } from '@/lib/useRunReadiness';
 
@@ -178,6 +179,10 @@ export function useCommandRegistry(): readonly Command[] {
   // ---- mutations (Edit group) -------------------------------------------
   const reloadMutation = useReloadCase();
   const undoMutation = useUndoLastEdit();
+
+  // ---- save (Workspace group) --------------------------------------------
+  // `target` is what Save does now: write the open file, or ask for a name.
+  const { target: saveTarget, save: saveOpenCase } = useSaveOpenCase();
 
   // ---- abort (Run group) -------------------------------------------------
   // True while a time-domain run is starting or streaming and has not been
@@ -301,15 +306,35 @@ export function useCommandRegistry(): readonly Command[] {
         action: () => __requestPaletteDialog('profile'),
         when: () => !editGateDisabled,
       },
+      // Save writes the open file back where that is safe (an xlsx or json case with
+      // nothing else in the way, see `saveInPlaceTarget`) and otherwise asks for a name
+      // and format, as the first save of a new document does: it opens the dialog of
+      // Save system as, which says why. Ctrl/Cmd+S is the browser's Save Page otherwise;
+      // see `<GlobalShortcuts />`.
+      {
+        id: 'workspace.save',
+        label: 'Save',
+        description: saveTarget.ok
+          ? `Writes the system back to ${saveTarget.filename}, replacing it.`
+          : `Asks for a name and format to save under. ${saveTarget.reason}`,
+        group: 'workspace',
+        keywords: ['save', 'write', 'overwrite', 'replace', 'file', 'system'],
+        action: () => {
+          if (saveTarget.ok) saveOpenCase();
+          else __requestPaletteDialog('save-system');
+        },
+        when: () => sessionId !== null && topology !== null,
+        shortcut: SHORTCUTS.save,
+      },
       {
         id: 'workspace.save-system',
-        label: 'Save system…',
+        label: 'Save system as…',
+        description:
+          'Writes the whole system to a new file in the workspace, as xlsx, raw or json, and leaves the case you opened as it is. To keep controller parameter edits in the format of the case, use Save parameter edits as case.',
         group: 'workspace',
-        keywords: ['save', 'export', 'xlsx', 'json', 'system'],
+        keywords: ['save', 'save as', 'export', 'xlsx', 'raw', 'json', 'system', 'new file'],
         action: () => __requestPaletteDialog('save-system'),
         when: () => sessionId !== null && topology !== null,
-        // Ctrl/Cmd+S is the browser's Save Page otherwise; see `<GlobalShortcuts />`.
-        shortcut: SHORTCUTS.save,
       },
       {
         id: 'workspace.save-snapshot',
@@ -429,9 +454,11 @@ export function useCommandRegistry(): readonly Command[] {
       },
       {
         id: 'clone.save-as',
-        label: 'Save as custom case…',
+        label: 'Save parameter edits as case…',
+        description:
+          'Writes the case files with your controller parameter edits to the workspace under a new name, in the format of the case you opened. The original case is not changed.',
         group: 'edit',
-        keywords: ['save', 'save as', 'custom', 'case', 'clone', 'workspace', 'tuned'],
+        keywords: ['save', 'save as', 'custom', 'case', 'clone', 'workspace', 'tuned', 'parameter'],
         action: () => __requestPaletteDialog('save-as-custom'),
         when: () => sessionId !== null && cloneInitialized,
         shortcut: 'ctrl+shift+s, meta+shift+s',
@@ -832,6 +859,8 @@ export function useCommandRegistry(): readonly Command[] {
     renameTargetRunId,
     reloadMutation,
     undoMutation,
+    saveTarget,
+    saveOpenCase,
     editMode,
     setEditMode,
     cloneInitialized,

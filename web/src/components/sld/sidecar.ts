@@ -346,6 +346,58 @@ export function buildSidecarLayout(
   };
 }
 
+/**
+ * The sidecar a save writes beside a case file: the positions the user has dragged
+ * nodes to, or `null` when there are none (the layout is then the curated or
+ * automatic one, which a sidecar need not repeat).
+ *
+ * `dragOverrides` is keyed by React Flow node id. A bus node's id is the bus idx;
+ * a generator, load or shunt node's is `${uiCategory}-${idx}`. The ANDES model
+ * class of those is looked up in `topology` so the entry lands under both layers
+ * (see `buildNonBusCoordinates`); a node whose element no longer exists (deleted
+ * between the drag and the save) has none and lands under the UI category only,
+ * which a later load still resolves by fallback.
+ */
+export function sidecarFromDragOverrides(
+  dragOverrides: Readonly<Record<string, BusCoord>>,
+  topology: TopologySummary | null,
+): SidecarLayout | null {
+  const modelByCategoryIdx = new Map<string, string>();
+  if (topology) {
+    for (const e of topology.generators ?? []) {
+      modelByCategoryIdx.set(`generator-${String(e.idx)}`, e.kind);
+    }
+    for (const e of topology.loads ?? []) {
+      modelByCategoryIdx.set(`load-${String(e.idx)}`, e.kind);
+    }
+    for (const e of topology.shunts ?? []) {
+      modelByCategoryIdx.set(`shunt-${String(e.idx)}`, e.kind);
+    }
+  }
+  const coordinates: CoordsByIdx = {};
+  const nonBusOverrides: NonBusOverride[] = [];
+  for (const [nodeId, coord] of Object.entries(dragOverrides)) {
+    const category = (['generator', 'load', 'shunt'] as const).find((c) =>
+      nodeId.startsWith(`${c}-`),
+    );
+    if (category === undefined) {
+      coordinates[nodeId] = coord;
+      continue;
+    }
+    nonBusOverrides.push({
+      uiCategory: category,
+      idx: nodeId.slice(category.length + 1),
+      modelClass: modelByCategoryIdx.get(nodeId) ?? null,
+      coord,
+    });
+  }
+  if (Object.keys(coordinates).length === 0 && nonBusOverrides.length === 0) return null;
+  return buildSidecarLayout(coordinates, {
+    andesVersion: 'unknown',
+    nonBusCoords: buildNonBusCoordinates(nonBusOverrides),
+  });
+}
+
 // ---- debounced PUT --------------------------------------------------------
 
 type PutFn = (layout: SidecarLayout) => void | Promise<void>;

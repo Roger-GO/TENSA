@@ -216,6 +216,44 @@ describe('unsaved work', () => {
   });
 });
 
+describe('replaced', () => {
+  it('is set by a replacement, so a save knows the system is not the open file any more', () => {
+    expect(useEditJournalStore.getState().replaced).toBe(false);
+
+    useEditJournalStore.getState().markReplaced();
+
+    expect(useEditJournalStore.getState().replaced).toBe(true);
+    // Edits on top of the replacement do not bring the file back.
+    record(addBus(2));
+    expect(useEditJournalStore.getState().replaced).toBe(true);
+  });
+
+  it('is cleared by a reload, which puts the open case file back', () => {
+    useEditJournalStore.getState().markReplaced();
+
+    record({ op: 'reload' });
+
+    expect(useEditJournalStore.getState().replaced).toBe(false);
+  });
+
+  it('is cleared by choosing another case', () => {
+    useEditJournalStore.getState().markReplaced();
+
+    useCaseStore
+      .getState()
+      .setCase({ primaryPath: parseWorkspacePath('kundur.xlsx'), addfiles: [] });
+
+    expect(useEditJournalStore.getState().replaced).toBe(false);
+  });
+
+  it('is not set by a save, a plain edit or an undo', () => {
+    record(addBus(1), { op: 'undo' });
+    useEditJournalStore.getState().markSaved();
+
+    expect(useEditJournalStore.getState().replaced).toBe(false);
+  });
+});
+
 describe('truncateAfter', () => {
   it('keeps the entries up to and including a revision', () => {
     record(addBus(1), addBus(2), addBus(3));

@@ -12,6 +12,7 @@ import {
   buildSidecarLayout,
   buildNonBusCoordinates,
   nonBusCoordsAsMap,
+  sidecarFromDragOverrides,
   debouncedPutSidecar,
   cancelPendingSidecarPut,
   __clearAllPendingForTests,
@@ -403,6 +404,59 @@ describe('buildSidecarLayout', () => {
       PQ: { '2': { x: 7, y: 7 } },
       load: { '2': { x: 7, y: 7 } },
     });
+  });
+});
+
+describe('sidecarFromDragOverrides', () => {
+  const topology: TopologySummary = {
+    state: 'pre-setup',
+    buses: [bus(1)],
+    lines: [],
+    transformers: [],
+    generators: [{ idx: 'GENROU_1', name: 'G1', kind: 'GENROU', params: {} }],
+    loads: [{ idx: 'PQ_1', name: 'L1', kind: 'PQ', params: {} }],
+    shunts: [{ idx: 'Shunt_1', name: 'S1', kind: 'Shunt', params: {} }],
+  };
+
+  it('is null when nothing was dragged, so a save writes no sidecar', () => {
+    expect(sidecarFromDragOverrides({}, topology)).toBeNull();
+  });
+
+  it('puts a bus drag under its idx, as the canvas names the bus node', () => {
+    const layout = sidecarFromDragOverrides({ '1': { x: 10, y: 20 } }, topology);
+    expect(layout?.coordinates).toEqual({ '1': { x: 10, y: 20 } });
+    expect(layout?.non_bus_coordinates).toEqual({});
+    expect(layout?.schema_version).toBe(SIDECAR_SCHEMA_VERSION);
+  });
+
+  it('puts a generator, load or shunt drag under its model class and its UI category', () => {
+    const layout = sidecarFromDragOverrides(
+      {
+        'generator-GENROU_1': { x: 1, y: 2 },
+        'load-PQ_1': { x: 3, y: 4 },
+        'shunt-Shunt_1': { x: 5, y: 6 },
+      },
+      topology,
+    );
+    expect(layout?.coordinates).toEqual({});
+    expect(layout?.non_bus_coordinates).toEqual({
+      GENROU: { GENROU_1: { x: 1, y: 2 } },
+      generator: { GENROU_1: { x: 1, y: 2 } },
+      PQ: { PQ_1: { x: 3, y: 4 } },
+      load: { PQ_1: { x: 3, y: 4 } },
+      Shunt: { Shunt_1: { x: 5, y: 6 } },
+      shunt: { Shunt_1: { x: 5, y: 6 } },
+    });
+  });
+
+  it('keeps a drag of an element that is gone under its UI category only', () => {
+    const layout = sidecarFromDragOverrides({ 'load-PQ_9': { x: 7, y: 8 } }, topology);
+    expect(layout?.non_bus_coordinates).toEqual({ load: { PQ_9: { x: 7, y: 8 } } });
+  });
+
+  it('still writes the UI category when there is no topology to look the model class up in', () => {
+    const layout = sidecarFromDragOverrides({ 'generator-GENROU_1': { x: 1, y: 2 } }, null);
+    expect(layout?.non_bus_coordinates).toEqual({ generator: { GENROU_1: { x: 1, y: 2 } } });
   });
 });
 

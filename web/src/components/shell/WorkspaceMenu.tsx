@@ -53,6 +53,7 @@ const TESTID_BY_ID: Record<string, string> = {
   'workspace.add-element': 'topbar-menu-workspace-add-element',
   'workspace.add-pmu': 'topbar-menu-workspace-add-pmu',
   'workspace.import-profile': 'topbar-menu-workspace-import-profile',
+  'workspace.save': 'topbar-menu-workspace-save',
   'workspace.save-system': 'topbar-menu-workspace-save-system',
   'workspace.save-snapshot': 'topbar-menu-workspace-save-snapshot',
   'workspace.load-snapshot': 'topbar-menu-workspace-load-snapshot',
@@ -101,7 +102,7 @@ export function WorkspaceMenu() {
           // A separator before the save and import-bundle items keeps the visual
           // grouping the pre-Unit-9 menu had.
           const separated =
-            idx > 0 && (cmd.id === 'workspace.save-system' || cmd.id === 'workspace.import-bundle');
+            idx > 0 && (cmd.id === 'workspace.save' || cmd.id === 'workspace.import-bundle');
           return [
             ...(separated ? [<TopBarMenuSeparator key={`${cmd.id}-separator`} />] : []),
             <TopBarMenuItem

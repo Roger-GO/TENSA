@@ -23,7 +23,7 @@ import type { ReactNode } from 'react';
 import { SaveSystemDialog } from '@/components/case/SaveSystemDialog';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
-import { parseSessionId } from '@/api/types';
+import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { ProblemDetails, TopologySummary } from '@/api/types';
 import { startBeatClock } from '../../helpers/beatClock';
 
@@ -108,6 +108,7 @@ beforeEach(() => {
     addPanelDirty: false,
     dragOverrides: {},
     pendingDependents: [],
+    cloneInitialized: false,
   });
 });
 
@@ -131,7 +132,7 @@ describe('<SaveSystemDialog />', () => {
   it('clicking the trigger opens the modal with the xlsx default + filename preview', async () => {
     render(withQueryClient(<Owner />));
     await userEvent.click(screen.getByTestId('save-system-button'));
-    expect(screen.getByRole('dialog')).toHaveTextContent(/Save system/i);
+    expect(screen.getByRole('dialog')).toHaveTextContent(/Save system as/i);
     // Preview reflects the default filename + xlsx default.
     expect(screen.getByText(/my-system\.xlsx/)).toBeInTheDocument();
   });
@@ -410,5 +411,50 @@ describe('<SaveSystemDialog /> opened by its owner', () => {
     // The answer belongs to the opening that was left: no "saved" line here.
     expect(screen.queryByText(/Wrote 10 bytes/)).not.toBeInTheDocument();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+});
+
+describe('<SaveSystemDialog /> why Save asked for a name', () => {
+  it('says why an opened raw case is not written back, as Save is not the one to do it', async () => {
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
+    });
+    render(withQueryClient(<Owner />));
+    await userEvent.click(screen.getByTestId('save-system-button'));
+    expect(screen.getByTestId('save-system-why-new-file')).toHaveTextContent(
+      /ieee14\.raw is a \.raw case.*Save replaces only xlsx and json cases/,
+    );
+  });
+
+  it('says the parameter edits live in a copy when a clone exists', async () => {
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('kundur_full.xlsx'), addfiles: [] },
+      cloneInitialized: true,
+    });
+    render(withQueryClient(<Owner />));
+    await userEvent.click(screen.getByTestId('save-system-button'));
+    expect(screen.getByTestId('save-system-why-new-file')).toHaveTextContent(
+      /Save parameter edits as case/,
+    );
+  });
+
+  it('says nothing for a case Save can write back, which the user chose to save as anew', async () => {
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('kundur_full.xlsx'), addfiles: [] },
+      cloneInitialized: false,
+    });
+    render(withQueryClient(<Owner />));
+    await userEvent.click(screen.getByTestId('save-system-button'));
+    expect(screen.queryByTestId('save-system-why-new-file')).toBeNull();
+  });
+
+  it('says nothing for a system built here, which has no file for Save to write', async () => {
+    useCaseStore.setState({
+      selection: { primaryPath: null, addfiles: [], blank: true },
+      cloneInitialized: false,
+    });
+    render(withQueryClient(<Owner />));
+    await userEvent.click(screen.getByTestId('save-system-button'));
+    expect(screen.queryByTestId('save-system-why-new-file')).toBeNull();
   });
 });

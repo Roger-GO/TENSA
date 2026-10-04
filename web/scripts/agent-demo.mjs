@@ -489,7 +489,11 @@ async function main() {
   await sleep(3000);
 
   // -- save the case to a file, then reload it from the workspace -----------
-  await caption(page, 'Saving the system to a file', 'Workspace → Save system → wscc9-built.xlsx');
+  await caption(
+    page,
+    'Saving the system to a file',
+    'Workspace → Save system as → wscc9-built.xlsx',
+  );
   await page.locator('[data-testid="topbar-menu-workspace-trigger"]').click();
   await sleep(500);
   await page.locator('[data-testid="topbar-menu-workspace-save-system"]').click();

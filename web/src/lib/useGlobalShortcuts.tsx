@@ -98,7 +98,7 @@ const BROWSER_KEYS: ReadonlyArray<{
 }> = [
   {
     binding: SHORTCUTS.save,
-    commandId: 'workspace.save-system',
+    commandId: 'workspace.save',
     unavailable: 'Nothing to save yet. Load a case or build a system first.',
     allowInPalette: false,
   },

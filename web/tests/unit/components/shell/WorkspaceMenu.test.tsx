@@ -160,13 +160,39 @@ describe('<WorkspaceMenu /> Open case, Save system and Import bundle', () => {
     });
   });
 
-  it('"Save system…" opens the save dialog, and the menu closes', async () => {
+  it('"Save system as…" opens the save dialog, and the menu closes', async () => {
     const user = userEvent.setup();
     render(withProviders(<WorkspaceMenu />));
     await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
     await user.click(await screen.findByTestId('topbar-menu-workspace-save-system'));
-    expect(await screen.findByRole('dialog')).toHaveTextContent(/Save system/);
+    expect(await screen.findByRole('dialog')).toHaveTextContent(/Save system as/);
     expect(screen.queryByTestId('topbar-menu-workspace-content')).not.toBeInTheDocument();
+  });
+
+  it('lists Save before Save system as, each with hover text that says what it writes', async () => {
+    const user = userEvent.setup();
+    render(withProviders(<WorkspaceMenu />));
+    await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
+    const save = await screen.findByTestId('topbar-menu-workspace-save');
+    const saveAs = screen.getByTestId('topbar-menu-workspace-save-system');
+    expect(save).toHaveTextContent('Save');
+    expect(saveAs).toHaveTextContent('Save system as…');
+    expect(save.compareDocumentPosition(saveAs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The case of these tests is a raw one, which Save cannot write back: it asks.
+    expect(save.getAttribute('title')).toMatch(/Asks for a name and format/);
+    expect(saveAs.getAttribute('title')).toMatch(/new file/);
+  });
+
+  it('"Save" on a case it cannot write back opens the save dialog and says why', async () => {
+    const user = userEvent.setup();
+    render(withProviders(<WorkspaceMenu />));
+    await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
+    await user.click(await screen.findByTestId('topbar-menu-workspace-save'));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent(/Save system as/);
+    expect(within(dialog).getByTestId('save-system-why-new-file')).toHaveTextContent(
+      /ieee14\.raw is a \.raw case/,
+    );
   });
 
   it('"Import bundle…" opens the bundle import dialog', async () => {

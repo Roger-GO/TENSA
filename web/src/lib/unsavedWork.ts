@@ -8,7 +8,7 @@
  *
  * - **Edits**: elements added, parameters changed, a system built from scratch, that
  *   no save has written to the workspace (``hasUnsavedEdits`` in the edit journal,
- *   which Save system and Save as custom case reset).
+ *   which Save, Save system as and Save parameter edits as case reset).
  * - **Runs**: a time-domain run, finished or streaming, or a sensitivity sweep. Their
  *   results exist only in this tab (there is no run file to save), so one that has
  *   produced any data counts, and so does one still running.

@@ -141,6 +141,13 @@ export interface EditJournalState {
   replayable: boolean;
   /** ``revision`` of the latest work the journal could not record, or 0. */
   opaqueRevision: number;
+  /**
+   * True after a snapshot restore or a bundle import replaced the system, until a
+   * reload puts the open case's file back or another case is chosen. The system is
+   * then not the open file plus the user's edits, so a save must not write it over
+   * that file.
+   */
+  replaced: boolean;
   /** Record one successful operation. */
   record: (op: JournalOp) => void;
   /**
@@ -167,6 +174,7 @@ const INITIAL = {
   savedRevision: 0,
   replayable: true,
   opaqueRevision: 0,
+  replaced: false,
 };
 
 export const useEditJournalStore = create<EditJournalState>((set, get) => ({
@@ -174,11 +182,14 @@ export const useEditJournalStore = create<EditJournalState>((set, get) => ({
   record: (op) => {
     const state = get();
     const rev = state.revision + 1;
+    // A reload is the open file again, whatever replaced the system before it.
+    const replaced = op.op === 'reload' ? false : state.replaced;
     if (!state.replayable) {
       // Nothing to replay any more; keep only whether there is unsaved work.
       set({
         revision: rev,
         opaqueRevision: isWorkOp(op) ? rev : state.opaqueRevision,
+        replaced,
       });
       return;
     }
@@ -195,10 +206,10 @@ export const useEditJournalStore = create<EditJournalState>((set, get) => ({
       entries = compactJournal(entries, selection !== null && selection.primaryPath !== null);
     }
     if (entries.length > MAX_JOURNAL_ENTRIES) {
-      set({ entries: [], revision: rev, replayable: false, opaqueRevision: rev });
+      set({ entries: [], revision: rev, replayable: false, opaqueRevision: rev, replaced });
       return;
     }
-    set({ entries, revision: rev });
+    set({ entries, revision: rev, replaced });
   },
   markOpaque: () => {
     const rev = get().revision + 1;
@@ -206,7 +217,14 @@ export const useEditJournalStore = create<EditJournalState>((set, get) => ({
   },
   markReplaced: () => {
     const rev = get().revision + 1;
-    set({ entries: [], revision: rev, savedRevision: rev, replayable: false, opaqueRevision: 0 });
+    set({
+      entries: [],
+      revision: rev,
+      savedRevision: rev,
+      replayable: false,
+      opaqueRevision: 0,
+      replaced: true,
+    });
   },
   markSaved: () => set((s) => ({ savedRevision: s.revision })),
   truncateAfter: (rev) => set((s) => ({ entries: s.entries.filter((e) => e.rev <= rev) })),

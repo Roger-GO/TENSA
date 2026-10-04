@@ -76,6 +76,17 @@ afterEach(() => {
   cleanup();
 });
 
+describe('<SaveAsCustomCaseDialog /> — naming', () => {
+  it('is titled for what it saves, and says it keeps the format of the opened case', async () => {
+    fetchSpy.mockImplementation(routeFetch());
+    render(withQueryClient(<SaveAsCustomCaseDialog open onOpenChange={() => {}} />));
+    const dialog = await screen.findByTestId('save-as-custom-case-dialog');
+    expect(dialog).toHaveTextContent('Save parameter edits as case');
+    expect(dialog).toHaveTextContent(/in the format of the case you opened/);
+    expect(dialog).not.toHaveTextContent(/custom case/i);
+  });
+});
+
 describe('<SaveAsCustomCaseDialog /> — validation', () => {
   it('confirm disabled with an empty name', async () => {
     fetchSpy.mockImplementation(routeFetch());

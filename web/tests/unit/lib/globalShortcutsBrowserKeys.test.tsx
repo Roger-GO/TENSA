@@ -26,6 +26,7 @@ import { GlobalShortcuts } from '@/lib/useGlobalShortcuts';
 import { toast } from '@/lib/toast';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useCaseStore } from '@/store/case';
+import { useEditJournalStore } from '@/store/editJournal';
 import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';
 import { useSessionStore } from '@/store/session';
@@ -257,6 +258,63 @@ describe('Ctrl/Cmd+S', () => {
     } finally {
       palette.remove();
     }
+  });
+});
+
+describe('Ctrl/Cmd+S on a case that can be written back', () => {
+  /** An xlsx case, with an edit that no save has written. */
+  function openEditedXlsx(): void {
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('cases/ieee14.xlsx'), addfiles: [] },
+      cloneInitialized: false,
+    });
+    useEditJournalStore.getState().reset();
+    useEditJournalStore
+      .getState()
+      .record({ op: 'add', model: 'Bus', params: { idx: 99, Vn: 110 } });
+  }
+
+  afterEach(() => {
+    useCaseStore.setState({ cloneInitialized: false });
+    useEditJournalStore.getState().reset();
+  });
+
+  it('writes the file itself, without a dialog, and keeps the browser from saving the page', async () => {
+    openEditedXlsx();
+    const success = vi.spyOn(toast, 'success').mockReturnValue('id');
+    render(withProviders(<GlobalShortcuts />));
+    const event = press(CTRL_S);
+    expect(event.defaultPrevented).toBe(true);
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1));
+    expect(postSpy).toHaveBeenCalledWith('/sessions/test-session/save', {
+      filename: 'cases/ieee14.xlsx',
+      format: 'xlsx',
+      overwrite: true,
+    });
+    await waitFor(() => expect(success).toHaveBeenCalledWith('Saved cases/ieee14.xlsx'));
+    expect(posted).toEqual([]);
+  });
+
+  it('says there is nothing to save when the file has no changes, and writes nothing', async () => {
+    openEditedXlsx();
+    useEditJournalStore.getState().markSaved();
+    const info = vi.spyOn(toast, 'info').mockReturnValue('id');
+    render(withProviders(<GlobalShortcuts />));
+    press(META_S);
+    await settle();
+    expect(postSpy).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith(expect.stringMatching(/nothing to save/i));
+    expect(posted).toEqual([]);
+  });
+
+  it('opens Save system as instead while the parameter edits live in a copy of the case', async () => {
+    openEditedXlsx();
+    useCaseStore.setState({ cloneInitialized: true });
+    render(withProviders(<GlobalShortcuts />));
+    press(CTRL_S);
+    await settle();
+    expect(postSpy).not.toHaveBeenCalled();
+    expect(posted).toEqual(['save-system']);
   });
 });
 

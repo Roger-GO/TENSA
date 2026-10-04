@@ -1,0 +1,269 @@
+/**
+ * Save: writes the open case over its own file where that is safe, tells the user
+ * what it did, and leaves everything else to Save system as.
+ *
+ * `andesClient` is stubbed, so the request each press sends is what is asserted.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import React from 'react';
+import type { ReactNode } from 'react';
+
+import { ProblemDetailsError } from '@/api/client';
+import { parseSessionId, parseWorkspacePath } from '@/api/types';
+import type { ProblemDetails, TopologySummary } from '@/api/types';
+import { toast } from '@/lib/toast';
+import { useSaveOpenCase } from '@/lib/useSaveOpenCase';
+import { useCaseStore } from '@/store/case';
+import { hasUnsavedEdits, useEditJournalStore } from '@/store/editJournal';
+import { useSessionStore } from '@/store/session';
+
+const postSpy = vi.fn();
+const putSpy = vi.fn();
+type Resolver = () => Promise<unknown>;
+let nextPost: Resolver = () => Promise.resolve({ filename: 'ieee14_full.xlsx', bytes_written: 9 });
+
+vi.mock('@/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/api/client')>('@/api/client');
+  return {
+    ...actual,
+    andesClient: {
+      get: vi.fn(),
+      delete: vi.fn(),
+      post: (path: string, opts: { body?: unknown }) => {
+        postSpy(path, opts.body);
+        return nextPost();
+      },
+      put: (path: string, opts: { body?: unknown; query?: Record<string, string> }) => {
+        putSpy(path, opts.body, opts.query);
+        return Promise.resolve(undefined);
+      },
+    },
+  };
+});
+
+const TOPOLOGY: TopologySummary = {
+  state: 'pre-setup',
+  buses: [],
+  lines: [],
+  transformers: [],
+  generators: [],
+  loads: [],
+  shunts: [],
+};
+vi.mock('@/api/queries', async () => {
+  const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
+  return { ...actual, useCurrentTopology: () => TOPOLOGY };
+});
+
+function wrapper({ children }: { children: ReactNode }) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return React.createElement(QueryClientProvider, { client }, children);
+}
+
+/** An edit the user made and has not saved. */
+function editSomething(): void {
+  useEditJournalStore.getState().record({ op: 'add', model: 'Bus', params: { idx: 99, Vn: 110 } });
+}
+
+function problem(status: number, detail: string): ProblemDetailsError {
+  const body: ProblemDetails = { type: 'about:blank', title: `HTTP ${status}`, status, detail };
+  return new ProblemDetailsError(body);
+}
+
+let success: MockInstance<typeof toast.success>;
+let failure: MockInstance<typeof toast.error>;
+let info: MockInstance<typeof toast.info>;
+
+beforeEach(() => {
+  postSpy.mockClear();
+  putSpy.mockClear();
+  nextPost = () => Promise.resolve({ filename: 'ieee14_full.xlsx', bytes_written: 9 });
+  success = vi.spyOn(toast, 'success').mockReturnValue('id');
+  failure = vi.spyOn(toast, 'error').mockReturnValue('id');
+  info = vi.spyOn(toast, 'info').mockReturnValue('id');
+  useSessionStore.setState({ sessionId: parseSessionId('s1') });
+  useCaseStore.setState({
+    selection: { primaryPath: parseWorkspacePath('ieee14_full.xlsx'), addfiles: [] },
+    cloneInitialized: false,
+    dragOverrides: {},
+  });
+  useEditJournalStore.getState().reset();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  useCaseStore.setState({ selection: null, dragOverrides: {} });
+  useEditJournalStore.getState().reset();
+});
+
+describe('useSaveOpenCase', () => {
+  it('writes the open xlsx case over its own file, then says so', async () => {
+    editSomething();
+    const { result } = renderHook(() => useSaveOpenCase(), { wrapper });
+    expect(result.current.target).toEqual({
+      ok: true,
+      filename: 'ieee14_full.xlsx',
+      format: 'xlsx',
+    });
+
+    act(() => result.current.save());
+
+    await waitFor(() => expect(success).toHaveBeenCalledWith('Saved ieee14_full.xlsx'));
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(postSpy).toHaveBeenCalledWith('/sessions/s1/save', {
+      filename: 'ieee14_full.xlsx',
+      format: 'xlsx',
+      overwrite: true,
+    });
+    // The edits are written out now, so closing the tab no longer loses them.
+    expect(hasUnsavedEdits()).toBe(false);
+  });
+
+  it('writes the positions the user dragged nodes to beside the file', async () => {
+    editSomething();
+    useCaseStore.setState({ dragOverrides: { '3': { x: 10, y: 20 } } });
+    const { result } = renderHook(() => useSaveOpenCase(), { wrapper });
+
+    act(() => result.current.save());
+
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
+    expect(putSpy.mock.calls[0]?.[0]).toBe('/workspace/layout');
+    expect(putSpy.mock.calls[0]?.[2]).toEqual({ case_path: 'ieee14_full.xlsx' });
+    expect(putSpy.mock.calls[0]?.[1]).toMatchObject({ coordinates: { '3': { x: 10, y: 20 } } });
+  });
+
+  it('writes no layout when nothing was dragged', async () => {
+    editSomething();
+    const { result } = renderHook(() => useSaveOpenCase(), { wrapper });
+
+    act(() => result.current.save());
+
+    await waitFor(() => expect(success).toHaveBeenCalled());
+    expect(putSpy).not.toHaveBeenCalled();
+  });
+
+  it('writes a json case as json', async () => {
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('cases/kundur.json'), addfiles: [] },
+    });
+    editSomething();
+    const { result } = renderHook(() => useSaveOpenCase(), { wrapper });
+
+    act(() => result.current.save());
+
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    expect(postSpy.mock.calls[0]?.[1]).toEqual({
+      filename: 'cases/kundur.json',
+      format: 'json',
+      overwrite: true,
+    });
+  });
+
+  it('does not rewrite a file with nothing newer than it, and says so', () => {
+    const { result } = renderHook(() => useSaveOpenCase(), { wrapper });
+
+    act(() => result.current.save());
+
+    expect(postSpy).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith(expect.stringMatching(/nothing to save.*ieee14_full\.xlsx/i));
+  });
+
+  it('does nothing itself where the case cannot be written back, for Save system as to take over', () => {
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
+    });
+    editSomething();
+    const { result } = renderHook(() => useSaveOpenCase(), { wrapper });
+    expect(result.current.target.ok).toBe(false);
+
+    act(() => result.current.save());
+
+    expect(postSpy).not.toHaveBeenCalled();
+    expect(success).not.toHaveBeenCalled();
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it('is off while the controller parameter edits live in a copy of the case', () => {
+    useCaseStore.setState({ cloneInitialized: true });
+    editSomething();
+    const { result } = renderHook(() => useSaveOpenCase(), { wrapper });
+    expect(result.current.target.ok).toBe(false);
+    act(() => result.current.save());
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it('is off after a bundle import or snapshot restore replaced the system, until a reload', () => {
+    useEditJournalStore.getState().markReplaced();
+    editSomething();
+    const replaced = renderHook(() => useSaveOpenCase(), { wrapper });
+    expect(replaced.result.current.target.ok).toBe(false);
+    replaced.unmount();
+
+    act(() => useEditJournalStore.getState().record({ op: 'reload' }));
+    editSomething();
+    const reloaded = renderHook(() => useSaveOpenCase(), { wrapper });
+    expect(reloaded.result.current.target.ok).toBe(true);
+  });
+
+  it('keeps the edits unsaved and says why when the server refuses', async () => {
+    nextPost = () => Promise.reject(problem(409, 'session is busy running a job'));
+    editSomething();
+    const { result } = renderHook(() => useSaveOpenCase(), { wrapper });
+
+    act(() => result.current.save());
+
+    await waitFor(() =>
+      expect(failure).toHaveBeenCalledWith('Could not save ieee14_full.xlsx', {
+        description: 'session is busy running a job',
+      }),
+    );
+    expect(success).not.toHaveBeenCalled();
+    expect(hasUnsavedEdits()).toBe(true);
+  });
+
+  it('sends one request however many times it is pressed while one is running', async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    nextPost = () => new Promise((resolve) => (finish = resolve));
+    editSomething();
+    const { result } = renderHook(() => useSaveOpenCase(), { wrapper });
+
+    act(() => result.current.save());
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1));
+    act(() => result.current.save());
+    act(() => result.current.save());
+    expect(postSpy).toHaveBeenCalledTimes(1);
+
+    await act(async () => finish({ filename: 'ieee14_full.xlsx', bytes_written: 9 }));
+    await waitFor(() => expect(success).toHaveBeenCalledTimes(1));
+  });
+
+  it('still tells the user when the menu, palette or key that asked is gone by the time it ends', async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    nextPost = () => new Promise((resolve) => (finish = resolve));
+    editSomething();
+    const { result, unmount } = renderHook(() => useSaveOpenCase(), { wrapper });
+
+    act(() => result.current.save());
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1));
+    unmount();
+    await act(async () => finish({ filename: 'ieee14_full.xlsx', bytes_written: 9 }));
+
+    await waitFor(() => expect(success).toHaveBeenCalledWith('Saved ieee14_full.xlsx'));
+  });
+
+  it('does nothing without a session', () => {
+    useSessionStore.setState({ sessionId: null });
+    editSomething();
+    const { result } = renderHook(() => useSaveOpenCase(), { wrapper });
+
+    act(() => result.current.save());
+
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+});
