@@ -235,6 +235,7 @@ describe('TimeSeriesPlot — multi-run overlay (Unit 9 v2.0)', () => {
       runs: {},
       activeRunId: null,
       overlayRunIds: new Set(),
+      runCount: 0,
     });
     usePlotStore.setState({
       selectedByRun: {},
@@ -268,6 +269,48 @@ describe('TimeSeriesPlot — multi-run overlay (Unit 9 v2.0)', () => {
     expect(constructSpy).toHaveBeenCalledTimes(1);
     const opts = constructSpy.mock.calls[0]?.[0] as { series: unknown[] };
     expect(opts.series).toHaveLength(4);
+  });
+
+  it('names each run in the plot legend by its number and scenario, not by its id', () => {
+    const start = (runId: string, scenario?: string) =>
+      useRunsStore.getState().startRun({
+        runId,
+        tf: 10,
+        columnNames: ['Bus_1_v'],
+        ...(scenario === undefined ? {} : { scenario }),
+      });
+    start('abcdef1234567890', 'fault bus 7');
+    appendRows('abcdef1234567890', [0, 1], { Bus_1_v: [1.0, 1.0] });
+    start('0123456789abcdef');
+    appendRows('0123456789abcdef', [0, 1], { Bus_1_v: [0.9, 0.9] });
+    useRunsStore.getState().setOverlayRuns(['abcdef1234567890', '0123456789abcdef']);
+    usePlotStore.getState().setSelection('0123456789abcdef', new Set(['Bus_1_v']));
+    render(<TimeSeriesPlot />);
+
+    const opts = constructSpy.mock.calls[0]?.[0] as { series: { label: string }[] };
+    expect(opts.series.slice(1).map((s) => s.label)).toEqual([
+      'TDS #1 - fault bus 7 · Bus_1_v',
+      'TDS #2 · Bus_1_v',
+    ]);
+  });
+
+  it('puts a name the researcher gave a run in the plot legend', () => {
+    seedRun('r1', ['Bus_1_v']);
+    appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.0] });
+    seedRun('r2', ['Bus_1_v']);
+    appendRows('r2', [0, 1], { Bus_1_v: [0.9, 0.9] });
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+    usePlotStore.getState().setSelection('r2', new Set(['Bus_1_v']));
+    render(<TimeSeriesPlot />);
+    constructSpy.mockClear();
+
+    act(() => useRunsStore.getState().setRunDisplayName('r1', 'Baseline'));
+
+    const opts = constructSpy.mock.calls.at(-1)?.[0] as { series: { label: string }[] };
+    expect(opts.series.slice(1).map((s) => s.label)).toEqual([
+      'Baseline · Bus_1_v',
+      'TDS #2 · Bus_1_v',
+    ]);
   });
 
   it('renders the legend chip strip when overlay > 1', () => {

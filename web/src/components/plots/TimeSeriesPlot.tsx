@@ -20,6 +20,7 @@ import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { RUN_VALUES_UNITS_COMMENT, timeSeriesToCsv } from '@/components/export/exportToCsv';
 import { elementToPng } from '@/components/export/exportToPng';
 import { runIdToStrokeStyle } from '@/lib/runIdToColor';
+import { runLabel } from '@/lib/runLabel';
 import { useTheme } from '@/lib/useTheme';
 import type { ResolvedTheme } from '@/store/theme';
 import { cn } from '@/lib/cn';
@@ -301,11 +302,10 @@ function buildMultiRunGroupChart(
       const { scale, factor } = plan.place({ series: parsed, bases: run.bases });
       // Resample: copy known values (in the axis's unit), leave NaN elsewhere.
       dataCols.push(resampleOnto(col, rowToAxis, tUnion.length, factor));
-      // Series label encodes the run prefix + var name so the legend
+      // Series label encodes the run's label + var name so the legend
       // distinguishes the same var across runs.
-      const runPrefix = run.runId.length > 8 ? run.runId.slice(0, 8) : run.runId;
       const seriesProps: uPlot.Series = {
-        label: `${runPrefix}·${name}`,
+        label: `${runLabel(run)} · ${name}`,
         scale,
         stroke,
         width: 1.5,

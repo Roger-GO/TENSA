@@ -38,6 +38,7 @@ import { usePflowStore } from '@/store/pflow';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { useRunsStore, DEFAULT_MEMORY_BUDGET_BYTES } from '@/store/runs';
+import { runLabel } from '@/lib/runLabel';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { CaseEvent, FaultSpec } from '@/api/types';
 import { arrowFrame } from '../../helpers/frames';
@@ -810,6 +811,48 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     expect(useRunsStore.getState().runs['run-bases']?.bases).toEqual({
       busKv: { '1': 230 },
       freqHz: 50,
+    });
+  });
+
+  describe('naming the run it starts', () => {
+    it('numbers the run and says which disturbance it was started with', async () => {
+      seedReady({ withDisturbances: true });
+      useRunsStore.setState({ runCount: 0 });
+      fetchSpy.mockImplementation(() =>
+        Promise.resolve(jsonResponse({ accepted: [{ kind: 'fault', idx: 'Fault_0' }] }, 200)),
+      );
+      serveShortRun(server, 'run-named');
+
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      await userEvent.click(screen.getByTestId('run-tds-button'));
+
+      await waitFor(() => {
+        expect(useRunsStore.getState().runs['run-named']?.state).toBe('done');
+      });
+      const run = useRunsStore.getState().runs['run-named']!;
+      expect(run.ordinal).toBe(1);
+      expect(run.scenario).toBe('fault bus 4');
+      expect(runLabel(run)).toBe('TDS #1 - fault bus 4');
+    });
+
+    it('gives a run that schedules nothing a number and no scenario', async () => {
+      seedReady();
+      useRunsStore.setState({ runCount: 0 });
+      fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+      serveShortRun(server, 'run-unnamed');
+
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      await userEvent.click(screen.getByTestId('run-mode-tds'));
+      await userEvent.click(screen.getByTestId('run-tds-button'));
+
+      await waitFor(() => {
+        expect(useRunsStore.getState().runs['run-unnamed']?.state).toBe('done');
+      });
+      const run = useRunsStore.getState().runs['run-unnamed']!;
+      expect(run).not.toHaveProperty('scenario');
+      expect(runLabel(run)).toBe('TDS #1');
     });
   });
 

@@ -12,8 +12,13 @@ import { HistoryRunRow } from '@/components/history/HistoryRunRow';
 import { useRunsStore } from '@/store/runs';
 import type { RunRecord } from '@/store/runs';
 
-function seedRun(runId: string, tf = 5): RunRecord {
-  useRunsStore.getState().startRun({ runId, tf, columnNames: ['Bus_1_v'] });
+function seedRun(runId: string, tf = 5, scenario?: string): RunRecord {
+  useRunsStore.getState().startRun({
+    runId,
+    tf,
+    columnNames: ['Bus_1_v'],
+    ...(scenario === undefined ? {} : { scenario }),
+  });
   return useRunsStore.getState().runs[runId]!;
 }
 
@@ -23,6 +28,7 @@ describe('HistoryRunRow', () => {
       runs: {},
       activeRunId: null,
       overlayRunIds: new Set(),
+      runCount: 0,
     });
   });
 
@@ -30,17 +36,38 @@ describe('HistoryRunRow', () => {
     cleanup();
   });
 
-  it('shows the run id prefix, state badge, tf, and timestamp', () => {
-    const run = seedRun('abcdef1234567890');
+  it('shows the run label, state badge, tf, and timestamp', () => {
+    const run = seedRun('abcdef1234567890', 5, 'fault bus 7');
     render(<HistoryRunRow run={run} isActive={false} isOverlayPinned={false} />);
     const row = screen.getByTestId('history-run-row-abcdef1234567890');
     expect(row).toHaveAttribute('data-run-id', 'abcdef1234567890');
     expect(screen.getByTestId('history-run-row-state-abcdef1234567890')).toHaveTextContent(
       'starting',
     );
-    // Run id truncated to 12 chars.
-    expect(row).toHaveTextContent('abcdef123456');
+    expect(screen.getByTestId('history-run-row-label-abcdef1234567890')).toHaveTextContent(
+      'TDS #1 - fault bus 7',
+    );
     expect(row).toHaveTextContent('tf=5s');
+  });
+
+  it('keeps the run id off the row, and on hover', () => {
+    const run = seedRun('abcdef1234567890');
+    render(<HistoryRunRow run={run} isActive={false} isOverlayPinned={false} />);
+    expect(screen.getByTestId('history-run-row-abcdef1234567890')).not.toHaveTextContent(
+      'abcdef12',
+    );
+    expect(screen.getByTestId('history-run-row-label-abcdef1234567890')).toHaveAttribute(
+      'title',
+      'Run id abcdef1234567890',
+    );
+  });
+
+  it('shows the name the researcher gave the run', () => {
+    seedRun('r1');
+    useRunsStore.getState().setRunDisplayName('r1', 'Baseline');
+    const run = useRunsStore.getState().runs.r1!;
+    render(<HistoryRunRow run={run} isActive={false} isOverlayPinned={false} />);
+    expect(screen.getByTestId('history-run-row-label-r1')).toHaveTextContent('Baseline');
   });
 
   it('flags the active run with the active badge', () => {

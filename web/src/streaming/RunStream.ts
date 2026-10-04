@@ -198,6 +198,12 @@ export interface RunStreamOptions {
    * the run so its values can be shown in kV and Hz after the case is gone.
    */
   bases?: UnitBases;
+  /**
+   * What the run does to the system, in words ("fault bus 7"); recorded on the
+   * run to name it in the legend and the history. Left off for a run that
+   * schedules nothing.
+   */
+  scenario?: string;
   onStart?: (event: StreamStartEvent) => void;
   onFrame?: (frame: DecodedFrame) => void;
   onDone?: (event: DoneEvent) => void;
@@ -564,6 +570,7 @@ export class RunStream {
         tf: this.opts.tdsArgs.tf,
         columnNames,
         bases: this.opts.bases,
+        ...(this.opts.scenario === undefined ? {} : { scenario: this.opts.scenario }),
       });
       this.opts.onStart?.({ runId, metadata });
     } else {

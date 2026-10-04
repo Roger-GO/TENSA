@@ -31,6 +31,7 @@ import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { reportAbortError } from '@/lib/abortRun';
 import { toast } from '@/lib/toast';
 import { unitBasesOf } from '@/lib/units';
+import { describeScenario } from '@/lib/runLabel';
 import { cn } from '@/lib/cn';
 
 /**
@@ -363,6 +364,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       ...(tdsConfigOverrides === undefined ? {} : { tdsConfigOverrides }),
     };
 
+    const scenario = describeScenario(disturbances.map((d) => d.spec));
     const stream = new RunStream({
       sessionId,
       wsUrl: buildRunStreamWsUrl(),
@@ -370,6 +372,9 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       // The run keeps the case's bases (rated kV, system frequency) so its
       // values stay readable in kV and Hz after another case is loaded.
       bases: unitBasesOf(useCaseStore.getState().topology),
+      // What the run does to the system, so the legend and the history can
+      // name it ("TDS #3 - fault bus 7") and not show its id.
+      ...(scenario === undefined ? {} : { scenario }),
       maxRateHz: tdsConfig.maxRateHz,
       onStart: () => {
         // ``RunStream`` already populated the runs slice via

@@ -20,6 +20,7 @@ function reset(): void {
     memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
     overlayRunIds: new Set<string>(),
     retentionLimit: DEFAULT_RETENTION_LIMIT,
+    runCount: 0,
   });
 }
 
@@ -125,6 +126,62 @@ describe('runs store — startRun + appendFrame', () => {
     });
     const r = useRunsStore.getState().runs.r1!;
     expect(Object.keys(r.columns)).toEqual(['Bus_1_v']);
+  });
+});
+
+describe('runs store — run numbers and scenarios', () => {
+  beforeEach(reset);
+  afterEach(reset);
+
+  const start = (runId: string, scenario?: string) =>
+    useRunsStore.getState().startRun({
+      runId,
+      tf: 1.0,
+      columnNames: ['Bus_1_v'],
+      ...(scenario === undefined ? {} : { scenario }),
+    });
+
+  it('numbers the runs 1, 2, 3 in the order they start', () => {
+    start('a');
+    start('b');
+    start('c');
+    const runs = useRunsStore.getState().runs;
+    expect([runs.a?.ordinal, runs.b?.ordinal, runs.c?.ordinal]).toEqual([1, 2, 3]);
+    expect(useRunsStore.getState().runCount).toBe(3);
+  });
+
+  it('never gives a new run the number of one that was dropped', () => {
+    start('a');
+    start('b');
+    useRunsStore.getState().resetRun('b');
+    start('c');
+    expect(useRunsStore.getState().runs.c?.ordinal).toBe(3);
+  });
+
+  it('keeps counting when retention evicts the oldest runs', () => {
+    useRunsStore.getState().setRetentionLimit(2);
+    for (const id of ['a', 'b', 'c', 'd']) {
+      start(id);
+      useRunsStore.getState().markRunDone(id, 1.0, true);
+    }
+    const runs = useRunsStore.getState().runs;
+    expect(Object.keys(runs)).toEqual(['c', 'd']);
+    expect([runs.c?.ordinal, runs.d?.ordinal]).toEqual([3, 4]);
+  });
+
+  it('starts counting again from 1 once the runs are cleared', () => {
+    start('a');
+    start('b');
+    useRunsStore.getState().clearRuns();
+    start('c');
+    expect(useRunsStore.getState().runs.c?.ordinal).toBe(1);
+  });
+
+  it('keeps the scenario it is given on the record, and none when it is given none', () => {
+    start('a', 'fault bus 7');
+    start('b');
+    expect(useRunsStore.getState().runs.a?.scenario).toBe('fault bus 7');
+    expect(useRunsStore.getState().runs.b).not.toHaveProperty('scenario');
   });
 });
 

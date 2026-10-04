@@ -95,6 +95,19 @@ export interface RunRecord {
    * was started without them; its values then stay per unit.
    */
   bases?: UnitBases;
+  /**
+   * Which run of the session this is: 1 for the first one started, counting up
+   * in the order they started. A later run never takes the number of one that
+   * was dropped from the history, so "TDS #3" names one run until the runs are
+   * cleared. Absent on a record that never went through ``startRun``; its label
+   * then falls back to the short run id (see ``runLabel``).
+   */
+  ordinal?: number;
+  /**
+   * What the run did to the system in a few words ("fault bus 7"), taken from
+   * the disturbances scheduled when it started. Absent when there were none.
+   */
+  scenario?: string;
   state: RunState;
   connection: RunConnectionStatus;
   /**
@@ -117,9 +130,10 @@ export interface RunRecord {
   converged?: boolean | null;
   /**
    * Optional researcher-supplied label for this run (Unit 20, v2.0).
-   * Surfaced by the ``RunLegendChip`` and any other run-identifying
-   * UI when present; falls back to the auto-generated short-id + tf
-   * label otherwise. Session-scoped (never persisted across reloads).
+   * Surfaced by the ``RunLegendChip``, the plot legend and the history
+   * list when present; falls back to the default label ("TDS #3 - fault
+   * bus 7", see ``runLabel``) otherwise. Session-scoped (never persisted
+   * across reloads).
    */
   displayName?: string;
   /**
@@ -174,6 +188,8 @@ export interface StartRunPayload {
   columnNames: readonly string[];
   /** The case's unit bases at the time the run starts; see ``RunRecord.bases``. */
   bases?: UnitBases;
+  /** What the run does to the system, in words; see ``RunRecord.scenario``. */
+  scenario?: string;
 }
 
 export interface RunsState {
@@ -200,6 +216,12 @@ export interface RunsState {
    * implicit — only ids actually in the set are rendered.
    */
   overlayRunIds: ReadonlySet<string>;
+  /**
+   * How many runs have started since the runs were last cleared. The next run
+   * is numbered one more (``RunRecord.ordinal``); it only counts up, so a run
+   * dropped from the history leaves its number unused.
+   */
+  runCount: number;
   /**
    * Maximum number of completed runs to retain. Active/streaming runs
    * are always retained on top of this. User-configurable via
@@ -478,11 +500,13 @@ export const useRunsStore = create<RunsState>((set, get) => ({
   memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
   activeRunId: null,
   overlayRunIds: new Set<string>(),
+  runCount: 0,
   retentionLimit: DEFAULT_RETENTION_LIMIT,
 
-  startRun: ({ runId, tf, columnNames, bases }) => {
+  startRun: ({ runId, tf, columnNames, bases, scenario }) => {
     const columns: Record<string, Float64Array> = {};
     for (const name of columnNames) columns[name] = new Float64Array(0);
+    const runCount = get().runCount + 1;
     const record: RunRecord = {
       runId,
       startedAt: Date.now(),
@@ -493,6 +517,8 @@ export const useRunsStore = create<RunsState>((set, get) => ({
       columns,
       columnNames: [...columnNames],
       ...(bases === undefined ? {} : { bases }),
+      ordinal: runCount,
+      ...(scenario === undefined ? {} : { scenario }),
       state: 'starting',
       connection: 'connected',
       abortedLocally: false,
@@ -510,6 +536,7 @@ export const useRunsStore = create<RunsState>((set, get) => ({
     set({
       runs: nextRuns,
       activeRunId: runId,
+      runCount,
       overlayRunIds: reconcileOverlay(get().overlayRunIds, nextRuns),
     });
   },
@@ -663,7 +690,8 @@ export const useRunsStore = create<RunsState>((set, get) => ({
     });
   },
 
-  clearRuns: () => set({ runs: {}, activeRunId: null, overlayRunIds: new Set<string>() }),
+  clearRuns: () =>
+    set({ runs: {}, activeRunId: null, overlayRunIds: new Set<string>(), runCount: 0 }),
 
   clearActiveRun: () => set({ activeRunId: null }),
 

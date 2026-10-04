@@ -2,9 +2,9 @@
  * RunLegendChip (Unit 9 of the v2.0 plan, extended in Unit 20).
  *
  * One chip per overlay run, surfaced above the TimeSeriesPlot. Shows
- * the runId-stable colour swatch, a short human-facing label (the
- * runId's leading 8 chars + tf), and a click target that toggles the
- * run in/out of the overlay set.
+ * the runId-stable colour swatch, a short human-facing label (the run's
+ * number and what it did to the system, plus tf), and a click target that
+ * toggles the run in/out of the overlay set.
  *
  * Lives next to the plot rather than inside ``<TimeSeriesPlot />`` so
  * the chips can be wrapped/styled by the surrounding layout (the v2.0
@@ -29,6 +29,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRunsStore } from '@/store/runs';
 import { runIdToStrokeStyle } from '@/lib/runIdToColor';
+import { autoRunLabel, shortRunId } from '@/lib/runLabel';
 import { Input } from '@/components/ui/Input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/cn';
@@ -39,7 +40,7 @@ export interface RunLegendChipProps {
   /**
    * Optional override for the displayed label. Defaults to the
    * researcher-set ``displayName`` (Unit 20) when present, otherwise
-   * ``"<run-id-prefix> · tf=<tf>s"``.
+   * ``"<default run label> · tf=<tf>s"`` (``"TDS #3 - fault bus 7 · tf=10s"``).
    */
   label?: string;
   /**
@@ -56,11 +57,6 @@ export interface RunLegendChipProps {
    */
   onToggle?: (runId: string, willBePinned: boolean) => void;
   className?: string;
-}
-
-/** Trim a run id for display (first 8 chars). */
-function shortRunId(runId: string): string {
-  return runId.length > 8 ? runId.slice(0, 8) : runId;
 }
 
 /**
@@ -298,12 +294,12 @@ export function RunLegendChip({ runId, label, pinned, onToggle, className }: Run
   const colorOverride = run?.colorOverride;
   const style = runIdToStrokeStyle(runId, colorOverride);
 
-  // Default label: ``<short> · tf=<tf>s`` so the chip is identifiable
+  // Default label: ``<run label> · tf=<tf>s`` so the chip is identifiable
   // even when the user has named their runs after their parameters.
   // Researcher-set ``displayName`` (Unit 20) wins when present unless
   // the caller explicitly passed a ``label`` prop (which always wins
   // — used by the History drawer).
-  const defaultLabel = run ? `${shortRunId(runId)} · tf=${run.tf}s` : shortRunId(runId);
+  const defaultLabel = run ? `${autoRunLabel(run)} · tf=${run.tf}s` : shortRunId(runId);
   const storeLabel = run?.displayName ?? defaultLabel;
   const displayLabel = label ?? storeLabel;
 

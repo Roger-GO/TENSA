@@ -12,8 +12,13 @@ import userEvent from '@testing-library/user-event';
 import { RunLegendChip } from '@/components/plots/RunLegendChip';
 import { useRunsStore } from '@/store/runs';
 
-function seedRun(runId: string) {
-  useRunsStore.getState().startRun({ runId, tf: 5, columnNames: [] });
+function seedRun(runId: string, scenario?: string) {
+  useRunsStore.getState().startRun({
+    runId,
+    tf: 5,
+    columnNames: [],
+    ...(scenario === undefined ? {} : { scenario }),
+  });
 }
 
 describe('RunLegendChip', () => {
@@ -22,6 +27,7 @@ describe('RunLegendChip', () => {
       runs: {},
       activeRunId: null,
       overlayRunIds: new Set(),
+      runCount: 0,
     });
   });
 
@@ -29,10 +35,32 @@ describe('RunLegendChip', () => {
     cleanup();
   });
 
-  it('renders the run id prefix + tf label by default', () => {
-    seedRun('abcdef1234');
+  it('names the run by its number and what it did, with tf, and not by its id', () => {
+    seedRun('abcdef1234', 'fault bus 7');
     render(<RunLegendChip runId="abcdef1234" />);
-    expect(screen.getByTestId('run-legend-chip-abcdef1234')).toHaveTextContent('abcdef12 · tf=5s');
+    const chip = screen.getByTestId('run-legend-chip-abcdef1234');
+    expect(chip).toHaveTextContent('TDS #1 - fault bus 7 · tf=5s');
+    expect(chip).not.toHaveTextContent('abcdef12');
+  });
+
+  it('numbers each run it is shown for, and has no scenario for a run that scheduled nothing', () => {
+    seedRun('first', 'fault bus 7');
+    seedRun('second');
+    render(
+      <>
+        <RunLegendChip runId="first" />
+        <RunLegendChip runId="second" />
+      </>,
+    );
+    expect(screen.getByTestId('run-legend-chip-first')).toHaveTextContent(
+      'TDS #1 - fault bus 7 · tf=5s',
+    );
+    expect(screen.getByTestId('run-legend-chip-second')).toHaveTextContent('TDS #2 · tf=5s');
+  });
+
+  it('falls back to the id prefix for a run the store does not hold', () => {
+    render(<RunLegendChip runId="abcdef1234" />);
+    expect(screen.getByTestId('run-legend-chip-abcdef1234')).toHaveTextContent('abcdef12');
   });
 
   it('respects an explicit label override', () => {
@@ -111,6 +139,7 @@ describe('RunLegendChip — inline rename (Unit 20)', () => {
       runs: {},
       activeRunId: null,
       overlayRunIds: new Set(),
+      runCount: 0,
     });
   });
 
@@ -187,7 +216,7 @@ describe('RunLegendChip — inline rename (Unit 20)', () => {
     await user.type(input, '{Enter}');
     expect(useRunsStore.getState().runs.r1!.displayName).toBeUndefined();
     // Chip falls back to the auto-generated default.
-    expect(screen.getByTestId('run-legend-chip-r1')).toHaveTextContent('r1 · tf=5s');
+    expect(screen.getByTestId('run-legend-chip-r1')).toHaveTextContent('TDS #1 · tf=5s');
   });
 });
 
@@ -200,6 +229,7 @@ describe('RunLegendChip — swatch picker (Unit 20)', () => {
       runs: {},
       activeRunId: null,
       overlayRunIds: new Set(),
+      runCount: 0,
     });
   });
 

@@ -1,9 +1,10 @@
 /**
  * HistoryRunRow (Unit 9 of the v2.0 plan).
  *
- * Single row in the history drawer: shows the run id (short prefix +
- * tf), state badge (streaming / done / error / aborted), the wall-clock
- * timestamp it started at, and per-row actions:
+ * Single row in the history drawer: shows the run's label ("TDS #3 -
+ * fault bus 7"; the run id is on hover), state badge (streaming / done /
+ * error / aborted), tf, the wall-clock timestamp it started at, and per-row
+ * actions:
  *
  * - "Pin to overlay" / "Unpin" — toggles ``overlayRunIds`` membership.
  * - "Reset" — drops the run from the runs slice (frees its buffers).
@@ -15,6 +16,7 @@ import { useRunsStore } from '@/store/runs';
 import type { RunRecord } from '@/store/runs';
 import { Button } from '@/components/ui/button';
 import { runIdToStrokeStyle } from '@/lib/runIdToColor';
+import { runLabel } from '@/lib/runLabel';
 import { cn } from '@/lib/cn';
 
 export interface HistoryRunRowProps {
@@ -58,10 +60,6 @@ const STATE_CLASS: Record<RunRecord['state'], string> = {
   error: 'bg-danger/15 text-foreground',
   aborted: 'bg-muted text-muted-foreground',
 };
-
-function shortRunId(runId: string): string {
-  return runId.length > 12 ? runId.slice(0, 12) : runId;
-}
 
 export function HistoryRunRow({
   run,
@@ -112,8 +110,12 @@ export function HistoryRunRow({
       />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-center gap-2">
-          <span className="text-foreground truncate font-mono text-xs">
-            {shortRunId(run.runId)}
+          <span
+            data-testid={`history-run-row-label-${run.runId}`}
+            title={`Run id ${run.runId}`}
+            className="text-foreground truncate text-xs"
+          >
+            {runLabel(run)}
           </span>
           {isActive ? (
             <span
