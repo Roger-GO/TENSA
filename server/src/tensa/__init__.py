@@ -54,3 +54,15 @@ def _resolve_version() -> str:
 # Feeds the OpenAPI ``info.version`` and the ``tensa_version`` stamp on
 # bundle manifests and snapshot sidecars.
 __version__ = _resolve_version()
+
+
+def andes_version() -> str:
+    """Installed ANDES version from package metadata, or ``"unknown"``.
+
+    Deliberately avoids ``import andes`` (seconds of import time), so
+    ``tensa --version`` and the version route stay instant.
+    """
+    try:
+        return _metadata.version("andes")
+    except _metadata.PackageNotFoundError:
+        return "unknown"

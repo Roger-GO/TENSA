@@ -122,6 +122,7 @@ async def test_every_route_declares_problem_details_for_4xx(
         ("get", "/api/sessions"),           # list — always succeeds
         ("delete", "/api/sessions/{session_id}"),  # idempotent close
         ("get", "/api/topology/schema"),    # static compile-time table
+        ("get", "/api/version"),            # package metadata, no input
         ("get", "/api/workspace/files"),    # directory listing
     }
     spec = (await client.get("/openapi.json")).json()

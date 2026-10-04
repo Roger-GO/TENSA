@@ -13,6 +13,7 @@ import json
 import re
 from pathlib import Path
 
+import httpx
 import pytest
 from packaging.version import Version
 
@@ -77,6 +78,70 @@ def test_fallback_is_a_clear_unknown_marker() -> None:
 def test_openapi_reports_the_package_version(tmp_path: Path) -> None:
     app = make_app(workspace=tmp_path, static_override=tmp_path)
     assert app.openapi()["info"]["version"] == tensa.__version__
+
+
+def test_andes_version_is_read_from_package_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ANDES version comes from metadata and never imports ANDES (seconds of import time)."""
+    asked: list[str] = []
+
+    def _fake(name: str) -> str:
+        asked.append(name)
+        return "7.6.5"
+
+    monkeypatch.setattr(importlib.metadata, "version", _fake)
+    assert tensa.andes_version() == "7.6.5"
+    assert asked == ["andes"]
+
+
+def test_andes_version_is_unknown_when_andes_is_not_installed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _missing(_name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError
+
+    monkeypatch.setattr(importlib.metadata, "version", _missing)
+    assert tensa.andes_version() == "unknown"
+
+
+async def _get_version(tmp_path: Path) -> httpx.Response:
+    app = make_app(workspace=tmp_path, static_override=tmp_path)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000") as client:
+        return await client.get("/api/version")
+
+
+async def test_version_route_reports_the_tensa_and_andes_versions(tmp_path: Path) -> None:
+    """The About dialog reads both versions here, with no session open."""
+    response = await _get_version(tmp_path)
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "tensa": tensa.__version__,
+        "andes": importlib.metadata.version("andes"),
+    }
+
+
+async def test_version_route_says_unknown_when_andes_metadata_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = importlib.metadata.version
+
+    def _no_andes(name: str) -> str:
+        if name == "andes":
+            raise importlib.metadata.PackageNotFoundError(name)
+        return real(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", _no_andes)
+    response = await _get_version(tmp_path)
+    assert response.status_code == 200, response.text
+    assert response.json() == {"tensa": tensa.__version__, "andes": "unknown"}
+
+
+def test_version_route_is_tagged_for_the_gui_parity_ledger(tmp_path: Path) -> None:
+    operation = make_app(workspace=tmp_path, static_override=tmp_path).openapi()["paths"][
+        "/api/version"
+    ]["get"]
+    assert operation["x-tensa-gui-location"] == "about-dialog"
+    assert operation["operationId"] == "getVersion"
 
 
 def test_version_matches_pyproject() -> None:

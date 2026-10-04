@@ -10,6 +10,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 
 | GUI location | Routes |
 | --- | --- |
+| `about-dialog` | 1 |
 | `activity-panel` | 2 |
 | `analysis-panel` | 7 |
 | `auto` | 4 |
@@ -27,7 +28,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `snapshot-dialog` | 4 |
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
-| **total** | **58** |
+| **total** | **59** |
 
 ## OpenAPI routes
 
@@ -88,6 +89,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `GET` | `/api/sessions/{session_id}/topology/models/{model}/alterable_params` | `disturbance-panel` |  |
 | `POST` | `/api/sessions/{session_id}/undo-last-edit` | `command-palette` |  |
 | `GET` | `/api/topology/schema` | `inspector` |  |
+| `GET` | `/api/version` | `about-dialog` |  |
 | `GET` | `/api/workspace/files` | `left-sidebar` |  |
 | `GET` | `/api/workspace/layout` | `workspace` |  |
 | `PUT` | `/api/workspace/layout` | `workspace` |  |

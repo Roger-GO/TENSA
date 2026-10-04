@@ -29,7 +29,7 @@ def test_version_reports_unknown_when_andes_metadata_missing(
     def _missing(_name: str) -> str:
         raise importlib.metadata.PackageNotFoundError
 
-    monkeypatch.setattr(cli.importlib.metadata, "version", _missing)
+    monkeypatch.setattr(importlib.metadata, "version", _missing)
     result = runner.invoke(cli.app, ["--version"])
     assert result.exit_code == 0
     assert "andes unknown" in result.output

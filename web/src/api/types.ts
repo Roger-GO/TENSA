@@ -54,6 +54,7 @@ export type DeleteElementResponse = TopologySummary;
  */
 export type DeleteBlockedResponse = components['schemas']['DeleteBlockedResponse'];
 export type TopologySchema = components['schemas']['TopologySchema'];
+export type VersionInfo = components['schemas']['VersionInfo'];
 export type TopologyParamMeta = components['schemas']['TopologyParamMeta'];
 export type SaveCaseRequest = components['schemas']['SaveCaseRequest'];
 export type SaveCaseResponse = components['schemas']['SaveCaseResponse'];

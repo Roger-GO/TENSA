@@ -20,7 +20,6 @@ Subcommands:
 from __future__ import annotations
 
 import contextlib
-import importlib.metadata
 import logging
 import os
 import socket
@@ -37,6 +36,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from tensa import __version__
+from tensa import andes_version as _andes_version
 from tensa.api.app import make_app
 from tensa.core.codegen_cache import (
     BackgroundWarm,
@@ -61,18 +61,6 @@ _STARTUP_FAILURE = 3
 
 # Bind addresses that listen everywhere but are not valid URL hosts.
 _WILDCARD_BINDS = frozenset({"0.0.0.0", "::", ""})
-
-
-def _andes_version() -> str:
-    """Installed ANDES version from package metadata.
-
-    Deliberately avoids ``import andes`` (seconds of import time) so
-    ``tensa --version`` stays instant.
-    """
-    try:
-        return importlib.metadata.version("andes")
-    except importlib.metadata.PackageNotFoundError:
-        return "unknown"
 
 
 def _version_callback(value: bool) -> None:

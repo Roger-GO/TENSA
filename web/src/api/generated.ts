@@ -546,6 +546,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Report the tensa and ANDES versions this server runs.
+         * @description Static endpoint: the versions are read from package metadata and never
+         *     change while the server runs.
+         */
+        get: operations["getVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/bundle/export": {
         parameters: {
             query?: never;
@@ -3449,6 +3470,22 @@ export interface components {
             ctx?: Record<string, never>;
         };
         /**
+         * VersionInfo
+         * @description Response shape for ``GET /version``: the packages this server runs on.
+         */
+        VersionInfo: {
+            /**
+             * Tensa
+             * @description Installed tensa version (the one in the OpenAPI ``info.version``).
+             */
+            tensa: string;
+            /**
+             * Andes
+             * @description Installed ANDES version, or ``unknown`` when its package metadata is missing.
+             */
+            andes: string;
+        };
+        /**
          * WorkspaceFile
          * @description One entry in the workspace file lister response.
          */
@@ -5000,6 +5037,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    getVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionInfo"];
                 };
             };
         };

@@ -64,6 +64,7 @@ Snapshots:       POST /sessions/{id}/snapshot · POST .../snapshot/restore · GE
 Bundles:         POST /sessions/{id}/bundle/export (zip: case+disturbances+params) · POST .../bundle/import
 Reports:         GET /sessions/{id}/report
 Workspace:       GET /workspace/files · GET/PUT /workspace/layout?case_path=<rel>
+Version:         GET /version  → {"tensa": "...", "andes": "..."}  (installed package versions, no session needed)
 
 ## WebSockets (live streaming)
 

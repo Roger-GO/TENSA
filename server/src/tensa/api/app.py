@@ -52,6 +52,7 @@ from tensa.api.routes.sessions import router as sessions_router
 from tensa.api.routes.snapshot import router as snapshot_router
 from tensa.api.routes.sweep import router as sweep_router
 from tensa.api.routes.tds import router as tds_router
+from tensa.api.routes.version import router as version_router
 from tensa.api.routes.workspace import router as workspace_router
 from tensa.api.routes.ws import router as ws_router
 from tensa.api.schemas import JobRecordSchema, ProblemDetails
@@ -335,6 +336,7 @@ def make_app(
     app.include_router(clone_router, prefix="/api", tags=["clone"])
     app.include_router(tds_router, prefix="/api", tags=["tds"])
     app.include_router(workspace_router, prefix="/api", tags=["workspace"])
+    app.include_router(version_router, prefix="/api", tags=["version"])
     # Houses both the Unit-3 bundle-export endpoint AND the Unit-7
     # snapshot save / restore / list / delete endpoints. The OpenAPI tag
     # is "snapshot" since that's the broader concept; the bundle export
