@@ -66,6 +66,7 @@ from tensa.core.errors import (
     SetupFailedError,
     SeUnderDeterminedError,
     SystemAlreadyLoadedError,
+    short_repr,
 )
 from tensa.core.rated_voltage import (
     buses_without_rated_voltage,
@@ -1634,7 +1635,7 @@ class Wrapper:
         for key in tds_config_overrides or {}:
             if not hasattr(ss.TDS.config, _TDS_OVERRIDE_ALIASES.get(key, key)):
                 raise SetupFailedError(
-                    f"unknown TDS override key {_echo(key)}; expected a "
+                    f"unknown TDS override key {short_repr(key)}; expected a "
                     f"wrapper-canonical alias {list(_TDS_OVERRIDE_ALIASES)!r} or "
                     f"a real ss.TDS.config field name"
                 )
@@ -4897,13 +4898,6 @@ def tds_fixed_step(
     return bool((tds_config_overrides or {}).get("fixt", 1))
 
 
-def _echo(value: object) -> str:
-    """``repr(value)``, cut short: a refusal quotes a client's value back, and
-    that value can be as long as the client likes."""
-    text = repr(value)
-    return text if len(text) <= 40 else f"{text[:37]}..."
-
-
 def validate_step_size(h: object, name: str = "h") -> float | None:
     """Return ``h`` as a float, or ``None`` when no step size was requested.
 
@@ -4922,7 +4916,7 @@ def validate_step_size(h: object, name: str = "h") -> float | None:
     if h is None:
         return None
     message = (
-        f"step size {_echo(name)} must be a finite number greater than 0, got {_echo(h)}"
+        f"step size {short_repr(name)} must be a finite number greater than 0, got {short_repr(h)}"
     )
     # ``bool`` is an ``int`` subclass; ``true`` is not a step size.
     if isinstance(h, bool) or not isinstance(h, int | float | str):
@@ -4966,18 +4960,18 @@ def validate_tds_overrides(overrides: Mapping[str, float] | None) -> None:
             finite = False
         if not finite:
             raise SetupFailedError(
-                f"TDS override {_echo(key)} must be a finite number, got {_echo(value)}"
+                f"TDS override {short_repr(key)} must be a finite number, got {short_repr(value)}"
             )
         if target == "tstep":
             validate_step_size(value, name=key)
         elif target == "dtmax" and value < 0:
             raise SetupFailedError(
-                f"TDS override {_echo(key)} must be 0 (automatic) or greater, got {_echo(value)}"
+                f"TDS override {short_repr(key)} must be 0 (automatic) or greater, got {short_repr(value)}"
             )
         elif target == "fixt" and value not in (0, 1):
             raise SetupFailedError(
-                f"TDS override {_echo(key)} must be 0 (variable step) or 1 (fixed step), "
-                f"got {_echo(value)}"
+                f"TDS override {short_repr(key)} must be 0 (variable step) or 1 (fixed step), "
+                f"got {short_repr(value)}"
             )
 
 

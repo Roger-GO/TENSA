@@ -93,3 +93,46 @@ def test_ws_start_tds_refuses_a_bad_step_override(
     # The refusal wrote nothing to the System: the same client can still run.
     ok = client.post(f"/api/sessions/{sid}/tds", json={"tf": 0.3, "h": 0.01})
     assert ok.status_code == 200, ok.text
+
+
+@pytest.mark.integration
+def test_ws_setup_failure_names_the_endpoint_not_the_python_api(
+    live: tuple[TestClient, str],
+) -> None:
+    """``SetupFailedError`` ends with the Python API's hint (``call reload_case()
+    to recover``). A WebSocket client, and the web UI that shows this reason in
+    a toast, gets what it can do instead, as ``POST /tds`` does for REST."""
+    client, sid = live
+    first = client.post(f"/api/sessions/{sid}/tds", json={"tf": 0.3, "h": 0.01})
+    assert first.status_code == 200, first.text
+
+    # The System has stepped, so QNDF cannot take over from the trapezoidal run.
+    frame = _refused(client, sid, {"tf": 0.6, "integrator": "qndf"})
+    reason = frame["reason"]
+    assert reason.startswith("SetupFailedError: ANDES setup() failed: QNDF cannot replace")
+    assert "reload_case()" not in reason
+    assert f"POST /api/sessions/{sid}/reload" in reason
+    assert "Reload from file" in reason
+    assert reason.count("reload the case to recover") == 1
+
+
+@pytest.mark.integration
+def test_ws_close_frame_stays_within_its_byte_limit(live: tuple[TestClient, str]) -> None:
+    """A close reason is at most 123 bytes. It was cut to 120 characters, which
+    is more than 123 bytes once the client's own text is not ASCII, and the
+    close that failed for it was swallowed: the client never got the code."""
+    client, sid = live
+    with client.websocket_connect(f"/api/ws/{sid}") as ws:
+        assert json.loads(ws.receive_text())["type"] == "ready"
+        ws.send_text(
+            json.dumps({"type": "start_tds", "tf": 0.3, "decimation": "é" * 100})
+        )
+        frame = json.loads(ws.receive_text())
+        assert frame["type"] == "error"
+        assert "unknown decimation mode" in frame["reason"]
+        # The client's text is quoted back in short, whatever its length.
+        assert len(frame["reason"]) < 120
+        with pytest.raises(WebSocketDisconnect) as closed:
+            ws.receive_text()
+    assert closed.value.code == WS_CLOSE_WORKER_ERROR
+    assert 0 < len(closed.value.reason.encode("utf-8")) <= 123

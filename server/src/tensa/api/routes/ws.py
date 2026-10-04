@@ -43,7 +43,10 @@ person; a client that needs to tell the two apart reads ``cause``.
 
 Unknown session id closes with 4404. Unknown run_id on resume closes with
 4404. Worker / wrapper errors close with code 4500 + a JSON
-``{"type":"error",...}`` text frame just before close.
+``{"type":"error",...}`` text frame just before close. The frame's ``reason`` is
+the whole message; the close frame repeats it cut to 120 bytes, since a close
+reason holds at most 123. A setup failure ends with what to do about it: reload
+the case, over ``POST /sessions/{id}/reload`` or from the web UI's Edit menu.
 """
 
 from __future__ import annotations
@@ -56,7 +59,7 @@ from typing import Any
 from fastapi import APIRouter, Request, WebSocket, status
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
-from tensa.core.errors import SetupFailedError
+from tensa.core.errors import SetupFailedError, short_repr
 from tensa.core.session import (
     SessionExpiredError,
     SessionManager,
@@ -71,6 +74,26 @@ log = logging.getLogger("tensa.ws")
 WS_CLOSE_SESSION_NOT_FOUND = 4404
 WS_CLOSE_WORKER_ERROR = 4500
 WS_CLOSE_INTERNAL_ERROR = 4500
+
+# A close frame's reason is at most 123 bytes (RFC 6455 §5.5: 125 for a control
+# frame, less the two bytes of the code). The full text goes in the ``error``
+# frame that precedes the close.
+WS_CLOSE_REASON_MAX_BYTES = 120
+
+
+def _recovery_for_ws(session_id: str) -> str:
+    """What a client of this socket can do about a failed setup."""
+    return (
+        "reload the case to recover "
+        f"(POST /api/sessions/{session_id}/reload, or Reload from file in the Edit menu)"
+    )
+
+
+def _setup_failure_detail(detail: str, session_id: str) -> str:
+    """A ``SetupFailedError`` message with the Python API's recovery hint
+    (``call reload_case() to recover``) swapped for one a WebSocket client or the
+    web UI can act on, as ``POST /tds`` does for REST callers."""
+    return f"{detail.removesuffix(SetupFailedError.RECOVERY_HINT)}; {_recovery_for_ws(session_id)}"
 
 
 def _manager(request: Request | WebSocket) -> SessionManager | None:
@@ -127,7 +150,7 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         await _close_with_error(
             websocket,
             WS_CLOSE_INTERNAL_ERROR,
-            f"expected start_tds or resume, got {cfg_type!r}",
+            f"expected start_tds or resume, got {short_repr(cfg_type)}",
         )
         return
 
@@ -140,7 +163,9 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
     try:
         h = validate_step_size(cfg.get("h"))
     except SetupFailedError as exc:
-        await _close_with_error(websocket, WS_CLOSE_INTERNAL_ERROR, str(exc))
+        await _close_with_error(
+            websocket, WS_CLOSE_INTERNAL_ERROR, _setup_failure_detail(str(exc), session_id)
+        )
         return
 
     # Optional decimation controls. Defaults match the v0.1 baseline: every
@@ -153,7 +178,7 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         await _close_with_error(
             websocket,
             WS_CLOSE_INTERNAL_ERROR,
-            f"unknown decimation mode {decimation_raw!r}; expected 'none' or 'mean'",
+            f"unknown decimation mode {short_repr(decimation_raw)}; expected 'none' or 'mean'",
         )
         return
     max_rate_hz_raw = cfg.get("max_rate_hz")
@@ -192,7 +217,8 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         await _close_with_error(
             websocket,
             WS_CLOSE_INTERNAL_ERROR,
-            f"unknown var group(s) {unknown!r}; expected one of {list(VAR_GROUPS)!r}",
+            f"unknown var group(s) {short_repr(unknown, 80)}; "
+            f"expected one of {list(VAR_GROUPS)!r}",
         )
         return
 
@@ -206,7 +232,8 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         await _close_with_error(
             websocket,
             WS_CLOSE_INTERNAL_ERROR,
-            f"unknown integrator {integrator_raw!r}; expected 'trapezoidal' or 'qndf'",
+            f"unknown integrator {short_repr(integrator_raw)}; "
+            "expected 'trapezoidal' or 'qndf'",
         )
         return
     overrides_raw = cfg.get("tds_config_overrides")
@@ -303,7 +330,7 @@ async def _stream_run_to_websocket(
                 await _close_with_error(
                     websocket,
                     WS_CLOSE_SESSION_NOT_FOUND,
-                    f"run {run_id!r} not found for this session",
+                    f"run {short_repr(run_id)} not found for this session",
                 )
                 return
             if event_type == "resync":
@@ -345,6 +372,8 @@ async def _stream_run_to_websocket(
             elif event_type == "error":
                 category = str(event.get("category", "unknown"))
                 detail = str(event.get("detail", ""))
+                if category == "SetupFailedError":
+                    detail = _setup_failure_detail(detail, session_id)
                 await _close_with_error(
                     websocket,
                     WS_CLOSE_WORKER_ERROR,
@@ -363,6 +392,12 @@ async def _stream_run_to_websocket(
         return
 
 
+def _fit_close_reason(reason: str) -> str:
+    """``reason`` cut to what a close frame can carry, by UTF-8 bytes (not
+    characters), without ending in half of a character."""
+    return reason.encode("utf-8")[:WS_CLOSE_REASON_MAX_BYTES].decode("utf-8", errors="ignore")
+
+
 async def _close_with_error(
     websocket: WebSocket, code: int, reason: str
 ) -> None:
@@ -374,4 +409,4 @@ async def _close_with_error(
             json.dumps({"type": "error", "code": code, "reason": reason})
         )
     with contextlib.suppress(Exception):
-        await websocket.close(code=code, reason=reason[:120])
+        await websocket.close(code=code, reason=_fit_close_reason(reason))

@@ -281,6 +281,12 @@ export class RunStream {
    * frames name no columns, so every frame is decoded against this list.
    */
   private columnNames: readonly string[] = [];
+  /**
+   * The ``reason`` of the server's last ``error`` frame. The close frame that
+   * follows carries the same text cut to 120 bytes, and it is the frame's text
+   * (a refusal's cause and what to do about it) that the user needs.
+   */
+  private serverErrorReason: string | null = null;
   /** Reconnect attempt counter (0-indexed). Reset on each successful frame. */
   private reconnectAttempt = 0;
   /** Pending reconnect timer handle. */
@@ -482,6 +488,9 @@ export class RunStream {
         // close handler will fire next with the right code; we record the
         // reason for the close handler to propagate.
         log.warn('[RunStream] server error frame', msg);
+        if (typeof msg.reason === 'string' && msg.reason !== '') {
+          this.serverErrorReason = msg.reason;
+        }
         return;
       default:
         log.warn('[RunStream] unknown message type', msg.type);
@@ -680,7 +689,10 @@ export class RunStream {
       return;
     }
     if (code === WS_CLOSE_WORKER_ERROR) {
-      this.emitError({ code: 'worker_error', reason: ev.reason || 'worker error' });
+      this.emitError({
+        code: 'worker_error',
+        reason: this.serverErrorReason ?? (ev.reason || 'worker error'),
+      });
       this.phase = 'closed';
       this.disposed = true;
       return;

@@ -13,6 +13,17 @@ if TYPE_CHECKING:
     from tensa.core.jobs import JobRecord
 
 
+def short_repr(value: object, limit: int = 40) -> str:
+    """``repr(value)`` cut to ``limit`` characters.
+
+    For an error message that quotes something a client sent: the client chooses
+    how long that is, and the message travels back to it, into logs, and into a
+    WebSocket close reason.
+    """
+    text = repr(value)
+    return text if len(text) <= limit else f"{text[: limit - 3]}..."
+
+
 class AndesAppError(Exception):
     """Base class for all wrapper-level exceptions.
 

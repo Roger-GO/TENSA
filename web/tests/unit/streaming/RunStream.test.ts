@@ -562,6 +562,58 @@ describe('RunStream — edge cases', () => {
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'run_not_found' }));
   });
 
+  describe('a refused run (close 4500)', () => {
+    const FULL_REASON =
+      'SetupFailedError: ANDES setup() failed: QNDF cannot replace the trapezoidal integrator ' +
+      'of a System that has already taken time-domain steps, in a run or in a snapshot taken ' +
+      `after one; reload the case to recover (POST /api/sessions/${SESSION_ID}/reload, or Reload from file in the Edit menu)`;
+
+    function startRefused(
+      onError: ReturnType<typeof vi.fn>,
+      sendErrorFrame: boolean,
+    ): { done: () => Promise<void> } {
+      server.on('connection', (socket) => {
+        socket.send(JSON.stringify({ type: 'ready' }));
+        socket.on('message', (raw: unknown) => {
+          if (JSON.parse(String(raw)).type !== 'start_tds') return;
+          if (sendErrorFrame) {
+            socket.send(JSON.stringify({ type: 'error', code: 4500, reason: FULL_REASON }));
+          }
+          // A close frame carries at most 123 bytes of the reason.
+          socket.close({ code: 4500, reason: FULL_REASON.slice(0, 120) });
+        });
+      });
+      const stream = new RunStream(
+        { sessionId: SESSION_ID, wsUrl: WS_URL, tdsArgs: { tf: 1 }, onError },
+        { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
+      );
+      stream.start();
+      return {
+        done: async () => {
+          for (let i = 0; i < 30 && onError.mock.calls.length === 0; i += 1) await tick();
+        },
+      };
+    }
+
+    it('reports the whole message of the error frame, not the close frame cut of it', async () => {
+      const onError = vi.fn();
+      await startRefused(onError, true).done();
+
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith({ code: 'worker_error', reason: FULL_REASON });
+    });
+
+    it('falls back to the close reason when no error frame came first', async () => {
+      const onError = vi.fn();
+      await startRefused(onError, false).done();
+
+      expect(onError).toHaveBeenCalledWith({
+        code: 'worker_error',
+        reason: FULL_REASON.slice(0, 120),
+      });
+    });
+  });
+
   it('reconnects with resume on abnormal close mid-stream and continues frame numbering', async () => {
     // First connection: stream_start + 2 frames (seq 1, 2), then 1006.
     // Second connection: resume with last_seq=2, stream_start (re-emit),
