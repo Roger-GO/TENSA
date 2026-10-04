@@ -11,12 +11,15 @@
  * scrollable per-iteration table (parameter value, converged?, final_t,
  * error).
  */
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useSweepStore } from '@/store/sweep';
 import { useSessionStore } from '@/store/session';
 import { SweepStream } from '@/streaming/SweepStream';
 import { buildRunStreamWsUrl } from '@/streaming/wsUrl';
+import { ExportMenu } from '@/components/export/ExportMenu';
+import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { cn } from '@/lib/cn';
+import { sweepToCsv } from './sweepExport';
 
 export function SweepProgressPanel() {
   const activeSweepId = useSweepStore((s) => s.activeSweepId);
@@ -77,6 +80,14 @@ export function SweepProgressPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sweep?.sweepId, sessionId, appendIteration, markFinished]);
 
+  // CSV is the iterations received so far, so a sweep still running exports its
+  // partial results.
+  const caseName = useExportCaseName();
+  const onExportCsv = useCallback(
+    () => (sweep === null || sweep.iterations.length === 0 ? null : sweepToCsv(sweep)),
+    [sweep],
+  );
+
   if (!sweep) {
     return (
       <div
@@ -101,9 +112,21 @@ export function SweepProgressPanel() {
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-foreground text-xs font-medium">Sweep · {sweep.parameterKind}</span>
-        <span className="text-muted-foreground text-xs">
-          {completed}/{total} ({percent}%)
-        </span>
+        <div className="flex items-center gap-1">
+          <span className="text-muted-foreground text-xs">
+            {completed}/{total} ({percent}%)
+          </span>
+          <ExportMenu
+            formats={['csv']}
+            disabled={completed === 0}
+            disabledTooltip="No iterations to export yet"
+            panel="sweep"
+            caseName={caseName}
+            runId={sweep.sweepId}
+            onExportCsv={onExportCsv}
+            className="h-6 px-2"
+          />
+        </div>
       </div>
       <div className="bg-muted/40 h-2 w-full overflow-hidden rounded" aria-label="sweep progress">
         <div
