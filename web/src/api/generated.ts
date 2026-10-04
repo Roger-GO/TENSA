@@ -1658,6 +1658,66 @@ export interface components {
             y: number;
         };
         /**
+         * CaseEvent
+         * @description A timed event the next time-domain run applies that the client did not
+         *     schedule: one the case's files define, or one a bundle import or a snapshot
+         *     restore replayed.
+         */
+        CaseEvent: {
+            /**
+             * Source
+             * @description ``case``: a ``Fault``, ``Toggle`` or ``Alter`` device the case file or one of its add-on files defines. ``restored``: a disturbance a bundle import or a snapshot restore replayed onto the system.
+             * @enum {string}
+             */
+            source: "case" | "restored";
+            /**
+             * Kind
+             * @description Which ANDES event model it is.
+             * @enum {string}
+             */
+            kind: "fault" | "toggle" | "alter";
+            /**
+             * T
+             * @description Time the event starts, in seconds: a fault's ``tf``, otherwise the time the toggle or alteration fires.
+             */
+            t: number;
+            /**
+             * Name
+             * @description The device's name in the case file. ``null`` for a restored disturbance, which has none.
+             */
+            name?: string | null;
+            /**
+             * Tc
+             * @description Fault only: time the fault is cleared, in seconds. ``null`` when the case gives none, which leaves the fault on.
+             */
+            tc?: number | null;
+            /**
+             * Model
+             * @description ANDES model of the device the event acts on: ``Bus`` for a fault, the toggled or altered model otherwise (a group name is possible in a case file).
+             */
+            model?: string | null;
+            /**
+             * Dev Idx
+             * @description ANDES idx of the device within ``model`` (the bus, for a fault).
+             */
+            dev_idx?: number | string | null;
+            /**
+             * Src
+             * @description Alter only: the parameter the event changes.
+             */
+            src?: string | null;
+            /**
+             * Method
+             * @description Alter only: how ``amount`` is combined with the parameter's current value (``=``, ``+``, ``-``, ``*`` or ``/``).
+             */
+            method?: string | null;
+            /**
+             * Amount
+             * @description Alter only: the operand applied via ``method``.
+             */
+            amount?: number | null;
+        };
+        /**
          * CloneDiffPair
          * @description One changed param's original-vs-current file values (Unit 23).
          */
@@ -3343,6 +3403,11 @@ export interface components {
              * @description Idx of the buses whose rated voltage (``Vn`` in the bus's params) the case file does not give: it is absent, blank or zero there, and ANDES fills in 110 kV. That 110 is not the bus's voltage base, so a client must not use it to turn a per-unit voltage into kV. Empty when every bus has a rated voltage. A bus whose ``Vn`` has been edited since the case was loaded is no longer listed.
              */
             buses_without_vn?: (number | string)[];
+            /**
+             * Events
+             * @description Timed events the next time-domain run applies besides the disturbances a client commits through ``POST /sessions/{id}/disturbances``: the ``Fault``, ``Toggle`` and ``Alter`` devices the case's files define (the bundled ``kundur_full.xlsx`` trips ``Line_8`` at 2 s), and the disturbances a bundle import or snapshot restore replayed. A client that says what a run will do must count these. A device that cannot act (switched off with ``u = 0``, or a time below zero) is not listed. Empty when there are none.
+             */
+            events?: components["schemas"]["CaseEvent"][];
             /**
              * Job Id
              * @description Job-registry id mirroring the routine that produced this topology snapshot (v3.1 Unit 5b) — case load / reload, element delete / undo, or blank-system create. ``null`` when the summary is a plain read (``GET /topology``).

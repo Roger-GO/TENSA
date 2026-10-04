@@ -41,6 +41,7 @@ from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING, Any, Literal
 
+from tensa.core.case_events import CaseEvent, event_from_spec, events_in_case
 from tensa.core.codegen_cache import wait_for_background_warm
 from tensa.core.connectivity_result import ConnectivityResult
 from tensa.core.cpf_result import CpfResult
@@ -194,6 +195,11 @@ class TopologySnapshot:
     # ANDES holds its 110 kV fill-in there, which a client must not read as
     # the bus's voltage base. See ``tensa.core.rated_voltage``.
     buses_without_vn: list[int | str] = field(default_factory=list)
+    # Timed events the next time-domain run applies besides the ones a client
+    # commits itself: those the case file defines (a ``Toggle`` that trips a
+    # line, say) and those a bundle import or snapshot restore replayed. See
+    # ``tensa.core.case_events``.
+    events: list[CaseEvent] = field(default_factory=list)
 
 
 @dataclass
@@ -298,6 +304,12 @@ class Wrapper:
         # The buses the loaded case file gives no ``Vn`` (ANDES fills in 110 kV),
         # worked out when the case is loaded: ANDES forgets it at ``setup()``.
         self._buses_without_vn: frozenset[int | str] = frozenset()
+        # The ``Fault`` / ``Toggle`` / ``Alter`` devices the loaded case file
+        # defines, read when it is loaded, before anything is added to the System.
+        self._case_events: list[CaseEvent] = []
+        # The disturbances a bundle import or snapshot restore replayed onto the
+        # System, which the client never scheduled. Emptied with every new System.
+        self._restored_events: list[CaseEvent] = []
         self._setup_failed: bool = False  # marks "requires reload"
         # ``_workspace`` is the per-launch workspace directory (the same one
         # the CLI hands the FastAPI app). Snapshot files (Unit 7) live under
@@ -427,6 +439,7 @@ class Wrapper:
         self._case_path = case_path
         self._addfiles = resolved_addfiles
         self._buses_without_vn = buses_without_rated_voltage(ss, case_path)
+        self._case_events = events_in_case(ss)
         self._setup_failed = False
         # Loading from a real case file invalidates any blank-session replay
         # history — that buffer is only meaningful for sessions whose entire
@@ -437,6 +450,7 @@ class Wrapper:
         # reload must capture them via ``list_disturbances()`` BEFORE
         # ``reload_case`` and then ``replay_disturbances()`` AFTER.
         self._disturbance_log = []
+        self._restored_events = []
         # SE measurements (Unit 13) are scoped to the previous System's
         # device idxes; load/reload invalidates them. The user must
         # call /se/measurements/generate again on the new System.
@@ -574,6 +588,8 @@ class Wrapper:
         self._setup_failed = False
         self._replay_buffer = []
         self._disturbance_log = []
+        self._case_events = events_in_case(ss)
+        self._restored_events = []
         self._se_measurements = None
         self._ensure_setup()
 
@@ -616,6 +632,7 @@ class Wrapper:
             controllers=_collect_models(ss, list(_CONTROLLER_MODEL_NAMES)),
             freq_hz=_system_frequency_hz(ss),
             buses_without_vn=still_without_rated_voltage(ss, self._buses_without_vn),
+            events=[*self._case_events, *self._restored_events],
         )
 
     # ----- disturbance management -----
@@ -3183,6 +3200,7 @@ class Wrapper:
                 if self._case_path is not None:
                     self._replay_buffer = []
                 self._disturbance_log = list(specs)
+                self._restored_events = [event_from_spec(spec) for spec in specs]
 
         replayed = len(specs)
         if not used_dill:
@@ -3192,8 +3210,10 @@ class Wrapper:
             # wanted the disturbance list back (snapshot was saved pre-PF) the
             # meta's has_pflow=False tells us to stop before setup.
             self.reload_case()
+            self._restored_events = []
             for spec in specs:
                 self.add_disturbance(spec)
+                self._restored_events.append(event_from_spec(spec))
             if metadata.has_pflow:
                 self._ensure_setup()
                 ss = self._require_loaded()
@@ -3748,6 +3768,7 @@ class Wrapper:
             try:
                 self.add_disturbance(spec)
                 replayed += 1
+                self._restored_events.append(event_from_spec(spec))
             except DisturbanceValidationError as exc:
                 # ANDES rejected the spec on the new System (e.g., bus
                 # idx no longer present after a case-level edit). We

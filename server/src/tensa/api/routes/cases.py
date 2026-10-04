@@ -98,6 +98,7 @@ def _topology_from_payload(payload: dict[str, Any]) -> TopologySummary:
         controllers=[TopologyEntry(**e) for e in payload.get("controllers", [])],
         freq_hz=payload.get("freq_hz"),
         buses_without_vn=payload.get("buses_without_vn", []),
+        events=payload.get("events", []),
     )
 
 

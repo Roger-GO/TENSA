@@ -329,6 +329,48 @@ async def test_topology_names_the_buses_the_case_gives_no_rated_voltage(
 
 
 @pytest.mark.integration
+async def test_topology_lists_the_events_the_case_file_defines(
+    app_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """``events`` names what a run applies besides what the client schedules:
+    nothing for IEEE 14, and the line trip that ``kundur_full.xlsx`` defines at
+    2 s, on a load and on a plain read. A fault the client commits is not added."""
+    client, ws = app_workspace
+    shutil.copy2(_bundled_ieee14_dir().parent / "kundur" / "kundur_full.xlsx", ws)
+
+    plain = await _create_session(client)
+    loaded = await client.post(f"/api/sessions/{plain}/case", json={"primary_path": "ieee14.raw"})
+    assert loaded.status_code == 200, loaded.text
+    assert loaded.json()["events"] == []
+
+    kundur = await _create_session(client)
+    loaded = await client.post(
+        f"/api/sessions/{kundur}/case", json={"primary_path": "kundur_full.xlsx"}
+    )
+    assert loaded.status_code == 200, loaded.text
+    trip = {
+        "source": "case",
+        "kind": "toggle",
+        "t": 2.0,
+        "name": "Toggler_1",
+        "tc": None,
+        "model": "Line",
+        "dev_idx": "Line_8",
+        "src": None,
+        "method": None,
+        "amount": None,
+    }
+    assert loaded.json()["events"] == [trip]
+    added = await client.post(
+        f"/api/sessions/{kundur}/disturbances",
+        json={"disturbances": [{"kind": "fault", "bus_idx": 3, "tf": 1.0, "tc": 1.1}]},
+    )
+    assert added.status_code in (200, 201), added.text
+    read = await client.get(f"/api/sessions/{kundur}/topology")
+    assert read.json()["events"] == [trip]
+
+
+@pytest.mark.integration
 async def test_topology_line_params_include_r_x(
     app_workspace: tuple[httpx.AsyncClient, Path],
 ) -> None:

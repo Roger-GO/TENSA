@@ -187,6 +187,12 @@ async def test_import_bundle_round_trip_clean_workspace(
     )
     assert topo.status_code == 200
     assert topo.json()["state"] == "pre-setup"
+    # The replayed fault is applied by the next run though no client scheduled
+    # it, so the topology names it (the dyr file brings events of its own too).
+    restored = [e for e in topo.json()["events"] if e["source"] == "restored"]
+    assert [(e["kind"], e["dev_idx"], e["t"], e["tc"]) for e in restored] == [
+        ("fault", 5, 1.0, 1.1)
+    ]
 
 
 @pytest.mark.integration
