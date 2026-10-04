@@ -69,6 +69,7 @@ export interface SavedCasesListProps {
 export function SavedCasesList({ className }: SavedCasesListProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
   const caseSelection = useCaseStore((s) => s.selection);
+  const loadingPath = useCaseStore((s) => s.loadingPath);
   const setCase = useCaseStore((s) => s.setCase);
 
   const filesQuery = useListWorkspaceFiles();
@@ -211,12 +212,14 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
           <ul className="flex flex-col gap-0.5" role="list" aria-label="Workspace files">
             {files.map((file) => {
               const current = isCurrent(file.name);
+              const loading = loadingPath === file.name;
               return (
                 <li key={file.name}>
                   <button
                     type="button"
                     data-testid={`saved-cases-row-${file.name}`}
                     aria-current={current ? 'true' : undefined}
+                    aria-busy={loading ? 'true' : undefined}
                     onClick={() => handleLoadFile(file.name)}
                     disabled={loadCase.isPending}
                     className={cn(
@@ -232,8 +235,13 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
                       <FileGlyph />
                       <span className="truncate font-mono">{file.name}</span>
                     </span>
-                    <span className="text-muted-foreground shrink-0 font-mono text-[10px]">
-                      {formatLabel(file.format)}
+                    <span
+                      className={cn(
+                        'shrink-0 font-mono text-[10px]',
+                        loading ? 'text-primary' : 'text-muted-foreground',
+                      )}
+                    >
+                      {loading ? 'Loading…' : formatLabel(file.format)}
                     </span>
                   </button>
                 </li>

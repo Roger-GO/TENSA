@@ -474,6 +474,44 @@ describe('<RunButton /> v0.2 — disabled / enabled', () => {
 
     useAnalyzeStore.setState({ eigResult: null });
   });
+
+  it('keeps the disabled reason in the page, so the button is described by it without a hover', async () => {
+    seedReady();
+    const { useAnalyzeStore } = await import('@/store/analyze');
+    usePflowStore.setState({
+      lastRun: {
+        run_id: 'pf-1',
+        converged: true,
+        iterations: 4,
+        mismatch: 1e-7,
+        bus_voltages: {},
+        bus_angles: {},
+        line_flows: {},
+      },
+      isRunning: false,
+      error: null,
+    });
+    useAnalyzeStore.setState({
+      eigResult: {
+        eigenvalues: [{ real: -0.1, imag: 1.0 }],
+        damping_ratios: [0.1],
+        frequencies_hz: [0.159],
+        mode_count: 1,
+        state_count: 1,
+        state_names: ['delta_1'],
+        tds_initialized: true,
+      },
+    });
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+
+    const button = screen.getByTestId('run-pflow-button');
+    expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleDescription(/EIG initialised the dynamic state/i);
+
+    useAnalyzeStore.setState({ eigResult: null });
+  });
 });
 
 describe('<RunButton /> v0.2 — PF branch (legacy v0.1 flow still works)', () => {

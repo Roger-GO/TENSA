@@ -60,8 +60,8 @@ const STEP_COPY: Record<Exclude<CoachStep, null>, StepCopy> = {
     cta: 'Got it',
   },
   3: {
-    title: 'Open Analyze',
-    body: 'Switch to the Analyze panel on the right to explore eigenvalues (EIG), continuation power flow (CPF), or state estimation (SE).',
+    title: 'Open Analysis',
+    body: 'Open the Analysis tab in the bottom drawer to explore eigenvalues (EIG), continuation power flow (CPF), or state estimation (SE). Each needs the power flow you just ran.',
     anchor: 'top-right',
     cta: 'Done',
   },

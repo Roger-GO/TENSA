@@ -35,6 +35,9 @@ import { useSldFrameOverlay } from '@/components/sld/overlay';
 import { RecoveryBadge } from '@/components/shell/RecoveryBadge';
 import { JobAnnouncer } from '@/components/shell/JobAnnouncer';
 import { ProblemDetailsError } from '@/api/client';
+// Imported for its side effect: the store entrypoint wires the cross-slice
+// cascade (a case change clears the previous case's PF and analysis results).
+import '@/store';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { useSnapshotStore } from '@/store/snapshot';
@@ -147,6 +150,7 @@ function AppInner({ children }: { children: React.ReactNode }) {
  */
 function CanvasSlot() {
   const caseSelection = useCaseStore((s) => s.selection);
+  const loadingPath = useCaseStore((s) => s.loadingPath);
   const sessionId = useSessionStore((s) => s.sessionId);
   const setCase = useCaseStore((s) => s.setCase);
   const openAddPanel = useCaseStore((s) => s.openAddPanel);
@@ -190,15 +194,27 @@ function CanvasSlot() {
       className="h-full w-full"
       data-testid="no-case-drop-zone"
     >
-      <EmptyState
-        icon={<FolderIcon />}
-        title="No case loaded"
-        description={
-          dropError ??
-          'Pick a case file from the left sidebar — or drag a component here to start a blank system.'
-        }
-        emptyStateKey="app-shell-no-case"
-      />
+      {loadingPath !== null ? (
+        // ``selection`` is only set once a load lands, and the first load of a
+        // case generates code for its models, so say that it is in progress.
+        <EmptyState
+          icon={<FolderIcon />}
+          title={`Loading ${loadingPath}…`}
+          description="Opening the case. The first load of a case can take a while."
+          emptyStateKey="app-shell-case-loading"
+          aria-busy="true"
+        />
+      ) : (
+        <EmptyState
+          icon={<FolderIcon />}
+          title="No case loaded"
+          description={
+            dropError ??
+            'Pick a case file from the left sidebar — or drag a component here to start a blank system.'
+          }
+          emptyStateKey="app-shell-no-case"
+        />
+      )}
     </ComponentDropZone>
   );
 }

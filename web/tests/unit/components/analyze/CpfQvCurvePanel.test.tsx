@@ -156,6 +156,27 @@ describe('<CpfQvCurvePanel />', () => {
     );
   });
 
+  it('shows the PF reason as visible text under Run, without a hover', () => {
+    usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+    render(withQueryClient(<CpfQvCurvePanel />));
+    expect(screen.getByTestId('cpf-qv-run-hint')).toHaveTextContent(
+      'Run PFlow first; CPF requires a converged operating point.',
+    );
+    expect(screen.getByTestId('cpf-qv-run')).toHaveAttribute('aria-describedby', 'cpf-qv-run-hint');
+    expect(screen.getByRole('button', { name: 'Run power flow' })).toBeInTheDocument();
+  });
+
+  it('tells the user to choose a bus while that is the only thing missing', async () => {
+    const user = userEvent.setup();
+    render(withQueryClient(<CpfQvCurvePanel />));
+    expect(screen.getByTestId('cpf-qv-run-hint')).toHaveTextContent(/choose a bus/i);
+    expect(screen.getByTestId('cpf-qv-run')).toHaveAttribute('aria-describedby', 'cpf-qv-run-hint');
+
+    await user.selectOptions(screen.getByTestId('bus-idx-select'), '5');
+    expect(screen.queryByTestId('cpf-qv-run-hint')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cpf-qv-run')).not.toHaveAttribute('aria-describedby');
+  });
+
   it('renders the QV chart for a result', () => {
     mockMutationState = { mutate, isPending: false, data: QV_RESULT, error: null };
     render(withQueryClient(<CpfQvCurvePanel />));

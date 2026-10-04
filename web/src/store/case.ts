@@ -77,6 +77,14 @@ export interface CaseState {
   /** The currently-selected case + addfiles, or null if none loaded. */
   selection: CaseSelection | null;
   /**
+   * Workspace path of a case that is being loaded right now, or `null`.
+   * `selection` is only set once a load succeeds, so without this the UI
+   * reads "No case loaded" for the whole time a slow load runs (the first
+   * load of a case also generates ANDES code for its models). Set and cleared
+   * by `useLoadCase`.
+   */
+  loadingPath: string | null;
+  /**
    * Last successfully fetched topology summary for the current selection.
    * Mirrors the TanStack Query cache; held here so non-Query consumers
    * (selection-driven side effects) can read the topology synchronously.
@@ -141,6 +149,7 @@ export interface CaseState {
   /** Number of undone clone edits re-appliable via redo. */
   cloneRedoDepth: number;
   setCase: (selection: CaseSelection) => void;
+  setLoadingPath: (path: string | null) => void;
   setDragOverrides: (next: DragOverrides) => void;
   clearDragOverrides: () => void;
   setTopology: (topology: TopologySummary | null) => void;
@@ -181,6 +190,7 @@ export interface CaseState {
 
 export const useCaseStore = create<CaseState>((set) => ({
   selection: null,
+  loadingPath: null,
   topology: null,
   layoutSidecar: null,
   selectedElement: null,
@@ -214,6 +224,7 @@ export const useCaseStore = create<CaseState>((set) => ({
       cloneUndoDepth: 0,
       cloneRedoDepth: 0,
     }),
+  setLoadingPath: (path: string | null) => set({ loadingPath: path }),
   setDragOverrides: (next: DragOverrides) => set({ dragOverrides: next }),
   clearDragOverrides: () => set({ dragOverrides: {} }),
   setTopology: (topology: TopologySummary | null) => set({ topology }),

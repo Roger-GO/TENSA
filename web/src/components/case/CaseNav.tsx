@@ -145,6 +145,7 @@ export interface CaseNavProps {
 
 export function CaseNav({ className }: CaseNavProps) {
   const selection = useCaseStore((s) => s.selection);
+  const loadingPath = useCaseStore((s) => s.loadingPath);
   const topology = useCaseStore((s) => s.topology);
   const clearCase = useCaseStore((s) => s.clearCase);
   const sessionId = useSessionStore((s) => s.sessionId);
@@ -202,9 +203,22 @@ export function CaseNav({ className }: CaseNavProps) {
         // the full WorkspaceFilePicker UI here would duplicate the file
         // list. Render a brief inline hint instead — the user finds the
         // canonical loader in the Saved Cases section below.
-        <div data-testid="case-nav-empty" className="text-muted-foreground p-3 text-xs">
-          No case loaded. Pick a file from <span className="font-medium">Saved cases</span> below or
-          drag a component onto the canvas to start a blank system.
+        <div
+          data-testid="case-nav-empty"
+          aria-busy={loadingPath !== null ? 'true' : undefined}
+          className="text-muted-foreground p-3 text-xs"
+        >
+          {loadingPath !== null ? (
+            <>
+              Loading <span className="text-foreground font-mono font-medium">{loadingPath}</span>…
+              The first load of a case can take a while.
+            </>
+          ) : (
+            <>
+              No case loaded. Pick a file from <span className="font-medium">Saved cases</span>{' '}
+              below or drag a component onto the canvas to start a blank system.
+            </>
+          )}
         </div>
       ) : (
         <SummaryCard

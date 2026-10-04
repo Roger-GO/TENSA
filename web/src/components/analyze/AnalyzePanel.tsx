@@ -14,6 +14,7 @@ import { AnalyzeSubModePicker } from './AnalyzeSubModePicker';
 import { CPFCurveChart } from './CPFCurveChart';
 import { CpfConfigPanel } from './CpfConfigPanel';
 import { CpfQvCurvePanel } from './CpfQvCurvePanel';
+import { RunReadinessNote } from './RunReadinessNote';
 import { EIGScatter } from './EIGScatter';
 import { EIGParticipationTable } from './EIGParticipationTable';
 import { EIGDampingChart } from './EIGDampingChart';
@@ -91,13 +92,14 @@ export function AnalyzePanel({ className }: AnalyzePanelProps) {
  * the disabled merge (readiness + pending) and the tooltip wrap.
  *
  * Plan-divergence: the AnalyzePanel sub-modes already render a 409
- * prerequisite-error banner with an "Open PF view" CTA after a failed
+ * prerequisite-error banner with a "Run power flow" CTA after a failed
  * click. The Run-readiness hook now gates the click *proactively* —
  * the user sees the same "Run PFlow first" reason on hover before they
- * click. The post-click 409 banner stays in place as a fallback for
- * the case where the substrate disagrees with the client's view of
- * readiness (e.g., the PF result we trust was actually invalidated
- * server-side).
+ * click, and as visible text from the sub-mode's ``RunReadinessNote``
+ * (which this button names in ``aria-describedby``). The post-click 409
+ * banner stays in place as a fallback for the case where the substrate
+ * disagrees with the client's view of readiness (e.g., the PF result we
+ * trust was actually invalidated server-side).
  */
 function AnalyzeRunButton({
   routine,
@@ -135,6 +137,9 @@ function AnalyzeRunButton({
       disabled={disabled}
       onClick={onClick}
       data-testid={testId}
+      aria-describedby={
+        readiness.disabledReason !== null && !isPending ? `${testId}-hint` : undefined
+      }
     >
       {isPending ? pendingLabel : label}
     </Button>
@@ -185,11 +190,14 @@ function SeGenerateButton({
   const button = (
     <Button
       type="button"
-      variant="outline"
+      // The next step is the primary action: Generate until there are
+      // measurements, then the Run SE button beside it.
+      variant={hasMeasurements ? 'outline' : 'primary'}
       size="sm"
       disabled={disabled}
       onClick={onClick}
       data-testid="analyze-se-generate-measurements"
+      aria-describedby={disabledReason !== null ? 'analyze-se-run-hint' : undefined}
     >
       {isPending
         ? 'Generating…'
@@ -227,11 +235,12 @@ function SeGenerateButton({
  * Branch → recovery mapping:
  *
  * - **409 prerequisite** (the routine needs a converged operating point):
- *   warning-toned banner + a ``run-pflow`` recovery (label "Open PF view")
+ *   warning-toned banner + a ``run-pflow`` recovery (label "Run power flow")
  *   whose ``<RecoveryActionButton>`` routes the user to the PF run mode +
- *   Analyze PF sub-mode. The substrate's own ``recovery`` descriptor is used
- *   when present; otherwise we synthesise the canonical ``run-pflow`` CTA so
- *   the affordance is preserved during the staged rollout.
+ *   Analyze PF sub-mode and runs the power flow. The substrate's own
+ *   ``recovery`` descriptor is used when present; otherwise we synthesise the
+ *   canonical ``run-pflow`` CTA so the affordance is preserved during the
+ *   staged rollout.
  * - **generic 4xx / 5xx**: danger-toned banner carrying whatever ``recovery``
  *   the substrate attached (``null`` → dismiss-only, per the staged-rollout
  *   fallback). The detail is the ProblemDetails ``detail`` (falling back to
@@ -247,11 +256,11 @@ function AnalyzeRoutineError({ routine, error }: { routine: RunRoutine; error: E
 
   if (isPrerequisite) {
     // Prefer the substrate's typed recovery; otherwise synthesise the
-    // canonical run-pflow CTA so the "Open PF view" affordance survives the
+    // canonical run-pflow CTA so the "Run power flow" affordance survives the
     // staged rollout (legacy 409s with no recovery field).
     const recovery: RecoveryDescriptor = error.recovery ?? {
       kind: 'run-pflow',
-      label: 'Open PF view',
+      label: 'Run power flow',
     };
     return (
       <ProblemDetailsErrorSurface
@@ -328,7 +337,7 @@ export function AnalyzeEigSubMode() {
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <AnalyzeRunButton
           routine="eig"
           label="Run EIG"
@@ -346,11 +355,13 @@ export function AnalyzeEigSubMode() {
               'rounded border px-2 py-1 text-[10px] leading-snug',
             )}
           >
-            Running EIG initialised the dynamic state. Subsequent TDS or re-run PF will start from
-            this initialised dae.
+            Running EIG initialised the dynamic state. To run power flow again, reload the case
+            first (Reload case, in the top bar).
           </span>
         ) : null}
       </div>
+
+      <RunReadinessNote routine="eig" testId="analyze-run-eig" />
 
       <AnalyzeRoutineError routine="eig" error={eigError} />
 
@@ -459,6 +470,7 @@ export function AnalyzeCpfNoseSubMode() {
       <CpfConfigPanel
         runLabel={cpfRun.isPending ? 'Running CPF…' : 'Run CPF'}
         runButtonTestId="analyze-run-cpf"
+        runNote={<RunReadinessNote routine="cpf" testId="analyze-run-cpf" />}
         renderRunButton={({ onClick, disabled }) => (
           <AnalyzeRunButton
             routine="cpf"
@@ -586,6 +598,12 @@ export function AnalyzeSeSubMode() {
     : 'Run PFlow first; SE requires a converged operating point.';
   const canGenerate =
     sessionId !== null && !seGenerate.isPending && noiseSeedError === null && pfConverged;
+  // SE is two steps and Run SE stays greyed out until the first is done. The
+  // measurements are synthesised from the solved power flow (nothing to
+  // import), which a first-time user cannot know, so spell it out beside the
+  // reason instead of leaving them to guess that SE needs a data file.
+  const needsMeasurements =
+    pfConverged && !(seMeasurementsCount !== null && seMeasurementsCount > 0);
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -615,6 +633,16 @@ export function AnalyzeSeSubMode() {
           </span>
         ) : null}
       </div>
+
+      <RunReadinessNote
+        routine="se"
+        testId="analyze-se-run"
+        extra={
+          needsMeasurements
+            ? 'Generate Measurements builds the set from the solved power flow, so no measurement file is required. Then click Run SE.'
+            : null
+        }
+      />
 
       <details className="group" data-testid="se-advanced">
         <summary

@@ -8,7 +8,8 @@
  *
  * The stores are mocked at module scope so each action is a `vi.fn()` we can
  * assert on without standing up the real Zustand slices; `useReloadCase`
- * (a TanStack mutation) is mocked to expose its `.mutate`.
+ * (a TanStack mutation) is mocked to expose its `.mutate`, and so is
+ * `useRunPflow`, which the run-pflow kinds start.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -17,6 +18,7 @@ import userEvent from '@testing-library/user-event';
 // ---- store / query mocks --------------------------------------------------
 
 const reloadMutateMock = vi.fn();
+const pflowMutateMock = vi.fn();
 const setActiveRoutineMock = vi.fn();
 const setSubModeMock = vi.fn();
 const setActiveBottomDrawerTabMock = vi.fn();
@@ -31,6 +33,7 @@ let sessionIdValue: string | null = 'sess-1';
 
 vi.mock('@/api/queries', () => ({
   useReloadCase: () => ({ mutate: reloadMutateMock, isPending: reloadPending }),
+  useRunPflow: () => ({ mutate: pflowMutateMock }),
 }));
 
 vi.mock('@/store/session', () => ({
@@ -118,19 +121,30 @@ describe('<RecoveryActionButton />', () => {
     expect(screen.getByTestId('recovery-action')).toBeDisabled();
   });
 
-  it('run-pflow → selects the PF run mode + Analyze PF sub-mode', async () => {
+  it('run-pflow → selects the PF run mode + Analyze PF sub-mode and runs the power flow', async () => {
     render(<RecoveryActionButton recovery={desc('run-pflow', 'Run power flow first')} />);
     await userEvent.click(screen.getByTestId('recovery-action'));
     expect(setActiveRoutineMock).toHaveBeenCalledWith('pflow');
     expect(setSubModeMock).toHaveBeenCalledWith('pflow');
+    expect(pflowMutateMock).toHaveBeenCalledTimes(1);
+    expect(pflowMutateMock.mock.calls[0]?.[0]).toBe('sess-1');
     expect(reloadMutateMock).not.toHaveBeenCalled();
   });
 
   it('open-pf (readiness-only kind) → routes identically to run-pflow', async () => {
-    render(<RecoveryActionButton recovery={desc('open-pf', 'Open PF view')} />);
+    render(<RecoveryActionButton recovery={desc('open-pf', 'Run power flow')} />);
     await userEvent.click(screen.getByTestId('recovery-action'));
     expect(setActiveRoutineMock).toHaveBeenCalledWith('pflow');
     expect(setSubModeMock).toHaveBeenCalledWith('pflow');
+    expect(pflowMutateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('run-pflow with no session id → still routes, but starts no power flow', async () => {
+    sessionIdValue = null;
+    render(<RecoveryActionButton recovery={desc('run-pflow', 'Run power flow')} />);
+    await userEvent.click(screen.getByTestId('recovery-action'));
+    expect(setSubModeMock).toHaveBeenCalledWith('pflow');
+    expect(pflowMutateMock).not.toHaveBeenCalled();
   });
 
   it('retry → fires the onRetry callback', async () => {

@@ -18,6 +18,7 @@
  *
  * Reasons map (per the plan):
  *
+ *   - "Loading <file>…"                                   — a case load is in flight
  *   - "No case loaded."                                   — case.selection === null
  *   - "Connecting to substrate…"                          — sessionId === null
  *   - "Run PFlow first; <routine> requires a converged
@@ -141,6 +142,7 @@ const DYNAMIC_REQUIRED: ReadonlySet<RunRoutine> = new Set(['tds', 'eig']);
  */
 export function useRunReadiness(routine: RunRoutine): RunReadiness {
   const selection = useCaseStore((s) => s.selection);
+  const loadingPath = useCaseStore((s) => s.loadingPath);
   const sessionId = useSessionStore((s) => s.sessionId);
   const pflowLastRun = usePflowStore((s) => s.lastRun);
   const eigResult = useAnalyzeStore((s) => s.eigResult);
@@ -160,6 +162,13 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
   // — "you can't run anything without a case" is a more useful tooltip
   // than "Run PFlow first" when there's no case in the first place.
 
+  // A slow load (the first load of a case generates code for its models)
+  // leaves ``selection`` null until it lands; say so instead of "No case".
+  // With another case already open it also holds every run back: the session
+  // is busy and the results on screen belong to the case being replaced.
+  if (loadingPath !== null) {
+    return ready(false, `Loading ${loadingPath}…`, null);
+  }
   if (selection === null) {
     return ready(false, 'No case loaded.', null);
   }
@@ -235,7 +244,7 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
       return ready(
         false,
         `Run PFlow first; ${routineLabel(routine)} requires a converged operating point.`,
-        { kind: 'open-pf', label: 'Open PF view' },
+        { kind: 'open-pf', label: 'Run power flow' },
       );
     }
   }

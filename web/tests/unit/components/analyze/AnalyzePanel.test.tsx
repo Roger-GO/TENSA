@@ -19,6 +19,7 @@ import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { useSweepStore } from '@/store/sweep';
 import { useRunModeStore } from '@/store/runMode';
+import { useRunsStore } from '@/store/runs';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { EigResult, PflowResult } from '@/api/types';
 
@@ -401,9 +402,14 @@ describe('<AnalyzePanel />', () => {
       await userEvent.click(screen.getByTestId('analyze-run-eig'));
 
       await screen.findByTestId('eig-prerequisite-error');
-      const cta = screen.getByRole('button', { name: /open pf view/i });
+      const cta = screen.getByRole('button', { name: /run power flow/i });
       await userEvent.click(cta);
       await waitFor(() => expect(useAnalyzeStore.getState().subMode).toBe('pflow'));
+      // The CTA does what it says: it starts a power flow rather than only
+      // moving the user to the PF view.
+      await waitFor(() =>
+        expect(fetchSpy.mock.calls.some((c) => String(c[0]).endsWith('/pflow'))).toBe(true),
+      );
     });
   });
 
@@ -514,5 +520,149 @@ describe('<AnalyzePanel />', () => {
         fetchSpy.mock.calls.some((c) => String(c[0]).includes('/se/measurements/generate')),
       ).toBe(false);
     });
+  });
+});
+
+// ---- visible run-readiness notes ----------------------------------------
+//
+// A disabled Run button used to explain itself only in a hover tooltip, so a
+// first-time user (or anyone on a keyboard or a screen reader) saw a greyed-out
+// button and no reason. The same reason now sits under the button as text, with
+// the recovery next to it.
+
+describe('<AnalyzePanel /> run-readiness notes', () => {
+  beforeEach(() => {
+    resetStores();
+  });
+  afterEach(() => {
+    resetStores();
+  });
+
+  it('EIG: shows why Run EIG is off without a hover, and the button is described by it', () => {
+    useAnalyzeStore.getState().setSubMode('eig');
+    render(withQueryClient(<AnalyzePanel />));
+    const note = screen.getByTestId('analyze-run-eig-hint');
+    expect(note).toHaveTextContent('Run PFlow first; EIG requires a converged operating point.');
+    expect(screen.getByTestId('analyze-run-eig')).toHaveAttribute(
+      'aria-describedby',
+      'analyze-run-eig-hint',
+    );
+    expect(note.id).toBe('analyze-run-eig-hint');
+    expect(screen.getByRole('button', { name: 'Run power flow' })).toBeInTheDocument();
+  });
+
+  it('EIG: the Run power flow action starts a power flow', async () => {
+    const fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ detail: 'nope' }), {
+          status: 409,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+    try {
+      useAnalyzeStore.getState().setSubMode('eig');
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('analyze-run-eig-hint-action'));
+      await waitFor(() =>
+        expect(fetchSpy.mock.calls.some((c) => String(c[0]).endsWith('/pflow'))).toBe(true),
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('EIG: the note goes away once a converged power flow exists', () => {
+    useAnalyzeStore.getState().setSubMode('eig');
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    render(withQueryClient(<AnalyzePanel />));
+    expect(screen.queryByTestId('analyze-run-eig-hint')).not.toBeInTheDocument();
+    expect(screen.getByTestId('analyze-run-eig')).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('EIG: on a static-only case the note says the case needs dynamic models, with no action', () => {
+    useCaseStore.setState({
+      topology: {
+        state: 'pre-setup',
+        buses: [],
+        lines: [],
+        transformers: [],
+        generators: [{ idx: '1', name: 'slack', kind: 'Slack', params: {} }],
+        loads: [],
+        controllers: [],
+      },
+    });
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    useAnalyzeStore.getState().setSubMode('eig');
+    render(withQueryClient(<AnalyzePanel />));
+    expect(screen.getByTestId('analyze-run-eig-hint')).toHaveTextContent(
+      /requires dynamic-model data/i,
+    );
+    expect(screen.queryByTestId('analyze-run-eig-hint-action')).not.toBeInTheDocument();
+  });
+
+  it('CPF: shows the reason under the Run CPF button', () => {
+    useAnalyzeStore.getState().setSubMode('cpf');
+    render(withQueryClient(<AnalyzePanel />));
+    expect(screen.getByTestId('analyze-run-cpf-hint')).toHaveTextContent(
+      'Run PFlow first; CPF requires a converged operating point.',
+    );
+    expect(screen.getByTestId('analyze-run-cpf')).toHaveAttribute(
+      'aria-describedby',
+      'analyze-run-cpf-hint',
+    );
+  });
+
+  it('SE: before a power flow, the note gives the PF reason and both buttons point at it', () => {
+    useAnalyzeStore.getState().setSubMode('se');
+    render(withQueryClient(<AnalyzePanel />));
+    expect(screen.getByTestId('analyze-se-run-hint')).toHaveTextContent(
+      'Run PFlow first; SE requires a converged operating point.',
+    );
+    expect(screen.getByTestId('analyze-se-run')).toHaveAttribute(
+      'aria-describedby',
+      'analyze-se-run-hint',
+    );
+    expect(screen.getByTestId('analyze-se-generate-measurements')).toHaveAttribute(
+      'aria-describedby',
+      'analyze-se-run-hint',
+    );
+  });
+
+  it('SE: after a power flow, the note spells out the Generate Measurements step', () => {
+    useAnalyzeStore.getState().setSubMode('se');
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    render(withQueryClient(<AnalyzePanel />));
+    const note = screen.getByTestId('analyze-se-run-hint');
+    expect(note).toHaveTextContent('Generate measurements first.');
+    expect(note).toHaveTextContent(/no measurement file is required/i);
+    expect(note).toHaveTextContent(/then click Run SE/i);
+    // Generate is the enabled next step; Run SE waits for it.
+    expect(screen.getByTestId('analyze-se-generate-measurements')).toBeEnabled();
+    expect(screen.getByTestId('analyze-se-run')).toBeDisabled();
+    expect(screen.queryByTestId('analyze-se-run-hint-action')).not.toBeInTheDocument();
+  });
+
+  it('SE: the note is gone once measurements exist', () => {
+    useAnalyzeStore.getState().setSubMode('se');
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    useAnalyzeStore.setState({ seMeasurementsCount: 30 });
+    render(withQueryClient(<AnalyzePanel />));
+    expect(screen.queryByTestId('analyze-se-run-hint')).not.toBeInTheDocument();
+    expect(screen.getByTestId('analyze-se-run')).toBeEnabled();
+  });
+
+  it('after a TDS run the note offers Reset run, not Run power flow', () => {
+    useAnalyzeStore.getState().setSubMode('eig');
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    useRunsStore.setState({ activeRunId: 'run-1' });
+    try {
+      render(withQueryClient(<AnalyzePanel />));
+      expect(screen.getByTestId('analyze-run-eig-hint')).toHaveTextContent(/Reset the run first/i);
+      expect(screen.getByRole('button', { name: 'Reset run' })).toBeInTheDocument();
+    } finally {
+      useRunsStore.setState({ activeRunId: null });
+    }
   });
 });

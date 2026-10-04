@@ -114,6 +114,21 @@ describe('<FirstRunCoach />', () => {
     expect(screen.getByTestId('first-run-coach').getAttribute('data-step')).toBe('3');
   });
 
+  it('step 3 points at the Analysis tab in the bottom drawer, where EIG / CPF / SE live', async () => {
+    const { FirstRunCoach } = await import('@/components/shell/FirstRunCoach');
+    const { useFirstRunStore } = await import('@/store/firstRun');
+    act(() => {
+      useFirstRunStore.getState().nextStep();
+      useFirstRunStore.getState().nextStep();
+    });
+    render(<FirstRunCoach />);
+    const card = screen.getByTestId('first-run-coach');
+    expect(card.getAttribute('data-step')).toBe('3');
+    // There is no Analyze panel "on the right": the views sit in the drawer.
+    expect(card).toHaveTextContent(/Analysis tab in the bottom drawer/i);
+    expect(card).not.toHaveTextContent(/on the right/i);
+  });
+
   it('clicking × dismisses the coach forever (persists)', async () => {
     const { FirstRunCoach } = await import('@/components/shell/FirstRunCoach');
     const { useFirstRunStore } = await import('@/store/firstRun');

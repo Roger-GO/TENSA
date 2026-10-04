@@ -88,6 +88,23 @@ describe('<CaseNav />', () => {
     expect(screen.queryByText(/Loaded case/i)).not.toBeInTheDocument();
   });
 
+  it('says which case is loading, instead of "No case loaded", while a load runs', () => {
+    useCaseStore.setState({ loadingPath: parseWorkspacePath('wscc9.xlsx') });
+    try {
+      fetchSpy.mockImplementation(() => new Promise(() => {}));
+      const { Wrapper } = makeWrapper();
+
+      render(<CaseNav />, { wrapper: Wrapper });
+
+      const hint = screen.getByTestId('case-nav-empty');
+      expect(hint).toHaveTextContent('Loading wscc9.xlsx');
+      expect(hint).toHaveAttribute('aria-busy', 'true');
+      expect(hint).not.toHaveTextContent('No case loaded');
+    } finally {
+      useCaseStore.setState({ loadingPath: null });
+    }
+  });
+
   it('renders the summary card when a case is loaded', () => {
     seedLoadedCase();
     fetchSpy.mockImplementation(() => new Promise(() => {}));

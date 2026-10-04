@@ -63,6 +63,7 @@ function resetStores(): void {
   });
   useCaseStore.setState({
     selection: null,
+    loadingPath: null,
     topology: null,
     layoutSidecar: null,
     selectedElement: null,
@@ -155,6 +156,27 @@ describe('useRunReadiness — no case loaded', () => {
       expect(result.current.recovery).toBeNull();
     },
   );
+});
+
+describe('useRunReadiness — a case is loading', () => {
+  it.each(ALL_ROUTINES)(
+    '%s: names the file being loaded instead of "No case loaded."',
+    (routine) => {
+      useCaseStore.setState({ loadingPath: parseWorkspacePath('wscc9.xlsx') });
+      const { result } = renderHook(() => useRunReadiness(routine));
+      expect(result.current.ready).toBe(false);
+      expect(result.current.disabledReason).toBe('Loading wscc9.xlsx…');
+      expect(result.current.recovery).toBeNull();
+    },
+  );
+
+  it('holds the runs back while a second case loads over an open one', () => {
+    seedReadyBaseline();
+    useCaseStore.setState({ loadingPath: parseWorkspacePath('kundur_full.xlsx') });
+    const { result } = renderHook(() => useRunReadiness('pflow'));
+    expect(result.current.ready).toBe(false);
+    expect(result.current.disabledReason).toBe('Loading kundur_full.xlsx…');
+  });
 });
 
 describe('useRunReadiness — dynamic via a synchronous machine (no controllers)', () => {
@@ -359,7 +381,7 @@ describe('useRunReadiness — PF prerequisite (pre-PF)', () => {
       expect(result.current.disabledReason).toMatch(/requires a converged operating point/);
       expect(result.current.recovery).toEqual({
         kind: 'open-pf',
-        label: 'Open PF view',
+        label: 'Run power flow',
       });
     },
   );

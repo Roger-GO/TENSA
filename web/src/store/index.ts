@@ -6,14 +6,20 @@
  * cascade:
  *
  * - When `session` clears, `case` and `pflow` clear too.
- * - When `case` changes, `pflow` clears (results don't carry across cases).
+ * - When `case` changes, `pflow`, the EIG / CPF / SE results, and the TDS
+ *   runs clear (results don't carry across cases).
+ * - When `pflow` clears (case change, reload, run reset), the EIG / CPF / SE
+ *   results clear with it: they were computed from that operating point.
  *
  * The cascade is wired here (one place to read) rather than each slice
  * importing every other slice (cycles + tangled blast radius).
  *
  * Side effect: this module's import has the side effect of registering
- * the cascade. Tests that exercise cascade behavior should `import './'`
- * to ensure the wiring is live.
+ * the cascade. `App.tsx` imports it for exactly that reason (nothing else
+ * in the app reads from this entrypoint, so without that import the
+ * cascade never runs and a case change leaves the old case's results
+ * enabling the new case's Run buttons). Tests that exercise cascade
+ * behavior should `import './'` to ensure the wiring is live.
  */
 import { useCaseStore } from './case';
 import { useSessionStore } from './session';
@@ -25,6 +31,7 @@ import { usePmuStore } from './pmu';
 import { useProfilesStore } from './profiles';
 import { useSweepStore } from './sweep';
 import { useJobsStore } from './jobs';
+import { useAnalyzeStore } from './analyze';
 
 // Re-export slices so consumers have one import surface.
 export { useSessionStore } from './session';
@@ -81,22 +88,44 @@ export function wireStoreCascade(): void {
     prevSessionId = next;
   });
 
-  // case change → pflow + connectivity + pmu + profiles clear.
-  // Triggered on selection change OR clear. Connectivity is bus-idx
-  // keyed and a new case has a new bus set, so a stale snapshot would
-  // grey out the wrong nodes; PMU and TimeSeries placements are
-  // device-idx keyed for the same reason.
+  // case change → pflow + analysis results + runs + connectivity + pmu +
+  // profiles clear. Triggered on selection change OR clear. Connectivity is
+  // bus-idx keyed and a new case has a new bus set, so a stale snapshot would
+  // grey out the wrong nodes; PMU and TimeSeries placements are device-idx
+  // keyed for the same reason. An EIG result that initialised the dynamic
+  // state, or a TDS run still marked active, would otherwise keep the new
+  // case's Run PF disabled ("Reset the run first") and draw the old case's
+  // frames over the new diagram.
   let prevSelection = useCaseStore.getState().selection;
   useCaseStore.subscribe((state) => {
     const next = state.selection;
     if (prevSelection !== next) {
       usePflowStore.getState().clearPflow();
+      clearAnalysisResults();
+      useRunsStore.getState().clearRuns();
+      useAnimationStore.getState().clearAll();
       useConnectivityStore.getState().clear();
       usePmuStore.getState().clear();
       useProfilesStore.getState().clear();
     }
     prevSelection = next;
   });
+
+  // pflow cleared → EIG / CPF / SE results clear. Reload, run reset, a case
+  // change, and a session clear all drop the operating point; the results
+  // computed from it must not outlive it (the Analyze views that used to
+  // clear them on this transition only do so while they are mounted).
+  usePflowStore.subscribe((state, prev) => {
+    if (prev.lastRun !== null && state.lastRun === null) clearAnalysisResults();
+  });
+}
+
+/** Drop the EIG, CPF and SE results (and the SE measurement count). */
+function clearAnalysisResults(): void {
+  const analyze = useAnalyzeStore.getState();
+  analyze.clearEigResult();
+  analyze.clearCpfResult();
+  analyze.clearSeResult();
 }
 
 /**
@@ -119,6 +148,13 @@ export function __resetCascadeForTests(): void {
     selectedElement: null,
   });
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  useAnalyzeStore.setState({
+    eigResult: null,
+    selectedModeId: null,
+    cpfResult: null,
+    seResult: null,
+    seMeasurementsCount: null,
+  });
   useRunsStore.setState({ runs: {}, activeRunId: null });
   useAnimationStore.setState({ busOverlayByRun: {} });
   useConnectivityStore.setState({

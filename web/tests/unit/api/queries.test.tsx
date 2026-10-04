@@ -58,7 +58,7 @@ describe('queries hooks', () => {
       typeof vi.spyOn
     >;
     useSessionStore.setState({ sessionId: null });
-    useCaseStore.setState({ selection: null });
+    useCaseStore.setState({ selection: null, loadingPath: null });
     useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
   });
 
@@ -106,6 +106,53 @@ describe('queries hooks', () => {
       expect(result.current.isSuccess).toBe(true);
     });
     expect(client.getQueryData(queryKeys.topology(sessionId))).toEqual(topology);
+  });
+
+  it('useLoadCase marks the case as loading while the request runs, and clears it after', async () => {
+    // ``selection`` is only set once a load lands, so this flag is what lets
+    // the UI say "Loading <file>…" through a slow first load.
+    const topology = {
+      state: 'pre-setup' as const,
+      buses: [],
+      lines: [],
+      transformers: [],
+      generators: [],
+      loads: [],
+    };
+    let release: (r: Response) => void = () => {};
+    fetchSpy.mockReturnValueOnce(new Promise<Response>((resolve) => (release = resolve)));
+
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useLoadCase(), { wrapper: Wrapper });
+    expect(useCaseStore.getState().loadingPath).toBeNull();
+
+    result.current.mutate({
+      sessionId: 'sess-slow' as SessionId,
+      request: { primary_path: 'wscc9.xlsx' },
+    });
+    await waitFor(() => expect(useCaseStore.getState().loadingPath).toBe('wscc9.xlsx'));
+
+    release(jsonResponse(topology));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(useCaseStore.getState().loadingPath).toBeNull();
+  });
+
+  it('useLoadCase clears the loading flag when the load fails', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(
+        { type: 'about:blank', title: 'Not Found', status: 404, detail: 'no such file' },
+        404,
+      ),
+    );
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useLoadCase(), { wrapper: Wrapper });
+
+    result.current.mutate({
+      sessionId: 'sess-bad' as SessionId,
+      request: { primary_path: 'missing.xlsx' },
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(useCaseStore.getState().loadingPath).toBeNull();
   });
 
   it('useLoadCase invalidates the per-case snapshots list on success', async () => {

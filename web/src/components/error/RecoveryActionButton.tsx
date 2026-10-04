@@ -9,8 +9,9 @@
  * Routing table (`recovery.kind` → side effect):
  *
  * - `reload-case` / `SetupFailed` → `useReloadCase().mutate(sessionId)`.
- * - `run-pflow` / `open-pf` → select the PF run mode (`useRunModeStore`)
- *   AND surface the Analyze panel's PF sub-mode (`useAnalyzeStore`).
+ * - `run-pflow` / `open-pf` → select the PF run mode (`useRunModeStore`),
+ *   surface the Analyze panel's PF sub-mode (`useAnalyzeStore`), AND run the
+ *   power flow, so the one click does what the label says.
  * - `retry` → re-run the failed mutation. The variables live on the
  *   `JobRecord.request_summary` (Unit 6); the caller wires the actual
  *   re-run as the `onRetry` callback (the Activity panel knows which
@@ -32,7 +33,9 @@
  */
 import { Button } from '@/components/ui/button';
 import { useReloadCase } from '@/api/queries';
+import { usePflowRunAction } from '@/lib/usePflowRunAction';
 import { useSessionStore } from '@/store/session';
+import { usePflowStore } from '@/store/pflow';
 import { useRunModeStore } from '@/store/runMode';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useLayoutStore } from '@/store/layout';
@@ -56,6 +59,11 @@ export interface RecoveryActionButtonProps {
   className?: string;
   /** data-testid override; defaults to `recovery-action`. */
   testId?: string;
+  /**
+   * Button look. Defaults to `danger` (the error banners); a precondition
+   * shown before anything went wrong passes `outline`.
+   */
+  variant?: 'danger' | 'outline';
 }
 
 /**
@@ -74,6 +82,10 @@ function useRecoveryHandler(
 ): { onActivate: () => void; pending: boolean } | null {
   const reloadCase = useReloadCase();
   const sessionId = useSessionStore((s) => s.sessionId);
+  const pflowRunning = usePflowStore((s) => s.isRunning);
+  const runPflow = usePflowRunAction(() => {
+    if (sessionId !== null) reloadCase.mutate(sessionId);
+  });
   const setActiveRoutine = useRunModeStore((s) => s.setActiveRoutine);
   const setSubMode = useAnalyzeStore((s) => s.setSubMode);
   const setActiveBottomDrawerTab = useLayoutStore((s) => s.setActiveBottomDrawerTab);
@@ -101,13 +113,15 @@ function useRecoveryHandler(
     case 'run-pflow':
     case 'open-pf':
       // Select the PF run mode AND surface the Analyze panel's PF sub-mode
-      // so the user lands on the prerequisite routine.
+      // so the user lands on the prerequisite routine, then run it: a button
+      // that only navigated left the user to find the Run PF button unaided.
       return {
         onActivate: () => {
           setActiveRoutine('pflow');
           setSubMode('pflow');
+          runPflow();
         },
-        pending: false,
+        pending: pflowRunning,
       };
 
     case 'retry':
@@ -161,6 +175,7 @@ export function RecoveryActionButton({
   jobId,
   className,
   testId = 'recovery-action',
+  variant = 'danger',
 }: RecoveryActionButtonProps) {
   const handler = useRecoveryHandler(recovery, onRetry, jobId);
 
@@ -180,7 +195,7 @@ export function RecoveryActionButton({
   return (
     <Button
       type="button"
-      variant="danger"
+      variant={variant}
       size="sm"
       className={className}
       onClick={handler.onActivate}

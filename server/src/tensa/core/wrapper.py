@@ -1758,8 +1758,7 @@ class Wrapper:
         # Independent PF gate — ANDES's own check is unsafe (see docstring).
         if not bool(getattr(ss.PFlow, "converged", False)):
             raise EigPrerequisiteError(
-                "Run PFlow first; EIG._pre_check warns but does not "
-                "short-circuit on non-converged PFlow"
+                "Run PFlow first; EIG requires a converged operating point."
             )
 
         try:
@@ -1952,8 +1951,7 @@ class Wrapper:
         # Independent PF gate — ANDES's own check is unsafe (only warns).
         if not bool(getattr(ss.PFlow, "converged", False)):
             raise CpfPrerequisiteError(
-                "Run PFlow first; CPF.init warns but does not "
-                "short-circuit on non-converged PFlow"
+                "Run PFlow first; CPF requires a converged operating point."
             )
 
         if direction not in ("load", "gen"):
@@ -2020,8 +2018,7 @@ class Wrapper:
         self._ensure_setup()
         if not bool(getattr(ss.PFlow, "converged", False)):
             raise CpfPrerequisiteError(
-                "Run PFlow first; CPF.init warns but does not "
-                "short-circuit on non-converged PFlow"
+                "Run PFlow first; CPF requires a converged operating point."
             )
 
         # ANDES accepts both int and str bus idxes. Try numeric coercion
@@ -2081,8 +2078,7 @@ class Wrapper:
         self._ensure_setup()
         if not bool(getattr(ss.PFlow, "converged", False)):
             raise SePrerequisiteError(
-                "Run PFlow first; SE.init logs an error but does not "
-                "raise on non-converged PFlow"
+                "Run PFlow first; SE requires a converged operating point."
             )
 
         m = Measurements(ss)
@@ -2135,13 +2131,12 @@ class Wrapper:
         self._ensure_setup()
         if not bool(getattr(ss.PFlow, "converged", False)):
             raise SePrerequisiteError(
-                "Run PFlow first; SE.init logs an error but does not "
-                "raise on non-converged PFlow"
+                "Run PFlow first; SE requires a converged operating point."
             )
         if self._se_measurements is None:
             raise SePrerequisiteError(
-                "Generate measurements first; call "
-                "/sessions/{id}/se/measurements/generate before /se"
+                "Generate measurements first, then run SE "
+                "(POST /sessions/{id}/se/measurements/generate)."
             )
 
         # Pre-check observability: WLS needs at least 2*nb measurements

@@ -176,6 +176,21 @@ describe('<SavedCasesList />', () => {
     });
   });
 
+  it('marks the row of the case being loaded', () => {
+    useCaseStore.setState({ loadingPath: parseWorkspacePath('ieee14.raw') });
+    try {
+      render(withClient(<SavedCasesList />));
+      const loading = screen.getByTestId('saved-cases-row-ieee14.raw');
+      expect(loading).toHaveAttribute('aria-busy', 'true');
+      expect(loading).toHaveTextContent('Loading…');
+      // The other rows keep their format tag.
+      expect(screen.getByTestId('saved-cases-row-kundur.raw')).toHaveTextContent('RAW');
+      expect(screen.getByTestId('saved-cases-row-kundur.raw')).not.toHaveAttribute('aria-busy');
+    } finally {
+      useCaseStore.setState({ loadingPath: null });
+    }
+  });
+
   it('clicking the already-loaded case is a same-file no-op (loadCase NOT fired)', async () => {
     const user = userEvent.setup();
     useCaseStore.setState({

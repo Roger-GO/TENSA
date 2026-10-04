@@ -493,9 +493,10 @@ export function useLoadCase(): UseMutationResult<TopologySummary, Error, LoadCas
         { body: request, timeoutMs: TIMEOUTS.caseLoad },
       );
     },
-    onMutate: ({ request }) => ({
-      jobId: registerJob('case-load', { primary_path: request.primary_path }),
-    }),
+    onMutate: ({ request }) => {
+      useCaseStore.getState().setLoadingPath(request.primary_path);
+      return { jobId: registerJob('case-load', { primary_path: request.primary_path }) };
+    },
     onSuccess: (data, { sessionId }, ctx) => {
       // Seed the topology cache with the load response (the substrate's
       // load handler returns the topology already; saves a round-trip).
@@ -512,6 +513,9 @@ export function useLoadCase(): UseMutationResult<TopologySummary, Error, LoadCas
     },
     onError: (err, _vars, ctx) => {
       if (ctx) failJob(ctx.jobId, err);
+    },
+    onSettled: () => {
+      useCaseStore.getState().setLoadingPath(null);
     },
   });
 }

@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/tooltip';
 import { BusIdxSelect } from '@/components/elements/BusIdxSelect';
 import { CPFCurveChart } from './CPFCurveChart';
+import { RunReadinessNote } from './RunReadinessNote';
 import { ProblemDetailsError } from '@/api/client';
 import { ProblemDetailsErrorSurface } from '@/components/error/ProblemDetailsErrorSurface';
 import type { RecoveryDescriptor } from '@/lib/recovery';
@@ -122,6 +123,20 @@ export function CpfQvCurvePanel({ className }: CpfQvCurvePanelProps) {
         ) : null}
       </div>
 
+      {/* The visible form of the Run button's reason. The PF prerequisite
+          comes first (it is the deeper gate); once PF is ready, the only gate
+          left is the unpicked bus, which gets its own line. */}
+      <RunReadinessNote routine="cpf" testId="cpf-qv-run" />
+      {readiness.ready && busMissing ? (
+        <p
+          id="cpf-qv-run-hint"
+          data-testid="cpf-qv-run-hint"
+          className="text-muted-foreground text-xs leading-snug"
+        >
+          Choose a bus above to enable Run QV-curve.
+        </p>
+      ) : null}
+
       <CpfQvError error={cpfQvRun.error} />
 
       <CPFCurveChart result={qvResult} className="min-h-[300px] flex-shrink-0" />
@@ -151,6 +166,7 @@ function CpfQvRunButton({
     <button
       type="button"
       data-testid="cpf-qv-run"
+      aria-describedby={disabled && !isPending ? 'cpf-qv-run-hint' : undefined}
       disabled={disabled}
       onClick={onClick}
       className={cn(
@@ -185,7 +201,7 @@ function CpfQvRunButton({
 /**
  * CpfQvError — the QV-specific error surface. Mirrors the AnalyzePanel
  * ``AnalyzeRoutineError`` 409 → run-pflow recovery branch so a QV run
- * with no converged PF lands the user on the same "Open PF view" CTA.
+ * with no converged PF lands the user on the same "Run power flow" CTA.
  */
 function CpfQvError({ error }: { error: Error | null }) {
   if (error === null) return null;
@@ -195,7 +211,7 @@ function CpfQvError({ error }: { error: Error | null }) {
   if (isPrerequisite) {
     const recovery: RecoveryDescriptor = error.recovery ?? {
       kind: 'run-pflow',
-      label: 'Open PF view',
+      label: 'Run power flow',
     };
     return (
       <ProblemDetailsErrorSurface

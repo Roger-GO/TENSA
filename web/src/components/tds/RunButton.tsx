@@ -13,10 +13,10 @@ import {
   useRefreshTopology,
   useReloadCase,
   useResetRun,
-  useRunPflow,
   loadOperatingPointIntoStore,
 } from '@/api/queries';
-import { ProblemDetailsError, ServerError } from '@/api/client';
+import { ProblemDetailsError } from '@/api/client';
+import { usePflowRunAction } from '@/lib/usePflowRunAction';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
@@ -153,7 +153,6 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     activeRunId === null ? null : (s.runs[activeRunId] ?? null),
   );
 
-  const runPflow = useRunPflow();
   const commitDisturbances = useCommitDisturbances();
   const reloadCase = useReloadCase();
   const refreshTopology = useRefreshTopology();
@@ -443,41 +442,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
 
   // ---- PF flow ------------------------------------------------------------
 
-  const onClickPf = () => {
-    if (!sessionId) return;
-    runPflow.mutate(sessionId, {
-      onSuccess: (data) => {
-        if (data.converged) {
-          toast.success(`PF converged in ${data.iterations} iterations.`);
-        }
-        // Non-convergence is a 200; ConvergenceErrorPanel reads from
-        // the pflow slice and surfaces. No toast.
-      },
-      onError: (err) => {
-        if (err instanceof ServerError) {
-          // 5xx routes through pflow.error to RuntimeCrashModal already;
-          // no toast (the modal is the surface).
-          return;
-        }
-        if (err instanceof ProblemDetailsError) {
-          const detail = err.detail ?? err.title ?? `HTTP ${err.status}`;
-          const recoverViaReload = /reload/i.test(detail);
-          if (recoverViaReload) {
-            toast.error('Run PF failed', {
-              description: detail,
-              action: { label: 'Reload case + retry', onClick: onReset },
-            });
-          } else {
-            toast.error('Run PF failed', { description: detail });
-          }
-        } else {
-          toast.error('Run PF failed', {
-            description: err.message ?? 'Run PF failed',
-          });
-        }
-      },
-    });
-  };
+  const onClickPf = usePflowRunAction(onReset);
 
   // ---- click dispatcher ---------------------------------------------------
 
@@ -547,7 +512,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       disabled={allDisabled}
       onClick={onClickPrimary}
       data-testid={primaryTestId}
-      aria-describedby={disabledReason ? 'run-button-disabled-reason' : undefined}
+      aria-describedby={disabledReason ? 'run-button-disabled-reason-text' : undefined}
       className={cn('min-w-[120px]', className)}
     >
       {primaryShowSpinner ? (
@@ -656,6 +621,13 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       ) : (
         primaryButton
       )}
+      {/* The tooltip above only exists while it is open, so the reason is also
+          kept in the page as text the button's aria-describedby can reach. */}
+      {disabledReason ? (
+        <span id="run-button-disabled-reason-text" className="sr-only">
+          {disabledReason}
+        </span>
+      ) : null}
       {inlineRecovery}
       {modeSelector}
     </div>

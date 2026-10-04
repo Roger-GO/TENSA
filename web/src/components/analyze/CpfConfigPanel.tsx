@@ -62,6 +62,11 @@ export interface CpfConfigPanelProps {
    * panel's ``handleRun`` (which gates on validation) regardless.
    */
   renderRunButton?: (props: { onClick: () => void; disabled: boolean }) => React.ReactNode;
+  /**
+   * Shown directly under the Run button, above the Advanced disclosure. The
+   * parent passes the visible "why Run CPF is off" note here.
+   */
+  runNote?: React.ReactNode;
   className?: string;
 }
 
@@ -112,6 +117,7 @@ export function CpfConfigPanel({
   runLabel,
   runButtonTestId,
   renderRunButton,
+  runNote,
   className,
 }: CpfConfigPanelProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -165,6 +171,8 @@ export function CpfConfigPanel({
           </Button>
         )}
       </div>
+
+      {runNote}
 
       {/* Advanced disclosure — collapsed by default (mirrors TdsConfigPanel). */}
       <div className="border-border/60 flex flex-col rounded border">
