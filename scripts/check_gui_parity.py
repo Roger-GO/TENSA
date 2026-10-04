@@ -100,13 +100,24 @@ _FRAMEWORK_DOC_PATHS = frozenset(
 
 
 def _build_app() -> Any:
-    """Build the app against a throwaway workspace. No socket bind, no worker spawn."""
-    workspace = Path(tempfile.mkdtemp(prefix="parity-")) / "ws"
+    """Build the app against a throwaway workspace. No socket bind, no worker spawn.
+
+    The app mounts the SPA only when it finds a built UI, and Pass 2 reviews the
+    mount only if it exists. A stand-in ``index.html`` makes the mount (and so its
+    review, and its row in the ledger) the same whether or not ``web/dist`` was
+    built here, so this check does not need the UI.
+    """
+    root = Path(tempfile.mkdtemp(prefix="parity-"))
+    workspace = root / "ws"
     workspace.mkdir(mode=0o700)
+    static = root / "static"
+    static.mkdir()
+    (static / "index.html").write_text("<!doctype html>\n", encoding="utf-8")
     return make_app(
         workspace=workspace,
         bind_host="127.0.0.1",
         bind_port=8000,
+        static_override=static,
     )
 
 

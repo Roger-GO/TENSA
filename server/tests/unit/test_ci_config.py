@@ -117,6 +117,18 @@ def test_every_stage_the_workflow_asks_for_exists_in_the_script() -> None:
         )
 
 
+def test_lint_does_not_wait_for_the_web_build() -> None:
+    """Lint, types, and the GUI-parity check read no UI: the editable install's
+    build hook skips it and the parity check builds its app with a stand-in for
+    the SPA. Waiting for ``web-dist`` held the static checks back behind a pnpm
+    install and build for nothing."""
+    job = _workflow()["jobs"]["lint"]
+    assert "needs" not in job
+    assert not [step for step in job["steps"] if "download-artifact" in step.get("uses", "")]
+    # The test legs still need it: the smoke test serves the real page.
+    assert "web-dist" in _workflow()["jobs"]["test"]["needs"]
+
+
 def test_the_smoke_test_runs_even_when_the_unit_tests_fail() -> None:
     """An ``if:`` without a status function carries an implicit ``success()``, so
     the smoke step was skipped on macOS and Windows exactly when the unit tests

@@ -63,7 +63,6 @@ jobs:
   # results of the test legs and the other way round.
   lint:
     name: lint + types + GUI parity
-    needs: web-dist
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -75,12 +74,6 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: server/pyproject.toml
-
-      - name: Download web/dist
-        uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: web/dist
 
       - name: Install tensa with dev dependencies
         run: |
@@ -94,7 +87,8 @@ jobs:
       # x-tensa-gui-location tag, when a 'none'-tagged route has no deferral
       # reason, or when a WS route / static mount lacks a
       # '# parity-reviewed: <date>' marker. Runs after the install step so the
-      # app (and its OpenAPI schema) imports cleanly.
+      # app (and its OpenAPI schema) imports cleanly. It builds the app with a
+      # stand-in for the SPA, so it needs no web/dist.
       - name: GUI-parity ledger check
         working-directory: server
         run: PYTHONPATH=src python ../scripts/check_gui_parity.py

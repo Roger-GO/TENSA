@@ -90,6 +90,19 @@ def test_the_app_passes_and_every_route_kind_is_reviewed(
     assert any(kind == "mount" for kind, _ident in reviewed)
 
 
+def test_the_check_reviews_the_spa_mount_without_a_built_ui(
+    script: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The app mounts the SPA only when it finds a bundle, and the mount is only
+    reviewed if it is there. The check builds its app with a stand-in, so a lint
+    job that never built ``web/dist`` still reviews it (and the ledger still has
+    its row)."""
+    monkeypatch.setattr("tensa.api.app._find_spa_dir", lambda: None)
+    failures, _openapi_rows, manual_rows = script._check(script._build_app())
+    assert failures == []
+    assert [row[:2] for row in manual_rows if row[0] == "mount"] == [("mount", "spa (/)")]
+
+
 def test_unmarked_routes_inside_included_routers_fail_the_check(script: ModuleType) -> None:
     failures, _openapi_rows, manual_rows = script._check(_nested_app())
     assert any(
