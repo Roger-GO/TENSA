@@ -120,6 +120,20 @@ describe('HistoryDrawerToggle', () => {
     expect(useHistoryStore.getState().drawerOpen).toBe(true);
   });
 
+  it('says what the button is for, and why it is off before a case is loaded', () => {
+    const { unmount } = render(<HistoryDrawerToggle />);
+    expect(screen.getByTestId('history-drawer-toggle')).toHaveAttribute(
+      'title',
+      'Run history: rename, pin or drop your runs',
+    );
+    unmount();
+    useSessionStore.setState({ sessionId: null });
+    render(<HistoryDrawerToggle />);
+    const btn = screen.getByTestId('history-drawer-toggle');
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute('title', 'Load a case to see the runs of its session');
+  });
+
   it('clicking again closes the drawer', async () => {
     const user = userEvent.setup();
     useHistoryStore.setState({ drawerOpen: true });
@@ -223,6 +237,77 @@ describe('HistoryDrawer', () => {
     render(<HistoryDrawer />);
     await user.click(screen.getByTestId('history-run-row-reset-r1'));
     expect(toastInfoMock).toHaveBeenCalledWith('Run dropped from history');
+  });
+
+  it('says that a run can be renamed, and that Reset run drops the active run from the list', () => {
+    seedRun('r1');
+    useHistoryStore.getState().openDrawer();
+    render(<HistoryDrawer />);
+    const text = screen.getByText(/Rename a run with its pencil/).textContent ?? '';
+    expect(text).toContain('plot legend');
+    expect(text).toContain('Reset run in the top bar also drops the active run from this list');
+  });
+
+  it('explains in the empty list why a run may be missing', () => {
+    useHistoryStore.getState().openDrawer();
+    render(<HistoryDrawer />);
+    expect(screen.getByTestId('history-drawer-empty')).toHaveTextContent(
+      'A run you discard with Reset run in the top bar is dropped from it.',
+    );
+  });
+
+  it('renaming a run from its row names it and confirms with a toast', async () => {
+    const user = userEvent.setup();
+    seedRun('r1');
+    useHistoryStore.getState().openDrawer();
+    render(<HistoryDrawer />);
+    await user.click(screen.getByTestId('history-run-row-rename-r1'));
+    await user.type(
+      screen.getByTestId('history-run-row-name-input-r1'),
+      'Baseline no fault{Enter}',
+    );
+    expect(useRunsStore.getState().runs.r1!.displayName).toBe('Baseline no fault');
+    expect(screen.getByTestId('history-run-row-label-r1')).toHaveTextContent('Baseline no fault');
+    expect(toastInfoMock).toHaveBeenCalledWith('Run renamed to "Baseline no fault"');
+  });
+
+  it('clearing a name confirms with a toast and brings back the default label', async () => {
+    const user = userEvent.setup();
+    seedRun('r1');
+    useRunsStore.getState().setRunDisplayName('r1', 'Old name');
+    useHistoryStore.getState().openDrawer();
+    render(<HistoryDrawer />);
+    await user.click(screen.getByTestId('history-run-row-rename-r1'));
+    await user.clear(screen.getByTestId('history-run-row-name-input-r1'));
+    await user.keyboard('{Enter}');
+    expect(toastInfoMock).toHaveBeenCalledWith('Run name cleared');
+    expect(screen.getByTestId('history-run-row-label-r1')).toHaveTextContent('TDS #1');
+  });
+
+  it("opens with the run's name ready to type when the Rename run command asks", () => {
+    seedRun('r1');
+    seedRun('r2');
+    useHistoryStore.getState().startRenaming('r1');
+    render(<HistoryDrawer />);
+    const input = screen.getByTestId('history-run-row-name-input-r1');
+    expect(document.activeElement).toBe(input);
+    expect(screen.queryByTestId('history-run-row-name-input-r2')).toBeNull();
+  });
+
+  it('Escape in the name field cancels the rename and leaves the drawer open', async () => {
+    const user = userEvent.setup();
+    seedRun('r1');
+    useHistoryStore.getState().startRenaming('r1');
+    render(<HistoryDrawer />);
+    await user.type(screen.getByTestId('history-run-row-name-input-r1'), 'Dropped');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByTestId('history-run-row-name-input-r1')).toBeNull();
+    expect(useRunsStore.getState().runs.r1!.displayName).toBeUndefined();
+    expect(useHistoryStore.getState().drawerOpen).toBe(true);
+    expect(screen.getByTestId('history-drawer')).toBeInTheDocument();
+    // With no field open, Escape closes the drawer as it always did.
+    await user.keyboard('{Escape}');
+    expect(useHistoryStore.getState().drawerOpen).toBe(false);
   });
 
   it('Clear overlay button is disabled when nothing is pinned', () => {

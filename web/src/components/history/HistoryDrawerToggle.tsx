@@ -31,6 +31,11 @@ export function HistoryDrawerToggle() {
       data-testid="history-drawer-toggle"
       aria-pressed={open}
       aria-label="Toggle run history"
+      title={
+        enabled
+          ? 'Run history: rename, pin or drop your runs'
+          : 'Load a case to see the runs of its session'
+      }
     >
       History{' '}
       {runCount > 0 ? (

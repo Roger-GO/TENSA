@@ -158,6 +158,38 @@ describe('RunLegendChip — inline rename (Unit 20)', () => {
     expect(document.activeElement).toBe(input);
   });
 
+  it('has a Rename button next to the name, so renaming does not depend on a double-click', async () => {
+    const user = userEvent.setup();
+    seedRun('r1', 'fault bus 7');
+    render(<RunLegendChip runId="r1" pinned />);
+    const pencil = screen.getByRole('button', { name: /^Rename TDS #1 - fault bus 7/ });
+    expect(pencil).toBe(screen.getByTestId('run-legend-rename-r1'));
+    await user.click(pencil);
+    const input = screen.getByTestId('run-legend-name-input-r1');
+    expect(document.activeElement).toBe(input);
+    // An empty field says what it goes back to.
+    expect(input).toHaveAttribute('placeholder', 'TDS #1 - fault bus 7');
+    await user.type(input, 'Baseline{Enter}');
+    expect(useRunsStore.getState().runs.r1!.displayName).toBe('Baseline');
+  });
+
+  it('the Rename button does not toggle the run in the overlay', async () => {
+    const user = userEvent.setup();
+    seedRun('r1');
+    render(<RunLegendChip runId="r1" />);
+    await user.click(screen.getByTestId('run-legend-rename-r1'));
+    expect(useRunsStore.getState().overlayRunIds.has('r1')).toBe(false);
+  });
+
+  it('tells, on hover, that a double-click renames the run', () => {
+    seedRun('r1');
+    render(<RunLegendChip runId="r1" />);
+    expect(screen.getByTestId('run-legend-name-r1')).toHaveAttribute(
+      'title',
+      expect.stringContaining('Double-click to rename'),
+    );
+  });
+
   it('Enter commits the new name to the runs store', async () => {
     const user = userEvent.setup();
     seedRun('r1');

@@ -6,6 +6,9 @@
  * error / aborted), tf, the wall-clock timestamp it started at, and per-row
  * actions:
  *
+ * - The pencil beside the label (or a double-click on the label) — renames the
+ *   run. The name shows in the plot legend too; an empty name puts the default
+ *   label back.
  * - "Pin to overlay" / "Unpin" — toggles ``overlayRunIds`` membership.
  * - "Reset" — drops the run from the runs slice (frees its buffers).
  *
@@ -14,9 +17,11 @@
  */
 import { useRunsStore } from '@/store/runs';
 import type { RunRecord } from '@/store/runs';
+import { useHistoryStore } from '@/store/history';
 import { Button } from '@/components/ui/button';
+import { RenameRunButton, RunRenameInput } from '@/components/plots/RunRename';
 import { runIdToStrokeStyle } from '@/lib/runIdToColor';
-import { runLabel } from '@/lib/runLabel';
+import { autoRunLabel, runLabel } from '@/lib/runLabel';
 import { cn } from '@/lib/cn';
 
 export interface HistoryRunRowProps {
@@ -29,6 +34,12 @@ export interface HistoryRunRowProps {
   onTogglePin?: (runId: string, willBePinned: boolean) => void;
   /** Callback fired after the user resets the run. */
   onReset?: (runId: string) => void;
+  /**
+   * Callback fired after the user gives the run a new name. ``name`` is
+   * ``undefined`` when the name was cleared, so the run has its default label
+   * again. Not fired when the name did not change.
+   */
+  onRename?: (runId: string, name: string | undefined) => void;
   className?: string;
 }
 
@@ -67,11 +78,18 @@ export function HistoryRunRow({
   isOverlayPinned,
   onTogglePin,
   onReset,
+  onRename,
   className,
 }: HistoryRunRowProps) {
   const addOverlayRun = useRunsStore((s) => s.addOverlayRun);
   const removeOverlayRun = useRunsStore((s) => s.removeOverlayRun);
   const resetRun = useRunsStore((s) => s.resetRun);
+  const setRunDisplayName = useRunsStore((s) => s.setRunDisplayName);
+  // Which run is being renamed lives in the history slice, so the "Rename run"
+  // command can open the field on a row it does not render.
+  const renaming = useHistoryStore((s) => s.renamingRunId === run.runId);
+  const startRenaming = useHistoryStore((s) => s.startRenaming);
+  const stopRenaming = useHistoryStore((s) => s.stopRenaming);
 
   // Pick up Unit 20's per-run colour override so the history row swatch
   // matches the legend chip + plot stroke when the researcher has
@@ -88,6 +106,18 @@ export function HistoryRunRow({
   const handleReset = () => {
     resetRun(run.runId);
     onReset?.(run.runId);
+  };
+
+  const label = runLabel(run);
+  const defaultName = autoRunLabel(run);
+
+  const handleRenameCommit = (next: string) => {
+    stopRenaming();
+    const trimmed = next.trim();
+    // Leaving the field as it was (a blur, or Enter on the same name) is not a rename.
+    if (trimmed === (run.displayName ?? '')) return;
+    setRunDisplayName(run.runId, trimmed);
+    onRename?.(run.runId, trimmed.length === 0 ? undefined : trimmed);
   };
 
   return (
@@ -109,32 +139,60 @@ export function HistoryRunRow({
         style={{ background: style.color }}
       />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <div className="flex items-center gap-2">
-          <span
-            data-testid={`history-run-row-label-${run.runId}`}
-            title={`Run id ${run.runId}`}
-            className="text-foreground truncate text-xs"
-          >
-            {runLabel(run)}
-          </span>
-          {isActive ? (
+        {renaming ? (
+          <>
+            <RunRenameInput
+              initialValue={run.displayName ?? ''}
+              placeholder={defaultName}
+              onCommit={handleRenameCommit}
+              onCancel={stopRenaming}
+              data-testid={`history-run-row-name-input-${run.runId}`}
+              aria-label={`New name for ${label}`}
+              className="w-full"
+            />
             <span
-              data-testid={`history-run-row-active-badge-${run.runId}`}
-              className="text-primary text-[10px] font-medium"
+              data-testid={`history-run-row-rename-hint-${run.runId}`}
+              className="text-muted-foreground text-[10px]"
             >
-              active
+              Enter saves, Esc cancels. Leave it empty to go back to {defaultName}.
             </span>
-          ) : null}
-          <span
-            data-testid={`history-run-row-state-${run.runId}`}
-            className={cn(
-              'rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10px]',
-              STATE_CLASS[run.state],
-            )}
-          >
-            {STATE_LABEL[run.state]}
-          </span>
-        </div>
+          </>
+        ) : (
+          // A name the researcher typed can be long, and it is the one thing on the
+          // row they will read back, so it wraps instead of being cut off.
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span
+              data-testid={`history-run-row-label-${run.runId}`}
+              title={`Run id ${run.runId}`}
+              onDoubleClick={() => startRenaming(run.runId)}
+              className="text-foreground min-w-0 text-xs break-words"
+            >
+              {label}
+            </span>
+            <RenameRunButton
+              aria-label={`Rename ${label}`}
+              onClick={() => startRenaming(run.runId)}
+              data-testid={`history-run-row-rename-${run.runId}`}
+            />
+            {isActive ? (
+              <span
+                data-testid={`history-run-row-active-badge-${run.runId}`}
+                className="text-primary text-[10px] font-medium"
+              >
+                active
+              </span>
+            ) : null}
+            <span
+              data-testid={`history-run-row-state-${run.runId}`}
+              className={cn(
+                'rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10px]',
+                STATE_CLASS[run.state],
+              )}
+            >
+              {STATE_LABEL[run.state]}
+            </span>
+          </div>
+        )}
         <div className="text-muted-foreground flex items-center gap-2 text-[10px]">
           <span data-testid={`history-run-row-timestamp-${run.runId}`}>
             {formatTime(run.startedAt)}

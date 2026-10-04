@@ -31,6 +31,7 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useRunsStore } from '@/store/runs';
+import { useHistoryStore } from '@/store/history';
 import { subscribeSldCommand } from '@/store/sld';
 import type { SldCommand } from '@/store/sld';
 import { usePflowStore } from '@/store/pflow';
@@ -507,6 +508,45 @@ describe('useCommandRegistry: Open case, Save system and Abort run', () => {
     useRunsStore.getState().markRunDone('r', 1, true);
     const done = renderHook(() => useCommandRegistry(), { wrapper });
     expect(find(done.result.current, 'run.abort')).toBeUndefined();
+  });
+});
+
+describe('useCommandRegistry: Rename run', () => {
+  afterEach(() => {
+    useHistoryStore.getState().reset();
+    useRunsStore.getState().clearRuns();
+  });
+
+  it('is offered only while there is a run to name', () => {
+    const none = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(none.result.current, 'navigation.rename-run')).toBeUndefined();
+    none.unmount();
+
+    useRunsStore.getState().startRun({ runId: 'r', tf: 1, columnNames: [] });
+    const some = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = find(some.result.current, 'navigation.rename-run');
+    expect(cmd?.group).toBe('navigation');
+    expect(cmd?.label).toBe('Rename run…');
+  });
+
+  it("opens the History drawer with the active run's name ready to edit", () => {
+    useRunsStore.getState().startRun({ runId: 'first', tf: 1, columnNames: [] });
+    useRunsStore.getState().startRun({ runId: 'second', tf: 1, columnNames: [] });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    act(() => find(result.current, 'navigation.rename-run')?.action());
+    expect(useHistoryStore.getState()).toMatchObject({
+      drawerOpen: true,
+      renamingRunId: 'second',
+    });
+  });
+
+  it('falls back to the latest run when none is active', () => {
+    useRunsStore.getState().startRun({ runId: 'first', tf: 1, columnNames: [] });
+    useRunsStore.getState().startRun({ runId: 'second', tf: 1, columnNames: [] });
+    useRunsStore.getState().clearActiveRun();
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    act(() => find(result.current, 'navigation.rename-run')?.action());
+    expect(useHistoryStore.getState().renamingRunId).toBe('second');
   });
 });
 

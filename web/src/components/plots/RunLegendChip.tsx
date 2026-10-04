@@ -14,11 +14,12 @@
  * **Unit 20 additions:** the chip lets researchers customise their
  * runs for paper figures.
  *
- *  - **Double-click the run name** swaps to an inline ``<Input>`` for
- *    rename. Enter / blur commits, Escape cancels. Empty value clears
- *    the override and falls back to the auto-generated default. The
- *    new name lives in ``runs[runId].displayName`` (session-scoped —
- *    no localStorage persistence per the plan).
+ *  - **The pencil next to the name, or a double-click on it,** swaps to
+ *    an inline ``<Input>`` for rename. Enter / blur commits, Escape
+ *    cancels. Empty value clears the override and falls back to the
+ *    auto-generated default. The new name lives in
+ *    ``runs[runId].displayName`` (session-scoped — no localStorage
+ *    persistence per the plan).
  *  - **Click the swatch** opens a Radix Popover with an 8-colour
  *    palette plus a "Custom" hex input + "Reset to default" button.
  *    Picking a colour writes ``runs[runId].colorOverride`` and the
@@ -26,11 +27,12 @@
  *    ``role="alert"`` error (form-validation is inline per the toast
  *    policy in ``web/AGENTS.md``, NEVER a toast).
  */
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useRunsStore } from '@/store/runs';
 import { runIdToStrokeStyle } from '@/lib/runIdToColor';
 import { autoRunLabel, shortRunId } from '@/lib/runLabel';
 import { Input } from '@/components/ui/Input';
+import { RenameRunButton, RunRenameInput } from './RunRename';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/cn';
 
@@ -92,58 +94,6 @@ const HEX_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
 function isValidHex(value: string): boolean {
   return HEX_PATTERN.test(value.trim());
-}
-
-/**
- * Inline rename input: double-click the chip's name to swap to an
- * editable ``<Input>``. Commit on Enter / blur, cancel on Escape,
- * select-all on focus so retyping is a single keypress.
- */
-function RenameInput({
-  runId,
-  initialValue,
-  onCommit,
-  onCancel,
-}: {
-  runId: string;
-  initialValue: string;
-  onCommit: (next: string) => void;
-  onCancel: () => void;
-}) {
-  const [value, setValue] = useState(initialValue);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Autofocus + select-all so the researcher can immediately retype.
-  // Running this once on mount via a ref is simpler than wiring up
-  // ``autoFocus`` (which Radix sometimes strips for a11y) plus a
-  // separate select-on-focus handler.
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.focus();
-    el.select();
-  }, []);
-
-  return (
-    <Input
-      ref={inputRef}
-      value={value}
-      onChange={setValue}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          onCommit(value);
-        } else if (e.key === 'Escape') {
-          e.preventDefault();
-          onCancel();
-        }
-      }}
-      onBlur={() => onCommit(value)}
-      data-testid={`run-legend-name-input-${runId}`}
-      aria-label="Rename run"
-      className="h-6 w-32 px-1.5 py-0 text-xs"
-    />
-  );
 }
 
 /**
@@ -299,7 +249,8 @@ export function RunLegendChip({ runId, label, pinned, onToggle, className }: Run
   // Researcher-set ``displayName`` (Unit 20) wins when present unless
   // the caller explicitly passed a ``label`` prop (which always wins
   // — used by the History drawer).
-  const defaultLabel = run ? `${autoRunLabel(run)} · tf=${run.tf}s` : shortRunId(runId);
+  const defaultName = run ? autoRunLabel(run) : shortRunId(runId);
+  const defaultLabel = run ? `${defaultName} · tf=${run.tf}s` : defaultName;
   const storeLabel = run?.displayName ?? defaultLabel;
   const displayLabel = label ?? storeLabel;
 
@@ -381,36 +332,49 @@ export function RunLegendChip({ runId, label, pinned, onToggle, className }: Run
       </Popover>
 
       {isRenaming ? (
-        <RenameInput
-          runId={runId}
+        <RunRenameInput
           initialValue={run?.displayName ?? ''}
+          placeholder={defaultName}
           onCommit={handleRenameCommit}
           onCancel={() => setIsRenaming(false)}
+          data-testid={`run-legend-name-input-${runId}`}
         />
       ) : (
-        <button
-          type="button"
-          onClick={handleClick}
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-            setIsRenaming(true);
-          }}
-          data-testid={`run-legend-name-${runId}`}
-          aria-pressed={isPinned}
-          aria-label={
-            isPinned
-              ? `Unpin ${displayLabel} from overlay (double-click to rename)`
-              : `Pin ${displayLabel} to overlay (double-click to rename)`
-          }
-          className={cn(
-            'font-mono',
-            'rounded-[var(--radius-sm)] px-0.5',
-            'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
-            isPinned ? 'hover:bg-muted/60' : 'hover:bg-muted/40',
-          )}
-        >
-          {displayLabel}
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={handleClick}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              setIsRenaming(true);
+            }}
+            data-testid={`run-legend-name-${runId}`}
+            aria-pressed={isPinned}
+            aria-label={
+              isPinned
+                ? `Unpin ${displayLabel} from overlay (double-click to rename)`
+                : `Pin ${displayLabel} to overlay (double-click to rename)`
+            }
+            title={
+              isPinned
+                ? 'Click to take this run out of the overlay. Double-click to rename it.'
+                : 'Click to add this run to the overlay. Double-click to rename it.'
+            }
+            className={cn(
+              'font-mono',
+              'rounded-[var(--radius-sm)] px-0.5',
+              'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+              isPinned ? 'hover:bg-muted/60' : 'hover:bg-muted/40',
+            )}
+          >
+            {displayLabel}
+          </button>
+          <RenameRunButton
+            aria-label={`Rename ${displayLabel}`}
+            onClick={() => setIsRenaming(true)}
+            data-testid={`run-legend-rename-${runId}`}
+          />
+        </>
       )}
     </span>
   );

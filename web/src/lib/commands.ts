@@ -160,6 +160,14 @@ export function useCommandRegistry(): readonly Command[] {
   const openPalettePage = useCommandPaletteStore((s) => s.openPage);
   const toggleCheatsheet = useShortcutCheatsheetStore((s) => s.toggleCheatsheet);
   const openHistoryDrawer = useHistoryStore((s) => s.openDrawer);
+  const startRenamingRun = useHistoryStore((s) => s.startRenaming);
+  // The run "Rename run" acts on: the active one, else the latest started. A
+  // string, so a streamed frame does not re-render consumers.
+  const renameTargetRunId = useRunsStore((s) => {
+    if (s.activeRunId !== null && s.runs[s.activeRunId] !== undefined) return s.activeRunId;
+    const ids = Object.keys(s.runs);
+    return ids[ids.length - 1] ?? null;
+  });
 
   // ---- mutations (Edit group) -------------------------------------------
   const reloadMutation = useReloadCase();
@@ -651,6 +659,18 @@ export function useCommandRegistry(): readonly Command[] {
         action: openHistoryDrawer,
         shortcut: 'g>h',
       },
+      // Opens the History drawer with the run's name ready to type, the same
+      // field as the pencil on its row. Offered while there is a run to name.
+      {
+        id: 'navigation.rename-run',
+        label: 'Rename run…',
+        group: 'navigation',
+        keywords: ['rename', 'name', 'label', 'title', 'run', 'history', 'legend', 'tds'],
+        action: () => {
+          if (renameTargetRunId !== null) startRenamingRun(renameTargetRunId);
+        },
+        when: () => renameTargetRunId !== null,
+      },
       // Unit 11 — SLD node search. The action posts to the
       // `subscribeOpenSldSearch` channel exposed by `store/sld.ts`;
       // `SldNodeSearch` subscribes once on mount and flips its local
@@ -795,6 +815,8 @@ export function useCommandRegistry(): readonly Command[] {
     openPalettePage,
     toggleCheatsheet,
     openHistoryDrawer,
+    startRenamingRun,
+    renameTargetRunId,
     reloadMutation,
     undoMutation,
     editMode,

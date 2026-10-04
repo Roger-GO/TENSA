@@ -7,6 +7,9 @@
  * from ``useRunsStore`` — no copy lives here — so the slice stays
  * minimal.
  *
+ * The slice also says which run's name is being edited, so that the pencil on a
+ * row and the "Rename run" command open the same field.
+ *
  * Sweep-progress fields (Unit 18 of the v2.0 plan) extend this slice
  * later; the basic version landed in Unit 9 only owns drawer
  * open/close + a transient toast message.
@@ -25,26 +28,37 @@ export interface HistoryState {
    * Optional — most actions don't surface a toast.
    */
   toastMessage: string | null;
+  /** The run whose name is being edited in the drawer, or ``null`` when none is. */
+  renamingRunId: string | null;
 
   /** Open the drawer (resets stale toast). */
   openDrawer: () => void;
   /** Close the drawer (toast preserved so a fast re-open doesn't lose it). */
   closeDrawer: () => void;
+  /** Open the drawer with the name of ``runId`` ready to edit. */
+  startRenaming: (runId: string) => void;
+  /** Stop editing a run's name (the edit itself is saved or dropped by the field). */
+  stopRenaming: () => void;
   /** Set or clear the inline toast message. */
   setToast: (message: string | null) => void;
   /** Reset every transient field (used on session change). */
   reset: () => void;
 }
 
-const INITIAL: Pick<HistoryState, 'drawerOpen' | 'toastMessage'> = {
+const INITIAL: Pick<HistoryState, 'drawerOpen' | 'toastMessage' | 'renamingRunId'> = {
   drawerOpen: false,
   toastMessage: null,
+  renamingRunId: null,
 };
 
 export const useHistoryStore = create<HistoryState>((set) => ({
   ...INITIAL,
   openDrawer: () => set({ drawerOpen: true, toastMessage: null }),
-  closeDrawer: () => set({ drawerOpen: false }),
+  // A name still being typed when the drawer closes is not carried over to the
+  // next time it opens.
+  closeDrawer: () => set({ drawerOpen: false, renamingRunId: null }),
+  startRenaming: (runId) => set({ drawerOpen: true, toastMessage: null, renamingRunId: runId }),
+  stopRenaming: () => set({ renamingRunId: null }),
   setToast: (message) => set({ toastMessage: message }),
   reset: () => set({ ...INITIAL }),
 }));

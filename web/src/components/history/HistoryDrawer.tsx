@@ -5,6 +5,7 @@
  * every retained run from ``useRunsStore`` (most-recent first) with
  * the ``HistoryRunRow`` component. Per-row actions:
  *
+ * - The pencil — renames the run (the name also reaches the plot legend).
  * - "Pin" / "Unpin" — toggles the run in/out of the multi-run overlay.
  * - "Reset" — drops the run from the runs slice.
  *
@@ -147,6 +148,11 @@ function HistoryDrawerInner() {
     toast.info('Overlay cleared');
   };
 
+  // Renamed runs get a toast like pinned ones do, so the change is confirmed
+  // even when the drawer closes straight after.
+  const toastRenamed = (_runId: string, name: string | undefined) =>
+    toast.info(name === undefined ? 'Run name cleared' : `Run renamed to "${name}"`);
+
   const overlayCount = overlayRunIds.size;
 
   return (
@@ -162,11 +168,17 @@ function HistoryDrawerInner() {
         'data-[state=open]:slide-in-from-right',
         'data-[state=closed]:slide-out-to-right',
       )}
+      // Esc in a run's name field cancels the rename, not the whole drawer.
+      onEscapeKeyDown={(e) => {
+        if (e.target instanceof Element && e.target.closest('[data-run-rename]')) {
+          e.preventDefault();
+        }
+      }}
     >
       <DialogTitle>{isRunsView ? 'Run history' : 'Job history'}</DialogTitle>
       <DialogDescription>
         {isRunsView
-          ? 'Pin runs to the multi-run overlay or drop them to free memory. The active run anchors the SLD animation regardless of the overlay set.'
+          ? 'Rename a run with its pencil to name it in the plot legend too, pin runs to the multi-run overlay, or drop them to free memory. Reset run in the top bar also drops the active run from this list. The active run anchors the SLD animation regardless of the overlay set.'
           : 'Every job kind in one chronological list. TDS runs keep their scrub + overlay controls on the Runs filter.'}
       </DialogDescription>
 
@@ -234,7 +246,7 @@ function HistoryDrawerInner() {
               <EmptyState
                 icon={<HistoryIcon />}
                 title="No runs yet"
-                description="Run a TDS to populate the history."
+                description="Run a TDS to populate the history. A run you discard with Reset run in the top bar is dropped from it."
                 action={{
                   label: 'Run TDS',
                   onClick: () => {
@@ -259,6 +271,7 @@ function HistoryDrawerInner() {
                   toast.info(willBePinned ? 'Pinned to overlay' : 'Unpinned from overlay')
                 }
                 onReset={() => toast.info('Run dropped from history')}
+                onRename={toastRenamed}
               />
             ))
           )
@@ -288,6 +301,7 @@ function HistoryDrawerInner() {
                   toast.info(willBePinned ? 'Pinned to overlay' : 'Unpinned from overlay')
                 }
                 onReset={() => toast.info('Run dropped from history')}
+                onRename={toastRenamed}
               />
             ) : (
               <HistoryJobRow key={job.id} job={job} onViewError={(j) => setErrorJob(j)} />
