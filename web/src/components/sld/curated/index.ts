@@ -17,6 +17,7 @@ import ieee14 from './ieee14.layout.json';
 import ieee39 from './ieee39.layout.json';
 import type { SidecarLayout } from '@/api/types';
 import { parseSidecar } from '../sidecar';
+import { stemOf } from '@/lib/paths';
 
 /**
  * `source_case` is an optional informational field on curated layouts;
@@ -52,13 +53,6 @@ const CURATED: Readonly<Record<string, SidecarLayout>> = Object.freeze(
   ),
 );
 
-/** Strip the directory + extension off a workspace path. */
-export function basenameWithoutExt(path: string): string {
-  const last = path.split(/[\\/]/).pop() ?? path;
-  const dot = last.lastIndexOf('.');
-  return dot > 0 ? last.slice(0, dot) : last;
-}
-
 /**
  * Look up a curated layout by case basename. Returns `null` when no
  * curated layout exists — caller falls through to sidecar then ELK.
@@ -69,7 +63,7 @@ export function basenameWithoutExt(path: string): string {
  */
 export function curatedLayoutFor(caseName: string): SidecarLayout | null {
   if (!caseName) return null;
-  const key = basenameWithoutExt(caseName).toLowerCase();
+  const key = stemOf(caseName).toLowerCase();
   return CURATED[key] ?? null;
 }
 

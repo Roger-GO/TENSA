@@ -45,6 +45,7 @@ import { useRunsStore } from '@/store/runs';
 import { useUiStore } from '@/store/ui';
 import { ProblemDetailsError } from '@/api/client';
 import { cn } from '@/lib/cn';
+import { baseName } from '@/lib/paths';
 import { useSafeTimeout } from '@/lib/useSafeTimeout';
 
 /**
@@ -78,12 +79,6 @@ function computePreviewFiles(args: {
   if (args.hasResultsCsv) out.push({ name: 'results.csv' });
   out.push({ name: 'manifest.json' });
   return out;
-}
-
-/** Strip the leading workspace dir from a workspace-relative path. */
-function basename(path: string): string {
-  const idx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-  return idx === -1 ? path : path.slice(idx + 1);
 }
 
 export function BundleExportButton() {
@@ -152,10 +147,10 @@ function BundleExportDialogInner() {
   // store. ``primaryPath`` is workspace-relative; we display the basename.
   const caseFilename = useMemo(() => {
     if (!caseSelection || caseSelection.primaryPath === null) return null;
-    return basename(caseSelection.primaryPath);
+    return baseName(caseSelection.primaryPath);
   }, [caseSelection]);
   const addfiles = useMemo(
-    () => (caseSelection?.addfiles ?? []).map((p) => basename(p)),
+    () => (caseSelection?.addfiles ?? []).map((p) => baseName(p)),
     [caseSelection],
   );
 

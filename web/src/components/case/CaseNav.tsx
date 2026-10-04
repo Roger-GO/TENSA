@@ -14,6 +14,7 @@ import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
 import { useDeleteSession } from '@/api/queries';
 import { cn } from '@/lib/cn';
+import { baseName } from '@/lib/paths';
 import type { CaseSelection } from '@/store/case';
 import type { TopologySummary } from '@/api/types';
 
@@ -33,12 +34,6 @@ import type { TopologySummary } from '@/api/types';
  * tearing down a session mid-RPC). A tooltip explains the disabled
  * cause.
  */
-
-/** Pull the basename out of a workspace-relative path. */
-function basename(path: string): string {
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] ?? path;
-}
 
 interface SummaryCardProps {
   selection: CaseSelection;
@@ -83,7 +78,7 @@ function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: Summar
           {isBlank ? 'New system' : 'Loaded case'}
         </p>
         <p className="text-foreground truncate font-mono text-sm font-medium">
-          {isBlank ? '— blank —' : selection.primaryPath ? basename(selection.primaryPath) : ''}
+          {isBlank ? '— blank —' : selection.primaryPath ? baseName(selection.primaryPath) : ''}
         </p>
         {selection.addfiles.length > 0 ? (
           <div className="flex flex-col gap-0.5">
@@ -91,7 +86,7 @@ function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: Summar
             <ul className="text-foreground flex flex-col gap-0.5 font-mono text-xs">
               {selection.addfiles.map((p) => (
                 <li key={p} className="truncate">
-                  {basename(p)}
+                  {baseName(p)}
                 </li>
               ))}
             </ul>

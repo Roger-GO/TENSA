@@ -37,13 +37,8 @@ import { subscribePaletteDialog } from '@/lib/commands';
 import { ProblemDetailsError } from '@/api/client';
 import { cn } from '@/lib/cn';
 import { userNameProblem } from '@/lib/fileName';
+import { stemOf } from '@/lib/paths';
 import { useSafeTimeout } from '@/lib/useSafeTimeout';
-
-/** Strip a trailing extension so collision compares stem-to-stem. */
-function stemOf(name: string): string {
-  const dot = name.lastIndexOf('.');
-  return dot > 0 ? name.slice(0, dot) : name;
-}
 
 export interface SaveAsCustomCaseDialogProps {
   /** Controlled open state. When omitted the dialog self-manages via the

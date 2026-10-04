@@ -5,15 +5,9 @@
  * whatever it gets, so this does not.
  */
 import { useCaseStore } from '@/store/case';
-
-/** Strip the directory and the extension from a workspace path. */
-export function deriveCaseName(path: string): string {
-  const base = path.split(/[\\/]/).pop() ?? path;
-  const dot = base.lastIndexOf('.');
-  return dot > 0 ? base.slice(0, dot) : base;
-}
+import { stemOf } from '@/lib/paths';
 
 export function useExportCaseName(): string {
   const primaryPath = useCaseStore((s) => s.selection?.primaryPath ?? null);
-  return primaryPath ? deriveCaseName(primaryPath) : 'case';
+  return primaryPath ? stemOf(primaryPath) : 'case';
 }

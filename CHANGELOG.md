@@ -159,6 +159,7 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 - A Playwright end-to-end job in `web.yml`. It builds the UI, starts `tensa serve` on a fresh workspace, and runs the flagship test (rewritten under Fixed above), which opens IEEE 14 in a real browser, runs a power flow, and checks the single-line diagram overlay and the Buses table against the live server. `web.yml` now also runs on changes under `server/`, because the job exercises the server, and the release workflow waits for it.
 - Tests that pin `Content-Type: application/json` on every JSON body sent by the callers outside the web client: `examples/tensa_client.py`, the MCP server, and the curl walkthrough in `examples/`, plus the bundle export request in the web UI, which bypasses the shared client. Removing the header from any of them now fails a test instead of showing up as a 422 from a real server.
 
+- The web UI's file-name helpers (`baseName`, `stemOf`, `extensionOf`) are one module, `web/src/lib/paths.ts`, with tests. The export case name, the diagram's curated-layout lookup, Save in place, the case list, the bundle export dialog and the Save as custom case dialog each had a copy; they split on `/` alone or on both slashes, and now all split on both.
 ## [0.4.0] — 2026-07-05
 
 ### Changed

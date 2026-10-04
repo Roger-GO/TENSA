@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { curatedLayoutFor, basenameWithoutExt, listCuratedKeys } from '@/components/sld/curated';
+import { curatedLayoutFor, listCuratedKeys } from '@/components/sld/curated';
 
 describe('curated layouts', () => {
   it('ships layouts for IEEE 14 and IEEE 39', () => {
@@ -47,18 +47,5 @@ describe('curated layouts', () => {
     expect(curatedLayoutFor('ieee57.raw')).toBeNull();
     expect(curatedLayoutFor('')).toBeNull();
     expect(curatedLayoutFor('kundur.xlsx')).toBeNull();
-  });
-});
-
-describe('basenameWithoutExt', () => {
-  it('strips directory + extension', () => {
-    expect(basenameWithoutExt('a/b/c.raw')).toBe('c');
-    expect(basenameWithoutExt('c.RAW')).toBe('c');
-    expect(basenameWithoutExt('c')).toBe('c');
-    expect(basenameWithoutExt('a\\b\\c.json')).toBe('c');
-  });
-
-  it('preserves dotfile names', () => {
-    expect(basenameWithoutExt('.gitignore')).toBe('.gitignore');
   });
 });

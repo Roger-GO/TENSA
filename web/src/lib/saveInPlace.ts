@@ -25,6 +25,7 @@
  * the answer reaches the user as the toast of a failed save.
  */
 import type { CaseSelection } from '@/store/case';
+import { baseName, extensionOf } from '@/lib/paths';
 
 export type SaveInPlaceFormat = 'xlsx' | 'json';
 
@@ -44,18 +45,6 @@ const FORMAT_BY_EXTENSION: Readonly<Record<string, SaveInPlaceFormat>> = {
   '.xlsx': 'xlsx',
   '.json': 'json',
 };
-
-/** The file name of a workspace path, for a sentence. */
-function baseName(path: string): string {
-  return path.slice(path.lastIndexOf('/') + 1);
-}
-
-/** The extension of a workspace path with its dot, as written (`''` when it has none). */
-function extensionOf(path: string): string {
-  const name = baseName(path);
-  const dot = name.lastIndexOf('.');
-  return dot > 0 ? name.slice(dot) : '';
-}
 
 export function saveInPlaceTarget(
   selection: CaseSelection | null,
