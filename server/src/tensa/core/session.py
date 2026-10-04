@@ -1018,14 +1018,15 @@ class SessionManager:
           {"type": "done", "result": {...}}        (terminal)
           {"type": "error", "category": "...", "detail": "..."}  (terminal)
           {"type": "resync", "current_seq": N,     (terminal; client must
-           "reason"?: "..."}                        re-fetch via batch endpoint)
+           "cause": "...", "reason"?: "..."}        re-fetch via batch endpoint)
           {"type": "not_found"}                    (terminal; unknown run_id
                                                     or wrong session)
 
-        ``resync`` is sent when the requested frames have left the run buffer,
-        and also when this client falls so far behind a live run that its
-        inbox fills (``RUN_CONSUMER_QUEUE_SIZE`` events). The second case
-        carries a ``reason``. A client is never sent frames with some missing.
+        ``resync`` is sent when the requested frames have left the run buffer
+        (``cause`` ``"buffer_evicted"``), and also when this client falls so
+        far behind a live run that its inbox fills (``RUN_CONSUMER_QUEUE_SIZE``
+        events; ``cause`` ``"client_lagged"``, with a ``reason``). A client is
+        never sent frames with some missing.
         """
         run_buf = self._runs.get(run_id)
         if run_buf is None or run_buf.session_id != session_id:
@@ -1042,7 +1043,11 @@ class SessionManager:
                 max_seq = run_buf.frames[-1][0]
                 if last_seq + 1 < min_seq:
                     # Frame last_seq+1 has been evicted from the ring buffer.
-                    yield {"type": "resync", "current_seq": max_seq}
+                    yield {
+                        "type": "resync",
+                        "current_seq": max_seq,
+                        "cause": "buffer_evicted",
+                    }
                     return
 
             # Subscribe FIRST so any new frame goes to the queue, then snapshot.
@@ -1095,6 +1100,7 @@ class SessionManager:
                     yield {
                         "type": "resync",
                         "current_seq": run_buf.frames[-1][0] if run_buf.frames else 0,
+                        "cause": "client_lagged",
                         "reason": (
                             "the client fell too far behind the run and missed "
                             "frames; re-run to get the whole stream"

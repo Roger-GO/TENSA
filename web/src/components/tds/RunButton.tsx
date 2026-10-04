@@ -62,7 +62,10 @@ import { cn } from '@/lib/cn';
  *
  * - WS ``run_not_found`` (close 4404) → non-modal warning toast inviting
  *   the user to Reset and re-run.
- * - WS ``buffer_evicted`` (resync) → non-modal warning toast.
+ * - WS ``buffer_evicted`` (a resume past the server's buffer) and
+ *   ``client_lagged`` (this tab fell behind a live run): both are a resync
+ *   that closes the stream, and each gets a non-modal warning toast worded for
+ *   its cause, since only one of them is a dropped connection.
  * - WS ``protocol_error`` / ``worker_error`` → handled via the runs
  *   slice's ``markRunError`` path (already wired by ``RunStream``); the
  *   runtime-crash modal opens via the existing PF surface when the call
@@ -384,6 +387,12 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
         } else if (err.code === 'buffer_evicted') {
           toast.warning(
             'Connection dropped too long; partial buffer retained. Reset and re-run to resume.',
+          );
+        } else if (err.code === 'client_lagged') {
+          // The connection never dropped: this tab read the stream more slowly
+          // than the run produced it, and the server stopped sending.
+          toast.warning(
+            'This tab fell too far behind the run and missed frames, so the plot is incomplete. Reset and re-run for the whole stream.',
           );
         } else {
           // protocol_error / worker_error / max_retries — surface as a

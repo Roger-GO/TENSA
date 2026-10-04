@@ -36,6 +36,11 @@ behind (``RUN_CONSUMER_QUEUE_SIZE`` in ``tensa.core.session``), it receives the
 same ``resync`` (with a ``reason`` saying it fell behind) and the socket
 closes, instead of a stream with frames missing.
 
+A ``resync`` says why in ``cause``: ``"buffer_evicted"`` when the frames a
+resuming client asked for have left the buffer, ``"client_lagged"`` when the
+client fell behind a live run. ``reason`` is the same thing in words for a
+person; a client that needs to tell the two apart reads ``cause``.
+
 Unknown session id closes with 4404. Unknown run_id on resume closes with
 4404. Worker / wrapper errors close with code 4500 + a JSON
 ``{"type":"error",...}`` text frame just before close.
@@ -310,6 +315,7 @@ async def _stream_run_to_websocket(
                     "type": "resync",
                     "run_id": run_id,
                     "current_seq": int(event.get("current_seq", 0)),
+                    "cause": event.get("cause", "buffer_evicted"),
                     "reason": reason,
                 }
                 if websocket.client_state == WebSocketState.CONNECTED:

@@ -328,7 +328,11 @@ describe('RunStream — edge cases', () => {
     warn.mockRestore();
   });
 
-  it('treats {type:"resync"} as terminal — no auto-reconnect', async () => {
+  /**
+   * Run a stream whose server answers ``start_tds`` with ``stream_start`` and
+   * then the given ``resync`` message, and wait for the stream to report it.
+   */
+  async function runUntilResync(resync: Record<string, unknown>) {
     const onError = vi.fn();
     const onResync = vi.fn();
     const onConn = vi.fn();
@@ -345,14 +349,7 @@ describe('RunStream — edge cases', () => {
               metadata: { schema_version: '2.0', vars: ['bus_v'], var_columns: [] },
             }),
           );
-          socket.send(
-            JSON.stringify({
-              type: 'resync',
-              run_id: 'r1',
-              current_seq: 200,
-              reason: 'frame fell out of resume buffer',
-            }),
-          );
+          socket.send(JSON.stringify({ type: 'resync', run_id: 'r1', ...resync }));
           socket.close({ code: 1000 });
         }
       });
@@ -373,20 +370,76 @@ describe('RunStream — edge cases', () => {
 
     for (let i = 0; i < 10 && onError.mock.calls.length === 0; i += 1) await tick();
 
+    const reconnects = onConn.mock.calls.filter(
+      (c) => (c[0] as { state: string }).state === 'reconnecting',
+    );
+    return { stream, onError, onResync, reconnects };
+  }
+
+  it('treats {type:"resync"} as terminal — no auto-reconnect', async () => {
+    const { stream, onError, onResync, reconnects } = await runUntilResync({
+      current_seq: 200,
+      cause: 'buffer_evicted',
+      reason: 'frame fell out of resume buffer',
+    });
+
     expect(onResync).toHaveBeenCalledWith({
       runId: 'r1',
       currentSeq: 200,
       reason: 'frame fell out of resume buffer',
+      cause: 'buffer_evicted',
     });
     expect(onError).toHaveBeenCalledWith(
       expect.objectContaining({ code: 'buffer_evicted', currentSeq: 200 }),
     );
+    expect(useRunsStore.getState().runs.r1?.errorReason).toBe('frame fell out of resume buffer');
     // No reconnect-status events.
-    const reconnects = onConn.mock.calls.filter(
-      (c) => (c[0] as { state: string }).state === 'reconnecting',
-    );
     expect(reconnects).toHaveLength(0);
     expect(stream.isClosed).toBe(true);
+  });
+
+  it('reports a resync for a client that fell behind a live run as client_lagged', async () => {
+    const reason = 'the client fell too far behind the run and missed frames';
+    const { stream, onError, onResync, reconnects } = await runUntilResync({
+      current_seq: 9000,
+      cause: 'client_lagged',
+      reason,
+    });
+
+    expect(onResync).toHaveBeenCalledWith({
+      runId: 'r1',
+      currentSeq: 9000,
+      reason,
+      cause: 'client_lagged',
+    });
+    expect(onError).toHaveBeenCalledWith({ code: 'client_lagged', reason, currentSeq: 9000 });
+    // The connection never dropped, so the run's error text must not say a
+    // buffer was evicted.
+    expect(useRunsStore.getState().runs.r1?.errorReason).toBe(reason);
+    expect(useRunsStore.getState().runs.r1?.state).toBe('error');
+    expect(reconnects).toHaveLength(0);
+    expect(stream.isClosed).toBe(true);
+  });
+
+  it('takes a resync that names no cause for the resume-buffer one', async () => {
+    const { onError, onResync } = await runUntilResync({ current_seq: 5 });
+
+    expect(onError).toHaveBeenCalledWith({
+      code: 'buffer_evicted',
+      reason: 'frame fell out of resume buffer',
+      currentSeq: 5,
+    });
+    expect(onResync).toHaveBeenCalledWith(expect.objectContaining({ cause: 'buffer_evicted' }));
+  });
+
+  it('gives a lagged resync without a reason the lag wording', async () => {
+    const { onError } = await runUntilResync({ current_seq: 5, cause: 'client_lagged' });
+
+    expect(onError).toHaveBeenCalledWith({
+      code: 'client_lagged',
+      reason: 'the client fell behind the run and missed frames',
+      currentSeq: 5,
+    });
   });
 
   it('emits onError({code:"run_not_found"}) on close 4404 after resume', async () => {

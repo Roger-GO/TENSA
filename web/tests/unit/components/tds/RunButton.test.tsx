@@ -1173,7 +1173,8 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     );
   });
 
-  it('WS resync (buffer evicted) shows a non-modal warning toast', async () => {
+  /** Run a TDS whose server answers ``start_tds`` with a run that is cut off by ``resync``. */
+  async function runCutOffByResync(resync: Record<string, unknown>): Promise<void> {
     seedReady();
     useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
     fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
@@ -1193,14 +1194,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
               },
             }),
           );
-          socket.send(
-            JSON.stringify({
-              type: 'resync',
-              run_id: 'run-resync',
-              current_seq: 50,
-              reason: 'buffer evicted',
-            }),
-          );
+          socket.send(JSON.stringify({ type: 'resync', run_id: 'run-resync', ...resync }));
           socket.close({ code: 1000 });
         }
       });
@@ -1210,10 +1204,31 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-mode-tds'));
     await userEvent.click(screen.getByTestId('run-tds-button'));
+  }
+
+  it('WS resync (buffer evicted) shows a non-modal warning toast', async () => {
+    await runCutOffByResync({ current_seq: 50, cause: 'buffer_evicted', reason: 'buffer evicted' });
 
     await waitFor(() =>
       expect(toastWarningMock).toHaveBeenCalledWith(expect.stringMatching(/connection dropped/i)),
     );
+  });
+
+  it('WS resync for a client that fell behind the run says so, not that the connection dropped', async () => {
+    await runCutOffByResync({
+      current_seq: 9000,
+      cause: 'client_lagged',
+      reason: 'the client fell too far behind the run and missed frames',
+    });
+
+    await waitFor(() =>
+      expect(toastWarningMock).toHaveBeenCalledWith(
+        expect.stringMatching(/fell too far behind the run and missed frames/i),
+      ),
+    );
+    expect(toastWarningMock).toHaveBeenCalledTimes(1);
+    expect(toastWarningMock).not.toHaveBeenCalledWith(expect.stringMatching(/connection dropped/i));
+    expect(toastErrorMock).not.toHaveBeenCalled();
   });
 });
 

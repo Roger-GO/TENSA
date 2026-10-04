@@ -77,7 +77,8 @@ WS /api/ws/{session_id}            — TDS live stream. Send {"type":"start_tds"
                                      Reconnect+resume: {"type":"resume","run_id":"...","last_seq":N}.
                                      A client that falls too far behind the run, or resumes past the
                                      ~30 s buffer, gets {"type":"resync",...} and the socket closes;
-                                     the run itself is never slowed by a client.
+                                     its "cause" is "client_lagged" or "buffer_evicted" ("reason"
+                                     says it in words). The run itself is never slowed by a client.
 WS /api/ws/{session_id}/jobs/events— job lifecycle feed: "snapshot" then "job" envelopes per transition.
 WS /api/ws/{session_id}/sweep/{id} — sweep progress per iteration.
 

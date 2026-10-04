@@ -99,8 +99,25 @@ async def test_a_client_that_falls_behind_is_sent_resync_instead_of_a_gap() -> N
 
     event = await asyncio.wait_for(first, 1)
     assert event["type"] == "resync"
+    assert event["cause"] == "client_lagged"
     assert "behind" in event["reason"]
     assert event["current_seq"] == RUN_CONSUMER_QUEUE_SIZE + 1
+    with pytest.raises(StopAsyncIteration):
+        await anext(events)
+    assert run_buf.consumers == []
+
+
+async def test_a_resume_past_the_run_buffer_is_sent_resync_with_its_own_cause() -> None:
+    """The other resync: the frames a reconnecting client asks for have left the
+    run buffer. It names that cause, so the client can tell it from a lag."""
+    mgr, run_buf = _mgr_with_run()
+    for seq in range(10, 14):
+        run_buf.frames.append((seq, b"x"))
+
+    events = mgr.attach_to_run("s1", "run-1", 3)
+
+    event = await asyncio.wait_for(anext(events), 1)
+    assert event == {"type": "resync", "current_seq": 13, "cause": "buffer_evicted"}
     with pytest.raises(StopAsyncIteration):
         await anext(events)
     assert run_buf.consumers == []
@@ -226,23 +243,40 @@ async def _resync_message(*events: dict[str, Any]) -> tuple[dict[str, Any], _Fak
     return message, socket
 
 
-async def test_the_resync_for_a_lagging_client_reaches_it_with_the_reason() -> None:
+async def test_the_resync_for_a_lagging_client_reaches_it_with_the_cause_and_reason() -> None:
     message, socket = await _resync_message(
-        {"type": "resync", "current_seq": 42, "reason": "the client fell behind"}
+        {
+            "type": "resync",
+            "current_seq": 42,
+            "cause": "client_lagged",
+            "reason": "the client fell behind",
+        }
     )
 
     assert message == {
         "type": "resync",
         "run_id": "run-1",
         "current_seq": 42,
+        "cause": "client_lagged",
         "reason": "the client fell behind",
     }
     assert socket.close_code == 1000
 
 
 async def test_a_resync_without_a_reason_keeps_the_resume_buffer_wording() -> None:
-    message, _socket = await _resync_message({"type": "resync", "current_seq": 7})
+    message, _socket = await _resync_message(
+        {"type": "resync", "current_seq": 7, "cause": "buffer_evicted"}
+    )
 
+    assert message["cause"] == "buffer_evicted"
     assert message["reason"] == (
         "frame fell out of the resume buffer; re-fetch via the batch endpoint"
     )
+
+
+async def test_a_resync_event_with_no_cause_is_sent_as_a_buffer_eviction() -> None:
+    """``resync`` was only ever the resume-buffer case before the cause existed,
+    so an event that names none is that case."""
+    message, _socket = await _resync_message({"type": "resync", "current_seq": 7})
+
+    assert message["cause"] == "buffer_evicted"

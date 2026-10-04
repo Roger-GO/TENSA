@@ -13,8 +13,9 @@
  * 5. For each WS binary message: decode the Arrow batch (its values matched to
  *    ``var_columns`` by position), append to the runs store, emit ``onFrame``.
  * 6. On ``{type: "done", ...}``: emit ``onDone``, mark store, close cleanly.
- * 7. On ``{type: "resync", ...}``: emit ``onError({code: "buffer_evicted"})``,
- *    tear down. **Terminal — does NOT auto-reconnect.**
+ * 7. On ``{type: "resync", ...}``: emit ``onError`` with code
+ *    ``buffer_evicted`` or ``client_lagged`` (the message's ``cause``), tear
+ *    down. **Terminal — does NOT auto-reconnect.**
  * 8. On ``WebSocket.onclose`` (code != 1000) mid-stream: schedule a
  *    reconnect attempt with exponential backoff, then send ``resume``.
  *
@@ -29,11 +30,20 @@
  * restarted, or the retention window elapsed. Emits
  * ``onError({code: "run_not_found"})``.
  *
- * **Resync** (server sends ``{type: "resync", ...}`` then closes): the
- * client's ``last_seq`` fell out of the substrate's ring buffer. Emits
- * ``onError({code: "buffer_evicted"})`` and does **not** auto-reconnect
- * (the reason for resync is "we waited too long"; reconnecting would
- * reopen the same gap).
+ * **Resync** (server sends ``{type: "resync", cause, reason, ...}`` then
+ * closes): the client missed frames it cannot be given again. ``cause`` says
+ * why, and ``onError`` carries it as the code:
+ *
+ * - ``buffer_evicted``: after a reconnect, the client's ``last_seq`` had fallen
+ *   out of the substrate's ring buffer (it was away for too long).
+ * - ``client_lagged``: the connection stayed up, but the client read more
+ *   slowly than the run produced frames until its inbox on the server
+ *   overflowed.
+ *
+ * Neither auto-reconnects (reconnecting would reopen the same gap), and the
+ * run itself carries on without this client, so the whole stream needs a
+ * re-run. ``reason`` is the server's wording of the cause; it becomes the
+ * run's ``errorReason``.
  *
  * **Frame buffer cap**: lives in the runs slice, not here. ``RunStream``
  * just calls ``appendFrame`` and lets the slice handle cap-eviction.
@@ -121,11 +131,23 @@ export interface ConnectionStatusEvent {
   attempt?: number;
 }
 
+/**
+ * Why the server sent ``resync`` (the message's ``cause``): the frames a
+ * resuming client asked for had left the run buffer, or the client fell behind
+ * a live run and missed frames.
+ */
+export type ResyncCause = 'buffer_evicted' | 'client_lagged';
+
+const DEFAULT_RESYNC_REASON: Record<ResyncCause, string> = {
+  buffer_evicted: 'frame fell out of resume buffer',
+  client_lagged: 'the client fell behind the run and missed frames',
+};
+
 /** Errors emitted via ``onError``. The codes mirror the v0.2 plan's taxonomy. */
 export interface RunStreamError {
-  code: 'run_not_found' | 'buffer_evicted' | 'protocol_error' | 'worker_error' | 'max_retries';
+  code: 'run_not_found' | ResyncCause | 'protocol_error' | 'worker_error' | 'max_retries';
   reason: string;
-  /** Server-reported sequence number on ``buffer_evicted``. */
+  /** Server-reported sequence number on ``buffer_evicted`` and ``client_lagged``. */
   currentSeq?: number;
 }
 
@@ -175,7 +197,12 @@ export interface RunStreamOptions {
   onDone?: (event: DoneEvent) => void;
   onError?: (error: RunStreamError) => void;
   /** Resync is a special-case error; surfaced as a separate hook for the UI banner. */
-  onResync?: (event: { runId: string; currentSeq: number; reason: string }) => void;
+  onResync?: (event: {
+    runId: string;
+    currentSeq: number;
+    reason: string;
+    cause: ResyncCause;
+  }) => void;
   onConnectionStatus?: (event: ConnectionStatusEvent) => void;
   /** Override reconnect delay schedule (test-only). */
   reconnectDelaysMs?: readonly number[];
@@ -433,6 +460,7 @@ export class RunStream {
             type: 'resync';
             run_id?: string;
             current_seq?: number;
+            cause?: string;
             reason?: string;
           },
         );
@@ -604,15 +632,19 @@ export class RunStream {
     type: 'resync';
     run_id?: string;
     current_seq?: number;
+    cause?: string;
     reason?: string;
   }): void {
     const currentSeq = typeof msg.current_seq === 'number' ? msg.current_seq : 0;
-    const reason = typeof msg.reason === 'string' ? msg.reason : 'frame fell out of resume buffer';
+    // A resync that names no cause is the resume-buffer one, the only kind the
+    // server sent before it said which.
+    const cause: ResyncCause = msg.cause === 'client_lagged' ? 'client_lagged' : 'buffer_evicted';
+    const reason = typeof msg.reason === 'string' ? msg.reason : DEFAULT_RESYNC_REASON[cause];
     if (this.runId !== null) {
-      this.opts.onResync?.({ runId: this.runId, currentSeq, reason });
-      useRunsStore.getState().markRunError(this.runId, `buffer evicted: ${reason}`);
+      this.opts.onResync?.({ runId: this.runId, currentSeq, reason, cause });
     }
-    this.emitError({ code: 'buffer_evicted', reason, currentSeq });
+    // ``emitError`` marks the run errored with ``reason``.
+    this.emitError({ code: cause, reason, currentSeq });
     // Resync is terminal — do NOT auto-reconnect (per v0.2 plan).
     this.phase = 'closed';
     this.disposed = true;
