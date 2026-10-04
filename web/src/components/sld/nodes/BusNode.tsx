@@ -8,6 +8,8 @@ import { useIsPendingDependent } from '@/store/pendingDependents';
 import { useRunsStore } from '@/store/runs';
 import { useFrameBusOverlay } from '@/store/animation';
 import { colorClassForBand, getBusOverlayState } from '../overlay';
+import { barClassForBand, type VoltageLimits } from '../voltage';
+import { VoltageMarker } from '../VoltageMarker';
 import { SOURCE_HANDLE, TARGET_HANDLE, type Side } from '../graph';
 
 /**
@@ -43,6 +45,12 @@ export interface SldNodeData extends Record<string, unknown> {
    */
   pflowIdx?: string | null;
   /**
+   * Bus nodes: the voltage limits (pu) the bus is judged against, from its
+   * `vmin` / `vmax` with the 0.95 / 1.05 default where the case sets none.
+   * Absent: the default. Stamped by `buildGraph`.
+   */
+  voltageLimits?: VoltageLimits;
+  /**
    * Generator / load nodes: which side of the node its P / Q readout hangs
    * off, the side facing the parent bus given where the device finally
    * sits. Stamped by `buildGraph`.
@@ -56,19 +64,6 @@ const SIDES: Array<{ side: Side; position: Position }> = [
   { side: 'south', position: Position.Bottom },
   { side: 'west', position: Position.Left },
 ];
-
-/**
- * Busbar fill by voltage band. Traditional one-line busbars are drawn as
- * a solid dark bar; we keep that for normal/unsolved buses and only tint
- * the bar amber / red when a voltage limit is breached, so a violation
- * reads at a glance without making every bus a different colour.
- */
-const BAR_BG_BY_BAND: Record<string, string> = {
-  danger: 'bg-[var(--color-danger)]',
-  warning: 'bg-[var(--color-warning)]',
-  success: 'bg-foreground',
-  neutral: 'bg-foreground',
-};
 
 /**
  * Bus node — drawn as a traditional one-line **busbar**: a thick
@@ -85,13 +80,17 @@ const BAR_BG_BY_BAND: Record<string, string> = {
  *
  * Unit 9: subscribes to `pflow.lastRun` + `ui.hideLabels` and consumes
  * `getBusOverlayState` to tint the bar on a limit violation + show a
- * voltage / angle label below it when post-PF.
+ * voltage / angle label below it when post-PF. The bar's tint is judged
+ * against the bus's own limits (`data.voltageLimits`), and a bus near or
+ * past a limit also carries a triangle beside its name (`VoltageMarker`)
+ * that stays when "Hide labels" is on, so the state does not rest on
+ * colour alone.
  */
 export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
   const d = data as SldNodeData;
   const pflowResult = usePflowStore((s) => s.lastRun);
   const hideLabels = useUiStore((s) => s.hideLabels);
-  const pflowOverlay = getBusOverlayState(d.idx, pflowResult, hideLabels);
+  const pflowOverlay = getBusOverlayState(d.idx, pflowResult, hideLabels, d.voltageLimits);
   const isPendingDependent = useIsPendingDependent(d.kind, d.idx);
 
   // v0.2 Unit 5: streaming-overlay layer.
@@ -116,6 +115,7 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
   const activeRunId = useRunsStore((s) => s.activeRunId);
   const frameOverlay = useFrameBusOverlay(activeRunId, d.idx);
   const effectiveBand = frameOverlay !== null ? frameOverlay.band : pflowOverlay.band;
+  const effectiveSide = frameOverlay !== null ? frameOverlay.side : pflowOverlay.side;
   const effectiveColorClass =
     frameOverlay !== null ? colorClassForBand(frameOverlay.band) : pflowOverlay.color_class;
 
@@ -124,7 +124,7 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
   // a `data-[selected=true]` selector so the visual stays in lockstep.
   const isSldSelected = d.sldSelected === true;
   const visuallySelected = selected || isSldSelected;
-  const barBg = BAR_BG_BY_BAND[effectiveBand] ?? 'bg-foreground';
+  const barBg = barClassForBand(effectiveBand);
   // `effectiveColorClass` (border-success/...) is retained on the node so
   // existing band-colour assertions keep working AND assistive tooling can
   // read the band off the wrapper; it's visually inert (no border drawn).
@@ -134,6 +134,7 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
       data-kind="bus"
       data-idx={d.idx}
       data-band={effectiveBand}
+      data-limit-side={effectiveSide ?? undefined}
       data-streaming={frameOverlay !== null ? 'true' : undefined}
       data-pending-dependent={isPendingDependent ? 'true' : undefined}
       data-selected={visuallySelected ? 'true' : undefined}
@@ -183,8 +184,15 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
       {/* Label block, offset below the bar. A faint backing keeps the text
           legible where a feeder line passes behind it. */}
       <div className="bg-background/70 mt-1 flex flex-col items-center gap-0 rounded px-1 leading-tight">
-        <span className="text-foreground font-mono text-[10px] leading-tight font-medium">
-          {d.name || d.idx}
+        <span className="flex items-center gap-0.5">
+          <span className="text-foreground font-mono text-[10px] leading-tight font-medium">
+            {d.name || d.idx}
+          </span>
+          <VoltageMarker
+            band={effectiveBand}
+            side={effectiveSide}
+            data-testid={`bus-limit-marker-${d.idx}`}
+          />
         </span>
         {pflowOverlay.voltage_label !== null ? (
           <span

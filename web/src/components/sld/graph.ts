@@ -9,6 +9,7 @@ import type { Edge, Node } from '@xyflow/react';
 import type { BusCoord, TopologyEntry, TopologySummary } from '@/api/types';
 import { subKindForControllerClass } from '@/lib/controllers';
 import { DYNAMIC_GENERATOR_KINDS, generatorRowKey } from '@/lib/topology';
+import { busVoltageLimits } from './voltage';
 import type { CoordsByIdx } from './sidecar';
 
 /** Cardinal handle sides exposed by every Bus node. */
@@ -902,6 +903,7 @@ export function buildGraph(
         idx,
         name: b.name,
         kind: b.kind,
+        voltageLimits: busVoltageLimits(b),
       },
     } satisfies Node;
   });

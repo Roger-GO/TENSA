@@ -14,15 +14,48 @@
  * ScrubControl test uses for its playback rAF.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import type { ReactNode } from 'react';
 import { render, cleanup, act } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useSldFrameOverlay } from '@/components/sld/overlay';
+import { queryKeys } from '@/api/queries';
+import { parseSessionId } from '@/api/types';
+import type { TopologyEntry, TopologySummary } from '@/api/types';
 import { useRunsStore } from '@/store/runs';
 import { usePlotStore } from '@/store/plot';
 import { useAnimationStore } from '@/store/animation';
+import { useSessionStore } from '@/store/session';
 
 function HookHost() {
   useSldFrameOverlay();
   return null;
+}
+
+let queryClient: QueryClient;
+
+/** Mount the hook where it lives in the app: under the query client. */
+function renderHost() {
+  return render(<HookHost />, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  });
+}
+
+const SESSION = parseSessionId('s-limits');
+
+function busEntry(idx: string, params: TopologyEntry['params']): TopologyEntry {
+  return { idx, name: `b${idx}`, kind: 'Bus', params };
+}
+
+function topologyOf(...buses: TopologyEntry[]): TopologySummary {
+  return { state: 'committed', buses, lines: [], transformers: [], generators: [], loads: [] };
+}
+
+/** Open a session whose cached topology holds these buses. */
+function openSessionWith(topology: TopologySummary): void {
+  useSessionStore.setState({ sessionId: SESSION });
+  queryClient.setQueryData(queryKeys.topology(SESSION), topology);
 }
 
 function installRafScheduler() {
@@ -78,6 +111,7 @@ function reset() {
     playingByRun: {},
   });
   useAnimationStore.setState({ busOverlayByRun: {} });
+  useSessionStore.setState({ sessionId: null });
 }
 
 describe('useSldFrameOverlay', () => {
@@ -85,17 +119,19 @@ describe('useSldFrameOverlay', () => {
 
   beforeEach(() => {
     reset();
+    queryClient = new QueryClient();
     scheduler = installRafScheduler();
   });
 
   afterEach(() => {
     cleanup();
+    queryClient.clear();
     scheduler.restore();
     reset();
   });
 
   it('does not schedule rAF when there is no active run', () => {
-    render(<HookHost />);
+    renderHost();
     expect(scheduler.hasPending()).toBe(false);
   });
 
@@ -105,7 +141,7 @@ describe('useSldFrameOverlay', () => {
       Bus_1_v: [1.0, 0.96, 0.92],
       Bus_2_v: [1.0, 1.0, 1.04],
     });
-    render(<HookHost />);
+    renderHost();
     // First tick processes the latest frame (live mode → seqCount-1 = 2).
     scheduler.tick();
     const overlay = useAnimationStore.getState().busOverlayByRun['r1'];
@@ -120,7 +156,7 @@ describe('useSldFrameOverlay', () => {
       Bus_1_v: [1.0, 1.0, 0.92],
       Bus_2_v: [1.0, 1.0, 1.0],
     });
-    render(<HookHost />);
+    renderHost();
     // Tick once: live mode → bus 1 should be danger (frame 2).
     scheduler.tick();
     expect(useAnimationStore.getState().busOverlayByRun['r1']!.get('1')?.band).toBe('danger');
@@ -139,7 +175,7 @@ describe('useSldFrameOverlay', () => {
       Bus_1_v: [1.0, 1.0, 0.92],
       Bus_2_v: [1.0, 1.0, 1.0],
     });
-    render(<HookHost />);
+    renderHost();
     scheduler.tick();
     expect(useAnimationStore.getState().busOverlayByRun['r1']).toBeDefined();
 
@@ -167,7 +203,7 @@ describe('useSldFrameOverlay', () => {
       useRunsStore.getState().markRunDone('r1', 2.0);
       usePlotStore.getState().setScrubT('r1', 1.0);
     });
-    render(<HookHost />);
+    renderHost();
     scheduler.tick();
     // Frame closest to t=1 is index 1 → bus 1 should be in warning.
     expect(useAnimationStore.getState().busOverlayByRun['r1']!.get('1')?.band).toBe('warning');
@@ -178,7 +214,7 @@ describe('useSldFrameOverlay', () => {
     appendRows('r1', [0, 1], {
       Bus_1_v: [1.0, 0.92],
     });
-    render(<HookHost />);
+    renderHost();
     scheduler.tick();
     expect(useAnimationStore.getState().busOverlayByRun['r1']).toBeDefined();
 
@@ -205,7 +241,7 @@ describe('useSldFrameOverlay', () => {
     appendRows('r1', [0, 1], {
       Bus_1_v: [1.0, 0.92],
     });
-    const { unmount } = render(<HookHost />);
+    const { unmount } = renderHost();
     scheduler.tick();
     expect(useAnimationStore.getState().busOverlayByRun['r1']).toBeDefined();
     expect(scheduler.hasPending()).toBe(true);
@@ -223,12 +259,71 @@ describe('useSldFrameOverlay', () => {
     const valuesByCol: Record<string, number[]> = {};
     for (const c of cols) valuesByCol[c] = [1.0, 1.0];
     appendRows('r1', tArr, valuesByCol);
-    render(<HookHost />);
+    renderHost();
     scheduler.tick();
     expect(useAnimationStore.getState().busOverlayByRun['r1']!.size).toBe(14);
     // After the tick, EXACTLY one rAF is scheduled (not 14).
     expect(scheduler.hasPending()).toBe(true);
     scheduler.tick();
     expect(scheduler.hasPending()).toBe(true);
+  });
+
+  describe("the open case's bus limits", () => {
+    it("classifies each streamed bus on its own limits from the case's topology", () => {
+      openSessionWith(
+        topologyOf(
+          busEntry('1', { vmin: 0.9, vmax: 1.1 }),
+          busEntry('2', { vmin: 0.95, vmax: 1.05 }),
+          busEntry('3', {}),
+        ),
+      );
+      seedRun('r1', ['Bus_1_v', 'Bus_2_v', 'Bus_3_v']);
+      appendRows('r1', [0, 1], {
+        Bus_1_v: [1.0, 1.07],
+        Bus_2_v: [1.0, 1.07],
+        Bus_3_v: [1.0, 1.07],
+      });
+      renderHost();
+      scheduler.tick();
+      const overlay = useAnimationStore.getState().busOverlayByRun['r1']!;
+      // 1.07 pu is clear on the wide 0.9 / 1.1 band, past 1.05 on the other two.
+      expect(overlay.get('1')).toMatchObject({ band: 'success', side: null });
+      expect(overlay.get('2')).toMatchObject({ band: 'danger', side: 'high' });
+      expect(overlay.get('3')).toMatchObject({ band: 'danger', side: 'high' });
+    });
+
+    it('uses the default limits until the topology has been fetched', () => {
+      useSessionStore.setState({ sessionId: SESSION });
+      seedRun('r1');
+      appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.07], Bus_2_v: [1.0, 1.0] });
+      renderHost();
+      scheduler.tick();
+      const overlay = useAnimationStore.getState().busOverlayByRun['r1']!;
+      expect(overlay.get('1')).toMatchObject({ band: 'danger', side: 'high' });
+      expect(overlay.get('2')).toMatchObject({ band: 'success', side: null });
+    });
+
+    it('picks up an edited limit on the next tick, without remounting', () => {
+      openSessionWith(topologyOf(busEntry('1', { vmin: 0.9, vmax: 1.1 })));
+      seedRun('r1', ['Bus_1_v']);
+      appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.07] });
+      renderHost();
+      scheduler.tick();
+      expect(useAnimationStore.getState().busOverlayByRun['r1']!.get('1')?.band).toBe('success');
+
+      // The user tightens the bus's vmax in the inspector; the topology refetch
+      // lands in the query cache.
+      act(() => {
+        queryClient.setQueryData(
+          queryKeys.topology(SESSION),
+          topologyOf(busEntry('1', { vmin: 0.9, vmax: 1.06 })),
+        );
+      });
+      scheduler.tick();
+      expect(useAnimationStore.getState().busOverlayByRun['r1']!.get('1')).toMatchObject({
+        band: 'danger',
+        side: 'high',
+      });
+    });
   });
 });

@@ -37,11 +37,15 @@ import { useUiStore } from '@/store/ui';
 import { parseRunId } from '@/api/types';
 import type { PflowResult } from '@/api/types';
 
-function nodeProps(idx: string, name = `b${idx}`): Parameters<typeof BusNode>[0] {
+function nodeProps(
+  idx: string,
+  name = `b${idx}`,
+  voltageLimits?: { vmin: number; vmax: number },
+): Parameters<typeof BusNode>[0] {
   // Minimal NodeProps shape; the component only reads `data` + `selected`.
   return {
     id: idx,
-    data: { idx, name, kind: 'Bus' },
+    data: { idx, name, kind: 'Bus', ...(voltageLimits ? { voltageLimits } : {}) },
     selected: false,
     type: 'bus',
     isConnectable: true,
@@ -117,6 +121,158 @@ describe('BusNode — v0.1 PF-result coloring path (no active run)', () => {
   });
 });
 
+describe('BusNode, the bus own voltage limits', () => {
+  beforeEach(resetStores);
+  afterEach(() => {
+    cleanup();
+    resetStores();
+  });
+
+  function solvedAt(idx: string, v: number): void {
+    usePflowStore.setState({
+      lastRun: makePflow({ bus_voltages: { [idx]: v }, bus_angles: { [idx]: 0 } }),
+      isRunning: false,
+      error: null,
+    });
+  }
+
+  it('judges the bus on the limits stamped on its node data', () => {
+    solvedAt('1', 1.07);
+    const wide = { vmin: 0.9, vmax: 1.1 };
+    // Past the default 1.05, inside the bus's own 1.10.
+    const own = render(<BusNode {...nodeProps('1', 'b1', wide)} />);
+    expect(own.getByTestId('bus-node-1')).toHaveAttribute('data-band', 'success');
+    own.unmount();
+    const fallback = render(<BusNode {...nodeProps('1')} />);
+    expect(fallback.getByTestId('bus-node-1')).toHaveAttribute('data-band', 'danger');
+  });
+
+  it('flags a bus a tighter limit puts out of band', () => {
+    solvedAt('2', 1.0);
+    const { getByTestId } = render(
+      <BusNode {...nodeProps('2', 'b2', { vmin: 1.01, vmax: 1.04 })} />,
+    );
+    expect(getByTestId('bus-node-2')).toHaveAttribute('data-band', 'danger');
+    expect(getByTestId('bus-node-2')).toHaveAttribute('data-limit-side', 'low');
+  });
+});
+
+describe('BusNode, limit marker (a sign that does not rest on colour)', () => {
+  beforeEach(resetStores);
+  afterEach(() => {
+    cleanup();
+    resetStores();
+  });
+
+  function solvedAt(idx: string, v: number): void {
+    usePflowStore.setState({
+      lastRun: makePflow({ bus_voltages: { [idx]: v }, bus_angles: { [idx]: 0 } }),
+      isRunning: false,
+      error: null,
+    });
+  }
+
+  it('draws no marker before a power flow or for a bus in the clear', () => {
+    const before = render(<BusNode {...nodeProps('1')} />);
+    expect(before.queryByTestId('bus-limit-marker-1')).toBeNull();
+    expect(before.getByTestId('bus-node-1')).not.toHaveAttribute('data-limit-side');
+    before.unmount();
+    solvedAt('1', 1.0);
+    const clear = render(<BusNode {...nodeProps('1')} />);
+    expect(clear.queryByTestId('bus-limit-marker-1')).toBeNull();
+  });
+
+  it('marks a bus beyond its upper limit with a filled up triangle', () => {
+    solvedAt('5', 1.08);
+    const { getByTestId, getByRole } = render(<BusNode {...nodeProps('5')} />);
+    const marker = getByTestId('bus-limit-marker-5');
+    expect(marker).toHaveAttribute('data-band', 'danger');
+    expect(marker).toHaveAttribute('data-side', 'high');
+    expect(getByRole('img', { name: 'Voltage beyond its upper limit' })).toBe(marker);
+    expect(getByTestId('bus-node-5')).toHaveAttribute('data-limit-side', 'high');
+  });
+
+  it('marks a bus beyond its lower limit with a down triangle', () => {
+    solvedAt('6', 0.91);
+    const { getByTestId } = render(<BusNode {...nodeProps('6')} />);
+    expect(getByTestId('bus-limit-marker-6')).toHaveAttribute('data-side', 'low');
+    expect(getByTestId('bus-limit-marker-6')).toHaveAttribute(
+      'aria-label',
+      'Voltage beyond its lower limit',
+    );
+  });
+
+  it('tells a bus near a limit from one beyond it by the shape, not the colour', () => {
+    solvedAt('7', 0.96);
+    const near = render(<BusNode {...nodeProps('7')} />);
+    const nearMarker = near.getByTestId('bus-limit-marker-7');
+    expect(nearMarker).toHaveAttribute('data-band', 'warning');
+    expect(nearMarker).toHaveAttribute('aria-label', 'Voltage near its lower limit');
+    const nearFill = nearMarker.querySelector('polygon')!.getAttribute('class');
+    near.unmount();
+    solvedAt('7', 0.92);
+    const beyond = render(<BusNode {...nodeProps('7')} />);
+    const beyondFill = beyond
+      .getByTestId('bus-limit-marker-7')
+      .querySelector('polygon')!
+      .getAttribute('class');
+    expect(nearFill).toContain('fill-transparent');
+    expect(beyondFill).toContain('fill-danger');
+  });
+
+  it('keeps the marker when "Hide labels" removes the value labels', () => {
+    solvedAt('8', 1.09);
+    useUiStore.setState({ hideLabels: true });
+    const { getByTestId, queryByTestId } = render(<BusNode {...nodeProps('8')} />);
+    expect(queryByTestId('bus-voltage-8')).toBeNull();
+    expect(getByTestId('bus-limit-marker-8')).toHaveAttribute('data-side', 'high');
+  });
+
+  it('follows the bus own limits: a wide band takes the marker away', () => {
+    solvedAt('9', 1.07);
+    const { queryByTestId } = render(
+      <BusNode {...nodeProps('9', 'b9', { vmin: 0.9, vmax: 1.1 })} />,
+    );
+    expect(queryByTestId('bus-limit-marker-9')).toBeNull();
+  });
+
+  it('takes the marker from the streaming overlay and turns it with the side', () => {
+    solvedAt('3', 1.0);
+    useRunsStore.setState({ runs: {}, activeRunId: 'run-x' });
+    useAnimationStore
+      .getState()
+      .setBusOverlayForRun(
+        'run-x',
+        new Map([['3', { band: 'danger', side: 'low', voltage: 0.8 }]]),
+      );
+    const { getByTestId } = render(<BusNode {...nodeProps('3')} />);
+    expect(getByTestId('bus-limit-marker-3')).toHaveAttribute('data-side', 'low');
+
+    act(() => {
+      useAnimationStore
+        .getState()
+        .setBusOverlayForRun(
+          'run-x',
+          new Map([['3', { band: 'danger', side: 'high', voltage: 1.3 }]]),
+        );
+    });
+    expect(getByTestId('bus-limit-marker-3')).toHaveAttribute('data-side', 'high');
+    expect(getByTestId('bus-node-3')).toHaveAttribute('data-limit-side', 'high');
+
+    act(() => {
+      useAnimationStore
+        .getState()
+        .setBusOverlayForRun(
+          'run-x',
+          new Map([['3', { band: 'success', side: null, voltage: 1.0 }]]),
+        );
+    });
+    expect(
+      getByTestId('bus-node-3').querySelector('[data-testid="bus-limit-marker-3"]'),
+    ).toBeNull();
+  });
+});
+
 describe('BusNode — v0.2 streaming overlay (active run)', () => {
   beforeEach(resetStores);
   afterEach(() => {
@@ -131,7 +287,10 @@ describe('BusNode — v0.2 streaming overlay (active run)', () => {
     });
     useAnimationStore
       .getState()
-      .setBusOverlayForRun('run-x', new Map([['7', { band: 'danger', voltage: 0.92 }]]));
+      .setBusOverlayForRun(
+        'run-x',
+        new Map([['7', { band: 'danger', side: 'low', voltage: 0.92 }]]),
+      );
     const { getByTestId } = render(<BusNode {...nodeProps('7')} />);
     const node = getByTestId('bus-node-7');
     expect(node).toHaveAttribute('data-band', 'danger');
@@ -150,7 +309,10 @@ describe('BusNode — v0.2 streaming overlay (active run)', () => {
     useRunsStore.setState({ runs: {}, activeRunId: 'run-x' });
     useAnimationStore
       .getState()
-      .setBusOverlayForRun('run-x', new Map([['3', { band: 'danger', voltage: 0.85 }]]));
+      .setBusOverlayForRun(
+        'run-x',
+        new Map([['3', { band: 'danger', side: 'low', voltage: 0.85 }]]),
+      );
     const { getByTestId } = render(<BusNode {...nodeProps('3')} />);
     const node = getByTestId('bus-node-3');
     expect(node).toHaveAttribute('data-band', 'danger');
@@ -172,7 +334,10 @@ describe('BusNode — v0.2 streaming overlay (active run)', () => {
     useRunsStore.setState({ runs: {}, activeRunId: 'run-x' });
     useAnimationStore
       .getState()
-      .setBusOverlayForRun('run-x', new Map([['1', { band: 'success', voltage: 1.0 }]]));
+      .setBusOverlayForRun(
+        'run-x',
+        new Map([['1', { band: 'success', side: null, voltage: 1.0 }]]),
+      );
     const { getByTestId } = render(<BusNode {...nodeProps('2')} />);
     const node = getByTestId('bus-node-2');
     expect(node).toHaveAttribute('data-band', 'danger');
@@ -189,7 +354,10 @@ describe('BusNode — v0.2 streaming overlay (active run)', () => {
     useRunsStore.setState({ runs: {}, activeRunId: 'run-x' });
     useAnimationStore
       .getState()
-      .setBusOverlayForRun('run-x', new Map([['4', { band: 'warning', voltage: 0.96 }]]));
+      .setBusOverlayForRun(
+        'run-x',
+        new Map([['4', { band: 'warning', side: 'low', voltage: 0.96 }]]),
+      );
     const { getByTestId, rerender } = render(<BusNode {...nodeProps('4')} />);
     expect(getByTestId('bus-node-4')).toHaveAttribute('data-band', 'warning');
 
@@ -215,7 +383,10 @@ describe('BusNode — v0.2 streaming overlay (active run)', () => {
     useRunsStore.setState({ runs: {}, activeRunId: 'run-x' });
     useAnimationStore
       .getState()
-      .setBusOverlayForRun('run-x', new Map([['8', { band: 'danger', voltage: 0.85 }]]));
+      .setBusOverlayForRun(
+        'run-x',
+        new Map([['8', { band: 'danger', side: 'low', voltage: 0.85 }]]),
+      );
     const { getByTestId } = render(<BusNode {...nodeProps('8')} />);
     expect(getByTestId('bus-voltage-8')).toHaveTextContent('1.000 pu');
   });
@@ -227,7 +398,10 @@ describe('BusNode — v0.2 streaming overlay (active run)', () => {
     useRunsStore.setState({ runs: {}, activeRunId: 'run-x' });
     useAnimationStore
       .getState()
-      .setBusOverlayForRun('run-x', new Map([['1', { band: 'success', voltage: 1.0 }]]));
+      .setBusOverlayForRun(
+        'run-x',
+        new Map([['1', { band: 'success', side: null, voltage: 1.0 }]]),
+      );
     const ref1 = useAnimationStore.getState().busOverlayByRun['run-x'];
 
     const { getByTestId } = render(<BusNode {...nodeProps('1')} />);
@@ -235,7 +409,10 @@ describe('BusNode — v0.2 streaming overlay (active run)', () => {
 
     useAnimationStore
       .getState()
-      .setBusOverlayForRun('run-x', new Map([['1', { band: 'success', voltage: 1.001 }]]));
+      .setBusOverlayForRun(
+        'run-x',
+        new Map([['1', { band: 'success', side: null, voltage: 1.001 }]]),
+      );
     const ref2 = useAnimationStore.getState().busOverlayByRun['run-x'];
     // No setState fired → BusNode subscriber didn't see a change → no
     // re-render. We assert the upstream invariant (no ref change) which
@@ -247,14 +424,20 @@ describe('BusNode — v0.2 streaming overlay (active run)', () => {
     useRunsStore.setState({ runs: {}, activeRunId: 'run-x' });
     useAnimationStore
       .getState()
-      .setBusOverlayForRun('run-x', new Map([['9', { band: 'success', voltage: 1.0 }]]));
+      .setBusOverlayForRun(
+        'run-x',
+        new Map([['9', { band: 'success', side: null, voltage: 1.0 }]]),
+      );
     const { getByTestId, rerender } = render(<BusNode {...nodeProps('9')} />);
     expect(getByTestId('bus-node-9')).toHaveAttribute('data-band', 'success');
 
     act(() => {
       useAnimationStore
         .getState()
-        .setBusOverlayForRun('run-x', new Map([['9', { band: 'warning', voltage: 0.96 }]]));
+        .setBusOverlayForRun(
+          'run-x',
+          new Map([['9', { band: 'warning', side: 'low', voltage: 0.96 }]]),
+        );
     });
     rerender(<BusNode {...nodeProps('9')} />);
     expect(getByTestId('bus-node-9')).toHaveAttribute('data-band', 'warning');
@@ -287,14 +470,20 @@ describe('BusNode — Unit 19 voltage transition easing', () => {
     useRunsStore.setState({ runs: {}, activeRunId: 'run-x' });
     useAnimationStore
       .getState()
-      .setBusOverlayForRun('run-x', new Map([['1', { band: 'success', voltage: 1.0 }]]));
+      .setBusOverlayForRun(
+        'run-x',
+        new Map([['1', { band: 'success', side: null, voltage: 1.0 }]]),
+      );
     const { getByTestId, rerender } = render(<BusNode {...nodeProps('1')} />);
     const transitionBefore = getByTestId('bus-bar-1').style.transition;
 
     act(() => {
       useAnimationStore
         .getState()
-        .setBusOverlayForRun('run-x', new Map([['1', { band: 'danger', voltage: 0.85 }]]));
+        .setBusOverlayForRun(
+          'run-x',
+          new Map([['1', { band: 'danger', side: 'low', voltage: 0.85 }]]),
+        );
     });
     rerender(<BusNode {...nodeProps('1')} />);
     expect(getByTestId('bus-bar-1').style.transition).toBe(transitionBefore);
@@ -315,7 +504,10 @@ describe('BusNode — edge cases', () => {
     useRunsStore.setState({ runs: {}, activeRunId: 'run-x' });
     useAnimationStore
       .getState()
-      .setBusOverlayForRun('run-y', new Map([['1', { band: 'danger', voltage: 0.85 }]]));
+      .setBusOverlayForRun(
+        'run-y',
+        new Map([['1', { band: 'danger', side: 'low', voltage: 0.85 }]]),
+      );
     const { getByTestId } = render(<BusNode {...nodeProps('1')} />);
     const node = getByTestId('bus-node-1');
     expect(node).toHaveAttribute('data-band', 'neutral');
@@ -326,7 +518,10 @@ describe('BusNode — edge cases', () => {
     useRunsStore.setState({ runs: {}, activeRunId: null });
     useAnimationStore
       .getState()
-      .setBusOverlayForRun('run-x', new Map([['1', { band: 'danger', voltage: 0.85 }]]));
+      .setBusOverlayForRun(
+        'run-x',
+        new Map([['1', { band: 'danger', side: 'low', voltage: 0.85 }]]),
+      );
     const { getByTestId } = render(<BusNode {...nodeProps('1')} />);
     const node = getByTestId('bus-node-1');
     expect(node).toHaveAttribute('data-band', 'neutral');

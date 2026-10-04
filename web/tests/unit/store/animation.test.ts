@@ -16,8 +16,17 @@ function reset(): void {
   useAnimationStore.setState({ busOverlayByRun: {} });
 }
 
-function entry(band: FrameBusOverlay['band'], voltage: number): FrameBusOverlay {
-  return { band, voltage };
+/** An overlay slot; the limit side follows the voltage unless a test names it. */
+function entry(
+  band: FrameBusOverlay['band'],
+  voltage: number,
+  side: FrameBusOverlay['side'] = band === 'success' || band === 'neutral'
+    ? null
+    : voltage < 1
+      ? 'low'
+      : 'high',
+): FrameBusOverlay {
+  return { band, side, voltage };
 }
 
 describe('animation slice — setBusOverlayForRun', () => {
@@ -35,6 +44,16 @@ describe('animation slice — setBusOverlayForRun', () => {
     expect(stored!.size).toBe(2);
     expect(stored!.get('1')?.band).toBe('success');
     expect(stored!.get('2')?.band).toBe('danger');
+  });
+
+  it('replaces the overlay when a bus moves to the other limit within the same band', () => {
+    useAnimationStore
+      .getState()
+      .setBusOverlayForRun('r1', new Map([['1', entry('danger', 0.9, 'low')]]));
+    useAnimationStore
+      .getState()
+      .setBusOverlayForRun('r1', new Map([['1', entry('danger', 1.2, 'high')]]));
+    expect(useAnimationStore.getState().busOverlayByRun['r1']!.get('1')?.side).toBe('high');
   });
 
   it('replaces the overlay when the band set changes', () => {
@@ -130,6 +149,15 @@ describe('bandsEqual (internal)', () => {
     const a: BusOverlayMap = new Map([['1', entry('success', 1.0)]]);
     const b: BusOverlayMap = new Map([['1', entry('warning', 0.96)]]);
     expect(__internal.bandsEqual(a, b)).toBe(false);
+  });
+
+  it('returns false when only the limit side changes within one band', () => {
+    // A bus can swing from under its lower limit to over its upper one
+    // without leaving danger, and its marker has to turn with it.
+    const a: BusOverlayMap = new Map([['1', entry('danger', 0.9, 'low')]]);
+    const b: BusOverlayMap = new Map([['1', entry('danger', 1.2, 'high')]]);
+    expect(__internal.bandsEqual(a, b)).toBe(false);
+    expect(__internal.bandsEqual(a, new Map([['1', entry('danger', 0.85, 'low')]]))).toBe(true);
   });
 
   it('returns false on size mismatch', () => {

@@ -10,18 +10,24 @@
  * - Bus / line nodes consume the helpers via plain function calls and
  *   stay thin.
  *
- * Voltage band thresholds default to the standard 0.95 / 1.05 pu limits
- * with a tighter 0.97 / 1.03 amber band; v0.5 will make these per-bus
- * configurable.
+ * A bus is judged against its own voltage limits (`voltage.ts`).
  */
 import { useEffect } from 'react';
-import type { PflowResult } from '@/api/types';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import type { PflowResult, TopologySummary } from '@/api/types';
+import { queryKeys } from '@/api/queries';
 import { useRunsStore, type RunRecord } from '@/store/runs';
+import { useSessionStore } from '@/store/session';
 import { findClosestFrameIdx, parseColumnName, usePlotStore } from '@/store/plot';
 import { useAnimationStore, type BusOverlayMap, type FrameBusOverlay } from '@/store/animation';
-
-/** Voltage band classification for a bus. */
-export type VoltageBand = 'success' | 'warning' | 'danger' | 'neutral';
+import {
+  DEFAULT_VOLTAGE_LIMITS,
+  assessVoltage,
+  busLimitsByIdx,
+  type VoltageBand,
+  type VoltageLimits,
+  type VoltageSide,
+} from './voltage';
 
 export interface BusOverlayState {
   /** "1.060 pu" or null if labels hidden / no PF / missing data. */
@@ -30,6 +36,8 @@ export interface BusOverlayState {
   angle_label: string | null;
   /** Classification used by the bus node to pick a stroke / border class. */
   band: VoltageBand;
+  /** The limit the voltage is near or past; `null` when `band` is success or neutral. */
+  side: VoltageSide | null;
   /** Tailwind border class to apply to the bus node container. */
   color_class: string;
 }
@@ -60,26 +68,6 @@ export interface DeviceOverlayState {
   has_data: boolean;
 }
 
-/** Default voltage thresholds (pu). */
-export const VOLTAGE_LIMITS = {
-  /** Below this is danger (limit-violation). */
-  danger_low: 0.95,
-  /** Below this (but above danger_low) is warning. */
-  warning_low: 0.97,
-  /** Above this (but below danger_high) is warning. */
-  warning_high: 1.03,
-  /** Above this is danger (limit-violation). */
-  danger_high: 1.05,
-} as const;
-
-/** Map a voltage to a band. Pure; exported for testing. */
-export function classifyVoltage(v: number): VoltageBand {
-  if (!Number.isFinite(v)) return 'neutral';
-  if (v < VOLTAGE_LIMITS.danger_low || v > VOLTAGE_LIMITS.danger_high) return 'danger';
-  if (v < VOLTAGE_LIMITS.warning_low || v > VOLTAGE_LIMITS.warning_high) return 'warning';
-  return 'success';
-}
-
 const BAND_COLOR_CLASS: Record<VoltageBand, string> = {
   success: 'border-success',
   warning: 'border-warning',
@@ -91,30 +79,34 @@ const NEUTRAL_BUS: BusOverlayState = {
   voltage_label: null,
   angle_label: null,
   band: 'neutral',
+  side: null,
   color_class: BAND_COLOR_CLASS.neutral,
 };
 
 /**
  * Compute the visual state for a bus given a PF result. Returns the
  * neutral state when there is no PF result, the run did not converge,
- * or the bus's idx is missing from the response.
+ * or the bus's idx is missing from the response. `limits` are the bus's
+ * own voltage limits (default: 0.95 / 1.05 pu).
  */
 export function getBusOverlayState(
   busIdx: string,
   pflowResult: PflowResult | null,
   hideLabels = false,
+  limits: VoltageLimits = DEFAULT_VOLTAGE_LIMITS,
 ): BusOverlayState {
   if (!pflowResult || !pflowResult.converged) return NEUTRAL_BUS;
   const v = pflowResult.bus_voltages[busIdx];
   const a = pflowResult.bus_angles[busIdx];
   if (v === undefined || !Number.isFinite(v)) return NEUTRAL_BUS;
-  const band = classifyVoltage(v);
+  const { band, side } = assessVoltage(v, limits);
   // Convert ANDES radians → degrees for the inspector / overlay label.
   const angleDeg = a !== undefined && Number.isFinite(a) ? (a * 180) / Math.PI : null;
   return {
     voltage_label: hideLabels ? null : `${v.toFixed(3)} pu`,
     angle_label: hideLabels || angleDeg === null ? null : `${angleDeg.toFixed(2)}°`,
     band,
+    side,
     color_class: BAND_COLOR_CLASS[band],
   };
 }
@@ -283,8 +275,9 @@ function busVoltageColumns(columnNames: readonly string[]): readonly BusVoltageC
  * Pure helper: extract the per-bus overlay slot for one frame index.
  *
  * Walks the run's ``Bus_<idx>_v`` columns (found once per run, see
- * ``busVoltageColumns``) and classifies each. Generator / line columns
- * are skipped (they don't drive bus coloring).
+ * ``busVoltageColumns``) and classifies each against that bus's entry in
+ * ``limits`` (a bus with none gets the 0.95 / 1.05 pu default). Generator
+ * / line columns are skipped (they don't drive bus coloring).
  *
  * Returns an empty map when ``frameIdx < 0`` (no buffered frame yet) so
  * callers can use a single ``map.size === 0`` check to distinguish "no
@@ -292,7 +285,11 @@ function busVoltageColumns(columnNames: readonly string[]): readonly BusVoltageC
  *
  * Pure / synchronous / no React — testable directly.
  */
-export function getFrameBusOverlay(run: RunRecord, frameIdx: number): BusOverlayMap {
+export function getFrameBusOverlay(
+  run: RunRecord,
+  frameIdx: number,
+  limits?: ReadonlyMap<string, VoltageLimits>,
+): BusOverlayMap {
   if (frameIdx < 0) return new Map();
   const out = new Map<string, FrameBusOverlay>();
   // Defensive: a frame index past the logical length would read into the
@@ -304,7 +301,8 @@ export function getFrameBusOverlay(run: RunRecord, frameIdx: number): BusOverlay
     const col = run.columns[name];
     if (!col) continue;
     const v = col[frameIdx]!;
-    out.set(busIdx, { band: classifyVoltage(v), voltage: v });
+    const { band, side } = assessVoltage(v, limits?.get(busIdx));
+    out.set(busIdx, { band, side, voltage: v });
   }
   return out;
 }
@@ -325,6 +323,18 @@ function isOverlayActive(state: RunRecord['state'], scrubT: number | null): bool
   if (state === 'starting' || state === 'streaming') return true;
   if (scrubT !== null) return true;
   return false;
+}
+
+/**
+ * The voltage limits of the open session's buses, read from the topology
+ * the query cache holds (``undefined`` until it has been fetched, which
+ * leaves every bus on the default limits).
+ */
+function cachedBusLimits(queryClient: QueryClient): ReadonlyMap<string, VoltageLimits> | undefined {
+  const sessionId = useSessionStore.getState().sessionId;
+  if (sessionId === null) return undefined;
+  const topology = queryClient.getQueryData<TopologySummary>(queryKeys.topology(sessionId));
+  return topology === undefined ? undefined : busLimitsByIdx(topology);
 }
 
 /**
@@ -355,6 +365,9 @@ function isOverlayActive(state: RunRecord['state'], scrubT: number | null): bool
  * the ScrubControl's playback loop.
  */
 export function useSldFrameOverlay(): void {
+  // Read in the tick, not subscribed to: the limits change only when the
+  // topology does, and a re-render of the App root is not worth that.
+  const queryClient = useQueryClient();
   // We re-run the effect (cancel + re-arm the rAF loop) on the two
   // edges that actually matter:
   //
@@ -410,7 +423,7 @@ export function useSldFrameOverlay(): void {
         return;
       }
       const frameIdx = pickFrameIdx(run, liveScrub);
-      const overlay = getFrameBusOverlay(run, frameIdx);
+      const overlay = getFrameBusOverlay(run, frameIdx, cachedBusLimits(queryClient));
       useAnimationStore.getState().setBusOverlayForRun(activeRunId, overlay);
       raf = requestAnimationFrame(tick);
     };
@@ -424,5 +437,5 @@ export function useSldFrameOverlay(): void {
       // until the next tick lands.
       useAnimationStore.getState().clearOverlayForRun(activeRunId);
     };
-  }, [activeRunId, activeRunState, scrubIsNull]);
+  }, [activeRunId, activeRunState, scrubIsNull, queryClient]);
 }

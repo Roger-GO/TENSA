@@ -243,6 +243,24 @@ describe('buildGraph', () => {
     expect(edges[0]?.target).toBe('2');
   });
 
+  it('stamps each bus node with the limits from its vmin and vmax, or the default when it has none', () => {
+    const topology = makeTopology([
+      { idx: 1, name: 'b1', kind: 'Bus', params: { vmin: 0.9, vmax: 1.1 } },
+      bus(2),
+      { idx: 3, name: 'b3', kind: 'Bus', params: { vmin: 1.2, vmax: 0.8 } },
+    ]);
+    const { nodes } = buildGraph(topology, {
+      '1': { x: 0, y: 0 },
+      '2': { x: 100, y: 0 },
+      '3': { x: 200, y: 0 },
+    });
+    const limitsOf = (id: string) => nodes.find((n) => n.id === id)?.data.voltageLimits;
+    expect(limitsOf('1')).toEqual({ vmin: 0.9, vmax: 1.1 });
+    expect(limitsOf('2')).toEqual({ vmin: 0.95, vmax: 1.05 });
+    // A pair with no band between them is not a limit.
+    expect(limitsOf('3')).toEqual({ vmin: 0.95, vmax: 1.05 });
+  });
+
   it('ignores branches missing bus1/bus2 params', () => {
     const topology = makeTopology(
       [bus(1), bus(2)],
@@ -439,6 +457,41 @@ describe('SldCanvas', () => {
       useUiStore.getState().setHideLabels(true);
     });
     expect(screen.queryByTestId(/-values-/)).not.toBeInTheDocument();
+  });
+
+  it('judges each bus on its own limits after a power flow, marks the ones out of band, and shows the legend', async () => {
+    // 1.07 pu is past the 0.95 / 1.05 default but inside bus 1's own 0.9 / 1.1.
+    mockTopology = makeTopology([
+      { idx: 1, name: 'b1', kind: 'Bus', params: { vmin: 0.9, vmax: 1.1 } },
+      bus(2),
+    ]);
+    seedSyntheticSelection();
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('bus-node-2')).toBeInTheDocument();
+    });
+    // Nothing is coloured before a power flow, so there is nothing to key.
+    expect(screen.queryByTestId('sld-voltage-legend')).not.toBeInTheDocument();
+
+    act(() => {
+      usePflowStore.getState().setLastRun({
+        ...PF_ROWS,
+        bus_voltages: { '1': 1.07, '2': 1.07 },
+        bus_angles: { '1': 0, '2': 0 },
+      });
+    });
+    expect(screen.getByTestId('bus-node-1')).toHaveAttribute('data-band', 'success');
+    expect(screen.queryByTestId('bus-limit-marker-1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('bus-node-2')).toHaveAttribute('data-band', 'danger');
+    expect(screen.getByTestId('bus-limit-marker-2')).toHaveAttribute('data-side', 'high');
+    expect(screen.getByTestId('sld-voltage-legend')).toBeInTheDocument();
+
+    // Hide labels keeps the marker: it is the colour-free sign of the violation.
+    act(() => {
+      useUiStore.getState().setHideLabels(true);
+    });
+    expect(screen.queryByTestId('bus-voltage-2')).not.toBeInTheDocument();
+    expect(screen.getByTestId('bus-limit-marker-2')).toBeInTheDocument();
   });
 
   it('writes the PF P / Q onto the one node of a machine that shares its idx with its generator', async () => {

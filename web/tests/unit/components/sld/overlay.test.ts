@@ -3,12 +3,12 @@
  * into per-bus / per-line visual state, AND the v0.2 frame-driven
  * helpers that derive the streaming overlay from a TDS run record.
  *
- * Voltage thresholds (per the plan): green 0.97-1.03 pu, amber
- * 0.95-0.97 + 1.03-1.05, red <0.95 or >1.05.
+ * A bus with no limits of its own is judged on the default band: green
+ * 0.97-1.03 pu, amber 0.95-0.97 + 1.03-1.05, red <0.95 or >1.05 (the rules
+ * themselves are covered in `voltage.test.ts`).
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
-  classifyVoltage,
   colorClassForBand,
   getBusOverlayState,
   getDeviceOverlayState,
@@ -33,38 +33,6 @@ function makeResult(overrides: Partial<PflowResult> = {}): PflowResult {
     ...overrides,
   };
 }
-
-describe('classifyVoltage', () => {
-  it('returns success for 1.00 pu', () => {
-    expect(classifyVoltage(1.0)).toBe('success');
-  });
-
-  it('returns success for the band edges (0.97, 1.03)', () => {
-    expect(classifyVoltage(0.97)).toBe('success');
-    expect(classifyVoltage(1.03)).toBe('success');
-  });
-
-  it('returns warning for 0.96', () => {
-    expect(classifyVoltage(0.96)).toBe('warning');
-  });
-
-  it('returns warning for 1.04', () => {
-    expect(classifyVoltage(1.04)).toBe('warning');
-  });
-
-  it('returns danger for 0.92', () => {
-    expect(classifyVoltage(0.92)).toBe('danger');
-  });
-
-  it('returns danger for 1.08', () => {
-    expect(classifyVoltage(1.08)).toBe('danger');
-  });
-
-  it('returns neutral for non-finite', () => {
-    expect(classifyVoltage(NaN)).toBe('neutral');
-    expect(classifyVoltage(Infinity)).toBe('neutral');
-  });
-});
 
 describe('getBusOverlayState', () => {
   it('returns neutral when pflowResult is null', () => {
@@ -148,6 +116,44 @@ describe('getBusOverlayState', () => {
     expect(result.color_class).toBe('border-danger');
     expect(result.voltage_label).toBeNull();
     expect(result.angle_label).toBeNull();
+  });
+});
+
+describe('getBusOverlayState against the bus limits', () => {
+  const wide = { vmin: 0.9, vmax: 1.1 };
+
+  it('judges the voltage on the limits it is given, not on 0.95 / 1.05', () => {
+    const pflow = makeResult({ bus_voltages: { '1': 1.07 }, bus_angles: { '1': 0 } });
+    // Past the default 1.05 limit, inside a case's own 1.10 one.
+    expect(getBusOverlayState('1', pflow).band).toBe('danger');
+    expect(getBusOverlayState('1', pflow, false, wide).band).toBe('success');
+  });
+
+  it('flags a voltage past a tighter limit than the default', () => {
+    const pflow = makeResult({ bus_voltages: { '1': 1.0 }, bus_angles: { '1': 0 } });
+    const tight = { vmin: 1.01, vmax: 1.04 };
+    const state = getBusOverlayState('1', pflow, false, tight);
+    expect(state.band).toBe('danger');
+    expect(state.side).toBe('low');
+    expect(state.color_class).toBe('border-danger');
+  });
+
+  it('names the limit side, and none for a bus in the clear or without a result', () => {
+    const pflow = makeResult({
+      bus_voltages: { '1': 1.0, '2': 0.93, '3': 1.07, '4': 1.04 },
+      bus_angles: {},
+    });
+    expect(getBusOverlayState('1', pflow).side).toBeNull();
+    expect(getBusOverlayState('2', pflow).side).toBe('low');
+    expect(getBusOverlayState('3', pflow).side).toBe('high');
+    expect(getBusOverlayState('4', pflow)).toMatchObject({ band: 'warning', side: 'high' });
+    expect(getBusOverlayState('9', pflow).side).toBeNull();
+    expect(getBusOverlayState('1', null).side).toBeNull();
+  });
+
+  it('keeps the side when the labels are hidden', () => {
+    const pflow = makeResult({ bus_voltages: { '1': 0.92 }, bus_angles: { '1': 0 } });
+    expect(getBusOverlayState('1', pflow, true).side).toBe('low');
   });
 });
 
@@ -426,6 +432,37 @@ describe('getFrameBusOverlay', () => {
     expect(f2.get('2')?.band).toBe('danger');
   });
 
+  it('classifies each bus on its own limits and falls back to the default for a bus with none', () => {
+    const run = makeRun({
+      seqCount: 1,
+      t: [0],
+      busColumns: { '1': [1.07], '2': [1.07], '3': [1.07] },
+    });
+    const limits = new Map([
+      ['1', { vmin: 0.9, vmax: 1.1 }],
+      ['2', { vmin: 0.95, vmax: 1.06 }],
+    ]);
+    const overlay = getFrameBusOverlay(run, 0, limits);
+    // Bus 1: inside its wide band. Bus 2: just past its upper limit.
+    // Bus 3: not in the map, so the 0.95 / 1.05 default applies.
+    expect(overlay.get('1')).toEqual({ band: 'success', side: null, voltage: 1.07 });
+    expect(overlay.get('2')).toEqual({ band: 'danger', side: 'high', voltage: 1.07 });
+    expect(overlay.get('3')).toEqual({ band: 'danger', side: 'high', voltage: 1.07 });
+    // No map at all is the same as every bus on the default.
+    expect(getFrameBusOverlay(run, 0).get('1')?.band).toBe('danger');
+  });
+
+  it('reports which limit a streamed voltage is near or past', () => {
+    const run = makeRun({
+      seqCount: 3,
+      t: [0, 1, 2],
+      busColumns: { '1': [1.0, 0.96, 1.08] },
+    });
+    expect(getFrameBusOverlay(run, 0).get('1')?.side).toBeNull();
+    expect(getFrameBusOverlay(run, 1).get('1')).toMatchObject({ band: 'warning', side: 'low' });
+    expect(getFrameBusOverlay(run, 2).get('1')).toMatchObject({ band: 'danger', side: 'high' });
+  });
+
   it('skips non-bus_v columns (Gen_*, Line_*) when building the bus overlay', () => {
     const run = makeRun({
       seqCount: 2,
@@ -454,7 +491,7 @@ describe('getFrameBusOverlay', () => {
     });
     const overlay = getFrameBusOverlay(run, 1);
     expect(overlay.size).toBe(1);
-    expect(overlay.get('1')).toEqual({ band: 'danger', voltage: 0.92 });
+    expect(overlay.get('1')).toEqual({ band: 'danger', side: 'low', voltage: 0.92 });
   });
 
   it("classifies a run's column names once, however often the overlay is read", () => {
@@ -493,7 +530,11 @@ describe('getFrameBusOverlay', () => {
         columns: { ...run.columns, Bus_1_v: new Float64Array([1.0, 0.9]) },
       };
       expect(grown.columnNames).toBe(run.columnNames);
-      expect(getFrameBusOverlay(grown, 1).get('1')).toEqual({ band: 'danger', voltage: 0.9 });
+      expect(getFrameBusOverlay(grown, 1).get('1')).toEqual({
+        band: 'danger',
+        side: 'low',
+        voltage: 0.9,
+      });
       expect(parse).not.toHaveBeenCalled();
     } finally {
       parse.mockRestore();

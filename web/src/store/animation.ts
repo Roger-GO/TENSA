@@ -32,12 +32,14 @@
  * Cleared per-run on ``clearOverlayForRun``.
  */
 import { create } from 'zustand';
-import type { VoltageBand } from '@/components/sld/overlay';
+import type { VoltageBand, VoltageSide } from '@/components/sld/voltage';
 
 /** Per-bus overlay slot used by BusNode at render time. */
 export interface FrameBusOverlay {
   /** Voltage band classification for the chosen frame. */
   band: VoltageBand;
+  /** The limit the voltage is near or past (drives the bus's limit marker); `null` in the clear. */
+  side: VoltageSide | null;
   /** The raw voltage value for the chosen frame (pu). */
   voltage: number;
 }
@@ -59,7 +61,7 @@ export interface AnimationState {
    * setter is unconditional so test code can drive it directly too.
    *
    * The setter compares the incoming map against the current one
-   * structurally (size + per-bus band) and SKIPS the state update when
+   * structurally (size + per-bus band and side) and SKIPS the state update when
    * nothing changed, so subscribers don't churn on every rAF tick.
    */
   setBusOverlayForRun: (runId: string, overlay: BusOverlayMap) => void;
@@ -77,7 +79,9 @@ export interface AnimationState {
 const EMPTY_MAP: BusOverlayMap = new Map();
 
 /**
- * Structural comparison: same set of bus idxs AND same band per bus?
+ * Structural comparison: same set of bus idxs AND same band and limit side
+ * per bus? (A bus can swing from below its lower limit to above its upper
+ * one without leaving the danger band, and its marker must follow.)
  * Voltage is intentionally ignored — re-renders should fire on band
  * boundaries, not on every sub-millivolt change. The voltage value is
  * still updated so consumers that show numerical labels (Unit 7+) see
@@ -89,7 +93,7 @@ function bandsEqual(a: BusOverlayMap, b: BusOverlayMap): boolean {
   for (const [idx, entry] of a) {
     const other = b.get(idx);
     if (!other) return false;
-    if (other.band !== entry.band) return false;
+    if (other.band !== entry.band || other.side !== entry.side) return false;
   }
   return true;
 }

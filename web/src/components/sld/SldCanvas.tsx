@@ -49,6 +49,7 @@ import { TransformerEdge } from './edges/TransformerEdge';
 import { StubEdge } from './edges/StubEdge';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
 import { SldEmptySystem } from './SldEmptySystem';
+import { SldVoltageLegend } from './SldVoltageLegend';
 import { useAutoLayout } from './useAutoLayout';
 import {
   buildSidecarLayout,
@@ -776,6 +777,10 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
             maskStrokeWidth={MINIMAP_MASK_STYLE.strokeWidth as number}
           />
         </ReactFlow>
+        {/* Key to the bus colours and limit markers. Inside the surface so
+            the PNG export carries it; it draws nothing until a power flow
+            or a run has put voltages on the diagram. */}
+        <SldVoltageLegend className="absolute top-2 left-2 z-10 w-[200px]" />
         {/* Floating search affordance — sits inside the canvas surface
             so it overlays the React Flow chrome rather than displacing
             it. Bottom-right matches the React Flow Controls position
