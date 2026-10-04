@@ -3,7 +3,10 @@
 ``POST /sessions`` — create a new session (server-generated id; rejects
 client-supplied ``session_id``).
 ``GET /sessions`` — list active sessions.
-``GET /sessions/{id}`` — describe one.
+``GET /sessions/{id}`` — describe one. Counts as activity: a session is reaped
+after ``--idle-timeout-seconds`` without any, so a client with nothing else to
+send (the web UI, whose open tab checks in every 30 seconds) keeps its session
+by calling this.
 ``DELETE /sessions/{id}`` — close one.
 """
 
@@ -100,12 +103,9 @@ async def list_sessions(request: Request) -> SessionList:
 
 @router.get(
     "/sessions/{session_id}",
-    openapi_extra={
-        "x-tensa-gui-location": "none",
-        "x-tensa-parity-deferred": "Session metadata is not surfaced standalone in the GUI; the web client tracks the active session client-side and never issues a bare GET /sessions/{id}.",
-    },
+    openapi_extra={"x-tensa-gui-location": "auto"},
     operation_id="getSession",
-    summary="Describe a session.",
+    summary="Describe a session and count the call as activity.",
     response_model=SessionDescriptor,
     responses={
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
@@ -115,7 +115,10 @@ async def get_session(
     session_id: str, request: Request
 ) -> SessionDescriptor:
     mgr = _manager(request)
-    if not mgr.is_alive(session_id):
+    # The call resets the idle clock. The web UI polls this while a tab is open,
+    # so a session whose user is thinking (or has stepped away) is not reaped
+    # under them; a 404 here is how the UI finds out the session is gone.
+    if not mgr.is_alive(session_id) or not mgr.touch(session_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"session {session_id!r} is not active",

@@ -12,14 +12,14 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | --- | --- |
 | `activity-panel` | 2 |
 | `analysis-panel` | 6 |
-| `auto` | 3 |
+| `auto` | 4 |
 | `bundle-dialog` | 2 |
 | `command-palette` | 5 |
 | `data-grid` | 1 |
 | `disturbance-panel` | 2 |
 | `inspector` | 9 |
 | `left-sidebar` | 2 |
-| `none` | 5 |
+| `none` | 4 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -35,7 +35,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | --- | --- | --- | --- |
 | `GET` | `/api/sessions` | `auto` |  |
 | `POST` | `/api/sessions` | `auto` |  |
-| `GET` | `/api/sessions/{session_id}` | `none` | Session metadata is not surfaced standalone in the GUI; the web client tracks the active session client-side and never issues a bare GET /sessions/{id}. |
+| `GET` | `/api/sessions/{session_id}` | `auto` |  |
 | `DELETE` | `/api/sessions/{session_id}` | `auto` |  |
 | `POST` | `/api/sessions/{session_id}/abort` | `run-controls` |  |
 | `POST` | `/api/sessions/{session_id}/blank` | `command-palette` |  |

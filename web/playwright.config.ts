@@ -26,9 +26,9 @@ import { defineConfig, devices } from '@playwright/test';
  *        --allow-origin http://127.0.0.1:5173
  *      pnpm test:e2e
  *
- * Every page load opens a session that stays until it idles out (three minutes
- * by default), and the default cap is 4. Past that the UI cannot open a case, so
- * the commands above raise it for repeated runs.
+ * Every page load opens a session that stays for as long as its tab is open and
+ * then idles out (three minutes by default), and the default cap is 4. Past that
+ * the UI cannot open a case, so the commands above raise it for repeated runs.
  *
  * The first load of a case generates ANDES code for its models, so the timeouts
  * below are generous for a cold cache.

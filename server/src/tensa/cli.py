@@ -125,7 +125,12 @@ def serve(
     idle_timeout_seconds: float = typer.Option(
         180.0,
         "--idle-timeout-seconds",
-        help="Sessions with no activity for this long are reaped.",
+        help=(
+            "Sessions with no activity for this long are reaped. A browser tab "
+            "with the UI open checks in every 30 seconds, so its session lives "
+            "until the tab closes; keep this above 60 seconds so a background "
+            "tab, whose timers the browser slows down, is not caught out."
+        ),
     ),
     sweep_workers: int | None = typer.Option(
         None,

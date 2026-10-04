@@ -15,7 +15,10 @@ Concurrency model:
   session (per-session run-cap is also enforced at the API layer).
 - A background reaper task scans for idle sessions every ``IDLE_REAP_TICK``
   seconds and calls ``close()`` on any session whose ``last_active`` is
-  older than ``idle_timeout``.
+  older than ``idle_timeout``. Every request to the worker stamps
+  ``last_active``, and so does ``touch``, which a client that has no request to
+  make (an open browser tab with nothing going on) calls to say it is still
+  there.
 
 A running TDS (batch or streaming) is stopped cooperatively: ``signal_abort``
 sets an event the worker checks on every ``callpert`` step. Closing a session
@@ -2022,6 +2025,21 @@ class SessionManager:
         with self._registry_lock:
             sess = self._sessions.get(session_id)
         return sess is not None and not sess.closed and sess.process.is_alive()
+
+    def touch(self, session_id: str) -> bool:
+        """Count a client's check-in as activity, so the idle reaper leaves the
+        session alone for another ``idle_timeout``.
+
+        Returns ``False`` when the session is gone (reaped, closed, never
+        existed) and ``True`` once it has been stamped. Cheap and lock-free:
+        it never talks to the worker, so it works while a job holds the session.
+        """
+        with self._registry_lock:
+            sess = self._sessions.get(session_id)
+        if sess is None or sess.closed:
+            return False
+        sess.last_active = time.monotonic()
+        return True
 
     # ----- internals -----
 

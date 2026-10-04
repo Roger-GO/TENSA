@@ -33,6 +33,7 @@ add-measurements | wait-for-job | wait-for-sweep | none, label: "..."}. Follow i
 ## Route inventory
 
 Sessions:        POST/GET /sessions · GET/DELETE /sessions/{id}
+                 (a session with no request for 180 s is reaped; GET /sessions/{id} counts as one)
 Case+topology:   POST /sessions/{id}/case · POST /sessions/{id}/reload · GET /sessions/{id}/topology
                  GET /sessions/{id}/topology/models/{model}/alterable_params · GET /sessions/{id}/connectivity
 Power flow:      POST /sessions/{id}/pflow · GET /sessions/{id}/operating-point

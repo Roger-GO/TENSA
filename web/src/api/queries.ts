@@ -262,6 +262,8 @@ export type ReportRoutine = 'pflow' | 'tds' | 'eig';
 export const queryKeys = {
   sessions: ['sessions'] as const,
   session: (id: SessionId) => ['sessions', id] as const,
+  /** The idle-timeout heartbeat poll, scoped per session (``useSessionHeartbeat``). */
+  sessionHeartbeat: (id: SessionId) => ['session-heartbeat', id] as const,
   topology: (id: SessionId) => ['topology', id] as const,
   workspaceFiles: ['workspace-files'] as const,
   sidecar: (casePath: WorkspacePath) => ['sidecar', casePath] as const,

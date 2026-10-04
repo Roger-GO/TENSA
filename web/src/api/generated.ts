@@ -29,7 +29,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Describe a session. */
+        /** Describe a session and count the call as activity. */
         get: operations["getSession"];
         put?: never;
         post?: never;
