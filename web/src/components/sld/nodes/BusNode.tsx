@@ -4,6 +4,8 @@ import type { NodeProps } from '@xyflow/react';
 import { cn } from '@/lib/cn';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
+import { useUnitsStore } from '@/store/units';
+import { voltageDisplay } from '@/lib/units';
 import { useIsPendingDependent } from '@/store/pendingDependents';
 import { useRunsStore } from '@/store/runs';
 import { useFrameBusOverlay } from '@/store/animation';
@@ -56,6 +58,12 @@ export interface SldNodeData extends Record<string, unknown> {
    */
   voltageLimits?: VoltageLimits;
   /**
+   * Bus nodes: the bus's rated voltage (kV), which the voltage label reads
+   * in under the actual-units display. Absent where the case sets none.
+   * Stamped by `buildGraph`.
+   */
+  baseKv?: number;
+  /**
    * Generator / load nodes: which side of the node its P / Q readout hangs
    * off, the side facing the parent bus given where the device finally
    * sits. Stamped by `buildGraph`.
@@ -95,7 +103,14 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
   const d = data as SldNodeData;
   const pflowResult = usePflowStore((s) => s.lastRun);
   const hideLabels = useUiStore((s) => s.hideLabels);
-  const pflowOverlay = getBusOverlayState(d.idx, pflowResult, hideLabels, d.voltageLimits);
+  const unitMode = useUnitsStore((s) => s.mode);
+  const pflowOverlay = getBusOverlayState(
+    d.idx,
+    pflowResult,
+    hideLabels,
+    d.voltageLimits,
+    voltageDisplay(unitMode, d.baseKv),
+  );
   const isPendingDependent = useIsPendingDependent(d.kind, d.idx);
 
   // v0.2 Unit 5: streaming-overlay layer.

@@ -261,6 +261,23 @@ describe('buildGraph', () => {
     expect(limitsOf('3')).toEqual({ vmin: 0.95, vmax: 1.05 });
   });
 
+  it('stamps each bus node with its rated voltage, and nothing when it has none', () => {
+    const topology = makeTopology([
+      { idx: 1, name: 'b1', kind: 'Bus', params: { Vn: 230 } },
+      { idx: 2, name: 'b2', kind: 'Bus', params: {} },
+      { idx: 3, name: 'b3', kind: 'Bus', params: { Vn: 0 } },
+    ]);
+    const { nodes } = buildGraph(topology, {
+      '1': { x: 0, y: 0 },
+      '2': { x: 100, y: 0 },
+      '3': { x: 200, y: 0 },
+    });
+    const dataOf = (id: string) => nodes.find((n) => n.id === id)?.data;
+    expect(dataOf('1')?.baseKv).toBe(230);
+    expect(dataOf('2')).not.toHaveProperty('baseKv');
+    expect(dataOf('3')).not.toHaveProperty('baseKv');
+  });
+
   it('ignores branches missing bus1/bus2 params', () => {
     const topology = makeTopology(
       [bus(1), bus(2)],

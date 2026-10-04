@@ -13,6 +13,7 @@ import type { ReactNode } from 'react';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useSessionStore } from '@/store/session';
+import { useUnitsStore } from '@/store/units';
 import { parseRunId, parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { PflowResult, TopologySummary } from '@/api/types';
 
@@ -113,6 +114,7 @@ describe('<ElementFormFields />', () => {
       editMode: 'run',
     });
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+    useUnitsStore.setState({ mode: 'pu' });
   });
 
   afterEach(() => {
@@ -121,6 +123,7 @@ describe('<ElementFormFields />', () => {
     useSessionStore.setState({ sessionId: null });
     useCaseStore.setState({ selection: null, selectedElement: null, editMode: 'run' });
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+    useUnitsStore.setState({ mode: 'pu' });
   });
 
   describe('saying how to edit', () => {
@@ -197,6 +200,29 @@ describe('<ElementFormFields />', () => {
       render(withQueryClient(<ElementFormFields />));
       expect(screen.getByTestId('inspector-bus-voltage')).toHaveTextContent('1.0000 pu');
       expect(screen.getByTestId('inspector-bus-limit-check')).toHaveTextContent('Within limits');
+    });
+
+    it('shows the voltage in kV under the actual-units display, and judges it in pu', () => {
+      mockTopology = topology('committed');
+      useUnitsStore.setState({ mode: 'actual' });
+      usePflowStore.setState({ lastRun: solved({ '1': 0.85 }) });
+      select('bus', '1');
+      render(withQueryClient(<ElementFormFields />));
+      // 0.85 pu on the 138 kV of BUS1.
+      expect(screen.getByTestId('inspector-bus-voltage')).toHaveTextContent('117.300 kV');
+      expect(screen.getByTestId('inspector-bus-limit-check')).toHaveTextContent('Below vmin');
+    });
+
+    it('keeps the voltage in pu under the actual-units display when the bus has no rated voltage', () => {
+      mockTopology = {
+        ...topology('committed'),
+        buses: [{ idx: 1, name: 'BUS1', kind: 'Bus', params: { vmax: 1.1, vmin: 0.9 } }],
+      };
+      useUnitsStore.setState({ mode: 'actual' });
+      usePflowStore.setState({ lastRun: solved({ '1': 0.85 }) });
+      select('bus', '1');
+      render(withQueryClient(<ElementFormFields />));
+      expect(screen.getByTestId('inspector-bus-voltage')).toHaveTextContent('0.8500 pu');
     });
 
     it('judges the bus on its own limits, not the 0.95 / 1.05 default', () => {

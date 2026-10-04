@@ -56,6 +56,7 @@ import {
   shouldGiveUp,
 } from './reconnect';
 import { useRunsStore } from '@/store/runs';
+import type { UnitBases } from '@/lib/units';
 
 const log = console;
 
@@ -192,6 +193,11 @@ export interface RunStreamOptions {
    */
   wsUrl: string;
   tdsArgs: TdsArgs;
+  /**
+   * The case's unit bases as they stand when the run is launched; recorded on
+   * the run so its values can be shown in kV and Hz after the case is gone.
+   */
+  bases?: UnitBases;
   onStart?: (event: StreamStartEvent) => void;
   onFrame?: (frame: DecodedFrame) => void;
   onDone?: (event: DoneEvent) => void;
@@ -557,6 +563,7 @@ export class RunStream {
         runId,
         tf: this.opts.tdsArgs.tf,
         columnNames,
+        bases: this.opts.bases,
       });
       this.opts.onStart?.({ runId, metadata });
     } else {

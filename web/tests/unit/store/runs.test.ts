@@ -44,6 +44,14 @@ describe('runs store — startRun + appendFrame', () => {
     expect(useRunsStore.getState().activeRunId).toBe('r1');
   });
 
+  it('startRun keeps the unit bases it is given on the record, and none when it is given none', () => {
+    const bases = { busKv: { '1': 230 }, freqHz: 60 };
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: ['Bus_1_v'], bases });
+    useRunsStore.getState().startRun({ runId: 'r2', tf: 1.0, columnNames: ['Bus_1_v'] });
+    expect(useRunsStore.getState().runs.r1?.bases).toEqual(bases);
+    expect(useRunsStore.getState().runs.r2).not.toHaveProperty('bases');
+  });
+
   it('appendFrame grows typed arrays geometrically and tracks seqCount', () => {
     useRunsStore.getState().startRun({
       runId: 'r1',

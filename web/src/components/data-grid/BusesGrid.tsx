@@ -15,7 +15,8 @@
  * voltage limits each bus is judged on, and the verdict in words, sit
  * right after V so a bus's voltage, its limits and where it stands read
  * across one row (the diagram says the same with a bar colour and a
- * triangle).
+ * triangle). The angle reads in degrees, as on the diagram and in the
+ * Inspector; V and its limits read in pu or kV with the display units.
  * p_inj / q_inj are computed client-side from the PF result's
  * per-device ``generator_outputs`` / ``load_consumption`` maps:
  * the net bus injection is Σ gen P − Σ load P at the bus (same for
@@ -27,6 +28,8 @@ import { useCurrentTopology } from '@/api/queries';
 import { usePflowStore } from '@/store/pflow';
 import { useSldStore } from '@/store/sld';
 import { useCaseStore } from '@/store/case';
+import { useUnitsStore } from '@/store/units';
+import { busBaseKv, radToDeg, unitBasesOf, type DisplayUnit } from '@/lib/units';
 import {
   DEFAULT_VOLTAGE_LIMITS,
   VOLTAGE_WARNING_MARGIN,
@@ -39,12 +42,14 @@ import type { PflowResult, TopologyEntry, TopologySummary } from '@/api/types';
 interface BusRow {
   idx: string;
   name: string;
+  /** In the unit the V column reads in (pu, or kV with the display units). */
   v: number | null;
-  /** The limits the bus is judged on (its own, or the 0.95 / 1.05 pu default). */
+  /** The limits the bus is judged on (its own, or the 0.95 / 1.05 pu default), in the same unit. */
   vmin: number;
   vmax: number;
   /** Where `v` stands against them, in words; null without a converged voltage. */
   limit_check: string | null;
+  /** Degrees. */
   theta: number | null;
   p_inj: number | null;
   q_inj: number | null;
@@ -94,37 +99,48 @@ export function computeBusInjections(pflow: PflowResult | null): Map<string, Bus
   return map;
 }
 
-const COLUMNS: ColumnConfig<BusRow>[] = [
-  { key: 'idx', label: 'idx', accessor: (r) => r.idx },
-  { key: 'name', label: 'name', accessor: (r) => r.name },
-  { key: 'v', label: 'V (pu)', numeric: true, accessor: (r) => r.v },
-  {
-    key: 'vmin',
-    label: 'vmin (pu)',
-    title: `Lower voltage limit this bus is judged on: the one the case sets, or ${DEFAULT_VOLTAGE_LIMITS.vmin} pu if it sets none`,
-    numeric: true,
-    accessor: (r) => r.vmin,
-  },
-  {
-    key: 'vmax',
-    label: 'vmax (pu)',
-    title: `Upper voltage limit this bus is judged on: the one the case sets, or ${DEFAULT_VOLTAGE_LIMITS.vmax} pu if it sets none`,
-    numeric: true,
-    accessor: (r) => r.vmax,
-  },
-  {
-    key: 'limit_check',
-    label: 'Limit check',
-    title: `Where V stands against this bus's own vmin and vmax: within them, near one (inside ${VOLTAGE_WARNING_MARGIN} pu of it) or beyond one. Filled in once a power flow has run.`,
-    width: 112,
-    accessor: (r) => r.limit_check,
-  },
-  { key: 'theta', label: 'θ (rad)', numeric: true, accessor: (r) => r.theta },
-  { key: 'p_inj', label: 'P (MW)', numeric: true, accessor: (r) => r.p_inj },
-  { key: 'q_inj', label: 'Q (MVAr)', numeric: true, accessor: (r) => r.q_inj },
-  { key: 'area', label: 'area', accessor: (r) => r.area },
-  { key: 'zone', label: 'zone', accessor: (r) => r.zone },
-];
+/** The columns, with V and its limits labelled in the unit they read in. */
+function columnsFor(voltageUnit: DisplayUnit): ColumnConfig<BusRow>[] {
+  const inKv =
+    voltageUnit === 'kV' ? '. Shown in kV: the pu limit times the rated voltage of the bus.' : '';
+  return [
+    { key: 'idx', label: 'idx', accessor: (r) => r.idx },
+    { key: 'name', label: 'name', accessor: (r) => r.name },
+    { key: 'v', label: `V (${voltageUnit})`, numeric: true, accessor: (r) => r.v },
+    {
+      key: 'vmin',
+      label: `vmin (${voltageUnit})`,
+      title: `Lower voltage limit this bus is judged on: the one the case sets, or ${DEFAULT_VOLTAGE_LIMITS.vmin} pu if it sets none${inKv}`,
+      numeric: true,
+      accessor: (r) => r.vmin,
+    },
+    {
+      key: 'vmax',
+      label: `vmax (${voltageUnit})`,
+      title: `Upper voltage limit this bus is judged on: the one the case sets, or ${DEFAULT_VOLTAGE_LIMITS.vmax} pu if it sets none${inKv}`,
+      numeric: true,
+      accessor: (r) => r.vmax,
+    },
+    {
+      key: 'limit_check',
+      label: 'Limit check',
+      title: `Where V stands against this bus's own vmin and vmax: within them, near one (inside ${VOLTAGE_WARNING_MARGIN} pu of it) or beyond one. Filled in once a power flow has run.`,
+      width: 112,
+      accessor: (r) => r.limit_check,
+    },
+    {
+      key: 'theta',
+      label: 'θ (°)',
+      title: 'Voltage angle in degrees',
+      numeric: true,
+      accessor: (r) => r.theta,
+    },
+    { key: 'p_inj', label: 'P (MW)', numeric: true, accessor: (r) => r.p_inj },
+    { key: 'q_inj', label: 'Q (MVAr)', numeric: true, accessor: (r) => r.q_inj },
+    { key: 'area', label: 'area', accessor: (r) => r.area },
+    { key: 'zone', label: 'zone', accessor: (r) => r.zone },
+  ];
+}
 
 /**
  * What to do to change a limit, for the line above the table. A bus's vmin
@@ -152,6 +168,18 @@ export function BusesGrid({ className }: BusesGridProps) {
   const setSelectedNodeId = useSldStore((s) => s.setSelectedNodeId);
   const selectedNodeId = useSldStore((s) => s.selectedNodeId);
   const setSelectedElement = useCaseStore((s) => s.setSelectedElement);
+  const unitMode = useUnitsStore((s) => s.mode);
+
+  // kV needs every bus's rated voltage: a column cannot read in two units.
+  const bases = useMemo(() => unitBasesOf(topology), [topology]);
+  const voltageUnit: DisplayUnit =
+    unitMode === 'actual' &&
+    topology !== null &&
+    topology.buses.length > 0 &&
+    topology.buses.every((bus) => busBaseKv(bases, bus.idx) !== null)
+      ? 'kV'
+      : 'pu';
+  const columns = useMemo(() => columnsFor(voltageUnit), [voltageUnit]);
 
   const rows = useMemo<BusRow[]>(() => {
     if (!topology) return [];
@@ -166,21 +194,23 @@ export function BusesGrid({ className }: BusesGridProps) {
       const inj = injections.get(idx) ?? null;
       const volts = typeof v === 'number' && Number.isFinite(v) ? v : null;
       const limits = busVoltageLimits(bus);
+      // The verdict is judged in pu; only what is shown changes unit.
+      const toShown = voltageUnit === 'kV' ? (busBaseKv(bases, bus.idx) ?? 1) : 1;
       return {
         idx,
         name: bus.name,
-        v: volts,
-        vmin: limits.vmin,
-        vmax: limits.vmax,
+        v: volts === null ? null : volts * toShown,
+        vmin: limits.vmin * toShown,
+        vmax: limits.vmax * toShown,
         limit_check: volts === null ? null : voltageStatusText(assessVoltage(volts, limits)),
-        theta: typeof theta === 'number' && Number.isFinite(theta) ? theta : null,
+        theta: typeof theta === 'number' && Number.isFinite(theta) ? radToDeg(theta) : null,
         p_inj: inj !== null && Number.isFinite(inj.p) ? inj.p : null,
         q_inj: inj !== null && Number.isFinite(inj.q) ? inj.q : null,
         area: paramString(bus, 'area'),
         zone: paramString(bus, 'zone'),
       };
     });
-  }, [topology, pflow]);
+  }, [topology, pflow, voltageUnit, bases]);
 
   const onRowClick = (id: string) => {
     setSelectedNodeId(id);
@@ -189,7 +219,7 @@ export function BusesGrid({ className }: BusesGridProps) {
 
   return (
     <DataGrid
-      columns={COLUMNS}
+      columns={columns}
       rows={rows}
       rowIdAccessor={(r) => r.idx}
       onRowClick={onRowClick}

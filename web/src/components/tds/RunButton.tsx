@@ -28,6 +28,7 @@ import type { RunStreamError, VarGroup } from '@/streaming/RunStream';
 import { buildRunStreamWsUrl } from '@/streaming/wsUrl';
 import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { toast } from '@/lib/toast';
+import { unitBasesOf } from '@/lib/units';
 import { cn } from '@/lib/cn';
 
 /**
@@ -348,6 +349,9 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       sessionId,
       wsUrl: buildRunStreamWsUrl(),
       tdsArgs,
+      // The run keeps the case's bases (rated kV, system frequency) so its
+      // values stay readable in kV and Hz after another case is loaded.
+      bases: unitBasesOf(useCaseStore.getState().topology),
       maxRateHz: tdsConfig.maxRateHz,
       onStart: () => {
         // ``RunStream`` already populated the runs slice via

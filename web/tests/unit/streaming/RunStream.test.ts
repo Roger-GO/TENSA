@@ -244,6 +244,36 @@ describe('RunStream — frames name no columns', () => {
     expect(Array.from(r.columns.Gen_1_omega!.subarray(0, 3))).toEqual([1.0, 1.001, 1.002]);
   });
 
+  it('records the unit bases the run was launched with on the run', async () => {
+    const onDone = vi.fn();
+    serveRun(['Bus_1_v'], [batch([0.0], { Bus_1_v: [1.0] })]);
+    const bases = { busKv: { '1': 230 }, freqHz: 50 };
+
+    const stream = new RunStream(
+      { sessionId: SESSION_ID, wsUrl: WS_URL, tdsArgs: { tf: 0.2 }, bases, onDone },
+      { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
+    );
+    stream.start();
+    for (let i = 0; i < 10 && onDone.mock.calls.length === 0; i += 1) await tick();
+
+    expect(useRunsStore.getState().runs.r1?.bases).toEqual(bases);
+  });
+
+  it('leaves the bases off a run launched without any', async () => {
+    const onDone = vi.fn();
+    serveRun(['Bus_1_v'], [batch([0.0], { Bus_1_v: [1.0] })]);
+
+    const stream = new RunStream(
+      { sessionId: SESSION_ID, wsUrl: WS_URL, tdsArgs: { tf: 0.2 }, onDone },
+      { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
+    );
+    stream.start();
+    for (let i = 0; i < 10 && onDone.mock.calls.length === 0; i += 1) await tick();
+
+    expect(useRunsStore.getState().runs.r1).toBeDefined();
+    expect(useRunsStore.getState().runs.r1).not.toHaveProperty('bases');
+  });
+
   it('reports a protocol error for a frame that is not as wide as var_columns', async () => {
     const onError = vi.fn();
     // stream_start names one column; the frame carries two values per row, so

@@ -12,6 +12,8 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { useCaseStore } from '@/store/case';
 import { useRunsStore } from '@/store/runs';
 import { usePflowStore } from '@/store/pflow';
+import { useUnitsStore } from '@/store/units';
+import type { UnitBases } from '@/lib/units';
 import { parseRunId, parseWorkspacePath } from '@/api/types';
 import { PlotsAccordion } from '@/components/inspector/PlotsAccordion';
 
@@ -55,6 +57,44 @@ function seedRunWithColumn(columnName: string, samples: number[]) {
   });
 }
 
+/** Seed an active run holding several columns, optionally with the unit bases it was made on. */
+function seedRunWithColumns(columns: Record<string, number[]>, bases?: UnitBases) {
+  const runId = 'run-multi';
+  const names = Object.keys(columns);
+  const rows = columns[names[0]!]!.length;
+  const t = new Float64Array(rows);
+  for (let i = 0; i < rows; i += 1) t[i] = i * 0.1;
+  useRunsStore.setState({
+    runs: {
+      [runId]: {
+        runId,
+        startedAt: Date.now(),
+        tf: 1.0,
+        tCurrent: t[rows - 1] ?? 0,
+        seqCount: rows,
+        t,
+        columns: Object.fromEntries(names.map((n) => [n, new Float64Array(columns[n]!)])),
+        columnNames: names,
+        ...(bases ? { bases } : {}),
+        state: 'streaming',
+        connection: 'connected',
+        abortedLocally: false,
+        errorReason: null,
+      },
+    },
+    activeRunId: runId,
+    overlayRunIds: new Set<string>(),
+  });
+}
+
+/** The label and the latest value each sparkline shows. */
+function sparklines(): Array<{ label: string; value: string }> {
+  return screen.getAllByTestId('inline-sparkline').map((el) => ({
+    label: el.querySelector('span')?.textContent ?? '',
+    value: el.querySelector('[data-testid="inline-sparkline-value"]')?.textContent ?? '',
+  }));
+}
+
 describe('<PlotsAccordion />', () => {
   beforeEach(() => {
     useCaseStore.setState({
@@ -65,10 +105,12 @@ describe('<PlotsAccordion />', () => {
     });
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
     useRunsStore.setState({ runs: {}, activeRunId: null, overlayRunIds: new Set<string>() });
+    useUnitsStore.setState({ mode: 'pu' });
   });
 
   afterEach(() => {
     cleanup();
+    useUnitsStore.setState({ mode: 'pu' });
     useCaseStore.setState({
       selection: null,
       topology: null,
@@ -207,6 +249,104 @@ describe('<PlotsAccordion />', () => {
       render(<PlotsAccordion />);
       expect(screen.queryByTestId('plots-static-badge')).not.toBeInTheDocument();
       expect(screen.getByTestId('empty-state')).toBeInTheDocument();
+    });
+  });
+
+  describe('units', () => {
+    const GEN = { Gen_G1_omega: [1.0, 1.001, 0.999, 1.0005], Gen_G1_delta: [0, 0.05, 0.1, 0.07] };
+
+    it('reads the rotor angle in degrees and the speed in pu by default', () => {
+      seedLoadedCase();
+      seedRunWithColumns(GEN, { busKv: {}, freqHz: 60 });
+      useCaseStore.setState({ selectedElement: { kind: 'generator', idx: 'G1' } });
+      render(<PlotsAccordion />);
+      expect(sparklines()).toEqual([
+        { label: 'ω (pu)', value: '1.0005' },
+        // 0.07 rad is 4.01 degrees.
+        { label: 'δ (°)', value: '4.01' },
+      ]);
+    });
+
+    it('reads the speed in Hz of the run system frequency in the actual mode', () => {
+      seedLoadedCase();
+      useUnitsStore.setState({ mode: 'actual' });
+      seedRunWithColumns(GEN, { busKv: {}, freqHz: 50 });
+      useCaseStore.setState({ selectedElement: { kind: 'generator', idx: 'G1' } });
+      render(<PlotsAccordion />);
+      expect(sparklines()).toEqual([
+        { label: 'f (Hz)', value: '50.025' },
+        { label: 'δ (°)', value: '4.01' },
+      ]);
+    });
+
+    it('keeps the speed in pu in the actual mode for a run that recorded no frequency', () => {
+      seedLoadedCase();
+      useUnitsStore.setState({ mode: 'actual' });
+      seedRunWithColumns(GEN);
+      useCaseStore.setState({ selectedElement: { kind: 'generator', idx: 'G1' } });
+      render(<PlotsAccordion />);
+      expect(sparklines()[0]).toEqual({ label: 'ω (pu)', value: '1.0005' });
+    });
+
+    it('reads a bus voltage in kV in the actual mode, with the bases of the run', () => {
+      seedLoadedCase();
+      useUnitsStore.setState({ mode: 'actual' });
+      // The open case says bus 5 is 230 kV; the run was made on a case where it is 100 kV.
+      useCaseStore.setState({
+        topology: {
+          state: 'pre-setup',
+          buses: [{ idx: 5, name: 'b5', kind: 'Bus', params: { Vn: 230 } }],
+          lines: [],
+          transformers: [],
+          generators: [],
+          loads: [],
+        },
+        selectedElement: { kind: 'bus', idx: '5' },
+      });
+      seedRunWithColumns({ Bus_5_v: [1.0, 1.01, 0.99, 1.03] }, { busKv: { '5': 100 }, freqHz: 60 });
+      render(<PlotsAccordion />);
+      expect(sparklines()).toEqual([{ label: 'Voltage (kV)', value: '103.000' }]);
+    });
+
+    it('keeps a bus voltage in pu by default', () => {
+      seedLoadedCase();
+      seedRunWithColumns({ Bus_5_v: [1.0, 1.01, 0.99, 1.03] }, { busKv: { '5': 100 }, freqHz: 60 });
+      useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '5' } });
+      render(<PlotsAccordion />);
+      expect(sparklines()).toEqual([{ label: 'Voltage (pu)', value: '1.0300' }]);
+    });
+
+    it('reads the PF voltage badge in kV with the bases of the open case', () => {
+      seedLoadedCase();
+      useUnitsStore.setState({ mode: 'actual' });
+      useCaseStore.setState({
+        topology: {
+          state: 'pre-setup',
+          buses: [{ idx: 5, name: 'b5', kind: 'Bus', params: { Vn: 138 } }],
+          lines: [],
+          transformers: [],
+          generators: [],
+          loads: [],
+        },
+        selectedElement: { kind: 'bus', idx: '5' },
+      });
+      usePflowStore.setState({
+        lastRun: {
+          run_id: parseRunId('pf-1'),
+          converged: true,
+          iterations: 4,
+          mismatch: 1e-6,
+          bus_voltages: { '5': 1.024 },
+          bus_angles: { '5': -0.087 },
+        },
+        isRunning: false,
+        error: null,
+      });
+      render(<PlotsAccordion />);
+      const badge = screen.getByTestId('plots-static-badge');
+      expect(badge).toHaveTextContent('Voltage (kV)');
+      // 1.024 pu on 138 kV.
+      expect(screen.getByText('141.312')).toBeInTheDocument();
     });
   });
 });

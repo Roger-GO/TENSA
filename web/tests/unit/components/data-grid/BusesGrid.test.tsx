@@ -16,6 +16,8 @@ import userEvent from '@testing-library/user-event';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useSldStore } from '@/store/sld';
+import { useUnitsStore } from '@/store/units';
+import { captureDownloads, exportAs, readBlob } from '../../helpers/downloads';
 import { parseRunId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary, PflowResult } from '@/api/types';
 
@@ -73,11 +75,13 @@ beforeEach(() => {
   });
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
   useSldStore.setState({ selectedNodeId: null });
+  useUnitsStore.setState({ mode: 'pu' });
 });
 
 afterEach(() => {
   cleanup();
   mockTopology = null;
+  useUnitsStore.setState({ mode: 'pu' });
 });
 
 describe('<BusesGrid />', () => {
@@ -267,5 +271,121 @@ describe('<BusesGrid /> voltage limits', () => {
     mockTopology = null;
     render(<BusesGrid />);
     expect(screen.queryByTestId('buses-grid-hint')).not.toBeInTheDocument();
+  });
+});
+
+describe('<BusesGrid /> units', () => {
+  /** The cell texts of one row, in column order. */
+  function cells(busIdx: string): string[] {
+    const row = screen.getByTestId(`buses-grid-row-${busIdx}`);
+    return within(row)
+      .getAllByRole('cell')
+      .map((cell) => cell.textContent ?? '');
+  }
+
+  /** The column headers without the sort glyphs. */
+  function headers(): string[] {
+    return screen
+      .getAllByRole('columnheader')
+      .map((h) => (h.textContent ?? '').replace(/[·▲▼↕↑↓]/g, ''));
+  }
+
+  // Columns: idx, name, V, vmin, vmax, Limit check, theta, P, Q, area, zone.
+  const V = 2;
+  const VMAX = 4;
+  const THETA = 6;
+
+  const KV_TOPOLOGY: TopologySummary = {
+    ...TOPOLOGY,
+    buses: [
+      { idx: 1, name: 'Bus1', kind: 'Bus', params: { Vn: 230, vmin: 0.9, vmax: 1.1 } },
+      { idx: 2, name: 'Bus2', kind: 'Bus', params: { Vn: 13.8 } },
+    ],
+  };
+
+  it('shows the angle in degrees, as the diagram and the Inspector do', () => {
+    mockTopology = TOPOLOGY;
+    usePflowStore.setState({ lastRun: pfConverged() });
+    render(<BusesGrid />);
+    expect(headers()[THETA]).toBe('θ (°)');
+    // -0.087 rad is -4.985 degrees.
+    expect(cells('1')[THETA]).toBe('0.000');
+    expect(cells('2')[THETA]).toBe('-4.985');
+  });
+
+  it('shows no angle before a power flow has converged', () => {
+    mockTopology = TOPOLOGY;
+    render(<BusesGrid />);
+    expect(cells('2')[THETA]).toBe('—');
+  });
+
+  it('reads V and its limits in pu by default', () => {
+    mockTopology = KV_TOPOLOGY;
+    usePflowStore.setState({ lastRun: pfConverged() });
+    render(<BusesGrid />);
+    expect(headers().slice(V, VMAX + 1)).toEqual(['V (pu)', 'vmin (pu)', 'vmax (pu)']);
+    expect(cells('1').slice(V, VMAX + 1)).toEqual(['1.060', '0.900', '1.100']);
+  });
+
+  it('reads V and its limits in kV, each bus times its rated voltage, in the actual mode', () => {
+    mockTopology = KV_TOPOLOGY;
+    useUnitsStore.setState({ mode: 'actual' });
+    usePflowStore.setState({ lastRun: pfConverged() });
+    render(<BusesGrid />);
+    expect(headers().slice(V, VMAX + 1)).toEqual(['V (kV)', 'vmin (kV)', 'vmax (kV)']);
+    // Bus 1: 1.06 pu on 230 kV, limits 0.9 and 1.1 pu.
+    expect(cells('1').slice(V, VMAX + 1)).toEqual(['243.800', '207.000', '253.000']);
+    // Bus 2: 1.045 pu on 13.8 kV, the 0.95 / 1.05 default limits.
+    expect(cells('2').slice(V, VMAX + 1)).toEqual(['14.421', '13.110', '14.490']);
+    // The angle is degrees in either mode.
+    expect(cells('2')[THETA]).toBe('-4.985');
+  });
+
+  it('judges the limits in pu whatever unit they are shown in', () => {
+    mockTopology = KV_TOPOLOGY;
+    useUnitsStore.setState({ mode: 'actual' });
+    usePflowStore.setState({
+      lastRun: { ...pfConverged(), bus_voltages: { '1': 1.12, '2': 1.0 } } as PflowResult,
+    });
+    render(<BusesGrid />);
+    expect(cells('1')[5]).toBe('Above vmax');
+    expect(cells('2')[5]).toBe('Within limits');
+  });
+
+  it('keeps the whole column per unit when a bus has no rated voltage', () => {
+    // One column cannot read in two units.
+    mockTopology = {
+      ...TOPOLOGY,
+      buses: [
+        { idx: 1, name: 'Bus1', kind: 'Bus', params: { Vn: 230 } },
+        { idx: 2, name: 'Bus2', kind: 'Bus', params: {} },
+      ],
+    };
+    useUnitsStore.setState({ mode: 'actual' });
+    usePflowStore.setState({ lastRun: pfConverged() });
+    render(<BusesGrid />);
+    expect(headers().slice(V, VMAX + 1)).toEqual(['V (pu)', 'vmin (pu)', 'vmax (pu)']);
+    expect(cells('1')[V]).toBe('1.060');
+  });
+
+  it('exports the angle in degrees and V in the unit it shows', async () => {
+    const downloads = captureDownloads();
+    try {
+      const user = userEvent.setup();
+      mockTopology = KV_TOPOLOGY;
+      useUnitsStore.setState({ mode: 'actual' });
+      usePflowStore.setState({ lastRun: pfConverged() });
+      render(<BusesGrid />);
+      await exportAs(user, 'csv');
+      const lines = (await readBlob(downloads.blobs[0]!)).trim().split(/\r?\n/);
+      const header = lines[0]!.split(',');
+      expect(header[V]).toBe('V (kV)');
+      expect(header[THETA]).toBe('θ (°)');
+      const bus2 = lines[2]!.split(',');
+      expect(Number(bus2[V])).toBeCloseTo(1.045 * 13.8, 10);
+      expect(Number(bus2[THETA])).toBeCloseTo((-0.087 * 180) / Math.PI, 10);
+    } finally {
+      downloads.restore();
+    }
   });
 });

@@ -9,6 +9,7 @@ import type { Edge, Node } from '@xyflow/react';
 import type { BusCoord, TopologyEntry, TopologySummary } from '@/api/types';
 import { subKindForControllerClass } from '@/lib/controllers';
 import { DYNAMIC_GENERATOR_KINDS, generatorRowKey } from '@/lib/topology';
+import { entryBaseKv } from '@/lib/units';
 import { busVoltageLimits } from './voltage';
 import type { CoordsByIdx } from './sidecar';
 
@@ -889,6 +890,7 @@ export function buildGraph(
   const nodes: Node[] = topology.buses.map((b) => {
     const idx = String(b.idx);
     const c = coords[idx] ?? { x: 0, y: 0 };
+    const kv = entryBaseKv(b);
     return {
       id: idx,
       type: 'bus',
@@ -904,6 +906,7 @@ export function buildGraph(
         name: b.name,
         kind: b.kind,
         voltageLimits: busVoltageLimits(b),
+        ...(kv === null ? {} : { baseKv: kv }),
       },
     } satisfies Node;
   });

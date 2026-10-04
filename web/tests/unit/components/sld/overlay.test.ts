@@ -34,6 +34,38 @@ function makeResult(overrides: Partial<PflowResult> = {}): PflowResult {
   };
 }
 
+describe('getBusOverlayState, display units', () => {
+  const solved = makeResult({ bus_voltages: { '1': 1.06 }, bus_angles: { '1': -0.087 } });
+
+  it('labels the voltage in pu by default', () => {
+    expect(getBusOverlayState('1', solved).voltage_label).toBe('1.060 pu');
+  });
+
+  it('labels the voltage in kV when given the bus rated voltage as the display', () => {
+    const state = getBusOverlayState('1', solved, false, undefined, { factor: 230, unit: 'kV' });
+    expect(state.voltage_label).toBe('243.80 kV');
+  });
+
+  it('judges the band in pu whatever unit the label is in', () => {
+    const high = makeResult({ bus_voltages: { '1': 1.08 }, bus_angles: { '1': 0 } });
+    const state = getBusOverlayState('1', high, false, undefined, { factor: 230, unit: 'kV' });
+    expect(state.band).toBe('danger');
+    expect(state.side).toBe('high');
+  });
+
+  it('writes the angle in degrees in either unit', () => {
+    expect(getBusOverlayState('1', solved).angle_label).toBe('-4.98°');
+    expect(
+      getBusOverlayState('1', solved, false, undefined, { factor: 230, unit: 'kV' }).angle_label,
+    ).toBe('-4.98°');
+  });
+
+  it('hides the label whatever the unit', () => {
+    const state = getBusOverlayState('1', solved, true, undefined, { factor: 230, unit: 'kV' });
+    expect(state.voltage_label).toBeNull();
+  });
+});
+
 describe('getBusOverlayState', () => {
   it('returns neutral when pflowResult is null', () => {
     const result = getBusOverlayState('1', null);

@@ -19,6 +19,7 @@ import { queryKeys } from '@/api/queries';
 import { useRunsStore, type RunRecord } from '@/store/runs';
 import { useSessionStore } from '@/store/session';
 import { findClosestFrameIdx, parseColumnName, usePlotStore } from '@/store/plot';
+import { PER_UNIT, formatDisplayed, radToDeg, type Display } from '@/lib/units';
 import { useAnimationStore, type BusOverlayMap, type FrameBusOverlay } from '@/store/animation';
 import {
   DEFAULT_VOLTAGE_LIMITS,
@@ -30,7 +31,7 @@ import {
 } from './voltage';
 
 export interface BusOverlayState {
-  /** "1.060 pu" or null if labels hidden / no PF / missing data. */
+  /** "1.060 pu" (or "243.80 kV" in actual units) or null if labels hidden / no PF / missing data. */
   voltage_label: string | null;
   /** "0.00°" (degrees) or null if labels hidden / no PF / missing data. */
   angle_label: string | null;
@@ -87,13 +88,15 @@ const NEUTRAL_BUS: BusOverlayState = {
  * Compute the visual state for a bus given a PF result. Returns the
  * neutral state when there is no PF result, the run did not converge,
  * or the bus's idx is missing from the response. `limits` are the bus's
- * own voltage limits (default: 0.95 / 1.05 pu).
+ * own voltage limits (default: 0.95 / 1.05 pu). The band is judged in pu;
+ * `display` only sets the unit the voltage label reads in (pu, or kV).
  */
 export function getBusOverlayState(
   busIdx: string,
   pflowResult: PflowResult | null,
   hideLabels = false,
   limits: VoltageLimits = DEFAULT_VOLTAGE_LIMITS,
+  display: Display = PER_UNIT,
 ): BusOverlayState {
   if (!pflowResult || !pflowResult.converged) return NEUTRAL_BUS;
   const v = pflowResult.bus_voltages[busIdx];
@@ -101,9 +104,9 @@ export function getBusOverlayState(
   if (v === undefined || !Number.isFinite(v)) return NEUTRAL_BUS;
   const { band, side } = assessVoltage(v, limits);
   // Convert ANDES radians → degrees for the inspector / overlay label.
-  const angleDeg = a !== undefined && Number.isFinite(a) ? (a * 180) / Math.PI : null;
+  const angleDeg = a !== undefined && Number.isFinite(a) ? radToDeg(a) : null;
   return {
-    voltage_label: hideLabels ? null : `${v.toFixed(3)} pu`,
+    voltage_label: hideLabels ? null : formatDisplayed(v, display, 3),
     angle_label: hideLabels || angleDeg === null ? null : `${angleDeg.toFixed(2)}°`,
     band,
     side,

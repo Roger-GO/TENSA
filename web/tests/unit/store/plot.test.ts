@@ -8,13 +8,7 @@
  * cascade, findClosestFrameIdx helper).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  findClosestFrameIdx,
-  groupAxisLabel,
-  groupLabel,
-  parseColumnName,
-  usePlotStore,
-} from '@/store/plot';
+import { findClosestFrameIdx, groupLabel, parseColumnName, usePlotStore } from '@/store/plot';
 import type { VarGroup } from '@/store/plot';
 
 function reset(): void {
@@ -235,20 +229,9 @@ describe('group labels are exhaustive over VarGroup', () => {
     }
   });
 
-  it('groupAxisLabel returns a non-empty string for every group', () => {
-    for (const g of ALL_GROUPS) {
-      expect(groupAxisLabel(g)).toBeTruthy();
-      expect(typeof groupAxisLabel(g)).toBe('string');
-    }
-  });
-
   it('labels are distinct per group (no accidental copy-paste collision on names)', () => {
     const labels = ALL_GROUPS.map(groupLabel);
     expect(new Set(labels).size).toBe(ALL_GROUPS.length);
-  });
-
-  it('the gen_state axis label flags omega as the frequency signal', () => {
-    expect(groupAxisLabel('gen_state')).toMatch(/freq/i);
   });
 });
 

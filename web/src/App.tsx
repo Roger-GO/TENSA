@@ -12,6 +12,7 @@ import { ConvergenceErrorPanel } from '@/components/pflow/ConvergenceErrorPanel'
 import { RuntimeCrashModal } from '@/components/pflow/RuntimeCrashModal';
 import { AddElementPanel } from '@/components/elements/AddElementPanel';
 import { HideLabelsToggle } from '@/components/pflow/HideLabelsToggle';
+import { UnitsToggle } from '@/components/shell/UnitsToggle';
 import { WorkspaceMenu } from '@/components/shell/WorkspaceMenu';
 import { EditMenu } from '@/components/shell/EditMenu';
 import { RunMenu } from '@/components/shell/RunMenu';
@@ -272,6 +273,7 @@ export function App() {
               <RecoveryBadge />
               <ExportMenu />
               <HideLabelsToggle />
+              <UnitsToggle />
             </>
           }
           leftSidebar={<LeftSidebar />}

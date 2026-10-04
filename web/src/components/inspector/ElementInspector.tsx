@@ -1,15 +1,24 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ChartLineIcon, CursorIcon, EmptyState, FolderIcon } from '@/components/ui/EmptyState';
 import { useRunModeStore } from '@/store/runMode';
 import { DeleteElementButton } from '@/components/elements/DeleteElementButton';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
+import { useUnitsStore } from '@/store/units';
 import { useCurrentTopology } from '@/api/queries';
 import type { PflowResult, TopologyEntry } from '@/api/types';
 import type { SelectedElement } from '@/store/case';
 import { findTopologyEntry, generatorRowKey } from '@/lib/topology';
 import { cn } from '@/lib/cn';
+import {
+  busBaseKv,
+  formatDisplayed,
+  radToDeg,
+  unitBasesOf,
+  voltageDisplay,
+  type UnitBases,
+} from '@/lib/units';
 import { ElementFormFields } from './ElementFormFields';
 
 /**
@@ -43,10 +52,13 @@ interface ResultsTabProps {
   /** The selected element's topology entry, when the topology holds it. */
   entry: TopologyEntry | null;
   pflowResult: PflowResult | null;
+  /** The open case's unit bases, for the voltages to read in kV under the actual-units display. */
+  bases: UnitBases | undefined;
 }
 
-function ResultsTab({ selected, entry, pflowResult }: ResultsTabProps) {
+function ResultsTab({ selected, entry, pflowResult, bases }: ResultsTabProps) {
   const setActiveRoutine = useRunModeStore((s) => s.setActiveRoutine);
+  const unitMode = useUnitsStore((s) => s.mode);
   if (!pflowResult) {
     return (
       <EmptyState
@@ -72,14 +84,16 @@ function ResultsTab({ selected, entry, pflowResult }: ResultsTabProps) {
     if (v === undefined) {
       return <p className="text-muted-foreground text-xs">No PF result for bus {selected.idx}.</p>;
     }
-    const angleDeg = a !== undefined && Number.isFinite(a) ? ((a * 180) / Math.PI).toFixed(2) : '—';
+    const angleDeg = a !== undefined && Number.isFinite(a) ? radToDeg(a).toFixed(2) : '—';
     return (
       <dl
         data-testid="inspector-results"
         className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm"
       >
         <dt className="text-muted-foreground font-mono text-xs">voltage</dt>
-        <dd className="text-foreground font-mono text-xs">{v.toFixed(4)} pu</dd>
+        <dd className="text-foreground font-mono text-xs">
+          {formatDisplayed(v, voltageDisplay(unitMode, busBaseKv(bases, selected.idx)), 4)}
+        </dd>
         <dt className="text-muted-foreground font-mono text-xs">angle</dt>
         <dd className="text-foreground font-mono text-xs">{angleDeg}°</dd>
       </dl>
@@ -124,7 +138,9 @@ function ResultsTab({ selected, entry, pflowResult }: ResultsTabProps) {
         <dt className="text-muted-foreground font-mono text-xs">Q</dt>
         <dd className="text-foreground font-mono text-xs">{gen.q.toFixed(2)} MVAr</dd>
         <dt className="text-muted-foreground font-mono text-xs">V_term</dt>
-        <dd className="text-foreground font-mono text-xs">{gen.v.toFixed(4)} pu</dd>
+        <dd className="text-foreground font-mono text-xs">
+          {formatDisplayed(gen.v, voltageDisplay(unitMode, busBaseKv(bases, gen.bus)), 4)}
+        </dd>
         <dt className="text-muted-foreground font-mono text-xs">bus</dt>
         <dd className="text-foreground font-mono text-xs">{String(gen.bus)}</dd>
       </dl>
@@ -200,6 +216,7 @@ export function ElementInspector({ className }: ElementInspectorProps) {
   const [tab, setTab] = useState<'properties' | 'results'>(initialTab);
 
   const entry = topology && selectedElement ? findTopologyEntry(topology, selectedElement) : null;
+  const bases = useMemo(() => unitBasesOf(topology), [topology]);
 
   const isPreSetup = topology?.state === 'pre-setup';
   // Edit affordances disabled mid-PF so the user can't fire a write
@@ -266,7 +283,12 @@ export function ElementInspector({ className }: ElementInspectorProps) {
           <ElementFormFields />
         </TabsContent>
         <TabsContent value="results" className="min-h-0 flex-1 overflow-auto">
-          <ResultsTab selected={selectedElement} entry={entry} pflowResult={pflowResult} />
+          <ResultsTab
+            selected={selectedElement}
+            entry={entry}
+            pflowResult={pflowResult}
+            bases={bases}
+          />
         </TabsContent>
       </Tabs>
     </div>

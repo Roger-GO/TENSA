@@ -34,6 +34,7 @@ import { useAnimationStore } from '@/store/animation';
 import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';
 import { useUiStore } from '@/store/ui';
+import { useUnitsStore } from '@/store/units';
 import { parseRunId } from '@/api/types';
 import type { PflowResult } from '@/api/types';
 
@@ -41,11 +42,18 @@ function nodeProps(
   idx: string,
   name = `b${idx}`,
   voltageLimits?: { vmin: number; vmax: number },
+  baseKv?: number,
 ): Parameters<typeof BusNode>[0] {
   // Minimal NodeProps shape; the component only reads `data` + `selected`.
   return {
     id: idx,
-    data: { idx, name, kind: 'Bus', ...(voltageLimits ? { voltageLimits } : {}) },
+    data: {
+      idx,
+      name,
+      kind: 'Bus',
+      ...(voltageLimits ? { voltageLimits } : {}),
+      ...(baseKv === undefined ? {} : { baseKv }),
+    },
     selected: false,
     type: 'bus',
     isConnectable: true,
@@ -76,6 +84,7 @@ function resetStores(): void {
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
   useRunsStore.setState({ runs: {}, activeRunId: null });
   useUiStore.setState({ hideLabels: false });
+  useUnitsStore.setState({ mode: 'pu' });
 }
 
 describe('BusNode — v0.1 PF-result coloring path (no active run)', () => {
@@ -118,6 +127,52 @@ describe('BusNode — v0.1 PF-result coloring path (no active run)', () => {
     const node = getByTestId('bus-node-5');
     expect(node).toHaveAttribute('data-band', 'danger');
     expect(node.className).toContain('border-danger');
+  });
+});
+
+describe('BusNode, display units', () => {
+  beforeEach(resetStores);
+  afterEach(() => {
+    cleanup();
+    resetStores();
+  });
+
+  function solved(): void {
+    usePflowStore.setState({
+      lastRun: makePflow({ bus_voltages: { '1': 1.06 }, bus_angles: { '1': -0.087 } }),
+      isRunning: false,
+      error: null,
+    });
+  }
+
+  it('labels the voltage in pu by default, with a rated voltage on the node or not', () => {
+    solved();
+    const { getByTestId } = render(<BusNode {...nodeProps('1', 'b1', undefined, 230)} />);
+    expect(getByTestId('bus-voltage-1')).toHaveTextContent('1.060 pu');
+  });
+
+  it('labels the voltage in kV under the actual-units display', () => {
+    solved();
+    useUnitsStore.setState({ mode: 'actual' });
+    const { getByTestId } = render(<BusNode {...nodeProps('1', 'b1', undefined, 230)} />);
+    expect(getByTestId('bus-voltage-1')).toHaveTextContent('243.80 kV');
+    // The angle reads in degrees either way.
+    expect(getByTestId('bus-angle-1')).toHaveTextContent('-4.98°');
+  });
+
+  it('keeps the label in pu under the actual-units display when the bus has no rated voltage', () => {
+    solved();
+    useUnitsStore.setState({ mode: 'actual' });
+    const { getByTestId } = render(<BusNode {...nodeProps('1')} />);
+    expect(getByTestId('bus-voltage-1')).toHaveTextContent('1.060 pu');
+  });
+
+  it('follows a change of the display units without a new power flow', () => {
+    solved();
+    const { getByTestId } = render(<BusNode {...nodeProps('1', 'b1', undefined, 230)} />);
+    expect(getByTestId('bus-voltage-1')).toHaveTextContent('1.060 pu');
+    act(() => useUnitsStore.getState().setMode('actual'));
+    expect(getByTestId('bus-voltage-1')).toHaveTextContent('243.80 kV');
   });
 });
 

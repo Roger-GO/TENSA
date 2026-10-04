@@ -88,14 +88,16 @@ export function alignRuns(runs: readonly AlignableRun[]): AlignedRuns {
  * draws as a gap, so a run that ended early simply has no line past its end.
  * ``rowToAxis`` is the run's entry from ``alignRuns``; ``values`` may be the
  * whole (over-allocated) column, since only the first ``rowToAxis.length``
- * rows are read.
+ * rows are read. Each copied value is multiplied by ``factor`` (a unit
+ * conversion), so scaling costs no second pass.
  */
 export function resampleOnto(
   values: ArrayLike<number>,
   rowToAxis: Int32Array,
   axisLength: number,
+  factor = 1,
 ): Float64Array {
   const out = new Float64Array(axisLength).fill(NaN);
-  for (let k = 0; k < rowToAxis.length; k += 1) out[rowToAxis[k]!] = values[k]!;
+  for (let k = 0; k < rowToAxis.length; k += 1) out[rowToAxis[k]!] = values[k]! * factor;
   return out;
 }

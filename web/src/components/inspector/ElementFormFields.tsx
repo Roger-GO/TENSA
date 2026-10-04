@@ -14,6 +14,7 @@ import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';
 import { useSessionStore } from '@/store/session';
+import { useUnitsStore } from '@/store/units';
 import {
   useCloneDiff,
   useCloneEdit,
@@ -25,6 +26,7 @@ import type { CloneDiffPair, ParamValue, TopologyEntry, TopologyParamMeta } from
 import type { SelectedElement } from '@/store/case';
 import { findTopologyEntry } from '@/lib/topology';
 import { cn } from '@/lib/cn';
+import { entryBaseKv, formatDisplayed, voltageDisplay } from '@/lib/units';
 import { assessVoltage, busVoltageLimits, voltageStatusText } from '@/components/sld/voltage';
 import { ModifiedFromOriginalDot } from './ModifiedFromOriginalDot';
 
@@ -281,6 +283,7 @@ function PropertiesBody({
     source: TopologyEntry | null;
     values: Readonly<Record<string, ParamValue>>;
   }>({ source: null, values: EMPTY_OVERRIDES });
+  const unitMode = useUnitsStore((s) => s.mode);
 
   if (!entry) {
     return (
@@ -307,7 +310,7 @@ function PropertiesBody({
         <>
           <dt className="text-muted-foreground font-mono text-xs">voltage</dt>
           <dd data-testid="inspector-bus-voltage" className="text-foreground font-mono text-xs">
-            {busReading.v.toFixed(4)} pu
+            {formatDisplayed(busReading.v, voltageDisplay(unitMode, entryBaseKv(entry)), 4)}
           </dd>
           {busReading.status !== null ? (
             <>

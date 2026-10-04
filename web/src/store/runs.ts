@@ -53,6 +53,7 @@
  * persisted — they only matter for the current page.
  */
 import { create } from 'zustand';
+import type { UnitBases } from '@/lib/units';
 
 /** Run lifecycle state (mirrors plan: starting → streaming → done/error/aborted). */
 export type RunState = 'starting' | 'streaming' | 'done' | 'error' | 'aborted';
@@ -85,6 +86,15 @@ export interface RunRecord {
   columns: Record<string, Float64Array>;
   /** Column names in stream-metadata order (excluding ``t``). */
   columnNames: readonly string[];
+  /**
+   * The bases the run's per-unit values convert to actual units with (a
+   * bus's rated kV, the system frequency), as the case had them when the run
+   * started. Kept on the run, not read from the open case, because a run
+   * outlives its case: a finished run stays for comparison after another case
+   * is loaded, and its bus idx may now name another bus. Absent when the run
+   * was started without them; its values then stay per unit.
+   */
+  bases?: UnitBases;
   state: RunState;
   connection: RunConnectionStatus;
   /**
@@ -162,6 +172,8 @@ export interface StartRunPayload {
    * branch on first-touch.
    */
   columnNames: readonly string[];
+  /** The case's unit bases at the time the run starts; see ``RunRecord.bases``. */
+  bases?: UnitBases;
 }
 
 export interface RunsState {
@@ -468,7 +480,7 @@ export const useRunsStore = create<RunsState>((set, get) => ({
   overlayRunIds: new Set<string>(),
   retentionLimit: DEFAULT_RETENTION_LIMIT,
 
-  startRun: ({ runId, tf, columnNames }) => {
+  startRun: ({ runId, tf, columnNames, bases }) => {
     const columns: Record<string, Float64Array> = {};
     for (const name of columnNames) columns[name] = new Float64Array(0);
     const record: RunRecord = {
@@ -480,6 +492,7 @@ export const useRunsStore = create<RunsState>((set, get) => ({
       t: new Float64Array(0),
       columns,
       columnNames: [...columnNames],
+      ...(bases === undefined ? {} : { bases }),
       state: 'starting',
       connection: 'connected',
       abortedLocally: false,

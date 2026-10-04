@@ -2,20 +2,18 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type uPlot from 'uplot';
 import { useShallow } from 'zustand/react/shallow';
 import { useRunsStore } from '@/store/runs';
-import {
-  usePlotStore,
-  parseColumnName,
-  groupAxisLabel,
-  groupLabel,
-  findClosestFrameIdx,
-} from '@/store/plot';
-import type { VarGroup } from '@/store/plot';
+import { usePlotStore, parseColumnName, groupLabel, findClosestFrameIdx } from '@/store/plot';
+import type { ParsedSeries, VarGroup } from '@/store/plot';
 import type { RunRecord } from '@/store/runs';
+import { useUnitsStore } from '@/store/units';
+import type { UnitMode } from '@/lib/units';
 import { UPlot } from './UPlot';
 import { RunLegendChip } from './RunLegendChip';
 import { alignRuns, resampleOnto } from './multiRunAlign';
 import type { AlignedRuns } from './multiRunAlign';
 import { resolveOverlayRuns } from './overlayRuns';
+import { SECONDARY_SCALE, planGroupAxes, scaleColumn } from './axes';
+import type { GroupAxes, PlannedSeries } from './axes';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { timeSeriesToCsv } from '@/components/export/exportToCsv';
@@ -40,6 +38,12 @@ import { cn } from '@/lib/cn';
  * row above the tree when overlay > 1 — see ``VariableTreePicker``).
  * When ``overlayRunIds`` is empty, the plot falls back to the active
  * run only.
+ *
+ * Axes and units: a group that mixes quantities of different size (a bus's
+ * voltage and its angle, a machine's speed and its rotor angle) gives each its
+ * own y axis, the angle dashed on the right and in degrees, and the display
+ * units (``store/units.ts``) pick pu or kV and Hz for the left one. Each run
+ * converts with the bases it was started with. See ``axes.ts``.
  *
  * Mismatched timelines: each run keeps its own t-column, so a run
  * with ``tf=5`` simply ends at t=5 in the stacked plot's shared
@@ -148,17 +152,48 @@ function colorFor(name: string, theme: ResolvedTheme): string {
   return palette[h % palette.length]!;
 }
 
+/** The selected series of ``runs`` that a chart draws, each with the bases of its run. */
+function plannedSeries(
+  runs: readonly RunRecord[],
+  selected: readonly ParsedSeries[],
+): PlannedSeries[] {
+  const out: PlannedSeries[] = [];
+  for (const run of runs) {
+    for (const series of selected) {
+      if (run.columns[series.name]) out.push({ series, bases: run.bases });
+    }
+  }
+  return out;
+}
+
+/** The time axis, then one y axis per quantity: the first on the left, a second on the right. */
+function axesOptions(plan: GroupAxes): uPlot.Axis[] {
+  return [
+    { label: 't (s)' },
+    ...plan.axes.map(
+      (axis): uPlot.Axis =>
+        axis.side === 'left'
+          ? { scale: axis.scale, label: axis.label }
+          : { scale: axis.scale, label: axis.label, side: 1, grid: { show: false } },
+    ),
+  ];
+}
+
 /**
  * Build the uPlot options + data for one variable group, single-run mode.
- * Each series gets a unique colour from the variable-name palette.
+ * Each series gets a unique colour from the variable-name palette. A series
+ * on the right-hand axis (an angle) is dashed, so the two axes can be told
+ * apart without reading the legend.
  */
 function buildGroupChart(
   run: RunRecord,
   group: VarGroup,
-  selectedNames: readonly string[],
+  selected: readonly ParsedSeries[],
   syncKey: string,
   theme: ResolvedTheme,
+  mode: UnitMode,
 ): { options: uPlot.Options; data: uPlot.AlignedData } {
+  const plan = planGroupAxes(group, plannedSeries([run], selected), mode);
   // Slice typed arrays to the logical seq count (the typed arrays are
   // over-allocated by the runs slice's geometric growth strategy).
   const len = run.seqCount;
@@ -166,15 +201,19 @@ function buildGroupChart(
   const dataCols: uPlot.AlignedData = [tSlice];
 
   const series: uPlot.Series[] = [{ label: 't' }];
-  for (const name of selectedNames) {
+  for (const parsed of selected) {
+    const { name } = parsed;
     const col = run.columns[name];
     if (!col) continue;
-    dataCols.push(col.subarray(0, len));
+    const { scale, factor } = plan.place({ series: parsed, bases: run.bases });
+    dataCols.push(scaleColumn(col.subarray(0, len), factor));
     series.push({
       label: name,
+      scale,
       stroke: colorFor(name, theme),
       width: 1.5,
       points: { show: false },
+      ...(scale === SECONDARY_SCALE ? { dash: [6, 4] } : {}),
     });
   }
 
@@ -185,7 +224,7 @@ function buildGroupChart(
     scales: {
       x: { time: false },
     },
-    axes: [{ label: 't (s)' }, { label: groupAxisLabel(group) }],
+    axes: axesOptions(plan),
     cursor: {
       sync: { key: syncKey, setSeries: false },
       drag: { x: true, y: false, uni: 50 },
@@ -216,10 +255,12 @@ function buildMultiRunGroupChart(
   runs: readonly RunRecord[],
   aligned: AlignedRuns,
   group: VarGroup,
-  selectedNames: readonly string[],
+  selected: readonly ParsedSeries[],
   syncKey: string,
   colorMode: 'hash' | 'gradient' = 'hash',
+  mode: UnitMode = 'pu',
 ): { options: uPlot.Options; data: uPlot.AlignedData } {
+  const plan = planGroupAxes(group, plannedSeries(runs, selected), mode);
   const tUnion = aligned.t;
   const dataCols: uPlot.AlignedData = [tUnion];
   const series: uPlot.Series[] = [{ label: 't' }];
@@ -235,16 +276,21 @@ function buildMultiRunGroupChart(
     const gradientColor = colorMode === 'gradient' ? gradientColorFor(runIdx, runs.length) : null;
     const stroke = gradientColor ?? style.color;
     const rowToAxis = aligned.rowToAxis[runIdx]!;
-    for (const name of selectedNames) {
+    for (const parsed of selected) {
+      const { name } = parsed;
       const col = run.columns[name];
       if (!col) continue;
-      // Resample: copy known values, leave NaN elsewhere.
-      dataCols.push(resampleOnto(col, rowToAxis, tUnion.length));
+      // Each run converts with its own bases: a pinned run can belong to
+      // another case than the open one.
+      const { scale, factor } = plan.place({ series: parsed, bases: run.bases });
+      // Resample: copy known values (in the axis's unit), leave NaN elsewhere.
+      dataCols.push(resampleOnto(col, rowToAxis, tUnion.length, factor));
       // Series label encodes the run prefix + var name so the legend
       // distinguishes the same var across runs.
       const runPrefix = run.runId.length > 8 ? run.runId.slice(0, 8) : run.runId;
       const seriesProps: uPlot.Series = {
         label: `${runPrefix}·${name}`,
+        scale,
         stroke,
         width: 1.5,
         points: { show: false },
@@ -267,7 +313,7 @@ function buildMultiRunGroupChart(
     scales: {
       x: { time: false },
     },
-    axes: [{ label: 't (s)' }, { label: groupAxisLabel(group) }],
+    axes: axesOptions(plan),
     cursor: {
       sync: { key: syncKey, setSeries: false },
       drag: { x: true, y: false, uni: 50 },
@@ -424,6 +470,7 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
   );
   const caseName = useExportCaseName();
   const containerRef = useRef<HTMLDivElement>(null);
+  const unitMode = useUnitsStore((s) => s.mode);
 
   // Group the selected series by VarGroup using the column-name parser.
   // In single-run mode we use the run's columnNames for stable order;
@@ -433,8 +480,8 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
   // Keyed on the column lists rather than the runs, so a streamed frame does
   // not redo the walk over every column name (1208 on the WECC case).
   const groupedSelections = useMemo(() => {
-    if (columnLists.length === 0 || !selected) return new Map<VarGroup, string[]>();
-    const groups = new Map<VarGroup, string[]>();
+    if (columnLists.length === 0 || !selected) return new Map<VarGroup, ParsedSeries[]>();
+    const groups = new Map<VarGroup, ParsedSeries[]>();
     const seen = new Set<string>();
     const orderedNames: string[] = [];
     for (const columnNames of columnLists) {
@@ -449,8 +496,8 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
       const parsed = parseColumnName(name);
       if (!parsed) continue;
       const bucket = groups.get(parsed.group);
-      if (bucket) bucket.push(name);
-      else groups.set(parsed.group, [name]);
+      if (bucket) bucket.push(parsed);
+      else groups.set(parsed.group, [parsed]);
     }
     return groups;
   }, [columnLists, selected]);
@@ -493,6 +540,11 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
       t: tSlice,
       columns: cols,
       droppedRowCount,
+      // The file holds the values as the run streamed them, not as the plot
+      // shows them (degrees, kV, Hz), so it says which unit each is in.
+      comments: [
+        'values as simulated: voltage and speed in pu, angles in rad, power in MW and MVar',
+      ],
     });
   }, [primaryRun, selected]);
 
@@ -517,14 +569,25 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
     // One time axis serves every stacked chart, so merge the runs' timelines
     // once here and not once per group.
     const aligned = isMultiRun && groupedSelections.size > 0 ? alignRuns(overlayRuns) : null;
-    for (const [group, names] of groupedSelections) {
+    for (const [group, series] of groupedSelections) {
       if (aligned) {
         out.push({
           group,
-          ...buildMultiRunGroupChart(overlayRuns, aligned, group, names, syncKey, colorMode),
+          ...buildMultiRunGroupChart(
+            overlayRuns,
+            aligned,
+            group,
+            series,
+            syncKey,
+            colorMode,
+            unitMode,
+          ),
         });
       } else {
-        out.push({ group, ...buildGroupChart(primaryRun!, group, names, syncKey, resolvedTheme) });
+        out.push({
+          group,
+          ...buildGroupChart(primaryRun!, group, series, syncKey, resolvedTheme, unitMode),
+        });
       }
     }
     return out;
@@ -533,7 +596,16 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
     // that's the intended hot path; the memo's role here is just
     // structuring. Building the options again is cheap; what must not
     // happen is ``<UPlot />`` seeing a new options object each time.
-  }, [overlayRuns, isMultiRun, primaryRun, groupedSelections, syncKey, colorMode, resolvedTheme]);
+  }, [
+    overlayRuns,
+    isMultiRun,
+    primaryRun,
+    groupedSelections,
+    syncKey,
+    colorMode,
+    resolvedTheme,
+    unitMode,
+  ]);
 
   if (!effectiveRunId || overlayRuns.length === 0) {
     return (

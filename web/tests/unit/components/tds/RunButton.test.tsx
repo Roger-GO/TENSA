@@ -761,6 +761,38 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     expect(disturbancesPosted).toBe(false);
   });
 
+  it('records the unit bases of the open case on the run it starts', async () => {
+    seedReady();
+    // The case's rated voltages and system frequency, as the topology carries them.
+    const seeded = useCaseStore.getState().topology!;
+    useCaseStore.setState({
+      topology: {
+        ...seeded,
+        buses: [
+          { idx: 1, name: 'b1', kind: 'Bus', params: { Vn: 230 } },
+          { idx: 2, name: 'b2', kind: 'Bus', params: {} },
+        ],
+        freq_hz: 50,
+      },
+    });
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+    serveShortRun(server, 'run-bases');
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-bases']?.state).toBe('done');
+    });
+    // The run keeps them, so it can be read in kV and Hz after another case is loaded.
+    expect(useRunsStore.getState().runs['run-bases']?.bases).toEqual({
+      busKv: { '1': 230 },
+      freqHz: 50,
+    });
+  });
+
   it('disturbance commit 422 surfaces inline error toast and does NOT open WS', async () => {
     seedReady({ withDisturbances: true });
     let wsOpened = false;

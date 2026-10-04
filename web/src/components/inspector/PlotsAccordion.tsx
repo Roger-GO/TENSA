@@ -4,9 +4,19 @@ import { useCaseStore } from '@/store/case';
 import type { SelectedElement } from '@/store/case';
 import { useRunsStore } from '@/store/runs';
 import { usePflowStore } from '@/store/pflow';
+import { useUnitsStore } from '@/store/units';
 import type { RunRecord } from '@/store/runs';
 import { cn } from '@/lib/cn';
 import { findTopologyEntry, generatorRowKey } from '@/lib/topology';
+import {
+  busBaseKv,
+  displayDecimals,
+  radToDeg,
+  speedDisplay,
+  unitBasesOf,
+  voltageDisplay,
+  type UnitBases,
+} from '@/lib/units';
 import { InlineSparkline } from './InlineSparkline';
 
 /**
@@ -23,6 +33,10 @@ import { InlineSparkline } from './InlineSparkline';
  *   2. PF result (no active TDS) → static scalar badge from the
  *      ``pflow.lastRun`` summary.
  *   3. Neither → ``<EmptyState />`` ("Run PF or TDS to populate plots.")
+ *
+ * Voltage and speed read in pu or in kV and Hz with the display units
+ * (``lib/units.ts``); angles read in degrees. A run's samples convert with the
+ * bases the run was started with, the PF badge with those of the open case.
  *
  * Implementation detail: the runs store is updated per-frame as TDS rows
  * stream in. Subscribing directly via Zustand triggers a render every
@@ -114,36 +128,50 @@ function useThrottledColumn(columnName: string | null): Float64Array | null {
   return snapshot;
 }
 
+/** The unit bases of the active run: what its streamed values convert to actual units with. */
+function useActiveRunBases(): UnitBases | undefined {
+  return useRunsStore((s) => (s.activeRunId ? s.runs[s.activeRunId]?.bases : undefined));
+}
+
 interface KindContentProps {
   kind: SelectedKind;
   idx: string;
   /** Row of the PF result's `generator_outputs` that a generator reads. */
   pflowKey: string;
+  /** The open case's unit bases, for the values read off the PF result. */
+  bases: UnitBases | undefined;
 }
 
-function BusContent({ idx }: { idx: string }) {
+function BusContent({ idx, bases }: { idx: string; bases: UnitBases | undefined }) {
   const colName = `Bus_${idx}_v`;
   const samples = useThrottledColumn(colName);
   const pflow = usePflowStore((s) => s.lastRun);
+  const unitMode = useUnitsStore((s) => s.mode);
+  const runBases = useActiveRunBases();
 
   if (samples && samples.length >= 2) {
+    const display = voltageDisplay(unitMode, busBaseKv(runBases, idx));
+    const decimals = displayDecimals(display, 4);
     return (
       <InlineSparkline
-        values={Array.from(samples)}
-        label="Voltage (pu)"
-        valueFormat={(v) => v.toFixed(4)}
+        values={Array.from(samples, (v) => v * display.factor)}
+        label={`Voltage (${display.unit})`}
+        valueFormat={(v) => v.toFixed(decimals)}
       />
     );
   }
   if (pflow && pflow.converged) {
     const v = pflow.bus_voltages[idx];
     if (v !== undefined && Number.isFinite(v)) {
+      const display = voltageDisplay(unitMode, busBaseKv(bases, idx));
       return (
         <div data-testid="plots-static-badge" className="flex flex-col gap-1">
           <span className="text-muted-foreground text-[10px] tracking-wide uppercase">
-            Voltage (pu)
+            Voltage ({display.unit})
           </span>
-          <span className="text-foreground font-mono text-lg">{v.toFixed(4)}</span>
+          <span className="text-foreground font-mono text-lg">
+            {(v * display.factor).toFixed(displayDecimals(display, 4))}
+          </span>
           <span className="text-muted-foreground text-[10px]">From PF result</span>
         </div>
       );
@@ -156,24 +184,28 @@ function GeneratorContent({ idx, pflowKey }: { idx: string; pflowKey: string }) 
   const omegaSamples = useThrottledColumn(`Gen_${idx}_omega`);
   const deltaSamples = useThrottledColumn(`Gen_${idx}_delta`);
   const pflow = usePflowStore((s) => s.lastRun);
+  const unitMode = useUnitsStore((s) => s.mode);
+  const runBases = useActiveRunBases();
 
   const hasOmega = omegaSamples && omegaSamples.length >= 2;
   const hasDelta = deltaSamples && deltaSamples.length >= 2;
   if (hasOmega || hasDelta) {
+    const speed = speedDisplay(unitMode, runBases?.freqHz);
+    const speedDecimals = displayDecimals(speed, 4);
     return (
       <div className="flex flex-col gap-3">
         {hasOmega ? (
           <InlineSparkline
-            values={Array.from(omegaSamples!)}
-            label="ω (pu)"
-            valueFormat={(v) => v.toFixed(4)}
+            values={Array.from(omegaSamples!, (v) => v * speed.factor)}
+            label={speed.unit === 'Hz' ? 'f (Hz)' : 'ω (pu)'}
+            valueFormat={(v) => v.toFixed(speedDecimals)}
           />
         ) : null}
         {hasDelta ? (
           <InlineSparkline
-            values={Array.from(deltaSamples!)}
-            label="δ (rad)"
-            valueFormat={(v) => v.toFixed(4)}
+            values={Array.from(deltaSamples!, radToDeg)}
+            label="δ (°)"
+            valueFormat={(v) => v.toFixed(2)}
           />
         ) : null}
       </div>
@@ -284,10 +316,10 @@ function PlotsEmpty() {
   );
 }
 
-function KindContent({ kind, idx, pflowKey }: KindContentProps) {
+function KindContent({ kind, idx, pflowKey, bases }: KindContentProps) {
   switch (kind) {
     case 'bus':
-      return <BusContent idx={idx} />;
+      return <BusContent idx={idx} bases={bases} />;
     case 'generator':
       return <GeneratorContent idx={idx} pflowKey={pflowKey} />;
     case 'line':
@@ -323,6 +355,7 @@ export function PlotsAccordion({ className }: PlotsAccordionProps) {
         kind={selectedElement.kind}
         idx={selectedElement.idx}
         pflowKey={entry ? generatorRowKey(entry) : selectedElement.idx}
+        bases={unitBasesOf(topology)}
       />
     </div>
   );

@@ -17,6 +17,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
+import { useUnitsStore } from '@/store/units';
 import { parseRunId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary, PflowResult } from '@/api/types';
 
@@ -113,6 +114,7 @@ describe('<ElementInspector />', () => {
       selectedElement: null,
     });
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+    useUnitsStore.setState({ mode: 'pu' });
   });
 
   afterEach(() => {
@@ -124,6 +126,7 @@ describe('<ElementInspector />', () => {
       selectedElement: null,
     });
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+    useUnitsStore.setState({ mode: 'pu' });
   });
 
   it('shows the no-case empty state when no case is loaded', () => {
@@ -166,6 +169,52 @@ describe('<ElementInspector />', () => {
     expect(screen.getByText('1.0600 pu')).toBeInTheDocument();
     // Angle in degrees: 0 rad → 0.00°
     expect(screen.getByText('0.00°')).toBeInTheDocument();
+  });
+
+  it('shows a bus voltage in kV, and its angle in degrees, under the actual-units display', () => {
+    seedLoadedCase();
+    useUnitsStore.setState({ mode: 'actual' });
+    useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '2' } });
+    usePflowStore.setState({ lastRun: makePflowResult(), isRunning: false, error: null });
+    render(withQueryClient(<ElementInspector />));
+
+    // 1.045 pu on the 138 kV of bus 2.
+    expect(screen.getByText('144.210 kV')).toBeInTheDocument();
+    // -0.087 rad is -4.98 degrees in either unit.
+    expect(screen.getByText('-4.98°')).toBeInTheDocument();
+  });
+
+  it('keeps a bus voltage in pu under the actual-units display when the bus has no rated voltage', () => {
+    seedLoadedCase();
+    useUnitsStore.setState({ mode: 'actual' });
+    mockTopology = {
+      ...TOPOLOGY,
+      buses: [{ idx: 1, name: 'Bus1', kind: 'Bus', params: {} }, ...TOPOLOGY.buses.slice(1)],
+    };
+    useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '1' } });
+    usePflowStore.setState({ lastRun: makePflowResult(), isRunning: false, error: null });
+    render(withQueryClient(<ElementInspector />));
+
+    expect(screen.getByText('1.0600 pu')).toBeInTheDocument();
+  });
+
+  it('shows a generator terminal voltage in kV on its bus, under the actual-units display', () => {
+    seedLoadedCase();
+    useUnitsStore.setState({ mode: 'actual' });
+    useCaseStore.setState({ selectedElement: { kind: 'generator', idx: 'G1' } });
+    usePflowStore.setState({
+      lastRun: makePflowResult({
+        generator_outputs: { G1: { p: 232.4, q: -16.9, v: 1.06, bus: 1 } },
+      }),
+      isRunning: false,
+      error: null,
+    });
+    render(withQueryClient(<ElementInspector />));
+
+    // 1.06 pu on the 138 kV of bus 1.
+    expect(screen.getByText('146.280 kV')).toBeInTheDocument();
+    // The powers are actual already.
+    expect(screen.getByText('232.40 MW')).toBeInTheDocument();
   });
 
   it('shows post-PF results for a selected line (p_flow + q_flow)', () => {

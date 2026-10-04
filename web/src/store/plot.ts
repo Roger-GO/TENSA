@@ -259,24 +259,3 @@ export function groupLabel(group: VarGroup): string {
       return 'Load power';
   }
 }
-
-/** Y-axis label for a group (used in TimeSeriesPlot). */
-export function groupAxisLabel(group: VarGroup): string {
-  switch (group) {
-    case 'bus_v':
-      // Mixed group: voltage is the primary axis (pu); angle series
-      // (Bus_<idx>_a) read in rad. Keep voltage as the headline unit and
-      // call out the angle series so a co-plotted angle isn't mistaken
-      // for a per-unit voltage.
-      return 'V (pu) / θ (rad)';
-    case 'gen_state':
-      // ω is the per-unit speed = FREQUENCY proxy; δ is the rotor angle.
-      return 'ω freq (pu) / δ (rad)';
-    case 'gen_power':
-      return 'P (MW) / Q (MVar)';
-    case 'line_flow':
-      return 'P (MW) / Q (MVar)';
-    case 'load_pq':
-      return 'P (MW) / Q (MVar)';
-  }
-}

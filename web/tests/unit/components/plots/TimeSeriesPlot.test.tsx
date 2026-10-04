@@ -62,9 +62,18 @@ import { useRunsStore } from '@/store/runs';
 import * as plotModule from '@/store/plot';
 import { usePlotStore } from '@/store/plot';
 import { useThemeStore } from '@/store/theme';
+import { useUnitsStore } from '@/store/units';
+import type { UnitBases } from '@/lib/units';
+import userEvent from '@testing-library/user-event';
+import { captureDownloads, exportAs, readBlob } from '../../helpers/downloads';
 
 function seedRun(runId: string, columnNames: string[], tf = 10) {
   useRunsStore.getState().startRun({ runId, tf, columnNames });
+}
+
+/** Start a run that carries the unit bases of the case it was made on. */
+function seedRunWithBases(runId: string, columnNames: string[], bases: UnitBases) {
+  useRunsStore.getState().startRun({ runId, tf: 10, columnNames, bases });
 }
 
 function appendRows(runId: string, t: number[], cols: Record<string, number[]>) {
@@ -93,6 +102,7 @@ describe('TimeSeriesPlot', () => {
       scrubByRun: {},
       playingByRun: {},
     });
+    useUnitsStore.setState({ mode: 'pu' });
   });
 
   afterEach(() => {
@@ -325,9 +335,9 @@ describe('TimeSeriesPlot — multi-run overlay (Unit 9 v2.0)', () => {
     const calls = constructSpy.mock.calls;
     const genStateCall = calls.find((c) => {
       const opts = c[0] as { axes?: { label?: string }[] };
-      // gen_state's axis label is now "ω freq (pu) / δ (rad)" (the omega
-      // series is the frequency proxy; Pe/Qe split off into gen_power).
-      return opts.axes?.[1]?.label === 'ω freq (pu) / δ (rad)';
+      // gen_state's y axis reads the speed (the omega series; Pe/Qe split
+      // off into gen_power). The rotor angle would get an axis of its own.
+      return opts.axes?.[1]?.label === 'ω (pu)';
     });
     expect(genStateCall).toBeDefined();
     const genOpts = genStateCall![0] as { series: unknown[] };
@@ -554,5 +564,220 @@ describe('TimeSeriesPlot — streaming frames do not rebuild the charts', () => 
     expect(constructSpy).toHaveBeenCalledTimes(2);
     const opts = constructSpy.mock.calls[1]?.[0] as { series: { stroke?: string }[] };
     expect(opts.series[2]?.stroke).toBe('#ff00ff');
+  });
+});
+
+describe('TimeSeriesPlot axes and units', () => {
+  interface PlotOptions {
+    series: { label: string; scale?: string; dash?: number[] }[];
+    axes: { scale?: string; label?: string; side?: number; grid?: { show: boolean } }[];
+  }
+
+  /** The options and data uPlot was constructed with for the chart at ``callIdx``. */
+  function constructed(callIdx = 0): { options: PlotOptions; data: Float64Array[] } {
+    const call = constructSpy.mock.calls[callIdx];
+    return { options: call?.[0] as PlotOptions, data: call?.[1] as Float64Array[] };
+  }
+
+  /** The y axes of a chart: its axes without the time axis. */
+  function yAxes(options: PlotOptions) {
+    return options.axes.slice(1).map((a) => [a.scale, a.label, a.side]);
+  }
+
+  beforeEach(() => {
+    constructSpy.mockClear();
+    destroySpy.mockClear();
+    setDataSpy.mockClear();
+    useRunsStore.setState({ runs: {}, activeRunId: null, overlayRunIds: new Set() });
+    usePlotStore.setState({
+      selectedByRun: {},
+      filterByRun: {},
+      expandedByRun: {},
+      scrubByRun: {},
+      playingByRun: {},
+    });
+    useUnitsStore.setState({ mode: 'pu' });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useUnitsStore.setState({ mode: 'pu' });
+  });
+
+  it('puts a bus angle on its own right-hand axis, in degrees, so the voltage is not squashed', () => {
+    seedRun('r1', ['Bus_1_v', 'Bus_1_a']);
+    appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.02], Bus_1_a: [0, 0.5] });
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v', 'Bus_1_a']));
+    render(<TimeSeriesPlot />);
+
+    const { options, data } = constructed();
+    expect(yAxes(options)).toEqual([
+      ['y', 'V (pu)', undefined],
+      ['y2', 'θ (°)', 1],
+    ]);
+    // The right-hand axis draws no grid of its own over the left one's.
+    expect(options.axes[2]?.grid).toEqual({ show: false });
+    expect(options.series.slice(1).map((s) => [s.label, s.scale])).toEqual([
+      ['Bus_1_v', 'y'],
+      ['Bus_1_a', 'y2'],
+    ]);
+    // The angle series is dashed, so the two axes can be told apart in the plot.
+    expect(options.series[1]?.dash).toBeUndefined();
+    expect(options.series[2]?.dash).toEqual([6, 4]);
+    // The voltage is as streamed; the angle is 0.5 rad in degrees.
+    expect(Array.from(data[1]!)).toEqual([1.0, 1.02]);
+    expect(data[2]![0]).toBe(0);
+    expect(data[2]![1]).toBeCloseTo(28.6479, 3);
+  });
+
+  it('puts the machine speed and rotor angle on separate axes', () => {
+    seedRun('r1', ['Gen_1_delta', 'Gen_1_omega']);
+    appendRows('r1', [0, 1], { Gen_1_delta: [0.5, 1.0], Gen_1_omega: [1.0, 1.001] });
+    usePlotStore.getState().setSelection('r1', new Set(['Gen_1_delta', 'Gen_1_omega']));
+    render(<TimeSeriesPlot />);
+
+    const { options, data } = constructed();
+    expect(yAxes(options)).toEqual([
+      ['y', 'ω (pu)', undefined],
+      ['y2', 'δ (°)', 1],
+    ]);
+    // The speed is the left axis whichever column comes first.
+    expect(options.series.slice(1).map((s) => [s.label, s.scale])).toEqual([
+      ['Gen_1_delta', 'y2'],
+      ['Gen_1_omega', 'y'],
+    ]);
+    expect(data[1]![1]).toBeCloseTo(57.2958, 3);
+    expect(Array.from(data[2]!)).toEqual([1.0, 1.001]);
+  });
+
+  it('leaves a power group on one axis, as before', () => {
+    seedRun('r1', ['Line_1_p', 'Line_1_q']);
+    appendRows('r1', [0, 1], { Line_1_p: [10, 12], Line_1_q: [2, 3] });
+    usePlotStore.getState().setSelection('r1', new Set(['Line_1_p', 'Line_1_q']));
+    render(<TimeSeriesPlot />);
+
+    const { options, data } = constructed();
+    expect(yAxes(options)).toEqual([['y', 'P (MW) / Q (MVar)', undefined]]);
+    expect(Array.from(data[1]!)).toEqual([10, 12]);
+  });
+
+  it('shows the speed in Hz and the voltage in kV in the actual mode', () => {
+    useUnitsStore.setState({ mode: 'actual' });
+    seedRunWithBases('r1', ['Bus_1_v', 'Bus_2_v', 'Gen_1_omega'], {
+      busKv: { '1': 230, '2': 13.8 },
+      freqHz: 50,
+    });
+    appendRows('r1', [0, 1], {
+      Bus_1_v: [1.0, 1.05],
+      Bus_2_v: [1.0, 0.5],
+      Gen_1_omega: [1.0, 1.002],
+    });
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v', 'Bus_2_v', 'Gen_1_omega']));
+    render(<TimeSeriesPlot />);
+
+    const bus = constructed(0);
+    expect(yAxes(bus.options)).toEqual([['y', 'V (kV)', undefined]]);
+    expect(bus.data[1]![0]).toBeCloseTo(230, 10);
+    expect(bus.data[1]![1]).toBeCloseTo(241.5, 10);
+    expect(bus.data[2]![0]).toBeCloseTo(13.8, 10);
+    expect(bus.data[2]![1]).toBeCloseTo(6.9, 10);
+    const gen = constructed(1);
+    expect(yAxes(gen.options)).toEqual([['y', 'f (Hz)', undefined]]);
+    expect(gen.data[1]![0]).toBeCloseTo(50, 10);
+    expect(gen.data[1]![1]).toBeCloseTo(50.1, 10);
+  });
+
+  it('keeps a run per unit in the actual mode when it recorded no bases', () => {
+    useUnitsStore.setState({ mode: 'actual' });
+    seedRun('r1', ['Bus_1_v', 'Gen_1_omega']);
+    appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.05], Gen_1_omega: [1.0, 1.002] });
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v', 'Gen_1_omega']));
+    render(<TimeSeriesPlot />);
+
+    expect(yAxes(constructed(0).options)).toEqual([['y', 'V (pu)', undefined]]);
+    expect(Array.from(constructed(0).data[1]!)).toEqual([1.0, 1.05]);
+    expect(yAxes(constructed(1).options)).toEqual([['y', 'ω (pu)', undefined]]);
+    expect(Array.from(constructed(1).data[1]!)).toEqual([1.0, 1.002]);
+  });
+
+  it('rebuilds the chart in the new unit when the display units change', () => {
+    seedRunWithBases('r1', ['Bus_1_v'], { busKv: { '1': 100 }, freqHz: 60 });
+    appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.1] });
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v']));
+    render(<TimeSeriesPlot />);
+    expect(constructSpy).toHaveBeenCalledTimes(1);
+    expect(yAxes(constructed(0).options)).toEqual([['y', 'V (pu)', undefined]]);
+
+    act(() => useUnitsStore.getState().setMode('actual'));
+
+    expect(destroySpy).toHaveBeenCalledTimes(1);
+    expect(constructSpy).toHaveBeenCalledTimes(2);
+    expect(yAxes(constructed(1).options)).toEqual([['y', 'V (kV)', undefined]]);
+    expect(constructed(1).data[1]![1]).toBeCloseTo(110, 10);
+  });
+
+  it('converts each pinned run with its own bases', () => {
+    useUnitsStore.setState({ mode: 'actual' });
+    // Two runs of different cases: bus 1 is 115 kV in the first, 230 kV in the second.
+    seedRunWithBases('r1', ['Bus_1_v'], { busKv: { '1': 115 }, freqHz: 60 });
+    appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.0] });
+    seedRunWithBases('r2', ['Bus_1_v'], { busKv: { '1': 230 }, freqHz: 60 });
+    appendRows('r2', [0, 1], { Bus_1_v: [1.0, 1.0] });
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+    usePlotStore.getState().setSelection('r2', new Set(['Bus_1_v']));
+    render(<TimeSeriesPlot />);
+
+    const { options, data } = constructed();
+    expect(yAxes(options)).toEqual([['y', 'V (kV)', undefined]]);
+    expect(Array.from(data[1]!)).toEqual([115, 115]);
+    expect(Array.from(data[2]!)).toEqual([230, 230]);
+  });
+
+  it('puts the angles of pinned runs on the right-hand axis, in degrees', () => {
+    seedRun('r1', ['Bus_1_v', 'Bus_1_a']);
+    appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.0], Bus_1_a: [0, Math.PI] });
+    seedRun('r2', ['Bus_1_v', 'Bus_1_a']);
+    appendRows('r2', [0, 1], { Bus_1_v: [1.0, 1.0], Bus_1_a: [0, Math.PI / 2] });
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+    usePlotStore.getState().setSelection('r2', new Set(['Bus_1_v', 'Bus_1_a']));
+    render(<TimeSeriesPlot />);
+
+    const { options, data } = constructed();
+    expect(yAxes(options)).toEqual([
+      ['y', 'V (pu)', undefined],
+      ['y2', 'θ (°)', 1],
+    ]);
+    // Series order: r1 v, r1 a, r2 v, r2 a (with the time column first).
+    expect(options.series.slice(1).map((s) => s.scale)).toEqual(['y', 'y2', 'y', 'y2']);
+    expect(data[2]![1]).toBeCloseTo(180, 10);
+    expect(data[4]![1]).toBeCloseTo(90, 10);
+  });
+
+  it('exports the values as simulated, and says in which units', async () => {
+    const downloads = captureDownloads();
+    try {
+      // The plot shows the angle in degrees and the voltage in kV, but the file holds the stream.
+      useUnitsStore.setState({ mode: 'actual' });
+      seedRunWithBases('r1', ['Bus_1_v', 'Bus_1_a'], { busKv: { '1': 230 }, freqHz: 60 });
+      appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.05], Bus_1_a: [0, 0.5] });
+      usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v', 'Bus_1_a']));
+      render(<TimeSeriesPlot />);
+
+      await exportAs(userEvent.setup(), 'csv');
+
+      const lines = (await readBlob(downloads.blobs[0]!)).trim().split(/\r?\n/);
+      expect(lines[0]).toBe(
+        '# values as simulated: voltage and speed in pu, angles in rad, power in MW and MVar',
+      );
+      expect(lines.slice(1)).toEqual([
+        'time,variable,value',
+        '0,Bus_1_v,1',
+        '0,Bus_1_a,0',
+        '1,Bus_1_v,1.05',
+        '1,Bus_1_a,0.5',
+      ]);
+    } finally {
+      downloads.restore();
+    }
   });
 });
