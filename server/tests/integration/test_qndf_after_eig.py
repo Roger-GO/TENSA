@@ -31,6 +31,10 @@ from tensa.core.wrapper import Wrapper
 
 OVERRIDES = {"rtol": 1e-4, "atol": 1e-7, "max_step": 0.05}
 
+# ANDES's eigenvalue routine warns about the conditioning of IEEE 14's state
+# matrix when it runs in this process (a worker's warnings never reach pytest).
+pytestmark = pytest.mark.filterwarnings("ignore:An ill-conditioned matrix detected")
+
 
 def _ieee14_dir() -> Path:
     pytest.importorskip("andes")
