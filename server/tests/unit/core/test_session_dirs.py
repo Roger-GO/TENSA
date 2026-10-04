@@ -46,16 +46,25 @@ DAY = 24 * 60 * 60
 
 
 def _session_dir(
-    workspace: Path, owner: int | str | None = None, *, fields: tuple[str, ...] = ()
+    workspace: Path,
+    owner: int | str | None = None,
+    *,
+    fields: tuple[str, ...] = (),
+    bare: bool = False,
 ) -> Path:
     """Create ``<workspace>/.sessions/<id>/clone/x.raw``, optionally marked.
 
-    ``owner`` alone writes the bare-pid marker of the first format; ``fields`` are
-    the ``key=value`` lines of the current one.
+    ``owner`` alone writes a marker for a pid on the host the tests run on (its
+    ``space=`` line is this host's); ``fields`` are the ``key=value`` lines to
+    write after the pid instead, and ``bare`` writes the pid alone, a marker that
+    names no host.
     """
     path = workspace / SESSIONS_DIRNAME / uuid.uuid4().hex
     (path / "clone").mkdir(parents=True)
     (path / "clone" / "x.raw").write_text("case\n", encoding="utf-8")
+    if isinstance(owner, int) and not fields and not bare:
+        here = pid_space()
+        fields = () if here is None else (f"space={here}",)
     if owner is not None:
         text = "".join(f"{line}\n" for line in (str(owner), *fields))
         (path / OWNER_MARKER_NAME).write_text(text, encoding="utf-8")
@@ -779,11 +788,44 @@ def test_sweep_probes_the_pid_when_this_servers_own_space_is_unknown(tmp_path: P
     assert _sweep(tmp_path, here=None, alive=False) == [theirs.name]
 
 
-def test_sweep_probes_a_pid_from_a_marker_that_names_no_space(tmp_path: Path) -> None:
-    """A marker of the first format has only a pid."""
-    old_format = _session_dir(tmp_path, owner=7)
-    assert _sweep(tmp_path) == []
-    assert _sweep(tmp_path, alive=False) == [old_format.name]
+def test_a_marker_that_names_no_space_is_judged_by_age_not_by_its_pid(tmp_path: Path) -> None:
+    """A marker with only a pid (written before the host was recorded, or by a
+    server that could not read its hostname) cannot be tied to this host: on a
+    shared volume its pid may belong to another machine, where "dead here" says
+    nothing. It is judged like a marker from another host, by how long nothing
+    in the directory has changed."""
+    probes: list[int] = []
+
+    def probe(pid: int) -> bool:
+        probes.append(pid)
+        return False  # dead here, which proves nothing
+
+    recent = _session_dir(tmp_path, owner=7, bare=True)
+    _age(recent, DAY / 2)
+    old = _session_dir(tmp_path, owner=7, bare=True)
+    _age(old, 2 * DAY)
+
+    removed = sweep_stale_session_dirs(
+        tmp_path,
+        pid_alive=probe,
+        local_space=lambda: HERE,
+        start_time=lambda pid: "100",
+    )
+
+    assert removed == [old.name]
+    assert recent.exists()
+    assert probes == [], "a pid the marker does not tie to this host must not be probed"
+
+
+def test_a_recently_touched_file_keeps_a_dir_whose_marker_names_no_space(
+    tmp_path: Path,
+) -> None:
+    busy = _session_dir(tmp_path, owner=7, bare=True)
+    _age(busy, 5 * DAY)
+    recent = time.time() - 3600
+    os.utime(busy / "clone" / "x.raw", (recent, recent))
+    assert _sweep(tmp_path, alive=False) == []
+    assert busy.exists()
 
 
 def test_a_server_marker_survives_the_real_sweep(tmp_path: Path, live_pid: int) -> None:

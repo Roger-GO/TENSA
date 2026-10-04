@@ -126,6 +126,7 @@ def open_workspace_file_for_andes(
     """
     _reject_unsafe_input(client_path)
 
+    workspace = canonical_directory(workspace)
     candidate = (workspace / client_path).expanduser()
 
     if sys.platform == "win32":
@@ -214,7 +215,15 @@ def _macos_fcntl_getpath(fd: int) -> Path:
 
 
 def _check_within_workspace(workspace: Path, canonical: Path) -> None:
-    workspace = canonical_directory(workspace)
+    """Raise ``WorkspacePathError`` unless ``canonical`` lies under ``workspace``.
+
+    Both have to be canonical already: ``workspace`` from ``canonical_directory``
+    (or ``ensure_workspace``), ``canonical`` from the file system. A caller that
+    takes the workspace from a client or a test canonicalizes it once, up front,
+    and uses the result for everything it does in the request. Doing it here as
+    well would cost a second ``realpath`` (on macOS an ``open`` plus ``fcntl``)
+    for every file a request touches.
+    """
     try:
         canonical.relative_to(workspace)
     except ValueError as exc:

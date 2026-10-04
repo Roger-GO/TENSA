@@ -86,6 +86,7 @@ def _layout_sidecar_path(workspace: Path, case_path: str) -> Path:
     case data).
     """
     _reject_unsafe_input(case_path)
+    workspace = canonical_directory(workspace)
     candidate = (workspace / case_path).expanduser()
     sidecar_name = candidate.name + ".layout.json"
     parent = candidate.parent

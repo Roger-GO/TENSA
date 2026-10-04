@@ -714,3 +714,66 @@ def test_write_under_unsearchable_ancestor_is_workspace_path_error(tmp_path: Pat
             pass
     finally:
         locked.chmod(0o700)
+
+
+# ---- the workspace is canonicalized once per request -------------------------
+
+
+@pytest.fixture
+def canonicalized(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    """Every directory ``canonical_directory`` is asked about."""
+    seen: list[Path] = []
+    real = paths.canonical_directory
+
+    def counting(directory: Path) -> Path:
+        seen.append(directory)
+        return real(directory)
+
+    monkeypatch.setattr(paths, "canonical_directory", counting)
+    return seen
+
+
+@pytest.mark.unit
+def test_opening_a_file_canonicalizes_the_workspace_once(
+    tmp_path: Path, canonicalized: list[Path]
+) -> None:
+    workspace = ensure_workspace(tmp_path / "ws")
+    (workspace / "ieee14.raw").write_text("x", encoding="utf-8")
+    canonicalized.clear()
+    with open_workspace_file_for_andes(workspace, "ieee14.raw"):
+        pass
+    assert canonicalized == [workspace]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("existing_target", [False, True])
+def test_a_write_target_canonicalizes_the_workspace_once(
+    tmp_path: Path, canonicalized: list[Path], existing_target: bool
+) -> None:
+    """The boundary check runs for the parent and again for an existing target,
+    and used to canonicalize the workspace each time: three times a request."""
+    workspace = ensure_workspace(tmp_path / "ws")
+    (workspace / "sub").mkdir()
+    if existing_target:
+        (workspace / "sub" / "out.json").write_text("{}", encoding="utf-8")
+    canonicalized.clear()
+    with open_workspace_file_for_write(workspace, "sub/out.json") as target:
+        assert target == workspace / "sub" / "out.json"
+    # Once for the workspace, once for the parent directory.
+    assert canonicalized == [workspace, workspace / "sub"]
+
+
+@pytest.mark.unit
+def test_the_boundary_check_trusts_the_workspace_it_is_given(tmp_path: Path) -> None:
+    """``_check_within_workspace`` compares what it is handed; making the
+    workspace canonical is the caller's job, done once per request."""
+    workspace = ensure_workspace(tmp_path / "ws")
+    inside = workspace / "a.raw"
+    inside.write_text("x", encoding="utf-8")
+    paths._check_within_workspace(workspace, inside)  # noqa: SLF001
+    with pytest.raises(WorkspacePathError, match="outside the workspace"):
+        paths._check_within_workspace(workspace, tmp_path)  # noqa: SLF001
+    # A directory that does not exist is not canonicalized here, so it is not
+    # an error of its own: it simply contains nothing.
+    with pytest.raises(WorkspacePathError, match="outside the workspace"):
+        paths._check_within_workspace(tmp_path / "nope", inside)  # noqa: SLF001

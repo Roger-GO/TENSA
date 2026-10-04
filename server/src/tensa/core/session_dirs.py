@@ -12,8 +12,8 @@ clean up after it without touching a directory a live server is still using:
   means nothing to a server on another host or in another container sharing the
   workspace, and the same pid comes back after a container restart.
 - **Startup sweep.** ``sweep_stale_session_dirs`` removes a directory only when
-  its recorded owner is gone, or (no usable marker, or one this server cannot
-  check) when nothing in it has changed for a day.
+  its recorded owner is gone, or (no usable marker, or one that cannot be tied to
+  this host) when nothing in it has changed for a day.
 - **Robust removal.** ``remove_tree`` is ``shutil.rmtree`` that clears the
   read-only bit Windows refuses to delete through.
 
@@ -52,9 +52,9 @@ SESSIONS_DIRNAME = ".sessions"
 OWNER_MARKER_NAME = "owner.pid"
 
 # A directory with no owner marker this server can check (made before markers
-# existed, the marker could not be written, or it was written on another host or
-# in another pid namespace) is only removed once nothing in it has changed for
-# this long.
+# existed, the marker could not be written, it names no host, or it was written
+# on another host or in another pid namespace) is only removed once nothing in
+# it has changed for this long.
 UNMARKED_MAX_AGE_SECONDS = 24 * 60 * 60
 
 # Keys after the pid on the marker's first line. Unknown keys are ignored, so
@@ -87,8 +87,10 @@ class OwnerMarker:
     """What ``owner.pid`` says about the server that owns a session dir.
 
     ``space`` and ``start`` are ``None`` for a marker written before they were
-    recorded, or when this OS could not provide them. A ``None`` is never held
-    against the owner: it only means that check is skipped.
+    recorded, or when this OS could not provide them. A ``None`` ``start`` only
+    means the check for a reused pid is skipped. A ``None`` ``space`` means the
+    pid cannot be tied to this host, so the sweep does not probe it and judges the
+    directory by its age, as it does for a marker from another host.
     """
 
     pid: int
@@ -334,8 +336,10 @@ def _is_stale(
     start_time: Callable[[int], str | None],
 ) -> bool:
     marker = read_owner_marker(path)
-    if marker is not None and (
-        marker.space is None or local_space is None or marker.space == local_space
+    if (
+        marker is not None
+        and marker.space is not None
+        and (local_space is None or marker.space == local_space)
     ):
         # The pid is meaningful here. A live owner keeps the directory, this
         # process's own pid included, unless the pid has since been reused by a
@@ -346,8 +350,9 @@ def _is_stale(
             return False
         current = start_time(marker.pid)
         return current is not None and current != marker.start
-    # No marker, or one from another host or pid namespace: its pid proves
-    # nothing here, so only a long-untouched directory is taken to be abandoned.
+    # No marker, or one that names no host or comes from another host or pid
+    # namespace: its pid proves nothing here, so only a long-untouched directory
+    # is taken to be abandoned.
     return now - _newest_mtime(path) > max_unmarked_age
 
 
@@ -366,9 +371,10 @@ def sweep_stale_session_dirs(
     A directory under ``<workspace>/.sessions/`` is removed when its owner
     marker names a process on this host that is dead, or whose pid a different
     process has since taken over (the recorded start time no longer matches).
-    When it has no usable marker, or the marker was written on another host or
-    in another pid namespace (so its pid cannot be probed here), it is removed
-    only if nothing in it has changed for ``max_unmarked_age`` seconds. A
+    When it has no usable marker, or the marker names no host, or was written on
+    another host or in another pid namespace (so its pid cannot be probed here),
+    it is removed only if nothing in it has changed for ``max_unmarked_age``
+    seconds. A
     directory whose owner is alive, a name in ``keep``, anything not named like a
     session id, and anything that is not a plain directory (a symlink is never
     followed) are left alone. Returns the names removed.
