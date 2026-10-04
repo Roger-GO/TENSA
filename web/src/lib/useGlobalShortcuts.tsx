@@ -24,6 +24,17 @@
  * palette), which is registered separately at AppShell with an
  * explicit `enableOnFormTags: ['INPUT', 'TEXTAREA']` opt-in.
  *
+ * Already-handled keys: a binding does not fire for a keydown something else
+ * has already used (`event.defaultPrevented`). That is what keeps Esc, which
+ * closes every dialog, menu and popover, from also aborting a run when it was
+ * pressed to close one: Radix dismisses a layer on Esc and prevents the event's
+ * default when it does, before this listener sees it.
+ *
+ * Browser keys: Ctrl/Cmd+S (Save Page) and Ctrl/Cmd+O (Open File) are keys the
+ * browser acts on unless the page swallows them. They are bound here whether or
+ * not their command is available, so a press with no case loaded does not fall
+ * through to a file dialog the app has nothing to do with.
+ *
  * Why a component (rather than a pure hook): React's rules-of-hooks
  * forbid calling `useHotkeys` inside a `.map()` body. We work around
  * that by rendering one `<ShortcutBinder />` per active command — each
@@ -35,6 +46,9 @@
 import type { ReactElement } from 'react';
 
 import { useCommandRegistry } from '@/lib/commands';
+import type { Command } from '@/lib/commands';
+import { SHORTCUTS } from '@/lib/shortcuts';
+import { toast } from '@/lib/toast';
 import { useHotkeys } from '@/lib/useHotkeys';
 import type { Options } from '@/lib/useHotkeys';
 
@@ -49,7 +63,34 @@ const SHORTCUT_OPTS: Options = {
   enableOnFormTags: false,
   enableOnContentEditable: false,
   preventDefault: true,
+  // Checked before the lib prevents the default itself, so it only sees what
+  // another listener (a Radix layer closing on Esc) did.
+  ignoreEventWhen: (event) => event.defaultPrevented,
 };
+
+/** Options for the browser keys: swallowed even from inside a text field. */
+const BROWSER_KEY_OPTS: Options = {
+  enableOnFormTags: ['INPUT', 'TEXTAREA', 'SELECT'],
+  enableOnContentEditable: false,
+  preventDefault: true,
+};
+
+/**
+ * The browser keys and what each does. The registry lists the command only
+ * while it is available; `unavailable` is what a press says when it is not.
+ */
+const BROWSER_KEYS: ReadonlyArray<{ binding: string; commandId: string; unavailable: string }> = [
+  {
+    binding: SHORTCUTS.save,
+    commandId: 'workspace.save-system',
+    unavailable: 'Nothing to save yet. Load a case or build a system first.',
+  },
+  {
+    binding: SHORTCUTS.openCase,
+    commandId: 'workspace.open-case',
+    unavailable: 'Cannot open a case right now: there is no session. Try again in a moment.',
+  },
+];
 
 /**
  * Bindings managed directly at AppShell (so they can opt into
@@ -60,7 +101,12 @@ const SHORTCUT_OPTS: Options = {
  * Keep this list in sync with the `useHotkeys(...)` calls inside
  * `AppShell.tsx`.
  */
-const APPSHELL_MANAGED_BINDINGS: ReadonlySet<string> = new Set<string>(['meta+k, ctrl+k', '?']);
+const APPSHELL_MANAGED_BINDINGS: ReadonlySet<string> = new Set<string>([
+  SHORTCUTS.commandPalette,
+  SHORTCUTS.cheatsheet,
+  // Bound by `BrowserKeyBinder` below, which runs them with or without the command.
+  ...BROWSER_KEYS.map((k) => k.binding),
+]);
 
 /**
  * Bridge component: each command-with-shortcut gets one of these,
@@ -86,6 +132,40 @@ function ShortcutBinder({ binding, action }: { binding: string; action: () => vo
 }
 
 /**
+ * Binds a browser key (see the header). It always swallows the key; it runs
+ * `command` when there is one, and says why not otherwise. A press that starts in
+ * a dialog is only swallowed, so the key never stacks one dialog on another; the
+ * palette is the exception, where Ctrl/Cmd+O is a way to switch it to Open case.
+ */
+function BrowserKeyBinder({
+  binding,
+  command,
+  unavailable,
+}: {
+  binding: string;
+  command: Command | undefined;
+  unavailable: string;
+}) {
+  useHotkeys(
+    binding,
+    (event) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest('[role="dialog"]:not([data-testid="command-palette"])') !== null
+      ) {
+        return;
+      }
+      if (command) command.action();
+      else toast.info(unavailable);
+    },
+    BROWSER_KEY_OPTS,
+    [binding, command],
+  );
+  return null;
+}
+
+/**
  * Hook + component dual. Reads the registry and renders one
  * `<ShortcutBinder />` per command-with-shortcut. The convention in
  * this codebase is to call this from JSX as `<GlobalShortcuts />` so
@@ -106,6 +186,14 @@ export function GlobalShortcuts(): ReactElement {
     <>
       {bound.map((cmd) => (
         <ShortcutBinder key={cmd.id} binding={cmd.shortcut as string} action={cmd.action} />
+      ))}
+      {BROWSER_KEYS.map((key) => (
+        <BrowserKeyBinder
+          key={key.commandId}
+          binding={key.binding}
+          command={commands.find((c) => c.id === key.commandId)}
+          unavailable={key.unavailable}
+        />
       ))}
     </>
   );

@@ -68,6 +68,9 @@ For ad-hoc skip checks: `isEditableTarget(element)` / `isEditableActiveElement()
 
 **Bindings live in the command registry** (`@/lib/commands`): give a command a `shortcut` and `<GlobalShortcuts />` binds it, the palette and the cheatsheet list it. A binding that something else has to repeat (a button's tooltip, a handler the registry cannot own) is a constant in `@/lib/shortcuts`; write tooltips with `withShortcut(text, SHORTCUTS.x)` from `@/lib/shortcutFormatter`, which names the key of the user's platform (Ctrl+B, or ⌘B on macOS), never a hard-coded `⌘`.
 
+- **Browser keys.** Ctrl/Cmd+S (Save Page) and Ctrl/Cmd+O (Open File) are bound in `<GlobalShortcuts />` whether or not their command is available, so a press never falls through to the browser. Do not bind Ctrl/Cmd+D, T, W or N, which the browser keeps.
+- **Esc and other layers.** A global binding does not fire for a keydown that something else already used (`event.defaultPrevented`), which is how Esc stays free to close dialogs, menus and popovers (Radix prevents the default when it dismisses) without also running a command bound to Esc. Pass `ignoreEventWhen` yourself if you register such a key outside the registry.
+
 ## Run-button readiness (Unit 4)
 
 **All Run buttons (PF / TDS / EIG / CPF / SE / Sweep) consume `useRunReadiness(routine)`** from `@/lib/useRunReadiness`. Returns `{ ready, disabledReason, recovery, recoveryHint }`.

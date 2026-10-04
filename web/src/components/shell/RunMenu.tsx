@@ -43,7 +43,8 @@ const TESTID_SUFFIX_BY_ID: Record<string, string> = {
 
 export function RunMenu() {
   const commands = useCommandRegistry();
-  const runCommands = commands.filter((c) => c.group === 'run');
+  // Abort run (Esc) is a run command but not a routine to pick.
+  const runCommands = commands.filter((c) => c.group === 'run' && c.id !== 'run.abort');
   const activeRoutine = useRunModeStore((s) => s.activeRoutine);
 
   const [sweepOpen, setSweepOpen] = useState(false);

@@ -39,6 +39,7 @@ import {
 } from '@/lib/commands';
 import { formatShortcut } from '@/lib/shortcutFormatter';
 import { useCommandPaletteStore } from '@/store/commandPalette';
+import { OpenCasePage } from './OpenCasePage';
 
 /** Heading text rendered above each group section in the palette. */
 const GROUP_HEADINGS: Record<CommandGroup, string> = {
@@ -53,6 +54,7 @@ const GROUP_HEADINGS: Record<CommandGroup, string> = {
 
 export function CommandPalette() {
   const open = useCommandPaletteStore((s) => s.open);
+  const page = useCommandPaletteStore((s) => s.page);
   const closePalette = useCommandPaletteStore((s) => s.closePalette);
   const commands = useCommandRegistry();
 
@@ -61,11 +63,12 @@ export function CommandPalette() {
       // Run the action FIRST, then close. The action may itself open
       // another dialog (e.g., snapshot save) — closing the palette
       // first would race against the new dialog's mount inside the
-      // same focus-trap teardown cycle on some browsers.
+      // same focus-trap teardown cycle on some browsers. A command that
+      // moves the palette to another of its pages (Open case) leaves it open.
       try {
         command.action();
       } finally {
-        closePalette();
+        if (!command.keepPaletteOpen) closePalette();
       }
     },
     [closePalette],
@@ -118,7 +121,8 @@ export function CommandPalette() {
             Search and run any application command.
           </DialogPrimitive.Description>
 
-          {open ? (
+          {open && page === 'open-case' ? <OpenCasePage /> : null}
+          {open && page === 'commands' ? (
             <CmdkCommand label="Command palette" loop className="flex max-h-[60vh] flex-col">
               <div className="border-border border-b">
                 <CmdkCommand.Input

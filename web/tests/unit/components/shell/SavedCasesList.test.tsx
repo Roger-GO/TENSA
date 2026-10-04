@@ -63,7 +63,7 @@ vi.mock('@/api/queries', async () => {
       refetch: vi.fn(),
     }),
     useLoadCase: () => ({
-      mutate: loadCaseMutate,
+      mutateAsync: loadCaseMutate,
       isPending: false,
       reset: vi.fn(),
       error: null,
@@ -87,6 +87,7 @@ function withClient(ui: ReactNode) {
 
 beforeEach(() => {
   loadCaseMutate.mockReset();
+  loadCaseMutate.mockResolvedValue({});
   restoreMutateAsync.mockReset();
   mockFiles = [
     { name: 'kundur.raw', size_bytes: 1024, modified_iso: '2026-05-01T00:00:00Z', format: 'raw' },

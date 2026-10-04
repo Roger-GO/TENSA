@@ -28,6 +28,7 @@ import { RunStream } from '@/streaming/RunStream';
 import type { RunStreamError, VarGroup } from '@/streaming/RunStream';
 import { buildRunStreamWsUrl } from '@/streaming/wsUrl';
 import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
+import { reportAbortError } from '@/lib/abortRun';
 import { toast } from '@/lib/toast';
 import { unitBasesOf } from '@/lib/units';
 import { cn } from '@/lib/cn';
@@ -443,11 +444,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     abortRun.mutate(sessionId, {
       onError: (err) => {
         setAborting(false);
-        const detail =
-          err instanceof ProblemDetailsError
-            ? (err.detail ?? err.title ?? `HTTP ${err.status}`)
-            : (err.message ?? 'Abort failed');
-        toast.error('TDS error', { description: `Could not abort: ${detail}` });
+        reportAbortError(err);
       },
     });
   };
@@ -513,7 +510,12 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       primaryLabel = 'Reset run';
       primaryVariant = 'outline';
       primaryDisabled = resetRun.isPending;
-    } else if (aborting || (isTdsRunning && abortRun.isPending)) {
+    } else if (
+      aborting ||
+      (isTdsRunning && (abortRun.isPending || (activeRun?.abortedLocally ?? false)))
+    ) {
+      // An abort sent from elsewhere (Esc) sets ``abortedLocally`` too, so the
+      // button says so whichever of them asked.
       primaryLabel = 'Aborting…';
       primaryDisabled = true;
       primaryShowSpinner = true;

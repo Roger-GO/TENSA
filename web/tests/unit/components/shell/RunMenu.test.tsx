@@ -13,7 +13,7 @@
  * - Escape closes the menu.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
@@ -24,6 +24,7 @@ import { useAnalyzeStore } from '@/store/analyze';
 import { useUiStore, DEFAULT_TDS_CONFIG } from '@/store/ui';
 import { useLayoutStore } from '@/store/layout';
 import { usePflowStore } from '@/store/pflow';
+import { useRunsStore } from '@/store/runs';
 import type { PflowResult } from '@/api/types';
 
 function withProviders(ui: ReactElement) {
@@ -84,6 +85,20 @@ describe('<RunMenu /> — render', () => {
     expect(screen.getByTestId('topbar-menu-run-cpf')).toBeInTheDocument();
     expect(screen.getByTestId('topbar-menu-run-se')).toBeInTheDocument();
     expect(screen.getByTestId('topbar-menu-run-sweep')).toBeInTheDocument();
+  });
+
+  it('does not list Abort run among the routines while a run streams', async () => {
+    const user = userEvent.setup();
+    useRunsStore.getState().startRun({ runId: 'streaming', tf: 5, columnNames: [] });
+    try {
+      render(withProviders(<RunMenu />));
+      await user.click(screen.getByTestId('topbar-menu-run-trigger'));
+      const content = await screen.findByTestId('topbar-menu-run-content');
+      expect(screen.queryByTestId('topbar-menu-run-abort')).toBeNull();
+      expect(within(content).queryByText(/abort/i)).toBeNull();
+    } finally {
+      useRunsStore.getState().clearRuns();
+    }
   });
 
   it('marks the active routine with `data-routine-position="active"`', async () => {

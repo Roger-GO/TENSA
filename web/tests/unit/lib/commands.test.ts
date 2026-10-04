@@ -29,6 +29,7 @@ import {
 } from '@/lib/commands';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
+import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useRunsStore } from '@/store/runs';
 import { usePflowStore } from '@/store/pflow';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
@@ -445,6 +446,65 @@ describe('useCommandRegistry: keys the browser keeps', () => {
     for (const reserved of ['meta+d', 'ctrl+d', 'meta+t', 'ctrl+t', 'meta+w', 'ctrl+w']) {
       expect(aliases).not.toContain(reserved);
     }
+  });
+});
+
+describe('useCommandRegistry: Open case, Save system and Abort run', () => {
+  afterEach(() => {
+    useCommandPaletteStore.setState({ open: false, page: 'commands' });
+    useRunsStore.getState().clearRuns();
+  });
+
+  it('Open case is offered with a session, and switches the palette to its Open case page', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = find(result.current, 'workspace.open-case');
+    expect(cmd?.group).toBe('workspace');
+    expect(cmd?.shortcut).toBe('meta+o, ctrl+o');
+    // The palette must not close on it: it is the same palette, on another page.
+    expect(cmd?.keepPaletteOpen).toBe(true);
+    act(() => cmd?.action());
+    expect(useCommandPaletteStore.getState()).toMatchObject({ open: true, page: 'open-case' });
+  });
+
+  it('Open case is not offered without a session', () => {
+    useSessionStore.setState({ sessionId: null });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(result.current, 'workspace.open-case')).toBeUndefined();
+  });
+
+  it('only Open case keeps the palette open', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const keepers = result.current.filter((c) => c.keepPaletteOpen).map((c) => c.id);
+    expect(keepers).toEqual(['workspace.open-case']);
+  });
+
+  it('Save system carries Ctrl/Cmd+S', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(result.current, 'workspace.save-system')?.shortcut).toBe('meta+s, ctrl+s');
+  });
+
+  it('Abort run (Esc) is offered only while a run can be stopped', () => {
+    const none = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(none.result.current, 'run.abort')).toBeUndefined();
+    none.unmount();
+
+    useRunsStore.getState().startRun({ runId: 'r', tf: 1, columnNames: [] });
+    const streaming = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = find(streaming.result.current, 'run.abort');
+    expect(cmd?.group).toBe('run');
+    expect(cmd?.shortcut).toBe('escape');
+    streaming.unmount();
+
+    // Already asked to stop: the second Esc has nothing to do.
+    useRunsStore.getState().setAbortedLocally('r', true);
+    const stopping = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(stopping.result.current, 'run.abort')).toBeUndefined();
+    stopping.unmount();
+
+    useRunsStore.getState().setAbortedLocally('r', false);
+    useRunsStore.getState().markRunDone('r', 1, true);
+    const done = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(done.result.current, 'run.abort')).toBeUndefined();
   });
 });
 

@@ -47,6 +47,28 @@ const BundleImportDialogBody = lazyNamed(
   'overlay',
 );
 
+export interface BundleImportDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+/**
+ * The import dialog without a trigger, for an owner that opens it from
+ * elsewhere (the Workspace menu keeps one for the palette command). Closed, it
+ * renders nothing but the empty dialog root.
+ */
+export function BundleImportDialog({ open, onOpenChange }: BundleImportDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {open ? (
+        <LazyMount when onLoadFailed={() => onOpenChange(false)}>
+          <BundleImportDialogBody onClose={() => onOpenChange(false)} />
+        </LazyMount>
+      ) : null}
+    </Dialog>
+  );
+}
+
 export interface BundleImportButtonProps {
   /**
    * Optional className passthrough so the picker can style the

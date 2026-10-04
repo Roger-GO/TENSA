@@ -41,12 +41,14 @@ import { useSnapshotStore } from '@/store/snapshot';
 import { useBundleStore } from '@/store/bundle';
 import { usePflowStore } from '@/store/pflow';
 import { useRunModeStore } from '@/store/runMode';
+import { useRunsStore } from '@/store/runs';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 import { useHistoryStore } from '@/store/history';
 import { useReportDialogStore } from '@/store/reportDialog';
 import {
+  useAbortRun,
   useCloneRedo,
   useCloneReset,
   useCloneUndo,
@@ -58,6 +60,7 @@ import { __requestOpenSldSearch } from '@/store/sld';
 import { useThemeStore } from '@/store/theme';
 import { useLayoutStore } from '@/store/layout';
 import { requestEigLogToggle, requestEigViewReset } from '@/lib/eigViewBus';
+import { reportAbortError } from '@/lib/abortRun';
 import { SHORTCUTS } from '@/lib/shortcuts';
 import type { RunRoutine } from '@/lib/useRunReadiness';
 
@@ -116,6 +119,12 @@ export interface Command {
    *     are comma-separated (e.g., `meta+k, ctrl+k`).
    */
   shortcut?: string;
+  /**
+   * Set when the action moves the palette to another of its own pages (Open case
+   * lists the workspace's files in it) instead of finishing. The palette then
+   * stays open after running it; every other command closes the palette.
+   */
+  keepPaletteOpen?: boolean;
 }
 
 /**
@@ -148,12 +157,26 @@ export function useCommandRegistry(): readonly Command[] {
   const setAnalyzeSubMode = useAnalyzeStore((s) => s.setSubMode);
   const setActiveCpfSubMode = useAnalyzeStore((s) => s.setActiveCpfSubMode);
   const togglePalette = useCommandPaletteStore((s) => s.togglePalette);
+  const openPalettePage = useCommandPaletteStore((s) => s.openPage);
   const toggleCheatsheet = useShortcutCheatsheetStore((s) => s.toggleCheatsheet);
   const openHistoryDrawer = useHistoryStore((s) => s.openDrawer);
 
   // ---- mutations (Edit group) -------------------------------------------
   const reloadMutation = useReloadCase();
   const undoMutation = useUndoLastEdit();
+
+  // ---- abort (Run group) -------------------------------------------------
+  // True while a time-domain run is starting or streaming and has not been
+  // asked to stop. A boolean, so a streamed frame does not re-render consumers.
+  const abortableRun = useRunsStore((s) => {
+    const run = s.activeRunId === null ? undefined : s.runs[s.activeRunId];
+    return (
+      run !== undefined &&
+      (run.state === 'starting' || run.state === 'streaming') &&
+      !run.abortedLocally
+    );
+  });
+  const abortMutation = useAbortRun();
 
   // ---- clone-on-write edit (Unit 22) ------------------------------------
   const editMode = useCaseStore((s) => s.editMode);
@@ -216,6 +239,19 @@ export function useCommandRegistry(): readonly Command[] {
 
     const all: Command[] = [
       // ---- workspace -----------------------------------------------------
+      // Opens the palette's Open case page (the workspace's case files), from the
+      // menu, the palette itself and Ctrl/Cmd+O (which is the browser's Open File
+      // otherwise; see `<GlobalShortcuts />`).
+      {
+        id: 'workspace.open-case',
+        label: 'Open case…',
+        group: 'workspace',
+        keywords: ['open', 'case', 'load', 'file', 'workspace', 'switch', 'change'],
+        action: () => openPalettePage('open-case'),
+        when: () => sessionId !== null,
+        shortcut: SHORTCUTS.openCase,
+        keepPaletteOpen: true,
+      },
       {
         id: 'workspace.add-element',
         label: 'Add element…',
@@ -254,6 +290,8 @@ export function useCommandRegistry(): readonly Command[] {
         keywords: ['save', 'export', 'xlsx', 'json', 'system'],
         action: () => __requestPaletteDialog('save-system'),
         when: () => sessionId !== null && topology !== null,
+        // Ctrl/Cmd+S is the browser's Save Page otherwise; see `<GlobalShortcuts />`.
+        shortcut: SHORTCUTS.save,
       },
       {
         id: 'workspace.save-snapshot',
@@ -451,6 +489,23 @@ export function useCommandRegistry(): readonly Command[] {
         action: () => {
           handleSelectRoutine('cpf', { cpfSubMode: 'qv' });
         },
+      },
+      // Esc. Stops the streaming time-domain run the way the Abort button does.
+      // Only offered while a run can be stopped, so Esc does nothing otherwise,
+      // and `<GlobalShortcuts />` leaves an Esc that a dialog, menu or popover
+      // already used to close itself.
+      {
+        id: 'run.abort',
+        label: 'Abort run',
+        group: 'run',
+        keywords: ['abort', 'cancel', 'stop', 'halt', 'interrupt', 'tds', 'run'],
+        action: () => {
+          // ``mutateAsync``: an error is reported even when the palette, whose
+          // registry this action came from, has closed by the time it arrives.
+          if (sessionId !== null) abortMutation.mutateAsync(sessionId).catch(reportAbortError);
+        },
+        when: () => abortableRun && sessionId !== null && !abortMutation.isPending,
+        shortcut: SHORTCUTS.abortRun,
       },
 
       // ---- export --------------------------------------------------------
@@ -714,6 +769,7 @@ export function useCommandRegistry(): readonly Command[] {
     setAnalyzeSubMode,
     setActiveCpfSubMode,
     togglePalette,
+    openPalettePage,
     toggleCheatsheet,
     openHistoryDrawer,
     reloadMutation,
@@ -732,6 +788,8 @@ export function useCommandRegistry(): readonly Command[] {
     reloadDisabled,
     undoDisabled,
     pfConverged,
+    abortableRun,
+    abortMutation,
   ]);
 }
 

@@ -10,12 +10,11 @@
  *
  * What this component still owns:
  *
- * - The local React state for the PMU placement and Profile import
- *   dialogs (whose original button components were
- *   `<PmuPlacementDialog />` + `<ProfileImportDialog />` with
- *   `useState` open/close). The Save System and Bundle Import
- *   dialogs likewise live as local state inside this component now,
- *   triggered via the palette-dialog bridge.
+ * - The local React state for the PMU placement, Profile import, Save
+ *   System and Bundle Import dialogs, which the palette-dialog bridge
+ *   opens. The Save System and Bundle Import dialogs are mounted here, not
+ *   inside their menu item, because a Radix popover unmounts its content
+ *   while closed and the palette (or Ctrl/Cmd+S) has no menu open to click.
  * - The `subscribePaletteDialog` subscription that lets the palette
  *   open those local-state dialogs without lifting their `useState`
  *   into a Zustand slice.
@@ -31,8 +30,8 @@ import { useEffect, useState } from 'react';
 import { TopBarMenu, TopBarMenuItem, TopBarMenuSeparator } from './TopBarMenu';
 import { LazyMount } from '@/components/ui/Lazy';
 import { lazyNamed } from '@/lib/lazyNamed';
-import { SaveSystemButton } from '@/components/case/SaveSystemButton';
-import { BundleImportButton } from '@/components/bundle/BundleImportDialog';
+import { SaveSystemDialog } from '@/components/case/SaveSystemButton';
+import { BundleImportDialog } from '@/components/bundle/BundleImportDialog';
 import { useCommandRegistry, subscribePaletteDialog } from '@/lib/commands';
 
 // The PMU and profile-import dialogs are separate chunks, fetched the first
@@ -50,6 +49,7 @@ const ProfileImportDialog = lazyNamed(
 
 /** Map registry id → existing testid suffix (preserves Unit-8 contract). */
 const TESTID_BY_ID: Record<string, string> = {
+  'workspace.open-case': 'topbar-menu-workspace-open-case',
   'workspace.add-element': 'topbar-menu-workspace-add-element',
   'workspace.add-pmu': 'topbar-menu-workspace-add-pmu',
   'workspace.import-profile': 'topbar-menu-workspace-import-profile',
@@ -72,11 +72,15 @@ export function WorkspaceMenu() {
   // route through a single open path.
   const [pmuOpen, setPmuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [importBundleOpen, setImportBundleOpen] = useState(false);
 
   useEffect(() => {
     return subscribePaletteDialog((key) => {
       if (key === 'pmu') setPmuOpen(true);
       if (key === 'profile') setProfileOpen(true);
+      if (key === 'save-system') setSaveOpen(true);
+      if (key === 'import-bundle') setImportBundleOpen(true);
     });
   }, []);
 
@@ -91,55 +95,27 @@ export function WorkspaceMenu() {
   return (
     <>
       <TopBarMenu label="Workspace" testId="topbar-menu-workspace">
-        {workspaceCommands.map((cmd, idx) => {
-          // SaveSystem and BundleImport were originally embedded as
-          // full-width Button components (the menu entry rendered the
-          // button itself). We keep that embedding for the click
-          // affordance but the registry now declares the canonical
-          // command id used everywhere else (palette, tests). Render
-          // a separator before the snapshot block + before the
-          // import-bundle block to match the visual grouping the
-          // pre-Unit-9 menu had.
-          const insertSeparatorBefore =
-            cmd.id === 'workspace.save-system' || cmd.id === 'workspace.import-bundle';
-
-          if (cmd.id === 'workspace.save-system') {
-            return (
-              <div key={cmd.id}>
-                {insertSeparatorBefore && idx > 0 ? <TopBarMenuSeparator /> : null}
-                <div
-                  data-testid={TESTID_BY_ID[cmd.id]}
-                  className="px-1 [&_button]:w-full [&_button]:justify-start"
-                >
-                  <SaveSystemButton />
-                </div>
-              </div>
-            );
-          }
-          if (cmd.id === 'workspace.import-bundle') {
-            return (
-              <div key={cmd.id}>
-                {insertSeparatorBefore && idx > 0 ? <TopBarMenuSeparator /> : null}
-                <div
-                  data-testid={TESTID_BY_ID[cmd.id]}
-                  className="px-1 [&_button]:w-full [&_button]:justify-start"
-                >
-                  <BundleImportButton />
-                </div>
-              </div>
-            );
-          }
-          return (
+        {/* A flat list, not a Fragment per item: TopBarMenu closes the menu on a
+            click by cloning the items that are its direct children. */}
+        {workspaceCommands.flatMap((cmd, idx) => {
+          // A separator before the save and import-bundle items keeps the visual
+          // grouping the pre-Unit-9 menu had.
+          const separated =
+            idx > 0 && (cmd.id === 'workspace.save-system' || cmd.id === 'workspace.import-bundle');
+          return [
+            ...(separated ? [<TopBarMenuSeparator key={`${cmd.id}-separator`} />] : []),
             <TopBarMenuItem
               key={cmd.id}
               testId={TESTID_BY_ID[cmd.id] ?? `topbar-menu-workspace-${cmd.id}`}
               onClick={() => handleClick(cmd.id)}
             >
               {cmd.label}
-            </TopBarMenuItem>
-          );
+            </TopBarMenuItem>,
+          ];
         })}
       </TopBarMenu>
+      <SaveSystemDialog open={saveOpen} onOpenChange={setSaveOpen} />
+      <BundleImportDialog open={importBundleOpen} onOpenChange={setImportBundleOpen} />
       <LazyMount when={pmuOpen} onLoadFailed={() => setPmuOpen(false)}>
         <PmuPlacementDialog open={pmuOpen} onOpenChange={setPmuOpen} />
       </LazyMount>

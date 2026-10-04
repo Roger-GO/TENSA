@@ -1780,6 +1780,44 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
     });
   });
 
+  it('says "Aborting…" and cannot be pressed again once the run was asked to stop from elsewhere (Esc)', async () => {
+    seedReady();
+    // A disturbance makes TDS the mode (the mode switch is locked during a run).
+    useDisturbanceStore.setState({
+      disturbances: [
+        { id: 'd1', spec: { kind: 'fault', bus_idx: '4', tf: 1, tc: 1.1, xf: 0.05, rf: 0 } },
+      ],
+      dirty: false,
+      committed: true,
+    });
+    useRunsStore.setState({
+      runs: {
+        'run-esc': {
+          runId: 'run-esc',
+          startedAt: 1,
+          tf: 5,
+          tCurrent: 1,
+          seqCount: 10,
+          t: new Float64Array(0),
+          columns: {},
+          columnNames: [],
+          state: 'streaming',
+          connection: 'connected',
+          // The Esc command's request succeeded; the run has not ended yet.
+          abortedLocally: true,
+          errorReason: null,
+        },
+      },
+      activeRunId: 'run-esc',
+      memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
+    });
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    const button = screen.getByTestId('run-tds-button');
+    expect(button).toHaveTextContent(/aborting/i);
+    expect(button).toBeDisabled();
+  });
+
   it('reset: click Reset run after done → POST /reload + clears the run', async () => {
     seedReady();
     useDisturbanceStore.setState({

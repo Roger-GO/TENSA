@@ -18,9 +18,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, waitFor, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 
-import { BundleImportButton } from '@/components/bundle/BundleImportDialog';
+import { BundleImportButton, BundleImportDialog } from '@/components/bundle/BundleImportDialog';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { parseSessionId } from '@/api/types';
@@ -154,6 +155,32 @@ describe('<BundleImportButton />', () => {
     render(withQueryClient(<BundleImportButton />));
     await user.click(screen.getByTestId('bundle-import-button'));
     expect(await screen.findByTestId('bundle-import-dialog')).toBeInTheDocument();
+  });
+});
+
+describe('<BundleImportDialog /> opened by its owner', () => {
+  function Owner() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button type="button" data-testid="owner-open" onClick={() => setOpen(true)}>
+          open
+        </button>
+        <BundleImportDialog open={open} onOpenChange={setOpen} />
+      </>
+    );
+  }
+
+  it("opens when the owner says so and closes through the dialog's own Cancel", async () => {
+    const user = userEvent.setup();
+    render(withQueryClient(<Owner />));
+    expect(screen.queryByTestId('bundle-import-dialog')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('owner-open'));
+    expect(await screen.findByTestId('bundle-import-dialog')).toBeInTheDocument();
+    await user.click(screen.getByTestId('bundle-import-cancel'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('bundle-import-dialog')).not.toBeInTheDocument();
+    });
   });
 });
 

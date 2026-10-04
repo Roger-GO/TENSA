@@ -11,7 +11,7 @@
  * the dialogs read from.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -21,6 +21,8 @@ import { WorkspaceMenu } from '@/components/shell/WorkspaceMenu';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useSnapshotStore } from '@/store/snapshot';
+import { useCommandPaletteStore } from '@/store/commandPalette';
+import { __requestPaletteDialog } from '@/lib/commands';
 import { useReportDialogStore } from '@/store/reportDialog';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 
@@ -135,6 +137,58 @@ describe('<WorkspaceMenu /> — actions', () => {
     await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
     await user.click(await screen.findByTestId('topbar-menu-workspace-report'));
     expect(useReportDialogStore.getState().dialogOpen).toBe(true);
+  });
+});
+
+describe('<WorkspaceMenu /> Open case, Save system and Import bundle', () => {
+  afterEach(() => {
+    useCommandPaletteStore.setState({ open: false, page: 'commands' });
+  });
+
+  it('lists Open case first, and it switches the palette to its Open case page', async () => {
+    const user = userEvent.setup();
+    render(withProviders(<WorkspaceMenu />));
+    await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
+    const content = await screen.findByTestId('topbar-menu-workspace-content');
+    const first = content.querySelector('[role="menuitem"]');
+    expect(first).toBe(screen.getByTestId('topbar-menu-workspace-open-case'));
+    await user.click(screen.getByTestId('topbar-menu-workspace-open-case'));
+    expect(useCommandPaletteStore.getState()).toMatchObject({ open: true, page: 'open-case' });
+    // The click closed the menu like every other item.
+    await waitFor(() => {
+      expect(screen.queryByTestId('topbar-menu-workspace-content')).not.toBeInTheDocument();
+    });
+  });
+
+  it('"Save system…" opens the save dialog, and the menu closes', async () => {
+    const user = userEvent.setup();
+    render(withProviders(<WorkspaceMenu />));
+    await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
+    await user.click(await screen.findByTestId('topbar-menu-workspace-save-system'));
+    expect(await screen.findByRole('dialog')).toHaveTextContent(/Save system/);
+    expect(screen.queryByTestId('topbar-menu-workspace-content')).not.toBeInTheDocument();
+  });
+
+  it('"Import bundle…" opens the bundle import dialog', async () => {
+    const user = userEvent.setup();
+    render(withProviders(<WorkspaceMenu />));
+    await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
+    await user.click(await screen.findByTestId('topbar-menu-workspace-import-bundle'));
+    expect(await screen.findByTestId('bundle-import-dialog')).toBeInTheDocument();
+  });
+
+  it('the palette command opens Save system with the menu closed (and Ctrl/Cmd+S the same way)', async () => {
+    render(withProviders(<WorkspaceMenu />));
+    expect(screen.queryByTestId('topbar-menu-workspace-content')).not.toBeInTheDocument();
+    act(() => __requestPaletteDialog('save-system'));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByTestId('save-confirm')).toBeInTheDocument();
+  });
+
+  it('the palette command opens Import bundle with the menu closed', async () => {
+    render(withProviders(<WorkspaceMenu />));
+    act(() => __requestPaletteDialog('import-bundle'));
+    expect(await screen.findByTestId('bundle-import-dialog')).toBeInTheDocument();
   });
 });
 

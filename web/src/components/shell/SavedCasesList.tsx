@@ -1,18 +1,13 @@
 import { useCallback } from 'react';
 import { EmptyState, FolderIcon, SnapshotIcon } from '@/components/ui/EmptyState';
-import {
-  useListSnapshots,
-  useListWorkspaceFiles,
-  useLoadCase,
-  useRestoreSnapshot,
-} from '@/api/queries';
+import { useListSnapshots, useListWorkspaceFiles, useRestoreSnapshot } from '@/api/queries';
 import type { SnapshotListEntry } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useSnapshotStore } from '@/store/snapshot';
 import { ProblemDetailsError } from '@/api/client';
-import { parseWorkspacePath } from '@/api/types';
 import type { WorkspaceFile } from '@/api/types';
+import { isPrimaryCase, useOpenCase } from '@/lib/openCase';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
 
@@ -27,9 +22,10 @@ import { cn } from '@/lib/cn';
  *  - **Workspace files** — every `.raw / .xlsx / .json / .m` file the
  *    substrate's workspace lister returns, minus `.layout.json` sidecars
  *    (same filter as ``WorkspaceFilePicker``). Click a row to load that
- *    case via ``useLoadCase``. Reuses the picker's parse-workspace-path
- *    + same-file no-op guard so a click on the already-loaded case is a
- *    no-op rather than a destructive reload.
+ *    case with ``useOpenCase``, which the palette's Open case page uses
+ *    too. It parses the workspace path and skips the load for the case
+ *    already open, so a click on that one is a no-op rather than a
+ *    destructive reload.
  *  - **Snapshots** — only renders when a case is loaded. Lists the
  *    substrate's snapshot listing for the active session. Click a row
  *    to restore via ``useRestoreSnapshot`` (replays the snapshot's
@@ -48,16 +44,6 @@ import { cn } from '@/lib/cn';
  * ``toast.*``, recovery hints get an action button).
  */
 
-type PrimaryFormat = 'xlsx' | 'raw' | 'json' | 'm';
-const PRIMARY_FORMATS: ReadonlySet<PrimaryFormat> = new Set(['xlsx', 'raw', 'json', 'm']);
-
-function isPrimaryCase(file: WorkspaceFile): file is WorkspaceFile & { format: PrimaryFormat } {
-  if (!PRIMARY_FORMATS.has(file.format as PrimaryFormat)) return false;
-  // Sidecar layout files (`<case>.layout.json`) are not loadable; skip.
-  if (file.name.endsWith('.layout.json')) return false;
-  return true;
-}
-
 function formatLabel(format: WorkspaceFile['format']): string {
   return format.toUpperCase();
 }
@@ -70,11 +56,10 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
   const caseSelection = useCaseStore((s) => s.selection);
   const loadingPath = useCaseStore((s) => s.loadingPath);
-  const setCase = useCaseStore((s) => s.setCase);
 
   const filesQuery = useListWorkspaceFiles();
   const snapshotsQuery = useListSnapshots();
-  const loadCase = useLoadCase();
+  const { openCase, isPending: loadPending } = useOpenCase();
   const restoreSnapshot = useRestoreSnapshot();
   const markRestorePending = useSnapshotStore((s) => s.markRestorePending);
   const markRestoreSuccess = useSnapshotStore((s) => s.markRestoreSuccess);
@@ -83,65 +68,6 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
   const files = (filesQuery.data?.files ?? []).filter(isPrimaryCase);
   const hasCaseLoaded = caseSelection !== null;
   const snapshots: readonly SnapshotListEntry[] = snapshotsQuery.data?.snapshots ?? [];
-
-  /**
-   * Click handler for a workspace-file row. Mirrors the
-   * ``WorkspaceFilePicker.onLoad`` happy path:
-   *   1. Parse the workspace path (defensive — the substrate also
-   *      validates `..` segments).
-   *   2. Same-file no-op guard — skip the load if the user clicked the
-   *      currently-loaded case (avoids tearing down PF results +
-   *      snapshots + disturbance log just to land back at the same
-   *      case).
-   *   3. Dispatch the load mutation; mirror the resolved selection into
-   *      the case slice so CaseNav's summary card swaps in.
-   *
-   * No addfile picker here — the LeftSidebar SavedCasesList is the
-   * "click to load" surface; the WorkspaceFilePicker (still mounted
-   * inside CaseNav for the no-case state) remains the entry point for
-   * `.raw` + `.dyr` pairings. Loading a `.raw` from this list defaults
-   * to "no addfile" — the user can re-open with the picker if they
-   * want to pair a `.dyr`.
-   */
-  const handleLoadFile = useCallback(
-    (fileName: string) => {
-      if (!sessionId) return;
-      let primary;
-      try {
-        primary = parseWorkspacePath(fileName);
-      } catch (err) {
-        toast.error(`Invalid workspace path: ${err instanceof Error ? err.message : String(err)}`);
-        return;
-      }
-      // Same-file no-op guard — see WorkspaceFilePicker.onLoad.
-      if (
-        caseSelection !== null &&
-        caseSelection.primaryPath === primary &&
-        caseSelection.addfiles.length === 0
-      ) {
-        return;
-      }
-      loadCase.mutate(
-        {
-          sessionId,
-          request: { primary_path: primary, addfiles: null },
-        },
-        {
-          onSuccess: () => {
-            setCase({ primaryPath: primary, addfiles: [] });
-          },
-          onError: (err) => {
-            const detail =
-              err instanceof ProblemDetailsError
-                ? (err.detail ?? err.title ?? `HTTP ${err.status}`)
-                : err.message;
-            toast.error(`Load failed: ${detail}`);
-          },
-        },
-      );
-    },
-    [sessionId, caseSelection, loadCase, setCase],
-  );
 
   /**
    * Click handler for a snapshot row. Mirrors ``LoadSnapshotDialog``'s
@@ -220,8 +146,8 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
                     data-testid={`saved-cases-row-${file.name}`}
                     aria-current={current ? 'true' : undefined}
                     aria-busy={loading ? 'true' : undefined}
-                    onClick={() => handleLoadFile(file.name)}
-                    disabled={loadCase.isPending}
+                    onClick={() => openCase(file.name)}
+                    disabled={loadPending}
                     className={cn(
                       'group flex w-full items-center justify-between gap-2',
                       'rounded-[var(--radius-sm)] px-2 py-1.5 text-left text-xs',

@@ -17,16 +17,26 @@
  * - Persistence: the slice is intentionally NOT persisted. Reload
  *   should land with the palette closed.
  *
- * The slice is tiny: just `open` + three setters. Future units (Unit 10
- * will add the `?` cheatsheet) can compose against the same shape.
+ * The slice is tiny: `open`, the `page` it lists (commands, or the
+ * workspace's case files for "Open case") and a few setters. Future units
+ * (Unit 10 will add the `?` cheatsheet) can compose against the same shape.
  */
 import { create } from 'zustand';
+
+/** What the open palette lists: every command, or the workspace's case files. */
+export type PalettePage = 'commands' | 'open-case';
 
 export interface CommandPaletteState {
   /** True while the palette is mounted in the open position. */
   open: boolean;
-  /** Open the palette (no-op if already open). */
+  /** The list the palette shows. Opening it any other way than `openPage` starts on commands. */
+  page: PalettePage;
+  /** Open the palette on its command list (no-op if already open). */
   openPalette: () => void;
+  /** Open the palette on `page`, or switch it there when it is already open. */
+  openPage: (page: PalettePage) => void;
+  /** Switch the open palette to `page`. */
+  setPage: (page: PalettePage) => void;
   /** Close the palette (no-op if already closed). */
   closePalette: () => void;
   /** Toggle the palette open/closed. */
@@ -35,7 +45,10 @@ export interface CommandPaletteState {
 
 export const useCommandPaletteStore = create<CommandPaletteState>((set) => ({
   open: false,
-  openPalette: () => set({ open: true }),
-  closePalette: () => set({ open: false }),
-  togglePalette: () => set((state) => ({ open: !state.open })),
+  page: 'commands',
+  openPalette: () => set({ open: true, page: 'commands' }),
+  openPage: (page) => set({ open: true, page }),
+  setPage: (page) => set({ page }),
+  closePalette: () => set({ open: false, page: 'commands' }),
+  togglePalette: () => set((state) => ({ open: !state.open, page: 'commands' })),
 }));

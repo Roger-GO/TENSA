@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -21,9 +21,13 @@ import { cn } from '@/lib/cn';
 import { useSafeTimeout } from '@/lib/useSafeTimeout';
 
 /**
- * "Save system" button + format-picker modal.
+ * "Save system" format-picker modal, and the button that opens it.
  *
- * Visible whenever a topology is loaded. Clicking opens a modal with:
+ * ``SaveSystemDialog`` is controlled, so whoever owns an always-mounted copy can
+ * open it from anywhere: the Workspace menu keeps one for the palette command
+ * and Ctrl/Cmd+S. ``SaveSystemButton`` is the button with a dialog of its own.
+ *
+ * The modal has:
  *
  * - Filename input (workspace-relative; extension auto-derived from
  *   format).
@@ -33,6 +37,11 @@ import { useSafeTimeout } from '@/lib/useSafeTimeout';
  * - Submit fires `useSaveCase()`. On 409 (file exists) the modal flips
  *   to an "Overwrite?" confirmation.
  */
+export interface SaveSystemDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
 export interface SaveSystemButtonProps {
   className?: string;
 }
@@ -53,7 +62,7 @@ function ensureExtension(filename: string, format: Format): string {
   return stripped + ext;
 }
 
-export function SaveSystemButton({ className }: SaveSystemButtonProps) {
+export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDialogProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
   const topology = useCurrentTopology();
   // Drag overrides are read lazily inside ``writeSidecarAlongside`` (Save
@@ -68,7 +77,6 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
   // click time, not on every render.
   const saveMutation = useSaveCase();
   const sidecarMutation = usePutSidecar();
-  const [modalOpen, setModalOpen] = useState(false);
   const [filename, setFilename] = useState('my-system');
   const [format, setFormat] = useState<Format>('xlsx');
   const [overwrite, setOverwrite] = useState(false);
@@ -84,14 +92,26 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
   const cancelAutoClose = useRef<(() => void) | null>(null);
   const modalEpoch = useRef(0);
 
-  const setModalState = (next: boolean) => {
+  const resetBeat = () => {
     modalEpoch.current += 1;
     cancelAutoClose.current?.();
     cancelAutoClose.current = null;
-    setModalOpen(next);
   };
-
-  const enabled = sessionId !== null && topology !== null;
+  const setModalState = (next: boolean) => {
+    resetBeat();
+    onOpenChange(next);
+  };
+  // The owner opens and closes the modal too, not only the buttons below, so
+  // each flip of ``open`` ends the last opening's beat and bumps the epoch, and
+  // an opening starts without the last one's error or "saved" line. They stay
+  // while the modal fades out.
+  useEffect(() => {
+    resetBeat();
+    if (modalOpen) {
+      setError(null);
+      setSuccess(null);
+    }
+  }, [modalOpen]);
 
   const writeSidecarAlongside = (caseFilename: string) => {
     // Build a sidecar carrying the current drag positions. Bus
@@ -224,21 +244,6 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
 
   return (
     <>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={!enabled}
-        onClick={() => {
-          setModalState(true);
-          setError(null);
-          setSuccess(null);
-        }}
-        className={className}
-        data-testid="save-system-button"
-      >
-        Save system
-      </Button>
       <Dialog
         open={modalOpen}
         onOpenChange={(next) => {
@@ -365,6 +370,30 @@ export function SaveSystemButton({ className }: SaveSystemButtonProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </>
+  );
+}
+
+/** The "Save system" button, with a dialog of its own. */
+export function SaveSystemButton({ className }: SaveSystemButtonProps) {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const topology = useCurrentTopology();
+  const [open, setOpen] = useState(false);
+  const enabled = sessionId !== null && topology !== null;
+  return (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={!enabled}
+        onClick={() => setOpen(true)}
+        className={className}
+        data-testid="save-system-button"
+      >
+        Save system
+      </Button>
+      <SaveSystemDialog open={open} onOpenChange={setOpen} />
     </>
   );
 }

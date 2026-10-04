@@ -17,9 +17,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 
-import { SaveSystemButton } from '@/components/case/SaveSystemButton';
+import { SaveSystemButton, SaveSystemDialog } from '@/components/case/SaveSystemButton';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { parseSessionId } from '@/api/types';
@@ -349,6 +350,73 @@ describe('<SaveSystemButton /> — auto-close beat', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+});
+
+describe('<SaveSystemDialog /> opened by its owner', () => {
+  /** A stand-in owner: a button outside the dialog that opens it, like a menu item or Ctrl/Cmd+S. */
+  function Owner() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button type="button" data-testid="owner-open" onClick={() => setOpen(true)}>
+          open
+        </button>
+        <SaveSystemDialog open={open} onOpenChange={setOpen} />
+      </>
+    );
+  }
+
+  it('shows the dialog when the owner opens it, and tells the owner when it closes', async () => {
+    const user = userEvent.setup();
+    render(withQueryClient(<Owner />));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('owner-open'));
+    expect(screen.getByRole('dialog')).toHaveTextContent(/Save system/i);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it("opens clean: the last opening's error is gone", async () => {
+    const user = userEvent.setup();
+    const { ProblemDetailsError } = await import('@/api/client');
+    nextPost = () =>
+      Promise.reject(new ProblemDetailsError(makeProblemDetails(409, 'File exists')));
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('owner-open'));
+    await user.click(screen.getByTestId('save-confirm'));
+    expect(await screen.findByTestId('save-error')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(screen.getByTestId('owner-open'));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByTestId('save-error')).not.toBeInTheDocument();
+  });
+
+  it('a save that answers after the dialog was left does not close the one open now', async () => {
+    const user = userEvent.setup();
+    let answer: ((v: unknown) => void) | null = null;
+    nextPost = () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      });
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('owner-open'));
+    await user.click(screen.getByTestId('save-confirm'));
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    // Leave while the save is in flight, and open again.
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await user.click(screen.getByTestId('owner-open'));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    await act(async () => {
+      answer?.({ filename: 'my-system.xlsx', bytes_written: 10 });
+      await Promise.resolve();
+    });
+    // The answer belongs to the opening that was left: no "saved" line here.
+    expect(screen.queryByText(/Wrote 10 bytes/)).not.toBeInTheDocument();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 });
