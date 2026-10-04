@@ -16,6 +16,7 @@ import {
   loadOperatingPointIntoStore,
 } from '@/api/queries';
 import { ProblemDetailsError, ServerError } from '@/api/client';
+import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
 import { useDisturbanceStore } from '@/store/disturbance';
@@ -73,6 +74,10 @@ import { cn } from '@/lib/cn';
  * - HTTP commit-disturbances 422 → routed via ``DisturbancePanel`` per-row
  *   error (the disturbance slice carries the error keyed by index); the
  *   button surfaces a compact toast pointing the user at the panel.
+ * - Disturbances on a System a prior run already committed (the substrate
+ *   would 409) → reload the case first, then commit. The topology's
+ *   ``committed`` state triggers it up front; a 409 on the commit is the
+ *   fallback when the topology lags the substrate.
  *
  * The component is intentionally chunky — it owns the start-flow
  * orchestration (commit → open WS → wire callbacks → cleanup on unmount)
@@ -255,30 +260,37 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
           sessionId,
           disturbances: disturbances.map((d) => d.spec),
         });
-      try {
+      // The substrate refuses disturbances once a prior run has committed
+      // setup(), and its recovery is reload-case (re-parse to pre-setup,
+      // which drops the committed System). Do it for the user. Without
+      // this, the natural "run PF → add fault → run TDS" flow dead-ends.
+      const reloadThenCommit = async () => {
+        toast.info('Reloading case', {
+          description: 'A previous run locked the system — reloading to apply the disturbances.',
+        });
+        await reloadCase.mutateAsync(sessionId);
         await commit();
-      } catch (err) {
-        // 409 = disturbances were added after a prior run committed
-        // setup(). The substrate's recovery is reload-case — do it for
-        // the user (re-parse to pre-setup, which drops the committed
-        // System), retry the commit once, and keep going. Without this,
-        // the natural "run PF → add fault → run TDS" flow dead-ends.
-        if (err instanceof ProblemDetailsError && err.status === 409) {
-          try {
-            toast.info('Reloading case', {
-              description:
-                'A previous run locked the system — reloading to apply the disturbances.',
-            });
-            await reloadCase.mutateAsync(sessionId);
-            await commit();
-          } catch (retryErr) {
-            reportCommitError(retryErr);
-            return;
-          }
+      };
+      try {
+        if (useCaseStore.getState().topology?.state === 'committed') {
+          // The topology already says setup() ran, so the commit would be
+          // refused with a 409 (and leave a failed job in the history).
+          // Reload first instead of sending a request bound to fail.
+          await reloadThenCommit();
         } else {
-          reportCommitError(err);
-          return;
+          try {
+            await commit();
+          } catch (err) {
+            // The topology can lag the substrate (a routine that commits
+            // setup() without refreshing it), so a 409 is still possible
+            // here. Recover the same way, once.
+            if (!(err instanceof ProblemDetailsError && err.status === 409)) throw err;
+            await reloadThenCommit();
+          }
         }
+      } catch (err) {
+        reportCommitError(err);
+        return;
       }
     }
 

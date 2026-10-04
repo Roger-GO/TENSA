@@ -102,11 +102,13 @@ function makeWrapper() {
   return { Wrapper };
 }
 
-function seedReady(opts: { withDisturbances?: boolean } = {}) {
+function seedReady(
+  opts: { withDisturbances?: boolean; topologyState?: 'pre-setup' | 'committed' } = {},
+) {
   useCaseStore.setState({
     selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
     topology: {
-      state: 'pre-setup',
+      state: opts.topologyState ?? 'pre-setup',
       buses: [],
       lines: [],
       transformers: [],
@@ -139,6 +141,94 @@ function seedReady(opts: { withDisturbances?: boolean } = {}) {
 
 function tick(ms = 10): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function topologyBody(state: 'pre-setup' | 'committed') {
+  return {
+    state,
+    buses: [],
+    lines: [],
+    transformers: [],
+    generators: [],
+    loads: [],
+    controllers: [],
+  };
+}
+
+/**
+ * Fake the substrate's disturbance gate on a System a prior run committed:
+ * a commit is refused with a 409 until ``/reload`` returns it to pre-setup.
+ * ``calls`` records which endpoint was hit, in order, with the commit's
+ * status, so a test can tell a commit that was sent and refused from one
+ * that was never sent.
+ */
+function fakeCommittedSubstrate(
+  fetchSpy: ReturnType<typeof vi.spyOn>,
+  calls: string[],
+  opts: { reloadFails?: boolean } = {},
+) {
+  let committed = true;
+  fetchSpy.mockImplementation((input) => {
+    const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+    if (url.includes('/reload')) {
+      if (opts.reloadFails) {
+        calls.push('reload:409');
+        return Promise.resolve(
+          jsonResponse({ title: 'Conflict', status: 409, detail: 'no case has been loaded' }, 409),
+        );
+      }
+      calls.push('reload');
+      committed = false;
+      return Promise.resolve(jsonResponse(topologyBody('pre-setup'), 200));
+    }
+    if (url.includes('/disturbances')) {
+      if (committed) {
+        calls.push('disturbances:409');
+        return Promise.resolve(
+          jsonResponse(
+            {
+              title: 'Conflict',
+              status: 409,
+              detail: 'cannot modify disturbances after setup() has been committed',
+              recovery: { kind: 'reload-case', label: 'Reload case' },
+            },
+            409,
+          ),
+        );
+      }
+      calls.push('disturbances:200');
+      return Promise.resolve(jsonResponse({ accepted: [{ kind: 'fault', idx: 'Fault_0' }] }, 200));
+    }
+    return Promise.resolve(jsonResponse({}, 200));
+  });
+}
+
+/** Answer ``start_tds`` with a stream that starts and finishes at once. */
+function serveShortRun(server: MockServerHandle, runId: string) {
+  server.on('connection', (socket) => {
+    socket.send(JSON.stringify({ type: 'ready' }));
+    socket.on('message', (raw: unknown) => {
+      const msg = JSON.parse(String(raw)) as { type: string };
+      if (msg.type !== 'start_tds') return;
+      socket.send(
+        JSON.stringify({
+          type: 'stream_start',
+          run_id: runId,
+          metadata: { schema_version: '2.0', vars: ['bus_v'], var_columns: ['Bus_1_v'] },
+        }),
+      );
+      socket.send(
+        JSON.stringify({
+          type: 'done',
+          run_id: runId,
+          converged: true,
+          final_t: 5,
+          callpert_count: 0,
+        }),
+      );
+      socket.close({ code: 1000 });
+    });
+  });
 }
 
 // Patch the global WebSocket so RunStream picks up the mock-socket
@@ -590,7 +680,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     expect(wsOpened).toBe(false);
   });
 
-  it('disturbance commit 409 (post-setup) auto-reloads, retries the commit, and runs', async () => {
+  it('commit 409 with a topology that still says pre-setup auto-reloads, retries once, and runs', async () => {
     seedReady({ withDisturbances: true });
 
     let disturbancePosts = 0;
@@ -685,6 +775,102 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     expect(reloadPosts).toBe(1);
     expect(disturbancePosts).toBe(2);
     expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('disturbances on a committed System reload first and commit once, with no refused commit', async () => {
+    seedReady({ withDisturbances: true, topologyState: 'committed' });
+    const calls: string[] = [];
+    fakeCommittedSubstrate(fetchSpy, calls);
+    serveShortRun(server, 'run-after-pf');
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-after-pf']?.state).toBe('done');
+    });
+    // The 409 round trip is gone: reload, then the one commit that lands.
+    expect(calls).toEqual(['reload', 'disturbances:200']);
+    expect(toastInfoMock).toHaveBeenCalledWith('Reloading case', expect.anything());
+    expect(toastErrorMock).not.toHaveBeenCalled();
+    expect(useDisturbanceStore.getState().committed).toBe(true);
+    // The reload's topology replaced the stale committed one.
+    expect(useCaseStore.getState().topology?.state).toBe('pre-setup');
+  });
+
+  it('a pre-setup topology commits straight away, with no reload', async () => {
+    seedReady({ withDisturbances: true, topologyState: 'pre-setup' });
+    const calls: string[] = [];
+    // The substrate really is pre-setup here, so the commit goes through.
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.includes('/disturbances')) {
+        calls.push('disturbances:200');
+        return Promise.resolve(
+          jsonResponse({ accepted: [{ kind: 'fault', idx: 'Fault_0' }] }, 200),
+        );
+      }
+      if (url.includes('/reload')) calls.push('reload');
+      return Promise.resolve(jsonResponse({}, 200));
+    });
+    serveShortRun(server, 'run-fresh');
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-fresh']?.state).toBe('done');
+    });
+    expect(calls).toEqual(['disturbances:200']);
+    expect(toastInfoMock).not.toHaveBeenCalled();
+  });
+
+  it('a committed System with no disturbances to commit runs without a reload', async () => {
+    seedReady({ topologyState: 'committed' });
+    const calls: string[] = [];
+    fakeCommittedSubstrate(fetchSpy, calls);
+    serveShortRun(server, 'run-free-committed');
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-free-committed']?.state).toBe('done');
+    });
+    expect(calls).toEqual([]);
+    expect(toastInfoMock).not.toHaveBeenCalled();
+  });
+
+  it('a failed proactive reload surfaces the error and neither commits nor opens the WS', async () => {
+    seedReady({ withDisturbances: true, topologyState: 'committed' });
+    const calls: string[] = [];
+    fakeCommittedSubstrate(fetchSpy, calls, { reloadFails: true });
+    let wsOpened = false;
+    server.on('connection', () => {
+      wsOpened = true;
+    });
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'TDS error',
+        expect.objectContaining({
+          description: expect.stringMatching(/no case has been loaded/),
+        }),
+      ),
+    );
+    await tick(20);
+    expect(calls).toEqual(['reload:409']);
+    expect(wsOpened).toBe(false);
+    // The button is usable again for another try.
+    expect(screen.getByTestId('run-tds-button')).toBeEnabled();
   });
 
   it('WS run_not_found (close 4404) shows a non-modal warning toast', async () => {
