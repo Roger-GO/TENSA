@@ -3,7 +3,8 @@
  *
  * Concerns:
  *  - Mounts the three sections (Case, Saved cases, Component library)
- *    with stable testids.
+ *    with stable testids, and a Disturbances section between the first
+ *    two once a case is loaded.
  *  - Each section renders its uppercase heading.
  *  - The shell composition holds — CaseNav + SavedCasesList +
  *    ComponentLibrary all mount together.
@@ -20,6 +21,7 @@ import type { ReactNode } from 'react';
 import { LeftSidebar } from '@/components/shell/LeftSidebar';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
+import { parseWorkspacePath } from '@/api/types';
 
 vi.mock('@/api/queries', async () => {
   const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
@@ -119,5 +121,34 @@ describe('<LeftSidebar />', () => {
     // ComponentLibrary surfaces its grid.
     expect(screen.getByTestId('saved-cases-list')).toBeInTheDocument();
     expect(screen.getByTestId('component-library')).toBeInTheDocument();
+  });
+
+  describe('Disturbances section', () => {
+    it('is not there before a case is loaded: there is nothing to disturb', () => {
+      render(withClient(<LeftSidebar />));
+      expect(screen.queryByTestId('left-sidebar-section-disturbances')).toBeNull();
+      expect(screen.queryByTestId('scheduled-disturbances')).toBeNull();
+    });
+
+    it('sits between the case and the saved cases once a case is loaded', () => {
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('kundur_full.xlsx'), addfiles: [] },
+      });
+      render(withClient(<LeftSidebar />));
+      const caseSection = screen.getByTestId('left-sidebar-section-case');
+      const disturbances = screen.getByTestId('left-sidebar-section-disturbances');
+      const saved = screen.getByTestId('left-sidebar-section-saved-cases');
+      expect(screen.getByTestId('left-sidebar-section-disturbances-heading').textContent).toBe(
+        'Disturbances',
+      );
+      expect(
+        caseSection.compareDocumentPosition(disturbances) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(
+        disturbances.compareDocumentPosition(saved) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      // With nothing scheduled it offers the first fault.
+      expect(screen.getByRole('button', { name: 'Add fault' })).toBeInTheDocument();
+    });
   });
 });

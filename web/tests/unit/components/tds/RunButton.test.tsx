@@ -375,6 +375,20 @@ describe('<RunButton /> v0.2 — disabled / enabled', () => {
     expect(screen.getByTestId('run-mode-tds')).toHaveAttribute('aria-checked', 'true');
   });
 
+  it('says in the run mode buttons what PF and TDS are', () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    expect(screen.getByTestId('run-mode-pf')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/power flow/i),
+    );
+    expect(screen.getByTestId('run-mode-tds')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/time-domain.*faults/i),
+    );
+  });
+
   it('manual mode override sticks across re-renders', async () => {
     seedReady();
     const { Wrapper } = makeWrapper();
@@ -793,6 +807,84 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     });
   });
 
+  describe('a run with no fault', () => {
+    function serveShort(runId: string) {
+      server.on('connection', (socket) => {
+        socket.send(JSON.stringify({ type: 'ready' }));
+        socket.on('message', (raw: unknown) => {
+          const msg = JSON.parse(String(raw)) as { type: string };
+          if (msg.type !== 'start_tds') return;
+          socket.send(
+            JSON.stringify({
+              type: 'stream_start',
+              run_id: runId,
+              metadata: {
+                schema_version: '2.0',
+                decimation: {
+                  algorithm: 'mean',
+                  mode: 'mean',
+                  source_rate_hz: null,
+                  output_rate_hz: 30,
+                  fixed_step: null,
+                },
+                vars: ['bus_v'],
+                var_columns: ['Bus_1_v'],
+              },
+            }),
+          );
+          socket.send(
+            JSON.stringify({
+              type: 'done',
+              run_id: runId,
+              converged: true,
+              final_t: 5,
+              callpert_count: 0,
+            }),
+          );
+          socket.close({ code: 1000 });
+        });
+      });
+    }
+
+    beforeEach(() => {
+      fetchSpy.mockImplementation(() =>
+        Promise.resolve(jsonResponse({ accepted: [{ kind: 'fault', idx: 'Fault_0' }] }, 200)),
+      );
+    });
+
+    it('says that nothing disturbs it, and where to add a fault, as it starts', async () => {
+      seedReady();
+      serveShort('run-nofault');
+
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      await userEvent.click(screen.getByTestId('run-mode-tds'));
+      await userEvent.click(screen.getByTestId('run-tds-button'));
+      await waitFor(() => {
+        expect(useRunsStore.getState().runs['run-nofault']?.state).toBe('done');
+      });
+
+      expect(toastInfoMock).toHaveBeenCalledTimes(1);
+      const [title, opts] = toastInfoMock.mock.calls[0] as [string, { description: string }];
+      expect(title).toBe('No fault is set');
+      expect(opts.description).toMatch(/curves stay flat.*Disturbances in the left sidebar/);
+    });
+
+    it('says nothing of the kind when a fault is set', async () => {
+      seedReady({ withDisturbances: true });
+      serveShort('run-fault');
+
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      await userEvent.click(screen.getByTestId('run-tds-button'));
+      await waitFor(() => {
+        expect(useRunsStore.getState().runs['run-fault']?.state).toBe('done');
+      });
+
+      expect(toastInfoMock).not.toHaveBeenCalledWith('No fault is set', expect.anything());
+    });
+  });
+
   it('disturbance commit 422 surfaces inline error toast and does NOT open WS', async () => {
     seedReady({ withDisturbances: true });
     let wsOpened = false;
@@ -996,7 +1088,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     await waitFor(() => {
       expect(calls).toEqual(['operating-point']);
     });
-    expect(toastInfoMock).not.toHaveBeenCalled();
+    expect(toastInfoMock).not.toHaveBeenCalledWith('Reloading case', expect.anything());
   });
 
   /**

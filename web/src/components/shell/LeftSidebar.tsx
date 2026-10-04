@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { CaseNav } from '@/components/case/CaseNav';
+import { ScheduledDisturbances } from '@/components/disturbance/ScheduledDisturbances';
+import { useCaseStore } from '@/store/case';
 import { SavedCasesList } from './SavedCasesList';
 import { ComponentLibrary } from './ComponentLibrary';
 import { cn } from '@/lib/cn';
@@ -7,7 +9,7 @@ import { cn } from '@/lib/cn';
 /**
  * LeftSidebar (v3 Unit 3).
  *
- * Vertical stack of three sections separated by hairline ``border-border``
+ * Vertical stack of sections separated by hairline ``border-border``
  * dividers. Each section has a small uppercase tracking-wider heading
  * (per the v3 plan's IA spec) and a content body.
  *
@@ -17,9 +19,12 @@ import { cn } from '@/lib/cn';
  *     summary card). CaseNav stays mounted unchanged so the case-load
  *     logic (parse-workspace-path, blank-system, change-case confirm)
  *     keeps working without duplication.
- *  2. **Saved cases** — workspace files + per-case snapshots
+ *  2. **Disturbances** — what the next TDS run does to the loaded case,
+ *     and the button that adds a fault (``<ScheduledDisturbances />``).
+ *     Only while a case is loaded.
+ *  3. **Saved cases** — workspace files + per-case snapshots
  *     (``<SavedCasesList />``, Unit 4).
- *  3. **Component library** — drag-and-drop palette of element kinds
+ *  4. **Component library** — drag-and-drop palette of element kinds
  *     (``<ComponentLibrary />``, Unit 5). Drag onto the canvas to open
  *     the AddElementPanel pre-filled with the dropped kind.
  *
@@ -34,6 +39,7 @@ export interface LeftSidebarProps {
 }
 
 export function LeftSidebar({ className }: LeftSidebarProps) {
+  const caseLoaded = useCaseStore((s) => s.selection !== null);
   return (
     <div
       data-testid="left-sidebar"
@@ -48,6 +54,11 @@ export function LeftSidebar({ className }: LeftSidebarProps) {
       <Section heading="Case" testId="left-sidebar-section-case">
         <CaseNav />
       </Section>
+      {caseLoaded ? (
+        <Section heading="Disturbances" testId="left-sidebar-section-disturbances">
+          <ScheduledDisturbances />
+        </Section>
+      ) : null}
       <Section heading="Saved cases" testId="left-sidebar-section-saved-cases">
         <SavedCasesList />
       </Section>

@@ -19,6 +19,7 @@ import { useRunReadiness } from '@/lib/useRunReadiness';
 import { __resetCascadeForTests, wireStoreCascade } from '@/store';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useCaseStore } from '@/store/case';
+import { blankFaultSpec, useDisturbanceStore } from '@/store/disturbance';
 import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';
 import { useSessionStore } from '@/store/session';
@@ -146,6 +147,55 @@ describe('store cascade — case change', () => {
     expect(useAnalyzeStore.getState().eigResult).toBeNull();
     expect(useRunsStore.getState().activeRunId).toBeNull();
     expect(Object.keys(useRunsStore.getState().runs)).toEqual(['run-1']);
+  });
+});
+
+describe('store cascade — scheduled disturbances', () => {
+  function scheduleFault(): void {
+    useDisturbanceStore.getState().addDisturbance({ ...blankFaultSpec(), bus_idx: 7 });
+  }
+
+  it('drops the disturbances scheduled for the old case when another case is set', () => {
+    seedResults();
+    scheduleFault();
+    expect(useDisturbanceStore.getState().disturbances).toHaveLength(1);
+
+    useCaseStore.getState().setCase(caseOf('wscc9.xlsx'));
+
+    const { disturbances, dirty, committed } = useDisturbanceStore.getState();
+    expect(disturbances).toEqual([]);
+    expect(dirty).toBe(false);
+    expect(committed).toBe(false);
+  });
+
+  it('drops them when the case is cleared, and when the session ends', () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1'), recoveryInProgress: false });
+    seedResults();
+    scheduleFault();
+    useCaseStore.getState().clearCase();
+    expect(useDisturbanceStore.getState().disturbances).toEqual([]);
+
+    seedResults();
+    scheduleFault();
+    useSessionStore.getState().clearSession();
+    expect(useDisturbanceStore.getState().disturbances).toEqual([]);
+  });
+
+  it('keeps them while the session is being recovered, so the next run still applies them', () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1'), recoveryInProgress: false });
+    seedResults();
+    scheduleFault();
+
+    useSessionStore.getState().resetSession();
+
+    expect(useDisturbanceStore.getState().disturbances).toHaveLength(1);
+  });
+
+  it('keeps them when a PF result is replaced or cleared on the same case', () => {
+    seedResults();
+    scheduleFault();
+    usePflowStore.getState().clearPflow();
+    expect(useDisturbanceStore.getState().disturbances).toHaveLength(1);
   });
 });
 

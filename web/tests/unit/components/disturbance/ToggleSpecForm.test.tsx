@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { ToggleSpecForm } from '@/components/disturbance/ToggleSpecForm';
@@ -107,5 +108,24 @@ describe('<ToggleSpecForm />', () => {
     const dev = screen.getByTestId('toggle-dev-idx') as HTMLSelectElement;
     expect(dev).toBeDisabled();
     expect(dev.querySelector('option')?.textContent).toMatch(/No Shunts/i);
+  });
+});
+
+describe('<ToggleSpecForm /> typing', () => {
+  it('lets the time be cleared and typed again, instead of filling the field with NaN', async () => {
+    const user = userEvent.setup();
+    // The form as its dialog holds it: the spec lives in state and follows every edit.
+    function Harness() {
+      const [spec, setSpec] = useState<ToggleSpec>({ ...blankToggleSpec(), model: 'Line' });
+      return <ToggleSpecForm spec={spec} onChange={setSpec} />;
+    }
+    render(withQueryClient(<Harness />));
+    const t = screen.getByTestId('field-toggle-t');
+
+    await user.clear(t);
+    expect(t).toHaveValue('');
+    await user.type(t, '2.5');
+
+    expect(t).toHaveValue('2.5');
   });
 });

@@ -301,6 +301,17 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       }
     }
 
+    // A run with nothing scheduled starts from the power flow and stays there,
+    // which plots as flat lines. Say so before the user wonders what is wrong,
+    // and where the fault goes.
+    if (disturbances.length === 0) {
+      toast.info('No fault is set', {
+        description:
+          'Nothing disturbs this run, so the curves stay flat. Add a fault under Disturbances in the left sidebar and run again.',
+        duration: 8000,
+      });
+    }
+
     // Step 2: open the WebSocket. Cleanly tear down any prior stream
     // first (defensive — a stale handle would race the new one).
     streamRef.current?.dispose();
@@ -547,6 +558,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
         role="radio"
         aria-checked={mode === 'pf'}
         data-testid="run-mode-pf"
+        title="Power flow: solve the steady state of the case"
         // Disable mode-switching while a run is active so a mid-flight
         // change can't strand the TDS state.
         disabled={isPfRunning || isTdsRunning || tdsStarting}
@@ -567,6 +579,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
         role="radio"
         aria-checked={mode === 'tds'}
         data-testid="run-mode-tds"
+        title="Time-domain simulation: step the case through time, applying the faults set under Disturbances"
         disabled={isPfRunning || isTdsRunning || tdsStarting}
         onClick={() => setManualMode('tds')}
         className={cn(

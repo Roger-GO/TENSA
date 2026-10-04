@@ -7,7 +7,9 @@
  *
  * - When `session` clears, `case` and `pflow` clear too.
  * - When `case` changes, `pflow` and the EIG / CPF / SE results clear
- *   (results don't carry across cases), and the active TDS run is released.
+ *   (results don't carry across cases), the disturbances scheduled for the next
+ *   TDS run clear (they name the old case's buses), and the active TDS run is
+ *   released.
  *   The finished runs themselves stay: they are results only this tab holds,
  *   and comparing a run on one case with a run on a modified copy is a normal
  *   workflow. They go when the session ends.
@@ -32,6 +34,7 @@ import { useAnimationStore } from './animation';
 import { useConnectivityStore } from './connectivity';
 import { usePmuStore } from './pmu';
 import { useProfilesStore } from './profiles';
+import { useDisturbanceStore } from './disturbance';
 import { useSweepStore } from './sweep';
 import { useJobsStore } from './jobs';
 import { useAnalyzeStore } from './analyze';
@@ -91,8 +94,8 @@ export function wireStoreCascade(): void {
     prevSessionId = next;
   });
 
-  // case change → pflow + analysis results + connectivity + pmu + profiles
-  // clear, and the active TDS run is released. Triggered on selection change
+  // case change → pflow + analysis results + connectivity + pmu + profiles +
+  // scheduled disturbances clear, and the active TDS run is released. Triggered on selection change
   // OR clear. Connectivity is bus-idx keyed and a new case has a new bus set,
   // so a stale snapshot would grey out the wrong nodes; PMU and TimeSeries
   // placements are device-idx keyed for the same reason. An EIG result that
@@ -101,7 +104,9 @@ export function wireStoreCascade(): void {
   // draw the old case's frames over the new diagram. Only the *active* run
   // does that, so the runs themselves (names, colours, overlay pins) are kept,
   // as Reset run keeps the rest of the history. The diagram overlay is bus-idx
-  // keyed, so it clears with the case.
+  // keyed, so it clears with the case. So are the scheduled disturbances: a
+  // fault on bus 7 of the old case would otherwise be committed to the new one
+  // (or refused, when it has no bus 7) the next time a TDS run starts.
   let prevSelection = useCaseStore.getState().selection;
   useCaseStore.subscribe((state) => {
     const next = state.selection;
@@ -113,6 +118,7 @@ export function wireStoreCascade(): void {
       useConnectivityStore.getState().clear();
       usePmuStore.getState().clear();
       useProfilesStore.getState().clear();
+      useDisturbanceStore.getState().clearDisturbances();
     }
     prevSelection = next;
   });
@@ -169,6 +175,7 @@ export function __resetCascadeForTests(): void {
   });
   usePmuStore.setState({ pmus: [] });
   useProfilesStore.setState({ profiles: [] });
+  useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
   useSweepStore.setState({ sweeps: {}, activeSweepId: null });
   useJobsStore.setState({ jobs: {} });
 }

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { AlterSpec } from '@/api/types';
 import { useAlterableParams, useCurrentTopology } from '@/api/queries';
 import { cn } from '@/lib/cn';
+import { useNumberText } from './useNumberText';
 
 /**
  * AlterSpecForm — fields for the substrate's ``AlterSpec`` shape (see
@@ -102,15 +103,8 @@ export function AlterSpecForm({ spec, onChange, onValidityChange, className }: A
   const paramsQuery = useAlterableParams(spec.model || null);
   const params = paramsQuery.data?.params ?? [];
 
-  const [tText, setTText] = useState(String(spec.t));
-  const [amountText, setAmountText] = useState(String(spec.amount));
-
-  useEffect(() => {
-    setTText(String(spec.t));
-  }, [spec.t]);
-  useEffect(() => {
-    setAmountText(String(spec.amount));
-  }, [spec.amount]);
+  const [tText, setTText] = useNumberText(spec.t);
+  const [amountText, setAmountText] = useNumberText(spec.amount);
 
   const errors = useMemo(() => {
     const out: Record<string, string> = {};

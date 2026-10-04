@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { AlterSpecForm } from '@/components/disturbance/AlterSpecForm';
@@ -122,6 +123,27 @@ describe('<AlterSpecForm />', () => {
     await user.type(amount, '0.2');
     // Last onChange call carries the fully-typed value.
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ amount: 0.2 }));
+  });
+
+  it('lets a negative amount be typed, which starts with a minus sign that is not a number yet', async () => {
+    const user = userEvent.setup();
+    // The form as its dialog holds it: the spec lives in state and follows every edit.
+    function Harness() {
+      const [spec, setSpec] = useState<AlterSpec>({
+        ...blankAlterSpec(),
+        model: 'PQ',
+        dev_idx: 'L1',
+      });
+      return <AlterSpecForm spec={spec} onChange={setSpec} />;
+    }
+    render(withQueryClient(<Harness />));
+    const amount = screen.getByTestId('field-alter-value');
+
+    await user.clear(amount);
+    expect(amount).toHaveValue('');
+    await user.type(amount, '-0.2');
+
+    expect(amount).toHaveValue('-0.2');
   });
 
   it('flags a non-finite amount as required', async () => {

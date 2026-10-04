@@ -4,6 +4,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -121,5 +122,51 @@ describe('<FaultSpecForm />', () => {
     // Final onChange call should have tf=2.5.
     expect(onChange).toHaveBeenCalled();
     expect(current.tf).toBe(2.5);
+  });
+});
+
+describe('<FaultSpecForm /> typing', () => {
+  /** The form as its dialog holds it: the spec lives in state and follows every edit. */
+  function Harness({ initial }: { initial: FaultSpec }) {
+    const [spec, setSpec] = useState(initial);
+    return (
+      <>
+        <FaultSpecForm spec={spec} onChange={setSpec} />
+        <output data-testid="spec">{JSON.stringify(spec)}</output>
+      </>
+    );
+  }
+  const spec = () => JSON.parse(screen.getByTestId('spec').textContent ?? '{}') as FaultSpec;
+
+  it('labels the times by what they are, not by names that also mean the end of the run', () => {
+    render(withQueryClient(<Harness initial={{ ...blankFaultSpec(), bus_idx: '1' }} />));
+    expect(screen.getByLabelText('Fault applied at (s)')).toHaveValue('1');
+    expect(screen.getByLabelText('Fault cleared at (s)')).toHaveValue('1.1');
+  });
+
+  it('lets a time be cleared and typed again, instead of filling the field with NaN', async () => {
+    const user = userEvent.setup();
+    render(withQueryClient(<Harness initial={{ ...blankFaultSpec(), bus_idx: '1' }} />));
+    const cleared = screen.getByLabelText('Fault cleared at (s)');
+
+    await user.clear(cleared);
+    expect(cleared).toHaveValue('');
+    expect(screen.getByTestId('error-fault-tc')).toBeInTheDocument();
+
+    await user.type(cleared, '1.3');
+    expect(cleared).toHaveValue('1.3');
+    expect(spec().tc).toBe(1.3);
+    expect(screen.queryByTestId('error-fault-tc')).toBeNull();
+  });
+
+  it('explains a clearing time that is not after the start in words that name neither tf nor tc', async () => {
+    const user = userEvent.setup();
+    render(withQueryClient(<Harness initial={{ ...blankFaultSpec(), bus_idx: '1' }} />));
+    const cleared = screen.getByLabelText('Fault cleared at (s)');
+    await user.clear(cleared);
+    await user.type(cleared, '0.5');
+    expect(screen.getByTestId('error-fault-tc')).toHaveTextContent(
+      'Must be later than the time the fault is applied',
+    );
   });
 });

@@ -55,7 +55,7 @@ const STEP_COPY: Record<Exclude<CoachStep, null>, StepCopy> = {
   },
   2: {
     title: 'Run power flow',
-    body: 'Use the Run button at the top of the screen to compute the operating point. The Inspector and Results table populate when PF converges.',
+    body: 'Use the Run button at the top of the screen to compute the operating point. The Inspector and Results table populate when PF converges. To simulate a fault instead, add it under Disturbances in the left rail and switch the Run mode to TDS.',
     anchor: 'top-center',
     cta: 'Got it',
   },

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { ToggleSpec } from '@/api/types';
 import { useCurrentTopology } from '@/api/queries';
 import { cn } from '@/lib/cn';
+import { useNumberText } from './useNumberText';
 
 /**
  * ToggleSpecForm — fields for the substrate's ``ToggleSpec`` shape (see
@@ -88,11 +89,7 @@ export function ToggleSpecForm({
 }: ToggleSpecFormProps) {
   const topology = useCurrentTopology();
   const devices = useMemo(() => devicesForModel(topology, spec.model), [topology, spec.model]);
-  const [tText, setTText] = useState(String(spec.t));
-
-  useEffect(() => {
-    setTText(String(spec.t));
-  }, [spec.t]);
+  const [tText, setTText] = useNumberText(spec.t);
 
   const errors = useMemo(() => {
     const out: Record<string, string> = {};

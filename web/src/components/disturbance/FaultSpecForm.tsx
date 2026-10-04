@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import type { FaultSpec } from '@/api/types';
 import { BusIdxSelect } from '@/components/elements/BusIdxSelect';
 import { BoltedFaultWarning } from '@/components/disturbance/BoltedFaultWarning';
+import { useNumberText } from '@/components/disturbance/useNumberText';
 import { cn } from '@/lib/cn';
 
 /**
@@ -22,7 +23,9 @@ import { cn } from '@/lib/cn';
  *
  * NOTE: the plan's prose uses ``bus`` / ``t`` / ``tf`` for these field
  * names; the substrate uses ``bus_idx`` / ``tf`` / ``tc``. This form
- * follows the substrate (single source of truth — the wire shape).
+ * follows the substrate (single source of truth — the wire shape). Its labels
+ * say what the times are rather than name them: ``tf`` is also the final time
+ * of a TDS run, and reads as that to anyone who has just set one.
  *
  * Validation:
  *
@@ -46,23 +49,15 @@ export interface FaultSpecFormProps {
 }
 
 export function FaultSpecForm({ spec, onChange, onValidityChange, className }: FaultSpecFormProps) {
-  // Keep the raw text inputs in local state so the user can clear a field
-  // and re-type without it snapping back to the last-valid number on
-  // every keystroke. The numeric values flow back into ``spec`` only on
-  // successful parse.
-  const [tfText, setTfText] = useState(String(spec.tf));
-  const [tcText, setTcText] = useState(String(spec.tc));
-  const [xfText, setXfText] = useState(String(spec.xf));
-  const [rfText, setRfText] = useState(String(spec.rf));
-
-  // Sync local text state when the spec is reset externally (e.g., on
+  // Keep the raw text inputs apart from the numbers so the user can clear a
+  // field and re-type without it snapping back to the last-valid number on
+  // every keystroke. The numeric values flow back into ``spec`` on each edit,
+  // and the text follows the spec when it is reset externally (e.g., on
   // edit-existing dialog open).
-  useEffect(() => {
-    setTfText(String(spec.tf));
-    setTcText(String(spec.tc));
-    setXfText(String(spec.xf));
-    setRfText(String(spec.rf));
-  }, [spec.bus_idx, spec.tf, spec.tc, spec.xf, spec.rf]);
+  const [tfText, setTfText] = useNumberText(spec.tf);
+  const [tcText, setTcText] = useNumberText(spec.tc);
+  const [xfText, setXfText] = useNumberText(spec.xf);
+  const [rfText, setRfText] = useNumberText(spec.rf);
 
   const errors = useMemo(() => {
     const out: Record<string, string> = {};
@@ -77,7 +72,7 @@ export function FaultSpecForm({ spec, onChange, onValidityChange, className }: F
     if (!Number.isFinite(spec.tc)) {
       out.tc = 'Enter a finite number';
     } else if (spec.tc <= spec.tf) {
-      out.tc = 'Must be > tf';
+      out.tc = 'Must be later than the time the fault is applied';
     }
     if (!Number.isFinite(spec.xf)) {
       out.xf = 'Enter a finite number';
@@ -129,21 +124,21 @@ export function FaultSpecForm({ spec, onChange, onValidityChange, className }: F
       </FieldRow>
       <NumberField
         id="fault-tf"
-        label="tf — fault applied (s)"
+        label="Fault applied at (s)"
         value={tfText}
         onChange={(t) => setNumber('tf', t)}
         error={errors.tf}
       />
       <NumberField
         id="fault-tc"
-        label="tc — fault cleared (s)"
+        label="Fault cleared at (s)"
         value={tcText}
         onChange={(t) => setNumber('tc', t)}
         error={errors.tc}
       />
       <NumberField
         id="fault-xf"
-        label="xf — fault reactance (pu)"
+        label="Fault reactance, xf (pu)"
         value={xfText}
         onChange={(t) => setNumber('xf', t)}
         error={errors.xf}
@@ -151,7 +146,7 @@ export function FaultSpecForm({ spec, onChange, onValidityChange, className }: F
       <BoltedFaultWarning xf={spec.xf} />
       <NumberField
         id="fault-rf"
-        label="rf — fault resistance (pu)"
+        label="Fault resistance, rf (pu)"
         value={rfText}
         onChange={(t) => setNumber('rf', t)}
         error={errors.rf}
