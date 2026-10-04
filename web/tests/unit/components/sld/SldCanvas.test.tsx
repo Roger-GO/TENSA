@@ -1109,8 +1109,12 @@ describe('SldCanvas', () => {
     render(withQueryClient(<SldCanvas />));
     await waitFor(() => expect(screen.getByTestId('rf-root')).toBeInTheDocument());
     // React Flow's own floor is 0.5, which stops the fit short and leaves the top
-    // and bottom of a tall diagram outside the pane.
-    expect(Number(screen.getByTestId('rf-root').getAttribute('data-min-zoom'))).toBeLessThan(0.5);
+    // and bottom of a tall diagram outside the pane. The mock leaves the attribute
+    // off when no floor is passed, so check it is there before reading its value.
+    const floor = screen.getByTestId('rf-root').getAttribute('data-min-zoom');
+    expect(floor).not.toBeNull();
+    expect(Number(floor)).toBeGreaterThan(0);
+    expect(Number(floor)).toBeLessThan(0.5);
   });
 
   it('says what the lock button locks, and what the diagram answers to', async () => {
