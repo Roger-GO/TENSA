@@ -431,7 +431,7 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
   // runs (still ordered by primary run first, then any extras).
   //
   // Keyed on the column lists rather than the runs, so a streamed frame does
-  // not redo the walk over every column name (1209 on the WECC case).
+  // not redo the walk over every column name (1208 on the WECC case).
   const groupedSelections = useMemo(() => {
     if (columnLists.length === 0 || !selected) return new Map<VarGroup, string[]>();
     const groups = new Map<VarGroup, string[]>();

@@ -14,10 +14,10 @@ however many variables are streamed, so a frame costs 8 bytes per value plus
 a fixed few hundred bytes, and encoding or decoding one costs the same per
 value. (One Arrow column per variable repeated every name in each frame's
 schema and carried a field node and buffer descriptors per column, which on a
-1209-column case was a 134 KB frame for 9.7 KB of values.) A run that selects
-variables with no members on the loaded case has no columns and its frames
-carry ``t`` alone. The WebSocket ``start_tds`` config's ``vars`` list selects
-which variable groups are included in each frame.
+case with 1208 variables was a 134 KB frame for 9.7 KB of values.) A run that
+selects variables with no members on the loaded case has no columns and its
+frames carry ``t`` alone. The WebSocket ``start_tds`` config's ``vars`` list
+selects which variable groups are included in each frame.
 
 The variable groups (and the columns each contributes, in canonical
 order) are:

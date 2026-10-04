@@ -194,7 +194,7 @@ interface BusVoltageColumn {
  * The bus-voltage columns found in a run's column-name list, keyed by the
  * list itself. A run keeps the same ``columnNames`` array for its whole
  * life (frames never touch it), so each list is parsed once and the rAF
- * loop does not re-run the column-name regexes on every tick (1209 names
+ * loop does not re-run the column-name regexes on every tick (1208 names
  * on the WECC case, of which only the buses matter). The store never
  * mutates a list, and the ``WeakMap`` drops the entry along with the run.
  */
