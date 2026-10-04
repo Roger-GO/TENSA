@@ -30,15 +30,17 @@
  * (``useImportBundle``) so other call sites (e.g., a future "Import from
  * URL" affordance) can re-use it.
  */
-import { Suspense, useState } from 'react';
+import { useState } from 'react';
 import { Dialog, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { LazyMount } from '@/components/ui/Lazy';
 import { useSessionStore } from '@/store/session';
 import { lazyNamed } from '@/lib/lazyNamed';
 
 // The dialog's content (and the conflict resolver and import mutation behind
 // it) loads the first time the dialog opens; the button is what ships with the
-// file picker and the Workspace menu.
+// file picker and the Workspace menu. If the chunk cannot be fetched, the
+// button toasts and closes the dialog, on this open and on every later one.
 const BundleImportDialogBody = lazyNamed(
   () => import('./BundleImportDialogBody'),
   'BundleImportDialogBody',
@@ -76,9 +78,9 @@ export function BundleImportButton({ className }: BundleImportButtonProps) {
         </Button>
       </DialogTrigger>
       {open ? (
-        <Suspense fallback={null}>
+        <LazyMount when onLoadFailed={() => setOpen(false)}>
           <BundleImportDialogBody onClose={() => setOpen(false)} />
-        </Suspense>
+        </LazyMount>
       ) : null}
     </Dialog>
   );

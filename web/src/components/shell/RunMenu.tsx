@@ -82,7 +82,7 @@ export function RunMenu() {
           );
         })}
       </TopBarMenu>
-      <LazyMount when={sweepOpen}>
+      <LazyMount when={sweepOpen} onLoadFailed={() => setSweepOpen(false)}>
         <SweepDialog open={sweepOpen} onOpenChange={setSweepOpen} />
       </LazyMount>
     </>

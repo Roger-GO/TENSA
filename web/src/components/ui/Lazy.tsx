@@ -1,6 +1,7 @@
-import { Suspense, useState } from 'react';
+import { Suspense, createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { toast } from '@/lib/toast';
 
 /**
  * Pieces for code that loads on demand (see ``lazyNamed`` in
@@ -38,12 +39,51 @@ export function LazyLoadFailed() {
   );
 }
 
+/** What a ``LazyMount`` tells the overlay inside it when that overlay failed to load. */
+interface LazyMountState {
+  when: boolean;
+  onLoadFailed: (() => void) | undefined;
+}
+
+const LazyMountContext = createContext<LazyMountState | null>(null);
+
+/**
+ * Stands in for an overlay (a dialog, drawer or palette) whose chunk failed to
+ * load. An overlay has no region of its own to put a message in, so this
+ * renders nothing and toasts instead, and it does so each time the overlay is
+ * asked for (each time its ``LazyMount`` gets ``when`` true), because the failed
+ * result is kept for the life of the page and a second attempt must not be
+ * silent. It then calls the mount's ``onLoadFailed`` so the owner can drop the
+ * open flag it set.
+ */
+export function LazyLoadFailedQuietly(): null {
+  const mount = useContext(LazyMountContext);
+  const asked = mount?.when ?? true;
+  const onLoadFailed = useRef(mount?.onLoadFailed);
+  onLoadFailed.current = mount?.onLoadFailed;
+  useEffect(() => {
+    if (!asked) return;
+    toast.error('Part of the app could not be loaded', {
+      description: 'The page may be out of date. Reload it and try again.',
+    });
+    onLoadFailed.current?.();
+  }, [asked]);
+  return null;
+}
+
 export interface LazyMountProps {
   /** When true, the children mount. They stay mounted once they have. */
   when: boolean;
   children: ReactNode;
   /** Shown while the children's chunks load. Nothing by default (dialogs). */
   fallback?: ReactNode;
+  /**
+   * Called when a lazy overlay among the children could not be loaded (it has
+   * said so in a toast). Pass what clears the flag that made ``when`` true:
+   * nothing is on screen to close it, and a flag left set turns the next click
+   * on the trigger into a no-op.
+   */
+  onLoadFailed?: () => void;
 }
 
 /**
@@ -53,8 +93,13 @@ export interface LazyMountProps {
  * itself from a store flag did before it was split out: its close animation
  * still runs and nothing else about it changes.
  */
-export function LazyMount({ when, children, fallback = null }: LazyMountProps) {
+export function LazyMount({ when, children, fallback = null, onLoadFailed }: LazyMountProps) {
   const [wanted, setWanted] = useState(when);
   if (when && !wanted) setWanted(true);
-  return wanted ? <Suspense fallback={fallback}>{children}</Suspense> : null;
+  if (!wanted) return null;
+  return (
+    <LazyMountContext.Provider value={{ when, onLoadFailed }}>
+      <Suspense fallback={fallback}>{children}</Suspense>
+    </LazyMountContext.Provider>
+  );
 }

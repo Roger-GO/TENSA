@@ -203,12 +203,13 @@ function CanvasSlot() {
 function SnapshotDialogs() {
   const saveOpen = useSnapshotStore((s) => s.saveDialogOpen);
   const loadOpen = useSnapshotStore((s) => s.loadDialogOpen);
+  const closeDialogs = useSnapshotStore((s) => s.closeDialogs);
   return (
     <>
-      <LazyMount when={saveOpen}>
+      <LazyMount when={saveOpen} onLoadFailed={closeDialogs}>
         <SaveSnapshotDialog />
       </LazyMount>
-      <LazyMount when={loadOpen}>
+      <LazyMount when={loadOpen} onLoadFailed={closeDialogs}>
         <LoadSnapshotDialog />
       </LazyMount>
     </>

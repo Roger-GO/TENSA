@@ -495,13 +495,15 @@ export function AppShell({
  */
 function GlobalOverlays() {
   const paletteOpen = useCommandPaletteStore((s) => s.open);
+  const closePalette = useCommandPaletteStore((s) => s.closePalette);
   const cheatsheetOpen = useShortcutCheatsheetStore((s) => s.open);
+  const closeCheatsheet = useShortcutCheatsheetStore((s) => s.closeCheatsheet);
   return (
     <>
-      <LazyMount when={paletteOpen}>
+      <LazyMount when={paletteOpen} onLoadFailed={closePalette}>
         <CommandPalette />
       </LazyMount>
-      <LazyMount when={cheatsheetOpen}>
+      <LazyMount when={cheatsheetOpen} onLoadFailed={closeCheatsheet}>
         <ShortcutCheatsheet />
       </LazyMount>
     </>

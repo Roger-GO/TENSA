@@ -140,10 +140,10 @@ export function WorkspaceMenu() {
           );
         })}
       </TopBarMenu>
-      <LazyMount when={pmuOpen}>
+      <LazyMount when={pmuOpen} onLoadFailed={() => setPmuOpen(false)}>
         <PmuPlacementDialog open={pmuOpen} onOpenChange={setPmuOpen} />
       </LazyMount>
-      <LazyMount when={profileOpen}>
+      <LazyMount when={profileOpen} onLoadFailed={() => setProfileOpen(false)}>
         <ProfileImportDialog open={profileOpen} onOpenChange={setProfileOpen} />
       </LazyMount>
     </>

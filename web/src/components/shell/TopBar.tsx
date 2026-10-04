@@ -189,17 +189,20 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
  */
 function TopBarDialogs() {
   const bundleOpen = useBundleStore((s) => s.dialogOpen);
+  const closeBundle = useBundleStore((s) => s.closeDialog);
   const reportOpen = useReportDialogStore((s) => s.dialogOpen);
+  const closeReport = useReportDialogStore((s) => s.closeDialog);
   const historyOpen = useHistoryStore((s) => s.drawerOpen);
+  const closeHistory = useHistoryStore((s) => s.closeDrawer);
   return (
     <>
-      <LazyMount when={bundleOpen}>
+      <LazyMount when={bundleOpen} onLoadFailed={closeBundle}>
         <BundleExportDialog />
       </LazyMount>
-      <LazyMount when={reportOpen}>
+      <LazyMount when={reportOpen} onLoadFailed={closeReport}>
         <ReportDialog />
       </LazyMount>
-      <LazyMount when={historyOpen}>
+      <LazyMount when={historyOpen} onLoadFailed={closeHistory}>
         <HistoryDrawer />
       </LazyMount>
     </>

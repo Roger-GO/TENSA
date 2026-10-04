@@ -18,24 +18,21 @@
  * - ``'panel'`` (default): the region shows ``LazyLoadFailed``, with a button
  *   that reloads the page.
  * - ``'overlay'`` (dialogs, drawers, palettes, which have no region of their
- *   own to put a message in): a toast says so and nothing renders.
+ *   own to put a message in): ``LazyLoadFailedQuietly`` renders nothing and
+ *   toasts.
  *
  * A failed load is not retried for the lifetime of the page, because ``lazy``
  * keeps the first result. A reload is the way out, which is what both messages
- * offer.
+ * offer. An overlay asked for again after a failure toasts again, so a second
+ * attempt is not silent (see ``LazyMount``'s ``onLoadFailed``).
  */
 import { lazy } from 'react';
 import type { ComponentType, LazyExoticComponent } from 'react';
-import { LazyLoadFailed } from '@/components/ui/Lazy';
-import { toast } from '@/lib/toast';
+import { LazyLoadFailed, LazyLoadFailedQuietly } from '@/components/ui/Lazy';
 
 type PropsOf<C> = C extends ComponentType<infer P> ? P : never;
 
 export type LazyFailure = 'panel' | 'overlay';
-
-function LazyLoadFailedQuietly(): null {
-  return null;
-}
 
 export function lazyNamed<M, K extends keyof M>(
   load: () => Promise<M>,
@@ -48,13 +45,7 @@ export function lazyNamed<M, K extends keyof M>(
       return { default: mod[name] as unknown as ComponentType<PropsOf<M[K]>> };
     } catch (err) {
       console.error(`[lazyNamed] could not load ${String(name)}`, err);
-      if (failure === 'overlay') {
-        toast.error('Part of the app could not be loaded', {
-          description: 'The page may be out of date. Reload it and try again.',
-        });
-        return { default: LazyLoadFailedQuietly };
-      }
-      return { default: LazyLoadFailed };
+      return { default: failure === 'overlay' ? LazyLoadFailedQuietly : LazyLoadFailed };
     }
   });
 }
