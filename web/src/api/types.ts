@@ -25,6 +25,7 @@ export type SessionList = components['schemas']['SessionList'];
 export type LoadCaseRequest = components['schemas']['LoadCaseRequest'];
 export type TopologyEntry = components['schemas']['TopologyEntry'];
 export type TopologySummary = components['schemas']['TopologySummary'];
+export type CaseEvent = components['schemas']['CaseEvent'];
 
 export type PflowRunRequest = components['schemas']['PflowRunRequest'];
 export type PflowResult = components['schemas']['PflowResult'];

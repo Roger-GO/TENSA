@@ -302,13 +302,18 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       }
     }
 
-    // A run with nothing scheduled starts from the power flow and stays there,
-    // which plots as flat lines. Say so before the user wonders what is wrong,
-    // and where the fault goes.
-    if (disturbances.length === 0) {
+    // A run that schedules nothing and whose case defines no event of its own
+    // (a line trip in the file, or one a bundle or snapshot replayed) has
+    // nothing to disturb it. Say so before the user wonders what is wrong, and
+    // where the fault goes. With events from the case the run does move, and
+    // the sidebar lists them, so there is nothing to warn about.
+    if (
+      disturbances.length === 0 &&
+      (useCaseStore.getState().topology?.events ?? []).length === 0
+    ) {
       toast.info('No fault is set', {
         description:
-          'Nothing disturbs this run, so the curves stay flat. Add a fault under Disturbances in the left sidebar and run again.',
+          'Neither the sidebar nor the case schedules a fault, a trip or a parameter change, so nothing disturbs this run. Add a fault under Disturbances in the left sidebar and run again.',
         duration: 8000,
       });
     }

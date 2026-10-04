@@ -39,7 +39,7 @@ import { useDisturbanceStore } from '@/store/disturbance';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { useRunsStore, DEFAULT_MEMORY_BUDGET_BYTES } from '@/store/runs';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
-import type { FaultSpec } from '@/api/types';
+import type { CaseEvent, FaultSpec } from '@/api/types';
 import { arrowFrame } from '../../helpers/frames';
 
 // A run waits for the lazily loaded Arrow decoder before it sends its command;
@@ -121,7 +121,11 @@ function TopologyMirror() {
 }
 
 function seedReady(
-  opts: { withDisturbances?: boolean; topologyState?: 'pre-setup' | 'committed' } = {},
+  opts: {
+    withDisturbances?: boolean;
+    topologyState?: 'pre-setup' | 'committed';
+    events?: CaseEvent[];
+  } = {},
 ) {
   useCaseStore.setState({
     selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
@@ -133,6 +137,7 @@ function seedReady(
       generators: [],
       loads: [],
       controllers: [DYNAMIC_CONTROLLER],
+      events: opts.events ?? [],
     },
     layoutSidecar: null,
     selectedElement: null,
@@ -853,7 +858,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
       );
     });
 
-    it('says that nothing disturbs it, and where to add a fault, as it starts', async () => {
+    it('says that nothing is scheduled, and where to add a fault, as it starts', async () => {
       seedReady();
       serveShort('run-nofault');
 
@@ -868,7 +873,55 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
       expect(toastInfoMock).toHaveBeenCalledTimes(1);
       const [title, opts] = toastInfoMock.mock.calls[0] as [string, { description: string }];
       expect(title).toBe('No fault is set');
-      expect(opts.description).toMatch(/curves stay flat.*Disturbances in the left sidebar/);
+      expect(opts.description).toMatch(
+        /Neither the sidebar nor the case schedules.*Disturbances in the left sidebar/,
+      );
+      // It claims nothing about the curves.
+      expect(opts.description).not.toMatch(/flat/);
+    });
+
+    it('says nothing of the kind when the case defines an event of its own', async () => {
+      // The Kundur case trips Line_8 at 2 s with nothing scheduled in the UI.
+      seedReady({
+        events: [
+          {
+            source: 'case',
+            kind: 'toggle',
+            name: 'Toggler_1',
+            t: 2,
+            model: 'Line',
+            dev_idx: 'Line_8',
+          },
+        ],
+      });
+      serveShort('run-case-event');
+
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      await userEvent.click(screen.getByTestId('run-mode-tds'));
+      await userEvent.click(screen.getByTestId('run-tds-button'));
+      await waitFor(() => {
+        expect(useRunsStore.getState().runs['run-case-event']?.state).toBe('done');
+      });
+
+      expect(toastInfoMock).not.toHaveBeenCalledWith('No fault is set', expect.anything());
+    });
+
+    it('says nothing of the kind when a bundle or snapshot replayed a disturbance', async () => {
+      seedReady({
+        events: [{ source: 'restored', kind: 'fault', t: 1, tc: 1.1, model: 'Bus', dev_idx: 4 }],
+      });
+      serveShort('run-restored');
+
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      await userEvent.click(screen.getByTestId('run-mode-tds'));
+      await userEvent.click(screen.getByTestId('run-tds-button'));
+      await waitFor(() => {
+        expect(useRunsStore.getState().runs['run-restored']?.state).toBe('done');
+      });
+
+      expect(toastInfoMock).not.toHaveBeenCalledWith('No fault is set', expect.anything());
     });
 
     it('says nothing of the kind when a fault is set', async () => {

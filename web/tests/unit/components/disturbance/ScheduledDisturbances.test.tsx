@@ -1,6 +1,7 @@
 /**
  * <ScheduledDisturbances />: the sidebar's list of what the next TDS run does
- * to the system, and the way to add a fault to it.
+ * to the system, and the way to add a fault to it. Besides the user's own
+ * disturbances it lists, read-only, the events the case defines.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
@@ -16,7 +17,7 @@ import {
   useDisturbanceStore,
 } from '@/store/disturbance';
 import { useCaseStore } from '@/store/case';
-import type { TopologySummary } from '@/api/types';
+import type { CaseEvent, TopologySummary } from '@/api/types';
 
 let MOCK_TOPOLOGY: TopologySummary | null = null;
 
@@ -66,9 +67,12 @@ afterEach(() => {
 describe('<ScheduledDisturbances />', () => {
   it('says that no fault is set, and what that means for the run', () => {
     render(withQueryClient(<ScheduledDisturbances />));
-    expect(screen.getByTestId('scheduled-disturbances-empty')).toHaveTextContent(
-      /No fault is set.*nothing to disturb the system.*flat/s,
+    const empty = screen.getByTestId('scheduled-disturbances-empty');
+    expect(empty).toHaveTextContent(
+      /No fault is set.*Neither this list nor the case schedules.*nothing to disturb the system/s,
     );
+    // It makes no claim about the curves: only that nothing is scheduled.
+    expect(empty).not.toHaveTextContent(/flat/);
     expect(screen.getByRole('button', { name: 'Add fault' })).toBeInTheDocument();
     expect(screen.queryByTestId('scheduled-disturbances-list')).toBeNull();
   });
@@ -173,5 +177,111 @@ describe('<ScheduledDisturbances />', () => {
     // A new one, not the existing one.
     expect(within(dialog).getByText('Add disturbance', { selector: 'h2' })).toBeInTheDocument();
     expect(within(dialog).getByLabelText('Bus')).toHaveValue('');
+  });
+
+  describe('events the case defines', () => {
+    const kundurTrip: CaseEvent = {
+      source: 'case',
+      kind: 'toggle',
+      name: 'Toggler_1',
+      t: 2,
+      model: 'Line',
+      dev_idx: 'Line_8',
+    };
+
+    function withEvents(events: CaseEvent[]) {
+      useCaseStore.setState({ topology: { ...MOCK_TOPOLOGY!, events } });
+    }
+
+    it('lists the line trip the case file sets, read-only, instead of saying nothing is set', () => {
+      withEvents([kundurTrip]);
+      render(withQueryClient(<ScheduledDisturbances />));
+
+      expect(screen.queryByTestId('scheduled-disturbances-empty')).toBeNull();
+      const row = screen.getByTestId('scheduled-case-event-0');
+      expect(row).toHaveTextContent('Toggle Line Line_8');
+      expect(row).toHaveTextContent('At 2 s');
+      expect(row).toHaveTextContent('Set by the case (Toggler_1)');
+      // The user cannot edit or delete what the file defines.
+      expect(within(row).queryByRole('button')).toBeNull();
+      expect(screen.getByText('Applied the next time you run TDS.')).toBeInTheDocument();
+    });
+
+    it('still offers Add fault while only the case sets events', () => {
+      withEvents([kundurTrip]);
+      render(withQueryClient(<ScheduledDisturbances />));
+      expect(screen.getByRole('button', { name: 'Add fault' })).toBeInTheDocument();
+    });
+
+    it('shows the case events and the user own ones together, in time order', () => {
+      withEvents([kundurTrip]);
+      const early = useDisturbanceStore
+        .getState()
+        .addDisturbance({ ...blankFaultSpec(), bus_idx: '7', tf: 1.0, tc: 1.1 });
+      render(withQueryClient(<ScheduledDisturbances />));
+
+      const rows = within(screen.getByTestId('scheduled-disturbances-list')).getAllByRole(
+        'listitem',
+      );
+      expect(rows.map((r) => r.getAttribute('data-testid'))).toEqual([
+        `scheduled-disturbance-${early.id}`,
+        'scheduled-case-event-0',
+      ]);
+      expect(screen.getByRole('button', { name: 'Add disturbance' })).toBeInTheDocument();
+    });
+
+    it('names the bus of a fault the case sets, and says when it is never cleared', () => {
+      withEvents([
+        {
+          source: 'case',
+          kind: 'fault',
+          name: 'Fault_1',
+          t: 1,
+          tc: null,
+          model: 'Bus',
+          dev_idx: 7,
+        },
+        { source: 'case', kind: 'fault', t: 3, tc: 3.1, model: 'Bus', dev_idx: 1 },
+      ]);
+      render(withQueryClient(<ScheduledDisturbances />));
+
+      const first = screen.getByTestId('scheduled-case-event-0');
+      expect(first).toHaveTextContent('Fault on bus 3 (idx 7)');
+      expect(first).toHaveTextContent('Applied at 1 s, not cleared');
+      const second = screen.getByTestId('scheduled-case-event-1');
+      expect(second).toHaveTextContent('Fault on bus 1');
+      expect(second).toHaveTextContent('Applied at 3 s, cleared at 3.1 s');
+      // No name in the file: it still says where the event comes from.
+      expect(second).toHaveTextContent('Set by the case');
+      expect(second).not.toHaveTextContent('(');
+    });
+
+    it('says what an alteration of the case changes', () => {
+      withEvents([
+        {
+          source: 'case',
+          kind: 'alter',
+          name: 'Alter_1',
+          t: 2.5,
+          model: 'PQ',
+          dev_idx: 'PQ_1',
+          src: 'Ppf',
+          method: '*',
+          amount: 1.2,
+        },
+      ]);
+      render(withQueryClient(<ScheduledDisturbances />));
+      const row = screen.getByTestId('scheduled-case-event-0');
+      expect(row).toHaveTextContent('Alter PQ PQ_1: Ppf * 1.2');
+      expect(row).toHaveTextContent('At 2.5 s');
+    });
+
+    it('says a replayed disturbance came from the bundle or snapshot', () => {
+      withEvents([{ source: 'restored', kind: 'fault', t: 1, tc: 1.1, model: 'Bus', dev_idx: 7 }]);
+      render(withQueryClient(<ScheduledDisturbances />));
+      const row = screen.getByTestId('scheduled-case-event-0');
+      expect(row).toHaveTextContent('Fault on bus 3 (idx 7)');
+      expect(row).toHaveTextContent('Replayed from a bundle or snapshot');
+    });
   });
 });
