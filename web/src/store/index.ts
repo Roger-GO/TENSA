@@ -6,8 +6,11 @@
  * cascade:
  *
  * - When `session` clears, `case` and `pflow` clear too.
- * - When `case` changes, `pflow`, the EIG / CPF / SE results, and the TDS
- *   runs clear (results don't carry across cases).
+ * - When `case` changes, `pflow` and the EIG / CPF / SE results clear
+ *   (results don't carry across cases), and the active TDS run is released.
+ *   The finished runs themselves stay: they are results only this tab holds,
+ *   and comparing a run on one case with a run on a modified copy is a normal
+ *   workflow. They go when the session ends.
  * - When `pflow` clears (case change, reload, run reset), the EIG / CPF / SE
  *   results clear with it: they were computed from that operating point.
  *
@@ -88,21 +91,24 @@ export function wireStoreCascade(): void {
     prevSessionId = next;
   });
 
-  // case change → pflow + analysis results + runs + connectivity + pmu +
-  // profiles clear. Triggered on selection change OR clear. Connectivity is
-  // bus-idx keyed and a new case has a new bus set, so a stale snapshot would
-  // grey out the wrong nodes; PMU and TimeSeries placements are device-idx
-  // keyed for the same reason. An EIG result that initialised the dynamic
-  // state, or a TDS run still marked active, would otherwise keep the new
-  // case's Run PF disabled ("Reset the run first") and draw the old case's
-  // frames over the new diagram.
+  // case change → pflow + analysis results + connectivity + pmu + profiles
+  // clear, and the active TDS run is released. Triggered on selection change
+  // OR clear. Connectivity is bus-idx keyed and a new case has a new bus set,
+  // so a stale snapshot would grey out the wrong nodes; PMU and TimeSeries
+  // placements are device-idx keyed for the same reason. An EIG result that
+  // initialised the dynamic state, or a TDS run still marked active, would
+  // otherwise keep the new case's Run PF disabled ("Reset the run first") and
+  // draw the old case's frames over the new diagram. Only the *active* run
+  // does that, so the runs themselves (names, colours, overlay pins) are kept,
+  // as Reset run keeps the rest of the history. The diagram overlay is bus-idx
+  // keyed, so it clears with the case.
   let prevSelection = useCaseStore.getState().selection;
   useCaseStore.subscribe((state) => {
     const next = state.selection;
     if (prevSelection !== next) {
       usePflowStore.getState().clearPflow();
       clearAnalysisResults();
-      useRunsStore.getState().clearRuns();
+      useRunsStore.getState().clearActiveRun();
       useAnimationStore.getState().clearAll();
       useConnectivityStore.getState().clear();
       usePmuStore.getState().clear();
@@ -155,7 +161,7 @@ export function __resetCascadeForTests(): void {
     seResult: null,
     seMeasurementsCount: null,
   });
-  useRunsStore.setState({ runs: {}, activeRunId: null });
+  useRunsStore.setState({ runs: {}, activeRunId: null, overlayRunIds: new Set<string>() });
   useAnimationStore.setState({ busOverlayByRun: {} });
   useConnectivityStore.setState({
     result: null,

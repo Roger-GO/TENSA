@@ -238,6 +238,15 @@ export interface RunsState {
   clearRuns: () => void;
 
   /**
+   * Stop treating a run as the active one without dropping any run. The runs
+   * stay for plots, overlay and export; only the run that gates the Run buttons
+   * and drives the diagram overlay is released. The case-change cascade uses it:
+   * the model the active run left in a dynamic state is gone with the old case,
+   * but the results are the researcher's to keep and compare.
+   */
+  clearActiveRun: () => void;
+
+  /**
    * Replace the overlay set wholesale. Caller may pass any iterable of
    * run ids; the store dedups + filters down to ids actually present in
    * the runs map (so a stale id from the History drawer can't pin a
@@ -642,6 +651,8 @@ export const useRunsStore = create<RunsState>((set, get) => ({
   },
 
   clearRuns: () => set({ runs: {}, activeRunId: null, overlayRunIds: new Set<string>() }),
+
+  clearActiveRun: () => set({ activeRunId: null }),
 
   setOverlayRuns: (ids) => {
     const runs = get().runs;

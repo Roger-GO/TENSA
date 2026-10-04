@@ -2,16 +2,20 @@
  * Tests for the cross-slice cascade wired in ``store/index.ts``.
  *
  * Concerns:
- *  - A case change drops the previous case's PF result, EIG / CPF / SE
- *    results and TDS runs, so none of them can leave a Run button on the new
- *    case enabled (or disabled) by state that belongs to the old one.
+ *  - A case change drops the previous case's PF result and EIG / CPF / SE
+ *    results and releases its active TDS run, so none of them can leave a Run
+ *    button on the new case enabled (or disabled) by state that belongs to the
+ *    old one. The finished runs stay, with their names, colours and overlay
+ *    pins: they exist only in this tab and are worth comparing across cases.
  *  - Clearing the PF result by itself (Reload case, Reset run) drops the
  *    analysis results computed from it, whether or not an Analyze view is
  *    mounted to notice.
  *  - A session clear drops the case and PF result, except mid-recovery, when
  *    the case selection has to survive so it can be re-loaded.
  */
+import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { useRunReadiness } from '@/lib/useRunReadiness';
 import { __resetCascadeForTests, wireStoreCascade } from '@/store';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useCaseStore } from '@/store/case';
@@ -77,7 +81,7 @@ afterEach(() => {
 });
 
 describe('store cascade — case change', () => {
-  it('drops the previous case results and TDS runs when another case is set', () => {
+  it('drops the previous case results and releases its active TDS run when another case is set', () => {
     seedResults();
     expect(useRunsStore.getState().activeRunId).toBe('run-1');
 
@@ -87,7 +91,52 @@ describe('store cascade — case change', () => {
     expect(useAnalyzeStore.getState().eigResult).toBeNull();
     expect(useAnalyzeStore.getState().seMeasurementsCount).toBeNull();
     expect(useRunsStore.getState().activeRunId).toBeNull();
-    expect(useRunsStore.getState().runs).toEqual({});
+  });
+
+  it('keeps the finished runs, with their names, colours and overlay pins', () => {
+    seedResults();
+    useRunsStore.getState().markRunDone('run-1', 1);
+    useRunsStore.getState().setRunDisplayName('run-1', 'Base case');
+    useRunsStore.getState().setRunColorOverride('run-1', '#aa3300');
+    useRunsStore.getState().addOverlayRun('run-1');
+
+    useCaseStore.getState().setCase(caseOf('wscc9.xlsx'));
+
+    const { runs, activeRunId, overlayRunIds } = useRunsStore.getState();
+    expect(activeRunId).toBeNull();
+    expect(Object.keys(runs)).toEqual(['run-1']);
+    expect(runs['run-1']?.displayName).toBe('Base case');
+    expect(runs['run-1']?.colorOverride).toBe('#aa3300');
+    expect(runs['run-1']?.state).toBe('done');
+    expect(overlayRunIds.has('run-1')).toBe(true);
+  });
+
+  it('does not let a kept run hold Run PF back on the new case', () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1') });
+    seedResults();
+    // Leave the run as the only thing gating Run PF (the seeded EIG would too).
+    useAnalyzeStore.getState().clearEigResult();
+    useRunsStore.getState().markRunDone('run-1', 1);
+    const before = renderHook(() => useRunReadiness('pflow'));
+    expect(before.result.current.disabledReason).toMatch(/Reset the run first/);
+
+    useCaseStore.getState().setCase(caseOf('wscc9.xlsx'));
+
+    const after = renderHook(() => useRunReadiness('pflow'));
+    expect(after.result.current.ready).toBe(true);
+    expect(Object.keys(useRunsStore.getState().runs)).toEqual(['run-1']);
+  });
+
+  it('lets a run on the new case start after one on the old case was kept', () => {
+    seedResults();
+    useRunsStore.getState().markRunDone('run-1', 1);
+    useCaseStore.getState().setCase(caseOf('wscc9.xlsx'));
+
+    useRunsStore.getState().startRun({ runId: 'run-2', tf: 1, columnNames: ['Bus_1_v'] });
+
+    const { runs, activeRunId } = useRunsStore.getState();
+    expect(activeRunId).toBe('run-2');
+    expect(Object.keys(runs).sort()).toEqual(['run-1', 'run-2']);
   });
 
   it('drops them when the case is cleared', () => {
@@ -96,6 +145,7 @@ describe('store cascade — case change', () => {
     expect(usePflowStore.getState().lastRun).toBeNull();
     expect(useAnalyzeStore.getState().eigResult).toBeNull();
     expect(useRunsStore.getState().activeRunId).toBeNull();
+    expect(Object.keys(useRunsStore.getState().runs)).toEqual(['run-1']);
   });
 });
 

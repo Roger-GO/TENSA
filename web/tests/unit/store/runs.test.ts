@@ -189,6 +189,29 @@ describe('runs store — done / error / aborted / connection', () => {
   });
 });
 
+describe('runs store — clearActiveRun', () => {
+  beforeEach(reset);
+  afterEach(reset);
+
+  it('releases the active run but keeps every run, its names and the overlay set', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().markRunDone('r1', 1.0);
+    useRunsStore.getState().startRun({ runId: 'r2', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().markRunDone('r2', 1.0);
+    useRunsStore.getState().setRunDisplayName('r1', 'Base case');
+    useRunsStore.getState().addOverlayRun('r1');
+    expect(useRunsStore.getState().activeRunId).toBe('r2');
+
+    useRunsStore.getState().clearActiveRun();
+
+    const { runs, activeRunId, overlayRunIds } = useRunsStore.getState();
+    expect(activeRunId).toBeNull();
+    expect(Object.keys(runs)).toEqual(['r1', 'r2']);
+    expect(runs.r1!.displayName).toBe('Base case');
+    expect(overlayRunIds.has('r1')).toBe(true);
+  });
+});
+
 describe('runs store — retention policy (Unit 9 v2.0)', () => {
   beforeEach(reset);
   afterEach(reset);
