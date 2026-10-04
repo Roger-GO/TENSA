@@ -569,7 +569,7 @@ describe('TimeSeriesPlot — streaming frames do not rebuild the charts', () => 
 
 describe('TimeSeriesPlot axes and units', () => {
   interface PlotOptions {
-    series: { label: string; scale?: string; dash?: number[] }[];
+    series: { label: string; scale?: string; stroke?: string; dash?: number[] }[];
     axes: { scale?: string; label?: string; side?: number; grid?: { show: boolean } }[];
   }
 
@@ -751,6 +751,34 @@ describe('TimeSeriesPlot axes and units', () => {
     expect(options.series.slice(1).map((s) => s.scale)).toEqual(['y', 'y2', 'y', 'y2']);
     expect(data[2]![1]).toBeCloseTo(180, 10);
     expect(data[4]![1]).toBeCloseTo(90, 10);
+  });
+
+  it("draws a run's angle in the run's own stroke in an overlay, since a dash there names the run", () => {
+    seedRun('r1', ['Bus_1_v', 'Bus_1_a']);
+    appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.0], Bus_1_a: [0, 1] });
+    seedRun('r2', ['Bus_1_v', 'Bus_1_a']);
+    appendRows('r2', [0, 1], { Bus_1_v: [1.0, 1.0], Bus_1_a: [0, 2] });
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+    usePlotStore.getState().setSelection('r2', new Set(['Bus_1_v', 'Bus_1_a']));
+    const { unmount } = render(<TimeSeriesPlot />);
+
+    // Series order: r1 v, r1 a, r2 v, r2 a. The right-hand axis adds no dash of its own.
+    const [v1, a1, v2, a2] = constructed().options.series.slice(1);
+    expect(a1?.scale).toBe('y2');
+    expect(a1?.stroke).toBe(v1?.stroke);
+    expect(a1?.dash).toEqual(v1?.dash);
+    expect(a2?.stroke).toBe(v2?.stroke);
+    expect(a2?.dash).toEqual(v2?.dash);
+    unmount();
+
+    // In gradient mode nothing is dashed.
+    constructSpy.mockClear();
+    render(<TimeSeriesPlot colorMode="gradient" />);
+    expect(
+      constructed()
+        .options.series.slice(1)
+        .map((s) => s.dash),
+    ).toEqual([undefined, undefined, undefined, undefined]);
   });
 
   it('exports the values as simulated, and says in which units', async () => {

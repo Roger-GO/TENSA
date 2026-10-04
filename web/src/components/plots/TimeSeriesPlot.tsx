@@ -41,9 +41,11 @@ import { cn } from '@/lib/cn';
  *
  * Axes and units: a group that mixes quantities of different size (a bus's
  * voltage and its angle, a machine's speed and its rotor angle) gives each its
- * own y axis, the angle dashed on the right and in degrees, and the display
- * units (``store/units.ts``) pick pu or kV and Hz for the left one. Each run
- * converts with the bases it was started with. See ``axes.ts``.
+ * own y axis, the angle on the right and in degrees (dashed on a single run's
+ * chart; an overlay draws a run's angle in the run's own stroke, see
+ * ``buildMultiRunGroupChart``), and the display units (``store/units.ts``) pick
+ * pu or kV and Hz for the left one. Each run converts with the bases it was
+ * started with. See ``axes.ts``.
  *
  * Mismatched timelines: each run keeps its own t-column, so a run
  * with ``tf=5`` simply ends at t=5 in the stacked plot's shared
@@ -250,6 +252,12 @@ function buildGroupChart(
  * The alignment does not depend on the group or the variables, so it is
  * made once per render and shared by every stacked chart, not rebuilt for
  * each of them.
+ *
+ * A series on the right-hand axis (an angle) is not dashed here, unlike the
+ * single-run chart. In the hash colour mode the dash is part of what names a
+ * run, so a dash for the axis would pass for another run's; in gradient mode
+ * nothing is dashed. The axes' own labels and the legend tell the quantities
+ * apart.
  */
 function buildMultiRunGroupChart(
   runs: readonly RunRecord[],
