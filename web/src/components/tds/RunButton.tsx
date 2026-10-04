@@ -494,6 +494,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   let primaryShowSpinner = false;
   let primaryTestId = 'run-button';
   let primaryVariant: 'primary' | 'outline' | 'danger' = 'primary';
+  let primaryTitle: string | undefined;
 
   if (mode === 'pf') {
     primaryTestId = 'run-pflow-button';
@@ -509,6 +510,8 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     if (isTdsTerminal) {
       primaryLabel = 'Reset run';
       primaryVariant = 'outline';
+      primaryTitle =
+        "Discard this run's results and reload the case so it can be run again. Export what you want to keep first. The disturbances stay in the list.";
       primaryDisabled = resetRun.isPending;
     } else if (
       aborting ||
@@ -540,6 +543,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       size="md"
       disabled={allDisabled}
       onClick={onClickPrimary}
+      title={primaryTitle}
       data-testid={primaryTestId}
       aria-describedby={disabledReason ? 'run-button-disabled-reason-text' : undefined}
       className={cn('min-w-[120px]', className)}

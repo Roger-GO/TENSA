@@ -1878,6 +1878,11 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-mode-tds'));
     expect(screen.getByTestId('run-tds-button')).toHaveTextContent(/reset run/i);
+    // The button says what it throws away, since the run is gone afterwards.
+    expect(screen.getByTestId('run-tds-button')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/discard this run's results/i),
+    );
     await userEvent.click(screen.getByTestId('run-tds-button'));
 
     await waitFor(() => expect(reloadPosted).toBe(true));

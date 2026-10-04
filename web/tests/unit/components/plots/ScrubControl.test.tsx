@@ -491,6 +491,120 @@ describe('ScrubControl playback speed', () => {
   });
 });
 
+describe('ScrubControl status', () => {
+  beforeEach(() => {
+    useRunsStore.setState({ runs: {}, activeRunId: null });
+    usePlotStore.setState({ scrubByRun: {}, playingByRun: {}, playbackRate: 1 });
+  });
+  afterEach(() => cleanup());
+
+  const status = () => screen.getByTestId('scrub-control-status');
+  const playButton = () => screen.getByTestId('scrub-control-play');
+  const speed = () => screen.getByRole('combobox', { name: 'Playback speed' });
+
+  /** Seed a finished run with frames up to t = 10. */
+  function seedDoneRun() {
+    seedRun('r1', 10);
+    appendRows('r1', [0, 5, 10], { Bus_1_v: [1, 1, 1] });
+    useRunsStore.getState().markRunDone('r1', 10);
+  }
+
+  it('is a live region, so a change is announced', () => {
+    seedDoneRun();
+    render(<ScrubControl />);
+    expect(screen.getByRole('status')).toBe(status());
+  });
+
+  it('tells a finished run to be replayed with Play, and a streaming one that it is live', () => {
+    seedDoneRun();
+    const { unmount } = render(<ScrubControl />);
+    expect(status()).toHaveTextContent('Press Play to replay');
+    expect(playButton()).toHaveAttribute('title', 'Play the run from the start');
+    unmount();
+    seedRun('r1', 10);
+    appendRows('r1', [0, 1], { Bus_1_v: [1, 1] });
+    render(<ScrubControl />);
+    expect(status()).toHaveTextContent('Live');
+  });
+
+  it('says why Play is disabled before there is any data', () => {
+    seedRun('r1', 10);
+    render(<ScrubControl />);
+    expect(status()).toHaveTextContent('Waiting for data');
+    expect(playButton()).toBeDisabled();
+    expect(playButton()).toHaveAttribute('title', expect.stringMatching(/no data/i));
+  });
+
+  it('names the speed while playing, and shows a change of speed at once', async () => {
+    seedDoneRun();
+    const sched = installRafScheduler();
+    try {
+      render(<ScrubControl />);
+      fireEvent.click(playButton());
+      sched.advanceMs(0);
+      sched.advanceMs(100);
+      expect(status()).toHaveTextContent('Playing at 1×');
+      expect(playButton()).toHaveAccessibleName('Pause');
+      await userEvent.setup().selectOptions(speed(), '10');
+      // Still playing: the button is still Pause, and the status has the new speed.
+      expect(playButton()).toHaveAccessibleName('Pause');
+      expect(status()).toHaveTextContent('Playing at 10×');
+      await userEvent.setup().selectOptions(speed(), '0.5');
+      expect(playButton()).toHaveAccessibleName('Pause');
+      expect(status()).toHaveTextContent('Playing at 0.5×');
+    } finally {
+      sched.restore();
+    }
+  });
+
+  it('says Paused after a pause, and that the run ended when playback gets to the end', async () => {
+    seedDoneRun();
+    const sched = installRafScheduler();
+    try {
+      render(<ScrubControl />);
+      fireEvent.click(playButton());
+      sched.advanceMs(0);
+      sched.advanceMs(500);
+      fireEvent.click(playButton());
+      expect(status()).toHaveTextContent('Paused');
+      expect(playButton()).toHaveAccessibleName('Play');
+      expect(playButton()).toHaveAttribute('title', 'Continue playing from the cursor');
+      // Play on, at 10x, past the end of the run.
+      await userEvent.setup().selectOptions(speed(), '10');
+      fireEvent.click(playButton());
+      sched.advanceMs(0);
+      sched.advanceMs(2000);
+      expect(usePlotStore.getState().playingByRun['r1']).toBe(false);
+      expect(status()).toHaveTextContent('End of run');
+      // The button offers a replay rather than looking like a plain pause.
+      expect(playButton()).toHaveAccessibleName('Replay');
+      expect(playButton()).toHaveAttribute('title', 'Replay from the start');
+      // Replay starts over, at the speed that was chosen.
+      fireEvent.click(playButton());
+      expect(usePlotStore.getState().scrubByRun['r1']).toBe(0);
+      expect(status()).toHaveTextContent('Playing at 10×');
+    } finally {
+      sched.restore();
+    }
+  });
+
+  it('does not call the head of a run that is still streaming the end of the run', () => {
+    seedRun('r1', 10);
+    appendRows('r1', [0, 0.5, 1], { Bus_1_v: [1, 1, 1] });
+    const sched = installRafScheduler();
+    try {
+      render(<ScrubControl />);
+      fireEvent.click(playButton());
+      sched.advanceMs(0);
+      sched.advanceMs(2000);
+      expect(status()).toHaveTextContent('Caught up with the run');
+      expect(status()).not.toHaveTextContent('End of run');
+    } finally {
+      sched.restore();
+    }
+  });
+});
+
 describe('ScrubControl export', () => {
   beforeEach(() => {
     useRunsStore.setState({ runs: {}, activeRunId: null });

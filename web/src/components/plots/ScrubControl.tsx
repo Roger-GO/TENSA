@@ -20,8 +20,9 @@
  *  - Filled portion from t=0 to t=tCurrent shows the buffered range.
  *  - Vertical cursor line at scrubT (or at tCurrent in live mode).
  *  - Play/pause button to the left of the strip.
- *  - Current time / total time display to the right, then the speed
- *    selector.
+ *  - Current time / total time display to the right, with a one-line
+ *    status under it (Playing at 10×, Paused, End of run, ...), then the
+ *    speed selector.
  *
  * Interaction:
  *  - Click anywhere on the strip → seek (sets scrubT to that t).
@@ -31,8 +32,10 @@
  *  - Play → start a requestAnimationFrame loop that advances scrubT
  *    at the selected speed (``playbackRate`` in the plot store: 1× is
  *    1 sim-second per wall-clock second, the selector offers 0.25× to
- *    10×). Stops at tCurrent (the latest buffered frame). Pause → cancel
- *    the loop, leave scrubT where it is.
+ *    10×). Stops at tCurrent (the latest buffered frame), where the
+ *    button becomes Replay and the status says the run has ended, so a
+ *    fast speed that gets there in a second is not mistaken for a pause.
+ *    Pause → cancel the loop, leave scrubT where it is.
  *  - Changing the speed while playing takes effect on the next frame,
  *    from where the cursor is: the loop reads the rate each tick rather
  *    than restarting.
@@ -49,6 +52,8 @@
  *    cancels in-flight frames cleanly.
  *
  * Accessibility / pointer events:
+ *  - The status line is a polite live region, so a change of speed or
+ *    the end of playback is announced as well as shown.
  *  - Uses native pointer events (pointerdown/move/up + setPointerCapture).
  *    Pointer events normalise mouse + touch + pen on desktop browsers,
  *    matching the plan's "pointer events work on both mouse + touch"
@@ -320,6 +325,28 @@ export function ScrubControl({ runId, className }: ScrubControlProps) {
 
   const isLive = scrubT === null;
   const isEmptyRange = tMax === 0;
+  // Playback ran into the end of the buffer and stopped there. For a run that
+  // is still streaming that is only the latest frame, not the end of the run.
+  const runStreaming = run.state === 'starting' || run.state === 'streaming';
+  const atEnd = scrubT !== null && !playing && !isEmptyRange && scrubT >= tMax;
+
+  // What the transport is doing, in words. The play button flipping back from
+  // Pause is the only other sign that playback stopped, and a change of speed
+  // would otherwise show nowhere but in the selector.
+  let status: string;
+  if (playing) status = `Playing at ${playbackRate}×`;
+  else if (isEmptyRange) status = runStreaming ? 'Waiting for data' : 'No data';
+  else if (atEnd) status = runStreaming ? 'Caught up with the run' : 'End of run';
+  else if (isLive) status = runStreaming ? 'Live' : 'Press Play to replay';
+  else status = 'Paused';
+
+  const playLabel = playing ? 'Pause' : atEnd ? 'Replay' : 'Play';
+  let playTitle: string;
+  if (isEmptyRange) playTitle = 'Nothing to play yet: the run has no data';
+  else if (playing) playTitle = 'Pause playback';
+  else if (atEnd) playTitle = 'Replay from the start';
+  else if (isLive) playTitle = 'Play the run from the start';
+  else playTitle = 'Continue playing from the cursor';
 
   return (
     <div
@@ -336,19 +363,14 @@ export function ScrubControl({ runId, className }: ScrubControlProps) {
         size="icon"
         onClick={onPlayPause}
         disabled={isEmptyRange}
-        aria-label={playing ? 'Pause' : 'Play'}
+        aria-label={playLabel}
+        title={playTitle}
         data-testid="scrub-control-play"
       >
         {/* Inline glyph keeps the bundle free of an icon-set dep. */}
-        {playing ? (
-          <span aria-hidden="true" className="font-mono text-sm">
-            ||
-          </span>
-        ) : (
-          <span aria-hidden="true" className="font-mono text-sm">
-            ▶
-          </span>
-        )}
+        <span aria-hidden="true" className="font-mono text-sm">
+          {playing ? '||' : atEnd ? '↻' : '▶'}
+        </span>
       </Button>
       <div
         ref={stripRef}
@@ -384,17 +406,23 @@ export function ScrubControl({ runId, className }: ScrubControlProps) {
           />
         )}
       </div>
-      <div
-        data-testid="scrub-control-time"
-        className="text-muted-foreground min-w-[7.5rem] text-right font-mono text-xs tabular-nums"
-      >
-        {formatTime(cursorT)} / {formatTime(run.tf || tMax)}
+      <div className="text-muted-foreground flex min-w-[7.5rem] flex-col items-end leading-tight">
+        <div data-testid="scrub-control-time" className="font-mono text-xs tabular-nums">
+          {formatTime(cursorT)} / {formatTime(run.tf || tMax)}
+        </div>
+        <div
+          role="status"
+          data-testid="scrub-control-status"
+          className={cn('text-[11px] whitespace-nowrap', playing && 'text-foreground')}
+        >
+          {status}
+        </div>
       </div>
       <label className="text-muted-foreground flex items-center gap-1 text-xs">
         <span>Speed</span>
         <select
           aria-label="Playback speed"
-          title="Playback speed, in simulated seconds per second. 1× is real time."
+          title="Playback speed, in simulated seconds per second: 1× is real time, 10× plays a 10 s run in 1 s. Changing it while playing carries on from where the cursor is."
           data-testid="scrub-control-speed"
           value={playbackRate}
           onChange={(e) => setPlaybackRate(Number(e.target.value))}
