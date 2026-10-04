@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   MAX_JOURNAL_ENTRIES,
   compactJournal,
+  hasEditsNotInFile,
   hasUnsavedEdits,
   useEditJournalStore,
 } from '@/store/editJournal';
@@ -213,6 +214,86 @@ describe('unsaved work', () => {
 
     record(addBus(2));
     expect(hasUnsavedEdits()).toBe(true);
+  });
+});
+
+describe('a save over the open case file', () => {
+  it('drops the entries the file now holds, so a recovery does not apply them twice', () => {
+    record(addBus(1), { op: 'edit', model: 'Bus', idx: '1', params: { Vn: 230 } }, addBus(2));
+
+    useEditJournalStore.getState().markSavedInPlace();
+
+    expect(ops()).toEqual([]);
+    expect(hasUnsavedEdits()).toBe(false);
+    expect(hasEditsNotInFile()).toBe(false);
+  });
+
+  it('keeps what came after it, and the clone operations, which are not in the file', () => {
+    record(
+      addBus(1),
+      { op: 'clone-init' },
+      { op: 'clone-edit', model: 'EXST1', idx: '1', param: 'KA', value: 50 },
+    );
+    useEditJournalStore.getState().markSavedInPlace();
+    record(addBus(2));
+
+    expect(ops()).toEqual(['clone-init', 'clone-edit', 'add']);
+    expect(hasEditsNotInFile()).toBe(true);
+    expect(useEditJournalStore.getState().entries.at(-1)).toMatchObject({
+      params: { idx: 2 },
+    });
+  });
+
+  it('does not merge the first edit after it into one the file already holds', () => {
+    record({ op: 'edit', model: 'Bus', idx: '1', params: { Vn: 230 } });
+    useEditJournalStore.getState().markSavedInPlace();
+    record({ op: 'edit', model: 'Bus', idx: '1', params: { v0: 1.02 } });
+
+    expect(useEditJournalStore.getState().entries).toMatchObject([
+      { op: 'edit', params: { v0: 1.02 } },
+    ]);
+  });
+
+  it('counts work the journal could not record as saved, once it is in the file', () => {
+    useEditJournalStore.getState().markOpaque();
+    expect(hasEditsNotInFile()).toBe(true);
+
+    useEditJournalStore.getState().markSavedInPlace();
+
+    expect(hasEditsNotInFile()).toBe(false);
+    expect(hasUnsavedEdits()).toBe(false);
+  });
+});
+
+describe('edits not in the open file', () => {
+  it('are not settled by a save under another name, which settles the unsaved work', () => {
+    record(addBus(1));
+
+    useEditJournalStore.getState().markSaved();
+
+    expect(hasUnsavedEdits()).toBe(false);
+    expect(hasEditsNotInFile()).toBe(true);
+  });
+
+  it('are none for a journal that only holds bookkeeping, or after a reload', () => {
+    record({ op: 'clone-init' });
+    expect(hasEditsNotInFile()).toBe(false);
+
+    record(addBus(1), { op: 'reload' });
+    expect(hasEditsNotInFile()).toBe(false);
+  });
+
+  it('start over with the journal when another case is chosen', () => {
+    record(addBus(1));
+    useEditJournalStore.getState().markSavedInPlace();
+    record(addBus(2));
+
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('b.raw'), addfiles: [] },
+    });
+
+    expect(useEditJournalStore.getState().fileSavedRevision).toBe(0);
+    expect(hasEditsNotInFile()).toBe(false);
   });
 });
 

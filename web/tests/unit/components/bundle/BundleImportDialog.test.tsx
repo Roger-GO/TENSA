@@ -24,6 +24,8 @@ import type { ReactNode } from 'react';
 import { BundleImportButton, BundleImportDialog } from '@/components/bundle/BundleImportDialog';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
+import { useEditJournalStore } from '@/store/editJournal';
+import { saveInPlaceTarget } from '@/lib/saveInPlace';
 import { parseSessionId } from '@/api/types';
 import { startBeatClock } from '../../helpers/beatClock';
 
@@ -44,26 +46,26 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
-function makeCommittedResponse() {
+function makeCommittedResponse(caseFilename = 'ieee14.raw') {
   return jsonResponse(200, {
     status: 'committed',
     plan: {
       manifest: {
         andes_version: '2.0.0',
         tensa_version: '0.4.0',
-        case_filename: 'ieee14.raw',
+        case_filename: caseFilename,
         case_sha256: 'abc',
         disturbance_count: 0,
         exported_at: '2026-05-09T00:00:00+00:00',
-        files: ['case/ieee14.raw', 'manifest.json'],
+        files: [`case/${caseFilename}`, 'manifest.json'],
       },
-      case_files: ['ieee14.raw'],
+      case_files: [caseFilename],
       conflicts: [],
       blocked: false,
       has_conflicts: false,
     },
     warnings: [],
-    case_filename: 'ieee14.raw',
+    case_filename: caseFilename,
     addfile_filenames: [],
     disturbances_replayed: 0,
   });
@@ -131,11 +133,13 @@ beforeEach(() => {
     topology: null,
     layoutSidecar: null,
   });
+  useEditJournalStore.getState().reset();
 });
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
   cleanup();
+  useEditJournalStore.getState().reset();
 });
 
 describe('<BundleImportButton />', () => {
@@ -222,6 +226,29 @@ describe('<BundleImportDialog /> — happy path', () => {
     );
     // Mutation hook mirrors the case selection into the case slice.
     await waitFor(() => expect(useCaseStore.getState().selection).not.toBeNull());
+  });
+});
+
+describe('<BundleImportDialog /> — what the import replaced', () => {
+  it('leaves Save off for the bundle case it chose, which is not that file with the edits', async () => {
+    const user = userEvent.setup();
+    fetchSpy.mockResolvedValue(makeCommittedResponse('ieee14.xlsx'));
+    render(withQueryClient(<BundleImportButton />));
+    await user.click(screen.getByTestId('bundle-import-button'));
+    const input = (await screen.findByTestId('bundle-import-file-input')) as HTMLInputElement;
+    await user.upload(input, new File([new Uint8Array([0x50, 0x4b])], 'bundle.zip'));
+    await user.click(screen.getByTestId('bundle-import-validate'));
+
+    await waitFor(() => expect(screen.getByTestId('bundle-import-success')).toBeInTheDocument());
+
+    // The import marks the replacement, choosing the bundle's case starts a fresh
+    // journal, and the mark has to survive that for the state Save reads.
+    const selection = useCaseStore.getState().selection;
+    expect(selection?.primaryPath).toBe('ieee14.xlsx');
+    const { replaced } = useEditJournalStore.getState();
+    expect(replaced).toBe(true);
+    const target = saveInPlaceTarget(selection, { cloneInitialized: false, replaced });
+    expect(target.ok).toBe(false);
   });
 });
 

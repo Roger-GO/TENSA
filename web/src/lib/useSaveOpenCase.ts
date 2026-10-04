@@ -6,18 +6,25 @@
  * Save system as (a dialog, a new file in a chosen format) and Save (no dialog, the
  * open file) are different commands that end the same way: the file is written, the
  * edit journal counts the edits as saved, and the positions the user dragged nodes to
- * are written as `<file>.layout.json`.
+ * are written as `<file>.layout.json`. A write over the open file also makes it the
+ * base the edit journal and the server rebuild from (see `useSaveCase`).
  */
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 
 import { ProblemDetailsError } from '@/api/client';
-import { useCurrentTopology, usePutSidecar, useSaveCase } from '@/api/queries';
+import {
+  SAVE_CASE_MUTATION_KEY,
+  useCurrentTopology,
+  usePutSidecar,
+  useSaveCase,
+} from '@/api/queries';
 import { parseWorkspacePath } from '@/api/types';
 import { sidecarFromDragOverrides } from '@/components/sld/sidecar';
 import { saveInPlaceTarget, type SaveInPlaceTarget } from '@/lib/saveInPlace';
 import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
-import { hasUnsavedEdits, useEditJournalStore } from '@/store/editJournal';
+import { hasEditsNotInFile, useEditJournalStore } from '@/store/editJournal';
 import { useSessionStore } from '@/store/session';
 
 /**
@@ -53,8 +60,8 @@ export interface SaveOpenCase {
   target: SaveInPlaceTarget;
   /**
    * Write the system over the open case file. Does nothing when `target` is not ok,
-   * while a save is already running, or (with a toast saying so) when there is
-   * nothing newer than the file.
+   * while a save is already running (started from any menu, palette or key), or (with
+   * a toast saying so) when the file already holds every edit.
    */
   save: () => void;
 }
@@ -69,7 +76,8 @@ export function useSaveOpenCase(): SaveOpenCase {
   const selection = useCaseStore((s) => s.selection);
   const cloneInitialized = useCaseStore((s) => s.cloneInitialized);
   const replaced = useEditJournalStore((s) => s.replaced);
-  const { mutateAsync: saveCase, isPending } = useSaveCase();
+  const queryClient = useQueryClient();
+  const { mutateAsync: saveCase } = useSaveCase();
   const writeSidecar = useWriteLayoutSidecar();
 
   const target = useMemo(
@@ -78,8 +86,13 @@ export function useSaveOpenCase(): SaveOpenCase {
   );
 
   const save = useCallback(() => {
-    if (!target.ok || sessionId === null || isPending) return;
-    if (!hasUnsavedEdits()) {
+    if (!target.ok || sessionId === null) return;
+    // The menus, the palette and the key handler each call this hook, and each has a
+    // mutation of its own, so what is running is asked of the query client, at the
+    // moment of the press (a render may not have caught up with a quick second one).
+    if (queryClient.isMutating({ mutationKey: SAVE_CASE_MUTATION_KEY }) > 0) return;
+    // A save under another name does not count: the open file is what Save writes.
+    if (!hasEditsNotInFile()) {
       toast.info(
         `Nothing to save: ${target.filename} has no changes since it was opened or saved.`,
       );
@@ -100,7 +113,7 @@ export function useSaveOpenCase(): SaveOpenCase {
         toast.error(`Could not save ${target.filename}`, { description: describeError(err) });
       },
     );
-  }, [target, sessionId, isPending, saveCase, writeSidecar]);
+  }, [target, sessionId, queryClient, saveCase, writeSidecar]);
 
   return { target, save };
 }

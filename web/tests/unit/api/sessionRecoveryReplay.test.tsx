@@ -10,9 +10,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { makeQueryClient, __resetRecoveryDebounceForTests, useTopology } from '@/api/queries';
+import {
+  makeQueryClient,
+  __resetRecoveryDebounceForTests,
+  useSaveCase,
+  useTopology,
+} from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import { useSessionStore } from '@/store/session';
@@ -239,6 +244,70 @@ describe('useSessionRecovery rebuilds edits from the journal', () => {
     expect(infoSpy).not.toHaveBeenCalled();
     expect(useEditJournalStore.getState().entries).toHaveLength(2);
     expect(hasUnsavedEdits()).toBe(true);
+  });
+
+  it('replays only what came after a save over the case file, which already holds the rest', async () => {
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('ieee14.xlsx'), addfiles: [] },
+    });
+    record({ op: 'add', model: 'Bus', params: { idx: 15, Vn: 110 } });
+    // Save, through the mutation the Save command and Save system as both use.
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const saver = renderHook(() => useSaveCase(), { wrapper: Wrapper });
+    await act(async () => {
+      await saver.result.current.mutateAsync({
+        sessionId: parseSessionId('sess-old'),
+        body: { filename: 'ieee14.xlsx', format: 'xlsx', overwrite: true },
+      });
+    });
+    saver.unmount();
+    record({ op: 'add', model: 'Bus', params: { idx: 16, Vn: 110 } });
+    calls.length = 0;
+
+    recover();
+    await recovered();
+
+    expect(calls).toEqual([
+      'POST /api/sessions',
+      'POST /api/sessions/sess-new/case',
+      'POST /api/sessions/sess-new/elements',
+    ]);
+    expect(bodies['POST /api/sessions/sess-new/elements']).toEqual({
+      model: 'Bus',
+      params: { idx: 16, Vn: 110 },
+    });
+    expect(successSpy).toHaveBeenCalledWith(
+      'Edits restored',
+      expect.objectContaining({ description: expect.stringContaining('1 change ') }),
+    );
+  });
+
+  it('replays everything after a save under another name, which leaves the open file as it was', async () => {
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('ieee14.xlsx'), addfiles: [] },
+    });
+    record({ op: 'add', model: 'Bus', params: { idx: 15, Vn: 110 } });
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const saver = renderHook(() => useSaveCase(), { wrapper: Wrapper });
+    await act(async () => {
+      await saver.result.current.mutateAsync({
+        sessionId: parseSessionId('sess-old'),
+        body: { filename: 'backup.xlsx', format: 'xlsx', overwrite: false },
+      });
+    });
+    saver.unmount();
+    calls.length = 0;
+
+    recover();
+    await recovered();
+
+    expect(calls.filter((c) => c.endsWith('/elements'))).toHaveLength(1);
   });
 
   it('brings the clone-on-write edits back and sets the stack depths from the replay', async () => {

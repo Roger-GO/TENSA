@@ -987,14 +987,23 @@ export interface SaveCaseVars {
 }
 
 /**
+ * The key of every `useSaveCase` mutation, so a caller can ask the query client
+ * whether any instance of the hook has a save running (`isMutating`).
+ */
+export const SAVE_CASE_MUTATION_KEY = ['save-case'] as const;
+
+/**
  * `POST /sessions/{id}/save`. Writes the current System to the workspace
  * as xlsx or json. ANDES 2.0 has no PSS/E .raw writer — that format is
  * read-only on this substrate. On success the workspace lister query is
- * invalidated so the new file shows up immediately in the picker.
+ * invalidated so the new file shows up immediately in the picker. A write over
+ * the open case's own file also moves the edit journal's base to that file, as
+ * the substrate moves its own (`Wrapper.save_case`).
  */
 export function useSaveCase(): UseMutationResult<SaveCaseResponse, Error, SaveCaseVars> {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: SAVE_CASE_MUTATION_KEY,
     mutationFn: async ({ sessionId, body }: SaveCaseVars) => {
       return await andesClient.post<SaveCaseResponse>(
         `/sessions/${encodeURIComponent(sessionId)}/save`,
@@ -1002,8 +1011,13 @@ export function useSaveCase(): UseMutationResult<SaveCaseResponse, Error, SaveCa
       );
     },
     onMutate: () => ({ jobId: registerJob('case-save') }),
-    onSuccess: (data, _vars, ctx) => {
-      useEditJournalStore.getState().markSaved();
+    onSuccess: (data, { body }, ctx) => {
+      const journal = useEditJournalStore.getState();
+      if (body.filename === useCaseStore.getState().selection?.primaryPath) {
+        journal.markSavedInPlace();
+      } else {
+        journal.markSaved();
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.workspaceFiles });
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
     },

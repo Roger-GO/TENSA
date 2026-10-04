@@ -29,7 +29,10 @@
  *
  * The journal also answers "is there unsaved work": an entry newer than the last
  * save (``markSaved``, called when the system or the clone is written to the
- * workspace) counts, which the unload guard reads.
+ * workspace) counts, which the unload guard reads. Save asks a narrower question,
+ * whether the open case's own file lacks an edit, which a write to some other file
+ * does not settle (``fileSavedRevision``). A write over the open file also makes
+ * that file the base the substrate rebuilds from (``markSavedInPlace``).
  *
  * Lifecycle: in memory only, like the session it belongs to. It is cleared when the
  * case selection changes (a new case, a discarded one). A session recovery keeps
@@ -133,6 +136,12 @@ export interface EditJournalState {
   /** ``revision`` when the system or clone was last written to the workspace. */
   savedRevision: number;
   /**
+   * ``revision`` when the system was last written over the open case's own file, or
+   * 0 for the file as it was opened. A save under another name moves
+   * ``savedRevision`` and not this.
+   */
+  fileSavedRevision: number;
+  /**
    * False once something the journal cannot replay has happened (see the file
    * comment) or it outgrew ``MAX_JOURNAL_ENTRIES``. Recovery then reloads the file
    * instead. ``entries`` stops growing; ``opaqueRevision`` keeps the "unsaved work"
@@ -161,8 +170,16 @@ export interface EditJournalState {
    * recovery cannot rebuild what the new system became.
    */
   markReplaced: () => void;
-  /** The system (or the clone) was just written to the workspace. */
+  /** The system (or the clone) was just written to the workspace, as another file. */
   markSaved: () => void;
+  /**
+   * The system was just written over the open case's own file. The file holds every
+   * edit up to now, so the substrate (which empties its replay buffer for the same
+   * reason) and a session recovery start from it: the entries are dropped as a
+   * file-backed reload drops them, and replaying them onto the file would apply each
+   * twice. A clone's operations stay, since its files and stacks are not in the file.
+   */
+  markSavedInPlace: () => void;
   /** Keep only the entries recorded up to and including revision ``rev``. */
   truncateAfter: (rev: number) => void;
   reset: () => void;
@@ -172,6 +189,7 @@ const INITIAL = {
   entries: [] as JournalEntry[],
   revision: 0,
   savedRevision: 0,
+  fileSavedRevision: 0,
   replayable: true,
   opaqueRevision: 0,
   replaced: false,
@@ -227,6 +245,16 @@ export const useEditJournalStore = create<EditJournalState>((set, get) => ({
     });
   },
   markSaved: () => set((s) => ({ savedRevision: s.revision })),
+  markSavedInPlace: () =>
+    set((s) => {
+      const rev = s.revision + 1;
+      return {
+        entries: s.entries.filter((e) => CLONE_OPS.has(e.op)),
+        revision: rev,
+        savedRevision: rev,
+        fileSavedRevision: rev,
+      };
+    }),
   truncateAfter: (rev) => set((s) => ({ entries: s.entries.filter((e) => e.rev <= rev) })),
   reset: () => set({ ...INITIAL, entries: [] }),
 }));
@@ -237,10 +265,21 @@ export const useEditJournalStore = create<EditJournalState>((set, get) => ({
  * journal could not record.
  */
 export function hasUnsavedEdits(): boolean {
-  const { entries, savedRevision, opaqueRevision } = useEditJournalStore.getState();
-  return (
-    opaqueRevision > savedRevision || entries.some((e) => isWorkOp(e) && e.rev > savedRevision)
-  );
+  return hasWorkAfter(useEditJournalStore.getState().savedRevision);
+}
+
+/**
+ * True when the open case's own file lacks work the user has done: an edit newer than
+ * the last write over that file, or work the journal could not record. A save under
+ * another name does not count, because the open file is not what it wrote.
+ */
+export function hasEditsNotInFile(): boolean {
+  return hasWorkAfter(useEditJournalStore.getState().fileSavedRevision);
+}
+
+function hasWorkAfter(revision: number): boolean {
+  const { entries, opaqueRevision } = useEditJournalStore.getState();
+  return opaqueRevision > revision || entries.some((e) => isWorkOp(e) && e.rev > revision);
 }
 
 // A different case (or none) starts a fresh journal. Wired here, not in the store

@@ -297,7 +297,7 @@ describe('Ctrl/Cmd+S on a case that can be written back', () => {
 
   it('says there is nothing to save when the file has no changes, and writes nothing', async () => {
     openEditedXlsx();
-    useEditJournalStore.getState().markSaved();
+    useEditJournalStore.getState().markSavedInPlace();
     const info = vi.spyOn(toast, 'info').mockReturnValue('id');
     render(withProviders(<GlobalShortcuts />));
     press(META_S);

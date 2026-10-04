@@ -17,7 +17,7 @@ import type { ProblemDetails, TopologySummary } from '@/api/types';
 import { toast } from '@/lib/toast';
 import { useSaveOpenCase } from '@/lib/useSaveOpenCase';
 import { useCaseStore } from '@/store/case';
-import { hasUnsavedEdits, useEditJournalStore } from '@/store/editJournal';
+import { hasEditsNotInFile, hasUnsavedEdits, useEditJournalStore } from '@/store/editJournal';
 import { useSessionStore } from '@/store/session';
 
 const postSpy = vi.fn();
@@ -125,6 +125,23 @@ describe('useSaveOpenCase', () => {
     expect(hasUnsavedEdits()).toBe(false);
   });
 
+  it('makes the file the base of the journal, which a recovery would otherwise replay on top of it', async () => {
+    editSomething();
+    editSomething();
+    const { result } = renderHook(() => useSaveOpenCase(), { wrapper });
+
+    act(() => result.current.save());
+
+    await waitFor(() => expect(success).toHaveBeenCalled());
+    expect(useEditJournalStore.getState().entries).toEqual([]);
+    // What is done next is the journal's again, and writes the file again.
+    editSomething();
+    expect(useEditJournalStore.getState().entries).toHaveLength(1);
+    expect(hasEditsNotInFile()).toBe(true);
+    act(() => result.current.save());
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(2));
+  });
+
   it('writes the positions the user dragged nodes to beside the file', async () => {
     editSomething();
     useCaseStore.setState({ dragOverrides: { '3': { x: 10, y: 20 } } });
@@ -163,6 +180,20 @@ describe('useSaveOpenCase', () => {
       format: 'json',
       overwrite: true,
     });
+  });
+
+  it('still writes the open file when the edits were saved under another name', async () => {
+    editSomething();
+    // Save system as, say: the edits are saved, but not in the file Save writes.
+    useEditJournalStore.getState().markSaved();
+    expect(hasUnsavedEdits()).toBe(false);
+    const { result } = renderHook(() => useSaveOpenCase(), { wrapper });
+
+    act(() => result.current.save());
+
+    await waitFor(() => expect(success).toHaveBeenCalledWith('Saved ieee14_full.xlsx'));
+    expect(info).not.toHaveBeenCalled();
+    expect(postSpy).toHaveBeenCalledTimes(1);
   });
 
   it('does not rewrite a file with nothing newer than it, and says so', () => {
@@ -241,6 +272,24 @@ describe('useSaveOpenCase', () => {
 
     await act(async () => finish({ filename: 'ieee14_full.xlsx', bytes_written: 9 }));
     await waitFor(() => expect(success).toHaveBeenCalledTimes(1));
+  });
+
+  it('sends one request when the press and a second surface come while one is running', async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    nextPost = () => new Promise((resolve) => (finish = resolve));
+    editSomething();
+    // The key handler, the palette and each menu call the hook on their own.
+    const { result } = renderHook(() => ({ key: useSaveOpenCase(), menu: useSaveOpenCase() }), {
+      wrapper,
+    });
+
+    act(() => result.current.key.save());
+    act(() => result.current.menu.save());
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1));
+
+    await act(async () => finish({ filename: 'ieee14_full.xlsx', bytes_written: 9 }));
+    await waitFor(() => expect(success).toHaveBeenCalledTimes(1));
+    expect(postSpy).toHaveBeenCalledTimes(1);
   });
 
   it('still tells the user when the menu, palette or key that asked is gone by the time it ends', async () => {

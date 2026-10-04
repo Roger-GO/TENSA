@@ -19,6 +19,10 @@
  * Anywhere else, Save asks for a name and a format instead, as the first save of a
  * new document does. The `reason` says which of the above applies, in a sentence the
  * Save system as dialog can show.
+ *
+ * Disturbances a run committed to the system are not checked here: the server refuses
+ * to write them over the case file (they would come back as the case's own events), and
+ * the answer reaches the user as the toast of a failed save.
  */
 import type { CaseSelection } from '@/store/case';
 

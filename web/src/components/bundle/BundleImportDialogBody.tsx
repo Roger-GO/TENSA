@@ -22,6 +22,7 @@ import { useImportBundle } from '@/api/queries';
 import type { BundleImportResponse } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
+import { useEditJournalStore } from '@/store/editJournal';
 import { ProblemDetailsError } from '@/api/client';
 import { parseWorkspacePath } from '@/api/types';
 import { BundleConflictResolver } from './BundleConflictResolver';
@@ -80,6 +81,10 @@ export function BundleImportDialogBody({ onClose }: BundleImportDialogBodyProps)
       const primary = parseWorkspacePath(response.case_filename ?? '');
       const addfiles = response.addfile_filenames.map((f) => parseWorkspacePath(f));
       setCase({ primaryPath: primary, addfiles });
+      // Choosing a case starts a fresh edit journal, which forgets what the import's
+      // own success handler noted: the system is the bundle's, not that file's, so
+      // Save must not write it over the file. Say so again, after the selection.
+      useEditJournalStore.getState().markReplaced();
       setSuccessMessage(
         `Imported ${response.case_filename}. ${response.disturbances_replayed} disturbance${
           response.disturbances_replayed === 1 ? '' : 's'
