@@ -1225,8 +1225,9 @@ def _handle_run_tds(
                 ) from exc
         tds_config_overrides = coerced
 
-    # QNDF on a System that already ran trapezoidally, or an unknown override
-    # key: the same refusals ``Wrapper.run_tds`` raises, asked for up front.
+    # QNDF on a System that has already stepped, an unknown override key, or an
+    # override value that breaks its rule: the same refusals ``Wrapper.run_tds``
+    # raises, asked for up front.
     wrapper.check_tds_request(integrator_raw, tds_config_overrides)
 
     abort_flag = threading.Event()

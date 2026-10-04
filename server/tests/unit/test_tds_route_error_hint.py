@@ -32,7 +32,7 @@ def _rest_message(detail: str) -> str:
     "detail",
     [
         "QNDF cannot replace the trapezoidal integrator of a System that has "
-        "already run a time-domain simulation",
+        "already taken time-domain steps, in a run or in a snapshot taken after one",
         "power flow did not converge; TDS cannot begin",
     ],
 )

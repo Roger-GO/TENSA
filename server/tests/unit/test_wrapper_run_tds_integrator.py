@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 pytest.importorskip("andes")
@@ -266,6 +267,60 @@ def test_check_tds_request_refuses_qndf_on_a_system_that_ran_trapezoidally(
     with pytest.raises(SetupFailedError, match="cannot replace the trapezoidal integrator"):
         w.check_tds_request("qndf")
     assert _tds_config(w) == before
+
+
+def _as_after_init(w: Wrapper, *, t: float, kcount: int, n: int) -> None:
+    """Fake what ``TDS.init()`` leaves (``t`` and ``kcount`` as the run loop
+    keeps them, ``n`` differential equations) on a System with the Trapezoid
+    integrator."""
+    ss = w._require_loaded()  # noqa: SLF001
+    ss.TDS.initialized = True
+    ss.dae.t = np.array(t)
+    ss.dae.kcount = kcount
+    ss.dae.n = n
+
+
+def test_check_tds_request_accepts_qndf_on_a_system_that_has_not_stepped(
+    loaded_wrapper: Wrapper,
+) -> None:
+    """``init()`` ran (an eigenvalue analysis does that) but nothing stepped:
+    ``run_tds`` builds the QNDF history itself, so nothing is refused."""
+    _as_after_init(loaded_wrapper, t=0.0, kcount=0, n=3)
+    loaded_wrapper.check_tds_request("qndf")
+
+
+@pytest.mark.parametrize(
+    ("t", "kcount"),
+    [
+        (0.0, 4),  # steps counted
+        (0.25, 0),  # a run began and moved time off zero
+        (-1.0, 0),  # the power flow's time: ``init()`` did not leave this state
+    ],
+)
+def test_check_tds_request_refuses_qndf_on_a_system_that_has_stepped(
+    loaded_wrapper: Wrapper, t: float, kcount: int
+) -> None:
+    _as_after_init(loaded_wrapper, t=t, kcount=kcount, n=3)
+    with pytest.raises(SetupFailedError) as refused:
+        loaded_wrapper.check_tds_request("qndf")
+    message = str(refused.value)
+    assert "cannot replace the trapezoidal integrator" in message
+    assert "taken time-domain steps, in a run or in a snapshot taken after one" in message
+
+
+def test_check_tds_request_refuses_qndf_without_differential_equations(
+    loaded_wrapper: Wrapper,
+) -> None:
+    _as_after_init(loaded_wrapper, t=0.0, kcount=0, n=0)
+    with pytest.raises(SetupFailedError, match="at least one differential equation"):
+        loaded_wrapper.check_tds_request("qndf")
+
+
+def test_check_tds_request_lets_trapezoidal_follow_an_eigenvalue_analysis(
+    loaded_wrapper: Wrapper,
+) -> None:
+    _as_after_init(loaded_wrapper, t=0.0, kcount=0, n=3)
+    loaded_wrapper.check_tds_request("trapezoidal")
 
 
 def test_check_tds_request_refuses_an_unknown_override_key(

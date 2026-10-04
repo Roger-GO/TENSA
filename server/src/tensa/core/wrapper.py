@@ -1612,17 +1612,24 @@ class Wrapper:
 
         # ANDES builds its integrator object once, in ``TDS.init()``, and a
         # System that has already run keeps it. QNDF also needs the history
-        # cache ``init()`` builds, so it cannot be swapped in afterwards: refuse
-        # rather than run with the trapezoidal object under a QNDF request.
-        if (
-            integrator == "qndf"
-            and bool(getattr(ss.TDS, "initialized", False))
-            and not bool(getattr(ss.TDS.method, "requires_variable_step", False))
-        ):
-            raise SetupFailedError(
-                "QNDF cannot replace the trapezoidal integrator of a System that "
-                "has already run a time-domain simulation"
-            )
+        # cache ``init()`` builds. Where nothing has stepped yet (an eigenvalue
+        # analysis calls ``init()`` and stops there) ``run_tds`` builds the cache
+        # itself. Past the first step it cannot be swapped in, so refuse rather
+        # than run with the trapezoidal object under a QNDF request.
+        if integrator == "qndf" and _qndf_needs_init(ss):
+            if not _tds_unstepped(ss):
+                raise SetupFailedError(
+                    "QNDF cannot replace the trapezoidal integrator of a System that "
+                    "has already taken time-domain steps, in a run or in a snapshot "
+                    "taken after one"
+                )
+            if not int(ss.dae.n):
+                # What ``TDS.init()`` raises for QNDF on a System without
+                # differential equations; asked here so the run is refused up front.
+                raise SetupFailedError(
+                    "QNDF requires at least one differential equation (dae.n > 0); "
+                    "load the dynamic data, or use the trapezoidal integrator"
+                )
 
         for key in tds_config_overrides or {}:
             if not hasattr(ss.TDS.config, _TDS_OVERRIDE_ALIASES.get(key, key)):
@@ -1666,10 +1673,12 @@ class Wrapper:
 
         ``fixt`` is set on every run (1 for trapezoidal, 0 for QNDF), and a
         trapezoidal run replaces a QNDF integrator left by an earlier run on
-        the same System. The reverse switch is not possible once a run has
-        happened, because ANDES builds the QNDF history in ``TDS.init()``: a
-        QNDF request on a System that already ran trapezoidally raises
-        ``SetupFailedError``, and the caller must reload the case first.
+        the same System. The reverse switch is possible only until the first
+        step: ANDES builds the QNDF history in ``TDS.init()``, and an eigenvalue
+        analysis runs ``init()`` without stepping, so a QNDF request after one
+        builds the history itself. Once the System has taken steps (a run, or a
+        snapshot restored from one) a QNDF request raises ``SetupFailedError``,
+        and the caller must reload the case first.
 
         ``tds_config_overrides`` (optional) is a dict of TDS config
         field names → values. Two key flavours are accepted:
@@ -1769,6 +1778,20 @@ class Wrapper:
         if tds_config_overrides:
             for key, value in tds_config_overrides.items():
                 setattr(ss.TDS.config, _TDS_OVERRIDE_ALIASES.get(key, key), value)
+
+        # QNDF on a System whose ``TDS.init()`` already ran, with the trapezoidal
+        # integrator (an eigenvalue analysis does that): ``init()`` is skipped, so
+        # build what it would have built for QNDF. Last, because the history takes
+        # its tolerances from the config at construction, overrides included.
+        if integrator == "qndf" and _qndf_needs_init(ss):
+            from andes.routines.qndf import QNDFCache
+
+            ss.TDS.set_method("qndf")
+            ss.TDS.qndf_cache = QNDFCache(
+                n=ss.dae.n,
+                abstol=ss.TDS.config.abstol,
+                reltol=ss.TDS.config.reltol,
+            )
 
         callpert_count = 0
 
@@ -4830,6 +4853,28 @@ _TDS_OVERRIDE_ALIASES: dict[str, str] = {
     "atol": "abstol",
     "max_step": "dtmax",
 }
+
+
+def _qndf_needs_init(ss: System) -> bool:
+    """Whether ``TDS.init()`` has already run with a fixed-step integrator.
+
+    ANDES builds the integrator object, and for QNDF its history, in
+    ``TDS.init()`` and skips it from then on, so a QNDF run on such a System has
+    to build the history itself (:func:`_tds_unstepped`) or cannot run.
+    """
+    return bool(getattr(ss.TDS, "initialized", False)) and not bool(
+        getattr(ss.TDS.method, "requires_variable_step", False)
+    )
+
+
+def _tds_unstepped(ss: System) -> bool:
+    """Whether the DAE is where ``TDS.init()`` left it: at time 0, no step taken.
+
+    An eigenvalue analysis leaves a System like this. ``dae.t`` moves off 0 when a
+    run starts and ``dae.kcount`` counts the steps it takes, so a System that ran
+    at all, or that was restored from a snapshot taken after a run, is not.
+    """
+    return float(ss.dae.t) == 0.0 and int(ss.dae.kcount) == 0
 
 
 def tds_fixed_step(
