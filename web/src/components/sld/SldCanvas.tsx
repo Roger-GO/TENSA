@@ -33,6 +33,7 @@ import { SldNodeSearch } from './SldNodeSearch';
 import { useGetSidecar, usePutSidecar, useCurrentTopology, useConnectivity } from '@/api/queries';
 import type { TopologySummary, SidecarLayout } from '@/api/types';
 import { ExportMenu } from '@/components/export/ExportMenu';
+import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { elementToPng } from '@/components/export/exportToPng';
 
 import { COMPONENT_DND_MIME } from '@/components/shell/ComponentLibrary';
@@ -708,15 +709,8 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
     return await elementToPng(el, { backgroundColor: '#ffffff' });
   }, []);
 
-  // Derive a stable case-name slug from the primary path, mirroring
-  // the helper used in the plot panels. Blank sessions fall back to
-  // "case" so the file still has a sensible name.
-  const caseName = (() => {
-    if (!primaryPath) return 'case';
-    const base = primaryPath.split(/[\\/]/).pop() ?? primaryPath;
-    const dot = base.lastIndexOf('.');
-    return dot > 0 ? base.slice(0, dot) : base;
-  })();
+  // Blank sessions fall back to "case" so the file still has a sensible name.
+  const caseName = useExportCaseName();
 
   if (coords === null) {
     return <SldLayoutSkeleton />;

@@ -17,9 +17,9 @@ import { alignRuns, resampleOnto } from './multiRunAlign';
 import type { AlignedRuns } from './multiRunAlign';
 import { resolveOverlayRuns } from './overlayRuns';
 import { ExportMenu } from '@/components/export/ExportMenu';
+import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { timeSeriesToCsv } from '@/components/export/exportToCsv';
 import { elementToPng } from '@/components/export/exportToPng';
-import { useCaseStore } from '@/store/case';
 import { runIdToStrokeStyle } from '@/lib/runIdToColor';
 import { useTheme } from '@/lib/useTheme';
 import type { ResolvedTheme } from '@/store/theme';
@@ -422,7 +422,7 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
   const scrubT = usePlotStore((s) =>
     effectiveRunId ? (s.scrubByRun[effectiveRunId] ?? null) : null,
   );
-  const primaryPath = useCaseStore((s) => s.selection?.primaryPath ?? null);
+  const caseName = useExportCaseName();
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Group the selected series by VarGroup using the column-name parser.
@@ -504,8 +504,6 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
     if (!el) return null;
     return await elementToPng(el);
   }, []);
-
-  const caseName = primaryPath ? deriveCaseName(primaryPath) : 'case';
 
   // Build per-group chart props. The ``options`` made here are a new
   // object on every pass; ``GroupChart`` hands <UPlot /> the same one
@@ -600,14 +598,4 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
       ))}
     </div>
   );
-}
-
-/**
- * Derive a short case name from a workspace path. Strips directory
- * prefix + extension. `ieee14.raw` → `ieee14`.
- */
-function deriveCaseName(path: string): string {
-  const base = path.split(/[\\/]/).pop() ?? path;
-  const dot = base.lastIndexOf('.');
-  return dot > 0 ? base.slice(0, dot) : base;
 }
