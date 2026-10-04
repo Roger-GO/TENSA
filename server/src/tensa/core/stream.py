@@ -51,19 +51,21 @@ Two streaming modes:
   declared honestly via ``algorithm: "boxcar-mean-best-effort"`` in the
   stream-start metadata.
 
-The ``StreamAggregator`` owns the buffering decision; the worker just
-calls ``push(t, values)`` per callpert step and ``flush()`` at run end,
-and emits whatever rows the aggregator returns as one Arrow batch.
+The ``StreamCollector`` reads the selected groups' values off the System at
+each callpert step: it resolves where every value lives once, when the run
+starts, and reads them with numpy after that. The ``StreamAggregator`` owns
+the buffering decision; the worker just calls ``push(t, collector.collect())``
+per callpert step and ``flush()`` at run end, and emits whatever rows the
+aggregator returns as one Arrow batch.
 """
 
 from __future__ import annotations
 
 import logging
-import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 import pyarrow as pa
@@ -94,6 +96,10 @@ VAR_GROUPS: tuple[VarGroup, ...] = (
 # (omega) is always plottable without re-running. The UI may default to a
 # narrower display selection, but the wire carries both groups.
 DEFAULT_VARS: tuple[VarGroup, ...] = ("bus_v", "gen_state")
+
+# One row of a frame: the step's time and its values in column order. The
+# collector produces arrays; plain lists work too (the tests build them).
+StreamRow = tuple[float, Sequence[float] | NDArray[np.float64]]
 
 log = logging.getLogger("tensa.stream")
 
@@ -284,17 +290,18 @@ def _frame_schema(n_columns: int) -> pa.Schema:
 
 def encode_batch(
     schema: pa.Schema,
-    rows: Iterable[tuple[float, list[float]]],
+    rows: Iterable[StreamRow],
 ) -> bytes:
     """Encode one or more rows into a frame: a self-contained Arrow IPC
     stream chunk (see the module docstring for the layout).
 
     ``schema`` is the column schema from :func:`make_combined_schema`; it
     says how many values a row carries. ``rows`` is an iterable of
-    ``(t, values)`` tuples, each value list matching the schema's variable
-    columns in order, and a row of any other length raises ``ValueError``.
-    ``t`` and each value may arrive as numpy scalars or 0-d ndarrays
-    (ANDES's ``dae.t`` is a numpy scalar); numpy coerces them to float64.
+    ``(t, values)`` tuples, each ``values`` a list or array matching the
+    schema's variable columns in order, and a row of any other length raises
+    ``ValueError``. ``t`` and each value may arrive as numpy scalars or 0-d
+    ndarrays (ANDES's ``dae.t`` is a numpy scalar); numpy coerces them to
+    float64.
     """
     rows_list = list(rows)
     if not rows_list:
@@ -343,37 +350,6 @@ def decode_batch(payload: bytes) -> tuple[NDArray[np.float64], NDArray[np.float6
 # ---- ANDES wiring -----------------------------------------------------------
 
 
-def collect_bus_voltages(system: System) -> list[float]:
-    """Read the current bus voltage magnitude + angle off the System's Bus
-    model, interleaved ``[v_0, a_0, v_1, a_1, ...]`` in bus idx order.
-
-    Magnitudes come from ``Bus.v.v`` (pu); angles from ``Bus.a.v`` (rad).
-    The interleave matches :func:`_bus_voltage_columns`'s ``Bus_<idx>_v``
-    then ``Bus_<idx>_a`` layout. If the angle algebraic variable is
-    missing (an unexpected ANDES API change), angles emit as ``nan`` so
-    the run never crashes over a single bad read.
-    """
-    mags = [float(v) for v in system.Bus.v.v]
-    a_var = getattr(system.Bus, "a", None)
-    a_values = getattr(a_var, "v", None) if a_var is not None else None
-    if a_values is None:
-        log.warning("Bus.a.v missing; emitting NaN angle columns")
-        angles = [float("nan")] * len(mags)
-    else:
-        angles = [float(a) for a in a_values]
-        if len(angles) != len(mags):
-            log.warning(
-                "Bus.a.v length %d != Bus.v.v length %d; emitting NaN angles",
-                len(angles), len(mags),
-            )
-            angles = [float("nan")] * len(mags)
-    out: list[float] = []
-    for v, a in zip(mags, angles, strict=True):
-        out.append(v)
-        out.append(a)
-    return out
-
-
 def bus_idx_values_from_system(system: System) -> list[int | str]:
     """Return the ANDES bus idx values in the order their voltage +
     angle columns will appear in each Arrow batch."""
@@ -382,7 +358,7 @@ def bus_idx_values_from_system(system: System) -> list[int | str]:
 
 def syngen_idx_values_from_system(system: System) -> list[int | str]:
     """Return the ANDES SynGen idx values (across GENROU / GENCLS / etc.)
-    in the order :func:`collect_generator_state` will read them.
+    in the order :class:`StreamCollector` reads them.
 
     ``ss.SynGen`` is the ANDES *group* parent of the dynamic generator
     models (``GENROU``, ``GENCLS``, ``PLBVFU1``). Static generators
@@ -400,58 +376,9 @@ def syngen_idx_values_from_system(system: System) -> list[int | str]:
         return []
 
 
-def collect_generator_state(
-    system: System, syngen_idx_values: list[int | str]
-) -> list[float]:
-    """Read the SynGen group's ``delta`` + ``omega`` for each idx, in the
-    same order :func:`make_generator_state_schema` lays out: ``[delta_0,
-    omega_0, delta_1, omega_1, ...]``. ``syngen_idx_values`` is captured
-    once at run start (it does not change mid-run).
-    """
-    if not syngen_idx_values:
-        return []
-    syngen = system.SynGen
-    deltas = list(syngen.get("delta", syngen_idx_values, "v"))
-    omegas = list(syngen.get("omega", syngen_idx_values, "v"))
-    out: list[float] = []
-    for d, o in zip(deltas, omegas, strict=True):
-        out.append(float(d))
-        out.append(float(o))
-    return out
-
-
-def collect_generator_power(
-    system: System, syngen_idx_values: list[int | str]
-) -> list[float]:
-    """Read the SynGen group's electrical power for each idx, in the same
-    order :func:`make_generator_power_schema` lays out: ``[Pe_0, Qe_0,
-    Pe_1, Qe_1, ...]`` in MW / MVar.
-
-    ``Pe``/``Qe`` are SynGen algebraic services in system-base pu; we
-    multiply by ``system.config.mva`` to surface MW / MVar. They are only
-    populated after ``TDS.init``; during a streaming run (reads fire from
-    ``callpert``, post-init) they carry live values. ``syngen_idx_values``
-    is captured once at run start.
-    """
-    if not syngen_idx_values:
-        return []
-    syngen = system.SynGen
-    try:
-        mva_base = float(getattr(system.config, "mva", 100.0))
-    except (TypeError, ValueError):
-        mva_base = 100.0
-    pes = list(syngen.get("Pe", syngen_idx_values, "v"))
-    qes = list(syngen.get("Qe", syngen_idx_values, "v"))
-    out: list[float] = []
-    for p, q in zip(pes, qes, strict=True):
-        out.append(float(p) * mva_base)
-        out.append(float(q) * mva_base)
-    return out
-
-
 def line_idx_values_from_system(system: System) -> list[int | str]:
     """Return the ANDES Line idx values in the order
-    :func:`collect_line_active_power` will read them. Cases with no Line
+    :class:`StreamCollector` reads them. Cases with no Line
     elements yield ``[]`` and a well-formed-empty line_flow schema."""
     line = getattr(system, "Line", None)
     if line is None:
@@ -462,110 +389,9 @@ def line_idx_values_from_system(system: System) -> list[int | str]:
     return list(getattr(idx_var, "v", []))
 
 
-# Line-flow attribute set sourced live from the System each callpert tick.
-# Mirrors ``tensa.core.wrapper._extract_line_flows`` — ANDES does not
-# expose ``ss.Line.p1`` / ``ss.Line.q1`` directly, so we recompute the same
-# pi-equivalent expressions that ANDES injects into the bus1 power-balance
-# equations. ``bh`` is needed for the Q1 shunt-susceptance term.
-_LINE_FLOW_ATTRS: tuple[str, ...] = (
-    "v1", "v2", "a1", "a2", "phi", "ue",
-    "gh", "bh", "ghk", "bhk", "itap", "itap2",
-)
-
-
-def collect_line_active_power(
-    system: System, line_idx_values: list[int | str]
-) -> list[float]:
-    """Compute the P + Q flow at terminal 1 for each line, in MW / MVar,
-    interleaved ``[p_0, q_0, p_1, q_1, ...]`` in idx order.
-
-    Mirrors :func:`tensa.core.wrapper._extract_line_flows`'s formulae
-    (P1 and Q1 of the standard pi-equivalent line model with off-nominal
-    tap + phase shift). Pulls live algebraic-variable values off
-    ``ss.Line`` (``v1``/``v2``, ``a1``/``a2``, plus the immutable per-line
-    line params) and returns two floats per idx in ``line_idx_values``,
-    matching :func:`_line_flow_columns`'s ``Line_<idx>_p`` then
-    ``Line_<idx>_q`` layout. Non-finite intermediate results (e.g., a
-    divergent step) emit ``nan`` rather than raising — uPlot handles NaN
-    gaps and the substrate must not crash a long sim over a single bad
-    line value.
-    """
-    if not line_idx_values:
-        return []
-    line = system.Line
-    n = len(line_idx_values)
-    arrays: dict[str, list[float]] = {}
-    for name in _LINE_FLOW_ATTRS:
-        attr = getattr(line, name, None)
-        if attr is None:
-            log.warning(
-                "line.%s missing; emitting NaN line_flow columns", name
-            )
-            return [float("nan")] * (2 * n)
-        values = getattr(attr, "v", None)
-        if values is None:
-            log.warning(
-                "line.%s.v is None; emitting NaN line_flow columns", name
-            )
-            return [float("nan")] * (2 * n)
-        try:
-            arrays[name] = [float(v) for v in values]
-        except (TypeError, ValueError):
-            log.warning(
-                "line.%s.v not iterable as floats; emitting NaN", name
-            )
-            return [float("nan")] * (2 * n)
-
-    for name, vlist in arrays.items():
-        if len(vlist) != n:
-            log.warning(
-                "line.%s.v length %d != idx length %d; emitting NaN",
-                name, len(vlist), n,
-            )
-            return [float("nan")] * (2 * n)
-
-    try:
-        mva_base = float(getattr(system.config, "mva", 100.0))
-    except (TypeError, ValueError):
-        mva_base = 100.0
-
-    out: list[float] = []
-    for i in range(n):
-        v1 = arrays["v1"][i]
-        v2 = arrays["v2"][i]
-        a1 = arrays["a1"][i]
-        a2 = arrays["a2"][i]
-        phi = arrays["phi"][i]
-        ue = arrays["ue"][i]
-        gh = arrays["gh"][i]
-        bh = arrays["bh"][i]
-        ghk = arrays["ghk"][i]
-        bhk = arrays["bhk"][i]
-        itap = arrays["itap"][i]
-        itap2 = arrays["itap2"][i]
-        d = a1 - a2 - phi
-        cos_d = math.cos(d)
-        sin_d = math.sin(d)
-        p_pu = ue * (
-            v1 * v1 * (gh + ghk) * itap2
-            - v1 * v2 * (ghk * cos_d + bhk * sin_d) * itap
-        )
-        # Q1 mirrors wrapper._extract_line_flows exactly: the shunt term
-        # uses (bh + bhk) and the series cross-term flips sign vs. P1.
-        q_pu = ue * (
-            -v1 * v1 * (bh + bhk) * itap2
-            - v1 * v2 * (ghk * sin_d - bhk * cos_d) * itap
-        )
-        p_mw = p_pu * mva_base
-        q_mvar = q_pu * mva_base
-        out.append(p_mw if math.isfinite(p_mw) else float("nan"))
-        out.append(q_mvar if math.isfinite(q_mvar) else float("nan"))
-    return out
-
-
 def pq_idx_values_from_system(system: System) -> list[int | str]:
     """Return the ANDES PQ idx values in the order
-    :func:`collect_load_consumption` will read them. Cases with no PQ
+    :class:`StreamCollector` reads them. Cases with no PQ
     loads yield ``[]`` and a well-formed-empty load_pq schema.
 
     Only the ``PQ`` model is included (constant-power loads). ZIP loads
@@ -580,96 +406,290 @@ def pq_idx_values_from_system(system: System) -> list[int | str]:
     return list(getattr(idx_var, "v", []))
 
 
-def collect_load_consumption(
-    system: System, pq_idx_values: list[int | str]
-) -> list[float]:
-    """Compute the P + Q consumption for each PQ load, in MW / MVar,
-    interleaved ``[p_0, q_0, p_1, q_1, ...]`` in idx order.
+# Line-flow attribute set read live from the System each callpert tick.
+# Mirrors ``tensa.core.wrapper._extract_line_flows`` — ANDES does not
+# expose ``ss.Line.p1`` / ``ss.Line.q1`` directly, so we recompute the same
+# pi-equivalent expressions that ANDES injects into the bus1 power-balance
+# equations. ``bh`` is needed for the Q1 shunt-susceptance term.
+_LINE_FLOW_ATTRS: tuple[str, ...] = (
+    "v1", "v2", "a1", "a2", "phi", "ue",
+    "gh", "bh", "ghk", "bhk", "itap", "itap2",
+)
 
-    Mirrors :func:`tensa.core.wrapper._extract_load_consumption` for
-    the PQ model: reads ``Ppf`` / ``Qpf`` (the post-PF active / reactive
-    power, pu) and scales by ``system.config.mva``. Falls back to the
-    ``p0`` / ``q0`` set-points if ``Ppf`` / ``Qpf`` are unavailable.
-    ``pq_idx_values`` is captured once at run start. Non-finite values
-    emit ``nan`` rather than raising.
-    """
-    if not pq_idx_values:
-        return []
-    pq = getattr(system, "PQ", None)
-    if pq is None:
-        return [float("nan")] * (2 * len(pq_idx_values))
+_NAN = float("nan")
+
+
+def _mva_base(system: System) -> float:
+    """The system base MVA, ``100.0`` when the configuration does not say."""
     try:
-        mva_base = float(getattr(system.config, "mva", 100.0))
+        return float(getattr(system.config, "mva", 100.0))
     except (TypeError, ValueError):
-        mva_base = 100.0
-    p_arr = _safe_param_list(getattr(pq, "Ppf", None) or getattr(pq, "p0", None))
-    q_arr = _safe_param_list(getattr(pq, "Qpf", None) or getattr(pq, "q0", None))
-    out: list[float] = []
-    for i in range(len(pq_idx_values)):
-        try:
-            p_pu = float(p_arr[i]) if i < len(p_arr) else float("nan")
-            q_pu = float(q_arr[i]) if i < len(q_arr) else float("nan")
-        except (TypeError, ValueError):
-            p_pu = float("nan")
-            q_pu = float("nan")
-        p_mw = p_pu * mva_base
-        q_mvar = q_pu * mva_base
-        out.append(p_mw if math.isfinite(p_mw) else float("nan"))
-        out.append(q_mvar if math.isfinite(q_mvar) else float("nan"))
-    return out
+        return 100.0
 
 
-def _safe_param_list(param: object) -> list[float]:
-    """Defensive ``.v`` reader for a PQ NumParam/Service. Returns ``[]``
-    for ``None`` / a missing or non-iterable ``.v`` (mirrors the
-    wrapper's ``_safe_list``)."""
-    if param is None:
-        return []
+def _values(param: object, n: int) -> NDArray[np.float64] | None:
+    """The ``n`` current values of an ANDES variable, parameter or service,
+    or ``None`` when it has no values, another count, or non-numeric ones.
+
+    The array is ANDES's own, not a copy: ANDES updates it in place at every
+    step, so a caller must write out what it computes from it and never keep
+    or return it.
+    """
     values = getattr(param, "v", None)
     if values is None:
-        return []
+        return None
     try:
-        return [float(v) for v in values]
+        array = np.asarray(values, dtype=np.float64)
     except (TypeError, ValueError):
-        return []
+        return None
+    return array if array.shape == (n,) else None
 
 
-def collect_combined_values(
-    system: System,
-    var_groups: list[VarGroup] | tuple[VarGroup, ...],
-    *,
-    syngen_idx_values: list[int | str],
-    line_idx_values: list[int | str],
-    pq_idx_values: list[int | str] | None = None,
-) -> list[float]:
-    """Read all selected groups' values and return them in the schema's
-    column order (matching :func:`make_combined_schema`).
+class _Reader:
+    """Fills the slice of a row that one variable group owns.
 
-    ``syngen_idx_values``, ``line_idx_values``, and ``pq_idx_values`` are
-    captured once at run start so we don't re-introspect the topology each
-    callpert tick. Bus voltages + angles are read live every call because
-    the Bus model is always present; idx-snapshot caching is unnecessary
-    there (``Bus.v.v`` / ``Bus.a.v`` are read directly). ``pq_idx_values``
-    defaults to ``[]`` for callers that never select the ``load_pq`` group.
+    A reader resolves what it reads (the model objects, the positions of its
+    devices) once, when the run starts, and then reads ANDES's arrays with
+    numpy at every step. The arrays themselves are read each time, not held:
+    ANDES changes their contents as the run goes (a tripped line changes
+    ``Line.ue``, an ``Alter`` changes ``PQ.Ppf``), and the stream shows that.
     """
-    if pq_idx_values is None:
-        pq_idx_values = []
-    requested = set(var_groups)
-    out: list[float] = []
-    for group in VAR_GROUPS:
-        if group not in requested:
-            continue
-        if group == "bus_v":
-            out.extend(collect_bus_voltages(system))
-        elif group == "gen_state":
-            out.extend(collect_generator_state(system, syngen_idx_values))
-        elif group == "gen_power":
-            out.extend(collect_generator_power(system, syngen_idx_values))
-        elif group == "line_flow":
-            out.extend(collect_line_active_power(system, line_idx_values))
-        elif group == "load_pq":
-            out.extend(collect_load_consumption(system, pq_idx_values))
-    return out
+
+    width: int
+
+    def __init__(self) -> None:
+        self._warned: set[str] = set()
+
+    def read(self, out: NDArray[np.float64]) -> None:
+        """Write the group's ``width`` values for the current step into ``out``."""
+        raise NotImplementedError
+
+    def _read(self, label: str, param: object, n: int) -> NDArray[np.float64] | None:
+        """:func:`_values`, logging the first step it comes back empty."""
+        values = _values(param, n)
+        if values is None and label not in self._warned:
+            self._warned.add(label)
+            log.warning("%s is missing or not %d values long; emitting NaN columns", label, n)
+        return values
+
+
+class _BusReader(_Reader):
+    """``[v_0, a_0, v_1, a_1, ...]``: ``Bus.v.v`` (pu) and ``Bus.a.v`` (rad) in
+    bus idx order. A missing or short array emits ``nan`` columns so the run
+    never crashes over one bad read."""
+
+    def __init__(self, system: System) -> None:
+        super().__init__()
+        self._bus = system.Bus
+        self._n = len(bus_idx_values_from_system(system))
+        self.width = 2 * self._n
+
+    def read(self, out: NDArray[np.float64]) -> None:
+        v = self._read("Bus.v.v", self._bus.v, self._n)
+        a = self._read("Bus.a.v", getattr(self._bus, "a", None), self._n)
+        out[0::2] = _NAN if v is None else v
+        out[1::2] = _NAN if a is None else a
+
+
+class _SynGenReader(_Reader):
+    """Two named variables of the SynGen members, interleaved per device in idx
+    order: ``[delta_0, omega_0, ...]`` or ``[Pe_0, Qe_0, ...]``, each times
+    ``scale``.
+
+    The members span several models (GENROU, GENCLS, ...), and ANDES's
+    ``SynGen.get`` looks every idx up again on each call. This looks each up
+    once, groups the members by model, and reads each model's array with one
+    fancy index per step.
+    """
+
+    def __init__(
+        self,
+        system: System,
+        idx_values: list[int | str],
+        names: tuple[str, str],
+        scale: float = 1.0,
+    ) -> None:
+        super().__init__()
+        self.width = 2 * len(idx_values)
+        self._scale = scale
+        # model -> (positions in idx order, uids within the model)
+        members: dict[int, tuple[Any, list[int], list[int]]] = {}
+        models = system.SynGen.idx2model(idx_values) if idx_values else []
+        for position, (idx, model) in enumerate(zip(idx_values, models, strict=True)):
+            _model, positions, uids = members.setdefault(id(model), (model, [], []))
+            positions.append(position)
+            uids.append(model.idx2uid(idx))
+        # (first-variable param, second-variable param, their columns, their uids)
+        self._parts = [
+            (
+                getattr(model, names[0]),
+                getattr(model, names[1]),
+                2 * np.array(positions, dtype=np.intp),
+                np.array(uids, dtype=np.intp),
+            )
+            for model, positions, uids in members.values()
+        ]
+
+    def read(self, out: NDArray[np.float64]) -> None:
+        for first, second, columns, uids in self._parts:
+            for offset, param in ((0, first), (1, second)):
+                values = np.asarray(param.v, dtype=np.float64)[uids]
+                out[columns + offset] = values if self._scale == 1.0 else values * self._scale
+
+
+class _LineFlowReader(_Reader):
+    """``[p_0, q_0, p_1, q_1, ...]``: the P and Q flow at terminal 1 of each
+    line in idx order, in MW / MVar.
+
+    Mirrors :func:`tensa.core.wrapper._extract_line_flows`'s formulae (P1 and
+    Q1 of the standard pi-equivalent line model with off-nominal tap + phase
+    shift) as array expressions over the live algebraic-variable values and
+    line parameters. A non-finite result (e.g., a divergent step) emits
+    ``nan`` rather than raising — uPlot handles NaN gaps and the substrate
+    must not crash a long sim over a single bad line value.
+    """
+
+    def __init__(self, system: System, n: int) -> None:
+        super().__init__()
+        self._n = n
+        self.width = 2 * n
+        line = getattr(system, "Line", None)
+        self._params = [(name, getattr(line, name, None)) for name in _LINE_FLOW_ATTRS]
+        self._mva = _mva_base(system)
+
+    def read(self, out: NDArray[np.float64]) -> None:
+        arrays: dict[str, NDArray[np.float64]] = {}
+        for name, param in self._params:
+            values = self._read(f"Line.{name}.v", param, self._n)
+            if values is None:
+                out[:] = _NAN
+                return
+            arrays[name] = values
+        v1, v2 = arrays["v1"], arrays["v2"]
+        gh, bh, ghk, bhk = arrays["gh"], arrays["bh"], arrays["ghk"], arrays["bhk"]
+        itap, itap2 = arrays["itap"], arrays["itap2"]
+        with np.errstate(all="ignore"):
+            d = arrays["a1"] - arrays["a2"] - arrays["phi"]
+            cos_d = np.cos(d)
+            sin_d = np.sin(d)
+            p_pu = arrays["ue"] * (
+                v1 * v1 * (gh + ghk) * itap2 - v1 * v2 * (ghk * cos_d + bhk * sin_d) * itap
+            )
+            # Q1 mirrors wrapper._extract_line_flows exactly: the shunt term
+            # uses (bh + bhk) and the series cross-term flips sign vs. P1.
+            q_pu = arrays["ue"] * (
+                -v1 * v1 * (bh + bhk) * itap2 - v1 * v2 * (ghk * sin_d - bhk * cos_d) * itap
+            )
+            out[0::2] = p_pu * self._mva
+            out[1::2] = q_pu * self._mva
+        out[~np.isfinite(out)] = _NAN
+
+
+class _LoadReader(_Reader):
+    """``[p_0, q_0, p_1, q_1, ...]``: the P and Q consumption of each PQ load in
+    idx order, in MW / MVar.
+
+    Mirrors :func:`tensa.core.wrapper._extract_load_consumption` for the PQ
+    model: reads ``Ppf`` / ``Qpf`` (the post-PF active / reactive power, pu)
+    and scales by the system base MVA. Falls back to the ``p0`` / ``q0``
+    set-points if ``Ppf`` / ``Qpf`` are unavailable. Non-finite values emit
+    ``nan`` rather than raising.
+    """
+
+    def __init__(self, system: System, n: int) -> None:
+        super().__init__()
+        self._n = n
+        self.width = 2 * n
+        pq = getattr(system, "PQ", None)
+        self._p = self._first(pq, "Ppf", "p0")
+        self._q = self._first(pq, "Qpf", "q0")
+        self._mva = _mva_base(system)
+
+    @staticmethod
+    def _first(model: object, *names: str) -> object | None:
+        for name in names:
+            param: object | None = getattr(model, name, None)
+            if param is not None:
+                return param
+        return None
+
+    def read(self, out: NDArray[np.float64]) -> None:
+        for column, label, param in ((0, "PQ.Ppf.v", self._p), (1, "PQ.Qpf.v", self._q)):
+            values = self._read(label, param, self._n)
+            if values is None:
+                out[column::2] = _NAN
+                continue
+            scaled = values * self._mva
+            scaled[~np.isfinite(scaled)] = _NAN
+            out[column::2] = scaled
+
+
+class StreamCollector:
+    """Reads the selected variable groups' values off a System at each step.
+
+    Built once per run, after the System is set up: the addresses of every
+    value are resolved then (which SynGen model holds each generator and at
+    what position, which line arrays to read), so a step is a handful of
+    numpy reads rather than a Python loop over devices and a dictionary
+    lookup per generator. :meth:`collect` returns one row, a float64 array in
+    the column order :func:`make_combined_schema` lays out, and builds a new
+    array each time: ANDES updates its own arrays in place, and the
+    aggregator keeps rows until a window closes.
+    """
+
+    def __init__(
+        self,
+        system: System,
+        var_groups: list[VarGroup] | tuple[VarGroup, ...],
+    ) -> None:
+        requested = set(var_groups)
+        unknown = requested - set(VAR_GROUPS)
+        if unknown:
+            raise ValueError(f"unknown var groups: {sorted(unknown)!r}")
+
+        syngen_idx_values = syngen_idx_values_from_system(system)
+        readers: list[_Reader] = []
+        # Canonical group order, so the row matches the schema's layout
+        # whatever order the client listed ``vars`` in.
+        for group in VAR_GROUPS:
+            if group not in requested:
+                continue
+            if group == "bus_v":
+                readers.append(_BusReader(system))
+            elif group == "gen_state":
+                readers.append(
+                    _SynGenReader(system, syngen_idx_values, ("delta", "omega"))
+                )
+            elif group == "gen_power":
+                readers.append(
+                    _SynGenReader(
+                        system, syngen_idx_values, ("Pe", "Qe"), _mva_base(system)
+                    )
+                )
+            elif group == "line_flow":
+                readers.append(
+                    _LineFlowReader(system, len(line_idx_values_from_system(system)))
+                )
+            elif group == "load_pq":
+                readers.append(
+                    _LoadReader(system, len(pq_idx_values_from_system(system)))
+                )
+
+        # (reader, first column, one past its last column)
+        self._slots: list[tuple[_Reader, int, int]] = []
+        start = 0
+        for reader in readers:
+            if reader.width:
+                self._slots.append((reader, start, start + reader.width))
+                start += reader.width
+        self.n_columns = start
+
+    def collect(self) -> NDArray[np.float64]:
+        """The current step's values, one per column (a new array each call)."""
+        row = np.empty(self.n_columns, dtype=np.float64)
+        for reader, start, stop in self._slots:
+            reader.read(row[start:stop])
+        return row
 
 
 # ---- aggregator -------------------------------------------------------------
@@ -699,7 +719,7 @@ class StreamAggregator:
     max_rate_hz: float | None
     fixed_step: bool = False  # ANDES TDS.config.fixt
     _next_emit_t: float | None = None
-    _buffer: list[tuple[float, list[float]]] | None = None
+    _buffer: list[StreamRow] | None = None
 
     def __post_init__(self) -> None:
         if self.decimation == "mean" and self.max_rate_hz is None:
@@ -733,10 +753,14 @@ class StreamAggregator:
         return 1.0 / self.max_rate_hz if self.max_rate_hz is not None else None
 
     def push(
-        self, t: float, values: list[float]
-    ) -> list[tuple[float, list[float]]] | None:
+        self, t: float, values: Sequence[float] | NDArray[np.float64]
+    ) -> list[StreamRow] | None:
         """Add a per-step snapshot. Returns the list of rows to emit as one
         Arrow batch, or ``None`` if no emit is due yet.
+
+        The aggregator keeps ``values`` until its window closes, so the caller
+        must pass a row of its own, not a view of an array that is changed in
+        place afterwards.
 
         Window alignment is anchored to the t=0 simulation origin so windows
         are predictable: [0, W), [W, 2W), ... A sample at exactly the
@@ -779,7 +803,7 @@ class StreamAggregator:
         self._buffer.append((t, values))
         return rows
 
-    def flush(self) -> list[tuple[float, list[float]]] | None:
+    def flush(self) -> list[StreamRow] | None:
         """Emit any buffered rows at end of run. Returns ``None`` if buffer
         is empty (e.g., no callpert fired since the last emit)."""
         assert self._buffer is not None
@@ -787,18 +811,15 @@ class StreamAggregator:
             return None
         return self._drain_buffer()
 
-    def _drain_buffer(self) -> list[tuple[float, list[float]]]:
+    def _drain_buffer(self) -> list[StreamRow]:
         assert self._buffer is not None
+        rows: list[StreamRow]
         if self.decimation == "none":
             rows = list(self._buffer)
         else:  # mean
-            n = len(self._buffer)
-            t_mean = sum(b[0] for b in self._buffer) / n
-            n_vars = len(self._buffer[0][1])
-            mean_values = [
-                sum(b[1][i] for b in self._buffer) / n for i in range(n_vars)
-            ]
-            rows = [(t_mean, mean_values)]
+            t_mean = sum(b[0] for b in self._buffer) / len(self._buffer)
+            window = np.array([b[1] for b in self._buffer], dtype=np.float64)
+            rows = [(t_mean, window.mean(axis=0))]
         self._buffer.clear()
         return rows
 
@@ -809,14 +830,10 @@ __all__ = [
     "DecimationAlgorithm",
     "DecimationMode",
     "StreamAggregator",
+    "StreamCollector",
+    "StreamRow",
     "VarGroup",
     "bus_idx_values_from_system",
-    "collect_bus_voltages",
-    "collect_combined_values",
-    "collect_generator_power",
-    "collect_generator_state",
-    "collect_line_active_power",
-    "collect_load_consumption",
     "decode_batch",
     "encode_batch",
     "line_idx_values_from_system",

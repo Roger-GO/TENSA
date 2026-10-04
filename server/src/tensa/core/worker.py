@@ -78,9 +78,10 @@ from tensa.core.stream import (
     DEFAULT_VARS,
     VAR_GROUPS,
     StreamAggregator,
+    StreamCollector,
+    StreamRow,
     VarGroup,
     bus_idx_values_from_system,
-    collect_combined_values,
     encode_batch,
     line_idx_values_from_system,
     make_combined_schema,
@@ -1304,14 +1305,15 @@ def _handle_run_tds(
         except ValueError as exc:
             raise AndesAppError(str(exc)) from exc
 
-        # Snapshot the topology indices ONCE per run so each callpert tick
-        # only does the (cheap) value reads. The schema mirrors the same
-        # snapshot, so column order and value order line up.
+        # Snapshot the topology ONCE per run so each callpert tick only reads
+        # values: the collector resolves where each one lives now, and the
+        # schema lists the same devices, so column order and value order line up.
         bus_idx_values = bus_idx_values_from_system(ss)
         syngen_idx_values = syngen_idx_values_from_system(ss)
         line_idx_values = line_idx_values_from_system(ss)
         pq_idx_values = pq_idx_values_from_system(ss)
         schema, var_columns = make_combined_schema(var_groups, ss)
+        collector = StreamCollector(ss, var_groups)
 
         # Send the stream-start metadata BEFORE the run begins so the WS
         # sender can forward it as a text frame ahead of any binary frames.
@@ -1343,9 +1345,7 @@ def _handle_run_tds(
         # post-run tail-flush below.
         frame_seq_holder = [0]
 
-        def _emit_rows(
-            rows: list[tuple[float, list[float]]], *, tail: bool = False
-        ) -> None:
+        def _emit_rows(rows: list[StreamRow], *, tail: bool = False) -> None:
             frame_seq_holder[0] += 1
             payload = encode_batch(schema, rows)
             envelope: dict[str, Any] = {
@@ -1364,14 +1364,7 @@ def _handle_run_tds(
 
         def _emit(t: float, system: Any) -> None:
             assert aggregator is not None
-            values = collect_combined_values(
-                system,
-                var_groups,
-                syngen_idx_values=syngen_idx_values,
-                line_idx_values=line_idx_values,
-                pq_idx_values=pq_idx_values,
-            )
-            rows = aggregator.push(t, values)
+            rows = aggregator.push(t, collector.collect())
             if rows:
                 _emit_rows(rows)
 

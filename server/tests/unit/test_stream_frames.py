@@ -46,6 +46,16 @@ def test_encode_batch_round_trip() -> None:
     assert values.tolist() == [row_values for _t, row_values in rows]
 
 
+def test_encode_batch_takes_rows_of_arrays_as_it_does_rows_of_lists() -> None:
+    """The collector hands the aggregator numpy rows, and the encoder must write
+    the same frame for them as for the lists the tests build by hand."""
+    schema = make_bus_voltage_schema([1, 2])
+    lists = [(0.0, [1.0, 0.0, 1.04, -0.03]), (0.01, [1.001, 0.001, 1.039, -0.031])]
+    arrays = [(t, np.array(values)) for t, values in lists]
+
+    assert encode_batch(schema, arrays) == encode_batch(schema, lists)
+
+
 def test_a_frame_is_one_record_batch_of_t_and_a_values_list() -> None:
     """The frame is a plain Arrow IPC stream any Arrow reader opens: one batch,
     ``t`` and ``v`` (a fixed-size list of float64 per row), whose child holds

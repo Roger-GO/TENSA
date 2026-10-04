@@ -3,7 +3,8 @@
 Mirrors ``test_stream_aggregator.py``'s structure: each test is a
 self-contained, andes-free check on the schema-builder helpers and their
 composition into the ``vars``-selected unified schema. ANDES-driven
-collection (i.e., ``collect_combined_values``) is exercised end-to-end by
+collection (``StreamCollector``) is exercised against ANDES by
+``server/tests/integration/test_stream_collectors.py`` and end-to-end by
 ``server/tests/acceptance/test_tds_streaming.py``.
 
 The streaming-variable contract each group contributes (per idx):
@@ -42,7 +43,7 @@ from tensa.core.stream import (
 def test_make_bus_voltage_schema_emits_v_then_a_per_bus() -> None:
     """The bus_v group emits ``Bus_<idx>_v`` (magnitude) then
     ``Bus_<idx>_a`` (angle, rad) per bus, in idx order — the same order
-    ``collect_bus_voltages`` reads them."""
+    ``StreamCollector`` reads them."""
     schema = make_bus_voltage_schema([1, 2, 3])
     assert schema.names == [
         "t",
@@ -63,7 +64,7 @@ def test_make_bus_voltage_schema_with_no_buses_is_well_formed() -> None:
 @pytest.mark.unit
 def test_make_generator_state_schema_emits_delta_then_omega_per_idx() -> None:
     """For each SynGen idx the schema lays out ``delta`` then ``omega``
-    in idx order — the same order ``collect_generator_state`` reads."""
+    in idx order — the same order ``StreamCollector`` reads."""
     schema = make_generator_state_schema(["GENROU_1", "GENROU_2"])
     assert schema.names == [
         "t",
@@ -87,7 +88,7 @@ def test_make_generator_state_schema_with_no_syngens_is_well_formed() -> None:
 @pytest.mark.unit
 def test_make_generator_power_schema_emits_Pe_then_Qe_per_idx() -> None:
     """For each SynGen idx the gen_power schema lays out ``Pe`` then
-    ``Qe`` in idx order — the order ``collect_generator_power`` reads."""
+    ``Qe`` in idx order — the order ``StreamCollector`` reads."""
     schema = make_generator_power_schema(["GENROU_1", "GENROU_2"])
     assert schema.names == [
         "t",
@@ -358,7 +359,7 @@ def test_combined_schema_dedupe_collapses_repeats() -> None:
 def test_combined_schema_round_trips_through_encode_and_decode() -> None:
     """A combined-schema batch encodes and decodes without losing a value or
     moving it to another column. The row layout follows
-    ``collect_combined_values`` ordering: [v, a] per bus, then [delta, omega]
+    ``StreamCollector``'s ordering: [v, a] per bus, then [delta, omega]
     per gen, then [Pe, Qe] per gen, then [p, q] per line, then [p, q] per
     load; ``var_columns`` names those positions."""
     system = _fake_system(

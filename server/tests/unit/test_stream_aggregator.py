@@ -187,3 +187,55 @@ def test_mean_row_time_is_the_window_mean_of_the_step_times() -> None:
     assert rows is not None
     assert len(rows) == 1
     assert rows[0][0] == pytest.approx(0.05)
+
+
+# ---- rows of numpy arrays ------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_mean_of_array_rows_is_the_column_wise_mean() -> None:
+    """The collector pushes numpy rows. A window's mean row is one array, each
+    column the mean of that column's values over the window."""
+    agg = StreamAggregator(decimation="mean", max_rate_hz=10.0)
+    agg.push(0.02, np.array([1.0, 10.0, -1.0]))
+    agg.push(0.04, np.array([2.0, 20.0, -2.0]))
+    agg.push(0.06, np.array([6.0, 60.0, -6.0]))
+
+    rows = agg.push(0.10, np.array([100.0, 100.0, 100.0]))
+
+    assert rows is not None and len(rows) == 1
+    t, values = rows[0]
+    assert t == pytest.approx(0.04)
+    assert np.asarray(values).tolist() == pytest.approx([3.0, 30.0, -3.0])
+
+
+@pytest.mark.unit
+def test_mean_over_wide_rows_matches_the_mean_taken_one_column_at_a_time() -> None:
+    """A WECC row is 1208 values. The window mean is taken as one array
+    operation; it must agree with averaging each column on its own."""
+    rng = np.random.default_rng(11)
+    pushed = [rng.normal(size=1208) for _ in range(6)]
+    agg = StreamAggregator(decimation="mean", max_rate_hz=10.0)
+    for i, row in enumerate(pushed):
+        assert agg.push(0.01 * (i + 1), row) is None
+
+    tail = agg.flush()
+
+    assert tail is not None
+    expected = [sum(row[j] for row in pushed) / len(pushed) for j in range(1208)]
+    assert np.asarray(tail[0][1]).tolist() == pytest.approx(expected, rel=1e-12, abs=1e-12)
+
+
+@pytest.mark.unit
+def test_mean_of_rows_with_no_columns_still_averages_the_times() -> None:
+    """A run that selects only groups with no devices on the case streams ``t``
+    alone, and its windows still close with the mean time."""
+    agg = StreamAggregator(decimation="mean", max_rate_hz=10.0)
+    agg.push(0.02, np.empty(0))
+    agg.push(0.04, np.empty(0))
+
+    tail = agg.flush()
+
+    assert tail is not None
+    assert tail[0][0] == pytest.approx(0.03)
+    assert np.asarray(tail[0][1]).shape == (0,)
