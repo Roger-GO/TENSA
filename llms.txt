@@ -16,7 +16,11 @@ Copy-paste examples: examples/ in the repo (curl walkthrough + Python client).
 3. (pre-setup only) POST /sessions/{id}/disturbances  — add faults/toggles/alters BEFORE running anything
 4. POST /sessions/{id}/pflow               → converged flag + bus voltages; or POST /sessions/{id}/tds {"tf": 5.0} for time-domain (batch, synchronous)
                                              pflow also returns, per line, P/Q at both ends, the loss and the loading in % of rate_a (null when unrated),
-                                             and, per generator, its Q limits in MVAr (limits are reported, not enforced)
+                                             per generator, its Q limits in MVAr, and a "summary" (generation, load, shunts, losses, slack output)
+                                             optional body, for that run only: {"tolerance": 1e-6, "max_iterations": 25, "flat_start": false,
+                                             "enforce_q_limits": false}. Q limits are reported, not enforced, unless enforce_q_limits is true.
+                                             "settings" in the response is what the run used. If it did not converge, retry with a higher
+                                             max_iterations, flat_start true, or a looser tolerance.
 5. GET  /sessions/{id}/operating-point     → PflowResult: bus_voltages/bus_angles dicts (keyed by bus idx),
                                              line_flows, generator_outputs, load_consumption
 6. POST /sessions/{id}/reload              → back to pre-setup state (required to add MORE disturbances after a run)

@@ -113,6 +113,7 @@ WORKER_ERROR_HTTP_MAP: dict[str, int] = {
     # --- 422 Unprocessable Content (validation / dirty-state) ---
     "SetupFailedError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "TdsRequestError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "PflowRequestError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "EigDirtyDaeError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "EigComputationError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "CpfDivergedError": status.HTTP_422_UNPROCESSABLE_CONTENT,

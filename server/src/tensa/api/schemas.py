@@ -14,6 +14,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tensa.core.jobs import JobKind as JobKindLiteral
 from tensa.core.jobs import JobStatus as JobStatusLiteral
+from tensa.core.pflow_options import (
+    MAX_ITERATIONS_MAX,
+    MAX_ITERATIONS_MIN,
+    TOLERANCE_MAX,
+    TOLERANCE_MIN,
+)
 from tensa.core.wrapper import ParamValue
 
 # ---- error envelope ---------------------------------------------------------
@@ -589,7 +595,8 @@ class LineFlow(BaseModel):
 
 class GeneratorOutput(BaseModel):
     """Per-generator PF output. Active + reactive injection at the
-    generator's terminal bus, plus the terminal voltage (pu).
+    generator's terminal bus, plus the terminal voltage (pu). A generator that
+    is switched off injects nothing: ``p`` and ``q`` are 0.
     """
 
     p: float = Field(
@@ -606,26 +613,113 @@ class GeneratorOutput(BaseModel):
         default=None,
         description=(
             "Lower reactive power limit the case sets (``qmin``), in MVAr. "
-            "Power flow does not enforce it, so ``q`` can lie below it. "
-            "``null`` for a generator that is switched off."
+            "Power flow does not enforce it unless the run asked for "
+            "``enforce_q_limits``, so ``q`` can lie below it. ``null`` for a "
+            "generator that is switched off."
         ),
     )
     q_max: float | None = Field(
         default=None,
         description=(
             "Upper reactive power limit the case sets (``qmax``), in MVAr. "
-            "Power flow does not enforce it, so ``q`` can lie above it. "
-            "``null`` for a generator that is switched off."
+            "Power flow does not enforce it unless the run asked for "
+            "``enforce_q_limits``, so ``q`` can lie above it. ``null`` for a "
+            "generator that is switched off."
         ),
     )
 
 
 class LoadConsumption(BaseModel):
-    """Per-load PF consumption at the converged voltage."""
+    """Per-load PF consumption at the converged voltage. A load that is
+    switched off draws nothing: ``p`` and ``q`` are 0."""
 
     p: float = Field(..., description="Active power drawn, in MW.")
     q: float = Field(..., description="Reactive power drawn, in MVAr.")
     bus: int | str = Field(..., description="Terminal bus idx.")
+
+
+class PflowSettings(BaseModel):
+    """The settings a power-flow run used: the request's where it gave one, the
+    case's own (ANDES's default unless the case file sets one) where it did not."""
+
+    tolerance: float = Field(
+        ...,
+        description="Mismatch (max residual, in pu) below which the solver stopped.",
+    )
+    max_iterations: int = Field(
+        ...,
+        description=(
+            "The iteration limit. ANDES stops once the count passes it, so a run "
+            "that does not converge reports ``iterations`` one above this."
+        ),
+    )
+    flat_start: bool = Field(
+        ...,
+        description=(
+            "``true`` if the solver started from 1 pu at angle 0 on every bus "
+            "that has no generator holding its voltage, ``false`` if it started "
+            "from the voltages and angles in the case."
+        ),
+    )
+    enforce_q_limits: bool = Field(
+        ...,
+        description=(
+            "``true`` if a PV or slack generator whose reactive power went past "
+            "``qmin`` or ``qmax`` was held at that limit (PV to PQ switching)."
+        ),
+    )
+
+
+class PflowSummary(BaseModel):
+    """System totals of a converged power flow, in MW and MVAr.
+
+    Generation, load, bus shunts and lines balance: ``generation = load +
+    shunt + loss``, in P and in Q, to the solver's tolerance. Devices that are
+    switched off count for nothing.
+    """
+
+    generation_p: float = Field(
+        ..., description="Active power the in-service generators produce, in MW."
+    )
+    generation_q: float = Field(
+        ..., description="Reactive power the in-service generators produce, in MVAr."
+    )
+    load_p: float = Field(..., description="Active power the loads draw, in MW.")
+    load_q: float = Field(..., description="Reactive power the loads draw, in MVAr.")
+    shunt_p: float = Field(
+        ..., description="Active power the bus shunts absorb, in MW (0 for a pure susceptance)."
+    )
+    shunt_q: float = Field(
+        ...,
+        description=(
+            "Reactive power the bus shunts absorb, in MVAr: negative for a capacitor, "
+            "which supplies it."
+        ),
+    )
+    loss_p: float = Field(
+        ..., description="Active power the lines and transformers dissipate, in MW."
+    )
+    loss_q: float = Field(
+        ...,
+        description=(
+            "Reactive power the lines and transformers absorb, in MVAr: their series "
+            "losses less their charging, so negative when charging dominates."
+        ),
+    )
+    slack_p: float | None = Field(
+        default=None,
+        description=(
+            "Active power the in-service slack generators produce, in MW: what the "
+            "case's schedules leave for the slack to make up. ``null`` when there is none."
+        ),
+    )
+    slack_q: float | None = Field(
+        default=None,
+        description=(
+            "Reactive power the in-service slack generators produce, in MVAr. "
+            "``null`` when there is none."
+        ),
+    )
 
 
 class PflowResult(BaseModel):
@@ -702,6 +796,21 @@ class PflowResult(BaseModel):
             "did not converge."
         ),
     )
+    settings: PflowSettings | None = Field(
+        default=None,
+        description=(
+            "The settings this run used, whether or not it converged. ``null`` "
+            "on ``GET /sessions/{id}/operating-point``, which runs nothing."
+        ),
+    )
+    summary: PflowSummary | None = Field(
+        default=None,
+        description=(
+            "System totals: generation, load, bus shunts, line losses and the "
+            "slack output. ``null`` when the run did not converge, and on "
+            "``GET /sessions/{id}/operating-point``."
+        ),
+    )
     job_id: str | None = Field(
         default=None,
         description=(
@@ -714,10 +823,50 @@ class PflowResult(BaseModel):
 
 
 class PflowRunRequest(BaseModel):
-    """Request body for ``POST /sessions/{id}/pflow``. Empty: PF parameters
-    are taken from the loaded case's defaults."""
+    """Request body for ``POST /sessions/{id}/pflow``. Every field is optional:
+    one that is left out keeps the case's own setting (ANDES's default unless
+    the case file's ``_config`` section says otherwise). The settings apply to
+    this run only; the next request starts from the case's settings again."""
 
     model_config = ConfigDict(extra="forbid")
+
+    tolerance: float | None = Field(
+        default=None,
+        ge=TOLERANCE_MIN,
+        le=TOLERANCE_MAX,
+        allow_inf_nan=False,
+        description=(
+            "Convergence tolerance: the solver stops once the largest residual "
+            f"(mismatch), in pu, is below it. From {TOLERANCE_MIN:g} to "
+            f"{TOLERANCE_MAX:g}. ANDES's default is 1e-6."
+        ),
+    )
+    max_iterations: int | None = Field(
+        default=None,
+        ge=MAX_ITERATIONS_MIN,
+        le=MAX_ITERATIONS_MAX,
+        description=(
+            "Iteration limit. ANDES gives up once the count passes it. From "
+            f"{MAX_ITERATIONS_MIN} to {MAX_ITERATIONS_MAX}. ANDES's default is 25."
+        ),
+    )
+    flat_start: bool | None = Field(
+        default=None,
+        description=(
+            "Start from 1 pu at angle 0 on every bus instead of the voltages and "
+            "angles in the case. A bus with a generator holding its voltage still "
+            "starts at that setpoint. Helps when the case's own starting point "
+            "is far from the solution."
+        ),
+    )
+    enforce_q_limits: bool | None = Field(
+        default=None,
+        description=(
+            "Hold a PV or slack generator at ``qmin`` or ``qmax`` when its "
+            "reactive power goes past one (PV to PQ switching). Without it the "
+            "limits are reported and not enforced."
+        ),
+    )
 
 
 # ---- disturbances -----------------------------------------------------------

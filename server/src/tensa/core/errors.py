@@ -132,6 +132,19 @@ class TdsRequestError(AndesAppError):
     recovery_kind: str | None = "none"
 
 
+class PflowRequestError(AndesAppError):
+    """Raised when a power-flow request asks for a setting ANDES must not be
+    given: a tolerance or an iteration limit outside the range the solver can
+    use, or a flag that is not a boolean.
+
+    Like :class:`TdsRequestError`, the check runs before anything is written to
+    the System, so there is nothing to recover from: the caller fixes the
+    request and sends it again. The response is a 422 without a recovery action.
+    """
+
+    recovery_kind: str | None = "none"
+
+
 class DisturbanceValidationError(AndesAppError):
     """Raised when a disturbance specification fails validation against the
     ANDES model (e.g., bus idx not present in the loaded case)."""

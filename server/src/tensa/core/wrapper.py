@@ -69,6 +69,11 @@ from tensa.core.errors import (
     TdsRequestError,
     short_repr,
 )
+from tensa.core.pflow_options import (
+    PflowSettings,
+    pflow_options_applied,
+    validate_pflow_options,
+)
 from tensa.core.rated_voltage import (
     buses_without_rated_voltage,
     still_without_rated_voltage,
@@ -263,6 +268,30 @@ class LoadConsumption:
 
 
 @dataclass
+class PflowSummary:
+    """System totals of a converged power flow, in MW / MVAr.
+
+    Generation, load, bus shunts and lines balance: ``generation = load + shunt
+    + loss``, in P and in Q, to the solver's tolerance. ``load`` and ``shunt``
+    are what they absorb (so a capacitor's ``shunt_q`` is negative), and
+    ``loss_q`` is what the lines absorb net of their charging. Devices switched
+    off count for nothing. ``slack_p`` / ``slack_q`` are the output of the
+    in-service slack generators, ``None`` when there is none.
+    """
+
+    generation_p: float
+    generation_q: float
+    load_p: float
+    load_q: float
+    shunt_p: float
+    shunt_q: float
+    loss_p: float
+    loss_q: float
+    slack_p: float | None
+    slack_q: float | None
+
+
+@dataclass
 class PflowResult:
     """Power-flow run result. Keyed by ANDES idx."""
 
@@ -274,6 +303,10 @@ class PflowResult:
     line_flows: dict[str, LineFlow] = field(default_factory=dict)
     generator_outputs: dict[str, GeneratorOutput] = field(default_factory=dict)
     load_consumption: dict[str, LoadConsumption] = field(default_factory=dict)
+    # Set by ``run_pflow`` only: the settings the run used, and (when it
+    # converged) the system totals. ``operating_point`` leaves both ``None``.
+    settings: PflowSettings | None = None
+    summary: PflowSummary | None = None
 
 
 @dataclass
@@ -1502,9 +1535,26 @@ class Wrapper:
 
     # ----- runs -----
 
-    def run_pflow(self) -> PflowResult:
+    def run_pflow(
+        self,
+        *,
+        tolerance: float | None = None,
+        max_iterations: int | None = None,
+        flat_start: bool | None = None,
+        enforce_q_limits: bool | None = None,
+    ) -> PflowResult:
         """Run power flow. Calls ``ss.setup()`` first if not yet committed
         (verified: ``PFlow.run`` does not auto-call setup).
+
+        The keyword arguments are the settings the request may change, each
+        ``None`` for "leave the System's own value": ``tolerance`` (the
+        mismatch, in pu, below which the solver stops), ``max_iterations``,
+        ``flat_start`` (start every bus voltage from 1 pu at angle 0) and
+        ``enforce_q_limits`` (turn a PV or slack generator into a PQ bus held at
+        ``qmin`` or ``qmax`` when its reactive power goes past one). They apply
+        to this run only (:func:`~tensa.core.pflow_options.pflow_options_applied`)
+        and a value out of range raises ``PflowRequestError`` before anything is
+        written. The result carries the settings the run used.
 
         Substrate-side gate (Phase 1 smoke Issue 1): if ``ss.TDS.initialized``
         is True, refuse with :class:`EigDirtyDaeError`. Background:
@@ -1524,6 +1574,12 @@ class Wrapper:
         Recovery is therefore ``reload_case()`` — full re-parse of the
         original case file. The error message points the caller there.
         """
+        validate_pflow_options(
+            tolerance=tolerance,
+            max_iterations=max_iterations,
+            flat_start=flat_start,
+            enforce_q_limits=enforce_q_limits,
+        )
         ss = self._require_loaded()
         if bool(getattr(getattr(ss, "TDS", None), "initialized", False)):
             raise EigDirtyDaeError(
@@ -1532,7 +1588,14 @@ class Wrapper:
                 "behavior, or use Run TDS instead."
             )
         self._ensure_setup()
-        ss.PFlow.run()
+        with pflow_options_applied(
+            ss,
+            tolerance=tolerance,
+            max_iterations=max_iterations,
+            flat_start=flat_start,
+            enforce_q_limits=enforce_q_limits,
+        ) as settings:
+            ss.PFlow.run()
         converged = bool(getattr(ss.PFlow, "converged", False))
         iterations = int(getattr(ss.PFlow, "niter", 0))
         # ``ss.PFlow.mis`` is a list of per-iteration mismatches; the final value
@@ -1570,6 +1633,12 @@ class Wrapper:
             line_flows=line_flows,
             generator_outputs=generator_outputs,
             load_consumption=load_consumption,
+            settings=settings,
+            summary=(
+                _summarize_pflow(ss, line_flows, generator_outputs, load_consumption)
+                if converged
+                else None
+            ),
         )
 
     def operating_point(self) -> PflowResult:
@@ -5385,6 +5454,74 @@ def _extract_line_flows(ss: System) -> dict[str, LineFlow]:
         log.warning("line-flow extraction failed: %s", exc)
         return {}
     return flows
+
+
+def _shunt_absorption(ss: System, mva_base: float) -> tuple[float, float]:
+    """The P and Q (MW, MVAr) the in-service bus shunts absorb at the solved
+    voltages: ANDES's own ``v**2 * g`` and ``-v**2 * b`` terms, so a capacitor
+    (``b`` > 0) absorbs a negative Q. ``(0.0, 0.0)`` when there is no shunt or
+    the arrays do not read."""
+    shunt = getattr(ss, "Shunt", None)
+    if shunt is None:
+        return 0.0, 0.0
+    arrays = {
+        name: _safe_list(getattr(shunt, name, None)) for name in ("u", "g", "b", "v")
+    }
+    p_total = q_total = 0.0
+    try:
+        for u, g, b, v in zip(
+            arrays["u"], arrays["g"], arrays["b"], arrays["v"], strict=True
+        ):
+            v2 = float(v) ** 2
+            p = float(u) * v2 * float(g)
+            q = -float(u) * v2 * float(b)
+            if math.isfinite(p) and math.isfinite(q):
+                p_total += p
+                q_total += q
+    except (TypeError, ValueError):
+        return 0.0, 0.0
+    return p_total * mva_base, q_total * mva_base
+
+
+def _summarize_pflow(
+    ss: System,
+    line_flows: dict[str, LineFlow],
+    generator_outputs: dict[str, GeneratorOutput],
+    load_consumption: dict[str, LoadConsumption],
+) -> PflowSummary:
+    """Add up a converged power flow: generation, load, bus shunts, line losses
+    and the slack generators' output (see :class:`PflowSummary`).
+
+    Built from the rows the other extractors made, which already leave out
+    anything switched off, so the totals are the ones the rows on screen add up
+    to. The slack output is read off the rows of the in-service ``Slack``
+    devices; ``None`` when there is none.
+    """
+    try:
+        mva_base = float(getattr(ss.config, "mva", 100.0))
+    except (TypeError, ValueError):
+        mva_base = 100.0
+    shunt_p, shunt_q = _shunt_absorption(ss, mva_base)
+
+    slack = getattr(ss, "Slack", None)
+    slack_u = _safe_list(getattr(slack, "u", None))
+    slack_rows = [
+        generator_outputs[str(idx)]
+        for i, idx in enumerate(_safe_list(getattr(slack, "idx", None)))
+        if str(idx) in generator_outputs and not (i < len(slack_u) and _is_zero(slack_u[i]))
+    ]
+    return PflowSummary(
+        generation_p=sum(g.p for g in generator_outputs.values()),
+        generation_q=sum(g.q for g in generator_outputs.values()),
+        load_p=sum(load.p for load in load_consumption.values()),
+        load_q=sum(load.q for load in load_consumption.values()),
+        shunt_p=shunt_p,
+        shunt_q=shunt_q,
+        loss_p=sum(f.loss for f in line_flows.values()),
+        loss_q=sum(f.q + f.q_to for f in line_flows.values()),
+        slack_p=sum(g.p for g in slack_rows) if slack_rows else None,
+        slack_q=sum(g.q for g in slack_rows) if slack_rows else None,
+    )
 
 
 # ---- EIG helpers (Unit 6) --------------------------------------------------

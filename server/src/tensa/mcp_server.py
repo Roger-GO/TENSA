@@ -158,9 +158,35 @@ def get_alterable_params(session_id: str, model: str) -> Any:
 
 
 @mcp.tool()
-def run_pflow(session_id: str) -> Any:
-    """Solve the power flow. Returns convergence flag and solution summary."""
-    return _api("POST", f"/sessions/{session_id}/pflow", {})
+def run_pflow(
+    session_id: str,
+    tolerance: float | None = None,
+    max_iterations: int | None = None,
+    flat_start: bool | None = None,
+    enforce_q_limits: bool | None = None,
+) -> Any:
+    """Solve the power flow. Returns convergence flag and solution summary.
+
+    Every setting is optional and applies to this run only. tolerance is the
+    mismatch in pu below which the solver stops (1e-12 to 1e-2, default 1e-6);
+    max_iterations is the iteration limit (1 to 1000, default 25); flat_start
+    starts every bus from 1 pu at angle 0; enforce_q_limits holds a generator
+    at its qmin or qmax when its reactive power goes past one. If the solution
+    does not converge, retry with a higher max_iterations, flat_start, or a
+    looser tolerance. A converged result has a summary of generation, load,
+    losses and slack output.
+    """
+    body = {
+        key: value
+        for key, value in (
+            ("tolerance", tolerance),
+            ("max_iterations", max_iterations),
+            ("flat_start", flat_start),
+            ("enforce_q_limits", enforce_q_limits),
+        )
+        if value is not None
+    }
+    return _api("POST", f"/sessions/{session_id}/pflow", body)
 
 
 @mcp.tool()

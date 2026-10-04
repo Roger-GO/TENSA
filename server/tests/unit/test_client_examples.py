@@ -111,6 +111,41 @@ def test_the_mcp_helper_sends_a_json_body_as_json(
     assert topology["body"] == b""
 
 
+def test_the_mcp_power_flow_tool_sends_only_the_settings_it_was_given(
+    recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    from tensa import mcp_server
+
+    base, seen = recorder
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+
+    mcp_server.run_pflow("abc")
+    mcp_server.run_pflow("abc", max_iterations=50, enforce_q_limits=False)
+
+    plain, tuned = seen
+    assert plain["path"] == "/api/sessions/abc/pflow"
+    assert plain["content_type"] == _JSON
+    assert plain["body"] == b"{}"
+    # A setting set to false is a setting; only the ones left out are dropped.
+    assert json.loads(tuned["body"]) == {"max_iterations": 50, "enforce_q_limits": False}
+
+
+def test_the_example_client_passes_power_flow_settings_through(
+    recorder: tuple[str, list[dict[str, Any]]],
+) -> None:
+    base, seen = recorder
+    client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
+    session = client.Session(client.AndesApp(base), "abc")
+
+    session.run_pflow()
+    session.run_pflow(flat_start=True, tolerance=1e-4)
+
+    plain, tuned = seen
+    assert plain["body"] == b"{}"
+    assert json.loads(tuned["body"]) == {"flat_start": True, "tolerance": 1e-4}
+
+
 def _curl_commands(script: Path) -> list[str]:
     """The lines of a shell script that run ``curl``, continuation lines joined."""
     text = script.read_text(encoding="utf-8").replace("\\\n", " ")

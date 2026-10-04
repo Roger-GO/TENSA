@@ -122,8 +122,11 @@ class Session:
         )
 
     # -- analyses ------------------------------------------------------------
-    def run_pflow(self) -> Any:
-        return self._req("POST", "/pflow", {})
+    def run_pflow(self, **settings: Any) -> Any:
+        """Solve the power flow. Optional settings, for this run only: tolerance,
+        max_iterations, flat_start, enforce_q_limits (hold generators at their Q
+        limits)."""
+        return self._req("POST", "/pflow", settings)
 
     def run_tds(self, tf: float, **kwargs: Any) -> Any:
         """Batch time-domain simulation (synchronous; server caps at 300 s wall time)."""

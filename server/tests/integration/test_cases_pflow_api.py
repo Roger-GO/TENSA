@@ -284,6 +284,130 @@ async def test_pflow_generator_outputs_report_the_reactive_limits(
 
 
 @pytest.mark.integration
+async def test_pflow_with_no_body_fields_reports_the_default_settings(
+    app_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    client, _ws = app_workspace
+    sid = await _create_session(client)
+    await client.post(f"/api/sessions/{sid}/case", json={"primary_path": "ieee14.raw"})
+    resp = await client.post(f"/api/sessions/{sid}/pflow", json={})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["settings"] == {
+        "tolerance": 1e-6,
+        "max_iterations": 25,
+        "flat_start": False,
+        "enforce_q_limits": False,
+    }
+
+
+@pytest.mark.integration
+async def test_pflow_settings_in_the_body_apply_to_that_run_only(
+    app_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    client, _ws = app_workspace
+    sid = await _create_session(client)
+    await client.post(f"/api/sessions/{sid}/case", json={"primary_path": "ieee14.raw"})
+    url = f"/api/sessions/{sid}/pflow"
+
+    held = await client.post(
+        url,
+        json={"enforce_q_limits": True, "tolerance": 1e-8, "max_iterations": 40, "flat_start": True},
+    )
+    assert held.status_code == 200, held.text
+    body = held.json()
+    assert body["converged"] is True
+    assert body["settings"] == {
+        "tolerance": 1e-8,
+        "max_iterations": 40,
+        "flat_start": True,
+        "enforce_q_limits": True,
+    }
+    # The generator on bus 2 is held at its 15 MVAr limit instead of solving to 30.
+    assert body["generator_outputs"]["2"]["q"] == pytest.approx(15.0, abs=1e-3)
+
+    free = await client.post(url, json={})
+    assert free.json()["settings"]["enforce_q_limits"] is False
+    assert free.json()["generator_outputs"]["2"]["q"] > 30.0
+    # The job record keeps what the run was asked to do.
+    job = await client.get(f"/api/sessions/{sid}/jobs/{body['job_id']}")
+    assert job.json()["request_summary"]["enforce_q_limits"] is True
+
+
+@pytest.mark.integration
+async def test_pflow_that_does_not_converge_says_so_with_its_settings_and_no_summary(
+    app_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    client, _ws = app_workspace
+    sid = await _create_session(client)
+    await client.post(f"/api/sessions/{sid}/case", json={"primary_path": "ieee14.raw"})
+    url = f"/api/sessions/{sid}/pflow"
+
+    resp = await client.post(url, json={"max_iterations": 1})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["converged"] is False
+    assert body["iterations"] == 2
+    assert body["settings"]["max_iterations"] == 1
+    assert body["summary"] is None
+
+    retry = await client.post(url, json={"max_iterations": 25})
+    assert retry.json()["converged"] is True
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"tolerance": 0},
+        {"tolerance": 0.5},
+        {"max_iterations": 0},
+        {"max_iterations": 100000},
+        {"flat_start": "sometimes"},
+        {"method": "NR"},
+    ],
+)
+async def test_pflow_refuses_a_setting_out_of_range_and_stays_usable(
+    app_workspace: tuple[httpx.AsyncClient, Path], payload: dict[str, object]
+) -> None:
+    client, _ws = app_workspace
+    sid = await _create_session(client)
+    await client.post(f"/api/sessions/{sid}/case", json={"primary_path": "ieee14.raw"})
+    url = f"/api/sessions/{sid}/pflow"
+
+    resp = await client.post(url, json=payload)
+    assert resp.status_code == 422, resp.text
+    # Refused before anything ran: the case is still editable.
+    topology = await client.get(f"/api/sessions/{sid}/topology")
+    assert topology.json()["state"] == "pre-setup"
+    assert (await client.post(url, json={})).status_code == 200
+
+
+@pytest.mark.integration
+async def test_pflow_returns_the_system_summary(
+    app_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    client, _ws = app_workspace
+    sid = await _create_session(client)
+    await client.post(f"/api/sessions/{sid}/case", json={"primary_path": "ieee14.raw"})
+    resp = await client.post(f"/api/sessions/{sid}/pflow", json={})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    s = body["summary"]
+    assert set(s) == {
+        "generation_p", "generation_q", "load_p", "load_q", "shunt_p", "shunt_q",
+        "loss_p", "loss_q", "slack_p", "slack_q",
+    }  # fmt: skip
+    # The books balance, and the totals are the rows' sums.
+    assert s["generation_p"] - s["load_p"] - s["shunt_p"] - s["loss_p"] == pytest.approx(0, abs=1e-3)
+    assert s["generation_q"] - s["load_q"] - s["shunt_q"] - s["loss_q"] == pytest.approx(0, abs=1e-3)
+    assert s["generation_p"] == pytest.approx(
+        sum(g["p"] for g in body["generator_outputs"].values())
+    )
+    assert s["loss_p"] == pytest.approx(sum(f["loss"] for f in body["line_flows"].values()))
+    assert s["slack_p"] == pytest.approx(body["generator_outputs"]["1"]["p"])
+
+
+@pytest.mark.integration
 async def test_pflow_line_rating_is_a_topology_param_and_editable(
     app_workspace: tuple[httpx.AsyncClient, Path],
 ) -> None:
@@ -535,6 +659,9 @@ async def test_operating_point_after_pflow_matches_pflow(
     assert len(body["bus_voltages"]) == 14
     assert body["bus_voltages"] == pf.json()["bus_voltages"]
     assert body["bus_angles"] == pf.json()["bus_angles"]
+    # It ran nothing, so it has no settings or totals of a run to report.
+    assert body["settings"] is None
+    assert body["summary"] is None
 
 
 @pytest.mark.integration

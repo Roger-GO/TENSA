@@ -21,6 +21,8 @@ from tensa.api.schemas import (
     LoadConsumption,
     PflowResult,
     PflowRunRequest,
+    PflowSettings,
+    PflowSummary,
     ProblemDetails,
 )
 from tensa.core.session import (
@@ -91,6 +93,10 @@ def _result_from_payload(payload: dict[str, Any], run_id: str) -> PflowResult:
         line_flows=line_flows,
         generator_outputs=generator_outputs,
         load_consumption=load_consumption,
+        settings=(
+            PflowSettings(**payload["settings"]) if payload.get("settings") else None
+        ),
+        summary=PflowSummary(**payload["summary"]) if payload.get("summary") else None,
     )
 
 
@@ -127,7 +133,9 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
             "description": (
                 "ANDES setup() failed, OR a previous EIG run mutated dae "
                 "state (``TDS.initialized=True``). Either case requires "
-                "POST /reload to recover."
+                "POST /reload to recover. Also a setting outside its range "
+                "(``tolerance``, ``max_iterations``), which needs no reload: "
+                "fix the request."
             ),
         },
     },
@@ -139,10 +147,13 @@ async def run_pflow(
 ) -> PflowResult:
     mgr = _manager(request)
     try:
+        # Only what the request names: the job record shows what the run was asked
+        # to do, and a setting left out is the case's own.
+        settings = body.model_dump(exclude_none=True)
         async with _run_as_job(
-            mgr, session_id, "pflow", request_summary=body.model_dump()
+            mgr, session_id, "pflow", request_summary=settings
         ) as job_id:
-            payload = await mgr.invoke(session_id, "run_pflow", {})
+            payload = await mgr.invoke(session_id, "run_pflow", settings)
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

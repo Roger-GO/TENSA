@@ -68,6 +68,31 @@ async def test_load_then_run_pflow(manager: SessionManager) -> None:
     pf = await manager.invoke(session_id, "run_pflow", {})
     assert pf["converged"] is True
     assert pf["iterations"] <= 10
+    assert pf["settings"]["max_iterations"] == 25
+    assert pf["summary"]["loss_p"] > 0.0
+
+
+@pytest.mark.integration
+async def test_run_pflow_settings_cross_the_pipe_and_a_bad_one_is_refused_by_the_worker(
+    manager: SessionManager,
+) -> None:
+    """The worker holds a setting to its range itself, since a request that did
+    not come through the REST body has not been checked by it."""
+    raw, _ = _ieee14_paths()
+    session_id = await manager.create_session()
+    await manager.invoke(session_id, "load_case", {"path": str(raw)})
+
+    pf = await manager.invoke(
+        session_id, "run_pflow", {"max_iterations": 1, "enforce_q_limits": False}
+    )
+    assert pf["converged"] is False
+    assert pf["settings"]["max_iterations"] == 1
+
+    with pytest.raises(WorkerError) as refused:
+        await manager.invoke(session_id, "run_pflow", {"tolerance": 5.0})
+    assert refused.value.category == "PflowRequestError"
+    assert "tolerance" in refused.value.detail
+    assert manager.is_alive(session_id)
 
 
 @pytest.mark.integration

@@ -52,6 +52,7 @@ from tensa.core.errors import (
     ElementNotFoundError,
     ElementValidationError,
     NoCaseLoadedError,
+    PflowRequestError,
     SeNonConvergentError,
     SePrerequisiteError,
     SessionBusyError,
@@ -92,6 +93,7 @@ _EXPECTED_MAPPING: list[tuple[type[AndesAppError], str]] = [
     (SweepInProgressError, "wait-for-sweep"),
     (DisturbanceValidationError, "none"),
     (TdsRequestError, "none"),
+    (PflowRequestError, "none"),
 ]
 
 
