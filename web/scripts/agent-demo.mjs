@@ -492,7 +492,7 @@ async function main() {
   await caption(page, 'Saving the system to a file', 'Workspace → Save system → wscc9-built.xlsx');
   await page.locator('[data-testid="topbar-menu-workspace-trigger"]').click();
   await sleep(500);
-  await page.locator('[data-testid="save-system-button"]').click();
+  await page.locator('[data-testid="topbar-menu-workspace-save-system"]').click();
   await sleep(700);
   await page.locator('[data-testid="save-filename"]').fill('wscc9-built');
   await sleep(500);
