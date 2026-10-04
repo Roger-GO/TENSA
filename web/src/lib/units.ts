@@ -10,7 +10,11 @@
  * - bus voltage and rotor speed per unit (`'pu'`, the default) or as actual
  *   kV and Hz (`'actual'`), where the base is known: a bus's rated voltage
  *   (`Vn`) and the system frequency. Where it is not, the value stays per
- *   unit and says so, never converted with a guess;
+ *   unit and says so. A `Vn` is a base only when the case gives it: ANDES fills
+ *   in 110 kV for a bus whose case leaves it out or sets it to zero, and the
+ *   topology lists those buses (`buses_without_vn`) so that fill-in is not
+ *   mistaken for one. The frequency is the case's own, or ANDES's default of
+ *   60 Hz where the case sets none (a MATPOWER file has none to set);
  * - powers as the substrate sends them: they are actual already, so the mode
  *   does not touch them.
  */
@@ -75,14 +79,29 @@ export function formatDisplayed(value: number, display: Display, puDecimals: num
 
 /** The bases of one case: what its per-unit values convert to actual with. */
 export interface UnitBases {
-  /** Each bus's rated voltage in kV, keyed by bus idx. A bus with none is absent. */
+  /** Each bus's rated voltage in kV, keyed by bus idx. A bus the case gives none is absent. */
   readonly busKv: Readonly<Record<string, number>>;
   /** System nominal frequency in Hz; `null` when the case does not say. */
   readonly freqHz: number | null;
 }
 
-/** A bus entry's rated voltage in kV (its `Vn`), or `null` when it has none. */
-export function entryBaseKv(bus: Pick<TopologyEntry, 'params'>): number | null {
+/**
+ * The idx (as strings) of the buses whose case gives no rated voltage, so the
+ * `Vn` in their params is ANDES's fill-in and no base. Empty for no topology.
+ */
+export function unratedBusIdx(topology: TopologySummary | null | undefined): ReadonlySet<string> {
+  return new Set((topology?.buses_without_vn ?? []).map(String));
+}
+
+/**
+ * A bus entry's rated voltage in kV (its `Vn`), or `null` when it has none or
+ * is one of the `unrated` buses (see `unratedBusIdx`), whose `Vn` is a fill-in.
+ */
+export function entryBaseKv(
+  bus: Pick<TopologyEntry, 'idx' | 'params'>,
+  unrated?: ReadonlySet<string>,
+): number | null {
+  if (unrated?.has(String(bus.idx))) return null;
   const vn = bus.params?.Vn;
   return isBase(vn) ? vn : null;
 }
@@ -93,9 +112,10 @@ export function entryBaseKv(bus: Pick<TopologyEntry, 'params'>): number | null {
  */
 export function unitBasesOf(topology: TopologySummary | null | undefined): UnitBases | undefined {
   if (!topology) return undefined;
+  const unrated = unratedBusIdx(topology);
   const busKv: Record<string, number> = {};
   for (const bus of topology.buses) {
-    const kv = entryBaseKv(bus);
+    const kv = entryBaseKv(bus, unrated);
     if (kv !== null) busKv[String(bus.idx)] = kv;
   }
   return { busKv, freqHz: isBase(topology.freq_hz) ? topology.freq_hz : null };

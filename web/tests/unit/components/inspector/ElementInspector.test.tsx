@@ -198,6 +198,18 @@ describe('<ElementInspector />', () => {
     expect(screen.getByText('1.0600 pu')).toBeInTheDocument();
   });
 
+  it('keeps a bus voltage in pu under the actual-units display when the case gives the bus no Vn', () => {
+    seedLoadedCase();
+    useUnitsStore.setState({ mode: 'actual' });
+    // The 138 kV in its params is ANDES's fill-in, which the topology lists.
+    mockTopology = { ...TOPOLOGY, buses_without_vn: [2] };
+    useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '2' } });
+    usePflowStore.setState({ lastRun: makePflowResult(), isRunning: false, error: null });
+    render(withQueryClient(<ElementInspector />));
+
+    expect(screen.getByText('1.0450 pu')).toBeInTheDocument();
+  });
+
   it('shows a generator terminal voltage in kV on its bus, under the actual-units display', () => {
     seedLoadedCase();
     useUnitsStore.setState({ mode: 'actual' });

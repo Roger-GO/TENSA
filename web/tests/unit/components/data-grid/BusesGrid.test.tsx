@@ -368,6 +368,24 @@ describe('<BusesGrid /> units', () => {
     expect(cells('1')[V]).toBe('1.060');
   });
 
+  it('keeps every bus per unit when the case gives none a rated voltage, whatever Vn holds', () => {
+    // ANDES fills in 110 kV where a case has no base (MATPOWER case14.m has a
+    // baseKV of 0), and the topology lists those buses.
+    mockTopology = {
+      ...TOPOLOGY,
+      buses: [
+        { idx: 1, name: 'Bus1', kind: 'Bus', params: { Vn: 110 } },
+        { idx: 2, name: 'Bus2', kind: 'Bus', params: { Vn: 110 } },
+      ],
+      buses_without_vn: [1, 2],
+    };
+    useUnitsStore.setState({ mode: 'actual' });
+    usePflowStore.setState({ lastRun: pfConverged() });
+    render(<BusesGrid />);
+    expect(headers().slice(V, VMAX + 1)).toEqual(['V (pu)', 'vmin (pu)', 'vmax (pu)']);
+    expect(cells('1')[V]).toBe('1.060');
+  });
+
   it('exports the angle in degrees and V in the unit it shows', async () => {
     const downloads = captureDownloads();
     try {

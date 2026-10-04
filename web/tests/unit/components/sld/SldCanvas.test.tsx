@@ -278,6 +278,21 @@ describe('buildGraph', () => {
     expect(dataOf('3')).not.toHaveProperty('baseKv');
   });
 
+  it('leaves a bus unstamped when the case gives it no rated voltage, whatever Vn holds', () => {
+    // ANDES fills in 110 kV for such a bus, and the topology lists it.
+    const topology = {
+      ...makeTopology([
+        { idx: 1, name: 'b1', kind: 'Bus', params: { Vn: 230 } },
+        { idx: 2, name: 'b2', kind: 'Bus', params: { Vn: 110 } },
+      ]),
+      buses_without_vn: [2],
+    };
+    const { nodes } = buildGraph(topology, { '1': { x: 0, y: 0 }, '2': { x: 100, y: 0 } });
+    const dataOf = (id: string) => nodes.find((n) => n.id === id)?.data;
+    expect(dataOf('1')?.baseKv).toBe(230);
+    expect(dataOf('2')).not.toHaveProperty('baseKv');
+  });
+
   it('ignores branches missing bus1/bus2 params', () => {
     const topology = makeTopology(
       [bus(1), bus(2)],

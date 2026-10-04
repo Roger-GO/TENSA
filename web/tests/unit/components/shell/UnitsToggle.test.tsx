@@ -55,7 +55,7 @@ describe('<UnitsToggle />', () => {
     );
     expect(screen.getByRole('radio', { name: 'Actual units' })).toHaveAttribute(
       'title',
-      expect.stringMatching(/kV.*Hz/),
+      expect.stringMatching(/kV.*rated voltage.*Hz.*base frequency/),
     );
   });
 });

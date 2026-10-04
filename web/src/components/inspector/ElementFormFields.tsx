@@ -26,7 +26,7 @@ import type { CloneDiffPair, ParamValue, TopologyEntry, TopologyParamMeta } from
 import type { SelectedElement } from '@/store/case';
 import { findTopologyEntry } from '@/lib/topology';
 import { cn } from '@/lib/cn';
-import { entryBaseKv, formatDisplayed, voltageDisplay } from '@/lib/units';
+import { entryBaseKv, formatDisplayed, unratedBusIdx, voltageDisplay } from '@/lib/units';
 import { assessVoltage, busVoltageLimits, voltageStatusText } from '@/components/sld/voltage';
 import { ModifiedFromOriginalDot } from './ModifiedFromOriginalDot';
 
@@ -229,6 +229,8 @@ interface BusReading {
   v: number;
   /** Where `v` stands against the bus's own limits, in words. */
   status: string | null;
+  /** The bus's rated voltage in kV when the case gives one, else `null`. */
+  baseKv: number | null;
 }
 
 /** A parameter that names the element or links it to a bus is not edited in place. */
@@ -310,7 +312,7 @@ function PropertiesBody({
         <>
           <dt className="text-muted-foreground font-mono text-xs">voltage</dt>
           <dd data-testid="inspector-bus-voltage" className="text-foreground font-mono text-xs">
-            {formatDisplayed(busReading.v, voltageDisplay(unitMode, entryBaseKv(entry)), 4)}
+            {formatDisplayed(busReading.v, voltageDisplay(unitMode, busReading.baseKv), 4)}
           </dd>
           {busReading.status !== null ? (
             <>
@@ -498,8 +500,9 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
     return {
       v,
       status: voltageStatusText(assessVoltage(v, busVoltageLimits(entry))),
+      baseKv: entryBaseKv(entry, unratedBusIdx(topology)),
     };
-  }, [selectedElement, entry, pflow]);
+  }, [selectedElement, entry, pflow, topology]);
 
   if (!selectedElement) return null;
 

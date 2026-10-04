@@ -225,6 +225,16 @@ describe('<ElementFormFields />', () => {
       expect(screen.getByTestId('inspector-bus-voltage')).toHaveTextContent('0.8500 pu');
     });
 
+    it('keeps the voltage in pu under the actual-units display when the case gives the bus no Vn', () => {
+      // The 138 in its params is ANDES's fill-in, which the topology lists.
+      mockTopology = { ...topology('committed'), buses_without_vn: [1] };
+      useUnitsStore.setState({ mode: 'actual' });
+      usePflowStore.setState({ lastRun: solved({ '1': 0.85 }) });
+      select('bus', '1');
+      render(withQueryClient(<ElementFormFields />));
+      expect(screen.getByTestId('inspector-bus-voltage')).toHaveTextContent('0.8500 pu');
+    });
+
     it('judges the bus on its own limits, not the 0.95 / 1.05 default', () => {
       mockTopology = topology('committed');
       // 0.93 is below the default band but inside BUS1's own 0.9 to 1.1.

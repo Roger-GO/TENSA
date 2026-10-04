@@ -13,6 +13,7 @@ import {
   radToDeg,
   speedDisplay,
   unitBasesOf,
+  unratedBusIdx,
   voltageDisplay,
 } from '@/lib/units';
 import type { TopologySummary } from '@/api/types';
@@ -116,6 +117,34 @@ describe('unitBasesOf', () => {
     expect(unitBasesOf(topology({ freq_hz: freq }))?.freqHz).toBeNull();
   });
 
+  it('leaves out a bus the case gives no rated voltage, whatever Vn holds for it', () => {
+    // ANDES fills in 110 kV for such a bus, and the topology says so.
+    const bases = unitBasesOf(
+      topology({
+        buses: [
+          { idx: 1, name: 'B1', kind: 'Bus', params: { Vn: 230 } },
+          { idx: 2, name: 'B2', kind: 'Bus', params: { Vn: 110 } },
+          { idx: 'B3', name: 'B3', kind: 'Bus', params: { Vn: 110 } },
+        ],
+        buses_without_vn: [2, 'B3'],
+      }),
+    );
+    expect(bases?.busKv).toEqual({ '1': 230 });
+    expect(busBaseKv(bases, 2)).toBeNull();
+    expect(busBaseKv(bases, 'B3')).toBeNull();
+  });
+
+  it('has no rated voltage for any bus of a case that gives none', () => {
+    const buses = [1, 2, 3].map((idx) => ({
+      idx,
+      name: `B${idx}`,
+      kind: 'Bus',
+      params: { Vn: 110 },
+    }));
+    const bases = unitBasesOf(topology({ buses, buses_without_vn: [1, 2, 3] }));
+    expect(bases?.busKv).toEqual({});
+  });
+
   it('ignores a rated voltage that is not a positive number', () => {
     const bases = unitBasesOf(
       topology({
@@ -131,7 +160,25 @@ describe('unitBasesOf', () => {
 
 describe('entryBaseKv', () => {
   it('reads a bus entry Vn, or null', () => {
-    expect(entryBaseKv({ params: { Vn: 138 } })).toBe(138);
-    expect(entryBaseKv({ params: {} })).toBeNull();
+    expect(entryBaseKv({ idx: 1, params: { Vn: 138 } })).toBe(138);
+    expect(entryBaseKv({ idx: 1, params: {} })).toBeNull();
+  });
+
+  it('is null for a bus whose case gives no Vn, though its params hold one', () => {
+    const unrated = new Set(['2']);
+    expect(entryBaseKv({ idx: 2, params: { Vn: 110 } }, unrated)).toBeNull();
+    expect(entryBaseKv({ idx: 3, params: { Vn: 110 } }, unrated)).toBe(110);
+  });
+});
+
+describe('unratedBusIdx', () => {
+  it('lists the idx of the buses the case gives no rated voltage, as strings', () => {
+    expect(unratedBusIdx(topology({ buses_without_vn: [2, 'B3'] }))).toEqual(new Set(['2', 'B3']));
+  });
+
+  it('is empty when the topology lists none, or is missing', () => {
+    expect(unratedBusIdx(topology()).size).toBe(0);
+    expect(unratedBusIdx(null).size).toBe(0);
+    expect(unratedBusIdx(undefined).size).toBe(0);
   });
 });

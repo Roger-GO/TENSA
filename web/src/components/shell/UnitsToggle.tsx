@@ -8,8 +8,12 @@ import { cn } from '@/lib/cn';
  * in the Buses grid, on the diagram, in the Inspector and on the plots.
  * Angles are degrees either way, and powers are MW / MVAr either way.
  *
- * A quantity whose base is unknown (a bus with no rated voltage, a case
- * with no system frequency) stays per unit and is labelled so.
+ * A voltage whose base the case does not give (a bus with no rated voltage,
+ * which ANDES fills in as 110 kV and the server lists, so the fill-in is not
+ * shown as kV) stays per unit and is labelled so, as does a speed when the case
+ * has no usable frequency. The frequency is the case's own (a RAW header, or
+ * the `_config` of an xlsx or json file) or else ANDES's default of 60 Hz,
+ * which is what a MATPOWER case reads in the actual mode.
  */
 
 export interface UnitsToggleProps {
@@ -43,7 +47,7 @@ export function UnitsToggle({ className }: UnitsToggleProps) {
       <ToggleGroupItem
         value="actual"
         aria-label="Actual units"
-        title="Actual units: bus voltage in kV and generator speed in Hz, where the case gives the base"
+        title="Actual units: bus voltage in kV where the case gives its rated voltage, generator speed in Hz of the case's base frequency (60 when the case sets none)"
       >
         Actual
       </ToggleGroupItem>
