@@ -195,6 +195,24 @@ def test_openapi_text_makes_no_promise_about_the_future(
     assert not found, "stale planning text in the API schema:\n" + "\n".join(found)
 
 
+# A pointer into the planning documents, which are not in the repository: a "Unit 5b" or
+# "KTD-20" tag, a "v3.1 plan", or a path under ``docs/plans``.
+_PLAN_PROVENANCE = re.compile(r"\bKTD-\d+|\bUnit\s+\d+|\bv\d+\.\d+\s+plan\b|docs/plans/")
+
+
+def test_openapi_text_carries_no_plan_provenance(openapi_schema: dict[str, Any]) -> None:
+    """The schema is public output (``/openapi.json``, the generated web types, the
+    docs a client reads): a tag that points into the planning documents tells its
+    reader nothing."""
+    found = [
+        f"{where}: {m.group(0)!r} in {text[:80]!r}"
+        for where, text in _strings(openapi_schema)
+        for m in [_PLAN_PROVENANCE.search(text)]
+        if m
+    ]
+    assert not found, "plan provenance in the API schema:\n" + "\n".join(found)
+
+
 def test_openapi_text_only_names_routes_that_exist(openapi_schema: dict[str, Any]) -> None:
     def normalize(path: str) -> str:
         path = re.sub(r"\{[^}]*\}", "{}", path)

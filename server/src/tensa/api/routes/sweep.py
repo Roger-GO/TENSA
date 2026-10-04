@@ -101,7 +101,7 @@ class StartSweepResponse(BaseModel):
     job_id: str | None = Field(
         default=None,
         description=(
-            "Job-registry id mirroring this sweep (v3.1 Unit 5c). Additive "
+            "Job-registry id mirroring this sweep. Additive "
             "and IDENTICAL to ``sweep_id`` — the two fields alias the same "
             "value, with ``sweep_id`` preserved for backward compatibility. "
             "``GET /sessions/{id}/jobs/{job_id}`` returns the matching "
@@ -117,7 +117,7 @@ class StartSweepResponse(BaseModel):
     "/sessions/{session_id}/sweep",
     openapi_extra={"x-tensa-gui-location": "sweep-dialog"},
     operation_id="startSweep",
-    summary="Start a sensitivity sweep — Unit 18.",
+    summary="Start a sensitivity sweep.",
     response_model=StartSweepResponse,
     status_code=status.HTTP_202_ACCEPTED,
     responses={

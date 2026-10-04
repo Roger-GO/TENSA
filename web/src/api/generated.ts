@@ -135,9 +135,9 @@ export interface paths {
         /**
          * Compute connected-component island count + per-island bus membership.
          * @description Run :meth:`ss.connectivity` on the loaded System and return the
-         *     island summary — Unit 17.
+         *     island summary.
          *
-         *     Per the v2.0 plan's Unit 17 auto-fix, this is **post-run only**.
+         *     This is **post-run only**.
          *     The substrate does not extend the streaming pipeline's
          *     ``VAR_GROUPS`` schema with per-frame island metadata; the UI calls
          *     this endpoint manually (e.g., after a TDS run completes) via the
@@ -587,8 +587,8 @@ export interface paths {
          *     and a ``Content-Disposition`` header that suggests a sensible
          *     filename.
          *
-         *     Snapshots (dill payloads) are explicitly NOT in the bundle per
-         *     KTD-4 + KTD-5 — they're version-locked and undermine portability.
+         *     Snapshots (dill payloads) are explicitly NOT in the bundle: they're
+         *     version-locked and undermine portability.
          */
         post: operations["exportBundle"];
         delete?: never;
@@ -608,7 +608,7 @@ export interface paths {
         put?: never;
         /**
          * Save the current operating point as a named snapshot.
-         * @description Save snapshot endpoint — Unit 7.
+         * @description Save snapshot endpoint.
          *
          *     Writes sidecar JSON metadata under
          *     ``<workspace>/snapshots/<case_basename>/<name>.json`` and, when
@@ -633,7 +633,7 @@ export interface paths {
         put?: never;
         /**
          * Restore a previously-saved snapshot onto the session.
-         * @description Restore snapshot endpoint — Unit 7.
+         * @description Restore snapshot endpoint.
          *
          *     By default reloads the case, replays the snapshot's
          *     ``disturbance_log`` from the sidecar JSON, and re-runs ``setup`` +
@@ -685,7 +685,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a snapshot by name.
-         * @description Delete snapshot endpoint — Unit 7.
+         * @description Delete snapshot endpoint.
          */
         delete: operations["deleteSnapshot"];
         options?: never;
@@ -782,9 +782,8 @@ export interface paths {
          * Per-mode participation factor row for the given mode index.
          * @description Slice ``EIG.pfactors[mode_idx]`` and return the per-state row.
          *
-         *     Substrate-side slice — there is no per-mode lazy API in ANDES (per
-         *     Unit 1a spike). The full ``pfactors`` matrix is held in memory
-         *     after EIG.run.
+         *     Substrate-side slice: there is no per-mode lazy API in ANDES. The
+         *     full ``pfactors`` matrix is held in memory after EIG.run.
          */
         get: operations["getEigParticipation"];
         put?: never;
@@ -1090,7 +1089,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Start a sensitivity sweep — Unit 18.
+         * Start a sensitivity sweep.
          * @description Start a sweep. Returns immediately; the WS channel emits progress.
          *
          *     Validates the parameter kind locally (so a bad request doesn't
@@ -1114,14 +1113,14 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List jobs for a session (v3.1 Unit 5a).
+         * List jobs for a session.
          * @description Return the session's jobs, newest-last, optionally filtered.
          *
          *     ``kind`` filters by routine kind; ``status`` (the wire query param) filters
          *     by lifecycle state — aliased to the local ``status_filter`` so it doesn't
          *     shadow the imported ``status`` module. Both default to ``None`` (no
          *     filter). The list spans the per-session registry AND the manager-wide
-         *     global registry so session-mutating jobs (KTD-20) surface here too.
+         *     global registry so session-mutating jobs surface here too.
          */
         get: operations["listJobs"];
         put?: never;
@@ -1140,14 +1139,14 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Fetch one job by id (v3.1 Unit 5a).
+         * Fetch one job by id.
          * @description Return one job record. 404 when the session or job id is unknown.
          */
         get: operations["getJob"];
         put?: never;
         post?: never;
         /**
-         * Cancel a job (v3.1 Unit 5a).
+         * Cancel a job.
          * @description Cancel a job.
          *
          *     - ``can_cancel == true`` → ``mark_cancelled`` + broadcast + 200 with the
@@ -1222,7 +1221,7 @@ export interface components {
             accepted: components["schemas"]["DisturbanceAck"][];
             /**
              * Job Id
-             * @description Job-registry id mirroring the disturbance-commit routine (v3.1 Unit 5b, kind ``disturbance-commit``). One job covers the whole batch; ``null`` on legacy responses.
+             * @description Job-registry id mirroring the disturbance-commit routine (kind ``disturbance-commit``). One job covers the whole batch; ``null`` on legacy responses.
              */
             job_id?: string | null;
         };
@@ -1260,10 +1259,10 @@ export interface components {
          *     coerces both via string-equality so the API surface stays uniform.
          *
          *     ``Ta`` / ``Tv`` (optional) are the angle / voltage low-pass filter
-         *     time constants in seconds. Defaults match the Unit 14 spike's
-         *     empirical sweet spot (0.05 s) — small enough to track a 60 Hz
-         *     swing, large enough to suppress integration noise on stiff cases.
-         *     ANDES's own defaults are 0.1 s.
+         *     time constants in seconds. The defaults are an empirical sweet spot
+         *     (0.05 s): small enough to track a 60 Hz swing, large enough to
+         *     suppress integration noise on stiff cases. ANDES's own defaults are
+         *     0.1 s.
          */
         AddPmuRequest: {
             /**
@@ -1329,7 +1328,7 @@ export interface components {
             tkey: string;
             /**
              * Mode
-             * @description Application mode. ``1`` (exact) applies values at exact step times. ``2`` (interpolated) raises NotImplementedError in ANDES (verified per Unit 1a spike) — the substrate rejects mode=2 with 422; default to mode=1.
+             * @description Application mode. ``1`` (exact) applies values at exact step times. ``2`` (interpolated) raises NotImplementedError in ANDES, so the substrate rejects mode=2 with 422; default to mode=1.
              * @default 1
              */
             mode: number;
@@ -1618,7 +1617,7 @@ export interface components {
             disturbances_replayed: number;
             /**
              * Job Id
-             * @description Job-registry id mirroring the bundle-import routine (v3.1 Unit 5b, kind ``bundle-import``). Recorded in the manager-wide global registry (KTD-20) so it survives the session being replaced on a committed import. Present on both the ``committed`` (200) body and the ``plan`` (409) body. ``null`` on legacy responses.
+             * @description Job-registry id mirroring the bundle-import routine (kind ``bundle-import``). Recorded in the manager-wide global registry so it survives the session being replaced on a committed import. Present on both the ``committed`` (200) body and the ``plan`` (409) body. ``null`` on legacy responses.
              */
             job_id?: string | null;
         };
@@ -1740,7 +1739,7 @@ export interface components {
         };
         /**
          * CloneDiffPair
-         * @description One changed param's original-vs-current file values (Unit 23).
+         * @description One changed param's original-vs-current file values.
          */
         CloneDiffPair: {
             /**
@@ -1827,7 +1826,7 @@ export interface components {
             redo_depth: number;
             /**
              * Job Id
-             * @description Job-registry id mirroring the clone routine (v3.1 Unit 5b, kinds ``clone-edit`` / ``clone-undo`` / ``clone-redo``). ``null`` on legacy responses.
+             * @description Job-registry id mirroring the clone routine (kinds ``clone-edit`` / ``clone-undo`` / ``clone-redo``). ``null`` on legacy responses.
              */
             job_id?: string | null;
         };
@@ -1929,7 +1928,7 @@ export interface components {
         };
         /**
          * ConnectivityResponse
-         * @description Wire shape of ``GET /sessions/{id}/connectivity`` (Unit 17).
+         * @description Wire shape of ``GET /sessions/{id}/connectivity``.
          *
          *     Mirrors :class:`tensa.core.connectivity_result.ConnectivityResult`
          *     1:1. Bus idxes are stringified for stable JSON keying — case-file
@@ -2022,7 +2021,7 @@ export interface components {
             mode: string;
             /**
              * Job Id
-             * @description Job-registry id mirroring this CPF routine (v3.1 Unit 5b, kind ``cpf`` for the PV sweep, ``cpf-qv`` for the QV curve). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
+             * @description Job-registry id mirroring this CPF routine (kind ``cpf`` for the PV sweep, ``cpf-qv`` for the QV curve). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
              */
             job_id?: string | null;
         };
@@ -2169,7 +2168,7 @@ export interface components {
             tds_initialized: boolean;
             /**
              * Job Id
-             * @description Job-registry id mirroring this EIG routine (v3.1 Unit 5b, kind ``eig``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
+             * @description Job-registry id mirroring this EIG routine (kind ``eig``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
              */
             job_id?: string | null;
         };
@@ -2197,7 +2196,7 @@ export interface components {
             element: components["schemas"]["TopologyEntry"];
             /**
              * Job Id
-             * @description Job-registry id mirroring the element-add routine (v3.1 Unit 5b, kind ``element-add``). ``null`` on legacy responses.
+             * @description Job-registry id mirroring the element-add routine (kind ``element-add``). ``null`` on legacy responses.
              */
             job_id?: string | null;
         };
@@ -2281,9 +2280,9 @@ export interface components {
          * JobRecordSchema
          * @description HTTP-visible shape of a ``_JobRegistry`` record.
          *
-         *     Returned by ``GET /sessions/{id}/jobs`` and ``GET /sessions/{id}/jobs/{job_id}``
-         *     in Unit 5a. Every routine response from Unit 5b also embeds a ``job_id``
-         *     that resolves to one of these records.
+         *     Returned by ``GET /sessions/{id}/jobs`` and ``GET /sessions/{id}/jobs/{job_id}``.
+         *     Every routine response also embeds a ``job_id`` that resolves to one of
+         *     these records.
          */
         JobRecordSchema: {
             /**
@@ -2340,11 +2339,11 @@ export interface components {
              * @description Opaque reference to the job's result, populated on ``done``. For TDS this is the ``run_id``; for sweep, the ``sweep_id``; for clone edits, the new param value reference.
              */
             result_ref?: string | null;
-            /** @description Populated on ``failed`` with the full ProblemDetails envelope (includes the typed ``recovery`` axes from KTD-3). Drives the Activity panel's per-job ``<ProblemDetailsErrorSurface>``. */
+            /** @description Populated on ``failed`` with the full ProblemDetails envelope (includes the typed ``recovery`` axes). Drives the Activity panel's per-job ``<ProblemDetailsErrorSurface>``. */
             problem?: components["schemas"]["ProblemDetails"] | null;
             /**
              * Repeated Count
-             * @description Number of identical-signature failures that coalesced into this record (KTD-19 sticky-first semantics). For ``done`` and in-flight jobs this is always ``0``.
+             * @description Number of identical-signature failures that coalesced into this record, which keeps the first of them. For ``done`` and in-flight jobs this is always ``0``.
              * @default 0
              */
             repeated_count: number;
@@ -2551,7 +2550,7 @@ export interface components {
             };
             /**
              * Job Id
-             * @description Job-registry id mirroring this routine invocation (v3.1 Unit 5b). Additive: ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``pflow``). ``null`` only on legacy responses synthesised outside the job lifecycle.
+             * @description Job-registry id mirroring this routine invocation. Additive: ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``pflow``). ``null`` only on legacy responses synthesised outside the job lifecycle.
              */
             job_id?: string | null;
         };
@@ -2592,7 +2591,7 @@ export interface components {
              * @description URI reference that identifies the specific occurrence of the problem.
              */
             instance?: string | null;
-            /** @description Optional recovery call-to-action describing how the client can resolve the problem (e.g., load a case, run power flow, retry). ``None`` means no recovery action is offered. Populated by the shared error mapper (Unit 4a) from the error's recovery kind. */
+            /** @description Optional recovery call-to-action describing how the client can resolve the problem (e.g., load a case, run power flow, retry). ``None`` means no recovery action is offered. Populated by the shared error mapper from the error's recovery kind. */
             recovery?: components["schemas"]["RecoveryDescriptor"] | null;
         } & {
             [key: string]: unknown;
@@ -2720,7 +2719,7 @@ export interface components {
             metadata: components["schemas"]["SnapshotMetadataModel"];
             /**
              * Job Id
-             * @description Job-registry id mirroring the snapshot-restore routine (v3.1 Unit 5b, kind ``snapshot-restore``). Recorded in the manager-wide global registry (KTD-20) so it survives the session being replaced, yet still surfaces via ``GET /sessions/{id}/jobs/{job_id}``. ``null`` on legacy responses.
+             * @description Job-registry id mirroring the snapshot-restore routine (kind ``snapshot-restore``). Recorded in the manager-wide global registry so it survives the session being replaced, yet still surfaces via ``GET /sessions/{id}/jobs/{job_id}``. ``null`` on legacy responses.
              */
             job_id?: string | null;
         };
@@ -2769,7 +2768,7 @@ export interface components {
             bytes_written: number;
             /**
              * Job Id
-             * @description Job-registry id mirroring the case-save routine (v3.1 Unit 5b, kind ``case-save``). ``null`` on legacy responses.
+             * @description Job-registry id mirroring the case-save routine (kind ``case-save``). ``null`` on legacy responses.
              */
             job_id?: string | null;
         };
@@ -2820,7 +2819,7 @@ export interface components {
             metadata_bytes: number;
             /**
              * Job Id
-             * @description Job-registry id mirroring the snapshot-save routine (v3.1 Unit 5b, kind ``snapshot-save``). ``null`` on legacy responses.
+             * @description Job-registry id mirroring the snapshot-save routine (kind ``snapshot-save``). ``null`` on legacy responses.
              */
             job_id?: string | null;
         };
@@ -2851,7 +2850,7 @@ export interface components {
             count: number;
             /**
              * Job Id
-             * @description Job-registry id mirroring the SE measurement-generation routine (v3.1 Unit 5b, kind ``se-measurements``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
+             * @description Job-registry id mirroring the SE measurement-generation routine (kind ``se-measurements``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
              */
             job_id?: string | null;
         };
@@ -2875,7 +2874,7 @@ export interface components {
             iterations: number;
             /**
              * Mismatch
-             * @description Final WLS objective ``J = sum(w * r^2)``. Smaller is better; the chi-squared test on ``J`` (not surfaced yet — Unit 14+) flags whether the measurement set fits the model at a given confidence level.
+             * @description Final WLS objective ``J = sum(w * r^2)``. Smaller is better; the chi-squared test on ``J`` (not surfaced yet) flags whether the measurement set fits the model at a given confidence level.
              */
             mismatch: number;
             /**
@@ -2895,7 +2894,7 @@ export interface components {
             flagged_indices: number[];
             /**
              * Job Id
-             * @description Job-registry id mirroring the SE run routine (v3.1 Unit 5b, kind ``se``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
+             * @description Job-registry id mirroring the SE run routine (kind ``se``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
              */
             job_id?: string | null;
         };
@@ -3086,7 +3085,7 @@ export interface components {
             total: number;
             /**
              * Job Id
-             * @description Job-registry id mirroring this sweep (v3.1 Unit 5c). Additive and IDENTICAL to ``sweep_id`` — the two fields alias the same value, with ``sweep_id`` preserved for backward compatibility. ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``sweep``).
+             * @description Job-registry id mirroring this sweep. Additive and IDENTICAL to ``sweep_id`` — the two fields alias the same value, with ``sweep_id`` preserved for backward compatibility. ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``sweep``).
              */
             job_id?: string | null;
         };
@@ -3212,7 +3211,7 @@ export interface components {
             callpert_count: number;
             /**
              * Job Id
-             * @description Job-registry id mirroring this TDS run (v3.1 Unit 5c). Additive and IDENTICAL to ``run_id`` — the two fields alias the same value, with ``run_id`` preserved for backward compatibility. ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``tds-batch``). ``null`` only on legacy responses synthesised outside the job lifecycle.
+             * @description Job-registry id mirroring this TDS run. Additive and IDENTICAL to ``run_id`` — the two fields alias the same value, with ``run_id`` preserved for backward compatibility. ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``tds-batch``). ``null`` only on legacy responses synthesised outside the job lifecycle.
              */
             job_id?: string | null;
         };
@@ -3241,7 +3240,7 @@ export interface components {
             vars?: ("bus_v" | "gen_state" | "line_flow")[] | null;
             /**
              * Integrator
-             * @description DAE integrator (Unit 16). ``"trapezoidal"`` (default) maps to ANDES's fixed-step Implicit Trapezoidal Method (``ss.TDS.config.method = "trapezoid"``). ``"qndf"`` selects the variable-order, variable-step QNDF (NDF) method and forces ``fixt = 0`` so ANDES enables LTE-driven step control. Combine ``integrator="qndf"`` with the Auto preset (``rtol=1e-3, atol=1e-6, max_step=0.05``) by passing the values via ``tds_config_overrides``.
+             * @description DAE integrator. ``"trapezoidal"`` (default) maps to ANDES's fixed-step Implicit Trapezoidal Method (``ss.TDS.config.method = "trapezoid"``). ``"qndf"`` selects the variable-order, variable-step QNDF (NDF) method and forces ``fixt = 0`` so ANDES enables LTE-driven step control. Combine ``integrator="qndf"`` with the Auto preset (``rtol=1e-3, atol=1e-6, max_step=0.05``) by passing the values via ``tds_config_overrides``.
              * @default trapezoidal
              * @enum {string}
              */
@@ -3315,7 +3314,7 @@ export interface components {
             };
             /**
              * Job Id
-             * @description Job-registry id mirroring the mutation that produced this entry (v3.1 Unit 5b). Populated only when this ``TopologyEntry`` is the top-level response of an edit / PMU-add / profile-add routine; ``null`` for nested entries inside a ``TopologySummary``.
+             * @description Job-registry id mirroring the mutation that produced this entry. Populated only when this ``TopologyEntry`` is the top-level response of an edit / PMU-add / profile-add routine; ``null`` for nested entries inside a ``TopologySummary``.
              */
             job_id?: string | null;
         };
@@ -3350,7 +3349,7 @@ export interface components {
         /**
          * TopologySchema
          * @description Per-model parameter metadata, used by the web client's polymorphic
-         *     form generator (Unit 6).
+         *     form generator.
          *
          *     Returned from ``GET /api/topology/schema``. Mirrors the wrapper-side
          *     ``_PARAMS_BY_MODEL`` table — adding a new model on the server
@@ -3431,7 +3430,7 @@ export interface components {
             events?: components["schemas"]["CaseEvent"][];
             /**
              * Job Id
-             * @description Job-registry id mirroring the routine that produced this topology snapshot (v3.1 Unit 5b) — case load / reload, element delete / undo, or blank-system create. ``null`` when the summary is a plain read (``GET /topology``).
+             * @description Job-registry id mirroring the routine that produced this topology snapshot: case load / reload, element delete / undo, or blank-system create. ``null`` when the summary is a plain read (``GET /topology``).
              */
             job_id?: string | null;
         };
@@ -3452,7 +3451,7 @@ export interface components {
             bytes_written: number;
             /**
              * Job Id
-             * @description Job-registry id mirroring the profile-upload routine (v3.1 Unit 5b, kind ``profile-upload``). ``null`` on legacy responses.
+             * @description Job-registry id mirroring the profile-upload routine (kind ``profile-upload``). ``null`` on legacy responses.
              */
             job_id?: string | null;
         };
@@ -5076,7 +5075,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Bundle stream. Body is a ``.zip`` containing case + disturbances.json + sim_params.json + results.csv + manifest.json (each optional except case + manifest). Per KTD-5; snapshots are NOT included. */
+            /** @description Bundle stream. Body is a ``.zip`` containing case + disturbances.json + sim_params.json + results.csv + manifest.json (each optional except case + manifest). Snapshots are NOT included. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5554,7 +5553,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description MATLAB v5 ``.mat`` file containing ``As`` (state matrix) and ``mu`` (eigenvalue vector). Consumed by the UI's MAT exporter (Unit 2). */
+            /** @description MATLAB v5 ``.mat`` file containing ``As`` (state matrix) and ``mu`` (eigenvalue vector). Consumed by the UI's MAT exporter. */
             200: {
                 headers: {
                     [name: string]: unknown;

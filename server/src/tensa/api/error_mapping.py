@@ -1,11 +1,10 @@
 """Shared worker-error → HTTP mapping + recovery-descriptor plumbing.
 
-Unit 4a of the v3.1 UX overhaul. This module is the single place the API
-layer translates a substrate :class:`~tensa.core.session.WorkerError`
-(which crosses the worker Pipe carrying only a *category string*, not the
-live exception type) into an :class:`fastapi.HTTPException`, and attaches the
-typed :class:`~tensa.api.schemas.RecoveryDescriptor` call-to-action the UI
-keys off.
+This module is the single place the API layer translates a substrate
+:class:`~tensa.core.session.WorkerError` (which crosses the worker Pipe
+carrying only a *category string*, not the live exception type) into an
+:class:`fastapi.HTTPException`, and attaches the typed
+:class:`~tensa.api.schemas.RecoveryDescriptor` call-to-action the UI keys off.
 
 Two public entry points:
 
@@ -14,10 +13,8 @@ Two public entry points:
   ``RecoveryKind``; otherwise ``None`` (so both ``recovery_kind="none"`` and a
   missing/``None`` attr render without a CTA).
 - :func:`map_worker_error` — consolidates the 13 per-route worker-error
-  helpers (audited during Unit 4a in the now-removed ``_error_audit.md``;
-  the surviving contract lives in the v3.1 plan, ``docs/plans/
-  2026-05-29-001-feat-v3-ux-overhaul-plan.md`` §"Unit 4") into one mapping,
-  preserving each documented status + extras shape and attaching ``recovery``.
+  helpers into one mapping, preserving each documented status + extras shape
+  and attaching ``recovery``.
 
 Design: the worker's wire ``category`` is
 almost always the ``AndesAppError`` subclass ``__name__`` (e.g.
@@ -26,7 +23,7 @@ almost always the ``AndesAppError`` subclass ``__name__`` (e.g.
 for :class:`DisturbanceCommitError`) and a third is the
 ``"BundleValidationError:<sub>"`` composite. We resolve ``category`` →
 ``AndesAppError`` subclass via a registry built over the FULL subclass
-hierarchy (the same module set the Unit 3 reflection test imports), then read
+hierarchy (the same module set the reflection test imports), then read
 ``recovery_kind`` off the class — the class attribute is the single source of
 truth. Status comes from an explicit ``category -> status`` table; the class
 attribute drives recovery so the two never drift.
@@ -91,9 +88,7 @@ _WIRE_CATEGORY_ALIASES: dict[str, str] = {
 
 
 # Canonical ``category -> HTTP status``. This is the CONTRACT distilled from
-# the 13 per-route audits (originally ``_error_audit.md``, removed once the
-# migration landed; see the v3.1 plan §"Unit 4"); it captures the *dominant*
-# status for each category. Where a single route overrides the canonical
+# the 13 per-route audits; it captures the *dominant* status for each category. Where a single route overrides the canonical
 # status (pmu ``SetupFailedError`` -> 409, profiles ``SetupFailedError`` ->
 # 500, snapshot ``SetupFailedError`` -> 422, bundle-export wide 422 bucket),
 # Unit 4b reconciles those at the call site (e.g. via per-route ``status``
@@ -186,9 +181,8 @@ def map_worker_error(
 ) -> HTTPException:
     """Map a :class:`WorkerError` to an :class:`HTTPException`.
 
-    Consolidates the per-route worker-error helpers (audited during Unit 4a
-    in the now-removed ``_error_audit.md``): looks up the canonical HTTP
-    status for the wire
+    Consolidates the per-route worker-error helpers: looks up the canonical
+    HTTP status for the wire
     ``category``, attaches the recovery descriptor read off the resolved error
     class, and spreads any ``extras`` (e.g. the DELETE-elements
     ``dependents`` / ``total``) into the detail dict so they ride along the

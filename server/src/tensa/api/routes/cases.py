@@ -36,7 +36,7 @@ router = APIRouter()
 
 
 class ConnectivityResponse(BaseModel):
-    """Wire shape of ``GET /sessions/{id}/connectivity`` (Unit 17).
+    """Wire shape of ``GET /sessions/{id}/connectivity``.
 
     Mirrors :class:`tensa.core.connectivity_result.ConnectivityResult`
     1:1. Bus idxes are stringified for stable JSON keying — case-file
@@ -339,9 +339,9 @@ async def get_connectivity(
     request: Request,
 ) -> ConnectivityResponse:
     """Run :meth:`ss.connectivity` on the loaded System and return the
-    island summary — Unit 17.
+    island summary.
 
-    Per the v2.0 plan's Unit 17 auto-fix, this is **post-run only**.
+    This is **post-run only**.
     The substrate does not extend the streaming pipeline's
     ``VAR_GROUPS`` schema with per-frame island metadata; the UI calls
     this endpoint manually (e.g., after a TDS run completes) via the

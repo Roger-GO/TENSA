@@ -98,7 +98,7 @@ class SeMeasurementsGeneratedResponse(BaseModel):
         default=None,
         description=(
             "Job-registry id mirroring the SE measurement-generation routine "
-            "(v3.1 Unit 5b, kind ``se-measurements``). "
+            "(kind ``se-measurements``). "
             "``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; "
             "``null`` on legacy responses."
         ),
@@ -137,7 +137,7 @@ class SeResultResponse(BaseModel):
         description=(
             "Final WLS objective ``J = sum(w * r^2)``. Smaller is "
             "better; the chi-squared test on ``J`` (not surfaced "
-            "yet — Unit 14+) flags whether the measurement set fits "
+            "yet) flags whether the measurement set fits "
             "the model at a given confidence level."
         ),
     )
@@ -171,7 +171,7 @@ class SeResultResponse(BaseModel):
     job_id: str | None = Field(
         default=None,
         description=(
-            "Job-registry id mirroring the SE run routine (v3.1 Unit 5b, kind "
+            "Job-registry id mirroring the SE run routine (kind "
             "``se``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching "
             "record; ``null`` on legacy responses."
         ),

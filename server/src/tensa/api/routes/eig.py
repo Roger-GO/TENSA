@@ -135,7 +135,7 @@ class EigResultResponse(BaseModel):
     job_id: str | None = Field(
         default=None,
         description=(
-            "Job-registry id mirroring this EIG routine (v3.1 Unit 5b, kind "
+            "Job-registry id mirroring this EIG routine (kind "
             "``eig``). ``GET /sessions/{id}/jobs/{job_id}`` returns the "
             "matching record; ``null`` on legacy responses."
         ),
@@ -311,9 +311,8 @@ async def get_eig_participation(
 ) -> EigParticipationResponse:
     """Slice ``EIG.pfactors[mode_idx]`` and return the per-state row.
 
-    Substrate-side slice — there is no per-mode lazy API in ANDES (per
-    Unit 1a spike). The full ``pfactors`` matrix is held in memory
-    after EIG.run.
+    Substrate-side slice: there is no per-mode lazy API in ANDES. The
+    full ``pfactors`` matrix is held in memory after EIG.run.
     """
     mgr = _manager(request)
     try:
@@ -363,8 +362,7 @@ async def get_eig_participation(
             "content": {"application/octet-stream": {}},
             "description": (
                 "MATLAB v5 ``.mat`` file containing ``As`` (state matrix) and "
-                "``mu`` (eigenvalue vector). Consumed by the UI's MAT exporter "
-                "(Unit 2)."
+                "``mu`` (eigenvalue vector). Consumed by the UI's MAT exporter."
             ),
         },
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},

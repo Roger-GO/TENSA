@@ -148,8 +148,8 @@ class AddProfileRequest(BaseModel):
         description=(
             "Application mode. ``1`` (exact) applies values at exact "
             "step times. ``2`` (interpolated) raises NotImplementedError "
-            "in ANDES (verified per Unit 1a spike) — the substrate "
-            "rejects mode=2 with 422; default to mode=1."
+            "in ANDES, so the substrate rejects mode=2 with 422; default "
+            "to mode=1."
         ),
         ge=1,
         le=2,
@@ -180,8 +180,8 @@ class UploadProfileResponse(BaseModel):
     job_id: str | None = Field(
         default=None,
         description=(
-            "Job-registry id mirroring the profile-upload routine (v3.1 Unit "
-            "5b, kind ``profile-upload``). ``null`` on legacy responses."
+            "Job-registry id mirroring the profile-upload routine (kind "
+            "``profile-upload``). ``null`` on legacy responses."
         ),
     )
 

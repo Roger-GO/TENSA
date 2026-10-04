@@ -1,5 +1,5 @@
 /**
- * Report dialog slice (Unit 4 of the v2.0 plan).
+ * Report dialog slice.
  *
  * Open / closed state for ``ReportDialog``, plus the routine tab the user last
  * had open. It lives in the store, not in the dialog's module, so the command

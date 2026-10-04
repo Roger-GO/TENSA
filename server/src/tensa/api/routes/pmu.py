@@ -64,10 +64,10 @@ class AddPmuRequest(BaseModel):
     coerces both via string-equality so the API surface stays uniform.
 
     ``Ta`` / ``Tv`` (optional) are the angle / voltage low-pass filter
-    time constants in seconds. Defaults match the Unit 14 spike's
-    empirical sweet spot (0.05 s) — small enough to track a 60 Hz
-    swing, large enough to suppress integration noise on stiff cases.
-    ANDES's own defaults are 0.1 s.
+    time constants in seconds. The defaults are an empirical sweet spot
+    (0.05 s): small enough to track a 60 Hz swing, large enough to
+    suppress integration noise on stiff cases. ANDES's own defaults are
+    0.1 s.
     """
 
     model_config = ConfigDict(extra="forbid")

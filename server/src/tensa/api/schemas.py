@@ -121,7 +121,7 @@ class ProblemDetails(BaseModel):
             "Optional recovery call-to-action describing how the client can "
             "resolve the problem (e.g., load a case, run power flow, retry). "
             "``None`` means no recovery action is offered. Populated by the "
-            "shared error mapper (Unit 4a) from the error's recovery kind."
+            "shared error mapper from the error's recovery kind."
         ),
     )
 
@@ -138,9 +138,9 @@ JobStatusSchema = JobStatusLiteral
 class JobRecordSchema(BaseModel):
     """HTTP-visible shape of a ``_JobRegistry`` record.
 
-    Returned by ``GET /sessions/{id}/jobs`` and ``GET /sessions/{id}/jobs/{job_id}``
-    in Unit 5a. Every routine response from Unit 5b also embeds a ``job_id``
-    that resolves to one of these records.
+    Returned by ``GET /sessions/{id}/jobs`` and ``GET /sessions/{id}/jobs/{job_id}``.
+    Every routine response also embeds a ``job_id`` that resolves to one of
+    these records.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -225,7 +225,7 @@ class JobRecordSchema(BaseModel):
         None,
         description=(
             "Populated on ``failed`` with the full ProblemDetails envelope "
-            "(includes the typed ``recovery`` axes from KTD-3). Drives the "
+            "(includes the typed ``recovery`` axes). Drives the "
             "Activity panel's per-job ``<ProblemDetailsErrorSurface>``."
         ),
     )
@@ -233,7 +233,7 @@ class JobRecordSchema(BaseModel):
         0,
         description=(
             "Number of identical-signature failures that coalesced into "
-            "this record (KTD-19 sticky-first semantics). For ``done`` and "
+            "this record, which keeps the first of them. For ``done`` and "
             "in-flight jobs this is always ``0``."
         ),
     )
@@ -339,8 +339,8 @@ class TopologyEntry(BaseModel):
     job_id: str | None = Field(
         default=None,
         description=(
-            "Job-registry id mirroring the mutation that produced this entry "
-            "(v3.1 Unit 5b). Populated only when this ``TopologyEntry`` is the "
+            "Job-registry id mirroring the mutation that produced this entry. "
+            "Populated only when this ``TopologyEntry`` is the "
             "top-level response of an edit / PMU-add / profile-add routine; "
             "``null`` for nested entries inside a ``TopologySummary``."
         ),
@@ -506,7 +506,7 @@ class TopologySummary(BaseModel):
         default=None,
         description=(
             "Job-registry id mirroring the routine that produced this topology "
-            "snapshot (v3.1 Unit 5b) — case load / reload, element delete / "
+            "snapshot: case load / reload, element delete / "
             "undo, or blank-system create. ``null`` when the summary is a plain "
             "read (``GET /topology``)."
         ),
@@ -650,8 +650,8 @@ class PflowResult(BaseModel):
     job_id: str | None = Field(
         default=None,
         description=(
-            "Job-registry id mirroring this routine invocation (v3.1 Unit "
-            "5b). Additive: ``GET /sessions/{id}/jobs/{job_id}`` returns the "
+            "Job-registry id mirroring this routine invocation. "
+            "Additive: ``GET /sessions/{id}/jobs/{job_id}`` returns the "
             "matching ``JobRecord`` (kind ``pflow``). ``null`` only on legacy "
             "responses synthesised outside the job lifecycle."
         ),
@@ -724,8 +724,8 @@ class AddDisturbancesResponse(BaseModel):
     job_id: str | None = Field(
         default=None,
         description=(
-            "Job-registry id mirroring the disturbance-commit routine (v3.1 "
-            "Unit 5b, kind ``disturbance-commit``). One job covers the whole "
+            "Job-registry id mirroring the disturbance-commit routine (kind "
+            "``disturbance-commit``). One job covers the whole "
             "batch; ``null`` on legacy responses."
         ),
     )
@@ -807,8 +807,8 @@ class ElementCreated(BaseModel):
     job_id: str | None = Field(
         default=None,
         description=(
-            "Job-registry id mirroring the element-add routine (v3.1 Unit 5b, "
-            "kind ``element-add``). ``null`` on legacy responses."
+            "Job-registry id mirroring the element-add routine (kind "
+            "``element-add``). ``null`` on legacy responses."
         ),
     )
 
@@ -897,7 +897,7 @@ class CloneEditResponse(BaseModel):
     job_id: str | None = Field(
         default=None,
         description=(
-            "Job-registry id mirroring the clone routine (v3.1 Unit 5b, kinds "
+            "Job-registry id mirroring the clone routine (kinds "
             "``clone-edit`` / ``clone-undo`` / ``clone-redo``). ``null`` on "
             "legacy responses."
         ),
@@ -987,7 +987,7 @@ class CloneResetResponse(BaseModel):
 
 
 class CloneDiffPair(BaseModel):
-    """One changed param's original-vs-current file values (Unit 23)."""
+    """One changed param's original-vs-current file values."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1115,8 +1115,8 @@ class SaveCaseResponse(BaseModel):
     job_id: str | None = Field(
         default=None,
         description=(
-            "Job-registry id mirroring the case-save routine (v3.1 Unit 5b, "
-            "kind ``case-save``). ``null`` on legacy responses."
+            "Job-registry id mirroring the case-save routine (kind "
+            "``case-save``). ``null`` on legacy responses."
         ),
     )
 
@@ -1162,7 +1162,7 @@ DeleteElementResponse = TopologySummary
 
 class TopologySchema(BaseModel):
     """Per-model parameter metadata, used by the web client's polymorphic
-    form generator (Unit 6).
+    form generator.
 
     Returned from ``GET /api/topology/schema``. Mirrors the wrapper-side
     ``_PARAMS_BY_MODEL`` table — adding a new model on the server
@@ -1231,7 +1231,7 @@ class TdsRunRequest(BaseModel):
     integrator: Literal["trapezoidal", "qndf"] = Field(
         "trapezoidal",
         description=(
-            "DAE integrator (Unit 16). ``\"trapezoidal\"`` (default) maps "
+            "DAE integrator. ``\"trapezoidal\"`` (default) maps "
             "to ANDES's fixed-step Implicit Trapezoidal Method "
             "(``ss.TDS.config.method = \"trapezoid\"``). ``\"qndf\"`` "
             "selects the variable-order, variable-step QNDF (NDF) method "
@@ -1293,7 +1293,7 @@ class TdsBatchResult(BaseModel):
     job_id: str | None = Field(
         default=None,
         description=(
-            "Job-registry id mirroring this TDS run (v3.1 Unit 5c). Additive "
+            "Job-registry id mirroring this TDS run. Additive "
             "and IDENTICAL to ``run_id`` — the two fields alias the same value, "
             "with ``run_id`` preserved for backward compatibility. "
             "``GET /sessions/{id}/jobs/{job_id}`` returns the matching "

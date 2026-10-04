@@ -184,7 +184,7 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
                 "Bundle stream. Body is a ``.zip`` containing case + "
                 "disturbances.json + sim_params.json + results.csv + "
                 "manifest.json (each optional except case + manifest). "
-                "Per KTD-5; snapshots are NOT included."
+                "Snapshots are NOT included."
             ),
         },
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
@@ -219,8 +219,8 @@ async def export_bundle(
     and a ``Content-Disposition`` header that suggests a sensible
     filename.
 
-    Snapshots (dill payloads) are explicitly NOT in the bundle per
-    KTD-4 + KTD-5 — they're version-locked and undermine portability.
+    Snapshots (dill payloads) are explicitly NOT in the bundle: they're
+    version-locked and undermine portability.
     """
     mgr = _manager(request)
 
@@ -365,8 +365,8 @@ class SaveSnapshotResponse(BaseModel):
     job_id: str | None = Field(
         default=None,
         description=(
-            "Job-registry id mirroring the snapshot-save routine (v3.1 Unit "
-            "5b, kind ``snapshot-save``). ``null`` on legacy responses."
+            "Job-registry id mirroring the snapshot-save routine (kind "
+            "``snapshot-save``). ``null`` on legacy responses."
         ),
     )
 
@@ -427,9 +427,9 @@ class RestoreSnapshotResponse(BaseModel):
     job_id: str | None = Field(
         default=None,
         description=(
-            "Job-registry id mirroring the snapshot-restore routine (v3.1 Unit "
-            "5b, kind ``snapshot-restore``). Recorded in the manager-wide "
-            "global registry (KTD-20) so it survives the session being "
+            "Job-registry id mirroring the snapshot-restore routine (kind "
+            "``snapshot-restore``). Recorded in the manager-wide "
+            "global registry so it survives the session being "
             "replaced, yet still surfaces via "
             "``GET /sessions/{id}/jobs/{job_id}``. ``null`` on legacy responses."
         ),
@@ -548,7 +548,7 @@ async def save_snapshot(
     body: SaveSnapshotRequest,
     request: Request,
 ) -> SaveSnapshotResponse:
-    """Save snapshot endpoint — Unit 7.
+    """Save snapshot endpoint.
 
     Writes sidecar JSON metadata under
     ``<workspace>/snapshots/<case_basename>/<name>.json`` and, when
@@ -615,7 +615,7 @@ async def restore_snapshot(
     body: RestoreSnapshotRequest,
     request: Request,
 ) -> RestoreSnapshotResponse:
-    """Restore snapshot endpoint — Unit 7.
+    """Restore snapshot endpoint.
 
     By default reloads the case, replays the snapshot's
     ``disturbance_log`` from the sidecar JSON, and re-runs ``setup`` +
@@ -730,7 +730,7 @@ async def delete_snapshot(
     name: str,
     request: Request,
 ) -> Response:
-    """Delete snapshot endpoint — Unit 7."""
+    """Delete snapshot endpoint."""
     mgr = _manager(request)
     try:
         async with _run_as_job(

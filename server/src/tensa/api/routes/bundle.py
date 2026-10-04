@@ -161,9 +161,9 @@ class BundleImportResponse(BaseModel):
     job_id: str | None = Field(
         default=None,
         description=(
-            "Job-registry id mirroring the bundle-import routine (v3.1 Unit "
-            "5b, kind ``bundle-import``). Recorded in the manager-wide global "
-            "registry (KTD-20) so it survives the session being replaced on a "
+            "Job-registry id mirroring the bundle-import routine (kind "
+            "``bundle-import``). Recorded in the manager-wide global "
+            "registry so it survives the session being replaced on a "
             "committed import. Present on both the ``committed`` (200) body and "
             "the ``plan`` (409) body. ``null`` on legacy responses."
         ),

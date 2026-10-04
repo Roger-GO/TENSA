@@ -84,7 +84,7 @@ def _job_to_schema(record: Any) -> JobRecordSchema:
     "/sessions/{session_id}/jobs",
     openapi_extra={"x-tensa-gui-location": "activity-panel"},
     operation_id="listJobs",
-    summary="List jobs for a session (v3.1 Unit 5a).",
+    summary="List jobs for a session.",
     response_model=list[JobRecordSchema],
     responses={
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
@@ -106,7 +106,7 @@ async def list_jobs(
     by lifecycle state — aliased to the local ``status_filter`` so it doesn't
     shadow the imported ``status`` module. Both default to ``None`` (no
     filter). The list spans the per-session registry AND the manager-wide
-    global registry so session-mutating jobs (KTD-20) surface here too.
+    global registry so session-mutating jobs surface here too.
     """
     mgr = _manager(request)
     try:
@@ -125,7 +125,7 @@ async def list_jobs(
         "x-tensa-parity-deferred": "The activity panel hydrates job state from the multiplexed jobs WS + the GET /jobs list resync; it never polls a single job by id (single-job GET kept for API/agent parity).",
     },
     operation_id="getJob",
-    summary="Fetch one job by id (v3.1 Unit 5a).",
+    summary="Fetch one job by id.",
     response_model=JobRecordSchema,
     responses={
         404: {
@@ -159,7 +159,7 @@ async def get_job(
     "/sessions/{session_id}/jobs/{job_id}",
     openapi_extra={"x-tensa-gui-location": "activity-panel"},
     operation_id="cancelJob",
-    summary="Cancel a job (v3.1 Unit 5a).",
+    summary="Cancel a job.",
     response_model=JobRecordSchema,
     responses={
         200: {"description": "Job cancelled; the updated record is returned."},

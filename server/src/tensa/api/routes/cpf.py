@@ -189,7 +189,7 @@ class CpfResultResponse(BaseModel):
     job_id: str | None = Field(
         default=None,
         description=(
-            "Job-registry id mirroring this CPF routine (v3.1 Unit 5b, kind "
+            "Job-registry id mirroring this CPF routine (kind "
             "``cpf`` for the PV sweep, ``cpf-qv`` for the QV curve). "
             "``GET /sessions/{id}/jobs/{job_id}`` returns the matching "
             "record; ``null`` on legacy responses."

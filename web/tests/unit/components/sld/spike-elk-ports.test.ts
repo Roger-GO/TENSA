@@ -1,5 +1,5 @@
 /**
- * Phase 0 spike (plan: docs/plans/2026-05-08-001-feat-v01-polish-element-builder-plan.md).
+ * Phase 0 spike.
  *
  * Verifies elkjs 0.9 actually honors `'elk.portConstraints': 'FIXED_SIDE'`
  * with per-port `'elk.port.side'` hints when `'elk.edgeRouting'` is
