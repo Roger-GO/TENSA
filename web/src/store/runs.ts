@@ -31,7 +31,9 @@
  * we keep up to ``N - 1`` completed runs + 1 active. Still-streaming
  * runs (state=='starting'/'streaming') are also shielded from eviction
  * — the cap is enforced over completed (done/error/aborted) runs only,
- * and the cap is ``retention - <count of active+streaming>``.
+ * and the cap is ``retention - <count of active+streaming>``. So are the
+ * runs the researcher pinned to the overlay or named: the history then
+ * holds more than the cap rather than dropping a run being compared.
  *
  * Per-run memory budget = total budget / retentionLimit (default
  * 200 MB / 5 = 40 MB per run). The per-run budget is informational
@@ -274,10 +276,14 @@ export interface RunsState {
 
   /**
    * Drop every finished run (done, error, aborted), freeing their frame
-   * buffers, and keep a run that is still starting or streaming. The History
-   * drawer's Clear runs. A run still streaming is spared because its stream
-   * keeps appending to it. The numbering starts over only when no run is left
-   * to share a number with.
+   * buffers, and keep a run that is still starting or streaming, and the active
+   * run. The History drawer's Clear runs. A run still streaming is spared
+   * because its stream keeps appending to it. The active run is spared because
+   * the Run buttons read "Reset run" while it is there: dropping it would turn
+   * them back into "Run TDS" over a System the run has already stepped, without
+   * the reload Reset run does. It is released by Reset run (``clearActiveRun``)
+   * and goes with the next Clear runs. Like every other removal, it leaves the
+   * numbering alone (``runCount``).
    */
   clearFinishedRuns: () => void;
 
@@ -446,9 +452,14 @@ function isCompletedState(state: RunState): boolean {
  * Apply the retention policy: drop the oldest completed runs until the
  * total retained count is ``<= retention``. The active run + any
  * starting/streaming runs are NEVER candidates for eviction; they
- * count toward the cap but can't be removed. So the eligible-for-
- * eviction pool is "completed AND not active" — we evict from this
- * pool (oldest first, by insertion order) until total <= retention.
+ * count toward the cap but can't be removed. A run the researcher
+ * pinned to the overlay or gave a name is shielded the same way: they
+ * are curating it (a "Baseline no fault" to compare later runs with),
+ * and a cap that dropped it without a word would undo that. So the
+ * eligible-for-eviction pool is "completed AND not active AND neither
+ * pinned nor named" — we evict from this pool (oldest first, by
+ * insertion order) until total <= retention. The memory budget
+ * (``applyCapEviction``) still bounds what is held, whatever the pins.
  *
  * Insertion order = chronological order (preserved for string keys in
  * JS objects). Returns a NEW runs map; mutates nothing on the input.
@@ -457,23 +468,26 @@ function applyRetentionPolicy(
   runs: Record<string, RunRecord>,
   retention: number,
   activeRunId: string | null,
+  overlay: ReadonlySet<string>,
 ): Record<string, RunRecord> {
   const ids = Object.keys(runs);
   if (ids.length <= retention) return runs;
   // Walk in insertion order; collect completed runs (excluding the
-  // active id even if it has settled — the active flag shields it).
+  // active id even if it has settled — the active flag shields it —
+  // and the ones the researcher pinned or named).
   const completedIds: string[] = [];
   for (const id of ids) {
     const r = runs[id]!;
     if (id === activeRunId) continue;
     if (!isCompletedState(r.state)) continue;
+    if (overlay.has(id) || r.displayName !== undefined) continue;
     completedIds.push(id);
   }
   // We need to drop ``ids.length - retention`` runs total, but only
-  // completed-non-active runs are eligible. If there aren't enough
-  // eligible runs to bring the total down to the cap, evict as many
-  // as we can — the remainder is unavoidable (e.g., 6 still-streaming
-  // runs with retention=5 would all stay).
+  // completed-non-active runs that are not pinned or named are eligible.
+  // If there aren't enough eligible runs to bring the total down to the
+  // cap, evict as many as we can — the remainder is unavoidable (e.g.,
+  // 6 still-streaming runs with retention=5 would all stay).
   const dropTarget = ids.length - retention;
   const dropCount = Math.min(dropTarget, completedIds.length);
   if (dropCount === 0) return runs;
@@ -545,7 +559,12 @@ export const useRunsStore = create<RunsState>((set, get) => ({
     // its id as ``activeRunId``. Still-streaming runs are never evicted
     // by retention regardless.
     const inserted = { ...get().runs, [runId]: record };
-    const nextRuns = applyRetentionPolicy(inserted, get().retentionLimit, runId);
+    const nextRuns = applyRetentionPolicy(
+      inserted,
+      get().retentionLimit,
+      runId,
+      get().overlayRunIds,
+    );
     set({
       runs: nextRuns,
       activeRunId: runId,
@@ -629,6 +648,7 @@ export const useRunsStore = create<RunsState>((set, get) => ({
       },
       get().retentionLimit,
       get().activeRunId,
+      get().overlayRunIds,
     );
     set({
       runs: nextRuns,
@@ -646,6 +666,7 @@ export const useRunsStore = create<RunsState>((set, get) => ({
       },
       get().retentionLimit,
       get().activeRunId,
+      get().overlayRunIds,
     );
     set({
       runs: nextRuns,
@@ -663,6 +684,7 @@ export const useRunsStore = create<RunsState>((set, get) => ({
       },
       get().retentionLimit,
       get().activeRunId,
+      get().overlayRunIds,
     );
     set({
       runs: nextRuns,
@@ -704,19 +726,16 @@ export const useRunsStore = create<RunsState>((set, get) => ({
   },
 
   clearFinishedRuns: () => {
-    const { runs, activeRunId, runCount } = get();
+    const { runs, activeRunId } = get();
     const kept: Record<string, RunRecord> = {};
     for (const id of Object.keys(runs)) {
       const run = runs[id]!;
-      if (!isCompletedState(run.state)) kept[id] = run;
+      if (id === activeRunId || !isCompletedState(run.state)) kept[id] = run;
     }
-    const keptIds = Object.keys(kept);
-    if (keptIds.length === Object.keys(runs).length) return;
+    if (Object.keys(kept).length === Object.keys(runs).length) return;
     set({
       runs: kept,
-      activeRunId: activeRunId !== null && kept[activeRunId] ? activeRunId : null,
       overlayRunIds: reconcileOverlay(get().overlayRunIds, kept),
-      runCount: keptIds.length === 0 ? 0 : runCount,
     });
   },
 
@@ -751,7 +770,12 @@ export const useRunsStore = create<RunsState>((set, get) => ({
   setRetentionLimit: (n) => {
     const clamped = Math.max(1, Math.min(MAX_RETENTION_LIMIT, Math.floor(n)));
     if (clamped === get().retentionLimit) return;
-    const nextRuns = applyRetentionPolicy(get().runs, clamped, get().activeRunId);
+    const nextRuns = applyRetentionPolicy(
+      get().runs,
+      clamped,
+      get().activeRunId,
+      get().overlayRunIds,
+    );
     set({
       retentionLimit: clamped,
       runs: nextRuns,

@@ -275,11 +275,28 @@ describe('runs store — clearFinishedRuns', () => {
     else useRunsStore.getState().markRunAborted(runId);
   };
 
-  it('drops every run that has ended, whichever way, and the active one with them', () => {
+  it('drops every run that has ended, whichever way, except the active one', () => {
     finish('r1');
     finish('r2', 'error');
     finish('r3', 'aborted');
     useRunsStore.getState().addOverlayRun('r1');
+    useRunsStore.getState().addOverlayRun('r3');
+
+    useRunsStore.getState().clearFinishedRuns();
+
+    // r3 is the run Reset run would release: the Run buttons still read "Reset
+    // run" for it, and dropping it would skip the reload that button does.
+    const { runs, activeRunId, overlayRunIds } = useRunsStore.getState();
+    expect(Object.keys(runs)).toEqual(['r3']);
+    expect(activeRunId).toBe('r3');
+    expect([...overlayRunIds]).toEqual(['r3']);
+  });
+
+  it('drops the run Reset run released with the others, the next time', () => {
+    finish('r1');
+    finish('r2');
+    useRunsStore.getState().addOverlayRun('r2');
+    useRunsStore.getState().clearActiveRun();
 
     useRunsStore.getState().clearFinishedRuns();
 
@@ -303,7 +320,7 @@ describe('runs store — clearFinishedRuns', () => {
     expect([...overlayRunIds]).toEqual(['r2']);
   });
 
-  it('keeps counting while a run is left, and starts over when none is', () => {
+  it('keeps the numbering going, whether or not a run is left', () => {
     finish('r1');
     useRunsStore.getState().startRun({ runId: 'r2', tf: 1.0, columnNames: [] });
     useRunsStore.getState().clearFinishedRuns();
@@ -311,10 +328,15 @@ describe('runs store — clearFinishedRuns', () => {
     expect(useRunsStore.getState().runCount).toBe(2);
 
     useRunsStore.getState().markRunDone('r2', 1.0, true);
+    useRunsStore.getState().clearActiveRun();
     useRunsStore.getState().clearFinishedRuns();
-    expect(useRunsStore.getState().runCount).toBe(0);
+    // Nothing is left, and the next run is still #3: a plot exported before the
+    // clear has a "TDS #1" and "TDS #2" in its legend, and a second "TDS #1"
+    // would be taken for the first.
+    expect(Object.keys(useRunsStore.getState().runs)).toEqual([]);
+    expect(useRunsStore.getState().runCount).toBe(2);
     useRunsStore.getState().startRun({ runId: 'r3', tf: 1.0, columnNames: [] });
-    expect(useRunsStore.getState().runs.r3?.ordinal).toBe(1);
+    expect(useRunsStore.getState().runs.r3?.ordinal).toBe(3);
   });
 
   it('does nothing, and does not touch the store, when no run has ended', () => {
@@ -326,6 +348,16 @@ describe('runs store — clearFinishedRuns', () => {
     expect(useRunsStore.getState().runs).toBe(before);
   });
 
+  it('does nothing when the only run that has ended is the active one', () => {
+    finish('r1');
+    const before = useRunsStore.getState().runs;
+
+    useRunsStore.getState().clearFinishedRuns();
+
+    expect(useRunsStore.getState().runs).toBe(before);
+    expect(useRunsStore.getState().activeRunId).toBe('r1');
+  });
+
   it('frees the frame buffers of the runs it drops', () => {
     useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: ['Bus_1_v'] });
     useRunsStore.getState().appendFrame('r1', {
@@ -333,6 +365,7 @@ describe('runs store — clearFinishedRuns', () => {
       columns: { Bus_1_v: new Float64Array([1, 1]) },
     });
     useRunsStore.getState().markRunDone('r1', 0.1, true);
+    useRunsStore.getState().clearActiveRun();
     expect(__internal.totalBytes(useRunsStore.getState().runs)).toBeGreaterThan(0);
 
     useRunsStore.getState().clearFinishedRuns();
@@ -455,6 +488,74 @@ describe('runs store — retention policy (Unit 9 v2.0)', () => {
   });
 });
 
+describe('runs store — retention keeps the runs being compared', () => {
+  beforeEach(reset);
+  afterEach(reset);
+
+  const finish = (runId: string) => {
+    useRunsStore.getState().startRun({ runId, tf: 1.0, columnNames: [] });
+    useRunsStore.getState().markRunDone(runId, 1.0);
+  };
+
+  it('skips a pinned run and drops the next oldest one instead', () => {
+    for (const id of ['r1', 'r2', 'r3', 'r4', 'r5']) finish(id);
+    useRunsStore.getState().addOverlayRun('r1');
+
+    useRunsStore.getState().startRun({ runId: 'r6', tf: 1.0, columnNames: [] });
+
+    expect(Object.keys(useRunsStore.getState().runs)).toEqual(['r1', 'r3', 'r4', 'r5', 'r6']);
+    expect([...useRunsStore.getState().overlayRunIds]).toEqual(['r1']);
+  });
+
+  it('skips a run that has a name, and one that is both pinned and named', () => {
+    for (const id of ['r1', 'r2', 'r3', 'r4', 'r5']) finish(id);
+    useRunsStore.getState().setRunDisplayName('r1', 'Baseline no fault');
+    useRunsStore.getState().addOverlayRun('r2');
+    useRunsStore.getState().setRunDisplayName('r2', 'Fault at bus 7');
+
+    useRunsStore.getState().startRun({ runId: 'r6', tf: 1.0, columnNames: [] });
+
+    expect(Object.keys(useRunsStore.getState().runs)).toEqual(['r1', 'r2', 'r4', 'r5', 'r6']);
+  });
+
+  it('holds more than the cap when every run that could go is pinned or named', () => {
+    useRunsStore.getState().setRetentionLimit(2);
+    finish('r1');
+    useRunsStore.getState().addOverlayRun('r1');
+    finish('r2');
+    useRunsStore.getState().setRunDisplayName('r2', 'Baseline');
+    finish('r3');
+
+    expect(Object.keys(useRunsStore.getState().runs)).toEqual(['r1', 'r2', 'r3']);
+  });
+
+  it('lets a run go again once it is unpinned and has its default name back', () => {
+    useRunsStore.getState().setRetentionLimit(1);
+    finish('r1');
+    useRunsStore.getState().addOverlayRun('r1');
+    useRunsStore.getState().setRunDisplayName('r1', 'Baseline');
+    finish('r2');
+    expect(Object.keys(useRunsStore.getState().runs)).toEqual(['r1', 'r2']);
+
+    useRunsStore.getState().removeOverlayRun('r1');
+    useRunsStore.getState().setRunDisplayName('r1', '');
+    useRunsStore.getState().startRun({ runId: 'r3', tf: 1.0, columnNames: [] });
+
+    expect(Object.keys(useRunsStore.getState().runs)).toEqual(['r3']);
+  });
+
+  it('setRetentionLimit skips them too', () => {
+    for (const id of ['r1', 'r2', 'r3', 'r4', 'r5']) finish(id);
+    useRunsStore.getState().addOverlayRun('r2');
+    useRunsStore.getState().setRunDisplayName('r3', 'Trip of Line 8');
+
+    useRunsStore.getState().setRetentionLimit(3);
+
+    // r5 is active; r2 and r3 are kept, so r1 and r4 are what goes.
+    expect(Object.keys(useRunsStore.getState().runs)).toEqual(['r2', 'r3', 'r5']);
+  });
+});
+
 describe('runs store — overlay set (Unit 9 v2.0)', () => {
   beforeEach(reset);
   afterEach(reset);
@@ -498,16 +599,24 @@ describe('runs store — overlay set (Unit 9 v2.0)', () => {
     expect(useRunsStore.getState().overlayRunIds.has('r1')).toBe(false);
   });
 
-  it('retention eviction removes the run from the overlay set too', () => {
-    useRunsStore.getState().setRetentionLimit(1);
-    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
+  it('budget eviction removes the run from the overlay set too', () => {
+    // Retention spares a pinned run, but the memory budget does not: a run the
+    // budget drops must leave the overlay set with it.
+    useRunsStore.setState({ memoryBudgetBytes: 4096 });
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: ['Bus_1_v'] });
+    useRunsStore.getState().appendFrame('r1', {
+      t: new Float64Array(200),
+      columns: { Bus_1_v: new Float64Array(200) },
+    });
     useRunsStore.getState().markRunDone('r1', 1.0);
     useRunsStore.getState().addOverlayRun('r1');
     expect(useRunsStore.getState().overlayRunIds.has('r1')).toBe(true);
-    // Start r2; r1 is the oldest completed-non-active; retention 1
-    // means we evict everything except r2 (active). r1 should be
-    // dropped from both the runs map and the overlay set.
-    useRunsStore.getState().startRun({ runId: 'r2', tf: 1.0, columnNames: [] });
+
+    useRunsStore.getState().startRun({ runId: 'r2', tf: 1.0, columnNames: ['Bus_1_v'] });
+    useRunsStore.getState().appendFrame('r2', {
+      t: new Float64Array(50),
+      columns: { Bus_1_v: new Float64Array(50) },
+    });
     expect(useRunsStore.getState().runs.r1).toBeUndefined();
     expect(useRunsStore.getState().overlayRunIds.has('r1')).toBe(false);
   });

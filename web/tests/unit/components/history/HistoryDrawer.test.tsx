@@ -252,6 +252,9 @@ describe('HistoryDrawer', () => {
     // The cap is stated with its real value, and where to change it.
     expect(text).toContain(`up to ${DEFAULT_RETENTION_LIMIT} runs`);
     expect(text).toContain('Retention, in the TDS tab');
+    // A run you pinned or named is not what the cap pushes out.
+    expect(text).toContain('neither pinned nor named');
+    expect(text).toContain('Clear runs deletes every finished run but the active one');
   });
 
   it('explains in the empty list that a run stays after Reset run', () => {
@@ -292,7 +295,7 @@ describe('HistoryDrawer', () => {
       render(<HistoryDrawer />);
     }
 
-    it('asks first, and deletes every finished run once confirmed', async () => {
+    it('asks first, and deletes every finished run but the active one once confirmed', async () => {
       const user = userEvent.setup();
       openWithRuns('r1', 'r2', 'r3');
       useRunsStore.getState().addOverlayRun('r2');
@@ -300,25 +303,54 @@ describe('HistoryDrawer', () => {
       await user.click(screen.getByTestId('history-drawer-clear-runs'));
       // Nothing is deleted by the first click.
       expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(3);
+      // r3 is the active run, the one the top bar's Reset run is for.
       expect(screen.getByTestId('history-drawer-clear-runs-prompt')).toHaveTextContent(
-        'Delete 3 finished runs?',
+        'Delete 2 finished runs?',
       );
 
       await user.click(screen.getByTestId('history-drawer-clear-runs-confirm'));
-      expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(0);
+      expect(Object.keys(useRunsStore.getState().runs)).toEqual(['r3']);
+      expect(useRunsStore.getState().activeRunId).toBe('r3');
       expect(useRunsStore.getState().overlayRunIds.size).toBe(0);
-      expect(toastInfoMock).toHaveBeenCalledWith('3 runs deleted from history');
+      expect(toastInfoMock).toHaveBeenCalledWith('2 runs deleted from history');
+      expect(screen.getByTestId('history-run-row-active-badge-r3')).toBeInTheDocument();
+    });
+
+    it('deletes the run Reset run released along with the rest', async () => {
+      const user = userEvent.setup();
+      openWithRuns('r1', 'r2');
+      expect(screen.getByTestId('history-drawer-clear-runs')).toBeEnabled();
+
+      // What Reset run does once the case is reloaded: r2 is no longer the active run.
+      act(() => {
+        useRunsStore.getState().clearActiveRun();
+      });
+      await user.click(screen.getByTestId('history-drawer-clear-runs'));
+      expect(screen.getByTestId('history-drawer-clear-runs-prompt')).toHaveTextContent(
+        'Delete 2 finished runs?',
+      );
+      await user.click(screen.getByTestId('history-drawer-clear-runs-confirm'));
+
+      expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(0);
       expect(screen.getByTestId('history-drawer-empty')).toBeInTheDocument();
+    });
+
+    it('is off when the only finished run is the active one, and says why', () => {
+      openWithRuns('r1');
+      const button = screen.getByTestId('history-drawer-clear-runs');
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute('title', expect.stringContaining('The active run stays'));
+      expect(button).toHaveAttribute('title', expect.stringContaining('Reset run'));
     });
 
     it('Keep leaves the runs alone and puts the button back', async () => {
       const user = userEvent.setup();
-      openWithRuns('r1', 'r2');
+      openWithRuns('r1', 'r2', 'r3');
 
       await user.click(screen.getByTestId('history-drawer-clear-runs'));
       await user.click(screen.getByTestId('history-drawer-clear-runs-cancel'));
 
-      expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(2);
+      expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(3);
       expect(screen.queryByTestId('history-drawer-clear-runs-prompt')).toBeNull();
       expect(screen.getByTestId('history-drawer-clear-runs')).toBeEnabled();
     });

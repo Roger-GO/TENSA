@@ -10,8 +10,9 @@
  * - "Delete" — drops the run from the runs slice.
  *
  * "Clear runs" drops every finished run at once (after a confirmation) and
- * leaves a run that is still streaming. Reset run in the top bar drops none of
- * them: a finished run stays here, as an earlier run, until it is deleted.
+ * leaves a run that is still streaming and the active run, which Reset run in
+ * the top bar releases. Reset run drops none of them: a finished run stays
+ * here, as an earlier run, until it is deleted.
  *
  * Sweep progress + bundle re-export-per-run are deferred to Unit 18
  * (the basic version only owns the run list + pin/unpin).
@@ -147,11 +148,17 @@ function HistoryDrawerInner() {
     return filtered.sort((a, b) => b.started_at - a.started_at);
   }, [jobs, filter, isRunsView]);
 
-  // Runs Clear runs would delete: every one that has ended. A run still
-  // streaming is kept, its stream is still adding to it.
+  // Runs Clear runs would delete: every one that has ended, bar the active
+  // run. A run still streaming is kept, its stream is still adding to it. The
+  // active run is kept because the top bar reads Reset run for it, and dropping
+  // it would offer Run TDS over a System that run has already stepped, with no
+  // reload.
   const finishedCount = useMemo(
-    () => orderedRuns.filter((r) => r.state !== 'starting' && r.state !== 'streaming').length,
-    [orderedRuns],
+    () =>
+      orderedRuns.filter(
+        (r) => r.runId !== activeRunId && r.state !== 'starting' && r.state !== 'streaming',
+      ).length,
+    [orderedRuns, activeRunId],
   );
   const showClearPrompt = confirmingClear && finishedCount > 0;
 
@@ -204,7 +211,7 @@ function HistoryDrawerInner() {
       <DialogTitle>{isRunsView ? 'Run history' : 'Job history'}</DialogTitle>
       <DialogDescription>
         {isRunsView
-          ? `Rename a run with its pencil to name it in the plot legend too, pin runs to the multi-run overlay, or delete them to free memory. Reset run in the top bar reloads the case but keeps its run here as an earlier run, so run again and pin both to compare them. History holds up to ${retentionLimit} runs and a newer run pushes out the oldest finished one (Retention, in the TDS tab). The active run anchors the SLD animation regardless of the overlay set.`
+          ? `Rename a run with its pencil to name it in the plot legend too, pin runs to the multi-run overlay, or delete them to free memory (Clear runs deletes every finished run but the active one). Reset run in the top bar reloads the case but keeps its run here as an earlier run, so run again and pin both to compare them. History holds up to ${retentionLimit} runs and a newer run pushes out the oldest finished one that is neither pinned nor named (Retention, in the TDS tab). The active run anchors the SLD animation regardless of the overlay set.`
           : 'Every job kind in one chronological list. TDS runs keep their scrub + overlay controls on the Runs filter.'}
       </DialogDescription>
 
@@ -284,7 +291,7 @@ function HistoryDrawerInner() {
               size="sm"
               onClick={() => setConfirmingClear(true)}
               disabled={finishedCount === 0}
-              title="Delete every finished run from history and free its memory"
+              title="Delete every finished run from history and free its memory. The active run stays until Reset run in the top bar releases it."
               data-testid="history-drawer-clear-runs"
             >
               Clear runs

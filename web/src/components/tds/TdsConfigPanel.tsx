@@ -534,7 +534,7 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
       <FieldRow
         id="tds-config-retention"
         label={`Retention — completed runs to keep (max ${MAX_RETENTION_LIMIT})`}
-        hint={`The active run is always kept on top. Per-run memory budget shrinks as you raise this; default ${5}.`}
+        hint={`The active run, and any run you pin or name, is kept on top of it. Per-run memory budget shrinks as you raise this; default ${5}.`}
       >
         <div className="flex items-center gap-2">
           <input
