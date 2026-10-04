@@ -154,6 +154,27 @@ export function formatShortcut(input: string): string[] {
 }
 
 /**
+ * A binding as one string, for a `title` attribute or a tooltip: "Ctrl+Shift+M"
+ * off macOS, "⌘⇧M" on it, "G then S" for a sequence. The chips the palette and
+ * the cheatsheet draw come from `formatShortcut`; this is the same wording for
+ * the places that can only hold text.
+ */
+export function shortcutLabel(input: string): string {
+  const mac = isMacPlatform();
+  const steps: string[][] = [[]];
+  for (const token of formatShortcut(input)) {
+    if (token === 'then') steps.push([]);
+    else steps[steps.length - 1]?.push(token);
+  }
+  return steps.map((step) => step.join(mac ? '' : '+')).join(' then ');
+}
+
+/** `text` followed by its binding in parentheses: "Hide left sidebar (Ctrl+B)". */
+export function withShortcut(text: string, binding: string): string {
+  return `${text} (${shortcutLabel(binding)})`;
+}
+
+/**
  * True when the binding is a sequence (e.g., "g>s" / "g s") rather
  * than a single combo. Useful for callers that want to render
  * sequences with extra spacing.

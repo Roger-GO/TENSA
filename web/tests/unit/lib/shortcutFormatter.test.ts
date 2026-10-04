@@ -13,7 +13,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { formatShortcut, isSequenceShortcut } from '@/lib/shortcutFormatter';
+import {
+  formatShortcut,
+  isSequenceShortcut,
+  shortcutLabel,
+  withShortcut,
+} from '@/lib/shortcutFormatter';
 
 const ORIGINAL_NAVIGATOR_DESCRIPTOR = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 
@@ -178,5 +183,35 @@ describe('isSequenceShortcut', () => {
 
   it('returns false for combos that contain `+` even with spaces around them', () => {
     expect(isSequenceShortcut('meta+k, ctrl+k')).toBe(false);
+  });
+});
+
+describe('shortcutLabel: the binding as text for a tooltip', () => {
+  it('writes the modifiers as ⌘⇧ glyphs, run together, on macOS', () => {
+    stubPlatform('MacIntel');
+    expect(shortcutLabel('meta+k, ctrl+k')).toBe('⌘K');
+    expect(shortcutLabel('meta+shift+m, ctrl+shift+m')).toBe('⌘⇧M');
+    expect(shortcutLabel('meta+backslash, ctrl+backslash')).toBe('⌘\\');
+  });
+
+  it('names the modifiers and joins them with "+" off macOS', () => {
+    stubPlatform('Linux x86_64');
+    expect(shortcutLabel('meta+k, ctrl+k')).toBe('Ctrl+K');
+    expect(shortcutLabel('meta+shift+m, ctrl+shift+m')).toBe('Ctrl+Shift+M');
+    expect(shortcutLabel('meta+slash, ctrl+slash')).toBe('Ctrl+/');
+  });
+
+  it('reads a sequence as "G then S" and a bare key as itself', () => {
+    stubPlatform('Win32');
+    expect(shortcutLabel('g>s')).toBe('G then S');
+    expect(shortcutLabel('escape')).toBe('Esc');
+    expect(shortcutLabel('?')).toBe('?');
+  });
+
+  it('withShortcut appends the label in parentheses', () => {
+    stubPlatform('MacIntel');
+    expect(withShortcut('Hide left sidebar', 'meta+b, ctrl+b')).toBe('Hide left sidebar (⌘B)');
+    stubPlatform('Win32');
+    expect(withShortcut('Hide left sidebar', 'meta+b, ctrl+b')).toBe('Hide left sidebar (Ctrl+B)');
   });
 });

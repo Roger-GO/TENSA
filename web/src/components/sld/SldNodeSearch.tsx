@@ -32,6 +32,8 @@ import { useReactFlow } from '@xyflow/react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/Input';
 import { useSldStore, subscribeOpenSldSearch } from '@/store/sld';
+import { SHORTCUTS } from '@/lib/shortcuts';
+import { withShortcut } from '@/lib/shortcutFormatter';
 import { cn } from '@/lib/cn';
 
 /** Per-row payload surfaced in the list. Mirrors React Flow node shape. */
@@ -183,7 +185,7 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
           type="button"
           data-testid="sld-node-search-trigger"
           aria-label="Search SLD nodes"
-          title="Search nodes (⌘/)"
+          title={withShortcut('Search nodes', SHORTCUTS.searchNodes)}
           className={cn(
             'rounded border px-2 py-0.5 text-xs',
             'border-border bg-background text-foreground',

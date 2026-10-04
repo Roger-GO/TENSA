@@ -16,6 +16,8 @@
  */
 import { Button } from '@/components/ui/button';
 import { useLayoutStore } from '@/store/layout';
+import { SHORTCUTS } from '@/lib/shortcuts';
+import { withShortcut } from '@/lib/shortcutFormatter';
 import { cn } from '@/lib/cn';
 
 export interface SidebarToggleProps {
@@ -26,7 +28,10 @@ export function SidebarToggle({ className }: SidebarToggleProps) {
   const collapsed = useLayoutStore((s) => s.leftSidebarCollapsed);
   const toggle = useLayoutStore((s) => s.toggleLeftSidebar);
 
-  const tooltip = collapsed ? 'Show left sidebar (⌘B)' : 'Hide left sidebar (⌘B)';
+  const tooltip = withShortcut(
+    collapsed ? 'Show left sidebar' : 'Hide left sidebar',
+    SHORTCUTS.toggleLeftSidebar,
+  );
 
   return (
     <Button

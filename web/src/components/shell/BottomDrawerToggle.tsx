@@ -22,6 +22,8 @@
  */
 import { Button } from '@/components/ui/button';
 import { useLayoutStore } from '@/store/layout';
+import { SHORTCUTS } from '@/lib/shortcuts';
+import { withShortcut } from '@/lib/shortcutFormatter';
 import { cn } from '@/lib/cn';
 
 export interface BottomDrawerToggleProps {
@@ -42,7 +44,10 @@ export function BottomDrawerToggle({ className }: BottomDrawerToggleProps) {
     if (hasUnread) clearUnread();
   };
 
-  const tooltip = collapsed ? 'Show bottom drawer (⌘J)' : 'Hide bottom drawer (⌘J)';
+  const tooltip = withShortcut(
+    collapsed ? 'Show bottom drawer' : 'Hide bottom drawer',
+    SHORTCUTS.toggleBottomDrawer,
+  );
 
   return (
     <Button

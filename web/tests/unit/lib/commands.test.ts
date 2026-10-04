@@ -29,6 +29,7 @@ import {
 } from '@/lib/commands';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
+import { useRunsStore } from '@/store/runs';
 import { usePflowStore } from '@/store/pflow';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
@@ -399,6 +400,51 @@ describe('useCommandRegistry — v3 Unit 14 auto-route on Run', () => {
     // grid + inspector, not in an Analysis sub-tab).
     expect(layout.activeBottomDrawerTab).toBe('analysis');
     expect(layout.activeAnalysisSubTab).toBe('eig');
+  });
+});
+
+const find = (commands: readonly { id: string }[], id: string) =>
+  commands.find((c) => c.id === id) as import('@/lib/commands').Command | undefined;
+
+function oneBusTopology(): TopologySummary {
+  return {
+    ...emptyTopology(),
+    buses: [{ idx: '1', name: 'BUS1', kind: 'Bus', params: {} }],
+  };
+}
+
+describe('useCommandRegistry: keys the browser keeps', () => {
+  afterEach(() => {
+    useRunsStore.getState().clearRuns();
+  });
+
+  it('the theme toggle is not on Ctrl/Cmd+D, the browser bookmark key', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(result.current, 'help.dark-mode')?.shortcut).toBe('meta+shift+l, ctrl+shift+l');
+  });
+
+  it('no binding is taken by two commands, and none by a key the app must leave to the browser', () => {
+    // A converged PF, a streaming run and a diagram, so every gated command is in the list.
+    usePflowStore.setState({
+      lastRun: {
+        converged: true,
+        iterations: 1,
+        max_mismatch: 0,
+        buses: [],
+      } as unknown as PflowResult,
+      isRunning: false,
+      error: null,
+    });
+    useRunsStore.getState().startRun({ runId: 'r', tf: 1, columnNames: [] });
+    MOCK_TOPOLOGY = oneBusTopology();
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const aliases = result.current.flatMap((c) =>
+      c.shortcut === undefined ? [] : c.shortcut.split(',').map((a) => a.trim()),
+    );
+    expect(new Set(aliases).size).toBe(aliases.length);
+    for (const reserved of ['meta+d', 'ctrl+d', 'meta+t', 'ctrl+t', 'meta+w', 'ctrl+w']) {
+      expect(aliases).not.toContain(reserved);
+    }
   });
 });
 

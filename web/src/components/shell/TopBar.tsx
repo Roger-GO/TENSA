@@ -9,6 +9,8 @@ import { useBundleStore } from '@/store/bundle';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useHistoryStore } from '@/store/history';
 import { useReportDialogStore } from '@/store/reportDialog';
+import { SHORTCUTS } from '@/lib/shortcuts';
+import { shortcutLabel } from '@/lib/shortcutFormatter';
 import { ThemeToggle } from '@/components/shell/ThemeToggle';
 import { SidebarToggle } from '@/components/shell/SidebarToggle';
 import { InspectorToggle } from '@/components/shell/InspectorToggle';
@@ -244,16 +246,15 @@ function AppBrand() {
 }
 
 /**
- * "⌘K" hint button (Unit 9). Mouse affordance for the command palette
+ * "Ctrl+K" / "⌘K" hint button (Unit 9). Mouse affordance for the command palette
  * — discovers the shortcut for users who don't read keyboard hints.
  * Sits between the Export menu / Hide-labels toggle (caller-provided
  * right-slot content) and the dark-mode placeholder, so it consistently
  * appears as the third-from-end control regardless of what the App
  * chooses to inject into the right slot.
  *
- * The button label uses the platform-agnostic "⌘K" glyph plus a
- * "Search" word so non-mac users still understand the affordance
- * without having to learn the symbol.
+ * The chip names the key of the user's platform (⌘K on macOS, Ctrl+K
+ * elsewhere), next to a "Search" word that says what it is for.
  */
 function CommandPaletteHint() {
   const openPalette = useCommandPaletteStore((s) => s.openPalette);
@@ -276,7 +277,7 @@ function CommandPaletteHint() {
           'border-border bg-muted text-muted-foreground',
         )}
       >
-        ⌘K
+        {shortcutLabel(SHORTCUTS.commandPalette)}
       </kbd>
     </Button>
   );

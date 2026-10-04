@@ -20,6 +20,8 @@
  */
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/lib/useTheme';
+import { SHORTCUTS } from '@/lib/shortcuts';
+import { withShortcut } from '@/lib/shortcutFormatter';
 import type { ThemePreference } from '@/store/theme';
 import { nextPreference } from '@/store/theme';
 import { cn } from '@/lib/cn';
@@ -37,7 +39,10 @@ const PREF_LABELS: Record<ThemePreference, string> = {
 export function ThemeToggle({ className }: ThemeToggleProps) {
   const { themePreference, cycleTheme } = useTheme();
   const next = nextPreference(themePreference);
-  const tooltip = `Theme: ${PREF_LABELS[themePreference]} — click to switch to ${PREF_LABELS[next]} mode`;
+  const tooltip = withShortcut(
+    `Theme: ${PREF_LABELS[themePreference]} — click to switch to ${PREF_LABELS[next]} mode`,
+    SHORTCUTS.toggleTheme,
+  );
 
   return (
     <Button

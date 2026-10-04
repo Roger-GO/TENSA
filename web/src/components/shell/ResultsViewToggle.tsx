@@ -18,6 +18,8 @@
  */
 import { Button } from '@/components/ui/button';
 import { useLayoutStore } from '@/store/layout';
+import { SHORTCUTS } from '@/lib/shortcuts';
+import { withShortcut } from '@/lib/shortcutFormatter';
 import { cn } from '@/lib/cn';
 
 export interface ResultsViewToggleProps {
@@ -28,7 +30,10 @@ export function ResultsViewToggle({ className }: ResultsViewToggleProps) {
   const active = useLayoutStore((s) => s.resultsViewActive);
   const toggle = useLayoutStore((s) => s.toggleResultsView);
 
-  const tooltip = active ? 'Exit results view (⌘⇧M)' : 'Maximize results (⌘⇧M)';
+  const tooltip = withShortcut(
+    active ? 'Exit results view' : 'Maximize results',
+    SHORTCUTS.toggleResultsView,
+  );
 
   return (
     <Button

@@ -151,7 +151,7 @@ describe('<GlobalShortcuts /> — single-key bindings', () => {
     expect(useSnapshotStore.getState().saveDialogOpen).toBe(true);
   });
 
-  it('cycles the theme when ⌘D is pressed (Unit 12)', () => {
+  it('cycles the theme when ⌘⇧L is pressed (Unit 12)', () => {
     useThemeStore.setState({
       themePreference: 'light',
       resolvedTheme: 'light',
@@ -159,9 +159,10 @@ describe('<GlobalShortcuts /> — single-key bindings', () => {
     });
     render(withProviders(<GlobalShortcuts />));
     const event = new KeyboardEvent('keydown', {
-      key: 'd',
-      code: 'KeyD',
+      key: 'L',
+      code: 'KeyL',
       metaKey: true,
+      shiftKey: true,
       bubbles: true,
       cancelable: true,
     });
@@ -169,6 +170,29 @@ describe('<GlobalShortcuts /> — single-key bindings', () => {
       document.dispatchEvent(event);
     });
     expect(useThemeStore.getState().themePreference).toBe('dark');
+  });
+
+  it('leaves ⌘D to the browser (its Bookmark key)', () => {
+    useThemeStore.setState({
+      themePreference: 'light',
+      resolvedTheme: 'light',
+      persistFailed: false,
+    });
+    render(withProviders(<GlobalShortcuts />));
+    for (const mod of [{ metaKey: true }, { ctrlKey: true }]) {
+      const event = new KeyboardEvent('keydown', {
+        key: 'd',
+        code: 'KeyD',
+        bubbles: true,
+        cancelable: true,
+        ...mod,
+      });
+      act(() => {
+        document.dispatchEvent(event);
+      });
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(useThemeStore.getState().themePreference).toBe('light');
   });
 
   it('runs the active routine when ⌘Enter is pressed', () => {

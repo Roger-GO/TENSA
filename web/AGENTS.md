@@ -66,6 +66,8 @@ For ad-hoc skip checks: `isEditableTarget(element)` / `isEditableActiveElement()
 
 **Never** call `window.addEventListener("keydown", ...)` directly — bypasses the editable-element skip and contributes to state-leakage bugs.
 
+**Bindings live in the command registry** (`@/lib/commands`): give a command a `shortcut` and `<GlobalShortcuts />` binds it, the palette and the cheatsheet list it. A binding that something else has to repeat (a button's tooltip, a handler the registry cannot own) is a constant in `@/lib/shortcuts`; write tooltips with `withShortcut(text, SHORTCUTS.x)` from `@/lib/shortcutFormatter`, which names the key of the user's platform (Ctrl+B, or ⌘B on macOS), never a hard-coded `⌘`.
+
 ## Run-button readiness (Unit 4)
 
 **All Run buttons (PF / TDS / EIG / CPF / SE / Sweep) consume `useRunReadiness(routine)`** from `@/lib/useRunReadiness`. Returns `{ ready, disabledReason, recovery, recoveryHint }`.

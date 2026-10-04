@@ -72,6 +72,32 @@ afterEach(() => {
   cleanup();
 });
 
+describe('<SldNodeSearch /> trigger tooltip', () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  afterEach(() => {
+    if (original) Object.defineProperty(globalThis, 'navigator', original);
+  });
+
+  it('names the search key of the platform', () => {
+    for (const [platform, key] of [
+      ['Linux x86_64', 'Ctrl+/'],
+      ['MacIntel', '⌘/'],
+    ] as const) {
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { platform, userAgent: '' } as unknown as Navigator,
+        configurable: true,
+        writable: true,
+      });
+      render(<SldNodeSearch />);
+      expect(screen.getByTestId('sld-node-search-trigger')).toHaveAttribute(
+        'title',
+        `Search nodes (${key})`,
+      );
+      cleanup();
+    }
+  });
+});
+
 async function openPopover(user: ReturnType<typeof userEvent.setup>) {
   const trigger = screen.getByTestId('sld-node-search-trigger');
   await user.click(trigger);

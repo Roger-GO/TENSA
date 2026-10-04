@@ -58,6 +58,7 @@ import { __requestOpenSldSearch } from '@/store/sld';
 import { useThemeStore } from '@/store/theme';
 import { useLayoutStore } from '@/store/layout';
 import { requestEigLogToggle, requestEigViewReset } from '@/lib/eigViewBus';
+import { SHORTCUTS } from '@/lib/shortcuts';
 import type { RunRoutine } from '@/lib/useRunReadiness';
 
 export type CommandGroup = 'workspace' | 'edit' | 'run' | 'export' | 'view' | 'navigation' | 'help';
@@ -484,7 +485,7 @@ export function useCommandRegistry(): readonly Command[] {
         action: () => {
           useLayoutStore.getState().toggleLeftSidebar();
         },
-        shortcut: 'meta+b, ctrl+b',
+        shortcut: SHORTCUTS.toggleLeftSidebar,
       },
       {
         id: 'view.toggleBottomDrawer',
@@ -499,7 +500,7 @@ export function useCommandRegistry(): readonly Command[] {
           toggleBottomDrawer();
           clearDrawerUnread();
         },
-        shortcut: 'meta+j, ctrl+j',
+        shortcut: SHORTCUTS.toggleBottomDrawer,
       },
       {
         id: 'view.toggleRightInspector',
@@ -509,7 +510,7 @@ export function useCommandRegistry(): readonly Command[] {
         action: () => {
           useLayoutStore.getState().toggleRightInspector();
         },
-        shortcut: 'meta+backslash, ctrl+backslash',
+        shortcut: SHORTCUTS.toggleRightInspector,
       },
       // v3.1 Unit 11 — Activity panel. Opens/expands the BottomDrawer onto
       // the Activity tab (Active sub-tab) so the user can watch in-flight
@@ -556,7 +557,7 @@ export function useCommandRegistry(): readonly Command[] {
         action: () => {
           useLayoutStore.getState().toggleResultsView();
         },
-        shortcut: 'meta+shift+m, ctrl+shift+m',
+        shortcut: SHORTCUTS.toggleResultsView,
       },
 
       // ---- navigation ----------------------------------------------------
@@ -586,7 +587,7 @@ export function useCommandRegistry(): readonly Command[] {
         group: 'navigation',
         keywords: ['search', 'find', 'node', 'bus', 'jump', 'pan'],
         action: () => __requestOpenSldSearch(),
-        shortcut: 'meta+slash, ctrl+slash',
+        shortcut: SHORTCUTS.searchNodes,
       },
       {
         id: 'navigation.panToBus',
@@ -650,7 +651,7 @@ export function useCommandRegistry(): readonly Command[] {
         group: 'help',
         keywords: ['palette', 'search', 'commands', 'k'],
         action: togglePalette,
-        shortcut: 'meta+k, ctrl+k',
+        shortcut: SHORTCUTS.commandPalette,
       },
       {
         id: 'help.shortcuts',
@@ -658,7 +659,7 @@ export function useCommandRegistry(): readonly Command[] {
         group: 'help',
         keywords: ['shortcuts', 'cheatsheet', 'help', 'keys'],
         action: toggleCheatsheet,
-        shortcut: '?',
+        shortcut: SHORTCUTS.cheatsheet,
       },
       // Dark-mode cycle (Unit 12). Cycles light → dark → system →
       // light via the theme slice. We read the action via
@@ -677,7 +678,8 @@ export function useCommandRegistry(): readonly Command[] {
         action: () => {
           useThemeStore.getState().cycleTheme();
         },
-        shortcut: 'meta+d, ctrl+d',
+        // Not Ctrl/Cmd+D: that is the browser's Bookmark.
+        shortcut: SHORTCUTS.toggleTheme,
       },
     ];
 

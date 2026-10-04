@@ -127,6 +127,29 @@ describe('<TopBar /> — auto-mounted right-slot anchors', () => {
   });
 });
 
+describe('<TopBar /> search hint', () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const stubPlatform = (platform: string) =>
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { platform, userAgent: '' } as unknown as Navigator,
+      configurable: true,
+      writable: true,
+    });
+  afterEach(() => {
+    if (original) Object.defineProperty(globalThis, 'navigator', original);
+  });
+
+  it('names the palette key of the platform: Ctrl+K elsewhere, ⌘K on macOS', () => {
+    stubPlatform('Linux x86_64');
+    render(<TopBar />);
+    expect(screen.getByTestId('command-palette-hint')).toHaveTextContent('Ctrl+K');
+    cleanup();
+    stubPlatform('MacIntel');
+    render(<TopBar />);
+    expect(screen.getByTestId('command-palette-hint')).toHaveTextContent('⌘K');
+  });
+});
+
 describe('<TopBar /> — v3 Unit 2 pane toggles', () => {
   it('mounts the sidebar / inspector / drawer toggles in the right cluster', () => {
     render(<TopBar />);

@@ -29,6 +29,7 @@ import { useSessionStore } from '@/store/session';
 import { useConnectivityStore } from '@/store/connectivity';
 import { useSldStore, __requestOpenSldSearch } from '@/store/sld';
 import { useHotkeys } from '@/lib/useHotkeys';
+import { SHORTCUTS } from '@/lib/shortcuts';
 import { SldNodeSearch } from './SldNodeSearch';
 import { useGetSidecar, usePutSidecar, useCurrentTopology, useConnectivity } from '@/api/queries';
 import type { TopologySummary, SidecarLayout } from '@/api/types';
@@ -221,7 +222,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   // canvas-toolbar buttons have focus — same escape hatch the global
   // ⌘K palette uses.
   useHotkeys(
-    'meta+slash, ctrl+slash',
+    SHORTCUTS.searchNodes,
     (e) => {
       e.preventDefault();
       __requestOpenSldSearch();

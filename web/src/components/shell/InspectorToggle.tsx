@@ -18,6 +18,8 @@
  */
 import { Button } from '@/components/ui/button';
 import { useLayoutStore } from '@/store/layout';
+import { SHORTCUTS } from '@/lib/shortcuts';
+import { withShortcut } from '@/lib/shortcutFormatter';
 import { cn } from '@/lib/cn';
 
 export interface InspectorToggleProps {
@@ -28,7 +30,10 @@ export function InspectorToggle({ className }: InspectorToggleProps) {
   const collapsed = useLayoutStore((s) => s.rightInspectorCollapsed);
   const toggle = useLayoutStore((s) => s.toggleRightInspector);
 
-  const tooltip = collapsed ? 'Show inspector (⌘\\)' : 'Hide inspector (⌘\\)';
+  const tooltip = withShortcut(
+    collapsed ? 'Show inspector' : 'Hide inspector',
+    SHORTCUTS.toggleRightInspector,
+  );
 
   return (
     <Button
