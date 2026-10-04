@@ -553,6 +553,19 @@ export function useCurrentTopology(): TopologySummary | null {
   return useTopology(sessionId).data ?? null;
 }
 
+/**
+ * Returns a function that marks a session's topology stale so it is read
+ * again. For a routine that commits `setup()` on the substrate but returns no
+ * topology (a streamed TDS run), which would otherwise leave the cached
+ * `state`, and the case-store mirror of it, saying `pre-setup`.
+ */
+export function useRefreshTopology(): (sessionId: SessionId) => void {
+  const queryClient = useQueryClient();
+  return (sessionId) => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
+  };
+}
+
 // ---- alterable params (Unit 1b endpoint, consumed by Unit 6 AlterSpecForm) -
 
 /**

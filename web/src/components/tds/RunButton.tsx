@@ -10,6 +10,7 @@ import {
 import {
   useAbortRun,
   useCommitDisturbances,
+  useRefreshTopology,
   useReloadCase,
   useResetRun,
   useRunPflow,
@@ -76,8 +77,9 @@ import { cn } from '@/lib/cn';
  *   button surfaces a compact toast pointing the user at the panel.
  * - Disturbances on a System a prior run already committed (the substrate
  *   would 409) → reload the case first, then commit. The topology's
- *   ``committed`` state triggers it up front; a 409 on the commit is the
- *   fallback when the topology lags the substrate.
+ *   ``committed`` state triggers it up front (a finished TDS run re-reads
+ *   the topology for it); a 409 on the commit is the fallback when the
+ *   topology still lags the substrate.
  *
  * The component is intentionally chunky — it owns the start-flow
  * orchestration (commit → open WS → wire callbacks → cleanup on unmount)
@@ -150,6 +152,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   const runPflow = useRunPflow();
   const commitDisturbances = useCommitDisturbances();
   const reloadCase = useReloadCase();
+  const refreshTopology = useRefreshTopology();
   const abortRun = useAbortRun();
   const resetRun = useResetRun();
 
@@ -358,6 +361,13 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
         // writes usePflowStore.lastRun, so without this the Buses grid sits
         // empty after a TDS-only run. Best-effort, read-only.
         void loadOperatingPointIntoStore(sessionId);
+        // The run committed setup() on the substrate but a stream returns no
+        // topology, so the cached one still says pre-setup. Read it again so
+        // a run started without a reload in between (one dropped from the
+        // history) reloads before it commits instead of being refused. Not
+        // at stream_start: the run holds the session until it ends, and a
+        // read in the meantime is refused as busy.
+        refreshTopology(sessionId);
       },
       onError: (err: RunStreamError) => {
         setTdsStarting(false);

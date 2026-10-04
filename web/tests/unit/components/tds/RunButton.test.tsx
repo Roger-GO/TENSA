@@ -8,10 +8,10 @@
  * HTTP endpoints, and assert on the visible UI states + store mutations.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Server as MockServer, WebSocket as MockWebSocket } from 'mock-socket';
 
 const toastSuccessMock = vi.fn();
@@ -31,7 +31,7 @@ vi.mock('@/lib/toast', () => ({
 
 import { RunButton } from '@/components/tds/RunButton';
 import { loadArrowDecoder } from '@/streaming/RunStream';
-import { makeQueryClient } from '@/api/queries';
+import { makeQueryClient, queryKeys, useCurrentTopology } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
@@ -99,7 +99,24 @@ function makeWrapper() {
   function Wrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
   }
-  return { Wrapper };
+  return { Wrapper, client };
+}
+
+// A TDS-runnable case has dynamic models; the topology carries one so the
+// dynamic-content gate keeps the TDS button enabled.
+const DYNAMIC_CONTROLLER = { idx: 'TGOV1_1', name: 't', kind: 'TGOV1', params: {} };
+
+/**
+ * Mounts the topology query and keeps the case-store mirror in step with it,
+ * as the app's root does, so a refresh of the query is seen by the next click.
+ */
+function TopologyMirror() {
+  const topology = useCurrentTopology();
+  const setTopology = useCaseStore((s) => s.setTopology);
+  useEffect(() => {
+    if (topology !== null) setTopology(topology);
+  }, [topology, setTopology]);
+  return null;
 }
 
 function seedReady(
@@ -114,9 +131,7 @@ function seedReady(
       transformers: [],
       generators: [],
       loads: [],
-      // A TDS-runnable case has dynamic models; carry one so Unit 24's
-      // dynamic-content gate keeps the TDS button enabled.
-      controllers: [{ idx: 'TGOV1_1', name: 't', kind: 'TGOV1', params: {} }],
+      controllers: [DYNAMIC_CONTROLLER],
     },
     layoutSidecar: null,
     selectedElement: null,
@@ -151,7 +166,7 @@ function topologyBody(state: 'pre-setup' | 'committed') {
     transformers: [],
     generators: [],
     loads: [],
-    controllers: [],
+    controllers: [DYNAMIC_CONTROLLER],
   };
 }
 
@@ -160,16 +175,21 @@ function topologyBody(state: 'pre-setup' | 'committed') {
  * a commit is refused with a 409 until ``/reload`` returns it to pre-setup.
  * ``calls`` records which endpoint was hit, in order, with the commit's
  * status, so a test can tell a commit that was sent and refused from one
- * that was never sent.
+ * that was never sent. The returned handle moves the System in or out of the
+ * committed state, as a run that starts does.
  */
 function fakeCommittedSubstrate(
   fetchSpy: ReturnType<typeof vi.spyOn>,
   calls: string[],
-  opts: { reloadFails?: boolean } = {},
+  opts: { reloadFails?: boolean; committed?: boolean } = {},
 ) {
-  let committed = true;
+  let committed = opts.committed ?? true;
   fetchSpy.mockImplementation((input) => {
     const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+    if (url.endsWith('/topology')) {
+      calls.push('topology');
+      return Promise.resolve(jsonResponse(topologyBody(committed ? 'committed' : 'pre-setup')));
+    }
     if (url.includes('/reload')) {
       if (opts.reloadFails) {
         calls.push('reload:409');
@@ -201,26 +221,41 @@ function fakeCommittedSubstrate(
     }
     return Promise.resolve(jsonResponse({}, 200));
   });
+  return {
+    setCommitted: (value: boolean) => {
+      committed = value;
+    },
+  };
 }
 
-/** Answer ``start_tds`` with a stream that starts and finishes at once. */
-function serveShortRun(server: MockServerHandle, runId: string) {
+/**
+ * Answer ``start_tds`` with a stream that starts and finishes at once.
+ * ``onStart`` runs when the command arrives, before the stream starts; ``runId``
+ * can be a function to give each run its own id.
+ */
+function serveShortRun(
+  server: MockServerHandle,
+  runId: string | (() => string),
+  onStart?: () => void,
+) {
   server.on('connection', (socket) => {
     socket.send(JSON.stringify({ type: 'ready' }));
     socket.on('message', (raw: unknown) => {
       const msg = JSON.parse(String(raw)) as { type: string };
       if (msg.type !== 'start_tds') return;
+      onStart?.();
+      const id = typeof runId === 'string' ? runId : runId();
       socket.send(
         JSON.stringify({
           type: 'stream_start',
-          run_id: runId,
+          run_id: id,
           metadata: { schema_version: '2.0', vars: ['bus_v'], var_columns: ['Bus_1_v'] },
         }),
       );
       socket.send(
         JSON.stringify({
           type: 'done',
-          run_id: runId,
+          run_id: id,
           converged: true,
           final_t: 5,
           callpert_count: 0,
@@ -843,6 +878,149 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     });
     expect(calls).toEqual([]);
     expect(toastInfoMock).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Run TDS with a disturbance on a pre-setup case, with the topology query
+   * mounted the way the app mounts it. The substrate commits setup() when a run
+   * starts, as the worker does, and returns no topology for the stream, so only
+   * the client's refresh at the end of the run can tell the topology about it.
+   */
+  async function runTdsOnce(calls: string[]) {
+    seedReady({ withDisturbances: true, topologyState: 'pre-setup' });
+    const substrate = fakeCommittedSubstrate(fetchSpy, calls, { committed: false });
+    let started = 0;
+    serveShortRun(
+      server,
+      () => `run-${(started += 1)}`,
+      () => substrate.setCommitted(true),
+    );
+    const { Wrapper, client } = makeWrapper();
+    // Seed the cache as the case load does, so mounting the query is no fetch.
+    client.setQueryData(queryKeys.topology(parseSessionId(SESSION_ID)), topologyBody('pre-setup'));
+    render(
+      <>
+        <TopologyMirror />
+        <RunButton />
+      </>,
+      { wrapper: Wrapper },
+    );
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-1']?.state).toBe('done');
+    });
+    // The topology is read again once the run is over.
+    await waitFor(() => {
+      expect(useCaseStore.getState().topology?.state).toBe('committed');
+    });
+  }
+
+  it('a run dropped from the history and started again reloads first, with no refused commit', async () => {
+    const calls: string[] = [];
+    await runTdsOnce(calls);
+    expect(calls).toEqual(['disturbances:200', 'topology']);
+
+    // Dropping a run from the history clears it without reloading the case,
+    // so the button reads Run TDS again over a System the first run committed.
+    act(() => {
+      useRunsStore.getState().resetRun('run-1');
+    });
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-2']?.state).toBe('done');
+    });
+
+    // The second run's end reads the topology again.
+    await waitFor(() => {
+      expect(calls).toEqual([
+        'disturbances:200',
+        'topology',
+        'reload',
+        'disturbances:200',
+        'topology',
+      ]);
+    });
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('a run started after Reset run commits once, with no refused commit', async () => {
+    const calls: string[] = [];
+    await runTdsOnce(calls);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-tds-button')).toHaveTextContent(/reset run/i);
+    });
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('run-tds-button')).toHaveTextContent(/run tds/i);
+    });
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-2']?.state).toBe('done');
+    });
+
+    // Reset run reloaded the case, so the second commit lands as it is.
+    await waitFor(() => {
+      expect(calls).toEqual([
+        'disturbances:200',
+        'topology',
+        'reload',
+        'disturbances:200',
+        'topology',
+      ]);
+    });
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('a commit refused again after the reload surfaces the error, retries once, and does not open the WS', async () => {
+    seedReady({ withDisturbances: true, topologyState: 'pre-setup' });
+    const calls: string[] = [];
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.includes('/reload')) {
+        calls.push('reload');
+        return Promise.resolve(jsonResponse(topologyBody('pre-setup'), 200));
+      }
+      if (url.includes('/disturbances')) {
+        calls.push('disturbances:409');
+        return Promise.resolve(
+          jsonResponse(
+            {
+              title: 'Conflict',
+              status: 409,
+              detail: 'cannot modify disturbances after setup() has been committed',
+              recovery: { kind: 'reload-case', label: 'Reload case' },
+            },
+            409,
+          ),
+        );
+      }
+      return Promise.resolve(jsonResponse({}, 200));
+    });
+    let wsOpened = false;
+    server.on('connection', () => {
+      wsOpened = true;
+    });
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'TDS error',
+        expect.objectContaining({
+          description: expect.stringMatching(/Could not commit disturbances: .*setup\(\)/),
+        }),
+      ),
+    );
+    await tick(20);
+    // One recovery, not a loop: commit, reload, commit, stop.
+    expect(calls).toEqual(['disturbances:409', 'reload', 'disturbances:409']);
+    expect(wsOpened).toBe(false);
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    // The button is usable again for another try.
+    expect(screen.getByTestId('run-tds-button')).toBeEnabled();
   });
 
   it('a failed proactive reload surfaces the error and neither commits nor opens the WS', async () => {
