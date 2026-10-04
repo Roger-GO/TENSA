@@ -229,7 +229,7 @@ describe('<BundleImportDialog /> — happy path', () => {
   });
 });
 
-describe('<BundleImportDialog /> — what the import replaced', () => {
+describe('<BundleImportDialog /> what the import replaced', () => {
   it('leaves Save off for the bundle case it chose, which is not that file with the edits', async () => {
     const user = userEvent.setup();
     fetchSpy.mockResolvedValue(makeCommittedResponse('ieee14.xlsx'));
