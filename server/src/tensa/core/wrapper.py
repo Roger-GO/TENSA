@@ -1600,11 +1600,12 @@ class Wrapper:
         """Raise ``SetupFailedError`` if :meth:`run_tds` would refuse this request.
 
         Covers the refusals that follow from the request and the System's
-        state: QNDF on a System that already ran trapezoidally, and an override
-        key that is neither a canonical alias nor a real ``ss.TDS.config``
-        field. ``run_tds`` calls it before any config write. A caller that
-        sends something ahead of the run (the streaming handler's stream-start
-        frame) calls it first, so a refused run never opens a stream. It writes
+        state: QNDF on a System that has already stepped, an override key that
+        is neither a canonical alias nor a real ``ss.TDS.config`` field, and an
+        override value that breaks its rule (:func:`validate_tds_overrides`).
+        ``run_tds`` calls it before any config write. A caller that sends
+        something ahead of the run (the streaming handler's stream-start frame)
+        calls it first, so a refused run never opens a stream. It writes
         nothing, so a refusal leaves the System as it was.
         """
         ss = self._require_loaded()
@@ -1626,10 +1627,11 @@ class Wrapper:
         for key in tds_config_overrides or {}:
             if not hasattr(ss.TDS.config, _TDS_OVERRIDE_ALIASES.get(key, key)):
                 raise SetupFailedError(
-                    f"unknown TDS override key {key!r}; expected a "
+                    f"unknown TDS override key {_echo(key)}; expected a "
                     f"wrapper-canonical alias {list(_TDS_OVERRIDE_ALIASES)!r} or "
                     f"a real ss.TDS.config field name"
                 )
+        validate_tds_overrides(tds_config_overrides)
 
     def run_tds(
         self,
@@ -1684,10 +1686,14 @@ class Wrapper:
           This is what the GUI's free-form override editor forwards.
 
         Overrides are applied after ``h``, so an explicit ``tstep`` key wins.
+        The step-size overrides follow the rule ``h`` does: ``tstep`` must be a
+        finite number greater than zero, ``max_step`` (``dtmax``) finite and
+        not negative, and ``fixt`` 0 or 1 (see :func:`validate_tds_overrides`).
 
         A key that is neither a canonical alias nor a real ``ss.TDS.config``
         field raises ``SetupFailedError`` (the wrapper stays a strict
-        gatekeeper — it never sets an attribute that does not exist). The
+        gatekeeper — it never sets an attribute that does not exist), and so
+        does a value that breaks its rule, before anything is written. The
         Auto preset (``rtol=1e-3, atol=1e-6, max_step=0.05``) is the
         caller's responsibility to set; this method does NOT inject
         defaults.
@@ -4836,18 +4842,24 @@ def tds_fixed_step(
     ``fixt`` per run, so before it runs the config holds whatever an earlier
     run (or ANDES's default of 1) left there. QNDF needs variable step, and
     ANDES sets ``fixt = 0`` for it. A trapezoidal run is fixed-step unless a
-    ``fixt`` override, applied after the wrapper's own, says otherwise, or a
-    ``tstep`` override is not positive, which ANDES turns into variable step.
+    ``fixt`` override, applied after the wrapper's own, says otherwise. (A
+    ``tstep`` override that is not positive would have ANDES quietly go to
+    variable step, but ``Wrapper.check_tds_request`` refuses it before a run
+    gets this far.)
     """
     if integrator == "qndf":
         return False
-    overrides = tds_config_overrides or {}
-    if not overrides.get("fixt", 1):
-        return False
-    return not (overrides.get("tstep", 1.0) <= 0.0)
+    return bool((tds_config_overrides or {}).get("fixt", 1))
 
 
-def validate_step_size(h: object) -> float | None:
+def _echo(value: object) -> str:
+    """``repr(value)``, cut short: a refusal quotes a client's value back, and
+    that value can be as long as the client likes."""
+    text = repr(value)
+    return text if len(text) <= 40 else f"{text[:37]}..."
+
+
+def validate_step_size(h: object, name: str = "h") -> float | None:
     """Return ``h`` as a float, or ``None`` when no step size was requested.
 
     A TDS step size has to be a finite number greater than zero. ANDES does
@@ -4856,14 +4868,17 @@ def validate_step_size(h: object) -> float | None:
     live System, and NaN or infinity reach the integrator unchecked. The REST
     bodies carry the same rule as a field constraint; the WebSocket start frame,
     the worker's run handlers, sweeps, and ``run_tds`` itself call this, so a bad
-    value is refused before it can touch the System.
+    value is refused before it can touch the System. ``name`` is what the
+    message calls the value (``tstep`` when it came in as an override).
 
     Raises:
         SetupFailedError: ``h`` is not a finite number greater than zero.
     """
     if h is None:
         return None
-    message = f"step size 'h' must be a finite number greater than 0, got {h!r}"
+    message = (
+        f"step size {_echo(name)} must be a finite number greater than 0, got {_echo(h)}"
+    )
     # ``bool`` is an ``int`` subclass; ``true`` is not a step size.
     if isinstance(h, bool) or not isinstance(h, int | float | str):
         raise SetupFailedError(message)
@@ -4874,6 +4889,51 @@ def validate_step_size(h: object) -> float | None:
     if not math.isfinite(value) or value <= 0.0:
         raise SetupFailedError(message)
     return value
+
+
+def validate_tds_overrides(overrides: Mapping[str, float] | None) -> None:
+    """Refuse a ``tds_config_overrides`` value that ANDES would take and then misbehave on.
+
+    ``Wrapper.run_tds`` writes every override onto the live ``ss.TDS.config``,
+    which ANDES reads without checking. The rule for ``h`` has to hold for the
+    overrides that set a step as well, or the same bad value gets in by the
+    other door and stays on the System for the rest of the session:
+
+    - ``tstep`` is a step size: finite and greater than zero (see
+      :func:`validate_step_size`).
+    - ``max_step`` (``dtmax``) bounds the step: finite and not negative. Zero is
+      ANDES's own "work it out from the frequency and the time span".
+    - ``fixt`` is the fixed-step switch: 0 or 1.
+    - Anything else has to be a finite number, since NaN and infinity are never a
+      meaningful setting for an ANDES numeric.
+
+    Keys are named as the caller wrote them. Unknown keys are not judged here;
+    only a loaded System says which keys are real (``Wrapper.check_tds_request``).
+
+    Raises:
+        SetupFailedError: a value breaks its rule.
+    """
+    for key, value in (overrides or {}).items():
+        target = _TDS_OVERRIDE_ALIASES.get(key, key)
+        try:
+            finite = isinstance(value, int | float) and math.isfinite(value)
+        except OverflowError:  # an int too large for a float
+            finite = False
+        if not finite:
+            raise SetupFailedError(
+                f"TDS override {_echo(key)} must be a finite number, got {_echo(value)}"
+            )
+        if target == "tstep":
+            validate_step_size(value, name=key)
+        elif target == "dtmax" and value < 0:
+            raise SetupFailedError(
+                f"TDS override {_echo(key)} must be 0 (automatic) or greater, got {_echo(value)}"
+            )
+        elif target == "fixt" and value not in (0, 1):
+            raise SetupFailedError(
+                f"TDS override {_echo(key)} must be 0 (variable step) or 1 (fixed step), "
+                f"got {_echo(value)}"
+            )
 
 
 def _reference_angle_drift(ss: System) -> float:

@@ -200,6 +200,40 @@ async def test_run_tds_unknown_override_key_returns_500(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ('{"tstep": 0}', "step size 'tstep'"),
+        ('{"tstep": -0.01}', "step size 'tstep'"),
+        # Python's ``json`` accepts the non-standard ``NaN`` / ``Infinity`` tokens.
+        ('{"tstep": NaN}', "'tstep' must be a finite number"),
+        ('{"max_step": -0.05}', "'max_step' must be 0"),
+        ('{"max_step": Infinity}', "'max_step' must be a finite number"),
+        ('{"fixt": 3}', "'fixt' must be 0"),
+    ],
+)
+async def test_run_tds_refuses_a_bad_step_override(
+    client: httpx.AsyncClient, overrides: str, message: str
+) -> None:
+    """``tstep`` and ``max_step`` are step sizes too: a value ANDES would take
+    and then misbehave on (it flips ``fixt`` to variable step for the rest of the
+    session) is a 422 naming the key, and the session's next run is unaffected."""
+    sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
+    refused = await client.post(
+        f"/api/sessions/{sid}/tds",
+        content=f'{{"tf": 0.5, "h": 0.01, "tds_config_overrides": {overrides}}}',
+        headers={"content-type": "application/json"},
+    )
+    assert refused.status_code == 422, refused.text
+    assert message in refused.json()["detail"], refused.text
+
+    # The refusal wrote nothing: a plain run still steps at the fixed ``h``.
+    ok = await client.post(f"/api/sessions/{sid}/tds", json={"tf": 0.5, "h": 0.01})
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["callpert_count"] >= 50
+
+
+@pytest.mark.integration
 async def test_run_tds_qndf_after_a_trapezoidal_run_asks_for_a_reload(
     client: httpx.AsyncClient,
 ) -> None:

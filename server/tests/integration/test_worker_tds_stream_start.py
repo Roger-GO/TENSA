@@ -184,12 +184,57 @@ def test_unknown_override_key_is_refused_before_stream_start(wrapper: Wrapper) -
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("stream", [True, False])
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"tstep": 0.0}, "step size 'tstep'"),
+        ({"tstep": -0.01}, "step size 'tstep'"),
+        ({"tstep": float("nan")}, "'tstep' must be a finite number"),
+        ({"max_step": -1.0}, "'max_step' must be 0"),
+        ({"max_step": float("inf")}, "'max_step' must be a finite number"),
+        ({"fixt": 2.0}, "'fixt' must be 0"),
+    ],
+)
+def test_a_bad_step_override_is_refused_before_stream_start(
+    wrapper: Wrapper, stream: bool, overrides: dict[str, float], message: str
+) -> None:
+    """``tstep`` and ``max_step`` reach ``ss.TDS.config`` like ``h`` does, so the
+    handler refuses them under the same rule: before any frame, before the
+    bridge thread, and with the System's configuration untouched (ANDES would
+    otherwise log a warning and leave ``fixt = 0`` on it for good)."""
+    before = _config_snapshot(wrapper)
+    bridges_before = _bridge_threads()
+
+    pipe = _RecordingPipe()
+    with pytest.raises(SetupFailedError, match=message):
+        worker._handle_run_tds(
+            wrapper,
+            {"tf": 0.3, "h": 0.01, "stream": stream, "tds_config_overrides": overrides},
+            threading.Event(),
+            pipe,  # type: ignore[arg-type]
+            seq=1,
+        )
+    assert pipe.sent == []
+    assert _config_snapshot(wrapper) == before
+    assert _bridge_threads() <= bridges_before
+
+    # The session still runs, at the fixed step it asked for.
+    result = wrapper.run_tds(tf=0.1, h=0.01)
+    assert result.final_t == pytest.approx(0.1)
+    cfg = wrapper._require_loaded().TDS.config  # noqa: SLF001
+    assert int(cfg.fixt) == 1
+    assert float(cfg.tstep) == pytest.approx(0.01)
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("args", "message"),
     [
         ({"integrator": "rk4"}, "unknown integrator"),
         ({"tds_config_overrides": [1.0]}, "must be a dict"),
         ({"tds_config_overrides": {"rtol": "fast"}}, "float-coercible"),
+        ({"tds_config_overrides": {"rtol": 10**400}}, "float-coercible"),
     ],
 )
 def test_malformed_integrator_or_overrides_are_refused_before_stream_start(

@@ -3248,7 +3248,7 @@ export interface components {
             integrator: "trapezoidal" | "qndf";
             /**
              * Tds Config Overrides
-             * @description Optional adaptive-integrator tolerance overrides (Unit 16). Supported keys are ``rtol`` (→ ``ss.TDS.config.reltol``), ``atol`` (→ ``ss.TDS.config.abstol``) and ``max_step`` (→ ``ss.TDS.config.dtmax``). Unknown keys are rejected with 500 ``SetupFailedError`` from the wrapper. Has no effect when ``integrator="trapezoidal"`` (the fixed-step path ignores ``reltol/abstol`` and uses ``h`` for stepping).
+             * @description Optional adaptive-integrator tolerance overrides. Supported keys are ``rtol`` (→ ``ss.TDS.config.reltol``), ``atol`` (→ ``ss.TDS.config.abstol``) and ``max_step`` (→ ``ss.TDS.config.dtmax``), or the name of any ``ss.TDS.config`` field. An unknown key is refused with 422. So is a value that ANDES would take and then misbehave on: ``tstep`` must be finite and greater than 0, ``max_step`` (``dtmax``) finite and not negative (0 lets ANDES choose), ``fixt`` 0 or 1, and every other value a finite number. The tolerances have no effect when ``integrator="trapezoidal"`` (the fixed-step path ignores ``reltol/abstol`` and uses ``h`` for stepping).
              */
             tds_config_overrides?: {
                 [key: string]: number;

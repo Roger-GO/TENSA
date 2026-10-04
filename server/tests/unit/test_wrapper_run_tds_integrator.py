@@ -17,7 +17,12 @@ import pytest
 pytest.importorskip("andes")
 
 from tensa.core.errors import NoCaseLoadedError, SetupFailedError
-from tensa.core.wrapper import Wrapper, tds_fixed_step, validate_step_size
+from tensa.core.wrapper import (
+    Wrapper,
+    tds_fixed_step,
+    validate_step_size,
+    validate_tds_overrides,
+)
 
 
 def _ieee14_raw() -> Path:
@@ -321,6 +326,122 @@ def test_run_tds_unknown_override_key_leaves_the_system_untouched(
     assert _tds_config(w) == before
 
 
+# ---- override values: the step rule holds for ``tstep`` and ``max_step`` too ---
+#
+# ``h`` is checked on every way in, but an override is written to the same
+# ``ss.TDS.config`` field. ANDES logs "Fixed time step must be positive" for a
+# ``tstep`` of 0 or less and then leaves ``fixt = 0`` on the System, so a bad
+# override has to be refused before any config write, like a bad ``h``.
+
+_BAD_OVERRIDES: list[tuple[dict[str, float], str]] = [
+    ({"tstep": 0.0}, "step size 'tstep'"),
+    ({"tstep": -0.01}, "step size 'tstep'"),
+    ({"tstep": float("nan")}, "'tstep' must be a finite number"),
+    ({"tstep": float("inf")}, "'tstep' must be a finite number"),
+    ({"max_step": -0.05}, "'max_step' must be 0"),
+    ({"dtmax": -1.0}, "'dtmax' must be 0"),
+    ({"max_step": float("nan")}, "'max_step' must be a finite number"),
+    ({"max_step": float("inf")}, "'max_step' must be a finite number"),
+    ({"fixt": 2.0}, "'fixt' must be 0"),
+    ({"fixt": -1.0}, "'fixt' must be 0"),
+    ({"fixt": float("nan")}, "'fixt' must be a finite number"),
+    ({"rtol": float("nan")}, "'rtol' must be a finite number"),
+    ({"tol": float("inf")}, "'tol' must be a finite number"),
+]
+
+
+@pytest.mark.parametrize(("overrides", "message"), _BAD_OVERRIDES)
+def test_validate_tds_overrides_refuses_a_bad_value(
+    overrides: dict[str, float], message: str
+) -> None:
+    with pytest.raises(SetupFailedError, match=message):
+        validate_tds_overrides(overrides)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        None,
+        {},
+        {"tstep": 0.002},
+        {"tstep": 1},
+        # Zero is ANDES's "choose the largest step from the frequency and time span".
+        {"max_step": 0.0},
+        {"max_step": 0.05, "dtmax": 0.1},
+        {"fixt": 0},
+        {"fixt": 1.0},
+        {"fixt": True},
+        {"rtol": 1e-3, "atol": 1e-6, "tol": 1e-5, "max_iter": 25},
+    ],
+)
+def test_validate_tds_overrides_accepts_a_sound_value(
+    overrides: dict[str, float] | None,
+) -> None:
+    validate_tds_overrides(overrides)
+
+
+@pytest.mark.parametrize("bad", ["0.01", True, [0.01], None, 10**400])
+def test_validate_tds_overrides_refuses_a_value_that_is_not_a_number(bad: object) -> None:
+    """A Python caller can hand over anything; a string in ``tstep`` would be
+    written to ``ss.TDS.config`` as a string."""
+    with pytest.raises(SetupFailedError):
+        validate_tds_overrides({"tstep": bad})  # type: ignore[dict-item]
+
+
+def test_validate_tds_overrides_quotes_a_long_value_in_short() -> None:
+    with pytest.raises(SetupFailedError) as refused:
+        validate_tds_overrides({"tstep": "x" * 5000})  # type: ignore[dict-item]
+    assert len(str(refused.value)) < 200
+
+
+@pytest.mark.parametrize(("overrides", "message"), _BAD_OVERRIDES)
+def test_check_tds_request_refuses_a_bad_override_value(
+    loaded_wrapper: Wrapper, overrides: dict[str, float], message: str
+) -> None:
+    w = loaded_wrapper
+    before = _tds_config(w)
+    with pytest.raises(SetupFailedError, match=message):
+        w.check_tds_request("trapezoidal", overrides)
+    assert _tds_config(w) == before
+
+
+def test_check_tds_request_names_an_unknown_key_before_judging_a_value(
+    loaded_wrapper: Wrapper,
+) -> None:
+    with pytest.raises(SetupFailedError, match="unknown TDS override key 'bogus'"):
+        loaded_wrapper.check_tds_request("trapezoidal", {"bogus": float("nan")})
+
+
+@pytest.mark.parametrize(("overrides", "message"), _BAD_OVERRIDES)
+def test_run_tds_refuses_a_bad_override_value_before_any_write(
+    loaded_wrapper: Wrapper, overrides: dict[str, float], message: str
+) -> None:
+    """The check comes before ``h``, the integrator, and ``tf`` are written, so
+    a refused request cannot leave ``fixt = 0`` or a zero ``tstep`` behind."""
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    before = _tds_config(w)
+    with pytest.raises(SetupFailedError, match=message):
+        w.run_tds(tf=0.7, h=0.005, integrator="qndf", tds_config_overrides=overrides)
+    assert _tds_config(w) == before
+    ss.TDS.run.assert_not_called()  # type: ignore[attr-defined]
+
+
+def test_run_tds_applies_a_sound_step_override(loaded_wrapper: Wrapper) -> None:
+    """The validated overrides still reach the config, and an explicit ``tstep``
+    still wins over ``h``."""
+    w = loaded_wrapper
+    ss = w._require_loaded()  # noqa: SLF001
+    w.run_tds(
+        tf=0.1,
+        h=0.005,
+        tds_config_overrides={"tstep": 0.002, "max_step": 0.0},
+    )
+    assert float(ss.TDS.config.tstep) == pytest.approx(0.002)
+    assert float(ss.TDS.config.dtmax) == 0.0
+    ss.TDS.run.assert_called_once()  # type: ignore[attr-defined]
+
+
 # ---- tds_fixed_step: what a request will do, read from the request ----------
 
 
@@ -335,9 +456,6 @@ def test_run_tds_unknown_override_key_leaves_the_system_untouched(
         # An explicit ``fixt`` override is applied after the wrapper's own.
         ("trapezoidal", {"fixt": 0}, False),
         ("trapezoidal", {"fixt": 0.0}, False),
-        # ANDES turns a non-positive ``tstep`` into variable-step.
-        ("trapezoidal", {"tstep": 0.0}, False),
-        ("trapezoidal", {"tstep": -0.01}, False),
         # QNDF needs variable step: ANDES sets ``fixt = 0`` for it.
         ("qndf", None, False),
         ("qndf", {"fixt": 1}, False),

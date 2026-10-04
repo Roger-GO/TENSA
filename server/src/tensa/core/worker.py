@@ -1219,7 +1219,7 @@ def _handle_run_tds(
                 )
             try:
                 coerced[key] = float(value)
-            except (TypeError, ValueError) as exc:
+            except (TypeError, ValueError, OverflowError) as exc:
                 raise AndesAppError(
                     f"'tds_config_overrides[{key!r}]' must be a float-coercible value"
                 ) from exc
