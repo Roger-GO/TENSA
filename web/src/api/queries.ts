@@ -80,7 +80,7 @@ import { useJobsStore, mintLocalJobId, LOCAL_ID_PREFIX } from '@/store/jobs';
 import type { JobKind, JobRecord } from '@/store/jobs';
 import { toast } from '@/lib/toast';
 import { announceViolations } from '@/lib/announceViolations';
-import { pflowRequestBody } from '@/lib/pflowOptions';
+import { caseSettingsFromRun, pflowRequestBody } from '@/lib/pflowOptions';
 
 // ---- job registration glue (Unit 6) ---------------------------------------
 
@@ -650,11 +650,19 @@ export function useRunPflow(): UseMutationResult<PflowResult, Error, SessionId> 
     },
     onMutate: () => {
       usePflowStore.getState().setRunning(true);
-      return { jobId: registerJob('pflow') };
+      // What the request sets, so the reply can say what the case itself sets for
+      // the rest.
+      const sent = pflowRequestBody(usePflowOptionsStore.getState().options);
+      return { jobId: registerJob('pflow'), sent };
     },
     onSuccess: (data, sessionId, ctx) => {
       const solved = { ...data, run_id: parseRunId(data.run_id) };
       usePflowStore.getState().setLastRun(solved);
+      if (ctx) {
+        usePflowOptionsStore
+          .getState()
+          .noteCaseSettings(caseSettingsFromRun(ctx.sent, data.settings));
+      }
       // The buses, lines and generators the run is judged against, before the
       // invalidation below fetches the committed topology.
       announceViolations(

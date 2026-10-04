@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ANDES_PFLOW_DEFAULTS,
   DEFAULT_PFLOW_OPTIONS,
+  caseSettingsFromRun,
   describeSettings,
   formatTolerance,
   isDefaultPflowOptions,
@@ -17,6 +18,7 @@ import {
   pflowRetries,
   pflowSuccessMessage,
   settingsOrAssumed,
+  shownSwitch,
 } from '@/lib/pflowOptions';
 import type { PflowSettings } from '@/api/types';
 
@@ -51,10 +53,16 @@ describe('pflowRequestBody', () => {
     });
   });
 
-  it('sends a checkbox only when it is ticked', () => {
-    const body = pflowRequestBody({ ...DEFAULT_PFLOW_OPTIONS, flatStart: false });
-    expect('flat_start' in body).toBe(false);
-    expect('enforce_q_limits' in body).toBe(false);
+  it('sends a checkbox only once it has been touched, and then whichever way it points', () => {
+    const untouched = pflowRequestBody(DEFAULT_PFLOW_OPTIONS);
+    expect('flat_start' in untouched).toBe(false);
+    expect('enforce_q_limits' in untouched).toBe(false);
+
+    // Unticked after being ticked is "off", not "leave it to the case": a case
+    // whose own settings turn Q limits on is otherwise one the form cannot turn off.
+    expect(
+      pflowRequestBody({ ...DEFAULT_PFLOW_OPTIONS, flatStart: false, enforceQLimits: false }),
+    ).toEqual({ flat_start: false, enforce_q_limits: false });
   });
 });
 
@@ -64,6 +72,37 @@ describe('isDefaultPflowOptions', () => {
     expect(isDefaultPflowOptions({ ...DEFAULT_PFLOW_OPTIONS, tolerance: 1e-6 })).toBe(false);
     expect(isDefaultPflowOptions({ ...DEFAULT_PFLOW_OPTIONS, flatStart: true })).toBe(false);
     expect(isDefaultPflowOptions({ ...DEFAULT_PFLOW_OPTIONS, enforceQLimits: true })).toBe(false);
+    // An explicit "off" is a choice, not the case's own.
+    expect(isDefaultPflowOptions({ ...DEFAULT_PFLOW_OPTIONS, enforceQLimits: false })).toBe(false);
+  });
+});
+
+describe('caseSettingsFromRun', () => {
+  const ON: PflowSettings = { ...PLAIN, flat_start: true, enforce_q_limits: true };
+
+  it('reads the case’s own switches off a run whose request left them alone', () => {
+    expect(caseSettingsFromRun({}, ON)).toEqual({ flatStart: true, enforceQLimits: true });
+    expect(caseSettingsFromRun({}, PLAIN)).toEqual({ flatStart: false, enforceQLimits: false });
+  });
+
+  it('learns nothing about a switch the request set, whichever way', () => {
+    expect(caseSettingsFromRun({ enforce_q_limits: false }, ON)).toEqual({ flatStart: true });
+    expect(caseSettingsFromRun({ flat_start: true, enforce_q_limits: true }, ON)).toEqual({});
+  });
+
+  it('learns nothing from a server that reports no settings', () => {
+    expect(caseSettingsFromRun({}, null)).toEqual({});
+    expect(caseSettingsFromRun({}, undefined)).toEqual({});
+  });
+});
+
+describe('shownSwitch', () => {
+  it('shows the choice, else the case’s own, else off', () => {
+    expect(shownSwitch(true, false)).toBe(true);
+    expect(shownSwitch(false, true)).toBe(false);
+    expect(shownSwitch(null, true)).toBe(true);
+    expect(shownSwitch(null, false)).toBe(false);
+    expect(shownSwitch(null, null)).toBe(false);
   });
 });
 
@@ -261,10 +300,15 @@ describe('pflowRetries', () => {
       mismatch: 0.3,
       settings: { ...PLAIN, enforce_q_limits: true },
     });
-    expect(retries.find((r) => r.id === 'no-q-limits')?.changes).toEqual({
-      enforceQLimits: false,
-    });
+    const off = retries.find((r) => r.id === 'no-q-limits');
+    expect(off?.changes).toEqual({ enforceQLimits: false });
     expect(ids({ iterations: 26, mismatch: 0.3, settings: PLAIN })).not.toContain('no-q-limits');
+
+    // The retry says "off" in the request, so it also beats a case that turns the
+    // limits on by itself; an untouched form would send nothing and change nothing.
+    expect(pflowRequestBody({ ...DEFAULT_PFLOW_OPTIONS, ...off?.changes })).toEqual({
+      enforce_q_limits: false,
+    });
   });
 
   it('every retry has a hint for its tooltip', () => {

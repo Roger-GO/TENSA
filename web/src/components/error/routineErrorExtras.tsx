@@ -46,14 +46,21 @@ function DetailPair({ row }: { row: DetailRow }) {
  * `ConvergenceErrorPanel` slide-out content (iteration / last mismatch /
  * run_id + the Newton-Raphson hint) verbatim.
  */
-export function PflowConvergenceExtras({ data }: { data: PflowConvergenceDetailData }) {
+export function PflowConvergenceExtras({
+  data,
+  hasRetries = false,
+}: {
+  data: PflowConvergenceDetailData;
+  /** The banner offers adjusted retries (buttons below these details). */
+  hasRetries?: boolean;
+}) {
   return (
     <div data-testid="convergence-error-details" className="flex flex-col gap-2 px-3 py-2">
       <RoutineDetailGrid rows={pflowConvergenceRows(data)} />
       <p className="text-muted-foreground text-xs leading-relaxed">
-        The Newton-Raphson iteration did not reach the convergence threshold. Retry with the
-        adjustments above, or inspect bus voltages and adjust the case (slack bus, generator
-        setpoints, line impedance) and retry.
+        The Newton-Raphson iteration did not reach the convergence threshold.{' '}
+        {hasRetries ? 'Retry with one of the adjustments below, or inspect' : 'Inspect'} bus
+        voltages and adjust the case (slack bus, generator setpoints, line impedance) and retry.
       </p>
     </div>
   );

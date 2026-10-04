@@ -44,7 +44,7 @@ beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
     typeof vi.spyOn
   >;
-  usePflowOptionsStore.getState().resetOptions();
+  usePflowOptionsStore.getState().resetForNewCase();
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
   useSessionStore.setState({ sessionId: null });
   useCaseStore.setState({ selection: null, loadingPath: null });
@@ -193,9 +193,77 @@ describe('<PflowOptionsForm /> and the store', () => {
     expect(usePflowOptionsStore.getState().options).toEqual({
       tolerance: null,
       maxIterations: null,
-      flatStart: false,
-      enforceQLimits: false,
+      flatStart: null,
+      enforceQLimits: null,
     });
+  });
+});
+
+describe('<PflowOptionsForm /> a case that sets the switches itself', () => {
+  it('shows a switch the case turns on as ticked, and says so', () => {
+    usePflowOptionsStore.getState().noteCaseSettings({ enforceQLimits: true, flatStart: false });
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+
+    expect(screen.getByTestId('pflow-enforce-q-limits')).toBeChecked();
+    expect(screen.getByTestId('pflow-enforce-q-limits-case-note')).toHaveTextContent(
+      /case itself turns this on/i,
+    );
+    expect(screen.getByTestId('pflow-flat-start')).not.toBeChecked();
+    expect(screen.queryByTestId('pflow-flat-start-case-note')).not.toBeInTheDocument();
+    // Nothing was chosen: the form still sends nothing and has nothing to reset.
+    expect(usePflowOptionsStore.getState().options.enforceQLimits).toBeNull();
+    expect(screen.getByTestId('pflow-options-reset')).toBeDisabled();
+  });
+
+  it('unticking it commits an explicit off, which a run then sends', async () => {
+    const user = userEvent.setup();
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1') });
+    useCaseStore.getState().setCase({
+      primaryPath: parseWorkspacePath('ieee14.raw'),
+      addfiles: [],
+    });
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(CONVERGED), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+    usePflowOptionsStore.getState().noteCaseSettings({ enforceQLimits: true });
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+
+    await user.click(screen.getByTestId('pflow-enforce-q-limits'));
+
+    expect(screen.getByTestId('pflow-enforce-q-limits')).not.toBeChecked();
+    expect(screen.getByTestId('pflow-enforce-q-limits-case-note')).toHaveTextContent(
+      /go without it while this is unticked/i,
+    );
+    expect(usePflowOptionsStore.getState().options.enforceQLimits).toBe(false);
+    await user.click(screen.getByTestId('pflow-options-run'));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ enforce_q_limits: false });
+  });
+
+  it('goes back to showing the case’s own after Reset', async () => {
+    const user = userEvent.setup();
+    usePflowOptionsStore.getState().noteCaseSettings({ enforceQLimits: true });
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    await user.click(screen.getByTestId('pflow-enforce-q-limits'));
+    expect(screen.getByTestId('pflow-enforce-q-limits')).not.toBeChecked();
+
+    await user.click(screen.getByTestId('pflow-options-reset'));
+
+    expect(screen.getByTestId('pflow-enforce-q-limits')).toBeChecked();
+    expect(usePflowOptionsStore.getState().options.enforceQLimits).toBeNull();
+  });
+
+  it("tells that a time-domain run that solves the power flow itself keeps the case's own settings", () => {
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    expect(screen.getByTestId('pflow-options-form')).toHaveTextContent(
+      /run PF first.*uses the case's own settings/i,
+    );
   });
 });
 

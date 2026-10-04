@@ -14,6 +14,7 @@ import {
   isDefaultPflowOptions,
   parseMaxIterations,
   parseTolerance,
+  shownSwitch,
   type ParsedField,
 } from '@/lib/pflowOptions';
 
@@ -24,7 +25,10 @@ import {
  *   default unless the case file sets one). Text that is not a valid value is
  *   not sent: the field says so, and the run uses the case's own value until it
  *   is fixed, so a run never goes out with a stale number beside a red field.
- * - Flat start and Enforce generator Q limits: sent only when ticked.
+ * - Flat start and Enforce generator Q limits: left alone they keep the case's own
+ *   (a case can turn either on itself), and once touched they are sent either way,
+ *   so a case that turns Q limits on can be run without. The box shows what the
+ *   case sets once a run has shown it.
  *
  * The values live in `usePflowOptionsStore`, which every control that starts a
  * power flow reads, and they reset when another case is opened. The text of the
@@ -51,8 +55,17 @@ function shownText(
   return stored === null ? '' : format(stored);
 }
 
+/** What to say of a switch the case file turns on itself, or `undefined` when it does not. */
+function caseNote(choice: boolean | null, caseOwn: boolean | null): string | undefined {
+  if (caseOwn !== true) return undefined;
+  return choice === false
+    ? 'The case itself turns this on. Runs go without it while this is unticked.'
+    : 'The case itself turns this on. Untick it to run without.';
+}
+
 export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
   const options = usePflowOptionsStore((s) => s.options);
+  const caseSettings = usePflowOptionsStore((s) => s.caseSettings);
   const setOptions = usePflowOptionsStore((s) => s.setOptions);
   const resetOptions = usePflowOptionsStore((s) => s.resetOptions);
   const isRunning = usePflowStore((s) => s.isRunning);
@@ -106,7 +119,9 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
       </header>
 
       <p className="text-muted-foreground text-xs leading-snug">
-        Used by <strong>Run PF</strong>, and kept until you open another case.
+        Used by <strong>Run PF</strong>, and kept until you open another case. A time-domain run
+        starts from the last converged power flow, so run PF first; one that has to solve it itself
+        uses the case&apos;s own settings.
       </p>
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(15rem,1fr))] items-start gap-x-4 gap-y-3">
@@ -146,16 +161,18 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
           id="pflow-flat-start"
           label="Flat start"
           hint="Start every bus from 1 pu at angle 0 instead of the case's own voltages and angles. Try it when a run does not converge."
-          checked={options.flatStart}
+          checked={shownSwitch(options.flatStart, caseSettings.flatStart)}
           onChange={(checked) => setOptions({ flatStart: checked })}
+          note={caseNote(options.flatStart, caseSettings.flatStart)}
         />
 
         <CheckRow
           id="pflow-enforce-q-limits"
           label="Enforce generator Q limits"
           hint="Hold a generator at its Qmin or Qmax when its reactive power goes past one, and let its voltage give. Without it the limits are only reported."
-          checked={options.enforceQLimits}
+          checked={shownSwitch(options.enforceQLimits, caseSettings.enforceQLimits)}
           onChange={(checked) => setOptions({ enforceQLimits: checked })}
+          note={caseNote(options.enforceQLimits, caseSettings.enforceQLimits)}
         />
       </div>
 
@@ -248,9 +265,11 @@ interface CheckRowProps {
   hint: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
+  /** Said under the hint when the case file sets this itself. */
+  note?: string | undefined;
 }
 
-function CheckRow({ id, label, hint, checked, onChange }: CheckRowProps) {
+function CheckRow({ id, label, hint, checked, onChange, note }: CheckRowProps) {
   return (
     <label
       htmlFor={id}
@@ -274,6 +293,14 @@ function CheckRow({ id, label, hint, checked, onChange }: CheckRowProps) {
       <span className="flex flex-col">
         <span className="text-foreground text-xs">{label}</span>
         <span className="text-muted-foreground text-[10px] leading-snug">{hint}</span>
+        {note !== undefined ? (
+          <span
+            data-testid={`${id}-case-note`}
+            className="text-muted-foreground text-[10px] leading-snug"
+          >
+            {note}
+          </span>
+        ) : null}
       </span>
     </label>
   );

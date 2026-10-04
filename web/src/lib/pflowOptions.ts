@@ -8,8 +8,10 @@
  *
  * A number left blank is `null`: the run keeps the case's own setting, which is
  * ANDES's default (1e-6, 25 iterations) unless the case file says otherwise. A
- * checkbox is sent only when it is ticked, so a case that asks for something itself
- * is not overruled by an untouched form.
+ * checkbox that has not been touched is `null` as well, so a case that asks for
+ * something itself (a `_config` that turns Q limits on) is not overruled by an
+ * untouched form; once it is touched it is sent whichever way it points, so such a
+ * case can be told to run without.
  */
 import type { PflowRunRequest, PflowSettings } from '@/api/types';
 
@@ -19,17 +21,23 @@ export interface PflowOptions {
   tolerance: number | null;
   /** Iteration limit, or `null` for the case's own. */
   maxIterations: number | null;
-  /** Start every bus from 1 pu at angle 0. */
-  flatStart: boolean;
-  /** Hold a generator at `qmin` / `qmax` when its Q goes past one. */
-  enforceQLimits: boolean;
+  /** Start every bus from 1 pu at angle 0, or `null` for the case's own. */
+  flatStart: boolean | null;
+  /** Hold a generator at `qmin` / `qmax` when its Q goes past one, or `null` for the case's own. */
+  enforceQLimits: boolean | null;
+}
+
+/** What the case itself sets for the two switches; `null` until a run has shown it. */
+export interface PflowCaseSettings {
+  flatStart: boolean | null;
+  enforceQLimits: boolean | null;
 }
 
 export const DEFAULT_PFLOW_OPTIONS: PflowOptions = {
   tolerance: null,
   maxIterations: null,
-  flatStart: false,
-  enforceQLimits: false,
+  flatStart: null,
+  enforceQLimits: null,
 };
 
 /** ANDES's own defaults, for placeholders and for judging what is "non-default". */
@@ -47,19 +55,43 @@ export function isDefaultPflowOptions(options: PflowOptions): boolean {
   return (
     options.tolerance === null &&
     options.maxIterations === null &&
-    !options.flatStart &&
-    !options.enforceQLimits
+    options.flatStart === null &&
+    options.enforceQLimits === null
   );
 }
 
-/** The request body: only what differs from the case's own settings. */
+/** The request body: only what has been set; the rest stays the case's own. */
 export function pflowRequestBody(options: PflowOptions): PflowRunRequest {
   const body: PflowRunRequest = {};
   if (options.tolerance !== null) body.tolerance = options.tolerance;
   if (options.maxIterations !== null) body.max_iterations = options.maxIterations;
-  if (options.flatStart) body.flat_start = true;
-  if (options.enforceQLimits) body.enforce_q_limits = true;
+  if (options.flatStart !== null) body.flat_start = options.flatStart;
+  if (options.enforceQLimits !== null) body.enforce_q_limits = options.enforceQLimits;
   return body;
+}
+
+/**
+ * What a run shows about the case's own switches: those its request left alone,
+ * as the server reported them. A switch the request set says nothing about the case.
+ */
+export function caseSettingsFromRun(
+  sent: PflowRunRequest,
+  settings: PflowSettings | null | undefined,
+): Partial<PflowCaseSettings> {
+  if (settings === null || settings === undefined) return {};
+  const learned: Partial<PflowCaseSettings> = {};
+  if (sent.flat_start === undefined) learned.flatStart = settings.flat_start;
+  if (sent.enforce_q_limits === undefined) learned.enforceQLimits = settings.enforce_q_limits;
+  return learned;
+}
+
+/**
+ * What a checkbox shows: the user's choice, else what the case itself sets where a
+ * run that left the switch alone has shown it (`caseOwn`), else off (ANDES's
+ * default).
+ */
+export function shownSwitch(choice: boolean | null, caseOwn: boolean | null): boolean {
+  return choice ?? caseOwn ?? false;
 }
 
 export type ParsedField<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -176,7 +208,8 @@ function powerOfTenAbove(value: number): number {
  *   so close that the tolerance alone kept it from being accepted: the next power of
  *   ten above the mismatch.
  * - Switching Q-limit enforcement off, when it was on: generators flipping between
- *   PV and PQ is a common reason a solution does not settle.
+ *   PV and PQ is a common reason a solution does not settle. The change is an
+ *   explicit "off", which also overrides a case that turns the limits on itself.
  */
 export function pflowRetries(run: {
   iterations: number;
@@ -235,7 +268,7 @@ export function settingsOrAssumed(
   return {
     tolerance: options.tolerance ?? ANDES_PFLOW_DEFAULTS.tolerance,
     max_iterations: options.maxIterations ?? ANDES_PFLOW_DEFAULTS.maxIterations,
-    flat_start: options.flatStart,
-    enforce_q_limits: options.enforceQLimits,
+    flat_start: options.flatStart ?? false,
+    enforce_q_limits: options.enforceQLimits ?? false,
   };
 }

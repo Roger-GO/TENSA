@@ -49,7 +49,7 @@ describe('<ConvergenceErrorPanel />', () => {
     >;
     useSessionStore.setState({ sessionId: parseSessionId('sess-1') });
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
-    usePflowOptionsStore.getState().resetOptions();
+    usePflowOptionsStore.getState().resetForNewCase();
     useLayoutStore.setState({ ...DEFAULT_LAYOUT });
   });
 
@@ -233,7 +233,7 @@ describe('<ConvergenceErrorPanel /> adjusted retries', () => {
     >;
     fetchSpy.mockImplementation(() => Promise.resolve(converged()));
     useSessionStore.setState({ sessionId: parseSessionId('sess-1') });
-    usePflowOptionsStore.getState().resetOptions();
+    usePflowOptionsStore.getState().resetForNewCase();
     useLayoutStore.setState({ ...DEFAULT_LAYOUT });
   });
 
@@ -302,7 +302,7 @@ describe('<ConvergenceErrorPanel /> adjusted retries', () => {
     expect(JSON.parse(String(init.body))).toEqual({ max_iterations: 50, flat_start: true });
   });
 
-  it('turning Q limits off removes them from the request', async () => {
+  it('turning Q limits off asks for them off, not for the case’s own', async () => {
     usePflowOptionsStore.getState().setOptions({ enforceQLimits: true });
     failedRun({ settings: { ...PLAIN, enforce_q_limits: true } });
     const { Wrapper } = makeWrapper();
@@ -312,8 +312,50 @@ describe('<ConvergenceErrorPanel /> adjusted retries', () => {
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
     const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(String(init.body))).toEqual({});
+    expect(JSON.parse(String(init.body))).toEqual({ enforce_q_limits: false });
     expect(usePflowOptionsStore.getState().options.enforceQLimits).toBe(false);
+  });
+
+  it('turns off Q limits that the case itself turned on, with the form untouched', async () => {
+    // The case file's own settings enforce the limits, so a request that says nothing
+    // about them runs the same enforced power flow again: only an explicit "off"
+    // changes the run.
+    expect(usePflowOptionsStore.getState().options.enforceQLimits).toBeNull();
+    failedRun({ settings: { ...PLAIN, enforce_q_limits: true } });
+    const { Wrapper } = makeWrapper();
+    render(<ConvergenceErrorPanel />, { wrapper: Wrapper });
+
+    await userEvent.click(screen.getByTestId('convergence-retry-no-q-limits'));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ enforce_q_limits: false });
+  });
+
+  it('points to the retry buttons below its details when there are some', async () => {
+    failedRun();
+    const { Wrapper } = makeWrapper();
+    render(<ConvergenceErrorPanel />, { wrapper: Wrapper });
+
+    await userEvent.click(screen.getByRole('button', { name: /view details/i }));
+
+    expect(screen.getByTestId('convergence-error-details')).toHaveTextContent(
+      /Retry with one of the adjustments below/,
+    );
+  });
+
+  it('does not point to adjustments when none applies', async () => {
+    // A flat start was used and the run gave up early: nothing to retry with.
+    failedRun({ iterations: 6, mismatch: 90, settings: { ...PLAIN, flat_start: true } });
+    const { Wrapper } = makeWrapper();
+    render(<ConvergenceErrorPanel />, { wrapper: Wrapper });
+    expect(screen.queryByTestId(/^convergence-retry-/)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /view details/i }));
+
+    const details = screen.getByTestId('convergence-error-details');
+    expect(details).not.toHaveTextContent(/adjustments/);
+    expect(details).toHaveTextContent(/Inspect bus voltages and adjust the case/);
   });
 
   it('works from a server that reports no settings, taking the options form at its word', () => {

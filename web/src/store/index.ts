@@ -116,7 +116,7 @@ export function wireStoreCascade(): void {
     const next = state.selection;
     if (prevSelection !== next) {
       usePflowStore.getState().clearPflow();
-      usePflowOptionsStore.getState().resetOptions();
+      usePflowOptionsStore.getState().resetForNewCase();
       clearAnalysisResults();
       useRunsStore.getState().clearActiveRun();
       useAnimationStore.getState().clearAll();
@@ -165,7 +165,7 @@ export function __resetCascadeForTests(): void {
     selectedElement: null,
   });
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
-  usePflowOptionsStore.getState().resetOptions();
+  usePflowOptionsStore.getState().resetForNewCase();
   useAnalyzeStore.setState({
     eigResult: null,
     selectedModeId: null,

@@ -395,6 +395,47 @@ describe('queries hooks', () => {
     usePflowOptionsStore.getState().resetOptions();
   });
 
+  it('useRunPflow learns what the case itself sets from a run that left a switch alone', async () => {
+    const ran = (settings: Record<string, unknown>) => ({
+      run_id: 'r1',
+      converged: true,
+      iterations: 3,
+      mismatch: 1e-6,
+      bus_voltages: {},
+      bus_angles: {},
+      line_flows: {},
+      settings,
+    });
+    const caseOn = {
+      tolerance: 1e-6,
+      max_iterations: 25,
+      flat_start: false,
+      enforce_q_limits: true,
+    };
+    fetchSpy.mockResolvedValueOnce(jsonResponse(ran(caseOn)));
+    fetchSpy.mockResolvedValueOnce(jsonResponse(ran({ ...caseOn, enforce_q_limits: false })));
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useRunPflow(), { wrapper: Wrapper });
+    usePflowOptionsStore.getState().resetForNewCase();
+
+    // Left alone, the run shows both: the case turns Q limits on and starts from its
+    // own voltages.
+    result.current.mutate('sess-9' as SessionId);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(usePflowOptionsStore.getState().caseSettings).toEqual({
+      flatStart: false,
+      enforceQLimits: true,
+    });
+
+    // A run that sets Q limits off says nothing about what the case sets.
+    usePflowOptionsStore.getState().setOptions({ enforceQLimits: false });
+    result.current.mutate('sess-9' as SessionId);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(usePflowOptionsStore.getState().caseSettings.enforceQLimits).toBe(true);
+    usePflowOptionsStore.getState().resetForNewCase();
+  });
+
   it('useRunPflow invalidates the topology cache', async () => {
     const pfResult = {
       run_id: 'r1',

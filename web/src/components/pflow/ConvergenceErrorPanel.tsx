@@ -117,6 +117,7 @@ export function ConvergenceErrorPanel({ className }: ConvergencePanelProps) {
         }}
         extras={
           <PflowConvergenceExtras
+            hasRetries={retries.length > 0}
             data={{
               iterations: lastRun.iterations,
               mismatch: lastRun.mismatch,
