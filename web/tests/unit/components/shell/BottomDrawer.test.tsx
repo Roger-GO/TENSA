@@ -53,6 +53,9 @@ vi.mock('@/components/analyze/AnalyzePanel', () => ({
   AnalyzeCpfSubMode: () => <div data-testid="analyze-cpf-stub" />,
   AnalyzeSeSubMode: () => <div data-testid="analyze-se-stub" />,
 }));
+vi.mock('@/components/pflow/PflowPanel', () => ({
+  PflowPanel: () => <div data-testid="pflow-panel-stub" />,
+}));
 vi.mock('@/components/tds/TdsConfigPanel', () => ({
   TdsConfigPanel: () => <div data-testid="tds-config-stub" />,
 }));
@@ -199,6 +202,47 @@ describe('<BottomDrawer />', () => {
     render(<BottomDrawer />, { wrapper });
     expect(screen.getByTestId('bottom-drawer-tab-content-analysis')).toBeInTheDocument();
     expect(await screen.findByTestId('analysis-tab')).toBeInTheDocument();
+  });
+});
+
+describe('<BottomDrawer /> PF sub-tab', () => {
+  it('mounts the PF panel when the PF sub-tab is active, and leaves the analyze sub-mode alone', async () => {
+    useLayoutStore.setState({
+      activeBottomDrawerTab: 'analysis',
+      activeAnalysisSubTab: 'pf',
+      bottomDrawerCollapsed: false,
+    });
+    render(<BottomDrawer />, { wrapper });
+    expect(await screen.findByTestId('pflow-panel-stub')).toBeInTheDocument();
+    // `pf` is a layout tab only: the Analyze slice keeps what it had.
+    expect(useAnalyzeStore.getState().subMode).toBe('eig');
+  });
+
+  it('clicking the PF sub-tab writes the layout and not the analyze sub-mode', async () => {
+    const user = userEvent.setup();
+    useLayoutStore.setState({
+      activeBottomDrawerTab: 'analysis',
+      activeAnalysisSubTab: 'plot',
+      bottomDrawerCollapsed: false,
+    });
+    render(<BottomDrawer />, { wrapper });
+    await user.click(await screen.findByTestId('analysis-sub-tab-pf'));
+    expect(useLayoutStore.getState().activeAnalysisSubTab).toBe('pf');
+    expect(useAnalyzeStore.getState().subMode).toBe('eig');
+    expect(await screen.findByTestId('pflow-panel-stub')).toBeInTheDocument();
+  });
+
+  it('clicking an analyze-backed sub-tab still writes both, as before', async () => {
+    const user = userEvent.setup();
+    useLayoutStore.setState({
+      activeBottomDrawerTab: 'analysis',
+      activeAnalysisSubTab: 'pf',
+      bottomDrawerCollapsed: false,
+    });
+    render(<BottomDrawer />, { wrapper });
+    await user.click(await screen.findByTestId('analysis-sub-tab-cpf'));
+    expect(useLayoutStore.getState().activeAnalysisSubTab).toBe('cpf');
+    expect(useAnalyzeStore.getState().subMode).toBe('cpf');
   });
 });
 

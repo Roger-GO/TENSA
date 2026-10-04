@@ -21,6 +21,7 @@ The clip above is sped up. [Watch the full 2-minute walkthrough (MP4)](https://g
 
 - **Build a system visually.** Add buses, lines, transformers, generators (static and GENROU), exciters, governors, loads, and shunts from the UI. The one-line diagram lays itself out and is fully draggable, so you can build a complete dynamic case without touching a file.
 - **Run five analyses, one click each.** Power flow, time-domain simulation, eigenvalue (small-signal), continuation power flow with PV and QV curves, and state estimation. Each runs as a non-blocking job with live progress and a cancel button.
+- **Tune the power flow.** Set the tolerance and iteration limit, start from a flat voltage profile, or hold generators at their reactive limits, from the PF tab of the Analysis drawer. A run that does not converge offers adjusted retries, and a converged one gets a system summary of generation, load, shunts, losses and the slack output.
 - **Watch a simulation while it runs.** Time-domain results stream over a WebSocket as Apache Arrow frames and fill the plots while the run is still going, with a voltage-band overlay animating on the diagram in step.
 - **Read the network at a glance.** A traditional busbar one-line, with feeders, machines, and loads sitting cleanly around each bus, voltage and MW/MVAr flow labels after a power flow, the P and Q of every machine and load beside it, and a color and a triangle marker when a bus nears or crosses its own voltage limits. Lines turn amber and red as they near and pass their rating, generators are marked on their reactive limits, and a Violations table lists every limit a power flow breaks.
 - **Add disturbances interactively.** Bus faults, breaker toggles, and parameter changes, set up before a run and replayed when you reload the case.
@@ -142,7 +143,7 @@ A typical programmatic flow:
 POST /api/sessions                         -> session_id
 POST /api/sessions/{id}/case               -> load a case (xlsx/raw/dyr/json/m)
 POST /api/sessions/{id}/disturbances       -> add faults/toggles/alters (pre-setup)
-POST /api/sessions/{id}/pflow              -> solve power flow
+POST /api/sessions/{id}/pflow              -> solve power flow (optional tolerance, iterations, flat start, Q limits)
 POST /api/sessions/{id}/tds                -> batch TDS, or stream via WS /api/ws/{id}
 GET  /api/sessions/{id}/operating-point    -> bus voltages and angles
 ```

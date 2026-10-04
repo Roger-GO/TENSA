@@ -2247,7 +2247,8 @@ export interface components {
         /**
          * GeneratorOutput
          * @description Per-generator PF output. Active + reactive injection at the
-         *     generator's terminal bus, plus the terminal voltage (pu).
+         *     generator's terminal bus, plus the terminal voltage (pu). A generator that
+         *     is switched off injects nothing: ``p`` and ``q`` are 0.
          */
         GeneratorOutput: {
             /**
@@ -2272,12 +2273,12 @@ export interface components {
             bus: number | string;
             /**
              * Q Min
-             * @description Lower reactive power limit the case sets (``qmin``), in MVAr. Power flow does not enforce it, so ``q`` can lie below it. ``null`` for a generator that is switched off.
+             * @description Lower reactive power limit the case sets (``qmin``), in MVAr. Power flow does not enforce it unless the run asked for ``enforce_q_limits``, so ``q`` can lie below it. ``null`` for a generator that is switched off.
              */
             q_min?: number | null;
             /**
              * Q Max
-             * @description Upper reactive power limit the case sets (``qmax``), in MVAr. Power flow does not enforce it, so ``q`` can lie above it. ``null`` for a generator that is switched off.
+             * @description Upper reactive power limit the case sets (``qmax``), in MVAr. Power flow does not enforce it unless the run asked for ``enforce_q_limits``, so ``q`` can lie above it. ``null`` for a generator that is switched off.
              */
             q_max?: number | null;
         };
@@ -2492,7 +2493,8 @@ export interface components {
         };
         /**
          * LoadConsumption
-         * @description Per-load PF consumption at the converged voltage.
+         * @description Per-load PF consumption at the converged voltage. A load that is
+         *     switched off draws nothing: ``p`` and ``q`` are 0.
          */
         LoadConsumption: {
             /**
@@ -2587,6 +2589,10 @@ export interface components {
             load_consumption?: {
                 [key: string]: components["schemas"]["LoadConsumption"];
             };
+            /** @description The settings this run used, whether or not it converged. ``null`` on ``GET /sessions/{id}/operating-point``, which runs nothing. */
+            settings?: components["schemas"]["PflowSettings"] | null;
+            /** @description System totals: generation, load, bus shunts, line losses and the slack output. ``null`` when the run did not converge, and on ``GET /sessions/{id}/operating-point``. */
+            summary?: components["schemas"]["PflowSummary"] | null;
             /**
              * Job Id
              * @description Job-registry id mirroring this routine invocation. Additive: ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``pflow``). ``null`` only on legacy responses synthesised outside the job lifecycle.
@@ -2595,10 +2601,120 @@ export interface components {
         };
         /**
          * PflowRunRequest
-         * @description Request body for ``POST /sessions/{id}/pflow``. Empty: PF parameters
-         *     are taken from the loaded case's defaults.
+         * @description Request body for ``POST /sessions/{id}/pflow``. Every field is optional:
+         *     one that is left out keeps the case's own setting (ANDES's default unless
+         *     the case file's ``_config`` section says otherwise). The settings apply to
+         *     this run only; the next request starts from the case's settings again.
          */
-        PflowRunRequest: Record<string, never>;
+        PflowRunRequest: {
+            /**
+             * Tolerance
+             * @description Convergence tolerance: the solver stops once the largest residual (mismatch), in pu, is below it. From 1e-12 to 0.01. ANDES's default is 1e-6.
+             */
+            tolerance?: number | null;
+            /**
+             * Max Iterations
+             * @description Iteration limit. ANDES gives up once the count passes it. From 1 to 1000. ANDES's default is 25.
+             */
+            max_iterations?: number | null;
+            /**
+             * Flat Start
+             * @description Start from 1 pu at angle 0 on every bus instead of the voltages and angles in the case. A bus with a generator holding its voltage still starts at that setpoint. Helps when the case's own starting point is far from the solution.
+             */
+            flat_start?: boolean | null;
+            /**
+             * Enforce Q Limits
+             * @description Hold a PV or slack generator at ``qmin`` or ``qmax`` when its reactive power goes past one (PV to PQ switching). Without it the limits are reported and not enforced.
+             */
+            enforce_q_limits?: boolean | null;
+        };
+        /**
+         * PflowSettings
+         * @description The settings a power-flow run used: the request's where it gave one, the
+         *     case's own (ANDES's default unless the case file sets one) where it did not.
+         */
+        PflowSettings: {
+            /**
+             * Tolerance
+             * @description Mismatch (max residual, in pu) below which the solver stopped.
+             */
+            tolerance: number;
+            /**
+             * Max Iterations
+             * @description The iteration limit. ANDES stops once the count passes it, so a run that does not converge reports ``iterations`` one above this.
+             */
+            max_iterations: number;
+            /**
+             * Flat Start
+             * @description ``true`` if the solver started from 1 pu at angle 0 on every bus that has no generator holding its voltage, ``false`` if it started from the voltages and angles in the case.
+             */
+            flat_start: boolean;
+            /**
+             * Enforce Q Limits
+             * @description ``true`` if a PV or slack generator whose reactive power went past ``qmin`` or ``qmax`` was held at that limit (PV to PQ switching).
+             */
+            enforce_q_limits: boolean;
+        };
+        /**
+         * PflowSummary
+         * @description System totals of a converged power flow, in MW and MVAr.
+         *
+         *     Generation, load, bus shunts and lines balance: ``generation = load +
+         *     shunt + loss``, in P and in Q, to the solver's tolerance. Devices that are
+         *     switched off count for nothing.
+         */
+        PflowSummary: {
+            /**
+             * Generation P
+             * @description Active power the in-service generators produce, in MW.
+             */
+            generation_p: number;
+            /**
+             * Generation Q
+             * @description Reactive power the in-service generators produce, in MVAr.
+             */
+            generation_q: number;
+            /**
+             * Load P
+             * @description Active power the loads draw, in MW.
+             */
+            load_p: number;
+            /**
+             * Load Q
+             * @description Reactive power the loads draw, in MVAr.
+             */
+            load_q: number;
+            /**
+             * Shunt P
+             * @description Active power the bus shunts absorb, in MW (0 for a pure susceptance).
+             */
+            shunt_p: number;
+            /**
+             * Shunt Q
+             * @description Reactive power the bus shunts absorb, in MVAr: negative for a capacitor, which supplies it.
+             */
+            shunt_q: number;
+            /**
+             * Loss P
+             * @description Active power the lines and transformers dissipate, in MW.
+             */
+            loss_p: number;
+            /**
+             * Loss Q
+             * @description Reactive power the lines and transformers absorb, in MVAr: their series losses less their charging, so negative when charging dominates.
+             */
+            loss_q: number;
+            /**
+             * Slack P
+             * @description Active power the in-service slack generators produce, in MW: what the case's schedules leave for the slack to make up. ``null`` when there is none.
+             */
+            slack_p?: number | null;
+            /**
+             * Slack Q
+             * @description Reactive power the in-service slack generators produce, in MVAr. ``null`` when there is none.
+             */
+            slack_q?: number | null;
+        };
         /**
          * ProblemDetails
          * @description RFC 7807 problem-details object. Used for all 4xx and 5xx responses.
@@ -3989,7 +4105,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description ANDES setup() failed, OR a previous EIG run mutated dae state (``TDS.initialized=True``). Either case requires POST /reload to recover. */
+            /** @description ANDES setup() failed, OR a previous EIG run mutated dae state (``TDS.initialized=True``). Either case requires POST /reload to recover. Also a setting outside its range (``tolerance``, ``max_iterations``), which needs no reload: fix the request. */
             422: {
                 headers: {
                     [name: string]: unknown;

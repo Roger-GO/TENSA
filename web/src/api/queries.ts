@@ -68,6 +68,7 @@ import type {
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
+import { usePflowOptionsStore } from '@/store/pflowOptions';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { useRunsStore } from '@/store/runs';
 import { useAnalyzeStore } from '@/store/analyze';
@@ -79,6 +80,7 @@ import { useJobsStore, mintLocalJobId, LOCAL_ID_PREFIX } from '@/store/jobs';
 import type { JobKind, JobRecord } from '@/store/jobs';
 import { toast } from '@/lib/toast';
 import { announceViolations } from '@/lib/announceViolations';
+import { pflowRequestBody } from '@/lib/pflowOptions';
 
 // ---- job registration glue (Unit 6) ---------------------------------------
 
@@ -638,9 +640,12 @@ export function useRunPflow(): UseMutationResult<PflowResult, Error, SessionId> 
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (sessionId: SessionId) => {
+      // The options form's settings, read when the run starts so every control
+      // that runs a power flow uses the same ones.
+      const body = pflowRequestBody(usePflowOptionsStore.getState().options);
       return await andesClient.post<PflowResult>(
         `/sessions/${encodeURIComponent(sessionId)}/pflow`,
-        { body: {}, timeoutMs: TIMEOUTS.pflowRun },
+        { body, timeoutMs: TIMEOUTS.pflowRun },
       );
     },
     onMutate: () => {

@@ -2,12 +2,14 @@
  * AnalysisTab (v3 Unit 14).
  *
  * Inner sub-tab strip for the Analysis bucket of the BottomDrawer:
- * Plot | EIG | CPF | SE | TDS. Per F-FEAS-3 each sub-tab mounts an
+ * Plot | PF | EIG | CPF | SE | TDS. Per F-FEAS-3 each sub-tab mounts an
  * existing chart component as-is — no rewrites:
  *
  *   - Plot → ``<TimeSeriesPlot /> + <ScrubControl /> + <VariableTreePicker />``
  *     (same composition that lived in App.tsx's PlotPanelContent
  *     before Unit 1 deleted it).
+ *   - PF   → ``<PflowPanel />``: the options of the next power flow and the
+ *     system summary of the last one.
  *   - EIG  → ``<AnalyzeEigSubMode />``  (the existing one, exported
  *     for re-use in v3 Unit 14).
  *   - CPF  → ``<AnalyzeCpfSubMode />``
@@ -39,9 +41,10 @@ import { useRunsStore } from '@/store/runs';
 import { TdsConfigPanel } from '@/components/tds/TdsConfigPanel';
 import { RunStatusBadge } from '@/components/tds/RunStatusBadge';
 
-// The EIG, CPF and SE views (their charts, tables and run forms) load the first
-// time one of those sub-tabs opens; the Plot sub-tab, which is the default,
-// does not wait for them.
+// The PF view (the options form and the summary table) and the EIG, CPF and SE
+// views (their charts, tables and run forms) load the first time one of those
+// sub-tabs opens; the Plot sub-tab, which is the default, does not wait for them.
+const PflowPanel = lazyNamed(() => import('@/components/pflow/PflowPanel'), 'PflowPanel');
 const AnalyzeEigSubMode = lazyNamed(
   () => import('@/components/analyze/AnalyzePanel'),
   'AnalyzeEigSubMode',
@@ -57,6 +60,7 @@ const AnalyzeSeSubMode = lazyNamed(
 
 const SUB_TAB_LABELS: Record<AnalysisSubTab, string> = {
   plot: 'Plot',
+  pf: 'PF',
   eig: 'EIG',
   cpf: 'CPF',
   se: 'SE',
@@ -117,6 +121,15 @@ export function AnalysisTab({ activeSubTab, onSubTabChange, className }: Analysi
           className="flex min-h-0 flex-1 flex-col"
         >
           <PlotPanelContent />
+        </TabsPrimitive.Content>
+        <TabsPrimitive.Content
+          value="pf"
+          data-testid="analysis-sub-tab-content-pf"
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <Suspense fallback={<LoadingPanel />}>
+            <PflowPanel />
+          </Suspense>
         </TabsPrimitive.Content>
         <TabsPrimitive.Content
           value="eig"

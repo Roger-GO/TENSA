@@ -29,6 +29,8 @@ export type CaseEvent = components['schemas']['CaseEvent'];
 
 export type PflowRunRequest = components['schemas']['PflowRunRequest'];
 export type PflowResult = components['schemas']['PflowResult'];
+export type PflowSettings = components['schemas']['PflowSettings'];
+export type PflowSummary = components['schemas']['PflowSummary'];
 export type LineFlow = components['schemas']['LineFlow'];
 
 export type WorkspaceFile = components['schemas']['WorkspaceFile'];

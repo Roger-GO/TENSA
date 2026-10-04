@@ -3,7 +3,7 @@
  *
  * Coverage:
  *
- *  - Renders all 5 sub-tab triggers + sub-tab routing.
+ *  - Renders all 6 sub-tab triggers + sub-tab routing.
  *  - Click writes via the onSubTabChange callback (caller wires both
  *    layout slice + analyze sub-mode atomically).
  */
@@ -36,6 +36,9 @@ vi.mock('@/components/tds/TdsConfigPanel', () => ({
 vi.mock('@/components/tds/RunStatusBadge', () => ({
   RunStatusBadge: () => <div data-testid="tds-status-stub" />,
 }));
+vi.mock('@/components/pflow/PflowPanel', () => ({
+  PflowPanel: () => <div data-testid="pflow-panel-stub" />,
+}));
 
 import { AnalysisTab } from '@/components/data-grid/AnalysisTab';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
@@ -56,10 +59,10 @@ afterEach(() => {
 });
 
 describe('<AnalysisTab />', () => {
-  it('renders all 5 sub-tab triggers', () => {
+  it('renders all 6 sub-tab triggers', () => {
     render(<AnalysisTab activeSubTab="eig" onSubTabChange={() => {}} />);
     expect(screen.getByTestId('analysis-tab')).toBeInTheDocument();
-    for (const sub of ['plot', 'eig', 'cpf', 'se', 'tds']) {
+    for (const sub of ['plot', 'pf', 'eig', 'cpf', 'se', 'tds']) {
       expect(screen.getByTestId(`analysis-sub-tab-${sub}`)).toBeInTheDocument();
     }
   });
@@ -68,6 +71,20 @@ describe('<AnalysisTab />', () => {
     render(<AnalysisTab activeSubTab="eig" onSubTabChange={() => {}} />);
     // The EIG, CPF and SE views are lazily loaded chunks.
     expect(await screen.findByTestId('analyze-eig-stub')).toBeInTheDocument();
+  });
+
+  it('renders the PF sub-tab (options and summary) as a lazily loaded chunk', async () => {
+    render(<AnalysisTab activeSubTab="pf" onSubTabChange={() => {}} />);
+    expect(screen.getByTestId('analysis-sub-tab-pf')).toHaveTextContent('PF');
+    expect(await screen.findByTestId('pflow-panel-stub')).toBeInTheDocument();
+  });
+
+  it('puts PF second, after Plot, in the strip', () => {
+    render(<AnalysisTab activeSubTab="plot" onSubTabChange={() => {}} />);
+    const order = screen
+      .getAllByRole('tab')
+      .map((tab) => tab.getAttribute('data-testid')?.replace('analysis-sub-tab-', ''));
+    expect(order).toEqual(['plot', 'pf', 'eig', 'cpf', 'se', 'tds']);
   });
 
   it('renders the active sub-tab content (Plot)', async () => {

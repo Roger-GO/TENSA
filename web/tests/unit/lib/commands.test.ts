@@ -36,6 +36,7 @@ import { useHistoryStore } from '@/store/history';
 import { subscribeSldCommand } from '@/store/sld';
 import type { SldCommand } from '@/store/sld';
 import { usePflowStore } from '@/store/pflow';
+import { useAnalyzeStore } from '@/store/analyze';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary, PflowResult } from '@/api/types';
@@ -502,17 +503,24 @@ describe('useCommandRegistry — v3 Unit 14 auto-route on Run', () => {
     expect(layout.bottomDrawerCollapsed).toBe(true);
   });
 
-  it('Run PFlow leaves activeAnalysisSubTab alone (no PF sub-tab in v3)', () => {
+  it('Run PFlow sets activeBottomDrawerTab=analysis + activeAnalysisSubTab=pf', () => {
     useLayoutStore.setState({ activeAnalysisSubTab: 'eig' });
     const { result } = renderHook(() => useCommandRegistry(), { wrapper });
     const cmd = result.current.find((c) => c.id === 'run.pflow');
     act(() => cmd?.action());
     const layout = useLayoutStore.getState();
-    // The outer drawer tab still routes to analysis; the sub-tab stays
-    // on whatever the user last used (PF results land on the Buses
-    // grid + inspector, not in an Analysis sub-tab).
+    // The PF sub-tab holds the power-flow options and the system summary,
+    // so choosing PF opens it the way choosing TDS opens the TDS one.
     expect(layout.activeBottomDrawerTab).toBe('analysis');
-    expect(layout.activeAnalysisSubTab).toBe('eig');
+    expect(layout.activeAnalysisSubTab).toBe('pf');
+  });
+
+  it('Run PFlow leaves the Analyze sub-mode alone (the PF tab is layout-only)', () => {
+    useAnalyzeStore.setState({ subMode: 'eig' });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'run.pflow');
+    act(() => cmd?.action());
+    expect(useAnalyzeStore.getState().subMode).toBe('eig');
   });
 });
 

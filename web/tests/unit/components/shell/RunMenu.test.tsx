@@ -127,17 +127,16 @@ describe('<RunMenu /> — render', () => {
 });
 
 describe('<RunMenu /> — selection effects', () => {
-  it('selecting PFlow updates `activeRoutine` and does not change the analysis sub-tab', async () => {
+  it('selecting PFlow updates `activeRoutine` and opens the PF sub-tab', async () => {
     const user = userEvent.setup();
     useRunModeStore.setState({ activeRoutine: 'tds' });
-    const beforeSubTab = useLayoutStore.getState().activeAnalysisSubTab;
     render(withProviders(<RunMenu />));
     await user.click(screen.getByTestId('topbar-menu-run-trigger'));
     await user.click(await screen.findByTestId('topbar-menu-run-pflow'));
     expect(useRunModeStore.getState().activeRoutine).toBe('pflow');
-    // PFlow has no analysis sub-tab (F-FEAS-3); ``activeAnalysisSubTab``
-    // is left alone — only the drawer's outer tab is set to ``analysis``.
-    expect(useLayoutStore.getState().activeAnalysisSubTab).toBe(beforeSubTab);
+    // The PF sub-tab holds the power-flow options and the system summary.
+    expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('analysis');
+    expect(useLayoutStore.getState().activeAnalysisSubTab).toBe('pf');
   });
 
   it('selecting EIG flips activeRoutine + analyze.subMode + opens the Analyze sub-tab', async () => {

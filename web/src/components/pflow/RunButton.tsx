@@ -12,6 +12,7 @@ import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
 import { useRunReadiness } from '@/lib/useRunReadiness';
 import { toast } from '@/lib/toast';
+import { pflowSuccessMessage } from '@/lib/pflowOptions';
 import { cn } from '@/lib/cn';
 
 /**
@@ -62,7 +63,7 @@ export function RunButton({ className }: RunButtonProps) {
     runPflow.mutate(sessionId, {
       onSuccess: (data) => {
         if (data.converged) {
-          toast.success(`PF converged in ${data.iterations} iterations.`);
+          toast.success(pflowSuccessMessage(data));
         }
         // Non-convergence is a 200 with converged=false. The
         // ConvergenceErrorPanel subscribes to `pflow.lastRun` and
@@ -106,7 +107,7 @@ export function RunButton({ className }: RunButtonProps) {
         runPflow.mutate(sessionId, {
           onSuccess: (data) => {
             if (data.converged) {
-              toast.success(`PF converged in ${data.iterations} iterations.`);
+              toast.success(pflowSuccessMessage(data));
             }
           },
           onError: (err) => {

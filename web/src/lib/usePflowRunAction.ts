@@ -4,7 +4,9 @@
  * "Run power flow" recovery that EIG / CPF / SE offer while no converged
  * operating point exists.
  *
- * Success toasts the iteration count. A non-converged run is a 200 that the
+ * Success toasts the iteration count, and whatever the run used that is not
+ * ANDES's default (flat start, enforced Q limits, a different tolerance). A
+ * non-converged run is a 200 that the
  * ``ConvergenceErrorPanel`` shows from the pflow slice, so it gets no toast,
  * and a 5xx goes to ``RuntimeCrashModal`` through ``pflow.error`` the same way.
  * A 4xx that points at a reload offers "Reload case + retry" when the caller
@@ -14,6 +16,7 @@ import { useRunPflow } from '@/api/queries';
 import { ProblemDetailsError, ServerError } from '@/api/client';
 import { useSessionStore } from '@/store/session';
 import { toast } from '@/lib/toast';
+import { pflowSuccessMessage } from '@/lib/pflowOptions';
 
 export function usePflowRunAction(reloadCase?: () => void): () => void {
   const sessionId = useSessionStore((s) => s.sessionId);
@@ -24,7 +27,7 @@ export function usePflowRunAction(reloadCase?: () => void): () => void {
     runPflow.mutate(sessionId, {
       onSuccess: (data) => {
         if (data.converged) {
-          toast.success(`PF converged in ${data.iterations} iterations.`);
+          toast.success(pflowSuccessMessage(data));
         }
       },
       onError: (err) => {

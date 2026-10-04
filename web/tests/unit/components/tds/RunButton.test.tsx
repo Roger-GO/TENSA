@@ -580,6 +580,36 @@ describe('<RunButton /> v0.2 — PF branch (legacy v0.1 flow still works)', () =
     );
   });
 
+  it('on PF success, the toast also names the options the run used that are not ANDES defaults', async () => {
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(
+        jsonResponse({
+          run_id: 'run-abc',
+          converged: true,
+          iterations: 5,
+          mismatch: 1e-7,
+          bus_voltages: { '1': 1.0 },
+          bus_angles: { '1': 0 },
+          line_flows: {},
+          settings: {
+            tolerance: 1e-6,
+            max_iterations: 25,
+            flat_start: false,
+            enforce_q_limits: true,
+          },
+        }),
+      ),
+    );
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-pflow-button'));
+    await waitFor(() =>
+      expect(toastSuccessMock).toHaveBeenCalledWith(
+        'PF converged in 5 iterations (Q limits enforced).',
+      ),
+    );
+  });
+
   it('on 5xx, sets pflow.error to ServerError (no toast — modal owns it)', async () => {
     fetchSpy.mockImplementation(() =>
       Promise.resolve(

@@ -59,19 +59,30 @@ export const BOTTOM_DRAWER_TABS: readonly BottomDrawerTab[] = [
 
 /**
  * Inner sub-tab identifier for the Analysis tab inside the BottomDrawer.
- * Per the F-FEAS-3 resolution, the ``pflow`` sub-mode that exists on
- * ``useAnalyzeStore.subMode`` is retired in v3 (PF results are read off
- * the always-available Buses grid + Inspector accordion instead).
+ * ``pf`` holds the power-flow options and the system summary of the last run.
+ * The ``pflow`` sub-mode that exists on ``useAnalyzeStore.subMode`` stays
+ * retired: ``pf`` is a layout tab only, and PF results are still read off the
+ * always-available Buses grid + Inspector accordion as well.
  */
-export type AnalysisSubTab = 'plot' | 'eig' | 'cpf' | 'se' | 'tds';
+export type AnalysisSubTab = 'plot' | 'pf' | 'eig' | 'cpf' | 'se' | 'tds';
 
 export const ANALYSIS_SUB_TABS: readonly AnalysisSubTab[] = [
   'plot',
+  'pf',
   'eig',
   'cpf',
   'se',
   'tds',
 ] as const;
+
+/**
+ * The sub-tabs that have an Analyze sub-mode of the same name, which the
+ * layout sub-tab and `useAnalyzeStore.subMode` are written in step for.
+ * `plot` and `pf` read from the runs and pflow slices instead.
+ */
+export function isAnalyzeBackedSubTab(sub: AnalysisSubTab): sub is 'eig' | 'cpf' | 'se' | 'tds' {
+  return sub !== 'plot' && sub !== 'pf';
+}
 
 /**
  * Active tab in the Activity panel (Unit 11). ``active`` shows in-flight +

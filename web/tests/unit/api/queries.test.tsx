@@ -32,6 +32,7 @@ import {
 import { parseSessionId } from '@/api/types';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
+import { usePflowOptionsStore } from '@/store/pflowOptions';
 import { useJobsStore, LOCAL_ID_PREFIX, isTerminalStatus } from '@/store/jobs';
 import type { SessionId, WorkspacePath } from '@/api/types';
 
@@ -354,6 +355,44 @@ describe('queries hooks', () => {
     expect(rec.problem?.title).toBe('Session Busy');
     expect(rec.problem?.status).toBe(409);
     expect(rec.problem?.recovery).toEqual({ kind: 'retry', label: 'Retry' });
+  });
+
+  it('useRunPflow sends the options store as the request body, only what was changed', async () => {
+    const pfResult = {
+      run_id: 'r1',
+      converged: true,
+      iterations: 3,
+      mismatch: 1e-6,
+      bus_voltages: {},
+      bus_angles: {},
+      line_flows: {},
+    };
+    fetchSpy.mockResolvedValueOnce(jsonResponse(pfResult));
+    fetchSpy.mockResolvedValueOnce(jsonResponse(pfResult));
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useRunPflow(), { wrapper: Wrapper });
+
+    // Nothing set: an empty body, so the case keeps its own settings.
+    usePflowOptionsStore.getState().resetOptions();
+    result.current.mutate('sess-9' as SessionId);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const [, plain] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(plain.body))).toEqual({});
+
+    usePflowOptionsStore
+      .getState()
+      .setOptions({ tolerance: 1e-8, maxIterations: 60, flatStart: true, enforceQLimits: true });
+    result.current.mutate('sess-9' as SessionId);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    const [url, tuned] = fetchSpy.mock.calls[1] as [string, RequestInit];
+    expect(url).toMatch(/\/sessions\/sess-9\/pflow$/);
+    expect(JSON.parse(String(tuned.body))).toEqual({
+      tolerance: 1e-8,
+      max_iterations: 60,
+      flat_start: true,
+      enforce_q_limits: true,
+    });
+    usePflowOptionsStore.getState().resetOptions();
   });
 
   it('useRunPflow invalidates the topology cache', async () => {

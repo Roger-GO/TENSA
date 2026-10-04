@@ -126,6 +126,12 @@ test('the first load fetches the entry chunks; the diagram and the Analysis tab 
   expect(assets.has('AnalysisTab')).toBe(true);
   expect(assets.has('AnalyzePanel')).toBe(false);
 
+  // The PF view (options and summary) is a chunk of its own, fetched with its sub-tab.
+  expect(assets.has('PflowPanel')).toBe(false);
+  await page.getByTestId('analysis-sub-tab-pf').click();
+  await expect.poll(() => assets.has('PflowPanel')).toBe(true);
+  expect(assets.has('AnalyzePanel')).toBe(false);
+
   await page.getByTestId('analysis-sub-tab-eig').click();
   await expect.poll(() => assets.has('AnalyzePanel')).toBe(true);
 

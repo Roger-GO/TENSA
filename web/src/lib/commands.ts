@@ -281,15 +281,15 @@ function useCommandSets(): CommandSets {
       // the click clears the badge atomically.
       const layout = useLayoutStore.getState();
       layout.setActiveBottomDrawerTab('analysis');
-      // ``pflow`` and ``sweep`` aren't AnalysisSubTab values —
-      // mapping per F-FEAS-3: pflow has no sub-tab in v3 (PF results
-      // land on the Buses grid + inspector); sweep is a dialog. For
-      // those routines we leave activeAnalysisSubTab alone (its
-      // last-set value will surface when the user opens the drawer)
-      // but still flip the unread bit so the user knows results
-      // arrived. For tds/eig/cpf/se the routine name maps 1:1 to
-      // the AnalysisSubTab id.
-      if (routine === 'tds' || routine === 'eig' || routine === 'cpf' || routine === 'se') {
+      // ``sweep`` isn't an AnalysisSubTab value: it is a dialog. For it
+      // we leave activeAnalysisSubTab alone (its last-set value will
+      // surface when the user opens the drawer) but still flip the
+      // unread bit so the user knows results arrived. The power flow's
+      // tab is ``pf`` (its options and the system summary); for
+      // tds/eig/cpf/se the routine name maps 1:1 to the AnalysisSubTab id.
+      if (routine === 'pflow') {
+        layout.setActiveAnalysisSubTab('pf');
+      } else if (routine === 'tds' || routine === 'eig' || routine === 'cpf' || routine === 'se') {
         layout.setActiveAnalysisSubTab(routine);
       }
       if (layout.bottomDrawerCollapsed) {

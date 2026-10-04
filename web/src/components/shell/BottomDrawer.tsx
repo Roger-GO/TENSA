@@ -26,7 +26,12 @@
 import { Fragment, useEffect } from 'react';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { cn } from '@/lib/cn';
-import { BOTTOM_DRAWER_TABS, useLayoutStore, type BottomDrawerTab } from '@/store/layout';
+import {
+  BOTTOM_DRAWER_TABS,
+  isAnalyzeBackedSubTab,
+  useLayoutStore,
+  type BottomDrawerTab,
+} from '@/store/layout';
 import { useAnalyzeStore } from '@/store/analyze';
 import { LazyGrid } from '@/components/data-grid/LazyGrid';
 import { usePflowStore } from '@/store/pflow';
@@ -103,11 +108,11 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
   const subMode = useAnalyzeStore((s) => s.subMode);
   const setAnalyzeSubMode = useAnalyzeStore((s) => s.setSubMode);
   useEffect(() => {
-    // Map layout sub-tab → analyze sub-mode. The 'plot' tab has no
-    // analyze sub-mode equivalent (plotting reads from useRunsStore,
-    // not the analyze slice) so we leave subMode alone in that case;
-    // mounting <PlotPanelContent /> doesn't read subMode anyway.
-    if (activeAnalysisSubTab === 'plot') return;
+    // Map layout sub-tab → analyze sub-mode. The 'plot' and 'pf' tabs have
+    // no analyze sub-mode equivalent (plotting reads from useRunsStore and
+    // the PF tab from the pflow slice, not the analyze slice) so we leave
+    // subMode alone in those cases; mounting them doesn't read subMode.
+    if (!isAnalyzeBackedSubTab(activeAnalysisSubTab)) return;
     if (activeAnalysisSubTab !== subMode) {
       setAnalyzeSubMode(activeAnalysisSubTab);
     }
@@ -234,7 +239,7 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
               activeSubTab={activeAnalysisSubTab}
               onSubTabChange={(next) => {
                 setActiveAnalysisSubTab(next);
-                if (next !== 'plot') {
+                if (isAnalyzeBackedSubTab(next)) {
                   setAnalyzeSubMode(next);
                 }
               }}

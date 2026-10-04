@@ -58,7 +58,7 @@ function finiteOrNull(v: number | undefined): number | null {
 const OUTPUT_TITLE = 'Output from the last power flow run. Shows a dash until power flow has run.';
 
 const Q_LIMIT_TITLE =
-  'The reactive power limit the case sets. Power flow does not enforce it, so Q can lie past it. A dash for a generator that is switched off, and until power flow has run.';
+  'The reactive power limit the case sets. Power flow does not enforce it unless Enforce generator Q limits is ticked in the PF options, so Q can lie past it. A dash for a generator that is switched off, and until power flow has run.';
 
 const COLUMNS: ColumnConfig<GeneratorRow>[] = [
   { key: 'idx', label: 'idx', accessor: (r) => r.idx },

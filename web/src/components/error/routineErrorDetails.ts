@@ -32,6 +32,8 @@ export interface PflowConvergenceDetailData {
   /** Last Newton mismatch. May be non-finite. */
   mismatch: number;
   runId: string;
+  /** What the run used (`tolerance 1e-6, up to 25 iterations`), when the server said. */
+  settings?: string;
 }
 
 /** The one-line banner detail for a non-converged PF run. */
@@ -41,16 +43,18 @@ export function pflowConvergenceDetail(iterations: number): string {
 
 /**
  * The detail rows for a non-converged PF run (iterations / last mismatch /
- * run_id), with the EXACT pre-migration formatting (`toExponential(3)`,
+ * the settings it ran with, when known / run_id), with the EXACT pre-migration formatting (`toExponential(3)`,
  * em-dash for a non-finite mismatch).
  */
 export function pflowConvergenceRows(data: PflowConvergenceDetailData): DetailRow[] {
   const mismatch = Number.isFinite(data.mismatch) ? data.mismatch.toExponential(3) : '—';
-  return [
+  const rows: DetailRow[] = [
     { key: 'iterations', value: String(data.iterations) },
     { key: 'last mismatch', value: mismatch },
-    { key: 'run_id', value: data.runId, truncate: true },
   ];
+  if (data.settings !== undefined) rows.push({ key: 'settings', value: data.settings });
+  rows.push({ key: 'run_id', value: data.runId, truncate: true });
+  return rows;
 }
 
 // ---- TDS numerical instability ----------------------------------------------

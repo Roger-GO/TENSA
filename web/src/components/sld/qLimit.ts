@@ -3,11 +3,13 @@
  * import-clean (no React, no stores), so the generator node, the legend, the
  * Generators table and the Violations table read the same rules.
  *
- * The power flow does not hold a generator to its `qmin` / `qmax`, so an
- * output can lie past either one: that is a violation. An output on the limit
- * (the solver's tolerance either side) is the generator running at its
- * limit, which is worth a flag but not a violation. A generator the server
- * sends no limits for (one switched off) has nothing to be judged against.
+ * The power flow does not hold a generator to its `qmin` / `qmax` unless the
+ * run enforced them (a PF option), so an output can lie past either one: that is
+ * a violation. An output on the limit (the solver's tolerance either side) is the
+ * generator running at its limit, which is worth a flag but not a violation, and
+ * is where a run that enforced the limits leaves a generator it held. A generator
+ * the server sends no limits for (one switched off) has nothing to be judged
+ * against.
  */
 import type { VoltageBand, VoltageSide } from './voltage';
 

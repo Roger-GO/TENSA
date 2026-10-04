@@ -51,8 +51,9 @@ export function PflowConvergenceExtras({ data }: { data: PflowConvergenceDetailD
     <div data-testid="convergence-error-details" className="flex flex-col gap-2 px-3 py-2">
       <RoutineDetailGrid rows={pflowConvergenceRows(data)} />
       <p className="text-muted-foreground text-xs leading-relaxed">
-        The Newton-Raphson iteration did not reach the convergence threshold. Inspect bus voltages +
-        adjust the case (slack bus, generator setpoints, line impedance) and retry.
+        The Newton-Raphson iteration did not reach the convergence threshold. Retry with the
+        adjustments above, or inspect bus voltages and adjust the case (slack bus, generator
+        setpoints, line impedance) and retry.
       </p>
     </div>
   );

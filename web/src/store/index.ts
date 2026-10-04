@@ -8,8 +8,8 @@
  * - When `session` clears, `case` and `pflow` clear too.
  * - When `case` changes, `pflow` and the EIG / CPF / SE results clear
  *   (results don't carry across cases), the disturbances scheduled for the next
- *   TDS run clear (they name the old case's buses), and the active TDS run is
- *   released.
+ *   TDS run clear (they name the old case's buses), the power-flow options go
+ *   back to the defaults, and the active TDS run is released.
  *   The finished runs themselves stay: they are results only this tab holds,
  *   and comparing a run on one case with a run on a modified copy is a normal
  *   workflow. They go when the session ends.
@@ -29,6 +29,7 @@
 import { useCaseStore } from './case';
 import { useSessionStore } from './session';
 import { usePflowStore } from './pflow';
+import { usePflowOptionsStore } from './pflowOptions';
 import { useRunsStore } from './runs';
 import { useAnimationStore } from './animation';
 import { useConnectivityStore } from './connectivity';
@@ -43,6 +44,7 @@ import { useAnalyzeStore } from './analyze';
 export { useSessionStore } from './session';
 export { useCaseStore } from './case';
 export { usePflowStore } from './pflow';
+export { usePflowOptionsStore } from './pflowOptions';
 export { useRunsStore } from './runs';
 export { useLayoutStore, DEFAULT_LAYOUT, LAYOUT_STORAGE_KEY } from './layout';
 export { BOTTOM_DRAWER_TABS, ANALYSIS_SUB_TABS } from './layout';
@@ -95,7 +97,9 @@ export function wireStoreCascade(): void {
   });
 
   // case change → pflow + analysis results + connectivity + pmu + profiles +
-  // scheduled disturbances clear, and the active TDS run is released. Triggered on selection change
+  // scheduled disturbances clear, the power-flow options go back to the defaults
+  // (a setting made to rescue one case should not follow the user to the next),
+  // and the active TDS run is released. Triggered on selection change
   // OR clear. Connectivity is bus-idx keyed and a new case has a new bus set,
   // so a stale snapshot would grey out the wrong nodes; PMU and TimeSeries
   // placements are device-idx keyed for the same reason. An EIG result that
@@ -112,6 +116,7 @@ export function wireStoreCascade(): void {
     const next = state.selection;
     if (prevSelection !== next) {
       usePflowStore.getState().clearPflow();
+      usePflowOptionsStore.getState().resetOptions();
       clearAnalysisResults();
       useRunsStore.getState().clearActiveRun();
       useAnimationStore.getState().clearAll();
@@ -160,6 +165,7 @@ export function __resetCascadeForTests(): void {
     selectedElement: null,
   });
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  usePflowOptionsStore.getState().resetOptions();
   useAnalyzeStore.setState({
     eigResult: null,
     selectedModeId: null,

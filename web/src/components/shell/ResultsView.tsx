@@ -23,7 +23,7 @@ import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import { ChartLineIcon, EmptyState } from '@/components/ui/EmptyState';
 import { LazyAnalysisTab } from '@/components/data-grid/LazyAnalysisTab';
-import { useLayoutStore } from '@/store/layout';
+import { isAnalyzeBackedSubTab, useLayoutStore } from '@/store/layout';
 import { useAnalyzeStore } from '@/store/analyze';
 import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';
@@ -89,7 +89,7 @@ export function ResultsView({ className }: ResultsViewProps) {
               // existing AnalyzeEigSubMode et al. (which read subMode)
               // follow the sub-tab click.
               setActiveAnalysisSubTab(next);
-              if (next !== 'plot') {
+              if (isAnalyzeBackedSubTab(next)) {
                 setAnalyzeSubMode(next);
               }
             }}

@@ -19,6 +19,7 @@ import {
   BOTTOM_DRAWER_TABS,
   DEFAULT_LAYOUT,
   LAYOUT_STORAGE_KEY,
+  isAnalyzeBackedSubTab,
   useLayoutStore,
 } from '@/store/layout';
 
@@ -70,7 +71,11 @@ describe('useLayoutStore — defaults', () => {
   });
 
   it('exposes ANALYSIS_SUB_TABS as the canonical ordered list', () => {
-    expect(ANALYSIS_SUB_TABS).toEqual(['plot', 'eig', 'cpf', 'se', 'tds']);
+    expect(ANALYSIS_SUB_TABS).toEqual(['plot', 'pf', 'eig', 'cpf', 'se', 'tds']);
+  });
+
+  it('says which sub-tabs have an Analyze sub-mode to be written in step: not Plot, not PF', () => {
+    expect(ANALYSIS_SUB_TABS.filter(isAnalyzeBackedSubTab)).toEqual(['eig', 'cpf', 'se', 'tds']);
   });
 });
 

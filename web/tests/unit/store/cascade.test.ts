@@ -21,6 +21,7 @@ import { useAnalyzeStore } from '@/store/analyze';
 import { useCaseStore } from '@/store/case';
 import { blankFaultSpec, useDisturbanceStore } from '@/store/disturbance';
 import { usePflowStore } from '@/store/pflow';
+import { usePflowOptionsStore } from '@/store/pflowOptions';
 import { useRunsStore } from '@/store/runs';
 import { useSessionStore } from '@/store/session';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
@@ -92,6 +93,31 @@ describe('store cascade — case change', () => {
     expect(useAnalyzeStore.getState().eigResult).toBeNull();
     expect(useAnalyzeStore.getState().seMeasurementsCount).toBeNull();
     expect(useRunsStore.getState().activeRunId).toBeNull();
+  });
+
+  it('puts the power-flow options back to the defaults, so a setting made for one case does not follow to the next', () => {
+    useCaseStore.getState().setCase(caseOf('kundur_full.xlsx'));
+    usePflowOptionsStore.getState().setOptions({ flatStart: true, tolerance: 1e-3 });
+
+    useCaseStore.getState().setCase(caseOf('wscc9.xlsx'));
+
+    expect(usePflowOptionsStore.getState().options).toEqual({
+      tolerance: null,
+      maxIterations: null,
+      flatStart: false,
+      enforceQLimits: false,
+    });
+  });
+
+  it('keeps the power-flow options while the same case is reloaded or its PF result replaced', () => {
+    useCaseStore.getState().setCase(caseOf('kundur_full.xlsx'));
+    usePflowStore.getState().setLastRun(PF);
+    usePflowOptionsStore.getState().setOptions({ enforceQLimits: true });
+
+    usePflowStore.getState().clearPflow();
+    usePflowStore.getState().setLastRun(PF);
+
+    expect(usePflowOptionsStore.getState().options.enforceQLimits).toBe(true);
   });
 
   it('keeps the finished runs, with their names, colours and overlay pins', () => {
