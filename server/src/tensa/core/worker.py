@@ -91,9 +91,9 @@ from tensa.core.stream import (
     bus_idx_values_from_system,
     encode_batch,
     line_idx_values_from_system,
-    make_combined_schema,
     pq_idx_values_from_system,
     syngen_idx_values_from_system,
+    var_column_names,
 )
 from tensa.core.wrapper import Wrapper, tds_fixed_step, validate_step_size
 
@@ -1273,9 +1273,9 @@ def _handle_run_tds(
                 raise AndesAppError(
                     "'vars' must be a non-empty list when provided"
                 )
-            # Dedupe while preserving canonical ordering (the schema
-            # composer also iterates VAR_GROUPS canonically, but normalize
-            # here so the metadata's ``vars`` list is stable too).
+            # Dedupe while preserving canonical ordering (``var_column_names``
+            # also iterates VAR_GROUPS canonically, but normalize here so the
+            # metadata's ``vars`` list is stable too).
             seen: set[str] = set()
             var_groups = []
             for g in VAR_GROUPS:
@@ -1287,8 +1287,8 @@ def _handle_run_tds(
                 "'vars' must be a list of variable-group names"
             )
 
-        # Resolve the System ONCE (after load); we need its Bus model to build
-        # the schema. If the wrapper has no System loaded the run will fail
+        # Resolve the System ONCE (after load); we need its Bus model to list
+        # the columns. If the wrapper has no System loaded the run will fail
         # later — surface the same error path as before.
         ss = wrapper._require_loaded()  # noqa: SLF001 — internal access by design
         # Ensure setup so Bus.v exists; the wrapper would do this anyway when
@@ -1314,12 +1314,13 @@ def _handle_run_tds(
 
         # Snapshot the topology ONCE per run so each callpert tick only reads
         # values: the collector resolves where each one lives now, and the
-        # schema lists the same devices, so column order and value order line up.
+        # column names list the same devices, so column order and value order
+        # line up.
         bus_idx_values = bus_idx_values_from_system(ss)
         syngen_idx_values = syngen_idx_values_from_system(ss)
         line_idx_values = line_idx_values_from_system(ss)
         pq_idx_values = pq_idx_values_from_system(ss)
-        schema, var_columns = make_combined_schema(var_groups, ss)
+        var_columns = var_column_names(var_groups, ss)
         collector = StreamCollector(ss, var_groups)
 
         # Send the stream-start metadata BEFORE the run begins so the WS
@@ -1354,7 +1355,7 @@ def _handle_run_tds(
 
         def _emit_rows(rows: list[StreamRow], *, tail: bool = False) -> None:
             frame_seq_holder[0] += 1
-            payload = encode_batch(schema, rows)
+            payload = encode_batch(len(var_columns), rows)
             envelope: dict[str, Any] = {
                 "type": "stream_frame",
                 "seq": seq,

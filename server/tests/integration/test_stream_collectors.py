@@ -53,14 +53,14 @@ def _load_ieee14_post_pf_tds_init():  # type: ignore[no-untyped-def]
 
 
 @pytest.mark.integration
-def test_combined_collector_column_count_matches_schema_for_all_groups() -> None:
-    """``StreamCollector`` returns exactly one float per schema column
-    (excluding ``t``) for every group selected. IEEE 14 + dyr:
+def test_combined_collector_column_count_matches_the_column_names_for_all_groups() -> None:
+    """``StreamCollector`` returns exactly one float per column name
+    (``t`` excluded) for every group selected. IEEE 14 + dyr:
     14 buses, 5 SynGen, 20 lines, 11 PQ loads → 2 columns each."""
     ss = _load_ieee14_post_pf_tds_init()
     groups = list(S.VAR_GROUPS)
 
-    _schema, var_columns = S.make_combined_schema(groups, ss)
+    var_columns = S.var_column_names(groups, ss)
     bus_idx = S.bus_idx_values_from_system(ss)
     sg_idx = S.syngen_idx_values_from_system(ss)
     line_idx = S.line_idx_values_from_system(ss)
@@ -86,7 +86,7 @@ def test_streamed_line_pq_matches_wrapper_extract_line_flows() -> None:
     Q1 pi-equivalent formula is replicated, not approximated."""
     ss = _load_ieee14_post_pf_tds_init()
     line_idx = S.line_idx_values_from_system(ss)
-    _schema, var_columns = S.make_combined_schema(["line_flow"], ss)
+    var_columns = S.var_column_names(["line_flow"], ss)
     values = S.StreamCollector(ss, ["line_flow"]).collect()
     name_to_value = dict(zip(var_columns, values, strict=True))
 
@@ -106,7 +106,7 @@ def test_streamed_load_pq_matches_wrapper_extract_load_consumption() -> None:
     ``wrapper._extract_load_consumption`` for the PQ model (Ppf/Qpf * mva)."""
     ss = _load_ieee14_post_pf_tds_init()
     pq_idx = S.pq_idx_values_from_system(ss)
-    _schema, var_columns = S.make_combined_schema(["load_pq"], ss)
+    var_columns = S.var_column_names(["load_pq"], ss)
     values = S.StreamCollector(ss, ["load_pq"]).collect()
     name_to_value = dict(zip(var_columns, values, strict=True))
 
@@ -127,7 +127,7 @@ def test_streamed_gen_power_matches_direct_syngen_get_times_mva() -> None:
     multiply."""
     ss = _load_ieee14_post_pf_tds_init()
     sg_idx = S.syngen_idx_values_from_system(ss)
-    _schema, var_columns = S.make_combined_schema(["gen_power"], ss)
+    var_columns = S.var_column_names(["gen_power"], ss)
     values = S.StreamCollector(ss, ["gen_power"]).collect()
     name_to_value = dict(zip(var_columns, values, strict=True))
 
@@ -147,7 +147,7 @@ def test_streamed_bus_angle_matches_bus_a_v() -> None:
     ``Bus_<idx>_a``; the angle column must equal ``Bus.a.v`` (rad)."""
     ss = _load_ieee14_post_pf_tds_init()
     bus_idx = S.bus_idx_values_from_system(ss)
-    _schema, var_columns = S.make_combined_schema(["bus_v"], ss)
+    var_columns = S.var_column_names(["bus_v"], ss)
     values = S.StreamCollector(ss, ["bus_v"]).collect()
     name_to_value = dict(zip(var_columns, values, strict=True))
 
@@ -161,10 +161,10 @@ def test_streamed_bus_angle_matches_bus_a_v() -> None:
 
 
 @pytest.mark.integration
-def test_no_syngen_case_yields_zero_gen_columns_but_well_formed_schema() -> None:
+def test_no_syngen_case_yields_zero_gen_columns_but_well_formed_columns() -> None:
     """A case loaded without a .dyr addfile has zero SynGen members. The
-    gen_state + gen_power groups contribute zero columns, but the schema
-    and collected values stay well-formed (bus + line + load only)."""
+    gen_state + gen_power groups contribute zero columns, but the column
+    names and collected values stay well-formed (bus + line + load only)."""
     import andes
 
     raw, _dyr = _ieee14_paths()
@@ -175,7 +175,7 @@ def test_no_syngen_case_yields_zero_gen_columns_but_well_formed_schema() -> None
     sg_idx = S.syngen_idx_values_from_system(ss)
     assert sg_idx == []
 
-    _schema, var_columns = S.make_combined_schema(groups, ss)
+    var_columns = S.var_column_names(groups, ss)
     assert not any(c.startswith("Gen_") for c in var_columns)
 
     values = S.StreamCollector(ss, groups).collect()

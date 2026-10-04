@@ -80,10 +80,11 @@ DecimationAlgorithm = Literal["none", "boxcar-mean", "boxcar-mean-best-effort"]
 DecimationMode = Literal["none", "mean"]
 
 # ``vars`` selector: each entry expands into a contiguous run of
-# columns in the Arrow schema (in the order listed in ``VAR_GROUPS``).
-# Adding a group here + its column/collect helpers extends the combined
-# schema, the per-tick collector, the worker idx-snapshot, AND the WS
-# vars-validation gate automatically (they all iterate ``VAR_GROUPS``).
+# columns in each row (in the order listed in ``VAR_GROUPS``).
+# Adding a group here + its branches in ``var_column_names`` and
+# ``StreamCollector`` extends the run's columns and the per-tick collector;
+# the worker's and the WS layer's ``vars`` validation iterate ``VAR_GROUPS``
+# and follow automatically.
 VarGroup = Literal["bus_v", "gen_state", "gen_power", "line_flow", "load_pq"]
 VAR_GROUPS: tuple[VarGroup, ...] = (
     "bus_v",
@@ -104,144 +105,34 @@ StreamRow = tuple[float, Sequence[float] | NDArray[np.float64]]
 log = logging.getLogger("tensa.stream")
 
 
-# ---- schema -----------------------------------------------------------------
+# ---- columns ----------------------------------------------------------------
 
 
-def make_bus_voltage_schema(bus_idx_values: list[int | str]) -> pa.Schema:
-    """Build the Arrow schema for a stream emitting bus state over time.
-
-    ``t`` is the simulation time; for each bus two columns are emitted in
-    idx order: ``Bus_<idx>_v`` (voltage magnitude, pu) then
-    ``Bus_<idx>_a`` (voltage angle, rad). Column names are stable across
-    the stream and surfaced in the stream-start metadata.
-    """
-    fields: list[pa.Field] = [pa.field("t", pa.float64())]
-    fields.extend(_bus_voltage_columns(bus_idx_values))
-    return pa.schema(fields)
-
-
-def _bus_voltage_columns(bus_idx_values: list[int | str]) -> list[pa.Field]:
-    fields: list[pa.Field] = []
-    for idx in bus_idx_values:
-        fields.append(pa.field(f"Bus_{idx}_v", pa.float64()))
-        fields.append(pa.field(f"Bus_{idx}_a", pa.float64()))
-    return fields
+def _paired_columns(
+    prefix: str, idx_values: list[int | str], first: str, second: str
+) -> list[str]:
+    """``<prefix>_<idx>_<first>`` then ``<prefix>_<idx>_<second>`` for each idx
+    in turn: the two-values-per-device layout every group uses."""
+    names: list[str] = []
+    for idx in idx_values:
+        names.append(f"{prefix}_{idx}_{first}")
+        names.append(f"{prefix}_{idx}_{second}")
+    return names
 
 
-def make_generator_state_schema(syngen_idx_values: list[int | str]) -> pa.Schema:
-    """Build the Arrow schema for a stream emitting generator state over time.
-
-    Two columns per generator: ``Gen_<idx>_delta`` (rotor angle, rad) and
-    ``Gen_<idx>_omega`` (per-unit speed). Order: delta then omega for each
-    idx, in the listed idx order. ``syngen_idx_values`` covers the
-    ``SynGen`` group (parent of GENROU / GENCLS / PLBVFU1); static
-    generators (``PV`` / ``Slack``) have no rotor state and are NOT
-    included. An empty list yields a schema with only the ``t`` column,
-    which is well-formed but useless on its own — callers compose with
-    other schemas via :func:`make_combined_schema`.
-    """
-    fields: list[pa.Field] = [pa.field("t", pa.float64())]
-    fields.extend(_generator_state_columns(syngen_idx_values))
-    return pa.schema(fields)
-
-
-def _generator_state_columns(syngen_idx_values: list[int | str]) -> list[pa.Field]:
-    fields: list[pa.Field] = []
-    for idx in syngen_idx_values:
-        fields.append(pa.field(f"Gen_{idx}_delta", pa.float64()))
-        fields.append(pa.field(f"Gen_{idx}_omega", pa.float64()))
-    return fields
-
-
-def make_generator_power_schema(syngen_idx_values: list[int | str]) -> pa.Schema:
-    """Build the Arrow schema for a stream emitting generator electrical
-    power over time.
-
-    Two columns per generator: ``Gen_<idx>_Pe`` (electrical active power,
-    MW) and ``Gen_<idx>_Qe`` (electrical reactive power, MVar). Order: Pe
-    then Qe for each idx, in the listed idx order. ``syngen_idx_values``
-    covers the ``SynGen`` group (same membership as
-    :func:`make_generator_state_schema`); static generators have no
-    electrical-power states and are NOT included. An empty list yields a
-    schema with only the ``t`` column — well-formed for composition via
-    :func:`make_combined_schema`.
-    """
-    fields: list[pa.Field] = [pa.field("t", pa.float64())]
-    fields.extend(_generator_power_columns(syngen_idx_values))
-    return pa.schema(fields)
-
-
-def _generator_power_columns(syngen_idx_values: list[int | str]) -> list[pa.Field]:
-    fields: list[pa.Field] = []
-    for idx in syngen_idx_values:
-        fields.append(pa.field(f"Gen_{idx}_Pe", pa.float64()))
-        fields.append(pa.field(f"Gen_{idx}_Qe", pa.float64()))
-    return fields
-
-
-def make_line_flow_schema(line_idx_values: list[int | str]) -> pa.Schema:
-    """Build the Arrow schema for a stream emitting per-line power flow.
-
-    Two columns per line: ``Line_<idx>_p`` (active power, MW) then
-    ``Line_<idx>_q`` (reactive power, MVar), both measured at terminal 1
-    (the ``bus1`` end) and computed in pu then multiplied by the system
-    base MVA. An empty list yields a schema with only the ``t`` column —
-    useful in combination with other groups via
-    :func:`make_combined_schema`, and required to keep ``vars=[
-    "line_flow"]`` well-formed on cases with zero lines.
-    """
-    fields: list[pa.Field] = [pa.field("t", pa.float64())]
-    fields.extend(_line_flow_columns(line_idx_values))
-    return pa.schema(fields)
-
-
-def _line_flow_columns(line_idx_values: list[int | str]) -> list[pa.Field]:
-    fields: list[pa.Field] = []
-    for idx in line_idx_values:
-        fields.append(pa.field(f"Line_{idx}_p", pa.float64()))
-        fields.append(pa.field(f"Line_{idx}_q", pa.float64()))
-    return fields
-
-
-def make_load_pq_schema(pq_idx_values: list[int | str]) -> pa.Schema:
-    """Build the Arrow schema for a stream emitting per-load consumption.
-
-    Two columns per PQ load: ``Load_<idx>_p`` (active consumption, MW)
-    then ``Load_<idx>_q`` (reactive consumption, MVar). Values come from
-    the PQ model's post-PF power (``Ppf``/``Qpf``, pu) scaled by the
-    system base MVA. An empty list yields a schema with only the ``t``
-    column — well-formed for composition via :func:`make_combined_schema`
-    and on cases with zero PQ loads.
-    """
-    fields: list[pa.Field] = [pa.field("t", pa.float64())]
-    fields.extend(_load_pq_columns(pq_idx_values))
-    return pa.schema(fields)
-
-
-def _load_pq_columns(pq_idx_values: list[int | str]) -> list[pa.Field]:
-    fields: list[pa.Field] = []
-    for idx in pq_idx_values:
-        fields.append(pa.field(f"Load_{idx}_p", pa.float64()))
-        fields.append(pa.field(f"Load_{idx}_q", pa.float64()))
-    return fields
-
-
-def make_combined_schema(
+def var_column_names(
     var_groups: list[VarGroup] | tuple[VarGroup, ...],
     system: System,
-) -> tuple[pa.Schema, list[str]]:
-    """Build a unified column schema for the requested variable groups.
+) -> list[str]:
+    """The names of the columns a run streams for ``var_groups`` on ``system``.
 
-    ``var_groups`` is an ordered, deduplicated subset of :data:`VAR_GROUPS`.
-    The returned schema has ``t`` as its first column followed by, for
-    each requested group in canonical :data:`VAR_GROUPS` order, the
-    columns that group contributes (sourced live from ``system``). It
-    fixes the column order and count but is not what goes on the wire:
-    :func:`encode_batch` packs the values into one list column and the names
-    travel once, as the second tuple element. That is the column-name list
-    (excluding ``t``), the same list ``stream_start.metadata.var_columns``
-    advertises to the client so the picker tree can be wired without the
-    client having to re-introspect the topology.
+    ``var_groups`` is a non-empty subset of :data:`VAR_GROUPS`. The names come
+    in canonical :data:`VAR_GROUPS` order whatever order the groups were listed
+    in, each group contributing its two columns per device in idx order (see
+    the module docstring), so the list fixes both the column count and the
+    order of the values in every row. ``t`` is not among them. This is the list
+    ``stream_start.metadata.var_columns`` sends the client, which is how it
+    names the values of the frames that follow.
     """
     if not var_groups:
         raise ValueError("var_groups must be a non-empty subset of VAR_GROUPS")
@@ -250,30 +141,25 @@ def make_combined_schema(
     if unknown:
         raise ValueError(f"unknown var groups: {sorted(unknown)!r}")
 
-    fields: list[pa.Field] = [pa.field("t", pa.float64())]
-    var_columns: list[str] = []
-
-    # Iterate in canonical group order so the schema layout is stable
-    # regardless of how the client ordered ``vars`` in the request.
+    names: list[str] = []
     for group in VAR_GROUPS:
         if group not in requested:
             continue
         if group == "bus_v":
-            cols = _bus_voltage_columns(bus_idx_values_from_system(system))
+            names += _paired_columns("Bus", bus_idx_values_from_system(system), "v", "a")
         elif group == "gen_state":
-            cols = _generator_state_columns(syngen_idx_values_from_system(system))
+            names += _paired_columns(
+                "Gen", syngen_idx_values_from_system(system), "delta", "omega"
+            )
         elif group == "gen_power":
-            cols = _generator_power_columns(syngen_idx_values_from_system(system))
+            names += _paired_columns("Gen", syngen_idx_values_from_system(system), "Pe", "Qe")
         elif group == "line_flow":
-            cols = _line_flow_columns(line_idx_values_from_system(system))
+            names += _paired_columns("Line", line_idx_values_from_system(system), "p", "q")
         elif group == "load_pq":
-            cols = _load_pq_columns(pq_idx_values_from_system(system))
+            names += _paired_columns("Load", pq_idx_values_from_system(system), "p", "q")
         else:  # pragma: no cover — exhaustively handled above
             raise ValueError(f"unexpected var group: {group!r}")
-        fields.extend(cols)
-        var_columns.extend(f.name for f in cols)
-
-    return pa.schema(fields), var_columns
+    return names
 
 
 # ---- encoding ---------------------------------------------------------------
@@ -289,31 +175,29 @@ def _frame_schema(n_columns: int) -> pa.Schema:
 
 
 def encode_batch(
-    schema: pa.Schema,
+    n_columns: int,
     rows: Iterable[StreamRow],
 ) -> bytes:
     """Encode one or more rows into a frame: a self-contained Arrow IPC
     stream chunk (see the module docstring for the layout).
 
-    ``schema`` is the column schema from :func:`make_combined_schema`; it
-    says how many values a row carries. ``rows`` is an iterable of
-    ``(t, values)`` tuples, each ``values`` a list or array matching the
-    schema's variable columns in order, and a row of any other length raises
-    ``ValueError``. ``t`` and each value may arrive as numpy scalars or 0-d
-    ndarrays (ANDES's ``dae.t`` is a numpy scalar); numpy coerces them to
-    float64.
+    ``n_columns`` is how many values a row carries, the length of the run's
+    :func:`var_column_names`. ``rows`` is an iterable of ``(t, values)``
+    tuples, each ``values`` a list or array of those values in column order,
+    and a row of any other length raises ``ValueError``. ``t`` and each value
+    may arrive as numpy scalars or 0-d ndarrays (ANDES's ``dae.t`` is a numpy
+    scalar); numpy coerces them to float64.
     """
     rows_list = list(rows)
     if not rows_list:
         # Empty batch is meaningless; signal up to caller.
         raise ValueError("encode_batch called with no rows")
 
-    n_columns = len(schema) - 1
     t = np.array([row_t for row_t, _ in rows_list], dtype=np.float64)
     values = np.array([row_values for _, row_values in rows_list], dtype=np.float64)
     if values.shape != (len(rows_list), n_columns):
         raise ValueError(
-            f"every row must carry {n_columns} values (the schema's columns); "
+            f"every row must carry {n_columns} values (one per column); "
             f"got an array of shape {values.shape}"
         )
 
@@ -351,8 +235,8 @@ def decode_batch(payload: bytes) -> tuple[NDArray[np.float64], NDArray[np.float6
 
 
 def bus_idx_values_from_system(system: System) -> list[int | str]:
-    """Return the ANDES bus idx values in the order their voltage +
-    angle columns will appear in each Arrow batch."""
+    """Return the ANDES bus idx values in the order their voltage and
+    angle columns appear in a row."""
     return list(system.Bus.idx.v)
 
 
@@ -365,7 +249,7 @@ def syngen_idx_values_from_system(system: System) -> list[int | str]:
     (``PV``, ``Slack``) are NOT in this group — they have no rotor state
     and contribute zero columns to the gen_state stream. On a case with
     no dynamic generators (e.g., a .raw loaded without a .dyr addfile),
-    this returns ``[]`` and the gen_state schema is well-formed-empty.
+    this returns ``[]`` and the gen_state and gen_power groups have no columns.
     """
     syngen = getattr(system, "SynGen", None)
     if syngen is None:
@@ -379,7 +263,7 @@ def syngen_idx_values_from_system(system: System) -> list[int | str]:
 def line_idx_values_from_system(system: System) -> list[int | str]:
     """Return the ANDES Line idx values in the order
     :class:`StreamCollector` reads them. Cases with no Line
-    elements yield ``[]`` and a well-formed-empty line_flow schema."""
+    elements yield ``[]`` and the line_flow group has no columns."""
     line = getattr(system, "Line", None)
     if line is None:
         return []
@@ -392,7 +276,7 @@ def line_idx_values_from_system(system: System) -> list[int | str]:
 def pq_idx_values_from_system(system: System) -> list[int | str]:
     """Return the ANDES PQ idx values in the order
     :class:`StreamCollector` reads them. Cases with no PQ
-    loads yield ``[]`` and a well-formed-empty load_pq schema.
+    loads yield ``[]`` and the load_pq group has no columns.
 
     Only the ``PQ`` model is included (constant-power loads). ZIP loads
     are a separate model and are not part of this group's contract.
@@ -632,7 +516,7 @@ class StreamCollector:
     what position, which line arrays to read), so a step is a handful of
     numpy reads rather than a Python loop over devices and a dictionary
     lookup per generator. :meth:`collect` returns one row, a float64 array in
-    the column order :func:`make_combined_schema` lays out, and builds a new
+    the column order :func:`var_column_names` lays out, and builds a new
     array each time: ANDES updates its own arrays in place, and the
     aggregator keeps rows until a window closes.
     """
@@ -649,7 +533,7 @@ class StreamCollector:
 
         syngen_idx_values = syngen_idx_values_from_system(system)
         readers: list[_Reader] = []
-        # Canonical group order, so the row matches the schema's layout
+        # Canonical group order, so the row matches ``var_column_names``
         # whatever order the client listed ``vars`` in.
         for group in VAR_GROUPS:
             if group not in requested:
@@ -837,12 +721,7 @@ __all__ = [
     "decode_batch",
     "encode_batch",
     "line_idx_values_from_system",
-    "make_bus_voltage_schema",
-    "make_combined_schema",
-    "make_generator_power_schema",
-    "make_generator_state_schema",
-    "make_line_flow_schema",
-    "make_load_pq_schema",
     "pq_idx_values_from_system",
     "syngen_idx_values_from_system",
+    "var_column_names",
 ]
