@@ -206,17 +206,27 @@ class TopologySnapshot:
 
 @dataclass
 class LineFlow:
-    """Per-line P/Q flow at terminal 1 (the ``bus1`` end), in MW / MVAr.
+    """Per-line P/Q flow at both terminals, in MW / MVAr.
 
-    Computed from the ANDES standard pi-equivalent line equation: the line's
-    power injection at ``bus1`` (which is exactly what ANDES's own ``Line.a1``
-    equation computes).
+    ``p`` / ``q`` are the power injected into the line at ``bus1`` and
+    ``p_to`` / ``q_to`` the power injected at ``bus2``, each computed from the
+    standard pi-equivalent line equations ANDES itself solves (the line's
+    ``a1`` / ``v1`` and ``a2`` / ``v2`` terms). ``loss`` is their sum, the
+    active power the line dissipates. ``rate_a`` is the line's long-term rating
+    in MVA and ``loading_pct`` the larger of the two terminal apparent powers
+    as a percentage of it; both are ``None`` for a line the case gives no
+    rating (a ``rate_a`` of zero).
     """
 
     p: float
     q: float
     from_idx: int | str
     to_idx: int | str
+    p_to: float
+    q_to: float
+    loss: float
+    rate_a: float | None
+    loading_pct: float | None
 
 
 @dataclass
@@ -229,12 +239,18 @@ class GeneratorOutput:
     no row of its own: it carries no ``p`` / ``q`` until TDS initialises,
     and its operating point is the one of the static generator it names in
     its ``gen`` parameter.
+
+    ``q_min`` / ``q_max`` are the reactive limits the case sets, in MVAr; the
+    power flow does not enforce them, so ``q`` can lie outside. ``None`` for a
+    generator that is switched off, which has no limit to be held to.
     """
 
     p: float  # MW (scaled by ss.config.mva)
     q: float  # MVAr
     v: float  # terminal voltage (pu)
     bus: int | str
+    q_min: float | None = None  # MVAr
+    q_max: float | None = None  # MVAr
 
 
 @dataclass
@@ -4010,6 +4026,9 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         ParamMeta("g", "number", unit="pu"),
         ParamMeta("tap", "number"),
         ParamMeta("phi", "number", unit="rad"),
+        # Long-term flow limit. The power flow does not use it: it is the
+        # rating a line's loading is read against (0 means the case sets none).
+        ParamMeta("rate_a", "number", unit="MVA"),
         # Connection status (1 = in service, 0 = out of service). Editable so
         # contingency studies can outage a branch through the API / inspector
         # and re-run PF, instead of faking an open line with huge impedance.
@@ -5040,6 +5059,9 @@ def _extract_generator_outputs(ss: System) -> dict[str, GeneratorOutput]:
 
     All values are in pu; we scale P/Q by ``ss.config.mva`` to MW/MVAr.
     Best-effort: defaults to 0.0 / 0.0 / 1.0 on any missing attribute.
+    Each row also carries the generator's reactive limits (``qmin`` /
+    ``qmax``, scaled the same way), left ``None`` for a generator that is
+    switched off (``u`` of 0) or whose limit is missing or not finite.
     Returns dict keyed by stringified idx.
     """
     log = logging.getLogger("tensa.wrapper.gen_outputs")
@@ -5061,6 +5083,9 @@ def _extract_generator_outputs(ss: System) -> dict[str, GeneratorOutput]:
         p_arr = _safe_list(getattr(model, "p", None))
         q_arr = _safe_list(getattr(model, "q", None))
         v_arr = _safe_list(getattr(model, "v", None))
+        u_arr = _safe_list(getattr(model, "u", None))
+        qmin_arr = _safe_list(getattr(model, "qmin", None))
+        qmax_arr = _safe_list(getattr(model, "qmax", None))
         for i, idx in enumerate(idx_values):
             try:
                 p_pu = float(p_arr[i]) if i < len(p_arr) else 0.0
@@ -5077,13 +5102,35 @@ def _extract_generator_outputs(ss: System) -> dict[str, GeneratorOutput]:
             bus = bus_values[i] if i < len(bus_values) else ""
             bus_coerced = _coerce_scalar(bus)
             bus_final: int | str = bus_coerced if isinstance(bus_coerced, int | str) and not isinstance(bus_coerced, bool) else str(bus)
+            switched_off = i < len(u_arr) and _is_zero(u_arr[i])
             out[str(idx)] = GeneratorOutput(
                 p=p_pu * mva_base,
                 q=q_pu * mva_base,
                 v=v_pu,
                 bus=bus_final,
+                q_min=None if switched_off else _scaled(qmin_arr, i, mva_base),
+                q_max=None if switched_off else _scaled(qmax_arr, i, mva_base),
             )
     return out
+
+
+def _is_zero(value: Any) -> bool:
+    """True for a number equal to zero; anything that is not a number is not."""
+    try:
+        return float(value) == 0.0
+    except (TypeError, ValueError):
+        return False
+
+
+def _scaled(values: list[Any], i: int, factor: float) -> float | None:
+    """``values[i] * factor`` when that is a finite number, else ``None``."""
+    if i >= len(values):
+        return None
+    try:
+        scaled = float(values[i]) * factor
+    except (TypeError, ValueError):
+        return None
+    return scaled if math.isfinite(scaled) else None
 
 
 def _extract_load_consumption(ss: System) -> dict[str, LoadConsumption]:
@@ -5176,10 +5223,27 @@ def _extract_line_flows(ss: System) -> dict[str, LineFlow]:
     the line's series + shunt admittance services on the bus1 end,
     ``itap = 1 / |tap|``, ``itap2 = itap**2``, and ``phi`` is the phase shift.
 
+    The terminal-2 injection is the line's ``a2`` / ``v2`` equation, which
+    ANDES writes with the same shunt terms:
+
+        P2 = ue * (v2^2 * (gh + ghk)
+                   - v1 * v2 * (ghk * cos(a1 - a2 - phi)
+                                - bhk * sin(a1 - a2 - phi)) * itap)
+
+        Q2 = ue * (-v2^2 * (bh + bhk)
+                   + v1 * v2 * (ghk * sin(a1 - a2 - phi)
+                                + bhk * cos(a1 - a2 - phi)) * itap)
+
+    Both ends follow the equations the power flow solved, so a bus's balance
+    holds with them. ``loss`` is ``P1 + P2``, and the loading is the larger of
+    the two terminal apparent powers over ``Line.rate_a`` (MVA; a rating of
+    zero means the case sets none, and leaves the rating and loading ``None``).
+
     All inputs are pulled defensively via ``getattr``; any missing attribute
     (e.g., on an unexpected ANDES API change) returns an empty dict and logs
     a warning. The PF run itself is not affected — line flows are
-    best-effort.
+    best-effort. A missing or malformed ``rate_a`` only leaves every line
+    unrated.
     """
     log = logging.getLogger("tensa.wrapper.line_flows")
 
@@ -5228,6 +5292,10 @@ def _extract_line_flows(ss: System) -> dict[str, LineFlow]:
     except (TypeError, ValueError):
         mva_base = 100.0
 
+    rate_a_values = _safe_list(getattr(line, "rate_a", None))
+    if len(rate_a_values) != n:
+        rate_a_values = []
+
     flows: dict[str, LineFlow] = {}
     try:
         for i, line_idx in enumerate(idx_values):
@@ -5254,8 +5322,30 @@ def _extract_line_flows(ss: System) -> dict[str, LineFlow]:
                 -v1 * v1 * (bh + bhk) * itap2
                 - v1 * v2 * (ghk * sin_d - bhk * cos_d) * itap
             )
-            if not (math.isfinite(p_pu) and math.isfinite(q_pu)):
+            p2_pu = ue * (
+                v2 * v2 * (gh + ghk)
+                - v1 * v2 * (ghk * cos_d - bhk * sin_d) * itap
+            )
+            q2_pu = ue * (
+                -v2 * v2 * (bh + bhk)
+                + v1 * v2 * (ghk * sin_d + bhk * cos_d) * itap
+            )
+            if not all(math.isfinite(x) for x in (p_pu, q_pu, p2_pu, q2_pu)):
                 continue
+            p_mw = p_pu * mva_base
+            q_mvar = q_pu * mva_base
+            p_to_mw = p2_pu * mva_base
+            q_to_mvar = q2_pu * mva_base
+            rate_a = _scaled(rate_a_values, i, 1.0)
+            if rate_a is not None and rate_a <= 0.0:
+                rate_a = None
+            loading_pct = (
+                None
+                if rate_a is None
+                else max(math.hypot(p_mw, q_mvar), math.hypot(p_to_mw, q_to_mvar))
+                / rate_a
+                * 100.0
+            )
             from_idx = arrays["bus1"][i]
             to_idx = arrays["bus2"][i]
             # Coerce numpy scalars (bus indices may be numpy ints from ANDES)
@@ -5273,10 +5363,15 @@ def _extract_line_flows(ss: System) -> dict[str, LineFlow]:
             else:
                 to_bus = str(to_idx)
             flows[str(line_idx)] = LineFlow(
-                p=p_pu * mva_base,
-                q=q_pu * mva_base,
+                p=p_mw,
+                q=q_mvar,
                 from_idx=from_bus,
                 to_idx=to_bus,
+                p_to=p_to_mw,
+                q_to=q_to_mvar,
+                loss=p_mw + p_to_mw,
+                rate_a=rate_a,
+                loading_pct=loading_pct,
             )
     except Exception as exc:  # noqa: BLE001 — defensive: never crash PF
         log.warning("line-flow extraction failed: %s", exc)

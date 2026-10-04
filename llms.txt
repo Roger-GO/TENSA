@@ -15,6 +15,8 @@ Copy-paste examples: examples/ in the repo (curl walkthrough + Python client).
 2. POST /sessions/{id}/case                {"primary_path": "ieee14/ieee14_full.xlsx"}  — path is RELATIVE to the server's --workspace dir; formats: xlsx raw dyr json m; optional "addfiles": ["...dyr"]
 3. (pre-setup only) POST /sessions/{id}/disturbances  — add faults/toggles/alters BEFORE running anything
 4. POST /sessions/{id}/pflow               → converged flag + bus voltages; or POST /sessions/{id}/tds {"tf": 5.0} for time-domain (batch, synchronous)
+                                             pflow also returns, per line, P/Q at both ends, the loss and the loading in % of rate_a (null when unrated),
+                                             and, per generator, its Q limits in MVAr (limits are reported, not enforced)
 5. GET  /sessions/{id}/operating-point     → PflowResult: bus_voltages/bus_angles dicts (keyed by bus idx),
                                              line_flows, generator_outputs, load_consumption
 6. POST /sessions/{id}/reload              → back to pre-setup state (required to add MORE disturbances after a run)

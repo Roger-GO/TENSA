@@ -239,6 +239,82 @@ async def test_pflow_returns_line_flows(
 
 
 @pytest.mark.integration
+async def test_pflow_line_flows_report_both_ends_and_the_loading(
+    app_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """Each line reports the power at its far end, its loss, and (when the case
+    rates it) its rating and loading, on the wire."""
+    client, _ws = app_workspace
+    sid = await _create_session(client)
+    await client.post(f"/api/sessions/{sid}/case", json={"primary_path": "ieee14.raw"})
+    resp = await client.post(f"/api/sessions/{sid}/pflow", json={})
+    assert resp.status_code == 200, resp.text
+    line_flows = resp.json()["line_flows"]
+    assert len(line_flows) == 20
+    for flow in line_flows.values():
+        assert flow["loss"] == pytest.approx(flow["p"] + flow["p_to"])
+        assert flow["loss"] >= 0.0
+        assert flow["rate_a"] > 0.0
+        s_max = max(
+            (flow["p"] ** 2 + flow["q"] ** 2) ** 0.5,
+            (flow["p_to"] ** 2 + flow["q_to"] ** 2) ** 0.5,
+        )
+        assert flow["loading_pct"] == pytest.approx(s_max / flow["rate_a"] * 100.0)
+    # Power enters one end and leaves the other: the busiest branch shows it.
+    busiest = max(line_flows.values(), key=lambda f: abs(f["p"]))
+    assert busiest["p"] * busiest["p_to"] < 0.0
+
+
+@pytest.mark.integration
+async def test_pflow_generator_outputs_report_the_reactive_limits(
+    app_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    client, _ws = app_workspace
+    sid = await _create_session(client)
+    await client.post(f"/api/sessions/{sid}/case", json={"primary_path": "ieee14.raw"})
+    resp = await client.post(f"/api/sessions/{sid}/pflow", json={})
+    assert resp.status_code == 200, resp.text
+    outputs = resp.json()["generator_outputs"]
+    assert outputs
+    for out in outputs.values():
+        assert out["q_min"] < out["q_max"]
+    # Without Q-limit enforcement, the generator on bus 2 solves past its 15 MVAr.
+    assert outputs["2"]["q_max"] == pytest.approx(15.0)
+    assert outputs["2"]["q"] > outputs["2"]["q_max"]
+
+
+@pytest.mark.integration
+async def test_pflow_line_rating_is_a_topology_param_and_editable(
+    app_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """A line's rating shows in the topology and a client can change it before
+    the run; the loading then follows it."""
+    client, _ws = app_workspace
+    sid = await _create_session(client)
+    topology = (
+        await client.post(f"/api/sessions/{sid}/case", json={"primary_path": "ieee14.raw"})
+    ).json()
+    line = topology["lines"][0]
+    assert line["params"]["rate_a"] > 0.0
+
+    edited = await client.put(
+        f"/api/sessions/{sid}/elements/Line/{line['idx']}", json={"params": {"rate_a": 25.0}}
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["params"]["rate_a"] == 25.0
+
+    flow = (await client.post(f"/api/sessions/{sid}/pflow", json={})).json()["line_flows"][
+        str(line["idx"])
+    ]
+    assert flow["rate_a"] == 25.0
+    s_max = max(
+        (flow["p"] ** 2 + flow["q"] ** 2) ** 0.5,
+        (flow["p_to"] ** 2 + flow["q_to"] ** 2) ** 0.5,
+    )
+    assert flow["loading_pct"] == pytest.approx(s_max / 25.0 * 100.0)
+
+
+@pytest.mark.integration
 async def test_topology_includes_params(
     app_workspace: tuple[httpx.AsyncClient, Path],
 ) -> None:

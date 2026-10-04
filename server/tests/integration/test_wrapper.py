@@ -245,6 +245,133 @@ def test_pflow_generator_outputs_skip_dynamic_machines_with_their_own_idx() -> N
 
 
 @pytest.mark.integration
+def test_pflow_line_flows_match_andes_at_both_ends() -> None:
+    """The terminal-2 injection is the line's own ``a2`` / ``v2`` equation. ANDES
+    evaluates all four terms at the solved state, so its ``e`` arrays are the
+    ground truth for both ends, taps and phase shifts included (IEEE 14 has
+    four transformers)."""
+    raw, _ = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw)
+    pf = w.run_pflow()
+    assert pf.converged
+    line = w._require_loaded().Line
+    assert np.any(np.asarray(line.tap.v) != 1.0), "the case must hold a tapped branch"
+
+    for i, idx in enumerate(line.idx.v):
+        flow = pf.line_flows[str(idx)]
+        assert flow.p == pytest.approx(line.a1.e[i] * 100.0, abs=1e-6)
+        assert flow.q == pytest.approx(line.v1.e[i] * 100.0, abs=1e-6)
+        assert flow.p_to == pytest.approx(line.a2.e[i] * 100.0, abs=1e-6)
+        assert flow.q_to == pytest.approx(line.v2.e[i] * 100.0, abs=1e-6)
+
+
+@pytest.mark.integration
+def test_pflow_line_losses_add_up_to_generation_less_load() -> None:
+    """Power is conserved: what the generators inject and the loads draw
+    differ by exactly the active power the lines dissipate (IEEE 14's only
+    shunt is a pure susceptance, so it takes none)."""
+    raw, _ = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw)
+    pf = w.run_pflow()
+    assert pf.converged
+
+    generation = sum(g.p for g in pf.generator_outputs.values())
+    load = sum(ld.p for ld in pf.load_consumption.values())
+    losses = [f.loss for f in pf.line_flows.values()]
+    assert all(loss >= 0.0 for loss in losses)
+    assert sum(losses) == pytest.approx(generation - load, abs=1e-4)
+
+
+@pytest.mark.integration
+def test_pflow_line_loading_is_read_against_the_case_rating() -> None:
+    """ieee14.raw rates every branch (20 to 100 MVA); ieee14_full.xlsx rates
+    none, so its lines carry no loading rather than a division by zero."""
+    pytest.importorskip("andes")
+    import andes
+
+    raw, _ = _ieee14_paths()
+    rated = Wrapper()
+    rated.load_case(raw)
+    pf = rated.run_pflow()
+    assert pf.converged
+    line = rated._require_loaded().Line
+    ratings = {str(idx): float(r) for idx, r in zip(line.idx.v, line.rate_a.v, strict=True)}
+    assert set(ratings.values()) > {100.0}, "the case must rate branches differently"
+    assert set(pf.line_flows) == set(ratings)
+    for idx, flow in pf.line_flows.items():
+        assert flow.rate_a == ratings[idx]
+        s_max = max(np.hypot(flow.p, flow.q), np.hypot(flow.p_to, flow.q_to))
+        assert flow.loading_pct == pytest.approx(s_max / ratings[idx] * 100.0)
+
+    unrated = Wrapper()
+    unrated.load_case(andes.get_case("ieee14/ieee14_full.xlsx"))
+    pf = unrated.run_pflow()
+    assert pf.converged
+    assert pf.line_flows
+    for flow in pf.line_flows.values():
+        assert flow.rate_a is None
+        assert flow.loading_pct is None
+
+
+@pytest.mark.integration
+def test_line_rating_is_editable_and_changes_the_loading() -> None:
+    """``rate_a`` is a line parameter the Inspector can set, so a case that
+    carries no ratings can still be checked for overloads."""
+    pytest.importorskip("andes")
+    import andes
+
+    w = Wrapper()
+    w.load_case(andes.get_case("ieee14/ieee14_full.xlsx"))
+    w.edit_element("Line", "Line_1", {"rate_a": 40.0})
+    pf = w.run_pflow()
+    assert pf.converged
+    flow = pf.line_flows["Line_1"]
+    assert flow.rate_a == 40.0
+    assert flow.loading_pct == pytest.approx(
+        max(np.hypot(flow.p, flow.q), np.hypot(flow.p_to, flow.q_to)) / 40.0 * 100.0
+    )
+    assert flow.loading_pct > 100.0  # about 50 MW over a 40 MVA rating
+    assert all(f.loading_pct is None for idx, f in pf.line_flows.items() if idx != "Line_1")
+
+
+@pytest.mark.integration
+def test_pflow_generator_outputs_carry_the_reactive_limits() -> None:
+    """The power flow does not enforce Q limits, so IEEE 14's generators at buses
+    2 and 6 solve to more reactive power than their cases allow. The row says
+    both, in MVAr, so a client can tell."""
+    raw, _ = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw)
+    pf = w.run_pflow()
+    assert pf.converged
+
+    pv2 = pf.generator_outputs["2"]
+    assert (pv2.q_min, pv2.q_max) == (pytest.approx(-40.0), pytest.approx(15.0))
+    assert pv2.q > pv2.q_max  # beyond its upper limit
+    pv3 = pf.generator_outputs["3"]
+    assert pv3.q_min is not None and pv3.q_max is not None
+    assert pv3.q_min < pv3.q < pv3.q_max  # within its limits
+    slack = pf.generator_outputs["1"]
+    assert (slack.q_min, slack.q_max) == (pytest.approx(-50.0), pytest.approx(100.0))
+
+
+@pytest.mark.integration
+def test_pflow_generator_switched_off_has_no_reactive_limits() -> None:
+    raw, _ = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw)
+    pv = w._require_loaded().PV
+    pv.u.v[list(pv.idx.v).index(3)] = 0  # ``u`` is not an editable parameter
+    pf = w.run_pflow()
+    assert pf.converged
+    off = pf.generator_outputs["3"]
+    assert (off.q_min, off.q_max) == (None, None)
+    assert pf.generator_outputs["2"].q_max is not None
+
+
+@pytest.mark.integration
 def test_operating_point_after_pflow_matches_pflow_result() -> None:
     """``operating_point`` reads the same solved Bus v/a as ``run_pflow``
     without re-running. After a PF, the two must agree."""

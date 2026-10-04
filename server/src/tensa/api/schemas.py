@@ -517,13 +517,17 @@ class TopologySummary(BaseModel):
 
 
 class LineFlow(BaseModel):
-    """Per-line active and reactive power flow, measured at terminal 1
-    (``bus1``) flowing into the line toward terminal 2 (``bus2``).
+    """Per-line active and reactive power flow at both terminals: ``p`` / ``q``
+    at terminal 1 (``bus1``) and ``p_to`` / ``q_to`` at terminal 2 (``bus2``),
+    each flowing from the bus INTO the line, plus the line's loss and its
+    loading against its rating.
 
     Sign convention: positive ``p`` means real power flowing FROM ``bus1``
     INTO the line; positive ``q`` means reactive power flowing FROM ``bus1``
-    INTO the line. The v0.1 SLD overlay uses the sign of ``p`` to render
-    directional arrows along each branch.
+    INTO the line, and the same at terminal 2 for ``p_to`` / ``q_to``. On a
+    line that carries power from ``bus1`` to ``bus2``, ``p`` is positive and
+    ``p_to`` negative, and the two sum to the loss. The SLD overlay uses the
+    sign of ``p`` to render directional arrows along each branch.
     """
 
     p: float = Field(
@@ -547,6 +551,40 @@ class LineFlow(BaseModel):
         ...,
         description="ANDES idx of the ``bus2`` terminal (the to-side bus).",
     )
+    p_to: float = Field(
+        ...,
+        description=(
+            "Active power leaving ``bus2`` into the line, in MW. Negative "
+            "when the line delivers power to ``bus2``."
+        ),
+    )
+    q_to: float = Field(
+        ...,
+        description="Reactive power leaving ``bus2`` into the line, in MVAr.",
+    )
+    loss: float = Field(
+        ...,
+        description=(
+            "Active power the line dissipates, in MW: ``p + p_to``."
+        ),
+    )
+    rate_a: float | None = Field(
+        default=None,
+        description=(
+            "The line's long-term rating (the case's ``rate_a``), in MVA. "
+            "``null`` when the case gives none (a ``rate_a`` of zero), in "
+            "which case the line has no loading either."
+        ),
+    )
+    loading_pct: float | None = Field(
+        default=None,
+        description=(
+            "The larger of the apparent powers at the two terminals, "
+            "``sqrt(p^2 + q^2)`` and ``sqrt(p_to^2 + q_to^2)``, as a "
+            "percentage of ``rate_a``. Above 100 is an overload. ``null`` "
+            "when the line has no rating."
+        ),
+    )
 
 
 class GeneratorOutput(BaseModel):
@@ -564,6 +602,22 @@ class GeneratorOutput(BaseModel):
         ..., description="Terminal bus voltage magnitude (pu)."
     )
     bus: int | str = Field(..., description="Terminal bus idx.")
+    q_min: float | None = Field(
+        default=None,
+        description=(
+            "Lower reactive power limit the case sets (``qmin``), in MVAr. "
+            "Power flow does not enforce it, so ``q`` can lie below it. "
+            "``null`` for a generator that is switched off."
+        ),
+    )
+    q_max: float | None = Field(
+        default=None,
+        description=(
+            "Upper reactive power limit the case sets (``qmax``), in MVAr. "
+            "Power flow does not enforce it, so ``q`` can lie above it. "
+            "``null`` for a generator that is switched off."
+        ),
+    )
 
 
 class LoadConsumption(BaseModel):
@@ -619,11 +673,12 @@ class PflowResult(BaseModel):
     line_flows: dict[str, LineFlow] = Field(
         default_factory=dict,
         description=(
-            "Per-line P/Q flow at terminal 1, keyed by line idx (stringified). "
+            "Per-line P/Q flow at both terminals, with the line's loss and "
+            "its loading against ``rate_a``, keyed by line idx (stringified). "
             "Empty if the wrapper could not extract line flows from the post-"
             "PF System (e.g., on an unexpected ANDES API change). "
             "Populated by computing the standard pi-equivalent line "
-            "injection at ``bus1`` from the converged ``v1``/``a1``/``v2``/"
+            "injection at each end from the converged ``v1``/``a1``/``v2``/"
             "``a2`` algebraic variables and the line's series + shunt "
             "admittances."
         ),
@@ -631,12 +686,12 @@ class PflowResult(BaseModel):
     generator_outputs: dict[str, GeneratorOutput] = Field(
         default_factory=dict,
         description=(
-            "Per-generator P / Q output and terminal voltage, keyed by "
-            "generator idx (stringified). Covers the static generators "
-            "(PV and Slack). A dynamic machine (GENROU, GENCLS) has no "
-            "entry of its own: read the entry of the static generator "
-            "named by its ``gen`` parameter. Empty when PF did not "
-            "converge."
+            "Per-generator P / Q output, terminal voltage and reactive "
+            "limits, keyed by generator idx (stringified). Covers the "
+            "static generators (PV and Slack). A dynamic machine (GENROU, "
+            "GENCLS) has no entry of its own: read the entry of the static "
+            "generator named by its ``gen`` parameter. Empty when PF did "
+            "not converge."
         ),
     )
     load_consumption: dict[str, LoadConsumption] = Field(

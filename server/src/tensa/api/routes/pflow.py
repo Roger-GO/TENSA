@@ -56,6 +56,11 @@ def _result_from_payload(payload: dict[str, Any], run_id: str) -> PflowResult:
             q=float(flow["q"]),
             from_idx=flow["from_idx"],
             to_idx=flow["to_idx"],
+            p_to=float(flow["p_to"]),
+            q_to=float(flow["q_to"]),
+            loss=float(flow["loss"]),
+            rate_a=flow["rate_a"],
+            loading_pct=flow["loading_pct"],
         )
     raw_gen = payload.get("generator_outputs") or {}
     generator_outputs: dict[str, GeneratorOutput] = {}
@@ -65,6 +70,8 @@ def _result_from_payload(payload: dict[str, Any], run_id: str) -> PflowResult:
             q=float(gen["q"]),
             v=float(gen["v"]),
             bus=gen["bus"],
+            q_min=gen["q_min"],
+            q_max=gen["q_max"],
         )
     raw_load = payload.get("load_consumption") or {}
     load_consumption: dict[str, LoadConsumption] = {}
