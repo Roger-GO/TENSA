@@ -20,7 +20,8 @@
  *  - Filled portion from t=0 to t=tCurrent shows the buffered range.
  *  - Vertical cursor line at scrubT (or at tCurrent in live mode).
  *  - Play/pause button to the left of the strip.
- *  - Current time / total time display to the right.
+ *  - Current time / total time display to the right, then the speed
+ *    selector.
  *
  * Interaction:
  *  - Click anywhere on the strip → seek (sets scrubT to that t).
@@ -28,9 +29,13 @@
  *    until pointerup. Capture the pointer so the drag survives the
  *    pointer leaving the strip bounds.
  *  - Play → start a requestAnimationFrame loop that advances scrubT
- *    at 1× wall-clock rate (1 sim-second per second). Stops at tCurrent
- *    (the latest buffered frame). Pause → cancel the loop, leave scrubT
- *    where it is.
+ *    at the selected speed (``playbackRate`` in the plot store: 1× is
+ *    1 sim-second per wall-clock second, the selector offers 0.25× to
+ *    10×). Stops at tCurrent (the latest buffered frame). Pause → cancel
+ *    the loop, leave scrubT where it is.
+ *  - Changing the speed while playing takes effect on the next frame,
+ *    from where the cursor is: the loop reads the rate each tick rather
+ *    than restarting.
  *
  * Live mode:
  *  - Resume-live button reappears whenever scrubT is non-null. Click
@@ -51,7 +56,7 @@
  */
 import { useCallback, useEffect, useRef } from 'react';
 import { useRunsStore } from '@/store/runs';
-import { usePlotStore } from '@/store/plot';
+import { PLAYBACK_RATES, usePlotStore } from '@/store/plot';
 import { Button } from '@/components/ui/button';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
@@ -66,11 +71,6 @@ export interface ScrubControlProps {
   runId?: string;
   /** Optional class on the wrapper. */
   className?: string;
-  /**
-   * Playback rate (sim-seconds per wall-clock-second). Defaults to 1.0.
-   * Adjustable in v0.5; exposed here so tests can pin a deterministic rate.
-   */
-  playbackRate?: number;
 }
 
 /**
@@ -88,7 +88,7 @@ function formatTime(t: number): string {
   return `${sign}${m}:${sStr}`;
 }
 
-export function ScrubControl({ runId, className, playbackRate = 1.0 }: ScrubControlProps) {
+export function ScrubControl({ runId, className }: ScrubControlProps) {
   const activeRunId = useRunsStore((s) => s.activeRunId);
   const effectiveRunId = runId ?? activeRunId;
   const run = useRunsStore((s) => (effectiveRunId ? s.runs[effectiveRunId] : undefined));
@@ -100,8 +100,10 @@ export function ScrubControl({ runId, className, playbackRate = 1.0 }: ScrubCont
   const playing = usePlotStore((s) =>
     effectiveRunId ? (s.playingByRun[effectiveRunId] ?? false) : false,
   );
+  const playbackRate = usePlotStore((s) => s.playbackRate);
   const setScrubT = usePlotStore((s) => s.setScrubT);
   const setPlaying = usePlotStore((s) => s.setPlaying);
+  const setPlaybackRate = usePlotStore((s) => s.setPlaybackRate);
 
   const stripRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
@@ -234,6 +236,10 @@ export function ScrubControl({ runId, className, playbackRate = 1.0 }: ScrubCont
       const runState = useRunsStore.getState().runs[effectiveRunId];
       const currentScrub = state.scrubByRun[effectiveRunId] ?? 0;
       const ceiling = runState?.tCurrent ?? 0;
+      // The rate is read here too, so a change of speed mid-playback
+      // applies from the next frame without tearing the loop down (which
+      // would drop a frame's worth of time).
+      const rate = state.playbackRate;
       if (lastTs === null) {
         // First tick: just record the timestamp so dt is meaningful on
         // the next call. Don't advance scrubT — that would waste any
@@ -244,7 +250,7 @@ export function ScrubControl({ runId, className, playbackRate = 1.0 }: ScrubCont
       }
       const dtMs = ts - lastTs;
       lastTs = ts;
-      const next = currentScrub + (dtMs / 1000) * playbackRate;
+      const next = currentScrub + (dtMs / 1000) * rate;
       if (next >= ceiling) {
         // Reached the end of the buffer: pin the cursor to ceiling and
         // pause. The user can press play again to resume from 0 (or
@@ -260,7 +266,7 @@ export function ScrubControl({ runId, className, playbackRate = 1.0 }: ScrubCont
     return () => {
       if (raf !== 0) cancelAnimationFrame(raf);
     };
-  }, [playing, effectiveRunId, playbackRate]);
+  }, [playing, effectiveRunId]);
 
   // ---- render -------------------------------------------------------------
 
@@ -384,6 +390,26 @@ export function ScrubControl({ runId, className, playbackRate = 1.0 }: ScrubCont
       >
         {formatTime(cursorT)} / {formatTime(run.tf || tMax)}
       </div>
+      <label className="text-muted-foreground flex items-center gap-1 text-xs">
+        <span>Speed</span>
+        <select
+          aria-label="Playback speed"
+          title="Playback speed, in simulated seconds per second. 1× is real time."
+          data-testid="scrub-control-speed"
+          value={playbackRate}
+          onChange={(e) => setPlaybackRate(Number(e.target.value))}
+          className={cn(
+            'bg-background border-border text-foreground h-7 rounded border px-1 font-mono text-xs',
+            'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+          )}
+        >
+          {PLAYBACK_RATES.map((rate) => (
+            <option key={rate} value={rate}>
+              {rate}×
+            </option>
+          ))}
+        </select>
+      </label>
       {!isLive && (
         <Button
           type="button"

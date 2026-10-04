@@ -20,6 +20,16 @@ export type VarGroup = 'bus_v' | 'gen_state' | 'gen_power' | 'line_flow' | 'load
 /** Set of selected series names per run id. */
 export type SelectionByRun = Record<string, ReadonlySet<string>>;
 
+/**
+ * Playback speeds the scrub control offers, in sim-seconds per wall-clock
+ * second. 1 is real time; 0.25 slows a fast transient down, 10 gets through a
+ * long run quickly.
+ */
+export const PLAYBACK_RATES = [0.25, 0.5, 1, 2, 5, 10] as const;
+
+/** Real time. */
+export const DEFAULT_PLAYBACK_RATE = 1;
+
 export interface PlotState {
   /**
    * Selected series per run id. The presence of a column name in the
@@ -56,6 +66,15 @@ export interface PlotState {
    * just reads/writes this flag — the store has no opinion about timing.
    */
   playingByRun: Record<string, boolean>;
+  /**
+   * Playback speed, in sim-seconds per wall-clock second (one of
+   * ``PLAYBACK_RATES``). One value for every run, not per run: it is how fast
+   * the user likes to watch, not a property of a run, so it carries over when
+   * the active run changes and ``resetRun`` / ``clearAll`` leave it alone.
+   * Not persisted across reloads, like the rest of this slice. A running
+   * playback loop reads it on every frame, so a change takes effect at once.
+   */
+  playbackRate: number;
 
   /** Toggle a single series. Idempotent — adds if absent, removes if present. */
   toggleSeries: (runId: string, name: string) => void;
@@ -76,6 +95,11 @@ export interface PlotState {
    * ``scrubT`` — pausing leaves the cursor where it is.
    */
   setPlaying: (runId: string, value: boolean) => void;
+  /**
+   * Set the playback speed. A value that is not one of ``PLAYBACK_RATES`` is
+   * ignored, so a bad rate can never reach the animation loop.
+   */
+  setPlaybackRate: (rate: number) => void;
   /** Drop a run's plot state entirely (called when a run is reset). */
   resetRun: (runId: string) => void;
   /** Clear every run's plot state (session cascade). */
@@ -88,6 +112,7 @@ export const usePlotStore = create<PlotState>((set, get) => ({
   expandedByRun: {},
   scrubByRun: {},
   playingByRun: {},
+  playbackRate: DEFAULT_PLAYBACK_RATE,
 
   toggleSeries: (runId, name) => {
     const current = get().selectedByRun[runId] ?? new Set<string>();
@@ -119,6 +144,11 @@ export const usePlotStore = create<PlotState>((set, get) => ({
 
   setPlaying: (runId, value) => {
     set({ playingByRun: { ...get().playingByRun, [runId]: value } });
+  },
+
+  setPlaybackRate: (rate) => {
+    if (!(PLAYBACK_RATES as readonly number[]).includes(rate)) return;
+    set({ playbackRate: rate });
   },
 
   resetRun: (runId) => {

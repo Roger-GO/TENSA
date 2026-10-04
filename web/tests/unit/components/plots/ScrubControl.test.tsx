@@ -15,7 +15,7 @@
  * scheduler would normally invoke it.
  */
 import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest';
-import { render, cleanup, fireEvent, act, screen } from '@testing-library/react';
+import { render, cleanup, fireEvent, act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { captureDownloads, exportAs, readBlob } from '../../helpers/downloads';
 
@@ -46,7 +46,7 @@ beforeAll(() => {
 
 import { ScrubControl } from '@/components/plots/ScrubControl';
 import { useRunsStore } from '@/store/runs';
-import { usePlotStore } from '@/store/plot';
+import { PLAYBACK_RATES, usePlotStore } from '@/store/plot';
 
 // ---- helpers --------------------------------------------------------------
 
@@ -149,6 +149,7 @@ describe('ScrubControl', () => {
       expandedByRun: {},
       scrubByRun: {},
       playingByRun: {},
+      playbackRate: 1,
     });
     restoreRect = patchStripRect();
   });
@@ -243,12 +244,12 @@ describe('ScrubControl', () => {
     expect(usePlotStore.getState().scrubByRun['r1']).toBeNull();
   });
 
-  it('clicking play starts the rAF loop that advances scrubT at the given playback rate', () => {
+  it('clicking play starts the rAF loop that advances scrubT at the playback rate', () => {
     seedRun('r1', 10);
     appendRows('r1', [0, 1, 2, 3, 4, 5], { Bus_1_v: [1, 1, 1, 1, 1, 1] });
     const sched = installRafScheduler();
     try {
-      const { getByTestId } = render(<ScrubControl playbackRate={1.0} />);
+      const { getByTestId } = render(<ScrubControl />);
       // Click play. scrubT was null → playback starts at 0.
       fireEvent.click(getByTestId('scrub-control-play'));
       expect(usePlotStore.getState().playingByRun['r1']).toBe(true);
@@ -273,7 +274,7 @@ describe('ScrubControl', () => {
     appendRows('r1', [0, 1, 2, 3, 4, 5], { Bus_1_v: [1, 1, 1, 1, 1, 1] });
     const sched = installRafScheduler();
     try {
-      const { getByTestId } = render(<ScrubControl playbackRate={1.0} />);
+      const { getByTestId } = render(<ScrubControl />);
       fireEvent.click(getByTestId('scrub-control-play'));
       sched.advanceMs(0);
       sched.advanceMs(500);
@@ -294,7 +295,7 @@ describe('ScrubControl', () => {
     appendRows('r1', [0, 0.5, 1.0], { Bus_1_v: [1, 1, 1] });
     const sched = installRafScheduler();
     try {
-      const { getByTestId } = render(<ScrubControl playbackRate={1.0} />);
+      const { getByTestId } = render(<ScrubControl />);
       fireEvent.click(getByTestId('scrub-control-play'));
       sched.advanceMs(0);
       // Run far past tCurrent (1.0).
@@ -314,7 +315,7 @@ describe('ScrubControl', () => {
     appendRows('r1', [0, 1, 2], { Bus_1_v: [1, 1, 1] });
     const sched = installRafScheduler();
     try {
-      const { getByTestId, unmount } = render(<ScrubControl playbackRate={1.0} />);
+      const { getByTestId, unmount } = render(<ScrubControl />);
       fireEvent.click(getByTestId('scrub-control-play'));
       sched.advanceMs(0);
       expect(sched.hasPending()).toBe(true);
@@ -354,6 +355,139 @@ describe('ScrubControl', () => {
     const cursor = getByTestId('scrub-control-cursor');
     // Clamped to 100 % so the cursor sticks at the right edge of the strip.
     expect(cursor.style.left).toBe('100%');
+  });
+});
+
+describe('ScrubControl playback speed', () => {
+  beforeEach(() => {
+    useRunsStore.setState({ runs: {}, activeRunId: null });
+    usePlotStore.setState({ scrubByRun: {}, playingByRun: {}, playbackRate: 1 });
+  });
+  afterEach(() => cleanup());
+
+  /** Play from t = 0 and consume the first frame, which only starts the clock. */
+  function startPlaying(sched: ReturnType<typeof installRafScheduler>) {
+    fireEvent.click(screen.getByTestId('scrub-control-play'));
+    sched.advanceMs(0);
+  }
+
+  it('has a labelled speed selector with 0.25x to 10x, at 1x to begin with', () => {
+    seedRun('r1', 10);
+    appendRows('r1', [0, 1], { Bus_1_v: [1, 1] });
+    render(<ScrubControl />);
+    const select = screen.getByRole('combobox', { name: 'Playback speed' });
+    expect(select).toHaveValue('1');
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(PLAYBACK_RATES.map((r) => `${r}×`));
+    expect(PLAYBACK_RATES.map(String)).toEqual(['0.25', '0.5', '1', '2', '5', '10']);
+  });
+
+  it('shows the speed before any frame has arrived, but not without a run', () => {
+    seedRun('r1', 10);
+    const { unmount } = render(<ScrubControl />);
+    expect(screen.getByRole('combobox', { name: 'Playback speed' })).toBeEnabled();
+    unmount();
+    useRunsStore.setState({ runs: {}, activeRunId: null });
+    render(<ScrubControl />);
+    expect(screen.queryByRole('combobox', { name: 'Playback speed' })).toBeNull();
+  });
+
+  it('picking a speed sets the store rate', async () => {
+    seedRun('r1', 10);
+    appendRows('r1', [0, 1], { Bus_1_v: [1, 1] });
+    render(<ScrubControl />);
+    await userEvent
+      .setup()
+      .selectOptions(screen.getByRole('combobox', { name: 'Playback speed' }), '2');
+    expect(usePlotStore.getState().playbackRate).toBe(2);
+    expect(screen.getByRole('combobox', { name: 'Playback speed' })).toHaveValue('2');
+  });
+
+  it.each([
+    [0.25, 0.1],
+    [0.5, 0.2],
+    [1, 0.4],
+    [2, 0.8],
+    [5, 2],
+    [10, 4],
+  ])('at %sx the cursor moves %s sim-s in 400 ms of wall-clock', async (rate, moved) => {
+    seedRun('r1', 100);
+    appendRows('r1', [0, 50, 100], { Bus_1_v: [1, 1, 1] });
+    const sched = installRafScheduler();
+    try {
+      render(<ScrubControl />);
+      await userEvent
+        .setup()
+        .selectOptions(screen.getByRole('combobox', { name: 'Playback speed' }), String(rate));
+      startPlaying(sched);
+      sched.advanceMs(400);
+      expect(usePlotStore.getState().scrubByRun['r1']).toBeCloseTo(moved, 5);
+    } finally {
+      sched.restore();
+    }
+  });
+
+  it('a faster speed reaches the end of the buffer sooner and then stops', async () => {
+    seedRun('r1', 10);
+    appendRows('r1', [0, 0.5, 1], { Bus_1_v: [1, 1, 1] });
+    const sched = installRafScheduler();
+    try {
+      render(<ScrubControl />);
+      await userEvent
+        .setup()
+        .selectOptions(screen.getByRole('combobox', { name: 'Playback speed' }), '10');
+      startPlaying(sched);
+      // 1x would be at 0.2 s after 200 ms; 10x is past the 1 s head.
+      sched.advanceMs(200);
+      expect(usePlotStore.getState().playingByRun['r1']).toBe(false);
+      expect(usePlotStore.getState().scrubByRun['r1']).toBeCloseTo(1, 5);
+      expect(sched.hasPending()).toBe(false);
+    } finally {
+      sched.restore();
+    }
+  });
+
+  it('changing the speed while playing applies from where the cursor is, without a restart', async () => {
+    seedRun('r1', 100);
+    appendRows('r1', [0, 50, 100], { Bus_1_v: [1, 1, 1] });
+    const sched = installRafScheduler();
+    try {
+      render(<ScrubControl />);
+      startPlaying(sched);
+      sched.advanceMs(100); // 1x: 0.1
+      expect(usePlotStore.getState().scrubByRun['r1']).toBeCloseTo(0.1, 5);
+      await userEvent
+        .setup()
+        .selectOptions(screen.getByRole('combobox', { name: 'Playback speed' }), '10');
+      // Still playing, loop still scheduled: nothing was torn down.
+      expect(usePlotStore.getState().playingByRun['r1']).toBe(true);
+      expect(sched.hasPending()).toBe(true);
+      sched.advanceMs(100); // 10x: +1.0, with the whole 100 ms counted
+      expect(usePlotStore.getState().scrubByRun['r1']).toBeCloseTo(1.1, 5);
+      await userEvent
+        .setup()
+        .selectOptions(screen.getByRole('combobox', { name: 'Playback speed' }), '0.25');
+      sched.advanceMs(400); // 0.25x: +0.1
+      expect(usePlotStore.getState().scrubByRun['r1']).toBeCloseTo(1.2, 5);
+    } finally {
+      sched.restore();
+    }
+  });
+
+  it('keeps the chosen speed when the active run changes', async () => {
+    seedRun('r1', 10);
+    appendRows('r1', [0, 1], { Bus_1_v: [1, 1] });
+    useRunsStore.getState().startRun({ runId: 'r2', tf: 10, columnNames: ['Bus_1_v'] });
+    appendRows('r2', [0, 1], { Bus_1_v: [1, 1] });
+    const { rerender } = render(<ScrubControl runId="r1" />);
+    await userEvent
+      .setup()
+      .selectOptions(screen.getByRole('combobox', { name: 'Playback speed' }), '5');
+    rerender(<ScrubControl runId="r2" />);
+    expect(screen.getByRole('combobox', { name: 'Playback speed' })).toHaveValue('5');
   });
 });
 

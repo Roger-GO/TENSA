@@ -9,6 +9,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  DEFAULT_PLAYBACK_RATE,
+  PLAYBACK_RATES,
   chartTitle,
   findClosestFrameIdx,
   groupLabel,
@@ -24,6 +26,7 @@ function reset(): void {
     expandedByRun: {},
     scrubByRun: {},
     playingByRun: {},
+    playbackRate: DEFAULT_PLAYBACK_RATE,
   });
 }
 
@@ -119,6 +122,41 @@ describe('plot store — scrubT + playing (v0.2)', () => {
     usePlotStore.getState().setScrubT('r1', 2.5);
     usePlotStore.getState().toggleSeries('r1', 'Bus_1_v');
     expect(usePlotStore.getState().scrubByRun['r1']).toBe(2.5);
+  });
+});
+
+describe('plot store: playback speed', () => {
+  beforeEach(reset);
+  afterEach(reset);
+
+  it('offers 0.25x up to 10x and starts at real time', () => {
+    expect(PLAYBACK_RATES[0]).toBe(0.25);
+    expect(PLAYBACK_RATES[PLAYBACK_RATES.length - 1]).toBe(10);
+    expect(PLAYBACK_RATES).toContain(1);
+    expect(usePlotStore.getState().playbackRate).toBe(1);
+  });
+
+  it('setPlaybackRate takes every offered speed', () => {
+    for (const rate of PLAYBACK_RATES) {
+      usePlotStore.getState().setPlaybackRate(rate);
+      expect(usePlotStore.getState().playbackRate).toBe(rate);
+    }
+  });
+
+  it('ignores a speed that is not offered, so a bad rate never reaches the loop', () => {
+    usePlotStore.getState().setPlaybackRate(5);
+    for (const bad of [0, -1, 3, 11, Number.NaN, Number.POSITIVE_INFINITY]) {
+      usePlotStore.getState().setPlaybackRate(bad);
+      expect(usePlotStore.getState().playbackRate).toBe(5);
+    }
+  });
+
+  it('is one speed for every run: resetRun and clearAll leave it alone', () => {
+    usePlotStore.getState().setPlaybackRate(0.5);
+    usePlotStore.getState().resetRun('r1');
+    expect(usePlotStore.getState().playbackRate).toBe(0.5);
+    usePlotStore.getState().clearAll();
+    expect(usePlotStore.getState().playbackRate).toBe(0.5);
   });
 });
 
