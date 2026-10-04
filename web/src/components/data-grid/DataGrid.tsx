@@ -54,6 +54,8 @@ export interface ColumnConfig<Row = unknown> {
   key: string;
   /** Header label rendered in the column heading. */
   label: string;
+  /** Hover text for the heading, for a column whose values need a word of context. */
+  title?: string;
   /** Pure projection from the row to a sortable / displayable value. */
   accessor: (row: Row) => string | number | null;
   /** Numeric cells get monospace + right-aligned styling. */
@@ -501,6 +503,7 @@ function Header<Row>({ columns, sort, onHeaderClick, testId }: HeaderProps<Row>)
                 type="button"
                 onClick={() => onHeaderClick(col.key)}
                 data-testid={testId ? `${testId}-header-${col.key}` : undefined}
+                title={col.title}
                 className={cn(
                   'inline-flex w-full items-center gap-1',
                   col.numeric ? 'justify-end' : 'justify-start',
@@ -521,7 +524,9 @@ function Header<Row>({ columns, sort, onHeaderClick, testId }: HeaderProps<Row>)
                 </span>
               </button>
             ) : (
-              <span className="font-mono">{col.label}</span>
+              <span className="font-mono" title={col.title}>
+                {col.label}
+              </span>
             )}
           </div>
         );

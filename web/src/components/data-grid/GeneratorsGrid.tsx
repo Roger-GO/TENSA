@@ -12,12 +12,20 @@
  * v3 Unit 15) plus a kind column (e.g. ``GENROU`` vs. ``PV``) and a
  * status column. Per v0.1 the status is not exposed at per-element
  * granularity; falls back to "online" when the param is absent.
+ *
+ * P / Q are the solved output (MW / MVAr) from the last converged power
+ * flow, the same figures the diagram and the inspector print, and read
+ * ``—`` until power flow has run. The case's own ``p0`` / ``q0`` are not
+ * shown: they are per-unit setpoints, a dynamic machine has none, and a
+ * PV generator has no ``q0``.
  */
 import { useMemo } from 'react';
 import { DataGrid, type ColumnConfig } from './DataGrid';
 import { useCurrentTopology } from '@/api/queries';
+import { usePflowStore } from '@/store/pflow';
 import { useSldStore } from '@/store/sld';
 import { useCaseStore } from '@/store/case';
+import { generatorRowKey } from '@/lib/topology';
 import type { TopologyEntry } from '@/api/types';
 
 interface GeneratorRow {
@@ -37,23 +45,31 @@ function paramString(entry: TopologyEntry, key: string): string | null {
   return String(v);
 }
 
-function paramNumber(entry: TopologyEntry, key: string): number | null {
-  const v = entry.params?.[key];
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  if (typeof v === 'string') {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
+function finiteOrNull(v: number | undefined): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
+
+const OUTPUT_TITLE = 'Output from the last power flow run. Shows a dash until power flow has run.';
 
 const COLUMNS: ColumnConfig<GeneratorRow>[] = [
   { key: 'idx', label: 'idx', accessor: (r) => r.idx },
   { key: 'name', label: 'name', accessor: (r) => r.name },
   { key: 'bus', label: 'bus', accessor: (r) => r.bus },
   { key: 'kind', label: 'kind', accessor: (r) => r.kind },
-  { key: 'p', label: 'P (MW)', numeric: true, accessor: (r) => r.p },
-  { key: 'q', label: 'Q (MVAr)', numeric: true, accessor: (r) => r.q },
+  {
+    key: 'p',
+    label: 'P (MW)',
+    title: OUTPUT_TITLE,
+    numeric: true,
+    accessor: (r) => r.p,
+  },
+  {
+    key: 'q',
+    label: 'Q (MVAr)',
+    title: OUTPUT_TITLE,
+    numeric: true,
+    accessor: (r) => r.q,
+  },
   { key: 'status', label: 'status', accessor: (r) => r.status },
 ];
 
@@ -63,6 +79,7 @@ export interface GeneratorsGridProps {
 
 export function GeneratorsGrid({ className }: GeneratorsGridProps) {
   const topology = useCurrentTopology();
+  const pflow = usePflowStore((s) => s.lastRun);
   const setSelectedNodeId = useSldStore((s) => s.setSelectedNodeId);
   const setSelectedElement = useCaseStore((s) => s.setSelectedElement);
   // Row highlight: rows are kind-namespaced (`pv-1`, `genrou-1`) but
@@ -78,12 +95,16 @@ export function GeneratorsGrid({ className }: GeneratorsGridProps) {
 
   const rows = useMemo<GeneratorRow[]>(() => {
     if (!topology) return [];
+    const outputs = pflow?.converged ? pflow.generator_outputs : undefined;
     return topology.generators.map((gen) => {
       const idx = String(gen.idx);
       const kind = gen.kind;
-      // P / Q for generators are typically the dispatch params (p0/q0).
-      const p = paramNumber(gen, 'p0') ?? paramNumber(gen, 'p');
-      const q = paramNumber(gen, 'q0') ?? paramNumber(gen, 'q');
+      // The PF result has a row per static generator (PV, Slack) only. A
+      // dynamic machine (GENROU, GENCLS) reads the row of the static
+      // generator it names, so both of the pair show the same output.
+      const output = outputs?.[generatorRowKey(gen)];
+      const p = finiteOrNull(output?.p);
+      const q = finiteOrNull(output?.q);
       // Generators in ANDES split across multiple kinds (PV, Slack,
       // GENROU, GENCLS, …) that all use the model-local idx (1, 2, 3,
       // …). A bus may carry BOTH a PV record AND a GENROU dynamic
@@ -110,7 +131,7 @@ export function GeneratorsGrid({ className }: GeneratorsGridProps) {
         status: paramString(gen, 'u') === '0' ? 'off' : 'online',
       };
     });
-  }, [topology]);
+  }, [topology, pflow]);
 
   const onRowClick = (id: string) => {
     // id is ``${kind.toLowerCase()}-${idx}`` (e.g. "pv-1", "genrou-1").

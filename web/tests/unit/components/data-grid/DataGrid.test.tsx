@@ -66,6 +66,33 @@ describe('<DataGrid /> — rendering', () => {
   });
 });
 
+describe('<DataGrid /> — heading hover text', () => {
+  it('puts a column title on the heading, sortable or not, and none where it is not set', () => {
+    render(
+      <DataGrid<FixtureRow>
+        columns={[
+          { key: 'id', label: 'idx', accessor: (r) => r.id },
+          { key: 'name', label: 'name', title: 'Label of the bus', accessor: (r) => r.name },
+          {
+            key: 'v',
+            label: 'V',
+            title: 'Solved voltage',
+            sortable: false,
+            numeric: true,
+            accessor: (r) => r.v,
+          },
+        ]}
+        rows={[{ id: '1', name: 'Bus1', v: 1.025 }]}
+        rowIdAccessor={(r) => r.id}
+        testId="dg"
+      />,
+    );
+    expect(screen.getByTestId('dg-header-id')).not.toHaveAttribute('title');
+    expect(screen.getByTestId('dg-header-name')).toHaveAttribute('title', 'Label of the bus');
+    expect(screen.getByText('V')).toHaveAttribute('title', 'Solved voltage');
+  });
+});
+
 describe('<DataGrid /> — sort', () => {
   it('cycles asc → desc → none on header click', async () => {
     const user = userEvent.setup();

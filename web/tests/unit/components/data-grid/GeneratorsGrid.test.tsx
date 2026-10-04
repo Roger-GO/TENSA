@@ -6,9 +6,10 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { useCaseStore } from '@/store/case';
+import { usePflowStore } from '@/store/pflow';
 import { useSldStore } from '@/store/sld';
-import { parseWorkspacePath } from '@/api/types';
-import type { TopologySummary } from '@/api/types';
+import { parseRunId, parseWorkspacePath } from '@/api/types';
+import type { PflowResult, TopologySummary } from '@/api/types';
 
 let mockTopology: TopologySummary | null = null;
 vi.mock('@/api/queries', async () => {
@@ -30,8 +31,43 @@ const TOPOLOGY: TopologySummary = {
   loads: [],
 };
 
+/**
+ * A kundur-like case: static generators PV 2 and Slack 1, and a machine
+ * GENROU_2 that names PV 2 in `gen` (its own idx is not a PF row key).
+ */
+const MACHINE_TOPOLOGY: TopologySummary = {
+  state: 'committed',
+  buses: [],
+  lines: [],
+  transformers: [],
+  generators: [
+    { idx: '2', name: '2', kind: 'PV', params: { bus: 2, p0: 7, v0: 1.01 } },
+    { idx: '1', name: '1', kind: 'Slack', params: { bus: 1, p0: 7.459, v0: 1.03 } },
+    { idx: 'GENROU_2', name: 'GENROU_2', kind: 'GENROU', params: { bus: 2, gen: 2 } },
+    { idx: 'GENROU_1', name: 'GENROU_1', kind: 'GENROU', params: { bus: 1, gen: 1 } },
+  ],
+  loads: [],
+};
+
+function pfWithGenerators(): PflowResult {
+  return {
+    run_id: parseRunId('run-1'),
+    converged: true,
+    iterations: 4,
+    mismatch: 1e-6,
+    bus_voltages: {},
+    bus_angles: {},
+    line_flows: {},
+    generator_outputs: {
+      '2': { p: 700, q: 185.25, v: 1.01, bus: 2 },
+      '1': { p: 745.9, q: -12.5, v: 1.03, bus: 1 },
+    },
+  } as unknown as PflowResult;
+}
+
 beforeEach(() => {
   mockTopology = null;
+  usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
   useCaseStore.setState({
     selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
     selectedElement: null,
@@ -64,5 +100,75 @@ describe('<GeneratorsGrid />', () => {
     });
     // Canvas node id stays kind-agnostic so SLD highlight follows.
     expect(useSldStore.getState().selectedNodeId).toBe('generator-1');
+  });
+
+  it('shows no output before power flow has run', () => {
+    mockTopology = MACHINE_TOPOLOGY;
+    render(<GeneratorsGrid />);
+    for (const id of ['pv-2', 'slack-1', 'genrou-GENROU_2', 'genrou-GENROU_1']) {
+      const cells = screen.getByTestId(`generators-grid-row-${id}`).querySelectorAll('[role=cell]');
+      // idx, name, bus, kind, P, Q, status
+      expect(cells[4]?.textContent).toBe('—');
+      expect(cells[5]?.textContent).toBe('—');
+    }
+  });
+
+  it('fills P and Q from the PF result, in MW and MVAr, for static generators and machines alike', () => {
+    mockTopology = MACHINE_TOPOLOGY;
+    usePflowStore.setState({ lastRun: pfWithGenerators(), isRunning: false, error: null });
+    render(<GeneratorsGrid />);
+    const pq = (id: string) =>
+      [...screen.getByTestId(`generators-grid-row-${id}`).querySelectorAll('[role=cell]')]
+        .slice(4, 6)
+        .map((c) => c.textContent);
+    expect(pq('pv-2')).toEqual(['700.000', '185.250']);
+    expect(pq('slack-1')).toEqual(['745.900', '-12.500']);
+    // A machine has no PF row of its own: it shows the one of the generator it names.
+    expect(pq('genrou-GENROU_2')).toEqual(['700.000', '185.250']);
+    expect(pq('genrou-GENROU_1')).toEqual(['745.900', '-12.500']);
+  });
+
+  it('does not print the per-unit setpoint of the case as MW', () => {
+    mockTopology = MACHINE_TOPOLOGY;
+    render(<GeneratorsGrid />);
+    expect(screen.getByTestId('generators-grid-row-pv-2').textContent).not.toContain('7.000');
+  });
+
+  it('leaves P and Q empty when the power flow did not converge', () => {
+    mockTopology = MACHINE_TOPOLOGY;
+    usePflowStore.setState({
+      lastRun: { ...pfWithGenerators(), converged: false } as PflowResult,
+      isRunning: false,
+      error: null,
+    });
+    render(<GeneratorsGrid />);
+    const cells = screen.getByTestId('generators-grid-row-pv-2').querySelectorAll('[role=cell]');
+    expect(cells[4]?.textContent).toBe('—');
+    expect(cells[5]?.textContent).toBe('—');
+  });
+
+  it('leaves a generator the PF result has no row for empty', () => {
+    mockTopology = MACHINE_TOPOLOGY;
+    const pf = pfWithGenerators();
+    delete (pf.generator_outputs as Record<string, unknown>)['2'];
+    usePflowStore.setState({ lastRun: pf, isRunning: false, error: null });
+    render(<GeneratorsGrid />);
+    const cells = screen.getByTestId('generators-grid-row-pv-2').querySelectorAll('[role=cell]');
+    expect(cells[4]?.textContent).toBe('—');
+    const slack = screen.getByTestId('generators-grid-row-slack-1').querySelectorAll('[role=cell]');
+    expect(slack[4]?.textContent).toBe('745.900');
+  });
+
+  it('explains on the P and Q headings where the figures come from', () => {
+    mockTopology = MACHINE_TOPOLOGY;
+    render(<GeneratorsGrid />);
+    expect(screen.getByTestId('generators-grid-header-p')).toHaveAttribute(
+      'title',
+      expect.stringContaining('power flow'),
+    );
+    expect(screen.getByTestId('generators-grid-header-q')).toHaveAttribute(
+      'title',
+      expect.stringContaining('power flow'),
+    );
   });
 });
