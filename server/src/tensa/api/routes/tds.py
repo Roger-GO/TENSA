@@ -81,7 +81,11 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
         },
         422: {
             "model": ProblemDetails,
-            "description": "ANDES setup() failed; call /reload to recover.",
+            "description": (
+                "ANDES setup() failed (call /reload to recover), or the request names a "
+                "step size or an override ANDES must not be given (nothing was written, "
+                "so there is nothing to reload)."
+            ),
         },
     },
 )

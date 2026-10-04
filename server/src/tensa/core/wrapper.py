@@ -66,6 +66,7 @@ from tensa.core.errors import (
     SetupFailedError,
     SeUnderDeterminedError,
     SystemAlreadyLoadedError,
+    TdsRequestError,
     short_repr,
 )
 from tensa.core.rated_voltage import (
@@ -1598,16 +1599,17 @@ class Wrapper:
         integrator: Literal["trapezoidal", "qndf"] = "trapezoidal",
         tds_config_overrides: dict[str, float] | None = None,
     ) -> None:
-        """Raise ``SetupFailedError`` if :meth:`run_tds` would refuse this request.
+        """Raise if :meth:`run_tds` would refuse this request.
 
         Covers the refusals that follow from the request and the System's
-        state: QNDF on a System that has already stepped, an override key that
-        is neither a canonical alias nor a real ``ss.TDS.config`` field, and an
-        override value that breaks its rule (:func:`validate_tds_overrides`).
-        ``run_tds`` calls it before any config write. A caller that sends
-        something ahead of the run (the streaming handler's stream-start frame)
-        calls it first, so a refused run never opens a stream. It writes
-        nothing, so a refusal leaves the System as it was.
+        state: QNDF on a System that has already stepped (``SetupFailedError``,
+        whose recovery is a reload), and an override key that is neither a
+        canonical alias nor a real ``ss.TDS.config`` field, or an override value
+        that breaks its rule (:func:`validate_tds_overrides`), both
+        ``TdsRequestError``. ``run_tds`` calls it before any config write. A
+        caller that sends something ahead of the run (the streaming handler's
+        stream-start frame) calls it first, so a refused run never opens a
+        stream. It writes nothing, so a refusal leaves the System as it was.
         """
         ss = self._require_loaded()
 
@@ -1634,7 +1636,7 @@ class Wrapper:
 
         for key in tds_config_overrides or {}:
             if not hasattr(ss.TDS.config, _TDS_OVERRIDE_ALIASES.get(key, key)):
-                raise SetupFailedError(
+                raise TdsRequestError(
                     f"unknown TDS override key {short_repr(key)}; expected a "
                     f"wrapper-canonical alias {list(_TDS_OVERRIDE_ALIASES)!r} or "
                     f"a real ss.TDS.config field name"
@@ -1701,7 +1703,7 @@ class Wrapper:
         not negative, and ``fixt`` 0 or 1 (see :func:`validate_tds_overrides`).
 
         A key that is neither a canonical alias nor a real ``ss.TDS.config``
-        field raises ``SetupFailedError`` (the wrapper stays a strict
+        field raises ``TdsRequestError`` (the wrapper stays a strict
         gatekeeper — it never sets an attribute that does not exist), and so
         does a value that breaks its rule, before anything is written. The
         Auto preset (``rtol=1e-3, atol=1e-6, max_step=0.05``) is the
@@ -1764,7 +1766,7 @@ class Wrapper:
             ):
                 ss.TDS.set_method("trapezoid")
         else:  # pragma: no cover — guarded by Literal type
-            raise SetupFailedError(
+            raise TdsRequestError(
                 f"unknown integrator {integrator!r}; expected 'trapezoidal' or 'qndf'"
             )
 
@@ -4911,7 +4913,7 @@ def validate_step_size(h: object, name: str = "h") -> float | None:
     message calls the value (``tstep`` when it came in as an override).
 
     Raises:
-        SetupFailedError: ``h`` is not a finite number greater than zero.
+        TdsRequestError: ``h`` is not a finite number greater than zero.
     """
     if h is None:
         return None
@@ -4920,13 +4922,13 @@ def validate_step_size(h: object, name: str = "h") -> float | None:
     )
     # ``bool`` is an ``int`` subclass; ``true`` is not a step size.
     if isinstance(h, bool) or not isinstance(h, int | float | str):
-        raise SetupFailedError(message)
+        raise TdsRequestError(message)
     try:
         value = float(h)
     except (ValueError, OverflowError):  # OverflowError: an int too large for a float
-        raise SetupFailedError(message) from None
+        raise TdsRequestError(message) from None
     if not math.isfinite(value) or value <= 0.0:
-        raise SetupFailedError(message)
+        raise TdsRequestError(message)
     return value
 
 
@@ -4950,7 +4952,7 @@ def validate_tds_overrides(overrides: Mapping[str, float] | None) -> None:
     only a loaded System says which keys are real (``Wrapper.check_tds_request``).
 
     Raises:
-        SetupFailedError: a value breaks its rule.
+        TdsRequestError: a value breaks its rule.
     """
     for key, value in (overrides or {}).items():
         target = _TDS_OVERRIDE_ALIASES.get(key, key)
@@ -4959,17 +4961,17 @@ def validate_tds_overrides(overrides: Mapping[str, float] | None) -> None:
         except OverflowError:  # an int too large for a float
             finite = False
         if not finite:
-            raise SetupFailedError(
+            raise TdsRequestError(
                 f"TDS override {short_repr(key)} must be a finite number, got {short_repr(value)}"
             )
         if target == "tstep":
             validate_step_size(value, name=key)
         elif target == "dtmax" and value < 0:
-            raise SetupFailedError(
+            raise TdsRequestError(
                 f"TDS override {short_repr(key)} must be 0 (automatic) or greater, got {short_repr(value)}"
             )
         elif target == "fixt" and value not in (0, 1):
-            raise SetupFailedError(
+            raise TdsRequestError(
                 f"TDS override {short_repr(key)} must be 0 (variable step) or 1 (fixed step), "
                 f"got {short_repr(value)}"
             )

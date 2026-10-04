@@ -17,7 +17,7 @@ import pytest
 
 pytest.importorskip("andes")
 
-from tensa.core.errors import NoCaseLoadedError, SetupFailedError
+from tensa.core.errors import NoCaseLoadedError, SetupFailedError, TdsRequestError
 from tensa.core.wrapper import (
     Wrapper,
     tds_fixed_step,
@@ -105,14 +105,14 @@ def test_run_tds_overrides_map_to_andes_field_names(loaded_wrapper: Wrapper) -> 
 
 
 def test_run_tds_unknown_override_key_raises(loaded_wrapper: Wrapper) -> None:
-    """Unknown override keys are caller bugs — surface as SetupFailedError.
+    """Unknown override keys are caller bugs — surface as TdsRequestError.
 
     Keeps the wrapper a strict gatekeeper; we don't silently set arbitrary
     ANDES fields from the wire. ``bogus`` is neither a canonical alias nor a
     real ``ss.TDS.config`` field, so it must raise.
     """
     w = loaded_wrapper
-    with pytest.raises(SetupFailedError, match="unknown TDS override key"):
+    with pytest.raises(TdsRequestError, match="unknown TDS override key"):
         w.run_tds(
             tf=0.1,
             integrator="qndf",
@@ -328,7 +328,7 @@ def test_check_tds_request_refuses_an_unknown_override_key(
 ) -> None:
     w = loaded_wrapper
     before = _tds_config(w)
-    with pytest.raises(SetupFailedError, match="unknown TDS override key 'bogus'"):
+    with pytest.raises(TdsRequestError, match="unknown TDS override key 'bogus'"):
         w.check_tds_request("trapezoidal", {"rtol": 1e-3, "bogus": 1.0})
     assert _tds_config(w) == before
 
@@ -371,7 +371,7 @@ def test_run_tds_unknown_override_key_leaves_the_system_untouched(
     written, so a rejected request cannot change the next run's configuration."""
     w = loaded_wrapper
     before = _tds_config(w)
-    with pytest.raises(SetupFailedError, match="unknown TDS override key"):
+    with pytest.raises(TdsRequestError, match="unknown TDS override key"):
         w.run_tds(
             tf=0.7,
             h=0.005,
@@ -409,7 +409,7 @@ _BAD_OVERRIDES: list[tuple[dict[str, float], str]] = [
 def test_validate_tds_overrides_refuses_a_bad_value(
     overrides: dict[str, float], message: str
 ) -> None:
-    with pytest.raises(SetupFailedError, match=message):
+    with pytest.raises(TdsRequestError, match=message):
         validate_tds_overrides(overrides)
 
 
@@ -439,12 +439,29 @@ def test_validate_tds_overrides_accepts_a_sound_value(
 def test_validate_tds_overrides_refuses_a_value_that_is_not_a_number(bad: object) -> None:
     """A Python caller can hand over anything; a string in ``tstep`` would be
     written to ``ss.TDS.config`` as a string."""
-    with pytest.raises(SetupFailedError):
+    with pytest.raises(TdsRequestError):
         validate_tds_overrides({"tstep": bad})  # type: ignore[dict-item]
 
 
+def test_a_refused_request_value_is_not_a_setup_failure() -> None:
+    """Nothing is written before the refusal, so it neither says ``setup()``
+    failed nor tells the caller to reload."""
+    for refuse in (
+        lambda: validate_step_size(0),
+        lambda: validate_tds_overrides({"fixt": 3}),
+        lambda: validate_tds_overrides({"tstep": float("nan")}),
+    ):
+        with pytest.raises(TdsRequestError) as refused:
+            refuse()
+        assert not isinstance(refused.value, SetupFailedError)
+        assert refused.value.recovery_kind == "none"
+        text = str(refused.value)
+        assert "setup()" not in text
+        assert "reload" not in text.lower()
+
+
 def test_validate_tds_overrides_quotes_a_long_value_in_short() -> None:
-    with pytest.raises(SetupFailedError) as refused:
+    with pytest.raises(TdsRequestError) as refused:
         validate_tds_overrides({"tstep": "x" * 5000})  # type: ignore[dict-item]
     assert len(str(refused.value)) < 200
 
@@ -455,7 +472,7 @@ def test_check_tds_request_refuses_a_bad_override_value(
 ) -> None:
     w = loaded_wrapper
     before = _tds_config(w)
-    with pytest.raises(SetupFailedError, match=message):
+    with pytest.raises(TdsRequestError, match=message):
         w.check_tds_request("trapezoidal", overrides)
     assert _tds_config(w) == before
 
@@ -463,7 +480,7 @@ def test_check_tds_request_refuses_a_bad_override_value(
 def test_check_tds_request_names_an_unknown_key_before_judging_a_value(
     loaded_wrapper: Wrapper,
 ) -> None:
-    with pytest.raises(SetupFailedError, match="unknown TDS override key 'bogus'"):
+    with pytest.raises(TdsRequestError, match="unknown TDS override key 'bogus'"):
         loaded_wrapper.check_tds_request("trapezoidal", {"bogus": float("nan")})
 
 
@@ -476,7 +493,7 @@ def test_run_tds_refuses_a_bad_override_value_before_any_write(
     w = loaded_wrapper
     ss = w._require_loaded()  # noqa: SLF001
     before = _tds_config(w)
-    with pytest.raises(SetupFailedError, match=message):
+    with pytest.raises(TdsRequestError, match=message):
         w.run_tds(tf=0.7, h=0.005, integrator="qndf", tds_config_overrides=overrides)
     assert _tds_config(w) == before
     ss.TDS.run.assert_not_called()  # type: ignore[attr-defined]
@@ -612,7 +629,7 @@ def test_validate_step_size_accepts_positive_finite_numbers(
     ],
 )
 def test_validate_step_size_rejects_everything_else(bad: object) -> None:
-    with pytest.raises(SetupFailedError, match="step size 'h'"):
+    with pytest.raises(TdsRequestError, match="step size 'h'"):
         validate_step_size(bad)
 
 
@@ -625,7 +642,7 @@ def test_run_tds_rejects_a_bad_step_without_touching_the_system(
     w = loaded_wrapper
     ss = w._require_loaded()  # noqa: SLF001
     before = (float(ss.TDS.config.tstep), int(ss.TDS.config.fixt), float(ss.TDS.config.tf))
-    with pytest.raises(SetupFailedError, match="step size 'h'"):
+    with pytest.raises(TdsRequestError, match="step size 'h'"):
         w.run_tds(tf=0.3, h=bad, integrator="qndf")
     after = (float(ss.TDS.config.tstep), int(ss.TDS.config.fixt), float(ss.TDS.config.tf))
     assert after == before
@@ -639,7 +656,7 @@ def test_run_sweep_rejects_a_bad_step_before_the_first_iteration(tmp_path: Path)
     ws.mkdir(mode=0o700)
     w = Wrapper(workspace=ws)
     seen: list[int] = []
-    with pytest.raises(SetupFailedError, match="step size 'h'"):
+    with pytest.raises(TdsRequestError, match="step size 'h'"):
         w.run_sweep(
             snapshot_name="whatever",
             parameter_kind="disturbance.fault.tc",

@@ -177,13 +177,11 @@ async def test_run_tds_freeform_real_config_key_round_trips(
 async def test_run_tds_unknown_override_key_returns_500(
     client: httpx.AsyncClient,
 ) -> None:
-    """An unknown override key surfaces as a 500 with the wrapper's message.
+    """An unknown override key is a 422 with the wrapper's message and no reload.
 
-    The wrapper raises ``SetupFailedError`` (catalogued as
-    ``SetupFailedError`` category in the worker), which the routes
-    layer maps to 422 (per the shared ``map_worker_error``). Either 422 or 500
-    is acceptable per R8 — the key check is that the error makes it
-    back to the client and isn't silently swallowed.
+    The wrapper raises ``TdsRequestError`` before it writes anything, which the
+    routes layer maps to 422 (per the shared ``map_worker_error``) with no
+    recovery action: the request is wrong, the session is fine.
     """
     sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
     resp = await client.post(
@@ -194,9 +192,11 @@ async def test_run_tds_unknown_override_key_returns_500(
             "tds_config_overrides": {"bogus": 1.0},
         },
     )
-    assert resp.status_code in (422, 500), resp.text
-    detail = resp.json().get("detail", "")
-    assert "bogus" in detail or "unknown" in detail.lower()
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    assert "unknown TDS override key 'bogus'" in body["detail"]
+    assert "reload" not in body["detail"].lower()
+    assert body["recovery"] is None
 
 
 @pytest.mark.integration
@@ -225,7 +225,11 @@ async def test_run_tds_refuses_a_bad_step_override(
         headers={"content-type": "application/json"},
     )
     assert refused.status_code == 422, refused.text
-    assert message in refused.json()["detail"], refused.text
+    body = refused.json()
+    assert message in body["detail"], refused.text
+    # Nothing was written, so there is nothing to reload: no hint, no recovery action.
+    assert "reload" not in body["detail"].lower(), refused.text
+    assert body["recovery"] is None, refused.text
 
     # The refusal wrote nothing: a plain run still steps at the fixed ``h``.
     ok = await client.post(f"/api/sessions/{sid}/tds", json={"tf": 0.5, "h": 0.01})

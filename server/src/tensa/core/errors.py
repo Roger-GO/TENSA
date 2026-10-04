@@ -117,6 +117,21 @@ class SetupFailedError(AndesAppError):
         self.detail = detail
 
 
+class TdsRequestError(AndesAppError):
+    """Raised when a TDS request asks for something ANDES must not be given: a
+    step size or an override value that is not a usable number, or an override
+    key ``ss.TDS.config`` does not have.
+
+    Unlike :class:`SetupFailedError`, nothing has been written to the System when
+    this is raised (the checks run before the first config write), so there is
+    nothing to recover from: the caller fixes the request and sends it again.
+    The message is the detail alone, with no ``setup()`` prefix and no reload
+    hint, and the response is a 422 without a recovery action.
+    """
+
+    recovery_kind: str | None = "none"
+
+
 class DisturbanceValidationError(AndesAppError):
     """Raised when a disturbance specification fails validation against the
     ANDES model (e.g., bus idx not present in the loaded case)."""

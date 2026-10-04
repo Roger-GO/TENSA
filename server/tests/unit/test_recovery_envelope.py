@@ -58,6 +58,7 @@ from tensa.core.errors import (
     SetupFailedError,
     SeUnderDeterminedError,
     SystemAlreadyLoadedError,
+    TdsRequestError,
 )
 from tensa.core.session import SweepInProgressError
 from tensa.security import paths
@@ -90,6 +91,7 @@ _EXPECTED_MAPPING: list[tuple[type[AndesAppError], str]] = [
     (SessionBusyError, "wait-for-job"),
     (SweepInProgressError, "wait-for-sweep"),
     (DisturbanceValidationError, "none"),
+    (TdsRequestError, "none"),
 ]
 
 

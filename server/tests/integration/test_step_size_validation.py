@@ -119,6 +119,8 @@ def test_ws_start_tds_rejects_a_bad_step_size(h: object, tmp_path: Path) -> None
             assert frame["type"] == "error"
             assert frame["code"] == WS_CLOSE_INTERNAL_ERROR
             assert "step size 'h'" in frame["reason"]
+            # Refused before it reached the System: nothing to reload.
+            assert "reload" not in frame["reason"].lower()
             with pytest.raises(WebSocketDisconnect) as closed:
                 ws.receive_text()
             assert closed.value.code == WS_CLOSE_INTERNAL_ERROR

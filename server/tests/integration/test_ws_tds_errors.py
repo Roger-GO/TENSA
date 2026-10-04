@@ -88,11 +88,24 @@ def test_ws_start_tds_refuses_a_bad_step_override(
     frame = _refused(
         client, sid, {"tf": 0.3, "h": 0.01, "tds_config_overrides": overrides}
     )
+    assert frame["reason"].startswith("TdsRequestError: ")
     assert message in frame["reason"]
+    # Nothing was written, so there is no reload to suggest.
+    assert "reload" not in frame["reason"].lower()
 
     # The refusal wrote nothing to the System: the same client can still run.
     ok = client.post(f"/api/sessions/{sid}/tds", json={"tf": 0.3, "h": 0.01})
     assert ok.status_code == 200, ok.text
+
+
+@pytest.mark.integration
+def test_ws_start_tds_refuses_an_unknown_override_key_without_a_reload_hint(
+    live: tuple[TestClient, str],
+) -> None:
+    client, sid = live
+    frame = _refused(client, sid, {"tf": 0.3, "tds_config_overrides": {"bogus": 1.0}})
+    assert "unknown TDS override key 'bogus'" in frame["reason"]
+    assert "reload" not in frame["reason"].lower()
 
 
 @pytest.mark.integration

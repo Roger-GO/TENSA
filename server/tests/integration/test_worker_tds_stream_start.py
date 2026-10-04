@@ -22,7 +22,7 @@ from typing import Any
 import pytest
 
 from tensa.core import worker
-from tensa.core.errors import AndesAppError, SetupFailedError
+from tensa.core.errors import AndesAppError, SetupFailedError, TdsRequestError
 from tensa.core.wrapper import Wrapper
 
 
@@ -163,7 +163,7 @@ def test_unknown_override_key_is_refused_before_stream_start(wrapper: Wrapper) -
     bridges_before = _bridge_threads()
 
     pipe = _RecordingPipe()
-    with pytest.raises(SetupFailedError, match="bogus_knob"):
+    with pytest.raises(TdsRequestError, match="bogus_knob"):
         worker._handle_run_tds(
             wrapper,
             {
@@ -225,7 +225,7 @@ def test_a_bad_step_override_is_refused_before_stream_start(
     bridges_before = _bridge_threads()
 
     pipe = _RecordingPipe()
-    with pytest.raises(SetupFailedError, match=message):
+    with pytest.raises(TdsRequestError, match=message):
         worker._handle_run_tds(
             wrapper,
             {"tf": 0.3, "h": 0.01, "stream": stream, "tds_config_overrides": overrides},

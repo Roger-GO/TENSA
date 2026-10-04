@@ -18,7 +18,7 @@ pytest.importorskip("andes")
 
 from tensa.core import worker
 from tensa.core.disturbance import FaultSpec, ToggleSpec
-from tensa.core.errors import AndesAppError, SetupFailedError
+from tensa.core.errors import AndesAppError, TdsRequestError
 from tensa.core.sweep_pool import PipeAbortEvent
 
 FAULT_TC = "disturbance.fault.tc"
@@ -169,7 +169,7 @@ def test_an_iteration_refuses_a_bad_step_before_starting_a_bridge(
     wrapper = MagicMock()
     bridges_before = _bridge_threads()
 
-    with pytest.raises(SetupFailedError, match="step size 'h'"):
+    with pytest.raises(TdsRequestError, match="step size 'h'"):
         worker._handle_run_sweep_iteration(wrapper, _args(h=bad), abort_event)
 
     wrapper.run_sweep_iteration.assert_not_called()

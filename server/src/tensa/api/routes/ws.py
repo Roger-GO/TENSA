@@ -59,7 +59,7 @@ from typing import Any
 from fastapi import APIRouter, Request, WebSocket, status
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
-from tensa.core.errors import SetupFailedError, short_repr
+from tensa.core.errors import SetupFailedError, TdsRequestError, short_repr
 from tensa.core.session import (
     SessionExpiredError,
     SessionManager,
@@ -162,10 +162,10 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         return
     try:
         h = validate_step_size(cfg.get("h"))
-    except SetupFailedError as exc:
-        await _close_with_error(
-            websocket, WS_CLOSE_INTERNAL_ERROR, _setup_failure_detail(str(exc), session_id)
-        )
+    except TdsRequestError as exc:
+        # Nothing has touched the System, so the reason is the refusal alone,
+        # with no reload to offer.
+        await _close_with_error(websocket, WS_CLOSE_INTERNAL_ERROR, str(exc))
         return
 
     # Optional decimation controls. Defaults match the v0.1 baseline: every
@@ -225,7 +225,7 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
     # Optional Unit 16 fields: integrator + tolerance overrides. These
     # default to the trapezoidal-fixed-step path so existing clients see
     # no change. Validation is light-touch here (literal + dict shape);
-    # the wrapper raises ``SetupFailedError`` on unknown override keys
+    # the wrapper raises ``TdsRequestError`` on unknown override keys
     # which the WS path surfaces as a worker_error close.
     integrator_raw = cfg.get("integrator", "trapezoidal")
     if integrator_raw not in ("trapezoidal", "qndf"):

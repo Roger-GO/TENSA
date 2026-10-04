@@ -17,7 +17,7 @@ import pytest
 pytest.importorskip("andes")
 
 from tensa.core import worker
-from tensa.core.errors import SetupFailedError
+from tensa.core.errors import TdsRequestError
 
 # An int too large for a float: ``float()`` raises OverflowError, not ValueError.
 _HUGE_INT = pytest.param(10**400, id="int-too-large-for-float")
@@ -40,7 +40,7 @@ def test_run_tds_handler_refuses_a_bad_step(
     wrapper = MagicMock()
     data_pipe = MagicMock()
     bridges_before = _bridge_threads()
-    with pytest.raises(SetupFailedError, match="step size 'h'"):
+    with pytest.raises(TdsRequestError, match="step size 'h'"):
         worker._handle_run_tds(
             wrapper,
             {"tf": 1.0, "h": bad, "stream": stream},
@@ -78,7 +78,7 @@ def test_run_sweep_handler_refuses_a_bad_step(
         "sweep_id": "sw1",
     }
     bridges_before = _bridge_threads()
-    with pytest.raises(SetupFailedError, match="step size 'h'"):
+    with pytest.raises(TdsRequestError, match="step size 'h'"):
         worker._handle_run_sweep(wrapper, args, abort_event)
     wrapper.run_sweep.assert_not_called()
     assert _bridge_threads() <= bridges_before

@@ -88,12 +88,13 @@ _WIRE_CATEGORY_ALIASES: dict[str, str] = {
 
 
 # Canonical ``category -> HTTP status``. This is the CONTRACT distilled from
-# the 13 per-route audits; it captures the *dominant* status for each category. Where a single route overrides the canonical
-# status (pmu ``SetupFailedError`` -> 409, profiles ``SetupFailedError`` ->
-# 500, snapshot ``SetupFailedError`` -> 422, bundle-export wide 422 bucket),
-# Unit 4b reconciles those at the call site (e.g. via per-route ``status``
-# overrides on the migrated mapper). Keys are wire categories (class ``__name__``
-# or the hyphenated aliases above).
+# the 13 per-route audits; it captures the *dominant* status for each
+# category. Where a single route overrides the canonical status (pmu
+# ``SetupFailedError`` -> 409, profiles ``SetupFailedError`` -> 500, snapshot
+# ``SetupFailedError`` -> 422, bundle-export wide 422 bucket), Unit 4b
+# reconciles those at the call site (e.g. via per-route ``status`` overrides
+# on the migrated mapper). Keys are wire categories (class ``__name__`` or the
+# hyphenated aliases above).
 WORKER_ERROR_HTTP_MAP: dict[str, int] = {
     # --- 409 Conflict (pre-condition / lifecycle) ---
     "no-case-loaded": status.HTTP_409_CONFLICT,
@@ -111,6 +112,7 @@ WORKER_ERROR_HTTP_MAP: dict[str, int] = {
     "SnapshotNotFoundError": status.HTTP_404_NOT_FOUND,
     # --- 422 Unprocessable Content (validation / dirty-state) ---
     "SetupFailedError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "TdsRequestError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "EigDirtyDaeError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "EigComputationError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "CpfDivergedError": status.HTTP_422_UNPROCESSABLE_CONTENT,

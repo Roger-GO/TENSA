@@ -517,11 +517,11 @@ def test_a_sub_worker_iteration_that_fails_is_recorded_not_raised(
 def test_a_sub_worker_iteration_refuses_a_bad_step_instead_of_recording_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: float
 ) -> None:
-    from tensa.core.errors import SetupFailedError
+    from tensa.core.errors import TdsRequestError
 
     w, rec = _stubbed_wrapper(tmp_path, monkeypatch)
 
-    with pytest.raises(SetupFailedError, match="step size 'h'"):
+    with pytest.raises(TdsRequestError, match="step size 'h'"):
         w.run_sweep_iteration(
             index=0,
             value=1.0,

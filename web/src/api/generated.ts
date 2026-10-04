@@ -4876,7 +4876,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description ANDES setup() failed; call /reload to recover. */
+            /** @description ANDES setup() failed (call /reload to recover), or the request names a step size or an override ANDES must not be given (nothing was written, so there is nothing to reload). */
             422: {
                 headers: {
                     [name: string]: unknown;
