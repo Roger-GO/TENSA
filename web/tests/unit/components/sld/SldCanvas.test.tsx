@@ -16,10 +16,16 @@
  * - The drift banner shows when `mergeWithDrift` reports drift.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, act, cleanup, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
+
+// Spies the mocks below hand out, shared with the tests that assert on them.
+const { fitViewSpy, putSidecarSpy } = vi.hoisted(() => ({
+  fitViewSpy: vi.fn(),
+  putSidecarSpy: vi.fn(),
+}));
 
 // ---- mocks ---------------------------------------------------------------
 //
@@ -36,17 +42,39 @@ vi.mock('@xyflow/react', async () => {
       data: Record<string, unknown>;
       className?: string;
     }[];
-    edges: { id: string; source: string; target: string }[];
+    edges: {
+      id: string;
+      source: string;
+      target: string;
+      type?: string;
+      data?: Record<string, unknown>;
+    }[];
     nodeTypes: Record<string, React.ComponentType<unknown>>;
     edgeTypes?: Record<string, React.ComponentType<unknown>>;
     onNodeClick?: (
       e: React.MouseEvent,
       n: { id: string; type: string; data: Record<string, unknown> },
     ) => void;
+    onNodeContextMenu?: (
+      e: React.MouseEvent,
+      n: { id: string; type: string; data: Record<string, unknown> },
+    ) => void;
+    onEdgeContextMenu?: (
+      e: React.MouseEvent,
+      edge: { id: string; type?: string; data?: Record<string, unknown> },
+    ) => void;
     children?: ReactNode;
   };
   return {
-    ReactFlow: ({ nodes, edges, nodeTypes, onNodeClick, children }: ReactFlowProps) => {
+    ReactFlow: ({
+      nodes,
+      edges,
+      nodeTypes,
+      onNodeClick,
+      onNodeContextMenu,
+      onEdgeContextMenu,
+      children,
+    }: ReactFlowProps) => {
       return React.createElement(
         'div',
         { 'data-testid': 'rf-root' },
@@ -63,6 +91,8 @@ vi.mock('@xyflow/react', async () => {
             'data-energised':
               (n.data as { energised?: boolean }).energised === false ? 'false' : 'true',
             onClick: (e: React.MouseEvent) => onNodeClick?.(e, n),
+            // React Flow calls this from the node wrapper's own contextmenu handler.
+            onContextMenu: (e: React.MouseEvent) => onNodeContextMenu?.(e, n),
           };
           if (n.className) wrapperProps.className = n.className;
           return React.createElement(
@@ -88,6 +118,7 @@ vi.mock('@xyflow/react', async () => {
             'data-testid': `edge-${e.id}`,
             'data-source': e.source,
             'data-target': e.target,
+            onContextMenu: (ev: React.MouseEvent) => onEdgeContextMenu?.(ev, e),
           }),
         ),
         children,
@@ -136,6 +167,7 @@ vi.mock('@xyflow/react', async () => {
       setCenter: vi.fn(),
       getZoom: vi.fn(() => 1),
       getNodes: vi.fn(() => []),
+      fitView: fitViewSpy,
       screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({ x, y }),
     }),
   };
@@ -159,6 +191,8 @@ import { SldCanvas } from '@/components/sld/SldCanvas';
 import { buildGraph } from '@/components/sld/graph';
 import { elkLayout } from '@/components/sld/elkClient';
 import { useCaseStore } from '@/store/case';
+import { __requestSldCommand } from '@/store/sld';
+import { toast } from '@/lib/toast';
 import { useSessionStore } from '@/store/session';
 import { useConnectivityStore } from '@/store/connectivity';
 import { usePflowStore } from '@/store/pflow';
@@ -216,7 +250,7 @@ vi.mock('@/api/queries', async () => {
       isError: false,
       error: null,
     }),
-    usePutSidecar: () => ({ mutate: vi.fn() }),
+    usePutSidecar: () => ({ mutate: putSidecarSpy }),
     useCurrentTopology: () => mockTopology,
     useConnectivity: () => ({
       data: null,
@@ -310,6 +344,9 @@ describe('SldCanvas', () => {
   beforeEach(() => {
     mockTopology = null;
     mockSidecar = null;
+    fitViewSpy.mockReset();
+    putSidecarSpy.mockReset();
+    act(() => useCaseStore.setState({ dragOverrides: {} }));
     vi.mocked(elkLayout).mockClear();
     mockConnectivityIsFetching = false;
     mockConnectivityIsError = false;
@@ -1029,5 +1066,171 @@ describe('SldCanvas', () => {
     const btn = screen.getByTestId('sld-recompute-connectivity');
     expect(btn.getAttribute('data-island-count')).toBe('2');
     expect(btn.textContent).toContain('2 islands');
+  });
+  // ---- Fit view, Reset to auto-layout and the right-click menu -------------
+
+  /** A loaded case with a saved layout for its buses (and drags of this visit, if asked). */
+  function loadSavedCase(opts: { drags?: boolean } = {}) {
+    const layout: SidecarLayout = {
+      schema_version: '1',
+      andes_version: '2.0.0',
+      last_modified: '2026-10-01T00:00:00Z',
+      coordinates: { '1': { x: 500, y: 40 }, '2': { x: 900, y: 80 } },
+      non_bus_coordinates: {},
+    };
+    mockTopology = makeTopology([bus(1), bus(2)], [line(10, 1, 2)]);
+    mockSidecar = layout;
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('synthetic.raw'), addfiles: [] },
+        dragOverrides: opts.drags ? { '1': { x: 500, y: 40 }, '2': { x: 900, y: 80 } } : {},
+      });
+    });
+    return layout;
+  }
+
+  async function renderLoaded() {
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => expect(screen.getByTestId('bus-node-1')).toBeInTheDocument());
+  }
+
+  it('Fit view fits the viewport', async () => {
+    loadSavedCase();
+    await renderLoaded();
+    act(() => __requestSldCommand('fit-view'));
+    expect(fitViewSpy).toHaveBeenCalledTimes(1);
+    expect(fitViewSpy.mock.calls[0]?.[0]).toMatchObject({ duration: expect.any(Number) });
+  });
+
+  it('Reset to auto-layout forgets the drags, replaces the saved layout with an empty one, and offers Undo', async () => {
+    const saved = loadSavedCase({ drags: true });
+    const success = vi.spyOn(toast, 'success').mockReturnValue('id');
+    await renderLoaded();
+    act(() => __requestSldCommand('reset-layout'));
+
+    // The drags are forgotten at once; the saved layout is replaced.
+    expect(useCaseStore.getState().dragOverrides).toEqual({});
+    expect(putSidecarSpy).toHaveBeenCalledTimes(1);
+    const [vars, callbacks] = putSidecarSpy.mock.calls[0] ?? [];
+    expect(vars.casePath).toBe('synthetic.raw');
+    expect(vars.layout.coordinates).toEqual({});
+    expect(vars.layout.non_bus_coordinates).toEqual({});
+    // Said once the write has gone through, not before.
+    expect(success).not.toHaveBeenCalled();
+    act(() => callbacks.onSuccess());
+    expect(success).toHaveBeenCalledWith(
+      expect.stringMatching(/reset/i),
+      expect.objectContaining({ action: expect.objectContaining({ label: 'Undo' }) }),
+    );
+
+    // Undo puts the drags and the saved layout back.
+    const undo = success.mock.calls[0]?.[1]?.action?.onClick;
+    act(() => undo?.());
+    expect(useCaseStore.getState().dragOverrides).toEqual({
+      '1': { x: 500, y: 40 },
+      '2': { x: 900, y: 80 },
+    });
+    expect(putSidecarSpy).toHaveBeenCalledTimes(2);
+    expect(putSidecarSpy.mock.calls[1]?.[0]).toEqual({ casePath: 'synthetic.raw', layout: saved });
+  });
+
+  it('Reset to auto-layout puts the drags back and says so when the layout cannot be replaced', async () => {
+    loadSavedCase({ drags: true });
+    const error = vi.spyOn(toast, 'error').mockReturnValue('id');
+    await renderLoaded();
+    act(() => __requestSldCommand('reset-layout'));
+    expect(useCaseStore.getState().dragOverrides).toEqual({});
+    const [, callbacks] = putSidecarSpy.mock.calls[0] ?? [];
+    act(() => callbacks.onError(new Error('workspace is read-only')));
+    expect(Object.keys(useCaseStore.getState().dragOverrides)).toEqual(['1', '2']);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('workspace is read-only'));
+  });
+
+  it('Reset to auto-layout with only drags of this visit writes nothing, and Undo restores them', async () => {
+    mockTopology = makeTopology([bus(1), bus(2)], [line(10, 1, 2)]);
+    const success = vi.spyOn(toast, 'success').mockReturnValue('id');
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: null, addfiles: [], blank: true },
+        dragOverrides: { '1': { x: 7, y: 8 } },
+      });
+    });
+    await renderLoaded();
+    act(() => __requestSldCommand('reset-layout'));
+    expect(useCaseStore.getState().dragOverrides).toEqual({});
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+    expect(success).toHaveBeenCalledTimes(1);
+    act(() => success.mock.calls[0]?.[1]?.action?.onClick());
+    expect(useCaseStore.getState().dragOverrides).toEqual({ '1': { x: 7, y: 8 } });
+  });
+
+  it('Reset to auto-layout says so when there is nothing to reset', async () => {
+    mockTopology = makeTopology([bus(1), bus(2)], [line(10, 1, 2)]);
+    const info = vi.spyOn(toast, 'info').mockReturnValue('id');
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('synthetic.raw'), addfiles: [] },
+      });
+    });
+    await renderLoaded();
+    act(() => __requestSldCommand('reset-layout'));
+    expect(info).toHaveBeenCalledWith(expect.stringMatching(/already/i));
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+  });
+
+  it('reads a saved layout with no position in it as none: the diagram is laid out again, with no drift banner', async () => {
+    mockTopology = makeTopology([bus(1), bus(2)], [line(10, 1, 2)]);
+    mockSidecar = {
+      schema_version: '1',
+      andes_version: 'unknown',
+      last_modified: '2026-10-01T00:00:00Z',
+      coordinates: {},
+      non_bus_coordinates: {},
+    };
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('synthetic.raw'), addfiles: [] },
+      });
+    });
+    await renderLoaded();
+    // ELK ran for the buses, as it does for a case with no saved layout, and a
+    // layout that holds nothing is not "the topology changed since it was saved".
+    expect(elkLayout).toHaveBeenCalled();
+    expect(screen.queryByTestId('sld-drift-banner')).toBeNull();
+  });
+
+  it('a right-click on a bus offers the bus menu, on a line the line menu, and on the canvas the canvas menu', async () => {
+    loadSavedCase();
+    await renderLoaded();
+    const busWrapper = screen.getByTestId('bus-node-1').closest('[data-rf-node-id]') as HTMLElement;
+    fireEvent.contextMenu(busWrapper);
+    let menu = await screen.findByTestId('sld-context-menu');
+    expect(within(menu).getByTestId('sld-context-menu-title')).toHaveTextContent('Bus b1 (idx 1)');
+    expect(within(menu).getByTestId('sld-context-fault')).toBeInTheDocument();
+    fireEvent.keyDown(menu, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('sld-context-menu')).toBeNull());
+
+    // A line: React Flow reports it from the edge, with the edge's own data.
+    fireEvent.contextMenu(screen.getByTestId('edge-line-10'));
+    menu = await screen.findByTestId('sld-context-menu');
+    expect(within(menu).getByTestId('sld-context-menu-title')).toHaveTextContent('Line l10');
+    expect(within(menu).getByTestId('sld-context-trip-line')).toBeInTheDocument();
+    fireEvent.keyDown(menu, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('sld-context-menu')).toBeNull());
+
+    // Empty canvas: nothing from the earlier right-click is left over.
+    fireEvent.contextMenu(screen.getByTestId('sld-canvas-surface'));
+    menu = await screen.findByTestId('sld-context-menu');
+    expect(within(menu).getByTestId('sld-context-menu-title')).toHaveTextContent('Diagram');
+    expect(within(menu).getByTestId('sld-context-fit-view')).toBeInTheDocument();
+    expect(within(menu).queryByTestId('sld-context-fault')).toBeNull();
+  });
+
+  it('the canvas menu runs Fit view', async () => {
+    loadSavedCase();
+    await renderLoaded();
+    fireEvent.contextMenu(screen.getByTestId('sld-canvas-surface'));
+    fireEvent.click(await screen.findByTestId('sld-context-fit-view'));
+    await waitFor(() => expect(fitViewSpy).toHaveBeenCalledTimes(1));
   });
 });

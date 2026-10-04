@@ -86,3 +86,36 @@ export function subscribeOpenSldSearch(listener: Listener): () => void {
     searchListeners.delete(listener);
   };
 }
+
+// ---------------------------------------------------------------------------
+// Canvas command bridge.
+//
+// Fit view and Reset to auto-layout are commands in the registry (palette,
+// shortcuts) but act on state only the mounted canvas holds: React Flow's
+// viewport, and the layout it was drawn from. Same shape as the search bridge
+// above: the registry posts an intent, the canvas subscribes once on mount.
+// With no canvas mounted (no case loaded, or the full-space results view) a
+// request reaches nobody, which is fine: the registry gates both commands on
+// there being a diagram to act on.
+// ---------------------------------------------------------------------------
+
+export type SldCommand = 'fit-view' | 'reset-layout';
+
+type CommandListener = (command: SldCommand) => void;
+const commandListeners: Set<CommandListener> = new Set();
+
+/** Ask the mounted canvas to run `command`. */
+export function __requestSldCommand(command: SldCommand): void {
+  for (const l of commandListeners) l(command);
+}
+
+/**
+ * Subscribe to canvas commands. Returns an unsubscribe function. `SldCanvas`
+ * subscribes once on mount.
+ */
+export function subscribeSldCommand(listener: CommandListener): () => void {
+  commandListeners.add(listener);
+  return () => {
+    commandListeners.delete(listener);
+  };
+}

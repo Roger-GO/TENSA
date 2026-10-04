@@ -197,6 +197,20 @@ export function mergeWithDrift(
 }
 
 /**
+ * True when `layout` places anything: a bus or a device. A sidecar with no
+ * position at all is what Reset to auto-layout leaves behind (the server cannot
+ * delete one), and the canvas treats it as no saved layout, so the case shows as
+ * it did before anything was moved: its curated layout, or auto-layout.
+ */
+export function hasSavedPositions(layout: SidecarLayout | null): layout is SidecarLayout {
+  if (layout === null) return false;
+  if (Object.keys(layout.coordinates).length > 0) return true;
+  return Object.values(layout.non_bus_coordinates ?? {}).some(
+    (inner) => Object.keys(inner).length > 0,
+  );
+}
+
+/**
  * True when `stored` places every bus of the topology, so `mergeWithDrift`
  * never reads an auto-layout coordinate and running ELK would be wasted
  * work. `null` (no stored or curated layout) never covers.

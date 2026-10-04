@@ -27,10 +27,18 @@ import { subKindForControllerClass } from '@/lib/controllers';
 import type { ControllerSubKind } from '@/lib/controllers';
 import { useSessionStore } from '@/store/session';
 import { useConnectivityStore } from '@/store/connectivity';
-import { useSldStore, __requestOpenSldSearch } from '@/store/sld';
+import { useSldStore, __requestOpenSldSearch, subscribeSldCommand } from '@/store/sld';
 import { useHotkeys } from '@/lib/useHotkeys';
 import { SHORTCUTS } from '@/lib/shortcuts';
+import { toast } from '@/lib/toast';
+import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { SldNodeSearch } from './SldNodeSearch';
+import { SldContextMenuBody } from './SldContextMenu';
+import {
+  contextTargetFromEdge,
+  contextTargetFromNode,
+  type SldContextTarget,
+} from './contextTarget';
 import { useGetSidecar, usePutSidecar, useCurrentTopology, useConnectivity } from '@/api/queries';
 import type { TopologySummary, SidecarLayout } from '@/api/types';
 import { ExportMenu } from '@/components/export/ExportMenu';
@@ -57,6 +65,7 @@ import {
   buildNonBusCoordinates,
   cancelPendingSidecarPut,
   debouncedPutSidecar,
+  hasSavedPositions,
   mergeWithDrift,
   nonBusCoordsAsMap,
   type CoordsByIdx,
@@ -193,9 +202,16 @@ interface InnerProps {
   topology: TopologySummary;
   /** Workspace path for sidecar I/O. `null` for blank sessions. */
   primaryPath: string | null;
+  /** The saved layout, or `null` when none holds a position (see `hasSavedPositions`). */
   storedSidecar: SidecarLayout | null;
-  putSidecar: (layout: SidecarLayout) => void;
+  putSidecar: PutSidecar;
 }
+
+/** Write the layout sidecar; the callbacks report how the write went. */
+type PutSidecar = (
+  layout: SidecarLayout,
+  callbacks?: { onSuccess?: () => void; onError?: (err: Error) => void },
+) => void;
 
 /**
  * Inner SLD canvas — assumes a topology + selection are present. The
@@ -700,6 +716,77 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
     // disappearing onDragEnd silently in code review.
   }, []);
 
+  // ---- Fit view and Reset to auto-layout ---------------------------------
+  //
+  // Commands of the palette and of the right-click menu; the registry reaches
+  // the canvas through the bridge in ``store/sld.ts``.
+  const fitView = useCallback(() => {
+    void rf.fitView({ duration: 250 });
+  }, [rf]);
+
+  // Forget where things were put: the drags of this visit (``dragOverrides``)
+  // and the layout saved beside the case. The diagram is then laid out as when
+  // the case first opened, with the case's own curated layout if it has one and
+  // ELK otherwise. The server has no way to delete a sidecar, so it is replaced by
+  // an empty one, which the canvas reads as none (``hasSavedPositions``). A layout
+  // placed by hand is work, so the toast offers Undo, which puts both back.
+  const resetLayout = useCallback(() => {
+    const previousOverrides = useCaseStore.getState().dragOverrides;
+    const previousSaved = storedSidecar;
+    if (Object.keys(previousOverrides).length === 0 && previousSaved === null) {
+      toast.info('The diagram is already in its automatic layout.');
+      return;
+    }
+    if (primaryPath) cancelPendingSidecarPut(primaryPath);
+    setDragOverrides({});
+    const reported = () =>
+      toast.success('Layout reset to auto-layout', {
+        action: {
+          label: 'Undo',
+          onClick: () => {
+            setDragOverrides(previousOverrides);
+            if (previousSaved !== null) putSidecar(previousSaved);
+          },
+        },
+      });
+    if (previousSaved === null) {
+      // Nothing saved to replace (a blank system, or only drags of this visit).
+      reported();
+      return;
+    }
+    putSidecar(buildSidecarLayout({}), {
+      onSuccess: reported,
+      onError: (err) => {
+        setDragOverrides(previousOverrides);
+        toast.error(`Could not reset the saved layout: ${err.message}`);
+      },
+    });
+  }, [primaryPath, storedSidecar, putSidecar, setDragOverrides]);
+
+  useEffect(
+    () =>
+      subscribeSldCommand((command) => {
+        if (command === 'fit-view') fitView();
+        else resetLayout();
+      }),
+    [fitView, resetLayout],
+  );
+
+  // ---- Right-click menu ----------------------------------------------------
+  //
+  // What the menu offers depends on what was clicked (``SldContextMenu``). Every
+  // right-click starts as the canvas's, in the capture phase; React Flow's node
+  // and edge handlers run later in the same event and replace it when the click
+  // was on one. Radix opens the menu from the trigger's own handler, after both.
+  const [contextTarget, setContextTarget] = useState<SldContextTarget>({ kind: 'canvas' });
+  const onSurfaceContextMenuCapture = useCallback(() => setContextTarget({ kind: 'canvas' }), []);
+  const onNodeContextMenu: NodeMouseHandler = useCallback((_e, node) => {
+    setContextTarget(contextTargetFromNode(node));
+  }, []);
+  const onEdgeContextMenu: EdgeMouseHandler = useCallback((_e, edge) => {
+    setContextTarget(contextTargetFromEdge(edge));
+  }, []);
+
   // PNG export rasterises the entire canvas container (the ReactFlow
   // root + its embedded SVG). The SLD is rendered as a mix of HTML
   // overlays (banners, MiniMap controls) and SVG (edges) so we use
@@ -738,64 +825,78 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
           onDismiss={() => setShowDriftBanner(false)}
         />
       ) : null}
-      <div
-        ref={canvasRef}
-        className="relative min-h-0 flex-1"
-        data-testid="sld-canvas-surface"
-        onDragOver={onDragOver}
-        onDrop={onDrop}
-        onDragEnd={onDragEnd}
-      >
-        <ReactFlow
-          nodes={nodesWithSelection}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          nodeTypes={NODE_TYPES}
-          edgeTypes={EDGE_TYPES}
-          onNodeClick={onNodeClick}
-          onEdgeClick={onEdgeClick}
-          fitView
-          nodesDraggable
-          selectionMode={SelectionMode.Partial}
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background
-            variant={BackgroundVariant.Dots}
-            gap={16}
-            size={1}
-            color={DOT_GRID_COLOR}
-            data-testid="sld-canvas-dot-grid"
-          />
-          <Controls className={FLOATING_OVERLAY_CHROME} />
-          <MiniMap
-            pannable
-            zoomable
-            nodeColor={miniMapNodeColor}
-            style={MINIMAP_STYLE}
-            className={FLOATING_OVERLAY_CHROME}
-            maskColor={MINIMAP_MASK_STYLE.fill as string}
-            maskStrokeColor={MINIMAP_MASK_STYLE.stroke as string}
-            maskStrokeWidth={MINIMAP_MASK_STYLE.strokeWidth as number}
-          />
-        </ReactFlow>
-        {/* Key to the bus colours and limit markers. Inside the surface so
+      {/* ``modal={false}``: Fault here and Trip line open a dialog from a menu
+          item, and a modal menu would leave the page unclickable after it. */}
+      <ContextMenu modal={false}>
+        <ContextMenuTrigger asChild>
+          <div
+            ref={canvasRef}
+            className="relative min-h-0 flex-1"
+            data-testid="sld-canvas-surface"
+            onDragOver={onDragOver}
+            onDrop={onDrop}
+            onDragEnd={onDragEnd}
+            onContextMenuCapture={onSurfaceContextMenuCapture}
+          >
+            <ReactFlow
+              nodes={nodesWithSelection}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              nodeTypes={NODE_TYPES}
+              edgeTypes={EDGE_TYPES}
+              onNodeClick={onNodeClick}
+              onEdgeClick={onEdgeClick}
+              onNodeContextMenu={onNodeContextMenu}
+              onEdgeContextMenu={onEdgeContextMenu}
+              fitView
+              nodesDraggable
+              selectionMode={SelectionMode.Partial}
+              proOptions={{ hideAttribution: true }}
+            >
+              <Background
+                variant={BackgroundVariant.Dots}
+                gap={16}
+                size={1}
+                color={DOT_GRID_COLOR}
+                data-testid="sld-canvas-dot-grid"
+              />
+              <Controls className={FLOATING_OVERLAY_CHROME} />
+              <MiniMap
+                pannable
+                zoomable
+                nodeColor={miniMapNodeColor}
+                style={MINIMAP_STYLE}
+                className={FLOATING_OVERLAY_CHROME}
+                maskColor={MINIMAP_MASK_STYLE.fill as string}
+                maskStrokeColor={MINIMAP_MASK_STYLE.stroke as string}
+                maskStrokeWidth={MINIMAP_MASK_STYLE.strokeWidth as number}
+              />
+            </ReactFlow>
+            {/* Key to the bus colours and limit markers. Inside the surface so
             the PNG export carries it; it draws nothing until a power flow
             or a run has put voltages on the diagram. */}
-        <SldVoltageLegend className="absolute top-2 left-2 z-10 w-[200px]" />
-        {/* Floating search affordance — sits inside the canvas surface
+            <SldVoltageLegend className="absolute top-2 left-2 z-10 w-[200px]" />
+            {/* Floating search affordance — sits inside the canvas surface
             so it overlays the React Flow chrome rather than displacing
             it. Bottom-right matches the React Flow Controls position
             convention; the popover anchors above the trigger so it
             doesn't hide the rest of the canvas. */}
-        <div
-          className="pointer-events-none absolute right-2 bottom-2 z-10 flex gap-2"
-          data-testid="sld-canvas-affordances"
-        >
-          <div className="pointer-events-auto">
-            <SldNodeSearch />
+            <div
+              className="pointer-events-none absolute right-2 bottom-2 z-10 flex gap-2"
+              data-testid="sld-canvas-affordances"
+            >
+              <div className="pointer-events-auto">
+                <SldNodeSearch />
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </ContextMenuTrigger>
+        <SldContextMenuBody
+          target={contextTarget}
+          onFitView={fitView}
+          onResetLayout={resetLayout}
+        />
+      </ContextMenu>
     </div>
   );
 }
@@ -886,16 +987,17 @@ export function SldCanvas() {
   const primaryPath = selection?.primaryPath ?? null;
   const sidecarQuery = useGetSidecar(primaryPath);
   const putSidecarMutation = usePutSidecar();
+  const savedSidecar = sidecarQuery.data ?? null;
 
   // TanStack Query v5 recreates the mutation result object every render but
   // guarantees `.mutate` is referentially stable; depend on it directly so
   // this callback isn't recreated on each render.
   const putSidecarMutate = putSidecarMutation.mutate;
-  const putSidecar = useCallback(
-    (layout: SidecarLayout) => {
+  const putSidecar = useCallback<PutSidecar>(
+    (layout, callbacks) => {
       if (!primaryPath) return;
       // primaryPath is already a branded WorkspacePath.
-      putSidecarMutate({ casePath: primaryPath, layout });
+      putSidecarMutate({ casePath: primaryPath, layout }, callbacks);
     },
     [primaryPath, putSidecarMutate],
   );
@@ -916,7 +1018,7 @@ export function SldCanvas() {
       <SldCanvasInner
         topology={topology}
         primaryPath={selection.primaryPath}
-        storedSidecar={sidecarQuery.data ?? null}
+        storedSidecar={hasSavedPositions(savedSidecar) ? savedSidecar : null}
         putSidecar={putSidecar}
       />
     </ReactFlowProvider>

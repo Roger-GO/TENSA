@@ -56,7 +56,7 @@ import {
   useReloadCase,
   useUndoLastEdit,
 } from '@/api/queries';
-import { __requestOpenSldSearch } from '@/store/sld';
+import { __requestOpenSldSearch, __requestSldCommand } from '@/store/sld';
 import { useThemeStore } from '@/store/theme';
 import { useLayoutStore } from '@/store/layout';
 import { requestEigLogToggle, requestEigViewReset } from '@/lib/eigViewBus';
@@ -177,6 +177,9 @@ export function useCommandRegistry(): readonly Command[] {
     );
   });
   const abortMutation = useAbortRun();
+  // The diagram is on screen: a case with buses is loaded and the full-space
+  // results view is not covering it. Fit view and Reset to auto-layout act on it.
+  const resultsViewActive = useLayoutStore((s) => s.resultsViewActive);
 
   // ---- clone-on-write edit (Unit 22) ------------------------------------
   const editMode = useCaseStore((s) => s.editMode);
@@ -197,6 +200,7 @@ export function useCommandRegistry(): readonly Command[] {
   const reloadDisabled = noTopology || caseSelection?.blank === true;
   const undoDisabled = noTopology || committed;
   const pfConverged = lastPfRun?.converged === true;
+  const diagramVisible = topology !== null && topology.buses.length > 0 && !resultsViewActive;
 
   return useMemo<readonly Command[]>(() => {
     const handleSelectRoutine = (routine: RunRoutine, opts?: { cpfSubMode?: 'nose' | 'qv' }) => {
@@ -614,6 +618,25 @@ export function useCommandRegistry(): readonly Command[] {
         },
         shortcut: SHORTCUTS.toggleResultsView,
       },
+      // The diagram's own viewport and layout, acted on through the canvas bridge
+      // in `store/sld.ts` (the canvas holds the React Flow instance and the
+      // layout). Both are also in the diagram's right-click menu.
+      {
+        id: 'view.fit',
+        label: 'Fit view',
+        group: 'view',
+        keywords: ['fit', 'zoom', 'centre', 'center', 'frame', 'viewport', 'diagram', 'sld'],
+        action: () => __requestSldCommand('fit-view'),
+        when: () => diagramVisible,
+      },
+      {
+        id: 'view.reset-layout',
+        label: 'Reset to auto-layout',
+        group: 'view',
+        keywords: ['layout', 'reset', 'auto', 'arrange', 'positions', 'drag', 'diagram', 'sld'],
+        action: () => __requestSldCommand('reset-layout'),
+        when: () => diagramVisible,
+      },
 
       // ---- navigation ----------------------------------------------------
       // Sequence shortcut "g h" — opens the run-history drawer.
@@ -790,6 +813,7 @@ export function useCommandRegistry(): readonly Command[] {
     pfConverged,
     abortableRun,
     abortMutation,
+    diagramVisible,
   ]);
 }
 

@@ -31,6 +31,8 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useRunsStore } from '@/store/runs';
+import { subscribeSldCommand } from '@/store/sld';
+import type { SldCommand } from '@/store/sld';
 import { usePflowStore } from '@/store/pflow';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
@@ -505,6 +507,42 @@ describe('useCommandRegistry: Open case, Save system and Abort run', () => {
     useRunsStore.getState().markRunDone('r', 1, true);
     const done = renderHook(() => useCommandRegistry(), { wrapper });
     expect(find(done.result.current, 'run.abort')).toBeUndefined();
+  });
+});
+
+describe('useCommandRegistry: Fit view and Reset to auto-layout', () => {
+  it('need a diagram on screen', () => {
+    // No buses: nothing to fit.
+    const empty = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(empty.result.current, 'view.fit')).toBeUndefined();
+    expect(find(empty.result.current, 'view.reset-layout')).toBeUndefined();
+    empty.unmount();
+
+    MOCK_TOPOLOGY = oneBusTopology();
+    const shown = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(shown.result.current, 'view.fit')?.group).toBe('view');
+    expect(find(shown.result.current, 'view.reset-layout')?.label).toBe('Reset to auto-layout');
+    shown.unmount();
+
+    // The full-space results view covers the diagram.
+    useLayoutStore.setState({ resultsViewActive: true });
+    const covered = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(covered.result.current, 'view.fit')).toBeUndefined();
+    expect(find(covered.result.current, 'view.reset-layout')).toBeUndefined();
+  });
+
+  it('post to the canvas bridge', () => {
+    MOCK_TOPOLOGY = oneBusTopology();
+    const seen: SldCommand[] = [];
+    const unsubscribe = subscribeSldCommand((c) => seen.push(c));
+    try {
+      const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+      act(() => find(result.current, 'view.fit')?.action());
+      act(() => find(result.current, 'view.reset-layout')?.action());
+    } finally {
+      unsubscribe();
+    }
+    expect(seen).toEqual(['fit-view', 'reset-layout']);
   });
 });
 

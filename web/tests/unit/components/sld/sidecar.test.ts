@@ -8,6 +8,7 @@ import {
   parseSidecar,
   mergeWithDrift,
   sidecarCoversBuses,
+  hasSavedPositions,
   buildSidecarLayout,
   buildNonBusCoordinates,
   nonBusCoordsAsMap,
@@ -326,6 +327,32 @@ describe('sidecarCoversBuses', () => {
   it('is false without a stored layout, even for an empty topology', () => {
     expect(sidecarCoversBuses(null, makeTopology([bus(1)]))).toBe(false);
     expect(sidecarCoversBuses(null, makeTopology([]))).toBe(false);
+  });
+});
+
+describe('hasSavedPositions', () => {
+  const layout = (
+    coordinates: SidecarLayout['coordinates'],
+    nonBus?: SidecarLayout['non_bus_coordinates'],
+  ): SidecarLayout => ({
+    schema_version: '1',
+    andes_version: 'unknown',
+    last_modified: '2026-10-01T00:00:00Z',
+    coordinates,
+    ...(nonBus === undefined ? {} : { non_bus_coordinates: nonBus }),
+  });
+
+  it('is false for no layout, and for the empty one Reset to auto-layout leaves behind', () => {
+    expect(hasSavedPositions(null)).toBe(false);
+    expect(hasSavedPositions(layout({}))).toBe(false);
+    expect(hasSavedPositions(layout({}, {}))).toBe(false);
+    // An outer key with nothing under it places nothing either.
+    expect(hasSavedPositions(layout({}, { PV: {}, generator: {} }))).toBe(false);
+  });
+
+  it('is true when a bus or a device has a position', () => {
+    expect(hasSavedPositions(layout({ '1': { x: 0, y: 0 } }))).toBe(true);
+    expect(hasSavedPositions(layout({}, { generator: { '1': { x: 5, y: 6 } } }))).toBe(true);
   });
 });
 
