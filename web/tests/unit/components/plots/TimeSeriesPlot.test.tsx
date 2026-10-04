@@ -57,7 +57,9 @@ vi.mock('uplot', () => ({
 vi.mock('uplot/dist/uPlot.min.css', () => ({}));
 
 import { TimeSeriesPlot } from '@/components/plots/TimeSeriesPlot';
+import * as alignModule from '@/components/plots/multiRunAlign';
 import { useRunsStore } from '@/store/runs';
+import * as plotModule from '@/store/plot';
 import { usePlotStore } from '@/store/plot';
 import { useThemeStore } from '@/store/theme';
 
@@ -432,6 +434,71 @@ describe('TimeSeriesPlot — streaming frames do not rebuild the charts', () => 
     // r2's rows land on the shared time axis, whose union grows with them.
     const t = (setDataSpy.mock.calls.at(-1)?.[0] as Float64Array[])[0];
     expect(t?.length).toBeGreaterThan(20);
+  });
+
+  it('does not classify the column names again while frames stream in', () => {
+    const columns = ['Bus_1_v', 'Bus_5_v', 'Gen_1_omega', 'Line_1_p'];
+    seedRun('r1', columns);
+    usePlotStore.getState().setSelection('r1', new Set(columns));
+    render(<TimeSeriesPlot />);
+    expect(constructSpy).toHaveBeenCalledTimes(3);
+    const parse = vi.spyOn(plotModule, 'parseColumnName');
+
+    streamFrames('r1', 0, 10, columns);
+
+    expect(parse).not.toHaveBeenCalled();
+    parse.mockRestore();
+  });
+
+  it('merges the pinned runs onto one time axis per frame, however many groups are stacked', () => {
+    const columns = ['Bus_1_v', 'Gen_1_omega', 'Line_1_p'];
+    seedRun('r1', columns);
+    appendRows('r1', [0, 1, 2], {
+      Bus_1_v: [1, 1, 1],
+      Gen_1_omega: [1, 1, 1],
+      Line_1_p: [5, 5, 5],
+    });
+    seedRun('r2', columns);
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+    usePlotStore.getState().setSelection('r2', new Set(columns));
+    const align = vi.spyOn(alignModule, 'alignRuns');
+
+    render(<TimeSeriesPlot />);
+    // Three stacked charts share the one alignment.
+    expect(constructSpy).toHaveBeenCalledTimes(3);
+    expect(align).toHaveBeenCalledTimes(1);
+
+    streamFrames('r2', 0, 4, columns);
+
+    expect(align).toHaveBeenCalledTimes(5);
+    // All three charts still got the merged axis: r1's 3 times plus the 3 new ones of r2 (t=0 is shared).
+    const lastPushes = setDataSpy.mock.calls.slice(-3).map((c) => (c[0] as Float64Array[])[0]);
+    expect(lastPushes.map((t) => t?.length)).toEqual([6, 6, 6]);
+    align.mockRestore();
+  });
+
+  it('leaves the pinned runs alone while another run streams', () => {
+    seedRun('r1', ['Bus_1_v']);
+    appendRows('r1', [0, 1, 2], { Bus_1_v: [1, 1, 1] });
+    seedRun('r2', ['Bus_1_v']);
+    appendRows('r2', [0, 1, 2], { Bus_1_v: [0.9, 0.9, 0.9] });
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+    // A third run starts and becomes the active run, but is not pinned.
+    seedRun('r3', ['Bus_1_v']);
+    usePlotStore.getState().setSelection('r3', new Set(['Bus_1_v']));
+    const align = vi.spyOn(alignModule, 'alignRuns');
+    render(<TimeSeriesPlot />);
+    expect(screen.getByTestId('time-series-plot')).toHaveAttribute('data-overlay-count', '2');
+    expect(align).toHaveBeenCalledTimes(1);
+    const pushes = setDataSpy.mock.calls.length;
+
+    streamFrames('r3', 0, 15, ['Bus_1_v']);
+
+    // The two pinned runs did not change, so nothing was merged or pushed again.
+    expect(align).toHaveBeenCalledTimes(1);
+    expect(setDataSpy.mock.calls.length).toBe(pushes);
+    expect(constructSpy).toHaveBeenCalledTimes(1);
+    align.mockRestore();
   });
 
   it('rebuilds only the group whose series set changed', () => {

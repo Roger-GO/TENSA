@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type uPlot from 'uplot';
+import { useShallow } from 'zustand/react/shallow';
 import { useRunsStore } from '@/store/runs';
 import {
   usePlotStore,
@@ -12,6 +13,9 @@ import type { VarGroup } from '@/store/plot';
 import type { RunRecord } from '@/store/runs';
 import { UPlot } from './UPlot';
 import { RunLegendChip } from './RunLegendChip';
+import { alignRuns, resampleOnto } from './multiRunAlign';
+import type { AlignedRuns } from './multiRunAlign';
+import { resolveOverlayRuns } from './overlayRuns';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { timeSeriesToCsv } from '@/components/export/exportToCsv';
 import { elementToPng } from '@/components/export/exportToPng';
@@ -43,8 +47,9 @@ import { cn } from '@/lib/cn';
  * one ``Series`` per (run, var) pair so the absent rows are simply
  * not plotted past their end).
  *
- * Re-render strategy: this component re-renders on runs-store changes
- * (new frames append) and on plot-store changes (selection toggle).
+ * Re-render strategy: this component re-renders when a displayed run
+ * changes (new frames append) and on plot-store changes (selection
+ * toggle); frames of a run that is not displayed leave it alone.
  * The frame-append path is the hot one (30 Hz max). For each render
  * we pass freshly-sliced typed arrays into ``<UPlot>`` whose data
  * effect calls ``setData`` — uPlot handles redraw efficiently from
@@ -195,45 +200,27 @@ function buildGroupChart(
  * Build the uPlot options + data for one variable group, multi-run mode.
  *
  * uPlot's ``AlignedData`` requires every series to share a single x
- * (time) column. Since overlay runs may have mismatched timelines, we
- * build the **union of all timestamps** (sorted ascending, dedup'd),
- * then resample each (run, var) onto that shared axis using NaN for
- * the timestamps before the run's first sample and after its last.
- * uPlot renders NaN as a gap, so a run with ``tf=5`` simply has no
- * line past t=5 in the shared plot.
+ * (time) column. Since overlay runs may have mismatched timelines, the
+ * caller aligns them once (``alignRuns``: the **union of all timestamps**,
+ * ascending and without repeats, plus where each run's rows sit on it) and
+ * this resamples each (run, var) onto that shared axis, using NaN for the
+ * timestamps before the run's first sample and after its last. uPlot
+ * renders NaN as a gap, so a run with ``tf=5`` simply has no line past t=5
+ * in the shared plot.
  *
- * For runs with O(1k) frames each and 5 overlay runs this is O(N log N)
- * once per render — fast enough at the v2.0 scale (the underlying
- * single-run path is still the hot path; multi-run is a deliberate
- * sub-30 Hz operation when the user pins extra runs).
+ * The alignment does not depend on the group or the variables, so it is
+ * made once per render and shared by every stacked chart, not rebuilt for
+ * each of them.
  */
 function buildMultiRunGroupChart(
   runs: readonly RunRecord[],
+  aligned: AlignedRuns,
   group: VarGroup,
   selectedNames: readonly string[],
   syncKey: string,
   colorMode: 'hash' | 'gradient' = 'hash',
 ): { options: uPlot.Options; data: uPlot.AlignedData } {
-  // Collect the union of timestamps. Use a Set for dedup; sort once at
-  // the end. Each run's t-array is already sorted, so a merge would be
-  // O(N) total — but for v2.0 sizes the Set+sort is simpler and
-  // benchmarks fine.
-  const tSet = new Set<number>();
-  for (const run of runs) {
-    const len = run.seqCount;
-    for (let i = 0; i < len; i += 1) tSet.add(run.t[i]!);
-  }
-  const tUnion = new Float64Array(tSet.size);
-  let i = 0;
-  for (const t of tSet) tUnion[i++] = t;
-  // ``Float64Array.sort`` compares numerically (unlike Array.prototype.sort
-  // which compares lexicographically by default).
-  tUnion.sort();
-
-  // Build a map from t-value → row index for lookup during resampling.
-  const tIndex = new Map<number, number>();
-  for (let j = 0; j < tUnion.length; j += 1) tIndex.set(tUnion[j]!, j);
-
+  const tUnion = aligned.t;
   const dataCols: uPlot.AlignedData = [tUnion];
   const series: uPlot.Series[] = [{ label: 't' }];
 
@@ -247,18 +234,12 @@ function buildMultiRunGroupChart(
     const style = runIdToStrokeStyle(run.runId, run.colorOverride);
     const gradientColor = colorMode === 'gradient' ? gradientColorFor(runIdx, runs.length) : null;
     const stroke = gradientColor ?? style.color;
-    const len = run.seqCount;
+    const rowToAxis = aligned.rowToAxis[runIdx]!;
     for (const name of selectedNames) {
       const col = run.columns[name];
       if (!col) continue;
       // Resample: copy known values, leave NaN elsewhere.
-      const resampled = new Float64Array(tUnion.length).fill(NaN);
-      for (let k = 0; k < len; k += 1) {
-        const idx = tIndex.get(run.t[k]!);
-        if (idx === undefined) continue;
-        resampled[idx] = col[k]!;
-      }
-      dataCols.push(resampled);
+      dataCols.push(resampleOnto(col, rowToAxis, tUnion.length));
       // Series label encodes the run prefix + var name so the legend
       // distinguishes the same var across runs.
       const runPrefix = run.runId.length > 8 ? run.runId.slice(0, 8) : run.runId;
@@ -413,34 +394,24 @@ function GroupChart({
 
 export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSeriesPlotProps) {
   const activeRunId = useRunsStore((s) => s.activeRunId);
-  const overlayRunIds = useRunsStore((s) => s.overlayRunIds);
-  const allRuns = useRunsStore((s) => s.runs);
   const effectiveRunId = runId ?? activeRunId;
   const { resolvedTheme } = useTheme();
 
-  // Resolve the set of runs to render. Priority:
-  //   1. Explicit ``runId`` prop  → render that run only.
-  //   2. Non-empty ``overlayRunIds`` → render those.
-  //   3. Active run                → render it only (legacy single-run mode).
-  // The intersection of the picker selection (in plot store) is shared
-  // across all overlay runs.
-  const overlayRuns = useMemo<readonly RunRecord[]>(() => {
-    if (runId) {
-      const r = allRuns[runId];
-      return r ? [r] : [];
-    }
-    if (overlayRunIds.size > 0) {
-      const out: RunRecord[] = [];
-      // Iterate in runs-map insertion order (chronological) for stable
-      // legend layout.
-      for (const id of Object.keys(allRuns)) {
-        if (overlayRunIds.has(id)) out.push(allRuns[id]!);
-      }
-      return out;
-    }
-    if (activeRunId && allRuns[activeRunId]) return [allRuns[activeRunId]!];
-    return [];
-  }, [runId, overlayRunIds, allRuns, activeRunId]);
+  // Resolve the set of runs to render (see ``resolveOverlayRuns`` for the
+  // priority). The intersection of the picker selection (in plot store) is
+  // shared across all overlay runs.
+  //
+  // Selecting the resolved runs with shallow equality, not the whole runs
+  // map, keeps the plot (and every chart it would rebuild) out of frames
+  // that belong to some other run: with two runs pinned, a third that
+  // streams without being pinned must not redraw them 30 times a second.
+  const overlayRuns = useRunsStore(useShallow((s) => resolveOverlayRuns(s, runId)));
+  // The runs' column-name lists, which do not change while a run streams
+  // (``overlayRuns`` is a new array on every frame of a displayed run,
+  // these are not).
+  const columnLists = useRunsStore(
+    useShallow((s) => resolveOverlayRuns(s, runId).map((r) => r.columnNames)),
+  );
 
   const isMultiRun = overlayRuns.length > 1;
   const primaryRun = overlayRuns[0];
@@ -458,13 +429,16 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
   // In single-run mode we use the run's columnNames for stable order;
   // in multi-run mode we use the union of column names across overlay
   // runs (still ordered by primary run first, then any extras).
+  //
+  // Keyed on the column lists rather than the runs, so a streamed frame does
+  // not redo the walk over every column name (1209 on the WECC case).
   const groupedSelections = useMemo(() => {
-    if (overlayRuns.length === 0 || !selected) return new Map<VarGroup, string[]>();
+    if (columnLists.length === 0 || !selected) return new Map<VarGroup, string[]>();
     const groups = new Map<VarGroup, string[]>();
     const seen = new Set<string>();
     const orderedNames: string[] = [];
-    for (const run of overlayRuns) {
-      for (const name of run.columnNames) {
+    for (const columnNames of columnLists) {
+      for (const name of columnNames) {
         if (seen.has(name)) continue;
         seen.add(name);
         orderedNames.push(name);
@@ -479,7 +453,7 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
       else groups.set(parsed.group, [name]);
     }
     return groups;
-  }, [overlayRuns, selected]);
+  }, [columnLists, selected]);
 
   const syncKey = effectiveRunId ? `tds-run-${effectiveRunId}` : 'tds-run-empty';
 
@@ -542,11 +516,14 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
   const charts = useMemo(() => {
     if (overlayRuns.length === 0) return [];
     const out: Array<{ group: VarGroup; options: uPlot.Options; data: uPlot.AlignedData }> = [];
+    // One time axis serves every stacked chart, so merge the runs' timelines
+    // once here and not once per group.
+    const aligned = isMultiRun && groupedSelections.size > 0 ? alignRuns(overlayRuns) : null;
     for (const [group, names] of groupedSelections) {
-      if (isMultiRun) {
+      if (aligned) {
         out.push({
           group,
-          ...buildMultiRunGroupChart(overlayRuns, group, names, syncKey, colorMode),
+          ...buildMultiRunGroupChart(overlayRuns, aligned, group, names, syncKey, colorMode),
         });
       } else {
         out.push({ group, ...buildGroupChart(primaryRun!, group, names, syncKey, resolvedTheme) });

@@ -6,12 +6,14 @@
  * partial-checked when only some children are selected), and the
  * filter behaviour.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, screen } from '@testing-library/react';
+import { Profiler } from 'react';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { render, cleanup, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { VariableTreePicker } from '@/components/plots/VariableTreePicker';
 import { useRunsStore } from '@/store/runs';
+import * as plotModule from '@/store/plot';
 import { usePlotStore } from '@/store/plot';
 
 function seedRun(runId: string, columnNames: string[]) {
@@ -255,5 +257,124 @@ describe('VariableTreePicker', () => {
       'Toggle Bus voltage / angle element 5',
       'Toggle Bus voltage / angle element 15',
     ]);
+  });
+});
+
+describe('VariableTreePicker — streaming frames', () => {
+  beforeEach(() => {
+    useRunsStore.setState({ runs: {}, activeRunId: null, overlayRunIds: new Set() });
+    usePlotStore.setState({ selectedByRun: {}, filterByRun: {}, expandedByRun: {} });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  /** Append ``count`` single-row frames the way the stream does, one store update each. */
+  function streamFrames(runId: string, count: number, columns: string[]) {
+    const startRows = useRunsStore.getState().runs[runId]!.seqCount;
+    for (let i = startRows; i < startRows + count; i += 1) {
+      const cols: Record<string, Float64Array> = {};
+      for (const name of columns) cols[name] = Float64Array.of(1 + i / 1000);
+      act(() =>
+        useRunsStore
+          .getState()
+          .appendFrame(runId, { t: Float64Array.of(i * 0.033), columns: cols }),
+      );
+    }
+  }
+
+  /** Render the picker and return a reader for how many times React committed it. */
+  function renderCounted(): () => number {
+    let commits = 0;
+    render(
+      <Profiler id="picker" onRender={() => (commits += 1)}>
+        <VariableTreePicker />
+      </Profiler>,
+    );
+    return () => commits;
+  }
+
+  it('does not re-render while frames stream into the run', () => {
+    const columns = ['Bus_1_v', 'Bus_5_v', 'Gen_1_omega'];
+    seedRun('r1', columns);
+    const commits = renderCounted();
+    const before = commits();
+
+    streamFrames('r1', 25, columns);
+
+    expect(commits()).toBe(before);
+    // The run really did receive the frames.
+    expect(useRunsStore.getState().runs['r1']!.seqCount).toBe(25);
+  });
+
+  it('does not classify the column names again as frames stream in', () => {
+    const columns = ['Bus_1_v', 'Bus_5_v', 'Gen_1_omega', 'Line_2_p'];
+    seedRun('r1', columns);
+    const parse = vi.spyOn(plotModule, 'parseColumnName');
+    renderCounted();
+    parse.mockClear();
+
+    streamFrames('r1', 10, columns);
+
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it('does not rebuild the tree while frames stream into a pinned run in overlay mode', () => {
+    seedRun('r1', ['Bus_1_v', 'Bus_5_v']);
+    useRunsStore.getState().startRun({ runId: 'r2', tf: 10, columnNames: ['Bus_1_v', 'Bus_9_v'] });
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+    const parse = vi.spyOn(plotModule, 'parseColumnName');
+    renderCounted();
+    expect(screen.getByTestId('variable-tree-picker')).toHaveAttribute('data-multi-run', 'true');
+    parse.mockClear();
+
+    streamFrames('r2', 15, ['Bus_1_v', 'Bus_9_v']);
+
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it('shows the columns of a run that starts after the picker mounted', () => {
+    seedRun('r1', ['Bus_1_v']);
+    usePlotStore.getState().toggleExpanded('r1', 'bus_v');
+    usePlotStore.getState().toggleExpanded('r2', 'bus_v');
+    render(<VariableTreePicker />);
+    expect(screen.getByTestId('variable-tree-picker-leaf-Bus_1_v')).toBeInTheDocument();
+
+    act(() =>
+      useRunsStore
+        .getState()
+        .startRun({ runId: 'r2', tf: 10, columnNames: ['Bus_3_v', 'Bus_4_v'] }),
+    );
+
+    expect(screen.queryByTestId('variable-tree-picker-leaf-Bus_1_v')).toBeNull();
+    expect(screen.getByTestId('variable-tree-picker-leaf-Bus_3_v')).toBeInTheDocument();
+    expect(screen.getByTestId('variable-tree-picker-leaf-Bus_4_v')).toBeInTheDocument();
+  });
+
+  it('lists the union of the pinned runs and follows the overlay set', () => {
+    seedRun('r1', ['Bus_1_v', 'Bus_5_v']);
+    useRunsStore.getState().startRun({ runId: 'r2', tf: 10, columnNames: ['Bus_1_v', 'Bus_9_v'] });
+    usePlotStore.getState().toggleExpanded('r2', 'bus_v');
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+    render(<VariableTreePicker />);
+
+    expect(screen.getByTestId('variable-tree-picker-runs-row')).toBeInTheDocument();
+    expect(screen.getByTestId('variable-tree-picker-leaf-Bus_5_v')).toBeInTheDocument();
+    expect(screen.getByTestId('variable-tree-picker-leaf-Bus_9_v')).toBeInTheDocument();
+    expect(screen.getByTestId('variable-tree-picker-leaf-availability-Bus_1_v')).toHaveTextContent(
+      '2/2',
+    );
+    expect(screen.getByTestId('variable-tree-picker-leaf-availability-Bus_5_v')).toHaveTextContent(
+      '1/2',
+    );
+
+    // Unpinning r1 leaves r2 alone: the tree drops r1's column and the runs row goes.
+    act(() => useRunsStore.getState().setOverlayRuns(['r2']));
+
+    expect(screen.queryByTestId('variable-tree-picker-runs-row')).toBeNull();
+    expect(screen.queryByTestId('variable-tree-picker-leaf-Bus_5_v')).toBeNull();
+    expect(screen.getByTestId('variable-tree-picker-leaf-Bus_9_v')).toBeInTheDocument();
   });
 });

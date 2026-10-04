@@ -1,9 +1,10 @@
 import { useEffect, useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useRunsStore } from '@/store/runs';
-import type { RunRecord } from '@/store/runs';
 import { usePlotStore, parseColumnName, groupLabel } from '@/store/plot';
 import type { ParsedSeries, VarGroup } from '@/store/plot';
 import { RunLegendChip } from './RunLegendChip';
+import { resolveOverlayRuns } from './overlayRuns';
 import { cn } from '@/lib/cn';
 
 /**
@@ -24,9 +25,10 @@ import { cn } from '@/lib/cn';
  * Filter input narrows the visible tree by substring match against
  * each series name. Empty filter = show everything.
  *
- * Reads the active run + the run's column metadata from the runs
- * store; reads selection + filter + expanded state from the plot
- * store.
+ * Reads the active run's id and the runs' column names from the runs
+ * store (never the runs themselves, so the tree is not rebuilt every
+ * time a frame streams in); reads selection + filter + expanded state
+ * from the plot store.
  *
  * Sort order: elements within a group are sorted by their numeric
  * idx when parseable, falling back to lexicographic. Series within an
@@ -63,8 +65,9 @@ function compareElementIdx(a: string, b: string): number {
 }
 
 /**
- * Build the tree from a list of runs, taking the **union** of their
- * column names. The per-run availability is tracked in
+ * Build the tree from the runs' column lists, taking the **union** of
+ * their column names. ``runIds[i]`` names the run whose columns are
+ * ``columnLists[i]``. The per-run availability is tracked in
  * ``availability``: ``Map<columnName, Set<runId>>`` so the per-run
  * filter row can grey out columns absent from a given run.
  *
@@ -72,14 +75,16 @@ function compareElementIdx(a: string, b: string): number {
  * legacy behaviour: ``buildTree(run.columnNames, filter)``.
  */
 function buildUnionTree(
-  runs: readonly RunRecord[],
+  runIds: readonly string[],
+  columnLists: readonly (readonly string[])[],
   filter: string,
 ): { tree: GroupBucket[]; availability: ReadonlyMap<string, ReadonlySet<string>> } {
   const seen = new Set<string>();
   const ordered: string[] = [];
   const availability = new Map<string, Set<string>>();
-  for (const run of runs) {
-    for (const name of run.columnNames) {
+  columnLists.forEach((columnNames, i) => {
+    const runId = runIds[i]!;
+    for (const name of columnNames) {
       if (!seen.has(name)) {
         seen.add(name);
         ordered.push(name);
@@ -89,9 +94,9 @@ function buildUnionTree(
         set = new Set<string>();
         availability.set(name, set);
       }
-      set.add(run.runId);
+      set.add(runId);
     }
-  }
+  });
   return { tree: buildTree(ordered, filter), availability };
 }
 
@@ -169,26 +174,27 @@ function TriCheckbox({
 
 export function VariableTreePicker({ runId, className }: VariableTreePickerProps) {
   const activeRunId = useRunsStore((s) => s.activeRunId);
-  const overlayRunIds = useRunsStore((s) => s.overlayRunIds);
-  const allRuns = useRunsStore((s) => s.runs);
   const effectiveRunId = runId ?? activeRunId;
-  const run = effectiveRunId ? allRuns[effectiveRunId] : undefined;
 
-  // Resolve the runs the picker reflects. Mirrors TimeSeriesPlot's
-  // priority: explicit prop > overlay set > active run.
-  const overlayRuns = useMemo<readonly RunRecord[]>(() => {
-    if (runId) return run ? [run] : [];
-    if (overlayRunIds.size > 0) {
-      const out: RunRecord[] = [];
-      for (const id of Object.keys(allRuns)) {
-        if (overlayRunIds.has(id)) out.push(allRuns[id]!);
-      }
-      return out;
-    }
-    return run ? [run] : [];
-  }, [runId, overlayRunIds, allRuns, run]);
+  // The picker needs only run ids and column names. A run keeps the same
+  // ``columnNames`` array while it streams, so selecting those (with
+  // shallow equality) leaves the picker alone as frames land. Selecting
+  // ``s.runs`` instead re-rendered it, and rebuilt the whole tree, on every
+  // frame.
+  const columnNames = useRunsStore((s) =>
+    effectiveRunId ? s.runs[effectiveRunId]?.columnNames : undefined,
+  );
 
-  const isMultiRun = overlayRuns.length > 1;
+  // The runs the picker reflects. Mirrors TimeSeriesPlot's priority:
+  // explicit prop > overlay set > active run.
+  const pickerRunIds = useRunsStore(
+    useShallow((s) => resolveOverlayRuns(s, runId).map((r) => r.runId)),
+  );
+  const pickerColumns = useRunsStore(
+    useShallow((s) => resolveOverlayRuns(s, runId).map((r) => r.columnNames)),
+  );
+
+  const isMultiRun = pickerRunIds.length > 1;
 
   const selected = usePlotStore((s) =>
     effectiveRunId ? s.selectedByRun[effectiveRunId] : undefined,
@@ -203,11 +209,11 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
   const toggleExpanded = usePlotStore((s) => s.toggleExpanded);
 
   const { tree, availability } = useMemo(() => {
-    if (overlayRuns.length === 0) {
+    if (pickerRunIds.length === 0) {
       return { tree: [], availability: new Map<string, Set<string>>() };
     }
-    return buildUnionTree(overlayRuns, filter);
-  }, [overlayRuns, filter]);
+    return buildUnionTree(pickerRunIds, pickerColumns, filter);
+  }, [pickerRunIds, pickerColumns, filter]);
 
   // Auto-select bus voltages the first time a run's columns appear, so the
   // plot shows the headline result immediately instead of an empty chart.
@@ -215,9 +221,9 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
   // so it never overrides the user's choices, and caps the count so a large
   // system doesn't flood the plot.
   useEffect(() => {
-    if (!effectiveRunId || !run || selected !== undefined) return;
+    if (!effectiveRunId || !columnNames || selected !== undefined) return;
     const defaults: string[] = [];
-    for (const name of run.columnNames) {
+    for (const name of columnNames) {
       const p = parseColumnName(name);
       if (p && p.group === 'bus_v' && p.field === 'v') {
         defaults.push(name);
@@ -225,13 +231,13 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
       }
     }
     if (defaults.length > 0) setSelection(effectiveRunId, new Set(defaults));
-  }, [effectiveRunId, run, selected, setSelection]);
+  }, [effectiveRunId, columnNames, selected, setSelection]);
 
   const selectionSet = selected ?? new Set<string>();
   const expandedSet = expanded ?? new Set<string>();
   const selectedCount = selectionSet.size;
 
-  if (!effectiveRunId || !run) {
+  if (!effectiveRunId || !columnNames) {
     return (
       <div
         data-testid="variable-tree-picker-empty"
@@ -316,8 +322,8 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
           className="border-border flex flex-wrap items-center gap-1 rounded border px-1.5 py-1"
         >
           <span className="text-muted-foreground pr-1 text-[10px] uppercase">Overlay</span>
-          {overlayRuns.map((r) => (
-            <RunLegendChip key={r.runId} runId={r.runId} pinned />
+          {pickerRunIds.map((id) => (
+            <RunLegendChip key={id} runId={id} pinned />
           ))}
         </div>
       ) : null}
@@ -410,7 +416,7 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
                               const missingFromAny =
                                 isMultiRun &&
                                 availSet !== undefined &&
-                                availSet.size < overlayRuns.length;
+                                availSet.size < pickerRunIds.length;
                               return (
                                 <label
                                   key={s.name}
@@ -442,11 +448,11 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
                                       )}
                                       title={
                                         missingFromAny
-                                          ? `Available in ${availSet.size} of ${overlayRuns.length} overlay runs`
-                                          : `Available in all ${overlayRuns.length} overlay runs`
+                                          ? `Available in ${availSet.size} of ${pickerRunIds.length} overlay runs`
+                                          : `Available in all ${pickerRunIds.length} overlay runs`
                                       }
                                     >
-                                      {availSet.size}/{overlayRuns.length}
+                                      {availSet.size}/{pickerRunIds.length}
                                     </span>
                                   ) : null}
                                 </label>
