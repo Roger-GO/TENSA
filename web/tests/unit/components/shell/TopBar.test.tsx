@@ -142,7 +142,7 @@ describe('<TopBar /> — auto-mounted right-slot anchors', () => {
   });
 });
 
-describe('<TopBar /> — narrow windows', () => {
+describe('<TopBar /> narrow windows', () => {
   // jsdom applies no CSS, so these read the classes that hide each control; the
   // widths themselves are checked in a real browser (tests/e2e/top-bar-fit.spec.ts).
   const dividers = () => screen.getAllByTestId('top-bar-divider');

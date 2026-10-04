@@ -76,7 +76,7 @@ afterEach(() => {
   cleanup();
 });
 
-describe('<SaveAsCustomCaseDialog /> — naming', () => {
+describe('<SaveAsCustomCaseDialog /> naming', () => {
   it('is titled for what it saves, and says it keeps the format of the opened case', async () => {
     fetchSpy.mockImplementation(routeFetch());
     render(withQueryClient(<SaveAsCustomCaseDialog open onOpenChange={() => {}} />));

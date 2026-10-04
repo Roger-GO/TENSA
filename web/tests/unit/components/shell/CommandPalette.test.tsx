@@ -90,7 +90,7 @@ afterEach(() => {
   useCommandPaletteStore.setState({ open: false });
 });
 
-describe('<CommandPalette /> — descriptions', () => {
+describe('<CommandPalette /> descriptions', () => {
   it('gives a command that has a description as hover text on its row', async () => {
     render(withProviders(<CommandPalette />));
     act(() => {
