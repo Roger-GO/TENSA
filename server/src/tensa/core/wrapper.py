@@ -1805,7 +1805,9 @@ class Wrapper:
 
         # ANDES TDS requires a converged power-flow solution as initial conditions.
         # Run PF first if it hasn't been solved (idempotent — re-running converged
-        # PF is fast and a no-op semantically).
+        # PF is fast and a no-op semantically). This one runs with the case's own
+        # settings: a power-flow request's options (``run_pflow``) apply only to a
+        # run that request makes.
         if not bool(getattr(ss.PFlow, "converged", False)):
             ss.PFlow.run()
             if not bool(getattr(ss.PFlow, "converged", False)):

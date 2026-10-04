@@ -856,7 +856,8 @@ class PflowRunRequest(BaseModel):
             "Start from 1 pu at angle 0 on every bus instead of the voltages and "
             "angles in the case. A bus with a generator holding its voltage still "
             "starts at that setpoint. Helps when the case's own starting point "
-            "is far from the solution."
+            "is far from the solution. Left out, the case's own setting stands; "
+            "``false`` turns off a flat start the case file asks for."
         ),
     )
     enforce_q_limits: bool | None = Field(
@@ -864,7 +865,8 @@ class PflowRunRequest(BaseModel):
         description=(
             "Hold a PV or slack generator at ``qmin`` or ``qmax`` when its "
             "reactive power goes past one (PV to PQ switching). Without it the "
-            "limits are reported and not enforced."
+            "limits are reported and not enforced. Left out, the case's own "
+            "setting stands; ``false`` turns off enforcement the case file asks for."
         ),
     )
 

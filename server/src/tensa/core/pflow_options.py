@@ -15,6 +15,11 @@ length of one run and puts back what it found, and it starts every run with the
 limiter flags cleared, so a result depends on the request alone and never on an
 earlier run. A setting the request leaves out keeps the System's own value, which
 is ANDES's default unless the case file's ``_config`` section says otherwise.
+
+Only a power-flow request carries these. A time-domain run that finds no converged
+solution, and a snapshot restore that re-solves, call ``PFlow.run`` with the
+System's own settings; a caller who wants others runs the power flow first, and
+the time-domain run then starts from that solution.
 """
 
 from __future__ import annotations

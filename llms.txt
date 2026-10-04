@@ -18,7 +18,8 @@ Copy-paste examples: examples/ in the repo (curl walkthrough + Python client).
                                              pflow also returns, per line, P/Q at both ends, the loss and the loading in % of rate_a (null when unrated),
                                              per generator, its Q limits in MVAr, and a "summary" (generation, load, shunts, losses, slack output)
                                              optional body, for that run only: {"tolerance": 1e-6, "max_iterations": 25, "flat_start": false,
-                                             "enforce_q_limits": false}. Q limits are reported, not enforced, unless enforce_q_limits is true.
+                                             "enforce_q_limits": false}. Q limits are reported, not enforced, unless enforce_q_limits is true or the case
+                                             file turns them on; false turns that off. Left-out settings keep the case's own.
                                              "settings" in the response is what the run used. If it did not converge, retry with a higher
                                              max_iterations, flat_start true, or a looser tolerance.
 5. GET  /sessions/{id}/operating-point     → PflowResult: bus_voltages/bus_angles dicts (keyed by bus idx),
