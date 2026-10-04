@@ -181,8 +181,10 @@ class TopologySnapshot:
     # e.g., a stock IEEE 14 .raw without the .dyr addfile.
     controllers: list[TopologyEntry] = field(default_factory=list)
     # System nominal frequency in Hz (``ss.config.freq``): the base a
-    # per-unit rotor speed converts to Hz with. ``None`` when the System
-    # carries no usable value, so a client never converts with a guess.
+    # per-unit rotor speed converts to Hz with. A RAW header or the ``_config``
+    # of an xlsx / json file sets it; any other case has ANDES's default of 60.
+    # ``None`` when the System carries no usable value, so a client never
+    # converts with a guess.
     freq_hz: float | None = None
 
 

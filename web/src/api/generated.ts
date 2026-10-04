@@ -3335,7 +3335,7 @@ export interface components {
             controllers?: components["schemas"]["TopologyEntry"][];
             /**
              * Freq Hz
-             * @description System nominal frequency in Hz (the case's base frequency, 60 unless the case sets another). A per-unit rotor speed ``omega`` times this is the speed in Hz. ``null`` when the case carries no usable value.
+             * @description System nominal frequency in Hz, as the case sets it: the header of a PSS/E RAW file, or the ``_config`` section of an xlsx or json file. A MATPOWER file, and any other case that sets none, keeps ANDES's default of 60. A per-unit rotor speed ``omega`` times this is the speed in Hz. ``null`` when the configuration has no usable value.
              */
             freq_hz?: number | null;
             /**
