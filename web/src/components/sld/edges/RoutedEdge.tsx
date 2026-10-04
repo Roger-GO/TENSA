@@ -1,10 +1,11 @@
 import { memo } from 'react';
-import { BaseEdge, EdgeLabelRenderer } from '@xyflow/react';
+import { BaseEdge } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
-import { getLineOverlayState } from '../overlay';
+import { getLineOverlayState, lineStrokeStyle } from '../overlay';
 import { LineFlowArrow } from './LineFlowArrow';
+import { LineFlowLabel } from './LineFlowLabel';
 import { maxAbsFlowMw } from './lineFlowArrowMath';
 
 /**
@@ -115,8 +116,7 @@ export const RoutedEdge = memo(function RoutedEdge({
   // The arrow is sized against the largest branch flow of the case, not a fixed
   // 1000 MW, so a 100 MVA case gets arrows as telling as a 10 GW one.
   const lineFlowSatMw = pflowResult?.line_flows ? maxAbsFlowMw(pflowResult.line_flows) : undefined;
-  const stroke = overlay?.has_data ? 'var(--color-foreground)' : 'var(--color-muted-foreground)';
-  const strokeWidth = overlay?.has_data ? 1.8 : 1.5;
+  const { stroke, strokeWidth } = lineStrokeStyle(overlay);
   // Endpoint dots — explicit markers at the polyline's start and end
   // so the reader can tell which lines actually connect to a bus vs.
   // ones that pass behind it. Match the conventions from TopologyEdge.
@@ -141,27 +141,8 @@ export const RoutedEdge = memo(function RoutedEdge({
           testid={`line-flow-arrow-${id}`}
         />
       ) : null}
-      {overlay && overlay.has_data && (overlay.p_label !== null || overlay.q_label !== null) ? (
-        <EdgeLabelRenderer>
-          <div
-            data-testid={`line-flow-label-${id}`}
-            data-direction={overlay.direction}
-            style={{
-              position: 'absolute',
-              transform: `translate(-50%, -50%) translate(${mid.x}px, ${mid.y}px)`,
-              pointerEvents: 'none',
-              zIndex: 20,
-            }}
-            className="bg-background text-foreground border-border rounded-[var(--radius-sm)] border px-1.5 py-0.5 font-mono text-[10px] leading-tight shadow-sm"
-          >
-            <div className="flex items-center gap-1">
-              <span aria-hidden="true">
-                {overlay.direction === 'forward' ? '→' : overlay.direction === 'reverse' ? '←' : ''}
-              </span>
-              {overlay.p_label !== null ? <span>{overlay.p_label}</span> : null}
-            </div>
-          </div>
-        </EdgeLabelRenderer>
+      {overlay ? (
+        <LineFlowLabel id={id} x={mid.x} y={mid.y} overlay={overlay} hideLabels={hideLabels} />
       ) : null}
     </>
   );

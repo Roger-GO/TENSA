@@ -336,3 +336,71 @@ describe('zoom-level label density', () => {
     expect(queryByTestId('generator-values-2')).toBeNull();
   });
 });
+
+describe('GeneratorNode reactive limit marker', () => {
+  const limits = (q: number) =>
+    makePflow({
+      generator_outputs: { '2': { p: 40, q, v: 1.03, bus: 2, q_min: -10, q_max: 15 } },
+    });
+  const node = (extra: Partial<SldNodeData> = {}) => (
+    <GeneratorNode {...props<typeof GeneratorNode>({ idx: '2', kind: 'PV', ...extra })} />
+  );
+
+  it('has no marker and the normal outline before a power flow or within the limits', () => {
+    const { getByTestId, queryByTestId } = render(node());
+    expect(queryByTestId('generator-q-marker-2')).toBeNull();
+    expect(getByTestId('generator-node-2').className).toContain('border-border');
+    setPflow(limits(5));
+    expect(queryByTestId('generator-q-marker-2')).toBeNull();
+    expect(getByTestId('generator-node-2').className).toContain('border-border');
+    expect(getByTestId('generator-node-2')).not.toHaveAttribute('data-q-limit');
+  });
+
+  it('outlines a generator past its upper limit red, with a filled triangle pointing up', () => {
+    setPflow(limits(30));
+    const { getByTestId } = render(node());
+    const gen = getByTestId('generator-node-2');
+    expect(gen).toHaveAttribute('data-q-limit', 'above-max');
+    expect(gen.className).toContain('border-danger');
+    const marker = getByTestId('generator-q-marker-2');
+    expect(marker).toHaveAttribute('data-band', 'danger');
+    expect(marker).toHaveAttribute('data-side', 'high');
+    expect(marker.getAttribute('aria-label')).toBe('Reactive power beyond its upper limit');
+  });
+
+  it('marks a generator past its lower limit with a triangle pointing down', () => {
+    setPflow(limits(-25));
+    const { getByTestId } = render(node());
+    expect(getByTestId('generator-node-2')).toHaveAttribute('data-q-limit', 'below-min');
+    expect(getByTestId('generator-q-marker-2')).toHaveAttribute('data-side', 'low');
+  });
+
+  it('outlines a generator on its limit amber, with an empty triangle', () => {
+    setPflow(limits(15));
+    const { getByTestId } = render(node());
+    const gen = getByTestId('generator-node-2');
+    expect(gen).toHaveAttribute('data-q-limit', 'at-max');
+    expect(gen.className).toContain('border-warning');
+    expect(getByTestId('generator-q-marker-2')).toHaveAttribute('data-band', 'warning');
+  });
+
+  it('keeps the marker when the labels are hidden', () => {
+    useUiStore.setState({ hideLabels: true });
+    setPflow(limits(30));
+    const { getByTestId, queryByTestId } = render(node());
+    expect(queryByTestId('generator-values-2')).toBeNull();
+    expect(getByTestId('generator-q-marker-2')).toBeInTheDocument();
+  });
+
+  it('reads the row the node prints: a machine reads its static generator, a quiet node nothing', () => {
+    setPflow(limits(30));
+    const machine = render(node({ idx: 'GENROU_2', kind: 'GENROU', pflowIdx: '2' }));
+    expect(machine.getByTestId('generator-node-GENROU_2')).toHaveAttribute(
+      'data-q-limit',
+      'above-max',
+    );
+    machine.unmount();
+    const quiet = render(node({ pflowIdx: null }));
+    expect(quiet.getByTestId('generator-node-2')).not.toHaveAttribute('data-q-limit');
+  });
+});

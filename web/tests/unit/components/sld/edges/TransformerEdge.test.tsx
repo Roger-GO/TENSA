@@ -13,6 +13,8 @@ import type { ComponentProps, ReactNode } from 'react';
 
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
+import { parseRunId } from '@/api/types';
+import { lineFlow } from '../../../helpers/lineFlow';
 
 vi.mock('@xyflow/react', async () => {
   const React = await import('react');
@@ -214,5 +216,67 @@ describe('<TransformerEdge />', () => {
   it('falls back gracefully when data is undefined (default 2w winding)', () => {
     const { getByTestId } = renderEdge({ id: 'tfm-empty' });
     expect(getByTestId('transformer-edge-icon-tfm-empty')).toHaveAttribute('data-winding', '2w');
+  });
+});
+
+describe('<TransformerEdge /> loading', () => {
+  function setFlow(loading: number | null): void {
+    usePflowStore.setState({
+      lastRun: {
+        run_id: parseRunId('pf-1'),
+        converged: true,
+        iterations: 4,
+        mismatch: 1e-6,
+        bus_voltages: {},
+        bus_angles: {},
+        line_flows: {
+          T1: lineFlow(26, 2, undefined, {
+            rate_a: loading === null ? null : 20,
+            loading_pct: loading,
+          }),
+        },
+      },
+      isRunning: false,
+      error: null,
+    });
+  }
+
+  it('outlines the icon red and heavy past the rating, and says so on hover', () => {
+    setFlow(130);
+    const { getByTestId } = renderEdge({ id: 'tfm-1', data: { idx: 'T1' } });
+    const icon = getByTestId('transformer-edge-icon-tfm-1');
+    expect(icon).toHaveAttribute('data-loading-band', 'danger');
+    expect(icon.className).toContain('border-danger');
+    expect(icon).toHaveAttribute('title', 'Over rating: 130.0% of its rating');
+    expect(getByTestId('transformer-edge-base').getAttribute('data-stroke')).toBe(
+      'var(--color-danger)',
+    );
+  });
+
+  it('outlines the icon amber near the rating', () => {
+    setFlow(85);
+    const { getByTestId } = renderEdge({ id: 'tfm-1', data: { idx: 'T1' } });
+    expect(getByTestId('transformer-edge-icon-tfm-1')).toHaveAttribute(
+      'data-loading-band',
+      'warning',
+    );
+    expect(getByTestId('transformer-edge-icon-tfm-1').className).toContain('border-warning');
+  });
+
+  it('leaves the icon alone for a lightly loaded or an unrated transformer', () => {
+    setFlow(30);
+    const light = renderEdge({ id: 'tfm-1', data: { idx: 'T1' } });
+    const icon = light.getByTestId('transformer-edge-icon-tfm-1');
+    expect(icon).toHaveAttribute('data-loading-band', 'success');
+    expect(icon.className).toContain('border-border');
+    expect(icon).not.toHaveAttribute('title');
+    light.unmount();
+
+    setFlow(null);
+    const unrated = renderEdge({ id: 'tfm-1', data: { idx: 'T1' } });
+    expect(unrated.getByTestId('transformer-edge-icon-tfm-1')).toHaveAttribute(
+      'data-loading-band',
+      'neutral',
+    );
   });
 });

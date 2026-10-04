@@ -7,10 +7,12 @@ import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useUnitsStore } from '@/store/units';
 import { useCurrentTopology } from '@/api/queries';
-import type { PflowResult, TopologyEntry } from '@/api/types';
+import type { LineFlow, PflowResult, TopologyEntry } from '@/api/types';
 import type { SelectedElement } from '@/store/case';
 import { findTopologyEntry, generatorRowKey } from '@/lib/topology';
 import { cn } from '@/lib/cn';
+import { loadingCheckText } from '@/components/sld/loading';
+import { assessQLimit, qLimitText } from '@/components/sld/qLimit';
 import {
   busBaseKv,
   formatDisplayed,
@@ -54,6 +56,55 @@ interface ResultsTabProps {
   pflowResult: PflowResult | null;
   /** The open case's unit bases, for the voltages to read in kV under the actual-units display. */
   bases: UnitBases | undefined;
+}
+
+/** The verdict on a generator's Q against its limits, as a trailing phrase (empty when there is none). */
+function qLimitCheck(
+  q: number,
+  qMin: number | null | undefined,
+  qMax: number | null | undefined,
+): string {
+  const text = qLimitText(assessQLimit(q, qMin, qMax));
+  return text === null ? '' : ` (${text.toLowerCase()})`;
+}
+
+/**
+ * The flow rows of a line or a transformer: the power at both ends, the loss,
+ * and, for a branch the case rates, the rating with the loading against it.
+ * Rendered inside the Results `<dl>`.
+ */
+function BranchFlowRows({ flow }: { flow: LineFlow }) {
+  const check = loadingCheckText(flow.loading_pct);
+  return (
+    <>
+      <dt className="text-muted-foreground font-mono text-xs">p_flow</dt>
+      <dd className="text-foreground font-mono text-xs">{flow.p.toFixed(2)} MW</dd>
+      <dt className="text-muted-foreground font-mono text-xs">q_flow</dt>
+      <dd className="text-foreground font-mono text-xs">{flow.q.toFixed(2)} MVAr</dd>
+      <dt className="text-muted-foreground font-mono text-xs">p_to</dt>
+      <dd className="text-foreground font-mono text-xs">{flow.p_to.toFixed(2)} MW</dd>
+      <dt className="text-muted-foreground font-mono text-xs">q_to</dt>
+      <dd className="text-foreground font-mono text-xs">{flow.q_to.toFixed(2)} MVAr</dd>
+      <dt className="text-muted-foreground font-mono text-xs">loss</dt>
+      <dd className="text-foreground font-mono text-xs">{flow.loss.toFixed(3)} MW</dd>
+      {flow.rate_a != null && flow.loading_pct != null ? (
+        <>
+          <dt className="text-muted-foreground font-mono text-xs">loading</dt>
+          <dd data-testid="inspector-loading" className="text-foreground font-mono text-xs">
+            {flow.loading_pct.toFixed(1)}% of {flow.rate_a.toFixed(1)} MVA
+            {check === null ? '' : ` (${check.toLowerCase()})`}
+          </dd>
+        </>
+      ) : (
+        <>
+          <dt className="text-muted-foreground font-mono text-xs">loading</dt>
+          <dd data-testid="inspector-loading" className="text-muted-foreground font-mono text-xs">
+            no rating (rate_a is 0)
+          </dd>
+        </>
+      )}
+    </>
+  );
 }
 
 function ResultsTab({ selected, entry, pflowResult, bases }: ResultsTabProps) {
@@ -109,10 +160,7 @@ function ResultsTab({ selected, entry, pflowResult, bases }: ResultsTabProps) {
         data-testid="inspector-results"
         className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm"
       >
-        <dt className="text-muted-foreground font-mono text-xs">p_flow</dt>
-        <dd className="text-foreground font-mono text-xs">{flow.p.toFixed(2)} MW</dd>
-        <dt className="text-muted-foreground font-mono text-xs">q_flow</dt>
-        <dd className="text-foreground font-mono text-xs">{flow.q.toFixed(2)} MVAr</dd>
+        <BranchFlowRows flow={flow} />
         <dt className="text-muted-foreground font-mono text-xs">from_idx</dt>
         <dd className="text-foreground font-mono text-xs">{String(flow.from_idx)}</dd>
         <dt className="text-muted-foreground font-mono text-xs">to_idx</dt>
@@ -137,6 +185,16 @@ function ResultsTab({ selected, entry, pflowResult, bases }: ResultsTabProps) {
         <dd className="text-foreground font-mono text-xs">{gen.p.toFixed(2)} MW</dd>
         <dt className="text-muted-foreground font-mono text-xs">Q</dt>
         <dd className="text-foreground font-mono text-xs">{gen.q.toFixed(2)} MVAr</dd>
+        {gen.q_min != null || gen.q_max != null ? (
+          <>
+            <dt className="text-muted-foreground font-mono text-xs">Q limits</dt>
+            <dd data-testid="inspector-q-limits" className="text-foreground font-mono text-xs">
+              {gen.q_min != null ? gen.q_min.toFixed(2) : '—'} to{' '}
+              {gen.q_max != null ? gen.q_max.toFixed(2) : '—'} MVAr
+              {qLimitCheck(gen.q, gen.q_min, gen.q_max)}
+            </dd>
+          </>
+        ) : null}
         <dt className="text-muted-foreground font-mono text-xs">V_term</dt>
         <dd className="text-foreground font-mono text-xs">
           {formatDisplayed(gen.v, voltageDisplay(unitMode, busBaseKv(bases, gen.bus)), 4)}
@@ -181,10 +239,7 @@ function ResultsTab({ selected, entry, pflowResult, bases }: ResultsTabProps) {
         data-testid="inspector-results"
         className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm"
       >
-        <dt className="text-muted-foreground font-mono text-xs">p_flow</dt>
-        <dd className="text-foreground font-mono text-xs">{flow.p.toFixed(2)} MW</dd>
-        <dt className="text-muted-foreground font-mono text-xs">q_flow</dt>
-        <dd className="text-foreground font-mono text-xs">{flow.q.toFixed(2)} MVAr</dd>
+        <BranchFlowRows flow={flow} />
       </dl>
     );
   }

@@ -20,6 +20,7 @@ import { usePflowStore } from '@/store/pflow';
 import { useUnitsStore } from '@/store/units';
 import { parseRunId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary, PflowResult } from '@/api/types';
+import { lineFlow } from '../../helpers/lineFlow';
 
 function withQueryClient(ui: ReactNode) {
   const client = new QueryClient({
@@ -99,7 +100,7 @@ function makePflowResult(overrides: Partial<PflowResult> = {}): PflowResult {
     mismatch: 1e-6,
     bus_voltages: { '1': 1.06, '2': 1.045 },
     bus_angles: { '1': 0, '2': -0.087 },
-    line_flows: { L1: { p: 156.9, q: -20.4, from_idx: 1, to_idx: 2 } },
+    line_flows: { L1: lineFlow(156.9, -20.4) },
     ...overrides,
   };
 }
@@ -237,6 +238,97 @@ describe('<ElementInspector />', () => {
 
     expect(screen.getByText('156.90 MW')).toBeInTheDocument();
     expect(screen.getByText('-20.40 MVAr')).toBeInTheDocument();
+  });
+
+  it('shows the power at both ends of a line, its loss, and its loading against the rating', () => {
+    seedLoadedCase();
+    useCaseStore.setState({ selectedElement: { kind: 'line', idx: 'L1' } });
+    usePflowStore.setState({
+      lastRun: makePflowResult({
+        line_flows: {
+          L1: lineFlow(
+            156.9,
+            -20.4,
+            { from: 1, to: 2 },
+            { p_to: -152.5, q_to: 25.1, loss: 4.4, rate_a: 150, loading_pct: 106.1 },
+          ),
+        },
+      }),
+      isRunning: false,
+      error: null,
+    });
+    render(withQueryClient(<ElementInspector />));
+
+    expect(screen.getByText('-152.50 MW')).toBeInTheDocument();
+    expect(screen.getByText('25.10 MVAr')).toBeInTheDocument();
+    expect(screen.getByText('4.400 MW')).toBeInTheDocument();
+    expect(screen.getByTestId('inspector-loading')).toHaveTextContent(
+      '106.1% of 150.0 MVA (over rating)',
+    );
+  });
+
+  it('says a line has no rating when the case gives none', () => {
+    seedLoadedCase();
+    useCaseStore.setState({ selectedElement: { kind: 'line', idx: 'L1' } });
+    usePflowStore.setState({ lastRun: makePflowResult(), isRunning: false, error: null });
+    render(withQueryClient(<ElementInspector />));
+
+    expect(screen.getByTestId('inspector-loading')).toHaveTextContent('no rating');
+  });
+
+  it('shows a loaded transformer the same two-ended flow and loading', () => {
+    seedLoadedCase();
+    mockTopology = {
+      ...TOPOLOGY,
+      transformers: [{ idx: 'T1', name: 'Trafo1', kind: 'Line', params: { bus1: 1, bus2: 2 } }],
+    };
+    useCaseStore.setState({ selectedElement: { kind: 'transformer', idx: 'T1' } });
+    usePflowStore.setState({
+      lastRun: makePflowResult({
+        line_flows: {
+          T1: lineFlow(26, 2, { from: 1, to: 2 }, { rate_a: 20, loading_pct: 130.4 }),
+        },
+      }),
+      isRunning: false,
+      error: null,
+    });
+    render(withQueryClient(<ElementInspector />));
+
+    expect(screen.getByTestId('inspector-loading')).toHaveTextContent(
+      '130.4% of 20.0 MVA (over rating)',
+    );
+  });
+
+  it('shows where a generator Q stands against its limits', () => {
+    seedLoadedCase();
+    useCaseStore.setState({ selectedElement: { kind: 'generator', idx: 'G1' } });
+    usePflowStore.setState({
+      lastRun: makePflowResult({
+        generator_outputs: { G1: { p: 232.4, q: 30, v: 1.06, bus: 1, q_min: -10, q_max: 15 } },
+      }),
+      isRunning: false,
+      error: null,
+    });
+    render(withQueryClient(<ElementInspector />));
+
+    expect(screen.getByTestId('inspector-q-limits')).toHaveTextContent(
+      '-10.00 to 15.00 MVAr (above qmax)',
+    );
+  });
+
+  it('leaves the Q limits out for a generator the server sends none for', () => {
+    seedLoadedCase();
+    useCaseStore.setState({ selectedElement: { kind: 'generator', idx: 'G1' } });
+    usePflowStore.setState({
+      lastRun: makePflowResult({
+        generator_outputs: { G1: { p: 0, q: 0, v: 1.06, bus: 1, q_min: null, q_max: null } },
+      }),
+      isRunning: false,
+      error: null,
+    });
+    render(withQueryClient(<ElementInspector />));
+
+    expect(screen.queryByTestId('inspector-q-limits')).not.toBeInTheDocument();
   });
 
   it('switches between Properties and Results when the user clicks tabs', async () => {

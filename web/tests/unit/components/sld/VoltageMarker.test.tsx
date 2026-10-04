@@ -57,4 +57,21 @@ describe('VoltageMarker', () => {
     expect(marker).toHaveAttribute('data-testid', 'm');
     expect(container.querySelector('title')).toHaveTextContent('Voltage near its lower limit');
   });
+
+  it('takes the words of another limit when given a label, and keeps the shape', () => {
+    const { getByRole, container } = render(
+      <VoltageMarker band="danger" side="high" label="Reactive power beyond its upper limit" />,
+    );
+    expect(getByRole('img', { name: 'Reactive power beyond its upper limit' })).toBeInTheDocument();
+    expect(container.querySelector('title')).toHaveTextContent(
+      'Reactive power beyond its upper limit',
+    );
+    expect(polygon(container).getAttribute('points')).toBe('5,1 9.2,9 0.8,9');
+    expect(polygon(container).getAttribute('class')).toContain('fill-danger');
+  });
+
+  it('draws nothing for a label of null, whatever the band', () => {
+    const { container } = render(<VoltageMarker band="danger" side="high" label={null} />);
+    expect(container.firstChild).toBeNull();
+  });
 });

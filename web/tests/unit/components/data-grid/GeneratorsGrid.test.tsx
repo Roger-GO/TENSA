@@ -172,3 +172,46 @@ describe('<GeneratorsGrid />', () => {
     );
   });
 });
+
+describe('<GeneratorsGrid /> reactive limits', () => {
+  function withLimits(): PflowResult {
+    return {
+      ...pfWithGenerators(),
+      generator_outputs: {
+        '2': { p: 700, q: 185.25, v: 1.01, bus: 2, q_min: -50, q_max: 150 },
+        '1': { p: 745.9, q: -12.5, v: 1.03, bus: 1, q_min: -50, q_max: 150 },
+      },
+    } as unknown as PflowResult;
+  }
+  // idx, name, bus, kind, P, Q, Qmin, Qmax, Q check, status
+  const limitCells = (id: string) =>
+    [...screen.getByTestId(`generators-grid-row-${id}`).querySelectorAll('[role=cell]')]
+      .slice(6, 9)
+      .map((c) => c.textContent);
+
+  it('shows the limits and where Q stands against them', () => {
+    mockTopology = MACHINE_TOPOLOGY;
+    usePflowStore.setState({ lastRun: withLimits(), isRunning: false, error: null });
+    render(<GeneratorsGrid />);
+    expect(limitCells('pv-2')).toEqual(['-50.000', '150.000', 'Above Qmax']);
+    expect(limitCells('slack-1')).toEqual(['-50.000', '150.000', 'Within limits']);
+    // A machine reads the row of the generator it names.
+    expect(limitCells('genrou-GENROU_2')).toEqual(['-50.000', '150.000', 'Above Qmax']);
+  });
+
+  it('leaves the limits empty before a power flow, and for a generator with none', () => {
+    mockTopology = MACHINE_TOPOLOGY;
+    const { unmount } = render(<GeneratorsGrid />);
+    expect(limitCells('pv-2')).toEqual(['—', '—', '—']);
+    unmount();
+    const pf = withLimits();
+    pf.generator_outputs = {
+      ...pf.generator_outputs,
+      '2': { p: 0, q: 0, v: 1.0, bus: 2, q_min: null, q_max: null },
+    };
+    usePflowStore.setState({ lastRun: pf, isRunning: false, error: null });
+    render(<GeneratorsGrid />);
+    expect(limitCells('pv-2')).toEqual(['—', '—', '—']);
+    expect(limitCells('slack-1')[2]).toBe('Within limits');
+  });
+});

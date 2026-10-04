@@ -17,7 +17,9 @@
  * flow, the same figures the diagram and the inspector print, and read
  * ``—`` until power flow has run. The case's own ``p0`` / ``q0`` are not
  * shown: they are per-unit setpoints, a dynamic machine has none, and a
- * PV generator has no ``q0``.
+ * PV generator has no ``q0``. The reactive limits (``qmin`` / ``qmax``, in
+ * MVAr) sit beside Q with the verdict in words, since the power flow does not
+ * hold a generator to them: an output can lie past one.
  */
 import { useMemo } from 'react';
 import { DataGrid, type ColumnConfig } from './DataGrid';
@@ -26,6 +28,7 @@ import { usePflowStore } from '@/store/pflow';
 import { useSldStore } from '@/store/sld';
 import { useCaseStore } from '@/store/case';
 import { generatorRowKey } from '@/lib/topology';
+import { assessQLimit, qLimitText } from '@/components/sld/qLimit';
 import type { TopologyEntry } from '@/api/types';
 
 interface GeneratorRow {
@@ -36,6 +39,9 @@ interface GeneratorRow {
   kind: string;
   p: number | null;
   q: number | null;
+  q_min: number | null;
+  q_max: number | null;
+  q_check: string | null;
   status: string;
 }
 
@@ -50,6 +56,9 @@ function finiteOrNull(v: number | undefined): number | null {
 }
 
 const OUTPUT_TITLE = 'Output from the last power flow run. Shows a dash until power flow has run.';
+
+const Q_LIMIT_TITLE =
+  'The reactive power limit the case sets. Power flow does not enforce it, so Q can lie past it. A dash for a generator that is switched off, and until power flow has run.';
 
 const COLUMNS: ColumnConfig<GeneratorRow>[] = [
   { key: 'idx', label: 'idx', accessor: (r) => r.idx },
@@ -69,6 +78,28 @@ const COLUMNS: ColumnConfig<GeneratorRow>[] = [
     title: OUTPUT_TITLE,
     numeric: true,
     accessor: (r) => r.q,
+  },
+  {
+    key: 'q_min',
+    label: 'Qmin (MVAr)',
+    title: Q_LIMIT_TITLE,
+    numeric: true,
+    accessor: (r) => r.q_min,
+  },
+  {
+    key: 'q_max',
+    label: 'Qmax (MVAr)',
+    title: Q_LIMIT_TITLE,
+    numeric: true,
+    accessor: (r) => r.q_max,
+  },
+  {
+    key: 'q_check',
+    label: 'Q check',
+    title:
+      'Where Q stands against Qmin and Qmax: within them, on one, or past one. Filled in once a power flow has run.',
+    width: 104,
+    accessor: (r) => r.q_check,
   },
   { key: 'status', label: 'status', accessor: (r) => r.status },
 ];
@@ -105,6 +136,8 @@ export function GeneratorsGrid({ className }: GeneratorsGridProps) {
       const output = outputs?.[generatorRowKey(gen)];
       const p = finiteOrNull(output?.p);
       const q = finiteOrNull(output?.q);
+      const qMin = finiteOrNull(output?.q_min ?? undefined);
+      const qMax = finiteOrNull(output?.q_max ?? undefined);
       // Generators in ANDES split across multiple kinds (PV, Slack,
       // GENROU, GENCLS, …) that all use the model-local idx (1, 2, 3,
       // …). A bus may carry BOTH a PV record AND a GENROU dynamic
@@ -123,6 +156,9 @@ export function GeneratorsGrid({ className }: GeneratorsGridProps) {
         kind,
         p,
         q,
+        q_min: qMin,
+        q_max: qMax,
+        q_check: qLimitText(assessQLimit(q, qMin, qMax)),
         // Status (online/off) isn't surfaced per-element by the v0.1
         // substrate; render "online" as the practical default — every
         // element loaded from a case file is online unless an explicit

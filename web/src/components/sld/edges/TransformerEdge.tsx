@@ -2,10 +2,11 @@ import { memo } from 'react';
 import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
 import { iconForModel } from '@/icons/iec60617/manifest';
+import { cn } from '@/lib/cn';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
 import { type Side, strideShift } from '../graph';
-import { getLineOverlayState } from '../overlay';
+import { getLineOverlayState, lineStrokeStyle } from '../overlay';
 
 /**
  * Transformer edge — bus-to-bus polyline (or smooth-step path) with the
@@ -111,8 +112,10 @@ export const TransformerEdge = memo(function TransformerEdge({
   // we read the overlay for both bucket values.
   const branchIdx = edgeData.idx;
   const overlay = branchIdx ? getLineOverlayState(branchIdx, pflowResult, hideLabels) : null;
-  const stroke = overlay?.has_data ? 'var(--color-foreground)' : 'var(--color-muted-foreground)';
-  const strokeWidth = overlay?.has_data ? 1.8 : 1.5;
+  const { stroke, strokeWidth } = lineStrokeStyle(overlay);
+  // A transformer is rated like a line: its icon takes the same outline when it
+  // is near or past its rating, and says so to assistive tooling.
+  const loadingBand = overlay?.loading_band ?? 'neutral';
   const dotRadius = 3.5;
   const dotFill = 'var(--color-foreground)';
 
@@ -131,13 +134,26 @@ export const TransformerEdge = memo(function TransformerEdge({
         <div
           data-testid={`transformer-edge-icon-${id}`}
           data-winding={winding}
+          data-loading-band={loadingBand}
+          title={
+            overlay?.loading_status && overlay.loading_label
+              ? `${overlay.loading_status}: ${overlay.loading_label} of its rating`
+              : undefined
+          }
           style={{
             position: 'absolute',
             transform: `translate(-50%, -50%) translate(${mid.x}px, ${mid.y}px)`,
             pointerEvents: 'all',
             zIndex: 20,
           }}
-          className="bg-background border-border flex h-7 w-7 items-center justify-center rounded-full border"
+          className={cn(
+            'bg-background flex h-7 w-7 items-center justify-center rounded-full border',
+            loadingBand === 'danger'
+              ? 'border-danger border-2'
+              : loadingBand === 'warning'
+                ? 'border-warning border-2'
+                : 'border-border',
+          )}
         >
           <img
             src={iconSrc}

@@ -2270,6 +2270,16 @@ export interface components {
              * @description Terminal bus idx.
              */
             bus: number | string;
+            /**
+             * Q Min
+             * @description Lower reactive power limit the case sets (``qmin``), in MVAr. Power flow does not enforce it, so ``q`` can lie below it. ``null`` for a generator that is switched off.
+             */
+            q_min?: number | null;
+            /**
+             * Q Max
+             * @description Upper reactive power limit the case sets (``qmax``), in MVAr. Power flow does not enforce it, so ``q`` can lie above it. ``null`` for a generator that is switched off.
+             */
+            q_max?: number | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -2350,13 +2360,17 @@ export interface components {
         };
         /**
          * LineFlow
-         * @description Per-line active and reactive power flow, measured at terminal 1
-         *     (``bus1``) flowing into the line toward terminal 2 (``bus2``).
+         * @description Per-line active and reactive power flow at both terminals: ``p`` / ``q``
+         *     at terminal 1 (``bus1``) and ``p_to`` / ``q_to`` at terminal 2 (``bus2``),
+         *     each flowing from the bus INTO the line, plus the line's loss and its
+         *     loading against its rating.
          *
          *     Sign convention: positive ``p`` means real power flowing FROM ``bus1``
          *     INTO the line; positive ``q`` means reactive power flowing FROM ``bus1``
-         *     INTO the line. The v0.1 SLD overlay uses the sign of ``p`` to render
-         *     directional arrows along each branch.
+         *     INTO the line, and the same at terminal 2 for ``p_to`` / ``q_to``. On a
+         *     line that carries power from ``bus1`` to ``bus2``, ``p`` is positive and
+         *     ``p_to`` negative, and the two sum to the loss. The SLD overlay uses the
+         *     sign of ``p`` to render directional arrows along each branch.
          */
         LineFlow: {
             /**
@@ -2379,6 +2393,31 @@ export interface components {
              * @description ANDES idx of the ``bus2`` terminal (the to-side bus).
              */
             to_idx: number | string;
+            /**
+             * P To
+             * @description Active power leaving ``bus2`` into the line, in MW. Negative when the line delivers power to ``bus2``.
+             */
+            p_to: number;
+            /**
+             * Q To
+             * @description Reactive power leaving ``bus2`` into the line, in MVAr.
+             */
+            q_to: number;
+            /**
+             * Loss
+             * @description Active power the line dissipates, in MW: ``p + p_to``.
+             */
+            loss: number;
+            /**
+             * Rate A
+             * @description The line's long-term rating (the case's ``rate_a``), in MVA. ``null`` when the case gives none (a ``rate_a`` of zero), in which case the line has no loading either.
+             */
+            rate_a?: number | null;
+            /**
+             * Loading Pct
+             * @description The larger of the apparent powers at the two terminals, ``sqrt(p^2 + q^2)`` and ``sqrt(p_to^2 + q_to^2)``, as a percentage of ``rate_a``. Above 100 is an overload. ``null`` when the line has no rating.
+             */
+            loading_pct?: number | null;
         };
         /**
          * ListDisturbancesResponse
@@ -2529,14 +2568,14 @@ export interface components {
             };
             /**
              * Line Flows
-             * @description Per-line P/Q flow at terminal 1, keyed by line idx (stringified). Empty if the wrapper could not extract line flows from the post-PF System (e.g., on an unexpected ANDES API change). Populated by computing the standard pi-equivalent line injection at ``bus1`` from the converged ``v1``/``a1``/``v2``/``a2`` algebraic variables and the line's series + shunt admittances.
+             * @description Per-line P/Q flow at both terminals, with the line's loss and its loading against ``rate_a``, keyed by line idx (stringified). Empty if the wrapper could not extract line flows from the post-PF System (e.g., on an unexpected ANDES API change). Populated by computing the standard pi-equivalent line injection at each end from the converged ``v1``/``a1``/``v2``/``a2`` algebraic variables and the line's series + shunt admittances.
              */
             line_flows?: {
                 [key: string]: components["schemas"]["LineFlow"];
             };
             /**
              * Generator Outputs
-             * @description Per-generator P / Q output and terminal voltage, keyed by generator idx (stringified). Covers the static generators (PV and Slack). A dynamic machine (GENROU, GENCLS) has no entry of its own: read the entry of the static generator named by its ``gen`` parameter. Empty when PF did not converge.
+             * @description Per-generator P / Q output, terminal voltage and reactive limits, keyed by generator idx (stringified). Covers the static generators (PV and Slack). A dynamic machine (GENROU, GENCLS) has no entry of its own: read the entry of the static generator named by its ``gen`` parameter. Empty when PF did not converge.
              */
             generator_outputs?: {
                 [key: string]: components["schemas"]["GeneratorOutput"];

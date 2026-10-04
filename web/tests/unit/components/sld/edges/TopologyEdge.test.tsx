@@ -20,7 +20,8 @@ import type { ComponentProps, ReactNode } from 'react';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
 import { parseRunId } from '@/api/types';
-import type { PflowResult } from '@/api/types';
+import type { LineFlow, PflowResult } from '@/api/types';
+import { lineFlow } from '../../../helpers/lineFlow';
 
 vi.mock('@xyflow/react', async () => {
   const React = await import('react');
@@ -113,7 +114,7 @@ function setPflow(linePMw: number, converged = true): void {
     mismatch: 1e-6,
     bus_voltages: { '1': 1.0, '2': 1.0 },
     bus_angles: { '1': 0, '2': 0 },
-    line_flows: { 'l-1': { p: linePMw, q: 0, from_idx: '1', to_idx: '2' } },
+    line_flows: { 'l-1': lineFlow(linePMw, 0, { from: '1', to: '2' }) },
   };
   usePflowStore.setState({ lastRun: result, isRunning: false, error: null });
 }
@@ -128,7 +129,7 @@ function setPflowLines(pByLine: Record<string, number>): void {
     bus_voltages: { '1': 1.0, '2': 1.0 },
     bus_angles: { '1': 0, '2': 0 },
     line_flows: Object.fromEntries(
-      Object.entries(pByLine).map(([idx, p]) => [idx, { p, q: 0, from_idx: '1', to_idx: '2' }]),
+      Object.entries(pByLine).map(([idx, p]) => [idx, lineFlow(p, 0, { from: '1', to: '2' })]),
     ),
   };
   usePflowStore.setState({ lastRun: result, isRunning: false, error: null });
@@ -248,5 +249,77 @@ describe('<TopologyEdge /> — Unit 19 line-flow arrow integration', () => {
     );
     const arrowAfter = getByTestId('line-flow-arrow-edge-1');
     expect(arrowAfter.getAttribute('data-direction')).toBe('forward');
+  });
+});
+
+/** A converged PF result with the one line `l-1` carrying `flow`. */
+function setPflowFlow(flow: LineFlow): void {
+  const result: PflowResult = {
+    run_id: parseRunId('pf-1'),
+    converged: true,
+    iterations: 4,
+    mismatch: 1e-6,
+    bus_voltages: { '1': 1.0, '2': 1.0 },
+    bus_angles: { '1': 0, '2': 0 },
+    line_flows: { 'l-1': flow },
+  };
+  usePflowStore.setState({ lastRun: result, isRunning: false, error: null });
+}
+
+describe('<TopologyEdge /> line loading', () => {
+  beforeEach(reset);
+
+  it('draws a line over its rating red and heavy, with its loading on the label', () => {
+    setPflowFlow(lineFlow(112, 8, undefined, { rate_a: 100, loading_pct: 112.4 }));
+    const { getByTestId } = renderEdge();
+    const base = getByTestId('topology-edge-base');
+    expect(base.getAttribute('data-stroke')).toBe('var(--color-danger)');
+    expect(base.getAttribute('data-stroke-width')).toBe('3');
+    const label = getByTestId('line-flow-label-edge-1');
+    expect(label.getAttribute('data-loading-band')).toBe('danger');
+    expect(label.className).toContain('border-danger');
+    expect(getByTestId('line-loading-edge-1').textContent).toBe('112.4%');
+  });
+
+  it('draws a line near its rating amber', () => {
+    setPflowFlow(lineFlow(85, 5, undefined, { rate_a: 100, loading_pct: 85 }));
+    const { getByTestId } = renderEdge();
+    expect(getByTestId('topology-edge-base').getAttribute('data-stroke')).toBe(
+      'var(--color-warning)',
+    );
+    expect(getByTestId('line-flow-label-edge-1').getAttribute('data-loading-band')).toBe('warning');
+    expect(getByTestId('line-loading-edge-1').textContent).toBe('85.0%');
+  });
+
+  it('keeps a lightly loaded rated line in the normal colour and still shows its loading', () => {
+    setPflowFlow(lineFlow(20, 2, undefined, { rate_a: 100, loading_pct: 20.2 }));
+    const { getByTestId } = renderEdge();
+    const base = getByTestId('topology-edge-base');
+    expect(base.getAttribute('data-stroke')).toBe('var(--color-foreground)');
+    expect(base.getAttribute('data-stroke-width')).toBe('1.8');
+    expect(getByTestId('line-loading-edge-1').textContent).toBe('20.2%');
+  });
+
+  it('shows no loading and no colour for a line the case gives no rating', () => {
+    setPflowFlow(lineFlow(500, 5));
+    const { getByTestId, queryByTestId } = renderEdge();
+    expect(getByTestId('topology-edge-base').getAttribute('data-stroke')).toBe(
+      'var(--color-foreground)',
+    );
+    expect(queryByTestId('line-loading-edge-1')).toBeNull();
+    expect(getByTestId('line-flow-label-edge-1').getAttribute('data-loading-band')).toBe('neutral');
+  });
+
+  it('keeps the loading of a flagged line when the labels are hidden, and drops the rest', () => {
+    useUiStore.setState({ hideLabels: true });
+    setPflowFlow(lineFlow(112, 8, undefined, { rate_a: 100, loading_pct: 112.4 }));
+    const flagged = renderEdge();
+    expect(flagged.getByTestId('line-loading-edge-1').textContent).toBe('112.4%');
+    expect(flagged.container.textContent).not.toContain('MW');
+    cleanup();
+
+    setPflowFlow(lineFlow(20, 2, undefined, { rate_a: 100, loading_pct: 20.2 }));
+    const quiet = renderEdge();
+    expect(quiet.queryByTestId('line-flow-label-edge-1')).toBeNull();
   });
 });

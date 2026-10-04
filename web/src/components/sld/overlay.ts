@@ -29,6 +29,8 @@ import {
   type VoltageLimits,
   type VoltageSide,
 } from './voltage';
+import { assessLoading, formatLoading, loadingStatusText, type LoadingBand } from './loading';
+import { assessQLimit, type QLimitState } from './qLimit';
 
 export interface BusOverlayState {
   /** "1.060 pu" (or "243.80 kV" in actual units) or null if labels hidden / no PF / missing data. */
@@ -58,6 +60,15 @@ export interface LineOverlayState {
   direction: 'forward' | 'reverse' | 'neutral';
   /** True if `pflowResult` is present, converged, and contains this line. */
   has_data: boolean;
+  /**
+   * The line's loading against its rating: `neutral` for a line the case
+   * rates at nothing, and before a power flow.
+   */
+  loading_band: LoadingBand;
+  /** "87.3%" of the rating, or null for a line with no rating (or without data). */
+  loading_label: string | null;
+  /** The words behind `loading_band` ("Over rating"), or null when the line is not close to its rating. */
+  loading_status: string | null;
 }
 
 export interface DeviceOverlayState {
@@ -119,6 +130,9 @@ const NEUTRAL_LINE: LineOverlayState = {
   q_label: null,
   direction: 'neutral',
   has_data: false,
+  loading_band: 'neutral',
+  loading_label: null,
+  loading_status: null,
 };
 
 /**
@@ -150,12 +164,39 @@ export function getLineOverlayState(
       : p < 0
         ? 'reverse'
         : 'neutral';
+  const loading = flow.loading_pct;
+  const loading_band = assessLoading(loading);
   return {
     p_label: hideLabels || !Number.isFinite(p) ? null : `${p.toFixed(2)} MW`,
     q_label: hideLabels || !Number.isFinite(q) ? null : `${q.toFixed(2)} MVAr`,
     direction,
     has_data: true,
+    loading_band,
+    loading_label: loading_band === 'neutral' ? null : formatLoading(loading as number),
+    loading_status: loadingStatusText(loading_band),
   };
+}
+
+/** How a line's stroke is drawn for each loading band. */
+const LOADING_STROKE: Record<LoadingBand, { stroke: string; strokeWidth: number }> = {
+  danger: { stroke: 'var(--color-danger)', strokeWidth: 3 },
+  warning: { stroke: 'var(--color-warning)', strokeWidth: 2.4 },
+  success: { stroke: 'var(--color-foreground)', strokeWidth: 1.8 },
+  neutral: { stroke: 'var(--color-foreground)', strokeWidth: 1.8 },
+};
+
+/**
+ * The stroke of a line or transformer edge: muted and thin before a power
+ * flow, the foreground colour after it, and amber or red, and heavier, when
+ * the line is near or past its rating. The heavier stroke and the loading
+ * figure on the label say the same without the colour.
+ */
+export function lineStrokeStyle(overlay: LineOverlayState | null): {
+  stroke: string;
+  strokeWidth: number;
+} {
+  if (!overlay?.has_data) return { stroke: 'var(--color-muted-foreground)', strokeWidth: 1.5 };
+  return LOADING_STROKE[overlay.loading_band];
 }
 
 const NEUTRAL_DEVICE: DeviceOverlayState = {
@@ -207,6 +248,23 @@ export function getDeviceOverlayState(
     q_label: hideLabels || !Number.isFinite(row.q) ? null : formatPower(row.q, 'MVAr'),
     has_data: true,
   };
+}
+
+/**
+ * Where a generator's reactive output stands against its limits after a
+ * converged power flow. `key` is the row of `generator_outputs` the node
+ * prints, as for `getDeviceOverlayState`: `none` for a node that prints no
+ * row, before a power flow, and for a generator the server sends no limits
+ * for.
+ */
+export function getGeneratorLimitState(
+  key: string | null,
+  pflowResult: PflowResult | null,
+): QLimitState {
+  if (key === null || !pflowResult || !pflowResult.converged) return 'none';
+  const row = pflowResult.generator_outputs?.[key];
+  if (!row) return 'none';
+  return assessQLimit(row.q, row.q_min, row.q_max);
 }
 
 // ---- frame-driven overlay (v0.2 Unit 5) ----------------------------------

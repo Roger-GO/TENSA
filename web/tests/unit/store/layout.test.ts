@@ -63,6 +63,7 @@ describe('useLayoutStore — defaults', () => {
       'generators',
       'loads',
       'shunts',
+      'violations',
       'analysis',
       'activity',
     ]);

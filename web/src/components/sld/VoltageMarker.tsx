@@ -4,6 +4,12 @@ import { voltageMarkerLabel, type VoltageBand, type VoltageSide } from './voltag
 export interface VoltageMarkerProps {
   band: VoltageBand;
   side: VoltageSide | null;
+  /**
+   * The words behind the marker (its tooltip and accessible name), for a
+   * limit that is not a bus voltage's: a generator's reactive power. Defaults
+   * to the voltage wording.
+   */
+  label?: string | null;
   className?: string;
   'data-testid'?: string;
 }
@@ -17,16 +23,18 @@ export interface VoltageMarkerProps {
  * bus in the clear.
  *
  * Both shapes keep the dark outline (not the amber / red) because the
- * outline is what has to read against the diagram's background.
+ * outline is what has to read against the diagram's background. A generator
+ * at a reactive limit draws the same marker (`label` says which limit).
  */
 export function VoltageMarker({
   band,
   side,
+  label: labelOverride,
   className,
   'data-testid': testId,
 }: VoltageMarkerProps) {
-  const label = voltageMarkerLabel(band, side);
-  if (label === null) return null;
+  const label = labelOverride === undefined ? voltageMarkerLabel(band, side) : labelOverride;
+  if (label === null || side === null) return null;
   const up = side === 'high';
   const beyond = band === 'danger';
   return (

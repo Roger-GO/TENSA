@@ -78,6 +78,7 @@ import { useEditJournalStore } from '@/store/editJournal';
 import { useJobsStore, mintLocalJobId, LOCAL_ID_PREFIX } from '@/store/jobs';
 import type { JobKind, JobRecord } from '@/store/jobs';
 import { toast } from '@/lib/toast';
+import { announceViolations } from '@/lib/announceViolations';
 
 // ---- job registration glue (Unit 6) ---------------------------------------
 
@@ -647,10 +648,14 @@ export function useRunPflow(): UseMutationResult<PflowResult, Error, SessionId> 
       return { jobId: registerJob('pflow') };
     },
     onSuccess: (data, sessionId, ctx) => {
-      usePflowStore.getState().setLastRun({
-        ...data,
-        run_id: parseRunId(data.run_id),
-      });
+      const solved = { ...data, run_id: parseRunId(data.run_id) };
+      usePflowStore.getState().setLastRun(solved);
+      // The buses, lines and generators the run is judged against, before the
+      // invalidation below fetches the committed topology.
+      announceViolations(
+        solved,
+        queryClient.getQueryData<TopologySummary>(queryKeys.topology(sessionId)),
+      );
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
     },

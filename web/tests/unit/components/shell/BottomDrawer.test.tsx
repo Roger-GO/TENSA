@@ -3,7 +3,7 @@
  *
  * Coverage:
  *
- *  - Renders the 6 outer tabs with their canonical testids.
+ *  - Renders the 8 outer tabs with their canonical testids.
  *  - Tab click switches activeBottomDrawerTab in useLayoutStore AND
  *    clears drawerHasUnreadResults.
  *  - When ``bottomDrawerCollapsed === true`` only the strip renders;
@@ -20,7 +20,9 @@ import React from 'react';
 
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { useAnalyzeStore } from '@/store/analyze';
+import { usePflowStore } from '@/store/pflow';
 import type { TopologySummary } from '@/api/types';
+import { LIMITS_TOPOLOGY, limitsPflow } from '../../helpers/limitsCase';
 
 // useCurrentTopology is read by the per-bucket grids that BottomDrawer
 // mounts. Stub it to a deterministic empty topology so the grids
@@ -71,6 +73,7 @@ beforeEach(() => {
   window.localStorage.clear();
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
   useAnalyzeStore.setState({ subMode: 'eig' });
+  usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
   mockTopology = null;
 });
 
@@ -78,13 +81,23 @@ afterEach(() => {
   cleanup();
   window.localStorage.clear();
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
+  usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
 });
 
 describe('<BottomDrawer />', () => {
-  it('renders all 7 outer tabs', () => {
+  it('renders all 8 outer tabs', () => {
     render(<BottomDrawer />, { wrapper });
     expect(screen.getByTestId('bottom-drawer')).toBeInTheDocument();
-    for (const tab of ['buses', 'lines', 'generators', 'loads', 'shunts', 'analysis', 'activity']) {
+    for (const tab of [
+      'buses',
+      'lines',
+      'generators',
+      'loads',
+      'shunts',
+      'violations',
+      'analysis',
+      'activity',
+    ]) {
       expect(screen.getByTestId(`bottom-drawer-tab-${tab}`)).toBeInTheDocument();
     }
   });
@@ -93,8 +106,8 @@ describe('<BottomDrawer />', () => {
     render(<BottomDrawer />, { wrapper });
     const divider = screen.getByTestId('bottom-drawer-tab-group-divider');
     expect(divider).toBeInTheDocument();
-    // Exactly one divider — it splits the five element grids from the
-    // Analysis | Activity tools group.
+    // Exactly one divider — it splits the element grids and the violations
+    // list from the Analysis | Activity tools group.
     expect(screen.getAllByTestId('bottom-drawer-tab-group-divider')).toHaveLength(1);
     // The divider must sit immediately before the Analysis trigger in DOM
     // order (the grids read as one group, Analysis|Activity as the next).
@@ -102,9 +115,9 @@ describe('<BottomDrawer />', () => {
     expect(
       divider.compareDocumentPosition(analysisTab) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    const shuntsTab = screen.getByTestId('bottom-drawer-tab-shunts');
+    const violationsTab = screen.getByTestId('bottom-drawer-tab-violations');
     expect(
-      shuntsTab.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING,
+      violationsTab.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
@@ -186,5 +199,73 @@ describe('<BottomDrawer />', () => {
     render(<BottomDrawer />, { wrapper });
     expect(screen.getByTestId('bottom-drawer-tab-content-analysis')).toBeInTheDocument();
     expect(await screen.findByTestId('analysis-tab')).toBeInTheDocument();
+  });
+});
+
+describe('<BottomDrawer /> Violations tab', () => {
+  it('mounts the violations table (a lazily loaded chunk) when it is the active tab', async () => {
+    useLayoutStore.setState({ activeBottomDrawerTab: 'violations', bottomDrawerCollapsed: false });
+    render(<BottomDrawer />, { wrapper });
+    expect(screen.getByTestId('bottom-drawer-tab-content-violations')).toBeInTheDocument();
+    expect(await screen.findByTestId('violations-grid-empty')).toBeInTheDocument();
+  });
+
+  it('shows no count before a power flow has converged', () => {
+    mockTopology = LIMITS_TOPOLOGY;
+    render(<BottomDrawer />, { wrapper });
+    expect(screen.queryByTestId('violations-tab-count')).not.toBeInTheDocument();
+    cleanup();
+    usePflowStore.setState({ lastRun: limitsPflow({ converged: false }) });
+    render(<BottomDrawer />, { wrapper });
+    expect(screen.queryByTestId('violations-tab-count')).not.toBeInTheDocument();
+  });
+
+  it('counts the violations beside the tab name, in red, once a power flow has converged', () => {
+    mockTopology = LIMITS_TOPOLOGY;
+    usePflowStore.setState({ lastRun: limitsPflow() });
+    render(<BottomDrawer />, { wrapper });
+    const count = screen.getByTestId('violations-tab-count');
+    expect(count).toHaveTextContent('4');
+    expect(count).toHaveAttribute('data-severity', 'violation');
+    expect(count).toHaveAttribute('title', '4 violations');
+    expect(screen.getByTestId('bottom-drawer-tab-violations')).toContainElement(count);
+  });
+
+  it('counts the warnings instead, in amber, when there are only warnings', () => {
+    mockTopology = LIMITS_TOPOLOGY;
+    usePflowStore.setState({
+      lastRun: limitsPflow({
+        bus_voltages: { '1': 1.0, '2': 0.915, '3': 1.0 },
+        line_flows: {},
+        generator_outputs: { '2': { p: 10, q: 15, v: 1.0, bus: 2, q_min: -50, q_max: 15 } },
+      }),
+    });
+    render(<BottomDrawer />, { wrapper });
+    const count = screen.getByTestId('violations-tab-count');
+    expect(count).toHaveTextContent('2');
+    expect(count).toHaveAttribute('data-severity', 'warning');
+    expect(count).toHaveAttribute('title', '2 warnings');
+  });
+
+  it('shows no count when every limit holds, and follows the next run', () => {
+    mockTopology = LIMITS_TOPOLOGY;
+    usePflowStore.setState({
+      lastRun: limitsPflow({
+        bus_voltages: { '1': 1.0, '2': 1.0, '3': 1.0 },
+        line_flows: {},
+        generator_outputs: {},
+      }),
+    });
+    render(<BottomDrawer />, { wrapper });
+    expect(screen.queryByTestId('violations-tab-count')).not.toBeInTheDocument();
+  });
+
+  it('keeps the tab reachable while the drawer is collapsed', async () => {
+    const user = userEvent.setup();
+    useLayoutStore.setState({ bottomDrawerCollapsed: true });
+    render(<BottomDrawer />, { wrapper });
+    await user.click(screen.getByTestId('bottom-drawer-tab-violations'));
+    expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(false);
+    expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('violations');
   });
 });

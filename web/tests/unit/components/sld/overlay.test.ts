@@ -13,11 +13,14 @@ import {
   getBusOverlayState,
   getDeviceOverlayState,
   getFrameBusOverlay,
+  getGeneratorLimitState,
   getLineOverlayState,
+  lineStrokeStyle,
   pickFrameIdx,
 } from '@/components/sld/overlay';
 import type { PflowResult } from '@/api/types';
 import { parseRunId } from '@/api/types';
+import { lineFlow } from '../../helpers/lineFlow';
 import type { RunRecord } from '@/store/runs';
 import * as plotModule from '@/store/plot';
 
@@ -205,7 +208,7 @@ describe('getLineOverlayState', () => {
   it('returns forward direction for positive p', () => {
     const pflow = makeResult({
       line_flows: {
-        L1: { p: 12.5, q: 3.2, from_idx: 1, to_idx: 2 },
+        L1: lineFlow(12.5, 3.2),
       },
     });
     const result = getLineOverlayState('L1', pflow);
@@ -218,7 +221,7 @@ describe('getLineOverlayState', () => {
   it('returns reverse direction for negative p', () => {
     const pflow = makeResult({
       line_flows: {
-        L2: { p: -8.7, q: 1.0, from_idx: 1, to_idx: 2 },
+        L2: lineFlow(-8.7, 1.0),
       },
     });
     const result = getLineOverlayState('L2', pflow);
@@ -227,14 +230,14 @@ describe('getLineOverlayState', () => {
   });
 
   it('returns neutral when line idx is missing', () => {
-    const pflow = makeResult({ line_flows: { L1: { p: 1, q: 1, from_idx: 1, to_idx: 2 } } });
+    const pflow = makeResult({ line_flows: { L1: lineFlow(1, 1) } });
     const result = getLineOverlayState('L99', pflow);
     expect(result.has_data).toBe(false);
   });
 
   it('hides labels when hideLabels=true but keeps direction', () => {
     const pflow = makeResult({
-      line_flows: { L1: { p: 5, q: 1, from_idx: 1, to_idx: 2 } },
+      line_flows: { L1: lineFlow(5, 1) },
     });
     const result = getLineOverlayState('L1', pflow, true);
     expect(result.direction).toBe('forward');
@@ -630,5 +633,108 @@ describe('getFrameBusOverlay', () => {
     const idx = pickFrameIdx(run, null);
     const overlay = getFrameBusOverlay(run, idx);
     expect(overlay.get('1')?.band).toBe('danger');
+  });
+});
+
+describe('getLineOverlayState, loading', () => {
+  const rated = (loading: number) =>
+    makeResult({
+      line_flows: { L1: lineFlow(50, 5, undefined, { rate_a: 100, loading_pct: loading }) },
+    });
+
+  it('reads the loading band, label and words from the line loading', () => {
+    expect(getLineOverlayState('L1', rated(120))).toMatchObject({
+      loading_band: 'danger',
+      loading_label: '120.0%',
+      loading_status: 'Over rating',
+    });
+    expect(getLineOverlayState('L1', rated(85))).toMatchObject({
+      loading_band: 'warning',
+      loading_label: '85.0%',
+      loading_status: 'Near rating',
+    });
+    expect(getLineOverlayState('L1', rated(40))).toMatchObject({
+      loading_band: 'success',
+      loading_label: '40.0%',
+      loading_status: null,
+    });
+  });
+
+  it('has no loading for a line the case gives no rating, nor without a result', () => {
+    const unrated = makeResult({ line_flows: { L1: lineFlow(50, 5) } });
+    expect(getLineOverlayState('L1', unrated)).toMatchObject({
+      has_data: true,
+      loading_band: 'neutral',
+      loading_label: null,
+      loading_status: null,
+    });
+    expect(getLineOverlayState('L1', null)).toMatchObject({
+      has_data: false,
+      loading_band: 'neutral',
+      loading_label: null,
+    });
+  });
+
+  it('keeps the loading when the labels are hidden: only the flow figures go', () => {
+    const state = getLineOverlayState('L1', rated(120), true);
+    expect(state.p_label).toBeNull();
+    expect(state.loading_label).toBe('120.0%');
+  });
+});
+
+describe('lineStrokeStyle', () => {
+  it('is muted and thin before there is flow data', () => {
+    expect(lineStrokeStyle(null)).toEqual({
+      stroke: 'var(--color-muted-foreground)',
+      strokeWidth: 1.5,
+    });
+    expect(lineStrokeStyle(getLineOverlayState('L1', null))).toEqual({
+      stroke: 'var(--color-muted-foreground)',
+      strokeWidth: 1.5,
+    });
+  });
+
+  it('is the foreground colour with flow data, amber near the rating and red past it, heavier each step', () => {
+    const style = (loading: number | null) =>
+      lineStrokeStyle(
+        getLineOverlayState(
+          'L1',
+          makeResult({
+            line_flows: {
+              L1: lineFlow(50, 5, undefined, {
+                rate_a: loading === null ? null : 100,
+                loading_pct: loading,
+              }),
+            },
+          }),
+        ),
+      );
+    expect(style(null)).toEqual({ stroke: 'var(--color-foreground)', strokeWidth: 1.8 });
+    expect(style(30)).toEqual({ stroke: 'var(--color-foreground)', strokeWidth: 1.8 });
+    expect(style(90)).toEqual({ stroke: 'var(--color-warning)', strokeWidth: 2.4 });
+    expect(style(110)).toEqual({ stroke: 'var(--color-danger)', strokeWidth: 3 });
+  });
+});
+
+describe('getGeneratorLimitState', () => {
+  const pflow = makeResult({
+    generator_outputs: {
+      '1': { p: 40, q: 30, v: 1.0, bus: 1, q_min: -40, q_max: 15 },
+      '2': { p: 40, q: 5, v: 1.0, bus: 2, q_min: -40, q_max: 15 },
+      '3': { p: 0, q: 0, v: 1.0, bus: 3, q_min: null, q_max: null },
+    },
+  });
+
+  it('reads where the reactive output stands against the limits of the row it prints', () => {
+    expect(getGeneratorLimitState('1', pflow)).toBe('above-max');
+    expect(getGeneratorLimitState('2', pflow)).toBe('within');
+  });
+
+  it('has nothing to say for a row with no limits, a missing row, a node printing no row, or no result', () => {
+    expect(getGeneratorLimitState('3', pflow)).toBe('none');
+    expect(getGeneratorLimitState('9', pflow)).toBe('none');
+    expect(getGeneratorLimitState(null, pflow)).toBe('none');
+    expect(getGeneratorLimitState('1', null)).toBe('none');
+    expect(getGeneratorLimitState('1', { ...pflow, converged: false })).toBe('none');
   });
 });

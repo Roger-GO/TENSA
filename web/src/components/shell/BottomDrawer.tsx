@@ -29,6 +29,8 @@ import { cn } from '@/lib/cn';
 import { BOTTOM_DRAWER_TABS, useLayoutStore, type BottomDrawerTab } from '@/store/layout';
 import { useAnalyzeStore } from '@/store/analyze';
 import { LazyGrid } from '@/components/data-grid/LazyGrid';
+import { usePflowStore } from '@/store/pflow';
+import { useViolationReport } from '@/lib/useViolationReport';
 import { LazyAnalysisTab } from '@/components/data-grid/LazyAnalysisTab';
 import { ActivityPanel } from '@/components/shell/ActivityPanel';
 
@@ -38,9 +40,44 @@ const TAB_LABELS: Record<BottomDrawerTab, string> = {
   generators: 'Generators',
   loads: 'Loads',
   shunts: 'Shunts',
+  violations: 'Violations',
   analysis: 'Analysis',
   activity: 'Activity',
 };
+
+/**
+ * The count of limit violations beside the Violations tab's name, red when a
+ * limit is broken and amber when there are only warnings, so a result that
+ * needs attention shows without opening the tab. Draws nothing until a power
+ * flow has converged, and when every limit holds. The count is its own
+ * component so the tab strip reads the topology only once there is a result.
+ */
+function ViolationsCount() {
+  const converged = usePflowStore((s) => s.lastRun?.converged === true);
+  return converged ? <ViolationsCountBadge /> : null;
+}
+
+function ViolationsCountBadge() {
+  const report = useViolationReport();
+  if (report === null || report.items.length === 0) return null;
+  const violations = report.violationCount > 0;
+  const count = violations ? report.violationCount : report.warningCount;
+  const word = violations ? 'violation' : 'warning';
+  return (
+    <span
+      data-testid="violations-tab-count"
+      data-severity={violations ? 'violation' : 'warning'}
+      title={`${count} ${word}${count === 1 ? '' : 's'}`}
+      className={cn(
+        'ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full px-1',
+        'text-[10px] leading-4 font-semibold',
+        violations ? 'bg-danger text-danger-foreground' : 'bg-warning text-warning-foreground',
+      )}
+    >
+      {count}
+    </span>
+  );
+}
 
 export interface BottomDrawerProps {
   className?: string;
@@ -107,8 +144,8 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
       >
         {BOTTOM_DRAWER_TABS.map((tab) => (
           <Fragment key={tab}>
-            {/* Group separator: the first five tabs are the per-bucket
-                element grids; ``analysis`` + ``activity`` are the tools
+            {/* Group separator: the first six tabs are the per-bucket
+                element grids and the violations list; ``analysis`` + ``activity`` are the tools
                 group. A thin spacer + hairline before ``analysis`` makes
                 that split read at a glance without a heavier divider. */}
             {tab === 'analysis' ? (
@@ -135,6 +172,7 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
               )}
             >
               {TAB_LABELS[tab]}
+              {tab === 'violations' ? <ViolationsCount /> : null}
             </TabsPrimitive.Trigger>
           </Fragment>
         ))}
@@ -179,6 +217,13 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
             className="flex min-h-0 flex-1 flex-col"
           >
             <LazyGrid tab="shunts" />
+          </TabsPrimitive.Content>
+          <TabsPrimitive.Content
+            value="violations"
+            data-testid="bottom-drawer-tab-content-violations"
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <LazyGrid tab="violations" />
           </TabsPrimitive.Content>
           <TabsPrimitive.Content
             value="analysis"

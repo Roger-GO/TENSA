@@ -9,13 +9,13 @@
  * its form data per the F-DESIGN-7 dual-write pattern.
  *
  * Columns mirror the retired v2 LINE_COLUMNS shape (file retired in
- * v3 Unit 15) plus per-end power
- * + loss split per the v3 plan unit-13 spec. Loss is computed as
- * (P_from + P_to) — line-flow conservation says these two are equal
- * in magnitude and opposite in sign for a lossless line; their sum is
- * the line loss in MW. ``q_to`` and ``p_to`` aren't surfaced by the
- * v0.1 substrate's ``LineFlow`` shape (which carries from-side P/Q
- * only), so those cells render ``—``.
+ * v3 Unit 15) plus per-end power + loss split per the v3 plan unit-13
+ * spec. The server reports the power at both ends of each line, so P_to and
+ * Q_to are read, and the loss is the sum of the two P (the active power the
+ * line dissipates). The rating (`rate_a`, MVA) and the loading against it
+ * (the larger end's apparent power, in percent) follow, with the verdict in
+ * words beside them: a line the case gives no rating has none of the three,
+ * and reads `—`.
  */
 import { useMemo } from 'react';
 import { DataGrid, type ColumnConfig } from './DataGrid';
@@ -23,6 +23,7 @@ import { useCurrentTopology } from '@/api/queries';
 import { usePflowStore } from '@/store/pflow';
 import { useSldStore } from '@/store/sld';
 import { useCaseStore } from '@/store/case';
+import { loadingCheckText } from '@/components/sld/loading';
 import type { TopologyEntry } from '@/api/types';
 
 interface LineRow {
@@ -35,12 +36,19 @@ interface LineRow {
   p_to: number | null;
   q_to: number | null;
   loss: number | null;
+  rate_a: number | null;
+  loading: number | null;
+  loading_check: string | null;
 }
 
 function paramString(entry: TopologyEntry, key: string): string | null {
   const v = entry.params?.[key];
   if (v === undefined || v === null) return null;
   return String(v);
+}
+
+function finiteOrNull(v: number | null | undefined): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
 const COLUMNS: ColumnConfig<LineRow>[] = [
@@ -51,7 +59,35 @@ const COLUMNS: ColumnConfig<LineRow>[] = [
   { key: 'q_from', label: 'Q_from (MVAr)', numeric: true, accessor: (r) => r.q_from },
   { key: 'p_to', label: 'P_to (MW)', numeric: true, accessor: (r) => r.p_to },
   { key: 'q_to', label: 'Q_to (MVAr)', numeric: true, accessor: (r) => r.q_to },
-  { key: 'loss', label: 'loss (MW)', numeric: true, accessor: (r) => r.loss },
+  {
+    key: 'loss',
+    label: 'loss (MW)',
+    title: 'Active power the line dissipates: P_from + P_to',
+    numeric: true,
+    accessor: (r) => r.loss,
+  },
+  {
+    key: 'rate_a',
+    label: 'rating (MVA)',
+    title:
+      'The line rating the case sets (rate_a). A line with none reads a dash and is not checked for overload.',
+    numeric: true,
+    accessor: (r) => r.rate_a,
+  },
+  {
+    key: 'loading',
+    label: 'loading (%)',
+    title: 'The larger of the apparent powers at the two ends, in percent of the rating',
+    numeric: true,
+    accessor: (r) => r.loading,
+  },
+  {
+    key: 'loading_check',
+    label: 'Loading check',
+    title: 'Over the rating, or near it (from 80%). Filled in once a power flow has run.',
+    width: 112,
+    accessor: (r) => r.loading_check,
+  },
 ];
 
 export interface LinesGridProps {
@@ -70,21 +106,20 @@ export function LinesGrid({ className }: LinesGridProps) {
     return topology.lines.map((line) => {
       const idx = String(line.idx);
       const flow = pflow?.converged ? pflow.line_flows?.[idx] : undefined;
-      const p_from = flow?.p ?? null;
-      const q_from = flow?.q ?? null;
-      // Per-end-of-line P/Q split isn't on the v0.1 substrate's
-      // LineFlow shape; loss can't be computed without both ends.
-      // Leave as null → renders ``—`` until a future server enhancement.
+      const loading = finiteOrNull(flow?.loading_pct);
       return {
         rowId: `line-${idx}`,
         idx,
         from_bus: paramString(line, 'bus1'),
         to_bus: paramString(line, 'bus2'),
-        p_from: typeof p_from === 'number' && Number.isFinite(p_from) ? p_from : null,
-        q_from: typeof q_from === 'number' && Number.isFinite(q_from) ? q_from : null,
-        p_to: null,
-        q_to: null,
-        loss: null,
+        p_from: finiteOrNull(flow?.p),
+        q_from: finiteOrNull(flow?.q),
+        p_to: finiteOrNull(flow?.p_to),
+        q_to: finiteOrNull(flow?.q_to),
+        loss: finiteOrNull(flow?.loss),
+        rate_a: finiteOrNull(flow?.rate_a),
+        loading,
+        loading_check: loadingCheckText(loading),
       };
     });
   }, [topology, pflow]);

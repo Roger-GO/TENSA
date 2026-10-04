@@ -1,11 +1,12 @@
 import { memo } from 'react';
-import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath } from '@xyflow/react';
+import { BaseEdge, getSmoothStepPath } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
 import { type Side, strideShift } from '../graph';
-import { getLineOverlayState } from '../overlay';
+import { getLineOverlayState, lineStrokeStyle } from '../overlay';
 import { LineFlowArrow } from './LineFlowArrow';
+import { LineFlowLabel } from './LineFlowLabel';
 import { maxAbsFlowMw } from './lineFlowArrowMath';
 
 /**
@@ -19,9 +20,9 @@ import { maxAbsFlowMw } from './lineFlowArrowMath';
  * surfaced on IEEE 14.
  *
  * Unit 9: when post-PF + the edge's bucket is `line`, render a
- * directional arrow + a magnitude label at the midpoint. Color encoding
- * stays neutral; the directional arrow itself is the dominant visual
- * cue. The edge `data.bucket` field (set in `graph.ts`) tells us
+ * directional arrow + a magnitude label at the midpoint. The arrow is the
+ * dominant cue for the direction; the stroke turns amber or red, and heavier,
+ * as the line nears or passes its rating. The edge `data.bucket` field (set in `graph.ts`) tells us
  * whether to look the line up in `pflowResult.line_flows`.
  */
 interface EdgeData {
@@ -76,11 +77,10 @@ export const TopologyEdge = memo(function TopologyEdge({
   // 1000 MW, so a 100 MVA case gets arrows as telling as a 10 GW one.
   const lineFlowSatMw = pflowResult?.line_flows ? maxAbsFlowMw(pflowResult.line_flows) : undefined;
 
-  // Style: thicker / colored stroke when we have flow data; neutral
-  // otherwise. The arrow direction is encoded via the marker plus a
-  // small inline glyph in the label (forward vs. reverse).
-  const stroke = overlay?.has_data ? 'var(--color-foreground)' : 'var(--color-muted-foreground)';
-  const strokeWidth = overlay?.has_data ? 1.8 : 1.5;
+  // Style: a heavier stroke once we have flow data, amber or red as the line
+  // nears or passes its rating; muted otherwise. The arrow direction is encoded
+  // via the marker plus a small inline glyph in the label (forward vs. reverse).
+  const { stroke, strokeWidth } = lineStrokeStyle(overlay);
 
   // Endpoint dots — explicit visual marker at each bus boundary so the
   // reader can tell which edges actually connect to a bus vs. ones
@@ -110,27 +110,8 @@ export const TopologyEdge = memo(function TopologyEdge({
           testid={`line-flow-arrow-${id}`}
         />
       ) : null}
-      {overlay && overlay.has_data && (overlay.p_label !== null || overlay.q_label !== null) ? (
-        <EdgeLabelRenderer>
-          <div
-            data-testid={`line-flow-label-${id}`}
-            data-direction={overlay.direction}
-            style={{
-              position: 'absolute',
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-              pointerEvents: 'none',
-              zIndex: 20,
-            }}
-            className="bg-background text-foreground border-border rounded-[var(--radius-sm)] border px-1.5 py-0.5 font-mono text-[10px] leading-tight shadow-sm"
-          >
-            <div className="flex items-center gap-1">
-              <span aria-hidden="true">
-                {overlay.direction === 'forward' ? '→' : overlay.direction === 'reverse' ? '←' : ''}
-              </span>
-              {overlay.p_label !== null ? <span>{overlay.p_label}</span> : null}
-            </div>
-          </div>
-        </EdgeLabelRenderer>
+      {overlay ? (
+        <LineFlowLabel id={id} x={labelX} y={labelY} overlay={overlay} hideLabels={hideLabels} />
       ) : null}
     </>
   );

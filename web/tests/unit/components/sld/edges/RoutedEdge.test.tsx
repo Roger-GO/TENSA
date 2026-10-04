@@ -12,13 +12,19 @@ import type { ComponentProps, ReactNode } from 'react';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
 import { parseRunId } from '@/api/types';
-import type { PflowResult } from '@/api/types';
+import type { LineFlow, PflowResult } from '@/api/types';
+import { lineFlow } from '../../../helpers/lineFlow';
 
 vi.mock('@xyflow/react', async () => {
   const React = await import('react');
   return {
-    BaseEdge: ({ path }: { path: string }) =>
-      React.createElement('path', { 'data-testid': 'routed-edge-base', 'data-path': path }),
+    BaseEdge: ({ path, style }: { path: string; style?: Record<string, unknown> }) =>
+      React.createElement('path', {
+        'data-testid': 'routed-edge-base',
+        'data-path': path,
+        'data-stroke': style?.stroke,
+        'data-stroke-width': style?.strokeWidth,
+      }),
     EdgeLabelRenderer: ({ children }: { children: ReactNode }) =>
       React.createElement('foreignObject', null, children),
   };
@@ -62,7 +68,7 @@ function setPflowLines(pByLine: Record<string, number>): void {
     bus_voltages: { '1': 1.0, '2': 1.0 },
     bus_angles: { '1': 0, '2': 0 },
     line_flows: Object.fromEntries(
-      Object.entries(pByLine).map(([idx, p]) => [idx, { p, q: 0, from_idx: '1', to_idx: '2' }]),
+      Object.entries(pByLine).map(([idx, p]) => [idx, lineFlow(p, 0, { from: '1', to: '2' })]),
     ),
   };
   usePflowStore.setState({ lastRun: result, isRunning: false, error: null });
@@ -94,5 +100,52 @@ describe('<RoutedEdge /> line-flow arrow', () => {
     expect(getByTestId('line-flow-arrow-edge-1').getAttribute('data-arrow-size')).toBe(
       arrowSizeFromMw(40, 160).toFixed(2),
     );
+  });
+});
+
+function setPflowFlow(flow: LineFlow): void {
+  const result: PflowResult = {
+    run_id: parseRunId('pf-1'),
+    converged: true,
+    iterations: 4,
+    mismatch: 1e-6,
+    bus_voltages: { '1': 1.0, '2': 1.0 },
+    bus_angles: { '1': 0, '2': 0 },
+    line_flows: { 'l-1': flow },
+  };
+  usePflowStore.setState({ lastRun: result, isRunning: false, error: null });
+}
+
+describe('<RoutedEdge /> line loading', () => {
+  beforeEach(() => {
+    cleanup();
+    usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+    useUiStore.setState({ hideLabels: false });
+  });
+
+  it('draws a line over its rating red and heavy, with its loading on the label', () => {
+    setPflowFlow(lineFlow(112, 8, undefined, { rate_a: 100, loading_pct: 112.4 }));
+    const { getByTestId } = renderEdge();
+    const base = getByTestId('routed-edge-base');
+    expect(base.getAttribute('data-stroke')).toBe('var(--color-danger)');
+    expect(base.getAttribute('data-stroke-width')).toBe('3');
+    expect(getByTestId('line-flow-label-edge-1').getAttribute('data-loading-band')).toBe('danger');
+    expect(getByTestId('line-loading-edge-1').textContent).toBe('112.4%');
+  });
+
+  it('draws a line near its rating amber and an unrated line in the normal colour', () => {
+    setPflowFlow(lineFlow(85, 5, undefined, { rate_a: 100, loading_pct: 85 }));
+    const warned = renderEdge();
+    expect(warned.getByTestId('routed-edge-base').getAttribute('data-stroke')).toBe(
+      'var(--color-warning)',
+    );
+    cleanup();
+
+    setPflowFlow(lineFlow(500, 5));
+    const unrated = renderEdge();
+    expect(unrated.getByTestId('routed-edge-base').getAttribute('data-stroke')).toBe(
+      'var(--color-foreground)',
+    );
+    expect(unrated.queryByTestId('line-loading-edge-1')).toBeNull();
   });
 });

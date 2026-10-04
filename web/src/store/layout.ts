@@ -32,8 +32,9 @@ import type { JobKind } from '@/store/jobs';
 
 /**
  * Outer tab strip identifier for the BottomDrawer (Unit 11). The first
- * five tabs are per-bucket data grids (Units 12 + 13); ``analysis`` opens
- * the nested sub-tab strip (Unit 14).
+ * five tabs are per-bucket data grids (Units 12 + 13) and ``violations``
+ * lists the limits a power flow breaks; ``analysis`` opens the nested
+ * sub-tab strip (Unit 14).
  */
 export type BottomDrawerTab =
   | 'buses'
@@ -41,6 +42,7 @@ export type BottomDrawerTab =
   | 'generators'
   | 'loads'
   | 'shunts'
+  | 'violations'
   | 'analysis'
   | 'activity';
 
@@ -50,6 +52,7 @@ export const BOTTOM_DRAWER_TABS: readonly BottomDrawerTab[] = [
   'generators',
   'loads',
   'shunts',
+  'violations',
   'analysis',
   'activity',
 ] as const;
