@@ -168,6 +168,7 @@ def _gen_system(
     qmin: float | None = -0.1,
     qmax: float | None = 0.2,
     u: float | None = 1.0,
+    ue: float | None = None,
     mva: float = MVA,
 ) -> SimpleNamespace:
     pv: dict[str, Any] = {
@@ -183,6 +184,8 @@ def _gen_system(
         pv["qmax"] = _param([qmax])
     if u is not None:
         pv["u"] = _param([u])
+    if ue is not None:
+        pv["ue"] = _param([ue])
     return SimpleNamespace(PV=SimpleNamespace(**pv), config=SimpleNamespace(mva=mva))
 
 
@@ -215,7 +218,21 @@ def test_a_generator_switched_off_injects_nothing() -> None:
     assert in_service.q == pytest.approx(30.0)
 
 
-def _load_system(*, u: float | None, mva: float = MVA) -> SimpleNamespace:
+def test_a_generator_on_a_bus_that_is_out_of_service_injects_nothing_and_has_no_limits() -> None:
+    # Its own ``u`` is 1; the bus it hangs on is out, which ANDES carries in ``ue``.
+    out = _extract_generator_outputs(_gen_system(q=0.3, u=1.0, ue=0.0))["2"]
+    assert (out.p, out.q) == (0.0, 0.0)
+    assert (out.q_min, out.q_max) == (None, None)
+
+
+def test_a_generator_is_judged_by_ue_when_the_model_has_it() -> None:
+    # ``ue`` is ``u`` less what a status parent takes out, so a ``ue`` of 1 is in service.
+    out = _extract_generator_outputs(_gen_system(q=0.3, u=1.0, ue=1.0))["2"]
+    assert out.p == pytest.approx(40.0)
+    assert out.q_max == pytest.approx(20.0)
+
+
+def _load_system(*, u: float | None, ue: float | None = None, mva: float = MVA) -> SimpleNamespace:
     pq: dict[str, Any] = {
         "idx": _param(["PQ_1"]),
         "bus": _param([4]),
@@ -224,6 +241,8 @@ def _load_system(*, u: float | None, mva: float = MVA) -> SimpleNamespace:
     }
     if u is not None:
         pq["u"] = _param([u])
+    if ue is not None:
+        pq["ue"] = _param([ue])
     return SimpleNamespace(PQ=SimpleNamespace(**pq), config=SimpleNamespace(mva=mva))
 
 
@@ -232,6 +251,11 @@ def test_a_load_switched_off_draws_nothing() -> None:
     out = _extract_load_consumption(_load_system(u=0.0))["PQ_1"]
     assert out.p == 0.0
     assert out.q == 0.0
+
+
+def test_a_load_on_a_bus_that_is_out_of_service_draws_nothing() -> None:
+    out = _extract_load_consumption(_load_system(u=1.0, ue=0.0))["PQ_1"]
+    assert (out.p, out.q) == (0.0, 0.0)
 
 
 @pytest.mark.parametrize("u", [1.0, None])

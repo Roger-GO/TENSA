@@ -5130,8 +5130,9 @@ def _extract_generator_outputs(ss: System) -> dict[str, GeneratorOutput]:
     Best-effort: defaults to 0.0 / 0.0 / 1.0 on any missing attribute.
     Each row also carries the generator's reactive limits (``qmin`` /
     ``qmax``, scaled the same way), left ``None`` for a generator that is
-    switched off (``u`` of 0) or whose limit is missing or not finite. A
-    generator that is switched off reports no output.
+    out of service (``ue`` of 0, see :func:`_in_service_flags`) or whose limit
+    is missing or not finite. A generator that is out of service reports no
+    output.
     Returns dict keyed by stringified idx.
     """
     log = logging.getLogger("tensa.wrapper.gen_outputs")
@@ -5153,7 +5154,7 @@ def _extract_generator_outputs(ss: System) -> dict[str, GeneratorOutput]:
         p_arr = _safe_list(getattr(model, "p", None))
         q_arr = _safe_list(getattr(model, "q", None))
         v_arr = _safe_list(getattr(model, "v", None))
-        u_arr = _safe_list(getattr(model, "u", None))
+        u_arr = _in_service_flags(model)
         qmin_arr = _safe_list(getattr(model, "qmin", None))
         qmax_arr = _safe_list(getattr(model, "qmax", None))
         for i, idx in enumerate(idx_values):
@@ -5174,8 +5175,8 @@ def _extract_generator_outputs(ss: System) -> dict[str, GeneratorOutput]:
             bus_final: int | str = bus_coerced if isinstance(bus_coerced, int | str) and not isinstance(bus_coerced, bool) else str(bus)
             switched_off = i < len(u_arr) and _is_zero(u_arr[i])
             # A PV generator's ``p`` is a copy of ``p0`` whatever ``u`` says, but
-            # the bus equation multiplies it by ``ue``: a machine that is off
-            # injects nothing.
+            # the bus equation multiplies it by ``ue``: a machine that is off, or
+            # sits on a bus that is, injects nothing.
             out[str(idx)] = GeneratorOutput(
                 p=0.0 if switched_off else p_pu * mva_base,
                 q=0.0 if switched_off else q_pu * mva_base,
@@ -5193,6 +5194,18 @@ def _is_zero(value: Any) -> bool:
         return float(value) == 0.0
     except (TypeError, ValueError):
         return False
+
+
+def _in_service_flags(model: Any) -> list[Any]:
+    """The flags that say which devices of a model take part in the equations.
+
+    ANDES writes ``ue`` into every bus equation, not ``u``: ``ue`` is ``u``
+    unless a device's status parent (the bus it hangs on) is out of service, which
+    leaves ``u`` at 1 and ``ue`` at 0. A model that does not carry ``ue`` is read
+    by its ``u``.
+    """
+    effective = _safe_list(getattr(model, "ue", None))
+    return effective if effective else _safe_list(getattr(model, "u", None))
 
 
 def _scaled(values: list[Any], i: int, factor: float) -> float | None:
@@ -5215,7 +5228,8 @@ def _extract_load_consumption(ss: System) -> dict[str, LoadConsumption]:
 
     Best-effort — falls back to ``p0`` / ``q0`` (the input setpoint) if
     ``Ppf`` / ``Qpf`` are unavailable. Always converts to MW / MVAr. A load
-    that is switched off (``u`` of 0) draws nothing.
+    that is out of service (``ue`` of 0, see :func:`_in_service_flags`) draws
+    nothing.
     """
     log = logging.getLogger("tensa.wrapper.load_consumption")
     out: dict[str, LoadConsumption] = {}
@@ -5240,7 +5254,7 @@ def _extract_load_consumption(ss: System) -> dict[str, LoadConsumption]:
         q_arr = _safe_list(
             getattr(model, "Qpf", None) or getattr(model, "q0", None)
         )
-        u_arr = _safe_list(getattr(model, "u", None))
+        u_arr = _in_service_flags(model)
         for i, idx in enumerate(idx_values):
             try:
                 p_pu = float(p_arr[i]) if i < len(p_arr) else 0.0
@@ -5256,7 +5270,8 @@ def _extract_load_consumption(ss: System) -> dict[str, LoadConsumption]:
             bus = bus_values[i] if i < len(bus_values) else ""
             bus_coerced = _coerce_scalar(bus)
             bus_final: int | str = bus_coerced if isinstance(bus_coerced, int | str) and not isinstance(bus_coerced, bool) else str(bus)
-            # ``Ppf`` / ``Qpf`` ignore ``u``, but a load that is off draws nothing.
+            # ``Ppf`` / ``Qpf`` ignore ``u``, but a load that is off, or on a bus
+            # that is, draws nothing.
             switched_off = i < len(u_arr) and _is_zero(u_arr[i])
             out[str(idx)] = LoadConsumption(
                 p=0.0 if switched_off else p_pu * mva_base,
@@ -5456,30 +5471,46 @@ def _extract_line_flows(ss: System) -> dict[str, LineFlow]:
     return flows
 
 
+def _static_shunts(ss: System) -> list[Any]:
+    """Every model of ANDES's ``StaticShunt`` group (``Shunt``, the switched
+    ``ShuntSw`` and ``ShuntTD``), or just ``Shunt`` where the group is absent."""
+    models = getattr(getattr(ss, "StaticShunt", None), "models", None)
+    if isinstance(models, Mapping) and models:
+        return list(models.values())
+    shunt = getattr(ss, "Shunt", None)
+    return [] if shunt is None else [shunt]
+
+
 def _shunt_absorption(ss: System, mva_base: float) -> tuple[float, float]:
     """The P and Q (MW, MVAr) the in-service bus shunts absorb at the solved
     voltages: ANDES's own ``v**2 * g`` and ``-v**2 * b`` terms, so a capacitor
-    (``b`` > 0) absorbs a negative Q. ``(0.0, 0.0)`` when there is no shunt or
-    the arrays do not read."""
-    shunt = getattr(ss, "Shunt", None)
-    if shunt is None:
-        return 0.0, 0.0
-    arrays = {
-        name: _safe_list(getattr(shunt, name, None)) for name in ("u", "g", "b", "v")
-    }
+    (``b`` > 0) absorbs a negative Q. A switched shunt contributes the
+    admittance it has switched to (``geff`` / ``beff``), not the ``g`` / ``b`` it
+    started from. A model whose arrays do not read is left out; ``(0.0, 0.0)``
+    when there is no shunt at all."""
     p_total = q_total = 0.0
-    try:
-        for u, g, b, v in zip(
-            arrays["u"], arrays["g"], arrays["b"], arrays["v"], strict=True
-        ):
-            v2 = float(v) ** 2
-            p = float(u) * v2 * float(g)
-            q = -float(u) * v2 * float(b)
-            if math.isfinite(p) and math.isfinite(q):
-                p_total += p
-                q_total += q
-    except (TypeError, ValueError):
-        return 0.0, 0.0
+    for shunt in _static_shunts(ss):
+        switched = hasattr(shunt, "geff") and hasattr(shunt, "beff")
+        g_name, b_name = ("geff", "beff") if switched else ("g", "b")
+        arrays = [
+            _in_service_flags(shunt),
+            _safe_list(getattr(shunt, g_name, None)),
+            _safe_list(getattr(shunt, b_name, None)),
+            _safe_list(getattr(shunt, "v", None)),
+        ]
+        p_model = q_model = 0.0
+        try:
+            for u, g, b, v in zip(*arrays, strict=True):
+                v2 = float(v) ** 2
+                p = float(u) * v2 * float(g)
+                q = -float(u) * v2 * float(b)
+                if math.isfinite(p) and math.isfinite(q):
+                    p_model += p
+                    q_model += q
+        except (TypeError, ValueError):
+            continue
+        p_total += p_model
+        q_total += q_model
     return p_total * mva_base, q_total * mva_base
 
 
@@ -5504,7 +5535,7 @@ def _summarize_pflow(
     shunt_p, shunt_q = _shunt_absorption(ss, mva_base)
 
     slack = getattr(ss, "Slack", None)
-    slack_u = _safe_list(getattr(slack, "u", None))
+    slack_u = _in_service_flags(slack)
     slack_rows = [
         generator_outputs[str(idx)]
         for i, idx in enumerate(_safe_list(getattr(slack, "idx", None)))

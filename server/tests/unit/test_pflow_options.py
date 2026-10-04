@@ -287,17 +287,33 @@ def _rows() -> tuple[
 
 
 def _summary_system(
-    *, shunt: dict[str, list[float]] | None = None, slack_u: float = 1.0
+    *,
+    shunt: dict[str, list[float]] | None = None,
+    slack_u: float = 1.0,
+    slack_ue: float | None = None,
+    shunt_models: dict[str, dict[str, list[float]]] | None = None,
 ) -> Any:
+    slack: dict[str, Any] = {
+        "idx": SimpleNamespace(v=np.array([1])),
+        "u": SimpleNamespace(v=np.array([slack_u])),
+    }
+    if slack_ue is not None:
+        slack["ue"] = SimpleNamespace(v=np.array([slack_ue]))
     ss: dict[str, Any] = {
         "config": SimpleNamespace(mva=100.0),
-        "Slack": SimpleNamespace(
-            idx=SimpleNamespace(v=np.array([1])), u=SimpleNamespace(v=np.array([slack_u]))
-        ),
+        "Slack": SimpleNamespace(**slack),
     }
     if shunt is not None:
-        ss["Shunt"] = SimpleNamespace(**{k: SimpleNamespace(v=np.array(v)) for k, v in shunt.items()})
+        ss["Shunt"] = _shunt_model(shunt)
+    if shunt_models is not None:
+        ss["StaticShunt"] = SimpleNamespace(
+            models={name: _shunt_model(arrays) for name, arrays in shunt_models.items()}
+        )
     return SimpleNamespace(**ss)
+
+
+def _shunt_model(arrays: dict[str, list[float]]) -> Any:
+    return SimpleNamespace(**{k: SimpleNamespace(v=np.array(v)) for k, v in arrays.items()})
 
 
 def test_the_summary_adds_up_the_rows() -> None:
@@ -323,6 +339,14 @@ def test_the_slack_output_is_the_slack_generators_row() -> None:
 def test_a_slack_switched_off_has_no_output_to_report() -> None:
     lines, gens, loads = _rows()
     summary = _summarize_pflow(_summary_system(slack_u=0.0), lines, gens, loads)
+    assert summary.slack_p is None
+    assert summary.slack_q is None
+
+
+def test_a_slack_on_a_bus_that_is_out_of_service_has_no_output_to_report() -> None:
+    # ``u`` stays 1 for a device whose bus is out; ``ue`` is what ANDES solves with.
+    lines, gens, loads = _rows()
+    summary = _summarize_pflow(_summary_system(slack_u=1.0, slack_ue=0.0), lines, gens, loads)
     assert summary.slack_p is None
     assert summary.slack_q is None
 
@@ -356,6 +380,42 @@ def test_the_shunts_enter_the_summary() -> None:
     shunt = {"u": [1.0], "g": [0.0], "b": [0.2], "v": [1.0]}
     summary = _summarize_pflow(_summary_system(shunt=shunt), lines, gens, loads)
     assert summary.shunt_q == pytest.approx(-20.0)
+
+
+def test_a_shunt_on_a_bus_that_is_out_of_service_absorbs_nothing() -> None:
+    # The second shunt's ``u`` is 1, but its bus is out, so its ``ue`` is 0.
+    shunt = {
+        "u": [1.0, 1.0],
+        "ue": [1.0, 0.0],
+        "g": [0.0, 0.0],
+        "b": [0.2, 0.3],
+        "v": [1.0, 1.0],
+    }
+    assert _shunt_absorption(_summary_system(shunt=shunt), 100.0)[1] == pytest.approx(-20.0)
+
+
+def test_every_model_of_the_static_shunt_group_counts() -> None:
+    models = {
+        "Shunt": {"u": [1.0], "g": [0.0], "b": [0.1], "v": [1.0]},
+        "ShuntTD": {"u": [1.0], "g": [0.01], "b": [0.1], "v": [1.0]},
+        "ShuntSw": {"u": [1.0, 1.0], "g": [0.0, 0.0], "b": [0.5, 0.5], "v": [1.0, 1.0],
+                    "geff": [0.0, 0.02], "beff": [0.1, 0.2]},
+        "Empty": {"u": [], "g": [], "b": [], "v": []},
+    }
+    p, q = _shunt_absorption(_summary_system(shunt_models=models), 100.0)
+    assert p == pytest.approx((0.01 + 0.02) * 100.0)
+    # The switched shunt counts for the 0.1 and 0.2 it has switched to, not the 0.5
+    # it started from.
+    assert q == pytest.approx(-(0.1 + 0.1 + 0.1 + 0.2) * 100.0)
+
+
+def test_a_shunt_model_that_does_not_read_leaves_the_others_in() -> None:
+    models = {
+        "Shunt": {"u": [1.0], "g": [0.0], "b": [0.1], "v": [1.0]},
+        "ShuntSw": {"u": [1.0, 1.0], "g": [0.0], "b": [0.1], "v": [1.0],
+                    "geff": [0.0], "beff": [0.1]},
+    }
+    assert _shunt_absorption(_summary_system(shunt_models=models), 100.0)[1] == pytest.approx(-10.0)
 
 
 def test_a_shunt_whose_arrays_disagree_is_left_out() -> None:

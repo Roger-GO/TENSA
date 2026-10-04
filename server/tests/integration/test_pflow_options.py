@@ -196,7 +196,13 @@ def test_a_time_domain_run_follows_a_run_that_enforced_the_limits() -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["ieee14/ieee14.raw", "ieee14/ieee14_full.xlsx", "kundur/kundur_full.xlsx"]
+    "name",
+    [
+        "ieee14/ieee14.raw",
+        "ieee14/ieee14_full.xlsx",
+        "ieee14/ieee14_shuntsw.xlsx",  # switched shunts, which carry geff / beff
+        "kundur/kundur_full.xlsx",
+    ],
 )
 @pytest.mark.parametrize("enforce", [False, True])
 def test_the_summary_balances(name: str, enforce: bool) -> None:
@@ -265,6 +271,57 @@ def test_devices_switched_off_count_for_nothing_in_the_summary() -> None:
     s = pf.summary
     assert s.generation_p - s.load_p - s.shunt_p - s.loss_p == pytest.approx(0.0, abs=1e-3)
     assert s.generation_q - s.load_q - s.shunt_q - s.loss_q == pytest.approx(0.0, abs=1e-3)
+
+
+def test_a_switched_shunt_counts_at_the_admittance_it_has_switched_to() -> None:
+    """``ShuntSw`` writes ``geff`` / ``beff`` into the bus equations, and the 0.095
+    and 0.15 pu it is entered with are only where it starts."""
+    w = _loaded("ieee14/ieee14_shuntsw.xlsx")
+    pf = w.run_pflow()
+    assert pf.converged and pf.summary is not None
+    sw = w._require_loaded().ShuntSw
+    assert list(sw.beff.v) != list(sw.b.v)
+    expected = -sum(float(b) * float(v) ** 2 for b, v in zip(sw.beff.v, sw.v.v, strict=True)) * 100.0
+    fixed = w._require_loaded().Shunt
+    expected -= sum(float(b) * float(v) ** 2 for b, v in zip(fixed.b.v, fixed.v.v, strict=True)) * 100.0
+    assert pf.summary.shunt_q == pytest.approx(expected)
+
+
+def _bus_out(w: Wrapper, bus: int) -> None:
+    ss = w._require_loaded()
+    ss.Bus.u.v[list(ss.Bus.idx.v).index(bus)] = 0
+
+
+def test_what_hangs_on_a_bus_that_is_out_of_service_counts_for_nothing() -> None:
+    """A load, a generator or a shunt keeps its own ``u`` of 1 when its bus is out
+    of service, and ANDES leaves it out of the equations through ``ue``. Bus 14
+    carries a load and a shunt, bus 8 a generator: the rows and the summary agree
+    with what the solver saw."""
+    for bus in (14, 8):
+        w = _loaded()
+        _bus_out(w, bus)
+        pf = w.run_pflow()
+        assert pf.converged and pf.summary is not None
+        s = pf.summary
+        assert s.generation_p - s.load_p - s.shunt_p - s.loss_p == pytest.approx(0.0, abs=1e-3)
+        assert s.generation_q - s.load_q - s.shunt_q - s.loss_q == pytest.approx(0.0, abs=1e-3)
+
+    w = _loaded()
+    _bus_out(w, 14)
+    ss = w._require_loaded()
+    pf = w.run_pflow()
+    on_14 = [str(idx) for idx, bus in zip(ss.PQ.idx.v, ss.PQ.bus.v, strict=True) if bus == 14]
+    assert on_14
+    assert all((pf.load_consumption[i].p, pf.load_consumption[i].q) == (0.0, 0.0) for i in on_14)
+
+    w = _loaded()
+    _bus_out(w, 8)
+    pf = w.run_pflow()
+    ss = w._require_loaded()
+    gen_on_8 = next(str(idx) for idx, bus in zip(ss.PV.idx.v, ss.PV.bus.v, strict=True) if bus == 8)
+    row = pf.generator_outputs[gen_on_8]
+    assert (row.p, row.q) == (0.0, 0.0)
+    assert (row.q_min, row.q_max) == (None, None)
 
 
 def test_there_is_no_summary_for_a_run_that_did_not_converge() -> None:
