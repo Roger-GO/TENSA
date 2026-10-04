@@ -66,6 +66,21 @@ describe('<ExportMenu />', () => {
     expect(screen.getByTestId('export-menu-disabled')).toBeInTheDocument();
   });
 
+  it('is called "Export" unless the panel names what it exports', () => {
+    const { rerender } = render(<ExportMenu formats={['csv']} panel="time-series" />);
+    expect(screen.getByRole('button', { name: 'Export' })).toHaveTextContent('Export');
+
+    // Two menus on one screen get names that tell them apart, in the label and for assistive tech.
+    rerender(<ExportMenu formats={['csv']} panel="time-series" label="Export plot" />);
+    expect(screen.queryByRole('button', { name: 'Export' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Export plot' })).toHaveTextContent('Export plot');
+  });
+
+  it('names the disabled trigger too', () => {
+    render(<ExportMenu formats={['csv']} disabled panel="scrub" label="Export run data" />);
+    expect(screen.getByRole('button', { name: 'Export run data' })).toBeDisabled();
+  });
+
   it('opens the popover and shows only the requested formats', async () => {
     const user = userEvent.setup();
     render(

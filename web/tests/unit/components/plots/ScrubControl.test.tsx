@@ -15,7 +15,9 @@
  * scheduler would normally invoke it.
  */
 import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest';
-import { render, cleanup, fireEvent, act } from '@testing-library/react';
+import { render, cleanup, fireEvent, act, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { captureDownloads, exportAs, readBlob } from '../../helpers/downloads';
 
 // jsdom 25 ships without ``window.PointerEvent``. testing-library's
 // ``fireEvent.pointerDown`` falls back to ``window.Event`` in that
@@ -352,5 +354,51 @@ describe('ScrubControl', () => {
     const cursor = getByTestId('scrub-control-cursor');
     // Clamped to 100 % so the cursor sticks at the right edge of the strip.
     expect(cursor.style.left).toBe('100%');
+  });
+});
+
+describe('ScrubControl export', () => {
+  beforeEach(() => {
+    useRunsStore.setState({ runs: {}, activeRunId: null });
+    usePlotStore.setState({ scrubByRun: {}, playingByRun: {} });
+  });
+  afterEach(() => cleanup());
+
+  it('is called "Export run data", not "Export", so it is not taken for the plot\'s export', () => {
+    seedRun('r1', 10);
+    appendRows('r1', [0, 1], { Bus_1_v: [1, 1] });
+    const { getByRole } = render(<ScrubControl />);
+    expect(getByRole('button', { name: 'Export run data' })).toBeInTheDocument();
+  });
+
+  it('is named so before there is a run, too', () => {
+    const { getByRole } = render(<ScrubControl />);
+    expect(getByRole('button', { name: 'Export run data' })).toBeDisabled();
+  });
+
+  it('exports every column of the run, and says which unit the values are in', async () => {
+    const downloads = captureDownloads();
+    try {
+      seedRun('r1', 10, ['Bus_1_v', 'Bus_1_a']);
+      appendRows('r1', [0, 1], { Bus_1_v: [1, 1.05], Bus_1_a: [0, 0.5] });
+      render(<ScrubControl />);
+
+      await exportAs(userEvent.setup(), 'csv');
+
+      const lines = (await readBlob(downloads.blobs[0]!)).trim().split(/\r?\n/);
+      expect(lines[0]).toBe(
+        '# values as simulated: voltage and speed in pu, angles in rad, power in MW and MVar',
+      );
+      expect(lines.slice(1)).toEqual([
+        'time,variable,value',
+        '0,Bus_1_v,1',
+        '0,Bus_1_a,0',
+        '1,Bus_1_v,1.05',
+        '1,Bus_1_a,0.5',
+      ]);
+      expect(screen.queryByTestId('export-menu')).toBeNull();
+    } finally {
+      downloads.restore();
+    }
   });
 });

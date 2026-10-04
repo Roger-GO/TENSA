@@ -8,7 +8,13 @@
  * cascade, findClosestFrameIdx helper).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { findClosestFrameIdx, groupLabel, parseColumnName, usePlotStore } from '@/store/plot';
+import {
+  chartTitle,
+  findClosestFrameIdx,
+  groupLabel,
+  parseColumnName,
+  usePlotStore,
+} from '@/store/plot';
 import type { VarGroup } from '@/store/plot';
 
 function reset(): void {
@@ -283,5 +289,29 @@ describe('findClosestFrameIdx (binary search for scrub → frame index)', () => 
     // still behave sensibly if a frame batch repeats a t value.
     const t = new Float64Array([0, 1, 1, 2]);
     expect(findClosestFrameIdx(t, 4, 1)).toBe(2);
+  });
+});
+
+describe('chartTitle', () => {
+  const fields = (...f: string[]) => new Set(f);
+
+  it('names the bus quantities a chart draws', () => {
+    expect(chartTitle('bus_v', fields('v'))).toBe('Bus voltage');
+    expect(chartTitle('bus_v', fields('a'))).toBe('Bus angle');
+    expect(chartTitle('bus_v', fields('v', 'a'))).toBe('Bus voltage and angle');
+  });
+
+  it('names the machine quantities a chart draws', () => {
+    expect(chartTitle('gen_state', fields('omega'))).toBe('Generator speed');
+    expect(chartTitle('gen_state', fields('delta'))).toBe('Generator rotor angle');
+    expect(chartTitle('gen_state', fields('omega', 'delta'))).toBe(
+      'Generator speed and rotor angle',
+    );
+  });
+
+  it('leaves the groups that hold one kind of quantity with their group label', () => {
+    for (const g of ['gen_power', 'line_flow', 'load_pq'] as const) {
+      expect(chartTitle(g, fields('p', 'q'))).toBe(groupLabel(g));
+    }
   });
 });

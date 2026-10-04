@@ -55,7 +55,7 @@ import { usePlotStore } from '@/store/plot';
 import { Button } from '@/components/ui/button';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
-import { timeSeriesToCsv } from '@/components/export/exportToCsv';
+import { RUN_VALUES_UNITS_COMMENT, timeSeriesToCsv } from '@/components/export/exportToCsv';
 import { cn } from '@/lib/cn';
 
 export interface ScrubControlProps {
@@ -281,7 +281,12 @@ export function ScrubControl({ runId, className, playbackRate = 1.0 }: ScrubCont
       cols[name] = col.subarray(0, len);
     }
     const droppedRowCount = run.connection === 'lagged' ? 1 : undefined;
-    return timeSeriesToCsv({ t: tSlice, columns: cols, droppedRowCount });
+    return timeSeriesToCsv({
+      t: tSlice,
+      columns: cols,
+      droppedRowCount,
+      comments: [RUN_VALUES_UNITS_COMMENT],
+    });
   }, [run]);
 
   if (!effectiveRunId || !run) {
@@ -294,7 +299,7 @@ export function ScrubControl({ runId, className, playbackRate = 1.0 }: ScrubCont
         )}
       >
         <span>No active run</span>
-        <ExportMenu formats={['csv']} disabled panel="scrub" />
+        <ExportMenu formats={['csv']} disabled panel="scrub" label="Export run data" />
       </div>
     );
   }
@@ -392,6 +397,7 @@ export function ScrubControl({ runId, className, playbackRate = 1.0 }: ScrubCont
       )}
       <ExportMenu
         formats={['csv']}
+        label="Export run data"
         disabled={isEmptyRange}
         panel="scrub"
         caseName={caseName}

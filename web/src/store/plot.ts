@@ -259,3 +259,29 @@ export function groupLabel(group: VarGroup): string {
       return 'Load power';
   }
 }
+
+/**
+ * Title of one chart: it names what the chart draws. ``groupLabel`` names the
+ * whole group (the picker header, "Bus voltage / angle"), but a chart that holds
+ * only the voltages must not claim an angle it does not show.
+ *
+ * ``fields`` are the ``ParsedSeries.field`` values the chart draws.
+ */
+export function chartTitle(group: VarGroup, fields: ReadonlySet<string>): string {
+  switch (group) {
+    case 'bus_v': {
+      const v = fields.has('v');
+      const a = fields.has('a');
+      if (v && a) return 'Bus voltage and angle';
+      return a ? 'Bus angle' : 'Bus voltage';
+    }
+    case 'gen_state': {
+      const omega = fields.has('omega');
+      const delta = fields.has('delta');
+      if (omega && delta) return 'Generator speed and rotor angle';
+      return delta ? 'Generator rotor angle' : 'Generator speed';
+    }
+    default:
+      return groupLabel(group);
+  }
+}

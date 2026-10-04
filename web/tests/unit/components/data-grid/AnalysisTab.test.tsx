@@ -7,13 +7,17 @@
  *  - Click writes via the onSubTabChange callback (caller wires both
  *    layout slice + analyze sub-mode atomically).
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import userEvent from '@testing-library/user-event';
 
 // Stub the heavy chart components — same pattern as BottomDrawer.test.tsx.
 vi.mock('@/components/plots/TimeSeriesPlot', () => ({
-  TimeSeriesPlot: () => <div data-testid="ts-plot-stub" />,
+  // The real plot draws the toolbar it is given beside its export menu.
+  TimeSeriesPlot: ({ toolbar }: { toolbar?: ReactNode }) => (
+    <div data-testid="ts-plot-stub">{toolbar}</div>
+  ),
 }));
 vi.mock('@/components/plots/ScrubControl', () => ({
   ScrubControl: () => <div data-testid="scrub-stub" />,
@@ -34,8 +38,22 @@ vi.mock('@/components/tds/RunStatusBadge', () => ({
 }));
 
 import { AnalysisTab } from '@/components/data-grid/AnalysisTab';
+import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
+import { usePlotStore } from '@/store/plot';
+import { useRunsStore } from '@/store/runs';
 
-afterEach(() => cleanup());
+beforeEach(() => {
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT });
+  useRunsStore.setState({ runs: {}, activeRunId: null, overlayRunIds: new Set<string>() });
+  usePlotStore.setState({ selectedByRun: {} });
+});
+
+afterEach(() => {
+  cleanup();
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT });
+  useRunsStore.setState({ runs: {}, activeRunId: null, overlayRunIds: new Set<string>() });
+  usePlotStore.setState({ selectedByRun: {} });
+});
 
 describe('<AnalysisTab />', () => {
   it('renders all 5 sub-tab triggers', () => {
@@ -82,5 +100,55 @@ describe('<AnalysisTab />', () => {
     render(<AnalysisTab activeSubTab="eig" onSubTabChange={onChange} />);
     await user.click(screen.getByTestId('analysis-sub-tab-cpf'));
     expect(onChange).toHaveBeenCalledWith('cpf');
+  });
+
+  describe('Plot sub-tab controls', () => {
+    function seedRun(selected: string[]): void {
+      useRunsStore
+        .getState()
+        .startRun({ runId: 'r1', tf: 10, columnNames: ['Bus_1_v', 'Bus_1_a', 'Gen_1_omega'] });
+      usePlotStore.getState().setSelection('r1', new Set(selected));
+    }
+
+    it('names the variable tree by what it does and says how many series it plots', async () => {
+      const user = userEvent.setup();
+      seedRun(['Bus_1_v', 'Gen_1_omega']);
+      render(<AnalysisTab activeSubTab="plot" onSubTabChange={() => {}} />);
+      const toggle = screen.getByTestId('plot-variables-toggle');
+      expect(toggle).toHaveAccessibleName('Choose variables · 2 selected');
+
+      await user.click(screen.getByRole('button', { name: 'Bus angle' }));
+      expect(toggle).toHaveAccessibleName('Choose variables · 3 selected');
+    });
+
+    it('has no selection to count before a run', () => {
+      render(<AnalysisTab activeSubTab="plot" onSubTabChange={() => {}} />);
+      expect(screen.getByTestId('plot-variables-toggle')).toHaveAccessibleName(
+        'Choose variables · 0 selected',
+      );
+    });
+
+    it('puts the quantity buttons in the plot toolbar, so the plot can be changed in a click', () => {
+      seedRun(['Bus_1_v']);
+      render(<AnalysisTab activeSubTab="plot" onSubTabChange={() => {}} />);
+      const plot = screen.getByTestId('ts-plot-stub');
+      expect(plot).toContainElement(screen.getByTestId('plot-quantity-toggles'));
+    });
+
+    it('opens the results view from the Expand plot button, which is there for the shrunken drawer', async () => {
+      const user = userEvent.setup();
+      render(<AnalysisTab activeSubTab="plot" onSubTabChange={() => {}} />);
+      expect(useLayoutStore.getState().resultsViewActive).toBe(false);
+
+      await user.click(screen.getByRole('button', { name: 'Expand plot' }));
+
+      expect(useLayoutStore.getState().resultsViewActive).toBe(true);
+    });
+
+    it('does not offer to expand a plot that already has the whole window', () => {
+      useLayoutStore.setState({ resultsViewActive: true });
+      render(<AnalysisTab activeSubTab="plot" onSubTabChange={() => {}} />);
+      expect(screen.queryByRole('button', { name: 'Expand plot' })).toBeNull();
+    });
   });
 });

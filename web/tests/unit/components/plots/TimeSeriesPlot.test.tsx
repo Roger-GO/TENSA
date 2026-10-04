@@ -809,3 +809,117 @@ describe('TimeSeriesPlot axes and units', () => {
     }
   });
 });
+
+describe('TimeSeriesPlot chart titles and toolbar', () => {
+  beforeEach(() => {
+    constructSpy.mockClear();
+    useRunsStore.setState({ runs: {}, activeRunId: null, overlayRunIds: new Set() });
+    usePlotStore.setState({
+      selectedByRun: {},
+      filterByRun: {},
+      expandedByRun: {},
+      scrubByRun: {},
+      playingByRun: {},
+    });
+    useUnitsStore.setState({ mode: 'pu' });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  function seedBus(selected: string[]) {
+    seedRun('r1', ['Bus_1_v', 'Bus_1_a', 'Gen_1_omega', 'Gen_1_delta']);
+    appendRows('r1', [0, 1], {
+      Bus_1_v: [1.0, 1.02],
+      Bus_1_a: [0, 0.5],
+      Gen_1_omega: [1.0, 1.001],
+      Gen_1_delta: [0.5, 1.0],
+    });
+    usePlotStore.getState().setSelection('r1', new Set(selected));
+  }
+
+  it('names a chart after what it draws, not after its whole group', () => {
+    seedBus(['Bus_1_v']);
+    const { rerender } = render(<TimeSeriesPlot />);
+    const group = screen.getByTestId('time-series-plot-group-bus_v');
+    expect(group).toHaveTextContent('Bus voltage');
+    expect(group).not.toHaveTextContent('angle');
+    // One quantity has one axis: nothing to say about which is which.
+    expect(screen.queryByTestId('time-series-plot-axes-bus_v')).toBeNull();
+
+    act(() => usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v', 'Bus_1_a'])));
+    rerender(<TimeSeriesPlot />);
+    expect(screen.getByTestId('time-series-plot-group-bus_v')).toHaveTextContent(
+      'Bus voltage and angle',
+    );
+
+    act(() => usePlotStore.getState().setSelection('r1', new Set(['Bus_1_a'])));
+    rerender(<TimeSeriesPlot />);
+    expect(screen.getByTestId('time-series-plot-group-bus_v')).toHaveTextContent('Bus angle');
+  });
+
+  it('says which axis reads what when a chart has two, and that the angle is dashed', () => {
+    seedBus(['Bus_1_v', 'Bus_1_a', 'Gen_1_omega', 'Gen_1_delta']);
+    render(<TimeSeriesPlot />);
+
+    expect(screen.getByTestId('time-series-plot-group-gen_state')).toHaveTextContent(
+      'Generator speed and rotor angle',
+    );
+    expect(screen.getByTestId('time-series-plot-axes-bus_v')).toHaveTextContent(
+      'V (pu) on the left axis, θ (°) on the right axis (dashed)',
+    );
+    expect(screen.getByTestId('time-series-plot-axes-gen_state')).toHaveTextContent(
+      'ω (pu) on the left axis, δ (°) on the right axis (dashed)',
+    );
+  });
+
+  it('does not call the angle dashed on a chart that overlays runs, where it is not', () => {
+    seedBus(['Bus_1_v', 'Bus_1_a']);
+    seedRun('r2', ['Bus_1_v', 'Bus_1_a']);
+    appendRows('r2', [0, 1], { Bus_1_v: [1.0, 1.0], Bus_1_a: [0, 1] });
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+    usePlotStore.getState().setSelection('r2', new Set(['Bus_1_v', 'Bus_1_a']));
+    render(<TimeSeriesPlot />);
+
+    const note = screen.getByTestId('time-series-plot-axes-bus_v');
+    expect(note).toHaveTextContent('V (pu) on the left axis, θ (°) on the right axis');
+    expect(note).not.toHaveTextContent('dashed');
+  });
+
+  it('draws the toolbar beside the export menu, with a run, without a selection, and without a run', () => {
+    seedBus(['Bus_1_v']);
+    const toolbar = <button type="button">Quick pick</button>;
+    const { rerender } = render(<TimeSeriesPlot toolbar={toolbar} />);
+    expect(screen.getByRole('button', { name: 'Quick pick' })).toBeInTheDocument();
+    // A control, not part of the picture: a PNG export leaves it out.
+    expect(
+      screen.getByRole('button', { name: 'Quick pick' }).closest('[data-export-ignore]'),
+    ).not.toBeNull();
+
+    // Nothing selected: the toolbar is how to get something drawn.
+    act(() => usePlotStore.getState().setSelection('r1', new Set()));
+    rerender(<TimeSeriesPlot toolbar={toolbar} />);
+    expect(screen.getByTestId('time-series-plot-empty')).toHaveTextContent(
+      'Select variables to plot',
+    );
+    expect(screen.getByRole('button', { name: 'Quick pick' })).toBeInTheDocument();
+
+    act(() => useRunsStore.setState({ runs: {}, activeRunId: null }));
+    rerender(<TimeSeriesPlot toolbar={toolbar} />);
+    expect(screen.getByTestId('time-series-plot-empty')).toHaveTextContent('Run a TDS');
+    expect(screen.getByRole('button', { name: 'Quick pick' })).toBeInTheDocument();
+  });
+
+  it('draws nothing for a toolbar that is not given', () => {
+    seedBus(['Bus_1_v']);
+    const { container } = render(<TimeSeriesPlot />);
+    expect(container.querySelector('[data-export-ignore]:not([data-testid])')).toBeNull();
+  });
+
+  it('calls its export menu "Export plot", so it is not taken for the run-data one', () => {
+    seedBus(['Bus_1_v']);
+    render(<TimeSeriesPlot />);
+    expect(screen.getByRole('button', { name: 'Export plot' })).toBeInTheDocument();
+  });
+});

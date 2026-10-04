@@ -233,6 +233,7 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
     if (defaults.length > 0) setSelection(effectiveRunId, new Set(defaults));
   }, [effectiveRunId, columnNames, selected, setSelection]);
 
+  const filtering = filter.trim().length > 0;
   const selectionSet = selected ?? new Set<string>();
   const expandedSet = expanded ?? new Set<string>();
   const selectedCount = selectionSet.size;
@@ -311,7 +312,7 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
       className={cn('flex h-full w-full flex-col gap-2 p-2 text-sm', className)}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-foreground font-medium">Variables</span>
+        <span className="text-foreground font-medium">Plotted series</span>
         <span data-testid="variable-tree-picker-count" className="text-muted-foreground text-xs">
           {selectedCount} selected
         </span>
@@ -331,7 +332,7 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
         type="search"
         value={filter}
         onChange={(e) => setFilter(effectiveRunId, e.target.value)}
-        placeholder="Filter (e.g., BUS5)"
+        placeholder="Filter, e.g. Bus_5 or Gen_1"
         aria-label="Filter variables"
         data-testid="variable-tree-picker-filter"
         className={cn(
@@ -353,7 +354,8 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
           </div>
         ) : (
           tree.map((g) => {
-            const isExpanded = expandedSet.has(g.group);
+            // A filter is a search: show what it found, not a row of collapsed groups.
+            const isExpanded = filtering || expandedSet.has(g.group);
             return (
               <div key={g.group} role="treeitem" aria-expanded={isExpanded}>
                 <div className="hover:bg-muted/50 flex items-center gap-1 rounded px-1 py-0.5">
@@ -366,8 +368,11 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
                         : `Expand ${groupLabel(g.group)}`
                     }
                     data-testid={`variable-tree-picker-expand-${g.group}`}
+                    disabled={filtering}
+                    title={filtering ? 'The groups stay open while a filter is on' : undefined}
                     className={cn(
                       'text-muted-foreground hover:text-foreground inline-flex h-4 w-4 items-center justify-center rounded',
+                      'disabled:pointer-events-none disabled:opacity-40',
                     )}
                   >
                     <span aria-hidden="true" className="text-[10px]">

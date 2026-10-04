@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
+import type { ReactNode } from 'react';
 import type uPlot from 'uplot';
 import { useShallow } from 'zustand/react/shallow';
 import { useRunsStore } from '@/store/runs';
-import { usePlotStore, parseColumnName, groupLabel, findClosestFrameIdx } from '@/store/plot';
+import { usePlotStore, parseColumnName, chartTitle, findClosestFrameIdx } from '@/store/plot';
 import type { ParsedSeries, VarGroup } from '@/store/plot';
 import type { RunRecord } from '@/store/runs';
 import { useUnitsStore } from '@/store/units';
@@ -13,10 +14,10 @@ import { alignRuns, resampleOnto } from './multiRunAlign';
 import type { AlignedRuns } from './multiRunAlign';
 import { resolveOverlayRuns } from './overlayRuns';
 import { SECONDARY_SCALE, planGroupAxes, scaleColumn } from './axes';
-import type { GroupAxes, PlannedSeries } from './axes';
+import type { AxisPlan, GroupAxes, PlannedSeries } from './axes';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
-import { timeSeriesToCsv } from '@/components/export/exportToCsv';
+import { RUN_VALUES_UNITS_COMMENT, timeSeriesToCsv } from '@/components/export/exportToCsv';
 import { elementToPng } from '@/components/export/exportToPng';
 import { runIdToStrokeStyle } from '@/lib/runIdToColor';
 import { useTheme } from '@/lib/useTheme';
@@ -86,6 +87,13 @@ export interface TimeSeriesPlotProps {
    *   axis).
    */
   colorMode?: 'hash' | 'gradient';
+  /**
+   * Controls for the plot, drawn at the left of the row above the charts, the
+   * export menu's row. They are controls, not part of the picture, so a PNG
+   * export leaves them out. They show in the empty states too, where they are
+   * the way to get something drawn.
+   */
+  toolbar?: ReactNode;
 }
 
 /**
@@ -194,7 +202,7 @@ function buildGroupChart(
   syncKey: string,
   theme: ResolvedTheme,
   mode: UnitMode,
-): { options: uPlot.Options; data: uPlot.AlignedData } {
+): { options: uPlot.Options; data: uPlot.AlignedData; axes: readonly AxisPlan[] } {
   const plan = planGroupAxes(group, plannedSeries([run], selected), mode);
   // Slice typed arrays to the logical seq count (the typed arrays are
   // over-allocated by the runs slice's geometric growth strategy).
@@ -234,7 +242,7 @@ function buildGroupChart(
     legend: { show: true },
   };
 
-  return { options, data: dataCols };
+  return { options, data: dataCols, axes: plan.axes };
 }
 
 /**
@@ -267,7 +275,7 @@ function buildMultiRunGroupChart(
   syncKey: string,
   colorMode: 'hash' | 'gradient' = 'hash',
   mode: UnitMode = 'pu',
-): { options: uPlot.Options; data: uPlot.AlignedData } {
+): { options: uPlot.Options; data: uPlot.AlignedData; axes: readonly AxisPlan[] } {
   const plan = planGroupAxes(group, plannedSeries(runs, selected), mode);
   const tUnion = aligned.t;
   const dataCols: uPlot.AlignedData = [tUnion];
@@ -329,7 +337,29 @@ function buildMultiRunGroupChart(
     legend: { show: true },
   };
 
-  return { options, data: dataCols };
+  return { options, data: dataCols, axes: plan.axes };
+}
+
+/**
+ * Which axis reads what, for the chart header: a chart with two axes says so, since
+ * the right-hand one is easy to miss on a small chart. ``dashRight`` is whether the
+ * series on it are drawn dashed (a single run's chart; see ``buildGroupChart``).
+ */
+function axesNote(axes: readonly AxisPlan[], dashRight: boolean): string | null {
+  const left = axes.find((a) => a.side === 'left');
+  const right = axes.find((a) => a.side === 'right');
+  if (!left || !right) return null;
+  return `${left.label} on the left axis, ${right.label} on the right axis${dashRight ? ' (dashed)' : ''}`;
+}
+
+/** The caller's controls, left out of a PNG export; renders nothing without any. */
+function Toolbar({ children }: { children: ReactNode }) {
+  if (children === undefined || children === null) return null;
+  return (
+    <div data-export-ignore="" className="flex flex-wrap items-center gap-2">
+      {children}
+    </div>
+  );
 }
 
 /** Empty-state placeholder shown when no series are selected (or no run). */
@@ -379,12 +409,16 @@ function useStableOptions(options: uPlot.Options): uPlot.Options {
  */
 function GroupChart({
   group,
+  title,
+  note,
   options,
   data,
   run,
   scrubT,
 }: {
   group: VarGroup;
+  title: string;
+  note: string | null;
   options: uPlot.Options;
   data: uPlot.AlignedData;
   run: RunRecord;
@@ -434,19 +468,46 @@ function GroupChart({
     <div
       key={group}
       data-testid={`time-series-plot-group-${group}`}
-      className="border-border min-h-[80px] flex-1 overflow-hidden rounded border"
+      className="border-border flex min-h-[260px] flex-1 flex-col overflow-hidden rounded border"
     >
-      <div className="text-muted-foreground border-border border-b px-2 py-1 text-xs font-medium">
-        {groupLabel(group)}
+      <div
+        className={cn(
+          'border-border flex h-7 shrink-0 items-center justify-between gap-3 border-b px-2',
+          'text-xs',
+        )}
+      >
+        <span className="text-foreground font-medium whitespace-nowrap">{title}</span>
+        {note !== null ? (
+          <span
+            data-testid={`time-series-plot-axes-${group}`}
+            className="text-muted-foreground truncate"
+          >
+            {note}
+          </span>
+        ) : null}
       </div>
-      <div className="h-[calc(100%-1.75rem)]">
-        <UPlot options={stableOptions} data={data} uplotRef={uplotRef} />
+      {/* The chart takes what the card has under its header. It is laid out by the
+          card (flex), not sized from its own content, and the chart fills it
+          absolutely: ``UPlot`` sizes itself to this box, and a box that grew
+          with the chart would make it grow again. */}
+      <div className="relative min-h-0 flex-1">
+        <UPlot
+          options={stableOptions}
+          data={data}
+          uplotRef={uplotRef}
+          className="absolute inset-0"
+        />
       </div>
     </div>
   );
 }
 
-export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSeriesPlotProps) {
+export function TimeSeriesPlot({
+  runId,
+  className,
+  colorMode = 'hash',
+  toolbar,
+}: TimeSeriesPlotProps) {
   const activeRunId = useRunsStore((s) => s.activeRunId);
   const effectiveRunId = runId ?? activeRunId;
   const { resolvedTheme } = useTheme();
@@ -548,11 +609,7 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
       t: tSlice,
       columns: cols,
       droppedRowCount,
-      // The file holds the values as the run streamed them, not as the plot
-      // shows them (degrees, kV, Hz), so it says which unit each is in.
-      comments: [
-        'values as simulated: voltage and speed in pu, angles in rad, power in MW and MVar',
-      ],
+      comments: [RUN_VALUES_UNITS_COMMENT],
     });
   }, [primaryRun, selected]);
 
@@ -573,29 +630,39 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
   // data prop and trigger uPlot.setData inside the wrapper.
   const charts = useMemo(() => {
     if (overlayRuns.length === 0) return [];
-    const out: Array<{ group: VarGroup; options: uPlot.Options; data: uPlot.AlignedData }> = [];
+    const out: Array<{
+      group: VarGroup;
+      title: string;
+      note: string | null;
+      options: uPlot.Options;
+      data: uPlot.AlignedData;
+    }> = [];
     // One time axis serves every stacked chart, so merge the runs' timelines
     // once here and not once per group.
     const aligned = isMultiRun && groupedSelections.size > 0 ? alignRuns(overlayRuns) : null;
     for (const [group, series] of groupedSelections) {
+      const title = chartTitle(group, new Set(series.map((p) => p.field)));
       if (aligned) {
-        out.push({
+        const { axes, ...chart } = buildMultiRunGroupChart(
+          overlayRuns,
+          aligned,
           group,
-          ...buildMultiRunGroupChart(
-            overlayRuns,
-            aligned,
-            group,
-            series,
-            syncKey,
-            colorMode,
-            unitMode,
-          ),
-        });
+          series,
+          syncKey,
+          colorMode,
+          unitMode,
+        );
+        out.push({ group, title, note: axesNote(axes, false), ...chart });
       } else {
-        out.push({
+        const { axes, ...chart } = buildGroupChart(
+          primaryRun!,
           group,
-          ...buildGroupChart(primaryRun!, group, series, syncKey, resolvedTheme, unitMode),
-        });
+          series,
+          syncKey,
+          resolvedTheme,
+          unitMode,
+        );
+        out.push({ group, title, note: axesNote(axes, true), ...chart });
       }
     }
     return out;
@@ -618,8 +685,9 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
   if (!effectiveRunId || overlayRuns.length === 0) {
     return (
       <div className={cn('h-full w-full', className)}>
-        <div className="flex justify-end">
-          <ExportMenu formats={['csv', 'png']} disabled panel="time-series" />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Toolbar>{toolbar}</Toolbar>
+          <ExportMenu formats={['csv', 'png']} disabled panel="time-series" label="Export plot" />
         </div>
         <EmptyState message="Run a TDS to see results" />
       </div>
@@ -629,8 +697,9 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
   if (charts.length === 0) {
     return (
       <div className={cn('h-full w-full', className)}>
-        <div className="flex justify-end">
-          <ExportMenu formats={['csv', 'png']} disabled panel="time-series" />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Toolbar>{toolbar}</Toolbar>
+          <ExportMenu formats={['csv', 'png']} disabled panel="time-series" label="Export plot" />
         </div>
         <EmptyState message="Select variables to plot" />
       </div>
@@ -648,17 +717,22 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
       className={cn('flex h-full w-full flex-col gap-2', className)}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        {isMultiRun ? (
-          <div data-testid="time-series-plot-legend" className="flex flex-wrap items-center gap-1">
-            {overlayRuns.map((r) => (
-              <RunLegendChip key={r.runId} runId={r.runId} pinned />
-            ))}
-          </div>
-        ) : (
-          <span />
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Toolbar>{toolbar}</Toolbar>
+          {isMultiRun ? (
+            <div
+              data-testid="time-series-plot-legend"
+              className="flex flex-wrap items-center gap-1"
+            >
+              {overlayRuns.map((r) => (
+                <RunLegendChip key={r.runId} runId={r.runId} pinned />
+              ))}
+            </div>
+          ) : null}
+        </div>
         <ExportMenu
           formats={['csv', 'png']}
+          label="Export plot"
           panel="time-series"
           caseName={caseName}
           runId={effectiveRunId}
@@ -666,10 +740,12 @@ export function TimeSeriesPlot({ runId, className, colorMode = 'hash' }: TimeSer
           onExportPng={onExportPng}
         />
       </div>
-      {charts.map(({ group, options, data }) => (
+      {charts.map(({ group, title, note, options, data }) => (
         <GroupChart
           key={group}
           group={group}
+          title={title}
+          note={note}
           options={options}
           data={data}
           run={primaryRun!}

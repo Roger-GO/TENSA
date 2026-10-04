@@ -36,6 +36,7 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useDisturbanceStore } from '@/store/disturbance';
+import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { useRunsStore, DEFAULT_MEMORY_BUDGET_BYTES } from '@/store/runs';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { FaultSpec } from '@/api/types';
@@ -882,6 +883,112 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
       });
 
       expect(toastInfoMock).not.toHaveBeenCalledWith('No fault is set', expect.anything());
+    });
+  });
+
+  describe('showing the run where it is plotted', () => {
+    /** A server that starts a short run named ``runId`` and finishes it. */
+    function serveRun(runId: string) {
+      server.on('connection', (socket) => {
+        socket.send(JSON.stringify({ type: 'ready' }));
+        socket.on('message', (raw: unknown) => {
+          const msg = JSON.parse(String(raw)) as { type: string };
+          if (msg.type !== 'start_tds') return;
+          socket.send(
+            JSON.stringify({
+              type: 'stream_start',
+              run_id: runId,
+              metadata: {
+                schema_version: '2.0',
+                decimation: {
+                  algorithm: 'mean',
+                  mode: 'mean',
+                  source_rate_hz: null,
+                  output_rate_hz: 30,
+                  fixed_step: null,
+                },
+                vars: ['bus_v'],
+                var_columns: ['Bus_1_v'],
+              },
+            }),
+          );
+          socket.send(
+            JSON.stringify({
+              type: 'done',
+              run_id: runId,
+              converged: true,
+              final_t: 5,
+              callpert_count: 0,
+            }),
+          );
+          socket.close({ code: 1000 });
+        });
+      });
+    }
+
+    beforeEach(() => {
+      useLayoutStore.setState({ ...DEFAULT_LAYOUT });
+      fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+    });
+
+    afterEach(() => {
+      useLayoutStore.setState({ ...DEFAULT_LAYOUT });
+    });
+
+    it('opens Analysis, then Plot, in the drawer when a run starts, as the Run menu does', async () => {
+      seedReady();
+      useLayoutStore.setState({
+        activeBottomDrawerTab: 'buses',
+        activeAnalysisSubTab: 'tds',
+      });
+      serveRun('run-route');
+
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      await userEvent.click(screen.getByTestId('run-mode-tds'));
+      await userEvent.click(screen.getByTestId('run-tds-button'));
+      await waitFor(() => {
+        expect(useRunsStore.getState().runs['run-route']?.state).toBe('done');
+      });
+
+      const layout = useLayoutStore.getState();
+      expect(layout.activeBottomDrawerTab).toBe('analysis');
+      expect(layout.activeAnalysisSubTab).toBe('plot');
+      expect(layout.drawerHasUnreadResults).toBe(false);
+    });
+
+    it('leaves a collapsed drawer collapsed and marks it unread instead', async () => {
+      seedReady();
+      useLayoutStore.setState({ bottomDrawerCollapsed: true });
+      serveRun('run-collapsed');
+
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      await userEvent.click(screen.getByTestId('run-mode-tds'));
+      await userEvent.click(screen.getByTestId('run-tds-button'));
+      await waitFor(() => {
+        expect(useRunsStore.getState().runs['run-collapsed']?.state).toBe('done');
+      });
+
+      const layout = useLayoutStore.getState();
+      expect(layout.bottomDrawerCollapsed).toBe(true);
+      expect(layout.drawerHasUnreadResults).toBe(true);
+      expect(layout.activeBottomDrawerTab).toBe('analysis');
+    });
+
+    it('does not move the drawer for a run that never started', async () => {
+      seedReady({ withDisturbances: true });
+      useLayoutStore.setState({ activeBottomDrawerTab: 'buses' });
+      fetchSpy.mockImplementation(() =>
+        Promise.resolve(jsonResponse({ detail: 'no such bus', title: 'Unprocessable' }, 422)),
+      );
+
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      await userEvent.click(screen.getByTestId('run-tds-button'));
+      await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+
+      expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('buses');
     });
   });
 

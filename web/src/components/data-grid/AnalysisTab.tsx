@@ -30,8 +30,12 @@ import { lazyNamed } from '@/lib/lazyNamed';
 import { ANALYSIS_SUB_TABS, type AnalysisSubTab } from '@/store/layout';
 import { LoadingPanel } from '@/components/ui/Lazy';
 import { TimeSeriesPlot } from '@/components/plots/TimeSeriesPlot';
+import { PlotQuantityToggles } from '@/components/plots/PlotQuantityToggles';
 import { ScrubControl } from '@/components/plots/ScrubControl';
 import { VariableTreePicker } from '@/components/plots/VariableTreePicker';
+import { useLayoutStore } from '@/store/layout';
+import { usePlotStore } from '@/store/plot';
+import { useRunsStore } from '@/store/runs';
 import { TdsConfigPanel } from '@/components/tds/TdsConfigPanel';
 import { RunStatusBadge } from '@/components/tds/RunStatusBadge';
 
@@ -160,19 +164,58 @@ export function AnalysisTab({ activeSubTab, onSubTabChange, className }: Analysi
  * PlotPanelContent — composition extracted from App.tsx (pre-v3 Unit 1).
  * Stacks the uPlot canvas + scrub control + variable picker.
  *
- * The variable tree is COLLAPSIBLE and collapsed by default. In a short
- * container (the bottom drawer is ~35% of the window) an always-open
- * picker ate the height and squeezed the chart down to a sliver; since
- * bus voltages auto-select, the plot is useful immediately and the
- * picker only needs opening to change the selection. Collapsed, the
- * chart gets the full height; expanded, it scrolls within a capped box.
+ * The quantity toggles above the chart (bus voltage, bus angle, generator speed,
+ * generator angle) are the quick way to choose what is drawn, and the button
+ * beside them opens the plot in the full-space results view, since the drawer is
+ * ~35% of the window and shows little more than one chart.
+ *
+ * The variable tree is COLLAPSIBLE and collapsed by default, for picking single
+ * elements. In a short container (the bottom drawer is ~35% of the window) an
+ * always-open picker ate the height and squeezed the chart down to a sliver;
+ * since bus voltages auto-select, the plot is useful immediately and the
+ * picker only needs opening to change the selection. Collapsed, the chart gets
+ * the full height; expanded, it scrolls within a capped box.
+ *
+ * The panel scrolls rather than squeezing: a chart keeps a height it can be read
+ * at (see ``GroupChart``), and what does not fit under it is reached by scrolling.
  */
 function PlotPanelContent() {
   const [showVars, setShowVars] = useState(false);
+  const resultsViewActive = useLayoutStore((s) => s.resultsViewActive);
+  const setResultsViewActive = useLayoutStore((s) => s.setResultsViewActive);
+  const activeRunId = useRunsStore((s) => s.activeRunId);
+  const selectedCount = usePlotStore((s) =>
+    activeRunId === null ? 0 : (s.selectedByRun[activeRunId]?.size ?? 0),
+  );
   return (
-    <div data-testid="plot-panel-content" className="flex h-full min-h-0 flex-col gap-2 p-2">
-      <div className="min-h-[140px] flex-1">
-        <TimeSeriesPlot />
+    <div
+      data-testid="plot-panel-content"
+      className="flex h-full min-h-0 flex-col gap-2 overflow-y-auto p-2"
+    >
+      <div className="flex flex-1 flex-col">
+        <TimeSeriesPlot
+          toolbar={
+            <>
+              <PlotQuantityToggles />
+              {resultsViewActive ? null : (
+                <button
+                  type="button"
+                  onClick={() => setResultsViewActive(true)}
+                  title="Give the plot the whole window, hiding the diagram"
+                  data-testid="plot-expand"
+                  className={cn(
+                    'border-border bg-background rounded border px-2 py-0.5 text-xs',
+                    'hover:bg-muted transition-colors',
+                    'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+                  )}
+                >
+                  <span aria-hidden="true">⤢ </span>
+                  Expand plot
+                </button>
+              )}
+            </>
+          }
+        />
       </div>
       <ScrubControl />
       <div className="border-border shrink-0 rounded border">
@@ -187,7 +230,10 @@ function PlotPanelContent() {
             'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
           )}
         >
-          <span>Variables</span>
+          <span>
+            Choose variables
+            <span className="font-normal"> · {selectedCount} selected</span>
+          </span>
           <svg
             aria-hidden="true"
             viewBox="0 0 16 16"

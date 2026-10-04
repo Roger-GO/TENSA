@@ -102,6 +102,13 @@ export interface ExportMenuProps {
   onExportMat?: () => Promise<Blob | null | undefined> | Blob | null | undefined;
   /** Optional class on the trigger button. */
   className?: string;
+  /**
+   * What the trigger says and is called. Defaults to "Export"; a panel that
+   * shares a screen with another menu names what it exports ("Export plot",
+   * "Export run data"), since two buttons both called "Export" cannot be told
+   * apart by someone who has to pick one.
+   */
+  label?: string;
 }
 
 const FORMAT_LABEL: Record<ExportFormat, string> = {
@@ -170,6 +177,7 @@ export function ExportMenu({
   onExportPng,
   onExportMat,
   className,
+  label = 'Export',
 }: ExportMenuProps) {
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
@@ -228,13 +236,13 @@ export function ExportMenu({
       // trigger is left out of the picture (see `elementToPng`).
       data-export-ignore=""
       className={cn('gap-1', className)}
-      aria-label="Export"
+      aria-label={label}
     >
       {/* Inline glyph keeps the dependency footprint flat. */}
       <span aria-hidden="true" className="font-mono text-xs">
         ↓
       </span>
-      <span className="text-xs">{busy ? 'Exporting…' : 'Export'}</span>
+      <span className="text-xs">{busy ? 'Exporting…' : label}</span>
     </Button>
   );
 

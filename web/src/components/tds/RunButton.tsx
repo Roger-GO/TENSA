@@ -21,6 +21,7 @@ import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
 import { useDisturbanceStore } from '@/store/disturbance';
+import { useLayoutStore } from '@/store/layout';
 import { useRunsStore } from '@/store/runs';
 import { useUiStore } from '@/store/ui';
 import { RunStream } from '@/streaming/RunStream';
@@ -366,9 +367,15 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       maxRateHz: tdsConfig.maxRateHz,
       onStart: () => {
         // ``RunStream`` already populated the runs slice via
-        // ``startRun`` — no extra work here. Kept as a hook so a future
-        // analytics tap has a place to land.
+        // ``startRun``. What is left is to show the run where it is plotted,
+        // so the user does not have to find the Plot tab while it streams.
+        // Like the Run menu's commands: a collapsed drawer stays collapsed
+        // and gets the unread dot instead.
         setTdsStarting(false);
+        const layout = useLayoutStore.getState();
+        layout.setActiveBottomDrawerTab('analysis');
+        layout.setActiveAnalysisSubTab('plot');
+        if (layout.bottomDrawerCollapsed) layout.setDrawerHasUnreadResults(true);
       },
       onDone: () => {
         // RunStream marked the run done in the slice; cleanup the stream

@@ -8,7 +8,7 @@
  */
 import { Profiler } from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, cleanup, screen, act } from '@testing-library/react';
+import { render, cleanup, screen, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { VariableTreePicker } from '@/components/plots/VariableTreePicker';
@@ -218,6 +218,38 @@ describe('VariableTreePicker', () => {
     expect(screen.queryByTestId('variable-tree-picker-group-gen_state')).toBeNull();
   });
 
+  it('opens the groups that match a filter, so a search shows its findings', async () => {
+    const user = userEvent.setup();
+    seedRun('r1', ['Bus_1_v', 'Bus_1_a', 'Bus_5_v', 'Gen_1_omega']);
+    render(<VariableTreePicker />);
+    // Groups start collapsed: no series to tick before searching.
+    expect(screen.queryByTestId('variable-tree-picker-leaf-Bus_5_v')).toBeNull();
+
+    await user.type(screen.getByTestId('variable-tree-picker-filter'), 'Bus_5');
+
+    expect(screen.getByTestId('variable-tree-picker-leaf-Bus_5_v')).toBeInTheDocument();
+    // The group cannot be collapsed under the search: its button says so and does nothing.
+    const expand = screen.getByTestId('variable-tree-picker-expand-bus_v');
+    expect(expand).toBeDisabled();
+    expect(expand).toHaveAttribute('title', expect.stringMatching(/stay open while a filter/));
+
+    // Back to what the user left: collapsed, and the button works again.
+    await user.clear(screen.getByTestId('variable-tree-picker-filter'));
+    expect(screen.queryByTestId('variable-tree-picker-leaf-Bus_5_v')).toBeNull();
+    expect(screen.getByTestId('variable-tree-picker-expand-bus_v')).toBeEnabled();
+  });
+
+  it('hints at a filter that finds something: the series are named Bus_5_v, not BUS5', async () => {
+    const user = userEvent.setup();
+    seedRun('r1', ['Bus_5_v', 'Gen_1_omega']);
+    render(<VariableTreePicker />);
+    const filter = screen.getByTestId('variable-tree-picker-filter');
+    expect(filter).toHaveAttribute('placeholder', 'Filter, e.g. Bus_5 or Gen_1');
+
+    await user.type(filter, 'Gen_1');
+    expect(screen.getByTestId('variable-tree-picker-leaf-Gen_1_omega')).toBeInTheDocument();
+  });
+
   it('clearing the filter restores the full tree', async () => {
     const user = userEvent.setup();
     seedRun('r1', ['Bus_1_v', 'Bus_5_v', 'Gen_1_omega']);
@@ -234,6 +266,14 @@ describe('VariableTreePicker', () => {
     render(<VariableTreePicker />);
     await user.type(screen.getByTestId('variable-tree-picker-filter'), 'nonexistent');
     expect(screen.getByTestId('variable-tree-picker-no-matches')).toBeInTheDocument();
+  });
+
+  it('is headed Plotted series, so its name is not the one of the toggle that opens it', () => {
+    seedRun('r1', ['Bus_1_v']);
+    render(<VariableTreePicker />);
+    const picker = screen.getByTestId('variable-tree-picker');
+    expect(within(picker).getByText('Plotted series')).toBeInTheDocument();
+    expect(within(picker).queryByText('Variables')).toBeNull();
   });
 
   it('header counter reflects the selected-series count', () => {

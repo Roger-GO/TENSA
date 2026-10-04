@@ -28,6 +28,11 @@ import { cn } from '@/lib/cn';
  * resize the chart's ``setSize`` is called. The chart's intrinsic
  * width/height come from the wrapper's content box. The parent is
  * responsible for giving the wrapper a non-zero size (CSS flex / grid).
+ * uPlot's ``height`` is that of the plot alone: its legend is drawn under it and
+ * adds to the element's height, so the plot is made that much shorter and the
+ * legend, which names the series, stays inside the wrapper instead of being cut
+ * off by it. The wrapper clips (``overflow-hidden``), so what it holds never
+ * changes its size and the observer cannot feed back into itself.
  *
  * jsdom note: uPlot constructs a ``<canvas>`` and reads
  * ``getContext('2d')``; jsdom returns ``null`` for that, which uPlot
@@ -53,6 +58,27 @@ export interface UPlotProps {
   emptyFallback?: React.ReactNode;
   /** Optional ref into the underlying uPlot instance for tests / advanced flows. */
   uplotRef?: React.MutableRefObject<uPlot | null>;
+}
+
+/** Least height the plot keeps when a tall legend takes most of the wrapper. */
+const MIN_PLOT_HEIGHT = 60;
+
+/** Height of the legend uPlot draws under the plot (0 before it exists or without layout). */
+function legendHeight(container: HTMLElement): number {
+  const legend = container.querySelector<HTMLElement>('.u-legend');
+  return legend ? legend.offsetHeight : 0;
+}
+
+/**
+ * Shrink the plot of ``instance`` so that its legend fits in a wrapper of
+ * ``width`` x ``height``. The legend wraps at the plot's width, so the plot is
+ * first given the wrapper's size and the legend is measured after that.
+ */
+function makeRoomForLegend(instance: uPlot, container: HTMLElement, width: number, height: number) {
+  const legend = legendHeight(container);
+  if (legend > 0) {
+    instance.setSize({ width, height: Math.max(MIN_PLOT_HEIGHT, height - legend) });
+  }
 }
 
 /** Identity check that's stable across re-renders for the series-count comparison. */
@@ -93,12 +119,24 @@ export function UPlot({ options, data, className, emptyFallback, uplotRef }: UPl
     };
 
     const instance = new uPlot(initialOptions, data, container);
+    makeRoomForLegend(instance, container, initialOptions.width, initialOptions.height);
+    // The legend is laid out a little after construction (uPlot styles it on its
+    // first draw), so what was measured above can be too tall. Fit once more
+    // when the frame has settled; later changes come through the observer below.
+    const settle = requestAnimationFrame(() => {
+      const { clientWidth: width, clientHeight: height } = container;
+      if (width > 0 && height > 0) {
+        instance.setSize({ width, height });
+        makeRoomForLegend(instance, container, width, height);
+      }
+    });
     instanceRef.current = instance;
     if (uplotRef) uplotRef.current = instance;
     optionsRef.current = options;
     seriesCountRef.current = seriesCount(options);
 
     return () => {
+      cancelAnimationFrame(settle);
       instance.destroy();
       instanceRef.current = null;
       if (uplotRef) uplotRef.current = null;
@@ -132,7 +170,10 @@ export function UPlot({ options, data, className, emptyFallback, uplotRef }: UPl
       const { width, height } = entry.contentRect;
       const instance = instanceRef.current;
       if (instance && width > 0 && height > 0) {
-        instance.setSize({ width: Math.round(width), height: Math.round(height) });
+        const w = Math.round(width);
+        const h = Math.round(height);
+        instance.setSize({ width: w, height: h });
+        makeRoomForLegend(instance, container, w, h);
       }
     });
     observer.observe(container);
@@ -155,7 +196,7 @@ export function UPlot({ options, data, className, emptyFallback, uplotRef }: UPl
     <div
       ref={containerRef}
       data-testid="uplot-container"
-      className={cn('relative h-full w-full', className)}
+      className={cn('relative h-full w-full overflow-hidden', className)}
     />
   );
 }

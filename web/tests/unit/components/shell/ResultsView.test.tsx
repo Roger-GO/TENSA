@@ -13,7 +13,7 @@
  *  - The Exit button calls setResultsViewActive(false).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -93,6 +93,19 @@ describe('<ResultsView />', () => {
     render(<ResultsView />, { wrapper });
     expect(screen.getByText('No results yet')).toBeInTheDocument();
     expect(screen.queryByTestId('analysis-tab')).not.toBeInTheDocument();
+  });
+
+  it('offers a way back to the diagram right in the empty page', async () => {
+    const user = userEvent.setup();
+    render(<ResultsView />, { wrapper });
+    // The page is restored after a reload while the results are not, so the
+    // empty page is where a returning user may land.
+    const emptyState = screen.getByText('No results yet').closest('[data-empty-state-key]');
+    expect(emptyState).not.toBeNull();
+    await user.click(
+      within(emptyState as HTMLElement).getByRole('button', { name: 'Show diagram' }),
+    );
+    expect(useLayoutStore.getState().resultsViewActive).toBe(false);
   });
 
   it('mounts the AnalysisTab once a PF result exists', async () => {

@@ -95,10 +95,14 @@ export function ResultsView({ className }: ResultsViewProps) {
             }}
           />
         ) : (
+          // The page is restored after a reload (it is a persisted layout choice)
+          // while the results are not, so it can be the first thing a returning
+          // user sees: say how to leave it right here, not only in the header.
           <EmptyState
             icon={<ChartLineIcon />}
             title="No results yet"
             description="Run an analysis (PF, TDS, EIG, CPF or SE) to see results here."
+            action={{ label: 'Show diagram', onClick: () => setResultsViewActive(false) }}
             emptyStateKey="results-view"
           />
         )}

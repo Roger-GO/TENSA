@@ -28,6 +28,10 @@ const { setDataSpy, setSizeSpy, destroySpy, constructSpy, FakeUPlot } = vi.hoist
       constructSpy(opts, data, target);
       this.root = document.createElement('div');
       this.root.setAttribute('data-uplot-root', 'true');
+      // uPlot draws its legend under the plot, inside its own element.
+      const legend = document.createElement('div');
+      legend.className = 'u-legend';
+      this.root.appendChild(legend);
       target.appendChild(this.root);
     }
     setData(data: unknown, resetScales?: boolean) {
@@ -198,5 +202,96 @@ describe('UPlot wrapper', () => {
     expect(ref.current).not.toBeNull();
     unmount();
     expect(ref.current).toBeNull();
+  });
+});
+
+describe('UPlot wrapper sizing with a legend', () => {
+  const options = { width: 600, height: 200, series: [{ label: 't' }, { label: 'y' }] };
+  const data: [Float64Array, Float64Array] = [
+    new Float64Array([0, 1]),
+    new Float64Array([0.1, 0.2]),
+  ];
+
+  /** The legend's height as the (layout-less) jsdom is told it is. */
+  let legendHeight = 0;
+  let observers: ((entries: { contentRect: { width: number; height: number } }[]) => void)[] = [];
+
+  beforeEach(() => {
+    setSizeSpy.mockClear();
+    constructSpy.mockClear();
+    legendHeight = 0;
+    observers = [];
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.classList.contains('u-legend') ? legendHeight : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      () => ({ width: 600, height: 200 }) as DOMRect,
+    );
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(200);
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: (typeof observers)[number]) {
+          observers.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('leaves the size alone when there is no legend to make room for', () => {
+    render(<UPlot options={options} data={data} />);
+    expect(setSizeSpy).not.toHaveBeenCalled();
+  });
+
+  it('makes the plot shorter by the height of the legend, so the legend stays inside the box', () => {
+    legendHeight = 40;
+    render(<UPlot options={options} data={data} />);
+    // uPlot's height is the plot's: the legend adds to it, and the box clips.
+    expect(setSizeSpy).toHaveBeenCalledWith({ width: 600, height: 160 });
+  });
+
+  it('measures the legend again once the frame has settled, since uPlot lays it out late', async () => {
+    render(<UPlot options={options} data={data} />);
+    legendHeight = 60;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(setSizeSpy).toHaveBeenLastCalledWith({ width: 600, height: 140 });
+  });
+
+  it('fits the plot and its legend to the box again when the box is resized', () => {
+    legendHeight = 40;
+    render(<UPlot options={options} data={data} />);
+    setSizeSpy.mockClear();
+
+    // The legend wraps at the new width, so the whole box is offered first and the legend is
+    // measured after that.
+    legendHeight = 80;
+    observers.forEach((cb) => cb([{ contentRect: { width: 400, height: 300 } }]));
+
+    expect(setSizeSpy.mock.calls.map((c) => c[0])).toEqual([
+      { width: 400, height: 300 },
+      { width: 400, height: 220 },
+    ]);
+  });
+
+  it('keeps the plot a usable height when the legend is taller than the box', () => {
+    legendHeight = 500;
+    render(<UPlot options={options} data={data} />);
+    expect(setSizeSpy).toHaveBeenCalledWith({ width: 600, height: 60 });
+  });
+
+  it('clips what it holds, so the box never grows with the chart and sets the observer off again', () => {
+    const { getByTestId } = render(<UPlot options={options} data={data} />);
+    expect(getByTestId('uplot-container').className).toContain('overflow-hidden');
   });
 });

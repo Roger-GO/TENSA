@@ -52,6 +52,14 @@
  * `<ExportMenu>` so all three exporters share a single convention.
  */
 
+/**
+ * The header comment of a run's CSV. The file holds the values as the run
+ * streamed them, not as the plot shows them (degrees, kV, Hz), so it says which
+ * unit each is in.
+ */
+export const RUN_VALUES_UNITS_COMMENT =
+  'values as simulated: voltage and speed in pu, angles in rad, power in MW and MVar';
+
 /** A long-form time-series export descriptor. */
 export interface TimeSeriesCsvInput {
   /** Time samples. Caller is expected to pass the logical-length slice. */
