@@ -878,6 +878,16 @@ function _busFromParam(entry: TopologyEntry, key: string): string | null {
 }
 
 /**
+ * The accessible name of an element: `Bus BUS1 (idx 1)`, the words the right-click
+ * menu's title uses. The idx follows when the name differs from it, because the
+ * forms and the API use the idx while the diagram prints the name.
+ */
+function elementAriaLabel(noun: string, idx: string, name: unknown): string {
+  const label = typeof name === 'string' && name !== '' ? name : idx;
+  return label !== idx ? `${noun} ${label} (idx ${idx})` : `${noun} ${idx}`;
+}
+
+/**
  * Build the React Flow nodes + edges from a topology + coordinate map.
  * Pure — exported for unit tests so they can assert on the shape
  * without spinning up a ReactFlow render.
@@ -895,6 +905,7 @@ export function buildGraph(
     return {
       id: idx,
       type: 'bus',
+      ariaLabel: elementAriaLabel('Bus', idx, b.name),
       position: { x: c.x, y: c.y },
       // Pre-measure size hint. RF v12 only draws a MiniMap rect for a
       // node whose user object carries dimensions; `initialWidth/Height`
@@ -948,6 +959,11 @@ export function buildGraph(
       id,
       source: t.from,
       target: t.to,
+      ariaLabel: `${elementAriaLabel(
+        kindLabel === 'transformer' ? 'Transformer' : 'Line',
+        String(entry.idx),
+        entry.name,
+      )}, bus ${t.from} to bus ${t.to}`,
       sourceHandle: handleAssignment ? SOURCE_HANDLE[handleAssignment.sourceSide] : undefined,
       targetHandle: handleAssignment ? TARGET_HANDLE[handleAssignment.targetSide] : undefined,
       type: edgeType,
@@ -1079,6 +1095,11 @@ export function buildGraph(
       const x = sidecar?.x ?? parentCoord.x + offset.x + offset.stackDx * colSigned + rowStagger;
       const y = sidecar?.y ?? parentCoord.y + offsetY + stackDy * row;
       const nodeId = `${bucket.kind}-${String(entry.idx)}`;
+      const deviceLabel = elementAriaLabel(
+        bucket.kind.charAt(0).toUpperCase() + bucket.kind.slice(1),
+        String(entry.idx),
+        entry.name,
+      );
       // The row of the PF result this node prints, or null when another
       // node prints it (see `assignGeneratorRows`).
       const pflowIdx =
@@ -1086,6 +1107,7 @@ export function buildGraph(
       nodes.push({
         id: nodeId,
         type: NON_BUS_NODE_TYPE[bucket.kind],
+        ariaLabel: deviceLabel,
         position: { x, y },
         // Pre-measure size hint so RF v12 draws a MiniMap rect; see the
         // bus-node note above. Dropped once the device glyph is measured.
@@ -1107,6 +1129,7 @@ export function buildGraph(
       const stubAssignment = stubAssignments.get(stubId);
       edges.push({
         id: stubId,
+        ariaLabel: `${deviceLabel}, connection to bus ${parentIdx}`,
         source: nodeId,
         sourceHandle: NON_BUS_HANDLE_ID,
         target: parentIdx,

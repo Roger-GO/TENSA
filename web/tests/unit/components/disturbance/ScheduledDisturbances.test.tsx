@@ -73,6 +73,8 @@ describe('<ScheduledDisturbances />', () => {
     );
     // It makes no claim about the curves: only that nothing is scheduled.
     expect(empty).not.toHaveTextContent(/flat/);
+    // The diagram's menu is the other way to a fault, and nothing else says so.
+    expect(empty).toHaveTextContent(/right-click a bus on the diagram and choose Fault here/);
     expect(screen.getByRole('button', { name: 'Add fault' })).toBeInTheDocument();
     expect(screen.queryByTestId('scheduled-disturbances-list')).toBeNull();
   });

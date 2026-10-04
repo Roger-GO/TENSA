@@ -75,6 +75,8 @@ vi.mock('@xyflow/react', async () => {
     }[];
     nodeTypes: Record<string, React.ComponentType<unknown>>;
     edgeTypes?: Record<string, React.ComponentType<unknown>>;
+    minZoom?: number;
+    ariaLabelConfig?: Record<string, string>;
     onNodeClick?: (
       e: React.MouseEvent,
       n: { id: string; type: string; data: Record<string, unknown> },
@@ -94,6 +96,8 @@ vi.mock('@xyflow/react', async () => {
       nodes,
       edges,
       nodeTypes,
+      minZoom,
+      ariaLabelConfig,
       onNodeClick,
       onNodeContextMenu,
       onEdgeContextMenu,
@@ -101,7 +105,11 @@ vi.mock('@xyflow/react', async () => {
     }: ReactFlowProps) => {
       return React.createElement(
         'div',
-        { 'data-testid': 'rf-root' },
+        {
+          'data-testid': 'rf-root',
+          'data-min-zoom': minZoom,
+          'data-lock-label': ariaLabelConfig?.['controls.interactive.ariaLabel'],
+        },
         nodes.map((n) => {
           const NodeComp = nodeTypes[n.type];
           if (!NodeComp) return null;
@@ -355,6 +363,26 @@ describe('buildGraph', () => {
     const dataOf = (id: string) => nodes.find((n) => n.id === id)?.data;
     expect(dataOf('1')?.baseKv).toBe(230);
     expect(dataOf('2')).not.toHaveProperty('baseKv');
+  });
+
+  it('names each element for assistive technology and for tools that find it by name', () => {
+    const topology: TopologySummary = {
+      ...makeTopology([bus(1, 'BUS1'), bus(2, '2')], [line(10, 1, 2)]),
+      transformers: [{ idx: 11, name: 'T1', kind: 'Line', params: { bus1: 1, bus2: 2 } }],
+      generators: [{ idx: 'GENROU_1', name: 'GENROU_1', kind: 'GENROU', params: { bus: 1 } }],
+    };
+    const { nodes, edges } = buildGraph(topology, { '1': { x: 0, y: 0 }, '2': { x: 100, y: 0 } });
+    const labelOf = (list: { id: string; ariaLabel?: string | null }[], id: string) =>
+      list.find((x) => x.id === id)?.ariaLabel;
+    // The idx follows when the diagram's name differs from it.
+    expect(labelOf(nodes, '1')).toBe('Bus BUS1 (idx 1)');
+    expect(labelOf(nodes, '2')).toBe('Bus 2');
+    expect(labelOf(nodes, 'generator-GENROU_1')).toBe('Generator GENROU_1');
+    expect(labelOf(edges, 'line-10')).toBe('Line l10 (idx 10), bus 1 to bus 2');
+    expect(labelOf(edges, 'transformer-11')).toBe('Transformer T1 (idx 11), bus 1 to bus 2');
+    expect(labelOf(edges, 'stub-generator-GENROU_1')).toBe(
+      'Generator GENROU_1, connection to bus 1',
+    );
   });
 
   it('ignores branches missing bus1/bus2 params', () => {
@@ -1066,6 +1094,43 @@ describe('SldCanvas', () => {
     expect(className).toContain('border-border');
     expect(className).toContain('rounded-lg');
     expect(className).toContain('shadow-lg');
+  });
+
+  it('lets the diagram zoom out past half size, so a tall case fits a short pane', async () => {
+    mockTopology = makeTopology([bus(1), bus(2)], [line(10, 1, 2)]);
+    act(() => {
+      useCaseStore.setState({
+        selection: {
+          primaryPath: parseWorkspacePath('synthetic.raw'),
+          addfiles: [],
+        },
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => expect(screen.getByTestId('rf-root')).toBeInTheDocument());
+    // React Flow's own floor is 0.5, which stops the fit short and leaves the top
+    // and bottom of a tall diagram outside the pane.
+    expect(Number(screen.getByTestId('rf-root').getAttribute('data-min-zoom'))).toBeLessThan(0.5);
+  });
+
+  it('says what the lock button locks, and what the diagram answers to', async () => {
+    mockTopology = makeTopology([bus(1), bus(2)], [line(10, 1, 2)]);
+    act(() => {
+      useCaseStore.setState({
+        selection: {
+          primaryPath: parseWorkspacePath('synthetic.raw'),
+          addfiles: [],
+        },
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => expect(screen.getByTestId('rf-root')).toBeInTheDocument());
+    expect(screen.getByTestId('rf-root').getAttribute('data-lock-label')).toMatch(
+      /lock.*dragging/i,
+    );
+    expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
+      /Drag a bus.*Right-click a bus, line or the background/,
+    );
   });
 
   it('Recompute connectivity button reflects the latest island_count from the store', async () => {

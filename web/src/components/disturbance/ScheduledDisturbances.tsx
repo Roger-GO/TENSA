@@ -144,7 +144,8 @@ export function ScheduledDisturbances({ className }: ScheduledDisturbancesProps)
       {rows.length === 0 ? (
         <p data-testid="scheduled-disturbances-empty" className="text-muted-foreground text-xs">
           No fault is set. Neither this list nor the case schedules a fault, a trip or a parameter
-          change, so a TDS run has nothing to disturb the system.
+          change, so a TDS run has nothing to disturb the system. You can also right-click a bus on
+          the diagram and choose Fault here.
         </p>
       ) : (
         <>

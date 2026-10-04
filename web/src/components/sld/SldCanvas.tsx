@@ -97,6 +97,26 @@ const EDGE_TYPES: EdgeTypes = {
 const LARGE_TOPOLOGY_THRESHOLD = 30;
 
 /**
+ * How far the diagram can be zoomed out, and so how small a fit can make it.
+ * React Flow's default floor is 0.5, which a tall diagram in a short pane
+ * overruns: the fit stops at half size, the rest of the diagram sits outside
+ * the pane where nothing can be reached, and the zoom-out button is dead.
+ */
+const MIN_ZOOM = 0.1;
+
+/**
+ * React Flow's name for the lock button is "Toggle Interactivity", which does not
+ * say that a locked diagram refuses drags and clicks with nothing to show why.
+ */
+const ARIA_LABELS = {
+  'controls.interactive.ariaLabel': 'Lock or unlock dragging and selecting',
+};
+
+/** What the diagram offers that nothing on it shows: the drag and the right-click menu. */
+const INTERACTION_HINT =
+  'Drag a bus to move it. Right-click a bus, line or the background for more actions.';
+
+/**
  * Per-kind color hint for the React Flow MiniMap. Uses semantic CSS
  * tokens directly so dark-mode (Unit 12) tracks the rest of the app
  * without revisiting this map. Defined at module scope so the
@@ -837,7 +857,14 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
 
   return (
     <div className="flex h-full w-full flex-col" data-testid="sld-canvas">
-      <div className="flex items-center justify-end gap-2 px-2 py-1">
+      <div className="flex items-center gap-2 px-2 py-1">
+        <p
+          data-testid="sld-canvas-hint"
+          title={INTERACTION_HINT}
+          className="text-muted-foreground min-w-0 flex-1 truncate text-xs"
+        >
+          {INTERACTION_HINT}
+        </p>
         <ConnectivityRecomputeButton />
         <ExportMenu formats={['png']} panel="sld" caseName={caseName} onExportPng={onExportPng} />
       </div>
@@ -880,6 +907,8 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
               onNodeContextMenu={onNodeContextMenu}
               onEdgeContextMenu={onEdgeContextMenu}
               fitView
+              minZoom={MIN_ZOOM}
+              ariaLabelConfig={ARIA_LABELS}
               nodesDraggable
               selectionMode={SelectionMode.Partial}
               proOptions={{ hideAttribution: true }}
