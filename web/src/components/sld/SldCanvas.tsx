@@ -35,8 +35,10 @@ import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { SldNodeSearch } from './SldNodeSearch';
 import { SldContextMenuBody } from './SldContextMenu';
 import {
+  contextTargetAt,
   contextTargetFromEdge,
   contextTargetFromNode,
+  sameContextTarget,
   type SldContextTarget,
 } from './contextTarget';
 import { useGetSidecar, usePutSidecar, useCurrentTopology, useConnectivity } from '@/api/queries';
@@ -778,8 +780,36 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   // right-click starts as the canvas's, in the capture phase; React Flow's node
   // and edge handlers run later in the same event and replace it when the click
   // was on one. Radix opens the menu from the trigger's own handler, after both.
+  //
+  // Touch and pen open the menu from a long press instead, which iOS reports with
+  // no ``contextmenu`` event, so a press on the diagram sets the target from what
+  // was pressed. Not while the menu is open: a press that dismisses it would
+  // change its items as it fades out.
   const [contextTarget, setContextTarget] = useState<SldContextTarget>({ kind: 'canvas' });
-  const onSurfaceContextMenuCapture = useCallback(() => setContextTarget({ kind: 'canvas' }), []);
+  const contextMenuOpenRef = useRef(false);
+  const onContextMenuOpenChange = useCallback((open: boolean) => {
+    contextMenuOpenRef.current = open;
+  }, []);
+  const onSurfaceContextMenuCapture = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // React events bubble through portals, so a right-click in the node search's
+    // popover arrives here though it is not on the diagram. Stopped in the capture
+    // phase, it never reaches the trigger, which would open this menu in place of
+    // the browser's own (Copy, Paste) over the search field.
+    if (e.target instanceof Node && !e.currentTarget.contains(e.target)) {
+      e.stopPropagation();
+      return;
+    }
+    setContextTarget({ kind: 'canvas' });
+  }, []);
+  const onSurfacePointerDownCapture = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.pointerType === 'mouse' || contextMenuOpenRef.current) return;
+      if (!(e.target instanceof Element) || !e.currentTarget.contains(e.target)) return;
+      const next = contextTargetAt(e.target, nodesWithSelection, edges);
+      setContextTarget((held) => (sameContextTarget(held, next) ? held : next));
+    },
+    [nodesWithSelection, edges],
+  );
   const onNodeContextMenu: NodeMouseHandler = useCallback((_e, node) => {
     setContextTarget(contextTargetFromNode(node));
   }, []);
@@ -827,7 +857,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
       ) : null}
       {/* ``modal={false}``: Fault here and Trip line open a dialog from a menu
           item, and a modal menu would leave the page unclickable after it. */}
-      <ContextMenu modal={false}>
+      <ContextMenu modal={false} onOpenChange={onContextMenuOpenChange}>
         <ContextMenuTrigger asChild>
           <div
             ref={canvasRef}
@@ -837,6 +867,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
             onDrop={onDrop}
             onDragEnd={onDragEnd}
             onContextMenuCapture={onSurfaceContextMenuCapture}
+            onPointerDownCapture={onSurfacePointerDownCapture}
           >
             <ReactFlow
               nodes={nodesWithSelection}

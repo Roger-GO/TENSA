@@ -13,9 +13,11 @@
  *    palette has.
  *
  * `SldCanvas` finds out what was right-clicked from React Flow's
- * `onNodeContextMenu` / `onEdgeContextMenu` and keeps it as an `SldContextTarget`
- * (`contextTarget.ts` turns a node or an edge into one). The menu is Radix's
- * (`@/components/ui/context-menu`), whose trigger wraps the canvas surface.
+ * `onNodeContextMenu` / `onEdgeContextMenu`, and what was pressed by touch or pen
+ * (a long press, which iOS reports with no `contextmenu` event) from the DOM, and
+ * keeps it as an `SldContextTarget` (`contextTarget.ts` turns a node or an edge
+ * into one). The menu is Radix's (`@/components/ui/context-menu`), whose trigger
+ * wraps the canvas surface.
  *
  * Fault and Trip add to the same disturbance list the sidebar shows and the next
  * TDS run applies, through the same dialog the sidebar's button opens, so the

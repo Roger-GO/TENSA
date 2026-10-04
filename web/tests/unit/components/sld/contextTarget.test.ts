@@ -1,10 +1,16 @@
 /**
- * What a right-click on the diagram is read as, from the React Flow node or edge
- * it landed on.
+ * What a right-click, or a press by touch or pen, on the diagram is read as: from
+ * the React Flow node or edge it landed on, or from the DOM around where it landed.
  */
 import { describe, expect, it } from 'vitest';
 
-import { contextTargetFromEdge, contextTargetFromNode } from '@/components/sld/contextTarget';
+import {
+  contextTargetAt,
+  contextTargetFromEdge,
+  contextTargetFromNode,
+  sameContextTarget,
+} from '@/components/sld/contextTarget';
+import type { SldContextTarget } from '@/components/sld/contextTarget';
 
 describe('contextTargetFromNode', () => {
   it('reads a bus node as a bus, with its name and node id', () => {
@@ -98,5 +104,81 @@ describe('contextTargetFromEdge', () => {
     expect(contextTargetFromEdge({ type: 'stub', data: { idx: '1' } })).toEqual({ kind: 'canvas' });
     expect(contextTargetFromEdge({ type: 'topology', data: {} })).toEqual({ kind: 'canvas' });
     expect(contextTargetFromEdge({ type: 'topology' })).toEqual({ kind: 'canvas' });
+  });
+});
+
+describe('contextTargetAt', () => {
+  const nodes = [
+    { id: '7', type: 'bus', data: { idx: '7', name: 'BUS7' } },
+    { id: 'generator-2', type: 'generator', data: { idx: '2', name: 'G2' } },
+  ];
+  const edges = [
+    { id: 'line-5', type: 'topology', data: { idx: '5', name: 'L5' } },
+    { id: 'stub-g2', type: 'stub', data: { idx: '2' } },
+  ];
+
+  /** A canvas as React Flow draws it: a node wrapper and an edge wrapper, each with its id. */
+  function canvas(): HTMLElement {
+    const root = document.createElement('div');
+    root.innerHTML = `
+      <div class="react-flow__edges"><svg>
+        <g class="react-flow__edge" data-id="line-5"><path id="line-path" /></g>
+        <g class="react-flow__edge" data-id="stub-g2"><path id="stub-path" /></g>
+        <g class="react-flow__edge" data-id="gone"><path id="gone-path" /></g>
+      </svg></div>
+      <div class="react-flow__node" data-id="7"><span id="bus-label">BUS7</span>
+        <div class="react-flow__handle" data-id="rf-7-a-source"></div></div>
+      <div class="react-flow__node" data-id="generator-2"><span id="gen-body">G2</span></div>
+      <div class="react-flow__node" data-id="no-such-node"><span id="gone-node">?</span></div>
+      <div id="background"></div>`;
+    return root;
+  }
+
+  const at = (root: HTMLElement, selector: string): SldContextTarget =>
+    contextTargetAt(root.querySelector(selector) as Element, nodes, edges);
+
+  it('reads a press inside a node wrapper as that node, a handle of it included', () => {
+    const root = canvas();
+    expect(at(root, '#bus-label')).toEqual({ kind: 'bus', idx: '7', name: 'BUS7', nodeId: '7' });
+    expect(at(root, '.react-flow__handle')).toEqual({
+      kind: 'bus',
+      idx: '7',
+      name: 'BUS7',
+      nodeId: '7',
+    });
+    expect(at(root, '#gen-body')).toEqual({
+      kind: 'device',
+      element: { kind: 'generator', idx: '2' },
+      name: 'G2',
+      nodeId: 'generator-2',
+    });
+  });
+
+  it('reads a press on an edge as that edge, and on a stub as the canvas', () => {
+    const root = canvas();
+    expect(at(root, '#line-path')).toEqual({
+      kind: 'branch',
+      idx: '5',
+      name: 'L5',
+      transformer: false,
+    });
+    expect(at(root, '#stub-path')).toEqual({ kind: 'canvas' });
+  });
+
+  it('reads a press on nothing, or on a wrapper of a node or edge the canvas no longer draws, as the canvas', () => {
+    const root = canvas();
+    expect(at(root, '#background')).toEqual({ kind: 'canvas' });
+    expect(at(root, '#gone-node')).toEqual({ kind: 'canvas' });
+    expect(at(root, '#gone-path')).toEqual({ kind: 'canvas' });
+  });
+});
+
+describe('sameContextTarget', () => {
+  it('is true for equal targets, labels included, and false otherwise', () => {
+    const bus: SldContextTarget = { kind: 'bus', idx: '7', name: 'BUS7', nodeId: '7' };
+    expect(sameContextTarget(bus, { ...bus })).toBe(true);
+    expect(sameContextTarget({ kind: 'canvas' }, { kind: 'canvas' })).toBe(true);
+    expect(sameContextTarget(bus, { ...bus, name: 'Renamed' })).toBe(false);
+    expect(sameContextTarget(bus, { kind: 'canvas' })).toBe(false);
   });
 });

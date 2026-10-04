@@ -15,7 +15,7 @@
  * - The >30-buses banner shows with no curated layout + no sidecar.
  * - The drift banner shows when `mergeWithDrift` reports drift.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, cleanup, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -26,6 +26,30 @@ const { fitViewSpy, putSidecarSpy } = vi.hoisted(() => ({
   fitViewSpy: vi.fn(),
   putSidecarSpy: vi.fn(),
 }));
+
+// jsdom 25 ships without ``window.PointerEvent``, and testing-library's
+// ``fireEvent.pointerDown`` then falls back to a generic Event that drops
+// ``pointerType`` (the long-press tests need it) and the coordinates. Polyfill it
+// as a thin MouseEvent subclass, as the other pointer tests do.
+beforeAll(() => {
+  if (typeof (globalThis as { PointerEvent?: unknown }).PointerEvent === 'undefined') {
+    class PointerEventPolyfill extends MouseEvent {
+      readonly pointerId: number;
+      readonly pointerType: string;
+      readonly isPrimary: boolean;
+      constructor(type: string, init: PointerEventInit = {}) {
+        super(type, init);
+        this.pointerId = init.pointerId ?? 0;
+        this.pointerType = init.pointerType ?? 'mouse';
+        this.isPrimary = init.isPrimary ?? true;
+      }
+    }
+    (globalThis as { PointerEvent: typeof PointerEventPolyfill }).PointerEvent =
+      PointerEventPolyfill;
+    (window as unknown as { PointerEvent: typeof PointerEventPolyfill }).PointerEvent =
+      PointerEventPolyfill;
+  }
+});
 
 // ---- mocks ---------------------------------------------------------------
 //
@@ -85,16 +109,20 @@ vi.mock('@xyflow/react', async () => {
           // node-data ``energised`` attribute land on the node wrapper
           // (Unit 17 connectivity overlay needs both for the grey-out
           // assertion in the SldCanvas test).
+          // The wrapper's class and ``data-id`` are the ones the real one has: the
+          // right-click menu finds a pressed node from them.
           const wrapperProps: Record<string, unknown> = {
             key: n.id,
             'data-rf-node-id': n.id,
+            'data-id': n.id,
+            className: 'react-flow__node',
             'data-energised':
               (n.data as { energised?: boolean }).energised === false ? 'false' : 'true',
             onClick: (e: React.MouseEvent) => onNodeClick?.(e, n),
             // React Flow calls this from the node wrapper's own contextmenu handler.
             onContextMenu: (e: React.MouseEvent) => onNodeContextMenu?.(e, n),
           };
-          if (n.className) wrapperProps.className = n.className;
+          if (n.className) wrapperProps.className = `react-flow__node ${n.className}`;
           return React.createElement(
             'div',
             wrapperProps,
@@ -115,6 +143,8 @@ vi.mock('@xyflow/react', async () => {
         edges.map((e) =>
           React.createElement('div', {
             key: e.id,
+            className: 'react-flow__edge',
+            'data-id': e.id,
             'data-testid': `edge-${e.id}`,
             'data-source': e.source,
             'data-target': e.target,
@@ -1224,6 +1254,93 @@ describe('SldCanvas', () => {
     expect(within(menu).getByTestId('sld-context-menu-title')).toHaveTextContent('Diagram');
     expect(within(menu).getByTestId('sld-context-fit-view')).toBeInTheDocument();
     expect(within(menu).queryByTestId('sld-context-fault')).toBeNull();
+  });
+
+  it('a right-click inside the node search popover leaves the browser its own menu', async () => {
+    loadSavedCase();
+    await renderLoaded();
+    fireEvent.click(screen.getByTestId('sld-node-search-trigger'));
+    const input = await screen.findByTestId('sld-node-search-input');
+    // The popover is portaled out of the canvas, though React still bubbles its
+    // events to it. ``fireEvent`` returns false when a handler prevented the
+    // default, which is what opening the diagram's menu does.
+    expect(fireEvent.contextMenu(input)).toBe(true);
+    expect(screen.queryByTestId('sld-context-menu')).toBeNull();
+    // The diagram's own menu still opens from the canvas.
+    fireEvent.contextMenu(screen.getByTestId('sld-canvas-surface'));
+    expect(await screen.findByTestId('sld-context-menu')).toBeInTheDocument();
+  });
+
+  /** Press on `el` the way a finger or a pen does, and hold past Radix's long-press delay. */
+  function longPress(el: Element, pointerType: 'touch' | 'pen') {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      fireEvent.pointerDown(el, { pointerType, clientX: 20, clientY: 20 });
+      act(() => {
+        vi.advanceTimersByTime(800);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  async function menuTitle(): Promise<string> {
+    return (await screen.findByTestId('sld-context-menu-title')).textContent ?? '';
+  }
+
+  async function closeMenu() {
+    fireEvent.keyDown(await screen.findByTestId('sld-context-menu'), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('sld-context-menu')).toBeNull());
+  }
+
+  it.each(['touch', 'pen'] as const)(
+    'a long press by %s offers the menu of what was pressed, whatever a right-click left behind',
+    async (pointerType) => {
+      loadSavedCase();
+      await renderLoaded();
+      const busWrapper = screen
+        .getByTestId('bus-node-1')
+        .closest('[data-rf-node-id]') as HTMLElement;
+
+      // iOS reports no contextmenu event for a long press, so nothing but the
+      // press itself can say what it landed on. A right-click on the bus first
+      // leaves that bus behind as the last target.
+      fireEvent.contextMenu(busWrapper);
+      expect(await menuTitle()).toContain('Bus b1');
+      await closeMenu();
+
+      longPress(screen.getByTestId('sld-canvas-surface'), pointerType);
+      expect(await menuTitle()).toBe('Diagram');
+      await closeMenu();
+
+      longPress(screen.getByTestId('edge-line-10'), pointerType);
+      expect(await menuTitle()).toContain('Line l10');
+      expect(screen.getByTestId('sld-context-trip-line')).toBeInTheDocument();
+      await closeMenu();
+
+      longPress(busWrapper, pointerType);
+      expect(await menuTitle()).toContain('Bus b1');
+      expect(screen.getByTestId('sld-context-fault')).toBeInTheDocument();
+    },
+  );
+
+  it('a touch that dismisses the open menu does not change what the menu offers as it goes', async () => {
+    loadSavedCase();
+    await renderLoaded();
+    longPress(
+      screen.getByTestId('bus-node-1').closest('[data-rf-node-id]') as HTMLElement,
+      'touch',
+    );
+    expect(await menuTitle()).toContain('Bus b1');
+    // Radix closes a menu on a touch outside it at the click that follows, so the
+    // menu is still up when the press lands; its items must not turn into the
+    // canvas's under the finger.
+    fireEvent.pointerDown(screen.getByTestId('sld-canvas-surface'), {
+      pointerType: 'touch',
+      clientX: 400,
+      clientY: 400,
+    });
+    expect(screen.getByTestId('sld-context-menu-title')).toHaveTextContent('Bus b1');
   });
 
   it('the canvas menu runs Fit view', async () => {

@@ -1,7 +1,8 @@
 /**
  * What a right-click on the single-line diagram landed on, worked out from the
- * React Flow node or edge. Pure, so the mapping is testable without a canvas;
- * `SldContextMenu` draws the menu for it.
+ * React Flow node or edge, or, for a press by touch or pen, from the DOM around
+ * it. Pure, so the mapping is testable without a canvas; `SldContextMenu` draws
+ * the menu for it.
  */
 import type { Edge, Node } from '@xyflow/react';
 
@@ -66,4 +67,33 @@ export function contextTargetFromEdge(edge: Pick<Edge, 'type' | 'data'>): SldCon
     name: data?.name ?? idx,
     transformer: edge.type === 'transformer',
   };
+}
+
+/**
+ * The target for a press on the diagram, found from the DOM: the React Flow node
+ * or edge wrapper that holds `element` (they carry the node's or edge's id as
+ * `data-id`), looked up in the nodes and edges the canvas draws. A press on
+ * neither is the canvas's. For touch and pen, which open the menu from a long
+ * press that iOS reports with no `contextmenu` event, so React Flow's own
+ * right-click handlers never say what was pressed.
+ */
+export function contextTargetAt(
+  element: Element,
+  nodes: ReadonlyArray<Pick<Node, 'id' | 'type' | 'data'>>,
+  edges: ReadonlyArray<Pick<Edge, 'id' | 'type' | 'data'>>,
+): SldContextTarget {
+  const wrapper = element.closest('.react-flow__node, .react-flow__edge');
+  const id = wrapper?.getAttribute('data-id');
+  if (!wrapper || !id) return { kind: 'canvas' };
+  if (wrapper.classList.contains('react-flow__edge')) {
+    const edge = edges.find((e) => e.id === id);
+    return edge ? contextTargetFromEdge(edge) : { kind: 'canvas' };
+  }
+  const node = nodes.find((n) => n.id === id);
+  return node ? contextTargetFromNode(node) : { kind: 'canvas' };
+}
+
+/** Whether two targets are the same, down to the labels (they are plain data). */
+export function sameContextTarget(a: SldContextTarget, b: SldContextTarget): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
