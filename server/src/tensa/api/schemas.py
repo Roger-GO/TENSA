@@ -401,6 +401,15 @@ class TopologySummary(BaseModel):
             "alone)."
         ),
     )
+    freq_hz: float | None = Field(
+        default=None,
+        description=(
+            "System nominal frequency in Hz (the case's base frequency, 60 "
+            "unless the case sets another). A per-unit rotor speed ``omega`` "
+            "times this is the speed in Hz. ``null`` when the case carries no "
+            "usable value."
+        ),
+    )
     job_id: str | None = Field(
         default=None,
         description=(

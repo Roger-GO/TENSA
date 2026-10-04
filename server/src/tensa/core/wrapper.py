@@ -180,6 +180,10 @@ class TopologySnapshot:
     # case carries no entries for any of the seven Unit-8 model classes —
     # e.g., a stock IEEE 14 .raw without the .dyr addfile.
     controllers: list[TopologyEntry] = field(default_factory=list)
+    # System nominal frequency in Hz (``ss.config.freq``): the base a
+    # per-unit rotor speed converts to Hz with. ``None`` when the System
+    # carries no usable value, so a client never converts with a guess.
+    freq_hz: float | None = None
 
 
 @dataclass
@@ -596,6 +600,7 @@ class Wrapper:
             loads=_collect_models(ss, ["PQ", "ZIP"]),
             shunts=_collect_models(ss, ["Shunt"]),
             controllers=_collect_models(ss, list(_CONTROLLER_MODEL_NAMES)),
+            freq_hz=_system_frequency_hz(ss),
         )
 
     # ----- disturbance management -----
@@ -4687,6 +4692,17 @@ def _collect_models(ss: System, model_names: list[str]) -> list[TopologyEntry]:
                 TopologyEntry(idx=idx, name=name, kind=model_name, params=params)
             )
     return entries
+
+
+def _system_frequency_hz(ss: System) -> float | None:
+    """The system nominal frequency in Hz, or ``None`` when ``ss.config.freq``
+    is missing, not a number, or not a positive finite value."""
+    configured: Any = getattr(ss.config, "freq", None)
+    try:
+        freq = float(configured)
+    except (TypeError, ValueError):
+        return None
+    return freq if math.isfinite(freq) and freq > 0 else None
 
 
 def _split_lines_transformers(

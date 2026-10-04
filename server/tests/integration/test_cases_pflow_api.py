@@ -270,6 +270,40 @@ async def test_topology_includes_params(
 
 
 @pytest.mark.integration
+async def test_topology_reports_the_case_frequency(
+    app_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """``freq_hz`` is the case's own base frequency on a load and on a plain
+    read: 60 for IEEE 14, and 50 once the RAW header says so."""
+    client, ws = app_workspace
+
+    sid = await _create_session(client)
+    loaded = await client.post(
+        f"/api/sessions/{sid}/case",
+        json={"primary_path": "ieee14.raw"},
+    )
+    assert loaded.status_code == 200, loaded.text
+    assert loaded.json()["freq_hz"] == 60.0
+    read = await client.get(f"/api/sessions/{sid}/topology")
+    assert read.json()["freq_hz"] == 60.0
+
+    # The base frequency is the sixth field of the RAW header line.
+    raw = (ws / "ieee14.raw").read_text(encoding="latin-1")
+    header, rest = raw.split("\n", 1)
+    assert "60.00" in header
+    (ws / "ieee14_50hz.raw").write_text(
+        header.replace("60.00", "50.00", 1) + "\n" + rest, encoding="latin-1"
+    )
+    sid50 = await _create_session(client)
+    loaded50 = await client.post(
+        f"/api/sessions/{sid50}/case",
+        json={"primary_path": "ieee14_50hz.raw"},
+    )
+    assert loaded50.status_code == 200, loaded50.text
+    assert loaded50.json()["freq_hz"] == 50.0
+
+
+@pytest.mark.integration
 async def test_topology_line_params_include_r_x(
     app_workspace: tuple[httpx.AsyncClient, Path],
 ) -> None:

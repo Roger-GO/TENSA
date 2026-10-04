@@ -3334,6 +3334,11 @@ export interface components {
              */
             controllers?: components["schemas"]["TopologyEntry"][];
             /**
+             * Freq Hz
+             * @description System nominal frequency in Hz (the case's base frequency, 60 unless the case sets another). A per-unit rotor speed ``omega`` times this is the speed in Hz. ``null`` when the case carries no usable value.
+             */
+            freq_hz?: number | null;
+            /**
              * Job Id
              * @description Job-registry id mirroring the routine that produced this topology snapshot (v3.1 Unit 5b) — case load / reload, element delete / undo, or blank-system create. ``null`` when the summary is a plain read (``GET /topology``).
              */
