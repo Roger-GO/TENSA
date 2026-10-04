@@ -1,8 +1,9 @@
 /**
  * The top bar fits the window: after a power flow has run (the run badge and the
- * units toggle are showing), no control is scrolled out of sight at 1280 or 1440
- * px, the widths of a laptop, where the right end of the bar (Search, Theme,
- * History, Help) used to be cut off.
+ * units toggle are showing), and while a time-domain run streams (the longest the
+ * bar gets: the Abort button, the "Streaming" status and the job chip show too), no
+ * control is scrolled out of sight at 1280 or 1440 px, the widths of a laptop, where
+ * the right end of the bar (Search, Theme, History, Help) used to be cut off.
  *
  * What does not fit inline is in the More menu (`TopBarMoreMenu`), which is there
  * below the width the layout constants give and gone from it up. jsdom applies no
@@ -86,6 +87,47 @@ test('top bar: nothing is cut off at laptop widths, and More holds what does not
       expect(await onScreen(page, 'history-drawer-toggle')).toBe(true);
     }
   }
+});
+
+test('top bar: nothing is cut off while a time-domain run streams, the longest the bar gets', async ({
+  page,
+}) => {
+  await loadCaseAndRunPf(page);
+  // A run long enough to still be streaming when the last width has been checked (the
+  // solver covers a few simulated seconds per second), at one frame per simulated
+  // second so the page stays free to answer the checks below. The widths in
+  // `topBarLayout.ts` are sized for this state.
+  await page.getByTestId('bottom-drawer-tab-analysis').click();
+  await page.getByTestId('analysis-sub-tab-tds').click();
+  await page.getByTestId('field-tds-config-tf').fill('1000');
+  await page.getByTestId('field-tds-config-max-rate').fill('1');
+  await page.getByTestId('run-mode-tds').click();
+  await page.getByTestId('run-tds-button').click();
+  const abort = page.getByTestId('run-tds-button');
+  await expect(abort).toHaveText('Abort', { timeout: 60_000 });
+  await expect(page.getByTestId('tds-run-status-badge')).toHaveAttribute('data-state', 'streaming');
+  await expect(page.getByTestId('in-flight-chip')).toBeVisible();
+
+  for (const width of [1280, 1440, 1600, 1819, WIDE_PX]) {
+    await page.setViewportSize({ width, height: 900 });
+    // The run is what makes the bar this long: it must still be going at each width.
+    await expect(abort, `the run ended before ${width}px was checked`).toHaveText('Abort');
+    expect(await overflow(page), `the bar scrolls at ${width}px while streaming`).toBe(0);
+    expect(await onScreen(page, 'topbar-menu-help-trigger'), `Help is cut off at ${width}px`).toBe(
+      true,
+    );
+    if (width < WIDE_PX) {
+      expect(
+        await onScreen(page, 'topbar-menu-more-trigger'),
+        `More is cut off at ${width}px`,
+      ).toBe(true);
+    }
+  }
+
+  await abort.click();
+  await expect(page.getByTestId('tds-run-status-badge')).toHaveAttribute('data-state', 'aborted', {
+    timeout: 30_000,
+  });
 });
 
 test('top bar: at 1280 px the More menu opens Search, History and Theme, and its items work', async ({
