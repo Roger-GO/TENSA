@@ -6,7 +6,11 @@ WebSocket-upgrade scopes. The execution order (outermost → innermost) is:
 
     1. Host/Origin check (rejects bad-host before any FastAPI code runs)
     2. CORS (FastAPI's middleware — allows preflights and validates origins)
-    3. FastAPI router
+    3. GZip (compresses a response only when the client sent
+       ``Accept-Encoding: gzip``; it sits inside CORS so a rejected preflight is
+       never compressed, and outside the router so every route, the error
+       envelopes and the SPA files share it)
+    4. FastAPI router
 
 There is no authentication: the server is a local-first tool that binds to
 loopback by default. uvicorn's default access log is disabled at startup;
@@ -25,6 +29,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import JSONResponse, Response
 from starlette.types import Scope
 
@@ -57,8 +62,37 @@ from tensa.security.middleware import make_host_origin_middleware
 log = logging.getLogger(__name__)
 
 
+# Vite names every file under ``assets/`` after a hash of its contents, so one
+# URL always means the same bytes and a browser can keep it for good. Everything
+# else in the bundle (``index.html``, which names the current hashes, and the
+# unhashed icons) has to be revalidated on each load, or a browser would keep
+# opening last release's page against files the new server no longer has.
+_HASHED_ASSET_PREFIX = "assets/"
+_IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
+_REVALIDATE_CACHE_CONTROL = "no-cache"
+
+# Responses smaller than this are sent as they are: the gzip header and the
+# round trip through the compressor cost more than they save.
+_GZIP_MINIMUM_SIZE = 1024
+# zlib's default. Level 9 (Starlette's default) is markedly slower for a percent
+# or two less, and the first load compresses the 400 KB entry chunk.
+_GZIP_LEVEL = 6
+
+
+def _url_path(path: str) -> str:
+    """``StaticFiles`` hands over an ``os.path.normpath``'d path, which has
+    backslashes on Windows; the checks below are written against URL paths."""
+    return path.replace("\\", "/")
+
+
+def _names_a_file(path: str) -> bool:
+    """True when the last segment has an extension (``assets/a.js``,
+    ``favicon.ico``), as opposed to a client-side route (``case/foo``)."""
+    return "." in _url_path(path).rsplit("/", 1)[-1]
+
+
 class _SpaStaticFiles(StaticFiles):
-    """``StaticFiles`` with SPA-style fallback.
+    """``StaticFiles`` with SPA-style fallback and cache headers.
 
     Stock Starlette ``StaticFiles(html=True)`` only serves an ``index.html``
     when the URL points at a real directory; otherwise it returns 404. A
@@ -66,15 +100,24 @@ class _SpaStaticFiles(StaticFiles):
     a file extension should fall through to ``index.html`` so the
     client-side router can pick up the route on hard reload.
 
-    We override ``get_response`` to catch a 404 on a missing file and
-    re-serve ``index.html`` with a 200. The ``/api/*`` namespace lives on
+    We override ``get_response`` to catch a 404 on a missing path and
+    re-serve ``index.html`` with a 200. A missing path that names a file
+    (``assets/old-3f9a.js``, ``favicon.ico``) stays a 404: a page left open
+    across an upgrade asks for code-split chunks that no longer exist, and
+    answering with the HTML shell would make the browser fail on a MIME type
+    instead of on the missing file. The ``/api/*`` namespace lives on
     its own routers (registered before this mount in ``make_app``), so
     the fallback never shadows the substrate API.
+
+    A file under ``assets/`` is served with ``Cache-Control: immutable`` and a
+    year of max-age; every other response (``index.html`` and the SPA
+    fallback included) with ``no-cache``, which still lets the browser
+    revalidate by ETag and get a ``304``.
     """
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as exc:
             # Only 404 from a missing file falls back. 401 / 405 / etc.
             # propagate untouched. The ``api/`` namespace also propagates
@@ -82,20 +125,36 @@ class _SpaStaticFiles(StaticFiles):
             # surface as 404, not the SPA HTML.
             if exc.status_code != 404:
                 raise
-            if path.startswith("api/") or path == "api":
+            if path.startswith("api/") or path == "api" or _names_a_file(path):
                 raise
-            return await super().get_response("index.html", scope)
+            return self._with_cache_control(
+                "index.html", await super().get_response("index.html", scope)
+            )
         except (FileNotFoundError, PermissionError) as exc:
             # If the SPA bundle directory disappears post-mount (or its
             # permissions change to deny read), Starlette can leak a bare
             # OSError instead of an HTTPException. Re-raise as a 404 so the
             # surrounding fallback logic handles it like any other miss.
-            if path.startswith("api/") or path == "api":
+            if path.startswith("api/") or path == "api" or _names_a_file(path):
                 raise StarletteHTTPException(status_code=404) from exc
             try:
-                return await super().get_response("index.html", scope)
+                return self._with_cache_control(
+                    "index.html", await super().get_response("index.html", scope)
+                )
             except (FileNotFoundError, PermissionError) as inner:
                 raise StarletteHTTPException(status_code=404) from inner
+        return self._with_cache_control(path, response)
+
+    @staticmethod
+    def _with_cache_control(path: str, response: Response) -> Response:
+        """Stamp ``response`` for the file ``path`` that produced it."""
+        if response.status_code in (200, 206, 304) and _url_path(path).startswith(
+            _HASHED_ASSET_PREFIX
+        ):
+            response.headers["Cache-Control"] = _IMMUTABLE_CACHE_CONTROL
+        else:
+            response.headers["Cache-Control"] = _REVALIDATE_CACHE_CONTROL
+        return response
 
 
 def _find_spa_dir() -> Path | None:
@@ -236,6 +295,15 @@ def make_app(
 
     # Mount in *reverse* order — Starlette's user_middleware is applied as a
     # stack, with the most-recently-added middleware being innermost.
+    # GZip goes first, so it ends up innermost (see the module docstring). It
+    # compresses API JSON (topologies, results, and every error envelope) and
+    # the SPA's scripts and styles for clients that ask for it, and leaves
+    # WebSockets and bodies that already carry a Content-Encoding alone.
+    app.add_middleware(
+        GZipMiddleware,
+        minimum_size=_GZIP_MINIMUM_SIZE,
+        compresslevel=_GZIP_LEVEL,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=sorted(allowed_origins),

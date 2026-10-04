@@ -198,3 +198,132 @@ async def test_app_still_serves_api_when_no_spa_bundle(
             assert resp.status_code == 404, resp.text
     finally:
         await mgr.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Cache headers, missing assets and compression
+# ---------------------------------------------------------------------------
+
+IMMUTABLE = "public, max-age=31536000, immutable"
+
+
+@pytest.mark.integration
+async def test_hashed_asset_is_cached_for_a_year(
+    client_with_static: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """A file under ``assets/`` has a content hash in its name, so a browser may
+    keep it without asking again."""
+    client, _static = client_with_static
+    resp = await client.get("/assets/foo.js")
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["cache-control"] == IMMUTABLE
+
+
+@pytest.mark.integration
+async def test_conditional_request_for_an_asset_keeps_the_cache_header(
+    client_with_static: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """A revalidation that gets a 304 must still say the file is immutable, or the
+    browser would drop the long lifetime it had."""
+    client, _static = client_with_static
+    first = await client.get("/assets/foo.js")
+    etag = first.headers["etag"]
+    resp = await client.get("/assets/foo.js", headers={"If-None-Match": etag})
+    assert resp.status_code == 304
+    assert resp.headers["cache-control"] == IMMUTABLE
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("path", ["/", "/index.html", "/some-frontend-path"])
+async def test_index_html_is_revalidated_on_every_load(
+    client_with_static: tuple[httpx.AsyncClient, Path], path: str
+) -> None:
+    """``index.html`` names the current hashed files, so it is never cached
+    blindly. That holds for the SPA fallback too, which serves the same page for
+    any client-side route."""
+    client, _static = client_with_static
+    resp = await client.get(path)
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["cache-control"] == "no-cache"
+
+
+@pytest.mark.integration
+async def test_unhashed_file_outside_assets_is_revalidated(
+    client_with_static: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """Icons and the like keep their name across releases, so they are not
+    immutable."""
+    client, static = client_with_static
+    (static / "favicon.svg").write_text("<svg xmlns='http://www.w3.org/2000/svg'/>")
+    resp = await client.get("/favicon.svg")
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["cache-control"] == "no-cache"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "path",
+    ["/assets/missing-3f9a1c.js", "/assets/missing-3f9a1c.css", "/favicon.ico"],
+)
+async def test_missing_file_is_a_404_not_the_spa_shell(
+    client_with_static: tuple[httpx.AsyncClient, Path], path: str
+) -> None:
+    """A page left open across an upgrade asks for code-split chunks that no
+    longer exist. Answering with ``index.html`` would make the browser report a
+    MIME type error instead of the missing file, and a cache could keep the HTML
+    under the chunk's URL."""
+    client, _static = client_with_static
+    resp = await client.get(path)
+    assert resp.status_code == 404, resp.text
+    assert '<div id="root">' not in resp.text
+    assert "immutable" not in resp.headers.get("cache-control", "")
+
+
+@pytest.mark.integration
+async def test_api_json_is_gzipped_when_the_client_accepts_it(
+    client_with_static: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """A large API response is compressed for a client that sent
+    ``Accept-Encoding: gzip`` and left alone for one that did not."""
+    client, _static = client_with_static
+    plain = await client.get("/openapi.json", headers={"Accept-Encoding": "identity"})
+    assert plain.status_code == 200, plain.text
+    assert "content-encoding" not in plain.headers
+    assert int(plain.headers["content-length"]) > 10_000
+
+    resp = await client.get("/openapi.json", headers={"Accept-Encoding": "gzip"})
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-encoding"] == "gzip"
+    assert "accept-encoding" in resp.headers["vary"].lower()
+    # httpx has decoded the body: it is the same document.
+    assert resp.json() == plain.json()
+    # ``Content-Length`` is that of the compressed body, much smaller than the JSON.
+    assert int(resp.headers["content-length"]) < int(plain.headers["content-length"]) / 4
+
+
+@pytest.mark.integration
+async def test_small_api_response_is_not_compressed(
+    client_with_static: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """Below the size threshold compression costs more than it saves."""
+    client, _static = client_with_static
+    resp = await client.get("/api/sessions", headers={"Accept-Encoding": "gzip"})
+    assert resp.status_code == 200, resp.text
+    assert "content-encoding" not in resp.headers
+
+
+@pytest.mark.integration
+async def test_spa_script_is_gzipped_and_still_immutable(
+    client_with_static: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """The scripts and styles of the UI are compressed too (they are most of the
+    bytes a remote user downloads), and compressing does not cost them their
+    cache header."""
+    client, static = client_with_static
+    body = "export const items = [" + ",".join(str(n) for n in range(2000)) + "];\n"
+    (static / "assets" / "big-abc123.js").write_text(body)
+    resp = await client.get("/assets/big-abc123.js", headers={"Accept-Encoding": "gzip"})
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-encoding"] == "gzip"
+    assert resp.headers["cache-control"] == IMMUTABLE
+    assert resp.text == body
