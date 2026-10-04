@@ -46,9 +46,10 @@ describe('<AnalysisTab />', () => {
     }
   });
 
-  it('renders the active sub-tab content (EIG)', () => {
+  it('renders the active sub-tab content (EIG)', async () => {
     render(<AnalysisTab activeSubTab="eig" onSubTabChange={() => {}} />);
-    expect(screen.getByTestId('analyze-eig-stub')).toBeInTheDocument();
+    // The EIG, CPF and SE views are lazily loaded chunks.
+    expect(await screen.findByTestId('analyze-eig-stub')).toBeInTheDocument();
   });
 
   it('renders the active sub-tab content (Plot)', async () => {

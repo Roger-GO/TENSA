@@ -22,7 +22,7 @@
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import { ChartLineIcon, EmptyState } from '@/components/ui/EmptyState';
-import { AnalysisTab } from '@/components/data-grid/AnalysisTab';
+import { LazyAnalysisTab } from '@/components/data-grid/LazyAnalysisTab';
 import { useLayoutStore } from '@/store/layout';
 import { useAnalyzeStore } from '@/store/analyze';
 import { usePflowStore } from '@/store/pflow';
@@ -81,7 +81,7 @@ export function ResultsView({ className }: ResultsViewProps) {
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {hasResults ? (
-          <AnalysisTab
+          <LazyAnalysisTab
             activeSubTab={activeAnalysisSubTab}
             onSubTabChange={(next) => {
               // Dual write — same contract BottomDrawer uses: keep the

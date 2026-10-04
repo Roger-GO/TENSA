@@ -7,7 +7,7 @@
  * via ``RunStream``. We mock-socket the WS server, mock fetch for the
  * HTTP endpoints, and assert on the visible UI states + store mutations.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -30,6 +30,7 @@ vi.mock('@/lib/toast', () => ({
 }));
 
 import { RunButton } from '@/components/tds/RunButton';
+import { loadArrowDecoder } from '@/streaming/RunStream';
 import { makeQueryClient } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
@@ -39,6 +40,12 @@ import { useRunsStore, DEFAULT_MEMORY_BUDGET_BYTES } from '@/store/runs';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { FaultSpec } from '@/api/types';
 import { arrowFrame } from '../../helpers/frames';
+
+// A run waits for the lazily loaded Arrow decoder before it sends its command;
+// load it once so the waits below measure the flow and not the first import.
+beforeAll(async () => {
+  await loadArrowDecoder();
+});
 
 const SESSION_ID = 'sess-1';
 const WS_HOST = 'localhost:9876';

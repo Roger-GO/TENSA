@@ -44,5 +44,29 @@ export default defineConfig({
     sourcemap: true,
     emptyOutDir: true,
     target: 'es2022',
+    rollupOptions: {
+      output: {
+        // React is the biggest part of the entry chunk and changes far less
+        // often than the app, so it gets a chunk of its own: the server hands
+        // out hashed assets with a year-long cache lifetime, and a release that
+        // only touches the app leaves this one cached. React is the only first
+        // load library named here: a catch-all vendor chunk would pull the
+        // libraries that the lazily loaded panels own (React Flow, uPlot,
+        // Arrow) into the first load.
+        manualChunks(id) {
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) {
+            return 'vendor-react';
+          }
+          // html-to-image is only reached by a dynamic import (a PNG export).
+          // Named here because its own entry file is called ``index.js``, and a
+          // second chunk called ``index-<hash>.js`` next to the app's is
+          // confusing to read in the build output and in network traces.
+          if (/[\\/]node_modules[\\/]html-to-image[\\/]/.test(id)) {
+            return 'html-to-image';
+          }
+          return undefined;
+        },
+      },
+    },
   },
 });

@@ -99,3 +99,13 @@ OpenAPI types regenerated via `pnpm regen-api-types` after every new endpoint. H
 ## When in doubt
 
 Read the closest existing example. The codebase converged on patterns over many sessions; reinventing creates drift. If the pattern feels wrong, propose a change in a brainstorm doc — don't fork silently.
+
+## Code splitting
+
+**The entry chunk holds only what the first paint needs.** It is whatever `src/main.tsx` reaches through static imports; a module reached only through `import()` becomes a chunk fetched when it is first used. Heavy or rarely used views load on demand:
+
+- A panel or dialog is loaded with `lazyNamed` from `@/lib/lazyNamed` and rendered inside a `<Suspense>` (give a panel `LoadingPanel` from `@/components/ui/Lazy` as its fallback).
+- A dialog that a store flag or a menu item opens is mounted through `<LazyMount when={open}>`, so its chunk is fetched on the first open and the dialog behaves as it did when it was always mounted. Pass `'overlay'` as `lazyNamed`'s third argument for it: if the chunk cannot be fetched (a page left open across an upgrade), that shows a toast, where a panel shows a reload prompt.
+- Whatever opens a lazy dialog must not import the dialog. Keep its open flag in `src/store/` (`reportDialog.ts`, `bundle.ts`) and its trigger button in a module of its own (`HistoryDrawerToggle.tsx`).
+
+`tests/unit/lib/codeSplitting.test.ts` lists the modules and packages that must stay out of the entry chunk. Add a new lazy module there. A static import of one of them from eager code fails that test, and nothing else would notice.

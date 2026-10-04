@@ -31,7 +31,8 @@ vi.mock('@/lib/toast', () => ({
   },
 }));
 
-import { HistoryDrawer, HistoryDrawerToggle } from '@/components/history/HistoryDrawer';
+import { HistoryDrawer } from '@/components/history/HistoryDrawer';
+import { HistoryDrawerToggle } from '@/components/history/HistoryDrawerToggle';
 import { useRunsStore } from '@/store/runs';
 import { useHistoryStore } from '@/store/history';
 import { useSessionStore } from '@/store/session';

@@ -31,8 +31,6 @@ import { ProblemDetailsErrorSurface } from '@/components/error/ProblemDetailsErr
 import { useRunModeStore } from '@/store/runMode';
 import { useHistoryStore } from '@/store/history';
 import { useRunsStore } from '@/store/runs';
-import { useSessionStore } from '@/store/session';
-import { useCaseStore } from '@/store/case';
 import { useJobsStore, type JobRecord } from '@/store/jobs';
 import { useLayoutStore, type HistoryKindFilter } from '@/store/layout';
 import type { RunRecord } from '@/store/runs';
@@ -67,37 +65,6 @@ const FILTER_OPTIONS: readonly { value: HistoryKindFilter; label: string }[] = [
   { value: 'cpf', label: kindLabel('cpf') },
   { value: 'se', label: kindLabel('se') },
 ];
-
-export function HistoryDrawerToggle() {
-  const open = useHistoryStore((s) => s.drawerOpen);
-  const openDrawer = useHistoryStore((s) => s.openDrawer);
-  const closeDrawer = useHistoryStore((s) => s.closeDrawer);
-  const runCount = useRunsStore((s) => Object.keys(s.runs).length);
-  // Gate on session+case loaded — consistent with the other TopBar
-  // controls (BundleExport, Report, Snapshot). The History drawer's
-  // run list is session-scoped (the runs slice clears on session
-  // change), so an unloaded session would always show empty.
-  const sessionId = useSessionStore((s) => s.sessionId);
-  const caseSelection = useCaseStore((s) => s.selection);
-  const enabled = sessionId !== null && caseSelection !== null;
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      disabled={!enabled}
-      onClick={() => (open ? closeDrawer() : openDrawer())}
-      data-testid="history-drawer-toggle"
-      aria-pressed={open}
-      aria-label="Toggle run history"
-    >
-      History{' '}
-      {runCount > 0 ? (
-        <span className="text-muted-foreground ml-1 text-[10px]">({runCount})</span>
-      ) : null}
-    </Button>
-  );
-}
 
 /**
  * Outer wrapper. Defers the inner drawer body until the user opens it,

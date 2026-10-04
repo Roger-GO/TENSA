@@ -1,9 +1,3 @@
-// ``useReportDialogStore`` is co-exported alongside the React
-// components so the trigger button and dialog body can share open
-// state without a new ``store/report.ts`` file (which the plan's
-// Files-to-create list does not include). Disable the react-refresh
-// hint here intentionally.
-/* eslint-disable react-refresh/only-export-components */
 /**
  * ReportDialog (Unit 4 of the v2.0 plan).
  *
@@ -31,7 +25,6 @@
  * stay green.
  */
 import { useMemo } from 'react';
-import { create } from 'zustand';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -41,41 +34,9 @@ import { ProblemDetailsError } from '@/api/client';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';
+import { useReportDialogStore } from '@/store/reportDialog';
 import { LatexCopyButton, type LatexReportTable } from '@/components/reports/LatexCopyButton';
 import { cn } from '@/lib/cn';
-
-// ---- local store (no separate file per the plan's Files-to-create list) --
-
-/**
- * Open / closed state for the dialog. Lives at module scope so the
- * trigger button (rendered in the TopBar) and the dialog itself
- * (rendered as the TopBar's portal-anchored sibling) can share state
- * without prop drilling.
- *
- * Single state field — there's no need for the BundleExportDialog's
- * status / error machinery here because the report endpoint itself
- * is GET-only and TanStack Query owns the loading / error state.
- */
-interface ReportDialogState {
-  dialogOpen: boolean;
-  /** The tab the user last had open; preserved across open/close. */
-  activeRoutine: ReportRoutine;
-  openDialog: (routine?: ReportRoutine) => void;
-  closeDialog: () => void;
-  setActiveRoutine: (routine: ReportRoutine) => void;
-}
-
-export const useReportDialogStore = create<ReportDialogState>((set) => ({
-  dialogOpen: false,
-  activeRoutine: 'pflow',
-  openDialog: (routine?: ReportRoutine) =>
-    set((state) => ({
-      dialogOpen: true,
-      activeRoutine: routine ?? state.activeRoutine,
-    })),
-  closeDialog: () => set({ dialogOpen: false }),
-  setActiveRoutine: (routine: ReportRoutine) => set({ activeRoutine: routine }),
-}));
 
 // ---- trigger button -------------------------------------------------------
 

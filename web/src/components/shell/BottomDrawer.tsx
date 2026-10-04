@@ -33,7 +33,7 @@ import { LinesGrid } from '@/components/data-grid/LinesGrid';
 import { GeneratorsGrid } from '@/components/data-grid/GeneratorsGrid';
 import { LoadsGrid } from '@/components/data-grid/LoadsGrid';
 import { ShuntsGrid } from '@/components/data-grid/ShuntsGrid';
-import { AnalysisTab } from '@/components/data-grid/AnalysisTab';
+import { LazyAnalysisTab } from '@/components/data-grid/LazyAnalysisTab';
 import { ActivityPanel } from '@/components/shell/ActivityPanel';
 
 const TAB_LABELS: Record<BottomDrawerTab, string> = {
@@ -189,7 +189,7 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
             data-testid="bottom-drawer-tab-content-analysis"
             className="flex min-h-0 flex-1 flex-col"
           >
-            <AnalysisTab
+            <LazyAnalysisTab
               activeSubTab={activeAnalysisSubTab}
               onSubTabChange={(next) => {
                 setActiveAnalysisSubTab(next);

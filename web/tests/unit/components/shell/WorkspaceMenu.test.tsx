@@ -21,7 +21,7 @@ import { WorkspaceMenu } from '@/components/shell/WorkspaceMenu';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useSnapshotStore } from '@/store/snapshot';
-import { useReportDialogStore } from '@/components/reports/ReportDialog';
+import { useReportDialogStore } from '@/store/reportDialog';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 
 let MOCK_TOPOLOGY: TopologySummary | null = null;
@@ -135,6 +135,35 @@ describe('<WorkspaceMenu /> — actions', () => {
     await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
     await user.click(await screen.findByTestId('topbar-menu-workspace-report'));
     expect(useReportDialogStore.getState().dialogOpen).toBe(true);
+  });
+});
+
+describe('<WorkspaceMenu /> — dialogs load on first open', () => {
+  it('mounts neither the PMU nor the profile dialog until its item is chosen', async () => {
+    const user = userEvent.setup();
+    render(withProviders(<WorkspaceMenu />));
+    expect(screen.queryByTestId('pmu-placement-dialog')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('profile-import-dialog')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
+    await screen.findByTestId('topbar-menu-workspace-content');
+    expect(screen.queryByTestId('pmu-placement-dialog')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('profile-import-dialog')).not.toBeInTheDocument();
+  });
+
+  it('"Add PMU" loads and opens the PMU placement dialog', async () => {
+    const user = userEvent.setup();
+    render(withProviders(<WorkspaceMenu />));
+    await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
+    await user.click(await screen.findByTestId('topbar-menu-workspace-add-pmu'));
+    expect(await screen.findByTestId('pmu-placement-dialog')).toBeInTheDocument();
+  });
+
+  it('"Import profile" loads and opens the profile import dialog', async () => {
+    const user = userEvent.setup();
+    render(withProviders(<WorkspaceMenu />));
+    await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
+    await user.click(await screen.findByTestId('topbar-menu-workspace-import-profile'));
+    expect(await screen.findByTestId('profile-import-dialog')).toBeInTheDocument();
   });
 });
 

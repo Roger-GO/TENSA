@@ -8,10 +8,17 @@
 // mock-socket doesn't ship type declarations; ``allowJs`` resolution
 // gives the imports an ``any`` shape that we narrow at the use sites.
 import { Server as MockServer, WebSocket as MockWebSocket } from 'mock-socket';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { RunStream } from '@/streaming/RunStream';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RunStream, loadArrowDecoder } from '@/streaming/RunStream';
 import { useRunsStore, DEFAULT_MEMORY_BUDGET_BYTES } from '@/store/runs';
 import { arrowFrame } from '../helpers/frames';
+
+// The decoder is a lazily loaded chunk that a run waits for before it sends its
+// command. Load it once up front so the tick-based waits below measure the
+// protocol and not the first import (RunStreamArrowLoad.test.ts covers the wait).
+beforeAll(async () => {
+  await loadArrowDecoder();
+});
 
 const WS_URL = 'ws://localhost:1234';
 const SESSION_ID = 'sess-abc';

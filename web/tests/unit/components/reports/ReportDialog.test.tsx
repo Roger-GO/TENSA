@@ -20,11 +20,8 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
-import {
-  ReportDialog,
-  ReportDialogButton,
-  useReportDialogStore,
-} from '@/components/reports/ReportDialog';
+import { ReportDialog, ReportDialogButton } from '@/components/reports/ReportDialog';
+import { useReportDialogStore } from '@/store/reportDialog';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';

@@ -29,11 +29,24 @@
  */
 import { useEffect, useState } from 'react';
 import { TopBarMenu, TopBarMenuItem, TopBarMenuSeparator } from './TopBarMenu';
-import { PmuPlacementDialog } from '@/components/pmu/PmuPlacementDialog';
-import { ProfileImportDialog } from '@/components/profiles/ProfileImportDialog';
+import { LazyMount } from '@/components/ui/Lazy';
+import { lazyNamed } from '@/lib/lazyNamed';
 import { SaveSystemButton } from '@/components/case/SaveSystemButton';
 import { BundleImportButton } from '@/components/bundle/BundleImportDialog';
 import { useCommandRegistry, subscribePaletteDialog } from '@/lib/commands';
+
+// The PMU and profile-import dialogs are separate chunks, fetched the first
+// time each opens.
+const PmuPlacementDialog = lazyNamed(
+  () => import('@/components/pmu/PmuPlacementDialog'),
+  'PmuPlacementDialog',
+  'overlay',
+);
+const ProfileImportDialog = lazyNamed(
+  () => import('@/components/profiles/ProfileImportDialog'),
+  'ProfileImportDialog',
+  'overlay',
+);
 
 /** Map registry id → existing testid suffix (preserves Unit-8 contract). */
 const TESTID_BY_ID: Record<string, string> = {
@@ -127,8 +140,12 @@ export function WorkspaceMenu() {
           );
         })}
       </TopBarMenu>
-      <PmuPlacementDialog open={pmuOpen} onOpenChange={setPmuOpen} />
-      <ProfileImportDialog open={profileOpen} onOpenChange={setProfileOpen} />
+      <LazyMount when={pmuOpen}>
+        <PmuPlacementDialog open={pmuOpen} onOpenChange={setPmuOpen} />
+      </LazyMount>
+      <LazyMount when={profileOpen}>
+        <ProfileImportDialog open={profileOpen} onOpenChange={setProfileOpen} />
+      </LazyMount>
     </>
   );
 }

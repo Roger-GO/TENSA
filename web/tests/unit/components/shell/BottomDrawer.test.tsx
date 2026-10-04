@@ -167,4 +167,11 @@ describe('<BottomDrawer />', () => {
     render(<BottomDrawer />, { wrapper });
     expect(screen.getByTestId('bottom-drawer-tab-content-buses')).toBeInTheDocument();
   });
+
+  it('mounts the analysis tab (a lazily loaded chunk) when it is the active tab', async () => {
+    useLayoutStore.setState({ activeBottomDrawerTab: 'analysis', bottomDrawerCollapsed: false });
+    render(<BottomDrawer />, { wrapper });
+    expect(screen.getByTestId('bottom-drawer-tab-content-analysis')).toBeInTheDocument();
+    expect(await screen.findByTestId('analysis-tab')).toBeInTheDocument();
+  });
 });

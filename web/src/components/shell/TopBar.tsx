@@ -1,11 +1,14 @@
 import { forwardRef } from 'react';
 import type { HTMLAttributes, ReactNode } from 'react';
 import { cn } from '@/lib/cn';
-import { BundleExportDialog } from '@/components/bundle/BundleExportDialog';
-import { ReportDialog } from '@/components/reports/ReportDialog';
-import { HistoryDrawer, HistoryDrawerToggle } from '@/components/history/HistoryDrawer';
+import { HistoryDrawerToggle } from '@/components/history/HistoryDrawerToggle';
 import { Button } from '@/components/ui/button';
+import { LazyMount } from '@/components/ui/Lazy';
+import { lazyNamed } from '@/lib/lazyNamed';
+import { useBundleStore } from '@/store/bundle';
 import { useCommandPaletteStore } from '@/store/commandPalette';
+import { useHistoryStore } from '@/store/history';
+import { useReportDialogStore } from '@/store/reportDialog';
 import { ThemeToggle } from '@/components/shell/ThemeToggle';
 import { SidebarToggle } from '@/components/shell/SidebarToggle';
 import { InspectorToggle } from '@/components/shell/InspectorToggle';
@@ -13,6 +16,24 @@ import { BottomDrawerToggle } from '@/components/shell/BottomDrawerToggle';
 import { ResultsViewToggle } from '@/components/shell/ResultsViewToggle';
 import { InFlightChip } from '@/components/shell/InFlightChip';
 import { DynamicContentBadge } from '@/components/case/DynamicContentBadge';
+
+// The three dialogs below are separate chunks, fetched the first time their
+// store flag opens them.
+const BundleExportDialog = lazyNamed(
+  () => import('@/components/bundle/BundleExportDialog'),
+  'BundleExportDialog',
+  'overlay',
+);
+const ReportDialog = lazyNamed(
+  () => import('@/components/reports/ReportDialog'),
+  'ReportDialog',
+  'overlay',
+);
+const HistoryDrawer = lazyNamed(
+  () => import('@/components/history/HistoryDrawer'),
+  'HistoryDrawer',
+  'overlay',
+);
 
 /**
  * TopBar. Fixed-height (~44px) bar with three slots — left, center, right —
@@ -48,9 +69,10 @@ import { DynamicContentBadge } from '@/components/case/DynamicContentBadge';
  *   what the App chooses to inject.
  *
  * The dialog wrappers for store-driven flows (BundleExportDialog,
- * ReportDialog, HistoryDrawer) stay mounted here because their open-
+ * ReportDialog, HistoryDrawer) are mounted here because their open-
  * close state is global (Zustand-backed). Mounting them at the TopBar
  * root keeps a single portal anchor across menu open/close cycles.
+ * Their code loads the first time one is opened.
  */
 export interface TopBarProps extends Omit<HTMLAttributes<HTMLElement>, 'children'> {
   left?: ReactNode;
@@ -156,12 +178,33 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
         <ThemeToggle />
         <HistoryDrawerToggle />
       </div>
-      <BundleExportDialog />
-      <ReportDialog />
-      <HistoryDrawer />
+      <TopBarDialogs />
     </header>
   );
 });
+
+/**
+ * The store-driven dialogs. Each is mounted on the first open and stays
+ * mounted, so it behaves as when it was always mounted (see ``LazyMount``).
+ */
+function TopBarDialogs() {
+  const bundleOpen = useBundleStore((s) => s.dialogOpen);
+  const reportOpen = useReportDialogStore((s) => s.dialogOpen);
+  const historyOpen = useHistoryStore((s) => s.drawerOpen);
+  return (
+    <>
+      <LazyMount when={bundleOpen}>
+        <BundleExportDialog />
+      </LazyMount>
+      <LazyMount when={reportOpen}>
+        <ReportDialog />
+      </LazyMount>
+      <LazyMount when={historyOpen}>
+        <HistoryDrawer />
+      </LazyMount>
+    </>
+  );
+}
 
 /**
  * App brand: busbar-and-sine mark + "TENSA" wordmark, pinned at the

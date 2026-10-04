@@ -6,9 +6,9 @@ import { cn } from '@/lib/cn';
 import { CursorIcon, EmptyState } from '@/components/ui/EmptyState';
 import { FirstRunCoach } from './FirstRunCoach';
 import { TopBar } from './TopBar';
-import { CommandPalette } from './CommandPalette';
-import { ShortcutCheatsheet } from './ShortcutCheatsheet';
 import { Toaster } from '@/components/ui/Toaster';
+import { LazyMount } from '@/components/ui/Lazy';
+import { lazyNamed } from '@/lib/lazyNamed';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 import { useLayoutStore } from '@/store/layout';
@@ -16,6 +16,15 @@ import { useSldStore } from '@/store/sld';
 import { useHotkeys } from '@/lib/useHotkeys';
 import { GlobalShortcuts } from '@/lib/useGlobalShortcuts';
 import { useTheme } from '@/lib/useTheme';
+
+// The palette (with ``cmdk``) and the cheatsheet are fetched the first time
+// they open, not with the shell.
+const CommandPalette = lazyNamed(() => import('./CommandPalette'), 'CommandPalette', 'overlay');
+const ShortcutCheatsheet = lazyNamed(
+  () => import('./ShortcutCheatsheet'),
+  'ShortcutCheatsheet',
+  'overlay',
+);
 
 /**
  * AppShell. Top-level v3 IDE-style 4-pane layout (Unit 1 of the v3 IDE
@@ -466,11 +475,9 @@ export function AppShell({
       {/* Global toast surface (v2.0 polish Unit 3). */}
       <Toaster />
 
-      {/* Global command palette (v2.0 polish Unit 9). */}
-      <CommandPalette />
-
-      {/* Global keyboard-shortcut cheatsheet (v2.0 polish Unit 10). */}
-      <ShortcutCheatsheet />
+      {/* Global command palette (v2.0 polish Unit 9) and keyboard-shortcut
+          cheatsheet (v2.0 polish Unit 10). */}
+      <GlobalOverlays />
 
       {/* Per-command shortcut registrar (v2.0 polish Unit 10). */}
       <GlobalShortcuts />
@@ -478,6 +485,26 @@ export function AppShell({
       {/* First-run coach (v2.0 polish Unit 13). */}
       <FirstRunCoach />
     </div>
+  );
+}
+
+/**
+ * The command palette and the shortcut cheatsheet, mounted the first time their
+ * store flag opens them. The flags are read here, not in ``AppShell``, so that
+ * opening either one does not re-render the whole shell.
+ */
+function GlobalOverlays() {
+  const paletteOpen = useCommandPaletteStore((s) => s.open);
+  const cheatsheetOpen = useShortcutCheatsheetStore((s) => s.open);
+  return (
+    <>
+      <LazyMount when={paletteOpen}>
+        <CommandPalette />
+      </LazyMount>
+      <LazyMount when={cheatsheetOpen}>
+        <ShortcutCheatsheet />
+      </LazyMount>
+    </>
   );
 }
 

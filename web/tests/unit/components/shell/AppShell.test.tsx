@@ -13,6 +13,8 @@ import { AppShell } from '@/components/shell/AppShell';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { DEFAULT_LAYOUT, LAYOUT_STORAGE_KEY, useLayoutStore } from '@/store/layout';
 import { useSldStore } from '@/store/sld';
+import { useCommandPaletteStore } from '@/store/commandPalette';
+import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 
 /**
  * AppShell tests cover the structural contract of the v3 4-pane chassis:
@@ -342,5 +344,30 @@ describe('AppShell — Toaster mount (Unit 3)', () => {
     await screen.findByText(/hello from the v3 toaster smoke test/i);
     const sonnerRoot = container.ownerDocument.querySelector('[data-sonner-toaster]');
     expect(sonnerRoot).not.toBeNull();
+  });
+});
+
+describe('AppShell — palette and cheatsheet load on first open', () => {
+  afterEach(() => {
+    useCommandPaletteStore.getState().closePalette();
+    useShortcutCheatsheetStore.getState().closeCheatsheet();
+  });
+
+  it('mounts neither while their flags are closed', () => {
+    render(<AppShell />);
+    expect(screen.queryByTestId('command-palette')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('shortcut-cheatsheet')).not.toBeInTheDocument();
+  });
+
+  it('mounts the command palette when it opens', async () => {
+    render(<AppShell />);
+    act(() => useCommandPaletteStore.getState().openPalette());
+    expect(await screen.findByTestId('command-palette')).toBeInTheDocument();
+  });
+
+  it('mounts the shortcut cheatsheet when it opens', async () => {
+    render(<AppShell />);
+    act(() => useShortcutCheatsheetStore.getState().openCheatsheet());
+    expect(await screen.findByTestId('shortcut-cheatsheet')).toBeInTheDocument();
   });
 });

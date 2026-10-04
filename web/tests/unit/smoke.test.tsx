@@ -15,7 +15,7 @@ describe('App scaffold', () => {
     expect(screen.getByRole('banner', { name: /top bar/i })).toBeInTheDocument();
   });
 
-  it('renders the snapshot save dialog when its store flag opens', () => {
+  it('renders the snapshot save dialog when its store flag opens', async () => {
     // Regression: SaveSnapshotDialog/LoadSnapshotDialog were mounted only
     // inside SnapshotMenu, which a v3 refactor stopped rendering. The
     // Workspace menu's "Save snapshot…" flipped saveDialogOpen but nothing
@@ -25,6 +25,7 @@ describe('App scaffold', () => {
     act(() => {
       useSnapshotStore.getState().openSaveDialog();
     });
-    expect(screen.getByTestId('save-snapshot-name-input')).toBeInTheDocument();
+    // The dialog is a lazily loaded chunk, fetched when the flag first opens.
+    expect(await screen.findByTestId('save-snapshot-name-input')).toBeInTheDocument();
   });
 });

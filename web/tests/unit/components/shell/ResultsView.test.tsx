@@ -95,7 +95,7 @@ describe('<ResultsView />', () => {
     expect(screen.queryByTestId('analysis-tab')).not.toBeInTheDocument();
   });
 
-  it('mounts the AnalysisTab once a PF result exists', () => {
+  it('mounts the AnalysisTab once a PF result exists', async () => {
     usePflowStore.setState({
       lastRun: {
         converged: true,
@@ -107,18 +107,19 @@ describe('<ResultsView />', () => {
       error: null,
     });
     render(<ResultsView />, { wrapper });
-    expect(screen.getByTestId('analysis-tab')).toBeInTheDocument();
+    // The tab is a lazily loaded chunk: a placeholder shows until it arrives.
+    expect(await screen.findByTestId('analysis-tab')).toBeInTheDocument();
     expect(screen.queryByText('No results yet')).not.toBeInTheDocument();
   });
 
-  it('renders the AnalysisTab driven by activeAnalysisSubTab', () => {
+  it('renders the AnalysisTab driven by activeAnalysisSubTab', async () => {
     useLayoutStore.setState({ resultsViewActive: true, activeAnalysisSubTab: 'eig' });
     useAnalyzeStore.setState({
       eigResult: { modes: [] } as unknown as never,
     });
     render(<ResultsView />, { wrapper });
     // EIG sub-tab content mounts (stubbed) since eig is the active sub-tab.
-    expect(screen.getByTestId('analyze-eig-stub')).toBeInTheDocument();
+    expect(await screen.findByTestId('analyze-eig-stub')).toBeInTheDocument();
   });
 
   it('Exit button calls setResultsViewActive(false)', async () => {

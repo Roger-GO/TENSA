@@ -38,8 +38,7 @@
  * **Frame buffer cap**: lives in the runs slice, not here. ``RunStream``
  * just calls ``appendFrame`` and lets the slice handle cap-eviction.
  */
-import { decodeArrowBatch } from './arrow';
-import type { DecodedFrame } from './arrow';
+import type { decodeArrowBatch, DecodedFrame } from './arrow';
 import {
   DEFAULT_MAX_RECONNECT_ATTEMPTS,
   DEFAULT_RECONNECT_DELAYS_MS,
@@ -49,6 +48,37 @@ import {
 import { useRunsStore } from '@/store/runs';
 
 const log = console;
+
+/**
+ * The Arrow decoder is its own chunk: ``apache-arrow`` is the largest
+ * dependency of the page, and nothing needs it until a run streams its first
+ * frame. ``start()`` begins fetching it while the socket connects, and the
+ * ``start_tds`` / ``resume`` command is not sent until it has arrived (see
+ * ``handleReady``). The server sends no frame before that command, so a frame
+ * never reaches a stream that cannot decode it.
+ */
+type ArrowDecoder = typeof decodeArrowBatch;
+let arrowDecoder: ArrowDecoder | null = null;
+let arrowDecoderLoad: Promise<ArrowDecoder> | null = null;
+
+/**
+ * Fetch the Arrow decoder chunk (once; later calls reuse the result). A failed
+ * fetch is not cached, so the next run tries again.
+ */
+export function loadArrowDecoder(): Promise<ArrowDecoder> {
+  if (arrowDecoder !== null) return Promise.resolve(arrowDecoder);
+  arrowDecoderLoad ??= import('./arrow').then(
+    (mod) => {
+      arrowDecoder = mod.decodeArrowBatch;
+      return arrowDecoder;
+    },
+    (err: unknown) => {
+      arrowDecoderLoad = null;
+      throw err;
+    },
+  );
+  return arrowDecoderLoad;
+}
 
 /** Variable group selector forwarded to ``start_tds``. */
 export type VarGroup = 'bus_v' | 'gen_state' | 'gen_power' | 'line_flow' | 'load_pq';
@@ -249,6 +279,9 @@ export class RunStream {
   start(): void {
     if (this.phase !== 'idle') return;
     this.phase = 'connecting';
+    // Start fetching the decoder now so it is usually there before the server
+    // answers. A failure is reported when ``ready`` arrives, so it is dropped here.
+    loadArrowDecoder().catch(() => undefined);
     this.openSocket(/*resume=*/ false);
   }
 
@@ -416,6 +449,26 @@ export class RunStream {
   }
 
   private handleReady(isResume: boolean): void {
+    if (arrowDecoder === null) {
+      // The decoder chunk has not arrived. Hold the command until it has: the
+      // server answers it with frames, and a frame needs the decoder.
+      loadArrowDecoder().then(
+        () => {
+          if (!this.disposed) this.handleReady(isResume);
+        },
+        (err: unknown) => {
+          if (this.disposed) return;
+          this.emitError({
+            code: 'protocol_error',
+            reason: `could not load the Arrow decoder: ${(err as Error).message}`,
+          });
+          this.phase = 'closed';
+          this.disposed = true;
+          this.tearDownSocket();
+        },
+      );
+      return;
+    }
     if (isResume) {
       if (this.runId === null) {
         this.emitError({
@@ -499,9 +552,15 @@ export class RunStream {
       return;
     }
     if (this.runId === null) return;
+    if (arrowDecoder === null) {
+      // Unreachable while ``handleReady`` holds the command back; kept so a
+      // frame that did arrive early is dropped, not thrown on.
+      log.warn('[RunStream] dropping binary frame received before the Arrow decoder loaded');
+      return;
+    }
     let decoded: DecodedFrame;
     try {
-      decoded = decodeArrowBatch(buffer, this.columnNames);
+      decoded = arrowDecoder(buffer, this.columnNames);
     } catch (err) {
       this.emitError({
         code: 'protocol_error',

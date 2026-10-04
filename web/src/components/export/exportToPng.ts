@@ -19,8 +19,6 @@
  * dimensions; no scaling is applied unless `pixelRatio` is set
  * explicitly.
  */
-import { toBlob } from 'html-to-image';
-
 export interface ExportToPngOptions {
   /**
    * Pixel ratio for the rasterised output. Defaults to the device's
@@ -60,6 +58,9 @@ export async function elementToPng(
     (typeof window !== 'undefined' && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1);
   const backgroundColor =
     options.backgroundColor === null ? undefined : (options.backgroundColor ?? '#ffffff');
+  // Loaded here, not at the top of the module: the rasteriser is only needed
+  // when someone exports a PNG, and the menu that calls this is on every page.
+  const { toBlob } = await import('html-to-image');
   const blob = await toBlob(element, {
     pixelRatio,
     backgroundColor,

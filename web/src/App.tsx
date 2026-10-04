@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from '@/components/shell/AppShell';
 import { LeftSidebar } from '@/components/shell/LeftSidebar';
@@ -16,7 +16,7 @@ import { WorkspaceMenu } from '@/components/shell/WorkspaceMenu';
 import { EditMenu } from '@/components/shell/EditMenu';
 import { RunMenu } from '@/components/shell/RunMenu';
 import { ExportMenu } from '@/components/shell/ExportMenu';
-import { SldCanvas } from '@/components/sld/SldCanvas';
+import { SldLayoutSkeleton } from '@/components/sld/SldLayoutSkeleton';
 import { RightInspector } from '@/components/inspector/RightInspector';
 import { BottomDrawer } from '@/components/shell/BottomDrawer';
 import { ResultsView } from '@/components/shell/ResultsView';
@@ -35,9 +35,25 @@ import { JobAnnouncer } from '@/components/shell/JobAnnouncer';
 import { ProblemDetailsError } from '@/api/client';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
+import { useSnapshotStore } from '@/store/snapshot';
 import { ComponentDropZone } from '@/components/sld/ComponentDropZone';
-import { SaveSnapshotDialog } from '@/components/snapshot/SaveSnapshotDialog';
-import { LoadSnapshotDialog } from '@/components/snapshot/LoadSnapshotDialog';
+import { LazyMount } from '@/components/ui/Lazy';
+import { lazyNamed } from '@/lib/lazyNamed';
+
+// Code split out of the first load: the diagram (React Flow and the layout
+// code) is fetched when a case is first shown, and the snapshot dialogs when
+// one is first opened.
+const SldCanvas = lazyNamed(() => import('@/components/sld/SldCanvas'), 'SldCanvas');
+const SaveSnapshotDialog = lazyNamed(
+  () => import('@/components/snapshot/SaveSnapshotDialog'),
+  'SaveSnapshotDialog',
+  'overlay',
+);
+const LoadSnapshotDialog = lazyNamed(
+  () => import('@/components/snapshot/LoadSnapshotDialog'),
+  'LoadSnapshotDialog',
+  'overlay',
+);
 
 /**
  * Root component. Wraps the AppShell with the cross-cutting providers
@@ -130,7 +146,14 @@ function CanvasSlot() {
   const [dropError, setDropError] = useState<string | null>(null);
 
   if (caseSelection !== null) {
-    return <SldCanvas />;
+    // The skeleton is the one SldCanvas itself shows while ELK lays the graph
+    // out, so the canvas does not flash a second placeholder as its chunk
+    // arrives.
+    return (
+      <Suspense fallback={<SldLayoutSkeleton />}>
+        <SldCanvas />
+      </Suspense>
+    );
   }
 
   // Drop = "start a blank system seeded with this element". Mirrors
@@ -169,6 +192,26 @@ function CanvasSlot() {
         emptyStateKey="app-shell-no-case"
       />
     </ComponentDropZone>
+  );
+}
+
+/**
+ * The snapshot save/load dialogs. Each is store-driven (``saveDialogOpen`` /
+ * ``loadDialogOpen``) and self-gates to nothing while closed, so it is only
+ * fetched and mounted once its flag has been set.
+ */
+function SnapshotDialogs() {
+  const saveOpen = useSnapshotStore((s) => s.saveDialogOpen);
+  const loadOpen = useSnapshotStore((s) => s.loadDialogOpen);
+  return (
+    <>
+      <LazyMount when={saveOpen}>
+        <SaveSnapshotDialog />
+      </LazyMount>
+      <LazyMount when={loadOpen}>
+        <LoadSnapshotDialog />
+      </LazyMount>
+    </>
   );
 }
 
@@ -228,8 +271,7 @@ export function App() {
                   snapshot…" / "Load snapshot…" flipped the store flag but
                   nothing rendered (and Sweep, which needs a snapshot, was
                   unreachable). Mount them at the app root so the actions work. */}
-              <SaveSnapshotDialog />
-              <LoadSnapshotDialog />
+              <SnapshotDialogs />
             </>
           }
         />

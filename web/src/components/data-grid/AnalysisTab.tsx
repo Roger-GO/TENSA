@@ -23,20 +23,33 @@
  * F-FEAS-2 dual-write resolution. The owner (BottomDrawer) passes the
  * ``onSubTabChange`` callback that performs the dual write.
  */
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { cn } from '@/lib/cn';
+import { lazyNamed } from '@/lib/lazyNamed';
 import { ANALYSIS_SUB_TABS, type AnalysisSubTab } from '@/store/layout';
-import {
-  AnalyzeEigSubMode,
-  AnalyzeCpfSubMode,
-  AnalyzeSeSubMode,
-} from '@/components/analyze/AnalyzePanel';
+import { LoadingPanel } from '@/components/ui/Lazy';
 import { TimeSeriesPlot } from '@/components/plots/TimeSeriesPlot';
 import { ScrubControl } from '@/components/plots/ScrubControl';
 import { VariableTreePicker } from '@/components/plots/VariableTreePicker';
 import { TdsConfigPanel } from '@/components/tds/TdsConfigPanel';
 import { RunStatusBadge } from '@/components/tds/RunStatusBadge';
+
+// The EIG, CPF and SE views (their charts, tables and run forms) load the first
+// time one of those sub-tabs opens; the Plot sub-tab, which is the default,
+// does not wait for them.
+const AnalyzeEigSubMode = lazyNamed(
+  () => import('@/components/analyze/AnalyzePanel'),
+  'AnalyzeEigSubMode',
+);
+const AnalyzeCpfSubMode = lazyNamed(
+  () => import('@/components/analyze/AnalyzePanel'),
+  'AnalyzeCpfSubMode',
+);
+const AnalyzeSeSubMode = lazyNamed(
+  () => import('@/components/analyze/AnalyzePanel'),
+  'AnalyzeSeSubMode',
+);
 
 const SUB_TAB_LABELS: Record<AnalysisSubTab, string> = {
   plot: 'Plot',
@@ -106,21 +119,27 @@ export function AnalysisTab({ activeSubTab, onSubTabChange, className }: Analysi
           data-testid="analysis-sub-tab-content-eig"
           className="flex min-h-0 flex-1 flex-col"
         >
-          <AnalyzeEigSubMode />
+          <Suspense fallback={<LoadingPanel />}>
+            <AnalyzeEigSubMode />
+          </Suspense>
         </TabsPrimitive.Content>
         <TabsPrimitive.Content
           value="cpf"
           data-testid="analysis-sub-tab-content-cpf"
           className="flex min-h-0 flex-1 flex-col"
         >
-          <AnalyzeCpfSubMode />
+          <Suspense fallback={<LoadingPanel />}>
+            <AnalyzeCpfSubMode />
+          </Suspense>
         </TabsPrimitive.Content>
         <TabsPrimitive.Content
           value="se"
           data-testid="analysis-sub-tab-content-se"
           className="flex min-h-0 flex-1 flex-col"
         >
-          <AnalyzeSeSubMode />
+          <Suspense fallback={<LoadingPanel />}>
+            <AnalyzeSeSubMode />
+          </Suspense>
         </TabsPrimitive.Content>
         <TabsPrimitive.Content
           value="tds"

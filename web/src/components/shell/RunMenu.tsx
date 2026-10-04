@@ -19,10 +19,18 @@
  */
 import { useEffect, useState } from 'react';
 import { TopBarMenu, TopBarMenuItem, TopBarMenuLabel } from './TopBarMenu';
-import { SweepDialog } from '@/components/sweep/SweepDialog';
+import { LazyMount } from '@/components/ui/Lazy';
+import { lazyNamed } from '@/lib/lazyNamed';
 import { useRunModeStore } from '@/store/runMode';
 import type { RunRoutine } from '@/lib/useRunReadiness';
 import { useCommandRegistry, subscribePaletteDialog } from '@/lib/commands';
+
+// The sweep dialog is its own chunk, fetched the first time it opens.
+const SweepDialog = lazyNamed(
+  () => import('@/components/sweep/SweepDialog'),
+  'SweepDialog',
+  'overlay',
+);
 
 const TESTID_SUFFIX_BY_ID: Record<string, string> = {
   'run.pflow': 'pflow',
@@ -74,7 +82,9 @@ export function RunMenu() {
           );
         })}
       </TopBarMenu>
-      <SweepDialog open={sweepOpen} onOpenChange={setSweepOpen} />
+      <LazyMount when={sweepOpen}>
+        <SweepDialog open={sweepOpen} onOpenChange={setSweepOpen} />
+      </LazyMount>
     </>
   );
 }

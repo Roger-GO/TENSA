@@ -45,7 +45,7 @@ import { useAnalyzeStore } from '@/store/analyze';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 import { useHistoryStore } from '@/store/history';
-import { useReportDialogStore } from '@/components/reports/ReportDialog';
+import { useReportDialogStore } from '@/store/reportDialog';
 import {
   useCloneRedo,
   useCloneReset,

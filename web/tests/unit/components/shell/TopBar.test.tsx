@@ -14,6 +14,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  act,
   cleanup,
   render as rtlRender,
   screen,
@@ -25,6 +26,9 @@ import type { ReactElement } from 'react';
 
 import { TopBar } from '@/components/shell/TopBar';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
+import { useBundleStore } from '@/store/bundle';
+import { useHistoryStore } from '@/store/history';
+import { useReportDialogStore } from '@/store/reportDialog';
 
 function render(ui: ReactElement): RenderResult {
   const client = new QueryClient({
@@ -37,6 +41,9 @@ afterEach(() => {
   cleanup();
   window.localStorage.clear();
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
+  useBundleStore.getState().closeDialog();
+  useReportDialogStore.getState().closeDialog();
+  useHistoryStore.getState().closeDrawer();
 });
 
 describe('<TopBar /> — structural contract', () => {
@@ -166,5 +173,32 @@ describe('<TopBar /> — v3 Unit 2 pane toggles', () => {
     useLayoutStore.setState({ drawerHasUnreadResults: true });
     render(<TopBar />);
     expect(screen.getByTestId('top-bar-toggle-drawer-unread-dot')).toBeInTheDocument();
+  });
+});
+
+describe('<TopBar /> — store-driven dialogs load on first open', () => {
+  it('mounts none of them while their flags are closed', () => {
+    render(<TopBar />);
+    expect(screen.queryByTestId('bundle-export-dialog')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('report-dialog')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('history-drawer')).not.toBeInTheDocument();
+  });
+
+  it('mounts the bundle export dialog when its flag opens', async () => {
+    render(<TopBar />);
+    act(() => useBundleStore.getState().openDialog());
+    expect(await screen.findByTestId('bundle-export-dialog')).toBeInTheDocument();
+  });
+
+  it('mounts the report dialog when its flag opens', async () => {
+    render(<TopBar />);
+    act(() => useReportDialogStore.getState().openDialog('pflow'));
+    expect(await screen.findByTestId('report-dialog')).toBeInTheDocument();
+  });
+
+  it('mounts the history drawer when its flag opens', async () => {
+    render(<TopBar />);
+    act(() => useHistoryStore.getState().openDrawer());
+    expect(await screen.findByTestId('history-drawer')).toBeInTheDocument();
   });
 });
