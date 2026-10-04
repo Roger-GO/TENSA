@@ -531,8 +531,11 @@ class PflowResult(BaseModel):
         default_factory=dict,
         description=(
             "Per-generator P / Q output and terminal voltage, keyed by "
-            "generator idx (stringified). Covers PV, Slack, GENROU, and "
-            "GENCLS. Empty when PF did not converge."
+            "generator idx (stringified). Covers the static generators "
+            "(PV and Slack). A dynamic machine (GENROU, GENCLS) has no "
+            "entry of its own: read the entry of the static generator "
+            "named by its ``gen`` parameter. Empty when PF did not "
+            "converge."
         ),
     )
     load_consumption: dict[str, LoadConsumption] = Field(

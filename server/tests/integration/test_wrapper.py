@@ -199,6 +199,52 @@ def test_run_sweep_forwards_step_size_to_tds(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+def test_pflow_generator_outputs_are_the_static_generators_only() -> None:
+    """kundur_full numbers its GENROU machines 1..4, the same idx as its
+    PV/Slack generators. The machines carry no p / q before TDS initialises,
+    so reading them wrote a zero row under each idx and overwrote the real
+    output of every generator in the case."""
+    pytest.importorskip("andes")
+    import andes
+
+    w = Wrapper()
+    topo = w.load_case(andes.get_case("kundur/kundur_full.xlsx"))
+    kinds = {g.kind for g in topo.generators}
+    assert {"PV", "Slack", "GENROU"} <= kinds, "the case must hold both halves of a machine"
+    static_idx = {str(g.idx) for g in topo.generators if g.kind in ("PV", "Slack")}
+
+    pf = w.run_pflow()
+    assert pf.converged
+    assert set(pf.generator_outputs) == static_idx
+    # A PV row carries its dispatched P (p0 in pu on the 100 MVA system base).
+    for g in topo.generators:
+        if g.kind == "PV":
+            p0 = g.params["p0"]
+            assert isinstance(p0, int | float)
+            assert pf.generator_outputs[str(g.idx)].p == pytest.approx(p0 * 100.0)
+    assert all(out.p > 0.0 for out in pf.generator_outputs.values())
+
+
+@pytest.mark.integration
+def test_pflow_generator_outputs_skip_dynamic_machines_with_their_own_idx() -> None:
+    """ieee14_full names its machines GENROU_1..5, so their idx never meets a
+    static generator's, but a machine still has no PF output of its own and
+    must not show up as a row of zeros."""
+    pytest.importorskip("andes")
+    import andes
+
+    w = Wrapper()
+    topo = w.load_case(andes.get_case("ieee14/ieee14_full.xlsx"))
+    machines = {str(g.idx) for g in topo.generators if g.kind == "GENROU"}
+    assert machines, "the case must carry GENROU machines"
+
+    pf = w.run_pflow()
+    assert pf.converged
+    assert machines.isdisjoint(pf.generator_outputs)
+    assert pf.generator_outputs["1"].p == pytest.approx(81.427, abs=0.01)  # the slack
+
+
+@pytest.mark.integration
 def test_operating_point_after_pflow_matches_pflow_result() -> None:
     """``operating_point`` reads the same solved Bus v/a as ``run_pflow``
     without re-running. After a PF, the two must agree."""

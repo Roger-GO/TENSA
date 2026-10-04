@@ -202,10 +202,11 @@ class GeneratorOutput:
     """Per-generator PF output: active + reactive power injection at the
     generator's terminal bus, plus the terminal voltage (pu).
 
-    For PV/Slack (static) generators these come straight from ANDES's
-    own ``p`` / ``q`` / ``v`` algebraic variables. For dynamic models
-    (GENROU/GENCLS) the same fields exist post-PF (the dynamic state
-    initialization runs after PF converges).
+    These come straight from the ``p`` / ``q`` / ``v`` variables of ANDES's
+    static generators (PV, Slack). A dynamic machine (GENROU/GENCLS) has
+    no row of its own: it carries no ``p`` / ``q`` until TDS initialises,
+    and its operating point is the one of the static generator it names in
+    its ``gen`` parameter.
     """
 
     p: float  # MW (scaled by ss.config.mva)
@@ -4849,12 +4850,15 @@ def _reference_angle_drift(ss: System) -> float:
 
 
 def _extract_generator_outputs(ss: System) -> dict[str, GeneratorOutput]:
-    """Walk PV, Slack, GENROU, GENCLS devices and read each one's
-    converged P / Q output + terminal voltage.
+    """Walk the PV and Slack devices and read each one's converged P / Q
+    output + terminal voltage.
 
-    For PV/Slack: ANDES stores these directly on the model (``p``,
-    ``q``, ``v`` algebraic variables). For dynamic generators
-    (GENROU/GENCLS): the same fields exist after PF init.
+    ANDES stores these directly on the static model (``p``, ``q``, ``v``
+    algebraic variables). The dynamic machines (GENROU/GENCLS) are left
+    out on purpose: they have no ``p`` / ``q`` before TDS initialises, so
+    reading them would invent a zero output, and a machine whose idx
+    equals a static generator's (kundur_full numbers both 1..4) would
+    overwrite that generator's real row with it.
 
     All values are in pu; we scale P/Q by ``ss.config.mva`` to MW/MVAr.
     Best-effort: defaults to 0.0 / 0.0 / 1.0 on any missing attribute.
@@ -4866,7 +4870,7 @@ def _extract_generator_outputs(ss: System) -> dict[str, GeneratorOutput]:
         mva_base = float(getattr(ss.config, "mva", 100.0))
     except (TypeError, ValueError):
         mva_base = 100.0
-    for model_name in ("PV", "Slack", "GENROU", "GENCLS"):
+    for model_name in ("PV", "Slack"):
         model = getattr(ss, model_name, None)
         if model is None:
             continue
