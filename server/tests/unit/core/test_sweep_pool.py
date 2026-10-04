@@ -261,8 +261,10 @@ async def test_when_every_worker_dies_the_sweep_fails_after_reporting_what_it_ha
 
     # Each worker takes one iteration and dies with it, leaving four never handed
     # out; the message counts those, and the two that were lost are failed rows.
-    with pytest.raises(SweepWorkersLostError, match="4 of 6 iterations still to run"):
+    with pytest.raises(SweepWorkersLostError, match="4 of 6 iterations still to run") as lost:
         await _run(workers, 6, got)
+    # The session's own worker is not among the dead, and the message says so.
+    assert "the session itself is unaffected" in str(lost.value)
 
     assert got.indices == [0, 1]
     assert all(r["error"] is not None for r in got.rows.values())

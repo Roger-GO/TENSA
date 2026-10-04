@@ -73,6 +73,11 @@ JOB_LIVENESS_TICK = 10.0
 # ``ProblemDetails`` of a job orphaned by a dead worker.
 WORKER_DIED_CATEGORY = "WorkerDied"
 
+# Category of a sweep that ended because every one of its sub-workers died. The
+# session's own worker is alive then, which is what sets this apart from
+# ``WorkerDied`` (the session is gone and the case must be reloaded).
+SWEEP_WORKERS_LOST_CATEGORY = SweepWorkersLostError.__name__
+
 
 class SessionExpiredError(AndesAppError):
     """Raised when a caller references a session that has been reaped or
@@ -1306,8 +1311,10 @@ class SessionManager:
                 sess, sweep_buf, "error", error=(exc.category, exc.detail)
             )
         except SweepWorkersLostError as exc:
+            # The sub-workers died; the session's own worker is fine, so this is
+            # not a ``WorkerDied`` (which tells the client to reload the case).
             await self._finish_sweep(
-                sess, sweep_buf, "error", error=(WORKER_DIED_CATEGORY, str(exc))
+                sess, sweep_buf, "error", error=(SWEEP_WORKERS_LOST_CATEGORY, str(exc))
             )
         except Exception as exc:  # noqa: BLE001
             await self._finish_sweep(

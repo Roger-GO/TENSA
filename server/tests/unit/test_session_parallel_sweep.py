@@ -18,6 +18,7 @@ import pytest
 
 from tensa.core import session as session_module
 from tensa.core.session import (
+    SWEEP_WORKERS_LOST_CATEGORY,
     WORKER_DIED_CATEGORY,
     SessionExpiredError,
     SessionManager,
@@ -210,7 +211,9 @@ async def test_the_parallel_result_decides_the_truncated_flag() -> None:
     assert buf.truncated is True
 
 
-async def test_losing_every_sub_worker_fails_the_sweep_as_a_worker_death() -> None:
+async def test_losing_every_sub_worker_fails_the_sweep_without_a_worker_death() -> None:
+    """The session's own worker is alive, so the client must not be told the
+    session died (``WorkerDied`` sends it to reload the case)."""
     mgr, sess = _manager(4)
     _Calls(mgr, parallel=SweepWorkersLostError("every sweep worker exited"))
     buf = _buffer(mgr, sess, 8)
@@ -218,10 +221,15 @@ async def test_losing_every_sub_worker_fails_the_sweep_as_a_worker_death() -> No
     await mgr._drive_sweep(sess, buf, _sweep_args(8))
 
     assert buf.state == "error"
-    assert buf.error == (WORKER_DIED_CATEGORY, "every sweep worker exited")
+    assert buf.error == (SWEEP_WORKERS_LOST_CATEGORY, "every sweep worker exited")
     assert sess.sweep_in_progress is None
     record = sess.job_registry.get_job(buf.sweep_id)
     assert record is not None and record.status == "failed"
+    assert record.problem is not None
+    assert record.problem["category"] == SWEEP_WORKERS_LOST_CATEGORY
+    assert record.problem["category"] != WORKER_DIED_CATEGORY
+    # The session stays usable: nothing marked it closed.
+    assert not sess.closed
 
 
 async def test_cancelling_a_parallel_sweep_finishes_it_aborted_and_propagates() -> None:

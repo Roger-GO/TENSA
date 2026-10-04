@@ -257,7 +257,8 @@ async def run_iterations(
             )
         raise SweepWorkersLostError(
             f"every sweep worker exited with {len(pending)} of {len(tasks)} "
-            "iterations still to run"
+            "iterations still to run; the session itself is unaffected, so the "
+            "sweep can be started again"
         )
     return cursor
 
