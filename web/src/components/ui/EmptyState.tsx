@@ -25,14 +25,9 @@ import { cn } from '@/lib/cn';
  *   ``primary`` variant. Clicking it fires the supplied ``onClick``.
  * - ``role="status"`` so assistive tech announces the empty state.
  *
- * Migration history: Unit 8 introduced a placeholder ``EmptyState``
- * under ``components/shell/EmptyState.tsx`` that took ``action: ReactNode``.
- * Unit 13 promotes the component to ``components/ui/EmptyState.tsx``
- * (the canonical UI surface) and tightens the action contract to
+ * This is the only empty-state component: ``action`` is typed
  * ``{ label, onClick }`` so every empty state surfaces a clear,
- * uniformly-styled CTA. The shell module re-exports from here so
- * existing call sites that still import from ``@/components/shell/EmptyState``
- * keep working.
+ * uniformly-styled CTA, and every call site imports it from here.
  */
 export interface EmptyStateAction {
   /** Button label. Sentence case, short. */

@@ -363,7 +363,7 @@ function Toolbar({ children }: { children: ReactNode }) {
 }
 
 /** Empty-state placeholder shown when no series are selected (or no run). */
-function EmptyState({ message }: { message: string }) {
+function EmptyPlotMessage({ message }: { message: string }) {
   return (
     <div
       data-testid="time-series-plot-empty"
@@ -689,7 +689,7 @@ export function TimeSeriesPlot({
           <Toolbar>{toolbar}</Toolbar>
           <ExportMenu formats={['csv', 'png']} disabled panel="time-series" label="Export plot" />
         </div>
-        <EmptyState message="Run a TDS to see results" />
+        <EmptyPlotMessage message="Run a TDS to see results" />
       </div>
     );
   }
@@ -701,7 +701,7 @@ export function TimeSeriesPlot({
           <Toolbar>{toolbar}</Toolbar>
           <ExportMenu formats={['csv', 'png']} disabled panel="time-series" label="Export plot" />
         </div>
-        <EmptyState message="Select variables to plot" />
+        <EmptyPlotMessage message="Select variables to plot" />
       </div>
     );
   }

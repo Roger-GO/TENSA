@@ -67,4 +67,9 @@ describe('<EmptyState /> (Unit 13 canonical)', () => {
     expect(screen.getByTestId('empty-state-action')).toBeInTheDocument();
     expect(screen.getByTestId('empty-state').getAttribute('data-empty-state-key')).toBe('composed');
   });
+
+  it('is the only EmptyState component module, so no second copy can drift from it', () => {
+    const modules = Object.keys(import.meta.glob('/src/components/**/EmptyState.{ts,tsx}'));
+    expect(modules).toEqual(['/src/components/ui/EmptyState.tsx']);
+  });
 });
