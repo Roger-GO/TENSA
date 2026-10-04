@@ -227,7 +227,7 @@ export function sidecarCoversBuses(
  * One non-bus drag override the writer needs to persist. The drag
  * override map keyed by React Flow node id (`${uiCategory}-${idx}`) does
  * NOT carry the ANDES model class on its own — the caller (e.g.,
- * `SaveSystemButton.writeSidecarAlongside`) resolves the model class from
+ * `SaveSystemDialog.writeSidecarAlongside`) resolves the model class from
  * the topology before passing the entries here. Entries with a `null`
  * `modelClass` get written ONLY under the UI-category layer (the
  * model-class fallback is omitted).

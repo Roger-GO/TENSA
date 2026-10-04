@@ -297,7 +297,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   const usingAutoLayout = curated === null && storedSidecar === null;
   // Drag overrides — per-node coordinate overrides applied AFTER
   // buildGraph so user drags persist across topology re-fetches (Unit 9
-  // fix). Lives on the case store (Unit 13a) so the SaveSystemButton
+  // fix). Lives on the case store (Unit 13a) so the SaveSystemDialog
   // can snapshot the current layout into the auto-saved sidecar
   // alongside the case file.
   const dragOverrides = useCaseStore((s) => s.dragOverrides);

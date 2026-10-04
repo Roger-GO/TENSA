@@ -1,5 +1,5 @@
 /**
- * SaveSystemButton — modal-driven case save with format radio,
+ * SaveSystemDialog: modal-driven case save with format radio,
  * extension auto-derivation, sidecar auto-write, and 409 overwrite-flip.
  *
  * Tests stub `andesClient.post`/`put` so the lifecycle is exercised
@@ -20,7 +20,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 
-import { SaveSystemButton, SaveSystemDialog } from '@/components/case/SaveSystemButton';
+import { SaveSystemDialog } from '@/components/case/SaveSystemDialog';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { parseSessionId } from '@/api/types';
@@ -111,20 +111,25 @@ beforeEach(() => {
   });
 });
 
-describe('<SaveSystemButton />', () => {
-  it('renders the trigger button enabled when a topology is loaded', () => {
-    render(withQueryClient(<SaveSystemButton />));
-    expect(screen.getByTestId('save-system-button')).toBeEnabled();
-  });
+/**
+ * A stand-in for whatever opens the dialog (a menu item, Ctrl/Cmd+S): a button
+ * outside it, with the dialog's open state in the owner.
+ */
+function Owner() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" data-testid="save-system-button" onClick={() => setOpen(true)}>
+        open
+      </button>
+      <SaveSystemDialog open={open} onOpenChange={setOpen} />
+    </>
+  );
+}
 
-  it('disables the trigger button when topology is null', () => {
-    MOCK_TOPOLOGY = null;
-    render(withQueryClient(<SaveSystemButton />));
-    expect(screen.getByTestId('save-system-button')).toBeDisabled();
-  });
-
+describe('<SaveSystemDialog />', () => {
   it('clicking the trigger opens the modal with the xlsx default + filename preview', async () => {
-    render(withQueryClient(<SaveSystemButton />));
+    render(withQueryClient(<Owner />));
     await userEvent.click(screen.getByTestId('save-system-button'));
     expect(screen.getByRole('dialog')).toHaveTextContent(/Save system/i);
     // Preview reflects the default filename + xlsx default.
@@ -133,7 +138,7 @@ describe('<SaveSystemButton />', () => {
 
   it('switching the format radio updates the auto-derived extension preview', async () => {
     const user = userEvent.setup();
-    render(withQueryClient(<SaveSystemButton />));
+    render(withQueryClient(<Owner />));
     await user.click(screen.getByTestId('save-system-button'));
     await user.click(screen.getByRole('radio', { name: /json/i }));
     expect(screen.getByText(/my-system\.json/)).toBeInTheDocument();
@@ -143,7 +148,7 @@ describe('<SaveSystemButton />', () => {
 
   it('happy path: submitting posts to /sessions/{id}/save with the right body', async () => {
     const user = userEvent.setup();
-    render(withQueryClient(<SaveSystemButton />));
+    render(withQueryClient(<Owner />));
     await user.click(screen.getByTestId('save-system-button'));
     await user.click(screen.getByTestId('save-confirm'));
     await waitFor(() => {
@@ -163,7 +168,7 @@ describe('<SaveSystemButton />', () => {
     const { ProblemDetailsError } = await import('@/api/client');
     nextPost = () =>
       Promise.reject(new ProblemDetailsError(makeProblemDetails(409, 'File exists')));
-    render(withQueryClient(<SaveSystemButton />));
+    render(withQueryClient(<Owner />));
     await user.click(screen.getByTestId('save-system-button'));
     await user.click(screen.getByTestId('save-confirm'));
     await waitFor(() => {
@@ -174,7 +179,7 @@ describe('<SaveSystemButton />', () => {
 
   it('toggling Overwrite + re-submitting passes overwrite=true to the server', async () => {
     const user = userEvent.setup();
-    render(withQueryClient(<SaveSystemButton />));
+    render(withQueryClient(<Owner />));
     await user.click(screen.getByTestId('save-system-button'));
     const overwriteCheckbox = screen.getByRole('checkbox', { name: /Overwrite if exists/i });
     await user.click(overwriteCheckbox);
@@ -194,7 +199,7 @@ describe('<SaveSystemButton />', () => {
         '1': { x: 10, y: 20 },
       },
     });
-    render(withQueryClient(<SaveSystemButton />));
+    render(withQueryClient(<Owner />));
     await user.click(screen.getByTestId('save-system-button'));
     await user.click(screen.getByTestId('save-confirm'));
     await waitFor(() => {
@@ -211,7 +216,7 @@ describe('<SaveSystemButton />', () => {
   it('skips the sidecar write entirely when there are no drag overrides', async () => {
     const user = userEvent.setup();
     useCaseStore.setState({ dragOverrides: {} });
-    render(withQueryClient(<SaveSystemButton />));
+    render(withQueryClient(<Owner />));
     await user.click(screen.getByTestId('save-system-button'));
     await user.click(screen.getByTestId('save-confirm'));
     await waitFor(() => {
@@ -222,7 +227,7 @@ describe('<SaveSystemButton />', () => {
 
   it('rejects an empty filename with an inline error before firing the request', async () => {
     const user = userEvent.setup();
-    render(withQueryClient(<SaveSystemButton />));
+    render(withQueryClient(<Owner />));
     await user.click(screen.getByTestId('save-system-button'));
     const filename = screen.getByTestId('save-filename') as HTMLInputElement;
     await user.clear(filename);
@@ -245,7 +250,7 @@ describe('<SaveSystemButton />', () => {
         'generator-1': { x: 50, y: 60 },
       },
     });
-    render(withQueryClient(<SaveSystemButton />));
+    render(withQueryClient(<Owner />));
     await user.click(screen.getByTestId('save-system-button'));
     await user.click(screen.getByTestId('save-confirm'));
     await waitFor(() => {
@@ -264,7 +269,7 @@ describe('<SaveSystemButton />', () => {
   });
 });
 
-describe('<SaveSystemButton /> — auto-close beat', () => {
+describe('<Owner /> — auto-close beat', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -278,7 +283,7 @@ describe('<SaveSystemButton /> — auto-close beat', () => {
 
   it('closes by itself after a successful save', async () => {
     const user = startBeatClock();
-    render(withQueryClient(<SaveSystemButton />));
+    render(withQueryClient(<Owner />));
     await saveAndConfirm(user);
 
     await act(async () => {
@@ -289,7 +294,7 @@ describe('<SaveSystemButton /> — auto-close beat', () => {
 
   it('does not close a re-opened modal when the previous one auto-closes', async () => {
     const user = startBeatClock();
-    render(withQueryClient(<SaveSystemButton />));
+    render(withQueryClient(<Owner />));
     await saveAndConfirm(user);
 
     // Close by hand inside the beat, then open the modal again.
@@ -314,7 +319,7 @@ describe('<SaveSystemButton /> — auto-close beat', () => {
       new Promise((resolve) => {
         answer = resolve;
       });
-    render(withQueryClient(<SaveSystemButton />));
+    render(withQueryClient(<Owner />));
     await user.click(screen.getByTestId('save-system-button'));
     await user.click(screen.getByTestId('save-confirm'));
     await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1));
@@ -342,7 +347,7 @@ describe('<SaveSystemButton /> — auto-close beat', () => {
     const user = startBeatClock();
     const { ProblemDetailsError } = await import('@/api/client');
     nextPost = () => Promise.reject(new ProblemDetailsError(makeProblemDetails(500, 'disk full')));
-    render(withQueryClient(<SaveSystemButton />));
+    render(withQueryClient(<Owner />));
     await user.click(screen.getByTestId('save-system-button'));
     await user.click(screen.getByTestId('save-confirm'));
     expect(await screen.findByTestId('save-error')).toHaveTextContent('disk full');
@@ -355,24 +360,11 @@ describe('<SaveSystemButton /> — auto-close beat', () => {
 });
 
 describe('<SaveSystemDialog /> opened by its owner', () => {
-  /** A stand-in owner: a button outside the dialog that opens it, like a menu item or Ctrl/Cmd+S. */
-  function Owner() {
-    const [open, setOpen] = useState(false);
-    return (
-      <>
-        <button type="button" data-testid="owner-open" onClick={() => setOpen(true)}>
-          open
-        </button>
-        <SaveSystemDialog open={open} onOpenChange={setOpen} />
-      </>
-    );
-  }
-
   it('shows the dialog when the owner opens it, and tells the owner when it closes', async () => {
     const user = userEvent.setup();
     render(withQueryClient(<Owner />));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    await user.click(screen.getByTestId('owner-open'));
+    await user.click(screen.getByTestId('save-system-button'));
     expect(screen.getByRole('dialog')).toHaveTextContent(/Save system/i);
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -384,12 +376,12 @@ describe('<SaveSystemDialog /> opened by its owner', () => {
     nextPost = () =>
       Promise.reject(new ProblemDetailsError(makeProblemDetails(409, 'File exists')));
     render(withQueryClient(<Owner />));
-    await user.click(screen.getByTestId('owner-open'));
+    await user.click(screen.getByTestId('save-system-button'));
     await user.click(screen.getByTestId('save-confirm'));
     expect(await screen.findByTestId('save-error')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    await user.click(screen.getByTestId('owner-open'));
+    await user.click(screen.getByTestId('save-system-button'));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.queryByTestId('save-error')).not.toBeInTheDocument();
   });
@@ -402,13 +394,13 @@ describe('<SaveSystemDialog /> opened by its owner', () => {
         answer = resolve;
       });
     render(withQueryClient(<Owner />));
-    await user.click(screen.getByTestId('owner-open'));
+    await user.click(screen.getByTestId('save-system-button'));
     await user.click(screen.getByTestId('save-confirm'));
     await waitFor(() => expect(postSpy).toHaveBeenCalled());
     // Leave while the save is in flight, and open again.
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    await user.click(screen.getByTestId('owner-open'));
+    await user.click(screen.getByTestId('save-system-button'));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
 
     await act(async () => {

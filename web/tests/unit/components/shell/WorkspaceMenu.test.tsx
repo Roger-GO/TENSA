@@ -6,7 +6,7 @@
  * contract inherited from `<TopBarMenu />`.
  *
  * Integration coverage with the per-component dialogs lives in those
- * components' own tests (SaveSystemButton, SnapshotMenu, etc.). We
+ * components' own tests (SaveSystemDialog, SnapshotMenu, etc.). We
  * verify here that the menu items reach the same store actions that
  * the dialogs read from.
  */

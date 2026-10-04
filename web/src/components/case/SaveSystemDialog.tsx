@@ -21,11 +21,11 @@ import { cn } from '@/lib/cn';
 import { useSafeTimeout } from '@/lib/useSafeTimeout';
 
 /**
- * "Save system" format-picker modal, and the button that opens it.
+ * "Save system" format-picker modal.
  *
- * ``SaveSystemDialog`` is controlled, so whoever owns an always-mounted copy can
- * open it from anywhere: the Workspace menu keeps one for the palette command
- * and Ctrl/Cmd+S. ``SaveSystemButton`` is the button with a dialog of its own.
+ * Controlled, so whoever owns an always-mounted copy can open it from anywhere:
+ * the Workspace menu keeps one for its menu item, the palette command and
+ * Ctrl/Cmd+S.
  *
  * The modal has:
  *
@@ -40,10 +40,6 @@ import { useSafeTimeout } from '@/lib/useSafeTimeout';
 export interface SaveSystemDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}
-
-export interface SaveSystemButtonProps {
-  className?: string;
 }
 
 type Format = 'xlsx' | 'json' | 'raw';
@@ -71,9 +67,9 @@ export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDi
   // because doing so caused a setState-during-render warning under
   // StrictMode dev: SldCanvas's prune-effect calls ``setDragOverrides``
   // synchronously inside its useEffect, and the notification chain
-  // would schedule a SaveSystemButton re-render in the same tick that
+  // would schedule a SaveSystemDialog re-render in the same tick that
   // SldCanvasInner was still rendering. Dropping the subscription
-  // breaks the chain — SaveSystemButton only needs the override map at
+  // breaks the chain — SaveSystemDialog only needs the override map at
   // click time, not on every render.
   const saveMutation = useSaveCase();
   const sidecarMutation = usePutSidecar();
@@ -370,30 +366,6 @@ export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDi
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
-  );
-}
-
-/** The "Save system" button, with a dialog of its own. */
-export function SaveSystemButton({ className }: SaveSystemButtonProps) {
-  const sessionId = useSessionStore((s) => s.sessionId);
-  const topology = useCurrentTopology();
-  const [open, setOpen] = useState(false);
-  const enabled = sessionId !== null && topology !== null;
-  return (
-    <>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={!enabled}
-        onClick={() => setOpen(true)}
-        className={className}
-        data-testid="save-system-button"
-      >
-        Save system
-      </Button>
-      <SaveSystemDialog open={open} onOpenChange={setOpen} />
     </>
   );
 }

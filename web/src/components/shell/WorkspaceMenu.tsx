@@ -30,7 +30,7 @@ import { useEffect, useState } from 'react';
 import { TopBarMenu, TopBarMenuItem, TopBarMenuSeparator } from './TopBarMenu';
 import { LazyMount } from '@/components/ui/Lazy';
 import { lazyNamed } from '@/lib/lazyNamed';
-import { SaveSystemDialog } from '@/components/case/SaveSystemButton';
+import { SaveSystemDialog } from '@/components/case/SaveSystemDialog';
 import { BundleImportDialog } from '@/components/bundle/BundleImportDialog';
 import { useCommandRegistry, subscribePaletteDialog } from '@/lib/commands';
 

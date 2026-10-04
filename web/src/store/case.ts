@@ -67,7 +67,7 @@ export type SelectedElement =
 /**
  * Per-node coordinate overrides captured from user drags on the SLD
  * canvas. Lives in the case store (rather than a `useState` inside
- * SldCanvasInner) so the SaveSystemButton can snapshot the current
+ * SldCanvasInner) so the SaveSystemDialog can snapshot the current
  * layout into the auto-saved sidecar without prop-drilling. Cleared on
  * case change.
  */
