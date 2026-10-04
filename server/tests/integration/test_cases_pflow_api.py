@@ -304,6 +304,31 @@ async def test_topology_reports_the_case_frequency(
 
 
 @pytest.mark.integration
+async def test_topology_names_the_buses_the_case_gives_no_rated_voltage(
+    app_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """``buses_without_vn`` is empty for a case that rates its buses, and lists
+    every bus of one that does not (MATPOWER's ``case14.m`` has a baseKV of 0, so
+    ANDES holds its 110 kV fill-in), on a load and on a plain read."""
+    client, ws = app_workspace
+    shutil.copy2(_bundled_ieee14_dir().parent / "matpower" / "case14.m", ws)
+
+    rated = await _create_session(client)
+    loaded = await client.post(f"/api/sessions/{rated}/case", json={"primary_path": "ieee14.raw"})
+    assert loaded.status_code == 200, loaded.text
+    assert loaded.json()["buses_without_vn"] == []
+
+    unrated = await _create_session(client)
+    loaded = await client.post(f"/api/sessions/{unrated}/case", json={"primary_path": "case14.m"})
+    assert loaded.status_code == 200, loaded.text
+    assert loaded.json()["buses_without_vn"] == list(range(1, 15))
+    read = await client.get(f"/api/sessions/{unrated}/topology")
+    assert read.json()["buses_without_vn"] == list(range(1, 15))
+    # The fill-in is still what the bus's params say, and is no base.
+    assert {b["params"]["Vn"] for b in read.json()["buses"]} == {110}
+
+
+@pytest.mark.integration
 async def test_topology_line_params_include_r_x(
     app_workspace: tuple[httpx.AsyncClient, Path],
 ) -> None:

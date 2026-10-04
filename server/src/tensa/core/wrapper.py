@@ -66,6 +66,10 @@ from tensa.core.errors import (
     SeUnderDeterminedError,
     SystemAlreadyLoadedError,
 )
+from tensa.core.rated_voltage import (
+    buses_without_rated_voltage,
+    still_without_rated_voltage,
+)
 from tensa.core.se_result import MeasurementsGenerated, SeResult
 
 # JSON-friendly scalar union surfaced through topology / line-flow APIs.
@@ -186,6 +190,10 @@ class TopologySnapshot:
     # ``None`` when the System carries no usable value, so a client never
     # converts with a guess.
     freq_hz: float | None = None
+    # Idx of the buses whose rated voltage (``Vn``) the case does not give:
+    # ANDES holds its 110 kV fill-in there, which a client must not read as
+    # the bus's voltage base. See ``tensa.core.rated_voltage``.
+    buses_without_vn: list[int | str] = field(default_factory=list)
 
 
 @dataclass
@@ -287,6 +295,9 @@ class Wrapper:
         self._ss: System | None = None
         self._case_path: Path | None = None
         self._addfiles: list[Path] | None = None
+        # The buses the loaded case file gives no ``Vn`` (ANDES fills in 110 kV),
+        # worked out when the case is loaded: ANDES forgets it at ``setup()``.
+        self._buses_without_vn: frozenset[int | str] = frozenset()
         self._setup_failed: bool = False  # marks "requires reload"
         # ``_workspace`` is the per-launch workspace directory (the same one
         # the CLI hands the FastAPI app). Snapshot files (Unit 7) live under
@@ -415,6 +426,7 @@ class Wrapper:
         self._ss = ss
         self._case_path = case_path
         self._addfiles = resolved_addfiles
+        self._buses_without_vn = buses_without_rated_voltage(ss, case_path)
         self._setup_failed = False
         # Loading from a real case file invalidates any blank-session replay
         # history — that buffer is only meaningful for sessions whose entire
@@ -603,6 +615,7 @@ class Wrapper:
             shunts=_collect_models(ss, ["Shunt"]),
             controllers=_collect_models(ss, list(_CONTROLLER_MODEL_NAMES)),
             freq_hz=_system_frequency_hz(ss),
+            buses_without_vn=still_without_rated_voltage(ss, self._buses_without_vn),
         )
 
     # ----- disturbance management -----

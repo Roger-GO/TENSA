@@ -412,6 +412,18 @@ class TopologySummary(BaseModel):
             "has no usable value."
         ),
     )
+    buses_without_vn: list[int | str] = Field(
+        default_factory=list,
+        description=(
+            "Idx of the buses whose rated voltage (``Vn`` in the bus's "
+            "params) the case file does not give: it is absent, blank or "
+            "zero there, and ANDES fills in 110 kV. That 110 is not the "
+            "bus's voltage base, so a client must not use it to turn a "
+            "per-unit voltage into kV. Empty when every bus has a rated "
+            "voltage. A bus whose ``Vn`` has been edited since the case was "
+            "loaded is no longer listed."
+        ),
+    )
     job_id: str | None = Field(
         default=None,
         description=(
