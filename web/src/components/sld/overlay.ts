@@ -184,12 +184,47 @@ export function pickFrameIdx(run: RunRecord, scrubT: number | null): number {
   return findClosestFrameIdx(run.t, run.seqCount, scrubT);
 }
 
+/** A bus-voltage column of a run: the bus idx and the key into ``run.columns``. */
+interface BusVoltageColumn {
+  busIdx: string;
+  name: string;
+}
+
+/**
+ * The bus-voltage columns found in a run's column-name list, keyed by the
+ * list itself. A run keeps the same ``columnNames`` array for its whole
+ * life (frames never touch it), so each list is parsed once and the rAF
+ * loop does not re-run the column-name regexes on every tick (1209 names
+ * on the WECC case, of which only the buses matter). The store never
+ * mutates a list, and the ``WeakMap`` drops the entry along with the run.
+ */
+const busVoltageColumnsByNames = new WeakMap<readonly string[], readonly BusVoltageColumn[]>();
+
+function busVoltageColumns(columnNames: readonly string[]): readonly BusVoltageColumn[] {
+  let columns = busVoltageColumnsByNames.get(columnNames);
+  if (columns === undefined) {
+    const found: BusVoltageColumn[] = [];
+    for (const name of columnNames) {
+      const parsed = parseColumnName(name);
+      // The bus_v group now carries BOTH voltage (field 'v') and angle
+      // (field 'a') columns per bus. Only the voltage magnitude drives bus
+      // coloring — skip the angle column, or it would overwrite the band
+      // classification depending on column iteration order.
+      if (!parsed || parsed.group !== 'bus_v' || parsed.field !== 'v') continue;
+      found.push({ busIdx: parsed.elementIdx, name });
+    }
+    columns = found;
+    busVoltageColumnsByNames.set(columnNames, columns);
+  }
+  return columns;
+}
+
 /**
  * Pure helper: extract the per-bus overlay slot for one frame index.
  *
- * Walks the run's column-name list, picks out the ``Bus_<idx>_v``
- * columns, and classifies each. Generator / line columns are skipped
- * (they don't drive bus coloring).
+ * Walks the run's ``Bus_<idx>_v`` columns (found once per run, see
+ * ``busVoltageColumns``) and classifies each. Generator / line columns
+ * are skipped (they don't drive bus coloring).
  *
  * Returns an empty map when ``frameIdx < 0`` (no buffered frame yet) so
  * callers can use a single ``map.size === 0`` check to distinguish "no
@@ -200,24 +235,16 @@ export function pickFrameIdx(run: RunRecord, scrubT: number | null): number {
 export function getFrameBusOverlay(run: RunRecord, frameIdx: number): BusOverlayMap {
   if (frameIdx < 0) return new Map();
   const out = new Map<string, FrameBusOverlay>();
-  for (const name of run.columnNames) {
-    const parsed = parseColumnName(name);
-    // The bus_v group now carries BOTH voltage (field 'v') and angle
-    // (field 'a') columns per bus. Only the voltage magnitude drives bus
-    // coloring — skip the angle column, or it would overwrite the band
-    // classification depending on column iteration order.
-    if (!parsed || parsed.group !== 'bus_v' || parsed.field !== 'v') continue;
+  // Defensive: a frame index past the logical length would read into the
+  // over-allocated tail (which contains zeros). The runs-slice append loop
+  // keeps every tracked column's logical length in lockstep with
+  // ``seqCount``, so this branch is mainly for paranoia.
+  if (frameIdx >= run.seqCount) return out;
+  for (const { busIdx, name } of busVoltageColumns(run.columnNames)) {
     const col = run.columns[name];
     if (!col) continue;
-    // Defensive: a frame index past the column's logical length would
-    // read into the over-allocated tail (which contains zeros). Only
-    // bus_v columns from the run's authoritative ``columnNames`` list
-    // reach this point, and the runs-slice append loop keeps every
-    // tracked column's logical length in lockstep with ``seqCount``,
-    // so this branch is mainly for paranoia.
-    if (frameIdx >= run.seqCount) continue;
     const v = col[frameIdx]!;
-    out.set(parsed.elementIdx, { band: classifyVoltage(v), voltage: v });
+    out.set(busIdx, { band: classifyVoltage(v), voltage: v });
   }
   return out;
 }

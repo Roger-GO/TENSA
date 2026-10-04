@@ -6,7 +6,7 @@
  * Voltage thresholds (per the plan): green 0.97-1.03 pu, amber
  * 0.95-0.97 + 1.03-1.05, red <0.95 or >1.05.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   classifyVoltage,
   colorClassForBand,
@@ -18,6 +18,7 @@ import {
 import type { PflowResult } from '@/api/types';
 import { parseRunId } from '@/api/types';
 import type { RunRecord } from '@/store/runs';
+import * as plotModule from '@/store/plot';
 
 function makeResult(overrides: Partial<PflowResult> = {}): PflowResult {
   return {
@@ -354,6 +355,69 @@ describe('getFrameBusOverlay', () => {
     expect(overlay.get('1')?.band).toBe('success');
     expect(overlay.has('g1')).toBe(false);
     expect(overlay.has('l1')).toBe(false);
+  });
+
+  it('ignores the bus angle columns that share the bus_v group', () => {
+    const run = makeRun({
+      seqCount: 2,
+      t: [0, 1],
+      busColumns: { '1': [1.0, 0.92] },
+      extraColumns: { Bus_1_a: [0, -0.4], Bus_2_a: [0, -0.5] },
+    });
+    const overlay = getFrameBusOverlay(run, 1);
+    expect(overlay.size).toBe(1);
+    expect(overlay.get('1')).toEqual({ band: 'danger', voltage: 0.92 });
+  });
+
+  it("classifies a run's column names once, however often the overlay is read", () => {
+    const run = makeRun({
+      seqCount: 3,
+      t: [0, 1, 2],
+      busColumns: { '1': [1.0, 1.0, 0.92], '2': [1.0, 1.04, 1.08] },
+      extraColumns: { Gen_g1_omega: [1, 1, 1], Line_l1_p: [50, 51, 52], Bus_1_a: [0, 0, 0] },
+    });
+    const parse = vi.spyOn(plotModule, 'parseColumnName');
+    try {
+      for (let i = 0; i < 20; i += 1) getFrameBusOverlay(run, i % 3);
+      // The first read parsed each name once; the other 19 parsed nothing.
+      expect(parse).toHaveBeenCalledTimes(run.columnNames.length);
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
+  it('keeps reading the right columns as the run grows, without parsing again', () => {
+    // The runs slice replaces the record on every frame but keeps the one
+    // ``columnNames`` array, and replaces a column's array when it grows.
+    const run = makeRun({
+      seqCount: 1,
+      t: [0],
+      busColumns: { '1': [1.0] },
+      extraColumns: { Gen_g1_omega: [1] },
+    });
+    expect(getFrameBusOverlay(run, 0).get('1')?.band).toBe('success');
+    const parse = vi.spyOn(plotModule, 'parseColumnName');
+    try {
+      const grown: RunRecord = {
+        ...run,
+        seqCount: 2,
+        t: new Float64Array([0, 1]),
+        columns: { ...run.columns, Bus_1_v: new Float64Array([1.0, 0.9]) },
+      };
+      expect(grown.columnNames).toBe(run.columnNames);
+      expect(getFrameBusOverlay(grown, 1).get('1')).toEqual({ band: 'danger', voltage: 0.9 });
+      expect(parse).not.toHaveBeenCalled();
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
+  it("keeps each run's columns apart when two runs have different column lists", () => {
+    const a = makeRun({ seqCount: 1, t: [0], busColumns: { '1': [0.9] } });
+    const b = makeRun({ seqCount: 1, t: [0], busColumns: { '7': [1.0] } });
+    expect(Array.from(getFrameBusOverlay(a, 0).keys())).toEqual(['1']);
+    expect(Array.from(getFrameBusOverlay(b, 0).keys())).toEqual(['7']);
+    expect(Array.from(getFrameBusOverlay(a, 0).keys())).toEqual(['1']);
   });
 
   it('does not over-read the over-allocated typed-array tail', () => {
