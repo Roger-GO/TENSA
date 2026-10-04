@@ -3,8 +3,10 @@
  * layers of the page:
  *
  *  - Ctrl/Cmd+S (Save Page) and Ctrl/Cmd+O (Open File) belong to the browser, so
- *    they are swallowed even when there is nothing to save or open, and from
- *    inside a text field; they run their command except from inside a dialog.
+ *    they are swallowed even when there is nothing to save or open, from inside a
+ *    text field and from any focused control, whatever its ARIA role; they run
+ *    their command except from inside a dialog. The command palette is a dialog
+ *    for Ctrl/Cmd+S, and not for Ctrl/Cmd+O, which switches it to Open case.
  *  - Esc aborts the streaming run, but only an Esc that nothing else used: the
  *    Esc that closes a dialog, menu or popover must not also stop a run. The
  *    dialog case runs against a real Radix dialog, because it is Radix's
@@ -16,6 +18,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
+import { UnitsToggle } from '@/components/shell/UnitsToggle';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { subscribePaletteDialog } from '@/lib/commands';
 import type { PaletteDialogKey } from '@/lib/commands';
@@ -93,6 +96,34 @@ async function settle(): Promise<void> {
   });
 }
 
+/**
+ * Roles react-hotkeys-hook counts as form fields, though they are not form tags:
+ * a Radix toggle item is a radio, the scrub strip a slider, a menu entry a menuitem.
+ */
+const FORM_ROLES = ['radio', 'slider', 'menuitem', 'option', 'textbox', 'spinbutton'];
+
+/** A focused element that carries `role`, in the page until `remove()`. */
+function focusedWithRole(role: string): HTMLElement {
+  const el = document.createElement('div');
+  el.setAttribute('role', role);
+  el.tabIndex = 0;
+  document.body.appendChild(el);
+  el.focus();
+  return el;
+}
+
+/** The command palette's dialog with a text field in it, focused. */
+function openPaletteDialog(): { palette: HTMLElement; input: HTMLInputElement } {
+  const palette = document.createElement('div');
+  palette.setAttribute('role', 'dialog');
+  palette.setAttribute('data-testid', 'command-palette');
+  const input = document.createElement('input');
+  palette.appendChild(input);
+  document.body.appendChild(palette);
+  input.focus();
+  return { palette, input };
+}
+
 const CTRL_S = { key: 's', code: 'KeyS', ctrlKey: true };
 const META_S = { key: 's', code: 'KeyS', metaKey: true };
 const CTRL_O = { key: 'o', code: 'KeyO', ctrlKey: true };
@@ -168,6 +199,35 @@ describe('Ctrl/Cmd+S', () => {
     }
   });
 
+  it.each(FORM_ROLES)('still swallows the key from a focused %s, and saves', (role) => {
+    render(withProviders(<GlobalShortcuts />));
+    const el = focusedWithRole(role);
+    try {
+      const event = press(CTRL_S, el);
+      expect(event.defaultPrevented).toBe(true);
+      expect(posted).toEqual(['save-system']);
+    } finally {
+      el.remove();
+    }
+  });
+
+  it('still swallows the key after a click on the units toggle, a Radix radio', async () => {
+    const user = userEvent.setup();
+    render(
+      withProviders(
+        <>
+          <GlobalShortcuts />
+          <UnitsToggle />
+        </>,
+      ),
+    );
+    await user.click(screen.getByRole('radio', { name: 'Actual units' }));
+    expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'Actual units' }));
+    const event = press(CTRL_S, document.activeElement as Element);
+    expect(event.defaultPrevented).toBe(true);
+    expect(posted).toEqual(['save-system']);
+  });
+
   it('inside a dialog only swallows the key, so one dialog never opens on another', () => {
     render(withProviders(<GlobalShortcuts />));
     const dialog = document.createElement('div');
@@ -184,6 +244,20 @@ describe('Ctrl/Cmd+S', () => {
       dialog.remove();
     }
   });
+
+  it('inside the command palette only swallows the key, so Save system does not open on it', () => {
+    render(withProviders(<GlobalShortcuts />));
+    const { palette, input } = openPaletteDialog();
+    try {
+      for (const keys of [CTRL_S, META_S]) {
+        const event = press(keys, input);
+        expect(event.defaultPrevented).toBe(true);
+      }
+      expect(posted).toEqual([]);
+    } finally {
+      palette.remove();
+    }
+  });
 });
 
 describe('Ctrl/Cmd+O', () => {
@@ -197,18 +271,24 @@ describe('Ctrl/Cmd+O', () => {
   it('switches an open palette to Open case', () => {
     useCommandPaletteStore.setState({ open: true, page: 'commands' });
     render(withProviders(<GlobalShortcuts />));
-    const palette = document.createElement('div');
-    palette.setAttribute('role', 'dialog');
-    palette.setAttribute('data-testid', 'command-palette');
-    const input = document.createElement('input');
-    palette.appendChild(input);
-    document.body.appendChild(palette);
-    input.focus();
+    const { palette, input } = openPaletteDialog();
     try {
       press(CTRL_O, input);
       expect(useCommandPaletteStore.getState().page).toBe('open-case');
     } finally {
       palette.remove();
+    }
+  });
+
+  it.each(FORM_ROLES)('still swallows the key from a focused %s, and opens Open case', (role) => {
+    render(withProviders(<GlobalShortcuts />));
+    const el = focusedWithRole(role);
+    try {
+      const event = press(CTRL_O, el);
+      expect(event.defaultPrevented).toBe(true);
+      expect(useCommandPaletteStore.getState()).toMatchObject({ open: true, page: 'open-case' });
+    } finally {
+      el.remove();
     }
   });
 

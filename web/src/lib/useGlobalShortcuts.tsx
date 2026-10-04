@@ -33,7 +33,9 @@
  * Browser keys: Ctrl/Cmd+S (Save Page) and Ctrl/Cmd+O (Open File) are keys the
  * browser acts on unless the page swallows them. They are bound here whether or
  * not their command is available, so a press with no case loaded does not fall
- * through to a file dialog the app has nothing to do with.
+ * through to a file dialog the app has nothing to do with. They are swallowed from
+ * any focused element too: a text field, or a control the lib takes for one (a
+ * Radix toggle, a slider, a menu entry).
  *
  * Why a component (rather than a pure hook): React's rules-of-hooks
  * forbid calling `useHotkeys` inside a `.map()` body. We work around
@@ -68,9 +70,16 @@ const SHORTCUT_OPTS: Options = {
   ignoreEventWhen: (event) => event.defaultPrevented,
 };
 
-/** Options for the browser keys: swallowed even from inside a text field. */
+/**
+ * Options for the browser keys: swallowed from inside a text field and from any
+ * focused control. `true`, not a list of tag names, because the lib counts a
+ * target with an interactive ARIA role (radio, slider, menuitem, option, ...) as a
+ * form tag too, and skips the event without preventing its default: a list of
+ * tags would let Save Page through once focus sits on a Radix toggle, the scrub
+ * strip or an open menu.
+ */
 const BROWSER_KEY_OPTS: Options = {
-  enableOnFormTags: ['INPUT', 'TEXTAREA', 'SELECT'],
+  enableOnFormTags: true,
   enableOnContentEditable: false,
   preventDefault: true,
 };
@@ -78,17 +87,26 @@ const BROWSER_KEY_OPTS: Options = {
 /**
  * The browser keys and what each does. The registry lists the command only
  * while it is available; `unavailable` is what a press says when it is not.
+ * `allowInPalette` lets a press run from inside the open command palette, for
+ * the key whose command works on the palette itself.
  */
-const BROWSER_KEYS: ReadonlyArray<{ binding: string; commandId: string; unavailable: string }> = [
+const BROWSER_KEYS: ReadonlyArray<{
+  binding: string;
+  commandId: string;
+  unavailable: string;
+  allowInPalette: boolean;
+}> = [
   {
     binding: SHORTCUTS.save,
     commandId: 'workspace.save-system',
     unavailable: 'Nothing to save yet. Load a case or build a system first.',
+    allowInPalette: false,
   },
   {
     binding: SHORTCUTS.openCase,
     commandId: 'workspace.open-case',
     unavailable: 'Cannot open a case right now: there is no session. Try again in a moment.',
+    allowInPalette: true,
   },
 ];
 
@@ -131,36 +149,39 @@ function ShortcutBinder({ binding, action }: { binding: string; action: () => vo
   return null;
 }
 
+/** Any open dialog, and any but the command palette. */
+const ANY_DIALOG = '[role="dialog"]';
+const DIALOG_BUT_PALETTE = '[role="dialog"]:not([data-testid="command-palette"])';
+
 /**
  * Binds a browser key (see the header). It always swallows the key; it runs
  * `command` when there is one, and says why not otherwise. A press that starts in
- * a dialog is only swallowed, so the key never stacks one dialog on another; the
- * palette is the exception, where Ctrl/Cmd+O is a way to switch it to Open case.
+ * a dialog is only swallowed, so the key never stacks one dialog on another. The
+ * command palette counts as a dialog too, except for a key with `allowInPalette`:
+ * Ctrl/Cmd+O there switches the palette to Open case.
  */
 function BrowserKeyBinder({
   binding,
   command,
   unavailable,
+  allowInPalette,
 }: {
   binding: string;
   command: Command | undefined;
   unavailable: string;
+  allowInPalette: boolean;
 }) {
   useHotkeys(
     binding,
     (event) => {
       const target = event.target;
-      if (
-        target instanceof Element &&
-        target.closest('[role="dialog"]:not([data-testid="command-palette"])') !== null
-      ) {
-        return;
-      }
+      const dialog = allowInPalette ? DIALOG_BUT_PALETTE : ANY_DIALOG;
+      if (target instanceof Element && target.closest(dialog) !== null) return;
       if (command) command.action();
       else toast.info(unavailable);
     },
     BROWSER_KEY_OPTS,
-    [binding, command],
+    [binding, command, allowInPalette],
   );
   return null;
 }
@@ -193,6 +214,7 @@ export function GlobalShortcuts(): ReactElement {
           binding={key.binding}
           command={commands.find((c) => c.id === key.commandId)}
           unavailable={key.unavailable}
+          allowInPalette={key.allowInPalette}
         />
       ))}
     </>
