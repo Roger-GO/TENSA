@@ -6,6 +6,7 @@ import { useUiStore } from '@/store/ui';
 import { type Side, strideShift } from '../graph';
 import { getLineOverlayState } from '../overlay';
 import { LineFlowArrow } from './LineFlowArrow';
+import { maxAbsFlowMw } from './lineFlowArrowMath';
 
 /**
  * Topology edge. Connects two bus nodes via a polyline (orthogonal
@@ -71,6 +72,9 @@ export const TopologyEdge = memo(function TopologyEdge({
     isLine && lineIdx && pflowResult?.line_flows
       ? Math.abs(pflowResult.line_flows[lineIdx]?.p ?? 0)
       : 0;
+  // The arrow is sized against the largest branch flow of the case, not a fixed
+  // 1000 MW, so a 100 MVA case gets arrows as telling as a 10 GW one.
+  const lineFlowSatMw = pflowResult?.line_flows ? maxAbsFlowMw(pflowResult.line_flows) : undefined;
 
   // Style: thicker / colored stroke when we have flow data; neutral
   // otherwise. The arrow direction is encoded via the marker plus a
@@ -102,6 +106,7 @@ export const TopologyEdge = memo(function TopologyEdge({
           angleDeg={arrowAngleDeg}
           direction={overlay.direction}
           absMw={lineFlowAbsMw}
+          satMw={lineFlowSatMw}
           testid={`line-flow-arrow-${id}`}
         />
       ) : null}

@@ -63,7 +63,11 @@ vi.mock('@xyflow/react', async () => {
 });
 
 import { TopologyEdge } from '@/components/sld/edges/TopologyEdge';
-import { ARROW_MIN_SIZE, arrowSizeFromMw } from '@/components/sld/edges/lineFlowArrowMath';
+import {
+  ARROW_MAX_SIZE,
+  ARROW_MIN_SIZE,
+  arrowSizeFromMw,
+} from '@/components/sld/edges/lineFlowArrowMath';
 
 interface RenderEdgeProps {
   id?: string;
@@ -110,6 +114,22 @@ function setPflow(linePMw: number, converged = true): void {
     bus_voltages: { '1': 1.0, '2': 1.0 },
     bus_angles: { '1': 0, '2': 0 },
     line_flows: { 'l-1': { p: linePMw, q: 0, from_idx: '1', to_idx: '2' } },
+  };
+  usePflowStore.setState({ lastRun: result, isRunning: false, error: null });
+}
+
+/** A converged PF result whose lines carry the given active powers (MW), by idx. */
+function setPflowLines(pByLine: Record<string, number>): void {
+  const result: PflowResult = {
+    run_id: parseRunId('pf-1'),
+    converged: true,
+    iterations: 4,
+    mismatch: 1e-6,
+    bus_voltages: { '1': 1.0, '2': 1.0 },
+    bus_angles: { '1': 0, '2': 0 },
+    line_flows: Object.fromEntries(
+      Object.entries(pByLine).map(([idx, p]) => [idx, { p, q: 0, from_idx: '1', to_idx: '2' }]),
+    ),
   };
   usePflowStore.setState({ lastRun: result, isRunning: false, error: null });
 }
@@ -162,11 +182,30 @@ describe('<TopologyEdge /> — Unit 19 line-flow arrow integration', () => {
     expect(queryByTestId('line-flow-arrow-edge-1')).toBeNull();
   });
 
-  it('arrow size scales with |P| via the arrowSizeFromMw mapping', () => {
-    setPflow(500);
+  it('arrow size scales with |P| via the arrowSizeFromMw mapping, against the case maximum', () => {
+    // Two lines: this one carries 500 MW, the other (not drawn here) 1000 MW.
+    setPflowLines({ 'l-1': 500, 'l-2': 1000 });
     const { getByTestId } = renderEdge();
     const arrow = getByTestId('line-flow-arrow-edge-1');
-    expect(arrow.getAttribute('data-arrow-size')).toBe(arrowSizeFromMw(500).toFixed(2));
+    expect(arrow.getAttribute('data-arrow-size')).toBe(arrowSizeFromMw(500, 1000).toFixed(2));
+  });
+
+  it('draws the case largest flow at the maximum size, however small the case is', () => {
+    // A 100 MVA case: its biggest flow is 150 MW. Against a fixed 1000 MW scale this
+    // arrow was 8.2 px, barely bigger than the 7 px of a line with no flow at all.
+    setPflowLines({ 'l-1': 150, 'l-2': 60 });
+    const { getByTestId } = renderEdge();
+    expect(getByTestId('line-flow-arrow-edge-1').getAttribute('data-arrow-size')).toBe(
+      ARROW_MAX_SIZE.toFixed(2),
+    );
+  });
+
+  it('draws a flow in proportion to the case largest, so a smaller one gets a smaller arrow', () => {
+    setPflowLines({ 'l-1': 75, 'l-2': -150 });
+    const { getByTestId } = renderEdge();
+    expect(getByTestId('line-flow-arrow-edge-1').getAttribute('data-arrow-size')).toBe(
+      ((ARROW_MIN_SIZE + ARROW_MAX_SIZE) / 2).toFixed(2),
+    );
   });
 
   it('clamps arrow size at the minimum for small |P|', () => {

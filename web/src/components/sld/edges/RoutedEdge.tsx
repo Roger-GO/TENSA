@@ -5,6 +5,7 @@ import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
 import { getLineOverlayState } from '../overlay';
 import { LineFlowArrow } from './LineFlowArrow';
+import { maxAbsFlowMw } from './lineFlowArrowMath';
 
 /**
  * Routed edge — used by the auto-layout case where ELK supplied a
@@ -111,6 +112,9 @@ export const RoutedEdge = memo(function RoutedEdge({
     isLine && lineIdx && pflowResult?.line_flows
       ? Math.abs(pflowResult.line_flows[lineIdx]?.p ?? 0)
       : 0;
+  // The arrow is sized against the largest branch flow of the case, not a fixed
+  // 1000 MW, so a 100 MVA case gets arrows as telling as a 10 GW one.
+  const lineFlowSatMw = pflowResult?.line_flows ? maxAbsFlowMw(pflowResult.line_flows) : undefined;
   const stroke = overlay?.has_data ? 'var(--color-foreground)' : 'var(--color-muted-foreground)';
   const strokeWidth = overlay?.has_data ? 1.8 : 1.5;
   // Endpoint dots — explicit markers at the polyline's start and end
@@ -133,6 +137,7 @@ export const RoutedEdge = memo(function RoutedEdge({
           angleDeg={mid.angleDeg}
           direction={overlay.direction}
           absMw={lineFlowAbsMw}
+          satMw={lineFlowSatMw}
           testid={`line-flow-arrow-${id}`}
         />
       ) : null}

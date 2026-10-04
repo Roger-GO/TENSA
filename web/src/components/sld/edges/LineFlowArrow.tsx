@@ -15,11 +15,11 @@
  *
  *  2. **Magnitude scaling.** Arrow size scales linearly with |P|,
  *     clamped to a perceptible range (``ARROW_MIN_SIZE`` …
- *     ``ARROW_MAX_SIZE``). The scaling defaults to a 1000 MW =
- *     max-size mapping when the case doesn't declare a per-case
- *     maximum (the substrate doesn't expose one today; v0.5 may
- *     surface it). This keeps very small flows visible without making
- *     big flows clip the path.
+ *     ``ARROW_MAX_SIZE``). The edges pass ``satMw``, the largest
+ *     branch flow of the case's power flow result, so the biggest
+ *     arrow is that flow whatever the case's size. Without it the
+ *     scale falls back to 1000 MW = max size. This keeps very small
+ *     flows visible without making big flows clip the path.
  *
  * Reduced-motion: the global ``@media (prefers-reduced-motion: reduce)``
  * rule in ``styles/globals.css`` collapses ``transition-duration`` to
@@ -63,6 +63,11 @@ interface LineFlowArrowProps {
    * size (used by tests + a defensive path when |P| isn't finite).
    */
   absMw?: number;
+  /**
+   * The magnitude (MW) drawn at the maximum size: the largest branch flow of
+   * the case. Defaults to ``ARROW_SAT_MW`` when omitted.
+   */
+  satMw?: number;
   /** Test hook — defaults to ``line-flow-arrow``; callers append the line idx. */
   testid?: string;
 }
@@ -81,9 +86,10 @@ export const LineFlowArrow = memo(function LineFlowArrow({
   angleDeg = 0,
   direction,
   absMw,
+  satMw,
   testid = 'line-flow-arrow',
 }: LineFlowArrowProps): ReactElement {
-  const size = arrowSizeFromMw(absMw ?? 0);
+  const size = arrowSizeFromMw(absMw ?? 0, satMw);
   // Triangle pointing right in local coords (apex at +half on X, base on
   // the −half X line). Centered on origin so the rotate pivots about
   // the anchor point.

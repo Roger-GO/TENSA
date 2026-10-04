@@ -17,6 +17,7 @@ import {
   ARROW_MAX_SIZE,
   ARROW_SAT_MW,
   arrowSizeFromMw,
+  maxAbsFlowMw,
 } from '@/components/sld/edges/lineFlowArrowMath';
 
 function svg(children: React.ReactNode): React.ReactElement {
@@ -54,7 +55,45 @@ describe('arrowSizeFromMw', () => {
   });
 });
 
+describe('maxAbsFlowMw', () => {
+  it('is the largest |p| of the flows, whichever way it flows', () => {
+    expect(maxAbsFlowMw({ a: { p: 40 }, b: { p: -157.6 }, c: { p: 12 } })).toBe(157.6);
+  });
+
+  it('is 0 for no flows, and skips a flow that is not a number', () => {
+    expect(maxAbsFlowMw({})).toBe(0);
+    expect(maxAbsFlowMw({ a: { p: Number.NaN }, b: { p: 30 }, c: { p: Infinity } })).toBe(30);
+  });
+
+  it('reads a map once, however many edges ask for it', () => {
+    let reads = 0;
+    const flows = new Proxy<Record<string, { p: number }>>(
+      { a: { p: 10 }, b: { p: 20 } },
+      {
+        ownKeys(target) {
+          reads += 1;
+          return Reflect.ownKeys(target);
+        },
+      },
+    );
+    expect(maxAbsFlowMw(flows)).toBe(20);
+    expect(maxAbsFlowMw(flows)).toBe(20);
+    expect(maxAbsFlowMw(flows)).toBe(20);
+    expect(reads).toBe(1);
+  });
+});
+
 describe('<LineFlowArrow />', () => {
+  it('sizes the arrow against satMw when the case gives one', () => {
+    // 150 MW is the case maximum: full size, where the 1000 MW default gave 8.2.
+    const { getByTestId } = render(
+      svg(<LineFlowArrow x={0} y={0} direction="forward" absMw={150} satMw={150} />),
+    );
+    expect(getByTestId('line-flow-arrow').getAttribute('data-arrow-size')).toBe(
+      ARROW_MAX_SIZE.toFixed(2),
+    );
+  });
+
   it('emits a polygon with the forward direction + tangent rotation', () => {
     const { getByTestId } = render(
       svg(<LineFlowArrow x={50} y={20} angleDeg={0} direction="forward" absMw={500} />),
