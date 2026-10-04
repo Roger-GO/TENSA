@@ -29,6 +29,7 @@ import {
 } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
 import { useSessionHeartbeat } from '@/api/useSessionHeartbeat';
+import { useUnsavedWorkGuard } from '@/lib/useUnsavedWorkGuard';
 import { useJobEventsStream } from '@/streaming/useJobEventsStream';
 import { useSldFrameOverlay } from '@/components/sld/overlay';
 import { RecoveryBadge } from '@/components/shell/RecoveryBadge';
@@ -105,6 +106,9 @@ function AppInner({ children }: { children: React.ReactNode }) {
   // Check in with the substrate every 30 s so an idle tab keeps its session
   // (and a lost one is noticed before the user's next click).
   useSessionHeartbeat();
+  // Ask before the tab is closed or reloaded with edits, a build or run results
+  // that nothing has saved.
+  useUnsavedWorkGuard();
   // v3.1 Unit 11: own the per-session JobStream here (the mount Unit 6
   // deferred). One WS per active session feeds canonical job events into
   // ``useJobsStore`` REGARDLESS of whether the Activity panel is open, so
