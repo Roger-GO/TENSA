@@ -3,7 +3,8 @@
  * the endpoints that made them.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { replayJournal } from '@/api/replayJournal';
+import { ProblemDetailsError } from '@/api/client';
+import { replayJournal, retryWhileBusy } from '@/api/replayJournal';
 import { parseSessionId } from '@/api/types';
 import type { JournalEntry, JournalOp } from '@/store/editJournal';
 
@@ -180,5 +181,105 @@ describe('replayJournal', () => {
 
     expect(sent).toEqual([]);
     expect(outcome).toMatchObject({ applied: 0, total: 0, error: null });
+  });
+});
+
+const BUSY = {
+  type: 'about:blank',
+  title: 'Conflict',
+  status: 409,
+  detail: 'session is busy with an in-flight operation',
+  recovery: { kind: 'wait-for-job', label: 'Wait for the running operation' },
+};
+
+describe('replayJournal with a session that is busy', () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let attempts: number;
+
+  beforeEach(() => {
+    attempts = 0;
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
+      typeof vi.spyOn
+    >;
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+  });
+
+  it('sends an edit again when the session was busy with something else, and carries on', async () => {
+    fetchSpy.mockImplementation(async () => {
+      attempts += 1;
+      return attempts <= 2 ? jsonResponse(BUSY, 409) : jsonResponse({});
+    });
+
+    const outcome = await replayJournal(
+      SESSION,
+      entries({ op: 'undo' }, { op: 'undo' }),
+      [0, 0, 0],
+    );
+
+    expect(outcome).toMatchObject({ applied: 2, error: null });
+    expect(attempts).toBe(4);
+  });
+
+  it('gives up on an edit that is still refused as busy after the last retry', async () => {
+    fetchSpy.mockImplementation(async () => jsonResponse(BUSY, 409));
+
+    const outcome = await replayJournal(SESSION, entries({ op: 'undo' }), [0, 0]);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(outcome.applied).toBe(0);
+    expect(outcome.error).toMatchObject({ status: 409 });
+  });
+
+  it('does not retry any other refusal', async () => {
+    fetchSpy.mockImplementation(async () =>
+      jsonResponse(
+        {
+          ...BUSY,
+          detail: 'already committed',
+          recovery: { kind: 'reload-case', label: 'Reload' },
+        },
+        409,
+      ),
+    );
+
+    await replayJournal(SESSION, entries({ op: 'undo' }), [0, 0]);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('retryWhileBusy', () => {
+  const busy = () =>
+    new ProblemDetailsError(
+      { type: 'about:blank', title: 'Conflict', status: 409, detail: 'busy' },
+      BUSY,
+    );
+
+  it('returns what the request returns once it stops being busy', async () => {
+    let calls = 0;
+
+    const result = await retryWhileBusy(async () => {
+      calls += 1;
+      if (calls < 3) throw busy();
+      return 'done';
+    }, [0, 0, 0]);
+
+    expect(result).toBe('done');
+    expect(calls).toBe(3);
+  });
+
+  it('rethrows an error that is not the substrate saying it is busy', async () => {
+    let calls = 0;
+
+    await expect(
+      retryWhileBusy(async () => {
+        calls += 1;
+        throw new Error('network down');
+      }, [0, 0]),
+    ).rejects.toThrow('network down');
+    expect(calls).toBe(1);
   });
 });

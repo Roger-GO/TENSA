@@ -92,6 +92,7 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCreateSession, useLoadCase } from './queries';
+import { retryWhileBusy } from './replayJournal';
 import { recreateBlankSystem, replayEditsInto, reportReplay } from './restoreEdits';
 import { useSessionStore, RECOVERY_STUCK_TIMEOUT_MS } from '@/store/session';
 import { useCaseStore } from '@/store/case';
@@ -364,25 +365,28 @@ export function useSessionRecovery(): void {
     // stale cached topology over an empty session.
     if (caseSelection.primaryPath === null) {
       void (async () => {
-        let recreated = journal.replayable;
-        if (recreated) {
-          try {
-            await recreateBlankSystem(sessionId, queryClient);
-          } catch {
-            recreated = false;
+        try {
+          let recreated = journal.replayable;
+          if (recreated) {
+            try {
+              await recreateBlankSystem(sessionId, queryClient);
+            } catch {
+              recreated = false;
+            }
           }
+          if (!recreated) {
+            useEditJournalStore.getState().reset();
+            toast.error('Session expired — blank system lost', {
+              description:
+                'A blank system only lives in the active session and could not be recovered. Start a new blank system or load a case file.',
+            });
+          } else if (replayEntries.length > 0) {
+            const outcome = await replayEditsInto(sessionId, queryClient, replayEntries);
+            reportReplay(outcome, replayEntries, 'a new blank system');
+          }
+        } finally {
+          clearRecoveryInProgress();
         }
-        if (!recreated) {
-          useEditJournalStore.getState().reset();
-          toast.error('Session expired — blank system lost', {
-            description:
-              'A blank system only lives in the active session and could not be recovered. Start a new blank system or load a case file.',
-          });
-        } else if (replayEntries.length > 0) {
-          const outcome = await replayEditsInto(sessionId, queryClient, replayEntries);
-          reportReplay(outcome, replayEntries, 'a new blank system');
-        }
-        clearRecoveryInProgress();
       })();
       return;
     }
@@ -400,48 +404,52 @@ export function useSessionRecovery(): void {
     const primaryPath = caseSelection.primaryPath;
     const addfiles = caseSelection.addfiles;
     void (async () => {
-      let loaded = true;
       try {
-        await loadCase.mutateAsync({
-          sessionId,
-          request: {
-            primary_path: primaryPath,
-            addfiles: addfiles.length > 0 ? addfiles : null,
-          },
-        });
-      } catch {
-        // The load error surfaces normally (the mutation's own error state).
-        loaded = false;
-      }
-      if (loaded && replayEntries.length > 0) {
-        const outcome = await replayEditsInto(sessionId, queryClient, replayEntries);
-        reportReplay(outcome, replayEntries, 'a fresh copy of the case');
+        let loaded = true;
+        try {
+          await retryWhileBusy(() =>
+            loadCase.mutateAsync({
+              sessionId,
+              request: {
+                primary_path: primaryPath,
+                addfiles: addfiles.length > 0 ? addfiles : null,
+              },
+            }),
+          );
+        } catch {
+          // The load error surfaces normally (the mutation's own error state).
+          loaded = false;
+        }
+        if (loaded && replayEntries.length > 0) {
+          const outcome = await replayEditsInto(sessionId, queryClient, replayEntries);
+          reportReplay(outcome, replayEntries, 'a fresh copy of the case');
+          return;
+        }
+        // The old clone is gone whether the re-load succeeded or failed, so
+        // drop ALL clone state (incl. depths) here — a stale Undo must not
+        // act on a clone that no longer exists. Done whether or not the
+        // re-load succeeded so a failed re-load doesn't leave dangling clone state.
+        if (cloneWasInitialized) {
+          useCaseStore.setState({
+            cloneInitialized: false,
+            cloneUndoDepth: 0,
+            cloneRedoDepth: 0,
+          });
+        }
+        // The journal's edits did not come back with the file (it could not replay
+        // them, or the re-load failed), so it starts over.
+        useEditJournalStore.getState().reset();
+        if (hadPendingEdits) {
+          toast.info('Unsaved edits lost', {
+            description:
+              'The session expired while you had pending edits. The case was reloaded from its file; your changes were not saved.',
+          });
+        }
+      } finally {
+        // Drop out of the recovery state regardless of success/error so the
+        // user sees any load error normally.
         clearRecoveryInProgress();
-        return;
       }
-      // The old clone is gone whether the re-load succeeded or failed, so
-      // drop ALL clone state (incl. depths) here — a stale Undo must not
-      // act on a clone that no longer exists. Done whether or not the
-      // re-load succeeded so a failed re-load doesn't leave dangling clone state.
-      if (cloneWasInitialized) {
-        useCaseStore.setState({
-          cloneInitialized: false,
-          cloneUndoDepth: 0,
-          cloneRedoDepth: 0,
-        });
-      }
-      // The journal's edits did not come back with the file (it could not replay
-      // them, or the re-load failed), so it starts over.
-      useEditJournalStore.getState().reset();
-      if (hadPendingEdits) {
-        toast.info('Unsaved edits lost', {
-          description:
-            'The session expired while you had pending edits. The case was reloaded from its file; your changes were not saved.',
-        });
-      }
-      // Drop out of the recovery state regardless of success/error so the
-      // user sees any load error normally.
-      clearRecoveryInProgress();
     })();
     // ``loadCase`` excluded for the same stability reason as createSession.
     // eslint-disable-next-line react-hooks/exhaustive-deps

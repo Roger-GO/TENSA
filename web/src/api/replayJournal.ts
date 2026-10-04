@@ -9,14 +9,15 @@
  * lost one was without this module knowing what any operation does.
  *
  * It stops at the first request the substrate refuses (a model it no longer
- * accepts, a session that vanished again). The result says how far it got, so the
+ * accepts, a session that vanished again), after retrying one that found the session
+ * busy. The result says how far it got, so the
  * caller can tell the user and cut the journal back to what the session now holds.
  *
  * The calls go straight through ``andesClient`` rather than the mutation hooks:
  * the hooks would record each one in the journal again, and a replay must not
  * change what it is replaying.
  */
-import { andesClient, TIMEOUTS } from './client';
+import { andesClient, ProblemDetailsError, TIMEOUTS } from './client';
 import type { CloneEditResponse, SessionId } from './types';
 import type { JournalEntry } from '@/store/editJournal';
 
@@ -37,6 +38,37 @@ export interface ReplayOutcome {
   appliedThroughRev: number | null;
   /** The clone-on-write state, or ``null`` when no clone operation was replayed. */
   clone: ReplayedCloneState | null;
+}
+
+/** How long to wait before each retry of a request the substrate found the session busy for. */
+export const BUSY_RETRY_DELAYS_MS: readonly number[] = [250, 500, 1000, 2000];
+
+/**
+ * Run ``request``, trying again while the substrate answers 409 "session is busy".
+ *
+ * A session serves one operation at a time and refuses the rest at once, so a read
+ * the UI happens to send (a list refreshing, a panel opening) can make a replayed
+ * edit fail for no reason of its own. That clears in moments, so the edit is sent
+ * again after each delay in ``delaysMs`` before it counts as refused. Any other error
+ * ends it at once.
+ */
+export async function retryWhileBusy<T>(
+  request: () => Promise<T>,
+  delaysMs: readonly number[] = BUSY_RETRY_DELAYS_MS,
+): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await request();
+    } catch (err) {
+      const busy =
+        err instanceof ProblemDetailsError &&
+        err.status === 409 &&
+        err.recovery?.kind === 'wait-for-job';
+      const delay = delaysMs[attempt];
+      if (!busy || delay === undefined) throw err;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
 }
 
 async function send(sessionId: SessionId, entry: JournalEntry): Promise<unknown> {
@@ -100,6 +132,7 @@ async function send(sessionId: SessionId, entry: JournalEntry): Promise<unknown>
 export async function replayJournal(
   sessionId: SessionId,
   entries: readonly JournalEntry[],
+  busyRetryDelaysMs: readonly number[] = BUSY_RETRY_DELAYS_MS,
 ): Promise<ReplayOutcome> {
   const outcome: ReplayOutcome = {
     applied: 0,
@@ -111,7 +144,7 @@ export async function replayJournal(
   for (const entry of entries) {
     let response: unknown;
     try {
-      response = await send(sessionId, entry);
+      response = await retryWhileBusy(() => send(sessionId, entry), busyRetryDelaysMs);
     } catch (err) {
       outcome.error = err;
       return outcome;

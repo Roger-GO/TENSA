@@ -517,6 +517,20 @@ export function useLoadCase(): UseMutationResult<TopologySummary, Error, LoadCas
 }
 
 /**
+ * True when a case is loaded AND the session is not mid-recovery. The queries that
+ * read a case (topology, snapshots, PMUs, profiles) gate on this, not on the
+ * selection alone: during a recovery the replacement session has no case yet, and
+ * a query that reaches it first holds the session while the recovery's own load or
+ * replay is refused with a 409 "session is busy". They are enabled again, and fetch
+ * against the restored session, when the recovery ends.
+ */
+function useCaseReady(): boolean {
+  const hasCase = useCaseStore((s) => s.selection !== null);
+  const recovering = useSessionStore((s) => s.recoveryInProgress);
+  return hasCase && !recovering;
+}
+
+/**
  * `GET /sessions/{id}/topology`. Disabled when `sessionId` is null; the
  * caller is responsible for guarding render until the session exists.
  */
@@ -526,7 +540,7 @@ export function useTopology(sessionId: SessionId | null): UseQueryResult<Topolog
   // landing page). The load mutation ``setQueryData``s the topology directly
   // (see ``useLoadCase``), so the SLD still primes instantly on load without
   // relying on this auto-fetch.
-  const hasCase = useCaseStore((s) => s.selection !== null);
+  const hasCase = useCaseReady();
   return useQuery({
     queryKey: sessionId ? queryKeys.topology(sessionId) : ['topology', 'noop'],
     enabled: sessionId !== null && hasCase,
@@ -1602,7 +1616,7 @@ export function useListSnapshots(): UseQueryResult<ListSnapshotsResponse, Error>
   // Gate on a loaded case: snapshots are listed per-case, so on a fresh
   // session with no case loaded this 409s (landing-page console noise). The
   // load mutation invalidates this key, so it refetches once a case lands.
-  const hasCase = useCaseStore((s) => s.selection !== null);
+  const hasCase = useCaseReady();
   const enabled = sessionId !== null && hasCase;
   return useQuery({
     queryKey: enabled ? snapshotsKey(sessionId) : ['snapshots', 'noop'],
@@ -2102,7 +2116,7 @@ export function useListPmus(): UseQueryResult<ListPmusResponse, Error> {
   // Gate on a loaded case: PMUs are session+case-scoped, so a fresh session
   // with no case loaded 409s (landing-page console noise). The placement
   // mutation invalidates this key, so it refetches once a case lands.
-  const hasCase = useCaseStore((s) => s.selection !== null);
+  const hasCase = useCaseReady();
   const enabled = sessionId !== null && hasCase;
   return useQuery({
     queryKey: enabled ? queryKeys.pmus(sessionId) : ['pmus', 'noop'],
@@ -2378,7 +2392,7 @@ export function useListProfiles(): UseQueryResult<ListProfilesResponse, Error> {
   // session with no case loaded 409s (landing-page console noise). The
   // add/upload mutations invalidate this key, so it refetches once a case
   // lands.
-  const hasCase = useCaseStore((s) => s.selection !== null);
+  const hasCase = useCaseReady();
   const enabled = sessionId !== null && hasCase;
   return useQuery({
     queryKey: enabled ? queryKeys.profiles(sessionId) : ['profiles', 'noop'],

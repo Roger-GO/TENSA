@@ -7,7 +7,7 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { andesClient, ProblemDetailsError, TIMEOUTS } from './client';
 import { queryKeys } from './queries';
-import { replayJournal } from './replayJournal';
+import { replayJournal, retryWhileBusy } from './replayJournal';
 import type { ReplayOutcome } from './replayJournal';
 import type { BlankSystemResponse, SessionId } from './types';
 import { useCaseStore } from '@/store/case';
@@ -24,9 +24,11 @@ export async function recreateBlankSystem(
   sessionId: SessionId,
   queryClient: QueryClient,
 ): Promise<void> {
-  const response = await andesClient.post<BlankSystemResponse>(
-    `/sessions/${encodeURIComponent(sessionId)}/blank`,
-    { body: {}, timeoutMs: TIMEOUTS.workspace },
+  const response = await retryWhileBusy(() =>
+    andesClient.post<BlankSystemResponse>(`/sessions/${encodeURIComponent(sessionId)}/blank`, {
+      body: {},
+      timeoutMs: TIMEOUTS.workspace,
+    }),
   );
   queryClient.setQueryData(queryKeys.topology(sessionId), response.topology);
   useCaseStore.getState().setTopology(response.topology);

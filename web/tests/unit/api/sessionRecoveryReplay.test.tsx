@@ -12,7 +12,7 @@ import type { MockInstance } from 'vitest';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { makeQueryClient, __resetRecoveryDebounceForTests } from '@/api/queries';
+import { makeQueryClient, __resetRecoveryDebounceForTests, useTopology } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import { useSessionStore } from '@/store/session';
@@ -336,5 +336,37 @@ describe('useSessionRecovery rebuilds edits from the journal', () => {
     expect(successSpy).not.toHaveBeenCalled();
     expect(infoSpy).toHaveBeenCalledWith('Unsaved edits lost', expect.anything());
     expect(useEditJournalStore.getState().entries).toEqual([]);
+  });
+
+  it('keeps the case queries off the replacement session until recovery ends, so they cannot hold it', async () => {
+    useCaseStore.setState({ selection: FILE_CASE });
+    // A topology read that reaches a session mid-recovery would hold it, and the
+    // recovery's own load is then refused as busy.
+    let topologyReads = 0;
+    answers['GET /api/sessions/sess-new/topology'] = () => {
+      topologyReads += 1;
+      return jsonResponse(TOPOLOGY);
+    };
+    let readsBeforeLoadSettled = -1;
+    answers['POST /api/sessions/sess-new/case'] = () => {
+      readsBeforeLoadSettled = topologyReads;
+      return jsonResponse(TOPOLOGY);
+    };
+
+    const client = makeQueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    renderHook(
+      () => {
+        useSessionRecovery();
+        useTopology(useSessionStore((s) => s.sessionId));
+      },
+      { wrapper: Wrapper },
+    );
+    useSessionStore.getState().resetSession();
+    await recovered();
+
+    expect(readsBeforeLoadSettled).toBe(0);
   });
 });
