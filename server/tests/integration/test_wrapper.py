@@ -372,6 +372,33 @@ def test_pflow_generator_switched_off_has_no_reactive_limits() -> None:
 
 
 @pytest.mark.integration
+def test_pflow_devices_switched_off_inject_and_draw_nothing() -> None:
+    """ANDES keeps a PV generator's ``p`` and a load's ``Ppf`` at the set-point
+    whatever ``u`` says, and zeroes them where it writes the bus equations. The
+    rows must say what the buses see, or generation, load and losses stop adding
+    up: here 40 MW of generation and a load that are both out of service."""
+    raw, _ = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw)
+    ss = w._require_loaded()
+    ss.PV.u.v[list(ss.PV.idx.v).index(3)] = 0
+    load_idx = str(ss.PQ.idx.v[0])
+    ss.PQ.u.v[0] = 0
+    pf = w.run_pflow()
+    assert pf.converged
+
+    off_gen = pf.generator_outputs["3"]
+    assert (off_gen.p, off_gen.q) == (0.0, 0.0)
+    off_load = pf.load_consumption[load_idx]
+    assert (off_load.p, off_load.q) == (0.0, 0.0)
+    assert pf.generator_outputs["2"].p == pytest.approx(40.0)  # the others are as before
+    generation = sum(g.p for g in pf.generator_outputs.values())
+    load = sum(ld.p for ld in pf.load_consumption.values())
+    losses = sum(f.loss for f in pf.line_flows.values())
+    assert losses == pytest.approx(generation - load, abs=1e-4)
+
+
+@pytest.mark.integration
 def test_operating_point_after_pflow_matches_pflow_result() -> None:
     """``operating_point`` reads the same solved Bus v/a as ``run_pflow``
     without re-running. After a PF, the two must agree."""

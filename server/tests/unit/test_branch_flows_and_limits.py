@@ -18,7 +18,11 @@ from typing import Any
 import numpy as np
 import pytest
 
-from tensa.core.wrapper import _extract_generator_outputs, _extract_line_flows
+from tensa.core.wrapper import (
+    _extract_generator_outputs,
+    _extract_line_flows,
+    _extract_load_consumption,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -199,6 +203,43 @@ def test_a_generator_switched_off_has_no_limits() -> None:
     out = _extract_generator_outputs(_gen_system(u=0.0))["2"]
     assert out.q_min is None
     assert out.q_max is None
+
+
+def test_a_generator_switched_off_injects_nothing() -> None:
+    # A PV generator's ``p`` is a copy of ``p0`` whatever ``u`` says (0.4 pu here).
+    out = _extract_generator_outputs(_gen_system(q=0.3, u=0.0))["2"]
+    assert out.p == 0.0
+    assert out.q == 0.0
+    in_service = _extract_generator_outputs(_gen_system(q=0.3, u=1.0))["2"]
+    assert in_service.p == pytest.approx(40.0)
+    assert in_service.q == pytest.approx(30.0)
+
+
+def _load_system(*, u: float | None, mva: float = MVA) -> SimpleNamespace:
+    pq: dict[str, Any] = {
+        "idx": _param(["PQ_1"]),
+        "bus": _param([4]),
+        "Ppf": _param([0.5]),
+        "Qpf": _param([0.2]),
+    }
+    if u is not None:
+        pq["u"] = _param([u])
+    return SimpleNamespace(PQ=SimpleNamespace(**pq), config=SimpleNamespace(mva=mva))
+
+
+def test_a_load_switched_off_draws_nothing() -> None:
+    # ``Ppf`` / ``Qpf`` keep the set-point whatever ``u`` says.
+    out = _extract_load_consumption(_load_system(u=0.0))["PQ_1"]
+    assert out.p == 0.0
+    assert out.q == 0.0
+
+
+@pytest.mark.parametrize("u", [1.0, None])
+def test_a_load_in_service_draws_its_power(u: float | None) -> None:
+    out = _extract_load_consumption(_load_system(u=u))["PQ_1"]
+    assert out.p == pytest.approx(50.0)
+    assert out.q == pytest.approx(20.0)
+    assert out.bus == 4
 
 
 def test_a_generator_in_service_keeps_its_limits_when_u_is_missing() -> None:

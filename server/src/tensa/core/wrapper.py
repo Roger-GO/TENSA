@@ -5061,7 +5061,8 @@ def _extract_generator_outputs(ss: System) -> dict[str, GeneratorOutput]:
     Best-effort: defaults to 0.0 / 0.0 / 1.0 on any missing attribute.
     Each row also carries the generator's reactive limits (``qmin`` /
     ``qmax``, scaled the same way), left ``None`` for a generator that is
-    switched off (``u`` of 0) or whose limit is missing or not finite.
+    switched off (``u`` of 0) or whose limit is missing or not finite. A
+    generator that is switched off reports no output.
     Returns dict keyed by stringified idx.
     """
     log = logging.getLogger("tensa.wrapper.gen_outputs")
@@ -5103,9 +5104,12 @@ def _extract_generator_outputs(ss: System) -> dict[str, GeneratorOutput]:
             bus_coerced = _coerce_scalar(bus)
             bus_final: int | str = bus_coerced if isinstance(bus_coerced, int | str) and not isinstance(bus_coerced, bool) else str(bus)
             switched_off = i < len(u_arr) and _is_zero(u_arr[i])
+            # A PV generator's ``p`` is a copy of ``p0`` whatever ``u`` says, but
+            # the bus equation multiplies it by ``ue``: a machine that is off
+            # injects nothing.
             out[str(idx)] = GeneratorOutput(
-                p=p_pu * mva_base,
-                q=q_pu * mva_base,
+                p=0.0 if switched_off else p_pu * mva_base,
+                q=0.0 if switched_off else q_pu * mva_base,
                 v=v_pu,
                 bus=bus_final,
                 q_min=None if switched_off else _scaled(qmin_arr, i, mva_base),
@@ -5141,7 +5145,8 @@ def _extract_load_consumption(ss: System) -> dict[str, LoadConsumption]:
     is rolled into the same Ppf/Qpf at the converged voltage.
 
     Best-effort — falls back to ``p0`` / ``q0`` (the input setpoint) if
-    ``Ppf`` / ``Qpf`` are unavailable. Always converts to MW / MVAr.
+    ``Ppf`` / ``Qpf`` are unavailable. Always converts to MW / MVAr. A load
+    that is switched off (``u`` of 0) draws nothing.
     """
     log = logging.getLogger("tensa.wrapper.load_consumption")
     out: dict[str, LoadConsumption] = {}
@@ -5166,6 +5171,7 @@ def _extract_load_consumption(ss: System) -> dict[str, LoadConsumption]:
         q_arr = _safe_list(
             getattr(model, "Qpf", None) or getattr(model, "q0", None)
         )
+        u_arr = _safe_list(getattr(model, "u", None))
         for i, idx in enumerate(idx_values):
             try:
                 p_pu = float(p_arr[i]) if i < len(p_arr) else 0.0
@@ -5181,9 +5187,11 @@ def _extract_load_consumption(ss: System) -> dict[str, LoadConsumption]:
             bus = bus_values[i] if i < len(bus_values) else ""
             bus_coerced = _coerce_scalar(bus)
             bus_final: int | str = bus_coerced if isinstance(bus_coerced, int | str) and not isinstance(bus_coerced, bool) else str(bus)
+            # ``Ppf`` / ``Qpf`` ignore ``u``, but a load that is off draws nothing.
+            switched_off = i < len(u_arr) and _is_zero(u_arr[i])
             out[str(idx)] = LoadConsumption(
-                p=p_pu * mva_base,
-                q=q_pu * mva_base,
+                p=0.0 if switched_off else p_pu * mva_base,
+                q=0.0 if switched_off else q_pu * mva_base,
                 bus=bus_final,
             )
     return out
