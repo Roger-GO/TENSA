@@ -2,7 +2,7 @@
  * Long-form CSV serialiser shared by every Export menu (Unit 2 of the
  * v2.0 plan).
  *
- * Two row shapes are supported:
+ * Three row shapes are supported:
  *
  * - Time-series: `(time, variable, value)` — used by `<TimeSeriesPlot>`
  *   and `<ScrubControl>`. One physical CSV row per (time-sample x
@@ -17,6 +17,12 @@
  *   per (visible-row x visible-column) tuple. Mirrors
  *   the visible filter + sort state in the table; the caller is
  *   expected to pass already-filtered/sorted rows.
+ *
+ * - Records: one header row of column names, then one CSV row per record.
+ *   Used by the data grids, the EIG, CPF and SE exports and the sweep
+ *   results. These have a fixed set of columns that a reader would want to
+ *   open as they are (a spreadsheet, `pandas.read_csv`), so the schema
+ *   argument for the long form above does not apply to them.
  *
  * Encoding:
  *
@@ -85,14 +91,33 @@ export interface TableCsvInput {
   readonly comments?: readonly string[];
 }
 
+/** A wide-form export descriptor: named columns, one array of cells per record. */
+export interface RecordsCsvInput {
+  /** Column names, in order. */
+  readonly columns: readonly string[];
+  /**
+   * Records. Each is parallel to `columns`; a missing, `null` or `undefined`
+   * cell is written empty, so a jagged input still gives a structurally valid
+   * CSV. Numbers are written at full precision, whatever the screen shows.
+   */
+  readonly rows: ReadonlyArray<ReadonlyArray<string | number | boolean | null | undefined>>;
+  /** Optional extra header comments. See `TimeSeriesCsvInput`. */
+  readonly comments?: readonly string[];
+}
+
 /**
  * Quote a CSV cell per RFC 4180 only when needed. Empty / null-style
  * sentinels (em-dash, undefined-stringified) are passed through unquoted
  * because they don't carry the special chars the spec quotes for.
  */
-function csvCell(value: string | number | null | undefined): string {
+function csvCell(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined) return '';
-  const s = typeof value === 'number' ? formatNumber(value) : value;
+  const s =
+    typeof value === 'number'
+      ? formatNumber(value)
+      : typeof value === 'boolean'
+        ? String(value)
+        : value;
   // Quote on `"`, `,`, `\n`, or `\r`. `"` becomes `""`.
   if (/[",\n\r]/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`;
@@ -124,7 +149,9 @@ function buildHeaderComments(
     parts.push(`# WARNING: this run dropped ${droppedRowCount} early rows due to memory pressure`);
   }
   if (comments) {
-    for (const c of comments) parts.push(`# ${c}`);
+    // A comment is one line: a line break in it (a name typed by the user, say)
+    // would end the comment and leave the rest to be read as data.
+    for (const c of comments) parts.push(`# ${c.replace(/[\r\n]+/g, ' ')}`);
   }
   return parts.length === 0 ? '' : `${parts.join('\n')}\n`;
 }
@@ -199,6 +226,31 @@ export function tableToCsv(input: TableCsvInput): Blob {
       // jagged input still produces a structurally-valid CSV.
       lines.push(`${labelCell},${csvCell(colName)},${csvCell(cell ?? '')}`);
     }
+  }
+  return new Blob([`${lines.join('\n')}\n`], { type: 'text/csv;charset=utf-8' });
+}
+
+/**
+ * Serialise records to a wide-form CSV `Blob`: a header of column names, then
+ * one line per record.
+ *
+ *     idx,name,V (pu)
+ *     1,Bus 1,1.06
+ *     2,Bus 2,1.045
+ *
+ * The caller passes the records in the order the panel shows them, so a
+ * filtered or sorted table exports as it reads.
+ */
+export function recordsToCsv(input: RecordsCsvInput): Blob {
+  const { columns, rows, comments } = input;
+  const lines: string[] = [];
+  const header = buildHeaderComments(undefined, comments);
+  if (header.length > 0) lines.push(header.trimEnd());
+  lines.push(columns.map((c) => csvCell(c)).join(','));
+  for (const row of rows) {
+    const cells: string[] = [];
+    for (let c = 0; c < columns.length; c++) cells.push(csvCell(row[c]));
+    lines.push(cells.join(','));
   }
   return new Blob([`${lines.join('\n')}\n`], { type: 'text/csv;charset=utf-8' });
 }

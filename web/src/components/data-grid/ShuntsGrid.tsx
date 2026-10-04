@@ -91,6 +91,7 @@ export function ShuntsGrid({ className }: ShuntsGridProps) {
       selectedRowId={selectedNodeId}
       emptyState={topology ? 'No shunts in this case.' : 'Load a case to see shunts.'}
       testId="shunts-grid"
+      exportPanel="shunts"
       className={className}
     />
   );

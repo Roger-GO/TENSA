@@ -141,6 +141,7 @@ export function GeneratorsGrid({ className }: GeneratorsGridProps) {
       })()}
       emptyState={topology ? 'No generators in this case.' : 'Load a case to see generators.'}
       testId="generators-grid"
+      exportPanel="generators"
       className={className}
     />
   );

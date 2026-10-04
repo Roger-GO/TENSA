@@ -108,6 +108,7 @@ export function LinesGrid({ className }: LinesGridProps) {
       selectedRowId={selectedNodeId}
       emptyState={topology ? 'No lines in this case.' : 'Load a case to see lines.'}
       testId="lines-grid"
+      exportPanel="lines"
       className={className}
     />
   );

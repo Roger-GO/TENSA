@@ -4,12 +4,13 @@
  * Covers:
  *  - Time-series happy path (3 vars × 60 rows → 180 data rows + header)
  *  - Table happy path (rows × columns long-form expansion)
+ *  - Records: header row, one line per record, full-precision numbers
  *  - Header comments + lagged-run warning header
  *  - RFC 4180-style cell quoting
  *  - Numeric formatting (NaN, Infinity, finite)
  */
 import { describe, expect, it } from 'vitest';
-import { tableToCsv, timeSeriesToCsv } from '@/components/export/exportToCsv';
+import { recordsToCsv, tableToCsv, timeSeriesToCsv } from '@/components/export/exportToCsv';
 
 async function readBlob(b: Blob): Promise<string> {
   // jsdom's Blob exposes neither `.text()` nor `.arrayBuffer()` directly,
@@ -154,5 +155,68 @@ describe('tableToCsv', () => {
     const lines = text.split('\n');
     expect(lines[0]).toBe('# filter=Bus1');
     expect(lines[1]).toBe('# tab=buses');
+  });
+});
+
+describe('recordsToCsv', () => {
+  it('writes the header row, then one line per record', async () => {
+    const blob = recordsToCsv({
+      columns: ['idx', 'name', 'V (pu)'],
+      rows: [
+        ['1', 'Bus 1', 1.06],
+        ['2', 'Bus 2', 1.045],
+      ],
+    });
+    expect(blob.type).toMatch(/^text\/csv/);
+    expect(await readBlob(blob)).toBe('idx,name,V (pu)\n1,Bus 1,1.06\n2,Bus 2,1.045\n');
+  });
+
+  it('keeps numbers at full precision and writes booleans as words', async () => {
+    const blob = recordsToCsv({
+      columns: ['x', 'ok'],
+      rows: [[0.1 + 0.2, true]],
+    });
+    expect(await readBlob(blob)).toBe('x,ok\n0.30000000000000004,true\n');
+  });
+
+  it('writes null, undefined and missing cells empty, and NaN and infinities as words', async () => {
+    const blob = recordsToCsv({
+      columns: ['a', 'b', 'c', 'd'],
+      rows: [
+        [null, undefined],
+        [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY],
+      ],
+    });
+    expect(await readBlob(blob)).toBe('a,b,c,d\n,,,\nNaN,Infinity,-Infinity,\n');
+  });
+
+  it('quotes a cell that holds a comma, a quote or a line break', async () => {
+    const blob = recordsToCsv({
+      columns: ['name, full', 'note'],
+      rows: [['Bus "A"', 'two\nlines']],
+    });
+    expect(await readBlob(blob)).toBe('"name, full",note\n"Bus ""A""","two\nlines"\n');
+  });
+
+  it('writes a header with no records as the header alone', async () => {
+    expect(await readBlob(recordsToCsv({ columns: ['a', 'b'], rows: [] }))).toBe('a,b\n');
+  });
+
+  it('puts the comments first, one `# ` line each', async () => {
+    const blob = recordsToCsv({
+      columns: ['a'],
+      rows: [[1]],
+      comments: ['first', 'second'],
+    });
+    expect(await readBlob(blob)).toBe('# first\n# second\na\n1\n');
+  });
+
+  it('keeps a comment on one line when the text has a line break in it', async () => {
+    const blob = recordsToCsv({
+      columns: ['a'],
+      rows: [[1]],
+      comments: ['snapshot x\n1,2,3'],
+    });
+    expect(await readBlob(blob)).toBe('# snapshot x 1,2,3\na\n1\n');
   });
 });

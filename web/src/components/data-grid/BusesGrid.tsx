@@ -138,6 +138,7 @@ export function BusesGrid({ className }: BusesGridProps) {
       selectedRowId={selectedNodeId}
       emptyState={topology ? 'No buses in this case.' : 'Load a case to see buses.'}
       testId="buses-grid"
+      exportPanel="buses"
       className={className}
     />
   );

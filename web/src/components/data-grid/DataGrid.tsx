@@ -17,6 +17,12 @@
  *    on the matching row (resolved via ``selectedRowId``).
  *  - Empty-state slot for "no rows" branches owned by callers.
  *
+ * With ``exportPanel`` set the grid shows an Export menu (CSV) above its
+ * header. The file is the grid as it reads: the rows in their current sort
+ * order, one column per column, the cell values at full precision. The bar sits
+ * outside the element that owns the arrow-key bindings, so Enter on the menu's
+ * button activates the button and does not select the focused row.
+ *
  * Generic over the row shape: callers pass ``columns`` (with per-column
  * ``accessor`` / ``numeric`` / ``sortable`` flags) and a ``rowIdAccessor``
  * that produces the stable string id used for selection-sync. The
@@ -28,6 +34,9 @@ import { useMemo, useState, useCallback, useEffect } from 'react';
 import { FixedSizeList, type ListChildComponentProps } from 'react-window';
 import { cn } from '@/lib/cn';
 import { useHotkeys } from '@/lib/useHotkeys';
+import { ExportMenu } from '@/components/export/ExportMenu';
+import { recordsToCsv } from '@/components/export/exportToCsv';
+import { useExportCaseName } from '@/components/export/useExportCaseName';
 
 const VIRTUALIZE_THRESHOLD = 50;
 const ROW_HEIGHT = 28;
@@ -65,6 +74,11 @@ export interface DataGridProps<Row = unknown> {
   className?: string;
   /** testid scope; child cells/rows/headers nest off this. */
   testId?: string;
+  /**
+   * Panel slug for the exported file's name (`buses`, `lines`). Setting it
+   * adds the Export menu above the header; without it the grid has none.
+   */
+  exportPanel?: string;
 }
 
 /** Format a value for display. ``null``/``undefined``/``NaN`` → ``—``. */
@@ -175,6 +189,7 @@ export function DataGrid<Row>({
   emptyState,
   className,
   testId,
+  exportPanel,
 }: DataGridProps<Row>) {
   const [sort, setSort] = useState<SortState>({ column: null, direction: 'none' });
   // Keyboard-nav cursor. Separate from `selectedRowId` so the user can
@@ -191,6 +206,19 @@ export function DataGrid<Row>({
     const direction = sort.direction;
     return [...rows].sort((a, b) => compareValues(col.accessor(a), col.accessor(b), direction));
   }, [rows, columns, sort]);
+
+  // CSV export: the rows in the order shown, the column labels as headers.
+  const caseName = useExportCaseName();
+  const onExportCsv = useCallback(
+    () =>
+      sortedRows.length === 0
+        ? null
+        : recordsToCsv({
+            columns: columns.map((c) => c.label),
+            rows: sortedRows.map((row) => columns.map((c) => c.accessor(row))),
+          }),
+    [sortedRows, columns],
+  );
 
   // Clamp the cursor to the current row range. Without this, a row
   // count drop (case reload, filter narrowing) could leave the cursor
@@ -294,8 +322,30 @@ export function DataGrid<Row>({
     [arrowDownRef, arrowUpRef, homeRef, endRef, enterRef],
   );
 
+  // The bar goes beside the keyboard-scoped grid element, not inside it (see
+  // the header note), so each return below wraps the grid in `withExportBar`.
+  const withExportBar = (grid: React.ReactElement) =>
+    exportPanel === undefined ? (
+      grid
+    ) : (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="border-border bg-muted/20 flex shrink-0 items-center justify-end border-b px-1">
+          <ExportMenu
+            formats={['csv']}
+            disabled={rows.length === 0}
+            disabledTooltip="No rows to export"
+            panel={exportPanel}
+            caseName={caseName}
+            onExportCsv={onExportCsv}
+            className="h-6 px-2"
+          />
+        </div>
+        {grid}
+      </div>
+    );
+
   if (rows.length === 0) {
-    return (
+    return withExportBar(
       <div
         data-testid={testId}
         ref={containerRefCallback}
@@ -313,13 +363,13 @@ export function DataGrid<Row>({
         >
           {emptyState ?? 'No rows.'}
         </div>
-      </div>
+      </div>,
     );
   }
 
   const useVirtualization = sortedRows.length > VIRTUALIZE_THRESHOLD;
 
-  return (
+  return withExportBar(
     <div
       data-testid={testId}
       ref={containerRefCallback}
@@ -402,7 +452,7 @@ export function DataGrid<Row>({
           })}
         </div>
       )}
-    </div>
+    </div>,
   );
 }
 
