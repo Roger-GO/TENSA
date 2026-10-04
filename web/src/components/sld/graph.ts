@@ -839,6 +839,20 @@ function dedupeGeneratorsByIdx(entries: readonly TopologyEntry[]): TopologyEntry
   return out;
 }
 
+/**
+ * Key of a device's row in the PF result maps (`generator_outputs`,
+ * `load_consumption`). A dynamic machine has no row of its own, so it
+ * reads the one of the static generator it names in `gen`; every other
+ * device reads the row under its own idx.
+ */
+function pflowKeyFor(entry: TopologyEntry): string {
+  if (DYNAMIC_GENERATOR_KINDS.has(entry.kind)) {
+    const gen = entry.params?.gen;
+    if (gen !== undefined && typeof gen !== 'boolean') return String(gen);
+  }
+  return String(entry.idx);
+}
+
 function _busFromParam(entry: TopologyEntry, key: string): string | null {
   const params = entry.params;
   if (!params) return null;
@@ -1056,6 +1070,8 @@ export function buildGraph(
           name: entry.name,
           kind: entry.kind,
           parentBus: parentIdx,
+          pflowIdx: pflowKeyFor(entry),
+          busSide: busSideForDevice,
         },
       } satisfies Node);
       // Stub edge from the non-bus node to the bus's appropriate side.

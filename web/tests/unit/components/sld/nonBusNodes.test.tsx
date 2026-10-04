@@ -226,6 +226,94 @@ describe('buildGraph — non-bus nodes', () => {
     expect(g2?.position.y).toBeLessThan(100); // north of the top bus
   });
 
+  describe('PF result key and bus face (what the P / Q labels read)', () => {
+    type DeviceData = { pflowIdx?: string; busSide?: string };
+    const dataOf = (nodes: { id: string; data: unknown }[], id: string): DeviceData =>
+      nodes.find((n) => n.id === id)?.data as DeviceData;
+
+    it('keys a static generator and a load by their own idx', () => {
+      const topology = makeTopology({
+        buses: [bus(1)],
+        generators: [gen('GEN_1', 1)],
+        loads: [load('PQ_1', 1)],
+      });
+      const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
+      expect(dataOf(nodes, 'generator-GEN_1').pflowIdx).toBe('GEN_1');
+      expect(dataOf(nodes, 'load-PQ_1').pflowIdx).toBe('PQ_1');
+    });
+
+    it('keys a dynamic machine by the static generator named in its gen link', () => {
+      // PF reports the machine under the static generator, not under the
+      // machine's own idx (it has no row of its own).
+      const topology = makeTopology({
+        buses: [bus(1)],
+        generators: [
+          gen('2', 1),
+          { idx: 'GENROU_1', name: 'm1', kind: 'GENROU', params: { bus: 1, gen: 2 } },
+          { idx: 'GENCLS_1', name: 'm2', kind: 'GENCLS', params: { bus: 1, gen: '2' } },
+        ],
+      });
+      const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
+      expect(dataOf(nodes, 'generator-2').pflowIdx).toBe('2');
+      expect(dataOf(nodes, 'generator-GENROU_1').pflowIdx).toBe('2');
+      expect(dataOf(nodes, 'generator-GENCLS_1').pflowIdx).toBe('2');
+    });
+
+    it('falls back to the machine idx when it names no static generator', () => {
+      const topology = makeTopology({
+        buses: [bus(1)],
+        generators: [{ idx: 'GENROU_1', name: 'm1', kind: 'GENROU', params: { bus: 1 } }],
+      });
+      const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
+      expect(dataOf(nodes, 'generator-GENROU_1').pflowIdx).toBe('GENROU_1');
+    });
+
+    it('keeps the machine node and its gen link when it shares an idx with its static generator', () => {
+      // kundur_full numbers PV/Slack and GENROU alike (1..4). The two collapse
+      // to the machine node, which must still read the static row under `1`.
+      const topology = makeTopology({
+        buses: [bus(1)],
+        generators: [
+          { idx: 1, name: 'slack', kind: 'Slack', params: { bus: 1 } },
+          { idx: 1, name: 'm1', kind: 'GENROU', params: { bus: 1, gen: 1 } },
+        ],
+      });
+      const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
+      const gens = nodes.filter((n) => n.type === 'generator');
+      expect(gens).toHaveLength(1);
+      expect((gens[0]?.data as { kind?: string }).kind).toBe('GENROU');
+      expect(dataOf(nodes, 'generator-1').pflowIdx).toBe('1');
+    });
+
+    it('stamps the face a device hangs off: generators north, loads south by default', () => {
+      const topology = makeTopology({
+        buses: [bus(1)],
+        generators: [gen('GEN_1', 1)],
+        loads: [load('PQ_1', 1)],
+      });
+      const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
+      expect(dataOf(nodes, 'generator-GEN_1').busSide).toBe('north');
+      expect(dataOf(nodes, 'load-PQ_1').busSide).toBe('south');
+    });
+
+    it('stamps the flipped face for a bus that sits below its branch neighbour', () => {
+      const topology = makeTopology({
+        buses: [bus(1), bus(2)],
+        transformers: [trafo('T12', 1, 2)],
+        generators: [gen('G1', 1), gen('G2', 2)],
+        loads: [load('L1', 1), load('L2', 2)],
+      });
+      const { nodes } = buildGraph(topology, {
+        '1': { x: 0, y: 500 }, // bottom bus: devices hang south
+        '2': { x: 0, y: 100 }, // top bus: devices hang north
+      });
+      expect(dataOf(nodes, 'generator-G1').busSide).toBe('south');
+      expect(dataOf(nodes, 'load-L1').busSide).toBe('south');
+      expect(dataOf(nodes, 'generator-G2').busSide).toBe('north');
+      expect(dataOf(nodes, 'load-L2').busSide).toBe('north');
+    });
+  });
+
   it('honors sidecar non_bus_coordinates overrides', () => {
     const topology = makeTopology({
       buses: [bus(1)],

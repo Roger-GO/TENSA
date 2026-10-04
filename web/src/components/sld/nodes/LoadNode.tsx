@@ -5,12 +5,14 @@ import { iconForModel } from '@/icons/iec60617/manifest';
 import { cn } from '@/lib/cn';
 import { useIsPendingDependent } from '@/store/pendingDependents';
 import type { SldNodeData } from './BusNode';
+import { DeviceValueLabel } from './DeviceValueLabel';
 
 /**
  * Load node. Renders the IEC 60617 load glyph; covers PQ and ZIP load
  * models per the icon manifest. Anchored south of its parent bus; the
  * stub edge connects the north handle (id `bus-anchor`) up to the bus's
- * `south-target` handle.
+ * `south-target` handle. After a converged PF it carries its P / Q
+ * readout (`DeviceValueLabel`).
  */
 export const LoadNode = memo(function LoadNode({ data, selected }: NodeProps) {
   const d = data as SldNodeData;
@@ -22,7 +24,7 @@ export const LoadNode = memo(function LoadNode({ data, selected }: NodeProps) {
       data-idx={d.idx}
       data-pending-dependent={isPendingDependent ? 'true' : undefined}
       className={cn(
-        'flex flex-col items-center gap-0.5 px-1.5 py-0.5',
+        'relative flex flex-col items-center gap-0.5 px-1.5 py-0.5',
         'bg-background text-foreground',
         'rounded-[var(--radius-md)] border',
         selected ? 'border-[var(--color-ring)] ring-2 ring-[var(--color-ring)]' : 'border-border',
@@ -45,6 +47,7 @@ export const LoadNode = memo(function LoadNode({ data, selected }: NodeProps) {
         draggable={false}
       />
       <span className="text-foreground font-mono text-[9px] leading-none">{d.name || d.idx}</span>
+      <DeviceValueLabel kind="load" data={d} />
     </div>
   );
 });

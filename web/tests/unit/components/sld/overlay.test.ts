@@ -11,6 +11,7 @@ import {
   classifyVoltage,
   colorClassForBand,
   getBusOverlayState,
+  getDeviceOverlayState,
   getFrameBusOverlay,
   getLineOverlayState,
   pickFrameIdx,
@@ -199,6 +200,85 @@ describe('getLineOverlayState', () => {
     });
     const result = getLineOverlayState('L1', pflow, true);
     expect(result.direction).toBe('forward');
+    expect(result.p_label).toBeNull();
+    expect(result.q_label).toBeNull();
+  });
+});
+
+describe('getDeviceOverlayState', () => {
+  const pflow = makeResult({
+    generator_outputs: { '1': { p: 40, q: 30.436, v: 1.03, bus: 2 } },
+    load_consumption: { PQ_1: { p: 21.7, q: 12.7, bus: 2 } },
+  });
+
+  it('returns neutral when no result', () => {
+    const result = getDeviceOverlayState('generator', '1', null);
+    expect(result).toEqual({ p_label: null, q_label: null, has_data: false });
+  });
+
+  it('returns neutral when not converged', () => {
+    const result = getDeviceOverlayState('generator', '1', { ...pflow, converged: false });
+    expect(result.has_data).toBe(false);
+    expect(result.p_label).toBeNull();
+  });
+
+  it('reads a generator from generator_outputs, to one decimal', () => {
+    const result = getDeviceOverlayState('generator', '1', pflow);
+    expect(result.has_data).toBe(true);
+    expect(result.p_label).toBe('40.0 MW');
+    expect(result.q_label).toBe('30.4 MVAr');
+  });
+
+  it('reads a load from load_consumption, not generator_outputs', () => {
+    const result = getDeviceOverlayState('load', 'PQ_1', pflow);
+    expect(result.p_label).toBe('21.7 MW');
+    expect(result.q_label).toBe('12.7 MVAr');
+    // The same key under the other kind is a different (absent) row.
+    expect(getDeviceOverlayState('generator', 'PQ_1', pflow).has_data).toBe(false);
+    expect(getDeviceOverlayState('load', '1', pflow).has_data).toBe(false);
+  });
+
+  it('keeps the sign of an absorbing generator', () => {
+    const slack = makeResult({
+      generator_outputs: { '1': { p: 81.43, q: -21.62, v: 1.03, bus: 1 } },
+    });
+    expect(getDeviceOverlayState('generator', '1', slack).q_label).toBe('-21.6 MVAr');
+  });
+
+  it('never writes a negative zero', () => {
+    const tiny = makeResult({
+      generator_outputs: { '1': { p: -0.04, q: 0.04, v: 1, bus: 1 } },
+    });
+    const result = getDeviceOverlayState('generator', '1', tiny);
+    expect(result.p_label).toBe('0.0 MW');
+    expect(result.q_label).toBe('0.0 MVAr');
+  });
+
+  it('returns neutral when the device has no row', () => {
+    expect(getDeviceOverlayState('generator', 'GENROU_1', pflow).has_data).toBe(false);
+  });
+
+  it('tolerates a result without the per-device maps', () => {
+    const bare = makeResult();
+    delete (bare as { generator_outputs?: unknown }).generator_outputs;
+    delete (bare as { load_consumption?: unknown }).load_consumption;
+    expect(getDeviceOverlayState('generator', '1', bare).has_data).toBe(false);
+    expect(getDeviceOverlayState('load', 'PQ_1', bare).has_data).toBe(false);
+  });
+
+  it('drops a non-finite value but keeps the other one', () => {
+    const odd = makeResult({
+      generator_outputs: { '1': { p: Number.NaN, q: 5, v: 1, bus: 1 } },
+    });
+    const result = getDeviceOverlayState('generator', '1', odd);
+    expect(result.has_data).toBe(true);
+    expect(result.p_label).toBeNull();
+    expect(result.q_label).toBe('5.0 MVAr');
+  });
+
+  it('hides the labels when hideLabels=true', () => {
+    const result = getDeviceOverlayState('generator', '1', pflow, true);
+    expect(result.has_data).toBe(true);
     expect(result.p_label).toBeNull();
     expect(result.q_label).toBeNull();
   });

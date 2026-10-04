@@ -121,6 +121,10 @@ vi.mock('@xyflow/react', async () => {
     getSmoothStepPath: () => ['M0,0 L1,1', 0, 0, 0, 0],
     Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
     SelectionMode: { Partial: 'partial', Full: 'full' },
+    // The generator / load nodes read the zoom to decide whether to draw
+    // their P / Q labels (`useDeviceLabelsVisible`). 1x: labels allowed.
+    useStore: (selector: (s: { transform: [number, number, number] }) => unknown) =>
+      selector({ transform: [0, 0, 1] }),
     // Unit 11 — `useReactFlow` is consumed by SldCanvas (for
     // `setCenter` panning) and by SldNodeSearch (for `getNodes` +
     // `getZoom`). v3 Unit 5 added `screenToFlowPosition` (consumed by
@@ -157,8 +161,10 @@ import { elkLayout } from '@/components/sld/elkClient';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { useConnectivityStore } from '@/store/connectivity';
+import { usePflowStore } from '@/store/pflow';
+import { useUiStore } from '@/store/ui';
 import { __resetCascadeForTests, wireStoreCascade } from '@/store';
-import { parseSessionId, parseWorkspacePath } from '@/api/types';
+import { parseRunId, parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary, TopologyEntry, SidecarLayout } from '@/api/types';
 
 function bus(idx: number | string, name = `b${idx}`): TopologyEntry {
@@ -272,6 +278,8 @@ describe('SldCanvas', () => {
     mockTopology = null;
     mockSidecar = null;
     cleanup();
+    usePflowStore.getState().clearPflow();
+    useUiStore.setState({ hideLabels: false });
     __resetCascadeForTests();
     useConnectivityStore.setState({
       result: null,
@@ -364,6 +372,57 @@ describe('SldCanvas', () => {
       modelClass: 'EXST1',
       idx: 'EXST1_1',
     });
+  });
+
+  it('writes the PF P / Q onto generator and load nodes, a machine reading its static generator', async () => {
+    mockTopology = {
+      ...makeTopology([bus(1)]),
+      generators: [
+        { idx: 1, name: 'slack', kind: 'Slack', params: { bus: 1 } },
+        { idx: 'GENROU_1', name: 'm1', kind: 'GENROU', params: { bus: 1, gen: 1 } },
+      ],
+      loads: [{ idx: 'PQ_1', name: 'pq1', kind: 'PQ', params: { bus: 1 } }],
+    };
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('synthetic.raw'), addfiles: [] },
+        selectedElement: null,
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('load-node-PQ_1')).toBeInTheDocument();
+    });
+    // No PF yet: names only.
+    expect(screen.queryByTestId('generator-values-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('load-values-PQ_1')).not.toBeInTheDocument();
+
+    act(() => {
+      usePflowStore.getState().setLastRun({
+        run_id: parseRunId('pf-1'),
+        converged: true,
+        iterations: 3,
+        mismatch: 1e-9,
+        bus_voltages: { '1': 1.03 },
+        bus_angles: { '1': 0 },
+        line_flows: {},
+        generator_outputs: { '1': { p: 81.43, q: -21.62, v: 1.03, bus: 1 } },
+        load_consumption: { PQ_1: { p: 21.7, q: 12.7, bus: 1 } },
+      });
+    });
+    // The slack and its machine share idx 1 and collapse to one node; it
+    // reads the static row under 1.
+    expect(screen.getByTestId('generator-p-1')).toHaveTextContent('81.4 MW');
+    expect(screen.getByTestId('generator-q-1')).toHaveTextContent('-21.6 MVAr');
+    expect(screen.getByTestId('load-p-PQ_1')).toHaveTextContent('21.7 MW');
+    expect(screen.getByTestId('load-q-PQ_1')).toHaveTextContent('12.7 MVAr');
+
+    // "Hide labels" clears the readouts together with the bus labels.
+    act(() => {
+      useUiStore.getState().setHideLabels(true);
+    });
+    expect(screen.queryByTestId('generator-values-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('load-values-PQ_1')).not.toBeInTheDocument();
   });
 
   it('shows the >30-buses banner with no curated layout + no sidecar', async () => {

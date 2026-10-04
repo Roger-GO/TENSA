@@ -5,6 +5,7 @@ import { iconForModel } from '@/icons/iec60617/manifest';
 import { cn } from '@/lib/cn';
 import { useIsPendingDependent } from '@/store/pendingDependents';
 import type { SldNodeData } from './BusNode';
+import { DeviceValueLabel } from './DeviceValueLabel';
 
 /**
  * Generator node. Renders the IEC 60617 generator glyph (a circle with
@@ -14,7 +15,8 @@ import type { SldNodeData } from './BusNode';
  *
  * Anchored to its parent bus via a stub edge from the south handle
  * (id `bus-anchor`); the stub's other end terminates at the bus's
- * `north-target` handle. Click to inspect.
+ * `north-target` handle. Click to inspect. After a converged PF it
+ * carries its P / Q readout (`DeviceValueLabel`).
  */
 export const GeneratorNode = memo(function GeneratorNode({ data, selected }: NodeProps) {
   const d = data as SldNodeData;
@@ -26,7 +28,7 @@ export const GeneratorNode = memo(function GeneratorNode({ data, selected }: Nod
       data-idx={d.idx}
       data-pending-dependent={isPendingDependent ? 'true' : undefined}
       className={cn(
-        'flex flex-col items-center gap-0.5 px-1.5 py-0.5',
+        'relative flex flex-col items-center gap-0.5 px-1.5 py-0.5',
         'bg-background text-foreground',
         'rounded-[var(--radius-md)] border',
         selected ? 'border-[var(--color-ring)] ring-2 ring-[var(--color-ring)]' : 'border-border',
@@ -49,6 +51,7 @@ export const GeneratorNode = memo(function GeneratorNode({ data, selected }: Nod
         draggable={false}
       />
       <span className="text-foreground font-mono text-[9px] leading-none">{d.name || d.idx}</span>
+      <DeviceValueLabel kind="generator" data={d} />
     </div>
   );
 });

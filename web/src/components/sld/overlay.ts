@@ -51,6 +51,15 @@ export interface LineOverlayState {
   has_data: boolean;
 }
 
+export interface DeviceOverlayState {
+  /** "40.0 MW" or null if labels hidden / no PF / missing data. */
+  p_label: string | null;
+  /** "30.4 MVAr" or null if labels hidden / no PF / missing data. */
+  q_label: string | null;
+  /** True if `pflowResult` is present, converged, and holds a row for this device. */
+  has_data: boolean;
+}
+
 /** Default voltage thresholds (pu). */
 export const VOLTAGE_LIMITS = {
   /** Below this is danger (limit-violation). */
@@ -150,6 +159,56 @@ export function getLineOverlayState(
     p_label: hideLabels || !Number.isFinite(p) ? null : `${p.toFixed(2)} MW`,
     q_label: hideLabels || !Number.isFinite(q) ? null : `${q.toFixed(2)} MVAr`,
     direction,
+    has_data: true,
+  };
+}
+
+const NEUTRAL_DEVICE: DeviceOverlayState = {
+  p_label: null,
+  q_label: null,
+  has_data: false,
+};
+
+/**
+ * One decimal keeps a device label inside the 62 px pitch the generators
+ * and loads of one bus are fanned at, and a value that rounds to zero is
+ * never written "-0.0".
+ */
+function formatPower(value: number, unit: 'MW' | 'MVAr'): string {
+  const text = value.toFixed(1);
+  return `${text === '-0.0' ? '0.0' : text} ${unit}`;
+}
+
+/**
+ * Compute the P / Q labels of a generator or load given a PF result.
+ * Returns the neutral state when no PF result is available, the run did
+ * not converge, or `key` has no row in `generator_outputs` /
+ * `load_consumption`.
+ *
+ * `key` is the device's row in that map, not always its own idx: a
+ * dynamic machine (GENROU / GENCLS) has no row of its own and reads the
+ * one of the static generator it names in `gen` (`graph.ts` puts the
+ * right key on the node as `pflowIdx`).
+ *
+ * Sign convention matches the substrate: generator P / Q are what the
+ * machine injects (a slack bus can absorb Q, so it can be negative), load
+ * P / Q are what the load draws.
+ */
+export function getDeviceOverlayState(
+  kind: 'generator' | 'load',
+  key: string,
+  pflowResult: PflowResult | null,
+  hideLabels = false,
+): DeviceOverlayState {
+  if (!pflowResult || !pflowResult.converged) return NEUTRAL_DEVICE;
+  const row =
+    kind === 'generator'
+      ? pflowResult.generator_outputs?.[key]
+      : pflowResult.load_consumption?.[key];
+  if (!row) return NEUTRAL_DEVICE;
+  return {
+    p_label: hideLabels || !Number.isFinite(row.p) ? null : formatPower(row.p, 'MW'),
+    q_label: hideLabels || !Number.isFinite(row.q) ? null : formatPower(row.q, 'MVAr'),
     has_data: true,
   };
 }
