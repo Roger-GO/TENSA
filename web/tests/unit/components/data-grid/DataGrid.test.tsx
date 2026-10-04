@@ -66,6 +66,37 @@ describe('<DataGrid /> — rendering', () => {
   });
 });
 
+describe('<DataGrid /> — accessible name', () => {
+  it('is a table named by ariaLabel, with rows and the heading row inside it', () => {
+    render(
+      <DataGrid<FixtureRow>
+        columns={COLUMNS}
+        rows={[{ id: '1', name: 'Bus1', v: 1.025 }]}
+        rowIdAccessor={(r) => r.id}
+        testId="dg"
+        ariaLabel="Buses"
+      />,
+    );
+    const table = screen.getByRole('table', { name: 'Buses' });
+    expect(table).toBe(screen.getByTestId('dg'));
+    expect(table.contains(screen.getByTestId('dg-row-1'))).toBe(true);
+    expect(table.contains(screen.getByTestId('dg-header-id'))).toBe(true);
+  });
+
+  it('keeps the name while there are no rows', () => {
+    render(
+      <DataGrid<FixtureRow>
+        columns={COLUMNS}
+        rows={[]}
+        rowIdAccessor={(r) => r.id}
+        testId="dg"
+        ariaLabel="Buses"
+      />,
+    );
+    expect(screen.getByRole('table', { name: 'Buses' })).toBe(screen.getByTestId('dg'));
+  });
+});
+
 describe('<DataGrid /> — heading hover text', () => {
   it('puts a column title on the heading, sortable or not, and none where it is not set', () => {
     render(

@@ -84,6 +84,8 @@ describe('<ViolationsGrid />', () => {
     expect(empty).toHaveTextContent(
       '1 line has no rating (rate_a) and is not checked for overload.',
     );
+    // ...and how to bring a line into the check.
+    expect(empty).toHaveTextContent("Set a line's rate_a in the Inspector to check it.");
   });
 
   it('lists the violations before the warnings, one row per element', () => {

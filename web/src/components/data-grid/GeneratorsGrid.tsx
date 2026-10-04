@@ -198,6 +198,7 @@ export function GeneratorsGrid({ className }: GeneratorsGridProps) {
       })()}
       emptyState={topology ? 'No generators in this case.' : 'Load a case to see generators.'}
       testId="generators-grid"
+      ariaLabel="Generators"
       exportPanel="generators"
       className={className}
     />

@@ -141,3 +141,58 @@ describe('<LinesGrid /> both ends, loss and loading', () => {
     expect(cells('line-L1').slice(3)).toEqual(Array(8).fill('—'));
   });
 });
+
+describe('<LinesGrid /> rating', () => {
+  const RATED: TopologySummary = {
+    ...TOPOLOGY,
+    lines: [
+      { idx: 'L1', name: 'Line1-2', kind: 'Line', params: { bus1: 1, bus2: 2, rate_a: 10 } },
+      { idx: 'L2', name: 'Line2-3', kind: 'Line', params: { bus1: 2, bus2: 3, rate_a: 0 } },
+    ],
+  };
+
+  it("shows the case's rating before a power flow, and a dash for a rating of 0", () => {
+    mockTopology = RATED;
+    render(<LinesGrid />);
+    // rating, loading, check: only the rating is there until a run solves the case.
+    expect(cells('line-L1').slice(8)).toEqual(['10.000', '—', '—']);
+    expect(cells('line-L2').slice(8)).toEqual(['—', '—', '—']);
+  });
+
+  it('keeps the rating of the run once a power flow has solved the case', () => {
+    mockTopology = RATED;
+    usePflowStore.setState({ lastRun: solved(), isRunning: false, error: null });
+    render(<LinesGrid />);
+    // The run's own rating (100) wins over the case's, so it matches the loading beside it.
+    expect(cells('line-L1').slice(8)).toEqual(['100.000', '112.400', 'Over rating']);
+  });
+});
+
+describe('<LinesGrid /> saying how to rate a line', () => {
+  it('names the table, so a screen reader or a test driver finds it', () => {
+    mockTopology = TOPOLOGY;
+    render(<LinesGrid />);
+    expect(screen.getByRole('table', { name: 'Lines' })).toBeInTheDocument();
+  });
+
+  it('says where rate_a is edited while the case has not been run', () => {
+    mockTopology = TOPOLOGY;
+    render(<LinesGrid />);
+    const hint = screen.getByTestId('lines-grid-hint');
+    expect(hint).toHaveTextContent('A dash means no rating, so no overload check.');
+    expect(hint).toHaveTextContent('click the pencil beside rate_a in the Inspector');
+  });
+
+  it('says how to unlock the rating once a run has locked the case', () => {
+    mockTopology = { ...TOPOLOGY, state: 'committed' };
+    render(<LinesGrid />);
+    const hint = screen.getByTestId('lines-grid-hint');
+    expect(hint).toHaveTextContent('Ratings are locked once a run has started.');
+    expect(hint).toHaveTextContent('use Reset run in the Inspector to change rate_a');
+  });
+
+  it('has no hint without a case', () => {
+    render(<LinesGrid />);
+    expect(screen.queryByTestId('lines-grid-hint')).not.toBeInTheDocument();
+  });
+});

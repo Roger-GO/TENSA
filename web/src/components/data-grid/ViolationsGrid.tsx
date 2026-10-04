@@ -141,6 +141,7 @@ export function ViolationsGrid({ className }: ViolationsGridProps) {
       selectedRowId={selectedRowId}
       emptyState={emptyState}
       testId="violations-grid"
+      ariaLabel="Violations"
       exportPanel="violations"
       hint={report === null || rows.length === 0 ? undefined : summaryLine(report)}
       className={className}
@@ -155,9 +156,11 @@ function checkedText(report: ViolationReport): string {
   parts.push(`${lines} rated line${lines === 1 ? '' : 's'}`);
   parts.push(`${generators} generator${generators === 1 ? '' : 's'}`);
   const checked = `Checked ${parts.join(', ')}.`;
-  return report.unratedLines === 0
-    ? checked
-    : `${checked} ${report.unratedLines} line${report.unratedLines === 1 ? ' has' : 's have'} no rating (rate_a) and ${report.unratedLines === 1 ? 'is' : 'are'} not checked for overload.`;
+  if (report.unratedLines === 0) return checked;
+  const n = report.unratedLines;
+  // Say how to bring a line into the check, since a first-time user sees no
+  // overload and cannot tell it is because nothing is rated.
+  return `${checked} ${n} line${n === 1 ? ' has' : 's have'} no rating (rate_a) and ${n === 1 ? 'is' : 'are'} not checked for overload. Set a line's rate_a in the Inspector to check it.`;
 }
 
 /** The headline and what was checked, as one sentence pair. */

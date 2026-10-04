@@ -28,6 +28,7 @@ import { findTopologyEntry } from '@/lib/topology';
 import { cn } from '@/lib/cn';
 import { entryBaseKv, formatDisplayed, unratedBusIdx, voltageDisplay } from '@/lib/units';
 import { assessVoltage, busVoltageLimits, voltageStatusText } from '@/components/sld/voltage';
+import { formatLoading, loadingCheckText } from '@/components/sld/loading';
 import { ModifiedFromOriginalDot } from './ModifiedFromOriginalDot';
 
 /**
@@ -233,6 +234,14 @@ interface BusReading {
   baseKv: number | null;
 }
 
+/** What the Inspector says about the selected line or transformer once a power flow has solved it. */
+interface BranchReading {
+  /** The loading against the rating, in percent, and the rating in MVA; `null` when the case sets none. */
+  loading: { pct: number; ratingMva: number } | null;
+  /** Where the loading stands against the rating, in words. */
+  check: string | null;
+}
+
 /** A parameter that names the element or links it to a bus is not edited in place. */
 function isIdentifierParam(key: string, meta: TopologyParamMeta | undefined): boolean {
   return key === 'idx' || key === 'name' || meta?.kind === 'bus_idx';
@@ -243,6 +252,15 @@ const EMPTY_OVERRIDES: Readonly<Record<string, ParamValue>> = {};
 const EDIT_HINT = 'Click the pencil beside a value to change it.';
 const BUS_EDIT_HINT =
   'vmin and vmax are the limits this bus is judged on. Click the pencil beside one to change it.';
+const LINE_EDIT_HINT =
+  'rate_a is the rating the loading is judged on, and 0 means none. Click the pencil beside a value to change it.';
+
+/** The line of guidance under the Properties heading for an element of this model. */
+function editHint(kind: string): string {
+  if (kind === 'Bus') return BUS_EDIT_HINT;
+  if (kind === 'Line') return LINE_EDIT_HINT;
+  return EDIT_HINT;
+}
 
 interface PropertiesBodyProps {
   entry: TopologyEntry | null;
@@ -263,6 +281,8 @@ interface PropertiesBodyProps {
   diffByParam: Map<string, CloneDiffPair>;
   /** A bus's solved voltage and where it stands against its limits, after a power flow. */
   busReading: BusReading | null;
+  /** A line's solved loading against its rating, after a power flow. */
+  branchReading: BranchReading | null;
 }
 
 function PropertiesBody({
@@ -274,6 +294,7 @@ function PropertiesBody({
   paramMetas,
   diffByParam,
   busReading,
+  branchReading,
 }: PropertiesBodyProps) {
   // Local optimistic mirror so an edited value is reflected immediately
   // without waiting for the topology re-fetch round-trip. It belongs to the
@@ -322,6 +343,27 @@ function PropertiesBody({
                 className="text-foreground font-mono text-xs"
               >
                 {busReading.status}
+              </dd>
+            </>
+          ) : null}
+        </>
+      ) : null}
+      {branchReading !== null ? (
+        <>
+          <dt className="text-muted-foreground font-mono text-xs">loading</dt>
+          <dd data-testid="inspector-line-loading" className="text-foreground font-mono text-xs">
+            {branchReading.loading === null
+              ? 'no rating (rate_a is 0)'
+              : `${formatLoading(branchReading.loading.pct)} of ${branchReading.loading.ratingMva.toFixed(1)} MVA`}
+          </dd>
+          {branchReading.check !== null ? (
+            <>
+              <dt className="text-muted-foreground font-mono text-xs">loading check</dt>
+              <dd
+                data-testid="inspector-line-loading-check"
+                className="text-foreground font-mono text-xs"
+              >
+                {branchReading.check}
               </dd>
             </>
           ) : null}
@@ -504,6 +546,30 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
     };
   }, [selectedElement, entry, pflow, topology]);
 
+  // A line's or a transformer's loading against its rating, so the rating it is
+  // edited against sits beside what it is judged on.
+  const branchReading = useMemo<BranchReading | null>(() => {
+    if (
+      (selectedElement?.kind !== 'line' && selectedElement?.kind !== 'transformer') ||
+      !entry ||
+      !pflow?.converged
+    ) {
+      return null;
+    }
+    const flow = pflow.line_flows?.[String(entry.idx)];
+    if (!flow) return null;
+    const pct = flow.loading_pct;
+    const ratingMva = flow.rate_a;
+    const loading =
+      typeof pct === 'number' &&
+      Number.isFinite(pct) &&
+      typeof ratingMva === 'number' &&
+      Number.isFinite(ratingMva)
+        ? { pct, ratingMva }
+        : null;
+    return { loading, check: loadingCheckText(loading?.pct) };
+  }, [selectedElement, entry, pflow]);
+
   if (!selectedElement) return null;
 
   const isPreSetup = topology?.state === 'pre-setup';
@@ -540,7 +606,7 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
       ) : null}
       {showEditHint ? (
         <p data-testid="inspector-edit-hint" className="text-muted-foreground text-xs">
-          {entry.kind === 'Bus' ? BUS_EDIT_HINT : EDIT_HINT}
+          {editHint(entry.kind)}
         </p>
       ) : null}
       <PropertiesBody
@@ -552,6 +618,7 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
         paramMetas={paramMetas}
         diffByParam={diffByParam}
         busReading={busReading}
+        branchReading={branchReading}
       />
     </div>
   );

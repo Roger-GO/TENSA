@@ -117,6 +117,7 @@ export function LoadsGrid({ className }: LoadsGridProps) {
       selectedRowId={selectedNodeId}
       emptyState={topology ? 'No loads in this case.' : 'Load a case to see loads.'}
       testId="loads-grid"
+      ariaLabel="Loads"
       exportPanel="loads"
       className={className}
     />

@@ -15,7 +15,10 @@
  * line dissipates). The rating (`rate_a`, MVA) and the loading against it
  * (the larger end's apparent power, in percent) follow, with the verdict in
  * words beside them: a line the case gives no rating has none of the three,
- * and reads `—`.
+ * and reads `—`. The rating is the case's own `rate_a`, so it shows before a
+ * power flow and right after an edit too; the loading needs a solved case.
+ * A line above the table says how to set a rating, which is edited in the
+ * Inspector like any other parameter and only while the case has not been run.
  */
 import { useMemo } from 'react';
 import { DataGrid, type ColumnConfig } from './DataGrid';
@@ -24,7 +27,7 @@ import { usePflowStore } from '@/store/pflow';
 import { useSldStore } from '@/store/sld';
 import { useCaseStore } from '@/store/case';
 import { loadingCheckText } from '@/components/sld/loading';
-import type { TopologyEntry } from '@/api/types';
+import type { TopologyEntry, TopologySummary } from '@/api/types';
 
 interface LineRow {
   rowId: string;
@@ -51,6 +54,28 @@ function finiteOrNull(v: number | null | undefined): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
+/** The rating the case sets for a line (`rate_a`, MVA); `null` for a rating of 0, which means none. */
+function ratingParam(entry: TopologyEntry): number | null {
+  const v = entry.params?.rate_a;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
+}
+
+/**
+ * What to do to rate a line, for the line above the table. `rate_a` is edited
+ * in the Inspector with the other parameters, and only while the case has not
+ * been run: a run commits the system, so the hint says how to unlock it
+ * instead.
+ */
+function ratingHint(state: TopologySummary['state'] | undefined): string | undefined {
+  if (state === 'pre-setup') {
+    return 'A dash means no rating, so no overload check. Select a line, then click the pencil beside rate_a in the Inspector.';
+  }
+  if (state === 'committed') {
+    return 'Ratings are locked once a run has started. Select a line, then use Reset run in the Inspector to change rate_a.';
+  }
+  return undefined;
+}
+
 const COLUMNS: ColumnConfig<LineRow>[] = [
   { key: 'idx', label: 'idx', accessor: (r) => r.idx },
   { key: 'from_bus', label: 'from', accessor: (r) => r.from_bus },
@@ -70,7 +95,7 @@ const COLUMNS: ColumnConfig<LineRow>[] = [
     key: 'rate_a',
     label: 'rating (MVA)',
     title:
-      'The line rating the case sets (rate_a). A line with none reads a dash and is not checked for overload.',
+      'The line rating the case sets (rate_a). A line with none reads a dash and is not checked for overload. Select the line and edit rate_a in the Inspector to set one.',
     numeric: true,
     accessor: (r) => r.rate_a,
   },
@@ -117,7 +142,7 @@ export function LinesGrid({ className }: LinesGridProps) {
         p_to: finiteOrNull(flow?.p_to),
         q_to: finiteOrNull(flow?.q_to),
         loss: finiteOrNull(flow?.loss),
-        rate_a: finiteOrNull(flow?.rate_a),
+        rate_a: finiteOrNull(flow?.rate_a) ?? ratingParam(line),
         loading,
         loading_check: loadingCheckText(loading),
       };
@@ -143,7 +168,9 @@ export function LinesGrid({ className }: LinesGridProps) {
       selectedRowId={selectedNodeId}
       emptyState={topology ? 'No lines in this case.' : 'Load a case to see lines.'}
       testId="lines-grid"
+      ariaLabel="Lines"
       exportPanel="lines"
+      hint={ratingHint(topology?.state)}
       className={className}
     />
   );

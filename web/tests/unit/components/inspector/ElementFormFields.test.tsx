@@ -15,7 +15,8 @@ import { usePflowStore } from '@/store/pflow';
 import { useSessionStore } from '@/store/session';
 import { useUnitsStore } from '@/store/units';
 import { parseRunId, parseSessionId, parseWorkspacePath } from '@/api/types';
-import type { PflowResult, TopologySummary } from '@/api/types';
+import type { LineFlow, PflowResult, TopologySummary } from '@/api/types';
+import { lineFlow } from '../../helpers/lineFlow';
 
 const putSpy = vi.fn();
 
@@ -54,7 +55,11 @@ vi.mock('@/api/queries', async () => {
             { name: 'vmax', kind: 'number', required: false, unit: 'pu' },
             { name: 'vmin', kind: 'number', required: false, unit: 'pu' },
           ],
-          Line: [{ name: 'r', kind: 'number', required: true }],
+          Line: [
+            { name: 'r', kind: 'number', required: true },
+            { name: 'rate_a', kind: 'number', required: false, unit: 'MVA' },
+          ],
+          PQ: [{ name: 'p0', kind: 'number', required: false, unit: 'pu' }],
         },
       },
     }),
@@ -78,10 +83,12 @@ function topology(state: 'pre-setup' | 'committed' = 'pre-setup'): TopologySumma
       { idx: 1, name: 'BUS1', kind: 'Bus', params: { Vn: 138, vmax: 1.1, vmin: 0.9 } },
       { idx: 2, name: 'BUS2', kind: 'Bus', params: { Vn: 138, vmax: 1.08, vmin: 0.92 } },
     ],
-    lines: [{ idx: 'L1', name: 'Line1', kind: 'Line', params: { bus1: 1, bus2: 2, r: 0.02 } }],
+    lines: [
+      { idx: 'L1', name: 'Line1', kind: 'Line', params: { bus1: 1, bus2: 2, r: 0.02, rate_a: 10 } },
+    ],
     transformers: [],
     generators: [],
-    loads: [],
+    loads: [{ idx: 'PQ1', name: 'PQ1', kind: 'PQ', params: { bus: 1, p0: 0.5 } }],
   };
 }
 
@@ -97,7 +104,7 @@ function solved(voltages: Record<string, number>): PflowResult {
   };
 }
 
-function select(kind: 'bus' | 'line', idx: string) {
+function select(kind: 'bus' | 'line' | 'load', idx: string) {
   useCaseStore.setState({ selectedElement: { kind, idx } });
 }
 
@@ -137,12 +144,22 @@ describe('<ElementFormFields />', () => {
       expect(screen.getByTestId('edit-vmax')).toBeInTheDocument();
     });
 
-    it('gives another element the plain hint', () => {
+    it('tells a line what rate_a is for while the case has not been run', () => {
       select('line', 'L1');
+      render(withQueryClient(<ElementFormFields />));
+      expect(screen.getByTestId('inspector-edit-hint')).toHaveTextContent(
+        'rate_a is the rating the loading is judged on, and 0 means none. Click the pencil beside a value to change it.',
+      );
+      expect(screen.getByTestId('edit-rate_a')).toBeInTheDocument();
+    });
+
+    it('gives another element the plain hint', () => {
+      select('load', 'PQ1');
       render(withQueryClient(<ElementFormFields />));
       expect(screen.getByTestId('inspector-edit-hint')).toHaveTextContent(
         'Click the pencil beside a value to change it.',
       );
+      expect(screen.getByTestId('inspector-edit-hint')).not.toHaveTextContent('rate_a');
     });
 
     it('does not offer a hint once a run has locked the case', () => {
@@ -261,6 +278,67 @@ describe('<ElementFormFields />', () => {
       select('line', 'L1');
       render(withQueryClient(<ElementFormFields />));
       expect(screen.queryByTestId('inspector-bus-voltage')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('a solved line', () => {
+    function solvedLine(flow: Partial<LineFlow>): PflowResult {
+      return {
+        ...solved({}),
+        line_flows: {
+          L1: lineFlow(5, 1, { from: 1, to: 2 }, flow),
+        },
+      };
+    }
+
+    it('shows the loading against the rating and where it stands', () => {
+      mockTopology = topology('committed');
+      usePflowStore.setState({
+        lastRun: solvedLine({ rate_a: 10, loading_pct: 533.57 }),
+      });
+      select('line', 'L1');
+      render(withQueryClient(<ElementFormFields />));
+      expect(screen.getByTestId('inspector-line-loading')).toHaveTextContent('533.6% of 10.0 MVA');
+      expect(screen.getByTestId('inspector-line-loading-check')).toHaveTextContent('Over rating');
+    });
+
+    it('says within rating for a line that is well under it', () => {
+      mockTopology = topology('committed');
+      usePflowStore.setState({ lastRun: solvedLine({ rate_a: 100, loading_pct: 12.34 }) });
+      select('line', 'L1');
+      render(withQueryClient(<ElementFormFields />));
+      expect(screen.getByTestId('inspector-line-loading')).toHaveTextContent('12.3% of 100.0 MVA');
+      expect(screen.getByTestId('inspector-line-loading-check')).toHaveTextContent('Within rating');
+    });
+
+    it('says a line with no rating has none to be judged on', () => {
+      mockTopology = topology('committed');
+      usePflowStore.setState({ lastRun: solvedLine({ rate_a: null, loading_pct: null }) });
+      select('line', 'L1');
+      render(withQueryClient(<ElementFormFields />));
+      expect(screen.getByTestId('inspector-line-loading')).toHaveTextContent(
+        'no rating (rate_a is 0)',
+      );
+      expect(screen.queryByTestId('inspector-line-loading-check')).not.toBeInTheDocument();
+    });
+
+    it('says nothing before a power flow has converged, or about a bus', () => {
+      select('line', 'L1');
+      const { unmount } = render(withQueryClient(<ElementFormFields />));
+      expect(screen.queryByTestId('inspector-line-loading')).not.toBeInTheDocument();
+      unmount();
+
+      usePflowStore.setState({
+        lastRun: { ...solvedLine({ rate_a: 10, loading_pct: 50 }), converged: false },
+      });
+      const second = render(withQueryClient(<ElementFormFields />));
+      expect(screen.queryByTestId('inspector-line-loading')).not.toBeInTheDocument();
+      second.unmount();
+
+      usePflowStore.setState({ lastRun: solvedLine({ rate_a: 10, loading_pct: 50 }) });
+      select('bus', '1');
+      render(withQueryClient(<ElementFormFields />));
+      expect(screen.queryByTestId('inspector-line-loading')).not.toBeInTheDocument();
     });
   });
 

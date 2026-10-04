@@ -25,6 +25,9 @@
  * puts a line of guidance at the bar's left (what to do with a row, say), and
  * gives the bar to a grid that has no export.
  *
+ * The grid is a `table` named by `ariaLabel` (`Lines`), so a screen reader or a
+ * test driver finds it by name and reads its header row and rows as a table.
+ *
  * Generic over the row shape: callers pass ``columns`` (with per-column
  * ``accessor`` / ``numeric`` / ``sortable`` flags) and a ``rowIdAccessor``
  * that produces the stable string id used for selection-sync. The
@@ -78,6 +81,8 @@ export interface DataGridProps<Row = unknown> {
   className?: string;
   /** testid scope; child cells/rows/headers nest off this. */
   testId?: string;
+  /** Accessible name of the table (`Lines`), for assistive tech and role queries. */
+  ariaLabel?: string;
   /**
    * Panel slug for the exported file's name (`buses`, `lines`). Setting it
    * adds the Export menu above the header; without it the grid has none.
@@ -198,6 +203,7 @@ export function DataGrid<Row>({
   emptyState,
   className,
   testId,
+  ariaLabel,
   exportPanel,
   hint,
 }: DataGridProps<Row>) {
@@ -369,6 +375,8 @@ export function DataGrid<Row>({
     return withExportBar(
       <div
         data-testid={testId}
+        role="table"
+        aria-label={ariaLabel}
         ref={containerRefCallback}
         tabIndex={0}
         className={cn(
@@ -393,6 +401,8 @@ export function DataGrid<Row>({
   return withExportBar(
     <div
       data-testid={testId}
+      role="table"
+      aria-label={ariaLabel}
       ref={containerRefCallback}
       tabIndex={0}
       className={cn(
