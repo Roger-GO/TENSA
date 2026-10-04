@@ -374,7 +374,31 @@ describe('SldCanvas', () => {
     });
   });
 
-  it('writes the PF P / Q onto generator and load nodes, a machine reading its static generator', async () => {
+  const PF_ROWS = {
+    run_id: parseRunId('pf-1'),
+    converged: true,
+    iterations: 3,
+    mismatch: 1e-9,
+    bus_voltages: { '1': 1.03 },
+    bus_angles: { '1': 0 },
+    line_flows: {},
+    generator_outputs: { '1': { p: 81.43, q: -21.62, v: 1.03, bus: 1 } },
+    load_consumption: { PQ_1: { p: 21.7, q: 12.7, bus: 1 } },
+  };
+
+  function seedSyntheticSelection() {
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('synthetic.raw'), addfiles: [] },
+        selectedElement: null,
+      });
+    });
+  }
+
+  it('writes the PF P / Q onto generator and load nodes, once per row, on the machine', async () => {
+    // ieee14_full's shape: the machine has an idx of its own, so the static
+    // generator and the machine are two nodes on one bus, and both would read
+    // the same row. The machine prints it; the static node stays quiet.
     mockTopology = {
       ...makeTopology([bus(1)]),
       generators: [
@@ -383,46 +407,61 @@ describe('SldCanvas', () => {
       ],
       loads: [{ idx: 'PQ_1', name: 'pq1', kind: 'PQ', params: { bus: 1 } }],
     };
-    act(() => {
-      useCaseStore.setState({
-        selection: { primaryPath: parseWorkspacePath('synthetic.raw'), addfiles: [] },
-        selectedElement: null,
-      });
-    });
+    seedSyntheticSelection();
     render(withQueryClient(<SldCanvas />));
     await waitFor(() => {
       expect(screen.getByTestId('load-node-PQ_1')).toBeInTheDocument();
     });
+    expect(screen.getByTestId('generator-node-1')).toBeInTheDocument();
+    expect(screen.getByTestId('generator-node-GENROU_1')).toBeInTheDocument();
     // No PF yet: names only.
-    expect(screen.queryByTestId('generator-values-1')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('load-values-PQ_1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId(/-values-/)).not.toBeInTheDocument();
 
     act(() => {
-      usePflowStore.getState().setLastRun({
-        run_id: parseRunId('pf-1'),
-        converged: true,
-        iterations: 3,
-        mismatch: 1e-9,
-        bus_voltages: { '1': 1.03 },
-        bus_angles: { '1': 0 },
-        line_flows: {},
-        generator_outputs: { '1': { p: 81.43, q: -21.62, v: 1.03, bus: 1 } },
-        load_consumption: { PQ_1: { p: 21.7, q: 12.7, bus: 1 } },
-      });
+      usePflowStore.getState().setLastRun(PF_ROWS);
     });
-    // The slack and its machine share idx 1 and collapse to one node; it
-    // reads the static row under 1.
-    expect(screen.getByTestId('generator-p-1')).toHaveTextContent('81.4 MW');
-    expect(screen.getByTestId('generator-q-1')).toHaveTextContent('-21.6 MVAr');
+    expect(screen.getByTestId('generator-p-GENROU_1')).toHaveTextContent('81.4 MW');
+    expect(screen.getByTestId('generator-q-GENROU_1')).toHaveTextContent('-21.6 MVAr');
     expect(screen.getByTestId('load-p-PQ_1')).toHaveTextContent('21.7 MW');
     expect(screen.getByTestId('load-q-PQ_1')).toHaveTextContent('12.7 MVAr');
+    // As many readouts as rows: the static generator the machine names does
+    // not print its row a second time.
+    expect(screen.queryByTestId('generator-values-1')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId(/^generator-values-/)).toHaveLength(
+      Object.keys(PF_ROWS.generator_outputs).length,
+    );
+    expect(screen.getAllByTestId(/^load-values-/)).toHaveLength(
+      Object.keys(PF_ROWS.load_consumption).length,
+    );
 
     // "Hide labels" clears the readouts together with the bus labels.
     act(() => {
       useUiStore.getState().setHideLabels(true);
     });
-    expect(screen.queryByTestId('generator-values-1')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('load-values-PQ_1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId(/-values-/)).not.toBeInTheDocument();
+  });
+
+  it('writes the PF P / Q onto the one node of a machine that shares its idx with its generator', async () => {
+    // kundur_full's shape: PV/Slack and GENROU are numbered alike, so the pair
+    // is one node, which reads the static row under that idx.
+    mockTopology = {
+      ...makeTopology([bus(1)]),
+      generators: [
+        { idx: 1, name: 'slack', kind: 'Slack', params: { bus: 1 } },
+        { idx: 1, name: 'm1', kind: 'GENROU', params: { bus: 1, gen: 1 } },
+      ],
+      loads: [{ idx: 'PQ_1', name: 'pq1', kind: 'PQ', params: { bus: 1 } }],
+    };
+    seedSyntheticSelection();
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('load-node-PQ_1')).toBeInTheDocument();
+    });
+    act(() => {
+      usePflowStore.getState().setLastRun(PF_ROWS);
+    });
+    expect(screen.getByTestId('generator-p-1')).toHaveTextContent('81.4 MW');
+    expect(screen.getAllByTestId(/^generator-values-/)).toHaveLength(1);
   });
 
   it('shows the >30-buses banner with no curated layout + no sidecar', async () => {

@@ -8,7 +8,7 @@
  * cover that they don't accidentally emit a node.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { buildGraph } from '@/components/sld/graph';
+import { buildGraph, DEVICE_VALUE_LABEL, NODE_FOOTPRINT } from '@/components/sld/graph';
 import type { TopologySummary, TopologyEntry } from '@/api/types';
 
 function bus(idx: number | string, name = `b${idx}`): TopologyEntry {
@@ -226,10 +226,21 @@ describe('buildGraph — non-bus nodes', () => {
     expect(g2?.position.y).toBeLessThan(100); // north of the top bus
   });
 
-  describe('PF result key and bus face (what the P / Q labels read)', () => {
-    type DeviceData = { pflowIdx?: string; busSide?: string };
+  describe('PF result key and readout side (what the P / Q labels read)', () => {
+    type DeviceData = { pflowIdx?: string | null; valueSide?: string };
     const dataOf = (nodes: { id: string; data: unknown }[], id: string): DeviceData =>
       nodes.find((n) => n.id === id)?.data as DeviceData;
+    const machine = (
+      idx: string,
+      busIdx: number,
+      genIdx?: number | string,
+      kind = 'GENROU',
+    ): TopologyEntry => ({
+      idx,
+      name: `m-${idx}`,
+      kind,
+      params: genIdx === undefined ? { bus: busIdx } : { bus: busIdx, gen: genIdx },
+    });
 
     it('keys a static generator and a load by their own idx', () => {
       const topology = makeTopology({
@@ -247,22 +258,16 @@ describe('buildGraph — non-bus nodes', () => {
       // machine's own idx (it has no row of its own).
       const topology = makeTopology({
         buses: [bus(1)],
-        generators: [
-          gen('2', 1),
-          { idx: 'GENROU_1', name: 'm1', kind: 'GENROU', params: { bus: 1, gen: 2 } },
-          { idx: 'GENCLS_1', name: 'm2', kind: 'GENCLS', params: { bus: 1, gen: '2' } },
-        ],
+        generators: [machine('GENROU_1', 1, 2)],
       });
       const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
-      expect(dataOf(nodes, 'generator-2').pflowIdx).toBe('2');
       expect(dataOf(nodes, 'generator-GENROU_1').pflowIdx).toBe('2');
-      expect(dataOf(nodes, 'generator-GENCLS_1').pflowIdx).toBe('2');
     });
 
     it('falls back to the machine idx when it names no static generator', () => {
       const topology = makeTopology({
         buses: [bus(1)],
-        generators: [{ idx: 'GENROU_1', name: 'm1', kind: 'GENROU', params: { bus: 1 } }],
+        generators: [machine('GENROU_1', 1)],
       });
       const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
       expect(dataOf(nodes, 'generator-GENROU_1').pflowIdx).toBe('GENROU_1');
@@ -285,18 +290,81 @@ describe('buildGraph — non-bus nodes', () => {
       expect(dataOf(nodes, 'generator-1').pflowIdx).toBe('1');
     });
 
-    it('stamps the face a device hangs off: generators north, loads south by default', () => {
+    it('prints the row of a static generator on its machine, not on both', () => {
+      // ieee14_full numbers its machines GENROU_1..5, so the static PV 2 and
+      // GENROU_2 are two nodes on bus 2 that read the same row. Only the
+      // machine prints it; the static generator it names stays quiet.
+      const topology = makeTopology({
+        buses: [bus(2)],
+        generators: [gen('2', 2), machine('GENROU_2', 2, 2)],
+      });
+      const { nodes } = buildGraph(topology, { '2': { x: 0, y: 100 } });
+      expect(dataOf(nodes, 'generator-2').pflowIdx).toBeNull();
+      expect(dataOf(nodes, 'generator-GENROU_2').pflowIdx).toBe('2');
+    });
+
+    it('prints a row once when two machines name the same static generator', () => {
+      const topology = makeTopology({
+        buses: [bus(1)],
+        generators: [gen('2', 1), machine('GENROU_1', 1, 2), machine('GENCLS_1', 1, '2', 'GENCLS')],
+      });
+      const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
+      expect(dataOf(nodes, 'generator-2').pflowIdx).toBeNull();
+      expect(dataOf(nodes, 'generator-GENROU_1').pflowIdx).toBe('2');
+      expect(dataOf(nodes, 'generator-GENCLS_1').pflowIdx).toBeNull();
+    });
+
+    it('still prints a static generator that no machine names', () => {
+      const topology = makeTopology({
+        buses: [bus(1), bus(2)],
+        generators: [gen('1', 1), gen('2', 2), machine('GENROU_2', 2, 2)],
+      });
+      const { nodes } = buildGraph(topology, {
+        '1': { x: 0, y: 100 },
+        '2': { x: 300, y: 100 },
+      });
+      expect(dataOf(nodes, 'generator-1').pflowIdx).toBe('1');
+      expect(dataOf(nodes, 'generator-2').pflowIdx).toBeNull();
+    });
+
+    it('prints every generator_outputs row exactly once on an ieee14_full-shaped case', () => {
+      // Five static generators on buses 1, 2, 3, 6 and 8, each with a machine
+      // of its own idx on the same bus: ten nodes, five rows.
+      const onBus = [1, 2, 3, 6, 8];
+      const topology = makeTopology({
+        buses: onBus.map((b) => bus(b)),
+        generators: [
+          ...onBus.map((b, i) => gen(String(i + 1), b, i === 0 ? 'Slack' : 'PV')),
+          ...onBus.map((b, i) => machine(`GENROU_${i + 1}`, b, i + 1)),
+        ],
+        loads: [load('PQ_1', 2), load('PQ_2', 3)],
+      });
+      const coords = Object.fromEntries(onBus.map((b, i) => [String(b), { x: i * 200, y: 100 }]));
+      const { nodes } = buildGraph(topology, coords);
+      const printed = nodes
+        .filter((n) => n.type === 'generator')
+        .map((n) => dataOf([n], n.id).pflowIdx)
+        .filter((key): key is string => typeof key === 'string');
+      expect(nodes.filter((n) => n.type === 'generator')).toHaveLength(10);
+      expect([...printed].sort()).toEqual(['1', '2', '3', '4', '5']);
+      // Loads each print their own row.
+      expect(dataOf(nodes, 'load-PQ_1').pflowIdx).toBe('PQ_1');
+      expect(dataOf(nodes, 'load-PQ_2').pflowIdx).toBe('PQ_2');
+    });
+
+    it('puts the readout on the side facing the bus: below a node above its bus', () => {
       const topology = makeTopology({
         buses: [bus(1)],
         generators: [gen('GEN_1', 1)],
         loads: [load('PQ_1', 1)],
       });
       const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
-      expect(dataOf(nodes, 'generator-GEN_1').busSide).toBe('north');
-      expect(dataOf(nodes, 'load-PQ_1').busSide).toBe('south');
+      // The generator hangs north of the bus, the load south of it.
+      expect(dataOf(nodes, 'generator-GEN_1').valueSide).toBe('below');
+      expect(dataOf(nodes, 'load-PQ_1').valueSide).toBe('above');
     });
 
-    it('stamps the flipped face for a bus that sits below its branch neighbour', () => {
+    it('flips the readout side for a bus that sits below its branch neighbour', () => {
       const topology = makeTopology({
         buses: [bus(1), bus(2)],
         transformers: [trafo('T12', 1, 2)],
@@ -304,13 +372,70 @@ describe('buildGraph — non-bus nodes', () => {
         loads: [load('L1', 1), load('L2', 2)],
       });
       const { nodes } = buildGraph(topology, {
-        '1': { x: 0, y: 500 }, // bottom bus: devices hang south
-        '2': { x: 0, y: 100 }, // top bus: devices hang north
+        '1': { x: 0, y: 500 }, // bottom bus: devices hang south, bus above them
+        '2': { x: 0, y: 100 }, // top bus: devices hang north, bus below them
       });
-      expect(dataOf(nodes, 'generator-G1').busSide).toBe('south');
-      expect(dataOf(nodes, 'load-L1').busSide).toBe('south');
-      expect(dataOf(nodes, 'generator-G2').busSide).toBe('north');
-      expect(dataOf(nodes, 'load-L2').busSide).toBe('north');
+      expect(dataOf(nodes, 'generator-G1').valueSide).toBe('above');
+      expect(dataOf(nodes, 'load-L1').valueSide).toBe('above');
+      expect(dataOf(nodes, 'generator-G2').valueSide).toBe('below');
+      expect(dataOf(nodes, 'load-L2').valueSide).toBe('below');
+    });
+
+    it('follows a device the user dragged to the other side of its bus', () => {
+      // The stub still targets the bus face the device was built for, but the
+      // readout goes where the device now sits relative to the bus.
+      const topology = makeTopology({
+        buses: [bus(1)],
+        generators: [gen('GEN_1', 1)],
+        loads: [load('PQ_1', 1)],
+      });
+      const coords = { '1': { x: 0, y: 100 } };
+      const dragOverrides = {
+        'generator-GEN_1': { x: 0, y: 260 }, // generator moved below the bus
+        'load-PQ_1': { x: 0, y: -60 }, // load moved above it
+      };
+      const { nodes } = buildGraph(topology, coords, { dragOverrides });
+      expect(dataOf(nodes, 'generator-GEN_1').valueSide).toBe('above');
+      expect(dataOf(nodes, 'load-PQ_1').valueSide).toBe('below');
+    });
+
+    it('follows a sidecar position and a moved bus', () => {
+      const topology = makeTopology({
+        buses: [bus(1)],
+        generators: [gen('GEN_1', 1)],
+      });
+      const nonBusCoords = new Map([['PV|GEN_1', { x: 0, y: 400 }]]);
+      const sidecar = buildGraph(topology, { '1': { x: 0, y: 100 } }, { nonBusCoords });
+      expect(dataOf(sidecar.nodes, 'generator-GEN_1').valueSide).toBe('above');
+      // The bus itself dragged below the generator's default spot.
+      const moved = buildGraph(
+        topology,
+        { '1': { x: 0, y: 100 } },
+        { dragOverrides: { '1': { x: 0, y: 600 } } },
+      );
+      expect(dataOf(moved.nodes, 'generator-GEN_1').valueSide).toBe('below');
+    });
+
+    it('hangs the readout in the strip between a device and its bus', () => {
+      // The strip is free by construction: the default offsets leave it
+      // between the footprint and the bus, so a node placed there collides
+      // with nothing. Check the readout box against both.
+      const topology = makeTopology({
+        buses: [bus(1)],
+        generators: [gen('GEN_1', 1)],
+        loads: [load('PQ_1', 1)],
+      });
+      const bus1 = { x: 0, y: 400 };
+      const { nodes } = buildGraph(topology, { '1': bus1 });
+      const g = nodes.find((n) => n.id === 'generator-GEN_1')!;
+      const l = nodes.find((n) => n.id === 'load-PQ_1')!;
+      // Generator above the bus: readout below the node, above the bus bar.
+      const genBottom = g.position.y + NODE_FOOTPRINT.generator.height;
+      expect(genBottom + DEVICE_VALUE_LABEL.height).toBeLessThanOrEqual(bus1.y);
+      // Load below the bus: readout above the node, under the bus box.
+      expect(l.position.y - DEVICE_VALUE_LABEL.height).toBeGreaterThanOrEqual(
+        bus1.y + NODE_FOOTPRINT.bus.height,
+      );
     });
   });
 

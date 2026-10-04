@@ -8,6 +8,7 @@
 import type { Edge, Node } from '@xyflow/react';
 import type { BusCoord, TopologyEntry, TopologySummary } from '@/api/types';
 import { subKindForControllerClass } from '@/lib/controllers';
+import { DYNAMIC_GENERATOR_KINDS, generatorRowKey } from '@/lib/topology';
 import type { CoordsByIdx } from './sidecar';
 
 /** Cardinal handle sides exposed by every Bus node. */
@@ -804,9 +805,6 @@ interface NonBusBucket {
   kind: 'generator' | 'load' | 'shunt';
 }
 
-/** ANDES SynGen (rotor) model classes — the dynamic half of a machine. */
-const DYNAMIC_GENERATOR_KINDS: ReadonlySet<string> = new Set(['GENROU', 'GENCLS']);
-
 /**
  * Collapse the generators bucket to one entry per idx. ANDES shares an idx
  * between a machine's static power-flow record (`PV`/`Slack`) and its dynamic
@@ -840,17 +838,33 @@ function dedupeGeneratorsByIdx(entries: readonly TopologyEntry[]): TopologyEntry
 }
 
 /**
- * Key of a device's row in the PF result maps (`generator_outputs`,
- * `load_consumption`). A dynamic machine has no row of its own, so it
- * reads the one of the static generator it names in `gen`; every other
- * device reads the row under its own idx.
+ * Which generator node prints each row of the PF result's
+ * `generator_outputs`, as `entry -> row key`; a node absent from the map
+ * prints nothing. A machine reads the row of the static generator it names
+ * in `gen` (`generatorRowKey`). When both are drawn (ieee14_full numbers its
+ * machines GENROU_1..5, so PV 2 and GENROU_2 both stand on bus 2) printing
+ * the row on each would show one injection twice. The machine prints it: it
+ * is the node a time-domain run drives and the controllers dock to. The
+ * static generator it names stays quiet, and one that no drawn machine names
+ * prints its own row.
  */
-function pflowKeyFor(entry: TopologyEntry): string {
-  if (DYNAMIC_GENERATOR_KINDS.has(entry.kind)) {
-    const gen = entry.params?.gen;
-    if (gen !== undefined && typeof gen !== 'boolean') return String(gen);
+function assignGeneratorRows(entries: readonly TopologyEntry[]): Map<TopologyEntry, string> {
+  const rows = new Map<TopologyEntry, string>();
+  const claimed = new Set<string>();
+  for (const e of entries) {
+    if (!DYNAMIC_GENERATOR_KINDS.has(e.kind)) continue;
+    const key = generatorRowKey(e);
+    // Two machines naming one generator: the first prints its row.
+    if (claimed.has(key)) continue;
+    claimed.add(key);
+    rows.set(e, key);
   }
-  return String(entry.idx);
+  for (const e of entries) {
+    if (DYNAMIC_GENERATOR_KINDS.has(e.kind)) continue;
+    const key = generatorRowKey(e);
+    if (!claimed.has(key)) rows.set(e, key);
+  }
+  return rows;
 }
 
 function _busFromParam(entry: TopologyEntry, key: string): string | null {
@@ -953,9 +967,11 @@ export function buildGraph(
   // Non-bus nodes (generators, loads, shunts). Anchor each to its parent
   // bus's coordinate plus a kind-specific offset; multiple devices on
   // one bus stack along the offset axis.
+  const generatorEntries = dedupeGeneratorsByIdx(topology.generators ?? []);
+  const generatorRows = assignGeneratorRows(generatorEntries);
   const nonBusBuckets: NonBusBucket[] = [
     {
-      entries: dedupeGeneratorsByIdx(topology.generators ?? []),
+      entries: generatorEntries,
       parentBus: (e) => _busFromParam(e, 'bus'),
       kind: 'generator',
     },
@@ -1057,6 +1073,10 @@ export function buildGraph(
       const x = sidecar?.x ?? parentCoord.x + offset.x + offset.stackDx * colSigned + rowStagger;
       const y = sidecar?.y ?? parentCoord.y + offsetY + stackDy * row;
       const nodeId = `${bucket.kind}-${String(entry.idx)}`;
+      // The row of the PF result this node prints, or null when another
+      // node prints it (see `assignGeneratorRows`).
+      const pflowIdx =
+        bucket.kind === 'generator' ? (generatorRows.get(entry) ?? null) : String(entry.idx);
       nodes.push({
         id: nodeId,
         type: NON_BUS_NODE_TYPE[bucket.kind],
@@ -1070,8 +1090,7 @@ export function buildGraph(
           name: entry.name,
           kind: entry.kind,
           parentBus: parentIdx,
-          pflowIdx: pflowKeyFor(entry),
-          busSide: busSideForDevice,
+          pflowIdx,
         },
       } satisfies Node);
       // Stub edge from the non-bus node to the bus's appropriate side.
@@ -1152,6 +1171,24 @@ export function buildGraph(
     }
   }
 
+  // The side of a generator / load its P / Q readout hangs off: the side
+  // facing its bus, the strip the stub runs through and the default offsets
+  // leave clear. It is judged by where the device finally sits (push-out and
+  // drag overrides applied) and not by the bus face its stub targets, so a
+  // device the user moved across its bus keeps the readout between the two.
+  const busPositions = new Map<string, { x: number; y: number }>();
+  for (const n of nodes) {
+    if (n.type === 'bus') busPositions.set(n.id, branchDragOverrides[n.id] ?? n.position);
+  }
+  for (let i = 0; i < nodes.length; i += 1) {
+    const n = nodes[i]!;
+    if (n.type !== 'generator' && n.type !== 'load') continue;
+    const parent = busPositions.get((n.data as { parentBus: string }).parentBus);
+    if (parent === undefined) continue;
+    const at = branchDragOverrides[n.id] ?? n.position;
+    nodes[i] = { ...n, data: { ...n.data, valueSide: at.y < parent.y ? 'below' : 'above' } };
+  }
+
   // ---- Dynamic controllers (Unit 19) ----------------------------------
   // Dock each controller beside the device it references. ANDES wires a
   // controller to a SynGen (`syn`), a Bus/StaticGen (`bus`/`gen`), or
@@ -1166,8 +1203,25 @@ export function buildGraph(
   return { nodes, edges };
 }
 
-/** Docked offset of a controller badge from its parent device's origin. */
-const CONTROLLER_DOCK = { x: 32, y: -18, stackDy: 22 } as const;
+/**
+ * Box (px) of the P / Q readout a generator or load carries after a power
+ * flow (`DeviceValueLabel`): two 10 px lines and the 2 px gap to the node, as
+ * wide as the longest value the diagram shows ("-1575.0 MVAr": 12 characters
+ * of 9 px mono plus padding). It is centred on its node and hangs on the side
+ * facing the bus, in the strip between the two (`NON_BUS_OFFSETS` leaves 24 px
+ * of it beyond the footprint), where only the stub runs. The node's far side
+ * is where the controller badges and the neighbouring buses and devices crowd
+ * in.
+ */
+export const DEVICE_VALUE_LABEL = { width: 72, height: 22 } as const;
+
+/**
+ * Docked offset of a controller badge from its parent device's origin. The
+ * badge sits past the right edge of the node's readout (`DEVICE_VALUE_LABEL`,
+ * centred on the node), so the two never share a strip, whichever face of its
+ * bus the machine hangs off.
+ */
+export const CONTROLLER_DOCK = { x: 64, y: -18, stackDy: 22 } as const;
 
 /**
  * Resolve the React Flow node id a controller should dock to, given the

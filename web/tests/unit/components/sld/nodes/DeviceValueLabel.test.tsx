@@ -43,7 +43,12 @@ vi.mock('@xyflow/react', async () => {
 import { GeneratorNode } from '@/components/sld/nodes/GeneratorNode';
 import { LoadNode } from '@/components/sld/nodes/LoadNode';
 import type { SldNodeData } from '@/components/sld/nodes/BusNode';
-import { DEVICE_LABEL_MIN_ZOOM, deviceLabelsVisibleAtZoom } from '@/components/sld/labelDensity';
+import {
+  DEVICE_LABEL_DENSE_COUNT,
+  DEVICE_LABEL_MIN_ZOOM,
+  deviceLabelsVisibleAtZoom,
+  deviceValueCount,
+} from '@/components/sld/labelDensity';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
 import { parseRunId } from '@/api/types';
@@ -81,6 +86,15 @@ function makePflow(overrides: Partial<PflowResult> = {}): PflowResult {
     load_consumption: { PQ_1: { p: 21.7, q: 12.7, bus: 2 } },
     ...overrides,
   };
+}
+
+/** A converged result with more readouts than a case shows at every zoom. */
+function makeDensePflow(): PflowResult {
+  const loads: NonNullable<PflowResult['load_consumption']> = {};
+  for (let i = 0; i <= DEVICE_LABEL_DENSE_COUNT; i += 1) {
+    loads[`PQ_${i}`] = { p: 10, q: 5, bus: 1 };
+  }
+  return makePflow({ load_consumption: loads });
 }
 
 function setPflow(result: PflowResult | null): void {
@@ -165,6 +179,16 @@ describe('GeneratorNode P / Q label', () => {
     expect(getByTestId('generator-p-2').textContent).toBe('81.4 MW');
   });
 
+  it('shows nothing for a node whose row another node prints (pflowIdx null)', () => {
+    // A static generator whose dynamic machine is drawn too leaves the row to
+    // the machine, so the injection is not printed twice.
+    setPflow(makePflow());
+    const { queryByTestId } = render(
+      <GeneratorNode {...props<typeof GeneratorNode>({ idx: '2', kind: 'PV', pflowIdx: null })} />,
+    );
+    expect(queryByTestId('generator-values-2')).toBeNull();
+  });
+
   it('is hidden by the Hide labels toggle and returns with it', () => {
     setPflow(makePflow());
     const { queryByTestId } = render(
@@ -177,21 +201,29 @@ describe('GeneratorNode P / Q label', () => {
     expect(queryByTestId('generator-values-2')).not.toBeNull();
   });
 
-  it('puts the label above a generator on the north face and below one on the south face', () => {
+  it('hangs the label on the side of the node that faces its bus', () => {
     setPflow(makePflow());
-    const north = render(
+    const below = render(
       <GeneratorNode
-        {...props<typeof GeneratorNode>({ idx: '2', kind: 'PV', busSide: 'north' })}
+        {...props<typeof GeneratorNode>({ idx: '2', kind: 'PV', valueSide: 'below' })}
       />,
     );
-    expect(north.getByTestId('generator-values-2').className).toContain('bottom-full');
+    expect(below.getByTestId('generator-values-2').className).toContain('top-full');
     cleanup();
-    const south = render(
+    const above = render(
       <GeneratorNode
-        {...props<typeof GeneratorNode>({ idx: '2', kind: 'PV', busSide: 'south' })}
+        {...props<typeof GeneratorNode>({ idx: '2', kind: 'PV', valueSide: 'above' })}
       />,
     );
-    expect(south.getByTestId('generator-values-2').className).toContain('top-full');
+    expect(above.getByTestId('generator-values-2').className).toContain('bottom-full');
+  });
+
+  it('puts the label below a generator that has no side stamped (it sits above its bus)', () => {
+    setPflow(makePflow());
+    const { getByTestId } = render(
+      <GeneratorNode {...props<typeof GeneratorNode>({ idx: '2', kind: 'PV' })} />,
+    );
+    expect(getByTestId('generator-values-2').className).toContain('top-full');
   });
 
   it('keeps the label outside the normal flow so the node box does not grow', () => {
@@ -210,19 +242,20 @@ describe('LoadNode P / Q label', () => {
   it('shows the consumption of the load after a converged PF', () => {
     setPflow(makePflow());
     const { getByTestId } = render(
-      <LoadNode {...props<typeof LoadNode>({ idx: 'PQ_1', kind: 'PQ', busSide: 'south' })} />,
+      <LoadNode {...props<typeof LoadNode>({ idx: 'PQ_1', kind: 'PQ' })} />,
     );
     expect(getByTestId('load-p-PQ_1').textContent).toBe('21.7 MW');
     expect(getByTestId('load-q-PQ_1').textContent).toBe('12.7 MVAr');
-    expect(getByTestId('load-values-PQ_1').className).toContain('top-full');
+    // A load sits below its bus by default, so the strip facing it is above.
+    expect(getByTestId('load-values-PQ_1').className).toContain('bottom-full');
   });
 
-  it('puts the label above a load that hangs off the north face', () => {
+  it('puts the label below a load that sits above its bus', () => {
     setPflow(makePflow());
     const { getByTestId } = render(
-      <LoadNode {...props<typeof LoadNode>({ idx: 'PQ_1', kind: 'PQ', busSide: 'north' })} />,
+      <LoadNode {...props<typeof LoadNode>({ idx: 'PQ_1', kind: 'PQ', valueSide: 'below' })} />,
     );
-    expect(getByTestId('load-values-PQ_1').className).toContain('bottom-full');
+    expect(getByTestId('load-values-PQ_1').className).toContain('top-full');
   });
 
   it('reads load_consumption, not generator_outputs', () => {
@@ -245,16 +278,40 @@ describe('LoadNode P / Q label', () => {
 });
 
 describe('zoom-level label density', () => {
-  it('draws the labels only at or above the threshold zoom', () => {
-    expect(deviceLabelsVisibleAtZoom(0.5)).toBe(false);
-    expect(deviceLabelsVisibleAtZoom(DEVICE_LABEL_MIN_ZOOM - 0.01)).toBe(false);
-    expect(deviceLabelsVisibleAtZoom(DEVICE_LABEL_MIN_ZOOM)).toBe(true);
-    expect(deviceLabelsVisibleAtZoom(1)).toBe(true);
-    expect(deviceLabelsVisibleAtZoom(2)).toBe(true);
+  it('draws a small or medium case at every zoom', () => {
+    expect(deviceLabelsVisibleAtZoom(0.5, 3)).toBe(true);
+    expect(deviceLabelsVisibleAtZoom(0.5, DEVICE_LABEL_DENSE_COUNT)).toBe(true);
+    expect(deviceLabelsVisibleAtZoom(2, 3)).toBe(true);
   });
 
-  it('hides the generator and load labels when the canvas is zoomed out', () => {
+  it('draws a dense case only at or above the threshold zoom', () => {
+    const dense = DEVICE_LABEL_DENSE_COUNT + 1;
+    expect(deviceLabelsVisibleAtZoom(0.5, dense)).toBe(false);
+    expect(deviceLabelsVisibleAtZoom(DEVICE_LABEL_MIN_ZOOM - 0.01, dense)).toBe(false);
+    expect(deviceLabelsVisibleAtZoom(DEVICE_LABEL_MIN_ZOOM, dense)).toBe(true);
+    expect(deviceLabelsVisibleAtZoom(2, dense)).toBe(true);
+  });
+
+  it('counts the readouts a converged result can put on the diagram', () => {
+    expect(deviceValueCount(null)).toBe(0);
+    expect(deviceValueCount(makePflow({ converged: false }))).toBe(0);
+    expect(deviceValueCount(makePflow())).toBe(3);
+    expect(deviceValueCount(makePflow({ generator_outputs: undefined }))).toBe(1);
+  });
+
+  it('shows the readouts of a small case at the most zoomed-out view', () => {
     setPflow(makePflow());
+    view.zoom = 0.5;
+    const gen = render(
+      <GeneratorNode {...props<typeof GeneratorNode>({ idx: '2', kind: 'PV' })} />,
+    );
+    const load = render(<LoadNode {...props<typeof LoadNode>({ idx: 'PQ_1', kind: 'PQ' })} />);
+    expect(gen.queryByTestId('generator-values-2')).not.toBeNull();
+    expect(load.queryByTestId('load-values-PQ_1')).not.toBeNull();
+  });
+
+  it('hides the generator and load labels of a dense case when the canvas is zoomed out', () => {
+    setPflow(makeDensePflow());
     view.zoom = 0.5;
     const gen = render(
       <GeneratorNode {...props<typeof GeneratorNode>({ idx: '2', kind: 'PV' })} />,
@@ -266,8 +323,8 @@ describe('zoom-level label density', () => {
     expect(gen.getByTestId('generator-node-2').textContent).toContain('name-2');
   });
 
-  it('brings the labels back when the canvas zooms in, and drops them again', () => {
-    setPflow(makePflow());
+  it('brings the labels of a dense case back when the canvas zooms in, and drops them again', () => {
+    setPflow(makeDensePflow());
     view.zoom = 0.5;
     const { queryByTestId } = render(
       <GeneratorNode {...props<typeof GeneratorNode>({ idx: '2', kind: 'PV' })} />,

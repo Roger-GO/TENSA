@@ -6,6 +6,7 @@ import { useRunsStore } from '@/store/runs';
 import { usePflowStore } from '@/store/pflow';
 import type { RunRecord } from '@/store/runs';
 import { cn } from '@/lib/cn';
+import { findTopologyEntry, generatorRowKey } from '@/lib/topology';
 import { InlineSparkline } from './InlineSparkline';
 
 /**
@@ -116,6 +117,8 @@ function useThrottledColumn(columnName: string | null): Float64Array | null {
 interface KindContentProps {
   kind: SelectedKind;
   idx: string;
+  /** Row of the PF result's `generator_outputs` that a generator reads. */
+  pflowKey: string;
 }
 
 function BusContent({ idx }: { idx: string }) {
@@ -149,7 +152,7 @@ function BusContent({ idx }: { idx: string }) {
   return <PlotsEmpty />;
 }
 
-function GeneratorContent({ idx }: { idx: string }) {
+function GeneratorContent({ idx, pflowKey }: { idx: string; pflowKey: string }) {
   const omegaSamples = useThrottledColumn(`Gen_${idx}_omega`);
   const deltaSamples = useThrottledColumn(`Gen_${idx}_delta`);
   const pflow = usePflowStore((s) => s.lastRun);
@@ -178,7 +181,7 @@ function GeneratorContent({ idx }: { idx: string }) {
   }
 
   if (pflow && pflow.converged) {
-    const gen = pflow.generator_outputs?.[idx];
+    const gen = pflow.generator_outputs?.[pflowKey];
     if (gen) {
       return (
         <div data-testid="plots-static-badge" className="flex flex-col gap-2">
@@ -281,12 +284,12 @@ function PlotsEmpty() {
   );
 }
 
-function KindContent({ kind, idx }: KindContentProps) {
+function KindContent({ kind, idx, pflowKey }: KindContentProps) {
   switch (kind) {
     case 'bus':
       return <BusContent idx={idx} />;
     case 'generator':
-      return <GeneratorContent idx={idx} />;
+      return <GeneratorContent idx={idx} pflowKey={pflowKey} />;
     case 'line':
     case 'transformer':
       return <LineContent idx={idx} />;
@@ -304,6 +307,7 @@ export interface PlotsAccordionProps {
 
 export function PlotsAccordion({ className }: PlotsAccordionProps) {
   const selectedElement = useCaseStore((s) => s.selectedElement);
+  const topology = useCaseStore((s) => s.topology);
   if (!selectedElement) {
     return (
       <div data-testid="plots-accordion" className={cn('flex flex-col gap-2', className)}>
@@ -311,9 +315,15 @@ export function PlotsAccordion({ className }: PlotsAccordionProps) {
       </div>
     );
   }
+  // A dynamic machine has no PF row of its own: it reads its static generator's.
+  const entry = topology ? findTopologyEntry(topology, selectedElement) : null;
   return (
     <div data-testid="plots-accordion" className={cn('flex flex-col gap-2', className)}>
-      <KindContent kind={selectedElement.kind} idx={selectedElement.idx} />
+      <KindContent
+        kind={selectedElement.kind}
+        idx={selectedElement.idx}
+        pflowKey={entry ? generatorRowKey(entry) : selectedElement.idx}
+      />
     </div>
   );
 }

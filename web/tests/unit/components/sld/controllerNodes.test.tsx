@@ -8,7 +8,12 @@
  * SynGen; PSS → Exciter; renewable plant REPCA1 → REECA1 → REGCP1 → Bus).
  */
 import { describe, it, expect } from 'vitest';
-import { buildGraph } from '@/components/sld/graph';
+import {
+  buildGraph,
+  CONTROLLER_DOCK,
+  DEVICE_VALUE_LABEL,
+  NODE_FOOTPRINT,
+} from '@/components/sld/graph';
 import type { TopologySummary, TopologyEntry } from '@/api/types';
 
 function bus(idx: number | string): TopologyEntry {
@@ -61,11 +66,11 @@ describe('buildGraph — controller nodes', () => {
     expect(ctrlNode?.draggable).toBe(false);
     // Docked at a fixed offset off the parent — exact regardless of where
     // collision push-out placed the generator.
-    expect(ctrlNode!.position.x - genNode!.position.x).toBe(32);
-    expect(ctrlNode!.position.y - genNode!.position.y).toBe(-18);
+    expect(ctrlNode!.position.x - genNode!.position.x).toBe(CONTROLLER_DOCK.x);
+    expect(ctrlNode!.position.y - genNode!.position.y).toBe(CONTROLLER_DOCK.y);
     // Tether vector points back to the parent origin.
-    expect(d.connectorDx).toBe(-32);
-    expect(d.connectorDy).toBe(18);
+    expect(d.connectorDx).toBe(-CONTROLLER_DOCK.x);
+    expect(d.connectorDy).toBe(-CONTROLLER_DOCK.y);
   });
 
   it('docks a governor (syn) and classifies it', () => {
@@ -216,5 +221,81 @@ describe('buildGraph — controller nodes', () => {
     // The governor docks to the single generator node.
     const gov = nodeById(nodes, 'controller-TGOV1-TGOV1_1');
     expect((gov?.data as Record<string, unknown>).parentNodeId).toBe('generator-2');
+  });
+
+  describe('clear of the generator P / Q readout', () => {
+    type Box = { left: number; right: number; top: number; bottom: number };
+    const overlap = (a: Box, b: Box) =>
+      Math.min(a.right, b.right) > Math.max(a.left, b.left) &&
+      Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top);
+
+    // The readout is centred on the node's footprint and hangs on the face
+    // of the node that looks at the bus (`valueSide`).
+    function readoutBox(node: { position: { x: number; y: number }; data: unknown }): Box {
+      const side = (node.data as { valueSide?: string }).valueSide;
+      const { width, height } = NODE_FOOTPRINT.generator;
+      const centre = node.position.x + width / 2;
+      const top =
+        side === 'below' ? node.position.y + height : node.position.y - DEVICE_VALUE_LABEL.height;
+      return {
+        left: centre - DEVICE_VALUE_LABEL.width / 2,
+        right: centre + DEVICE_VALUE_LABEL.width / 2,
+        top,
+        bottom: top + DEVICE_VALUE_LABEL.height,
+      };
+    }
+
+    // Two controllers on one machine stack down the dock; the smallest badge
+    // the canvas draws (CONTROLLER_GLYPH_FOOTPRINT) is enough for the check
+    // because the dock fixes the badge's left edge.
+    function badgeBoxes(nodes: ReturnType<typeof buildGraph>['nodes']): Box[] {
+      return nodes
+        .filter((n) => n.type === 'controller')
+        .map((n) => ({
+          left: n.position.x,
+          right: n.position.x + 28,
+          top: n.position.y,
+          bottom: n.position.y + 28,
+        }));
+    }
+
+    const controllers = [
+      ctrl('EXST1_1', 'EXST1', { syn: 'GENROU_1' }),
+      ctrl('TGOV1_1', 'TGOV1', { syn: 'GENROU_1' }),
+    ];
+
+    it('leaves the readout of a machine above its bus clear of its badges', () => {
+      const topology = makeTopology({
+        buses: [bus(1)],
+        generators: [gen('GENROU_1', 1)],
+        controllers,
+      });
+      const { nodes } = buildGraph(topology, COORDS);
+      const machine = nodeById(nodes, 'generator-GENROU_1')!;
+      expect((machine.data as { valueSide?: string }).valueSide).toBe('below');
+      const badges = badgeBoxes(nodes);
+      expect(badges).toHaveLength(2);
+      for (const badge of badges) expect(overlap(readoutBox(machine), badge)).toBe(false);
+    });
+
+    it('leaves the readout of a machine below its bus clear of its badges', () => {
+      // Bus 1 sits below its branch neighbour, so its machine hangs south and
+      // the readout moves to the strip above the node, where the first badge
+      // used to dock.
+      const topology = makeTopology({
+        buses: [bus(1), bus(2)],
+        transformers: [
+          { idx: 'T12', name: 't', kind: 'Line', params: { bus1: 1, bus2: 2, r: 0.01, x: 0.05 } },
+        ],
+        generators: [gen('GENROU_1', 1)],
+        controllers,
+      });
+      const { nodes } = buildGraph(topology, { '1': { x: 0, y: 500 }, '2': { x: 0, y: 100 } });
+      const machine = nodeById(nodes, 'generator-GENROU_1')!;
+      expect((machine.data as { valueSide?: string }).valueSide).toBe('above');
+      const badges = badgeBoxes(nodes);
+      expect(badges).toHaveLength(2);
+      for (const badge of badges) expect(overlap(readoutBox(machine), badge)).toBe(false);
+    });
   });
 });

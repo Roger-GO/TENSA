@@ -53,3 +53,21 @@ export function findTopologyEntry(
   }
   return bucket.find((e) => String(e.idx) === selected.idx) ?? null;
 }
+
+/** ANDES SynGen (rotor) model classes: the dynamic half of a machine. */
+export const DYNAMIC_GENERATOR_KINDS: ReadonlySet<string> = new Set(['GENROU', 'GENCLS']);
+
+/**
+ * Key of a generator's row in the PF result's `generator_outputs`. The power
+ * flow solves the static generators (PV, Slack) only, so a dynamic machine
+ * has no row of its own: it reads the one of the static generator it names in
+ * `gen`. Every other generator reads the row under its own idx, as does a
+ * machine that names none.
+ */
+export function generatorRowKey(entry: TopologyEntry): string {
+  if (DYNAMIC_GENERATOR_KINDS.has(entry.kind)) {
+    const gen = entry.params?.gen;
+    if (gen !== undefined && typeof gen !== 'boolean') return String(gen);
+  }
+  return String(entry.idx);
+}

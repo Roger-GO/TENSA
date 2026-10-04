@@ -258,6 +258,14 @@ describe('getDeviceOverlayState', () => {
     expect(getDeviceOverlayState('generator', 'GENROU_1', pflow).has_data).toBe(false);
   });
 
+  it('returns neutral for a node that prints no row (null key)', () => {
+    expect(getDeviceOverlayState('generator', null, pflow)).toEqual({
+      p_label: null,
+      q_label: null,
+      has_data: false,
+    });
+  });
+
   it('tolerates a result without the per-device maps', () => {
     const bare = makeResult();
     delete (bare as { generator_outputs?: unknown }).generator_outputs;

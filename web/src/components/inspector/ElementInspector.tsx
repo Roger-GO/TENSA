@@ -6,9 +6,9 @@ import { DeleteElementButton } from '@/components/elements/DeleteElementButton';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useCurrentTopology } from '@/api/queries';
-import type { PflowResult } from '@/api/types';
+import type { PflowResult, TopologyEntry } from '@/api/types';
 import type { SelectedElement } from '@/store/case';
-import { findTopologyEntry } from '@/lib/topology';
+import { findTopologyEntry, generatorRowKey } from '@/lib/topology';
 import { cn } from '@/lib/cn';
 import { ElementFormFields } from './ElementFormFields';
 
@@ -40,10 +40,12 @@ import { ElementFormFields } from './ElementFormFields';
 
 interface ResultsTabProps {
   selected: SelectedElement;
+  /** The selected element's topology entry, when the topology holds it. */
+  entry: TopologyEntry | null;
   pflowResult: PflowResult | null;
 }
 
-function ResultsTab({ selected, pflowResult }: ResultsTabProps) {
+function ResultsTab({ selected, entry, pflowResult }: ResultsTabProps) {
   const setActiveRoutine = useRunModeStore((s) => s.setActiveRoutine);
   if (!pflowResult) {
     return (
@@ -105,7 +107,8 @@ function ResultsTab({ selected, pflowResult }: ResultsTabProps) {
     );
   }
   if (selected.kind === 'generator') {
-    const gen = pflowResult.generator_outputs?.[selected.idx];
+    // A dynamic machine has no row of its own: it reads its static generator's.
+    const gen = pflowResult.generator_outputs?.[entry ? generatorRowKey(entry) : selected.idx];
     if (!gen) {
       return (
         <p className="text-muted-foreground text-xs">No PF output for generator {selected.idx}.</p>
@@ -263,7 +266,7 @@ export function ElementInspector({ className }: ElementInspectorProps) {
           <ElementFormFields />
         </TabsContent>
         <TabsContent value="results" className="min-h-0 flex-1 overflow-auto">
-          <ResultsTab selected={selectedElement} pflowResult={pflowResult} />
+          <ResultsTab selected={selectedElement} entry={entry} pflowResult={pflowResult} />
         </TabsContent>
       </Tabs>
     </div>

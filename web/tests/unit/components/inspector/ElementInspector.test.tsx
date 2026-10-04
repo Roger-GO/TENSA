@@ -224,6 +224,59 @@ describe('<ElementInspector />', () => {
     expect(screen.getByText('1.0600 pu')).toBeInTheDocument();
   });
 
+  it('shows the row of the static generator a dynamic machine names in gen', () => {
+    // A machine has no row of its own in generator_outputs; the diagram and
+    // the Inspector read the same one.
+    seedLoadedCase();
+    mockTopology = {
+      ...TOPOLOGY,
+      generators: [
+        ...TOPOLOGY.generators,
+        {
+          idx: 'GENROU_1',
+          name: 'Machine1',
+          kind: 'GENROU',
+          params: { bus: 1, gen: 'G1' },
+        },
+      ],
+    };
+    useCaseStore.setState({ selectedElement: { kind: 'generator', idx: 'GENROU_1' } });
+    usePflowStore.setState({
+      lastRun: makePflowResult({
+        generator_outputs: { G1: { p: 232.4, q: -16.9, v: 1.06, bus: 1 } },
+      }),
+      isRunning: false,
+      error: null,
+    });
+    render(withQueryClient(<ElementInspector />));
+
+    expect(screen.getByText('232.40 MW')).toBeInTheDocument();
+    expect(screen.getByText('-16.90 MVAr')).toBeInTheDocument();
+    expect(screen.queryByText(/no pf output/i)).not.toBeInTheDocument();
+  });
+
+  it('says there is no PF output for a machine that names no static generator', () => {
+    seedLoadedCase();
+    mockTopology = {
+      ...TOPOLOGY,
+      generators: [
+        ...TOPOLOGY.generators,
+        { idx: 'GENROU_1', name: 'Machine1', kind: 'GENROU', params: { bus: 1 } },
+      ],
+    };
+    useCaseStore.setState({ selectedElement: { kind: 'generator', idx: 'GENROU_1' } });
+    usePflowStore.setState({
+      lastRun: makePflowResult({
+        generator_outputs: { G1: { p: 232.4, q: -16.9, v: 1.06, bus: 1 } },
+      }),
+      isRunning: false,
+      error: null,
+    });
+    render(withQueryClient(<ElementInspector />));
+
+    expect(screen.getByText(/no pf output for generator GENROU_1/i)).toBeInTheDocument();
+  });
+
   it('shows shunt fallback hint (no per-shunt PF results)', () => {
     seedLoadedCase();
     useCaseStore.setState({ selectedElement: { kind: 'shunt', idx: 'SH1' } });

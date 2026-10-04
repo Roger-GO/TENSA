@@ -35,17 +35,19 @@ export interface SldNodeData extends Record<string, unknown> {
   sldSelected?: boolean;
   /**
    * Generator / load nodes: the key of this device's row in the PF
-   * result maps. A dynamic machine (GENROU / GENCLS) reads the row of the
-   * static generator it names in `gen`, since it has none of its own.
-   * Stamped by `buildGraph`.
+   * result maps, or `null` when another node prints that row (a static
+   * generator whose dynamic machine is drawn too). A dynamic machine
+   * (GENROU / GENCLS) reads the row of the static generator it names in
+   * `gen`, since it has none of its own. Absent: read the row under the
+   * node's own idx. Stamped by `buildGraph`.
    */
-  pflowIdx?: string;
+  pflowIdx?: string | null;
   /**
-   * Device nodes: the face of the parent bus the device hangs off. Its
-   * P / Q label sits on the far side, clear of the stub and the bus
-   * label. Stamped by `buildGraph`.
+   * Generator / load nodes: which side of the node its P / Q readout hangs
+   * off, the side facing the parent bus given where the device finally
+   * sits. Stamped by `buildGraph`.
    */
-  busSide?: Side;
+  valueSide?: 'above' | 'below';
 }
 
 const SIDES: Array<{ side: Side; position: Position }> = [

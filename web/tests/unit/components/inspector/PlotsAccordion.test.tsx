@@ -161,4 +161,52 @@ describe('<PlotsAccordion />', () => {
     const sparklines = screen.getAllByTestId('inline-sparkline');
     expect(sparklines.length).toBe(2);
   });
+
+  describe('generator PF badge (a machine has no row of its own)', () => {
+    function seedMachine(genLink: Record<string, number | string>) {
+      seedLoadedCase();
+      useCaseStore.setState({
+        topology: {
+          state: 'committed',
+          buses: [{ idx: 1, name: 'b1', kind: 'Bus', params: {} }],
+          lines: [],
+          transformers: [],
+          generators: [
+            { idx: 2, name: 'pv', kind: 'PV', params: { bus: 1 } },
+            { idx: 'GENROU_2', name: 'm2', kind: 'GENROU', params: { bus: 1, ...genLink } },
+          ],
+          loads: [],
+        },
+        selectedElement: { kind: 'generator', idx: 'GENROU_2' },
+      });
+      usePflowStore.setState({
+        lastRun: {
+          run_id: parseRunId('pf-1'),
+          converged: true,
+          iterations: 4,
+          mismatch: 1e-6,
+          bus_voltages: {},
+          bus_angles: {},
+          generator_outputs: { '2': { p: 40, q: 30.436, v: 1.03, bus: 1 } },
+        },
+        isRunning: false,
+        error: null,
+      });
+    }
+
+    it('reads the row of the static generator the machine names in gen', () => {
+      seedMachine({ gen: 2 });
+      render(<PlotsAccordion />);
+      expect(screen.getByTestId('plots-static-badge')).toBeInTheDocument();
+      expect(screen.getByText('40.00 MW')).toBeInTheDocument();
+      expect(screen.getByText('30.44 MVAr')).toBeInTheDocument();
+    });
+
+    it('shows no badge for a machine that names no generator', () => {
+      seedMachine({});
+      render(<PlotsAccordion />);
+      expect(screen.queryByTestId('plots-static-badge')).not.toBeInTheDocument();
+      expect(screen.getByTestId('empty-state')).toBeInTheDocument();
+    });
+  });
 });
