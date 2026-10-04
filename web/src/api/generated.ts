@@ -4401,7 +4401,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Filename failed validation (path traversal, mismatched extension, or unwriteable target). */
+            /** @description Filename failed validation (path traversal, mismatched extension, or unwriteable target), or ``filename`` is the case file this session loaded and the system holds disturbances, which would be written into it. */
             422: {
                 headers: {
                     [name: string]: unknown;

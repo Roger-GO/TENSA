@@ -1270,6 +1270,13 @@ class Wrapper:
           classes it can emit (Bus, PQ/ZIP, Shunt, PV/Slack/GENROU/
           GENCLS, Line, 2W transformer).
 
+        Writing over the file the case was loaded from makes that file the new
+        base of the session: it now holds the elements added since the load, so
+        ``_replay_buffer`` is emptied (an undo or a delete would otherwise reload
+        the file and add those elements a second time). That write is refused
+        while the System holds disturbances a client committed or a restore
+        replayed, because they would become part of the case file.
+
         Returns the absolute path of the written file. Caller (the
         route handler) is responsible for canonicalizing ``filename``
         against the workspace and rejecting traversal.
@@ -1279,6 +1286,13 @@ class Wrapper:
         if format not in ("xlsx", "json", "raw"):  # pragma: no cover — Literal
             raise ElementValidationError(
                 f"unsupported save format {format!r}; supported: xlsx, json, raw"
+            )
+        overwrites_open_case = self._is_open_case_file(target)
+        if overwrites_open_case and (self._disturbance_log or self._restored_events):
+            raise CaseSaveError(
+                "the system holds disturbances for a run, and saving over "
+                f"{target.name} would make them part of that case. Save it under "
+                "a new name, or reload the case first"
             )
 
         # ATOMIC WRITE. The ANDES xlsx/json writers are NOT atomic: they create
@@ -1340,7 +1354,18 @@ class Wrapper:
             with contextlib.suppress(OSError):
                 tmp_path.unlink()
             raise CaseSaveError(_sanitize_message(str(exc))) from exc
+        if overwrites_open_case:
+            self._replay_buffer = []
         return target
+
+    def _is_open_case_file(self, target: Path) -> bool:
+        """Whether ``target`` is the file the loaded case was read from."""
+        if self._case_path is None:
+            return False
+        try:
+            return os.path.samefile(target, self._case_path)
+        except OSError:  # one of the two does not exist
+            return False
 
     def create_blank(self) -> TopologySnapshot:
         """Create a brand-new empty ``andes.System()`` for this session.

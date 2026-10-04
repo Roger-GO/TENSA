@@ -87,6 +87,10 @@ async def _topology(client: httpx.AsyncClient, sid: str) -> dict[str, Any]:
     return body
 
 
+async def _bus_idxes(client: httpx.AsyncClient, sid: str) -> list[str]:
+    return [str(b["idx"]) for b in (await _topology(client, sid))["buses"]]
+
+
 def _bus(idx: str, vn: float = 100.0) -> Step:
     return ("POST", "/elements", {"model": "Bus", "params": {"idx": idx, "name": f"BUS{idx}", "Vn": vn}})
 
@@ -226,3 +230,120 @@ async def test_a_clone_reset_on_a_loaded_case_undoes_everything_before_it(
     topology = await _replays_to_the_same_topology(client, with_reset, pristine)
 
     assert "100" not in {str(b["idx"]) for b in topology["buses"]}
+
+
+def _save_over(path: str) -> Step:
+    fmt = path.rsplit(".", 1)[1]
+    return ("POST", "/save", {"filename": path, "format": fmt, "overwrite": True})
+
+
+async def test_a_save_over_the_open_case_undoes_nothing_before_it(
+    client: httpx.AsyncClient,
+) -> None:
+    """Why the journal may drop the entries before a save over the open case file:
+    the file then holds them, and a session that loads it starts from there. (The
+    writer spells some numbers differently, so the two are compared by their buses.)"""
+    original = await _new_session(client)
+    await _send(
+        client,
+        original,
+        [
+            _load("kundur_full.xlsx"),
+            _bus("100", 230.0),
+            _bus("101", 230.0),
+            _save_over("kundur_full.xlsx"),
+            _bus("102", 230.0),
+        ],
+    )
+    fresh = await _new_session(client)
+    await _send(client, fresh, [_load("kundur_full.xlsx"), _bus("102", 230.0)])
+
+    got = await _bus_idxes(client, fresh)
+    assert got == await _bus_idxes(client, original)
+    assert {"100", "101", "102"} <= set(got)
+    assert len(got) == len(set(got))
+
+
+async def test_undo_after_a_save_over_the_open_case_drops_only_what_came_after(
+    client: httpx.AsyncClient,
+) -> None:
+    """The saved elements are part of the file now: an undo reloads it and must not
+    add them a second time, and must not take the last of them away either."""
+    sid = await _new_session(client)
+    await _send(
+        client,
+        sid,
+        [
+            _load("kundur_full.xlsx"),
+            _bus("100", 230.0),
+            _bus("101", 230.0),
+            _save_over("kundur_full.xlsx"),
+        ],
+    )
+    saved = await _bus_idxes(client, sid)
+    assert saved.count("100") == 1 and saved.count("101") == 1
+
+    nothing = await client.post(f"/api/sessions/{sid}/undo-last-edit")
+    assert nothing.status_code == 422, nothing.text
+    assert await _bus_idxes(client, sid) == saved
+
+    await _send(client, sid, [_bus("102", 230.0)])
+    assert await _bus_idxes(client, sid) == [*saved, "102"]
+    await _send(client, sid, [("POST", "/undo-last-edit", None)])
+    assert await _bus_idxes(client, sid) == saved
+
+
+async def test_a_saved_element_is_the_cases_to_delete_like_any_other(
+    client: httpx.AsyncClient,
+) -> None:
+    sid = await _new_session(client)
+    await _send(
+        client, sid, [_load("kundur_full.xlsx"), _bus("100", 230.0), _save_over("kundur_full.xlsx")]
+    )
+    resp = await client.delete(f"/api/sessions/{sid}/elements/Bus/100")
+    assert resp.status_code == 422, resp.text
+    assert "loaded case file" in resp.json()["detail"]
+
+
+async def test_a_save_under_another_name_keeps_the_edits_to_undo(
+    client: httpx.AsyncClient,
+) -> None:
+    sid = await _new_session(client)
+    await _send(
+        client,
+        sid,
+        [
+            _load("kundur_full.xlsx"),
+            _bus("100", 230.0),
+            ("POST", "/save", {"filename": "backup.xlsx", "format": "xlsx"}),
+            ("POST", "/undo-last-edit", None),
+        ],
+    )
+    assert "100" not in await _bus_idxes(client, sid)
+
+
+async def test_a_save_over_the_open_case_is_refused_while_disturbances_are_committed(
+    client: httpx.AsyncClient, tmp_path: Path
+) -> None:
+    """A committed fault is a device of the system. Written over the case file it
+    would come back as one of the case's own events the next time it is opened."""
+    case = tmp_path / "ws" / "kundur_full.xlsx"
+    before = case.read_bytes()
+    sid = await _new_session(client)
+    fault = {"kind": "fault", "bus_idx": 4, "tf": 1.0, "tc": 1.1}
+    await _send(
+        client,
+        sid,
+        [_load("kundur_full.xlsx"), ("POST", "/disturbances", {"disturbances": [fault]})],
+    )
+
+    refused = await client.post(f"/api/sessions/{sid}/save", json=_save_over("kundur_full.xlsx")[2])
+    assert refused.status_code == 422, refused.text
+    assert "disturbances" in refused.json()["detail"]
+    assert case.read_bytes() == before
+
+    # Under another name it is written as before: the user named that file.
+    elsewhere = await client.post(
+        f"/api/sessions/{sid}/save", json={"filename": "with-fault.xlsx", "format": "xlsx"}
+    )
+    assert elsewhere.status_code == 201, elsewhere.text

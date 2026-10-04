@@ -372,7 +372,9 @@ def _validate_save_filename(workspace: Path, filename: str, format: str) -> Path
             "model": ProblemDetails,
             "description": (
                 "Filename failed validation (path traversal, mismatched "
-                "extension, or unwriteable target)."
+                "extension, or unwriteable target), or ``filename`` is the "
+                "case file this session loaded and the system holds "
+                "disturbances, which would be written into it."
             ),
         },
     },
