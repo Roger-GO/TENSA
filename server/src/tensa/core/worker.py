@@ -75,6 +75,7 @@ from tensa.core.errors import (
     DisturbanceCommitError,
     ElementHasDependentsError,
     NoCaseLoadedError,
+    short_repr,
 )
 
 # AndesAppError catches the new ElementValidationError /
@@ -1221,7 +1222,7 @@ def _handle_run_tds(
                 coerced[key] = float(value)
             except (TypeError, ValueError, OverflowError) as exc:
                 raise AndesAppError(
-                    f"'tds_config_overrides[{key!r}]' must be a float-coercible value"
+                    f"'tds_config_overrides[{short_repr(key)}]' must be a float-coercible value"
                 ) from exc
         tds_config_overrides = coerced
 

@@ -184,6 +184,24 @@ def test_unknown_override_key_is_refused_before_stream_start(wrapper: Wrapper) -
 
 
 @pytest.mark.integration
+def test_a_long_override_key_is_quoted_in_short(wrapper: Wrapper) -> None:
+    """The refusal travels back to the client that sent the key, so it does not
+    repeat all of it."""
+    pipe = _RecordingPipe()
+    with pytest.raises(AndesAppError) as refused:
+        worker._handle_run_tds(
+            wrapper,
+            {"tf": 0.3, "stream": True, "tds_config_overrides": {"k" * 5000: "fast"}},
+            threading.Event(),
+            pipe,  # type: ignore[arg-type]
+            seq=1,
+        )
+    assert "float-coercible" in str(refused.value)
+    assert len(str(refused.value)) < 200
+    assert pipe.sent == []
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("stream", [True, False])
 @pytest.mark.parametrize(
     ("overrides", "message"),
