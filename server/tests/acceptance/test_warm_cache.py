@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from tensa.cli import _andes_version
+from tensa import andes_version
 from tensa.core.codegen_cache import cache_state
 
 
@@ -58,4 +58,4 @@ def test_warm_cache_runs_green_and_populates_cache_dir() -> None:
 
     # It also records that the cache was checked against this ANDES, which is what
     # lets ``tensa serve`` skip its background check on the next start.
-    assert cache_state(_andes_version()) == "ready"
+    assert cache_state(andes_version()) == "ready"
