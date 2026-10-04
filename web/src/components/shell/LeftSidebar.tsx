@@ -24,9 +24,9 @@ import { cn } from '@/lib/cn';
  *     Only while a case is loaded.
  *  3. **Saved cases** — workspace files + per-case snapshots
  *     (``<SavedCasesList />``, Unit 4).
- *  4. **Component library** — drag-and-drop palette of element kinds
- *     (``<ComponentLibrary />``, Unit 5). Drag onto the canvas to open
- *     the AddElementPanel pre-filled with the dropped kind.
+ *  4. **Component library** — palette of element kinds
+ *     (``<ComponentLibrary />``, Unit 5). Click a tile, or drag it onto the
+ *     canvas, to open the AddElementPanel pre-filled with that kind.
  *
  * The sidebar itself scrolls only when its content overflows; each
  * section grows to fit its content rather than competing for fixed

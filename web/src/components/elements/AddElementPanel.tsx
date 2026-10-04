@@ -75,13 +75,30 @@ const SUPPORTED_KINDS: ReadonlyArray<{
   { value: 'Shunt', label: 'Shunt', group: 'Shunts', submitModel: 'Shunt' },
 ];
 
+/**
+ * The Component library names families, not models: a Generator tile cannot say
+ * whether the user wants a PV, a Slack or a GENROU. The panel opens on the most
+ * common model of the family, with the picker one click away, rather than on a
+ * kind it has no form for (its own model names are the picker's values above).
+ */
+const DEFAULT_KIND_OF_FAMILY: Readonly<Record<string, string>> = {
+  Generator: 'PV',
+  Load: 'PQ',
+  Transformer: 'Transformer2W',
+};
+
+/** The picker kind a requested kind stands for: the family's default, else itself. */
+function pickerKindFor(kind: string | null): string | null {
+  return kind === null ? null : (DEFAULT_KIND_OF_FAMILY[kind] ?? kind);
+}
+
 export interface AddElementPanelProps {
   className?: string;
 }
 
 export function AddElementPanel({ className }: AddElementPanelProps) {
   const open = useCaseStore((s) => s.addPanelOpen);
-  const kind = useCaseStore((s) => s.addPanelKind);
+  const requestedKind = useCaseStore((s) => s.addPanelKind);
   const dirty = useCaseStore((s) => s.addPanelDirty);
   const setKind = useCaseStore((s) => s.setAddPanelKind);
   const closeAddPanel = useCaseStore((s) => s.closeAddPanel);
@@ -108,6 +125,8 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
   const [lastAdded, setLastAdded] = useState<string | null>(null);
 
   if (!open) return null;
+
+  const kind = pickerKindFor(requestedKind);
 
   const requestClose = () => {
     if (dirty) {

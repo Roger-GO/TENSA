@@ -23,25 +23,19 @@ import { RightInspector } from '@/components/inspector/RightInspector';
 import { BottomDrawer } from '@/components/shell/BottomDrawer';
 import { ResultsView } from '@/components/shell/ResultsView';
 import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
-import {
-  makeQueryClient,
-  wireGlobalErrorRecovery,
-  useCurrentTopology,
-  useBlankSystem,
-} from '@/api/queries';
+import { makeQueryClient, wireGlobalErrorRecovery, useCurrentTopology } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
 import { useSessionHeartbeat } from '@/api/useSessionHeartbeat';
 import { useUnsavedWorkGuard } from '@/lib/useUnsavedWorkGuard';
+import { useAddComponent } from '@/lib/useAddComponent';
 import { useJobEventsStream } from '@/streaming/useJobEventsStream';
 import { useSldFrameOverlay } from '@/components/sld/overlay';
 import { RecoveryBadge } from '@/components/shell/RecoveryBadge';
 import { JobAnnouncer } from '@/components/shell/JobAnnouncer';
-import { ProblemDetailsError } from '@/api/client';
 // Imported for its side effect: the store entrypoint wires the cross-slice
 // cascade (a case change clears the previous case's PF and analysis results).
 import '@/store';
 import { useCaseStore } from '@/store/case';
-import { useSessionStore } from '@/store/session';
 import { useSnapshotStore } from '@/store/snapshot';
 import { ComponentDropZone } from '@/components/sld/ComponentDropZone';
 import { LazyMount } from '@/components/ui/Lazy';
@@ -153,10 +147,7 @@ function AppInner({ children }: { children: React.ReactNode }) {
 function CanvasSlot() {
   const caseSelection = useCaseStore((s) => s.selection);
   const loadingPath = useCaseStore((s) => s.loadingPath);
-  const sessionId = useSessionStore((s) => s.sessionId);
-  const setCase = useCaseStore((s) => s.setCase);
-  const openAddPanel = useCaseStore((s) => s.openAddPanel);
-  const blank = useBlankSystem();
+  const { add: addComponent } = useAddComponent();
   const [dropError, setDropError] = useState<string | null>(null);
 
   if (caseSelection !== null) {
@@ -170,24 +161,11 @@ function CanvasSlot() {
     );
   }
 
-  // Drop = "start a blank system seeded with this element". Mirrors
-  // NewSystemButton's blank flow, then opens the dropped kind's form.
+  // Drop = "start a blank system seeded with this element": the same as a click on
+  // a Component library tile, which says why when it cannot.
   const handleDropComponent = (kind: string) => {
-    if (!sessionId || blank.isPending) return;
     setDropError(null);
-    blank.mutate(sessionId, {
-      onSuccess: () => {
-        setCase({ primaryPath: null, addfiles: [], blank: true });
-        openAddPanel(kind);
-      },
-      onError: (err) => {
-        if (err instanceof ProblemDetailsError && err.status === 409) {
-          setDropError('A system is already loaded; discard it first or open a fresh tab.');
-        } else if (err instanceof Error) {
-          setDropError(err.message);
-        }
-      },
-    });
+    addComponent(kind, setDropError);
   };
 
   return (
@@ -212,7 +190,7 @@ function CanvasSlot() {
           title="No case loaded"
           description={
             dropError ??
-            'Pick a case file from the left sidebar — or drag a component here to start a blank system.'
+            'Pick a case file from the left sidebar, or click or drag a component from the Component library to start a blank system.'
           }
           emptyStateKey="app-shell-no-case"
         />

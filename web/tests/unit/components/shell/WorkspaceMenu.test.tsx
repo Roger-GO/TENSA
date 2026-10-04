@@ -22,7 +22,7 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useSnapshotStore } from '@/store/snapshot';
 import { useCommandPaletteStore } from '@/store/commandPalette';
-import { __requestPaletteDialog } from '@/lib/commands';
+import { __requestPaletteDialog, subscribePaletteDialog } from '@/lib/commands';
 import { useReportDialogStore } from '@/store/reportDialog';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 
@@ -77,6 +77,9 @@ beforeEach(() => {
     addPanelDirty: false,
     dragOverrides: {},
     pendingDependents: [],
+    cloneInitialized: false,
+    cloneUndoDepth: 0,
+    cloneRedoDepth: 0,
   });
   useSnapshotStore.getState().reset();
   useReportDialogStore.setState({ dialogOpen: false, activeRoutine: 'pflow' });
@@ -179,8 +182,62 @@ describe('<WorkspaceMenu /> Open case, Save system and Import bundle', () => {
     expect(saveAs).toHaveTextContent('Save system as…');
     expect(save.compareDocumentPosition(saveAs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // The case of these tests is a raw one, which Save cannot write back: it asks.
-    expect(save.getAttribute('title')).toMatch(/Asks for a name and format/);
-    expect(saveAs.getAttribute('title')).toMatch(/new file/);
+    expect(save.getAttribute('aria-description')).toMatch(/Asks for a name and format/);
+    expect(saveAs.getAttribute('aria-description')).toMatch(/new file/);
+    // The hover text is drawn on the screen too, not only left to the browser.
+    await user.hover(saveAs);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/new file/);
+  });
+
+  it('lists Save parameter edits as case with the other saves, greyed out until there is a copy', async () => {
+    const user = userEvent.setup();
+    render(withProviders(<WorkspaceMenu />));
+    await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
+    const saveAs = await screen.findByTestId('topbar-menu-workspace-save-system');
+    const saveEdits = screen.getByTestId('topbar-menu-workspace-clone-save-as');
+    const snapshot = screen.getByTestId('topbar-menu-workspace-save-snapshot');
+    expect(saveEdits).toHaveTextContent('Save parameter edits as case…');
+    // Right after Save system as, before the snapshots.
+    expect(
+      saveAs.compareDocumentPosition(saveEdits) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      saveEdits.compareDocumentPosition(snapshot) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // It says what to do first, and a click does not open its dialog.
+    expect(saveEdits).toHaveAttribute('aria-disabled', 'true');
+    expect(saveEdits).toHaveTextContent(/Switch to Edit mode and change a controller parameter/);
+    await user.click(saveEdits);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByTestId('topbar-menu-workspace-content')).toBeInTheDocument();
+  });
+
+  it('turns Save parameter edits as case into a working entry once Edit mode made the copy', async () => {
+    useCaseStore.setState({ cloneInitialized: true, cloneUndoDepth: 1, cloneRedoDepth: 0 });
+    const user = userEvent.setup();
+    render(withProviders(<WorkspaceMenu />));
+    await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
+    const saveEdits = await screen.findByTestId('topbar-menu-workspace-clone-save-as');
+    expect(saveEdits).not.toHaveAttribute('aria-disabled');
+    const opened: string[] = [];
+    const unsubscribe = subscribePaletteDialog((key) => opened.push(key));
+    await user.click(saveEdits);
+    unsubscribe();
+    // It asks for the dialog the Edit menu's entry opens, and the menu closes like
+    // for any other item.
+    expect(opened).toEqual(['save-as-custom']);
+    await waitFor(() => {
+      expect(screen.queryByTestId('topbar-menu-workspace-content')).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not list Save parameter edits as case when no case is open', async () => {
+    MOCK_TOPOLOGY = null;
+    const user = userEvent.setup();
+    render(withProviders(<WorkspaceMenu />));
+    await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
+    await screen.findByTestId('topbar-menu-workspace-content');
+    expect(screen.queryByTestId('topbar-menu-workspace-clone-save-as')).not.toBeInTheDocument();
   });
 
   it('"Save" on a case it cannot write back opens the save dialog and says why', async () => {

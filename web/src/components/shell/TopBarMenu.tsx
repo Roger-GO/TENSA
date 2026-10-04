@@ -39,6 +39,7 @@ import {
   isValidElement,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
 } from 'react';
@@ -51,6 +52,13 @@ import type {
 } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipPortal,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { cn } from '@/lib/cn';
 
 /**
@@ -236,7 +244,11 @@ export function TopBarMenu({
         data-testid={`${testId}-content`}
         className="w-60 p-1"
       >
-        {wrappedChildren}
+        {/* One provider for the item hints, so moving from one item to the next
+            shows the next hint without waiting for the delay again. */}
+        <TooltipProvider delayDuration={350} skipDelayDuration={200}>
+          {wrappedChildren}
+        </TooltipProvider>
       </PopoverContent>
     </Popover>
   );
@@ -261,6 +273,14 @@ export interface TopBarMenuItemProps extends Omit<
   checked?: boolean;
   /** When true, suppresses the close-on-click behaviour. */
   preventCloseOnSelect?: boolean;
+  /**
+   * Set (to the reason) for an entry that is in the menu but cannot be used now, so a
+   * user looking for it finds it and is told what to do first. It is drawn dimmed with
+   * the reason under the label, and does nothing when activated and leaves the menu open.
+   * It stays focusable (`aria-disabled`, not `disabled`), so the arrow keys reach it and
+   * a screen reader reads the reason. Use `disabled` for an item that is not worth showing.
+   */
+  unavailableReason?: string;
   /** Stable testid. */
   testId?: string;
   /**
@@ -279,24 +299,55 @@ const TopBarMenuItemImpl = forwardRef<HTMLButtonElement, TopBarMenuItemProps>(
       checked = false,
       disabled = false,
       preventCloseOnSelect = false,
+      unavailableReason,
       onClick,
       testId,
       className,
+      title,
       __closeMenu,
       ...rest
     },
     ref,
   ) {
-    return (
+    const unavailable = unavailableReason !== undefined;
+    const id = useId();
+    const labelId = `${id}-label`;
+    const reasonId = `${id}-reason`;
+    // `title` is the item's hover text. It is drawn as a tooltip of our own, which
+    // shows on a hover and is in the page for a screenshot or a script to read, where
+    // the browser's own tooltip is not. It is not opened by focus: the menu moves
+    // focus onto its first item as it opens, and a tooltip popping up over an
+    // unhovered menu, or taking the first Escape, would be noise. A screen reader
+    // gets the same text as the item's description.
+    const [hintOpen, setHintOpen] = useState(false);
+    const pointerInside = useRef(false);
+    const describedBy = unavailable ? reasonId : undefined;
+    const button = (
       <button
         ref={ref}
         type="button"
         role="menuitem"
         tabIndex={-1}
         disabled={disabled}
+        aria-disabled={unavailable ? true : undefined}
+        aria-labelledby={unavailable ? labelId : undefined}
+        aria-describedby={describedBy}
+        aria-description={title}
         data-disabled={disabled ? 'true' : undefined}
+        data-unavailable={unavailable ? 'true' : undefined}
         data-testid={testId}
+        onPointerEnter={() => {
+          pointerInside.current = true;
+        }}
+        onPointerLeave={() => {
+          pointerInside.current = false;
+          setHintOpen(false);
+        }}
         onClick={(event) => {
+          if (unavailable) {
+            event.preventDefault();
+            return;
+          }
           onClick?.(event);
           if (!event.defaultPrevented && !preventCloseOnSelect) {
             __closeMenu?.();
@@ -308,6 +359,7 @@ const TopBarMenuItemImpl = forwardRef<HTMLButtonElement, TopBarMenuItemProps>(
           'hover:bg-muted/60 focus:bg-muted/60',
           'outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
           'disabled:pointer-events-none disabled:opacity-50',
+          unavailable && 'cursor-not-allowed',
           className,
         )}
         {...rest}
@@ -315,11 +367,35 @@ const TopBarMenuItemImpl = forwardRef<HTMLButtonElement, TopBarMenuItemProps>(
         <span aria-hidden="true" className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
           {checked ? <CheckGlyph /> : Icon ? <Icon className="h-3.5 w-3.5" /> : null}
         </span>
-        <span className="flex-1 truncate">{children}</span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span id={labelId} className={cn('truncate', unavailable && 'opacity-60')}>
+            {children}
+          </span>
+          {unavailable ? (
+            <span
+              id={reasonId}
+              data-testid={testId ? `${testId}-reason` : undefined}
+              className="text-muted-foreground text-[10px] leading-snug"
+            >
+              {unavailableReason}
+            </span>
+          ) : null}
+        </span>
         {shortcut ? (
           <span className="text-muted-foreground ml-2 font-mono text-[10px]">{shortcut}</span>
         ) : null}
       </button>
+    );
+    if (title === undefined || title === '' || disabled) return button;
+    return (
+      <Tooltip open={hintOpen} onOpenChange={(next) => setHintOpen(next && pointerInside.current)}>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipPortal>
+          <TooltipContent side="right" align="start" sideOffset={8}>
+            {title}
+          </TooltipContent>
+        </TooltipPortal>
+      </Tooltip>
     );
   },
 );

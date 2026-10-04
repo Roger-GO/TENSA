@@ -31,6 +31,12 @@
  * affordance lives on the topbar menus (where users have visual
  * context for "why is this greyed out?") and not on a search-driven
  * surface where invisibility is the right answer.
+ *
+ * A command a first-time user would look for before it can run (Save
+ * parameter edits as case, until a controller parameter has been edited)
+ * may also give an `unavailableReason`. The registry still leaves it out,
+ * but `useMenuCommands()` keeps it, with the reason, for the menus to draw
+ * greyed out and say what to do first.
  */
 import { useMemo } from 'react';
 import type { ReactNode } from 'react';
@@ -110,6 +116,13 @@ export interface Command {
    */
   when?: () => boolean;
   /**
+   * For a command the menus keep in view while its `when()` is false: why it cannot
+   * run yet, in a sentence that says what to do first, or `null` when it should
+   * simply not be listed (the case it makes no sense in). Read only while `when()`
+   * is false. The palette ignores it and still hides the command.
+   */
+  unavailableReason?: () => string | null;
+  /**
    * Search synonyms forwarded to cmdk's fuzzy matcher. e.g. PF →
    * ["pflow", "power flow", "load flow"] so users searching for any
    * of those land on the same command.
@@ -134,6 +147,12 @@ export interface Command {
   keepPaletteOpen?: boolean;
 }
 
+/** A command as a menu lists it: runnable, or greyed out with the reason it is not. */
+export interface MenuCommand extends Command {
+  /** Why the command cannot run now, or `null` when it can. */
+  unavailable: string | null;
+}
+
 /**
  * Returns the active commands, ordered by `COMMAND_GROUP_ORDER` then
  * by intra-group declaration order. Filters out any command whose
@@ -146,6 +165,24 @@ export interface Command {
  * mutations don't churn the palette.
  */
 export function useCommandRegistry(): readonly Command[] {
+  return useCommandSets().available;
+}
+
+/**
+ * Like `useCommandRegistry()`, for the top bar menus: the same commands in the same
+ * order, plus the ones that cannot run yet but give an `unavailableReason`, each marked
+ * with it, in the place the command is declared in.
+ */
+export function useMenuCommands(): readonly MenuCommand[] {
+  return useCommandSets().menu;
+}
+
+interface CommandSets {
+  available: readonly Command[];
+  menu: readonly MenuCommand[];
+}
+
+function useCommandSets(): CommandSets {
   // ---- subscriptions used by gates + actions -----------------------------
   const sessionId = useSessionStore((s) => s.sessionId);
   const caseSelection = useCaseStore((s) => s.selection);
@@ -221,7 +258,7 @@ export function useCommandRegistry(): readonly Command[] {
   const pfConverged = lastPfRun?.converged === true;
   const diagramVisible = topology !== null && topology.buses.length > 0 && !resultsViewActive;
 
-  return useMemo<readonly Command[]>(() => {
+  return useMemo<CommandSets>(() => {
     const handleSelectRoutine = (routine: RunRoutine, opts?: { cpfSubMode?: 'nose' | 'qv' }) => {
       setActiveRoutine(routine);
       if (routine === 'eig') {
@@ -410,6 +447,10 @@ export function useCommandRegistry(): readonly Command[] {
           editMode === 'edit'
             ? 'Switch to Run mode'
             : 'Switch to Edit mode (controller parameters)',
+        description:
+          editMode === 'edit'
+            ? 'Edit mode is on: controller parameters (exciters, governors) can be changed in the Inspector. Switch to Run mode to lock them.'
+            : 'Unlocks the controller parameters (exciters, governors) in the Inspector, and keeps your changes in a copy of the case, so the file you opened stays as it was. Bus, line, generator and load values are edited with the pencil beside them before the case is run, in either mode.',
         group: 'edit',
         keywords: ['edit', 'run', 'mode', 'toggle', 'inspector', 'controller', 'parameter'],
         action: () => setEditMode(editMode === 'edit' ? 'run' : 'edit'),
@@ -434,6 +475,16 @@ export function useCommandRegistry(): readonly Command[] {
           cloneInitialized &&
           cloneUndoDepth > 0 &&
           !cloneUndoMutation.isPending,
+        // Listed greyed out while there is nothing to undo, so the two Undos sit side
+        // by side in the menu and the second says what it is for.
+        unavailableReason: () => {
+          if (sessionId === null || topology === null || cloneUndoMutation.isPending) return null;
+          return cloneInitialized
+            ? 'No controller parameter has been changed yet.'
+            : editMode === 'edit'
+              ? 'Change a controller parameter in the Inspector first.'
+              : 'Switch to Edit mode and change a controller parameter first.';
+        },
         shortcut: 'ctrl+z, meta+z',
       },
       {
@@ -461,6 +512,14 @@ export function useCommandRegistry(): readonly Command[] {
         keywords: ['save', 'save as', 'custom', 'case', 'clone', 'workspace', 'tuned', 'parameter'],
         action: () => __requestPaletteDialog('save-as-custom'),
         when: () => sessionId !== null && cloneInitialized,
+        // Listed greyed out, in the Edit menu and beside the other saves in the
+        // Workspace menu, until Edit mode has made the copy that holds the edits.
+        unavailableReason: () => {
+          if (sessionId === null || topology === null) return null;
+          return editMode === 'edit'
+            ? 'Nothing to save yet. Change a controller parameter in the Inspector first.'
+            : 'Nothing to save yet. Switch to Edit mode and change a controller parameter first.';
+        },
         shortcut: 'ctrl+shift+s, meta+shift+s',
       },
       {
@@ -833,7 +892,18 @@ export function useCommandRegistry(): readonly Command[] {
       seen.add(cmd.id);
     }
 
-    return all.filter((cmd) => (cmd.when ? cmd.when() : true));
+    const menu: MenuCommand[] = [];
+    const available: Command[] = [];
+    for (const cmd of all) {
+      if (cmd.when ? cmd.when() : true) {
+        available.push(cmd);
+        menu.push({ ...cmd, unavailable: null });
+        continue;
+      }
+      const reason = cmd.unavailableReason?.() ?? null;
+      if (reason !== null) menu.push({ ...cmd, unavailable: reason });
+    }
+    return { available, menu };
     // `caseSelection`, `isPfRunning`, `lastPfRun` aren't listed
     // directly — they feed the derived `*Disabled` / `pfConverged`
     // gates which ARE in the deps. Re-listing the upstream sources

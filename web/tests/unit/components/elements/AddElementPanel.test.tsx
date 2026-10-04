@@ -31,6 +31,18 @@ const SCHEMA: TopologySchema = {
       { name: 'r', kind: 'number', required: true, unit: 'pu' },
       { name: 'x', kind: 'number', required: true, unit: 'pu' },
     ],
+    PV: [
+      { name: 'idx', kind: 'string', required: true },
+      { name: 'name', kind: 'string', required: true },
+      { name: 'bus', kind: 'bus_idx', required: true },
+      { name: 'p0', kind: 'number', required: true, unit: 'pu' },
+    ],
+    PQ: [
+      { name: 'idx', kind: 'string', required: true },
+      { name: 'name', kind: 'string', required: true },
+      { name: 'bus', kind: 'bus_idx', required: true },
+      { name: 'p0', kind: 'number', required: true, unit: 'pu' },
+    ],
   },
 };
 
@@ -170,6 +182,36 @@ describe('<AddElementPanel />', () => {
     await user.click(screen.getByRole('button', { name: /^cancel$/i }));
     expect(useCaseStore.getState().addPanelOpen).toBe(false);
     expect(screen.queryByTestId('add-element-cancel-confirm')).toBeNull();
+  });
+
+  // ---- Component library families ---------------------------------------
+
+  it.each([
+    ['Generator', 'PV', 'PV generator', 'PV'],
+    ['Load', 'PQ', 'PQ load', 'PQ'],
+    ['Transformer', 'Transformer2W', 'Transformer (2W)', 'Line'],
+  ])(
+    'opens the %s tile on its most common model, with the picker on it and its form shown',
+    async (family, pickerValue, pickerLabel, formModel) => {
+      useCaseStore.setState({ addPanelOpen: true, addPanelKind: family });
+      render(withQueryClient(<AddElementPanel />));
+      const picker = screen.getByTestId('add-element-kind') as HTMLSelectElement;
+      expect(picker.value).toBe(pickerValue);
+      expect(picker.options[picker.selectedIndex]?.text).toBe(pickerLabel);
+      await waitFor(() => {
+        expect(screen.getByTestId(`element-form-${formModel}`)).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/No schema for model/)).toBeNull();
+    },
+  );
+
+  it('lets the user move off the family default through the picker', async () => {
+    const user = userEvent.setup();
+    useCaseStore.setState({ addPanelOpen: true, addPanelKind: 'Load' });
+    render(withQueryClient(<AddElementPanel />));
+    await user.selectOptions(screen.getByTestId('add-element-kind'), 'Bus');
+    expect(useCaseStore.getState().addPanelKind).toBe('Bus');
+    await waitFor(() => expect(screen.getByTestId('element-form-Bus')).toBeInTheDocument());
   });
 
   // ---- v3 Unit 5 — dropCoord seed ---------------------------------------

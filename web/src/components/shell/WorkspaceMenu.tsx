@@ -24,7 +24,9 @@
  * filters the command out, and the menu naturally hides it. The
  * pre-Unit-9 menu rendered disabled items; the registry-driven menu
  * hides them entirely. This matches the palette's behaviour and
- * keeps the topbar tighter when no case is loaded.
+ * keeps the topbar tighter when no case is loaded. The exception is a
+ * command that gives an `unavailableReason`, which the menu keeps,
+ * greyed out with the reason under it (`useMenuCommands()`).
  */
 import { useEffect, useState } from 'react';
 import { TopBarMenu, TopBarMenuItem, TopBarMenuSeparator } from './TopBarMenu';
@@ -32,7 +34,7 @@ import { LazyMount } from '@/components/ui/Lazy';
 import { lazyNamed } from '@/lib/lazyNamed';
 import { SaveSystemDialog } from '@/components/case/SaveSystemDialog';
 import { BundleImportDialog } from '@/components/bundle/BundleImportDialog';
-import { useCommandRegistry, subscribePaletteDialog } from '@/lib/commands';
+import { useMenuCommands, subscribePaletteDialog } from '@/lib/commands';
 
 // The PMU and profile-import dialogs are separate chunks, fetched the first
 // time each opens.
@@ -59,11 +61,25 @@ const TESTID_BY_ID: Record<string, string> = {
   'workspace.load-snapshot': 'topbar-menu-workspace-load-snapshot',
   'workspace.import-bundle': 'topbar-menu-workspace-import-bundle',
   'workspace.report': 'topbar-menu-workspace-report',
+  'clone.save-as': 'topbar-menu-workspace-clone-save-as',
 };
 
 export function WorkspaceMenu() {
-  const commands = useCommandRegistry();
+  const commands = useMenuCommands();
   const workspaceCommands = commands.filter((c) => c.group === 'workspace');
+  // Save parameter edits as case is declared in the Edit group, because it follows the
+  // edits made in Edit mode, but it is a save, and the Workspace menu is where a
+  // first-time user looks for one. It is listed here too, after Save system as, greyed
+  // out with its reason until there are edits to save.
+  const saveEdits = commands.find((c) => c.id === 'clone.save-as');
+  if (saveEdits !== undefined) {
+    const saveSystemAt = workspaceCommands.findIndex((c) => c.id === 'workspace.save-system');
+    workspaceCommands.splice(
+      saveSystemAt >= 0 ? saveSystemAt + 1 : workspaceCommands.length,
+      0,
+      saveEdits,
+    );
+  }
 
   // Local dialog ownership for the Save-system / Bundle-import /
   // PMU / Profile flows. These dialogs were previously embedded as
@@ -109,6 +125,7 @@ export function WorkspaceMenu() {
               key={cmd.id}
               testId={TESTID_BY_ID[cmd.id] ?? `topbar-menu-workspace-${cmd.id}`}
               title={cmd.description}
+              unavailableReason={cmd.unavailable ?? undefined}
               onClick={() => handleClick(cmd.id)}
             >
               {cmd.label}

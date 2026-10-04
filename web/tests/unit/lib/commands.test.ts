@@ -23,6 +23,7 @@ import React from 'react';
 import {
   COMMAND_GROUP_ORDER,
   useCommandRegistry,
+  useMenuCommands,
   subscribePaletteDialog,
   __requestPaletteDialog,
   type CommandGroup,
@@ -163,6 +164,92 @@ describe('useCommandRegistry: the two Undos', () => {
     // The hover text of each points at the other, so a user who picked the wrong one is told.
     expect(byId('edit.undo')?.description).toMatch(/added last/);
     expect(byId('clone.undo')?.description).toMatch(/Undo last addition/);
+  });
+});
+
+describe('useMenuCommands: commands kept in view while they cannot run', () => {
+  const ids = (list: readonly { id: string }[]) => list.map((c) => c.id);
+
+  it('keeps the two parameter commands, with what to do first, where the palette hides them', () => {
+    const { result: registry } = renderHook(() => useCommandRegistry(), { wrapper });
+    const { result: menu } = renderHook(() => useMenuCommands(), { wrapper });
+    expect(ids(registry.current)).not.toContain('clone.save-as');
+    expect(ids(registry.current)).not.toContain('clone.undo');
+    const save = menu.current.find((c) => c.id === 'clone.save-as');
+    const undo = menu.current.find((c) => c.id === 'clone.undo');
+    expect(save?.unavailable).toMatch(/Nothing to save yet.*Switch to Edit mode/);
+    expect(undo?.unavailable).toMatch(/Switch to Edit mode and change a controller parameter/);
+    // The command still runs nothing by itself: its gate is the same one.
+    expect(save?.when?.()).toBe(false);
+  });
+
+  it('does not say to switch to Edit mode when it is already on', () => {
+    act(() => {
+      useCaseStore.setState({ editMode: 'edit' });
+    });
+    const { result } = renderHook(() => useMenuCommands(), { wrapper });
+    const save = result.current.find((c) => c.id === 'clone.save-as');
+    const undo = result.current.find((c) => c.id === 'clone.undo');
+    expect(save?.unavailable).toMatch(/Change a controller parameter in the Inspector first/);
+    expect(save?.unavailable).not.toMatch(/Switch to Edit mode/);
+    expect(undo?.unavailable).toMatch(/Change a controller parameter in the Inspector first/);
+    act(() => {
+      useCaseStore.setState({ editMode: 'run' });
+    });
+  });
+
+  it('lists the runnable commands first-hand, in the order the registry has them', () => {
+    const { result: registry } = renderHook(() => useCommandRegistry(), { wrapper });
+    const { result: menu } = renderHook(() => useMenuCommands(), { wrapper });
+    const runnable = menu.current.filter((c) => c.unavailable === null);
+    expect(ids(runnable)).toEqual(ids(registry.current));
+    // The greyed ones are in the place they are declared in, after Edit mode's switch.
+    const order = ids(menu.current);
+    expect(order.indexOf('inspector.toggle-edit-mode')).toBeLessThan(order.indexOf('clone.undo'));
+    expect(order.indexOf('clone.undo')).toBeLessThan(order.indexOf('clone.save-as'));
+  });
+
+  it('says there is nothing to undo, not to switch modes, once the copy exists without edits', () => {
+    act(() => {
+      useCaseStore.setState({ cloneInitialized: true, cloneUndoDepth: 0, cloneRedoDepth: 0 });
+    });
+    const { result } = renderHook(() => useMenuCommands(), { wrapper });
+    expect(result.current.find((c) => c.id === 'clone.undo')?.unavailable).toMatch(
+      /No controller parameter has been changed yet/,
+    );
+    // Save parameter edits as case is usable once the copy exists.
+    expect(result.current.find((c) => c.id === 'clone.save-as')?.unavailable).toBeNull();
+  });
+
+  it('lists a command that is usable with no reason, and leaves out the ones with no reason to give', () => {
+    act(() => {
+      useCaseStore.setState({ cloneInitialized: true, cloneUndoDepth: 1, cloneRedoDepth: 0 });
+    });
+    const { result } = renderHook(() => useMenuCommands(), { wrapper });
+    expect(result.current.find((c) => c.id === 'clone.undo')?.unavailable).toBeNull();
+    // Redo and Discard are shown when they apply and are otherwise not listed.
+    expect(ids(result.current)).not.toContain('clone.redo');
+    act(() => {
+      useCaseStore.setState({ cloneRedoDepth: 1 });
+    });
+    const { result: after } = renderHook(() => useMenuCommands(), { wrapper });
+    expect(after.current.find((c) => c.id === 'clone.redo')?.unavailable).toBeNull();
+  });
+
+  it('lists none of them when no case is open, since there is nothing to edit or save', () => {
+    MOCK_TOPOLOGY = null;
+    const { result } = renderHook(() => useMenuCommands(), { wrapper });
+    expect(ids(result.current)).not.toContain('clone.undo');
+    expect(ids(result.current)).not.toContain('clone.save-as');
+  });
+
+  it('lists none of them without a session', () => {
+    act(() => {
+      useSessionStore.setState({ sessionId: null });
+    });
+    const { result } = renderHook(() => useMenuCommands(), { wrapper });
+    expect(ids(result.current)).not.toContain('clone.undo');
+    expect(ids(result.current)).not.toContain('clone.save-as');
   });
 });
 

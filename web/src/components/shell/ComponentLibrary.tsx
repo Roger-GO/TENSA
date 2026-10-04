@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/cn';
+import { useAddComponent } from '@/lib/useAddComponent';
 
 /**
  * ComponentLibrary (v3 Unit 5).
@@ -16,12 +17,19 @@ import { cn } from '@/lib/cn';
  * "Transformer"); the canvas decodes and routes to
  * ``useCaseStore.openAddPanel(kind, dropCoord)``.
  *
+ * A tile can also be clicked (or reached with Tab and pressed with Enter or
+ * Space), which opens the same form without a drag: dragging is a fiddly gesture
+ * on a trackpad, and from the keyboard it is not possible at all. A line under
+ * the tiles says so, and says instead why nothing can be added when that is so
+ * (``useAddComponent``). With no case open, a click starts a blank system as a
+ * drop on the empty canvas does.
+ *
  * The library kinds use UI-facing labels (e.g., "Generator" rather
  * than "PV" / "Slack" / "GENROU"); the AddElementPanel's kind picker
  * still surfaces the full ANDES-class breakdown so the user picks the
- * right model once the form opens. Drag-from-tile sets the picker's
- * top-level kind only; the user finishes the picker selection inside
- * the form.
+ * right model once the form opens. A tile sets the picker's top-level
+ * kind only (the panel opens a family on its most common model); the
+ * user finishes the picker selection inside the form.
  *
  * Drag image: leaves the browser default for v3.0 (no
  * ``dataTransfer.setDragImage`` call). Design-iterator can polish in
@@ -62,28 +70,63 @@ export interface ComponentLibraryProps {
 }
 
 export function ComponentLibrary({ className }: ComponentLibraryProps) {
+  const { blockedReason, add } = useAddComponent();
   return (
-    <div
-      data-testid="component-library"
-      className={cn('grid grid-cols-3 gap-1.5 px-2 pt-1 pb-3', className)}
-    >
-      {TILES.map((tile) => (
-        <Tile key={tile.kind} {...tile} />
-      ))}
+    <div data-testid="component-library" className={cn('px-2 pt-1 pb-3', className)}>
+      <div className="grid grid-cols-3 gap-1.5">
+        {TILES.map((tile) => (
+          <Tile key={tile.kind} {...tile} blockedReason={blockedReason} onAdd={add} />
+        ))}
+      </div>
+      <p
+        data-testid="component-library-hint"
+        className={cn(
+          'mt-2 px-0.5 text-[11px] leading-snug',
+          blockedReason === null ? 'text-muted-foreground' : 'text-foreground',
+        )}
+      >
+        {blockedReason ?? 'Click a tile to add that element, or drag it onto the diagram.'}
+      </p>
     </div>
   );
 }
 
-function Tile({ kind, label, glyph }: TileSpec) {
+interface TileProps extends TileSpec {
+  /** Why nothing can be added now, or `null`. */
+  blockedReason: string | null;
+  onAdd: (kind: string) => void;
+}
+
+function Tile({ kind, label, glyph, blockedReason, onAdd }: TileProps) {
+  const blocked = blockedReason !== null;
   return (
     <div
       role="button"
       tabIndex={0}
-      draggable
+      draggable={!blocked}
+      aria-disabled={blocked ? true : undefined}
       data-testid={`component-library-tile-${kind}`}
       data-component-kind={kind}
-      aria-label={`Drag ${label} onto canvas`}
+      aria-label={`Add ${label}`}
+      title={
+        blocked
+          ? blockedReason
+          : `Add a ${label.toLowerCase()}: click here, or drag it onto the diagram`
+      }
+      onClick={() => {
+        if (!blocked) onAdd(kind);
+      }}
+      onKeyDown={(e) => {
+        // A button made of a div has to answer Enter and Space itself.
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        if (!blocked) onAdd(kind);
+      }}
       onDragStart={(e) => {
+        if (blocked) {
+          e.preventDefault();
+          return;
+        }
         // Native HTML5 DnD: write the kind payload + force the copy
         // cursor so the user gets a "+" affordance over the canvas.
         // The canvas onDrop reads the same MIME below.
@@ -95,8 +138,12 @@ function Tile({ kind, label, glyph }: TileSpec) {
         'min-h-[56px] px-1 py-2',
         'rounded-[var(--radius-sm)] border',
         'border-border bg-background',
-        'text-foreground hover:bg-muted/60 hover:border-muted-foreground/40',
-        'cursor-grab active:cursor-grabbing',
+        blocked
+          ? 'cursor-not-allowed opacity-50'
+          : [
+              'text-foreground hover:bg-muted/60 hover:border-muted-foreground/40',
+              'cursor-pointer active:cursor-grabbing',
+            ],
         'transition-colors duration-[var(--duration-fast)]',
         'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
         'select-none',

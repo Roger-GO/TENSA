@@ -14,6 +14,10 @@
  * `edit.reload` action posts to the palette-dialog bridge so both
  * paths (menu click + palette pick) open the same dialog.
  *
+ * A command the Edit menu would hide only because nothing has been edited yet
+ * (Undo parameter edit, Save parameter edits as case) is kept in it greyed out,
+ * with what to do first under it, so a user looking for it finds it.
+ *
  * The `<WorkflowToolbar />` component itself is no longer mounted
  * here — its tests (`tests/unit/components/case/WorkflowToolbar.test.tsx`)
  * keep covering the underlying mutation logic, but the topbar surface
@@ -31,7 +35,7 @@ import {
 } from '@/components/ui/dialog';
 import { useReloadCase } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
-import { useCommandRegistry, subscribePaletteDialog } from '@/lib/commands';
+import { useMenuCommands, subscribePaletteDialog } from '@/lib/commands';
 import { ProblemDetailsError } from '@/api/client';
 import { SaveAsCustomCaseDialog } from '@/components/case/SaveAsCustomCaseDialog';
 
@@ -46,7 +50,7 @@ const TESTID_BY_ID: Record<string, string> = {
 };
 
 export function EditMenu() {
-  const commands = useCommandRegistry();
+  const commands = useMenuCommands();
   const editCommands = commands.filter((c) => c.group === 'edit');
 
   const sessionId = useSessionStore((s) => s.sessionId);
@@ -92,6 +96,7 @@ export function EditMenu() {
             key={cmd.id}
             testId={TESTID_BY_ID[cmd.id] ?? `topbar-menu-edit-${cmd.id}`}
             title={cmd.description}
+            unavailableReason={cmd.unavailable ?? undefined}
             onClick={() => handleClick(cmd.id)}
           >
             {cmd.label}

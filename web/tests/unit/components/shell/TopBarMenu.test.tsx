@@ -13,9 +13,13 @@
  *   `onSelect` close-on-default semantics).
  * - Escape closes the menu.
  * - `disabled` items don't receive focus + don't fire onClick.
+ * - An item with a `title` shows it as a tooltip on a hover (not on a focus), and
+ *   gives it to assistive technology as the item's description.
+ * - An item with an `unavailableReason` stays in the menu and in the arrow-key order,
+ *   shows the reason, and does nothing when activated.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import {
@@ -319,5 +323,105 @@ describe('<TopBarMenu /> — link items', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('topbar-menu-sample-content')).not.toBeInTheDocument(),
     );
+  });
+});
+
+describe('<TopBarMenu /> item hover text', () => {
+  function renderTitled() {
+    render(
+      <TopBarMenu label="Sample" testId="topbar-menu-sample">
+        <TopBarMenuItem testId="item-a" title="What A does, in a sentence.">
+          Item A
+        </TopBarMenuItem>
+        <TopBarMenuItem testId="item-b">Item B</TopBarMenuItem>
+      </TopBarMenu>,
+    );
+  }
+
+  it('shows the title as a tooltip on a hover, and takes it away on leaving', async () => {
+    const user = userEvent.setup();
+    renderTitled();
+    await user.click(screen.getByTestId('topbar-menu-sample-trigger'));
+    const itemA = await screen.findByTestId('item-a');
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    await user.hover(itemA);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('What A does, in a sentence.');
+    await user.unhover(itemA);
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+  });
+
+  it('keeps the browser tooltip off the item and the title out of its name', async () => {
+    const user = userEvent.setup();
+    renderTitled();
+    await user.click(screen.getByTestId('topbar-menu-sample-trigger'));
+    const itemA = await screen.findByTestId('item-a');
+    expect(itemA).not.toHaveAttribute('title');
+    expect(itemA).toHaveAccessibleName('Item A');
+    expect(itemA).toHaveAttribute('aria-description', 'What A does, in a sentence.');
+    expect(screen.getByTestId('item-b')).not.toHaveAttribute('aria-description');
+  });
+
+  it('does not open the tooltip when the menu focuses its first item', async () => {
+    const user = userEvent.setup();
+    renderTitled();
+    await user.click(screen.getByTestId('topbar-menu-sample-trigger'));
+    const itemA = await screen.findByTestId('item-a');
+    await waitFor(() => expect(itemA).toHaveFocus());
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
+});
+
+describe('<TopBarMenu /> unavailable items', () => {
+  function renderUnavailable(onClickLocked = vi.fn()) {
+    render(
+      <TopBarMenu label="Sample" testId="topbar-menu-sample">
+        <TopBarMenuItem testId="item-a">Item A</TopBarMenuItem>
+        <TopBarMenuItem
+          testId="item-locked"
+          unavailableReason="Do this first."
+          onClick={onClickLocked}
+        >
+          Locked item
+        </TopBarMenuItem>
+        <TopBarMenuItem testId="item-c">Item C</TopBarMenuItem>
+      </TopBarMenu>,
+    );
+  }
+
+  it('shows the reason under the label, and names and describes the item', async () => {
+    const user = userEvent.setup();
+    renderUnavailable();
+    await user.click(screen.getByTestId('topbar-menu-sample-trigger'));
+    const locked = await screen.findByTestId('item-locked');
+    expect(locked).toHaveAttribute('aria-disabled', 'true');
+    expect(locked).not.toBeDisabled();
+    expect(within(locked).getByTestId('item-locked-reason')).toHaveTextContent('Do this first.');
+    // The reason is the description, not part of the name.
+    expect(locked).toHaveAccessibleName('Locked item');
+    expect(locked).toHaveAccessibleDescription('Do this first.');
+  });
+
+  it('does nothing when clicked, and leaves the menu open', async () => {
+    const user = userEvent.setup();
+    const onClickLocked = vi.fn();
+    renderUnavailable(onClickLocked);
+    await user.click(screen.getByTestId('topbar-menu-sample-trigger'));
+    await user.click(await screen.findByTestId('item-locked'));
+    expect(onClickLocked).not.toHaveBeenCalled();
+    expect(screen.getByTestId('topbar-menu-sample-content')).toBeInTheDocument();
+  });
+
+  it('is reached by the arrow keys, so the reason can be found without a mouse', async () => {
+    const user = userEvent.setup();
+    renderUnavailable();
+    await user.click(screen.getByTestId('topbar-menu-sample-trigger'));
+    await screen.findByTestId('item-locked');
+    await waitFor(() => expect(screen.getByTestId('item-a')).toHaveFocus());
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByTestId('item-locked')).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByTestId('topbar-menu-sample-content')).toBeInTheDocument();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByTestId('item-c')).toHaveFocus();
   });
 });
