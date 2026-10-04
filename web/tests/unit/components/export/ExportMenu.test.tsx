@@ -194,6 +194,38 @@ describe('<ExportMenu />', () => {
   });
 });
 
+describe('<ExportMenu /> — MAT and PNG capture', () => {
+  it('MAT click runs the handler and downloads a .mat file', async () => {
+    const user = userEvent.setup();
+    const onExportMat = vi.fn(async () => new Blob(['MATL'], { type: 'application/octet-stream' }));
+    render(
+      <ExportMenu
+        formats={['csv', 'mat']}
+        panel="eig"
+        caseName="kundur"
+        onExportCsv={() => new Blob(['x'])}
+        onExportMat={onExportMat}
+      />,
+    );
+    await user.click(screen.getByTestId('export-menu-trigger'));
+    const matButton = await screen.findByTestId('export-menu-mat');
+    expect(matButton).toBeEnabled();
+    await user.click(matButton);
+    await waitFor(() => expect(onExportMat).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledTimes(1));
+    expect(String(toastSuccessMock.mock.calls[0]![0])).toMatch(/^Exported kundur_eig_.*\.mat$/);
+    expect((createObjectUrlMock.mock.calls[0]![0] as Blob).type).toBe('application/octet-stream');
+  });
+
+  it('keeps its trigger out of a PNG of the panel that holds it', () => {
+    const { rerender } = render(<ExportMenu formats={['png']} panel="p" onExportPng={vi.fn()} />);
+    expect(screen.getByTestId('export-menu-trigger')).toHaveAttribute('data-export-ignore');
+    rerender(<ExportMenu formats={['png']} panel="p" disabled />);
+    expect(screen.getByTestId('export-menu-trigger')).toHaveAttribute('data-export-ignore');
+    expect(screen.getByTestId('export-menu-disabled')).toHaveAttribute('data-export-ignore');
+  });
+});
+
 describe('downloadBlob', () => {
   it('creates an object URL, dispatches a click on a temp anchor, then revokes', async () => {
     vi.useFakeTimers();

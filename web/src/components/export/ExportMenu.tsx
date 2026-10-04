@@ -62,9 +62,8 @@ export interface ExportMenuProps {
    */
   disabledTooltip?: string;
   /**
-   * Tooltip shown for the MAT button specifically. Defaults to the
-   * v1.5 stub message ("MAT export available after Unit 6 (EIG)") so
-   * users understand why the option is present-but-not-functional.
+   * Tooltip shown for the MAT button specifically. Defaults to a line
+   * saying what the file holds, since "MAT" alone does not.
    */
   matTooltip?: string;
   /**
@@ -81,8 +80,8 @@ export interface ExportMenuProps {
   runId?: string;
   /**
    * Panel slug used in the auto-generated filename. Examples:
-   * `time-series`, `scrub`, `results-table-buses`, `sld`. Should be
-   * kebab-case + filesystem-safe.
+   * `time-series`, `scrub`, `buses`, `sld`. Should be kebab-case +
+   * filesystem-safe.
    */
   panel: string;
   /**
@@ -98,7 +97,7 @@ export interface ExportMenuProps {
   onExportPng?: () => Promise<Blob | null | undefined> | Blob | null | undefined;
   /**
    * MAT handler. Mirrors `onExportCsv`. Only supplied for the EIG
-   * state matrix panel.
+   * panel, which downloads the state matrix from the substrate.
    */
   onExportMat?: () => Promise<Blob | null | undefined> | Blob | null | undefined;
   /** Optional class on the trigger button. */
@@ -163,7 +162,7 @@ export function ExportMenu({
   formats,
   disabled = false,
   disabledTooltip = 'No data to export',
-  matTooltip = 'MAT export available after Unit 6 (EIG)',
+  matTooltip = 'MATLAB file with the state matrix (As) and the eigenvalues (mu)',
   caseName = 'case',
   runId,
   panel,
@@ -225,6 +224,9 @@ export function ExportMenu({
       disabled={disabled || busy}
       data-testid="export-menu-trigger"
       data-busy={busy}
+      // A panel that holds this menu can be rasterised as it stands; the
+      // trigger is left out of the picture (see `elementToPng`).
+      data-export-ignore=""
       className={cn('gap-1', className)}
       aria-label="Export"
     >
@@ -241,7 +243,12 @@ export function ExportMenu({
       <TooltipProvider delayDuration={150}>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span tabIndex={0} className="inline-block" data-testid="export-menu-disabled">
+            <span
+              tabIndex={0}
+              className="inline-block"
+              data-testid="export-menu-disabled"
+              data-export-ignore=""
+            >
               {triggerButton}
             </span>
           </TooltipTrigger>

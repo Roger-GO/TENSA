@@ -19,6 +19,80 @@
  * dimensions; no scaling is applied unless `pixelRatio` is set
  * explicitly.
  */
+/**
+ * Attribute that keeps a node out of a PNG export. The export menu's own
+ * trigger carries it, so a panel that holds a menu can be rasterised as it
+ * stands without the "Export" button showing up in the picture; a panel's
+ * other controls (a zoom reset, a scale toggle) can carry it too.
+ */
+export const EXPORT_IGNORE_ATTR = 'data-export-ignore';
+
+/**
+ * `html-to-image` calls its filter on text nodes as well as elements (the
+ * `HTMLElement` in its type is optimistic), so only elements are inspected.
+ */
+function keepInPng(node: HTMLElement): boolean {
+  return !(node instanceof Element) || !node.hasAttribute(EXPORT_IGNORE_ATTR);
+}
+
+/**
+ * The properties that decide how SVG content is painted. `html-to-image` copies
+ * an `<svg>` as markup and does not visit what is inside it, so none of its
+ * descendants get their computed style written in. The charts style their SVG
+ * with classes (`fill-danger`, `stroke-border`, `text-[6px]`), and the
+ * rasterised copy has no stylesheet to resolve them against: points come out
+ * black, gridlines vanish and labels take the surrounding font size.
+ */
+const SVG_PAINT_PROPERTIES = [
+  'fill',
+  'fill-opacity',
+  'fill-rule',
+  'stroke',
+  'stroke-width',
+  'stroke-opacity',
+  'stroke-dasharray',
+  'stroke-dashoffset',
+  'stroke-linecap',
+  'stroke-linejoin',
+  'opacity',
+  'color',
+  'display',
+  'visibility',
+  'font-family',
+  'font-size',
+  'font-weight',
+  'font-style',
+  'letter-spacing',
+  'text-anchor',
+  'dominant-baseline',
+  'text-decoration',
+] as const;
+
+/**
+ * Write the computed paint properties onto every SVG descendant of `root`, so
+ * `html-to-image` copies them with the markup. The values equal what is on
+ * screen, so the page does not change; the returned function puts each node's
+ * own `style` attribute back, and the caller runs it once the picture is taken.
+ */
+function inlineSvgPaint(root: HTMLElement): () => void {
+  const saved: Array<[SVGElement, string | null]> = [];
+  for (const node of root.querySelectorAll('svg *')) {
+    // Left-out nodes are not copied, so there is nothing to style.
+    if (!(node instanceof SVGElement) || node.closest(`[${EXPORT_IGNORE_ATTR}]`) !== null) continue;
+    const computed = getComputedStyle(node);
+    saved.push([node, node.getAttribute('style')]);
+    for (const property of SVG_PAINT_PROPERTIES) {
+      node.style.setProperty(property, computed.getPropertyValue(property));
+    }
+  }
+  return () => {
+    for (const [node, original] of saved) {
+      if (original === null) node.removeAttribute('style');
+      else node.setAttribute('style', original);
+    }
+  };
+}
+
 export interface ExportToPngOptions {
   /**
    * Pixel ratio for the rasterised output. Defaults to the device's
@@ -61,15 +135,20 @@ export async function elementToPng(
   // Loaded here, not at the top of the module: the rasteriser is only needed
   // when someone exports a PNG, and the menu that calls this is on every page.
   const { toBlob } = await import('html-to-image');
-  const blob = await toBlob(element, {
-    pixelRatio,
-    backgroundColor,
-    cacheBust: true,
-    // html-to-image returns a `Blob | null`; null is its "browser
-    // returned an empty data URL" path, surfaced as a hard failure
-    // upstream so the caller can show the error toast.
-  });
-  return blob;
+  const restoreSvgStyles = inlineSvgPaint(element);
+  try {
+    return await toBlob(element, {
+      pixelRatio,
+      backgroundColor,
+      cacheBust: true,
+      filter: keepInPng,
+      // html-to-image returns a `Blob | null`; null is its "browser
+      // returned an empty data URL" path, surfaced as a hard failure
+      // upstream so the caller can show the error toast.
+    });
+  } finally {
+    restoreSvgStyles();
+  }
 }
 
 /**
