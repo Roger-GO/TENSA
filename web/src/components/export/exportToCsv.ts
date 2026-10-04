@@ -58,7 +58,7 @@
  * unit each is in.
  */
 export const RUN_VALUES_UNITS_COMMENT =
-  'values as simulated: voltage and speed in pu, angles in rad, power in MW and MVar';
+  'values as simulated: voltage and speed in pu, angles in rad, power in MW and MVAr';
 
 /** A long-form time-series export descriptor. */
 export interface TimeSeriesCsvInput {

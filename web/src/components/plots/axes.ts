@@ -113,7 +113,7 @@ export function planGroupAxes(
       case 'angle':
         return { quantity, scale, side, unit: '°', label: angleLabel(group) };
       case 'power':
-        return { quantity, scale, side, unit: 'MW', label: 'P (MW) / Q (MVar)' };
+        return { quantity, scale, side, unit: 'MW', label: 'P (MW) / Q (MVAr)' };
     }
   });
 

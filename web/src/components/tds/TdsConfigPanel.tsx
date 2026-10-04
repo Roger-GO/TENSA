@@ -67,9 +67,9 @@ const VAR_GROUP_LABELS: Record<TdsVarGroup, string> = {
 const VAR_GROUP_HINTS: Record<TdsVarGroup, string> = {
   bus_v: 'Voltage magnitude + angle, one column each per bus.',
   gen_state: 'Rotor speed ω (frequency proxy) + angle δ, per synchronous generator.',
-  gen_power: 'Electrical real + reactive power (MW / MVar) per synchronous generator.',
-  line_flow: 'Real + reactive flow (MW / MVar) per line. Opt-in for flow studies.',
-  load_pq: 'Real + reactive consumption (MW / MVar) per PQ load.',
+  gen_power: 'Electrical real + reactive power (MW / MVAr) per synchronous generator.',
+  line_flow: 'Real + reactive flow (MW / MVAr) per line. Opt-in for flow studies.',
+  load_pq: 'Real + reactive consumption (MW / MVAr) per PQ load.',
 };
 
 const INTEGRATOR_OPTIONS: ReadonlyArray<{

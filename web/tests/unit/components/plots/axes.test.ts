@@ -76,7 +76,7 @@ describe('planGroupAxes', () => {
     const series = [planned('Line_1_p'), planned('Line_1_q')];
     const plan = planGroupAxes('line_flow', series, 'actual');
     expect(plan.axes).toEqual([
-      { quantity: 'power', scale: 'y', side: 'left', unit: 'MW', label: 'P (MW) / Q (MVar)' },
+      { quantity: 'power', scale: 'y', side: 'left', unit: 'MW', label: 'P (MW) / Q (MVAr)' },
     ]);
     expect(plan.place(series[0]!).factor).toBe(1);
   });

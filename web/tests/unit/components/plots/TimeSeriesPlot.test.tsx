@@ -700,7 +700,7 @@ describe('TimeSeriesPlot axes and units', () => {
     render(<TimeSeriesPlot />);
 
     const { options, data } = constructed();
-    expect(yAxes(options)).toEqual([['y', 'P (MW) / Q (MVar)', undefined]]);
+    expect(yAxes(options)).toEqual([['y', 'P (MW) / Q (MVAr)', undefined]]);
     expect(Array.from(data[1]!)).toEqual([10, 12]);
   });
 
@@ -838,7 +838,7 @@ describe('TimeSeriesPlot axes and units', () => {
 
       const lines = (await readBlob(downloads.blobs[0]!)).trim().split(/\r?\n/);
       expect(lines[0]).toBe(
-        '# values as simulated: voltage and speed in pu, angles in rad, power in MW and MVar',
+        '# values as simulated: voltage and speed in pu, angles in rad, power in MW and MVAr',
       );
       expect(lines.slice(1)).toEqual([
         'time,variable,value',

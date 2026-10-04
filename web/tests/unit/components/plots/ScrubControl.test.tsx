@@ -635,7 +635,7 @@ describe('ScrubControl export', () => {
 
       const lines = (await readBlob(downloads.blobs[0]!)).trim().split(/\r?\n/);
       expect(lines[0]).toBe(
-        '# values as simulated: voltage and speed in pu, angles in rad, power in MW and MVar',
+        '# values as simulated: voltage and speed in pu, angles in rad, power in MW and MVAr',
       );
       expect(lines.slice(1)).toEqual([
         'time,variable,value',
