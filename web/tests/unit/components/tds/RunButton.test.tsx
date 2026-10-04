@@ -177,18 +177,56 @@ function topologyBody(state: 'pre-setup' | 'committed') {
  * status, so a test can tell a commit that was sent and refused from one
  * that was never sent. The returned handle moves the System in or out of the
  * committed state, as a run that starts does.
+ *
+ * ``singleFlight`` makes the reads (topology, operating point) share the
+ * session's lock as the real substrate does: one that arrives while another
+ * is still being answered is refused with a 409 ``session is busy``, and its
+ * call is recorded with that status. ``holdOperatingPoint`` keeps the first
+ * operating-point read open until the handle's ``releaseOperatingPoint``.
  */
 function fakeCommittedSubstrate(
   fetchSpy: ReturnType<typeof vi.spyOn>,
   calls: string[],
-  opts: { reloadFails?: boolean; committed?: boolean } = {},
+  opts: {
+    reloadFails?: boolean;
+    committed?: boolean;
+    singleFlight?: boolean;
+    holdOperatingPoint?: boolean;
+  } = {},
 ) {
   let committed = opts.committed ?? true;
+  let reading = false;
+  let holdOperatingPoint = opts.holdOperatingPoint ?? false;
+  let releaseOperatingPoint: (() => void) | null = null;
+  const serveRead = (name: string, body: () => unknown, hold?: Promise<void>) => {
+    if (opts.singleFlight && reading) {
+      calls.push(`${name}:409`);
+      return Promise.resolve(
+        jsonResponse(
+          { title: 'Conflict', status: 409, detail: 'session is busy with an in-flight operation' },
+          409,
+        ),
+      );
+    }
+    calls.push(name);
+    reading = true;
+    return (hold ?? Promise.resolve()).then(() => {
+      reading = false;
+      return jsonResponse(body());
+    });
+  };
   fetchSpy.mockImplementation((input) => {
     const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
     if (url.endsWith('/topology')) {
-      calls.push('topology');
-      return Promise.resolve(jsonResponse(topologyBody(committed ? 'committed' : 'pre-setup')));
+      return serveRead('topology', () => topologyBody(committed ? 'committed' : 'pre-setup'));
+    }
+    if (url.endsWith('/operating-point')) {
+      const hold = holdOperatingPoint
+        ? new Promise<void>((resolve) => {
+            releaseOperatingPoint = resolve;
+          })
+        : undefined;
+      return serveRead('operating-point', () => ({}), hold);
     }
     if (url.includes('/reload')) {
       if (opts.reloadFails) {
@@ -224,6 +262,11 @@ function fakeCommittedSubstrate(
   return {
     setCommitted: (value: boolean) => {
       committed = value;
+    },
+    releaseOperatingPoint: () => {
+      holdOperatingPoint = false;
+      releaseOperatingPoint?.();
+      releaseOperatingPoint = null;
     },
   };
 }
@@ -825,8 +868,11 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     await waitFor(() => {
       expect(useRunsStore.getState().runs['run-after-pf']?.state).toBe('done');
     });
-    // The 409 round trip is gone: reload, then the one commit that lands.
-    expect(calls).toEqual(['reload', 'disturbances:200']);
+    // The 409 round trip is gone: reload, then the one commit that lands. The
+    // operating point is read once the run is over.
+    await waitFor(() => {
+      expect(calls).toEqual(['reload', 'disturbances:200', 'operating-point']);
+    });
     expect(toastInfoMock).toHaveBeenCalledWith('Reloading case', expect.anything());
     expect(toastErrorMock).not.toHaveBeenCalled();
     expect(useDisturbanceStore.getState().committed).toBe(true);
@@ -876,7 +922,10 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     await waitFor(() => {
       expect(useRunsStore.getState().runs['run-free-committed']?.state).toBe('done');
     });
-    expect(calls).toEqual([]);
+    // Nothing to reload or commit; only the operating point is read at the end.
+    await waitFor(() => {
+      expect(calls).toEqual(['operating-point']);
+    });
     expect(toastInfoMock).not.toHaveBeenCalled();
   });
 
@@ -886,9 +935,15 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
    * starts, as the worker does, and returns no topology for the stream, so only
    * the client's refresh at the end of the run can tell the topology about it.
    */
-  async function runTdsOnce(calls: string[]) {
+  async function startTdsRun(
+    calls: string[],
+    substrateOpts: { singleFlight?: boolean; holdOperatingPoint?: boolean } = {},
+  ) {
     seedReady({ withDisturbances: true, topologyState: 'pre-setup' });
-    const substrate = fakeCommittedSubstrate(fetchSpy, calls, { committed: false });
+    const substrate = fakeCommittedSubstrate(fetchSpy, calls, {
+      ...substrateOpts,
+      committed: false,
+    });
     let started = 0;
     serveShortRun(
       server,
@@ -909,6 +964,11 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     await waitFor(() => {
       expect(useRunsStore.getState().runs['run-1']?.state).toBe('done');
     });
+    return substrate;
+  }
+
+  async function runTdsOnce(calls: string[]) {
+    await startTdsRun(calls);
     // The topology is read again once the run is over.
     await waitFor(() => {
       expect(useCaseStore.getState().topology?.state).toBe('committed');
@@ -918,7 +978,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
   it('a run dropped from the history and started again reloads first, with no refused commit', async () => {
     const calls: string[] = [];
     await runTdsOnce(calls);
-    expect(calls).toEqual(['disturbances:200', 'topology']);
+    expect(calls).toEqual(['disturbances:200', 'operating-point', 'topology']);
 
     // Dropping a run from the history clears it without reloading the case,
     // so the button reads Run TDS again over a System the first run committed.
@@ -934,9 +994,51 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     await waitFor(() => {
       expect(calls).toEqual([
         'disturbances:200',
+        'operating-point',
         'topology',
         'reload',
         'disturbances:200',
+        'operating-point',
+        'topology',
+      ]);
+    });
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('reads the topology after the operating point, not beside it, on a substrate that serves one read at a time', async () => {
+    const calls: string[] = [];
+    const substrate = await startTdsRun(calls, { singleFlight: true, holdOperatingPoint: true });
+
+    // The operating point is the read in flight. The topology waits for it
+    // instead of going out beside it and being refused as busy.
+    await waitFor(() => {
+      expect(calls).toContain('operating-point');
+    });
+    await tick(20);
+    expect(calls).toEqual(['disturbances:200', 'operating-point']);
+
+    substrate.releaseOperatingPoint();
+    await waitFor(() => {
+      expect(useCaseStore.getState().topology?.state).toBe('committed');
+    });
+    expect(calls).toEqual(['disturbances:200', 'operating-point', 'topology']);
+
+    // The topology landed, so the next run reloads first and commits once.
+    act(() => {
+      useRunsStore.getState().resetRun('run-1');
+    });
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-2']?.state).toBe('done');
+    });
+    await waitFor(() => {
+      expect(calls).toEqual([
+        'disturbances:200',
+        'operating-point',
+        'topology',
+        'reload',
+        'disturbances:200',
+        'operating-point',
         'topology',
       ]);
     });
@@ -963,9 +1065,11 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     await waitFor(() => {
       expect(calls).toEqual([
         'disturbances:200',
+        'operating-point',
         'topology',
         'reload',
         'disturbances:200',
+        'operating-point',
         'topology',
       ]);
     });
