@@ -75,6 +75,9 @@ WS /api/ws/{session_id}            — TDS live stream. Send {"type":"start_tds"
                                      per frame, each with a "t" column and a "v" list column holding
                                      the row's values in var_columns order, then {"type":"done",...}.
                                      Reconnect+resume: {"type":"resume","run_id":"...","last_seq":N}.
+                                     A client that falls too far behind the run, or resumes past the
+                                     ~30 s buffer, gets {"type":"resync",...} and the socket closes;
+                                     the run itself is never slowed by a client.
 WS /api/ws/{session_id}/jobs/events— job lifecycle feed: "snapshot" then "job" envelopes per transition.
 WS /api/ws/{session_id}/sweep/{id} — sweep progress per iteration.
 

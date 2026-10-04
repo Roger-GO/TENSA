@@ -213,6 +213,42 @@ def _job_event_envelope(record: JobRecord) -> dict[str, Any]:
 
 RunState = Literal["pending", "running", "completed", "error"]
 
+# How many events one attached client may have waiting before it counts as
+# unable to keep up (see ``_RunConsumer``).
+RUN_CONSUMER_QUEUE_SIZE = 10000
+
+
+class _RunConsumer:
+    """The inbox of one client attached to a streaming run.
+
+    The run never waits for its clients. Frames go to the run buffer and to
+    every inbox as the worker produces them, so a client that stops reading (a
+    stalled browser tab, a dead connection nobody has noticed yet) must neither
+    hold the solver back nor grow the server's memory, and its inbox is
+    bounded. When the inbox fills, the client has missed frames that the run
+    buffer may no longer hold, so it cannot be caught up. The inbox is emptied
+    and left holding one ``lagged`` marker, and nothing more is queued for this
+    client: ``attach_to_run`` turns the marker into a ``resync`` event, so the
+    client is told it missed frames instead of receiving a stream with a hole
+    in it.
+    """
+
+    def __init__(self, size: int = RUN_CONSUMER_QUEUE_SIZE) -> None:
+        self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=size)
+        self.lagged = False
+
+    def offer(self, event: dict[str, Any]) -> None:
+        """Queue ``event`` without waiting; a full inbox marks the client lagged."""
+        if self.lagged:
+            return
+        try:
+            self.queue.put_nowait(event)
+        except asyncio.QueueFull:
+            self.lagged = True
+            while not self.queue.empty():
+                self.queue.get_nowait()
+            self.queue.put_nowait({"type": "lagged"})
+
 
 @dataclass
 class _RunBuffer:
@@ -235,9 +271,14 @@ class _RunBuffer:
     state: RunState = "pending"
     result_payload: dict[str, Any] | None = None
     error: tuple[str, str] | None = None  # (category, detail)
-    consumers: list[asyncio.Queue[dict[str, Any]]] = field(default_factory=list)
+    consumers: list[_RunConsumer] = field(default_factory=list)
     finished_at: float | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    def publish(self, event: dict[str, Any]) -> None:
+        """Hand ``event`` to every attached client without waiting for any."""
+        for consumer in self.consumers:
+            consumer.offer(event)
 
 
 # Retention window for completed run buffers. After this many seconds since
@@ -891,10 +932,7 @@ class SessionManager:
             async with run_buf.lock:
                 run_buf.metadata = meta
                 run_buf.state = "running"
-                event = {"type": "metadata", "data": meta}
-                for q in run_buf.consumers:
-                    with contextlib.suppress(asyncio.QueueFull):
-                        q.put_nowait(event)
+                run_buf.publish({"type": "metadata", "data": meta})
             # v3.1 Unit 5c: the worker has begun emitting frames — flip the
             # registry record running so the activity panel shows the spinner.
             self._mark_streaming_job_running(run_buf)
@@ -905,10 +943,7 @@ class SessionManager:
                 frame_seq_counter += 1
                 seq = frame_seq_counter
                 run_buf.frames.append((seq, payload))
-                event = {"type": "frame", "seq": seq, "payload": payload}
-                for q in run_buf.consumers:
-                    with contextlib.suppress(asyncio.QueueFull):
-                        q.put_nowait(event)
+                run_buf.publish({"type": "frame", "seq": seq, "payload": payload})
 
         try:
             result = await self.invoke_streaming(
@@ -958,10 +993,7 @@ class SessionManager:
             run_buf.result_payload = result
             run_buf.error = error
             run_buf.finished_at = time.monotonic()
-            event = {"type": "finished"}
-            for q in run_buf.consumers:
-                with contextlib.suppress(asyncio.QueueFull):
-                    q.put_nowait(event)
+            run_buf.publish({"type": "finished"})
         # v3.1 Unit 5c: reconcile the registry record (job_id == run_id) to its
         # terminal status so the activity panel resolves the spinner. Done
         # outside the buffer lock since it touches a different lock (the
@@ -985,17 +1017,22 @@ class SessionManager:
           {"type": "frame", "seq": N, "payload": <bytes>}   (one per frame)
           {"type": "done", "result": {...}}        (terminal)
           {"type": "error", "category": "...", "detail": "..."}  (terminal)
-          {"type": "resync", "current_seq": N}     (terminal; client must
-                                                    re-fetch via batch endpoint)
+          {"type": "resync", "current_seq": N,     (terminal; client must
+           "reason"?: "..."}                        re-fetch via batch endpoint)
           {"type": "not_found"}                    (terminal; unknown run_id
                                                     or wrong session)
+
+        ``resync`` is sent when the requested frames have left the run buffer,
+        and also when this client falls so far behind a live run that its
+        inbox fills (``RUN_CONSUMER_QUEUE_SIZE`` events). The second case
+        carries a ``reason``. A client is never sent frames with some missing.
         """
         run_buf = self._runs.get(run_id)
         if run_buf is None or run_buf.session_id != session_id:
             yield {"type": "not_found"}
             return
 
-        consumer: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=10000)
+        consumer = _RunConsumer()
         last_yielded_seq = last_seq
 
         async with run_buf.lock:
@@ -1046,9 +1083,24 @@ class SessionManager:
             # Live phase: drain queue. Skip events whose seq we already
             # yielded from the snapshot (race-window dedup).
             while True:
-                event = await consumer.get()
+                event = await consumer.queue.get()
                 event_type = event.get("type")
 
+                if event_type == "lagged":
+                    log.warning(
+                        "run %s: a client fell %d events behind; sending resync",
+                        run_buf.run_id[:8],
+                        RUN_CONSUMER_QUEUE_SIZE,
+                    )
+                    yield {
+                        "type": "resync",
+                        "current_seq": run_buf.frames[-1][0] if run_buf.frames else 0,
+                        "reason": (
+                            "the client fell too far behind the run and missed "
+                            "frames; re-run to get the whole stream"
+                        ),
+                    }
+                    return
                 if event_type == "frame":
                     seq = int(event["seq"])
                     if seq <= last_yielded_seq:

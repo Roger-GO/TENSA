@@ -16,12 +16,19 @@ Threading model inside the worker:
   The parent sets the event via the control channel; the wrapper's
   ``callpert`` callback checks the event each invocation and sets
   ``ss.TDS.busted = True`` on detect. Decoupling abort polling from the data
-  Pipe keeps abort responsive even if ``callpert`` is sleeping at the credit
-  ceiling.
+  Pipe keeps the abort flag current even while ``callpert`` is blocked
+  writing a frame to a full data Pipe.
 - **Orphan-detection thread (macOS only)** — polls ``os.getppid()`` every 1 s.
   When the parent dies, ``getppid()`` returns 1 (init). The thread then
   ``os.kill(os.getpid(), SIGTERM)``. On Linux this thread is unnecessary
   because ``PR_SET_PDEATHSIG(SIGTERM)`` is set at entry.
+
+A streaming run has no credit protocol. Frames go out on the data Pipe as fast
+as the solver produces them, and the one thing that paces the solver is that
+``Pipe.send`` blocks while the pipe's buffer is full, so it can run no faster
+than the parent reads. The parent reads without waiting for any client; a
+client that falls behind is sent a ``resync`` (see
+``SessionManager.attach_to_run``), never waited for.
 
 The worker ignores SIGINT: a terminal sends Ctrl+C to every process in the
 foreground group, and the parent alone decides when workers stop.

@@ -30,6 +30,12 @@ ring buffer holds ~30 seconds of frames at the configured output rate;
 reconnect attempts past that window receive ``{"type":"resync",...}`` and
 must re-fetch via the batch endpoint.
 
+The run does not wait for its clients: a client that reads more slowly than
+the run produces frames does not hold the solver back. Once it is 10000 events
+behind (``RUN_CONSUMER_QUEUE_SIZE`` in ``tensa.core.session``), it receives the
+same ``resync`` (with a ``reason`` saying it fell behind) and the socket
+closes, instead of a stream with frames missing.
+
 Unknown session id closes with 4404. Unknown run_id on resume closes with
 4404. Worker / wrapper errors close with code 4500 + a JSON
 ``{"type":"error",...}`` text frame just before close.
@@ -296,14 +302,15 @@ async def _stream_run_to_websocket(
                 )
                 return
             if event_type == "resync":
+                reason = event.get("reason") or (
+                    "frame fell out of the resume buffer; "
+                    "re-fetch via the batch endpoint"
+                )
                 msg = {
                     "type": "resync",
                     "run_id": run_id,
                     "current_seq": int(event.get("current_seq", 0)),
-                    "reason": (
-                        "frame fell out of the resume buffer; "
-                        "re-fetch via the batch endpoint"
-                    ),
+                    "reason": reason,
                 }
                 if websocket.client_state == WebSocketState.CONNECTED:
                     await websocket.send_text(json.dumps(msg))
