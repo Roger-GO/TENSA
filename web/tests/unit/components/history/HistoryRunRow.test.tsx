@@ -79,6 +79,50 @@ describe('HistoryRunRow', () => {
     expect(screen.getByTestId('history-run-row-r1')).toHaveAttribute('data-active', 'true');
   });
 
+  it('marks a run that has ended and is no longer active as earlier', () => {
+    seedRun('r1');
+    useRunsStore.getState().markRunDone('r1', 5);
+    const run = useRunsStore.getState().runs.r1!;
+    render(<HistoryRunRow run={run} isActive={false} isOverlayPinned={false} />);
+    expect(screen.getByTestId('history-run-row-earlier-badge-r1')).toHaveTextContent('earlier');
+    expect(screen.queryByTestId('history-run-row-active-badge-r1')).toBeNull();
+  });
+
+  it('marks an earlier run whichever way it ended', () => {
+    seedRun('e1');
+    useRunsStore.getState().markRunError('e1', 'boom');
+    seedRun('a1');
+    useRunsStore.getState().markRunAborted('a1');
+    for (const id of ['e1', 'a1']) {
+      render(
+        <HistoryRunRow
+          run={useRunsStore.getState().runs[id]!}
+          isActive={false}
+          isOverlayPinned={false}
+        />,
+      );
+      expect(screen.getByTestId(`history-run-row-earlier-badge-${id}`)).toBeInTheDocument();
+    }
+  });
+
+  it('does not call the active run, or one still streaming, earlier', () => {
+    const run = seedRun('r1');
+    useRunsStore.getState().markRunDone('r1', 5);
+    const done = useRunsStore.getState().runs.r1!;
+    const { rerender } = render(<HistoryRunRow run={done} isActive isOverlayPinned={false} />);
+    expect(screen.queryByTestId('history-run-row-earlier-badge-r1')).toBeNull();
+
+    // A run that has not ended yet is not "earlier" even when it is not the active one.
+    rerender(
+      <HistoryRunRow
+        run={{ ...run, state: 'streaming' }}
+        isActive={false}
+        isOverlayPinned={false}
+      />,
+    );
+    expect(screen.queryByTestId('history-run-row-earlier-badge-r1')).toBeNull();
+  });
+
   it('renders the Pin button when not pinned; clicking adds to overlay', async () => {
     const user = userEvent.setup();
     const run = seedRun('r1');
@@ -100,11 +144,13 @@ describe('HistoryRunRow', () => {
     expect(useRunsStore.getState().overlayRunIds.has('r1')).toBe(false);
   });
 
-  it('Reset button drops the run from the runs map', async () => {
+  it('Delete button drops the run from the runs map', async () => {
     const user = userEvent.setup();
     const run = seedRun('r1');
     render(<HistoryRunRow run={run} isActive={false} isOverlayPinned={false} />);
-    await user.click(screen.getByTestId('history-run-row-reset-r1'));
+    const button = screen.getByTestId('history-run-row-delete-r1');
+    expect(button).toHaveTextContent('Delete');
+    await user.click(button);
     expect(useRunsStore.getState().runs.r1).toBeUndefined();
   });
 
@@ -124,13 +170,15 @@ describe('HistoryRunRow', () => {
     expect(onTogglePin).toHaveBeenCalledWith('r1', true);
   });
 
-  it('fires onReset callback after the run is dropped', async () => {
+  it('fires onDelete callback after the run is dropped', async () => {
     const user = userEvent.setup();
     const run = seedRun('r1');
-    const onReset = vi.fn();
-    render(<HistoryRunRow run={run} isActive={false} isOverlayPinned={false} onReset={onReset} />);
-    await user.click(screen.getByTestId('history-run-row-reset-r1'));
-    expect(onReset).toHaveBeenCalledWith('r1');
+    const onDelete = vi.fn();
+    render(
+      <HistoryRunRow run={run} isActive={false} isOverlayPinned={false} onDelete={onDelete} />,
+    );
+    await user.click(screen.getByTestId('history-run-row-delete-r1'));
+    expect(onDelete).toHaveBeenCalledWith('r1');
   });
 
   describe('renaming', () => {

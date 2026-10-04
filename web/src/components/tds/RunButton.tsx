@@ -31,7 +31,7 @@ import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { reportAbortError } from '@/lib/abortRun';
 import { toast } from '@/lib/toast';
 import { unitBasesOf } from '@/lib/units';
-import { describeScenario } from '@/lib/runLabel';
+import { describeScenario, runLabel } from '@/lib/runLabel';
 import { cn } from '@/lib/cn';
 
 /**
@@ -60,7 +60,9 @@ import { cn } from '@/lib/cn';
  * - **Running (PF)**: label is "Running PF…" + disabled (the PF wrapper
  *   has no abort path; mirrors v0.1).
  * - **Done / Error / Aborted (TDS)**: label flips to "Reset run". Click
- *   fires ``POST /reload`` and clears the run buffer; back to Idle.
+ *   fires ``POST /reload`` and releases the run; back to Idle. The run keeps
+ *   its results and stays in History as an earlier run, so a second run can be
+ *   compared with it.
  *
  * Error routing (per the v0.2 plan's R8 taxonomy):
  *
@@ -458,7 +460,15 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
 
   const onReset = () => {
     if (!sessionId) return;
+    // "Reset" reads as a delete, so say where the run it releases went.
+    const kept = activeRun === null ? null : runLabel(activeRun);
     resetRun.mutate(sessionId, {
+      onSuccess: () => {
+        if (kept === null) return;
+        toast.info(`${kept} stays in History`, {
+          description: 'Run again, then pin both runs in History to overlay them.',
+        });
+      },
       onError: (err) => {
         const detail =
           err instanceof ProblemDetailsError
@@ -516,7 +526,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       primaryLabel = 'Reset run';
       primaryVariant = 'outline';
       primaryTitle =
-        "Discard this run's results and reload the case so it can be run again. Export what you want to keep first. The disturbances stay in the list.";
+        "Reload the case so it can be run again. This run's results stay in History, where you can compare them with the next run or delete them. The disturbances stay in the list.";
       primaryDisabled = resetRun.isPending;
     } else if (
       aborting ||

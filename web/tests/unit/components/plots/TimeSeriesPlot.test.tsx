@@ -115,6 +115,22 @@ describe('TimeSeriesPlot', () => {
     expect(constructSpy).not.toHaveBeenCalled();
   });
 
+  it('does not point at the history while there is nothing in it', () => {
+    const { getByTestId } = render(<TimeSeriesPlot />);
+    expect(getByTestId('time-series-plot-empty')).not.toHaveTextContent('History');
+  });
+
+  it('points at the history when runs are kept but none is active, as after Reset run', () => {
+    seedRun('r1', ['Bus_1_v']);
+    useRunsStore.getState().markRunDone('r1', 1);
+    useRunsStore.getState().clearActiveRun();
+    const { getByTestId } = render(<TimeSeriesPlot />);
+    expect(getByTestId('time-series-plot-empty')).toHaveTextContent(
+      'Run a TDS to see results. Earlier runs are in History.',
+    );
+    expect(constructSpy).not.toHaveBeenCalled();
+  });
+
   it('renders the "select variables" empty state when a run is active but no series picked', () => {
     seedRun('r1', ['Bus_1_v', 'Bus_2_v']);
     const { getByTestId } = render(<TimeSeriesPlot />);

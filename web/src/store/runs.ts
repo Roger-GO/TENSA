@@ -38,7 +38,10 @@
  * — the cap-eviction loop above operates on the total budget; the
  * retention policy provides the count cap.
  *
- * On ``resetRun``: evict the run's buffers fully.
+ * On ``removeRun`` (the History drawer's Delete) and ``clearFinishedRuns``
+ * (its Clear runs): evict the run's buffers fully. The top bar's Reset run is
+ * not one of them: it reloads the case and releases the active run
+ * (``clearActiveRun``), and the finished run stays for comparison.
  * On a fresh ``startRun`` while the retention limit would be exceeded:
  * evict the oldest completed run.
  *
@@ -262,11 +265,21 @@ export interface RunsState {
   setAbortedLocally: (runId: string, value: boolean) => void;
 
   /**
-   * Drop a run completely (frame buffers freed). Used by the UI's "Reset
-   * run" button after an aborted/failed run. Also clears the run from
-   * ``overlayRunIds`` if pinned.
+   * Drop a run completely (frame buffers freed). Used by the History drawer's
+   * Delete on a row. Also clears the run from ``overlayRunIds`` if pinned. The
+   * top bar's Reset run does not call it: that keeps the run (see
+   * ``clearActiveRun``).
    */
-  resetRun: (runId: string) => void;
+  removeRun: (runId: string) => void;
+
+  /**
+   * Drop every finished run (done, error, aborted), freeing their frame
+   * buffers, and keep a run that is still starting or streaming. The History
+   * drawer's Clear runs. A run still streaming is spared because its stream
+   * keeps appending to it. The numbering starts over only when no run is left
+   * to share a number with.
+   */
+  clearFinishedRuns: () => void;
 
   /** Clear every run (called by the auth-clear cascade in store/index.ts). */
   clearRuns: () => void;
@@ -679,7 +692,7 @@ export const useRunsStore = create<RunsState>((set, get) => ({
     });
   },
 
-  resetRun: (runId) => {
+  removeRun: (runId) => {
     const next = { ...get().runs };
     delete next[runId];
     const nextActive = get().activeRunId === runId ? null : get().activeRunId;
@@ -687,6 +700,23 @@ export const useRunsStore = create<RunsState>((set, get) => ({
       runs: next,
       activeRunId: nextActive,
       overlayRunIds: reconcileOverlay(get().overlayRunIds, next),
+    });
+  },
+
+  clearFinishedRuns: () => {
+    const { runs, activeRunId, runCount } = get();
+    const kept: Record<string, RunRecord> = {};
+    for (const id of Object.keys(runs)) {
+      const run = runs[id]!;
+      if (!isCompletedState(run.state)) kept[id] = run;
+    }
+    const keptIds = Object.keys(kept);
+    if (keptIds.length === Object.keys(runs).length) return;
+    set({
+      runs: kept,
+      activeRunId: activeRunId !== null && kept[activeRunId] ? activeRunId : null,
+      overlayRunIds: reconcileOverlay(get().overlayRunIds, kept),
+      runCount: keptIds.length === 0 ? 0 : runCount,
     });
   },
 

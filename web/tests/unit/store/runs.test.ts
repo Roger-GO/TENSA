@@ -153,7 +153,7 @@ describe('runs store — run numbers and scenarios', () => {
   it('never gives a new run the number of one that was dropped', () => {
     start('a');
     start('b');
-    useRunsStore.getState().resetRun('b');
+    useRunsStore.getState().removeRun('b');
     start('c');
     expect(useRunsStore.getState().runs.c?.ordinal).toBe(3);
   });
@@ -167,6 +167,16 @@ describe('runs store — run numbers and scenarios', () => {
     const runs = useRunsStore.getState().runs;
     expect(Object.keys(runs)).toEqual(['c', 'd']);
     expect([runs.c?.ordinal, runs.d?.ordinal]).toEqual([3, 4]);
+  });
+
+  it('keeps the numbers going when the active run is released and another starts', () => {
+    // What Reset run does between two runs: the first stays, the next is #2.
+    start('a');
+    useRunsStore.getState().markRunDone('a', 1.0, true);
+    useRunsStore.getState().clearActiveRun();
+    start('b');
+    const runs = useRunsStore.getState().runs;
+    expect([runs.a?.ordinal, runs.b?.ordinal]).toEqual([1, 2]);
   });
 
   it('starts counting again from 1 once the runs are cleared', () => {
@@ -235,10 +245,10 @@ describe('runs store — done / error / aborted / connection', () => {
     expect(useRunsStore.getState().runs.r1!.abortedLocally).toBe(true);
   });
 
-  it('resetRun fully drops the run and clears activeRunId if it was active', () => {
+  it('removeRun fully drops the run and clears activeRunId if it was active', () => {
     useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
     expect(useRunsStore.getState().activeRunId).toBe('r1');
-    useRunsStore.getState().resetRun('r1');
+    useRunsStore.getState().removeRun('r1');
     expect(useRunsStore.getState().runs.r1).toBeUndefined();
     expect(useRunsStore.getState().activeRunId).toBeNull();
   });
@@ -251,6 +261,83 @@ describe('runs store — done / error / aborted / connection', () => {
     expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(0);
     expect(useRunsStore.getState().activeRunId).toBeNull();
     expect(useRunsStore.getState().overlayRunIds.size).toBe(0);
+  });
+});
+
+describe('runs store — clearFinishedRuns', () => {
+  beforeEach(reset);
+  afterEach(reset);
+
+  const finish = (runId: string, state: 'done' | 'error' | 'aborted' = 'done') => {
+    useRunsStore.getState().startRun({ runId, tf: 1.0, columnNames: [] });
+    if (state === 'done') useRunsStore.getState().markRunDone(runId, 1.0, true);
+    else if (state === 'error') useRunsStore.getState().markRunError(runId, 'boom');
+    else useRunsStore.getState().markRunAborted(runId);
+  };
+
+  it('drops every run that has ended, whichever way, and the active one with them', () => {
+    finish('r1');
+    finish('r2', 'error');
+    finish('r3', 'aborted');
+    useRunsStore.getState().addOverlayRun('r1');
+
+    useRunsStore.getState().clearFinishedRuns();
+
+    const { runs, activeRunId, overlayRunIds } = useRunsStore.getState();
+    expect(Object.keys(runs)).toEqual([]);
+    expect(activeRunId).toBeNull();
+    expect(overlayRunIds.size).toBe(0);
+  });
+
+  it('keeps a run that is still streaming, and stays the active run', () => {
+    finish('r1');
+    useRunsStore.getState().startRun({ runId: 'r2', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().addOverlayRun('r1');
+    useRunsStore.getState().addOverlayRun('r2');
+
+    useRunsStore.getState().clearFinishedRuns();
+
+    const { runs, activeRunId, overlayRunIds } = useRunsStore.getState();
+    expect(Object.keys(runs)).toEqual(['r2']);
+    expect(activeRunId).toBe('r2');
+    expect([...overlayRunIds]).toEqual(['r2']);
+  });
+
+  it('keeps counting while a run is left, and starts over when none is', () => {
+    finish('r1');
+    useRunsStore.getState().startRun({ runId: 'r2', tf: 1.0, columnNames: [] });
+    useRunsStore.getState().clearFinishedRuns();
+    // r2 is still #2, so the next run must not take its number.
+    expect(useRunsStore.getState().runCount).toBe(2);
+
+    useRunsStore.getState().markRunDone('r2', 1.0, true);
+    useRunsStore.getState().clearFinishedRuns();
+    expect(useRunsStore.getState().runCount).toBe(0);
+    useRunsStore.getState().startRun({ runId: 'r3', tf: 1.0, columnNames: [] });
+    expect(useRunsStore.getState().runs.r3?.ordinal).toBe(1);
+  });
+
+  it('does nothing, and does not touch the store, when no run has ended', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
+    const before = useRunsStore.getState().runs;
+
+    useRunsStore.getState().clearFinishedRuns();
+
+    expect(useRunsStore.getState().runs).toBe(before);
+  });
+
+  it('frees the frame buffers of the runs it drops', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: ['Bus_1_v'] });
+    useRunsStore.getState().appendFrame('r1', {
+      t: new Float64Array([0, 0.1]),
+      columns: { Bus_1_v: new Float64Array([1, 1]) },
+    });
+    useRunsStore.getState().markRunDone('r1', 0.1, true);
+    expect(__internal.totalBytes(useRunsStore.getState().runs)).toBeGreaterThan(0);
+
+    useRunsStore.getState().clearFinishedRuns();
+
+    expect(__internal.totalBytes(useRunsStore.getState().runs)).toBe(0);
   });
 });
 
@@ -404,10 +491,10 @@ describe('runs store — overlay set (Unit 9 v2.0)', () => {
     expect(set.size).toBe(2);
   });
 
-  it('resetRun also unpins the run from the overlay set', () => {
+  it('removeRun also unpins the run from the overlay set', () => {
     useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: [] });
     useRunsStore.getState().addOverlayRun('r1');
-    useRunsStore.getState().resetRun('r1');
+    useRunsStore.getState().removeRun('r1');
     expect(useRunsStore.getState().overlayRunIds.has('r1')).toBe(false);
   });
 

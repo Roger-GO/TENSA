@@ -10,9 +10,12 @@
  *   run. The name shows in the plot legend too; an empty name puts the default
  *   label back.
  * - "Pin to overlay" / "Unpin" — toggles ``overlayRunIds`` membership.
- * - "Reset" — drops the run from the runs slice (frees its buffers).
+ * - "Delete" — drops the run from the runs slice (frees its buffers). Reset run
+ *   in the top bar does not: it keeps the run, which then reads "earlier".
  *
- * The row is visually distinct for the active run (bolder border).
+ * The row is visually distinct for the active run (bolder border); every other
+ * run is marked "earlier", the badge a run takes on once Reset run, a case
+ * change or a newer run has released it.
  * Sweep progress (Unit 18) extends this row with a progress bar.
  */
 import { useRunsStore } from '@/store/runs';
@@ -32,8 +35,8 @@ export interface HistoryRunRowProps {
   isOverlayPinned: boolean;
   /** Callback fired after the user pins/unpins the run. */
   onTogglePin?: (runId: string, willBePinned: boolean) => void;
-  /** Callback fired after the user resets the run. */
-  onReset?: (runId: string) => void;
+  /** Callback fired after the user deletes the run. */
+  onDelete?: (runId: string) => void;
   /**
    * Callback fired after the user gives the run a new name. ``name`` is
    * ``undefined`` when the name was cleared, so the run has its default label
@@ -77,13 +80,13 @@ export function HistoryRunRow({
   isActive,
   isOverlayPinned,
   onTogglePin,
-  onReset,
+  onDelete,
   onRename,
   className,
 }: HistoryRunRowProps) {
   const addOverlayRun = useRunsStore((s) => s.addOverlayRun);
   const removeOverlayRun = useRunsStore((s) => s.removeOverlayRun);
-  const resetRun = useRunsStore((s) => s.resetRun);
+  const removeRun = useRunsStore((s) => s.removeRun);
   const setRunDisplayName = useRunsStore((s) => s.setRunDisplayName);
   // Which run is being renamed lives in the history slice, so the "Rename run"
   // command can open the field on a row it does not render.
@@ -103,13 +106,15 @@ export function HistoryRunRow({
     onTogglePin?.(run.runId, willBePinned);
   };
 
-  const handleReset = () => {
-    resetRun(run.runId);
-    onReset?.(run.runId);
+  const handleDelete = () => {
+    removeRun(run.runId);
+    onDelete?.(run.runId);
   };
 
   const label = runLabel(run);
   const defaultName = autoRunLabel(run);
+  // A run that has ended and is no longer the active one.
+  const isEarlier = !isActive && run.state !== 'starting' && run.state !== 'streaming';
 
   const handleRenameCommit = (next: string) => {
     stopRenaming();
@@ -181,6 +186,14 @@ export function HistoryRunRow({
               >
                 active
               </span>
+            ) : isEarlier ? (
+              <span
+                data-testid={`history-run-row-earlier-badge-${run.runId}`}
+                title="A newer run, Reset run or a case change has released this run. Its results stay here until you delete them."
+                className="text-muted-foreground text-[10px] font-medium"
+              >
+                earlier
+              </span>
             ) : null}
             <span
               data-testid={`history-run-row-state-${run.runId}`}
@@ -215,11 +228,11 @@ export function HistoryRunRow({
         type="button"
         variant="ghost"
         size="sm"
-        onClick={handleReset}
-        data-testid={`history-run-row-reset-${run.runId}`}
-        title="Drop this run from history"
+        onClick={handleDelete}
+        data-testid={`history-run-row-delete-${run.runId}`}
+        title="Delete this run from history and free its memory"
       >
-        Reset
+        Delete
       </Button>
     </div>
   );

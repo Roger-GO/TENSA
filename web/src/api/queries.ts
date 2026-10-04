@@ -1137,7 +1137,11 @@ export function useAbortRun(): UseMutationResult<AbortResponse, Error, SessionId
  * Same wire endpoint as ``useReloadCase`` but with different post-success
  * cleanup tailored to the TDS run lifecycle:
  *
- * - Drop the active run's frame buffer (``runs.resetRun(activeRunId)``).
+ * - Release the active run (``runs.clearActiveRun()``) so the Run buttons are
+ *   free again, and keep every run, the one just finished included. Reset run
+ *   throws away the System's state, which the reload did; the results are the
+ *   researcher's to keep, compare with the next run, and delete from History
+ *   when they want the memory back.
  * - Clear the disturbance commit flag (the substrate's reload threw away
  *   the committed disturbance list; the timeline editor's local list is
  *   preserved per the v0.2 plan's Open Questions decision so the user can
@@ -1159,10 +1163,7 @@ export function useResetRun(): UseMutationResult<TopologySummary, Error, Session
       queryClient.setQueryData(queryKeys.topology(sessionId), data);
       useCaseStore.getState().setTopology(data);
       usePflowStore.getState().clearPflow();
-      const activeRunId = useRunsStore.getState().activeRunId;
-      if (activeRunId !== null) {
-        useRunsStore.getState().resetRun(activeRunId);
-      }
+      useRunsStore.getState().clearActiveRun();
       // Disturbance timeline list is preserved (per the plan's Open
       // Questions decision); only the "committed against substrate" flag
       // is reset so the next Run TDS re-commits the (possibly-edited)
@@ -1471,13 +1472,11 @@ export function useImportBundle(): UseMutationResult<
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.workspaceFiles });
       // Reset session-scoped slices that the import made stale: pflow
-      // (no run yet on the new System), runs (TDS state belongs to
-      // the old System), disturbance committed-flag.
+      // (no run yet on the new System), the active run (the dynamic state it
+      // left belongs to the old System; its results stay in the history, as
+      // after Reset run), disturbance committed-flag.
       usePflowStore.getState().clearPflow();
-      const activeRunId = useRunsStore.getState().activeRunId;
-      if (activeRunId !== null) {
-        useRunsStore.getState().resetRun(activeRunId);
-      }
+      useRunsStore.getState().clearActiveRun();
       useDisturbanceStore.setState({ committed: false, dirty: true });
     },
     onError: (err, _vars, ctx) => {

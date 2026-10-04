@@ -1348,7 +1348,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     // Dropping a run from the history clears it without reloading the case,
     // so the button reads Run TDS again over a System the first run committed.
     act(() => {
-      useRunsStore.getState().resetRun('run-1');
+      useRunsStore.getState().removeRun('run-1');
     });
     await userEvent.click(screen.getByTestId('run-tds-button'));
     await waitFor(() => {
@@ -1390,7 +1390,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
 
     // The topology landed, so the next run reloads first and commits once.
     act(() => {
-      useRunsStore.getState().resetRun('run-1');
+      useRunsStore.getState().removeRun('run-1');
     });
     await userEvent.click(screen.getByTestId('run-tds-button'));
     await waitFor(() => {
@@ -1412,6 +1412,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
 
   it('a run started after Reset run commits once, with no refused commit', async () => {
     const calls: string[] = [];
+    useRunsStore.setState({ runCount: 0 });
     await runTdsOnce(calls);
 
     await waitFor(() => {
@@ -1439,6 +1440,13 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
       ]);
     });
     expect(toastErrorMock).not.toHaveBeenCalled();
+
+    // Reset run kept the first run, so both are there to compare, numbered 1 and 2.
+    const { runs, activeRunId } = useRunsStore.getState();
+    expect(Object.keys(runs)).toEqual(['run-1', 'run-2']);
+    expect([runs['run-1']?.ordinal, runs['run-2']?.ordinal]).toEqual([1, 2]);
+    expect(runs['run-1']?.state).toBe('done');
+    expect(activeRunId).toBe('run-2');
   });
 
   it('a commit refused again after the reload surfaces the error, retries once, and does not open the WS', async () => {
@@ -1861,7 +1869,7 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
     expect(button).toBeDisabled();
   });
 
-  it('reset: click Reset run after done → POST /reload + clears the run', async () => {
+  it('reset: click Reset run after done → POST /reload + releases the run and keeps its results', async () => {
     seedReady();
     useDisturbanceStore.setState({
       disturbances: [
@@ -1921,16 +1929,30 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-mode-tds'));
     expect(screen.getByTestId('run-tds-button')).toHaveTextContent(/reset run/i);
-    // The button says what it throws away, since the run is gone afterwards.
+    // The button says where the run goes: it stays in History.
     expect(screen.getByTestId('run-tds-button')).toHaveAttribute(
       'title',
-      expect.stringMatching(/discard this run's results/i),
+      expect.stringMatching(/results stay in history/i),
     );
     await userEvent.click(screen.getByTestId('run-tds-button'));
 
     await waitFor(() => expect(reloadPosted).toBe(true));
     await waitFor(() => {
       expect(useRunsStore.getState().activeRunId).toBeNull();
+    });
+    // The run is released, not dropped: it keeps its frames, its number and its name.
+    const kept = useRunsStore.getState().runs['run-done'];
+    expect(kept?.state).toBe('done');
+    expect(kept?.seqCount).toBe(100);
+    await waitFor(() => {
+      expect(toastInfoMock).toHaveBeenCalledWith(
+        'run-done stays in History',
+        expect.objectContaining({ description: expect.stringMatching(/pin both runs/i) }),
+      );
+    });
+    // The button is ready to run again.
+    await waitFor(() => {
+      expect(screen.getByTestId('run-tds-button')).toHaveTextContent(/run tds/i);
     });
     // Disturbance timeline preserved; only the committed flag flipped.
     expect(useDisturbanceStore.getState().disturbances).toHaveLength(1);

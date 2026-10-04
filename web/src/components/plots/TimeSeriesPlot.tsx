@@ -530,6 +530,9 @@ export function TimeSeriesPlot({
 
   const isMultiRun = overlayRuns.length > 1;
   const primaryRun = overlayRuns[0];
+  // Runs kept after Reset run or a case change, which nothing plots until one
+  // is started or pinned: the empty plot points at where they are.
+  const retainedRunCount = useRunsStore((s) => Object.keys(s.runs).length);
 
   const selected = usePlotStore((s) =>
     effectiveRunId ? s.selectedByRun[effectiveRunId] : undefined,
@@ -689,7 +692,13 @@ export function TimeSeriesPlot({
           <Toolbar>{toolbar}</Toolbar>
           <ExportMenu formats={['csv', 'png']} disabled panel="time-series" label="Export plot" />
         </div>
-        <EmptyPlotMessage message="Run a TDS to see results" />
+        <EmptyPlotMessage
+          message={
+            retainedRunCount > 0
+              ? 'Run a TDS to see results. Earlier runs are in History.'
+              : 'Run a TDS to see results'
+          }
+        />
       </div>
     );
   }

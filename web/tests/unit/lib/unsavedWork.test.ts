@@ -70,11 +70,23 @@ describe('unsavedWork', () => {
     expect(hasUnsavedWork()).toBe(true);
   });
 
-  it('stops counting a run once it is reset', () => {
+  it('stops counting a run once it is deleted from the history', () => {
     startRun();
-    useRunsStore.getState().resetRun('r1');
+    useRunsStore.getState().removeRun('r1');
 
     expect(hasUnsavedWork()).toBe(false);
+  });
+
+  it('still counts a run that Reset run released, since its results stay in the tab', () => {
+    startRun();
+    useRunsStore.getState().appendFrame('r1', {
+      t: new Float64Array([0, 0.1]),
+      columns: { Bus_1_v: new Float64Array([1, 1]) },
+    });
+    useRunsStore.getState().markRunDone('r1', 0.1, true);
+    useRunsStore.getState().clearActiveRun();
+
+    expect(hasUnsavedWork()).toBe(true);
   });
 
   it('counts a sweep that is running or has results, until it is dropped', () => {

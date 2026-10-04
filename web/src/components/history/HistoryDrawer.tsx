@@ -7,7 +7,11 @@
  *
  * - The pencil — renames the run (the name also reaches the plot legend).
  * - "Pin" / "Unpin" — toggles the run in/out of the multi-run overlay.
- * - "Reset" — drops the run from the runs slice.
+ * - "Delete" — drops the run from the runs slice.
+ *
+ * "Clear runs" drops every finished run at once (after a confirmation) and
+ * leaves a run that is still streaming. Reset run in the top bar drops none of
+ * them: a finished run stays here, as an earlier run, until it is deleted.
  *
  * Sweep progress + bundle re-export-per-run are deferred to Unit 18
  * (the basic version only owns the run list + pin/unpin).
@@ -93,6 +97,8 @@ function HistoryDrawerInner() {
   const activeRunId = useRunsStore((s) => s.activeRunId);
   const overlayRunIds = useRunsStore((s) => s.overlayRunIds);
   const setOverlayRuns = useRunsStore((s) => s.setOverlayRuns);
+  const clearFinishedRuns = useRunsStore((s) => s.clearFinishedRuns);
+  const retentionLimit = useRunsStore((s) => s.retentionLimit);
   const jobs = useJobsStore((s) => s.jobs);
   const filter = useLayoutStore((s) => s.historyKindFilter);
   const setFilter = useLayoutStore((s) => s.setHistoryKindFilter);
@@ -109,10 +115,12 @@ function HistoryDrawerInner() {
   // Shared error modal (clone-on-write: panel-local React state, never
   // mutated through the store) for "View error" on failed non-run rows.
   const [errorJob, setErrorJob] = useState<JobRecord | null>(null);
+  // Clear runs asks once before it deletes, since it takes every finished run.
+  const [confirmingClear, setConfirmingClear] = useState(false);
 
   // The default "Runs" view is the historical TDS-runs surface. It sources
   // DIRECTLY from ``useRunsStore`` (not via ``useJobsStore``) so every
-  // TDS-specific affordance — scrub, overlay pin/unpin, reset, per-run
+  // TDS-specific affordance — scrub, overlay pin/unpin, delete, per-run
   // colour — keeps working unchanged. This is the no-regression path.
   const isRunsView = filter === 'runs';
 
@@ -138,6 +146,24 @@ function HistoryDrawerInner() {
     const filtered = filter === 'all' ? list : list.filter((j) => j.kind === filter);
     return filtered.sort((a, b) => b.started_at - a.started_at);
   }, [jobs, filter, isRunsView]);
+
+  // Runs Clear runs would delete: every one that has ended. A run still
+  // streaming is kept, its stream is still adding to it.
+  const finishedCount = useMemo(
+    () => orderedRuns.filter((r) => r.state !== 'starting' && r.state !== 'streaming').length,
+    [orderedRuns],
+  );
+  const showClearPrompt = confirmingClear && finishedCount > 0;
+
+  const handleClearRuns = () => {
+    setConfirmingClear(false);
+    clearFinishedRuns();
+    toast.info(
+      finishedCount === 1
+        ? '1 run deleted from history'
+        : `${finishedCount} runs deleted from history`,
+    );
+  };
 
   const handleClearOverlay = () => {
     setOverlayRuns([]);
@@ -178,7 +204,7 @@ function HistoryDrawerInner() {
       <DialogTitle>{isRunsView ? 'Run history' : 'Job history'}</DialogTitle>
       <DialogDescription>
         {isRunsView
-          ? 'Rename a run with its pencil to name it in the plot legend too, pin runs to the multi-run overlay, or drop them to free memory. Reset run in the top bar also drops the active run from this list. The active run anchors the SLD animation regardless of the overlay set.'
+          ? `Rename a run with its pencil to name it in the plot legend too, pin runs to the multi-run overlay, or delete them to free memory. Reset run in the top bar reloads the case but keeps its run here as an earlier run, so run again and pin both to compare them. History holds up to ${retentionLimit} runs and a newer run pushes out the oldest finished one (Retention, in the TDS tab). The active run anchors the SLD animation regardless of the overlay set.`
           : 'Every job kind in one chronological list. TDS runs keep their scrub + overlay controls on the Runs filter.'}
       </DialogDescription>
 
@@ -220,10 +246,54 @@ function HistoryDrawerInner() {
           >
             {overlayCount === 0 ? 'No runs pinned' : `${overlayCount} pinned to overlay`}
           </span>
+          {showClearPrompt ? (
+            <span
+              role="group"
+              aria-label="Confirm clearing runs"
+              className="flex items-center gap-1.5"
+            >
+              <span
+                data-testid="history-drawer-clear-runs-prompt"
+                className="text-muted-foreground text-xs"
+              >
+                Delete {finishedCount === 1 ? '1 finished run' : `${finishedCount} finished runs`}?
+              </span>
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                onClick={handleClearRuns}
+                data-testid="history-drawer-clear-runs-confirm"
+              >
+                Delete
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmingClear(false)}
+                data-testid="history-drawer-clear-runs-cancel"
+              >
+                Keep
+              </Button>
+            </span>
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfirmingClear(true)}
+              disabled={finishedCount === 0}
+              title="Delete every finished run from history and free its memory"
+              data-testid="history-drawer-clear-runs"
+            >
+              Clear runs
+            </Button>
+          )}
         </div>
       ) : null}
 
-      {/* Per-row pin/unpin/reset toasts now route through the global
+      {/* Per-row pin/unpin/delete toasts now route through the global
           toast surface (Unit 3 of the v2.0 polish plan). The previous
           inline `history-drawer-toast` div has been retired. */}
 
@@ -246,7 +316,7 @@ function HistoryDrawerInner() {
               <EmptyState
                 icon={<HistoryIcon />}
                 title="No runs yet"
-                description="Run a TDS to populate the history. A run you discard with Reset run in the top bar is dropped from it."
+                description="Run a TDS to populate the history. A run stays here after Reset run in the top bar until you delete it."
                 action={{
                   label: 'Run TDS',
                   onClick: () => {
@@ -270,7 +340,7 @@ function HistoryDrawerInner() {
                 onTogglePin={(_id, willBePinned) =>
                   toast.info(willBePinned ? 'Pinned to overlay' : 'Unpinned from overlay')
                 }
-                onReset={() => toast.info('Run dropped from history')}
+                onDelete={() => toast.info('Run deleted from history')}
                 onRename={toastRenamed}
               />
             ))
@@ -287,7 +357,7 @@ function HistoryDrawerInner() {
         ) : (
           orderedJobs.map((job) =>
             // Run-like kinds that still have a live RunRecord keep their rich
-            // TDS row (scrub/overlay/reset). We join JobRecord → RunRecord by
+            // TDS row (scrub/overlay/delete). We join JobRecord → RunRecord by
             // ``runId === job_id`` (run_id aliases job_id from Unit 5c). When
             // the RunRecord has been evicted (or this is a batch/sweep without
             // streamed frames), fall back to the simple job row.
@@ -300,7 +370,7 @@ function HistoryDrawerInner() {
                 onTogglePin={(_id, willBePinned) =>
                   toast.info(willBePinned ? 'Pinned to overlay' : 'Unpinned from overlay')
                 }
-                onReset={() => toast.info('Run dropped from history')}
+                onDelete={() => toast.info('Run deleted from history')}
                 onRename={toastRenamed}
               />
             ) : (

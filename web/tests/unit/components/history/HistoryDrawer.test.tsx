@@ -13,7 +13,7 @@
  * portaled content fine).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { act, render, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const toastInfoMock = vi.fn();
@@ -33,7 +33,7 @@ vi.mock('@/lib/toast', () => ({
 
 import { HistoryDrawer } from '@/components/history/HistoryDrawer';
 import { HistoryDrawerToggle } from '@/components/history/HistoryDrawerToggle';
-import { useRunsStore } from '@/store/runs';
+import { DEFAULT_RETENTION_LIMIT, useRunsStore } from '@/store/runs';
 import { useHistoryStore } from '@/store/history';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
@@ -149,6 +149,7 @@ describe('HistoryDrawer', () => {
       runs: {},
       activeRunId: null,
       overlayRunIds: new Set(),
+      runCount: 0,
     });
     useJobsStore.setState({ jobs: {} });
     useLayoutStore.getState().setHistoryKindFilter('runs');
@@ -230,30 +231,126 @@ describe('HistoryDrawer', () => {
     expect(screen.queryByTestId('history-drawer-toast')).toBeNull();
   });
 
-  it('reset row fires toast.info "Run dropped from history"', async () => {
+  it('delete row fires toast.info "Run deleted from history"', async () => {
     const user = userEvent.setup();
     seedRun('r1');
     useHistoryStore.getState().openDrawer();
     render(<HistoryDrawer />);
-    await user.click(screen.getByTestId('history-run-row-reset-r1'));
-    expect(toastInfoMock).toHaveBeenCalledWith('Run dropped from history');
+    await user.click(screen.getByTestId('history-run-row-delete-r1'));
+    expect(toastInfoMock).toHaveBeenCalledWith('Run deleted from history');
+    expect(useRunsStore.getState().runs.r1).toBeUndefined();
   });
 
-  it('says that a run can be renamed, and that Reset run drops the active run from the list', () => {
+  it('says that a run can be renamed, and that Reset run keeps its run in the list', () => {
     seedRun('r1');
     useHistoryStore.getState().openDrawer();
     render(<HistoryDrawer />);
     const text = screen.getByText(/Rename a run with its pencil/).textContent ?? '';
     expect(text).toContain('plot legend');
-    expect(text).toContain('Reset run in the top bar also drops the active run from this list');
+    expect(text).toContain('Reset run in the top bar reloads the case but keeps its run here');
+    expect(text).not.toContain('drops the active run');
+    // The cap is stated with its real value, and where to change it.
+    expect(text).toContain(`up to ${DEFAULT_RETENTION_LIMIT} runs`);
+    expect(text).toContain('Retention, in the TDS tab');
   });
 
-  it('explains in the empty list why a run may be missing', () => {
+  it('explains in the empty list that a run stays after Reset run', () => {
     useHistoryStore.getState().openDrawer();
     render(<HistoryDrawer />);
     expect(screen.getByTestId('history-drawer-empty')).toHaveTextContent(
-      'A run you discard with Reset run in the top bar is dropped from it.',
+      'A run stays here after Reset run in the top bar until you delete it.',
     );
+  });
+
+  describe('a run Reset run has released', () => {
+    it('stays in the list, marked earlier, and a new run is the active one', () => {
+      seedRun('r1');
+      useRunsStore.getState().setRunDisplayName('r1', 'No fault');
+      // What Reset run does to the runs once the case is reloaded.
+      useRunsStore.getState().clearActiveRun();
+      useHistoryStore.getState().openDrawer();
+      render(<HistoryDrawer />);
+
+      expect(screen.queryByTestId('history-drawer-empty')).toBeNull();
+      expect(screen.getByTestId('history-run-row-label-r1')).toHaveTextContent('No fault');
+      expect(screen.getByTestId('history-run-row-earlier-badge-r1')).toBeInTheDocument();
+      expect(screen.queryByTestId('history-run-row-active-badge-r1')).toBeNull();
+
+      act(() => {
+        useRunsStore.getState().startRun({ runId: 'r2', tf: 5, columnNames: ['Bus_1_v'] });
+      });
+      expect(screen.getByTestId('history-run-row-label-r2')).toHaveTextContent('TDS #2');
+      expect(screen.getByTestId('history-run-row-active-badge-r2')).toBeInTheDocument();
+      expect(screen.getByTestId('history-run-row-earlier-badge-r1')).toBeInTheDocument();
+    });
+  });
+
+  describe('Clear runs', () => {
+    function openWithRuns(...ids: string[]) {
+      for (const id of ids) seedRun(id);
+      useHistoryStore.getState().openDrawer();
+      render(<HistoryDrawer />);
+    }
+
+    it('asks first, and deletes every finished run once confirmed', async () => {
+      const user = userEvent.setup();
+      openWithRuns('r1', 'r2', 'r3');
+      useRunsStore.getState().addOverlayRun('r2');
+
+      await user.click(screen.getByTestId('history-drawer-clear-runs'));
+      // Nothing is deleted by the first click.
+      expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(3);
+      expect(screen.getByTestId('history-drawer-clear-runs-prompt')).toHaveTextContent(
+        'Delete 3 finished runs?',
+      );
+
+      await user.click(screen.getByTestId('history-drawer-clear-runs-confirm'));
+      expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(0);
+      expect(useRunsStore.getState().overlayRunIds.size).toBe(0);
+      expect(toastInfoMock).toHaveBeenCalledWith('3 runs deleted from history');
+      expect(screen.getByTestId('history-drawer-empty')).toBeInTheDocument();
+    });
+
+    it('Keep leaves the runs alone and puts the button back', async () => {
+      const user = userEvent.setup();
+      openWithRuns('r1', 'r2');
+
+      await user.click(screen.getByTestId('history-drawer-clear-runs'));
+      await user.click(screen.getByTestId('history-drawer-clear-runs-cancel'));
+
+      expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(2);
+      expect(screen.queryByTestId('history-drawer-clear-runs-prompt')).toBeNull();
+      expect(screen.getByTestId('history-drawer-clear-runs')).toBeEnabled();
+    });
+
+    it('is off when there is no finished run, and spares a run that is still streaming', async () => {
+      const user = userEvent.setup();
+      useRunsStore.getState().startRun({ runId: 'live', tf: 5, columnNames: ['Bus_1_v'] });
+      useHistoryStore.getState().openDrawer();
+      render(<HistoryDrawer />);
+      expect(screen.getByTestId('history-drawer-clear-runs')).toBeDisabled();
+
+      // One run finishes while another starts: only the finished one is offered.
+      act(() => {
+        useRunsStore.getState().markRunDone('live', 5);
+        useRunsStore.getState().startRun({ runId: 'next', tf: 5, columnNames: ['Bus_1_v'] });
+      });
+      await user.click(screen.getByTestId('history-drawer-clear-runs'));
+      expect(screen.getByTestId('history-drawer-clear-runs-prompt')).toHaveTextContent(
+        'Delete 1 finished run?',
+      );
+      await user.click(screen.getByTestId('history-drawer-clear-runs-confirm'));
+
+      expect(Object.keys(useRunsStore.getState().runs)).toEqual(['next']);
+      expect(toastInfoMock).toHaveBeenCalledWith('1 run deleted from history');
+    });
+
+    it('is not shown on the job views, which have no runs to clear', async () => {
+      const user = userEvent.setup();
+      openWithRuns('r1');
+      await user.selectOptions(screen.getByTestId('history-drawer-kind-filter'), 'all');
+      expect(screen.queryByTestId('history-drawer-clear-runs')).toBeNull();
+    });
   });
 
   it('renaming a run from its row names it and confirms with a toast', async () => {
@@ -322,7 +419,7 @@ describe('HistoryDrawer', () => {
 
   it('default "Runs" filter still renders TDS runs with scrub/overlay controls', () => {
     // Regression guard: the default filter must keep the existing TDS-only
-    // behaviour — run rows with the pin (overlay) + reset (scrub-adjacent)
+    // behaviour — run rows with the pin (overlay) + delete (scrub-adjacent)
     // affordances, sourced from useRunsStore unchanged.
     seedRun('r1');
     useHistoryStore.getState().openDrawer();
@@ -330,7 +427,7 @@ describe('HistoryDrawer', () => {
     expect(useLayoutStore.getState().historyKindFilter).toBe('runs');
     expect(screen.getByTestId('history-run-row-r1')).toBeInTheDocument();
     expect(screen.getByTestId('history-run-row-pin-r1')).toBeInTheDocument();
-    expect(screen.getByTestId('history-run-row-reset-r1')).toBeInTheDocument();
+    expect(screen.getByTestId('history-run-row-delete-r1')).toBeInTheDocument();
   });
 
   it('"All jobs" view renders PF/EIG/CPF/SE jobs as simple rows', async () => {
