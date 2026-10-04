@@ -88,7 +88,8 @@ export function SldVoltageLegend({ className }: { className?: string }) {
       </ul>
       <p className="text-muted-foreground mt-1">
         Up: above vmax. Down: below vmin. Each bus uses its own limits,{' '}
-        {DEFAULT_VOLTAGE_LIMITS.vmin} and {DEFAULT_VOLTAGE_LIMITS.vmax} pu if it has none.
+        {DEFAULT_VOLTAGE_LIMITS.vmin} and {DEFAULT_VOLTAGE_LIMITS.vmax} pu if it has none. Select a
+        bus to see its limits and how to change them.
       </p>
     </div>
   );

@@ -62,11 +62,15 @@ export function EditModeToggle({ className }: EditModeToggleProps) {
   };
 
   const isEdit = editMode === 'edit';
+  // Edit mode is only for controller parameters (exciters, governors). A bus,
+  // line, generator, load or shunt value is edited with the pencil beside it,
+  // before the case is run, whatever the mode is: say so, because the toggle
+  // sits in the header of every selection.
   const tooltipLabel = streaming
     ? 'TDS streaming — switch modes when the run completes.'
     : isEdit
-      ? 'Editing enabled. Switch to Run mode to lock inputs.'
-      : 'Switch to Edit mode to change controller parameters.';
+      ? 'Edit mode is on: controller parameters (exciters, governors) can be changed. Switch to Run mode to lock them.'
+      : 'Switch to Edit mode to change controller parameters (exciters, governors). Bus, line, generator and load values are edited with the pencil beside them before the case is run.';
 
   return (
     <TooltipProvider delayDuration={200}>

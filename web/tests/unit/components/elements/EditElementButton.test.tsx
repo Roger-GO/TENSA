@@ -68,6 +68,13 @@ describe('EditElementButton', () => {
     expect(screen.getByText('100')).toBeInTheDocument();
   });
 
+  it('names the pencil when the pointer rests on it', () => {
+    render(
+      withQueryClient(<EditElementButton model="Bus" idx="1" meta={VnMeta} value={100} enabled />),
+    );
+    expect(screen.getByLabelText('Edit Vn')).toHaveAttribute('title', 'Edit Vn');
+  });
+
   it('shows pencil → input → save cycle and posts the new value', async () => {
     const user = userEvent.setup();
     const onUpdated = vi.fn();

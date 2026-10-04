@@ -320,7 +320,10 @@ export function useCommandRegistry(): readonly Command[] {
       // session exists (the toggle itself no-ops on a non-controller).
       {
         id: 'inspector.toggle-edit-mode',
-        label: editMode === 'edit' ? 'Switch to Run mode' : 'Switch to Edit mode',
+        label:
+          editMode === 'edit'
+            ? 'Switch to Run mode'
+            : 'Switch to Edit mode (controller parameters)',
         group: 'edit',
         keywords: ['edit', 'run', 'mode', 'toggle', 'inspector', 'controller', 'parameter'],
         action: () => setEditMode(editMode === 'edit' ? 'run' : 'edit'),

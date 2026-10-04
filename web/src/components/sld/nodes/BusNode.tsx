@@ -8,7 +8,12 @@ import { useIsPendingDependent } from '@/store/pendingDependents';
 import { useRunsStore } from '@/store/runs';
 import { useFrameBusOverlay } from '@/store/animation';
 import { colorClassForBand, getBusOverlayState } from '../overlay';
-import { barClassForBand, type VoltageLimits } from '../voltage';
+import {
+  DEFAULT_VOLTAGE_LIMITS,
+  barClassForBand,
+  formatVoltageLimits,
+  type VoltageLimits,
+} from '../voltage';
 import { VoltageMarker } from '../VoltageMarker';
 import { SOURCE_HANDLE, TARGET_HANDLE, type Side } from '../graph';
 
@@ -183,7 +188,10 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
       </div>
       {/* Label block, offset below the bar. A faint backing keeps the text
           legible where a feeder line passes behind it. */}
-      <div className="bg-background/70 mt-1 flex flex-col items-center gap-0 rounded px-1 leading-tight">
+      <div
+        title={`${d.name || d.idx}: voltage limits ${formatVoltageLimits(d.voltageLimits ?? DEFAULT_VOLTAGE_LIMITS)}`}
+        className="bg-background/70 mt-1 flex flex-col items-center gap-0 rounded px-1 leading-tight"
+      >
         <span className="flex items-center gap-0.5">
           <span className="text-foreground font-mono text-[10px] leading-tight font-medium">
             {d.name || d.idx}

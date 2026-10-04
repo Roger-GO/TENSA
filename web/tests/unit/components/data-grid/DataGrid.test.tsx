@@ -388,3 +388,48 @@ describe('<DataGrid /> — virtualization threshold', () => {
     expect(screen.getByTestId('dg-virtual')).toBeInTheDocument();
   });
 });
+
+describe('<DataGrid /> — hint', () => {
+  const rows = [{ id: '1', name: 'Bus1', v: 1.0 }];
+
+  it('shows the hint above the header, with no export menu when none is asked for', () => {
+    render(
+      <DataGrid<FixtureRow>
+        columns={COLUMNS}
+        rows={rows}
+        rowIdAccessor={(r) => r.id}
+        testId="dg"
+        hint="Select a row to edit it."
+      />,
+    );
+    expect(screen.getByTestId('dg-hint')).toHaveTextContent('Select a row to edit it.');
+    expect(screen.queryByTestId('export-menu-trigger')).not.toBeInTheDocument();
+  });
+
+  it('sits beside the export menu when the grid has one', () => {
+    render(
+      <DataGrid<FixtureRow>
+        columns={COLUMNS}
+        rows={rows}
+        rowIdAccessor={(r) => r.id}
+        testId="dg"
+        exportPanel="buses"
+        hint="Select a row to edit it."
+      />,
+    );
+    expect(screen.getByTestId('dg-hint')).toBeInTheDocument();
+    expect(screen.getByTestId('export-menu-trigger')).toBeInTheDocument();
+  });
+
+  it('adds nothing without a hint', () => {
+    render(
+      <DataGrid<FixtureRow>
+        columns={COLUMNS}
+        rows={rows}
+        rowIdAccessor={(r) => r.id}
+        testId="dg"
+      />,
+    );
+    expect(screen.queryByTestId('dg-hint')).not.toBeInTheDocument();
+  });
+});

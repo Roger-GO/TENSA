@@ -131,19 +131,20 @@ export function EditElementButton({
           type="button"
           onClick={() => setEditing(true)}
           aria-label={`Edit ${meta.name}`}
+          title={`Edit ${meta.name}`}
           data-testid={`edit-${meta.name}`}
           className={cn(
             'text-muted-foreground hover:text-foreground',
-            'inline-flex h-4 w-4 items-center justify-center rounded',
-            'opacity-60 transition-opacity group-hover:opacity-100 hover:opacity-100 focus-visible:opacity-100',
+            'inline-flex h-5 w-5 items-center justify-center rounded',
+            'opacity-80 transition-opacity group-hover:opacity-100 hover:opacity-100 focus-visible:opacity-100',
             'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
           )}
         >
           <svg
             aria-hidden="true"
             viewBox="0 0 16 16"
-            width="10"
-            height="10"
+            width="12"
+            height="12"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.5"

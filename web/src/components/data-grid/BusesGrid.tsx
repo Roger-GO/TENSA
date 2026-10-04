@@ -11,7 +11,11 @@
  *
  * Columns mirror the retired v2 BUS_COLUMNS shape verbatim (the
  * canonical pattern from Phase 2 Unit 11; v2 file retired in v3
- * Unit 15) plus area + zone (per the v3 plan unit-13 spec).
+ * Unit 15) plus area + zone (per the v3 plan unit-13 spec). The two
+ * voltage limits each bus is judged on, and the verdict in words, sit
+ * right after V so a bus's voltage, its limits and where it stands read
+ * across one row (the diagram says the same with a bar colour and a
+ * triangle).
  * p_inj / q_inj are computed client-side from the PF result's
  * per-device ``generator_outputs`` / ``load_consumption`` maps:
  * the net bus injection is Σ gen P − Σ load P at the bus (same for
@@ -23,12 +27,24 @@ import { useCurrentTopology } from '@/api/queries';
 import { usePflowStore } from '@/store/pflow';
 import { useSldStore } from '@/store/sld';
 import { useCaseStore } from '@/store/case';
-import type { PflowResult, TopologyEntry } from '@/api/types';
+import {
+  DEFAULT_VOLTAGE_LIMITS,
+  VOLTAGE_WARNING_MARGIN,
+  assessVoltage,
+  busVoltageLimits,
+  voltageStatusText,
+} from '@/components/sld/voltage';
+import type { PflowResult, TopologyEntry, TopologySummary } from '@/api/types';
 
 interface BusRow {
   idx: string;
   name: string;
   v: number | null;
+  /** The limits the bus is judged on (its own, or the 0.95 / 1.05 pu default). */
+  vmin: number;
+  vmax: number;
+  /** Where `v` stands against them, in words; null without a converged voltage. */
+  limit_check: string | null;
   theta: number | null;
   p_inj: number | null;
   q_inj: number | null;
@@ -82,12 +98,49 @@ const COLUMNS: ColumnConfig<BusRow>[] = [
   { key: 'idx', label: 'idx', accessor: (r) => r.idx },
   { key: 'name', label: 'name', accessor: (r) => r.name },
   { key: 'v', label: 'V (pu)', numeric: true, accessor: (r) => r.v },
+  {
+    key: 'vmin',
+    label: 'vmin (pu)',
+    title: `Lower voltage limit this bus is judged on: the one the case sets, or ${DEFAULT_VOLTAGE_LIMITS.vmin} pu if it sets none`,
+    numeric: true,
+    accessor: (r) => r.vmin,
+  },
+  {
+    key: 'vmax',
+    label: 'vmax (pu)',
+    title: `Upper voltage limit this bus is judged on: the one the case sets, or ${DEFAULT_VOLTAGE_LIMITS.vmax} pu if it sets none`,
+    numeric: true,
+    accessor: (r) => r.vmax,
+  },
+  {
+    key: 'limit_check',
+    label: 'Limit check',
+    title: `Where V stands against this bus's own vmin and vmax: within them, near one (inside ${VOLTAGE_WARNING_MARGIN} pu of it) or beyond one. Filled in once a power flow has run.`,
+    width: 112,
+    accessor: (r) => r.limit_check,
+  },
   { key: 'theta', label: 'θ (rad)', numeric: true, accessor: (r) => r.theta },
   { key: 'p_inj', label: 'P (MW)', numeric: true, accessor: (r) => r.p_inj },
   { key: 'q_inj', label: 'Q (MVAr)', numeric: true, accessor: (r) => r.q_inj },
   { key: 'area', label: 'area', accessor: (r) => r.area },
   { key: 'zone', label: 'zone', accessor: (r) => r.zone },
 ];
+
+/**
+ * What to do to change a limit, for the line above the table. A bus's vmin
+ * and vmax are edited in the Inspector with the other parameters, and only
+ * while the case has not been run: a run commits the system, so the hint
+ * says how to unlock it instead.
+ */
+function limitsHint(state: TopologySummary['state'] | undefined): string | undefined {
+  if (state === 'pre-setup') {
+    return "To change a bus's vmin or vmax, select its row and click the pencil beside the value in the Inspector.";
+  }
+  if (state === 'committed') {
+    return 'vmin and vmax are locked once a run has started. Select a bus, then use Reset run in the Inspector to edit them.';
+  }
+  return undefined;
+}
 
 export interface BusesGridProps {
   className?: string;
@@ -111,10 +164,15 @@ export function BusesGrid({ className }: BusesGridProps) {
       // this bus). ``null`` (→ "—") when no generator/load attaches
       // here or PF hasn't converged yet.
       const inj = injections.get(idx) ?? null;
+      const volts = typeof v === 'number' && Number.isFinite(v) ? v : null;
+      const limits = busVoltageLimits(bus);
       return {
         idx,
         name: bus.name,
-        v: typeof v === 'number' && Number.isFinite(v) ? v : null,
+        v: volts,
+        vmin: limits.vmin,
+        vmax: limits.vmax,
+        limit_check: volts === null ? null : voltageStatusText(assessVoltage(volts, limits)),
         theta: typeof theta === 'number' && Number.isFinite(theta) ? theta : null,
         p_inj: inj !== null && Number.isFinite(inj.p) ? inj.p : null,
         q_inj: inj !== null && Number.isFinite(inj.q) ? inj.q : null,
@@ -139,6 +197,7 @@ export function BusesGrid({ className }: BusesGridProps) {
       emptyState={topology ? 'No buses in this case.' : 'Load a case to see buses.'}
       testId="buses-grid"
       exportPanel="buses"
+      hint={limitsHint(topology?.state)}
       className={className}
     />
   );

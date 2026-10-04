@@ -106,6 +106,27 @@ describe('<EditModeToggle />', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('says what Edit mode covers, and where the other values are edited', async () => {
+    const user = userEvent.setup();
+    render(withProviders(<EditModeToggle />));
+    await user.hover(screen.getByTestId('edit-mode-toggle'));
+    const tip = await screen.findByTestId('edit-mode-toggle-tooltip');
+    expect(tip).toHaveTextContent('change controller parameters');
+    expect(tip).toHaveTextContent(
+      'Bus, line, generator and load values are edited with the pencil',
+    );
+  });
+
+  it('says what a controller can be edited with once Edit mode is on', async () => {
+    const user = userEvent.setup();
+    useCaseStore.setState({ editMode: 'edit', cloneInitialized: true });
+    render(withProviders(<EditModeToggle />));
+    await user.hover(screen.getByTestId('edit-mode-toggle'));
+    const tip = await screen.findByTestId('edit-mode-toggle-tooltip');
+    expect(tip).toHaveTextContent('Edit mode is on');
+    expect(tip).toHaveTextContent('Switch to Run mode to lock them');
+  });
+
   it('is disabled while a TDS run is streaming', () => {
     useRunsStore.setState({
       runs: {

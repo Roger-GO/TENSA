@@ -43,6 +43,10 @@ interface BadgeAppearance {
   title?: string;
 }
 
+/** Where a finished run is played back, and what the diagram does while it plays. */
+const PLAYBACK_HINT =
+  'Open Analysis, then Plot, in the bottom drawer to play this run back. The diagram checks each bus against its voltage limits as it plays.';
+
 function pickAppearance(run: RunRecord): BadgeAppearance {
   if (run.connection === 'reconnecting') {
     return {
@@ -99,12 +103,14 @@ function pickAppearance(run: RunRecord): BadgeAppearance {
         label: `Done at t=${run.tCurrent.toFixed(2)}`,
         tone: 'border-success/40 bg-success/10 text-foreground',
         pulse: false,
+        title: PLAYBACK_HINT,
       };
     case 'streaming':
       return {
         label: `Streaming… t=${run.tCurrent.toFixed(2)}`,
         tone: 'border-primary/40 bg-primary/10 text-foreground',
         pulse: true,
+        title: 'The diagram checks each bus against its voltage limits as the run streams.',
       };
     case 'starting':
     default:

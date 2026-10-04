@@ -12,8 +12,10 @@ import {
   barClassForBand,
   busLimitsByIdx,
   busVoltageLimits,
+  formatVoltageLimits,
   resolveVoltageLimits,
   voltageMarkerLabel,
+  voltageStatusText,
 } from '@/components/sld/voltage';
 
 function bus(idx: number | string, params: TopologyEntry['params'] = {}): TopologyEntry {
@@ -165,6 +167,30 @@ describe('voltageMarkerLabel', () => {
     expect(voltageMarkerLabel('neutral', null)).toBeNull();
     expect(voltageMarkerLabel('danger', null)).toBeNull();
     expect(voltageMarkerLabel('success', 'high')).toBeNull();
+  });
+});
+
+describe('voltageStatusText', () => {
+  const limits = { vmin: 0.9, vmax: 1.1 };
+
+  it('reads each standing against the limits as the words the legend uses', () => {
+    expect(voltageStatusText(assessVoltage(1.0, limits))).toBe('Within limits');
+    expect(voltageStatusText(assessVoltage(0.91, limits))).toBe('Near vmin');
+    expect(voltageStatusText(assessVoltage(1.09, limits))).toBe('Near vmax');
+    expect(voltageStatusText(assessVoltage(0.85, limits))).toBe('Below vmin');
+    expect(voltageStatusText(assessVoltage(1.2, limits))).toBe('Above vmax');
+  });
+
+  it('has no words when there is no voltage to judge', () => {
+    expect(voltageStatusText(assessVoltage(Number.NaN, limits))).toBeNull();
+  });
+});
+
+describe('formatVoltageLimits', () => {
+  it('writes both limits as one phrase without trailing zeros', () => {
+    expect(formatVoltageLimits({ vmin: 0.9, vmax: 1.1 })).toBe('0.9 to 1.1 pu');
+    expect(formatVoltageLimits({ vmin: 0.95, vmax: 1.05 })).toBe('0.95 to 1.05 pu');
+    expect(formatVoltageLimits({ vmin: 0.9125, vmax: 1.0875 })).toBe('0.9125 to 1.0875 pu');
   });
 });
 

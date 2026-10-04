@@ -147,6 +147,14 @@ describe('BusNode, the bus own voltage limits', () => {
     expect(fallback.getByTestId('bus-node-1')).toHaveAttribute('data-band', 'danger');
   });
 
+  it('names the limits in the tooltip of its label, the default when it has none', () => {
+    const own = render(<BusNode {...nodeProps('1', 'BUS1', { vmin: 0.9, vmax: 1.1 })} />);
+    expect(own.getByTitle('BUS1: voltage limits 0.9 to 1.1 pu')).toBeInTheDocument();
+    own.unmount();
+    const fallback = render(<BusNode {...nodeProps('2', 'BUS2')} />);
+    expect(fallback.getByTitle('BUS2: voltage limits 0.95 to 1.05 pu')).toBeInTheDocument();
+  });
+
   it('flags a bus a tighter limit puts out of band', () => {
     solvedAt('2', 1.0);
     const { getByTestId } = render(

@@ -25,6 +25,7 @@ import type { CloneDiffPair, ParamValue, TopologyEntry, TopologyParamMeta } from
 import type { SelectedElement } from '@/store/case';
 import { findTopologyEntry } from '@/lib/topology';
 import { cn } from '@/lib/cn';
+import { assessVoltage, busVoltageLimits, voltageStatusText } from '@/components/sld/voltage';
 import { ModifiedFromOriginalDot } from './ModifiedFromOriginalDot';
 
 /**
@@ -221,6 +222,24 @@ function CloneEditField({ model, idx, param, value, streamingLock, diff }: Clone
   );
 }
 
+/** What the Inspector says about the selected bus once a power flow has solved it. */
+interface BusReading {
+  v: number;
+  /** Where `v` stands against the bus's own limits, in words. */
+  status: string | null;
+}
+
+/** A parameter that names the element or links it to a bus is not edited in place. */
+function isIdentifierParam(key: string, meta: TopologyParamMeta | undefined): boolean {
+  return key === 'idx' || key === 'name' || meta?.kind === 'bus_idx';
+}
+
+const EMPTY_OVERRIDES: Readonly<Record<string, ParamValue>> = {};
+
+const EDIT_HINT = 'Click the pencil beside a value to change it.';
+const BUS_EDIT_HINT =
+  'vmin and vmax are the limits this bus is judged on. Click the pencil beside one to change it.';
+
 interface PropertiesBodyProps {
   entry: TopologyEntry | null;
   selected: SelectedElement;
@@ -238,6 +257,8 @@ interface PropertiesBodyProps {
   paramMetas: Map<string, TopologyParamMeta>;
   /** Per-param clone-vs-original diff pairs (Unit 23), keyed by param name. */
   diffByParam: Map<string, CloneDiffPair>;
+  /** A bus's solved voltage and where it stands against its limits, after a power flow. */
+  busReading: BusReading | null;
 }
 
 function PropertiesBody({
@@ -248,10 +269,18 @@ function PropertiesBody({
   streamingLock,
   paramMetas,
   diffByParam,
+  busReading,
 }: PropertiesBodyProps) {
   // Local optimistic mirror so an edited value is reflected immediately
-  // without waiting for the topology re-fetch round-trip.
-  const [overrides, setOverrides] = useState<Record<string, ParamValue>>({});
+  // without waiting for the topology re-fetch round-trip. It belongs to the
+  // topology entry it was made on: once that entry is replaced (the re-fetch
+  // after the edit, a reload that put the file's values back) or another
+  // element is selected, the topology is the truth again and the mirror is
+  // ignored, so the Inspector never shows a value the case no longer holds.
+  const [mirror, setMirror] = useState<{
+    source: TopologyEntry | null;
+    values: Readonly<Record<string, ParamValue>>;
+  }>({ source: null, values: EMPTY_OVERRIDES });
 
   if (!entry) {
     return (
@@ -260,6 +289,7 @@ function PropertiesBody({
       </p>
     );
   }
+  const overrides = mirror.source === entry ? mirror.values : EMPTY_OVERRIDES;
   const params = { ...(entry.params ?? {}), ...overrides };
   const entries = Object.entries(params);
   return (
@@ -273,6 +303,25 @@ function PropertiesBody({
       <dd className="text-foreground truncate text-xs">{entry.name}</dd>
       <dt className="text-muted-foreground font-mono text-xs">kind</dt>
       <dd className="text-foreground font-mono text-xs">{entry.kind}</dd>
+      {busReading !== null ? (
+        <>
+          <dt className="text-muted-foreground font-mono text-xs">voltage</dt>
+          <dd data-testid="inspector-bus-voltage" className="text-foreground font-mono text-xs">
+            {busReading.v.toFixed(4)} pu
+          </dd>
+          {busReading.status !== null ? (
+            <>
+              <dt className="text-muted-foreground font-mono text-xs">limit check</dt>
+              <dd
+                data-testid="inspector-bus-limit-check"
+                className="text-foreground font-mono text-xs"
+              >
+                {busReading.status}
+              </dd>
+            </>
+          ) : null}
+        </>
+      ) : null}
       {entries.length === 0 ? (
         <p className="text-muted-foreground col-span-2 mt-2 text-xs">
           No additional parameters reported by ANDES.
@@ -280,7 +329,7 @@ function PropertiesBody({
       ) : (
         entries.map(([key, value]) => {
           const meta = paramMetas.get(key);
-          const isIdentifierField = key === 'idx' || key === 'name' || meta?.kind === 'bus_idx';
+          const isIdentifierField = isIdentifierParam(key, meta);
           // Clone-edit path (Unit 22): whitelisted controller params become
           // editable inputs that commit via the clone-on-write endpoint. The
           // substrate is whitelist-first, so a non-editable param simply 422s
@@ -311,7 +360,12 @@ function PropertiesBody({
                     meta={meta}
                     value={value}
                     enabled
-                    onUpdated={(next) => setOverrides((curr) => ({ ...curr, [key]: next }))}
+                    onUpdated={(next) =>
+                      setMirror((curr) => ({
+                        source: entry,
+                        values: { ...(curr.source === entry ? curr.values : {}), [key]: next },
+                      }))
+                    }
                   />
                 ) : (
                   <span className="flex items-center gap-1.5">
@@ -345,9 +399,11 @@ function PropertiesBody({
 interface ResetBannerProps {
   onReset: () => void;
   resetting: boolean;
+  /** The selection is a controller, whose parameters Edit mode can change on a locked case. */
+  controller: boolean;
 }
 
-function ResetBanner({ onReset, resetting }: ResetBannerProps) {
+function ResetBanner({ onReset, resetting, controller }: ResetBannerProps) {
   return (
     <div
       role="status"
@@ -358,7 +414,11 @@ function ResetBanner({ onReset, resetting }: ResetBannerProps) {
         'text-xs',
       )}
     >
-      <span>Run has committed setup. Reset to edit.</span>
+      <span>
+        {controller
+          ? 'A run has locked this case. Turn on Edit mode to change controller parameters, or reset the run to edit other values; resetting discards the edits you made so far.'
+          : 'A run has locked this case. Reset the run to edit values again; the edits you made so far are discarded.'}
+      </span>
       <Button
         type="button"
         variant="outline"
@@ -395,6 +455,7 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
   const reloadCase = useReloadCase();
   const schema = useTopologySchema();
+  const pflow = usePflowStore((s) => s.lastRun);
 
   const entry = useMemo(() => {
     if (!topology || !selectedElement) return null;
@@ -425,6 +486,18 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
     return map;
   }, [entry, schema.data]);
 
+  // A bus's solved voltage and the verdict on it, so the limits it is edited
+  // against sit beside what they are judged on.
+  const busReading = useMemo<BusReading | null>(() => {
+    if (selectedElement?.kind !== 'bus' || !entry || !pflow?.converged) return null;
+    const v = pflow.bus_voltages[String(entry.idx)];
+    if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+    return {
+      v,
+      status: voltageStatusText(assessVoltage(v, busVoltageLimits(entry))),
+    };
+  }, [selectedElement, entry, pflow]);
+
   if (!selectedElement) return null;
 
   const isPreSetup = topology?.state === 'pre-setup';
@@ -434,6 +507,16 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
   // edit path it does NOT require a pre-setup System — the clone endpoint
   // re-loads + re-setups from the edited files on every commit.
   const cloneEditable = editMode === 'edit' && isController;
+  // Say how to edit, once, where it can be done: the pencils are small, and a
+  // first-time user has no other cue that the values are editable.
+  const showEditHint =
+    editable &&
+    !cloneEditable &&
+    entry !== null &&
+    Object.keys(entry.params ?? {}).some((key) => {
+      const meta = paramMetas.get(key);
+      return meta !== undefined && !isIdentifierParam(key, meta);
+    });
 
   const onResetRun = () => {
     if (!sessionId) return;
@@ -443,7 +526,16 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
   return (
     <div data-testid="element-form-fields" className={cn('flex min-h-0 flex-col gap-2', className)}>
       {isCommitted && !cloneEditable ? (
-        <ResetBanner onReset={onResetRun} resetting={reloadCase.isPending} />
+        <ResetBanner
+          onReset={onResetRun}
+          resetting={reloadCase.isPending}
+          controller={isController}
+        />
+      ) : null}
+      {showEditHint ? (
+        <p data-testid="inspector-edit-hint" className="text-muted-foreground text-xs">
+          {entry.kind === 'Bus' ? BUS_EDIT_HINT : EDIT_HINT}
+        </p>
       ) : null}
       <PropertiesBody
         entry={entry}
@@ -453,6 +545,7 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
         streamingLock={tdsStreaming}
         paramMetas={paramMetas}
         diffByParam={diffByParam}
+        busReading={busReading}
       />
     </div>
   );

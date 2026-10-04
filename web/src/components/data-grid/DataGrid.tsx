@@ -21,7 +21,9 @@
  * header. The file is the grid as it reads: the rows in their current sort
  * order, one column per column, the cell values at full precision. The bar sits
  * outside the element that owns the arrow-key bindings, so Enter on the menu's
- * button activates the button and does not select the focused row.
+ * button activates the button and does not select the focused row. A ``hint``
+ * puts a line of guidance at the bar's left (what to do with a row, say), and
+ * gives the bar to a grid that has no export.
  *
  * Generic over the row shape: callers pass ``columns`` (with per-column
  * ``accessor`` / ``numeric`` / ``sortable`` flags) and a ``rowIdAccessor``
@@ -81,6 +83,11 @@ export interface DataGridProps<Row = unknown> {
    * adds the Export menu above the header; without it the grid has none.
    */
   exportPanel?: string;
+  /**
+   * One line of guidance shown above the header, at the left of the Export
+   * menu, for what a first-time user would not guess from the table alone.
+   */
+  hint?: string;
 }
 
 /** Format a value for display. ``null``/``undefined``/``NaN`` → ``—``. */
@@ -192,6 +199,7 @@ export function DataGrid<Row>({
   className,
   testId,
   exportPanel,
+  hint,
 }: DataGridProps<Row>) {
   const [sort, setSort] = useState<SortState>({ column: null, direction: 'none' });
   // Keyboard-nav cursor. Separate from `selectedRowId` so the user can
@@ -327,20 +335,31 @@ export function DataGrid<Row>({
   // The bar goes beside the keyboard-scoped grid element, not inside it (see
   // the header note), so each return below wraps the grid in `withExportBar`.
   const withExportBar = (grid: React.ReactElement) =>
-    exportPanel === undefined ? (
+    exportPanel === undefined && hint === undefined ? (
       grid
     ) : (
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="border-border bg-muted/20 flex shrink-0 items-center justify-end border-b px-1">
-          <ExportMenu
-            formats={['csv']}
-            disabled={rows.length === 0}
-            disabledTooltip="No rows to export"
-            panel={exportPanel}
-            caseName={caseName}
-            onExportCsv={onExportCsv}
-            className="h-6 px-2"
-          />
+        <div className="border-border bg-muted/20 flex shrink-0 items-center gap-2 border-b px-1">
+          {hint !== undefined ? (
+            <p
+              data-testid={testId ? `${testId}-hint` : undefined}
+              title={hint}
+              className="text-muted-foreground min-w-0 flex-1 truncate px-1 text-[11px]"
+            >
+              {hint}
+            </p>
+          ) : null}
+          {exportPanel !== undefined ? (
+            <ExportMenu
+              formats={['csv']}
+              disabled={rows.length === 0}
+              disabledTooltip="No rows to export"
+              panel={exportPanel}
+              caseName={caseName}
+              onExportCsv={onExportCsv}
+              className="ml-auto h-6 px-2"
+            />
+          ) : null}
         </div>
         {grid}
       </div>

@@ -120,6 +120,25 @@ describe('useCommandRegistry — shape', () => {
   });
 });
 
+describe('useCommandRegistry — edit mode command', () => {
+  it('says the mode is for controller parameters, and how to leave it', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const toggle = result.current.find((c) => c.id === 'inspector.toggle-edit-mode');
+    expect(toggle?.label).toBe('Switch to Edit mode (controller parameters)');
+
+    act(() => {
+      useCaseStore.setState({ editMode: 'edit' });
+    });
+    const { result: editing } = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(editing.current.find((c) => c.id === 'inspector.toggle-edit-mode')?.label).toBe(
+      'Switch to Run mode',
+    );
+    act(() => {
+      useCaseStore.setState({ editMode: 'run' });
+    });
+  });
+});
+
 describe('useCommandRegistry — when() filter', () => {
   it('omits workspace edit commands when no topology is loaded', () => {
     MOCK_TOPOLOGY = null;

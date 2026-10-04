@@ -118,6 +118,30 @@ export function voltageMarkerLabel(band: VoltageBand, side: VoltageSide | null):
 }
 
 /**
+ * A bus's standing against its limits in words, for the Buses table and the
+ * Inspector: where the diagram has a bar colour and a triangle, this is the
+ * same reading as text. `null` when there is no voltage to judge.
+ */
+export function voltageStatusText(status: Readonly<VoltageStatus>): string | null {
+  switch (status.band) {
+    case 'success':
+      return 'Within limits';
+    case 'warning':
+      return status.side === 'low' ? 'Near vmin' : 'Near vmax';
+    case 'danger':
+      return status.side === 'low' ? 'Below vmin' : 'Above vmax';
+    default:
+      return null;
+  }
+}
+
+/** The limits as one phrase, e.g. `0.9 to 1.1 pu`, for a tooltip. */
+export function formatVoltageLimits(limits: VoltageLimits): string {
+  const pu = (value: number) => String(Number(value.toFixed(4)));
+  return `${pu(limits.vmin)} to ${pu(limits.vmax)} pu`;
+}
+
+/**
  * Busbar fill by voltage band. Traditional one-line busbars are drawn as
  * a solid dark bar; we keep that for normal/unsolved buses and only tint
  * the bar amber / red when a voltage limit is breached, so a violation

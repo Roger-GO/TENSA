@@ -112,6 +112,22 @@ describe('<RunStatusBadge />', () => {
     );
   });
 
+  it('tells a finished run where to play it back', () => {
+    seedRun({ state: 'done', tCurrent: 5, tf: 5, converged: true });
+    render(<RunStatusBadge />);
+    expect(screen.getByTestId('tds-run-status-badge').getAttribute('title')).toContain(
+      'Open Analysis, then Plot',
+    );
+  });
+
+  it('says the diagram checks the voltage limits while the run streams', () => {
+    seedRun({ state: 'streaming', tCurrent: 1 });
+    render(<RunStatusBadge />);
+    expect(screen.getByTestId('tds-run-status-badge').getAttribute('title')).toContain(
+      'voltage limits',
+    );
+  });
+
   it('shows "Aborted at t=…" when aborted', () => {
     seedRun({ state: 'aborted', tCurrent: 2.5 });
     render(<RunStatusBadge />);

@@ -109,6 +109,14 @@ describe('SldVoltageLegend', () => {
     expect(legend).toHaveTextContent('0.95 and 1.05 pu if it has none');
   });
 
+  it('points to where a bus limits are seen and changed', () => {
+    usePflowStore.setState({ lastRun: pflow(true) });
+    render(<SldVoltageLegend />);
+    expect(screen.getByTestId('sld-voltage-legend')).toHaveTextContent(
+      'Select a bus to see its limits and how to change them.',
+    );
+  });
+
   it('takes the class it is given, so the canvas can place it', () => {
     usePflowStore.setState({ lastRun: pflow(true) });
     render(<SldVoltageLegend className="absolute top-2 left-2" />);
