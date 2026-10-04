@@ -14,6 +14,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 import types
 from pathlib import Path
@@ -608,3 +609,131 @@ def test_warm_cache_leaves_the_cache_unstamped_when_the_generation_fails(
     result = CliRunner().invoke(cli.app, ["warm-cache"])
     assert result.exit_code != 0
     assert cache_state("9.9.9", fake_andes["directory"]) == "unchecked"
+
+
+# ---- servers that share one marker -------------------------------------------
+#
+# The marker sits beside ``~/.andes/pycode`` and every ``tensa serve`` on the
+# machine uses the same one. A second server used to start its own child and the
+# first child to end removed the marker out from under the other, so a loading
+# worker stopped waiting while that child was still generating.
+
+
+def _touch_command(path: Path) -> list[str]:
+    """A child that proves it ran by creating ``path``."""
+    return [_PYTHON, "-c", f"import pathlib; pathlib.Path({str(path)!r}).touch()"]
+
+
+def test_a_second_server_leaves_the_generation_to_the_first(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    directory = _cache(tmp_path)
+    first = start_background_warm("2.0.0", log, directory=directory, command=_SLEEP)
+    assert first is not None
+    ran = tmp_path / "second-child-ran"
+    try:
+        with caplog.at_level(logging.INFO, logger=log.name):
+            second = start_background_warm(
+                "2.0.0", log, directory=directory, command=_touch_command(ran)
+            )
+        assert second is None
+        assert "another tensa serve is already generating" in caplog.text
+        # No child of its own, and the first one's marker is untouched.
+        time.sleep(0.3)
+        assert not ran.exists()
+        assert background_warm_running(directory)
+    finally:
+        first.stop()
+    assert not running_marker(directory).exists()
+
+
+def test_a_leftover_marker_does_not_stop_a_server_from_warming(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A server that was killed leaves its marker behind; once nobody refreshes it,
+    the next server takes its place."""
+    monkeypatch.setattr(codegen_cache, "MARKER_STALE_SECONDS", 0.5)
+    directory = _cache(tmp_path)
+    marker = running_marker(directory)
+    marker.write_text("pid-of-a-dead-server", encoding="utf-8")
+    old = time.time() - 3600
+    os.utime(marker, (old, old))
+
+    warm = start_background_warm("2.0.0", log, directory=directory, command=_SLEEP)
+    assert warm is not None
+    try:
+        assert background_warm_running(directory)
+        assert marker.read_text(encoding="utf-8") != "pid-of-a-dead-server"
+    finally:
+        warm.stop()
+    assert not marker.exists()
+
+
+def _start_together(directory: Path, racers: int) -> list[BackgroundWarm | None]:
+    """``racers`` servers asking to warm ``directory`` at the same moment."""
+    barrier = threading.Barrier(racers)
+    started: list[BackgroundWarm | None] = []
+
+    def race() -> None:
+        barrier.wait()
+        started.append(start_background_warm("2.0.0", log, directory=directory, command=_SLEEP))
+
+    threads = [threading.Thread(target=race) for _ in range(racers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(60.0)
+    return started
+
+
+def test_servers_that_start_together_do_not_both_warm(tmp_path: Path) -> None:
+    """The marker is created exclusively, so exactly one of them gets it."""
+    for round_ in range(5):
+        (tmp_path / f"round-{round_}").mkdir()
+        directory = _cache(tmp_path / f"round-{round_}")
+        started = _start_together(directory, racers=6)
+        winners = [warm for warm in started if warm is not None]
+        try:
+            assert len(started) == 6
+            assert len(winners) == 1, f"round {round_}: {len(winners)} children started"
+        finally:
+            for warm in winners:
+                warm.stop()
+
+
+def test_a_server_does_not_touch_a_marker_another_server_now_owns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If a heartbeat stall let another server take the marker over, the original
+    owner neither keeps it alive nor removes it when its own child ends."""
+    monkeypatch.setattr(BackgroundWarm, "_HEARTBEAT_SECONDS", 0.05)
+    directory = _cache(tmp_path)
+    marker = running_marker(directory)
+    warm = start_background_warm("2.0.0", log, directory=directory, command=_SLEEP)
+    assert warm is not None
+    try:
+        marker.write_text("the-other-servers-token", encoding="utf-8")
+        old = time.time() - 3600
+        os.utime(marker, (old, old))
+        time.sleep(0.4)  # several beats
+        # Not refreshed on the other server's behalf.
+        assert time.time() - marker.stat().st_mtime > 3000
+    finally:
+        warm.stop()
+    # Still there, and still the other server's.
+    assert marker.read_text(encoding="utf-8") == "the-other-servers-token"
+
+
+def test_a_marker_without_a_token_is_still_removed_by_its_writer(tmp_path: Path) -> None:
+    """``BackgroundWarm`` built the old way, with a marker and no token."""
+    marker = tmp_path / "marker"
+    marker.touch()
+    process = subprocess.Popen(
+        [_PYTHON, "-c", "pass"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    warm = BackgroundWarm(process, log, marker)
+    _finished(warm)
+    assert not marker.exists()

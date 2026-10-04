@@ -31,8 +31,13 @@ beside the cache directory that the server keeps fresh while the child runs, and
 that ``wait_for_background_warm`` (called by a worker before it builds a System)
 watches. The marker is only ever a hint: one nobody has refreshed lately is a
 leftover of a server that died, and a wait has an upper bound, after which the
-worker generates the code itself as it always has. Two cases still run side by
-side: a worker that gave up waiting, and a ``tensa warm-cache`` run by hand (it
+worker generates the code itself as it always has.
+
+Every server on the machine shares that one marker, so the server that finds a
+live one leaves the generation to its owner (it is created exclusively, so two
+servers starting together cannot both claim it), and each server removes or
+refreshes the marker only while it still holds the token it wrote into it. Two
+cases still run side by side: a worker that gave up waiting, and a ``tensa warm-cache`` run by hand (it
 leaves no marker) while a server is loading. ANDES writes each model file in
 place, so a worker that imports one while the other process rewrites it can in
 principle fail that load, and loading again fixes it. Nobody has seen that happen.
@@ -48,6 +53,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
@@ -183,7 +189,9 @@ class BackgroundWarm:
 
     While the child runs, a second thread keeps ``marker`` fresh (see
     ``wait_for_background_warm``); the marker is removed when the child ends or is
-    stopped.
+    stopped. ``token`` is what this server wrote into the marker: with one, the
+    marker is touched and removed only while the file still holds it, so a server
+    that took over a marker it thought dead is not undone by the original owner.
     """
 
     # How long ``stop`` waits for the child to end before it kills it.
@@ -197,10 +205,12 @@ class BackgroundWarm:
         process: subprocess.Popen[bytes],
         log: logging.Logger,
         marker: Path | None = None,
+        token: str | None = None,
     ) -> None:
         self._process = process
         self._log = log
         self._marker = marker
+        self._token = token
         self._started = time.monotonic()
         self._stopping = False
         self._ended = threading.Event()
@@ -215,9 +225,20 @@ class BackgroundWarm:
         )
         self._watcher.start()
 
+    def _owns_marker(self, marker: Path) -> bool:
+        """Whether ``marker`` still holds this server's token (always, without one)."""
+        if self._token is None:
+            return True
+        try:
+            return marker.read_text(encoding="utf-8") == self._token
+        except (OSError, ValueError):
+            return False
+
     def _beat(self, marker: Path) -> None:
         while not self._ended.wait(self._HEARTBEAT_SECONDS):
             try:
+                if not self._owns_marker(marker):
+                    return
                 # Refreshes the marker without ever creating it, so a beat that
                 # lands after ``_clear_marker`` cannot bring it back.
                 os.utime(marker)
@@ -233,7 +254,8 @@ class BackgroundWarm:
         if self._beater is not None:
             self._beater.join(self._STOP_GRACE_SECONDS)
         with contextlib.suppress(OSError):
-            self._marker.unlink(missing_ok=True)
+            if self._owns_marker(self._marker):
+                self._marker.unlink(missing_ok=True)
 
     def _watch(self) -> None:
         # Draining stderr here also keeps the child from blocking on a full pipe.
@@ -293,16 +315,51 @@ def _was_interrupted(code: int | None, stderr_lines: Sequence[str]) -> bool:
     return bool(stderr_lines) and stderr_lines[-1].strip().startswith("KeyboardInterrupt")
 
 
-def _create_running_marker(directory: Path | None) -> Path | None:
-    """Create the marker, or return ``None`` when it cannot be (the child then
-    runs unannounced, and a loading worker does not wait for it)."""
+class _MarkerHeldError(Exception):
+    """A live marker already exists: another server's child is generating the code."""
+
+
+def _claim_running_marker(directory: Path | None) -> tuple[Path, str] | None:
+    """Create the marker, with a token of this claim written into it.
+
+    The file is created exclusively, so of two servers starting together only one
+    gets it. A marker nobody has refreshed lately is a leftover of a server that
+    died, and is replaced.
+
+    Returns ``None`` when the marker cannot be created (the child then runs
+    unannounced, and a loading worker does not wait for it).
+
+    Raises:
+        _MarkerHeldError: a live marker exists, so someone else is generating.
+    """
     marker = running_marker(directory)
+    token = f"{os.getpid()}-{uuid.uuid4().hex}"
     try:
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.touch()
     except OSError:
         return None
-    return marker
+    for _ in range(2):
+        try:
+            fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            if not marker.is_file():
+                return None  # something else sits there; the child runs unannounced
+            if background_warm_running(directory):
+                raise _MarkerHeldError from None
+            with contextlib.suppress(OSError):
+                marker.unlink(missing_ok=True)
+            continue
+        except OSError:
+            return None
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(token)
+        except OSError:
+            with contextlib.suppress(OSError):
+                marker.unlink(missing_ok=True)
+            return None
+        return marker, token
+    return None
 
 
 def start_background_warm(
@@ -321,6 +378,19 @@ def start_background_warm(
     state = cache_state(andes_version, directory)
     if state == "ready":
         return None
+    # Before the child exists, so a case loaded in the meantime already sees it.
+    # A live marker belongs to another server's child, which is doing this work:
+    # a second one would only share its cores and, finishing first, take away
+    # the marker its owner still needs.
+    try:
+        claim = _claim_running_marker(directory)
+    except _MarkerHeldError:
+        log.info(
+            "another tensa serve is already generating the ANDES code; "
+            "a case loaded meanwhile waits for it"
+        )
+        return None
+    marker, token = claim if claim is not None else (None, None)
     if state == "missing":
         log.info(
             "ANDES generated code not found; generating it in the background "
@@ -333,8 +403,6 @@ def start_background_warm(
         if command is not None
         else [sys.executable, "-m", "tensa", "warm-cache", "--quick", "--incremental"]
     )
-    # Before the child exists, so a case loaded in the meantime already sees it.
-    marker = _create_running_marker(directory)
     try:
         # The same thread caps a worker gets: ANDES spawns a process per core.
         with worker_spawn_env():
@@ -346,6 +414,7 @@ def start_background_warm(
             )
     except OSError as exc:
         if marker is not None:
+            # Ours, since the claim just wrote it.
             with contextlib.suppress(OSError):
                 marker.unlink(missing_ok=True)
         log.warning(
@@ -356,4 +425,4 @@ def start_background_warm(
         return None
     # Windows only: end it with the server, as a worker does. Nothing elsewhere.
     attach_kill_on_close_job(process.pid)
-    return BackgroundWarm(process, log, marker)
+    return BackgroundWarm(process, log, marker, token)
