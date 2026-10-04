@@ -5,6 +5,9 @@ import { useEigParticipation } from '@/api/queries';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useHotkeys } from '@/lib/useHotkeys';
 import { Input } from '@/components/ui/Input';
+import { ExportMenu } from '@/components/export/ExportMenu';
+import { useExportCaseName } from '@/components/export/useExportCaseName';
+import { participationToCsv } from './analyzeExport';
 import type { ParticipationFactor } from '@/api/types';
 
 /**
@@ -205,6 +208,16 @@ export function EIGParticipationTable({ className, rows }: EIGParticipationTable
     return { sorted, total: base.length, filteredCount: filtered.length };
   }, [displayRows, filter, sort]);
 
+  // CSV is the rows as the table shows them: the filter and the sort applied.
+  const caseName = useExportCaseName();
+  const onExportCsv = useCallback(
+    () =>
+      processed.sorted.length === 0
+        ? null
+        : participationToCsv(processed.sorted, selectedModeId, filter),
+    [processed, selectedModeId, filter],
+  );
+
   if (selectedModeId === null && rows === undefined) {
     return (
       <div
@@ -283,12 +296,31 @@ export function EIGParticipationTable({ className, rows }: EIGParticipationTable
         className,
       )}
     >
-      <div className="border-border text-muted-foreground border-b px-2 py-1 text-[10px]">
-        Participation factors ({processed.sorted.length}
-        {processed.filteredCount !== processed.total
-          ? ` of ${processed.total} matched`
-          : ` of ${processed.total}`}
-        )
+      <div
+        className={cn(
+          'border-border text-muted-foreground flex items-center justify-between gap-2',
+          'border-b px-2 py-0.5 text-[10px]',
+        )}
+      >
+        <span>
+          Participation factors ({processed.sorted.length}
+          {processed.filteredCount !== processed.total
+            ? ` of ${processed.total} matched`
+            : ` of ${processed.total}`}
+          )
+        </span>
+        <ExportMenu
+          formats={['csv']}
+          disabled={processed.sorted.length === 0}
+          panel={
+            selectedModeId === null
+              ? 'eig-participation'
+              : `eig-participation-mode-${selectedModeId}`
+          }
+          caseName={caseName}
+          onExportCsv={onExportCsv}
+          className="h-6 px-2"
+        />
       </div>
       <div className="border-border border-b p-2">
         <Input

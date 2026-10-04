@@ -33,6 +33,20 @@ export interface FetchMatOptions {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+/** Copy for the statuses the endpoint documents, used when the body is not RFC 7807. */
+function fallbackProblem(status: number): { title: string; detail: string | null } {
+  if (status === 404) {
+    return {
+      title: 'Session not found',
+      detail: 'The session is closed or has expired. Reload the case and run EIG again.',
+    };
+  }
+  if (status === 409) {
+    return { title: 'EIG has not been run', detail: 'Run EIG, then export the state matrix.' };
+  }
+  return { title: `HTTP ${status}`, detail: null };
+}
+
 /**
  * Fetch the EIG state matrix as a `.mat` file `Blob`.
  *
@@ -100,22 +114,13 @@ export async function fetchEigStateMatrixMat(
       // Fall through with a synthesised ProblemDetails.
     }
     const obj = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+    const fallback = fallbackProblem(response.status);
     throw new ProblemDetailsError(
       {
         type: typeof obj.type === 'string' ? obj.type : 'about:blank',
-        title:
-          typeof obj.title === 'string'
-            ? obj.title
-            : response.status === 404
-              ? 'EIG state matrix not available yet'
-              : `HTTP ${response.status}`,
+        title: typeof obj.title === 'string' ? obj.title : fallback.title,
         status: typeof obj.status === 'number' ? obj.status : response.status,
-        detail:
-          typeof obj.detail === 'string'
-            ? obj.detail
-            : response.status === 404
-              ? 'MAT export becomes available after Unit 6 (EIG routine).'
-              : null,
+        detail: typeof obj.detail === 'string' ? obj.detail : fallback.detail,
         instance: typeof obj.instance === 'string' ? obj.instance : null,
       },
       body,

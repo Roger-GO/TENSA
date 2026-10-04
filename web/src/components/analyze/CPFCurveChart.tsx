@@ -1,7 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useTheme } from '@/lib/useTheme';
+import { ExportMenu } from '@/components/export/ExportMenu';
+import { elementToPng } from '@/components/export/exportToPng';
+import { useExportCaseName } from '@/components/export/useExportCaseName';
+import { cpfResultToCsv } from './analyzeExport';
 import type { CpfResult } from '@/api/types';
 import type { ResolvedTheme } from '@/store/theme';
 
@@ -305,6 +309,20 @@ export function CPFCurveChart({
     [result, effectiveVisible],
   );
 
+  // CSV has every bus's voltage at every step, not only the buses the chart
+  // shows; PNG is the card as drawn. The nose curve and the QV curve both
+  // render here, so one mount covers both.
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const caseName = useExportCaseName();
+  const onExportCsv = useCallback(
+    () => (result === null || result.lambdas.length === 0 ? null : cpfResultToCsv(result)),
+    [result],
+  );
+  const onExportPng = useCallback(async () => {
+    const el = cardRef.current;
+    return el === null ? null : await elementToPng(el);
+  }, []);
+
   if (result === null) {
     return (
       <div
@@ -408,19 +426,36 @@ export function CPFCurveChart({
 
   return (
     <div
+      ref={cardRef}
       data-testid="cpf-curve"
       data-mode={result.mode}
       className={cn('border-border bg-background flex flex-col rounded border', className)}
     >
-      <div className="border-border text-muted-foreground border-b px-2 py-1 text-[10px]">
-        CPF {result.mode === 'qv' ? 'QV-curve' : 'PV-curve / nose-curve'} — {result.lambdas.length}{' '}
-        steps, max {result.mode === 'qv' ? 'Q' : 'lambda'} = {result.max_lam.toFixed(4)}
-        {!result.truncated ? null : (
-          <>
-            {' '}
-            <span className="text-warning-foreground">(truncated)</span>
-          </>
+      <div
+        className={cn(
+          'border-border text-muted-foreground flex items-center justify-between gap-2',
+          'border-b px-2 py-0.5 text-[10px]',
         )}
+      >
+        <span>
+          CPF {result.mode === 'qv' ? 'QV-curve' : 'PV-curve / nose-curve'} —{' '}
+          {result.lambdas.length} steps, max {result.mode === 'qv' ? 'Q' : 'lambda'} ={' '}
+          {result.max_lam.toFixed(4)}
+          {!result.truncated ? null : (
+            <>
+              {' '}
+              <span className="text-warning-foreground">(truncated)</span>
+            </>
+          )}
+        </span>
+        <ExportMenu
+          formats={['csv', 'png']}
+          panel={result.mode === 'qv' ? 'cpf-qv' : 'cpf-pv'}
+          caseName={caseName}
+          onExportCsv={onExportCsv}
+          onExportPng={onExportPng}
+          className="h-6 px-2"
+        />
       </div>
 
       {result.truncated ? (

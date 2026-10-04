@@ -1,6 +1,9 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { cn } from '@/lib/cn';
 import { useAnalyzeStore } from '@/store/analyze';
+import { ExportMenu } from '@/components/export/ExportMenu';
+import { elementToPng } from '@/components/export/exportToPng';
+import { useExportCaseName } from '@/components/export/useExportCaseName';
 import type { EigResult } from '@/api/types';
 
 /**
@@ -42,6 +45,14 @@ export function EIGDampingChart({ className, result: resultProp }: EIGDampingCha
     }));
   }, [result]);
 
+  // PNG only: the damping ratios are columns of the scatter's CSV already.
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const caseName = useExportCaseName();
+  const onExportPng = useCallback(async () => {
+    const el = cardRef.current;
+    return el === null ? null : await elementToPng(el);
+  }, []);
+
   if (result === null || result.mode_count === 0) {
     return (
       <div
@@ -67,13 +78,28 @@ export function EIGDampingChart({ className, result: resultProp }: EIGDampingCha
 
   return (
     <div
+      ref={cardRef}
       data-testid="eig-damping-chart"
       className={cn('border-border bg-background flex flex-col rounded border', className)}
     >
-      <div className="border-border text-muted-foreground border-b px-2 py-1 text-[10px]">
-        Damping ratios — {barCount} of {result.mode_count} bars
-        {result.mode_count > MAX_VISIBLE_BARS ? ` (capped at first ${MAX_VISIBLE_BARS})` : ''}
-        {selectedModeId !== null ? ` · selected mode ${selectedModeId}` : ''}
+      <div
+        className={cn(
+          'border-border text-muted-foreground flex items-center justify-between gap-2',
+          'border-b px-2 py-0.5 text-[10px]',
+        )}
+      >
+        <span>
+          Damping ratios — {barCount} of {result.mode_count} bars
+          {result.mode_count > MAX_VISIBLE_BARS ? ` (capped at first ${MAX_VISIBLE_BARS})` : ''}
+          {selectedModeId !== null ? ` · selected mode ${selectedModeId}` : ''}
+        </span>
+        <ExportMenu
+          formats={['png']}
+          panel="eig-damping"
+          caseName={caseName}
+          onExportPng={onExportPng}
+          className="h-6 px-2"
+        />
       </div>
       <div className="overflow-auto">
         <svg width={svgWidth} height={SVG_HEIGHT} role="img" aria-label="Damping ratios bar chart">

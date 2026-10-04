@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { useAnalyzeStore } from '@/store/analyze';
+import { ExportMenu } from '@/components/export/ExportMenu';
+import { elementToPng } from '@/components/export/exportToPng';
+import { useExportCaseName } from '@/components/export/useExportCaseName';
+import { seResidualsToCsv } from './analyzeExport';
 import type { SeResult } from '@/api/types';
 
 /**
@@ -180,6 +184,18 @@ export function SEResidualChart({
     setSelectedBinIdx(null);
   }, [result]);
 
+  // CSV is every residual with its flag; PNG is the histogram card as drawn.
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const caseName = useExportCaseName();
+  const onExportCsv = useCallback(
+    () => (result === null || result.residuals.length === 0 ? null : seResidualsToCsv(result)),
+    [result],
+  );
+  const onExportPng = useCallback(async () => {
+    const el = cardRef.current;
+    return el === null ? null : await elementToPng(el);
+  }, []);
+
   if (result === null) {
     return (
       <div
@@ -229,28 +245,41 @@ export function SEResidualChart({
 
   return (
     <div
+      ref={cardRef}
       data-testid="se-residual-chart"
       className={cn('border-border bg-background flex flex-col rounded border', className)}
     >
       <div
-        data-testid="se-residual-summary"
-        className="border-border text-muted-foreground border-b px-2 py-1 text-[10px]"
+        className={cn(
+          'border-border text-muted-foreground flex items-center justify-between gap-2',
+          'border-b px-2 py-0.5 text-[10px]',
+        )}
       >
-        SE residual histogram —{' '}
-        <span className="text-foreground font-medium">{result.measurement_count}</span>{' '}
-        measurements, <span className="text-foreground font-medium">{result.iterations}</span>{' '}
-        iterations, J ={' '}
-        <span className="text-foreground font-medium">{result.mismatch.toExponential(3)}</span>
-        {result.flagged_indices.length > 0 ? (
-          <>
-            {' '}
-            —{' '}
-            <span className="text-danger font-medium">
-              {result.flagged_indices.length} flagged
-            </span>{' '}
-            (|r| / sigma {'>'} 3)
-          </>
-        ) : null}
+        <span data-testid="se-residual-summary">
+          SE residual histogram —{' '}
+          <span className="text-foreground font-medium">{result.measurement_count}</span>{' '}
+          measurements, <span className="text-foreground font-medium">{result.iterations}</span>{' '}
+          iterations, J ={' '}
+          <span className="text-foreground font-medium">{result.mismatch.toExponential(3)}</span>
+          {result.flagged_indices.length > 0 ? (
+            <>
+              {' '}
+              —{' '}
+              <span className="text-danger font-medium">
+                {result.flagged_indices.length} flagged
+              </span>{' '}
+              (|r| / sigma {'>'} 3)
+            </>
+          ) : null}
+        </span>
+        <ExportMenu
+          formats={['csv', 'png']}
+          panel="se-residuals"
+          caseName={caseName}
+          onExportCsv={onExportCsv}
+          onExportPng={onExportPng}
+          className="h-6 px-2"
+        />
       </div>
 
       <svg
@@ -418,6 +447,7 @@ function SEResidualDetailPanel({
   return (
     <div
       data-testid="se-residual-detail-panel"
+      data-export-ignore=""
       className={cn(
         'border-border bg-muted/30 border-t px-3 py-2.5 text-xs',
         'shadow-[inset_0_1px_0_0_oklch(1_0_0/0.04)]',

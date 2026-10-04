@@ -3,7 +3,7 @@
  *
  * Covers:
  *  - Happy path: 200 → Blob with octet-stream MIME
- *  - 404 → ProblemDetailsError with the v1.5 stub copy
+ *  - 404 / 409 with no body → ProblemDetailsError with fallback copy
  *  - Network failure → NetworkError
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -51,15 +51,26 @@ describe('fetchEigStateMatrixMat', () => {
     expect(headers.get('Accept')).toBe('application/octet-stream');
   });
 
-  it('throws ProblemDetailsError with the v1.5 stub copy on 404', async () => {
+  it('throws ProblemDetailsError with fallback copy on a 404 with no body', async () => {
     globalThis.fetch = vi
       .fn()
       .mockResolvedValue(new Response(null, { status: 404 })) as typeof fetch;
     await expect(fetchEigStateMatrixMat('sess-1')).rejects.toMatchObject({
       status: 404,
-      title: 'EIG state matrix not available yet',
+      title: 'Session not found',
     });
     await expect(fetchEigStateMatrixMat('sess-1')).rejects.toBeInstanceOf(ProblemDetailsError);
+  });
+
+  it('says EIG has not been run on a 409 with no body', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response('not json', { status: 409 })) as typeof fetch;
+    await expect(fetchEigStateMatrixMat('sess-1')).rejects.toMatchObject({
+      status: 409,
+      title: 'EIG has not been run',
+      detail: 'Run EIG, then export the state matrix.',
+    });
   });
 
   it('parses RFC 7807 body when the substrate provides one', async () => {

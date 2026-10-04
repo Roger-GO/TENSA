@@ -354,15 +354,7 @@ async def get_eig_participation(
 
 @router.get(
     "/sessions/{session_id}/eig/state-matrix.mat",
-    openapi_extra={
-        "x-tensa-gui-location": "none",
-        "x-tensa-parity-deferred": (
-            "The EIG state-matrix .mat export client (web exportToMat.ts) is "
-            "shipped but not yet wired into any ExportMenu mount. Until the "
-            "Export-menu MAT entry lands (formats={['mat']}+onExportMat on the "
-            "analysis/EIG ExportMenu), this download is CLI/agent-only."
-        ),
-    },
+    openapi_extra={"x-tensa-gui-location": "analysis-panel"},
     operation_id="getEigStateMatrix",
     summary="Download EIG.As + EIG.mu as a .mat file.",
     response_class=Response,

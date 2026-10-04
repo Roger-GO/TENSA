@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
 import { Button } from '@/components/ui/button';
+import { ExportMenu } from '@/components/export/ExportMenu';
+import { fetchEigStateMatrixMat } from '@/components/export/exportToMat';
+import { elementToPng } from '@/components/export/exportToPng';
+import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { cn } from '@/lib/cn';
 import { applyEigFilter, useAnalyzeStore } from '@/store/analyze';
+import { useSessionStore } from '@/store/session';
+import { eigResultToCsv } from './analyzeExport';
 import { subscribeEigViewReset, subscribeEigLogToggle } from '@/lib/eigViewBus';
 import type { EigResult } from '@/api/types';
 
@@ -260,6 +266,7 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
   const [hoverPointIdx, setHoverPointIdx] = useState<number | null>(null);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
   // Pointer-drag bookkeeping. ``startPx`` is captured on pointerdown;
   // ``startView`` is the view at the moment the drag began so we can
   // translate from absolute deltas (no cumulative drift).
@@ -515,6 +522,25 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
     setSelectedModeId(idx);
   };
 
+  // ---- export ----------------------------------------------------------
+  // CSV has every computed mode (the filter above only changes what is drawn);
+  // PNG is the card as drawn; MAT is the state matrix the substrate holds for
+  // the session, so it needs the session and not the result.
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const caseName = useExportCaseName();
+  const onExportCsv = useCallback(
+    () => (result === null ? null : eigResultToCsv(result)),
+    [result],
+  );
+  const onExportPng = useCallback(async () => {
+    const el = cardRef.current;
+    return el === null ? null : await elementToPng(el);
+  }, []);
+  const onExportMat = useCallback(
+    async () => (sessionId === null ? null : await fetchEigStateMatrixMat(sessionId)),
+    [sessionId],
+  );
+
   // ---- empty-state branches (unchanged from Unit 6) -------------------
   if (result === null) {
     return (
@@ -565,6 +591,7 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
 
   return (
     <div
+      ref={cardRef}
       data-testid="eig-scatter"
       data-x-scale={xScale}
       className={cn('border-border bg-background relative flex flex-col rounded border', className)}
@@ -580,7 +607,7 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
             </>
           )}
         </span>
-        <div className="bg-muted/40 flex items-center gap-0.5 rounded p-0.5">
+        <div data-export-ignore="" className="bg-muted/40 flex items-center gap-0.5 rounded p-0.5">
           <Button
             type="button"
             variant={showingAll ? 'secondary' : 'ghost'}
@@ -634,6 +661,15 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
           >
             Reset
           </Button>
+          <ExportMenu
+            formats={['csv', 'png', 'mat']}
+            panel="eig"
+            caseName={caseName}
+            onExportCsv={onExportCsv}
+            onExportPng={onExportPng}
+            onExportMat={onExportMat}
+            className="h-6 px-2"
+          />
         </div>
       </div>
       {/* Damping-band legend — mirrors the per-point colour coding. */}
@@ -662,7 +698,7 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
           />
           ≥ 10% damping
         </span>
-        <span className="text-muted-foreground/70 ml-auto hidden sm:inline">
+        <span data-export-ignore="" className="text-muted-foreground/70 ml-auto hidden sm:inline">
           scroll to zoom · drag to pan · double-click to reset
         </span>
       </div>
