@@ -10,9 +10,14 @@
  * Every test gets a fresh module registry so the decoder starts out unloaded
  * (the module keeps it for the life of the page), and swaps `@/streaming/arrow`
  * for a module whose load the test controls.
+ *
+ * Waits on the chunk are generous: evaluating `apache-arrow` again in a cleared
+ * registry is slow when the whole suite runs in parallel. Each test's stream is
+ * disposed afterwards so a slow one cannot send its held command into the next.
  */
 import { Server as MockServer, WebSocket as MockWebSocket } from 'mock-socket';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RunStream as RunStreamClass, RunStreamOptions } from '@/streaming/RunStream';
 import { arrowFrame } from '../helpers/frames';
 
 const WS_URL = 'ws://localhost:1234';
@@ -22,15 +27,36 @@ const FULL_URL = `${WS_URL}/api/ws/${SESSION_ID}`;
 interface ServerSocket {
   send: (data: string | ArrayBuffer) => void;
   on: (ev: string, cb: (...args: unknown[]) => void) => void;
-  close: (opts?: { code?: number }) => void;
+  close: (opts?: { code?: number; reason?: string }) => void;
 }
 interface MockServerHandle {
   on: (ev: 'connection', cb: (socket: ServerSocket) => void) => void;
   stop: () => void;
 }
 
+/** Budget for the stream to react to a chunk that has arrived (or failed). */
+const CHUNK_WAIT = { timeout: 10_000 };
+
 function tick(ms = 10): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * A socket class that reports when the server's `ready` frame reaches it. Its
+ * listener is added before the stream's own, so by the next timer the stream
+ * has handled the frame too.
+ */
+function socketCtorWatchingReady(onReady: () => void): typeof WebSocket {
+  class Watching extends MockWebSocket {
+    constructor(url: string | URL, protocols?: string | string[]) {
+      super(url, protocols);
+      this.addEventListener('message', (ev: Event) => {
+        const { data } = ev as MessageEvent;
+        if (typeof data === 'string' && JSON.parse(data).type === 'ready') onReady();
+      });
+    }
+  }
+  return Watching as unknown as typeof WebSocket;
 }
 
 /** A fresh `RunStream` module whose `@/streaming/arrow` is `factory`'s module. */
@@ -40,14 +66,18 @@ async function loadRunStreamWith(factory: () => Promise<unknown>) {
   return import('@/streaming/RunStream');
 }
 
-describe('RunStream — Arrow decoder chunk', () => {
+describe('RunStream — Arrow decoder chunk', { timeout: 30_000 }, () => {
   let server: MockServerHandle;
+  let serverSocket: ServerSocket | undefined;
+  let stream: RunStreamClass | undefined;
   const commands: string[] = [];
 
   beforeEach(() => {
     commands.length = 0;
+    serverSocket = undefined;
     server = new MockServer(FULL_URL) as unknown as MockServerHandle;
     server.on('connection', (socket) => {
+      serverSocket = socket;
       socket.send(JSON.stringify({ type: 'ready' }));
       socket.on('message', (raw: unknown) => {
         const msg = JSON.parse(String(raw));
@@ -76,43 +106,67 @@ describe('RunStream — Arrow decoder chunk', () => {
   });
 
   afterEach(() => {
+    stream?.dispose();
+    stream = undefined;
     server.stop();
     vi.doUnmock('@/streaming/arrow');
     vi.resetModules();
   });
 
-  it('holds start_tds until the decoder has loaded, then decodes the run', async () => {
-    let release: () => void = () => undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
+  /**
+   * Starts a stream whose decoder chunk stays out until the test settles it
+   * (`'load'` delivers the module, `'fail'` makes the fetch fail), and returns
+   * once the server's `ready` has been handled, so the command is being held.
+   */
+  async function startHeldStream(
+    handlers: Pick<RunStreamOptions, 'onFrame' | 'onDone' | 'onError'>,
+  ) {
+    let settle: (outcome: 'load' | 'fail') => void = () => undefined;
+    const gate = new Promise<'load' | 'fail'>((resolve) => {
+      settle = resolve;
     });
-    const { RunStream } = await loadRunStreamWith(async () => {
-      await gate;
+    const { RunStream, loadArrowDecoder } = await loadRunStreamWith(async () => {
+      if ((await gate) === 'fail') throw new Error('Failed to fetch dynamically imported module');
       return vi.importActual('@/streaming/arrow');
     });
-    const onFrame = vi.fn();
-    const onDone = vi.fn();
-    const onError = vi.fn();
-    const stream = new RunStream(
+    let readyHandled = false;
+    stream = new RunStream(
       {
         sessionId: SESSION_ID,
         wsUrl: WS_URL,
         tdsArgs: { tf: 0.01, vars: ['bus_v'] },
-        onFrame,
-        onDone,
-        onError,
+        ...handlers,
       },
-      { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
+      {
+        webSocketCtor: socketCtorWatchingReady(() => {
+          readyHandled = true;
+        }),
+      },
     );
     stream.start();
+    await vi.waitFor(() => expect(readyHandled).toBe(true), CHUNK_WAIT);
+    await tick(0);
+    /** Resolves once every callback the stream queued on the chunk has run. */
+    const settled = async () => {
+      await loadArrowDecoder().catch(() => undefined);
+      await tick(20);
+    };
+    return { stream, settle, settled };
+  }
 
-    // The server's `ready` has long arrived; the command waits for the chunk.
-    await tick(60);
+  it('holds start_tds until the decoder has loaded, then decodes the run', async () => {
+    const onFrame = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const held = await startHeldStream({ onFrame, onDone, onError });
+
+    // The server's `ready` has been handled; the command waits for the chunk.
+    await tick(30);
     expect(commands).toEqual([]);
     expect(onError).not.toHaveBeenCalled();
 
-    release();
-    for (let i = 0; i < 20 && onDone.mock.calls.length === 0; i += 1) await tick();
+    held.settle('load');
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalled(), CHUNK_WAIT);
 
     expect(commands).toEqual(['start_tds']);
     expect(onFrame).toHaveBeenCalledTimes(1);
@@ -127,7 +181,7 @@ describe('RunStream — Arrow decoder chunk', () => {
     });
     const onError = vi.fn();
     const onFrame = vi.fn();
-    const stream = new RunStream(
+    stream = new RunStream(
       {
         sessionId: SESSION_ID,
         wsUrl: WS_URL,
@@ -138,7 +192,7 @@ describe('RunStream — Arrow decoder chunk', () => {
       { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
     );
     stream.start();
-    for (let i = 0; i < 20 && onError.mock.calls.length === 0; i += 1) await tick();
+    await vi.waitFor(() => expect(onError).toHaveBeenCalled(), CHUNK_WAIT);
 
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onError.mock.calls[0]![0]).toMatchObject({ code: 'protocol_error' });
@@ -162,5 +216,52 @@ describe('RunStream — Arrow decoder chunk', () => {
     expect(Array.from(frame.t)).toEqual([0.5]);
     // Loaded now: later calls answer from the module, not from another fetch.
     expect(await loadArrowDecoder()).toBe(decode);
+  });
+
+  it('sends nothing when the stream is disposed while the command is held', async () => {
+    const onFrame = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const held = await startHeldStream({ onFrame, onDone, onError });
+
+    held.stream.dispose();
+    held.settle('load');
+    await held.settled();
+
+    expect(commands).toEqual([]);
+    expect(held.stream.isClosed).toBe(true);
+    expect(onFrame).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('stays quiet about a failed load when the stream was disposed meanwhile', async () => {
+    const onError = vi.fn();
+    const held = await startHeldStream({ onError });
+
+    held.stream.dispose();
+    held.settle('fail');
+    await held.settled();
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(commands).toEqual([]);
+  });
+
+  it('stays closed when the socket closes while the command is held', async () => {
+    const onError = vi.fn();
+    const held = await startHeldStream({ onError });
+
+    serverSocket!.close({ code: 1006, reason: 'abnormal' });
+    await vi.waitFor(() => expect(onError).toHaveBeenCalled(), CHUNK_WAIT);
+    expect(onError.mock.calls[0]![0]).toMatchObject({ code: 'protocol_error' });
+    expect(onError.mock.calls[0]![0].reason).toMatch(/before stream_start/);
+
+    held.settle('load');
+    await held.settled();
+
+    // The late chunk neither sends a command nor reopens the finished stream.
+    expect(commands).toEqual([]);
+    expect(held.stream.isClosed).toBe(true);
+    expect(onError).toHaveBeenCalledTimes(1);
   });
 });
