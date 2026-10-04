@@ -73,6 +73,7 @@ import { useAnalyzeStore } from '@/store/analyze';
 import { useConnectivityStore } from '@/store/connectivity';
 import { usePmuStore } from '@/store/pmu';
 import { useProfilesStore } from '@/store/profiles';
+import { useEditJournalStore } from '@/store/editJournal';
 import { useJobsStore, mintLocalJobId, LOCAL_ID_PREFIX } from '@/store/jobs';
 import type { JobKind, JobRecord } from '@/store/jobs';
 import { toast } from '@/lib/toast';
@@ -687,6 +688,7 @@ export function useReloadCase(): UseMutationResult<TopologySummary, Error, Sessi
     },
     onMutate: () => ({ jobId: registerJob('case-reload') }),
     onSuccess: (data, sessionId, ctx) => {
+      useEditJournalStore.getState().record({ op: 'reload' });
       queryClient.setQueryData(queryKeys.topology(sessionId), data);
       useCaseStore.getState().setTopology(data);
       usePflowStore.getState().clearPflow();
@@ -806,7 +808,12 @@ export function useAddElement(): UseMutationResult<ElementCreated, Error, AddEle
       );
     },
     onMutate: ({ body }) => ({ jobId: registerJob('element-add', { model: body.model }) }),
-    onSuccess: (data, { sessionId }, ctx) => {
+    onSuccess: (data, { sessionId, body }, ctx) => {
+      useEditJournalStore.getState().record({
+        op: 'add',
+        model: body.model,
+        params: { ...body.params },
+      });
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
     },
@@ -839,7 +846,8 @@ export function useEditElement(): UseMutationResult<TopologyEntry, Error, EditEl
       );
     },
     onMutate: ({ model, idx }) => ({ jobId: registerJob('element-edit', { model, idx }) }),
-    onSuccess: (data, { sessionId }, ctx) => {
+    onSuccess: (data, { sessionId, model, idx, params }, ctx) => {
+      useEditJournalStore.getState().record({ op: 'edit', model, idx, params: { ...params } });
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
     },
@@ -883,6 +891,7 @@ export function useDeleteElement(): UseMutationResult<TopologySummary, Error, De
     },
     onMutate: ({ model, idx }) => ({ jobId: registerJob('element-delete', { model, idx }) }),
     onSuccess: (data, { sessionId, model, idx }, ctx) => {
+      useEditJournalStore.getState().record({ op: 'delete', model, idx });
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
       queryClient.setQueryData(queryKeys.topology(sessionId), data);
       useCaseStore.getState().setTopology(data);
@@ -958,6 +967,7 @@ export function useSaveCase(): UseMutationResult<SaveCaseResponse, Error, SaveCa
     },
     onMutate: () => ({ jobId: registerJob('case-save') }),
     onSuccess: (data, _vars, ctx) => {
+      useEditJournalStore.getState().markSaved();
       void queryClient.invalidateQueries({ queryKey: queryKeys.workspaceFiles });
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
     },
@@ -984,6 +994,7 @@ export function useUndoLastEdit(): UseMutationResult<TopologySummary, Error, Ses
     },
     onMutate: () => ({ jobId: registerJob('element-undo') }),
     onSuccess: (data, sessionId, ctx) => {
+      useEditJournalStore.getState().record({ op: 'undo' });
       queryClient.setQueryData(queryKeys.topology(sessionId), data);
       useCaseStore.getState().setTopology(data);
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
@@ -1094,6 +1105,7 @@ export function useResetRun(): UseMutationResult<TopologySummary, Error, Session
       );
     },
     onSuccess: (data, sessionId) => {
+      useEditJournalStore.getState().record({ op: 'reload' });
       queryClient.setQueryData(queryKeys.topology(sessionId), data);
       useCaseStore.getState().setTopology(data);
       usePflowStore.getState().clearPflow();
@@ -1404,6 +1416,8 @@ export function useImportBundle(): UseMutationResult<
       // a plan response means the user is mid-conflict-resolution and
       // the session state is unchanged.
       if (data.status !== 'committed') return;
+      // The bundle's case replaced the system, which the journal cannot rebuild.
+      useEditJournalStore.getState().markReplaced();
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.workspaceFiles });
       // Reset session-scoped slices that the import made stale: pflow
@@ -1558,6 +1572,8 @@ export function useRestoreSnapshot(): UseMutationResult<
     },
     onMutate: ({ name }) => ({ jobId: registerJob('snapshot-restore', { name }) }),
     onSuccess: (data, { sessionId }, ctx) => {
+      // The restored system is not something the journal's edits can rebuild.
+      useEditJournalStore.getState().markReplaced();
       // Restore swaps the System; every session-scoped query is now
       // potentially stale. Invalidate the broad set rather than
       // hand-list each one — a snapshot restore is a rare operation
@@ -2058,6 +2074,8 @@ export function useAddPmu(): UseMutationResult<TopologyEntry, Error, AddPmuVars>
     },
     onMutate: () => ({ jobId: registerJob('pmu-add') }),
     onSuccess: (data, { sessionId }, ctx) => {
+      // A placement the edit journal does not replay.
+      useEditJournalStore.getState().markOpaque();
       usePmuStore.getState().appendPmu(data);
       void queryClient.invalidateQueries({ queryKey: queryKeys.pmus(sessionId) });
       // The PMU also lives in the topology bucket (controllers) — a
@@ -2137,6 +2155,7 @@ export function useDeletePmu(): UseMutationResult<void, Error, DeletePmuVars> {
     },
     onMutate: ({ idx }) => ({ jobId: registerJob('pmu-delete', { idx }) }),
     onSuccess: (data, { sessionId, idx }, ctx) => {
+      useEditJournalStore.getState().markOpaque();
       usePmuStore.getState().removePmu(idx);
       void queryClient.invalidateQueries({ queryKey: queryKeys.pmus(sessionId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
@@ -2330,6 +2349,7 @@ export function useAddProfile(): UseMutationResult<TopologyEntry, Error, AddProf
     },
     onMutate: () => ({ jobId: registerJob('profile-add') }),
     onSuccess: (data, { sessionId }, ctx) => {
+      useEditJournalStore.getState().markOpaque();
       useProfilesStore.getState().appendProfile(data);
       void queryClient.invalidateQueries({ queryKey: queryKeys.profiles(sessionId) });
       // The new TimeSeries also lives in the topology bucket
@@ -2409,6 +2429,7 @@ export function useDeleteProfile(): UseMutationResult<void, Error, DeleteProfile
     },
     onMutate: ({ idx }) => ({ jobId: registerJob('profile-delete', { idx }) }),
     onSuccess: (data, { sessionId, idx }, ctx) => {
+      useEditJournalStore.getState().markOpaque();
       useProfilesStore.getState().removeProfile(idx);
       void queryClient.invalidateQueries({ queryKey: queryKeys.profiles(sessionId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
@@ -2574,6 +2595,7 @@ export function useInitClone(): UseMutationResult<CloneInitResponse, Error, Sess
     },
     onMutate: () => ({ jobId: registerJob('clone-init') }),
     onSuccess: (data, sessionId, ctx) => {
+      useEditJournalStore.getState().record({ op: 'clone-init' });
       useCaseStore.getState().setCloneInitialized(true);
       invalidateAfterCloneChange(queryClient, sessionId);
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
@@ -2614,7 +2636,8 @@ export function useCloneEdit(): UseMutationResult<CloneEditResponse, Error, Clon
     onMutate: ({ model, idx, param }) => ({
       jobId: registerJob('clone-edit', { model, idx, param }),
     }),
-    onSuccess: (data, { sessionId }, ctx) => {
+    onSuccess: (data, { sessionId, model, idx, param, value }, ctx) => {
+      useEditJournalStore.getState().record({ op: 'clone-edit', model, idx, param, value });
       useCaseStore.getState().setCloneDepths(data.undo_depth, data.redo_depth);
       invalidateAfterCloneChange(queryClient, sessionId);
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
@@ -2641,6 +2664,7 @@ export function useCloneUndo(): UseMutationResult<CloneEditResponse, Error, Sess
     },
     onMutate: () => ({ jobId: registerJob('clone-undo') }),
     onSuccess: (data, sessionId, ctx) => {
+      useEditJournalStore.getState().record({ op: 'clone-undo' });
       useCaseStore.getState().setCloneDepths(data.undo_depth, data.redo_depth);
       invalidateAfterCloneChange(queryClient, sessionId);
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
@@ -2666,6 +2690,7 @@ export function useCloneRedo(): UseMutationResult<CloneEditResponse, Error, Sess
     },
     onMutate: () => ({ jobId: registerJob('clone-redo') }),
     onSuccess: (data, sessionId, ctx) => {
+      useEditJournalStore.getState().record({ op: 'clone-redo' });
       useCaseStore.getState().setCloneDepths(data.undo_depth, data.redo_depth);
       invalidateAfterCloneChange(queryClient, sessionId);
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
@@ -2705,6 +2730,7 @@ export function useCloneSaveAs(): UseMutationResult<CloneSaveAsResponse, Error, 
     },
     onMutate: ({ name }) => ({ jobId: registerJob('clone-save-as', { name }) }),
     onSuccess: (data, _vars, ctx) => {
+      useEditJournalStore.getState().markSaved();
       void queryClient.invalidateQueries({ queryKey: queryKeys.workspaceFiles });
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
     },
@@ -2730,6 +2756,7 @@ export function useCloneReset(): UseMutationResult<CloneResetResponse, Error, Se
     },
     onMutate: () => ({ jobId: registerJob('clone-reset') }),
     onSuccess: (data, sessionId, ctx) => {
+      useEditJournalStore.getState().record({ op: 'clone-reset' });
       const store = useCaseStore.getState();
       store.setCloneInitialized(false);
       store.setCloneDepths(0, 0);

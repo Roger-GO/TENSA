@@ -49,9 +49,17 @@
  *    "got a fresh one and need to re-load the case".)
  * 3. **Re-load:** after the new session id lands AND a previously-loaded
  *    case path is still in the case slice, re-fire ``loadCase`` against
- *    the new id so the workspace returns to its pre-recovery state.
- * 4. **Clear flag:** clear ``recoveryInProgress`` once the re-load
- *    settles (success OR error — a failed re-load surfaces normally
+ *    the new id so the workspace returns to its pre-recovery state. A
+ *    system built from scratch is recreated blank instead.
+ * 3b. **Replay edits:** when the edit journal (``store/editJournal.ts``) holds
+ *    the user's edits, replay them into the fresh case or blank system
+ *    (``restoreEdits.ts``), so what was built or changed since the file was
+ *    loaded comes back. A refused edit ends the replay and the user is told how
+ *    much returned. When the journal cannot rebuild the session (a PMU placement,
+ *    a snapshot restore), the old behaviour applies: the file is reloaded and
+ *    the user is told what was lost.
+ * 4. **Clear flag:** clear ``recoveryInProgress`` once the re-load and the
+ *    replay settle (success OR error — a failed re-load surfaces normally
  *    rather than pinning the spinner forever).
  *
  * Per-instance debounce: prevent rapid-fire create attempts from
@@ -82,9 +90,12 @@
  *    where a future analytics integration would tap in.
  */
 import { useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCreateSession, useLoadCase } from './queries';
+import { recreateBlankSystem, replayEditsInto, reportReplay } from './restoreEdits';
 import { useSessionStore, RECOVERY_STUCK_TIMEOUT_MS } from '@/store/session';
 import { useCaseStore } from '@/store/case';
+import { hasUnsavedEdits, useEditJournalStore } from '@/store/editJournal';
 import { toast } from '@/lib/toast';
 
 const CREATE_DEBOUNCE_MS = 1_000;
@@ -152,6 +163,7 @@ export function useSessionRecovery(): void {
   const caseSelection = useCaseStore((s) => s.selection);
   const createSession = useCreateSession();
   const loadCase = useLoadCase();
+  const queryClient = useQueryClient();
 
   // Edge tracker for recovery: only act on the false → true transition.
   const recoveryStartedRef = useRef(false);
@@ -324,7 +336,7 @@ export function useSessionRecovery(): void {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, recoveryFailed, recoveryInProgress]);
 
-  // ---- Branch (3+4): re-load case after recovery --------------------------
+  // ---- Branch (3+4): restore the case and its edits after recovery -------
   useEffect(() => {
     // Once the new session id has been written, restore what we can.
     if (!recoveryInProgress) return;
@@ -339,15 +351,39 @@ export function useSessionRecovery(): void {
       return;
     }
 
-    // A blank system lives only in the (now-dead) worker — there is no file
-    // to re-load into the fresh session. Tell the user plainly rather than
-    // leaving the UI showing stale cached topology over an empty session.
+    // What the edit journal can rebuild: every recorded edit, replayed in order
+    // onto the fresh case (or the fresh blank system). Read it now, before the
+    // load below can touch any store.
+    const journal = useEditJournalStore.getState();
+    const replayEntries = journal.replayable ? [...journal.entries] : [];
+
+    // A blank system lives only in the (now-dead) worker, so there is no file to
+    // re-load into the fresh session. With a replayable journal, recreate the empty
+    // system and replay the build into it; without one (a PMU was placed, a
+    // snapshot restored) tell the user plainly rather than leaving the UI showing
+    // stale cached topology over an empty session.
     if (caseSelection.primaryPath === null) {
-      clearRecoveryInProgress();
-      toast.error('Session expired — blank system lost', {
-        description:
-          'A blank system only lives in the active session and could not be recovered. Start a new blank system or load a case file.',
-      });
+      void (async () => {
+        let recreated = journal.replayable;
+        if (recreated) {
+          try {
+            await recreateBlankSystem(sessionId, queryClient);
+          } catch {
+            recreated = false;
+          }
+        }
+        if (!recreated) {
+          useEditJournalStore.getState().reset();
+          toast.error('Session expired — blank system lost', {
+            description:
+              'A blank system only lives in the active session and could not be recovered. Start a new blank system or load a case file.',
+          });
+        } else if (replayEntries.length > 0) {
+          const outcome = await replayEditsInto(sessionId, queryClient, replayEntries);
+          reportReplay(outcome, replayEntries, 'a new blank system');
+        }
+        clearRecoveryInProgress();
+      })();
       return;
     }
 
@@ -359,40 +395,54 @@ export function useSessionRecovery(): void {
     // "Edits lost" only when there were ACTUAL edits — merely toggling Edit
     // mode initialises a clone (depth 0) with nothing to lose; warning then
     // would be a false alarm.
-    const hadPendingEdits = cloneSnapshot.cloneUndoDepth > 0 || cloneSnapshot.cloneRedoDepth > 0;
-    loadCase.mutate(
-      {
-        sessionId,
-        request: {
-          primary_path: caseSelection.primaryPath,
-          addfiles: caseSelection.addfiles.length > 0 ? caseSelection.addfiles : null,
-        },
-      },
-      {
-        onSettled: () => {
-          // The old clone is gone whether the re-load succeeded or failed, so
-          // drop ALL clone state (incl. depths) here — a stale Undo must not
-          // act on a clone that no longer exists. Done in onSettled (not
-          // onSuccess) so a failed re-load doesn't leave dangling clone state.
-          if (cloneWasInitialized) {
-            useCaseStore.setState({
-              cloneInitialized: false,
-              cloneUndoDepth: 0,
-              cloneRedoDepth: 0,
-            });
-            if (hadPendingEdits) {
-              toast.info('Unsaved edits lost', {
-                description:
-                  'The session expired while you had pending edits. The case was reloaded from its file; your changes were not saved.',
-              });
-            }
-          }
-          // Drop out of the recovery state regardless of success/error so the
-          // user sees any load error normally.
-          clearRecoveryInProgress();
-        },
-      },
-    );
+    const hadPendingEdits =
+      cloneSnapshot.cloneUndoDepth > 0 || cloneSnapshot.cloneRedoDepth > 0 || hasUnsavedEdits();
+    const primaryPath = caseSelection.primaryPath;
+    const addfiles = caseSelection.addfiles;
+    void (async () => {
+      let loaded = true;
+      try {
+        await loadCase.mutateAsync({
+          sessionId,
+          request: {
+            primary_path: primaryPath,
+            addfiles: addfiles.length > 0 ? addfiles : null,
+          },
+        });
+      } catch {
+        // The load error surfaces normally (the mutation's own error state).
+        loaded = false;
+      }
+      if (loaded && replayEntries.length > 0) {
+        const outcome = await replayEditsInto(sessionId, queryClient, replayEntries);
+        reportReplay(outcome, replayEntries, 'a fresh copy of the case');
+        clearRecoveryInProgress();
+        return;
+      }
+      // The old clone is gone whether the re-load succeeded or failed, so
+      // drop ALL clone state (incl. depths) here — a stale Undo must not
+      // act on a clone that no longer exists. Done whether or not the
+      // re-load succeeded so a failed re-load doesn't leave dangling clone state.
+      if (cloneWasInitialized) {
+        useCaseStore.setState({
+          cloneInitialized: false,
+          cloneUndoDepth: 0,
+          cloneRedoDepth: 0,
+        });
+      }
+      // The journal's edits did not come back with the file (it could not replay
+      // them, or the re-load failed), so it starts over.
+      useEditJournalStore.getState().reset();
+      if (hadPendingEdits) {
+        toast.info('Unsaved edits lost', {
+          description:
+            'The session expired while you had pending edits. The case was reloaded from its file; your changes were not saved.',
+        });
+      }
+      // Drop out of the recovery state regardless of success/error so the
+      // user sees any load error normally.
+      clearRecoveryInProgress();
+    })();
     // ``loadCase`` excluded for the same stability reason as createSession.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recoveryInProgress, sessionId, caseSelection, clearRecoveryInProgress]);

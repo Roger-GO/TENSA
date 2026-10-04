@@ -553,6 +553,10 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
       topology: null,
       layoutSidecar: null,
     });
+    // ...and the edit journal cannot rebuild it (a PMU was placed), so nothing is
+    // recreated in the fresh session either.
+    const { useEditJournalStore } = await import('@/store/editJournal');
+    useEditJournalStore.getState().markOpaque();
 
     fetchSpy.mockImplementation((input) => {
       const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
@@ -580,8 +584,11 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
       return u.includes('/case');
     });
     expect(caseCall).toBeUndefined();
+    const blankCall = fetchSpy.mock.calls.find(([url]) => String(url).endsWith('/blank'));
+    expect(blankCall).toBeUndefined();
     expect(errSpy).toHaveBeenCalledWith('Session expired — blank system lost', expect.anything());
     errSpy.mockRestore();
+    useEditJournalStore.getState().reset();
   });
 
   it('re-loads and warns about lost edits when clone-on-write had pending edits pre-recovery', async () => {
