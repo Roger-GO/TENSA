@@ -37,6 +37,11 @@ export default defineConfig({
         ws: true,
         secure: false,
       },
+      // The API reference (Swagger UI) and the schema it reads sit at the root,
+      // outside ``/api``. The Help menu links to ``/docs``, which would otherwise
+      // fall through to this dev server's own index page.
+      '/docs': { target: ANDES_TARGET, changeOrigin: true, secure: false },
+      '/openapi.json': { target: ANDES_TARGET, changeOrigin: true, secure: false },
     },
   },
   build: {

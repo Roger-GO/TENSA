@@ -43,6 +43,7 @@ import {
   useState,
 } from 'react';
 import type {
+  AnchorHTMLAttributes,
   ButtonHTMLAttributes,
   KeyboardEvent as ReactKeyboardEvent,
   ReactElement,
@@ -115,6 +116,12 @@ export interface TopBarMenuProps {
    * and every item in the menu would itself be disabled.
    */
   disabled?: boolean;
+  /**
+   * Draw only the icon on the trigger, for a menu that earns its place by a
+   * familiar glyph (Help) and should not cost the top bar a word's width. The
+   * label stays as the accessible name and the hover text. Needs `icon`.
+   */
+  iconOnly?: boolean;
   /** Optional class on the trigger button. */
   triggerClassName?: string;
 }
@@ -129,6 +136,7 @@ export function TopBarMenu({
   testId,
   alignEnd = false,
   disabled = false,
+  iconOnly = false,
   triggerClassName,
 }: TopBarMenuProps) {
   const [open, setOpen] = useState(false);
@@ -201,6 +209,8 @@ export function TopBarMenu({
           size="sm"
           disabled={disabled}
           aria-haspopup="menu"
+          aria-label={iconOnly ? label : undefined}
+          title={iconOnly ? label : undefined}
           data-testid={`${testId}-trigger`}
           className={cn(
             'gap-1 px-2 text-xs',
@@ -211,9 +221,9 @@ export function TopBarMenu({
             triggerClassName,
           )}
         >
-          {Icon ? <Icon className="h-3.5 w-3.5" /> : null}
-          <span>{label}</span>
-          <ChevronDown className="ml-0.5 opacity-80" />
+          {Icon ? <Icon className={iconOnly ? 'h-4 w-4' : 'h-3.5 w-3.5'} /> : null}
+          {iconOnly ? null : <span>{label}</span>}
+          {iconOnly ? null : <ChevronDown className="ml-0.5 opacity-80" />}
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -320,6 +330,93 @@ const TopBarMenuItemImpl = forwardRef<HTMLButtonElement, TopBarMenuItemProps>(
 (TopBarMenuItemImpl as unknown as { __isTopBarMenuItem: true }).__isTopBarMenuItem = true;
 
 export const TopBarMenuItem = TopBarMenuItemImpl;
+
+// ---- Menu link primitive --------------------------------------------------
+
+export interface TopBarMenuLinkProps extends Omit<
+  AnchorHTMLAttributes<HTMLAnchorElement>,
+  'children' | 'target' | 'rel'
+> {
+  /** Where the link goes. It opens in a new tab. */
+  href: string;
+  /** Link label. */
+  children: ReactNode;
+  /** Where it goes, in a few words, shown right-aligned (e.g. "llms.txt"). */
+  hint?: string;
+  /** Stable testid. */
+  testId?: string;
+  /**
+   * Internal: injected by the parent `<TopBarMenu />` to close the
+   * menu when the link is followed. Callers do not pass this.
+   */
+  __closeMenu?: () => void;
+}
+
+/**
+ * A menu item that is a real link (it opens in a new tab), so a middle click,
+ * the status-bar address and "copy link" all work. `role="menuitem"` keeps it
+ * in the menu's arrow-key order.
+ */
+const TopBarMenuLinkImpl = forwardRef<HTMLAnchorElement, TopBarMenuLinkProps>(
+  function TopBarMenuLink(
+    { children, hint, href, onClick, testId, className, __closeMenu, ...rest },
+    ref,
+  ) {
+    return (
+      <a
+        ref={ref}
+        role="menuitem"
+        tabIndex={-1}
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        data-testid={testId}
+        onClick={(event) => {
+          onClick?.(event);
+          if (!event.defaultPrevented) __closeMenu?.();
+        }}
+        className={cn(
+          'flex w-full items-center gap-2 rounded-[var(--radius-sm)]',
+          'px-2 py-1.5 text-left text-xs',
+          'hover:bg-muted/60 focus:bg-muted/60',
+          'outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+          className,
+        )}
+        {...rest}
+      >
+        <span className="flex-1 truncate">{children}</span>
+        {hint ? (
+          <span className="text-muted-foreground ml-2 font-mono text-[10px]">{hint}</span>
+        ) : null}
+        <ExternalGlyph />
+      </a>
+    );
+  },
+);
+
+(TopBarMenuLinkImpl as unknown as { __isTopBarMenuItem: true }).__isTopBarMenuItem = true;
+
+export const TopBarMenuLink = TopBarMenuLinkImpl;
+
+function ExternalGlyph() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 12 12"
+      width="10"
+      height="10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="text-muted-foreground shrink-0"
+    >
+      <path d="M5 2.5H3a.5.5 0 0 0-.5.5v6a.5.5 0 0 0 .5.5h6a.5.5 0 0 0 .5-.5V7" />
+      <path d="M7 2.5h2.5V5M9.5 2.5 5.5 6.5" />
+    </svg>
+  );
+}
 
 function CheckGlyph() {
   return (

@@ -22,6 +22,7 @@ import {
   TopBarMenu,
   TopBarMenuItem,
   TopBarMenuLabel,
+  TopBarMenuLink,
   TopBarMenuSeparator,
 } from '@/components/shell/TopBarMenu';
 
@@ -212,5 +213,111 @@ describe('<TopBarMenu /> — checked items', () => {
     // for a child SVG (the unchecked item has no SVG child).
     expect(itemA.querySelector('svg')).not.toBeNull();
     expect(screen.getByTestId('item-b').querySelector('svg')).toBeNull();
+  });
+});
+
+function Glyph({ className }: { className?: string }) {
+  return <svg data-testid="glyph" className={className} />;
+}
+
+describe('<TopBarMenu /> — icon-only trigger', () => {
+  it('draws the icon and no label or chevron, and keeps the label as its name', () => {
+    render(
+      <TopBarMenu label="Help" icon={Glyph} iconOnly testId="topbar-menu-help">
+        <TopBarMenuItem testId="item-a">A</TopBarMenuItem>
+      </TopBarMenu>,
+    );
+    const trigger = screen.getByTestId('topbar-menu-help-trigger');
+    expect(screen.getByRole('button', { name: 'Help' })).toBe(trigger);
+    expect(trigger).toHaveAttribute('title', 'Help');
+    expect(trigger).not.toHaveTextContent('Help');
+    // The icon is the only drawing: no chevron beside it.
+    expect(trigger.querySelectorAll('svg')).toHaveLength(1);
+    expect(screen.getByTestId('glyph')).toBeInTheDocument();
+  });
+
+  it('still opens its menu', async () => {
+    const user = userEvent.setup();
+    render(
+      <TopBarMenu label="Help" icon={Glyph} iconOnly testId="topbar-menu-help">
+        <TopBarMenuItem testId="item-a">A</TopBarMenuItem>
+      </TopBarMenu>,
+    );
+    await user.click(screen.getByTestId('topbar-menu-help-trigger'));
+    expect(await screen.findByTestId('item-a')).toBeInTheDocument();
+    expect(screen.getByTestId('topbar-menu-help-content')).toHaveAttribute('aria-label', 'Help');
+  });
+
+  it('keeps the label and the chevron on a trigger that is not icon-only', () => {
+    render(
+      <TopBarMenu label="Sample" icon={Glyph} testId="topbar-menu-sample">
+        <TopBarMenuItem testId="item-a">A</TopBarMenuItem>
+      </TopBarMenu>,
+    );
+    const trigger = screen.getByTestId('topbar-menu-sample-trigger');
+    expect(trigger).toHaveTextContent('Sample');
+    expect(trigger).not.toHaveAttribute('title');
+    expect(trigger.querySelectorAll('svg')).toHaveLength(2);
+  });
+});
+
+describe('<TopBarMenu /> — link items', () => {
+  it('renders a real link that opens in a new tab without handing over the opener', async () => {
+    const user = userEvent.setup();
+    render(
+      <TopBarMenu label="Sample" testId="topbar-menu-sample">
+        <TopBarMenuLink testId="link-a" href="https://example.com/a" hint="example.com">
+          Docs
+        </TopBarMenuLink>
+      </TopBarMenu>,
+    );
+    await user.click(screen.getByTestId('topbar-menu-sample-trigger'));
+    const link = await screen.findByTestId('link-a');
+    expect(link.tagName).toBe('A');
+    expect(link).toHaveAttribute('role', 'menuitem');
+    expect(link).toHaveAttribute('href', 'https://example.com/a');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link).toHaveTextContent('Docs');
+    expect(link).toHaveTextContent('example.com');
+  });
+
+  it('is part of the arrow-key order, and keeps the menu open when a handler prevents the follow', async () => {
+    const user = userEvent.setup();
+    render(
+      <TopBarMenu label="Sample" testId="topbar-menu-sample">
+        <TopBarMenuItem testId="item-a">A</TopBarMenuItem>
+        <TopBarMenuLink
+          testId="link-b"
+          href="https://example.com/b"
+          onClick={(event) => event.preventDefault()}
+        >
+          B
+        </TopBarMenuLink>
+      </TopBarMenu>,
+    );
+    await user.click(screen.getByTestId('topbar-menu-sample-trigger'));
+    await screen.findByTestId('link-b');
+    await waitFor(() => expect(screen.getByTestId('item-a')).toHaveFocus());
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByTestId('link-b')).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByTestId('topbar-menu-sample-content')).toBeInTheDocument();
+  });
+
+  it('closes the menu when it is followed', async () => {
+    const user = userEvent.setup();
+    render(
+      <TopBarMenu label="Sample" testId="topbar-menu-sample">
+        <TopBarMenuLink testId="link-a" href="https://example.com/a">
+          A
+        </TopBarMenuLink>
+      </TopBarMenu>,
+    );
+    await user.click(screen.getByTestId('topbar-menu-sample-trigger'));
+    await user.click(await screen.findByTestId('link-a'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('topbar-menu-sample-content')).not.toBeInTheDocument(),
+    );
   });
 });

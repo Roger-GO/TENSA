@@ -61,6 +61,7 @@ import type {
   TopologySchema,
   TopologySummary,
   UploadProfileResponse,
+  VersionInfo,
   WorkspaceFileList,
   WorkspacePath,
 } from './types';
@@ -269,6 +270,7 @@ export const queryKeys = {
   workspaceFiles: ['workspace-files'] as const,
   sidecar: (casePath: WorkspacePath) => ['sidecar', casePath] as const,
   topologySchema: ['topology-schema'] as const,
+  version: ['version'] as const,
   /** Alterable-params lookup, scoped per (session, model). */
   alterableParams: (id: SessionId, model: string) => ['alterable-params', id, model] as const,
   /** Report payload, scoped per (session, routine). */
@@ -800,6 +802,22 @@ export function useTopologySchema(): UseQueryResult<TopologySchema, Error> {
     queryFn: async () => {
       return await andesClient.get<TopologySchema>('/topology/schema', {
         timeoutMs: TIMEOUTS.workspace,
+      });
+    },
+  });
+}
+
+/**
+ * `GET /version`. The tensa and ANDES versions the server runs. They cannot
+ * change while it runs, so this is fetched once per page.
+ */
+export function useVersionInfo(): UseQueryResult<VersionInfo, Error> {
+  return useQuery({
+    queryKey: queryKeys.version,
+    staleTime: Infinity,
+    queryFn: async () => {
+      return await andesClient.get<VersionInfo>('/version', {
+        timeoutMs: TIMEOUTS.sessionLifecycle,
       });
     },
   });

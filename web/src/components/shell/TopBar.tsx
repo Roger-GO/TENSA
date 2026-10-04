@@ -12,6 +12,7 @@ import { useReportDialogStore } from '@/store/reportDialog';
 import { SHORTCUTS } from '@/lib/shortcuts';
 import { shortcutLabel } from '@/lib/shortcutFormatter';
 import { ThemeToggle } from '@/components/shell/ThemeToggle';
+import { HelpMenu } from '@/components/shell/HelpMenu';
 import { SidebarToggle } from '@/components/shell/SidebarToggle';
 import { InspectorToggle } from '@/components/shell/InspectorToggle';
 import { BottomDrawerToggle } from '@/components/shell/BottomDrawerToggle';
@@ -66,9 +67,9 @@ const HistoryDrawer = lazyNamed(
  * - ``center``: the primary Run button + RunStatusBadge.
  * - ``right``: a slot the App fills with the Export trigger + the
  *   "Hide labels" toggle. The TopBar adds the command-palette hint,
- *   the theme toggle (Unit 12), and History trigger after the slot
- *   content so they always sit at the rightmost edge regardless of
- *   what the App chooses to inject.
+ *   the theme toggle (Unit 12), the History trigger and the Help menu
+ *   after the slot content so they always sit at the rightmost edge
+ *   regardless of what the App chooses to inject.
  *
  * The dialog wrappers for store-driven flows (BundleExportDialog,
  * ReportDialog, HistoryDrawer) are mounted here because their open-
@@ -179,6 +180,7 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
         <TopBarDivider />
         <ThemeToggle />
         <HistoryDrawerToggle />
+        <HelpMenu />
       </div>
       <TopBarDialogs />
     </header>

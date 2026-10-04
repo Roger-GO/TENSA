@@ -115,6 +115,16 @@ describe('<TopBar /> — auto-mounted right-slot anchors', () => {
     expect(screen.getByTestId('top-bar-right').contains(toggle)).toBe(true);
   });
 
+  it('renders the Help menu at the far right, after the history toggle', () => {
+    render(<TopBar />);
+    const right = screen.getByTestId('top-bar-right');
+    const help = screen.getByTestId('topbar-menu-help-trigger');
+    const history = screen.getByTestId('history-drawer-toggle');
+    expect(right.contains(help)).toBe(true);
+    expect(history.compareDocumentPosition(help) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(help).toHaveAccessibleName('Help');
+  });
+
   it('right-slot caller content renders BEFORE the auto-mounted anchors', () => {
     render(<TopBar right={<button data-testid="caller-right">x</button>} />);
     const right = screen.getByTestId('top-bar-right');
