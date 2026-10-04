@@ -144,6 +144,25 @@ describe('useCommandRegistry — edit mode command', () => {
   });
 });
 
+describe('useCommandRegistry: the two Undos', () => {
+  it('"Undo last addition" drops an add, "Undo parameter edit" steps back a clone edit, and they read differently', () => {
+    act(() => {
+      useCaseStore.setState({ cloneInitialized: true, cloneUndoDepth: 2, cloneRedoDepth: 1 });
+    });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const byId = (id: string) => result.current.find((c) => c.id === id);
+    expect(byId('edit.undo')?.label).toBe('Undo last addition');
+    expect(byId('clone.undo')?.label).toBe('Undo parameter edit');
+    expect(byId('clone.redo')?.label).toBe('Redo parameter edit');
+    // Only the parameter undo has Ctrl/Cmd+Z; the addition undo has no key.
+    expect(byId('edit.undo')?.shortcut).toBeUndefined();
+    expect(byId('clone.undo')?.shortcut).toBe('ctrl+z, meta+z');
+    // The hover text of each points at the other, so a user who picked the wrong one is told.
+    expect(byId('edit.undo')?.description).toMatch(/added last/);
+    expect(byId('clone.undo')?.description).toMatch(/Undo last addition/);
+  });
+});
+
 describe('useCommandRegistry — when() filter', () => {
   it('omits workspace edit commands when no topology is loaded', () => {
     MOCK_TOPOLOGY = null;

@@ -34,13 +34,19 @@ const KIND_LABELS: Partial<Record<JobKind, string>> = {
   'element-add': 'Add element',
   'element-edit': 'Edit element',
   'element-delete': 'Delete element',
-  'element-undo': 'Undo edit',
+  'element-undo': 'Undo addition',
   'disturbance-commit': 'Commit disturbances',
   'pmu-add': 'Add PMU',
   'pmu-delete': 'Delete PMU',
   'profile-upload': 'Upload profile',
   'profile-add': 'Add profile',
   'profile-delete': 'Delete profile',
+  'clone-init': 'Start parameter edits',
+  'clone-edit': 'Edit parameter',
+  'clone-undo': 'Undo parameter edit',
+  'clone-redo': 'Redo parameter edit',
+  'clone-save-as': 'Save parameter edits as case',
+  'clone-reset': 'Discard parameter edits',
 };
 
 export function kindLabel(kind: JobKind): string {

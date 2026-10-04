@@ -88,6 +88,12 @@ export interface Command {
   /** Human-readable label shown in the menu / palette. */
   label: string;
   /**
+   * One or two sentences on what the command does, for the hover text of its menu
+   * item and palette row. For the commands whose label alone leaves two of them
+   * easy to confuse (the two Undos, the two ways to save).
+   */
+  description?: string;
+  /**
    * Optional icon node. Renders before the label. Components passed
    * here should already be sized (e.g., `<Icon className="h-4 w-4" />`).
    */
@@ -345,11 +351,15 @@ export function useCommandRegistry(): readonly Command[] {
       },
 
       // ---- edit ----------------------------------------------------------
+      // Drops the last add (an element, a PMU or a profile). It has nothing to do with
+      // parameter edits: those are the two commands below, which carry Ctrl/Cmd+Z.
       {
         id: 'edit.undo',
-        label: 'Undo last edit',
+        label: 'Undo last addition',
+        description:
+          'Removes the element, PMU or profile you added last. The system is rebuilt from the case file and the additions that remain, so changes to the parameters of existing elements are dropped too.',
         group: 'edit',
-        keywords: ['undo', 'revert', 'last'],
+        keywords: ['undo', 'revert', 'last', 'add', 'addition', 'element', 'remove'],
         action: () => {
           if (sessionId !== null) undoMutation.mutate(sessionId);
         },
@@ -381,12 +391,14 @@ export function useCommandRegistry(): readonly Command[] {
         when: () => sessionId !== null,
       },
       // Clone undo / redo (Ctrl+Z / Ctrl+Shift+Z). NOTE: the existing
-      // ``edit.undo`` (Undo last edit) is palette/menu-only with NO shortcut
+      // ``edit.undo`` (Undo last addition) is palette/menu-only with NO shortcut
       // binding, so Ctrl+Z is free to bind here without collision. Gated on a
       // live clone + a non-empty stack so the binding is a no-op otherwise.
       {
         id: 'clone.undo',
         label: 'Undo parameter edit',
+        description:
+          'Steps back the last controller parameter you changed in Edit mode. To remove an element you added, use Undo last addition.',
         group: 'edit',
         keywords: ['undo', 'clone', 'parameter', 'edit', 'revert', 'controller'],
         action: () => {
@@ -402,6 +414,7 @@ export function useCommandRegistry(): readonly Command[] {
       {
         id: 'clone.redo',
         label: 'Redo parameter edit',
+        description: 'Re-applies the controller parameter edit you just undid.',
         group: 'edit',
         keywords: ['redo', 'clone', 'parameter', 'edit', 'reapply', 'controller'],
         action: () => {

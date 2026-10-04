@@ -90,6 +90,22 @@ afterEach(() => {
   useCommandPaletteStore.setState({ open: false });
 });
 
+describe('<CommandPalette /> — descriptions', () => {
+  it('gives a command that has a description as hover text on its row', async () => {
+    render(withProviders(<CommandPalette />));
+    act(() => {
+      useCommandPaletteStore.getState().openPalette();
+    });
+    const undo = await screen.findByTestId('command-palette-item-edit.undo');
+    expect(undo).toHaveTextContent('Undo last addition');
+    expect(undo.getAttribute('title')).toMatch(/added last/);
+    // A command with none has no title.
+    expect(screen.getByTestId('command-palette-item-edit.reload').hasAttribute('title')).toBe(
+      false,
+    );
+  });
+});
+
 describe('<CommandPalette /> — open / close', () => {
   it('mounts only when the store flag is true', () => {
     render(withProviders(<CommandPalette />));

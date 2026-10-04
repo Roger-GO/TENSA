@@ -170,6 +170,7 @@ export function CommandPalette() {
                           value={`${cmd.id} ${cmd.label}`}
                           keywords={cmd.keywords}
                           onSelect={() => handleSelect(cmd)}
+                          title={cmd.description}
                           data-testid={`command-palette-item-${cmd.id}`}
                           className={cn(
                             'flex cursor-pointer items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-sm',

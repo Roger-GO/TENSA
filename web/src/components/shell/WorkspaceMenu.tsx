@@ -107,6 +107,7 @@ export function WorkspaceMenu() {
             <TopBarMenuItem
               key={cmd.id}
               testId={TESTID_BY_ID[cmd.id] ?? `topbar-menu-workspace-${cmd.id}`}
+              title={cmd.description}
               onClick={() => handleClick(cmd.id)}
             >
               {cmd.label}

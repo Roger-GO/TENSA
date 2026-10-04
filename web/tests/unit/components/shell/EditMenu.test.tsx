@@ -91,6 +91,23 @@ describe('<EditMenu />', () => {
     expect(screen.getByTestId('topbar-menu-edit-reload')).toBeInTheDocument();
   });
 
+  it('names the two undos for what each one undoes, and explains them on hover', async () => {
+    useCaseStore.setState({ cloneInitialized: true, cloneUndoDepth: 1, cloneRedoDepth: 1 });
+    const user = userEvent.setup();
+    render(withProviders(<EditMenu />));
+    await user.click(screen.getByTestId('topbar-menu-edit-trigger'));
+    const addition = await screen.findByTestId('topbar-menu-edit-undo');
+    const parameter = screen.getByTestId('topbar-menu-edit-clone-undo');
+    expect(addition).toHaveTextContent('Undo last addition');
+    expect(parameter).toHaveTextContent('Undo parameter edit');
+    // Each hover text says what it leaves alone, so neither is read as the other.
+    expect(addition.getAttribute('title')).toMatch(/added last/);
+    expect(parameter.getAttribute('title')).toMatch(/Undo last addition/);
+    expect(screen.getByTestId('topbar-menu-edit-clone-redo')).toHaveTextContent(
+      'Redo parameter edit',
+    );
+  });
+
   it('Escape closes the menu', async () => {
     const user = userEvent.setup();
     render(withProviders(<EditMenu />));

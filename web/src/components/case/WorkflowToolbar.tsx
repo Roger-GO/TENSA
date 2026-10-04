@@ -15,7 +15,7 @@ import { cn } from '@/lib/cn';
 
 /**
  * Workflow toolbar (Unit 12): "Reload" reverts to the on-disk case (or
- * the empty-blank state); "Undo last" drops the most recent add().
+ * the empty-blank state); "Undo addition" drops the most recent add().
  *
  * Sits in the top-bar's left slot next to AddElement / Save System.
  *
@@ -89,9 +89,9 @@ export function WorkflowToolbar({ className }: WorkflowToolbarProps) {
           onClick={handleUndo}
           data-testid="undo-last-edit-button"
           className="text-xs"
-          title="Undo the last element added or edited"
+          title="Remove the element, PMU or profile you added last"
         >
-          {undo.isPending ? 'Undoing…' : 'Undo'}
+          {undo.isPending ? 'Undoing…' : 'Undo addition'}
         </Button>
         <Button
           type="button"
