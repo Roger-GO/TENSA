@@ -25,6 +25,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 
 import { TopBar } from '@/components/shell/TopBar';
+import {
+  INLINE_FROM_MEDIUM,
+  INLINE_FROM_WIDE,
+  MORE_BELOW_WIDE,
+} from '@/components/shell/topBarLayout';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { useBundleStore } from '@/store/bundle';
 import { useHistoryStore } from '@/store/history';
@@ -134,6 +139,48 @@ describe('<TopBar /> — auto-mounted right-slot anchors', () => {
     const toggleIdx = Array.from(right.children).indexOf(toggle);
     expect(callerIdx).toBeGreaterThanOrEqual(0);
     expect(toggleIdx).toBeGreaterThan(callerIdx);
+  });
+});
+
+describe('<TopBar /> — narrow windows', () => {
+  // jsdom applies no CSS, so these read the classes that hide each control; the
+  // widths themselves are checked in a real browser (tests/e2e/top-bar-fit.spec.ts).
+  const dividers = () => screen.getAllByTestId('top-bar-divider');
+
+  it('hides Search, Theme and History below the wide width, where the More menu takes them', () => {
+    render(<TopBar />);
+    for (const id of ['command-palette-hint', 'theme-toggle', 'history-drawer-toggle']) {
+      expect(screen.getByTestId(id).className).toContain(INLINE_FROM_WIDE);
+    }
+    expect(screen.getByTestId('topbar-menu-more-trigger').className).toContain(MORE_BELOW_WIDE);
+  });
+
+  it('hides the four pane toggles below the medium width', () => {
+    render(<TopBar />);
+    for (const id of [
+      'top-bar-toggle-sidebar',
+      'top-bar-toggle-inspector',
+      'top-bar-toggle-drawer',
+      'top-bar-toggle-results-view',
+    ]) {
+      expect(screen.getByTestId(id).className).toContain(INLINE_FROM_MEDIUM);
+    }
+  });
+
+  it('hides each divider with the group it sets off, so none is left standing alone', () => {
+    render(<TopBar />);
+    const classes = dividers().map((d) => d.className);
+    expect(classes.filter((c) => c.includes(INLINE_FROM_MEDIUM))).toHaveLength(1);
+    expect(classes.filter((c) => c.includes(INLINE_FROM_WIDE))).toHaveLength(2);
+    expect(classes.filter((c) => c.includes(MORE_BELOW_WIDE))).toHaveLength(1);
+  });
+
+  it('keeps Help outside the menu, after it, so it is on screen at every width', () => {
+    render(<TopBar />);
+    const more = screen.getByTestId('topbar-menu-more-trigger');
+    const help = screen.getByTestId('topbar-menu-help-trigger');
+    expect(more.compareDocumentPosition(help) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(help.className).not.toMatch(/(max|min)-\[/);
   });
 });
 

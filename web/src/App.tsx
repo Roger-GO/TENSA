@@ -13,6 +13,7 @@ import { RuntimeCrashModal } from '@/components/pflow/RuntimeCrashModal';
 import { AddElementPanel } from '@/components/elements/AddElementPanel';
 import { HideLabelsToggle } from '@/components/pflow/HideLabelsToggle';
 import { UnitsToggle } from '@/components/shell/UnitsToggle';
+import { INLINE_FROM_NARROW } from '@/components/shell/topBarLayout';
 import { WorkspaceMenu } from '@/components/shell/WorkspaceMenu';
 import { EditMenu } from '@/components/shell/EditMenu';
 import { RunMenu } from '@/components/shell/RunMenu';
@@ -272,8 +273,8 @@ export function App() {
             <>
               <RecoveryBadge />
               <ExportMenu />
-              <HideLabelsToggle />
-              <UnitsToggle />
+              <HideLabelsToggle className={INLINE_FROM_NARROW} />
+              <UnitsToggle className={INLINE_FROM_NARROW} />
             </>
           }
           leftSidebar={<LeftSidebar />}

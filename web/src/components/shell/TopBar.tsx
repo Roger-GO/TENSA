@@ -18,6 +18,12 @@ import { InspectorToggle } from '@/components/shell/InspectorToggle';
 import { BottomDrawerToggle } from '@/components/shell/BottomDrawerToggle';
 import { ResultsViewToggle } from '@/components/shell/ResultsViewToggle';
 import { InFlightChip } from '@/components/shell/InFlightChip';
+import { TopBarMoreMenu } from '@/components/shell/TopBarMoreMenu';
+import {
+  INLINE_FROM_MEDIUM,
+  INLINE_FROM_WIDE,
+  MORE_BELOW_WIDE,
+} from '@/components/shell/topBarLayout';
 import { DynamicContentBadge } from '@/components/case/DynamicContentBadge';
 
 // The three dialogs below are separate chunks, fetched the first time their
@@ -69,7 +75,8 @@ const HistoryDrawer = lazyNamed(
  *   "Hide labels" toggle. The TopBar adds the command-palette hint,
  *   the theme toggle (Unit 12), the History trigger and the Help menu
  *   after the slot content so they always sit at the rightmost edge
- *   regardless of what the App chooses to inject.
+ *   regardless of what the App chooses to inject. On a window too narrow
+ *   for all of them, some hand over to a More menu (``topBarLayout.ts``).
  *
  * The dialog wrappers for store-driven flows (BundleExportDialog,
  * ReportDialog, HistoryDrawer) are mounted here because their open-
@@ -168,18 +175,22 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
             theme / history cluster so the layout-controls form a
             distinct perceptual group at roughly the visual centre of
             the right cluster. */}
-        <TopBarDivider />
-        <SidebarToggle />
-        <InspectorToggle />
-        <BottomDrawerToggle />
+        <TopBarDivider className={INLINE_FROM_MEDIUM} />
+        <SidebarToggle className={INLINE_FROM_MEDIUM} />
+        <InspectorToggle className={INLINE_FROM_MEDIUM} />
+        <BottomDrawerToggle className={INLINE_FROM_MEDIUM} />
         {/* v3.1 — full-space results view toggle. Sits alongside the other
             pane toggles so the four layout controls form one group. */}
-        <ResultsViewToggle />
-        <TopBarDivider />
-        <CommandPaletteHint />
-        <TopBarDivider />
-        <ThemeToggle />
-        <HistoryDrawerToggle />
+        <ResultsViewToggle className={INLINE_FROM_MEDIUM} />
+        <TopBarDivider className={INLINE_FROM_WIDE} />
+        <CommandPaletteHint className={INLINE_FROM_WIDE} />
+        <TopBarDivider className={INLINE_FROM_WIDE} />
+        <ThemeToggle className={INLINE_FROM_WIDE} />
+        <HistoryDrawerToggle className={INLINE_FROM_WIDE} />
+        {/* The controls hidden above, in a menu, on a window too narrow for them
+            (see topBarLayout.ts). */}
+        <TopBarDivider className={MORE_BELOW_WIDE} />
+        <TopBarMoreMenu />
         <HelpMenu />
       </div>
       <TopBarDialogs />
@@ -258,7 +269,7 @@ function AppBrand() {
  * The chip names the key of the user's platform (⌘K on macOS, Ctrl+K
  * elsewhere), next to a "Search" word that says what it is for.
  */
-function CommandPaletteHint() {
+function CommandPaletteHint({ className }: { className?: string }) {
   const openPalette = useCommandPaletteStore((s) => s.openPalette);
   return (
     <Button
@@ -268,7 +279,7 @@ function CommandPaletteHint() {
       onClick={openPalette}
       data-testid="command-palette-hint"
       aria-label="Open command palette"
-      className="gap-1.5 px-2 text-xs"
+      className={cn('gap-1.5 px-2 text-xs', className)}
     >
       <span>Search</span>
       <kbd
@@ -292,12 +303,12 @@ function CommandPaletteHint() {
  * theme + history. Without these dividers the cluster reads as eight
  * undifferentiated chips.
  */
-function TopBarDivider() {
+function TopBarDivider({ className }: { className?: string }) {
   return (
     <span
       aria-hidden="true"
       data-testid="top-bar-divider"
-      className="bg-border mx-1.5 h-5 w-px shrink-0"
+      className={cn('bg-border mx-1.5 h-5 w-px shrink-0', className)}
     />
   );
 }

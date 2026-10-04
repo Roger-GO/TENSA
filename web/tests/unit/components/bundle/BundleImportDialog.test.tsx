@@ -154,7 +154,11 @@ describe('<BundleImportButton />', () => {
     const user = userEvent.setup();
     render(withQueryClient(<BundleImportButton />));
     await user.click(screen.getByTestId('bundle-import-button'));
-    expect(await screen.findByTestId('bundle-import-dialog')).toBeInTheDocument();
+    // The first open in this file loads the dialog's chunk cold, which takes longer
+    // than the default second while the whole suite is running.
+    expect(
+      await screen.findByTestId('bundle-import-dialog', undefined, { timeout: 10_000 }),
+    ).toBeInTheDocument();
   });
 });
 

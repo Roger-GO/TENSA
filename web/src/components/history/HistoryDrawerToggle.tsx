@@ -9,7 +9,7 @@ import { useCaseStore } from '@/store/case';
  * its own so the TopBar can render it without loading ``HistoryDrawer``, which
  * is fetched the first time the drawer opens.
  */
-export function HistoryDrawerToggle() {
+export function HistoryDrawerToggle({ className }: { className?: string }) {
   const open = useHistoryStore((s) => s.drawerOpen);
   const openDrawer = useHistoryStore((s) => s.openDrawer);
   const closeDrawer = useHistoryStore((s) => s.closeDrawer);
@@ -29,6 +29,7 @@ export function HistoryDrawerToggle() {
       disabled={!enabled}
       onClick={() => (open ? closeDrawer() : openDrawer())}
       data-testid="history-drawer-toggle"
+      className={className}
       aria-pressed={open}
       aria-label="Toggle run history"
       title={
