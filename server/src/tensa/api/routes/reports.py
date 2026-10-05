@@ -97,9 +97,12 @@ class ReportResponse(BaseModel):
     plain_text: str = Field(
         ...,
         description=(
-            "Verbatim report text — for ``pflow``, the file ANDES would "
+            "Report text — for ``pflow``, the file ANDES would "
             "have written to ``<case>_out.txt``; for ``tds``, "
-            "``TDS.summary()``'s log output augmented with run statistics."
+            "``TDS.summary()``'s log output augmented with run statistics. "
+            "It is ANDES's own text, except that the server's paths are taken "
+            "out of it: the case file in the header reads relative to the "
+            "workspace."
         ),
     )
     structured: ReportStructured = Field(

@@ -25,6 +25,11 @@ duration of the call.
 
 ``ss.EIG.report()`` is captured the same way as the PFlow report (see
 ``_generate_eig_report``).
+
+ANDES heads the PFlow and EIG reports with the path of the case file as the
+server opened it. A report goes to a client, which may save it and pass it on,
+so the worker takes the server's paths out of it first
+(:func:`without_server_paths`), as it does for the messages ANDES logs.
 """
 
 from __future__ import annotations
@@ -33,7 +38,7 @@ import dataclasses
 import logging
 import re
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Literal
 
@@ -104,6 +109,29 @@ def generate_report(ss, routine: ReportRoutine) -> ReportPayload:  # type: ignor
     # The routes layer constrains the literal upstream; this is
     # belt-and-braces.
     raise AndesAppError(f"unknown report routine: {routine!r}")
+
+
+def without_server_paths(
+    payload: ReportPayload, scrub: Callable[[str], str]
+) -> ReportPayload:
+    """``payload`` with ``scrub`` applied to its text and to every table cell.
+
+    ``scrub`` is a :class:`tensa.core.messages.PathScrubber`: the workspace is
+    written relative to itself, so the header's ``Case file:`` line names the
+    file (``ieee14.raw``) and not where the server keeps it.
+    """
+    return dataclasses.replace(
+        payload,
+        plain_text=scrub(payload.plain_text),
+        tables=tuple(
+            ReportTable(
+                title=scrub(table.title),
+                headers=tuple(scrub(header) for header in table.headers),
+                rows=tuple(tuple(scrub(cell) for cell in row) for row in table.rows),
+            )
+            for table in payload.tables
+        ),
+    )
 
 
 # ---- per-routine implementations -------------------------------------------
@@ -546,4 +574,5 @@ __all__ = [
     "parse_eig_tables",
     "parse_pflow_tables",
     "parse_tds_tables",
+    "without_server_paths",
 ]

@@ -79,7 +79,13 @@ from tensa.core.errors import (
     TdsRequestError,
     short_repr,
 )
-from tensa.core.messages import attach_log, begin_command, install_capture, uninstall_capture
+from tensa.core.messages import (
+    PathScrubber,
+    attach_log,
+    begin_command,
+    install_capture,
+    uninstall_capture,
+)
 from tensa.core.pflow_notices import log_pflow_notices
 
 # AndesAppError catches the new ElementValidationError /
@@ -501,6 +507,10 @@ def _handle_generate_report(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     the wrapper's loaded System (private accessor) — the report
     generator does not mutate state, only reads + tempfile-roundtrips
     the ``ss.PFlow.report()`` / ``ss.EIG.report()`` output.
+
+    ANDES writes the case file's full path into the report's header. It is
+    taken out before the report leaves the worker, as the paths in the
+    messages ANDES logs are: the workspace reads relative to itself.
     """
     from tensa.core.report import (
         EigReportPrerequisiteError,
@@ -509,6 +519,7 @@ def _handle_generate_report(wrapper: Wrapper, args: dict[str, Any]) -> Any:
         ReportRoutine,
         TdsNotRunError,
         generate_report,
+        without_server_paths,
     )
 
     routine_raw = args.get("routine")
@@ -532,6 +543,7 @@ def _handle_generate_report(wrapper: Wrapper, args: dict[str, Any]) -> Any:
         # forwards the subclass name as ``category`` for the routes
         # layer to map to the right HTTP status.
         raise
+    payload = without_server_paths(payload, PathScrubber(wrapper._workspace))  # noqa: SLF001
     return _serialize_dataclass(payload)
 
 

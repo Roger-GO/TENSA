@@ -44,7 +44,9 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
         max_sessions=2,
         idle_timeout_seconds=180.0,
     )
-    mgr = SessionManager(max_sessions=2, idle_timeout=180.0)
+    # The workers know the workspace, as they do under ``make_app``'s own
+    # manager: a report names the case file relative to it.
+    mgr = SessionManager(max_sessions=2, idle_timeout=180.0, workspace=str(workspace))
     await mgr.start()
     app.state.session_manager = mgr
     app.state.workspace = workspace
@@ -136,6 +138,29 @@ async def test_report_pflow_bus_table_row_count_matches_case(
     assert "Bus Name" in bus["headers"]
     # IEEE 14 has 14 buses → 14 rows.
     assert len(bus["rows"]) == 14
+
+
+@pytest.mark.integration
+async def test_report_pflow_names_the_case_file_without_the_servers_path(
+    client: httpx.AsyncClient, tmp_path: Path
+) -> None:
+    """ANDES heads its report with the full path of the case file. The report
+    is shown to the client and can be saved into a file that is passed on, so it
+    names the file relative to the workspace and gives nothing of where the
+    server keeps it."""
+    sid = await _create_session_and_load(client, "ieee14.raw")
+    pf = await client.post(f"/api/sessions/{sid}/pflow", json={})
+    assert pf.status_code == 200, pf.text
+
+    resp = await client.get(f"/api/sessions/{sid}/report", params={"routine": "pflow"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert "Case file: ieee14.raw\n" in body["plain_text"]
+    assert str(tmp_path) not in resp.text
+    assert str(tmp_path.resolve()) not in resp.text
+    # The report itself is whole.
+    assert "BUS DATA" in body["plain_text"]
 
 
 # ---- happy path: TDS report ----------------------------------------------

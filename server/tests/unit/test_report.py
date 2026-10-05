@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from tensa.core.errors import AndesAppError, NoCaseLoadedError
+from tensa.core.messages import PathScrubber
 from tensa.core.report import (
     PflowNotConvergedError,
     ReportGenerationError,
@@ -31,6 +32,7 @@ from tensa.core.report import (
     _tds_state_table,
     generate_report,
     parse_pflow_tables,
+    without_server_paths,
 )
 
 # ---- _split_columns -------------------------------------------------------
@@ -450,3 +452,59 @@ def test_report_table_dataclass_is_frozen() -> None:
     table = ReportTable(title="t", headers=("a",), rows=(("1",),))
     with pytest.raises(dataclasses.FrozenInstanceError):
         table.title = "other"  # type: ignore[misc]
+
+
+# ---- without_server_paths --------------------------------------------------
+
+
+@pytest.mark.unit
+def test_without_server_paths_names_the_case_file_and_not_where_it_is_kept() -> None:
+    """ANDES heads a report with the case file's full path. A report goes to a
+    client, so the workspace is written relative to itself."""
+    payload = ReportPayload(
+        routine="pflow",
+        plain_text=(
+            "ANDES 2.0.0\n"
+            "Case file: /srv/tensa/workspace/cases/ieee14.raw\n"
+            "Report time: 10/05/2026 04:19:51 AM\n\n"
+            "Power flow converged in 4 iterations.\n"
+        ),
+        tables=(),
+    )
+    scrub = PathScrubber("/srv/tensa/workspace", home="/home/operator", cwd="/srv/tensa")
+
+    clean = without_server_paths(payload, scrub)
+
+    assert "Case file: cases/ieee14.raw\n" in clean.plain_text
+    assert "/srv/tensa" not in clean.plain_text
+    # The rest of the report reads as ANDES wrote it.
+    assert "Report time: 10/05/2026 04:19:51 AM" in clean.plain_text
+    assert "Power flow converged in 4 iterations." in clean.plain_text
+    assert clean.routine == "pflow"
+
+
+@pytest.mark.unit
+def test_without_server_paths_reaches_the_table_cells_and_leaves_numbers_alone() -> None:
+    table = ReportTable(
+        title="SUMMARY",
+        headers=("Field", "Value"),
+        rows=(
+            ("Case", "/home/operator/studies/kundur.xlsx"),
+            ("Output", "/var/tmp/andes-report-x1/report.txt"),
+            ("Generation", "7.1921"),
+            ("Ratio", "1/30"),
+        ),
+    )
+    payload = ReportPayload(routine="pflow", plain_text="", tables=(table,))
+    scrub = PathScrubber("/srv/tensa/workspace", home="/home/operator", cwd="/srv/tensa")
+
+    clean = without_server_paths(payload, scrub).tables[0]
+
+    assert clean.title == "SUMMARY"
+    assert clean.headers == ("Field", "Value")
+    assert clean.rows == (
+        ("Case", "~/studies/kundur.xlsx"),
+        ("Output", "<path>"),
+        ("Generation", "7.1921"),
+        ("Ratio", "1/30"),
+    )
