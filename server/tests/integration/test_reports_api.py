@@ -163,6 +163,31 @@ async def test_report_pflow_names_the_case_file_without_the_servers_path(
     assert "BUS DATA" in body["plain_text"]
 
 
+@pytest.mark.integration
+async def test_report_eig_names_the_case_file_without_the_servers_path(
+    client: httpx.AsyncClient, tmp_path: Path
+) -> None:
+    """The eigenvalue report has the same header as the power-flow one, with
+    the full path of the case file in it, and reaches the client the same way.
+    It names the file relative to the workspace too."""
+    sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
+    pf = await client.post(f"/api/sessions/{sid}/pflow", json={})
+    assert pf.status_code == 200, pf.text
+    eig = await client.post(f"/api/sessions/{sid}/eig", json={})
+    assert eig.status_code == 200, eig.text
+
+    resp = await client.get(f"/api/sessions/{sid}/report", params={"routine": "eig"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["routine"] == "eig"
+
+    assert "Case file: ieee14.raw\n" in body["plain_text"]
+    assert str(tmp_path) not in resp.text
+    assert str(tmp_path.resolve()) not in resp.text
+    # The report itself is whole.
+    assert "EIGENVALUE ANALYSIS REPORT" in body["plain_text"]
+
+
 # ---- happy path: TDS report ----------------------------------------------
 
 
