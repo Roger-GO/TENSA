@@ -16,6 +16,7 @@ import { CpfConfigPanel } from './CpfConfigPanel';
 import { CpfGeneratorPanel } from './CpfGeneratorPanel';
 import { CpfQLimitsSwitch } from './CpfQLimitsSwitch';
 import { CpfQvCurvePanel } from './CpfQvCurvePanel';
+import { CpfStepLimitNote } from './CpfStepLimitNote';
 import { RunReadinessNote } from './RunReadinessNote';
 import { EIGScatter } from './EIGScatter';
 import { EIGParticipationTable } from './EIGParticipationTable';
@@ -465,12 +466,18 @@ function CpfSubModePicker() {
  * options' own (``CpfQLimitsSwitch``), which the run hook reads. The
  * curve is followed by what the generators did along it
  * (``CpfGeneratorPanel``).
+ *
+ * The one-line summary of the last run sits beside the Run button, and a
+ * run that used up its steps is answered under it (``CpfStepLimitNote``):
+ * the options are between the button and the curve, so in a short drawer
+ * the curve is not on screen when the run ends.
  */
 export function AnalyzeCpfNoseSubMode() {
   const sessionId = useSessionStore((s) => s.sessionId);
   const lastPf = usePflowStore((s) => s.lastRun);
   const cpfResult = useAnalyzeStore((s) => s.cpfResult);
   const cpfRun = useCpfRun();
+  const readiness = useRunReadiness('cpf');
   const topology = useCurrentTopology();
   // The devices a custom direction can name, with their solved power.
   const devices = useMemo(() => directionRows(topology, lastPf), [topology, lastPf]);
@@ -511,6 +518,22 @@ export function AnalyzeCpfNoseSubMode() {
             disabledOverride={disabled}
           />
         )}
+        runStatus={
+          cpfResult !== null ? (
+            <span data-testid="cpf-summary" role="status" className="text-muted-foreground text-xs">
+              {cpfResult.mode === 'qv' ? 'QV-curve' : 'PV-curve'} — {cpfResult.lambdas.length}{' '}
+              steps; max {cpfResult.mode === 'qv' ? 'Q' : 'lambda'} = {cpfResult.max_lam.toFixed(4)}{' '}
+              (the curve is below the options)
+            </span>
+          ) : null
+        }
+        renderRunFollowUp={({ runWithMaxSteps }) => (
+          <CpfStepLimitNote
+            result={cpfResult}
+            onRunAgain={runWithMaxSteps}
+            disabled={!readiness.ready || cpfRun.isPending}
+          />
+        )}
         loads={devices.loads}
         generators={devices.generators}
         limitsSwitch={<CpfQLimitsSwitch idPrefix="cpf-config" />}
@@ -520,13 +543,6 @@ export function AnalyzeCpfNoseSubMode() {
           cpfRun.mutate({ sessionId, ...overrides });
         }}
       />
-
-      {cpfResult !== null ? (
-        <span data-testid="cpf-summary" className="text-muted-foreground text-[10px]">
-          {cpfResult.mode === 'qv' ? 'QV-curve' : 'PV-curve'} — {cpfResult.lambdas.length} steps;
-          max {cpfResult.mode === 'qv' ? 'Q' : 'lambda'} = {cpfResult.max_lam.toFixed(4)}
-        </span>
-      ) : null}
 
       <AnalyzeRoutineError routine="cpf" error={cpfError} />
 

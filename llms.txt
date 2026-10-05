@@ -87,6 +87,9 @@ CPF:             POST /sessions/{id}/cpf · POST /sessions/{id}/cpf/qv  (needs a
                  gen (PV generators only) | custom, with "load_increase": [{"idx":"PQ_1","p":10,"q":3}] and
                  "generator_increase": [{"idx":2,"p":10}] in MW / MVAr per unit of lambda (the slack cannot be named).
                  With load, load-only and gen, lambda = 1 is twice the base value.
+                 step is the first step only: ANDES sizes the rest itself, 0.5 in lambda at most. A custom direction of small increases
+                 is therefore a long path (ten times the increases is the same curve at a tenth of the lambda); when done_msg reads
+                 "Reached max steps (N)" the run stopped short, and a larger max_iter takes it further.
                  enforce_q_limits true switches a PV or slack generator to PQ at qmin/qmax along the path; solve pflow with
                  enforce_q_limits first, or the answer is 409 when a generator is already past a limit. A generator held at a limit
                  stays held. stop_at full also traces the lower branch back to lambda = 0 (the steps after nose_idx).

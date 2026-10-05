@@ -12,6 +12,7 @@ import {
   hasLowerBranch,
   lambdaMeaning,
   limitName,
+  stepLimitReached,
   switchedAlongThePath,
 } from '@/lib/cpfOptions';
 import type { CpfResult } from '@/api/types';
@@ -114,6 +115,9 @@ const PADDING_BOTTOM = 32;
 const DEFAULT_MAX_BUSES = 8;
 const STROKE_DEFAULT = 1.5;
 const STROKE_HOVERED = 3;
+// The form's own words: the field is under its Advanced disclosure.
+const MORE_STEPS_ADVICE =
+  'To go further, raise Max steps (under Advanced in the options above) and run again.';
 
 /** Pure helper: compute the Y-range across all visible buses, with a 5% pad. */
 // eslint-disable-next-line react-refresh/only-export-components
@@ -430,6 +434,8 @@ export function CPFCurveChart({
   // A lower branch that broke off: the curve has its nose, and stops short of
   // the base load.
   const incomplete = !result.truncated && result.complete === false;
+  // Set when either of the two is down to the run having used up its steps.
+  const stepLimit = stepLimitReached(result);
   const caption = runCaption(result);
 
   // Narrow ``noseLambda`` to ``number`` (rather than ``number |
@@ -539,9 +545,10 @@ export function CPFCurveChart({
             'border-b px-2 py-1 text-[10px] leading-snug',
           )}
         >
-          CPF terminated before reaching a nose point.{' '}
-          {result.done_msg ? `Reason: ${result.done_msg}.` : null} The voltage- collapse margin
-          could not be determined; widen ``max_iter`` or adjust ``step`` and re-run.
+          The run ended before it reached a nose.{' '}
+          {result.done_msg ? `Reason: ${result.done_msg}.` : null} The curve is drawn as far as the
+          run got, so the voltage-collapse margin is not known.
+          {stepLimit !== null ? ` ${MORE_STEPS_ADVICE}` : null}
         </div>
       ) : null}
 
@@ -557,6 +564,7 @@ export function CPFCurveChart({
           The lower branch stops before it is back at the base load.{' '}
           {result.done_msg ? `Reason: ${result.done_msg}.` : null} The nose and the upper branch are
           complete.
+          {stepLimit !== null ? ` ${MORE_STEPS_ADVICE}` : null}
         </div>
       ) : null}
 

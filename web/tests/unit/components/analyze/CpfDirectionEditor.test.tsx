@@ -7,7 +7,11 @@ import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { CpfDirectionEditor, baseValueDirection } from '@/components/analyze/CpfDirectionEditor';
+import {
+  CpfDirectionEditor,
+  baseValueDirection,
+  directionTotalText,
+} from '@/components/analyze/CpfDirectionEditor';
 import { EMPTY_CUSTOM_DIRECTION, type CustomDirection } from '@/lib/cpfOptions';
 
 const LOADS = [
@@ -83,6 +87,58 @@ describe('<CpfDirectionEditor />', () => {
     await user.click(screen.getByTestId('cpf-direction-clear'));
     expect(screen.getByTestId('cpf-direction-load-PQ_1-p')).toHaveValue('');
     expect(latest).toEqual(EMPTY_CUSTOM_DIRECTION);
+  });
+
+  it('says that any size works and where to start from', () => {
+    render(<Harness />);
+    const hint = screen.getByTestId('cpf-direction-size-hint');
+    expect(hint).toHaveTextContent('ten times the numbers is the same curve at a tenth of the λ');
+    expect(hint).toHaveTextContent('Small numbers make a long run');
+    expect(hint).toHaveTextContent('Fill with base values');
+  });
+
+  it('adds up what one unit of lambda is, beside the base case', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    const total = screen.getByTestId('cpf-direction-total');
+    expect(total).toHaveTextContent(
+      'No increase is set yet: a run needs one on at least one load or generator.',
+    );
+
+    await user.type(screen.getByTestId('cpf-direction-load-PQ_1-p'), '10');
+    await user.type(screen.getByTestId('cpf-direction-load-PQ_1-q'), '5');
+    expect(total).toHaveTextContent(
+      'One unit of λ changes the loads by +10 MW and +5 MVAr (base case: 71.7 MW, 12.7 MVAr).',
+    );
+
+    await user.type(screen.getByTestId('cpf-direction-gen-2-p'), '-2.5');
+    expect(total).toHaveTextContent(
+      'One unit of λ changes the loads by +10 MW and +5 MVAr (base case: 71.7 MW, 12.7 MVAr) ' +
+        'and the PV generators by -2.5 MW (base case: 40 MW).',
+    );
+
+    // The proportional direction is as large as the base case itself.
+    await user.click(screen.getByTestId('cpf-direction-fill'));
+    expect(total).toHaveTextContent(
+      'the loads by +71.7 MW and +12.7 MVAr (base case: 71.7 MW, 12.7 MVAr)',
+    );
+  });
+
+  it('directionTotalText covers a shift between devices and a case with no solved power', () => {
+    expect(
+      directionTotalText(
+        { loads: { PQ_1: { p: '10', q: '' }, PQ_2: { p: '-10', q: '' } }, generators: {} },
+        LOADS,
+        GENERATORS,
+      ),
+    ).toBe('One unit of λ moves power between devices and adds none in total.');
+    expect(
+      directionTotalText(
+        { loads: {}, generators: { '2': { p: '5', q: '' } } },
+        [],
+        [{ idx: '2', name: 'G2', bus: '2', p: null }],
+      ),
+    ).toBe('One unit of λ changes the PV generators by +5 MW.');
   });
 
   it('cannot fill from base values that are not there', () => {

@@ -35,7 +35,10 @@ import { CpfDirectionEditor } from './CpfDirectionEditor';
  * The panel owns ONLY the form + the Run button; the parent
  * ``AnalyzeCpfSubMode`` owns the mutation, the readiness gate, the
  * result summary, and the post-run error/recovery banner. On Run the
- * panel hands the parent the validated settings via ``onRun``.
+ * panel hands the parent the validated settings via ``onRun``. What the
+ * parent says about the last run sits by the Run button (``runStatus``,
+ * ``renderRunFollowUp``), where the run was started: the curve is under
+ * the options and out of sight in a short drawer.
  *
  * Validation: ``step`` and ``max_iter`` are optional. When provided
  * they must be finite and positive (a negative / zero / NaN step makes
@@ -80,11 +83,20 @@ export interface CpfConfigPanelProps {
    * panel's ``handleRun`` (which gates on validation) regardless.
    */
   renderRunButton?: (props: { onClick: () => void; disabled: boolean }) => React.ReactNode;
+  /** Shown beside the Run button: the parent's one line on the last run. */
+  runStatus?: React.ReactNode;
   /**
    * Shown directly under the Run button, above the options. The
    * parent passes the visible "why Run CPF is off" note here.
    */
   runNote?: React.ReactNode;
+  /**
+   * Shown after ``runNote``: what the parent has to say about the last run
+   * that the form can act on. ``runWithMaxSteps`` writes the number into
+   * the Max steps field, opens Advanced so that it shows, and starts a run
+   * with the form as it stands.
+   */
+  renderRunFollowUp?: (actions: { runWithMaxSteps: (maxSteps: number) => void }) => React.ReactNode;
   /** The PQ loads a custom direction can move, with their solved power. */
   loads?: readonly DirectionLoadRow[];
   /** The PV generators a custom direction can move, with their solved power. */
@@ -131,7 +143,9 @@ export function CpfConfigPanel({
   runLabel,
   runButtonTestId,
   renderRunButton,
+  runStatus,
   runNote,
+  renderRunFollowUp,
   loads = NO_LOADS,
   generators = NO_GENERATORS,
   limitsSwitch,
@@ -162,11 +176,15 @@ export function CpfConfigPanel({
       : fieldErrors;
   const hasErrors = Object.keys(errors).length > 0;
 
-  const handleRun = () => {
-    if (hasErrors) {
+  // ``maxIter`` is the Max steps field as this run reads it: what it holds,
+  // or the number "run again with more steps" is writing into it.
+  const startRun = (maxIter: string) => {
+    const runFieldErrors = validateCpfOverrides(stepText, maxIter);
+    const customRefused = parsedCustom !== null && !parsedCustom.ok;
+    if (customRefused || Object.keys(runFieldErrors).length > 0) {
       setShowErrors(true);
       // Open the disclosure when the offending field is inside it.
-      if (Object.keys(fieldErrors).length > 0) setAdvancedOpen(true);
+      if (Object.keys(runFieldErrors).length > 0) setAdvancedOpen(true);
       return;
     }
     setShowErrors(false);
@@ -178,9 +196,18 @@ export function CpfConfigPanel({
     if (lowerBranch) overrides.stopAt = 'full';
     const stepTrim = stepText.trim();
     if (stepTrim.length > 0) overrides.step = Number(stepTrim);
-    const maxIterTrim = maxIterText.trim();
+    const maxIterTrim = maxIter.trim();
     if (maxIterTrim.length > 0) overrides.maxIter = Number(maxIterTrim);
     onRun(overrides);
+  };
+
+  const handleRun = () => startRun(maxIterText);
+
+  const runWithMaxSteps = (maxSteps: number) => {
+    const maxIter = String(maxSteps);
+    setMaxIterText(maxIter);
+    setAdvancedOpen(true);
+    startRun(maxIter);
   };
 
   const errorMessages = Object.values(errors);
@@ -191,7 +218,7 @@ export function CpfConfigPanel({
       aria-label="CPF run configuration"
       className={cn('flex flex-col gap-3', className)}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {renderRunButton ? (
           renderRunButton({ onClick: handleRun, disabled: runDisabled })
         ) : (
@@ -206,9 +233,12 @@ export function CpfConfigPanel({
             {runLabel}
           </Button>
         )}
+        {runStatus}
       </div>
 
       {runNote}
+
+      {renderRunFollowUp ? renderRunFollowUp({ runWithMaxSteps }) : null}
 
       <fieldset className="flex flex-col gap-1.5" data-testid="cpf-config-direction">
         <legend className="text-muted-foreground text-xs font-medium">What grows with λ</legend>
@@ -317,21 +347,21 @@ export function CpfConfigPanel({
           >
             <NumberField
               id="cpf-config-step"
-              label="step — continuation step size (optional)"
+              label="Step (optional)"
               value={stepText}
               onChange={setStepText}
               error={showErrors ? errors.step : undefined}
-              hint="Maps to ANDES CPF.config.step. Leave blank for the substrate default."
+              hint="The first step in λ (step in the API, ANDES CPF.config.step). ANDES sizes the steps after it itself, half a unit of λ at most, so a larger value does not shorten a long run. Blank is its default, 0.1."
               placeholder="default"
             />
 
             <NumberField
               id="cpf-config-max-iter"
-              label="max_iter — max continuation steps (optional)"
+              label="Max steps (optional)"
               value={maxIterText}
               onChange={setMaxIterText}
               error={showErrors ? errors.maxIter : undefined}
-              hint="Caps the number of continuation steps before truncation. Leave blank for the substrate default."
+              hint="The most steps one run may take (max_iter in the API). A run that gets there before it is done stops short and says so; raise this to go further. Blank is ANDES's default, 500."
               placeholder="default"
             />
           </div>

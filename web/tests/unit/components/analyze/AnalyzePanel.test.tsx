@@ -493,6 +493,85 @@ describe('<AnalyzePanel />', () => {
       expect(screen.getByTestId('cpf-run-caption')).toHaveTextContent('Loads only');
     });
 
+    it('a CPF that used up its steps says so by the Run button and runs again with more', async () => {
+      const json = (body: unknown) =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      const topology = {
+        state: 'committed',
+        buses: [],
+        lines: [],
+        transformers: [],
+        generators: [],
+        loads: [{ idx: 'PQ_1', name: 'Load A', kind: 'PQ', params: { bus: 4 } }],
+      };
+      // 500 steps along a small custom increase, and no nose yet.
+      const cutShort = {
+        lambdas: [0, 120, 247.2766],
+        voltages_per_bus: { '1': [1, 0.99, 0.97] },
+        bus_idxes: ['1'],
+        nose_idx: -1,
+        max_lam: 247.2766,
+        truncated: true,
+        done_msg: 'Reached max steps (500)',
+        mode: 'pv',
+        direction: 'custom',
+        stop_at: 'nose',
+        complete: false,
+        q_limits_enforced: false,
+        generators: [],
+        limit_events: [],
+      };
+      const whole = {
+        ...cutShort,
+        lambdas: [0, 120, 274.4788, 274.39],
+        voltages_per_bus: { '1': [1, 0.99, 0.93, 0.92] },
+        nose_idx: 2,
+        max_lam: 274.4788,
+        truncated: false,
+        done_msg: 'Nose point at lambda=274.478844',
+        complete: true,
+      };
+      const posted: Record<string, unknown>[] = [];
+      fetchSpy.mockImplementation((...args: unknown[]) => {
+        const [url, init] = args as [unknown, RequestInit | undefined];
+        if (String(url).endsWith('/topology')) return Promise.resolve(json(topology));
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        posted.push(body);
+        return Promise.resolve(json(body.max_iter === undefined ? cutShort : whole));
+      });
+      useAnalyzeStore.getState().setSubMode('cpf');
+
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('cpf-config-direction-custom'));
+      await userEvent.type(await screen.findByTestId('cpf-direction-load-PQ_1-p'), '10');
+      await userEvent.click(screen.getByTestId('analyze-run-cpf'));
+
+      // The summary is in the Run button's row, and the note follows it.
+      const summary = await screen.findByTestId('cpf-summary');
+      expect(summary).toHaveTextContent('3 steps; max lambda = 247.2766');
+      expect(summary.parentElement).toContainElement(screen.getByTestId('analyze-run-cpf'));
+      expect(screen.getByTestId('cpf-step-limit-note')).toHaveTextContent(
+        'The run used all of its 500 steps and stopped at λ = 247.2766, before it reached the nose.',
+      );
+
+      await userEvent.click(
+        screen.getByRole('button', { name: 'Run again with up to 2000 steps' }),
+      );
+      await waitFor(() =>
+        expect(screen.queryByTestId('cpf-step-limit-note')).not.toBeInTheDocument(),
+      );
+      // The same direction, with the limit raised, and the field shows it.
+      expect(posted).toEqual([
+        { direction: 'custom', load_increase: [{ idx: 'PQ_1', p: 10, q: 0 }] },
+        { direction: 'custom', load_increase: [{ idx: 'PQ_1', p: 10, q: 0 }], max_iter: 2000 },
+      ]);
+      expect(screen.getByTestId('field-cpf-config-max-iter')).toHaveValue('2000');
+      expect(screen.getByTestId('cpf-summary')).toHaveTextContent('max lambda = 274.4788');
+    });
+
     it('SE 409 prerequisite renders the prerequisite banner with the run-pflow CTA', async () => {
       respondWith(409, {
         type: 'about:blank',

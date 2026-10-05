@@ -2,6 +2,7 @@ import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import {
   EMPTY_CUSTOM_DIRECTION,
+  directionTotals,
   parseIncrease,
   type CustomDirection,
   type DirectionGeneratorRow,
@@ -20,11 +21,18 @@ import {
  * thinned out from there. The slack generator has no row: it supplies what the
  * rest leaves.
  *
+ * How large the numbers should be is the first thing a new user asks, and the
+ * answer is that it does not matter to the curve: lambda counts multiples of
+ * them. The editor says so, and under the tables it adds up what is typed
+ * beside what the case has (``cpf-direction-total``), so the scale of lambda
+ * can be read before the run.
+ *
  * Presentational: the drafts live in the parent form, which parses them when
  * the run is started (``parseCustomDirection``).
  *
  * Test hooks: ``cpf-direction-editor``, ``cpf-direction-fill``,
- * ``cpf-direction-clear``, ``cpf-direction-load-{idx}-p`` / ``-q`` and
+ * ``cpf-direction-clear``, ``cpf-direction-size-hint``,
+ * ``cpf-direction-total``, ``cpf-direction-load-{idx}-p`` / ``-q`` and
  * ``cpf-direction-gen-{idx}-p``.
  */
 export interface CpfDirectionEditorProps {
@@ -39,6 +47,51 @@ const BLANK: IncreaseDraft = { p: '', q: '' };
 
 function formatBase(value: number | null): string {
   return value === null ? '—' : value.toFixed(1);
+}
+
+/** A sum as typed numbers add up: no trailing zeros, no float noise. */
+function formatSum(value: number): string {
+  return String(Number(value.toFixed(3)));
+}
+
+/** A change with its sign, so that an increase and a decrease read apart. */
+function formatChange(value: number): string {
+  return `${value > 0 ? '+' : ''}${formatSum(value)}`;
+}
+
+/**
+ * What one unit of lambda is with the drafts as they stand, beside the base
+ * case's own totals.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function directionTotalText(
+  custom: CustomDirection,
+  loads: readonly DirectionLoadRow[],
+  generators: readonly DirectionGeneratorRow[],
+): string {
+  const totals = directionTotals(custom, loads, generators);
+  if (totals.moved === 0) {
+    return 'No increase is set yet: a run needs one on at least one load or generator.';
+  }
+  const parts: string[] = [];
+  if (totals.loadP !== 0 || totals.loadQ !== 0) {
+    const base =
+      totals.baseLoadP === null
+        ? ''
+        : ` (base case: ${formatSum(totals.baseLoadP)} MW, ${formatSum(totals.baseLoadQ ?? 0)} MVAr)`;
+    parts.push(
+      `the loads by ${formatChange(totals.loadP)} MW and ${formatChange(totals.loadQ)} MVAr${base}`,
+    );
+  }
+  if (totals.generatorP !== 0) {
+    const base =
+      totals.baseGeneratorP === null ? '' : ` (base case: ${formatSum(totals.baseGeneratorP)} MW)`;
+    parts.push(`the PV generators by ${formatChange(totals.generatorP)} MW${base}`);
+  }
+  // Increases that cancel out across devices still move something.
+  if (parts.length === 0)
+    return 'One unit of λ moves power between devices and adds none in total.';
+  return `One unit of λ changes ${parts.join(' and ')}.`;
 }
 
 /** The drafts that make the custom direction the proportional one. */
@@ -76,15 +129,24 @@ export function CpfDirectionEditor({
       data-testid="cpf-direction-editor"
       className={cn('border-border/60 flex flex-col gap-2 rounded border p-2', className)}
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-muted-foreground text-[10px] leading-snug">
-          What each device gains for one unit of λ. Blank is no change, and a negative number takes
-          power off. The slack generator supplies whatever the rest leaves.
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <span className="text-muted-foreground flex min-w-0 flex-1 basis-80 flex-col gap-1 text-[10px] leading-snug">
+          <span>
+            What each device gains for one unit of λ. Blank is no change, and a negative number
+            takes power off. The slack generator supplies whatever the rest leaves.
+          </span>
+          <span data-testid="cpf-direction-size-hint">
+            Any size works: λ counts multiples of these numbers, so ten times the numbers is the
+            same curve at a tenth of the λ. Small numbers make a long run, because one step moves λ
+            by half a unit at most; a run that uses up its steps says so and offers more. Not sure
+            where to start? Fill with base values is every device growing in proportion, to edit
+            from.
+          </span>
         </span>
         <span className="flex gap-1">
           <Button
             type="button"
-            variant="ghost"
+            variant="outline"
             size="sm"
             disabled={!hasBase}
             title="Copy each device's own power in: the same curve as Loads and generation, to edit from"
@@ -156,6 +218,10 @@ export function CpfDirectionEditor({
           ))}
         </IncreaseTable>
       </div>
+
+      <span data-testid="cpf-direction-total" className="text-foreground text-[11px] leading-snug">
+        {directionTotalText(value, loads, generators)}
+      </span>
     </div>
   );
 }

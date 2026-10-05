@@ -4,7 +4,8 @@
  *   load IEEE 14 -> power flow -> nose curve without limits -> tick Q limits ->
  *   the form says the power flow broke them and solves it again -> the nose is
  *   where the slack generator runs out of reactive power -> the full curve ->
- *   a custom direction
+ *   a custom direction -> a run that uses up its steps, and the button that
+ *   runs it again with more
  *
  * It drives the real UI against a real `tensa serve` (see `playwright.config.ts`):
  * the curves are what ANDES traced, with the limits enforced by the server. The
@@ -61,7 +62,7 @@ async function runCpf(page: Page): Promise<Record<string, unknown>> {
   return (await response.json()) as Record<string, unknown>;
 }
 
-/** The lambda the summary line under the form gives as the largest reached. */
+/** The lambda the summary line beside the Run button gives as the largest reached. */
 async function maxLambda(page: Page): Promise<number> {
   const text = await page.getByTestId('cpf-summary').innerText();
   const match = /max lambda = ([\d.]+)/.exec(text);
@@ -151,13 +152,48 @@ test('CPF: limits change the nose, and the result says which generator it is due
   await page.getByTestId('cpf-direction-load-PQ_11-p').fill('10');
   await page.getByTestId('cpf-direction-load-PQ_11-q').fill('3');
   await page.getByTestId('cpf-direction-gen-2-p').fill('10');
+  // The editor adds up what one unit of lambda is, beside what the case has.
+  await expect(page.getByTestId('cpf-direction-total')).toContainText(
+    'One unit of λ changes the loads by +10 MW and +3 MVAr (base case: 223.7 MW',
+  );
   const custom = await runCpf(page);
   expect(custom.direction).toBe('custom');
   await expect(page.getByTestId('cpf-run-caption')).toContainText(
     'Custom · λ = 1 is the custom increase as given',
   );
   // Lambda counts tens of megawatts on one bus now, not multiples of the system load.
-  expect(await maxLambda(page)).toBeGreaterThan(1);
+  const customNose = await maxLambda(page);
+  expect(customNose).toBeGreaterThan(1);
+  await expect(page.getByTestId('cpf-step-limit-note')).toHaveCount(0);
+
+  // ---- a run that uses up its steps ---------------------------------------------
+  // Eight steps do not get this direction to its nose. The form says so by the
+  // Run button and offers four times as many, which do.
+  await page.getByTestId('cpf-config-advanced-toggle').click();
+  await page.getByTestId('field-cpf-config-max-iter').fill('8');
+  const cutShort = await runCpf(page);
+  expect(cutShort.truncated).toBe(true);
+  const stepNote = page.getByTestId('cpf-step-limit-note');
+  await expect(stepNote).toContainText('The run used all of its 8 steps and stopped at λ = ');
+  await expect(stepNote).toContainText('before it reached the nose');
+  await expect(page.getByTestId('cpf-truncated-banner')).toContainText(
+    'raise Max steps (under Advanced in the options above) and run again',
+  );
+  const [again] = await Promise.all([
+    page.waitForResponse(
+      (reply) =>
+        reply.request().method() === 'POST' && new URL(reply.url()).pathname.endsWith('/cpf'),
+      { timeout: 90_000 },
+    ),
+    page.getByRole('button', { name: 'Run again with up to 32 steps' }).click(),
+  ]);
+  expect(again.request().postDataJSON()).toMatchObject({ direction: 'custom', max_iter: 32 });
+  const whole = (await again.json()) as Record<string, unknown>;
+  expect(whole.truncated).toBe(false);
+  await expect(stepNote).toHaveCount(0);
+  await expect(page.getByTestId('field-cpf-config-max-iter')).toHaveValue('32');
+  // The same nose as the run that had steps to spare.
+  expect(await maxLambda(page)).toBeCloseTo(customNose, 3);
 
   expect(uncaughtErrors, uncaughtErrors.join('\n')).toEqual([]);
 });

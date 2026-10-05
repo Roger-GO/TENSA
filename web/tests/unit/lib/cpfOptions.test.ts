@@ -1,8 +1,9 @@
 /**
  * The rules of a continuation power flow's options: what the request body
- * holds, how a custom direction's drafts become its two lists, which devices
- * a direction can name, and how a result is read (the lower branch, the
- * generators held at a limit, the sentences about them).
+ * holds, how a custom direction's drafts become its two lists and what they
+ * add up to, which devices a direction can name, and how a result is read (the
+ * lower branch, a run that used up its steps, the generators held at a limit,
+ * the sentences about them).
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -10,14 +11,17 @@ import {
   cpfRequestBody,
   directionLabel,
   directionRows,
+  directionTotals,
   hasLowerBranch,
   heldFromTheStart,
   lambdaMeaning,
   limitsSummary,
+  moreSteps,
   noseLimitEvent,
   parseCustomDirection,
   parseIncrease,
   releaseCaution,
+  stepLimitReached,
   switchedAlongThePath,
   wouldHaveReleased,
 } from '@/lib/cpfOptions';
@@ -175,6 +179,59 @@ describe('a custom direction', () => {
   });
 });
 
+describe('directionTotals', () => {
+  const loads = [
+    { idx: 'PQ_1', name: 'PQ_1', bus: '2', p: 21.7, q: 12.7 },
+    { idx: 'PQ_2', name: 'PQ_2', bus: '3', p: 50, q: 25 },
+  ];
+  const generators = [{ idx: '2', name: '2', bus: '2', p: 40 }];
+
+  it('adds up what is typed beside what the case has', () => {
+    const totals = directionTotals(
+      {
+        loads: { PQ_1: { p: '10', q: '5' }, PQ_2: { p: '-2.5', q: '' } },
+        generators: { '2': { p: '5', q: '' } },
+      },
+      loads,
+      generators,
+    );
+    expect(totals).toEqual({
+      loadP: 7.5,
+      loadQ: 5,
+      generatorP: 5,
+      baseLoadP: 71.7,
+      baseLoadQ: 37.7,
+      baseGeneratorP: 40,
+      moved: 3,
+    });
+  });
+
+  it('counts a field that is no number as zero, and a draft of another case not at all', () => {
+    const totals = directionTotals(
+      {
+        loads: { PQ_1: { p: 'abc', q: '' }, PQ_99: { p: '100', q: '' } },
+        generators: {},
+      },
+      loads,
+      generators,
+    );
+    expect(totals.loadP).toBe(0);
+    expect(totals.moved).toBe(0);
+  });
+
+  it('has no base totals without a solved power flow', () => {
+    const totals = directionTotals(
+      { loads: { PQ_1: { p: '1', q: '' } }, generators: {} },
+      [{ idx: 'PQ_1', name: 'PQ_1', bus: '2', p: null, q: null }],
+      [],
+    );
+    expect(totals.baseLoadP).toBeNull();
+    expect(totals.baseLoadQ).toBeNull();
+    expect(totals.baseGeneratorP).toBeNull();
+    expect(totals.moved).toBe(1);
+  });
+});
+
 describe('directionRows', () => {
   const topology = {
     loads: [
@@ -238,6 +295,35 @@ describe('reading a result', () => {
     expect(hasLowerBranch(result({ stop_at: 'full' }))).toBe(true);
     expect(hasLowerBranch(result({ stop_at: 'full', nose_idx: 3 }))).toBe(false);
     expect(hasLowerBranch(result({ stop_at: 'full', nose_idx: -1, truncated: true }))).toBe(false);
+  });
+
+  it('names the step limit of a run that used it up, with or without a nose', () => {
+    // No nose: the routine ran out of steps on the way up.
+    const cut = result({ nose_idx: -1, truncated: true, done_msg: 'Reached max steps (500)' });
+    expect(stepLimitReached(cut)).toBe(500);
+    // A nose, and a lower branch that ran out of them.
+    const brokenOff = result({
+      stop_at: 'full',
+      complete: false,
+      done_msg: 'Reached max steps (1000)',
+    });
+    expect(stepLimitReached(brokenOff)).toBe(1000);
+    expect(moreSteps(500)).toBe(2000);
+  });
+
+  it('names no step limit for a run that ended another way', () => {
+    expect(stepLimitReached(result())).toBeNull();
+    expect(
+      stepLimitReached(result({ truncated: true, done_msg: 'Corrector failed at lambda=0.3' })),
+    ).toBeNull();
+    // The message alone is not enough: the run has to have stopped short.
+    expect(stepLimitReached(result({ done_msg: 'Reached max steps (500)' }))).toBeNull();
+    // A QV curve has no step limit to raise.
+    expect(
+      stepLimitReached(
+        result({ mode: 'qv', truncated: true, done_msg: 'Reached max steps (500)' }),
+      ),
+    ).toBeNull();
   });
 
   it('splits the events into held from the start and switched along the path', () => {

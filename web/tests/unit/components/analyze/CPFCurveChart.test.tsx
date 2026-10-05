@@ -199,6 +199,36 @@ describe('<CPFCurveChart /> what the run was asked for', () => {
     expect(screen.getByTestId('cpf-truncated-banner')).toBeInTheDocument();
     expect(screen.queryByTestId('cpf-incomplete-banner')).not.toBeInTheDocument();
   });
+
+  it('points a run that used up its steps to the field that raises them', () => {
+    const advice =
+      'To go further, raise Max steps (under Advanced in the options above) and run again.';
+    const { rerender } = render(<CPFCurveChart result={TRUNCATED_RESULT} />);
+    expect(screen.getByTestId('cpf-truncated-banner')).toHaveTextContent(
+      'The run ended before it reached a nose. Reason: Reached max steps (3). The curve is ' +
+        `drawn as far as the run got, so the voltage-collapse margin is not known. ${advice}`,
+    );
+
+    rerender(
+      <CPFCurveChart
+        result={{ ...FULL_RESULT, complete: false, done_msg: 'Reached max steps (6)' }}
+      />,
+    );
+    expect(screen.getByTestId('cpf-incomplete-banner')).toHaveTextContent(
+      `The nose and the upper branch are complete. ${advice}`,
+    );
+
+    // A run that stopped for another reason is not helped by more steps, and
+    // a QV curve has no such field.
+    rerender(
+      <CPFCurveChart
+        result={{ ...TRUNCATED_RESULT, done_msg: 'Corrector failed at lambda=0.3' }}
+      />,
+    );
+    expect(screen.getByTestId('cpf-truncated-banner')).not.toHaveTextContent('Max steps');
+    rerender(<CPFCurveChart result={{ ...TRUNCATED_RESULT, mode: 'qv' }} />);
+    expect(screen.getByTestId('cpf-truncated-banner')).not.toHaveTextContent('Max steps');
+  });
 });
 
 describe('interpolateBusVoltage on one branch', () => {

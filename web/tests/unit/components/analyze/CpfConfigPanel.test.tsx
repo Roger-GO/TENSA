@@ -14,7 +14,9 @@
  *   moves, and hands the parent the two lists;
  * - the lower-branch box asks for the full curve;
  * - an invalid (negative) step renders the inline error banner and blocks
- *   the ``onRun`` call.
+ *   the ``onRun`` call;
+ * - what the parent says about the last run sits by the Run button, and its
+ *   "run with more steps" writes the Max steps field and runs the form.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -108,6 +110,14 @@ describe('<CpfConfigPanel />', () => {
     expect(screen.getByTestId('cpf-config-advanced')).toBeInTheDocument();
     expect(screen.getByTestId('field-cpf-config-step')).toBeInTheDocument();
     expect(screen.getByTestId('field-cpf-config-max-iter')).toBeInTheDocument();
+    // The fields go by the names the rest of the form uses for them, and each
+    // says what it does to a run and what blank stands for.
+    expect(screen.getByLabelText('Step (optional)')).toHaveAccessibleDescription(
+      /does not shorten a long run\. Blank is its default, 0\.1\./,
+    );
+    expect(screen.getByLabelText('Max steps (optional)')).toHaveAccessibleDescription(
+      /raise this to go further\. Blank is ANDES's default, 500\./,
+    );
   });
 
   it('defaults direction to load and runs with just the direction when fields are blank', async () => {
@@ -224,5 +234,69 @@ describe('<CpfConfigPanel />', () => {
     expect(screen.getByTestId('error-cpf-config-step')).toBeInTheDocument();
     // onRun was NOT called — the invalid request never reaches the parent.
     expect(onRun).not.toHaveBeenCalled();
+  });
+
+  it('shows what the parent says about the last run by the Run button', () => {
+    renderPanel(vi.fn(), {
+      runStatus: <span data-testid="status">18 steps</span>,
+      renderRunFollowUp: () => <span data-testid="follow-up">used up its steps</span>,
+    });
+    const status = screen.getByTestId('status');
+    // Beside the button, in its row.
+    expect(status.parentElement).toContainElement(screen.getByTestId('analyze-run-cpf'));
+    // The follow-up comes before the options.
+    const followUp = screen.getByTestId('follow-up');
+    expect(
+      followUp.compareDocumentPosition(screen.getByTestId('cpf-config-direction')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('runs the form as it stands with more steps, and shows the number it wrote', async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    renderPanel(onRun, {
+      renderRunFollowUp: ({ runWithMaxSteps }) => (
+        <button type="button" onClick={() => runWithMaxSteps(2000)}>
+          more steps
+        </button>
+      ),
+    });
+    await user.click(screen.getByTestId('cpf-config-direction-custom'));
+    await user.type(screen.getByTestId('cpf-direction-load-PQ_1-p'), '10');
+    await user.click(screen.getByTestId('cpf-config-lower-branch'));
+
+    await user.click(screen.getByRole('button', { name: 'more steps' }));
+
+    expect(onRun).toHaveBeenCalledExactlyOnceWith({
+      direction: 'custom',
+      loadIncrease: [{ idx: 'PQ_1', p: 10, q: 0 }],
+      generatorIncrease: [],
+      stopAt: 'full',
+      maxIter: 2000,
+    });
+    // Advanced is open on the field, which keeps the number for the next run.
+    expect(screen.getByTestId('field-cpf-config-max-iter')).toHaveValue('2000');
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).toHaveBeenLastCalledWith(expect.objectContaining({ maxIter: 2000 }));
+  });
+
+  it('more steps do not get a form that is not valid past the check', async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    renderPanel(onRun, {
+      renderRunFollowUp: ({ runWithMaxSteps }) => (
+        <button type="button" onClick={() => runWithMaxSteps(2000)}>
+          more steps
+        </button>
+      ),
+    });
+    // A custom direction with nothing typed moves nothing.
+    await user.click(screen.getByTestId('cpf-config-direction-custom'));
+    await user.click(screen.getByRole('button', { name: 'more steps' }));
+    expect(onRun).not.toHaveBeenCalled();
+    expect(screen.getByTestId('cpf-config-error')).toHaveTextContent(
+      'A custom direction needs an increase on at least one load or generator.',
+    );
   });
 });

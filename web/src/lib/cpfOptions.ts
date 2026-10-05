@@ -215,6 +215,66 @@ export function directionRows(
   return { loads, generators };
 }
 
+/**
+ * What a custom direction changes for one unit of lambda, beside what the
+ * devices it can name hold in the solved power flow. The pair is what tells a
+ * reader how large the direction is: lambda counts multiples of it.
+ */
+export interface DirectionTotals {
+  /** MW and MVAr the loads gain, and MW the PV generators gain. */
+  loadP: number;
+  loadQ: number;
+  generatorP: number;
+  /** The same sums over the solved power flow; `null` when there is none to read. */
+  baseLoadP: number | null;
+  baseLoadQ: number | null;
+  baseGeneratorP: number | null;
+  /** How many devices have an increase other than zero. */
+  moved: number;
+}
+
+function sumOrNull(values: readonly (number | null)[]): number | null {
+  const known = values.filter((value): value is number => value !== null);
+  return known.length === 0 ? null : known.reduce((total, value) => total + value, 0);
+}
+
+/**
+ * Add up the drafts of a custom direction over the devices listed, as
+ * `parseCustomDirection` reads them. A field that is not a number counts as
+ * zero here: the field itself is marked, and the run says which one it is.
+ */
+export function directionTotals(
+  custom: CustomDirection,
+  loads: readonly DirectionLoadRow[],
+  generators: readonly DirectionGeneratorRow[],
+): DirectionTotals {
+  let loadP = 0;
+  let loadQ = 0;
+  let generatorP = 0;
+  let moved = 0;
+  for (const row of loads) {
+    const p = parseIncrease(custom.loads[row.idx]?.p) ?? 0;
+    const q = parseIncrease(custom.loads[row.idx]?.q) ?? 0;
+    loadP += p;
+    loadQ += q;
+    if (p !== 0 || q !== 0) moved += 1;
+  }
+  for (const row of generators) {
+    const p = parseIncrease(custom.generators[row.idx]?.p) ?? 0;
+    generatorP += p;
+    if (p !== 0) moved += 1;
+  }
+  return {
+    loadP,
+    loadQ,
+    generatorP,
+    baseLoadP: sumOrNull(loads.map((row) => row.p)),
+    baseLoadQ: sumOrNull(loads.map((row) => row.q)),
+    baseGeneratorP: sumOrNull(generators.map((row) => row.p)),
+    moved,
+  };
+}
+
 // ---- the request ------------------------------------------------------------
 
 /** What one run of the nose curve is asked for. */
@@ -257,6 +317,28 @@ export function hasLowerBranch(result: CpfResult): boolean {
   return (
     result.stop_at === 'full' && result.nose_idx >= 0 && result.nose_idx < result.lambdas.length - 1
   );
+}
+
+/**
+ * The step limit a nose-curve run used up before it was done, or `null` when
+ * it ended any other way. A run that gets there has no nose, or has one and
+ * a lower branch that stops short. ANDES says which limit it was in its
+ * closing message only (`Reached max steps (500)`).
+ */
+export function stepLimitReached(result: CpfResult): number | null {
+  if (result.mode !== 'pv') return null;
+  if (!result.truncated && result.complete !== false) return null;
+  const match = /^Reached max steps \((\d+)\)/.exec(result.done_msg);
+  return match === null ? null : Number(match[1]);
+}
+
+/**
+ * The limit a run that used up its steps is offered next: four times as many.
+ * A full curve takes about twice the steps of its upper branch, so this still
+ * closes the curve of a run that was stopped halfway to its nose.
+ */
+export function moreSteps(limit: number): number {
+  return limit * 4;
 }
 
 /** The generators the power flow already held at a limit when the run started. */
