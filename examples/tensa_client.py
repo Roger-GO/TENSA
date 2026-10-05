@@ -53,8 +53,10 @@ class AndesApp:
         body: dict[str, Any] | None = None,
         *,
         raw: bytes | None = None,
+        binary: bool = False,
     ) -> Any:
-        """Send ``body`` as JSON, or ``raw`` bytes as the file they are."""
+        """Send ``body`` as JSON, or ``raw`` bytes as the file they are. The answer
+        is read as JSON, or returned as the bytes it is when ``binary`` is set."""
         if raw is not None:
             data: bytes | None = raw
             headers = {"Content-Type": "application/octet-stream"}
@@ -69,8 +71,10 @@ class AndesApp:
         )
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                raw = resp.read()
-                return json.loads(raw) if raw else None
+                answer = resp.read()
+                if binary:
+                    return answer
+                return json.loads(answer) if answer else None
         except urllib.error.HTTPError as e:
             try:
                 problem = json.loads(e.read())
@@ -113,6 +117,22 @@ class AndesApp:
         Options: ``t_start``, ``t_end`` (the window), ``settling_band``,
         ``rocof_window``. Needs no session."""
         return self.request("POST", "/response-metrics", {"series": series, **options})
+
+    def comtrade(
+        self, t: list[float], channels: list[dict[str, Any]], **options: Any
+    ) -> bytes:
+        """A COMTRADE (IEEE C37.111-1999) record of signals, as the bytes of a
+        ``.zip`` that holds its ``.cfg`` and its ASCII ``.dat``.
+
+        ``t`` is the sample times in seconds and ``channels`` a list of
+        ``{"name": ..., "values": [...]}``, each optionally with a ``"unit"``:
+        ``traces["t"]`` and ``traces["variables"]`` of ``run_tds(..., dae_vars=[...])``
+        as they are. Options: ``name`` (what the two files are called),
+        ``station``, ``device``, ``frequency_hz``, ``start_time`` (ISO 8601, the
+        date simulated time zero stands for), ``trigger_t`` (a fault's time, in
+        seconds). Needs no session."""
+        body = {"t": t, "channels": channels, **options}
+        return self.request("POST", "/comtrade", body, binary=True)
 
 
 class Session:

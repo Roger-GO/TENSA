@@ -53,6 +53,11 @@ TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrat
 Response metrics:POST /response-metrics  (no session; body {"series":[{"name","t":[...],"y":[...]}], optional t_start, t_end,
                  settling_band, rocof_window} -> per series: initial, final, peak, nadir, max_deviation, rocof, settling_time,
                  overshoot_pct, damping {ratio, frequency_hz}; feed it a batch run's "traces")
+COMTRADE export: POST /comtrade  (no session; body {"t":[...],"channels":[{"name","values":[...],"unit"}], optional name, station,
+                 device, frequency_hz, start_time, trigger_t} -> application/zip holding <name>.cfg and <name>.dat, an
+                 IEEE C37.111-1999 record with ASCII data: one analog channel per signal, scaled over its own range, and a
+                 time stamp per sample; feed it "t" and "variables" of a batch run's "traces" as they are; "unit" is
+                 optional, null values are written as missing; 413 over 5,000,000 values, channels times samples)
 Disturbances:    POST/GET /sessions/{id}/disturbances
   FaultSpec:  {"kind":"fault","bus_idx":"7","tf":1.0,"tc":1.1,"xf":0.05,"rf":0}   (3-phase fault at bus, applied tf→tc seconds)
   ToggleSpec: {"kind":"toggle","model":"Line","dev_idx":"Line_6","t":1.0}          (connect/disconnect a device at t)

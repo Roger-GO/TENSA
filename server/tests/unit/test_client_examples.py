@@ -168,6 +168,29 @@ def test_the_example_client_lists_andes_variables_and_describes_signals(
     assert json.loads(metrics["body"])["t_start"] == 0.5
 
 
+def test_the_example_client_asks_for_a_comtrade_record_and_returns_its_bytes(
+    recorder: tuple[str, list[dict[str, Any]]],
+) -> None:
+    base, seen = recorder
+    client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
+    app = client.AndesApp(base)
+    traces = {"t": [0.0, 0.1], "variables": [{"name": "omega GENROU 1", "values": [1.0, 1.01]}]}
+
+    archive = app.comtrade(traces["t"], traces["variables"], name="ieee14", trigger_t=0.1)
+
+    (request,) = seen
+    assert request["path"] == "/api/comtrade"
+    assert request["content_type"] == _JSON
+    assert json.loads(request["body"]) == {
+        "t": [0.0, 0.1],
+        "channels": [{"name": "omega GENROU 1", "values": [1.0, 1.01]}],
+        "name": "ieee14",
+        "trigger_t": 0.1,
+    }
+    # The answer is a .zip: it comes back as the bytes it is, not parsed as JSON.
+    assert archive == b'{"ok": true}'
+
+
 def test_the_example_client_reads_the_messages_of_a_session(
     recorder: tuple[str, list[dict[str, Any]]],
 ) -> None:

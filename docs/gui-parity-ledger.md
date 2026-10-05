@@ -12,7 +12,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | --- | --- |
 | `about-dialog` | 1 |
 | `activity-panel` | 2 |
-| `analysis-panel` | 8 |
+| `analysis-panel` | 9 |
 | `auto` | 4 |
 | `bundle-dialog` | 2 |
 | `command-palette` | 5 |
@@ -29,12 +29,13 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `snapshot-dialog` | 4 |
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
-| **total** | **64** |
+| **total** | **65** |
 
 ## OpenAPI routes
 
 | Method | Path | GUI location | Deferral reason |
 | --- | --- | --- | --- |
+| `POST` | `/api/comtrade` | `analysis-panel` |  |
 | `POST` | `/api/response-metrics` | `analysis-panel` |  |
 | `GET` | `/api/sessions` | `auto` |  |
 | `POST` | `/api/sessions` | `auto` |  |
