@@ -12,12 +12,15 @@
  *    mounted to notice.
  *  - A session clear drops the case and PF result, except mid-recovery, when
  *    the case selection has to survive so it can be re-loaded.
+ *  - A session clear drops the messages of the session that ended, recovery or not:
+ *    they are that worker's log.
  */
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { useRunReadiness } from '@/lib/useRunReadiness';
 import { __resetCascadeForTests, wireStoreCascade } from '@/store';
 import { useAnalyzeStore } from '@/store/analyze';
+import { useMessagesStore } from '@/store/messages';
 import { useCaseStore } from '@/store/case';
 import { blankFaultSpec, useDisturbanceStore } from '@/store/disturbance';
 import { usePflowStore } from '@/store/pflow';
@@ -311,5 +314,33 @@ describe('store cascade — session clear', () => {
     expect(useCaseStore.getState().selection).not.toBeNull();
     // Runs are tied to the dead worker, so they go either way.
     expect(useRunsStore.getState().activeRunId).toBeNull();
+  });
+
+  describe('the messages ANDES logged', () => {
+    function seedMessages(): void {
+      useMessagesStore.getState().receive('sess-1', {
+        messages: [
+          { seq: 1, time: 1, level: 'warning', logger: 'andes', source: '', text: 'x', repeat: 1 },
+        ],
+        first_seq: 1,
+        last_seq: 1,
+        next_after: 1,
+        dropped: 0,
+      });
+    }
+
+    it('go with the session that ended', () => {
+      seedMessages();
+      useSessionStore.getState().clearSession();
+      expect(useMessagesStore.getState().messages).toEqual([]);
+      expect(useMessagesStore.getState().sessionId).toBeNull();
+      expect(useMessagesStore.getState().cursor).toBe(0);
+    });
+
+    it('go with a session that is being recovered too: they are its worker’s log', () => {
+      seedMessages();
+      useSessionStore.getState().resetSession();
+      expect(useMessagesStore.getState().messages).toEqual([]);
+    });
   });
 });

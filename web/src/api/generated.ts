@@ -1224,6 +1224,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read what ANDES said while the session's commands ran.
+         * @description The messages ANDES logged for this session, oldest first, at most
+         *     ``limit`` of them. Warnings and errors are what to look for after a run that
+         *     gave an odd result; ``info`` adds how each run went (iteration counts, the
+         *     events a time-domain run applied). A read costs the worker nothing and does
+         *     not wait for a command in progress.
+         */
+        get: operations["listMessages"];
+        put?: never;
+        post?: never;
+        /**
+         * Forget the session's messages.
+         * @description Empty the session's message log. Message numbers go on from where they
+         *     were, so a client that reads on from the last number it has sees only what
+         *     is logged from now.
+         */
+        delete: operations["clearMessages"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3373,6 +3403,80 @@ export interface components {
              * @description Snapshot of currently-active sessions for this token.
              */
             sessions: components["schemas"]["SessionDescriptor"][];
+        };
+        /**
+         * SessionMessageSchema
+         * @description One message in a session's log: something ANDES reported while the
+         *     session's worker ran a command.
+         */
+        SessionMessageSchema: {
+            /**
+             * Seq
+             * @description Number of the message in the session, from 1, in the order the server received them. Numbers are never reused, not even after the log is cleared, so ``after=<seq>`` always reads what came next.
+             */
+            seq: number;
+            /**
+             * Time
+             * @description Unix time, in seconds, at which ANDES logged the message.
+             */
+            time: number;
+            /**
+             * Level
+             * @description ``info`` for what ANDES reports about a run's progress, ``warning`` for something that may make a result wrong (a device whose initialisation failed, a limit that was not adjusted), ``error`` for what stopped the command.
+             * @enum {string}
+             */
+            level: "info" | "warning" | "error";
+            /**
+             * Logger
+             * @description Name of the ANDES logger that said it (``andes.routines.pflow``).
+             */
+            logger: string;
+            /**
+             * Source
+             * @description The command the worker was running: ``load_case``, ``run_pflow``, ``run_tds``, ``run_eig``, ... Empty for a message logged between commands.
+             */
+            source: string;
+            /**
+             * Text
+             * @description The message. It can span several lines: ANDES logs tables. A message longer than 20000 characters is cut.
+             */
+            text: string;
+            /**
+             * Repeat
+             * @description How many times in a row ANDES logged this exact message, which is kept once (a solver that warns on every step).
+             */
+            repeat: number;
+        };
+        /**
+         * SessionMessages
+         * @description Response of ``GET /sessions/{id}/messages``.
+         */
+        SessionMessages: {
+            /**
+             * Messages
+             * @description The messages asked for, oldest first.
+             */
+            messages: components["schemas"]["SessionMessageSchema"][];
+            /**
+             * First Seq
+             * @description The number of the oldest message the session still holds (of the next one to arrive, when it holds none). A reader that kept older messages should drop them: they were evicted or cleared.
+             */
+            first_seq: number;
+            /**
+             * Last Seq
+             * @description The number of the newest message the session has had; 0 before any.
+             */
+            last_seq: number;
+            /**
+             * Next After
+             * @description What to pass as ``after`` to read on from here: the last message returned when the read stopped at ``limit``, otherwise ``last_seq``.
+             */
+            next_after: number;
+            /**
+             * Dropped
+             * @description How many messages were lost to the caps (the worker keeps 1000 between two replies, the session keeps the latest 2000), over the session's life. Clearing the log does not count.
+             */
+            dropped: number;
         };
         /**
          * SidecarLayout
@@ -7078,6 +7182,91 @@ export interface operations {
             };
             /** @description The job is not cancellable (a synchronous routine that must run to completion). Carries a ``wait-for-job`` recovery CTA. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listMessages: {
+        parameters: {
+            query?: {
+                /** @description Only messages numbered above this. Pass the ``next_after`` of the previous read to get what came since; 0 reads from the start. */
+                after?: number;
+                /** @description The lowest level to return: ``warning`` gives warnings and errors, ``error`` only errors. */
+                level?: "info" | "warning" | "error";
+                /** @description Most messages to return. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionMessages"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clearMessages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Session not found or already closed. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

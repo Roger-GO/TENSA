@@ -64,6 +64,11 @@ export type SaveCaseResponse = components['schemas']['SaveCaseResponse'];
 export type GeneratorOutput = components['schemas']['GeneratorOutput'];
 export type LoadConsumption = components['schemas']['LoadConsumption'];
 
+/** One thing ANDES said while a command ran, from `GET /sessions/{id}/messages`. */
+export type SessionMessage = components['schemas']['SessionMessageSchema'];
+export type SessionMessages = components['schemas']['SessionMessages'];
+export type MessageLevel = SessionMessage['level'];
+
 export type DaeVariableInfo = components['schemas']['DaeVariableInfo'];
 export type DaeVariableList = components['schemas']['DaeVariableList'];
 export type MetricsSeries = components['schemas']['MetricsSeries'];

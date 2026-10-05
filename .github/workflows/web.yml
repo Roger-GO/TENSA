@@ -140,7 +140,7 @@ jobs:
           workspace="$RUNNER_TEMP/tensa-e2e-workspace"
           log="$RUNNER_TEMP/tensa-e2e-server.log"
           mkdir -p "$workspace"
-          nohup tensa serve --port "$E2E_PORT" --workspace "$workspace" --max-sessions 16 \
+          nohup tensa serve --port "$E2E_PORT" --workspace "$workspace" --max-sessions 32 \
             > "$log" 2>&1 &
           for _ in $(seq 1 60); do
             if curl --silent --fail "http://127.0.0.1:$E2E_PORT/openapi.json" > /dev/null; then

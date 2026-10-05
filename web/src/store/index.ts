@@ -39,6 +39,7 @@ import { useProfilesStore } from './profiles';
 import { useDisturbanceStore } from './disturbance';
 import { useSweepStore } from './sweep';
 import { useJobsStore } from './jobs';
+import { useMessagesStore } from './messages';
 import { useAnalyzeStore } from './analyze';
 import { useUiStore } from './ui';
 
@@ -90,6 +91,8 @@ export function wireStoreCascade(): void {
       // Jobs are session-scoped (a job's lifecycle belongs to the worker
       // that produced it); always clear on session change, recovery or not.
       useJobsStore.getState().clearJobs();
+      // The messages are the server session's log; a new session starts with none.
+      useMessagesStore.getState().reset();
       if (!state.recoveryInProgress) {
         useCaseStore.getState().clearCase();
         usePflowStore.getState().clearPflow();

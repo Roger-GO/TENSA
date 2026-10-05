@@ -698,6 +698,21 @@ function useCommandSets(): CommandSets {
         },
         shortcut: 'meta+shift+j, ctrl+shift+j',
       },
+      // What ANDES said while a command ran: opens the BottomDrawer onto the
+      // Messages tab (warnings and errors first). Always opens, like Activity.
+      {
+        id: 'view.openMessages',
+        label: 'Open Messages',
+        group: 'view',
+        keywords: ['messages', 'warnings', 'errors', 'log', 'andes', 'console', 'output', 'drawer'],
+        action: () => {
+          const layout = useLayoutStore.getState();
+          layout.setResultsViewActive(false);
+          layout.setActiveBottomDrawerTab('messages');
+          layout.setBottomDrawerCollapsed(false);
+          layout.clearDrawerUnread();
+        },
+      },
       // v3.1 — full-space results view. Toggles
       // ``useLayoutStore.resultsViewActive``, which makes the AppShell
       // short-circuit the diagram + inspector + drawer and render the

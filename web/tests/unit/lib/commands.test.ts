@@ -412,6 +412,33 @@ describe('useCommandRegistry — v3 Unit 2 view commands', () => {
   });
 });
 
+describe('useCommandRegistry: Open Messages command', () => {
+  it('is in the view group and findable by what a user would call it', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'view.openMessages');
+    expect(cmd?.group).toBe('view');
+    expect(cmd?.label).toBe('Open Messages');
+    expect(cmd?.keywords).toEqual(expect.arrayContaining(['warnings', 'errors', 'log']));
+  });
+
+  it('opens the drawer on the Messages tab, from the results view or a collapsed drawer', () => {
+    useLayoutStore.setState({
+      bottomDrawerCollapsed: true,
+      resultsViewActive: true,
+      activeBottomDrawerTab: 'buses',
+      drawerHasUnreadResults: true,
+    });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    result.current.find((c) => c.id === 'view.openMessages')?.action();
+
+    const layout = useLayoutStore.getState();
+    expect(layout.activeBottomDrawerTab).toBe('messages');
+    expect(layout.bottomDrawerCollapsed).toBe(false);
+    expect(layout.resultsViewActive).toBe(false);
+    expect(layout.drawerHasUnreadResults).toBe(false);
+  });
+});
+
 describe('useCommandRegistry — v3.1 results view command', () => {
   it('exposes view.toggle-results-view in the view group', () => {
     const { result } = renderHook(() => useCommandRegistry(), { wrapper });

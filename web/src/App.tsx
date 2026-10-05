@@ -26,6 +26,7 @@ import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
 import { makeQueryClient, wireGlobalErrorRecovery, useCurrentTopology } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
 import { useSessionHeartbeat } from '@/api/useSessionHeartbeat';
+import { useSessionMessagesSync } from '@/api/useSessionMessages';
 import { useUnsavedWorkGuard } from '@/lib/useUnsavedWorkGuard';
 import { useAddComponent } from '@/lib/useAddComponent';
 import { useJobEventsStream } from '@/streaming/useJobEventsStream';
@@ -115,6 +116,10 @@ function AppInner({ children }: { children: React.ReactNode }) {
   // the TopBar in-flight chip + the panel history stay live. Disposes on
   // session change / unmount.
   useJobEventsStream();
+  // What ANDES says while a command runs: read from the server's log whenever a job
+  // starts or ends (and while one is in flight) into ``useMessagesStore``, so the
+  // Messages tab and its count are current whether or not the tab is open.
+  useSessionMessagesSync();
   // Keep the case-store topology mirror in sync with the topology query so the
   // dynamic-content badge + run-readiness gate (Unit 24) reflect the loaded
   // case even when the query is served from cache.

@@ -15,14 +15,14 @@ import { defineConfig, devices } from '@playwright/test';
  *    same bundle a user gets from `pip install tensa`.
  *
  *      pnpm build
- *      tensa serve --port 8765 --workspace "$(mktemp -d)" --max-sessions 16
+ *      tensa serve --port 8765 --workspace "$(mktemp -d)" --max-sessions 32
  *      E2E_BASE_URL=http://127.0.0.1:8765 E2E_NO_WEBSERVER=1 pnpm test:e2e
  *
  * 2. Against the Vite dev server, which the `webServer` block below starts. It
  *    proxies `/api` to the substrate (port 8000 unless `VITE_ANDES_PORT` says
  *    otherwise), and the substrate has to accept the dev server's origin.
  *
- *      tensa serve --port 8000 --workspace "$(mktemp -d)" --max-sessions 16 \
+ *      tensa serve --port 8000 --workspace "$(mktemp -d)" --max-sessions 32 \
  *        --allow-origin http://127.0.0.1:5173
  *      pnpm test:e2e
  *

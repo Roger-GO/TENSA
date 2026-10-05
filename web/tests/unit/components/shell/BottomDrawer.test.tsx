@@ -3,7 +3,7 @@
  *
  * Coverage:
  *
- *  - Renders the 11 outer tabs with their canonical testids.
+ *  - Renders the 12 outer tabs with their canonical testids.
  *  - Tab click switches activeBottomDrawerTab in useLayoutStore AND
  *    clears drawerHasUnreadResults.
  *  - When ``bottomDrawerCollapsed === true`` only the strip renders;
@@ -21,6 +21,8 @@ import React from 'react';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { useAnalyzeStore } from '@/store/analyze';
 import { usePflowStore } from '@/store/pflow';
+import { useMessagesStore } from '@/store/messages';
+import type { SessionMessage } from '@/api/types';
 import type { TopologySummary } from '@/api/types';
 import { LIMITS_TOPOLOGY, limitsPflow } from '../../helpers/limitsCase';
 
@@ -77,6 +79,7 @@ beforeEach(() => {
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
   useAnalyzeStore.setState({ subMode: 'eig' });
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  useMessagesStore.getState().reset();
   mockTopology = null;
 });
 
@@ -85,10 +88,11 @@ afterEach(() => {
   window.localStorage.clear();
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  useMessagesStore.getState().reset();
 });
 
 describe('<BottomDrawer />', () => {
-  it('renders all 11 outer tabs', () => {
+  it('renders all 12 outer tabs', () => {
     render(<BottomDrawer />, { wrapper });
     expect(screen.getByTestId('bottom-drawer')).toBeInTheDocument();
     for (const tab of [
@@ -103,6 +107,7 @@ describe('<BottomDrawer />', () => {
       'violations',
       'analysis',
       'activity',
+      'messages',
     ]) {
       expect(screen.getByTestId(`bottom-drawer-tab-${tab}`)).toBeInTheDocument();
     }
@@ -113,10 +118,10 @@ describe('<BottomDrawer />', () => {
     const divider = screen.getByTestId('bottom-drawer-tab-group-divider');
     expect(divider).toBeInTheDocument();
     // Exactly one divider — it splits the element grids, the dynamic-model
-    // tables and the violations list from the Analysis | Activity tools group.
+    // tables and the violations list from the Analysis | Activity | Messages tools group.
     expect(screen.getAllByTestId('bottom-drawer-tab-group-divider')).toHaveLength(1);
     // The divider must sit immediately before the Analysis trigger in DOM
-    // order (the grids read as one group, Analysis|Activity as the next).
+    // order (the grids read as one group, Analysis|Activity|Messages as the next).
     const analysisTab = screen.getByTestId('bottom-drawer-tab-analysis');
     expect(
       divider.compareDocumentPosition(analysisTab) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -326,5 +331,75 @@ describe('<BottomDrawer /> Violations tab', () => {
     await user.click(screen.getByTestId('bottom-drawer-tab-violations'));
     expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(false);
     expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('violations');
+  });
+});
+
+describe('<BottomDrawer /> Messages tab', () => {
+  function logged(...levels: SessionMessage['level'][]): void {
+    useMessagesStore.getState().receive('sess-1', {
+      messages: levels.map((level, i) => ({
+        seq: i + 1,
+        time: 1_700_000_000,
+        level,
+        logger: 'andes.test',
+        source: 'run_pflow',
+        text: `${level} ${i + 1}`,
+        repeat: 1,
+      })),
+      first_seq: 1,
+      last_seq: levels.length,
+      next_after: levels.length,
+      dropped: 0,
+    });
+  }
+
+  it('mounts the messages panel when it is the active tab', () => {
+    useLayoutStore.setState({ activeBottomDrawerTab: 'messages', bottomDrawerCollapsed: false });
+    render(<BottomDrawer />, { wrapper });
+    expect(screen.getByTestId('bottom-drawer-tab-content-messages')).toBeInTheDocument();
+    expect(screen.getByTestId('messages-panel')).toBeInTheDocument();
+  });
+
+  it('opens on a click of its tab', async () => {
+    const user = userEvent.setup();
+    render(<BottomDrawer />, { wrapper });
+    await user.click(screen.getByTestId('bottom-drawer-tab-messages'));
+    expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('messages');
+    expect(screen.getByTestId('messages-panel')).toBeInTheDocument();
+  });
+
+  it('shows no count while ANDES has logged nothing worse than information', () => {
+    render(<BottomDrawer />, { wrapper });
+    expect(screen.queryByTestId('messages-tab-count')).not.toBeInTheDocument();
+    cleanup();
+    logged('info', 'info');
+    render(<BottomDrawer />, { wrapper });
+    expect(screen.queryByTestId('messages-tab-count')).not.toBeInTheDocument();
+  });
+
+  it('counts the warnings beside the tab name, in amber', () => {
+    logged('info', 'warning', 'warning');
+    render(<BottomDrawer />, { wrapper });
+    const count = screen.getByTestId('messages-tab-count');
+    expect(count).toHaveTextContent('2');
+    expect(count).toHaveAttribute('data-severity', 'warning');
+    expect(count).toHaveAttribute('title', '2 warnings');
+    expect(screen.getByTestId('bottom-drawer-tab-messages')).toContainElement(count);
+  });
+
+  it('counts warnings and errors together, in red, once there is an error', () => {
+    logged('warning', 'error', 'info');
+    render(<BottomDrawer />, { wrapper });
+    const count = screen.getByTestId('messages-tab-count');
+    expect(count).toHaveTextContent('2');
+    expect(count).toHaveAttribute('data-severity', 'error');
+    expect(count).toHaveAttribute('title', '1 error, 1 warning');
+  });
+
+  it('keeps the count in view while the drawer is collapsed', () => {
+    useLayoutStore.setState({ bottomDrawerCollapsed: true });
+    logged('error');
+    render(<BottomDrawer />, { wrapper });
+    expect(screen.getByTestId('messages-tab-count')).toHaveTextContent('1');
   });
 });

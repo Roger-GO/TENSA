@@ -23,7 +23,7 @@
  * tabs clears ``drawerHasUnreadResults`` (mirrors the click path on the
  * BottomDrawerToggle button + the ⌘J command).
  */
-import { Fragment, useEffect } from 'react';
+import { Fragment, useEffect, useMemo } from 'react';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { cn } from '@/lib/cn';
 import {
@@ -38,6 +38,9 @@ import { usePflowStore } from '@/store/pflow';
 import { useViolationReport } from '@/lib/useViolationReport';
 import { LazyAnalysisTab } from '@/components/data-grid/LazyAnalysisTab';
 import { ActivityPanel } from '@/components/shell/ActivityPanel';
+import { MessagesPanel } from '@/components/messages/MessagesPanel';
+import { countByLevel } from '@/lib/messages';
+import { useMessagesStore } from '@/store/messages';
 
 const TAB_LABELS: Record<BottomDrawerTab, string> = {
   buses: 'Buses',
@@ -51,6 +54,7 @@ const TAB_LABELS: Record<BottomDrawerTab, string> = {
   violations: 'Violations',
   analysis: 'Analysis',
   activity: 'Activity',
+  messages: 'Messages',
 };
 
 /**
@@ -83,6 +87,40 @@ function ViolationsCountBadge() {
       )}
     >
       {count}
+    </span>
+  );
+}
+
+/**
+ * The count of warnings and errors ANDES has logged, beside the Messages tab's
+ * name: red when any is an error, amber when there are only warnings, so a run
+ * that needs a look shows without opening the tab. Draws nothing while there are
+ * none (the information messages are not counted).
+ */
+function MessagesCount() {
+  const messages = useMessagesStore((s) => s.messages);
+  const counts = useMemo(() => countByLevel(messages), [messages]);
+  const total = counts.error + counts.warning;
+  if (total === 0) return null;
+  const errors = counts.error > 0;
+  const title = [
+    counts.error > 0 ? `${counts.error} error${counts.error === 1 ? '' : 's'}` : null,
+    counts.warning > 0 ? `${counts.warning} warning${counts.warning === 1 ? '' : 's'}` : null,
+  ]
+    .filter((part) => part !== null)
+    .join(', ');
+  return (
+    <span
+      data-testid="messages-tab-count"
+      data-severity={errors ? 'error' : 'warning'}
+      title={title}
+      className={cn(
+        'ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full px-1',
+        'text-[10px] leading-4 font-semibold',
+        errors ? 'bg-danger text-danger-foreground' : 'bg-warning text-warning-foreground',
+      )}
+    >
+      {total}
     </span>
   );
 }
@@ -154,8 +192,9 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
           <Fragment key={tab}>
             {/* Group separator: the tabs before it are the per-bucket
                 element grids, the dynamic-model tables and the violations
-                list; ``analysis`` + ``activity`` are the tools group. A thin spacer + hairline before ``analysis`` makes
-                that split read at a glance without a heavier divider. */}
+                list; ``analysis``, ``activity`` and ``messages`` are the
+                tools group. A thin spacer + hairline before ``analysis``
+                makes that split read at a glance without a heavier divider. */}
             {tab === 'analysis' ? (
               <span
                 aria-hidden="true"
@@ -181,6 +220,7 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
             >
               {TAB_LABELS[tab]}
               {tab === 'violations' ? <ViolationsCount /> : null}
+              {tab === 'messages' ? <MessagesCount /> : null}
             </TabsPrimitive.Trigger>
           </Fragment>
         ))}
@@ -275,6 +315,13 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
             className="flex min-h-0 flex-1 flex-col"
           >
             <ActivityPanel />
+          </TabsPrimitive.Content>
+          <TabsPrimitive.Content
+            value="messages"
+            data-testid="bottom-drawer-tab-content-messages"
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <MessagesPanel />
           </TabsPrimitive.Content>
         </div>
       )}

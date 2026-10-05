@@ -70,6 +70,7 @@ describe('useLayoutStore — defaults', () => {
       'violations',
       'analysis',
       'activity',
+      'messages',
     ]);
   });
 

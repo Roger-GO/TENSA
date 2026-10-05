@@ -35,7 +35,8 @@ import type { JobKind } from '@/store/jobs';
  * five tabs are per-bucket data grids (Units 12 + 13), ``machines``,
  * ``exciters`` and ``governors`` are the tables of the dynamic models, and
  * ``violations`` lists the limits a power flow breaks; ``analysis`` opens the
- * nested sub-tab strip (Unit 14).
+ * nested sub-tab strip (Unit 14); ``messages`` lists what ANDES said while a
+ * command ran.
  */
 export type BottomDrawerTab =
   | 'buses'
@@ -48,7 +49,8 @@ export type BottomDrawerTab =
   | 'governors'
   | 'violations'
   | 'analysis'
-  | 'activity';
+  | 'activity'
+  | 'messages';
 
 export const BOTTOM_DRAWER_TABS: readonly BottomDrawerTab[] = [
   'buses',
@@ -62,6 +64,7 @@ export const BOTTOM_DRAWER_TABS: readonly BottomDrawerTab[] = [
   'violations',
   'analysis',
   'activity',
+  'messages',
 ] as const;
 
 /**
