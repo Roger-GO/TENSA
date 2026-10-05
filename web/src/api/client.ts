@@ -356,4 +356,10 @@ export const TIMEOUTS = {
   upload: 60_000,
   /** A run sent to be written as a COMTRADE record: seconds for a long run of many columns. */
   comtradeExport: 120_000,
+  /**
+   * A continuation power flow. Seconds for most cases; with Q limits enforced
+   * each solve factorises afresh, and a full curve of a 2000-bus case takes
+   * most of a minute.
+   */
+  cpfRun: 180_000,
 } as const;

@@ -40,6 +40,7 @@ import type {
   CloneSaveAsResponse,
   ComtradeExportRequest,
   ConnectivityResult,
+  CpfQvRunRequest,
   CpfResult,
   DaeVariableList,
   DisturbanceSpec,
@@ -91,6 +92,7 @@ import { announceViolations } from '@/lib/announceViolations';
 import { elementNamesOf } from '@/lib/elementNames';
 import { stemOf } from '@/lib/paths';
 import { caseSettingsFromRun, pflowRequestBody } from '@/lib/pflowOptions';
+import { cpfRequestBody, type CpfRunOptions } from '@/lib/cpfOptions';
 
 // ---- job registration glue (Unit 6) ---------------------------------------
 
@@ -1984,20 +1986,17 @@ export function useEigParticipation(
 
 // ---- CPF (Unit 12 — continuation power flow) -----------------------------
 
-/** Request body shape for ``POST /api/sessions/{id}/cpf``. */
-export interface CpfRunVars {
+/**
+ * What one run of the nose curve is asked for: the session, and the settings
+ * of ``CpfRunOptions`` (``lib/cpfOptions``). ``direction`` defaults to
+ * ``'load'``. ``enforceQLimits`` left out takes the switch of the power-flow
+ * options: the continuation starts from the power flow, so the two run under
+ * one setting. ``maxIter`` maps onto ANDES's ``CPF.config.max_steps`` (which
+ * controls truncation; the ANDES ``max_iter`` config is corrector iterations
+ * per step, not total steps).
+ */
+export interface CpfRunVars extends Partial<CpfRunOptions> {
   sessionId: SessionId;
-  /** ``'load'`` (default) scales loads up; ``'gen'`` scales generation up. */
-  direction?: 'load' | 'gen';
-  /** Optional initial continuation step size (passes to ``CPF.config.step``). */
-  step?: number;
-  /**
-   * Optional cap on the number of continuation steps. Maps onto
-   * ANDES's ``CPF.config.max_steps`` (which controls truncation; the
-   * ANDES ``max_iter`` config is corrector iterations per step, not
-   * total steps).
-   */
-  maxIter?: number;
 }
 
 /** Request body shape for ``POST /api/sessions/{id}/cpf/qv``. */
@@ -2007,6 +2006,11 @@ export interface CpfQvRunVars {
   busIdx: string;
   /** Optional reactive-power range; ANDES default is 5.0. */
   qRange?: number;
+}
+
+/** The Q-limit switch of the power-flow options, which a continuation shares. */
+function sharedEnforceQLimits(): boolean | null {
+  return usePflowOptionsStore.getState().options.enforceQLimits;
 }
 
 /**
@@ -2022,7 +2026,10 @@ export interface CpfQvRunVars {
  * - 409 ``CpfPrerequisiteError`` — substrate gates on
  *   ``ss.PFlow.converged`` independently (per Unit 1a spike). The
  *   AnalyzePanel catches this and shows a "Run PFlow first" empty
- *   state with a CTA back to the PF view.
+ *   state with a CTA back to the PF view. Also when Q limits are to be
+ *   enforced and the solved power flow leaves a generator past one: the
+ *   same CTA runs the power flow with the shared switch on.
+ * - 422 ``CpfRequestError`` — a custom direction the case cannot take.
  * - 422 ``CpfDivergedError`` — ANDES routine raised; surfaced as a
  *   banner.
  *
@@ -2034,19 +2041,17 @@ export interface CpfQvRunVars {
 export function useCpfRun(): UseMutationResult<CpfResult, Error, CpfRunVars> {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ sessionId, direction, step, maxIter }: CpfRunVars) => {
-      const body: Record<string, unknown> = {
-        direction: direction ?? 'load',
-      };
-      if (step !== undefined) body.step = step;
-      if (maxIter !== undefined) body.max_iter = maxIter;
-      return await andesClient.post<CpfResult>(
-        `/sessions/${encodeURIComponent(sessionId)}/cpf`,
-        // CPF can take longer than PF (multi-step continuation); reuse
-        // the case-load timeout (60s) which sits comfortably above the
-        // ~3 s observed for IEEE 14 with default config.
-        { body, timeoutMs: TIMEOUTS.caseLoad },
-      );
+    mutationFn: async ({ sessionId, ...options }: CpfRunVars) => {
+      const body = cpfRequestBody({
+        ...options,
+        direction: options.direction ?? 'load',
+        enforceQLimits:
+          options.enforceQLimits === undefined ? sharedEnforceQLimits() : options.enforceQLimits,
+      });
+      return await andesClient.post<CpfResult>(`/sessions/${encodeURIComponent(sessionId)}/cpf`, {
+        body,
+        timeoutMs: TIMEOUTS.cpfRun,
+      });
     },
     onMutate: ({ direction }) => ({
       jobId: registerJob('cpf', { direction: direction ?? 'load' }),
@@ -2066,17 +2071,20 @@ export function useCpfRun(): UseMutationResult<CpfResult, Error, CpfRunVars> {
  * ``POST /api/sessions/{id}/cpf/qv`` — runs a single-bus QV-curve
  * continuation. Same wire-shape response as ``useCpfRun``; the
  * ``mode`` discriminator on the result is ``"qv"`` so the chart
- * labels the X-axis "Q (pu)" instead of "lambda".
+ * labels the X-axis "Q (pu)" instead of "lambda". Q limits follow the
+ * switch of the power-flow options, as the nose curve's do.
  */
 export function useCpfQvRun(): UseMutationResult<CpfResult, Error, CpfQvRunVars> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ sessionId, busIdx, qRange }: CpfQvRunVars) => {
-      const body: Record<string, unknown> = { bus_idx: busIdx };
+      const body: Partial<CpfQvRunRequest> = { bus_idx: busIdx };
       if (qRange !== undefined) body.q_range = qRange;
+      const enforceQLimits = sharedEnforceQLimits();
+      if (enforceQLimits !== null) body.enforce_q_limits = enforceQLimits;
       return await andesClient.post<CpfResult>(
         `/sessions/${encodeURIComponent(sessionId)}/cpf/qv`,
-        { body, timeoutMs: TIMEOUTS.caseLoad },
+        { body, timeoutMs: TIMEOUTS.cpfRun },
       );
     },
     onMutate: ({ busIdx }) => ({ jobId: registerJob('cpf-qv', { bus_idx: busIdx }) }),

@@ -228,15 +228,34 @@ export interface EigParticipationResponse {
  * - ``bus_idxes`` — ordered list of bus idxes (stringified) matching
  *   the canonical render order. Surfaced separately so the UI doesn't
  *   rely on dict-key iteration order.
- * - ``nose_idx`` — index into ``lambdas`` where lambda is maximised
- *   (the nose / voltage-collapse margin). ``-1`` when truncated.
- * - ``max_lam`` — peak lambda value reached. Always populated.
+ * - ``nose_idx`` — index into ``lambdas`` of the nose (the
+ *   voltage-collapse margin): the point after which lambda first goes
+ *   down. ``-1`` when truncated. On a full curve the steps after it are
+ *   the lower branch.
+ * - ``max_lam`` — lambda at the nose; without one, the largest value
+ *   reached. Always populated.
  * - ``truncated`` — ``true`` when the run terminated without finding a
  *   nose point. UI surfaces the truncation note from ``done_msg``.
  * - ``done_msg`` — ANDES's terminal status string (e.g.,
  *   ``"Nose point at lambda=3.258046"``,
  *   ``"Reached max steps (5)"``).
  * - ``mode`` — ``"pv"`` for the full sweep, ``"qv"`` for single-bus.
+ * - ``generators`` — every in-service PV and slack generator's reactive
+ *   output (MVAr) at every step, with its limits.
+ * - ``limit_events`` — the generators held at a reactive limit, each with
+ *   the first step at which it is; step 0 is "held by the power flow the
+ *   run started from". ``at_nose`` marks the one the nose is due to.
+ * - ``q_limits_enforced`` — whether generators were switched to PQ at
+ *   their limits along the path.
+ * - ``stop_at`` — ``"nose"``, or ``"full"`` for a curve that goes on along
+ *   the lower branch.
+ * - ``complete`` — ``false`` for a run that did not end the way
+ *   ``stop_at`` asked (with ``truncated`` false: a lower branch that broke
+ *   off).
+ * - ``direction`` — what lambda increased on a PV run; ``null`` for QV.
+ *
+ * The fields after ``mode`` are optional here because a result kept from
+ * before they existed does not have them; the server always sends them.
  */
 export interface CpfResult {
   lambdas: number[];
@@ -247,7 +266,24 @@ export interface CpfResult {
   truncated: boolean;
   done_msg: string;
   mode: 'pv' | 'qv';
+  generators?: CpfGeneratorTrace[];
+  limit_events?: CpfLimitEvent[];
+  q_limits_enforced?: boolean;
+  stop_at?: 'nose' | 'full';
+  complete?: boolean;
+  direction?: CpfDirection | null;
 }
+
+/** One PV or slack generator's reactive output along a CPF path. */
+export type CpfGeneratorTrace = components['schemas']['CpfGeneratorTraceSchema'];
+/** The first step at which a generator is held at a reactive limit. */
+export type CpfLimitEvent = components['schemas']['CpfLimitEventSchema'];
+/** Request body of ``POST /sessions/{id}/cpf``. */
+export type CpfRunRequest = components['schemas']['CpfRunRequest'];
+/** Request body of ``POST /sessions/{id}/cpf/qv``. */
+export type CpfQvRunRequest = components['schemas']['CpfQvRunRequest'];
+/** What lambda increases on a PV run. */
+export type CpfDirection = NonNullable<CpfRunRequest['direction']>;
 
 // ---- SE result (Unit 13 — state estimation) ------------------------------
 

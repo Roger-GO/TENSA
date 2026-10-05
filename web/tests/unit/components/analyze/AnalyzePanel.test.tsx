@@ -8,13 +8,14 @@
  * behaviour is covered by EIGScatter.test / EIGParticipationTable.test.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AnalyzePanel } from '@/components/analyze/AnalyzePanel';
 import { ANALYZE_SUB_MODES, DEFAULT_EIG_FILTER, useAnalyzeStore } from '@/store/analyze';
 import { DEFAULT_TDS_CONFIG, useUiStore } from '@/store/ui';
 import { usePflowStore } from '@/store/pflow';
+import { usePflowOptionsStore } from '@/store/pflowOptions';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { useSweepStore } from '@/store/sweep';
@@ -31,6 +32,7 @@ function withQueryClient(ui: React.ReactNode) {
 }
 
 function resetStores() {
+  usePflowOptionsStore.getState().resetForNewCase();
   useAnalyzeStore.setState({
     subMode: 'pflow',
     eigResult: null,
@@ -366,6 +368,113 @@ describe('<AnalyzePanel />', () => {
       const banner = await screen.findByTestId('cpf-prerequisite-error');
       expect(banner).toHaveTextContent('Run PFlow before CPF.');
       expect(screen.getByRole('button', { name: /open pf view/i })).toBeInTheDocument();
+    });
+
+    it('a CPF run refused for the power flow is no longer shown once the power flow is solved again', async () => {
+      respondWith(409, {
+        type: 'about:blank',
+        title: 'Prerequisite not met',
+        status: 409,
+        detail:
+          'The power flow this continuation starts from leaves 2 generators past a reactive limit.',
+        recovery: { kind: 'run-pflow', label: 'Run power flow first' },
+      });
+      useAnalyzeStore.getState().setSubMode('cpf');
+
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('analyze-run-cpf'));
+      expect(await screen.findByTestId('cpf-prerequisite-error')).toHaveTextContent(
+        'past a reactive limit',
+      );
+
+      // The user does what it says: the power flow is solved again.
+      act(() => {
+        usePflowStore.getState().setLastRun({ ...FAKE_PFLOW_RESULT, run_id: 'pf-2' } as never);
+      });
+      expect(screen.queryByTestId('cpf-prerequisite-error')).not.toBeInTheDocument();
+    });
+
+    it('a CPF error that a power flow does not answer stays', async () => {
+      respondWith(422, {
+        type: 'about:blank',
+        title: 'Unprocessable',
+        status: 422,
+        detail: "load_increase names 'PQ_99', which is not a PQ load",
+      });
+      useAnalyzeStore.getState().setSubMode('cpf');
+
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('analyze-run-cpf'));
+      expect(await screen.findByTestId('cpf-error')).toHaveTextContent('not a PQ load');
+
+      act(() => {
+        usePflowStore.getState().setLastRun({ ...FAKE_PFLOW_RESULT, run_id: 'pf-2' } as never);
+      });
+      expect(screen.getByTestId('cpf-error')).toBeInTheDocument();
+    });
+
+    it('Run CPF sends the form and the Q-limit switch it shares with the power flow', async () => {
+      const json = (body: unknown) =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      const topology = {
+        state: 'committed',
+        buses: [],
+        lines: [],
+        transformers: [],
+        generators: [{ idx: 2, name: 'G2', kind: 'PV', params: { bus: 2 } }],
+        loads: [{ idx: 'PQ_1', name: 'Load A', kind: 'PQ', params: { bus: 4 } }],
+      };
+      const cpfResult = {
+        lambdas: [0, 0.5],
+        voltages_per_bus: { '1': [1, 0.9] },
+        bus_idxes: ['1'],
+        nose_idx: 1,
+        max_lam: 0.5,
+        truncated: false,
+        done_msg: 'Nose point at lambda=0.500000',
+        mode: 'pv',
+        direction: 'load-only',
+        stop_at: 'full',
+        complete: true,
+        q_limits_enforced: true,
+        generators: [{ idx: '1', model: 'Slack', bus: '1', q: [5, 9], q_min: -50, q_max: 100 }],
+        limit_events: [],
+      };
+      fetchSpy.mockImplementation((...args: unknown[]) =>
+        Promise.resolve(json(String(args[0]).endsWith('/topology') ? topology : cpfResult)),
+      );
+      useAnalyzeStore.getState().setSubMode('cpf');
+
+      render(withQueryClient(<AnalyzePanel />));
+      // The devices of a custom direction come from the case.
+      await userEvent.click(screen.getByTestId('cpf-config-direction-custom'));
+      expect(await screen.findByTestId('cpf-direction-load-PQ_1-p')).toBeInTheDocument();
+      expect(screen.getByTestId('cpf-direction-gen-2-p')).toBeInTheDocument();
+      // The box in the CPF form is the power-flow option.
+      await userEvent.click(screen.getByTestId('cpf-config-enforce-q-limits'));
+      expect(usePflowOptionsStore.getState().options.enforceQLimits).toBe(true);
+      await userEvent.click(screen.getByTestId('cpf-config-direction-load-only'));
+      await userEvent.click(screen.getByTestId('cpf-config-lower-branch'));
+      await userEvent.click(screen.getByTestId('analyze-run-cpf'));
+
+      await screen.findByTestId('cpf-generators');
+      const posted = fetchSpy.mock.calls.find(
+        ([url, init]) => String(url).endsWith('/cpf') && (init as RequestInit).method === 'POST',
+      );
+      expect(posted).toBeDefined();
+      expect(JSON.parse(String((posted![1] as RequestInit).body))).toEqual({
+        direction: 'load-only',
+        enforce_q_limits: true,
+        stop_at: 'full',
+      });
+      // What the generators did is under the curve.
+      expect(screen.getByTestId('cpf-generators-summary')).toHaveTextContent(
+        'Q limits were enforced and no generator reached one.',
+      );
+      expect(screen.getByTestId('cpf-run-caption')).toHaveTextContent('Loads only');
     });
 
     it('SE 409 prerequisite renders the prerequisite banner with the run-pflow CTA', async () => {

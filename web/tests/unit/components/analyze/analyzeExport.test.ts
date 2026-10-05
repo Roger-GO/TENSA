@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  cpfGeneratorsToCsv,
   cpfResultToCsv,
   eigResultToCsv,
   participationToCsv,
@@ -121,6 +122,118 @@ describe('cpfResultToCsv', () => {
   it('leaves out a bus the run has no voltages for', async () => {
     const text = await readBlob(cpfResultToCsv({ ...pv, bus_idxes: ['1', '9', '2'] }));
     expect(text).toContain('\nlambda,bus_1_v,bus_2_v\n');
+  });
+
+  const withGenerators: CpfResult = {
+    ...pv,
+    direction: 'load-only',
+    stop_at: 'nose',
+    complete: true,
+    q_limits_enforced: true,
+    generators: [
+      { idx: '2', model: 'PV', bus: '2', q: [10, 15, 15], q_min: -40, q_max: 15 },
+      { idx: '1', model: 'Slack', bus: '1', q: [-5, 20, 100], q_min: null, q_max: 100 },
+    ],
+    limit_events: [
+      { step: 1, lam: 0.5, idx: '2', model: 'PV', bus: '2', limit: 'qmax', at_nose: false },
+      { step: 2, lam: 1, idx: '1', model: 'Slack', bus: '1', limit: 'qmax', at_nose: true },
+    ],
+  };
+
+  it("adds each generator's reactive power, and says what the run was and found", async () => {
+    const text = await readBlob(cpfResultToCsv(withGenerators));
+    expect(text.split('\n')).toEqual([
+      '# CPF PV curve, bus voltages in pu, generator reactive power in MVAr',
+      '# max lambda = 1',
+      '# Nose point at lambda=1.000000',
+      '# direction: Loads only (lambda = 1 is twice the base load)',
+      '# generator Q limits enforced along the path',
+      '# PV 2 on bus 2 held at Qmax from step 1 (lambda = 0.5)',
+      '# Slack 1 on bus 1 held at Qmax from step 2 (lambda = 1): the nose is where it reached the limit',
+      'lambda,bus_1_v,bus_2_v,pv_2_q_mvar,slack_1_q_mvar',
+      '0,1.06,1.04,10,-5',
+      '0.5,1.05,1.02,15,20',
+      '1,1,0.9,15,100',
+      '',
+    ]);
+  });
+
+  it('says where the lower branch starts, when one broke off, and where a generator would have left its limit', async () => {
+    const text = await readBlob(
+      cpfResultToCsv({
+        ...withGenerators,
+        lambdas: [0, 1, 0.5],
+        nose_idx: 1,
+        stop_at: 'full',
+        complete: false,
+        q_limits_enforced: false,
+        limit_events: [
+          {
+            step: 0,
+            lam: 0,
+            idx: '2',
+            model: 'PV',
+            bus: '2',
+            limit: 'qmin',
+            at_nose: false,
+            would_release_step: 1,
+          },
+        ],
+      }),
+    );
+    expect(text).toContain('# generator Q limits not enforced along the path\n');
+    expect(text).toContain(
+      '# PV 2 on bus 2 held at Qmin from the start (held by the power flow); from step 1 its voltage is back across the set-point and a real exciter would leave the limit\n',
+    );
+    expect(text).toContain(
+      '# full curve: steps 0 to 1 are the upper branch, the rest the lower branch\n',
+    );
+    expect(text).toContain('# the lower branch stops before it is back at the base load\n');
+  });
+});
+
+describe('cpfGeneratorsToCsv', () => {
+  const result: CpfResult = {
+    lambdas: [0, 0.5],
+    voltages_per_bus: { '1': [1.06, 1.05] },
+    bus_idxes: ['1'],
+    nose_idx: 1,
+    max_lam: 0.5,
+    truncated: false,
+    done_msg: 'Nose point at lambda=0.500000',
+    mode: 'pv',
+    direction: 'load',
+    q_limits_enforced: false,
+    generators: [
+      { idx: '2', model: 'PV', bus: '2', q: [10, 30], q_min: -40, q_max: 15 },
+      { idx: '1', model: 'Slack', bus: '1', q: [-5, 20], q_min: null, q_max: 100 },
+    ],
+    limit_events: [],
+  };
+
+  it("writes each generator's reactive power per step, with its limits in the header", async () => {
+    const blob = cpfGeneratorsToCsv(result);
+    expect(blob).not.toBeNull();
+    expect((await readBlob(blob!)).split('\n')).toEqual([
+      '# CPF PV curve, generator reactive power in MVAr',
+      '# direction: Loads and generation (lambda = 1 is twice the base load and PV generation)',
+      '# generator Q limits not enforced along the path',
+      '# PV 2 on bus 2: Qmin -40, Qmax 15 MVAr',
+      '# Slack 1 on bus 1: Qmin none, Qmax 100 MVAr',
+      'lambda,pv_2_q_mvar,slack_1_q_mvar',
+      '0,10,-5',
+      '0.5,30,20',
+      '',
+    ]);
+  });
+
+  it('names the axis of a QV curve and has nothing to write without generators', async () => {
+    const qv = await readBlob(cpfGeneratorsToCsv({ ...result, mode: 'qv', direction: null })!);
+    expect(qv).toContain('# CPF QV curve, generator reactive power in MVAr\n');
+    expect(qv).toContain('\nq_injection,pv_2_q_mvar,slack_1_q_mvar\n');
+    expect(qv).not.toContain('direction:');
+    expect(cpfGeneratorsToCsv({ ...result, generators: [] })).toBeNull();
+    expect(cpfGeneratorsToCsv({ ...result, generators: undefined })).toBeNull();
   });
 });
 

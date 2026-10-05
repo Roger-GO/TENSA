@@ -21,6 +21,8 @@ import {
   fetchComtradeRecord,
   fetchResponseMetrics,
   useAlterableParams,
+  useCpfQvRun,
+  useCpfRun,
   useCreateSession,
   useDaeVariables,
   useListPmus,
@@ -738,6 +740,108 @@ describe('queries hooks', () => {
       enforce_q_limits: true,
     });
     usePflowOptionsStore.getState().resetOptions();
+  });
+
+  describe('the CPF runs', () => {
+    const cpfResult = {
+      lambdas: [0, 0.5],
+      voltages_per_bus: { '1': [1, 0.9] },
+      bus_idxes: ['1'],
+      nose_idx: 1,
+      max_lam: 0.5,
+      truncated: false,
+      done_msg: 'Nose point at lambda=0.500000',
+      mode: 'pv',
+    };
+
+    function sentBody(call: number): { url: string; body: unknown } {
+      const [url, init] = fetchSpy.mock.calls[call] as [string, RequestInit];
+      return { url, body: JSON.parse(String(init.body)) };
+    }
+
+    afterEach(() => {
+      usePflowOptionsStore.getState().resetOptions();
+    });
+
+    it('useCpfRun sends the default direction alone when nothing was set', async () => {
+      usePflowOptionsStore.getState().resetOptions();
+      fetchSpy.mockResolvedValueOnce(jsonResponse(cpfResult));
+      const { Wrapper } = makeWrapper();
+      const { result } = renderHook(() => useCpfRun(), { wrapper: Wrapper });
+
+      result.current.mutate({ sessionId: 'sess-9' as SessionId });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      const { url, body } = sentBody(0);
+      expect(url).toMatch(/\/sessions\/sess-9\/cpf$/);
+      expect(body).toEqual({ direction: 'load' });
+    });
+
+    it('useCpfRun sends a custom direction, the full curve and the solver settings', async () => {
+      usePflowOptionsStore.getState().resetOptions();
+      fetchSpy.mockResolvedValueOnce(jsonResponse(cpfResult));
+      const { Wrapper } = makeWrapper();
+      const { result } = renderHook(() => useCpfRun(), { wrapper: Wrapper });
+
+      result.current.mutate({
+        sessionId: 'sess-9' as SessionId,
+        direction: 'custom',
+        loadIncrease: [{ idx: 'PQ_1', p: 10, q: 3 }],
+        generatorIncrease: [{ idx: '2', p: 10 }],
+        stopAt: 'full',
+        step: 0.05,
+        maxIter: 800,
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      expect(sentBody(0).body).toEqual({
+        direction: 'custom',
+        load_increase: [{ idx: 'PQ_1', p: 10, q: 3 }],
+        generator_increase: [{ idx: '2', p: 10 }],
+        stop_at: 'full',
+        step: 0.05,
+        max_iter: 800,
+      });
+    });
+
+    it('useCpfRun takes the Q-limit switch of the power-flow options, read when the run starts', async () => {
+      fetchSpy.mockResolvedValue(jsonResponse(cpfResult));
+      const { Wrapper } = makeWrapper();
+      const { result } = renderHook(() => useCpfRun(), { wrapper: Wrapper });
+
+      usePflowOptionsStore.getState().setOptions({ enforceQLimits: true });
+      result.current.mutate({ sessionId: 'sess-9' as SessionId, direction: 'load-only' });
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      expect(sentBody(0).body).toEqual({ direction: 'load-only', enforce_q_limits: true });
+
+      // Unticked is sent too: a case that turns limits on can be run without.
+      usePflowOptionsStore.getState().setOptions({ enforceQLimits: false });
+      result.current.mutate({ sessionId: 'sess-9' as SessionId });
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      expect(sentBody(1).body).toEqual({ direction: 'load', enforce_q_limits: false });
+
+      // A caller that says which it wants is not overruled by the store.
+      result.current.mutate({ sessionId: 'sess-9' as SessionId, enforceQLimits: null });
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+      expect(sentBody(2).body).toEqual({ direction: 'load' });
+    });
+
+    it('useCpfQvRun sends the bus, and the same switch', async () => {
+      fetchSpy.mockResolvedValue(jsonResponse({ ...cpfResult, mode: 'qv' }));
+      const { Wrapper } = makeWrapper();
+      const { result } = renderHook(() => useCpfQvRun(), { wrapper: Wrapper });
+
+      usePflowOptionsStore.getState().resetOptions();
+      result.current.mutate({ sessionId: 'sess-9' as SessionId, busIdx: '5' });
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      expect(sentBody(0).url).toMatch(/\/sessions\/sess-9\/cpf\/qv$/);
+      expect(sentBody(0).body).toEqual({ bus_idx: '5' });
+
+      usePflowOptionsStore.getState().setOptions({ enforceQLimits: true });
+      result.current.mutate({ sessionId: 'sess-9' as SessionId, busIdx: '5', qRange: 2 });
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+      expect(sentBody(1).body).toEqual({ bus_idx: '5', q_range: 2, enforce_q_limits: true });
+    });
   });
 
   it('useRunPflow learns what the case itself sets from a run that left a switch alone', async () => {

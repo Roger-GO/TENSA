@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
@@ -13,6 +13,8 @@ import { TdsConfigPanel } from '@/components/tds/TdsConfigPanel';
 import { AnalyzeSubModePicker } from './AnalyzeSubModePicker';
 import { CPFCurveChart } from './CPFCurveChart';
 import { CpfConfigPanel } from './CpfConfigPanel';
+import { CpfGeneratorPanel } from './CpfGeneratorPanel';
+import { CpfQLimitsSwitch } from './CpfQLimitsSwitch';
 import { CpfQvCurvePanel } from './CpfQvCurvePanel';
 import { RunReadinessNote } from './RunReadinessNote';
 import { EIGScatter } from './EIGScatter';
@@ -20,7 +22,14 @@ import { EIGParticipationTable } from './EIGParticipationTable';
 import { EIGDampingChart } from './EIGDampingChart';
 import { SEResidualChart } from './SEResidualChart';
 import { useAnalyzeStore } from '@/store/analyze';
-import { useCpfRun, useEigRun, useSeGenerateMeasurements, useSeRun } from '@/api/queries';
+import {
+  useCpfRun,
+  useCurrentTopology,
+  useEigRun,
+  useSeGenerateMeasurements,
+  useSeRun,
+} from '@/api/queries';
+import { directionRows } from '@/lib/cpfOptions';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
 import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
@@ -376,12 +385,11 @@ export function AnalyzeEigSubMode() {
  * AnalyzeCpfSubMode — CPF home (Unit 12, extended Unit 13).
  *
  * Hosts a ``nose`` / ``qv`` sub-mode strip. ``nose`` is the full
- * PV-curve sweep driven by ``CpfConfigPanel`` (direction load|gen +
- * step + max_iter behind an Advanced disclosure); ``qv`` is the
- * single-bus QV-curve driven by ``CpfQvCurvePanel`` (bus picker + Run).
- * The strip + both flows live under one Analyze ``cpf`` sub-tab so all
- * three CPF endpoint variants (load nose, gen nose, QV) are reachable
- * from the GUI.
+ * PV-curve sweep driven by ``CpfConfigPanel`` (what grows, Q limits, the
+ * lower branch, and step + max_iter behind an Advanced disclosure); ``qv``
+ * is the single-bus QV-curve driven by ``CpfQvCurvePanel`` (bus picker +
+ * Run). The strip + both flows live under one Analyze ``cpf`` sub-tab so
+ * every CPF endpoint variant is reachable from the GUI.
  */
 export function AnalyzeCpfSubMode() {
   const activeCpfSubMode = useAnalyzeStore((s) => s.activeCpfSubMode);
@@ -402,7 +410,11 @@ function CpfSubModePicker() {
   const activeCpfSubMode = useAnalyzeStore((s) => s.activeCpfSubMode);
   const setActiveCpfSubMode = useAnalyzeStore((s) => s.setActiveCpfSubMode);
   const options: ReadonlyArray<{ value: 'nose' | 'qv'; label: string; hint: string }> = [
-    { value: 'nose', label: 'Nose curve', hint: 'PV-curve sweep (load or generation direction)' },
+    {
+      value: 'nose',
+      label: 'Nose curve',
+      hint: 'PV-curve sweep: loads, generation or a custom direction',
+    },
     { value: 'qv', label: 'QV curve', hint: 'Single-bus reactive-margin curve' },
   ];
   return (
@@ -445,15 +457,22 @@ function CpfSubModePicker() {
 
 /**
  * AnalyzeCpfNoseSubMode — the full PV-curve / nose-curve flow. Wires
- * ``CpfConfigPanel`` (direction + step + max_iter) into ``useCpfRun``,
- * wrapping the panel's Run button in the readiness-tooltip
- * ``AnalyzeRunButton`` via the panel's ``renderRunButton`` prop.
+ * ``CpfConfigPanel`` (direction, lower branch, step + max_iter) into
+ * ``useCpfRun``, wrapping the panel's Run button in the
+ * readiness-tooltip ``AnalyzeRunButton`` via the panel's
+ * ``renderRunButton`` prop. The Q-limit switch is the power-flow
+ * options' own (``CpfQLimitsSwitch``), which the run hook reads. The
+ * curve is followed by what the generators did along it
+ * (``CpfGeneratorPanel``).
  */
 export function AnalyzeCpfNoseSubMode() {
   const sessionId = useSessionStore((s) => s.sessionId);
   const lastPf = usePflowStore((s) => s.lastRun);
   const cpfResult = useAnalyzeStore((s) => s.cpfResult);
   const cpfRun = useCpfRun();
+  const topology = useCurrentTopology();
+  // The devices a custom direction can name, with their solved power.
+  const devices = useMemo(() => directionRows(topology, lastPf), [topology, lastPf]);
 
   // When PF clears (case change cascade), drop the stale CPF result so
   // the empty-state shows.
@@ -463,7 +482,12 @@ export function AnalyzeCpfNoseSubMode() {
     }
   }, [lastPf, cpfResult]);
 
-  const cpfError = cpfRun.error;
+  // A run refused for the state of the power flow (409) is answered by solving
+  // the power flow again. Once that has happened the refusal no longer
+  // describes the session, so it is not shown.
+  const [pfAtRun, setPfAtRun] = useState(lastPf);
+  const refused = cpfRun.error instanceof ProblemDetailsError && cpfRun.error.status === 409;
+  const cpfError = refused && lastPf !== pfAtRun ? null : cpfRun.error;
 
   return (
     <div className="flex flex-col gap-3">
@@ -482,9 +506,13 @@ export function AnalyzeCpfNoseSubMode() {
             disabledOverride={disabled}
           />
         )}
-        onRun={({ direction, step, maxIter }) => {
+        loads={devices.loads}
+        generators={devices.generators}
+        limitsSwitch={<CpfQLimitsSwitch idPrefix="cpf-config" />}
+        onRun={(overrides) => {
           if (!sessionId) return;
-          cpfRun.mutate({ sessionId, direction, step, maxIter });
+          setPfAtRun(lastPf);
+          cpfRun.mutate({ sessionId, ...overrides });
         }}
       />
 
@@ -498,6 +526,7 @@ export function AnalyzeCpfNoseSubMode() {
       <AnalyzeRoutineError routine="cpf" error={cpfError} />
 
       <CPFCurveChart className="min-h-[300px] flex-shrink-0" />
+      <CpfGeneratorPanel className="flex-shrink-0" />
     </div>
   );
 }

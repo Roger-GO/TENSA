@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { cn } from '@/lib/cn';
 import { useCpfQvRun } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
+import { usePflowStore } from '@/store/pflow';
 import { useRunReadiness } from '@/lib/useRunReadiness';
 import {
   Tooltip,
@@ -12,6 +13,8 @@ import {
 } from '@/components/ui/tooltip';
 import { BusIdxSelect } from '@/components/elements/BusIdxSelect';
 import { CPFCurveChart } from './CPFCurveChart';
+import { CpfGeneratorPanel } from './CpfGeneratorPanel';
+import { CpfQLimitsSwitch } from './CpfQLimitsSwitch';
 import { RunReadinessNote } from './RunReadinessNote';
 import { ProblemDetailsError } from '@/api/client';
 import { ProblemDetailsErrorSurface } from '@/components/error/ProblemDetailsErrorSurface';
@@ -46,6 +49,11 @@ import type { CpfResult } from '@/api/types';
  * behaviour — but this panel reads from its own mutation data so the
  * QV chart is stable regardless.)
  *
+ * Generator Q limits are the power-flow options' switch, shown here by
+ * ``CpfQLimitsSwitch`` and read by ``useCpfQvRun`` when the run starts;
+ * what the generators did along the curve follows it
+ * (``CpfGeneratorPanel``).
+ *
  * Test hooks:
  * - ``data-testid="cpf-qv-panel"`` outer section.
  * - ``data-testid="cpf-qv-bus-select"`` bus picker (BusIdxSelect's
@@ -74,8 +82,16 @@ export function CpfQvCurvePanel({ className }: CpfQvCurvePanelProps) {
   // pre-click tooltip ("Run PFlow first…") instead of only a post-click 409.
   const readiness = useRunReadiness('cpf');
 
+  // A run refused for the state of the power flow (409) stops being true once
+  // the power flow has been solved again, and is no longer shown then.
+  const lastPf = usePflowStore((s) => s.lastRun);
+  const [pfAtRun, setPfAtRun] = useState(lastPf);
+  const refused = cpfQvRun.error instanceof ProblemDetailsError && cpfQvRun.error.status === 409;
+  const qvError = refused && lastPf !== pfAtRun ? null : cpfQvRun.error;
+
   const onRun = () => {
     if (!sessionId || busIdx === '' || !readiness.ready) return;
+    setPfAtRun(lastPf);
     cpfQvRun.mutate({ sessionId, busIdx });
   };
 
@@ -137,9 +153,12 @@ export function CpfQvCurvePanel({ className }: CpfQvCurvePanelProps) {
         </p>
       ) : null}
 
-      <CpfQvError error={cpfQvRun.error} />
+      <CpfQLimitsSwitch idPrefix="cpf-qv" />
+
+      <CpfQvError error={qvError} />
 
       <CPFCurveChart result={qvResult} className="min-h-[300px] flex-shrink-0" />
+      <CpfGeneratorPanel result={qvResult} className="flex-shrink-0" />
     </section>
   );
 }

@@ -9,6 +9,9 @@
  * - QV mode relabels the X-axis and renders only the requested bus.
  * - pickDefaultVisibleBuses ranks by voltage swing.
  * - computeViewport returns sane defaults on degenerate inputs.
+ * - What a run was asked for: the caption, a full curve's dashed lower
+ *   branch and two-branch readout, the markers where generators reached a
+ *   limit, and the banner of a lower branch that broke off.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
@@ -73,6 +76,152 @@ const QV_RESULT: CpfResult = {
   done_msg: 'Nose point at q=5.000000',
   mode: 'qv',
 };
+
+// A full curve: up to the nose at step 3, then back down to lambda 0.
+const FULL_RESULT: CpfResult = {
+  lambdas: [0.0, 0.4, 0.8, 1.0, 0.7, 0.3, 0.0],
+  voltages_per_bus: {
+    '1': [1.0, 0.98, 0.94, 0.85, 0.7, 0.55, 0.4],
+    '2': [1.02, 1.0, 0.97, 0.9, 0.78, 0.6, 0.45],
+  },
+  bus_idxes: ['1', '2'],
+  nose_idx: 3,
+  max_lam: 1.0,
+  truncated: false,
+  done_msg: 'Full curve traced (returned to lambda=0)',
+  mode: 'pv',
+  direction: 'load-only',
+  stop_at: 'full',
+  complete: true,
+  q_limits_enforced: true,
+  generators: [],
+  limit_events: [
+    { step: 0, lam: 0, idx: '2', model: 'PV', bus: '2', limit: 'qmax', at_nose: false },
+    { step: 2, lam: 0.8, idx: '3', model: 'PV', bus: '3', limit: 'qmax', at_nose: false },
+    { step: 3, lam: 1.0, idx: '1', model: 'Slack', bus: '1', limit: 'qmax', at_nose: true },
+    { step: 5, lam: 0.3, idx: '4', model: 'PV', bus: '4', limit: 'qmin', at_nose: false },
+  ],
+};
+
+describe('<CPFCurveChart /> what the run was asked for', () => {
+  beforeEach(() => {
+    resetAnalyzeStore();
+  });
+
+  it('says the direction, what lambda is, and whether limits were enforced', () => {
+    render(<CPFCurveChart result={FULL_RESULT} />);
+    expect(screen.getByTestId('cpf-run-caption')).toHaveTextContent(
+      'Loads only · λ = 1 is twice the base load · Q limits enforced · full curve',
+    );
+    expect(screen.getByText('lambda (load scale, generation fixed)')).toBeInTheDocument();
+  });
+
+  it('has no caption for a result that does not say what was run', () => {
+    render(<CPFCurveChart result={PV_RESULT} />);
+    expect(screen.queryByTestId('cpf-run-caption')).not.toBeInTheDocument();
+    expect(screen.getByText('lambda (load scale)')).toBeInTheDocument();
+  });
+
+  it('a QV curve says only whether limits were enforced', () => {
+    render(<CPFCurveChart result={{ ...QV_RESULT, q_limits_enforced: false }} />);
+    expect(screen.getByTestId('cpf-run-caption')).toHaveTextContent(/^Q limits not enforced$/);
+  });
+
+  it('draws the lower branch of a full curve as its own dashed line, joined at the nose', () => {
+    render(<CPFCurveChart result={FULL_RESULT} />);
+    const upper = screen.getByTestId('cpf-curve-line-1').getAttribute('points')!.split(' ');
+    const lower = screen.getByTestId('cpf-curve-lower-1');
+    const lowerPoints = lower.getAttribute('points')!.split(' ');
+    // Steps 0 to 3 up, steps 3 to 6 down: the nose point is on both.
+    expect(upper).toHaveLength(4);
+    expect(lowerPoints).toHaveLength(4);
+    expect(lowerPoints[0]).toBe(upper[3]);
+    expect(lower).toHaveAttribute('stroke-dasharray');
+    expect(lower.getAttribute('stroke')).toBe(
+      screen.getByTestId('cpf-curve-line-1').getAttribute('stroke'),
+    );
+  });
+
+  it('a run that stops at the nose is one line, as before', () => {
+    render(<CPFCurveChart result={PV_RESULT} />);
+    expect(screen.getByTestId('cpf-curve-line-1').getAttribute('points')!.split(' ')).toHaveLength(
+      9,
+    );
+    expect(screen.queryByTestId('cpf-curve-lower-1')).not.toBeInTheDocument();
+  });
+
+  it('marks where each generator reached a limit along the path, not those held from the start', () => {
+    render(<CPFCurveChart result={FULL_RESULT} />);
+    expect(screen.queryByTestId('cpf-limit-marker-PV-2')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cpf-limit-marker-PV-3')).toHaveTextContent(
+      'PV 3 reached Qmax at λ = 0.8000',
+    );
+    // The one the nose is due to stands out, and one on the way down says so.
+    expect(screen.getByTestId('cpf-limit-marker-Slack-1')).toHaveClass('fill-danger');
+    expect(screen.getByTestId('cpf-limit-marker-PV-3')).toHaveClass('fill-warning');
+    expect(screen.getByTestId('cpf-limit-marker-PV-4')).toHaveTextContent(
+      'PV 4 reached Qmin at λ = 0.3000 (lower branch)',
+    );
+  });
+
+  it('reads both branches at the sampled lambda of a full curve', async () => {
+    render(<CPFCurveChart result={FULL_RESULT} />);
+    const slider = screen.getByTestId('cpf-lambda-slider') as HTMLInputElement;
+    await act(async () => {
+      // React tracks the value through the native setter.
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        slider,
+        '0.4',
+      );
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const row = screen.getByTestId('cpf-lambda-readout-row-1');
+    // 0.98 on the way up; on the way down, a quarter of the way from 0.7 to 0.3.
+    expect(row).toHaveTextContent('0.980 pu');
+    expect(screen.getByTestId('cpf-lambda-readout-lower-1')).toHaveTextContent('0.588 pu');
+  });
+
+  it('says when a lower branch broke off, and that the nose stands', () => {
+    render(
+      <CPFCurveChart
+        result={{ ...FULL_RESULT, complete: false, done_msg: 'Corrector failed at lambda=0.3' }}
+      />,
+    );
+    expect(screen.getByTestId('cpf-incomplete-banner')).toHaveTextContent(
+      'The lower branch stops before it is back at the base load. Reason: Corrector failed at lambda=0.3.',
+    );
+    expect(screen.queryByTestId('cpf-truncated-banner')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cpf-nose-marker')).toBeInTheDocument();
+  });
+
+  it('a truncated run has the truncation banner, not the lower-branch one', () => {
+    render(<CPFCurveChart result={{ ...TRUNCATED_RESULT, complete: false }} />);
+    expect(screen.getByTestId('cpf-truncated-banner')).toBeInTheDocument();
+    expect(screen.queryByTestId('cpf-incomplete-banner')).not.toBeInTheDocument();
+  });
+});
+
+describe('interpolateBusVoltage on one branch', () => {
+  it('reads the upper branch up to the nose and the lower branch from it', () => {
+    expect(interpolateBusVoltage(FULL_RESULT, '1', 0.4, 'upper')).toBeCloseTo(0.98, 6);
+    expect(interpolateBusVoltage(FULL_RESULT, '1', 0.4, 'lower')).toBeCloseTo(0.5875, 6);
+    // The whole trace gives the later of the two, as it always did.
+    expect(interpolateBusVoltage(FULL_RESULT, '1', 0.4)).toBeCloseTo(0.5875, 6);
+    expect(interpolateBusVoltage(FULL_RESULT, '1', 1.0, 'upper')).toBeCloseTo(0.85, 6);
+    expect(interpolateBusVoltage(FULL_RESULT, '1', 1.0, 'lower')).toBeCloseTo(0.85, 6);
+  });
+
+  it('gives null where the branch has no point, not its nearest end', () => {
+    const partial: CpfResult = {
+      ...FULL_RESULT,
+      lambdas: [0.0, 0.4, 0.8, 1.0, 0.7],
+      voltages_per_bus: { '1': [1.0, 0.98, 0.94, 0.85, 0.7] },
+      bus_idxes: ['1'],
+    };
+    expect(interpolateBusVoltage(partial, '1', 0.4, 'lower')).toBeNull();
+    expect(interpolateBusVoltage(partial, '1', 0.4, 'upper')).toBeCloseTo(0.98, 6);
+  });
+});
 
 describe('<CPFCurveChart />', () => {
   beforeEach(() => {

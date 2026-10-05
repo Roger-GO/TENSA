@@ -585,13 +585,23 @@ function useCommandSets(): CommandSets {
             ? `Run ${routine.toUpperCase()}  ✓`
             : `Run ${routine.toUpperCase()}`,
         group: 'run',
-        // ``run.cpf`` routes to the CPF nose-curve flow; the direction
-        // (load | gen) knob lives in the panel's Advanced disclosure, so
-        // we surface "load" / "gen" / "direction" as search synonyms so
-        // a user searching for the gen-direction nose lands here.
+        // ``run.cpf`` routes to the CPF nose-curve flow, whose form holds
+        // the direction, the Q-limit switch and the lower branch, so we
+        // surface those as search synonyms: a user searching for the
+        // generation direction or for Q limits lands here.
         keywords:
           routine === 'cpf'
-            ? [...keywordsForRoutine(routine), 'direction', 'load', 'gen', 'generation']
+            ? [
+                ...keywordsForRoutine(routine),
+                'direction',
+                'load',
+                'gen',
+                'generation',
+                'custom',
+                'q limits',
+                'reactive limits',
+                'lower branch',
+              ]
             : keywordsForRoutine(routine),
         action: () => {
           handleSelectRoutine(routine);

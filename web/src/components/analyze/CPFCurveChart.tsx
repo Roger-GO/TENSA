@@ -6,6 +6,14 @@ import { ExportMenu } from '@/components/export/ExportMenu';
 import { elementToPng } from '@/components/export/exportToPng';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { cpfResultToCsv } from './analyzeExport';
+import {
+  directionLabel,
+  generatorName,
+  hasLowerBranch,
+  lambdaMeaning,
+  limitName,
+  switchedAlongThePath,
+} from '@/lib/cpfOptions';
 import type { CpfResult } from '@/api/types';
 import type { ResolvedTheme } from '@/store/theme';
 
@@ -31,6 +39,16 @@ import type { ResolvedTheme } from '@/store/theme';
  * - The nose point (``nose_idx``) is marked with a vertical dashed
  *   line + small triangle annotation. ``nose_idx === -1`` (truncated)
  *   skips the marker and shows the truncation banner above the chart.
+ *
+ * What a run was asked for shows on the chart:
+ *
+ * - A full curve (``stop_at === 'full'``) draws the steps after the nose,
+ *   the lower branch, as a dashed line of the bus's colour, and the
+ *   readout below gives both branches' voltage at the sampled lambda.
+ * - Each generator that reached a reactive limit along the path gets a
+ *   small marker on the lambda axis where it did.
+ * - A caption under the header names the direction and says whether Q
+ *   limits were enforced; a banner says when a lower branch broke off.
  *
  * Empty state:
  *
@@ -74,6 +92,10 @@ import type { ResolvedTheme } from '@/store/theme';
  * - ``data-testid="cpf-lambda-readout"`` per-bus voltage readout.
  * - ``data-testid="cpf-lambda-marker"`` vertical line driven by slider.
  * - ``data-testid="cpf-lambda-readout-row-{busIdx}"`` rows in readout.
+ * - ``data-testid="cpf-run-caption"`` what the run was asked for.
+ * - ``data-testid="cpf-curve-lower-{busIdx}"`` a bus's lower branch.
+ * - ``data-testid="cpf-limit-marker-{model}-{idx}"`` a generator's limit marker.
+ * - ``data-testid="cpf-incomplete-banner"`` a lower branch that broke off.
  */
 export interface CPFCurveChartProps {
   /** Override for tests; usually pulled from the analyze store. */
@@ -197,11 +219,21 @@ export function busColor(bus: string, theme: ResolvedTheme = 'light'): string {
  * that biases towards the post-nose / collapse branch when both exist,
  * which is the more useful answer for a stability researcher.
  *
+ * A full curve has a whole lower branch, and there the two answers are
+ * both wanted: ``branch`` narrows the walk to the steps up to the nose
+ * (``'upper'``) or from the nose on (``'lower'``), and a lambda the branch
+ * does not cover gives ``null`` rather than its nearest end.
+ *
  * Returns ``null`` when the trace is empty or lam is outside the union
  * of segment ranges.
  */
 // eslint-disable-next-line react-refresh/only-export-components
-export function interpolateBusVoltage(result: CpfResult, bus: string, lam: number): number | null {
+export function interpolateBusVoltage(
+  result: CpfResult,
+  bus: string,
+  lam: number,
+  branch: 'whole' | 'upper' | 'lower' = 'whole',
+): number | null {
   const trace = result.voltages_per_bus[bus];
   const lambdas = result.lambdas;
   if (!trace || trace.length === 0 || lambdas.length === 0) return null;
@@ -209,8 +241,11 @@ export function interpolateBusVoltage(result: CpfResult, bus: string, lam: numbe
     const only = trace[0];
     return only === undefined ? null : only;
   }
+  const nose = result.nose_idx >= 0 ? result.nose_idx : trace.length - 1;
+  const first = branch === 'lower' ? nose : 0;
+  const last = branch === 'upper' ? nose : trace.length - 1;
   let pick: number | null = null;
-  for (let i = 0; i < trace.length - 1; i++) {
+  for (let i = first; i < last; i++) {
     const lamA = lambdas[i];
     const lamB = lambdas[i + 1];
     const vA = trace[i];
@@ -230,6 +265,7 @@ export function interpolateBusVoltage(result: CpfResult, bus: string, lam: numbe
     pick = vA + t * (vB - vA);
   }
   if (pick !== null) return pick;
+  if (branch !== 'whole') return null;
   // Fallback: clamp to nearest endpoint by lambda.
   let nearestIdx = 0;
   let nearestDist = Infinity;
@@ -261,6 +297,33 @@ export function computeLambdaRange(result: CpfResult): { min: number; max: numbe
   // the rightmost point on the curve for both happy + truncated runs.
   const max = Math.max(result.max_lam, ...lambdas);
   return { min, max };
+}
+
+/** The lambda axis of a nose curve, named for what the direction scales. */
+function xAxisLabelOf(result: CpfResult): string {
+  switch (result.direction) {
+    case 'load-only':
+      return 'lambda (load scale, generation fixed)';
+    case 'gen':
+      return 'lambda (generation scale, load fixed)';
+    case 'custom':
+      return 'lambda (multiples of the custom increase)';
+    default:
+      return 'lambda (load scale)';
+  }
+}
+
+/**
+ * One line saying what the run was asked for, or ``null`` for a result that
+ * does not say (a QV curve says only whether limits were enforced).
+ */
+function runCaption(result: CpfResult): string | null {
+  if (result.q_limits_enforced === undefined) return null;
+  const limits = result.q_limits_enforced ? 'Q limits enforced' : 'Q limits not enforced';
+  if (result.mode === 'qv') return limits;
+  const parts = [directionLabel(result.direction), lambdaMeaning(result.direction), limits];
+  if (result.stop_at === 'full') parts.push('full curve');
+  return parts.join(' · ');
 }
 
 export function CPFCurveChart({
@@ -360,8 +423,14 @@ export function CPFCurveChart({
   const xToPx = (x: number) => PADDING_LEFT + ((x - viewport.xMin) / xRange) * plotW;
   const yToPx = (y: number) => PADDING_TOP + ((viewport.yMax - y) / yRange) * plotH;
 
-  const xAxisLabel = result.mode === 'qv' ? 'Q injection (pu)' : 'lambda (load scale)';
+  const xAxisLabel = result.mode === 'qv' ? 'Q injection (pu)' : xAxisLabelOf(result);
   const yAxisLabel = 'Bus voltage (pu)';
+  const lowerBranch = hasLowerBranch(result);
+  const limitMarkers = switchedAlongThePath(result);
+  // A lower branch that broke off: the curve has its nose, and stops short of
+  // the base load.
+  const incomplete = !result.truncated && result.complete === false;
+  const caption = runCaption(result);
 
   // Narrow ``noseLambda`` to ``number`` (rather than ``number |
   // undefined``) so the SVG marker block doesn't fight TS's
@@ -407,10 +476,13 @@ export function CPFCurveChart({
       ? lambdaRange.max
       : Math.min(Math.max(sliderLambda, lambdaRange.min), lambdaRange.max);
 
-  const readout: { bus: string; v: number | null }[] = effectiveVisible
+  // On a full curve the readout is the upper branch (the operating points),
+  // with the lower branch's voltage at the same lambda beside it.
+  const readout: { bus: string; v: number | null; lower: number | null }[] = effectiveVisible
     .map((bus) => ({
       bus,
-      v: interpolateBusVoltage(result, bus, sliderClamped),
+      v: interpolateBusVoltage(result, bus, sliderClamped, lowerBranch ? 'upper' : 'whole'),
+      lower: lowerBranch ? interpolateBusVoltage(result, bus, sliderClamped, 'lower') : null,
     }))
     .sort((a, b) => {
       if (a.v === null && b.v === null) return 0;
@@ -470,6 +542,30 @@ export function CPFCurveChart({
           CPF terminated before reaching a nose point.{' '}
           {result.done_msg ? `Reason: ${result.done_msg}.` : null} The voltage- collapse margin
           could not be determined; widen ``max_iter`` or adjust ``step`` and re-run.
+        </div>
+      ) : null}
+
+      {incomplete ? (
+        <div
+          data-testid="cpf-incomplete-banner"
+          role="status"
+          className={cn(
+            'border-warning/40 bg-warning/10 text-foreground',
+            'border-b px-2 py-1 text-[10px] leading-snug',
+          )}
+        >
+          The lower branch stops before it is back at the base load.{' '}
+          {result.done_msg ? `Reason: ${result.done_msg}.` : null} The nose and the upper branch are
+          complete.
+        </div>
+      ) : null}
+
+      {caption !== null ? (
+        <div
+          data-testid="cpf-run-caption"
+          className="border-border text-muted-foreground border-b px-2 py-0.5 text-[10px]"
+        >
+          {caption}
         </div>
       ) : null}
 
@@ -547,28 +643,70 @@ export function CPFCurveChart({
         {effectiveVisible.map((bus) => {
           const trace = result.voltages_per_bus[bus];
           if (!trace) return null;
-          const points = trace
-            .map((v, i) => {
-              const lam = result.lambdas[i];
-              if (lam === undefined) return null;
-              return `${xToPx(lam)},${yToPx(v)}`;
-            })
-            .filter((p): p is string => p !== null)
-            .join(' ');
+          const pointsOf = (from: number, to: number) =>
+            trace
+              .slice(from, to)
+              .map((v, i) => {
+                const lam = result.lambdas[from + i];
+                if (lam === undefined) return null;
+                return `${xToPx(lam)},${yToPx(v)}`;
+              })
+              .filter((p): p is string => p !== null)
+              .join(' ');
           const isHovered = hoveredBus === bus;
+          // A full curve is drawn in two: up to the nose, and the lower branch
+          // from it, dashed.
+          const upperEnd = lowerBranch ? result.nose_idx + 1 : trace.length;
           return (
-            <polyline
-              key={bus}
-              points={points}
-              fill="none"
-              stroke={busColor(bus, resolvedTheme)}
-              strokeWidth={isHovered ? STROKE_HOVERED : STROKE_DEFAULT}
-              data-testid={`cpf-curve-line-${bus}`}
-              data-hovered={isHovered ? 'true' : 'false'}
-              onPointerEnter={() => setHoveredBus(bus)}
-              onPointerLeave={() => setHoveredBus((cur) => (cur === bus ? null : cur))}
-              style={{ cursor: 'pointer' }}
-            />
+            <g key={bus}>
+              <polyline
+                points={pointsOf(0, upperEnd)}
+                fill="none"
+                stroke={busColor(bus, resolvedTheme)}
+                strokeWidth={isHovered ? STROKE_HOVERED : STROKE_DEFAULT}
+                data-testid={`cpf-curve-line-${bus}`}
+                data-hovered={isHovered ? 'true' : 'false'}
+                onPointerEnter={() => setHoveredBus(bus)}
+                onPointerLeave={() => setHoveredBus((cur) => (cur === bus ? null : cur))}
+                style={{ cursor: 'pointer' }}
+              />
+              {lowerBranch ? (
+                <polyline
+                  points={pointsOf(result.nose_idx, trace.length)}
+                  fill="none"
+                  stroke={busColor(bus, resolvedTheme)}
+                  strokeWidth={isHovered ? STROKE_HOVERED : STROKE_DEFAULT}
+                  strokeDasharray="4,3"
+                  strokeOpacity={0.75}
+                  data-testid={`cpf-curve-lower-${bus}`}
+                  onPointerEnter={() => setHoveredBus(bus)}
+                  onPointerLeave={() => setHoveredBus((cur) => (cur === bus ? null : cur))}
+                  style={{ cursor: 'pointer' }}
+                />
+              ) : null}
+            </g>
+          );
+        })}
+
+        {/* where each generator reached a reactive limit */}
+        {limitMarkers.map((event) => {
+          const px = xToPx(event.lam);
+          const base = PADDING_TOP + plotH;
+          const onLower = lowerBranch && event.step > result.nose_idx + 1;
+          return (
+            <polygon
+              key={`${event.model}-${event.idx}`}
+              data-testid={`cpf-limit-marker-${event.model}-${event.idx}`}
+              points={`${px - 3},${base} ${px + 3},${base} ${px},${base - 6}`}
+              className={event.at_nose ? 'fill-danger' : 'fill-warning'}
+              fillOpacity={onLower ? 0.45 : 1}
+            >
+              <title>
+                {`${generatorName(event)} reached ${limitName(event.limit)} at ${
+                  result.mode === 'qv' ? 'Q' : 'λ'
+                } = ${event.lam.toFixed(4)}${onLower ? ' (lower branch)' : ''}`}
+              </title>
+            </polygon>
           );
         })}
 
@@ -695,6 +833,7 @@ export function CPFCurveChart({
           <div className="text-muted-foreground flex items-center justify-between px-0.5 text-[10px]">
             <span>
               Per-bus voltage at {result.mode === 'qv' ? 'Q' : 'λ'} = {sliderClamped.toFixed(3)}
+              {lowerBranch ? ': upper branch, then lower' : null}
             </span>
             <span className="text-muted-foreground/70">most-stressed first</span>
           </div>
@@ -709,7 +848,7 @@ export function CPFCurveChart({
             {readout.length === 0 ? (
               <li className="text-muted-foreground">No visible buses.</li>
             ) : (
-              readout.map(({ bus, v }) => (
+              readout.map(({ bus, v, lower }) => (
                 <li
                   key={bus}
                   data-testid={`cpf-lambda-readout-row-${bus}`}
@@ -731,6 +870,14 @@ export function CPFCurveChart({
                   </span>
                   <span className="text-foreground font-mono tabular-nums">
                     {v === null ? '—' : `${v.toFixed(3)} pu`}
+                    {lowerBranch ? (
+                      <span
+                        data-testid={`cpf-lambda-readout-lower-${bus}`}
+                        className="text-muted-foreground ml-2"
+                      >
+                        {lower === null ? '—' : `${lower.toFixed(3)} pu`}
+                      </span>
+                    ) : null}
                   </span>
                 </li>
               ))

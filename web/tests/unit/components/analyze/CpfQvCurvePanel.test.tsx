@@ -8,11 +8,13 @@
  * test:
  *
  * - the bus picker + Run wire to ``useCpfQvRun.mutate`` with the picked bus;
- * - a QV result renders the chart;
- * - a 409 result renders the run-pflow recovery banner with the CTA.
+ * - a QV result renders the chart, and what the generators did under it;
+ * - a 409 result renders the run-pflow recovery banner with the CTA, until
+ *   the power flow has been solved again;
+ * - the Q-limit box is the power-flow options' switch.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ProblemDetailsError } from '@/api/client';
@@ -45,6 +47,7 @@ import { useAnalyzeStore } from '@/store/analyze';
 import { useRunModeStore } from '@/store/runMode';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
+import { usePflowOptionsStore } from '@/store/pflowOptions';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { PflowResult } from '@/api/types';
 
@@ -106,6 +109,7 @@ beforeEach(() => {
     topology: null,
   });
   usePflowStore.setState({ lastRun: CONVERGED_PF, isRunning: false, error: null });
+  usePflowOptionsStore.getState().resetForNewCase();
 });
 
 afterEach(() => {
@@ -216,6 +220,58 @@ describe('<CpfQvCurvePanel />', () => {
     await userEvent.click(cta);
     expect(useAnalyzeStore.getState().subMode).toBe('pflow');
     expect(useRunModeStore.getState().activeRoutine).toBe('pflow');
+  });
+
+  it('a run refused for the power flow is no longer shown once the power flow is solved again', () => {
+    const body = {
+      type: 'about:blank',
+      title: 'Prerequisite not met',
+      status: 409,
+      detail:
+        'The power flow this continuation starts from leaves 1 generator past a reactive limit.',
+      recovery: { kind: 'run-pflow' as const, label: 'Run power flow first' },
+    };
+    mockMutationState = {
+      mutate,
+      isPending: false,
+      data: null,
+      error: new ProblemDetailsError(body, body),
+    };
+    render(withQueryClient(<CpfQvCurvePanel />));
+    expect(screen.getByTestId('cpf-qv-prerequisite-error')).toHaveTextContent(
+      'past a reactive limit',
+    );
+
+    act(() => {
+      usePflowStore.setState({ lastRun: { ...CONVERGED_PF, run_id: 'pf-2' } as PflowResult });
+    });
+    expect(screen.queryByTestId('cpf-qv-prerequisite-error')).not.toBeInTheDocument();
+  });
+
+  it('the Q-limit box is the power-flow option', async () => {
+    const user = userEvent.setup();
+    render(withQueryClient(<CpfQvCurvePanel />));
+    const box = screen.getByTestId('cpf-qv-enforce-q-limits');
+    expect(box).not.toBeChecked();
+    await user.click(box);
+    expect(usePflowOptionsStore.getState().options.enforceQLimits).toBe(true);
+  });
+
+  it('shows what the generators did under the curve', () => {
+    const withGenerators: CpfResult = {
+      ...QV_RESULT,
+      q_limits_enforced: true,
+      generators: [{ idx: '1', model: 'Slack', bus: '1', q: [5, 60, 100], q_min: -50, q_max: 100 }],
+      limit_events: [
+        { step: 2, lam: 2, idx: '1', model: 'Slack', bus: '1', limit: 'qmax', at_nose: true },
+      ],
+    };
+    mockMutationState = { mutate, isPending: false, data: withGenerators, error: null };
+    render(withQueryClient(<CpfQvCurvePanel />));
+    expect(screen.getByTestId('cpf-generators-nose')).toHaveTextContent(
+      'The nose is where Slack 1 (bus 1) reached Qmax, at Q = 2.0000.',
+    );
+    expect(screen.getByTestId('cpf-run-caption')).toHaveTextContent('Q limits enforced');
   });
 
   it('a generic (500) error renders the danger error banner', () => {
