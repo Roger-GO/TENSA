@@ -19,6 +19,9 @@ type Answer = {
   isPending: boolean;
   isError: boolean;
   error: Error | null;
+  // Set while a fetch that failed is being tried again.
+  failureCount?: number;
+  failureReason?: Error | null;
 };
 
 let answer: Answer;
@@ -203,22 +206,38 @@ describe('<DaeVariablePicker />', () => {
     expect(screen.getByTestId('tds-config-dae-status')).toHaveTextContent('Loading variables');
   });
 
+  const BUSY = new ProblemDetailsError({
+    type: 'about:blank',
+    title: 'Conflict',
+    status: 409,
+    detail: 'busy',
+  });
+
   it('says the session is busy while a run streams, and that the list returns after', () => {
-    answer = {
-      isPending: false,
-      isError: true,
-      error: new ProblemDetailsError({
-        type: 'about:blank',
-        title: 'Conflict',
-        status: 409,
-        detail: 'busy',
-      }),
-    };
+    // The list is asked for again for as long as the run refuses it, so the
+    // query is loading all the while, with the refusals counted.
+    answer = { isPending: true, isError: false, error: null, failureCount: 4, failureReason: BUSY };
+    const { rerender } = render(<DaeVariablePicker />);
+
+    const busy = 'The session is busy with a run. The list is back when the run ends.';
+    expect(screen.getByTestId('tds-config-dae-status')).toHaveTextContent(busy);
+
+    // Refused again two seconds on: the same message, not "Loading".
+    answer = { ...answer, failureCount: 5 };
+    rerender(<DaeVariablePicker />);
+    expect(screen.getByTestId('tds-config-dae-status')).toHaveTextContent(busy);
+
+    // A fetch given up while refused says the same.
+    answer = { isPending: false, isError: true, error: BUSY };
+    rerender(<DaeVariablePicker />);
+    expect(screen.getByTestId('tds-config-dae-status')).toHaveTextContent(busy);
+  });
+
+  it('is still loading through a refusal or two, which another list asked for at once explains', () => {
+    answer = { isPending: true, isError: false, error: null, failureCount: 2, failureReason: BUSY };
     render(<DaeVariablePicker />);
 
-    expect(screen.getByTestId('tds-config-dae-status')).toHaveTextContent(
-      'The session is busy with a run. The list is back when the run ends.',
-    );
+    expect(screen.getByTestId('tds-config-dae-status')).toHaveTextContent('Loading variables');
   });
 
   it('shows any other failure as it is', () => {

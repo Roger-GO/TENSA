@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { ProblemDetailsError } from '@/api/client';
-import { useTdsControllers } from '@/api/queries';
+import { isWaitingForSession, useTdsControllers } from '@/api/queries';
 import type { TdsControllerCatalogue, TdsControllerTarget } from '@/api/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
@@ -212,11 +211,11 @@ function ControllerForms({
   const catalogue = list.data;
 
   let status: string | null = null;
-  if (list.isError) {
-    status =
-      list.error instanceof ProblemDetailsError && list.error.status === 409
-        ? 'The session is busy with a run. Controllers can be added when the run ends.'
-        : `Could not list the devices a controller can command: ${list.error.message}`;
+  // First, since the list is asked for again for as long as a run refuses it.
+  if (isWaitingForSession(list)) {
+    status = 'The session is busy with a run. Controllers can be added when the run ends.';
+  } else if (list.isError) {
+    status = `Could not list the devices a controller can command: ${list.error.message}`;
   } else if (catalogue === undefined) {
     status = 'Looking for devices a controller can command…';
   } else if (catalogue.targets.length === 0) {

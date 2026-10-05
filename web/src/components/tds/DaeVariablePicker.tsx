@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ProblemDetailsError } from '@/api/client';
-import { useDaeVariables } from '@/api/queries';
+import { isWaitingForSession, useDaeVariables } from '@/api/queries';
 import type { DaeVariableInfo } from '@/api/types';
 import { MAX_TDS_DAE_VARS, useUiStore } from '@/store/ui';
 import { useCaseStore } from '@/store/case';
@@ -178,12 +177,12 @@ function DaeVariableResults({
   };
 
   let status: string | null = null;
-  if (list.isError) {
-    status =
-      list.error instanceof ProblemDetailsError && list.error.status === 409
-        ? 'The session is busy with a run. The list is back when the run ends.'
-        : `Could not list the variables: ${list.error.message}`;
-  } else if (list.isPending) status = 'Loading variables…';
+  // First, since the list is asked for again for as long as a run refuses it:
+  // the query is loading all that time, and this is what there is to say.
+  if (isWaitingForSession(list)) {
+    status = 'The session is busy with a run. The list is back when the run ends.';
+  } else if (list.isError) status = `Could not list the variables: ${list.error.message}`;
+  else if (list.isPending) status = 'Loading variables…';
   else if (items.length === 0) status = 'No variable matches.';
 
   if (status !== null) {

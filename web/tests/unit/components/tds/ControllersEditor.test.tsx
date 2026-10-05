@@ -19,6 +19,9 @@ type Answer = {
   data?: TdsControllerCatalogue;
   isError: boolean;
   error: Error | null;
+  // Set while a fetch that failed is being tried again.
+  failureCount?: number;
+  failureReason?: Error | null;
 };
 
 let answer: Answer;
@@ -383,16 +386,28 @@ describe('<ControllersEditor />', () => {
   });
 
   it('says so while a run holds the session, and when the list cannot be read', () => {
-    answer = {
-      isError: true,
-      error: new ProblemDetailsError({
-        type: 'about:blank',
-        status: 409,
-        title: 'Conflict',
-        detail: 'busy',
-      }),
-    };
-    const { unmount } = render(<ControllersEditor />);
+    const busy = new ProblemDetailsError({
+      type: 'about:blank',
+      status: 409,
+      title: 'Conflict',
+      detail: 'busy',
+    });
+    // The list is asked for again for as long as the run refuses it, so there
+    // is no answer and no error all the while, only the refusals counted.
+    answer = { isError: false, error: null, failureCount: 4, failureReason: busy };
+    const { rerender, unmount } = render(<ControllersEditor />);
+    expect(screen.getByTestId('tds-controllers-status')).toHaveTextContent(
+      'The session is busy with a run. Controllers can be added when the run ends.',
+    );
+    // Refused again two seconds on: the same message, not "Looking for devices".
+    answer = { ...answer, failureCount: 5 };
+    rerender(<ControllersEditor />);
+    expect(screen.getByTestId('tds-controllers-status')).toHaveTextContent(
+      'The session is busy with a run.',
+    );
+    // A fetch given up while refused says the same.
+    answer = { isError: true, error: busy };
+    rerender(<ControllersEditor />);
     expect(screen.getByTestId('tds-controllers-status')).toHaveTextContent(
       'The session is busy with a run.',
     );
@@ -402,6 +417,24 @@ describe('<ControllersEditor />', () => {
     render(<ControllersEditor />);
     expect(screen.getByTestId('tds-controllers-status')).toHaveTextContent(
       'Could not list the devices a controller can command: boom',
+    );
+  });
+
+  it('is still looking through a refusal or two, which another list asked for at once explains', () => {
+    answer = {
+      isError: false,
+      error: null,
+      failureCount: 2,
+      failureReason: new ProblemDetailsError({
+        type: 'about:blank',
+        status: 409,
+        title: 'Conflict',
+        detail: 'busy',
+      }),
+    };
+    render(<ControllersEditor />);
+    expect(screen.getByTestId('tds-controllers-status')).toHaveTextContent(
+      'Looking for devices a controller can command',
     );
   });
 

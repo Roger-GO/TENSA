@@ -14,12 +14,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
+import type { UseQueryResult } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import {
   makeQueryClient,
   queryKeys,
   fetchComtradeRecord,
   fetchResponseMetrics,
+  isWaitingForSession,
   useAlterableParams,
   useCpfQvRun,
   useCpfRun,
@@ -562,23 +564,151 @@ describe('queries hooks', () => {
     expect(result.current.isError).toBe(false);
   });
 
-  it('a list still refused after a few tries says so, as it is while a run holds the session', async () => {
-    useSessionStore.setState({ sessionId: parseSessionId('sess-busy') });
-    useCaseStore.setState({
-      selection: { primaryPath: 'kundur_full.xlsx' as WorkspacePath, addfiles: [] },
-    });
-    fetchSpy.mockImplementation(() =>
+  describe('a list a run keeps from its caller', () => {
+    const refused = () =>
       Promise.resolve(
         jsonResponse({ type: 'about:blank', title: 'Conflict', status: 409, detail: 'busy' }, 409),
-      ),
-    );
+      );
+    const CATALOGUE = {
+      types: ['droop', 'ffr'],
+      coi_available: true,
+      freq_hz: 60,
+      base_mva: 100,
+      targets: [],
+    };
 
-    const { Wrapper } = makeWrapper();
-    const { result } = renderHook(() => useDaeVariables('', 10), { wrapper: Wrapper });
+    /** Let ``ms`` of the hook's waiting between two tries go by. */
+    async function pass(ms: number): Promise<void> {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    }
 
-    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 5_000 });
-    // The first try and three more.
-    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    beforeEach(() => {
+      vi.useFakeTimers();
+      useSessionStore.setState({ sessionId: parseSessionId('sess-busy') });
+      useCaseStore.setState({
+        selection: { primaryPath: 'ieee14_esd1.xlsx' as WorkspacePath, addfiles: [] },
+      });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('says so after a few tries, and goes on saying so while it asks once every two seconds', async () => {
+      fetchSpy.mockImplementation(refused);
+      // Whether a caller would show its busy message, at each render.
+      const shown: boolean[] = [];
+      const { Wrapper } = makeWrapper();
+      const { result, unmount } = renderHook(
+        () => {
+          const list = useDaeVariables('', 10);
+          shown.push(isWaitingForSession(list));
+          return list;
+        },
+        { wrapper: Wrapper },
+      );
+
+      // Two of the quick tries in: nothing to say yet, another list may be all that is in the way.
+      await pass(500);
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      expect(isWaitingForSession(result.current)).toBe(false);
+
+      // The first try and three more, within about a second.
+      await pass(600);
+      expect(fetchSpy).toHaveBeenCalledTimes(4);
+      expect(isWaitingForSession(result.current)).toBe(true);
+
+      // From here on one request every two seconds, for as long as the run goes.
+      await pass(10_000);
+      expect(fetchSpy).toHaveBeenCalledTimes(9);
+      // Never an error and never loading afresh in between: once the message
+      // is up it stays up, through every refusal that follows.
+      expect(result.current.isError).toBe(false);
+      const since = shown.indexOf(true);
+      expect(shown.length - since).toBeGreaterThan(5);
+      expect(shown.slice(since)).not.toContain(false);
+      unmount();
+    });
+
+    const LISTS: { list: string; use: () => UseQueryResult<unknown, Error>; answer: unknown }[] = [
+      {
+        list: 'the ANDES variables',
+        use: () => useDaeVariables('omega', 10),
+        answer: { total: 1, items: [] },
+      },
+      {
+        list: 'the devices a controller can command',
+        use: () => useTdsControllers(),
+        answer: CATALOGUE,
+      },
+    ];
+
+    it.each(LISTS)('$list are back when the run ends, with nothing asked anew', async (given) => {
+      const { use, answer } = given;
+      fetchSpy.mockImplementation(refused);
+      const { Wrapper } = makeWrapper();
+      // Rendered once: nothing about what is asked for changes from here on.
+      const { result, unmount } = renderHook(use, { wrapper: Wrapper });
+
+      await pass(8_000);
+      expect(isWaitingForSession(result.current)).toBe(true);
+      expect(result.current.data).toBeUndefined();
+      const asked = fetchSpy.mock.calls.length;
+
+      // The run ends: the next time the list is asked for it is answered.
+      fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse(answer)));
+      await pass(2_000);
+
+      expect(result.current.isSuccess).toBe(true);
+      expect(result.current.data).toEqual(answer);
+      expect(isWaitingForSession(result.current)).toBe(false);
+      expect(fetchSpy).toHaveBeenCalledTimes(asked + 1);
+      // And that is the end of the asking.
+      await pass(4_000);
+      expect(fetchSpy).toHaveBeenCalledTimes(asked + 1);
+      unmount();
+    });
+
+    it('gives up on a list nobody waits for any more, and asks again when somebody does', async () => {
+      fetchSpy.mockImplementation(refused);
+      const { Wrapper } = makeWrapper();
+      const first = renderHook(() => useTdsControllers(), { wrapper: Wrapper });
+      await pass(4_000);
+      expect(isWaitingForSession(first.result.current)).toBe(true);
+
+      // The TDS tab is closed while the run goes: no more requests.
+      first.unmount();
+      await pass(2_000);
+      const asked = fetchSpy.mock.calls.length;
+      await pass(10_000);
+      expect(fetchSpy).toHaveBeenCalledTimes(asked);
+
+      // Opened again after the run: the list is asked for and answered.
+      fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse(CATALOGUE)));
+      const second = renderHook(() => useTdsControllers(), { wrapper: Wrapper });
+      await pass(100);
+      expect(second.result.current.data).toEqual(CATALOGUE);
+      second.unmount();
+    });
+
+    it('does not take any other failure for a run', async () => {
+      fetchSpy.mockImplementation(() =>
+        Promise.resolve(
+          jsonResponse({ type: 'about:blank', title: 'Not found', status: 404, detail: 'x' }, 404),
+        ),
+      );
+      const { Wrapper } = makeWrapper();
+      const { result, unmount } = renderHook(() => useDaeVariables('', 10), { wrapper: Wrapper });
+
+      await pass(8_000);
+      expect(result.current.isError).toBe(true);
+      expect(isWaitingForSession(result.current)).toBe(false);
+      // Asked for once: a refusal that is not about the session being held stands.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      unmount();
+    });
   });
 
   it('useDaeVariables stays disabled without a session or without a case', () => {
