@@ -729,6 +729,41 @@ def test_add_element_leaves_a_reference_to_no_device_as_it_was_sent() -> None:
 
 
 @pytest.mark.integration
+def test_add_without_a_mandatory_param_is_refused_and_leaves_no_half_built_device() -> None:
+    """ANDES counts a device in before it reads its params, so its own refusal
+    ("Mandatory parameter GENROU.gen is missing") left the idx on the model with
+    param lists one short, and the next setup, power flow or time-domain run
+    failed on them ("operands could not be broadcast together"). The add is now
+    refused before ANDES is called."""
+    raw, _ = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw)
+    ss = w._ss
+    assert ss.GENROU.n == 0
+
+    with pytest.raises(ElementValidationError) as refused:
+        w.add_element("GENROU", {"idx": "G_x", "name": "G_x", "bus": 2, "Sn": 100, "Vn": 69})
+    assert "GENROU cannot be added without gen" in str(refused.value)
+    assert ss.GENROU.n == 0 and list(ss.GENROU.idx.v) == []
+    assert w._replay_buffer == []
+
+    with pytest.raises(ElementValidationError) as refused:
+        w.add_element("GENROU", {"idx": "G_x", "name": "G_x", "Sn": 100, "Vn": 69})
+    assert "GENROU cannot be added without bus, gen: ANDES has no default for them" in str(
+        refused.value
+    )
+
+    # The same idx can still be added, complete, and the case solves.
+    gen = ss.PV.idx.v[0]
+    w.add_element(
+        "GENROU",
+        {"idx": "G_x", "name": "G_x", "bus": ss.PV.bus.v[0], "gen": gen, "Sn": 100, "Vn": 69, "H": 5},
+    )
+    assert list(ss.GENROU.idx.v) == ["G_x"]
+    assert w.run_pflow().converged
+
+
+@pytest.mark.integration
 def test_controller_schema_syn_link_uses_syn_idx() -> None:
     """An exciter/governor's machine link renders as a machine picker."""
     from tensa.core.wrapper import _PARAMS_BY_MODEL

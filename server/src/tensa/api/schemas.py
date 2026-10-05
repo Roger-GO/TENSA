@@ -1085,6 +1085,8 @@ class AddElementRequest(BaseModel):
             "A reference to another device (``bus``, ``gen``, ``syn``) may be "
             "sent as text or as a number: it is matched to the idx the case "
             "holds. "
+            "A request that leaves out a parameter ANDES has no default for "
+            "is rejected with 422 and adds nothing. "
             "Required keys vary per model — query "
             "``GET /api/topology/schema`` for the live form metadata."
         ),

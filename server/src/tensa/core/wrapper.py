@@ -1006,6 +1006,18 @@ class Wrapper:
             }
             _validate_genrou_reactances(params, genrou_defaults)
 
+        # ANDES counts the device in before it reads the params, so an add it
+        # refuses for a missing mandatory one leaves a half-built device on the
+        # System (an idx with param lists one short), and the next setup, power
+        # flow or time-domain run fails on the mismatched lists. Refused here,
+        # nothing has been touched.
+        missing = _missing_mandatory(ss, model, params)
+        if missing:
+            raise ElementValidationError(
+                f"{model} cannot be added without {', '.join(missing)}: ANDES has "
+                f"no default for {'it' if len(missing) == 1 else 'them'}"
+            )
+
         # Snapshot the params for replay BEFORE ANDES gets a chance to
         # mutate the dict in-place — ``ss.add`` pops ``idx`` (and possibly
         # other identifier fields) out of the input dict during model
@@ -4860,6 +4872,26 @@ def param_metadata_for_form(model: str) -> tuple[ParamMeta, ...]:
     polymorphic form generator (Unit 6).
     """
     return _PARAMS_BY_MODEL.get(model, ())
+
+
+def _missing_mandatory(ss: Any, model: str, params: Mapping[str, Any]) -> list[str]:
+    """The params ANDES marks mandatory for ``model`` that ``params`` leaves out.
+
+    What ANDES's own ``add`` would refuse, found before it runs: a param flagged
+    ``mandatory`` whose value is absent, ``None`` or NaN.
+    """
+    declared = getattr(getattr(ss, model, None), "params", None)
+    if not isinstance(declared, dict):
+        return []
+    missing: list[str] = []
+    for name, param in declared.items():
+        get_property = getattr(param, "get_property", None)
+        if not callable(get_property) or not get_property("mandatory"):
+            continue
+        value = params.get(name)
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            missing.append(str(name))
+    return missing
 
 
 # GENROU reactance-ordering chains. Standard round-rotor machine physics:

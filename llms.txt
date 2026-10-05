@@ -147,6 +147,7 @@ response and needs no Arrow decoding.
 - Exciters/governors link to machines via the "syn" parameter (a SynGen idx).
 - A reference to another device ("bus", "gen", "syn") may be sent as "5" or 5: the add and edit routes match it
   to the idx the case holds.
+- An add that leaves out a parameter ANDES has no default for ("gen" of a GENROU) is a 422 and adds nothing.
 - Line/Transformer impedances are pu on (Sn, Vn1); the add-element endpoint derives
   Vn1/Vn2 from the connected buses automatically.
 - TDS batch endpoint is synchronous with a 300 s server-side cap; for long runs use the WS stream.
