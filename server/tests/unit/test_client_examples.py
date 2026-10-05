@@ -168,6 +168,21 @@ def test_the_example_client_lists_andes_variables_and_describes_signals(
     assert json.loads(metrics["body"])["t_start"] == 0.5
 
 
+def test_the_example_client_reads_the_messages_of_a_session(
+    recorder: tuple[str, list[dict[str, Any]]],
+) -> None:
+    base, seen = recorder
+    client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
+    session = client.Session(client.AndesApp(base), "abc")
+
+    session.messages()
+    session.messages(level="error", after=40)
+
+    warnings, errors = seen
+    assert warnings["path"] == "/api/sessions/abc/messages?level=warning&after=0"
+    assert errors["path"] == "/api/sessions/abc/messages?level=error&after=40"
+
+
 def test_the_example_client_uploads_a_case_file_as_its_own_bytes(
     recorder: tuple[str, list[dict[str, Any]]], tmp_path: Path
 ) -> None:
@@ -208,6 +223,23 @@ def test_the_mcp_tds_tool_sends_the_variables_it_was_asked_to_record(
     assert json.loads(plain["body"]) == {"tf": 2.0}
     assert json.loads(recording["body"]) == {"tf": 2.0, "dae_vars": ["omega GENROU 1"]}
     assert listing["path"] == "/api/sessions/abc/dae-variables?q=omega&kind=x&limit=100"
+
+
+def test_the_mcp_messages_tool_asks_for_warnings_unless_told_otherwise(
+    recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    from tensa import mcp_server
+
+    base, seen = recorder
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+
+    mcp_server.get_messages("abc")
+    mcp_server.get_messages("abc", level="info", after=17)
+
+    warnings, everything = seen
+    assert warnings["path"] == "/api/sessions/abc/messages?level=warning&after=0"
+    assert everything["path"] == "/api/sessions/abc/messages?level=info&after=17"
 
 
 def test_the_mcp_metrics_tool_runs_the_simulation_and_returns_only_the_metrics(

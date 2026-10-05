@@ -275,6 +275,22 @@ def get_operating_point(session_id: str) -> Any:
 
 
 @mcp.tool()
+def get_messages(session_id: str, level: str = "warning", after: int = 0) -> Any:
+    """Read what ANDES said while this session's commands ran.
+
+    A run that converged can still carry a warning (a device whose
+    initialisation failed, a limit that was not adjusted), and a run that did
+    not converge says why. level is the lowest to return: 'warning' (the default)
+    gives warnings and errors, 'info' adds how each run went, 'error' only
+    errors. Each message has its level, the command that was running (source),
+    the ANDES logger and the text. Pass next_after back as after to read only
+    what came since. Needs no run and does not wait for one in progress.
+    """
+    query = urllib.parse.urlencode({"level": level, "after": after})
+    return _api("GET", f"/sessions/{session_id}/messages?{query}")
+
+
+@mcp.tool()
 def run_eig(session_id: str) -> Any:
     """Run small-signal eigenvalue analysis (requires a converged power flow)."""
     return _api("POST", f"/sessions/{session_id}/eig", {})

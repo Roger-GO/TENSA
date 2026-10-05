@@ -79,6 +79,7 @@ from tensa.core.errors import (
     TdsRequestError,
     short_repr,
 )
+from tensa.core.messages import attach_log, begin_command, install_capture, uninstall_capture
 
 # AndesAppError catches the new ElementValidationError /
 # ElementNotFoundError / SystemAlreadyLoadedError subclasses and forwards
@@ -1389,7 +1390,9 @@ def _handle_run_tds(
             if tail:
                 envelope["tail"] = True
             try:
-                data_pipe.send(envelope)
+                # What ANDES logged since the last frame goes with this one, so a
+                # long run's messages (an event applied at t = 2 s) arrive as it goes.
+                data_pipe.send(attach_log(envelope))
             except (BrokenPipeError, OSError):
                 abort_flag.set()
 
@@ -1576,17 +1579,40 @@ def worker_main(
     _ignore_sigint()
     _set_parent_death_signal()
     _spawn_orphan_detector()
-    # Import ANDES now, before the first ``recv``, so the first load does not. This
-    # runs ahead of the audit hook on purpose: it reads only library files, and the
-    # hook would log some of them (the system's ``mime.types``) as strays.
-    _warm_up_if_idle(ctrl)
-    _install_strict_fs_audit_hook(workspace)
+    # What ANDES logs while a command runs goes back with its reply (see
+    # ``tensa.core.messages``). Installed before anything imports ANDES, and taken
+    # off again when the loop ends so a worker run in-process leaves no handler.
+    install_capture()
+    try:
+        # Import ANDES now, before the first ``recv``, so the first load does not. This
+        # runs ahead of the audit hook on purpose: it reads only library files, and the
+        # hook would log some of them (the system's ``mime.types``) as strays.
+        _warm_up_if_idle(ctrl)
+        _install_strict_fs_audit_hook(workspace)
+        return _serve_commands(ctrl, data, abort_event, workspace, session_id, owner_pid)
+    finally:
+        uninstall_capture()
+
+
+def _serve_commands(
+    ctrl: Connection,
+    data: Connection,
+    abort_event: EventType,
+    workspace: str | None,
+    session_id: str | None,
+    owner_pid: int | None,
+) -> int:
+    """The command loop of :func:`worker_main`: read a command, run it, send the
+    reply (with what ANDES logged while it ran), until ``shutdown`` or a closed pipe."""
 
     # ``workspace`` is forwarded so the wrapper's snapshot methods
     # (Unit 7) can resolve ``<workspace>/snapshots/<case>/<name>.{dill,json}``
     # without re-deriving the directory from the FastAPI app state (which
     # the worker subprocess can't read).
     wrapper = Wrapper(workspace=workspace, session_id=session_id, owner_pid=owner_pid)
+
+    def reply(message: dict[str, Any]) -> None:
+        data.send(attach_log(message))
 
     while True:
         try:
@@ -1604,6 +1630,7 @@ def worker_main(
                 data.send({"type": "result", "seq": seq, "payload": None})
             return 0
 
+        begin_command(str(op))
         try:
             if op == "run_tds":
                 payload = _handle_run_tds(wrapper, args, abort_event, data, seq)
@@ -1619,9 +1646,9 @@ def worker_main(
                 if handler is None:
                     raise AndesAppError(f"unknown op: {op!r}")
                 payload = handler(wrapper, args)
-            data.send({"type": "result", "seq": seq, "payload": payload})
+            reply({"type": "result", "seq": seq, "payload": payload})
         except DisturbanceCommitError as exc:
-            data.send(
+            reply(
                 {
                     "type": "error",
                     "seq": seq,
@@ -1630,7 +1657,7 @@ def worker_main(
                 }
             )
         except NoCaseLoadedError as exc:
-            data.send(
+            reply(
                 {
                     "type": "error",
                     "seq": seq,
@@ -1644,7 +1671,7 @@ def worker_main(
             # ``DeleteBlockedResponse`` body. ``extra`` is the worker
             # side's structured-extra escape hatch; the parent's
             # ``WorkerError`` exposes it via ``exc.extra``.
-            data.send(
+            reply(
                 {
                     "type": "error",
                     "seq": seq,
@@ -1678,9 +1705,9 @@ def worker_main(
             }
             if extra is not None:
                 error_payload["extra"] = extra
-            data.send(error_payload)
+            reply(error_payload)
         except Exception as exc:  # noqa: BLE001 — last-resort
-            data.send(
+            reply(
                 {
                     "type": "error",
                     "seq": seq,

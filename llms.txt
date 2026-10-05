@@ -64,6 +64,10 @@ Elements:        GET /topology/schema (every buildable model + typed params) · 
                  POST /sessions/{id}/undo-last-edit
 Jobs:            GET /sessions/{id}/jobs[?kind=&status=] · GET/DELETE /sessions/{id}/jobs/{job_id}
                  (statuses: pending running done failed cancelled)
+Messages:        GET /sessions/{id}/messages[?after=&level=&limit=] · DELETE /sessions/{id}/messages  (what ANDES logged while a command ran:
+                 {"messages":[{"seq","time","level","logger","source","text","repeat"}],"first_seq","last_seq","next_after","dropped"};
+                 level is info, warning or error, source the command (load_case, run_pflow, run_tds, ...); level=warning returns warnings and
+                 errors only; pass next_after back as after to read on; a read does not wait for a run in progress)
 Clone editing:   POST /sessions/{id}/case/clone (start copy-on-write edit)
                  PUT /sessions/{id}/case/clone/params/{model}/{idx}/{param} (edit one param)
                  POST .../case/clone/undo · .../case/clone/redo · .../case/clone/reset · .../case/clone/save-as
@@ -118,6 +122,8 @@ response and needs no Arrow decoding.
   Vn1/Vn2 from the connected buses automatically.
 - TDS batch endpoint is synchronous with a 300 s server-side cap; for long runs use the WS stream.
 - After any run, GET /operating-point reflects the final state (TDS end point, not the initial PF).
+- A run that converged can still carry warnings (a device whose initialisation failed, a limit ANDES did not adjust). After an odd
+  result, GET /sessions/{id}/messages?level=warning shows what ANDES said about it.
 - Snapshots restore by replay (reload the case, re-add the recorded disturbances, setup, PF). The
   ANDES solver-state blob is opt-in on both ends: "include_dill": true on POST .../snapshot writes it
   and "use_dill_optimization": true on POST .../snapshot/restore tries it first.

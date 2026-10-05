@@ -182,5 +182,13 @@ class Session:
     def operating_point(self) -> Any:
         return self._req("GET", "/operating-point")
 
+    def messages(self, level: str = "warning", after: int = 0) -> Any:
+        """What ANDES said while this session's commands ran: ``level`` is the lowest
+        to return (``info``, ``warning`` or ``error``), ``after`` a message number to
+        read on from (pass back the ``next_after`` of the last read). A run that
+        converged can still carry a warning, and one that did not says why."""
+        query = urllib.parse.urlencode({"level": level, "after": after})
+        return self._req("GET", f"/messages?{query}")
+
     def run_eig(self) -> Any:
         return self._req("POST", "/eig", {})

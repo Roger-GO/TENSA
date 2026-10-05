@@ -45,6 +45,7 @@ from typing import Any, Literal
 
 from tensa.core.errors import AndesAppError, SessionBusyError, WorkerDiedError
 from tensa.core.jobs import JobKind, JobRecord, JobStatus, _JobRegistry
+from tensa.core.messages import MessageLog
 from tensa.core.session_dirs import SESSIONS_DIRNAME, remove_tree, sweep_stale_session_dirs
 from tensa.core.sweep import default_sweep_workers, sweep_worker_count
 from tensa.core.sweep_pool import (
@@ -181,6 +182,10 @@ class _Session:
     job_event_subscribers: list[asyncio.Queue[dict[str, Any]]] = field(
         default_factory=list
     )
+    # What ANDES logged while this session's worker ran commands, as the worker
+    # attached it to its replies (see ``tensa.core.messages``). Filled by
+    # ``_absorb_log`` wherever a reply is read; read by ``GET /sessions/{id}/messages``.
+    messages: MessageLog = field(default_factory=MessageLog)
 
 
 def _current_inflight_job(sess: _Session) -> JobRecord | None:
@@ -198,6 +203,21 @@ def _current_inflight_job(sess: _Session) -> JobRecord | None:
         if jobs:
             return max(jobs, key=lambda job: job.updated_at)
     return None
+
+
+def _absorb_log(sess: _Session, message: object) -> None:
+    """Move what ANDES logged, carried on a worker message as ``log`` (and
+    ``log_dropped``), into the session's message log. Any message may carry it:
+    a result, an error, a streamed frame."""
+    if not isinstance(message, dict):
+        return
+    entries = message.get("log")
+    dropped = message.get("log_dropped")
+    if entries or dropped:
+        sess.messages.extend(
+            entries if isinstance(entries, list) else [],
+            dropped if isinstance(dropped, int) else 0,
+        )
 
 
 def _job_event_envelope(record: JobRecord) -> dict[str, Any]:
@@ -714,6 +734,9 @@ class SessionManager:
                 try:
                     sess.ctrl.send({"op": op, "args": args or {}, "seq": seq})
                     response = sess.data.recv()
+                    # Here, not after the await: a caller that timed out still
+                    # reads the reply on this thread, and its messages are kept.
+                    _absorb_log(sess, response)
                 except (
                     EOFError,
                     BrokenPipeError,
@@ -813,6 +836,7 @@ class SessionManager:
                 sess.last_active = time.monotonic()
                 if not isinstance(msg, dict):
                     raise WorkerError("malformed", f"non-dict response: {msg!r}")
+                _absorb_log(sess, msg)
                 return msg
 
             deadline = (
@@ -1692,6 +1716,13 @@ class SessionManager:
         ``global_job_registry`` instead.
         """
         return self._require_session(session_id).job_registry
+
+    def session_messages(self, session_id: str) -> MessageLog:
+        """Return the session's log of what ANDES said while its worker ran commands.
+
+        Raises ``SessionExpiredError`` for an unknown / closed session.
+        """
+        return self._require_session(session_id).messages
 
     @property
     def global_job_registry(self) -> _JobRegistry:

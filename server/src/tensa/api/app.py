@@ -43,6 +43,7 @@ from tensa.api.routes.disturbances import router as disturbances_router
 from tensa.api.routes.eig import router as eig_router
 from tensa.api.routes.elements import router as elements_router
 from tensa.api.routes.jobs import router as jobs_router
+from tensa.api.routes.messages import router as messages_router
 from tensa.api.routes.metrics import router as metrics_router
 from tensa.api.routes.pflow import router as pflow_router
 from tensa.api.routes.pmu import router as pmu_router
@@ -364,6 +365,7 @@ def make_app(
     # multiplexed WS). The 10s liveness sweeper is owned by SessionManager and
     # started in ``mgr.start()`` / cancelled in ``mgr.shutdown()`` above.
     app.include_router(jobs_router, prefix="/api", tags=["jobs"])
+    app.include_router(messages_router, prefix="/api", tags=["messages"])
     app.include_router(ws_router, prefix="/api", tags=["streaming"])
 
     # SPA mount goes LAST so the ``/api/*`` routers and ``/openapi.json``

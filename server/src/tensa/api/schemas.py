@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from tensa.core.dae_vars import MAX_DAE_VARS
 from tensa.core.jobs import JobKind as JobKindLiteral
 from tensa.core.jobs import JobStatus as JobStatusLiteral
+from tensa.core.messages import MAX_MESSAGE_CHARS, MESSAGE_LOG_CAPACITY, PENDING_CAPACITY
 from tensa.core.pflow_options import (
     MAX_ITERATIONS_MAX,
     MAX_ITERATIONS_MIN,
@@ -243,6 +244,104 @@ class JobRecordSchema(BaseModel):
             "Number of identical-signature failures that coalesced into "
             "this record, which keeps the first of them. For ``done`` and "
             "in-flight jobs this is always ``0``."
+        ),
+    )
+
+
+# ---- messages: what ANDES said while a command ran ---------------------------
+
+MessageLevelSchema = Literal["info", "warning", "error"]
+
+
+class SessionMessageSchema(BaseModel):
+    """One message in a session's log: something ANDES reported while the
+    session's worker ran a command."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    seq: int = Field(
+        ...,
+        description=(
+            "Number of the message in the session, from 1, in the order the "
+            "server received them. Numbers are never reused, not even after the "
+            "log is cleared, so ``after=<seq>`` always reads what came next."
+        ),
+    )
+    time: float = Field(
+        ...,
+        description="Unix time, in seconds, at which ANDES logged the message.",
+    )
+    level: MessageLevelSchema = Field(
+        ...,
+        description=(
+            "``info`` for what ANDES reports about a run's progress, ``warning`` "
+            "for something that may make a result wrong (a device whose "
+            "initialisation failed, a limit that was not adjusted), ``error`` for "
+            "what stopped the command."
+        ),
+    )
+    logger: str = Field(
+        ...,
+        description="Name of the ANDES logger that said it (``andes.routines.pflow``).",
+    )
+    source: str = Field(
+        ...,
+        description=(
+            "The command the worker was running: ``load_case``, ``run_pflow``, "
+            "``run_tds``, ``run_eig``, ... Empty for a message logged between commands."
+        ),
+    )
+    text: str = Field(
+        ...,
+        description=(
+            "The message. It can span several lines: ANDES logs tables. A "
+            f"message longer than {MAX_MESSAGE_CHARS} characters is cut."
+        ),
+    )
+    repeat: int = Field(
+        ...,
+        ge=1,
+        description=(
+            "How many times in a row ANDES logged this exact message, which is "
+            "kept once (a solver that warns on every step)."
+        ),
+    )
+
+
+class SessionMessages(BaseModel):
+    """Response of ``GET /sessions/{id}/messages``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    messages: list[SessionMessageSchema] = Field(
+        ...,
+        description="The messages asked for, oldest first.",
+    )
+    first_seq: int = Field(
+        ...,
+        description=(
+            "The number of the oldest message the session still holds (of the "
+            "next one to arrive, when it holds none). A reader that kept older "
+            "messages should drop them: they were evicted or cleared."
+        ),
+    )
+    last_seq: int = Field(
+        ...,
+        description="The number of the newest message the session has had; 0 before any.",
+    )
+    next_after: int = Field(
+        ...,
+        description=(
+            "What to pass as ``after`` to read on from here: the last message "
+            "returned when the read stopped at ``limit``, otherwise ``last_seq``."
+        ),
+    )
+    dropped: int = Field(
+        ...,
+        description=(
+            f"How many messages were lost to the caps (the worker keeps {PENDING_CAPACITY} "
+            f"between two replies, the session keeps the latest {MESSAGE_LOG_CAPACITY}), "
+            "over the session's life. Clearing the log does not count."
         ),
     )
 
