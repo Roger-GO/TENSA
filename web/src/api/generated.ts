@@ -5611,7 +5611,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The extension is not one of ``.xlsx``, ``.raw``, ``.dyr``, ``.json``, ``.m``, or the file is empty. */
+            /** @description The extension is not one of ``.xlsx``, ``.raw``, ``.dyr``, ``.json``, ``.m``, the name is a layout sidecar (``<case>.layout.json``, written by ``PUT /workspace/layout``), or the file is empty. */
             422: {
                 headers: {
                     [name: string]: unknown;

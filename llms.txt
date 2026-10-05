@@ -80,7 +80,7 @@ Reports:         GET /sessions/{id}/report
 Workspace:       GET /workspace/files · GET/PUT /workspace/layout?case_path=<rel>
                  POST /workspace/files?name=<file>[&overwrite=true]  (adds a case file; the body IS the file's bytes
                  as in curl --data-binary @ieee14.raw ..., not multipart, which answers 415; 32 MiB; xlsx raw dyr json m;
-                 409 if the name exists and overwrite is not true)
+                 409 if the name exists and overwrite is not true; a <case>.layout.json name is refused, PUT /workspace/layout writes those)
 Version:         GET /version  → {"tensa": "...", "andes": "..."}  (installed package versions, no session needed)
 
 ## WebSockets (live streaming)

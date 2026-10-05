@@ -62,6 +62,9 @@ _ALLOWED_EXTENSIONS: frozenset[str] = frozenset({".xlsx", ".raw", ".dyr", ".json
 # Layout sidecar body cap: 256 KB. Computed once.
 _MAX_LAYOUT_BYTES = 256 * 1024
 
+# What a layout sidecar's name adds to its case's: ``ieee14.raw.layout.json``.
+_LAYOUT_SIDECAR_SUFFIX = ".layout.json"
+
 # Case-file upload cap: 32 MiB. A RAW, xlsx or MATPOWER case of tens of thousands
 # of buses is a few MB; the cap only stops a runaway body.
 MAX_UPLOAD_BYTES = 32 * 1024 * 1024
@@ -104,7 +107,7 @@ def _layout_sidecar_path(workspace: Path, case_path: str) -> Path:
     _reject_unsafe_input(case_path)
     workspace = canonical_directory(workspace)
     candidate = (workspace / case_path).expanduser()
-    sidecar_name = candidate.name + ".layout.json"
+    sidecar_name = candidate.name + _LAYOUT_SIDECAR_SUFFIX
     parent = candidate.parent
     try:
         parent_exists = parent.exists()
@@ -183,7 +186,8 @@ def _check_upload_name(name: str) -> None:
     separators (the lister does not recurse, and the write check looks only at the
     last component, so it would accept ``sub/x.raw``), no leading dot (the lister
     hides such files) and the length a file system takes. 422 when the name is
-    well formed but not a case format.
+    well formed but not a case format, which a layout sidecar is not: it is
+    written by ``PUT /workspace/layout``, which caps and validates it.
     """
     if "/" in name or "\\" in name:
         raise HTTPException(
@@ -207,6 +211,14 @@ def _check_upload_name(name: str) -> None:
             detail=(
                 f"unsupported file type {suffix or '(no extension)'!r} for {name!r}: "
                 f"the workspace holds {', '.join(sorted(_ALLOWED_EXTENSIONS))} files"
+            ),
+        )
+    if name.lower().endswith(_LAYOUT_SIDECAR_SUFFIX):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"{name!r} is a layout sidecar, not a case: "
+                "layout sidecars are written with PUT /workspace/layout"
             ),
         )
 
@@ -288,7 +300,9 @@ async def _read_upload_body(request: Request) -> bytes:
             "model": ProblemDetails,
             "description": (
                 "The extension is not one of ``.xlsx``, ``.raw``, ``.dyr``, "
-                "``.json``, ``.m``, or the file is empty."
+                "``.json``, ``.m``, the name is a layout sidecar "
+                "(``<case>.layout.json``, written by ``PUT /workspace/layout``), "
+                "or the file is empty."
             ),
         },
         500: {
@@ -543,7 +557,7 @@ async def put_layout(
     _len: None = Depends(_enforce_layout_content_length),
 ) -> Response:
     workspace = _workspace(request)
-    sidecar_rel = case_path + ".layout.json"
+    sidecar_rel = case_path + _LAYOUT_SIDECAR_SUFFIX
     try:
         with open_workspace_file_for_write(
             workspace,

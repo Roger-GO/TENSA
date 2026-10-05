@@ -46,6 +46,20 @@ describe('uploadProblem', () => {
     },
   );
 
+  it.each(['ieee14.raw.layout.json', 'a.layout.json', 'A.Layout.JSON'])(
+    'turns the layout sidecar %s away, since the server writes those itself',
+    (name) => {
+      const problem = uploadProblem({ name, size: 10 });
+      expect(problem).toContain(name);
+      expect(problem).toContain('diagram layout');
+    },
+  );
+
+  it('does not take a case for a sidecar because of its name', () => {
+    expect(uploadProblem({ name: 'layout.json', size: 10 })).toBeNull();
+    expect(uploadProblem({ name: 'my-layout.json', size: 10 })).toBeNull();
+  });
+
   it('accepts a file of exactly the cap', () => {
     expect(uploadProblem({ name: 'a.raw', size: MAX_CASE_UPLOAD_BYTES })).toBeNull();
   });

@@ -3,8 +3,8 @@
  * the server enforces (checked here first, so a file that is bound to be refused
  * is not sent), and what to open once a group of files has been stored.
  *
- * Mirrors `_ALLOWED_EXTENSIONS` and `MAX_UPLOAD_BYTES` in
- * `server/src/tensa/api/routes/workspace.py`. The server still has the final say,
+ * Mirrors `_ALLOWED_EXTENSIONS`, the refusal of layout sidecars and
+ * `MAX_UPLOAD_BYTES` in `server/src/tensa/api/routes/workspace.py`. The server still has the final say,
  * and its message is what the user reads when a name slips past (a reserved
  * Windows device name, say).
  */
@@ -28,12 +28,18 @@ export function fileExtension(name: string): string {
 /**
  * Why a file cannot be added, in a sentence that names it, or `null` when it can
  * be tried. Checks what the server would refuse without needing the file's
- * content: its type, that it is not empty, and its size.
+ * content: its type (a `<case>.layout.json` sidecar included), that it is not
+ * empty, and its size.
  */
 export function uploadProblem(file: { name: string; size: number }): string | null {
   const ext = fileExtension(file.name);
   if (!(CASE_FILE_EXTENSIONS as readonly string[]).includes(ext)) {
     return `${file.name} is not a case file. The workspace holds ${CASE_FILE_EXTENSIONS.join(', ')} files.`;
+  }
+  // The layout the diagram saves beside a case: the server writes it itself, from
+  // its own route, and refuses it as an upload.
+  if (file.name.toLowerCase().endsWith('.layout.json')) {
+    return `${file.name} is a diagram layout, which the app saves beside its case. It is not a case file.`;
   }
   if (file.size === 0) return `${file.name} is empty.`;
   if (file.size > MAX_CASE_UPLOAD_BYTES) {

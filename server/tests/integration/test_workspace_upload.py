@@ -114,7 +114,7 @@ async def test_upload_stores_the_bytes_and_the_lister_shows_the_file(
         ("a.json", "json"),
         ("a.m", "m"),
         ("IEEE14.RAW", "raw"),
-        ("a.layout.json", "json"),
+        ("layout.json", "json"),  # only a name ending in `.layout.json` is a sidecar's
         ("été.m", "m"),
     ],
 )
@@ -301,6 +301,33 @@ async def test_upload_refuses_a_file_type_the_workspace_does_not_hold(
     assert _names(ws) == []
 
 
+@pytest.mark.parametrize("name", ["ieee14.raw.layout.json", "a.layout.json", "A.Layout.JSON"])
+async def test_upload_refuses_a_layout_sidecar(
+    client_workspace: tuple[httpx.AsyncClient, Path], name: str
+) -> None:
+    """``PUT /workspace/layout`` is the one writer of a sidecar: it caps the body at
+    256 KB and checks it against the layout schema, which an upload would skip."""
+    client, ws = client_workspace
+    resp = await _upload(client, name, b"{}")
+    assert resp.status_code == 422, resp.text
+    assert "PUT /workspace/layout" in resp.json()["detail"]
+    assert _names(ws) == []
+    # The layout writer still makes one for a case, and the lister shows it.
+    (ws / "ieee14.raw").write_bytes(b"case")
+    saved = await client.put(
+        "/api/workspace/layout",
+        params={"case_path": "ieee14.raw"},
+        json={
+            "schema_version": "1.0",
+            "andes_version": "2.0.0",
+            "coordinates": {"1": {"x": 0.0, "y": 0.0}},
+            "last_modified": "2026-05-07T12:00:00+00:00",
+        },
+    )
+    assert saved.status_code == 204, saved.text
+    assert _names(ws) == ["ieee14.raw", "ieee14.raw.layout.json"]
+
+
 async def test_upload_without_a_name_is_a_validation_error(
     client_workspace: tuple[httpx.AsyncClient, Path],
 ) -> None:
@@ -433,6 +460,107 @@ async def test_upload_takes_the_body_whatever_its_content_type(
     assert (ws / "a.raw").read_bytes() == b"a=b&c=d"
     assert (ws / "b.json").read_bytes() == b'{"Bus": []}'
     assert (ws / "c.m").read_bytes() == b"function mpc = c"
+
+
+# ---- when the write or the connection fails ----------------------------------
+
+
+def _disk_full(*_args: object, **_kwargs: object) -> None:
+    raise OSError(errno.ENOSPC, "No space left on device")
+
+
+async def test_upload_that_cannot_be_written_is_a_500_and_leaves_no_temp_file(
+    client_workspace: tuple[httpx.AsyncClient, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, ws = client_workspace
+    monkeypatch.setattr(os, "fsync", _disk_full)  # the temp file is half written
+    resp = await _upload(client, "a.raw")
+    assert resp.status_code == 500, resp.text
+    assert "could not store 'a.raw'" in resp.json()["detail"]
+    assert _names(ws) == []
+
+
+async def test_upload_that_cannot_be_put_in_place_is_a_500_and_leaves_no_temp_file(
+    client_workspace: tuple[httpx.AsyncClient, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The temp file was written whole but neither the link nor the rename that
+    would give it its name works: it must not stay behind."""
+    client, ws = client_workspace
+
+    def no_links(src: object, dst: object) -> None:
+        raise OSError(errno.EPERM, "hard links are not supported here")
+
+    monkeypatch.setattr(os, "link", no_links)
+    monkeypatch.setattr(os, "replace", _disk_full)
+    resp = await _upload(client, "a.raw")
+    assert resp.status_code == 500, resp.text
+    assert "could not store 'a.raw'" in resp.json()["detail"]
+    assert _names(ws) == []
+
+
+async def test_upload_that_cannot_replace_a_file_keeps_the_old_one_and_no_temp_file(
+    client_workspace: tuple[httpx.AsyncClient, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, ws = client_workspace
+    (ws / "a.raw").write_bytes(b"the old case")
+    monkeypatch.setattr(os, "replace", _disk_full)
+    resp = await _upload(client, "a.raw", b"the new case", overwrite=True)
+    assert resp.status_code == 500, resp.text
+    assert (ws / "a.raw").read_bytes() == b"the old case"
+    assert _names(ws) == ["a.raw"]
+
+
+async def test_upload_cut_off_partway_through_the_body_stores_nothing(tmp_path: Path) -> None:
+    """The client goes away after the first chunk (``http.disconnect`` is what ASGI
+    delivers): a 400 saying so, and neither a file nor a temp file in the workspace.
+    Driven through the ASGI interface, since httpx's transport has no disconnect."""
+    ws = tmp_path / "ws"
+    ws.mkdir(mode=0o700)
+    app = make_app(
+        workspace=ws,
+        bind_host="127.0.0.1",
+        bind_port=8000,
+        max_sessions=1,
+        idle_timeout_seconds=180.0,
+    )
+    app.state.workspace = ws
+    incoming = iter(
+        [
+            {"type": "http.request", "body": b"the first half of a ca", "more_body": True},
+            {"type": "http.disconnect"},
+        ]
+    )
+    sent: list[dict[str, object]] = []
+
+    async def receive() -> dict[str, object]:
+        return next(incoming)
+
+    async def send(message: dict[str, object]) -> None:
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/workspace/files",
+        "raw_path": b"/api/workspace/files",
+        "root_path": "",
+        "query_string": b"name=a.raw",
+        "headers": [
+            (b"host", b"127.0.0.1:8000"),
+            (b"content-type", b"application/octet-stream"),
+        ],
+        "client": ("127.0.0.1", 50000),
+        "server": ("127.0.0.1", 8000),
+    }
+    await app(scope, receive, send)  # type: ignore[arg-type]
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    assert start["status"] == 400
+    body = b"".join(m["body"] for m in sent if m["type"] == "http.response.body")  # type: ignore[misc]
+    assert b"interrupted" in body
+    assert _names(ws) == []
 
 
 # ---- who may upload ---------------------------------------------------------
