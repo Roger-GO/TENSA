@@ -6,7 +6,7 @@
  * The API client is stubbed, so each test reads the requests that went out.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, screen } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
@@ -223,7 +223,7 @@ describe('<BusesGrid /> editing', () => {
     fireEvent.paste(screen.getByTestId('buses-grid'), {
       clipboardData: { getData: () => '0.92\t1.07\n0.96\t1.04\n' },
     });
-    await vi.waitFor(() => expect(client.put).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(client.put).toHaveBeenCalledTimes(2));
     expect(puts()).toEqual([
       ['/sessions/s1/elements/Bus/1', { params: { vmin: 0.92, vmax: 1.07 } }],
       ['/sessions/s1/elements/Bus/2', { params: { vmin: 0.96, vmax: 1.04 } }],
@@ -256,7 +256,7 @@ describe('a table once a run has locked the case', () => {
     expect(cell('buses', '1', 'vmax')).not.toHaveAttribute('data-editable');
     await user.dblClick(cell('buses', '1', 'vmax'));
     expect(screen.queryByTestId('buses-grid-editor')).not.toBeInTheDocument();
-    expect(screen.getByTestId('buses-grid-hint')).toHaveTextContent('A run has locked this case.');
+    expect(screen.getByTestId('buses-grid-hint')).toHaveTextContent('The case is set up for a run');
     await user.click(screen.getByTestId('grid-reset-run'));
     expect(client.post).toHaveBeenCalledWith('/sessions/s1/reload', expect.anything());
   });
@@ -268,9 +268,9 @@ describe('a table once a run has locked the case', () => {
     fireEvent.paste(screen.getByTestId('buses-grid'), {
       clipboardData: { getData: () => '0.92' },
     });
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(toastMock.info).toHaveBeenCalledWith(
-        expect.stringMatching(/^Nothing was pasted\. A run has locked this case\./),
+        expect.stringMatching(/^Nothing was pasted\. The case is set up for a run/),
       ),
     );
     expect(client.put).not.toHaveBeenCalled();

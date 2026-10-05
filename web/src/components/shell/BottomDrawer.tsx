@@ -45,6 +45,9 @@ const TAB_LABELS: Record<BottomDrawerTab, string> = {
   generators: 'Generators',
   loads: 'Loads',
   shunts: 'Shunts',
+  machines: 'Machines',
+  exciters: 'Exciters',
+  governors: 'Governors',
   violations: 'Violations',
   analysis: 'Analysis',
   activity: 'Activity',
@@ -149,9 +152,9 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
       >
         {BOTTOM_DRAWER_TABS.map((tab) => (
           <Fragment key={tab}>
-            {/* Group separator: the first six tabs are the per-bucket
-                element grids and the violations list; ``analysis`` + ``activity`` are the tools
-                group. A thin spacer + hairline before ``analysis`` makes
+            {/* Group separator: the tabs before it are the per-bucket
+                element grids, the dynamic-model tables and the violations
+                list; ``analysis`` + ``activity`` are the tools group. A thin spacer + hairline before ``analysis`` makes
                 that split read at a glance without a heavier divider. */}
             {tab === 'analysis' ? (
               <span
@@ -222,6 +225,27 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
             className="flex min-h-0 flex-1 flex-col"
           >
             <LazyGrid tab="shunts" />
+          </TabsPrimitive.Content>
+          <TabsPrimitive.Content
+            value="machines"
+            data-testid="bottom-drawer-tab-content-machines"
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <LazyGrid tab="machines" />
+          </TabsPrimitive.Content>
+          <TabsPrimitive.Content
+            value="exciters"
+            data-testid="bottom-drawer-tab-content-exciters"
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <LazyGrid tab="exciters" />
+          </TabsPrimitive.Content>
+          <TabsPrimitive.Content
+            value="governors"
+            data-testid="bottom-drawer-tab-content-governors"
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <LazyGrid tab="governors" />
           </TabsPrimitive.Content>
           <TabsPrimitive.Content
             value="violations"

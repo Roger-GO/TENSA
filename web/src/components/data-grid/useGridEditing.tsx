@@ -14,7 +14,8 @@
  *   writers cover the controller models only; a bus, line, generator or load is
  *   never written this way.
  * - **After a run, or while one is going.** Locked, with the reason and, after a
- *   run, a Reset run button: a run commits the System, and resetting discards the
+ *   run, a Reset run button: a run commits the System (so does a change in Edit
+ *   mode, which sets the case up again from the copy), and resetting discards the
  *   edits made so far.
  *
  * Writes go one after another, since the server holds one request per session,
@@ -60,17 +61,17 @@ const EDIT_HINT = 'Double-click a value to change it, or paste values copied fro
 const CONTROLLER_EDIT_HINT = `${EDIT_HINT} Edit mode keeps controller changes through a run.`;
 
 const CLONE_HINT =
-  'Edit mode: double-click a value to change it. Each change goes to a copy of the case file and the case is read again from it, which drops changes made before Edit mode was on.';
+  'Edit mode: double-click a value to change it. A change goes to a copy of the case file and the case is read again from it, which drops values changed before Edit mode was on. Once the case is set up its values are shown on the system base, so a value can read differently from the one typed.';
 
 const STREAMING_REASON = 'A run is streaming. Values can be changed when it ends.';
 
 const PFLOW_REASON = 'A power flow is running. Values can be changed when it ends.';
 
 const LOCKED_REASON =
-  'A run has locked this case. Reset the run to change values again; the changes made so far are discarded.';
+  'The case is set up for a run (a run or a change in Edit mode does that), which locks these values. Reset the run to change them again; the changes made so far are discarded.';
 
 const CONTROLLER_LOCKED_REASON =
-  'A run has locked this case. Turn on Edit mode to change controller values, or reset the run to change them as before; resetting discards the changes made so far.';
+  'The case is set up for a run (a run or a change in Edit mode does that), which locks these values. Turn on Edit mode to change controller values, or reset the run to change them as before; resetting discards the changes made so far.';
 
 /** What the server or the client said about a refused write, as a sentence. */
 function reasonOf(err: unknown): string {

@@ -51,6 +51,14 @@ export function findTopologyEntry(
       bucket.find((e) => e.kind === selected.modelClass && String(e.idx) === selected.idx) ?? null
     );
   }
+  // A selection that names its model (a row of the Machines table) finds that
+  // device even where another model's device has the same idx.
+  if (selected.modelClass !== undefined) {
+    const exact = bucket.find(
+      (e) => e.kind === selected.modelClass && String(e.idx) === selected.idx,
+    );
+    if (exact) return exact;
+  }
   return bucket.find((e) => String(e.idx) === selected.idx) ?? null;
 }
 

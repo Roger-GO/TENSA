@@ -372,7 +372,7 @@ describe('useGridEditing: after a run', () => {
     const user = userEvent.setup();
     mount();
     expect(latest.canEdit(BUS1, column('vmin'))).toBe(false);
-    expect(latest.lockedReason).toMatch(/A run has locked this case/);
+    expect(latest.lockedReason).toMatch(/The case is set up for a run/);
     expect(latest.hint).toBe(latest.lockedReason);
     const reset = screen.getByTestId('grid-reset-run');
     expect(reset).toHaveTextContent('Reset run');
@@ -434,6 +434,8 @@ describe('useGridEditing: controllers', () => {
     expect(latest.canEdit(EXCITER, column('KA'))).toBe(true);
     expect(latest.lockedReason).toBeNull();
     expect(latest.hint).toMatch(/Edit mode: double-click a value/);
+    // Setting the case up again shows its values on the system base.
+    expect(latest.hint).toMatch(/shown on the system base/);
     let result;
     await act(async () => {
       result = await latest.commit([edit(EXCITER, 'KA', 50), edit(EXCITER, 'TA', 0.1)]);

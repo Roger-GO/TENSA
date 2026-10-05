@@ -3,7 +3,7 @@
  *
  * Coverage:
  *
- *  - Renders the 8 outer tabs with their canonical testids.
+ *  - Renders the 11 outer tabs with their canonical testids.
  *  - Tab click switches activeBottomDrawerTab in useLayoutStore AND
  *    clears drawerHasUnreadResults.
  *  - When ``bottomDrawerCollapsed === true`` only the strip renders;
@@ -88,7 +88,7 @@ afterEach(() => {
 });
 
 describe('<BottomDrawer />', () => {
-  it('renders all 8 outer tabs', () => {
+  it('renders all 11 outer tabs', () => {
     render(<BottomDrawer />, { wrapper });
     expect(screen.getByTestId('bottom-drawer')).toBeInTheDocument();
     for (const tab of [
@@ -97,6 +97,9 @@ describe('<BottomDrawer />', () => {
       'generators',
       'loads',
       'shunts',
+      'machines',
+      'exciters',
+      'governors',
       'violations',
       'analysis',
       'activity',
@@ -109,8 +112,8 @@ describe('<BottomDrawer />', () => {
     render(<BottomDrawer />, { wrapper });
     const divider = screen.getByTestId('bottom-drawer-tab-group-divider');
     expect(divider).toBeInTheDocument();
-    // Exactly one divider — it splits the element grids and the violations
-    // list from the Analysis | Activity tools group.
+    // Exactly one divider — it splits the element grids, the dynamic-model
+    // tables and the violations list from the Analysis | Activity tools group.
     expect(screen.getAllByTestId('bottom-drawer-tab-group-divider')).toHaveLength(1);
     // The divider must sit immediately before the Analysis trigger in DOM
     // order (the grids read as one group, Analysis|Activity as the next).
@@ -195,6 +198,18 @@ describe('<BottomDrawer />', () => {
     useLayoutStore.setState({ activeBottomDrawerTab: 'shunts' });
     render(<BottomDrawer />, { wrapper });
     expect(await screen.findByTestId('shunts-grid-empty')).toBeInTheDocument();
+  });
+
+  it('mounts the tables of the dynamic models (the same lazily loaded chunk) when one is the active tab', async () => {
+    for (const tab of ['machines', 'exciters', 'governors'] as const) {
+      useLayoutStore.setState({ activeBottomDrawerTab: tab, bottomDrawerCollapsed: false });
+      const { unmount } = render(<BottomDrawer />, { wrapper });
+      expect(screen.getByTestId(`bottom-drawer-tab-content-${tab}`)).toBeInTheDocument();
+      expect(await screen.findByTestId(`${tab}-grid-empty`)).toHaveTextContent(
+        `Load a case to see ${tab}.`,
+      );
+      unmount();
+    }
   });
 
   it('mounts the analysis tab (a lazily loaded chunk) when it is the active tab', async () => {

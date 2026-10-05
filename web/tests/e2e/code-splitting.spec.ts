@@ -12,7 +12,7 @@
  *   for their own sub-tab;
  * - the element tables load as their drawer tab is shown: the Buses table is the
  *   tab that is open from the start, so it follows the first paint, and the
- *   other four wait for their tab;
+ *   other four, and the tables of the dynamic models, wait for their tab;
  * - every asset comes with `Cache-Control: immutable` (its name has a hash in
  *   it), and the large scripts come gzipped.
  *
@@ -91,6 +91,7 @@ test('the first load fetches the entry chunks; the diagram and the Analysis tab 
     'GeneratorsGrid',
     'LoadsGrid',
     'ShuntsGrid',
+    'ModelParamsGrid',
   ]) {
     expect(assets.has(later), `${later} was fetched before it was needed`).toBe(false);
   }

@@ -61,7 +61,17 @@ export type StaticElementKind = 'bus' | 'line' | 'transformer' | 'generator' | '
  * namespaced `controller-<modelClass>-<idx>` (review(phase5)).
  */
 export type SelectedElement =
-  | { kind: StaticElementKind; idx: string }
+  | {
+      kind: StaticElementKind;
+      idx: string;
+      /**
+       * The ANDES model of the element, when a table that knows it selects it. A
+       * generator and a machine can share an idx (a Slack 1 and a GENROU 1), and the
+       * diagram has one node for both, so the idx alone finds the first of them; the
+       * class says which one was meant.
+       */
+      modelClass?: string;
+    }
   | { kind: 'controller'; subKind: ControllerSubKind; modelClass: string; idx: string };
 
 /**

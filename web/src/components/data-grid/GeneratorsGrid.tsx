@@ -225,7 +225,13 @@ export function GeneratorsGrid({ className }: GeneratorsGridProps) {
     // the bare ``generator-${idx}`` id, not the kind-namespaced id.
     const idx = id.replace(/^[^-]+-/, '');
     setSelectedNodeId(`generator-${idx}`);
-    setSelectedElement({ kind: 'generator', idx });
+    // The row's own model, so a machine and a static generator that share an idx
+    // are not mistaken for each other in the Inspector.
+    setSelectedElement({
+      kind: 'generator',
+      idx,
+      modelClass: rows.find((r) => r.rowId === id)?.kind,
+    });
   };
 
   return (

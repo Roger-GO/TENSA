@@ -565,6 +565,12 @@ describe('<DataGrid /> cell editor', () => {
     expect(screen.getByRole('button', { name: 'Unlock' })).toBeInTheDocument();
   });
 
+  it('says nothing about what to do with cells when there are no rows', () => {
+    const { editing } = makeEditing({ hint: 'Double-click a value to change it.' });
+    renderGrid({ editing, rows: [] });
+    expect(screen.queryByTestId('dg-hint')).not.toBeInTheDocument();
+  });
+
   it('keeps a hint of its own over the one of the editing', () => {
     const { editing } = makeEditing({ hint: 'from editing' });
     renderGrid({ editing, hint: 'from the grid' });
@@ -729,13 +735,13 @@ describe('<DataGrid /> width', () => {
     renderGrid({ columns: wide });
     const inner = screen.getByTestId('dg').firstElementChild as HTMLElement;
     expect(inner.style.minWidth).toBe('600px');
-    expect(screen.getByTestId('dg')).toHaveClass('overflow-x-auto');
+    expect(screen.getByTestId('dg')).toHaveClass('overflow-auto');
   });
 
   it('shares the width when a column flexes', () => {
     renderGrid();
     const inner = screen.getByTestId('dg').firstElementChild as HTMLElement;
     expect(inner.style.minWidth).toBe('');
-    expect(screen.getByTestId('dg')).not.toHaveClass('overflow-x-auto');
+    expect(screen.getByTestId('dg')).not.toHaveClass('overflow-auto');
   });
 });

@@ -857,7 +857,8 @@ export function DataGrid<Row>({
     cells,
   };
 
-  const hintText = hint ?? editing?.hint;
+  // What to do with the cells means nothing in a table with no rows.
+  const hintText = hint ?? (rows.length > 0 ? editing?.hint : undefined);
   const showFilter = filterable && rows.length > 0;
   const showBar =
     exportPanel !== undefined ||
@@ -978,9 +979,10 @@ export function DataGrid<Row>({
   // A table whose columns all have a width (or a least width) is as wide as they
   // add up to at the least, and scrolls sideways in a narrower panel; the rest
   // share the width there is.
-  const columnsWidth = columns.every((col) => (col.width ?? col.minWidth) !== undefined)
-    ? columns.reduce((sum, col) => sum + (col.width ?? col.minWidth ?? 0), 0)
-    : undefined;
+  const columnsWidth =
+    columns.length > 0 && columns.every((col) => (col.width ?? col.minWidth) !== undefined)
+      ? columns.reduce((sum, col) => sum + (col.width ?? col.minWidth ?? 0), 0)
+      : undefined;
 
   const frame = (body: React.ReactNode) => (
     <div
@@ -993,14 +995,16 @@ export function DataGrid<Row>({
       onCopy={cellsEnabled ? onCopy : undefined}
       onPaste={editing ? onPaste : undefined}
       className={cn(
-        'flex min-h-0 flex-1 flex-col overflow-hidden',
-        columnsWidth !== undefined ? 'overflow-x-auto' : '',
+        'flex min-h-0 flex-1 flex-col',
+        // A table as wide as its columns scrolls as one in the container, the
+        // heading row sticking at the top, so its two scrollbars are not two.
+        columnsWidth !== undefined ? 'overflow-auto' : 'overflow-hidden',
         'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
         className,
       )}
     >
       <div
-        className="flex min-h-0 flex-1 flex-col"
+        className={cn('flex flex-col', columnsWidth !== undefined ? 'flex-auto' : 'min-h-0 flex-1')}
         style={columnsWidth !== undefined ? { minWidth: columnsWidth } : undefined}
       >
         <Header columns={columns} sort={sort} onHeaderClick={onHeaderClick} testId={testId} />
@@ -1040,7 +1044,10 @@ export function DataGrid<Row>({
           </FixedSizeList>
         </div>
       ) : (
-        <div role="rowgroup" className="min-h-0 flex-1 overflow-auto">
+        <div
+          role="rowgroup"
+          className={columnsWidth !== undefined ? 'flex-1' : 'min-h-0 flex-1 overflow-auto'}
+        >
           {sortedRows.map((row, index) => (
             <GridRow
               key={rowIdAccessor(row)}

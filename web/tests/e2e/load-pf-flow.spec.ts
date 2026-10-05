@@ -18,9 +18,9 @@ const BUS_COUNT = 14;
 /** Key under which the UI remembers that the first-run coach was dismissed. */
 const FIRST_RUN_COACH_KEY = 'tensa:first-run-coach-v1';
 
-/** The V (pu) column is the third cell of a Buses table row (idx, name, V, ...). */
+/** The V (pu) cell of a Buses table row, found by its column so a new column moves nothing. */
 function busVoltageCell(page: Page, busIdx: number) {
-  return page.getByTestId(`buses-grid-row-${busIdx}`).getByRole('cell').nth(2);
+  return page.getByTestId(`buses-grid-cell-${busIdx}-v`);
 }
 
 test.beforeEach(async ({ page }) => {

@@ -19,6 +19,7 @@ vi.mock('@/api/queries', async () => {
 });
 
 import { GeneratorsGrid } from '@/components/data-grid/GeneratorsGrid';
+import { findTopologyEntry } from '@/lib/topology';
 
 const TOPOLOGY: TopologySummary = {
   state: 'pre-setup',
@@ -103,9 +104,29 @@ describe('<GeneratorsGrid />', () => {
     expect(useCaseStore.getState().selectedElement).toEqual({
       kind: 'generator',
       idx: '1',
+      modelClass: 'PV',
     });
     // Canvas node id stays kind-agnostic so SLD highlight follows.
     expect(useSldStore.getState().selectedNodeId).toBe('generator-1');
+  });
+
+  it('names the model of the row, so a machine that shares its idx with a static generator is the one inspected', async () => {
+    const user = userEvent.setup();
+    mockTopology = {
+      ...TOPOLOGY,
+      generators: [
+        { idx: '1', name: 'Slack_1', kind: 'Slack', params: { bus: 1 } },
+        { idx: '1', name: 'GENROU_1', kind: 'GENROU', params: { bus: 1, gen: 1 } },
+      ],
+    };
+    render(<GeneratorsGrid />);
+    await user.click(screen.getByTestId('generators-grid-row-genrou-1'));
+    const selected = useCaseStore.getState().selectedElement;
+    expect(selected).toEqual({ kind: 'generator', idx: '1', modelClass: 'GENROU' });
+    expect(selected && findTopologyEntry(mockTopology, selected)?.name).toBe('GENROU_1');
+    await user.click(screen.getByTestId('generators-grid-row-slack-1'));
+    const slack = useCaseStore.getState().selectedElement;
+    expect(slack && findTopologyEntry(mockTopology, slack)?.name).toBe('Slack_1');
   });
 
   it('shows no output before power flow has run', () => {
