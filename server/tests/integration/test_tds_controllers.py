@@ -25,7 +25,7 @@ import numpy as np
 import pytest
 
 from tensa.core.disturbance import AlterSpec
-from tensa.core.errors import TdsRequestError
+from tensa.core.errors import SetupFailedError, TdsRequestError
 from tensa.core.tds_controllers import (
     SETPOINT,
     controllable_models,
@@ -365,6 +365,27 @@ def test_the_input_is_put_back_when_a_run_is_aborted(bus_voltage: float) -> None
     assert float(wrapper._require_loaded().ESD1.Pext0.v[0]) == 0.0  # noqa: SLF001
 
 
+def test_the_input_is_put_back_when_the_run_raises(bus_voltage: float) -> None:
+    """A run that ends in an exception does not return, so nothing after
+    ``TDS.run`` is reached; the input is put back all the same."""
+    wrapper = _build(bus_voltage)
+    bank = wrapper.tds_controllers(parse_controllers([{**DROOP, "gain": 500.0}]))
+    seen: list[float] = []
+
+    def fail_once_it_acts(t: float, system: Any) -> None:
+        seen.append(float(system.ESD1.Pext0.v[0]))
+        if seen[-1] != 0.0:
+            raise RuntimeError("the step hook failed")
+
+    with pytest.raises(SetupFailedError, match="TDS.run raised: the step hook failed"):
+        wrapper.run_tds(
+            tf=TF, on_step=fail_once_it_acts, controllers=bank,
+            tds_config_overrides={"criteria": 0},
+        )
+    assert seen[-1] != 0.0
+    assert float(wrapper._require_loaded().ESD1.Pext0.v[0]) == 0.0  # noqa: SLF001
+
+
 # ---- a run that carries on -----------------------------------------------------
 
 
@@ -420,6 +441,28 @@ def test_a_run_without_controllers_ends_them(bus_voltage: float) -> None:
     again = _run(wrapper, [FFR], tf=4.0)
     assert again.coi[0] < F0 - 0.1
     assert again.controllers[0]["first_action_t"] == pytest.approx(3.0, abs=1e-3)
+
+
+def test_a_run_without_controllers_that_takes_no_step_ends_them_too(bus_voltage: float) -> None:
+    """A run to the ``tf`` the last one reached takes no step, so the System is
+    still where the controllers stopped and nothing about it says a run came
+    between. The controllers are ended all the same: named again, the FFR that
+    was half a second into its hold is one that has not fired."""
+    wrapper = _build(bus_voltage)
+    first = _run(wrapper, [FFR], tf=2.0)
+    assert first.controllers[0]["first_action_t"] == pytest.approx(1.5, abs=1e-3)
+    assert first.controllers[0]["released_t"] is None
+
+    idle = wrapper.run_tds(tf=2.0, tds_config_overrides={"criteria": 0})
+    assert idle.callpert_count == 0
+    assert idle.final_t == first.result.final_t
+
+    again = _run(wrapper, [FFR], tf=4.0)
+    (controller,) = again.controllers
+    # Carried on, it would still be holding its 30 MW at the first sample of
+    # this run, and report the 1.5 s it first acted at.
+    assert controller["trace"]["command"][0] == 0.0
+    assert controller["first_action_t"] >= 2.0
 
 
 # ---- what is refused -----------------------------------------------------------
