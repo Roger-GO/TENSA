@@ -1036,6 +1036,11 @@ class Wrapper:
         if model == "GENROU":
             params = self._genrou_edit_params(model_obj, i, params)
 
+        # Every value is checked before any is written, so a refused one leaves
+        # the device as it was.
+        from andes.core.param import NumParam
+
+        writes: list[tuple[str, Any, Any]] = []
         for pname, value in params.items():
             if pname in ("idx", "name"):
                 # idx / name updates are not safe at the array-write level —
@@ -1050,6 +1055,11 @@ class Wrapper:
                 raise ElementValidationError(
                     f"param {pname!r} not editable on {model}"
                 )
+            if isinstance(param, NumParam):
+                value = _edit_number(model, pname, value)
+            writes.append((pname, param_v, value))
+
+        for pname, param_v, value in writes:
             try:
                 # ANDES service params expose .v as a numpy array — direct
                 # element write is the documented way to alter a single
@@ -1078,9 +1088,11 @@ class Wrapper:
         for: it holds ``M`` (= 2H), as ``add_element`` converts it. A table
         that lists ``H`` has to be able to write it back, so the edit takes it
         too. An edit giving both ``H`` and ``M`` is refused, since the two say
-        the same thing and could disagree. A change to a reactance is checked
-        against the ordering the machine needs (see
-        ``_validate_genrou_reactance_edit``) on the values the machine holds.
+        the same thing and could disagree; a caller that holds both (the
+        tables do) sends the one that changed. ``H`` must be a number above
+        zero. A change to a reactance is checked against the ordering the
+        machine needs (see ``_validate_genrou_reactance_edit``) on the values
+        the machine holds.
         """
         edited = dict(params)
         if "H" in edited:
@@ -1090,20 +1102,35 @@ class Wrapper:
                 )
             raw_h = edited.pop("H")
             try:
-                edited["M"] = 2.0 * float(raw_h)
+                if isinstance(raw_h, bool):
+                    raise TypeError("a boolean is not a number")
+                h = float(raw_h)
             except (TypeError, ValueError) as exc:
                 raise ElementValidationError(
                     f"GENROU param 'H' must be a number; got {raw_h!r}"
                 ) from exc
+            if not math.isfinite(h) or h <= 0.0:
+                raise ElementValidationError(
+                    f"GENROU param 'H' must be a number above zero; got {raw_h!r}"
+                )
+            edited["M"] = 2.0 * h
         if any(name in edited for name in _GENROU_REACTANCE_NAMES):
             current: dict[str, float] = {}
             for name in _GENROU_REACTANCE_NAMES:
                 param = getattr(model_obj, name, None)
                 values = getattr(param, "v", None)
-                if values is not None and i < len(values):
-                    current[name] = float(values[i])
-                else:
-                    current[name] = float(getattr(param, "default", 0.0))
+                held = (
+                    values[i]
+                    if values is not None and i < len(values)
+                    else getattr(param, "default", 0.0)
+                )
+                try:
+                    current[name] = float(held)
+                except (TypeError, ValueError) as exc:
+                    raise ElementValidationError(
+                        f"GENROU {name} holds {held!r}, which is not a number; "
+                        "set it to one before changing the reactances"
+                    ) from exc
             _validate_genrou_reactance_edit(current, edited)
         return edited
 
@@ -4822,13 +4849,14 @@ def _validate_genrou_reactance_edit(
     ``current`` holds the machine's reactances as it has them; ``edits`` is the
     edit's params. Only an ordering the edit takes part in is checked, so a case
     whose data already breaks a pair elsewhere does not block an unrelated
-    change. Raises :class:`ElementValidationError` (HTTP 422) on a violation,
-    naming the pair.
+    change. A reactance given as null is an error, not a value to skip: the
+    machine would hold it as null and the next edit would fail on it. Raises
+    :class:`ElementValidationError` (HTTP 422) on a violation, naming the pair.
     """
     merged = dict(current)
     edited: set[str] = set()
     for name in _GENROU_REACTANCE_NAMES:
-        if name in edits and edits[name] is not None:
+        if name in edits:
             try:
                 merged[name] = float(edits[name])
             except (TypeError, ValueError) as exc:
@@ -4847,6 +4875,30 @@ def _validate_genrou_reactance_edit(
                 f"leaves {hi}={merged[hi]:g} <= {lo}={merged[lo]:g}. Change the "
                 "other reactances in the same edit, so the set stays in order."
             )
+
+
+def _edit_number(model: str, name: str, value: Any) -> Any:
+    """The value an edit gives a numeric ANDES parameter, or a 422.
+
+    A number goes through as it is, and so does a boolean (a status switch such
+    as ``u`` takes one). A string that reads as a number is turned into it. What
+    is not a number, a null, and a value that is not finite are refused: the
+    pre-setup parameter list takes anything, and the case would fail later in
+    ANDES, far from the edit that put the value there.
+    """
+    if isinstance(value, bool):
+        return value
+    try:
+        number = value if isinstance(value, int | float) else float(value)
+    except (TypeError, ValueError) as exc:
+        raise ElementValidationError(
+            f"{model} param {name!r} must be a number; got {value!r}"
+        ) from exc
+    if isinstance(number, float) and not math.isfinite(number):
+        raise ElementValidationError(
+            f"{model} param {name!r} must be a finite number; got {value!r}"
+        )
+    return number
 
 
 def _coerce_scalar(value: Any) -> ParamValue | None:

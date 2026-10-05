@@ -1,4 +1,5 @@
-"""Unit tests for the GENROU reactance-ordering validator.
+"""Unit tests for the GENROU reactance-ordering validator and the check of an
+edit's numeric value.
 
 Exercises ``_validate_genrou_reactances`` directly with plain dicts (no
 ANDES System needed): the function receives the user's params plus the
@@ -13,6 +14,7 @@ import pytest
 
 from tensa.core.errors import ElementValidationError
 from tensa.core.wrapper import (
+    _edit_number,
     _validate_genrou_reactance_edit,
     _validate_genrou_reactances,
 )
@@ -155,3 +157,31 @@ def test_edit_with_a_non_number_is_rejected() -> None:
     with pytest.raises(ElementValidationError) as ei:
         _validate_genrou_reactance_edit(_HELD, {"xd": "wide"})
     assert "must be a number" in str(ei.value)
+
+
+def test_edit_with_a_null_reactance_is_rejected_not_skipped() -> None:
+    with pytest.raises(ElementValidationError) as ei:
+        _validate_genrou_reactance_edit(_HELD, {"xd": None})
+    assert "'xd' must be a number; got None" in str(ei.value)
+
+
+# ---- the value an edit gives a numeric param --------------------------------
+
+
+@pytest.mark.parametrize(
+    ("given", "taken"),
+    [(0.5, 0.5), (3, 3), ("0.25", 0.25), (" 2 ", 2.0), (True, True), (False, False)],
+)
+def test_edit_number_takes_numbers_text_that_reads_as_one_and_booleans(
+    given: object, taken: object
+) -> None:
+    got = _edit_number("Line", "r", given)
+    assert got == taken
+    assert type(got) is type(taken)
+
+
+@pytest.mark.parametrize("bad", ["abc", "", None, [1.0], float("nan"), float("inf"), "-inf"])
+def test_edit_number_refuses_what_is_no_finite_number(bad: object) -> None:
+    with pytest.raises(ElementValidationError) as ei:
+        _edit_number("Line", "r", bad)
+    assert "Line param 'r' must be a" in str(ei.value)

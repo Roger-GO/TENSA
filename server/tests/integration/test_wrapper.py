@@ -905,3 +905,80 @@ def test_edit_genrou_reactance_set_in_one_edit_is_accepted() -> None:
     w.edit_element("GENROU", idx, {"xd1": xd1_new, "xd2": xd2_new})
     assert float(gen.xd1.v[uid]) == pytest.approx(xd1_new)
     assert float(gen.xd2.v[uid]) == pytest.approx(xd2_new)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -3.0, 0.0, True])
+def test_edit_genrou_h_that_is_no_positive_number_is_refused(bad: object) -> None:
+    """A nan, an infinity, a value at or below zero and a JSON boolean would
+    each land as an M no machine can have (a boolean as 2)."""
+    w = _ieee14_full_wrapper()
+    idx = w._ss.GENROU.idx.v[0]
+    uid = w._ss.GENROU.idx2uid(idx)
+    before = float(w._ss.GENROU.M.v[uid])
+    with pytest.raises(ElementValidationError) as ei:
+        w.edit_element("GENROU", idx, {"H": bad})
+    assert "'H' must be a number" in str(ei.value)
+    assert float(w._ss.GENROU.M.v[uid]) == before
+
+
+@pytest.mark.integration
+def test_edit_genrou_reactance_given_as_null_is_refused_and_leaves_the_machine() -> None:
+    """A null reactance used to be skipped by the ordering check and then
+    written, which made the machine's next reactance edit fail in ``float()``."""
+    w = _ieee14_full_wrapper()
+    gen = w._ss.GENROU
+    idx = gen.idx.v[0]
+    uid = gen.idx2uid(idx)
+    xd = float(gen.xd.v[uid])
+    with pytest.raises(ElementValidationError) as ei:
+        w.edit_element("GENROU", idx, {"xd": None})
+    assert "'xd' must be a number" in str(ei.value)
+    assert float(gen.xd.v[uid]) == xd
+    # The next edit of the machine is judged as usual.
+    xd1 = float(gen.xd1.v[uid])
+    w.edit_element("GENROU", idx, {"xd1": xd1 - 0.01})
+    assert float(gen.xd1.v[uid]) == pytest.approx(xd1 - 0.01)
+
+
+@pytest.mark.integration
+def test_edit_genrou_reactance_when_the_machine_holds_a_non_number_is_refused_not_crashed() -> None:
+    w = _ieee14_full_wrapper()
+    gen = w._ss.GENROU
+    idx = gen.idx.v[0]
+    uid = gen.idx2uid(idx)
+    gen.xd.v[uid] = None
+    with pytest.raises(ElementValidationError) as ei:
+        w.edit_element("GENROU", idx, {"xd1": 0.2})
+    assert "xd holds None" in str(ei.value)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("bad", ["abc", None, float("nan"), float("inf")])
+def test_edit_numeric_param_that_is_no_number_is_refused_and_writes_nothing(bad: object) -> None:
+    """The pre-setup parameter list takes any value, so a case would fail later
+    in ANDES for an edit that put a string in a line's ``r``. Every value of an
+    edit is checked before one is written, so the ``x`` that was fine is not
+    written either."""
+    w = _ieee14_full_wrapper()
+    line = w._ss.Line
+    idx = line.idx.v[0]
+    uid = line.idx2uid(idx)
+    r, x = line.r.v[uid], line.x.v[uid]
+    with pytest.raises(ElementValidationError) as ei:
+        w.edit_element("Line", idx, {"x": x + 0.1, "r": bad})
+    assert "'r' must be a" in str(ei.value)
+    assert line.r.v[uid] == r
+    assert line.x.v[uid] == x
+
+
+@pytest.mark.integration
+def test_edit_numeric_param_takes_a_number_as_text_and_a_status_switch() -> None:
+    w = _ieee14_full_wrapper()
+    line = w._ss.Line
+    idx = line.idx.v[0]
+    uid = line.idx2uid(idx)
+    w.edit_element("Line", idx, {"r": "0.0125", "u": False})
+    assert line.r.v[uid] == 0.0125
+    assert isinstance(line.r.v[uid], float)
+    assert not line.u.v[uid]

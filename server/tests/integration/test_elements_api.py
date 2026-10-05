@@ -419,6 +419,75 @@ async def test_edit_element_idx_field_rejected(client: httpx.AsyncClient) -> Non
     assert resp.status_code == 422, resp.text
 
 
+async def _load_ieee14_with_machines(client: httpx.AsyncClient, sid: str) -> dict[str, object]:
+    """Load the case with its .dyr file and return the first GENROU entry."""
+    resp = await client.post(
+        f"/api/sessions/{sid}/case",
+        json={"primary_path": "ieee14.raw", "addfiles": ["ieee14.dyr"]},
+    )
+    assert resp.status_code == 200, resp.text
+    topo = (await client.get(f"/api/sessions/{sid}/topology")).json()
+    machines = [g for g in topo["generators"] if g["kind"] == "GENROU"]
+    assert machines, "the .dyr file should bring GENROU machines"
+    entry: dict[str, object] = machines[0]
+    return entry
+
+
+@pytest.mark.integration
+async def test_edit_genrou_takes_the_inertia_as_h(client: httpx.AsyncClient) -> None:
+    """The route takes the ``H`` the schema lists and holds it as ``M`` (= 2H);
+    both together are refused, whether or not they agree."""
+    sid = await _create_session(client)
+    machine = await _load_ieee14_with_machines(client, sid)
+    url = f"/api/sessions/{sid}/elements/GENROU/{machine['idx']}"
+    resp = await client.put(url, json={"params": {"H": 6.5}})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["params"]["M"] == 13.0
+
+    resp = await client.put(url, json={"params": {"H": 6.5, "M": 13.0}})
+    assert resp.status_code == 422, resp.text
+    assert "not both" in resp.json()["detail"]
+
+    resp = await client.put(url, json={"params": {"H": -1}})
+    assert resp.status_code == 422, resp.text
+    assert "'H' must be a number above zero" in resp.json()["detail"]
+
+
+@pytest.mark.integration
+async def test_edit_genrou_reactance_out_of_order_returns_422_naming_the_chain(
+    client: httpx.AsyncClient,
+) -> None:
+    sid = await _create_session(client)
+    machine = await _load_ieee14_with_machines(client, sid)
+    params = machine["params"]
+    assert isinstance(params, dict)
+    url = f"/api/sessions/{sid}/elements/GENROU/{machine['idx']}"
+    # xd at the held transient reactance breaks xd > xd1.
+    resp = await client.put(url, json={"params": {"xd": params["xd1"]}})
+    assert resp.status_code == 422, resp.text
+    assert "xd > xd1 > xd2 > xl" in resp.json()["detail"]
+    # Nothing was written: the machine still holds the reactance it had.
+    topo = (await client.get(f"/api/sessions/{sid}/topology")).json()
+    held = next(g for g in topo["generators"] if g["idx"] == machine["idx"])
+    assert held["params"]["xd"] == params["xd"]
+
+
+@pytest.mark.integration
+async def test_edit_numeric_param_that_is_no_number_returns_422(
+    client: httpx.AsyncClient,
+) -> None:
+    sid = await _create_session(client)
+    await _load_ieee14(client, sid)
+    topo = (await client.get(f"/api/sessions/{sid}/topology")).json()
+    line = topo["lines"][0]
+    resp = await client.put(
+        f"/api/sessions/{sid}/elements/Line/{line['idx']}",
+        json={"params": {"r": "abc"}},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "'r' must be a number" in resp.json()["detail"]
+
+
 # ---- replay buffer + blank-session reload ---------------------------------
 
 
