@@ -1620,8 +1620,12 @@ class TdsRunRequest(BaseModel):
             "named. A controller that names a device the case does not have is "
             "refused with 422 before anything runs. What each did comes back in "
             "the result's ``controllers``; when the run ends the devices' inputs "
-            "are as they were. The streaming ``start_tds`` frame takes the same "
-            "field. Sweeps do not take controllers."
+            "are as they were. A later run that names the same controllers and "
+            "goes on from where this one stopped (a larger ``tf``) keeps their "
+            "state, so an ``ffr`` that has fired does not fire again. After a "
+            "reload or a restored snapshot they start afresh, and it can. The "
+            "streaming ``start_tds`` frame takes the same field. Sweeps do not "
+            "take controllers."
         ),
     )
     tds_config_overrides: dict[str, float] | None = Field(

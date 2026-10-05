@@ -1923,7 +1923,8 @@ class Wrapper:
 
         A run that names the controllers the last one had, on the same System
         and from where that run stopped, is given that run's bank, so it carries
-        on: an FFR that has fired stays fired. Any other run gets a new one.
+        on: an FFR that has fired stays fired. Any other run gets a new one, also
+        the first on a System a reload or a restored snapshot put in place.
         Nothing is written to the System here.
 
         Raises:

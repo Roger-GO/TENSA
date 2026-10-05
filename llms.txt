@@ -170,6 +170,9 @@ response and needs no Arrow decoding.
   Alter on the same device's "Pext0" is a 422 (an Alter on "pref0" is fine).
 - TDS controllers act on distributed generation devices only. A synchronous machine's governor is not a target.
   With a p_max left out a droop is limited to what the device can deliver ("p_limit" of the listing).
+- A TDS run that goes on from where the last one stopped (a larger tf) with the same "controllers" keeps their
+  state: an ffr that has fired does not fire again. A reload or a restored snapshot starts them afresh, so an ffr
+  that fired before the snapshot was taken can fire again in a run that goes on from it.
 - Line/Transformer impedances are pu on (Sn, Vn1); the add-element endpoint derives
   Vn1/Vn2 from the connected buses automatically.
 - TDS batch endpoint is synchronous with a 300 s server-side cap; for long runs use the WS stream.

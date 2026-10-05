@@ -209,7 +209,10 @@ def run_tds(
     "trigger_deviation": Hz, "trigger_rocof": Hz/s, "hold": s}, both with optional
     "frequency" ("coi" or "bus"), "period" (s between samples, 0.1 by default),
     "t_start" (s) and "ramp" (MW/s). What each did, with its samples (t,
-    frequency, command, output, soc), comes back under "controllers".
+    frequency, command, output, soc), comes back under "controllers". A later
+    run with the same controllers and a larger tf keeps their state (an ffr
+    that has fired does not fire again); after a reload or a restored snapshot
+    they start afresh.
     """
     body: dict[str, Any] = {"tf": tf}
     if dae_vars:

@@ -66,7 +66,11 @@ instant itself.)
 device's input is put back to what it held. A later run on the same System that
 names the same controllers and starts where this one stopped (a larger ``tf``)
 carries them on: an FFR that has fired stays fired, a ramp goes on from the
-command it had reached. Any other run starts its controllers afresh.
+command it had reached. Any other run starts its controllers afresh. So does a
+run on a System a reload or a restored snapshot put in this one's place: what a
+controller has done is kept beside the System and not in it, so a snapshot does
+not hold it, and an FFR that fired before the snapshot was taken can fire again
+in a run that goes on from it.
 
 An ``Alter`` event on the same device's ``Pext0`` would be overwritten at the
 next sample, so a run with both is refused; an ``Alter`` on ``pref0`` steps the
@@ -771,6 +775,8 @@ class ControllerBank:
     whatever the outcome. Between runs the bank keeps the controllers' state
     and no reference to the System, so a run that carries on where the last one
     stopped can be given the same bank (:meth:`continues`, :meth:`rebind`).
+    The state is the bank's alone: a System loaded or restored in that one's
+    place is another System, and its runs get a new bank.
     """
 
     def __init__(self, system: System, specs: Sequence[ControllerSpec]) -> None:
