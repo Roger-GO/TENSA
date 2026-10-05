@@ -27,6 +27,11 @@ from tensa.core.pflow_options import (
     TOLERANCE_MIN,
 )
 from tensa.core.stream import MAX_TRACE_VALUES
+from tensa.core.tds_controllers import (
+    MAX_CONTROLLERS,
+    MAX_SAMPLE_VALUES,
+    ControllerSpec,
+)
 from tensa.core.wrapper import ParamValue
 
 # ---- error envelope ---------------------------------------------------------
@@ -1599,6 +1604,26 @@ class TdsRunRequest(BaseModel):
             "the values via ``tds_config_overrides``."
         ),
     )
+    controllers: list[ControllerSpec] | None = Field(
+        None,
+        max_length=MAX_CONTROLLERS,
+        description=(
+            "Controllers that act while the run goes: each reads the frequency "
+            "once a sample ``period`` and sets the power of a battery or another "
+            "distributed generation device, on top of the device's own "
+            "set-point. Two kinds, picked by ``type``: ``droop`` (power in "
+            "proportion to the frequency deviation beyond a dead band) and "
+            "``ffr`` (a fixed power, once, for a set time when the frequency "
+            "leaves a threshold or moves too fast). Powers are in MW, positive "
+            "discharging, and frequencies in Hz. "
+            "``GET /sessions/{id}/tds/controllers`` lists the devices that can be "
+            "named. A controller that names a device the case does not have is "
+            "refused with 422 before anything runs. What each did comes back in "
+            "the result's ``controllers``; when the run ends the devices' inputs "
+            "are as they were. The streaming ``start_tds`` frame takes the same "
+            "field. Sweeps do not take controllers."
+        ),
+    )
     tds_config_overrides: dict[str, float] | None = Field(
         None,
         description=(
@@ -1645,6 +1670,91 @@ class TdsTraces(BaseModel):
             "``true`` when the run took more steps than a response holds "
             f"({MAX_TRACE_VALUES} values in all) and the later steps were left "
             "out. Raise ``h`` or ask for fewer variables."
+        ),
+    )
+
+
+class TdsControllerTrace(BaseModel):
+    """What one controller read and commanded at each of its samples."""
+
+    t: list[float] = Field(
+        ...,
+        description=(
+            "Simulation time of each sample, in seconds: the solved instant the "
+            "controller read, from which its command applies."
+        ),
+    )
+    frequency: list[float] = Field(
+        ..., description="The frequency the controller read at each sample, in Hz."
+    )
+    command: list[float] = Field(
+        ...,
+        description=(
+            "The power the controller commanded from each sample on, in MW, "
+            "positive discharging: what it adds to the device's own set-point."
+        ),
+    )
+    output: list[float | None] = Field(
+        ...,
+        description=(
+            "The active power the device was delivering at each sample, in MW, "
+            "its own set-point included. Where it stays below what the command "
+            "asks for, the device is at one of its limits. ``null`` where the "
+            "device has no such reading."
+        ),
+    )
+    soc: list[float | None] = Field(
+        ...,
+        description=(
+            "The device's state of charge at each sample, 0 to 1. ``null`` for a "
+            "device without one (a ``PVD1``)."
+        ),
+    )
+    truncated: bool = Field(
+        ...,
+        description=(
+            "``true`` when the run took more samples than a response holds "
+            f"({MAX_SAMPLE_VALUES} values over all controllers) and the later "
+            "ones were left out. Raise ``period``."
+        ),
+    )
+
+
+class TdsControllerResult(BaseModel):
+    """What one controller of a TDS run did."""
+
+    type: Literal["droop", "ffr"] = Field(..., description="The kind of controller.")
+    model: str = Field(..., description="ANDES model of the device it commanded.")
+    idx: int | str = Field(..., description="The device's idx, as the case holds it.")
+    samples: int = Field(
+        ..., ge=0, description="How many times it read the frequency in this run."
+    )
+    first_action_t: float | None = Field(
+        default=None,
+        description=(
+            "Simulation time, in seconds, of the first sample at which it commanded "
+            "a power: for an ``ffr``, when it triggered. ``null`` if it never did."
+        ),
+    )
+    released_t: float | None = Field(
+        default=None,
+        description=(
+            "Simulation time, in seconds, at which an ``ffr`` let go after its "
+            "hold. ``null`` for a ``droop``, and for an ``ffr`` that did not "
+            "trigger or was still holding when the run ended."
+        ),
+    )
+    peak_command: float = Field(
+        ..., description="Its command of the largest magnitude, in MW, with its sign."
+    )
+    final_command: float = Field(
+        ..., description="Its command when the run ended, in MW."
+    )
+    trace: TdsControllerTrace | None = Field(
+        default=None,
+        description=(
+            "Its samples. Returned by a batch run; ``null`` in a stream's ``done`` "
+            "frame, where the device's variables are streamed instead."
         ),
     )
 
@@ -1697,6 +1807,104 @@ class TdsBatchResult(BaseModel):
         description=(
             "The values of the request's ``dae_vars``, every step of the run. "
             "``null`` when the request named none."
+        ),
+    )
+    controllers: list[TdsControllerResult] | None = Field(
+        default=None,
+        description=(
+            "What each of the request's ``controllers`` did, in the order asked, "
+            "with its samples. ``null`` when the request named none."
+        ),
+    )
+
+
+class TdsControllerVariables(BaseModel):
+    """The ANDES variables that show a controller at work on one device: names
+    to put in a run's ``dae_vars``."""
+
+    command: str = Field(
+        ...,
+        description=(
+            "The external power signal as the device receives it (``Pext``), per "
+            "unit of the system base: what the controllers on it command."
+        ),
+    )
+    frequency: str = Field(
+        ..., description="The frequency the device measures at its bus (``fHz``), in Hz."
+    )
+    active_current: str = Field(
+        ...,
+        description=(
+            "The device's active current (``Ipout_y``), per unit of the system "
+            "base; times the bus voltage it is the active power delivered."
+        ),
+    )
+    soc: str | None = Field(
+        default=None,
+        description="The device's state of charge (``pIG_y``); ``null`` for a model without one.",
+    )
+
+
+class TdsControllerTarget(BaseModel):
+    """One device of the loaded case a controller can command."""
+
+    model: str = Field(..., description="The device's ANDES model.")
+    idx: int | str = Field(..., description="The device's idx.")
+    name: str = Field(..., description="The device's name in the case.")
+    bus: int | str | None = Field(default=None, description="Idx of the bus it is on.")
+    in_service: bool = Field(
+        ..., description="``false`` for a device that is switched off: commands do nothing to it."
+    )
+    p_limit: float | None = Field(
+        default=None,
+        description=(
+            "The most active power the device delivers, in MW: the smaller of "
+            "its power limit ``pmx`` and its current limit ``ialim`` (the power "
+            "that current carries at rated voltage). A command beyond it is not "
+            "delivered, and a ``droop`` that names no ``p_max`` is limited to "
+            "it. ``null`` where the model has neither."
+        ),
+    )
+    fn: float | None = Field(
+        default=None,
+        description="The device's nominal frequency, in Hz: what a ``bus`` reading deviates from.",
+    )
+    variables: TdsControllerVariables = Field(
+        ..., description="ANDES variables to record to see the controller at work."
+    )
+
+
+class TdsControllerCatalogue(BaseModel):
+    """The controllers a TDS run takes, for the loaded case."""
+
+    types: list[Literal["droop", "ffr"]] = Field(
+        ..., description="The kinds of controller: the values ``type`` takes."
+    )
+    coi_available: bool = Field(
+        ...,
+        description=(
+            "``true`` when the case has a synchronous machine, which the "
+            "centre-of-inertia frequency (``frequency: \"coi\"``) is read from. "
+            "Without one a controller has to read its own ``bus``."
+        ),
+    )
+    freq_hz: float | None = Field(
+        default=None,
+        description=(
+            "The system's nominal frequency, in Hz: what a ``coi`` reading "
+            "deviates from. ``null`` with no case loaded."
+        ),
+    )
+    base_mva: float | None = Field(
+        default=None,
+        description="The system MVA base. ``null`` with no case loaded.",
+    )
+    targets: list[TdsControllerTarget] = Field(
+        ...,
+        description=(
+            "The devices a controller can command: those of ANDES's distributed "
+            "generation models (``ESD1``, ``PVD1``, ``EV1``, ``EV2``). Empty when "
+            "the case has none, and with no case loaded."
         ),
     )
 

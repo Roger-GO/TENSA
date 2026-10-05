@@ -25,11 +25,11 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
-| `run-controls` | 4 |
+| `run-controls` | 5 |
 | `snapshot-dialog` | 4 |
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
-| **total** | **65** |
+| **total** | **66** |
 
 ## OpenAPI routes
 
@@ -91,6 +91,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `GET` | `/api/sessions/{session_id}/snapshots` | `snapshot-dialog` |  |
 | `POST` | `/api/sessions/{session_id}/sweep` | `sweep-dialog` |  |
 | `POST` | `/api/sessions/{session_id}/tds` | `none` | Batch (synchronous) TDS; the GUI runs TDS exclusively through the streaming WS channel (/ws/{session_id}) for live plotting. The batch POST is retained for CLI/agent/scripted use. |
+| `GET` | `/api/sessions/{session_id}/tds/controllers` | `run-controls` |  |
 | `GET` | `/api/sessions/{session_id}/topology` | `workspace` |  |
 | `GET` | `/api/sessions/{session_id}/topology/models/{model}/alterable_params` | `disturbance-panel` |  |
 | `POST` | `/api/sessions/{session_id}/undo-last-edit` | `command-palette` |  |

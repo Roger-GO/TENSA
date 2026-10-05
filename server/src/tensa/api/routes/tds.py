@@ -6,7 +6,8 @@ which sends Arrow IPC frames while the run is in progress.
 
 The wrapper (``run_tds``) calls ``ss.setup()`` first if not yet committed,
 runs PF first if not yet converged (TDS requires PF), then ``ss.TDS.run()``
-with ``callpert`` wired to count steps and check the abort flag.
+with ``callpert`` wired to count steps, check the abort flag and run the
+request's controllers (``tensa.core.tds_controllers``).
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ from tensa.api.schemas import (
     DaeVariableList,
     ProblemDetails,
     TdsBatchResult,
+    TdsControllerCatalogue,
+    TdsControllerResult,
     TdsRunRequest,
     TdsTraces,
     TdsTraceSeries,
@@ -87,8 +90,9 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
             "model": ProblemDetails,
             "description": (
                 "ANDES setup() failed (call /reload to recover), or the request names a "
-                "step size or an override ANDES must not be given (nothing was written, "
-                "so there is nothing to reload)."
+                "step size or an override ANDES must not be given, or a controller the "
+                "loaded case cannot bind (nothing was written, so there is nothing to "
+                "reload)."
             ),
         },
     },
@@ -113,6 +117,8 @@ async def run_tds(
         args["tds_config_overrides"] = body.tds_config_overrides
     if body.dae_vars:
         args["dae_vars"] = body.dae_vars
+    if body.controllers:
+        args["controllers"] = [controller.model_dump() for controller in body.controllers]
 
     # v3.1 Unit 5c: mirror the batch run as a first-class job whose ``job_id``
     # EQUALS the response's ``run_id`` (same value across both fields — additive,
@@ -191,6 +197,7 @@ async def run_tds(
         _broadcast_job(mgr, session_id, run_id)
 
     traces = payload.get("traces")
+    controllers = payload.get("controllers")
     return TdsBatchResult(
         run_id=run_id,
         job_id=run_id,
@@ -204,6 +211,11 @@ async def run_tds(
                 truncated=bool(traces["truncated"]),
             )
             if traces
+            else None
+        ),
+        controllers=(
+            [TdsControllerResult(**controller) for controller in controllers]
+            if controllers
             else None
         ),
     )
@@ -278,6 +290,36 @@ async def list_dae_variables(
         total=int(payload["total"]),
         items=[DaeVariableInfo(**item) for item in payload["items"]],
     )
+
+
+@router.get(
+    "/sessions/{session_id}/tds/controllers",
+    openapi_extra={"x-tensa-gui-location": "run-controls"},
+    operation_id="listTdsControllers",
+    summary="List the controllers a TDS run takes and the devices of the loaded case they can command.",
+    response_model=TdsControllerCatalogue,
+    responses={
+        404: {"model": ProblemDetails, "description": "Session not found or already closed."},
+    },
+)
+async def list_tds_controllers(session_id: str, request: Request) -> TdsControllerCatalogue:
+    """The kinds of controller a TDS request's ``controllers`` can name (a
+    frequency droop, a fast frequency response) and the devices of the loaded
+    case each can command, with the ANDES variables to record to watch one at
+    work. Needs no setup, so asking does not close the case to new
+    disturbances. With no case loaded the list of devices is empty (a 200, as
+    for the variable list)."""
+    mgr = _manager(request)
+    try:
+        payload = await mgr.invoke(session_id, "list_tds_controllers", {})
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except WorkerError as exc:
+        raise map_worker_error(exc) from exc
+    return TdsControllerCatalogue(**payload)
 
 
 @router.post(

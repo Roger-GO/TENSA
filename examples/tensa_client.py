@@ -188,8 +188,19 @@ class Session:
         """Batch time-domain simulation (synchronous; server caps at 300 s wall time).
 
         ``dae_vars=["omega GENROU 1", ...]`` records those ANDES variables at
-        every step and returns them under ``traces`` (see ``dae_variables``)."""
+        every step and returns them under ``traces`` (see ``dae_variables``).
+        ``controllers=[{"type": "droop", "model": "ESD1", "idx": 1, "gain": 50}]``
+        closes a frequency loop on a battery (MW per Hz) while the run goes, and
+        what each controller did comes back under ``controllers`` (see
+        ``tds_controllers``)."""
         return self._req("POST", "/tds", {"tf": tf, **kwargs})
+
+    def tds_controllers(self) -> Any:
+        """The kinds of controller ``run_tds`` takes (``droop``, ``ffr``) and the
+        devices of the loaded case they can command: batteries and other
+        distributed generation, each with its power limit in MW and the ANDES
+        variables that show a controller at work on it."""
+        return self._req("GET", "/tds/controllers")
 
     def dae_variables(self, **filters: Any) -> Any:
         """The ANDES variables of the loaded case that ``run_tds`` can record, named

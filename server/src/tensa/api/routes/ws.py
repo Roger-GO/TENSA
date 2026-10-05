@@ -11,12 +11,15 @@ values in ``metadata.var_columns`` order; the column names are sent only in
   client → server (text)  {"type":"start_tds","tf":1.0,"h":0.0083}  start the run
                            (optional "vars": variable groups, "dae_vars": ANDES
                            variable names such as "omega GENROU 1", each one more
-                           column named as given)
+                           column named as given, "controllers": droop and fast
+                           frequency response loops, as in the REST body)
   server → client (text)  {"type":"stream_start","run_id":"...",    schema preamble +
                             "metadata":{...}}                       run identifier
   server → client (binary) <Arrow IPC stream chunk with frame_seq=N>
                                        ...
   server → client (text)  {"type":"done","converged":true,"final_t":1.0,...}
+                           (with "controllers", what each controller did, when
+                           the run had any)
 
   --- resume an existing run after WS drop ---
   client → server (text)  {"type":"resume","run_id":"...","last_seq":N}
@@ -68,6 +71,7 @@ from tensa.core.session import (
     SessionManager,
 )
 from tensa.core.stream import DEFAULT_VARS, VAR_GROUPS
+from tensa.core.tds_controllers import parse_controllers
 from tensa.core.wrapper import validate_step_size
 
 router = APIRouter()
@@ -264,6 +268,16 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         )
         return
 
+    # Optional ``controllers``: the droop and fast-frequency-response loops the
+    # run closes (``tensa.core.tds_controllers``). Their shape and ranges are
+    # checked here, by the rule the REST body carries; the worker checks each
+    # against the loaded case before the run starts.
+    try:
+        controllers = parse_controllers(cfg.get("controllers"))
+    except TdsRequestError as exc:
+        await _close_with_error(websocket, WS_CLOSE_INTERNAL_ERROR, str(exc))
+        return
+
     # Start the streaming run as a background task; the run survives WS
     # disconnect and can be resumed via {"type":"resume",...}.
     run_args: dict[str, Any] = {
@@ -279,6 +293,8 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         run_args["dae_vars"] = dae_vars_raw
     if overrides_raw is not None:
         run_args["tds_config_overrides"] = overrides_raw
+    if controllers:
+        run_args["controllers"] = [controller.model_dump() for controller in controllers]
     try:
         run_id = await mgr.start_streaming_run(
             session_id,
@@ -384,6 +400,9 @@ async def _stream_run_to_websocket(
                     "final_t": float(result.get("final_t", 0.0)),
                     "callpert_count": int(result.get("callpert_count", 0)),
                 }
+                if result.get("controllers"):
+                    # What each controller of the run did, without its samples.
+                    done_msg["controllers"] = result["controllers"]
                 if websocket.client_state == WebSocketState.CONNECTED:
                     await websocket.send_text(json.dumps(done_msg))
                     await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)

@@ -44,11 +44,22 @@ Sessions:        POST/GET /sessions · GET/DELETE /sessions/{id}
 Case+topology:   POST /sessions/{id}/case · POST /sessions/{id}/reload · GET /sessions/{id}/topology
                  GET /sessions/{id}/topology/models/{model}/alterable_params · GET /sessions/{id}/connectivity
 Power flow:      POST /sessions/{id}/pflow · GET /sessions/{id}/operating-point
-TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrator, tds_config_overrides, dae_vars)
+TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrator, tds_config_overrides, dae_vars, controllers)
                  dae_vars: ANDES variables to record, named as ANDES names them ("omega GENROU 1", "vf GENROU 2");
                  their values at every step come back under "traces" ({t, variables:[{name, values}], truncated}).
                  GET /sessions/{id}/dae-variables[?q=&kind=&model=&limit=&offset=]  (the names a run can record: q is
                  words that must all appear, kind x=state or y=algebraic; needs no run, does not close the case to disturbances)
+                 controllers: frequency loops the run closes on batteries and other distributed generation devices
+                 (ESD1, PVD1, EV1, EV2). Parameters only, no code. Each is {"type":"droop","model":"ESD1","idx":1,
+                 "gain":MW per Hz,"deadband":Hz,"p_max":MW} or {"type":"ffr","model":"ESD1","idx":1,"power":MW,
+                 "trigger_deviation":Hz,"trigger_rocof":Hz/s,"hold":s}, with optional "frequency" ("coi": inertia-weighted
+                 machine speed, the default; "bus": the device's own measurement), "period" (s between samples, 0.1),
+                 "t_start" (s) and "ramp" (MW/s). Powers in MW, positive discharging. The result's "controllers" has,
+                 per controller, first_action_t, released_t (ffr), peak_command, final_command and "trace"
+                 ({t, frequency, command, output, soc, truncated}, one entry per sample).
+                 GET /sessions/{id}/tds/controllers  (the devices of the loaded case a controller can command, each with
+                 "p_limit" in MW and "variables": dae_vars names for its command "Pext", frequency "fHz", current and
+                 state of charge; "coi_available" false means only "frequency":"bus" works; needs no run)
                  POST /sessions/{id}/abort  (cooperative abort of a running TDS)
 Response metrics:POST /response-metrics  (no session; body {"series":[{"name","t":[...],"y":[...]}], optional t_start, t_end,
                  settling_band, rocof_window} -> per series: initial, final, peak, nadir, max_deviation, rocof, settling_time,
@@ -120,8 +131,9 @@ Protocol for all WS endpoints: connect → server sends {"type":"ready"} → cli
 first command frame. Close codes: 4404 unknown session, 4500 worker error.
 
 WS /api/ws/{session_id}            — TDS live stream. Send {"type":"start_tds","tf":5.0}, optionally with
-                                     "vars" (groups bus_v gen_state gen_power line_flow load_pq) and "dae_vars" (ANDES
-                                     variable names, each one more column named as given);
+                                     "vars" (groups bus_v gen_state gen_power line_flow load_pq), "dae_vars" (ANDES
+                                     variable names, each one more column named as given) and "controllers" (as on
+                                     POST /tds; the "done" frame then carries "controllers" without the traces);
                                      server replies {"type":"stream_start",...} (metadata.var_columns
                                      names the columns once) then BINARY Apache Arrow IPC chunks, one
                                      per frame, each with a "t" column and a "v" list column holding
@@ -153,7 +165,11 @@ response and needs no Arrow decoding.
   "Sn" defaults to the system base (topology "base_mva"); keep it there: pmx/qmx/qmn/ialim are pu of Sn while the
   set-point and the output are pu of the system base. The state of charge is the dae var "pIG_y ESD1 <idx>"
   (name it in dae_vars); it moves by the delivered MW over En (MWh) each hour. Step the power during a run with
-  an Alter on "Pext0" (system-base pu, added to the set-point).
+  an Alter on "Pext0" (system-base pu, added to the set-point), or have it follow the frequency with a TDS
+  "controllers" entry. Not both on one battery: a controller writes "Pext0" at every sample, so a run with an
+  Alter on the same device's "Pext0" is a 422 (an Alter on "pref0" is fine).
+- TDS controllers act on distributed generation devices only. A synchronous machine's governor is not a target.
+  With a p_max left out a droop is limited to what the device can deliver ("p_limit" of the listing).
 - Line/Transformer impedances are pu on (Sn, Vn1); the add-element endpoint derives
   Vn1/Vn2 from the connected buses automatically.
 - TDS batch endpoint is synchronous with a 300 s server-side cap; for long runs use the WS stream.

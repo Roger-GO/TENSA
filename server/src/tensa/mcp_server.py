@@ -191,17 +191,46 @@ def run_pflow(
 
 
 @mcp.tool()
-def run_tds(session_id: str, tf: float, dae_vars: list[str] | None = None) -> Any:
+def run_tds(
+    session_id: str,
+    tf: float,
+    dae_vars: list[str] | None = None,
+    controllers: list[dict[str, Any]] | None = None,
+) -> Any:
     """Run a time-domain simulation from t=0 to t=tf seconds (batch; registered disturbances apply).
 
     Synchronous — returns when the simulation finishes (server caps wall time at 300 s).
     dae_vars names ANDES variables to record, as list_dae_variables gives them
     ('omega GENROU 1'); their values at every step come back under "traces".
+    controllers closes frequency loops on batteries and other distributed
+    generation devices (list_tds_controllers names them). Each is an object:
+    {"type": "droop", "model": "ESD1", "idx": 1, "gain": MW per Hz, "deadband": Hz,
+    "p_max": MW} or {"type": "ffr", "model": "ESD1", "idx": 1, "power": MW,
+    "trigger_deviation": Hz, "trigger_rocof": Hz/s, "hold": s}, both with optional
+    "frequency" ("coi" or "bus"), "period" (s between samples, 0.1 by default),
+    "t_start" (s) and "ramp" (MW/s). What each did, with its samples (t,
+    frequency, command, output, soc), comes back under "controllers".
     """
     body: dict[str, Any] = {"tf": tf}
     if dae_vars:
         body["dae_vars"] = dae_vars
+    if controllers:
+        body["controllers"] = controllers
     return _api("POST", f"/sessions/{session_id}/tds", body)
+
+
+@mcp.tool()
+def list_tds_controllers(session_id: str) -> Any:
+    """List the controllers run_tds takes and the devices of the loaded case they can command.
+
+    "types" are the kinds ('droop', 'ffr'); "targets" are the batteries and other
+    distributed generation devices (ESD1, PVD1, EV1, EV2), each with its own power
+    limit in MW ("p_limit") and the ANDES variables that show a controller at work
+    on it ("variables": pass them as dae_vars). "coi_available" says whether the
+    case has the synchronous machines the default frequency reading needs.
+    Needs no run, and does not close the case to disturbances.
+    """
+    return _api("GET", f"/sessions/{session_id}/tds/controllers")
 
 
 @mcp.tool()

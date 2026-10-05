@@ -495,6 +495,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/tds/controllers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the controllers a TDS run takes and the devices of the loaded case they can command.
+         * @description The kinds of controller a TDS request's ``controllers`` can name (a
+         *     frequency droop, a fast frequency response) and the devices of the loaded
+         *     case each can command, with the ANDES variables to record to watch one at
+         *     work. Needs no setup, so asking does not close the case to new
+         *     disturbances. With no case loaded the list of devices is empty (a 200, as
+         *     for the variable list).
+         */
+        get: operations["listTdsControllers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/abort": {
         parameters: {
             query?: never;
@@ -2549,6 +2574,68 @@ export interface components {
             idx: number | string;
         };
         /**
+         * DroopController
+         * @description Frequency droop: power in proportion to the frequency deviation beyond a
+         *     dead band, positive (discharging) when the frequency is below nominal.
+         */
+        DroopController: {
+            /**
+             * Model
+             * @description ANDES model of the device the controller commands: one of the distributed generation models (``ESD1``, ``PVD1``, ``EV1``, ``EV2``). ``GET /sessions/{id}/tds/controllers`` lists the devices of the loaded case that can be named.
+             */
+            model: string;
+            /**
+             * Idx
+             * @description The device's idx. ``5`` and ``"5"`` name the same device.
+             */
+            idx: number | string;
+            /**
+             * Frequency
+             * @description The frequency the controller reads. ``coi``: the centre-of-inertia frequency, the inertia-weighted mean speed of the synchronous machines in service times the system's nominal frequency. ``bus``: the frequency the device measures at its own bus (its ``fHz``), which jumps during a fault.
+             * @default coi
+             * @enum {string}
+             */
+            frequency: "coi" | "bus";
+            /**
+             * Period
+             * @description Seconds between two samples. The controller reads the frequency and sets its command once a period and holds it in between. A period shorter than the integration step samples at every step.
+             * @default 0.1
+             */
+            period: number;
+            /**
+             * T Start
+             * @description Simulation time, in seconds, before which the controller commands nothing.
+             * @default 0
+             */
+            t_start: number;
+            /**
+             * Ramp
+             * @description The most the command may change, in MW per second. ``null`` lets it jump from one sample to the next.
+             */
+            ramp?: number | null;
+            /**
+             * @description Discriminator: a frequency droop. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            type: "droop";
+            /**
+             * Gain
+             * @description MW commanded per Hz of deviation beyond the dead band.
+             */
+            gain: number;
+            /**
+             * Deadband
+             * @description Deviation from nominal, in Hz either way, the controller ignores.
+             * @default 0
+             */
+            deadband: number;
+            /**
+             * P Max
+             * @description The largest command, in MW, discharging or charging. ``null`` uses the device's own limit: the smaller of its power limit ``pmx`` and its current limit ``ialim``.
+             */
+            p_max?: number | null;
+        };
+        /**
          * EditElementRequest
          * @description Request body for ``PUT /sessions/{id}/elements/{model}/{idx}``.
          *
@@ -2703,6 +2790,73 @@ export interface components {
              * @default 0
              */
             rf: number;
+        };
+        /**
+         * FfrController
+         * @description Fast frequency response: a fixed power, delivered once for a set time
+         *     when the frequency leaves a threshold or moves too fast.
+         */
+        FfrController: {
+            /**
+             * Model
+             * @description ANDES model of the device the controller commands: one of the distributed generation models (``ESD1``, ``PVD1``, ``EV1``, ``EV2``). ``GET /sessions/{id}/tds/controllers`` lists the devices of the loaded case that can be named.
+             */
+            model: string;
+            /**
+             * Idx
+             * @description The device's idx. ``5`` and ``"5"`` name the same device.
+             */
+            idx: number | string;
+            /**
+             * Frequency
+             * @description The frequency the controller reads. ``coi``: the centre-of-inertia frequency, the inertia-weighted mean speed of the synchronous machines in service times the system's nominal frequency. ``bus``: the frequency the device measures at its own bus (its ``fHz``), which jumps during a fault.
+             * @default coi
+             * @enum {string}
+             */
+            frequency: "coi" | "bus";
+            /**
+             * Period
+             * @description Seconds between two samples. The controller reads the frequency and sets its command once a period and holds it in between. A period shorter than the integration step samples at every step.
+             * @default 0.1
+             */
+            period: number;
+            /**
+             * T Start
+             * @description Simulation time, in seconds, before which the controller commands nothing.
+             * @default 0
+             */
+            t_start: number;
+            /**
+             * Ramp
+             * @description The most the command may change, in MW per second. ``null`` lets it jump from one sample to the next.
+             */
+            ramp?: number | null;
+            /**
+             * @description Discriminator: a fast frequency response. (enum property replaced by openapi-typescript)
+             * @enum {string}
+             */
+            type: "ffr";
+            /**
+             * Power
+             * @description MW commanded once triggered. Positive discharges and answers a low frequency; negative absorbs and answers a high one. Not zero.
+             */
+            power: number;
+            /**
+             * Trigger Deviation
+             * @description Triggers when the frequency is this many Hz below nominal (above, for a negative ``power``). ``null`` leaves the deviation out.
+             */
+            trigger_deviation?: number | null;
+            /**
+             * Trigger Rocof
+             * @description Triggers when the frequency falls this many Hz per second or faster (rises, for a negative ``power``), measured between two samples. ``null`` leaves the rate out. At least one of the two triggers must be given.
+             */
+            trigger_rocof?: number | null;
+            /**
+             * Hold
+             * @description Seconds the power is held before the controller lets go.
+             * @default 10
+             */
+            hold: number;
         };
         /**
          * GeneratorOutput
@@ -4049,6 +4203,197 @@ export interface components {
             job_id?: string | null;
             /** @description The values of the request's ``dae_vars``, every step of the run. ``null`` when the request named none. */
             traces?: components["schemas"]["TdsTraces"] | null;
+            /**
+             * Controllers
+             * @description What each of the request's ``controllers`` did, in the order asked, with its samples. ``null`` when the request named none.
+             */
+            controllers?: components["schemas"]["TdsControllerResult"][] | null;
+        };
+        /**
+         * TdsControllerCatalogue
+         * @description The controllers a TDS run takes, for the loaded case.
+         */
+        TdsControllerCatalogue: {
+            /**
+             * Types
+             * @description The kinds of controller: the values ``type`` takes.
+             */
+            types: ("droop" | "ffr")[];
+            /**
+             * Coi Available
+             * @description ``true`` when the case has a synchronous machine, which the centre-of-inertia frequency (``frequency: "coi"``) is read from. Without one a controller has to read its own ``bus``.
+             */
+            coi_available: boolean;
+            /**
+             * Freq Hz
+             * @description The system's nominal frequency, in Hz: what a ``coi`` reading deviates from. ``null`` with no case loaded.
+             */
+            freq_hz?: number | null;
+            /**
+             * Base Mva
+             * @description The system MVA base. ``null`` with no case loaded.
+             */
+            base_mva?: number | null;
+            /**
+             * Targets
+             * @description The devices a controller can command: those of ANDES's distributed generation models (``ESD1``, ``PVD1``, ``EV1``, ``EV2``). Empty when the case has none, and with no case loaded.
+             */
+            targets: components["schemas"]["TdsControllerTarget"][];
+        };
+        /**
+         * TdsControllerResult
+         * @description What one controller of a TDS run did.
+         */
+        TdsControllerResult: {
+            /**
+             * Type
+             * @description The kind of controller.
+             * @enum {string}
+             */
+            type: "droop" | "ffr";
+            /**
+             * Model
+             * @description ANDES model of the device it commanded.
+             */
+            model: string;
+            /**
+             * Idx
+             * @description The device's idx, as the case holds it.
+             */
+            idx: number | string;
+            /**
+             * Samples
+             * @description How many times it read the frequency in this run.
+             */
+            samples: number;
+            /**
+             * First Action T
+             * @description Simulation time, in seconds, of the first sample at which it commanded a power: for an ``ffr``, when it triggered. ``null`` if it never did.
+             */
+            first_action_t?: number | null;
+            /**
+             * Released T
+             * @description Simulation time, in seconds, at which an ``ffr`` let go after its hold. ``null`` for a ``droop``, and for an ``ffr`` that did not trigger or was still holding when the run ended.
+             */
+            released_t?: number | null;
+            /**
+             * Peak Command
+             * @description Its command of the largest magnitude, in MW, with its sign.
+             */
+            peak_command: number;
+            /**
+             * Final Command
+             * @description Its command when the run ended, in MW.
+             */
+            final_command: number;
+            /** @description Its samples. Returned by a batch run; ``null`` in a stream's ``done`` frame, where the device's variables are streamed instead. */
+            trace?: components["schemas"]["TdsControllerTrace"] | null;
+        };
+        /**
+         * TdsControllerTarget
+         * @description One device of the loaded case a controller can command.
+         */
+        TdsControllerTarget: {
+            /**
+             * Model
+             * @description The device's ANDES model.
+             */
+            model: string;
+            /**
+             * Idx
+             * @description The device's idx.
+             */
+            idx: number | string;
+            /**
+             * Name
+             * @description The device's name in the case.
+             */
+            name: string;
+            /**
+             * Bus
+             * @description Idx of the bus it is on.
+             */
+            bus?: number | string | null;
+            /**
+             * In Service
+             * @description ``false`` for a device that is switched off: commands do nothing to it.
+             */
+            in_service: boolean;
+            /**
+             * P Limit
+             * @description The most active power the device delivers, in MW: the smaller of its power limit ``pmx`` and its current limit ``ialim`` (the power that current carries at rated voltage). A command beyond it is not delivered, and a ``droop`` that names no ``p_max`` is limited to it. ``null`` where the model has neither.
+             */
+            p_limit?: number | null;
+            /**
+             * Fn
+             * @description The device's nominal frequency, in Hz: what a ``bus`` reading deviates from.
+             */
+            fn?: number | null;
+            /** @description ANDES variables to record to see the controller at work. */
+            variables: components["schemas"]["TdsControllerVariables"];
+        };
+        /**
+         * TdsControllerTrace
+         * @description What one controller read and commanded at each of its samples.
+         */
+        TdsControllerTrace: {
+            /**
+             * T
+             * @description Simulation time of each sample, in seconds: the solved instant the controller read, from which its command applies.
+             */
+            t: number[];
+            /**
+             * Frequency
+             * @description The frequency the controller read at each sample, in Hz.
+             */
+            frequency: number[];
+            /**
+             * Command
+             * @description The power the controller commanded from each sample on, in MW, positive discharging: what it adds to the device's own set-point.
+             */
+            command: number[];
+            /**
+             * Output
+             * @description The active power the device was delivering at each sample, in MW, its own set-point included. Where it stays below what the command asks for, the device is at one of its limits. ``null`` where the device has no such reading.
+             */
+            output: (number | null)[];
+            /**
+             * Soc
+             * @description The device's state of charge at each sample, 0 to 1. ``null`` for a device without one (a ``PVD1``).
+             */
+            soc: (number | null)[];
+            /**
+             * Truncated
+             * @description ``true`` when the run took more samples than a response holds (500000 values over all controllers) and the later ones were left out. Raise ``period``.
+             */
+            truncated: boolean;
+        };
+        /**
+         * TdsControllerVariables
+         * @description The ANDES variables that show a controller at work on one device: names
+         *     to put in a run's ``dae_vars``.
+         */
+        TdsControllerVariables: {
+            /**
+             * Command
+             * @description The external power signal as the device receives it (``Pext``), per unit of the system base: what the controllers on it command.
+             */
+            command: string;
+            /**
+             * Frequency
+             * @description The frequency the device measures at its bus (``fHz``), in Hz.
+             */
+            frequency: string;
+            /**
+             * Active Current
+             * @description The device's active current (``Ipout_y``), per unit of the system base; times the bus voltage it is the active power delivered.
+             */
+            active_current: string;
+            /**
+             * Soc
+             * @description The device's state of charge (``pIG_y``); ``null`` for a model without one.
+             */
+            soc?: string | null;
         };
         /**
          * TdsRunRequest
@@ -4085,6 +4430,11 @@ export interface components {
              * @enum {string}
              */
             integrator: "trapezoidal" | "qndf";
+            /**
+             * Controllers
+             * @description Controllers that act while the run goes: each reads the frequency once a sample ``period`` and sets the power of a battery or another distributed generation device, on top of the device's own set-point. Two kinds, picked by ``type``: ``droop`` (power in proportion to the frequency deviation beyond a dead band) and ``ffr`` (a fixed power, once, for a set time when the frequency leaves a threshold or moves too fast). Powers are in MW, positive discharging, and frequencies in Hz. ``GET /sessions/{id}/tds/controllers`` lists the devices that can be named. A controller that names a device the case does not have is refused with 422 before anything runs. What each did comes back in the result's ``controllers``; when the run ends the devices' inputs are as they were. The streaming ``start_tds`` frame takes the same field. Sweeps do not take controllers.
+             */
+            controllers?: (components["schemas"]["DroopController"] | components["schemas"]["FfrController"])[] | null;
             /**
              * Tds Config Overrides
              * @description Optional adaptive-integrator tolerance overrides. Supported keys are ``rtol`` (→ ``ss.TDS.config.reltol``), ``atol`` (→ ``ss.TDS.config.abstol``) and ``max_step`` (→ ``ss.TDS.config.dtmax``), or the name of any ``ss.TDS.config`` field. An unknown key is refused with 422. So is a value that ANDES would take and then misbehave on: ``tstep`` must be finite and greater than 0, ``max_step`` (``dtmax``) finite and not negative (0 lets ANDES choose), ``fixt`` 0 or 1, and every other value a finite number. The tolerances have no effect when ``integrator="trapezoidal"`` (the fixed-step path ignores ``reltol/abstol`` and uses ``h`` for stepping).
@@ -5791,7 +6141,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description ANDES setup() failed (call /reload to recover), or the request names a step size or an override ANDES must not be given (nothing was written, so there is nothing to reload). */
+            /** @description ANDES setup() failed (call /reload to recover), or the request names a step size or an override ANDES must not be given, or a controller the loaded case cannot bind (nothing was written, so there is nothing to reload). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -5831,6 +6181,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DaeVariableList"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listTdsControllers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TdsControllerCatalogue"];
                 };
             };
             /** @description Session not found or already closed. */

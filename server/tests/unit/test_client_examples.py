@@ -206,6 +206,22 @@ def test_the_example_client_reads_the_messages_of_a_session(
     assert errors["path"] == "/api/sessions/abc/messages?level=error&after=40"
 
 
+def test_the_example_client_runs_with_controllers_and_lists_what_they_can_command(
+    recorder: tuple[str, list[dict[str, Any]]],
+) -> None:
+    base, seen = recorder
+    client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
+    session = client.Session(client.AndesApp(base), "abc")
+    droop = {"type": "droop", "model": "ESD1", "idx": 1, "gain": 50}
+
+    session.tds_controllers()
+    session.run_tds(5.0, controllers=[droop])
+
+    listing, run = seen
+    assert (listing["method"], listing["path"]) == ("GET", "/api/sessions/abc/tds/controllers")
+    assert json.loads(run["body"]) == {"tf": 5.0, "controllers": [droop]}
+
+
 def test_the_example_client_uploads_a_case_file_as_its_own_bytes(
     recorder: tuple[str, list[dict[str, Any]]], tmp_path: Path
 ) -> None:
@@ -246,6 +262,27 @@ def test_the_mcp_tds_tool_sends_the_variables_it_was_asked_to_record(
     assert json.loads(plain["body"]) == {"tf": 2.0}
     assert json.loads(recording["body"]) == {"tf": 2.0, "dae_vars": ["omega GENROU 1"]}
     assert listing["path"] == "/api/sessions/abc/dae-variables?q=omega&kind=x&limit=100"
+
+
+def test_the_mcp_tds_tool_sends_its_controllers_and_lists_what_they_can_command(
+    recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    from tensa import mcp_server
+
+    base, seen = recorder
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+    ffr = {"type": "ffr", "model": "ESD1", "idx": 1, "power": 20, "trigger_deviation": 0.1}
+
+    mcp_server.run_tds("abc", 2.0, controllers=[ffr])
+    mcp_server.run_tds("abc", 2.0, controllers=[])
+    mcp_server.list_tds_controllers("abc")
+
+    controlled, plain, listing = seen
+    assert json.loads(controlled["body"]) == {"tf": 2.0, "controllers": [ffr]}
+    # An empty list is not sent: the request body stays what it was without the option.
+    assert json.loads(plain["body"]) == {"tf": 2.0}
+    assert (listing["method"], listing["path"]) == ("GET", "/api/sessions/abc/tds/controllers")
 
 
 def test_the_mcp_messages_tool_asks_for_warnings_unless_told_otherwise(

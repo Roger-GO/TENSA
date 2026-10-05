@@ -34,7 +34,7 @@ import os
 import re
 import tempfile
 import zipfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -90,6 +90,7 @@ from tensa.core.rated_voltage import (
     still_without_rated_voltage,
 )
 from tensa.core.se_result import MeasurementsGenerated, SeResult
+from tensa.core.tds_controllers import ControllerBank, ControllerSpec, controller_catalogue
 
 # JSON-friendly scalar union surfaced through topology / line-flow APIs.
 # Mirrored on the API layer (``schemas.TopologyEntry.params``); see schemas.py.
@@ -434,6 +435,11 @@ class Wrapper:
         # ``init_clone`` so a session that never edits pays nothing. It holds
         # the per-session clone files + undo/redo stacks.
         self._clone_manager: CloneManager | None = None
+        # The controllers of the last time-domain run that had any (see
+        # ``tensa.core.tds_controllers``), kept so a run that carries on where
+        # that one stopped carries its controllers on too. It holds their state
+        # and no reference to the System.
+        self._controller_bank: ControllerBank | None = None
 
     def _clone_mgr(self) -> CloneManager:
         """Return (creating on first use) this session's clone manager."""
@@ -1911,6 +1917,34 @@ class Wrapper:
                 )
         validate_tds_overrides(tds_config_overrides)
 
+    def tds_controllers(self, specs: Sequence[ControllerSpec]) -> ControllerBank | None:
+        """The controllers of a time-domain run about to start, bound to the
+        loaded System; ``None`` for a run that names none.
+
+        A run that names the controllers the last one had, on the same System
+        and from where that run stopped, is given that run's bank, so it carries
+        on: an FFR that has fired stays fired. Any other run gets a new one.
+        Nothing is written to the System here.
+
+        Raises:
+            TdsRequestError: a controller names a device the case does not have
+                or one no controller can command (see
+                ``tensa.core.tds_controllers``).
+        """
+        ss = self._require_loaded()
+        if not specs:
+            return None
+        bank = self._controller_bank
+        if bank is not None and bank.continues(ss, specs):
+            bank.rebind(ss)
+            return bank
+        return ControllerBank(ss, specs)
+
+    def tds_controller_catalogue(self) -> dict[str, Any]:
+        """The kinds of controller a time-domain run takes and the devices of
+        the loaded case they can command; no devices when no case is loaded."""
+        return controller_catalogue(self._ss)
+
     def run_tds(
         self,
         tf: float,
@@ -1919,6 +1953,7 @@ class Wrapper:
         abort_flag: Event | None = None,
         integrator: Literal["trapezoidal", "qndf"] = "trapezoidal",
         tds_config_overrides: dict[str, float] | None = None,
+        controllers: ControllerBank | None = None,
     ) -> TdsBatchResult:
         """Run a time-domain simulation up to ``tf`` seconds.
 
@@ -1926,6 +1961,11 @@ class Wrapper:
         ``TDS.callpert`` hook. ``abort_flag``, when set, causes the wrapper
         to set ``ss.TDS.busted = True`` on the next callpert invocation,
         cleanly terminating the integration loop within ~2 steps.
+
+        ``controllers`` (from :meth:`tds_controllers`) act from the same hook,
+        ahead of ``on_step``: each reads the frequency once a sample period and
+        sets the power of its device. What they wrote is taken back when the
+        run ends, however it ends.
 
         ``h`` (seconds) is written to ``ss.TDS.config.tstep``, the field
         ANDES 2.0.0 reads. With the trapezoidal integrator it is the fixed
@@ -2074,6 +2114,8 @@ class Wrapper:
             if abort_flag is not None and abort_flag.is_set():
                 system.TDS.busted = True
                 return
+            if controllers is not None:
+                controllers.step(t, system)
             if on_step is not None:
                 on_step(t, system)
 
@@ -2082,10 +2124,18 @@ class Wrapper:
         # Reset busted flag in case of re-run on the same System
         ss.TDS.busted = False
 
+        # Only a run that names the same controllers again carries them on; a
+        # run without any ends them.
+        self._controller_bank = controllers
+        if controllers is not None:
+            controllers.begin_run()
         try:
             ss.TDS.run()
         except Exception as exc:  # noqa: BLE001
             raise SetupFailedError(f"TDS.run raised: {exc}") from exc
+        finally:
+            if controllers is not None:
+                controllers.end_run(ss)
 
         final_t = float(ss.dae.t)
         # If ANDES set a non-zero exit code, treat as not-fully-converged but do not raise

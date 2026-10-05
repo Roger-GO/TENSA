@@ -107,6 +107,8 @@ from tensa.core.stream import (
     syngen_idx_values_from_system,
     var_column_names,
 )
+from tensa.core.tds_controllers import log_notices as log_controller_notices
+from tensa.core.tds_controllers import parse_controllers
 from tensa.core.wrapper import Wrapper, tds_fixed_step, validate_step_size
 
 
@@ -1278,6 +1280,11 @@ def _handle_run_tds(
         raise TdsRequestError("'dae_vars' must be a list of ANDES variable names")
     dae_names = [v.name for v in resolve_dae_vars(wrapper._require_loaded(), dae_vars_raw)]  # noqa: SLF001
 
+    # The run's controllers (``tensa.core.tds_controllers``): each is checked and
+    # bound to its device here, so one that names a device the case does not have
+    # is refused like a bad variable name, before a stream starts.
+    controllers = wrapper.tds_controllers(parse_controllers(args.get("controllers")))
+
     abort_flag = threading.Event()
     if abort_event.is_set():
         abort_flag.set()
@@ -1460,6 +1467,7 @@ def _handle_run_tds(
             abort_flag=abort_flag,
             integrator=integrator_raw,
             tds_config_overrides=tds_config_overrides,
+            controllers=controllers,
         )
     finally:
         abort_flag.set()
@@ -1474,7 +1482,20 @@ def _handle_run_tds(
     payload = _serialize_dataclass(result)
     if recorder is not None:
         payload["traces"] = recorder.result()
+    if controllers is not None:
+        # What each controller did goes into the session's messages, and into the
+        # result: with its samples for a batch run, which has no stream to plot
+        # them from, and without for a streamed one, whose ``done`` frame is small.
+        log_controller_notices(controllers)
+        payload["controllers"] = controllers.results(traces=not stream)
     return payload
+
+
+def _handle_list_tds_controllers(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """The kinds of controller a run takes and the devices of the loaded case
+    they can command (see ``tensa.core.tds_controllers``). A listing is a read:
+    with no case loaded there are no devices."""
+    return wrapper.tds_controller_catalogue()
 
 
 def _handle_list_dae_variables(wrapper: Wrapper, args: dict[str, Any]) -> Any:
@@ -1517,6 +1538,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "run_pflow": _handle_run_pflow,
     "alterable_params": _handle_alterable_params,
     "list_dae_variables": _handle_list_dae_variables,
+    "list_tds_controllers": _handle_list_tds_controllers,
     # Unit 21 — clone-on-write file edits (init / edit / undo / redo / save-as / reset).
     "init_clone": _handle_init_clone,
     "apply_clone_edit": _handle_apply_clone_edit,
