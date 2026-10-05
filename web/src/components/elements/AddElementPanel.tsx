@@ -25,8 +25,10 @@ import { elementDefaults } from './elementHelp';
  *
  *   pick kind → form renders → fill → Submit →
  *     Saving (button locks, spinner) →
- *     201 → topology re-fetch → the form resets for the next element, under
- *           a line that names what was added and says the panel stays open
+ *     201 → topology re-fetch starts → the form resets for the next element,
+ *           under a line that names what was added and says the panel stays
+ *           open. The form is back before the re-fetch is, and holds no
+ *           generator chosen from the case as it was (`ElementForm`)
  *     422 → inline error, panel stays open
  *     409 → close + caller surfaces reset banner
  *

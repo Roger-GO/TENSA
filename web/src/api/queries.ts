@@ -18,7 +18,13 @@
  * - Reload → invalidate topology + clear PF cache.
  * - Sidecar PUT → invalidate sidecar GET for the same case path.
  */
-import { useMutation, useQuery, useQueryClient, QueryClient } from '@tanstack/react-query';
+import {
+  useIsFetching,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  QueryClient,
+} from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import { andesClient, NetworkError, ProblemDetailsError, TIMEOUTS } from './client';
 import { parseSessionId, parseRunId } from './types';
@@ -613,6 +619,18 @@ export function useTopology(sessionId: SessionId | null): UseQueryResult<Topolog
 export function useCurrentTopology(): TopologySummary | null {
   const sessionId = useSessionStore((s) => s.sessionId);
   return useTopology(sessionId).data ?? null;
+}
+
+/**
+ * Whether the current session's topology is being read again. Until the read
+ * is back, `useCurrentTopology` returns the case as it was before whatever
+ * asked for it: after an add, the case without the element just added. For a
+ * component that would otherwise act on what the case no longer says.
+ */
+export function useTopologyRefetching(): boolean {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const queryKey = sessionId ? queryKeys.topology(sessionId) : ['topology', 'noop'];
+  return useIsFetching({ queryKey }) > 0;
 }
 
 /**

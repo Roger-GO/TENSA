@@ -158,7 +158,9 @@ export function followLink(
  * can gain the generator of that bus while the form is open. Neither is a pick
  * by the user, so neither chooses a generator that is already in use: that
  * would make a second device on it the form's own suggestion, and two devices
- * on one generator do not initialize as they stand (`linkWarnings`).
+ * on one generator do not initialize as they stand (`linkWarnings`). For the
+ * same reason the form gives up what it chose this way when the case turns out
+ * to have a device on that generator (`ElementForm`).
  */
 export function freeGeneratorOn(
   bus: string,

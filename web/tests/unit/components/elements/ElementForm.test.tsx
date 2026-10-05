@@ -23,6 +23,8 @@
  *   to the first of them.
  * - A static generator opens named after its idx, with a line under its numbers.
  * - A form opened on a bus starts there, with the free generator of that bus.
+ * - A generator the form chose is given up once a device takes it, and none is
+ *   chosen while the case is being read again.
  * - A bus without a generator offers to add one there.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -85,6 +87,8 @@ const SCHEMA: TopologySchema = {
 };
 
 let MOCK_TOPOLOGY: TopologySummary | null = null;
+/** The topology is being read again: what `MOCK_TOPOLOGY` holds may be behind the case. */
+let MOCK_REFETCHING = false;
 
 vi.mock('@/api/queries', async () => {
   const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
@@ -92,6 +96,7 @@ vi.mock('@/api/queries', async () => {
     ...actual,
     useTopologySchema: () => ({ data: SCHEMA, isLoading: false, isError: false }),
     useCurrentTopology: () => MOCK_TOPOLOGY,
+    useTopologyRefetching: () => MOCK_REFETCHING,
   };
 });
 
@@ -116,6 +121,7 @@ function emptyTopology(): TopologySummary {
 
 beforeEach(() => {
   MOCK_TOPOLOGY = emptyTopology();
+  MOCK_REFETCHING = false;
 });
 
 describe('<ElementForm />', () => {
@@ -912,6 +918,132 @@ describe('<ElementForm /> follows the case while it is open', () => {
     MOCK_TOPOLOGY = withGeneratorOnBus5();
     taken.rerender(batteryFormOn('2'));
     expect(genSelect().value).toBe('');
+  });
+
+  /** `topology` once a battery has been added on the static generator `gen` of `bus`. */
+  function withBatteryOn(topology: TopologySummary, bus: number, gen: number | string) {
+    return {
+      ...topology,
+      controllers: [{ idx: 'ESD1_1', name: 'ESD1_1', kind: 'ESD1', params: { bus, gen } }],
+    };
+  }
+
+  it('gives up the generator it chose once a device has taken it, and asks for one', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const form = () =>
+      withQueryClient(
+        <ElementForm
+          model="ESD1"
+          defaultParams={{ Sn: 100, pqflag: 1, pmx: 1, En: 100 }}
+          saving={false}
+          serverError={null}
+          onSubmit={onSubmit}
+          onCancel={() => {}}
+          seedBus="3"
+        />,
+      );
+    MOCK_TOPOLOGY = linkedTopology();
+    const view = render(form());
+    expect(genSelect().value).toBe('PV_B');
+    expect(screen.getByTestId('field-note-gen')).toBeInTheDocument();
+
+    // The form is back after an add before the case has the battery: once it
+    // has, the generator the form opened with is the first battery's.
+    MOCK_TOPOLOGY = withBatteryOn(linkedTopology(), 3, 'PV_B');
+    view.rerender(form());
+    expect(busSelect().value).toBe('3');
+    expect(genSelect().value).toBe('');
+    expect(screen.queryByTestId('field-note-gen')).toBeNull();
+    expect(screen.queryByTestId('field-warning-gen')).toBeNull();
+    expect(inputOf('idx').value).toBe('ESD1_2');
+
+    await user.click(screen.getByRole('button', { name: /add esd1/i }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByTestId('form-problems')).toHaveTextContent(
+      'Nothing was added: gen is required and empty.',
+    );
+  });
+
+  it('gives up one it chose for a bus that gained its generator, too', () => {
+    MOCK_TOPOLOGY = linkedTopology();
+    const view = render(batteryFormOn('5'));
+    MOCK_TOPOLOGY = withGeneratorOnBus5();
+    view.rerender(batteryFormOn('5'));
+    expect(genSelect().value).toBe('8');
+
+    MOCK_TOPOLOGY = withBatteryOn(withGeneratorOnBus5(), 5, 8);
+    view.rerender(batteryFormOn('5'));
+    expect(genSelect().value).toBe('');
+    expect(screen.queryByTestId('field-note-gen')).toBeNull();
+  });
+
+  it('keeps a generator the user picked, with its bus or by itself, and warns', async () => {
+    const user = userEvent.setup();
+    MOCK_TOPOLOGY = linkedTopology();
+    // Picking bus 3 brings its generator along: that is the user's choice.
+    const picked = render(batteryForm());
+    await user.selectOptions(busSelect(), '3');
+    expect(genSelect().value).toBe('PV_B');
+    MOCK_TOPOLOGY = withBatteryOn(linkedTopology(), 3, 'PV_B');
+    picked.rerender(batteryForm());
+    expect(genSelect().value).toBe('PV_B');
+    expect(screen.getByTestId('field-warning-gen')).toHaveTextContent(
+      'ESD1_1 already takes over PV_B.',
+    );
+    picked.unmount();
+
+    // So is the bus the form opened on, once the user has picked it again.
+    MOCK_TOPOLOGY = linkedTopology();
+    const seeded = render(batteryFormOn('3'));
+    await user.selectOptions(busSelect(), '2');
+    await user.selectOptions(busSelect(), '3');
+    MOCK_TOPOLOGY = withBatteryOn(linkedTopology(), 3, 'PV_B');
+    seeded.rerender(batteryFormOn('3'));
+    expect(genSelect().value).toBe('PV_B');
+    expect(screen.getByTestId('field-warning-gen')).toBeInTheDocument();
+  });
+
+  it('chooses no generator while the case is being read again, and does once it is in', () => {
+    // The form that comes back after an add: the topology it has is the one
+    // from before the add, which may call a generator free that is not.
+    MOCK_TOPOLOGY = linkedTopology();
+    MOCK_REFETCHING = true;
+    const view = render(batteryFormOn('3'));
+    expect(busSelect().value).toBe('3');
+    expect(genSelect().value).toBe('');
+    expect(screen.queryByTestId('field-note-gen')).toBeNull();
+
+    // The read is in and the generator is still free.
+    MOCK_REFETCHING = false;
+    view.rerender(batteryFormOn('3'));
+    expect(genSelect().value).toBe('PV_B');
+    expect(screen.getByTestId('field-note-gen')).toHaveTextContent(
+      'Set to PV_B, the static generator on bus 3.',
+    );
+    view.unmount();
+
+    // The read is in and a device has it: the generator is left to pick.
+    MOCK_TOPOLOGY = linkedTopology();
+    MOCK_REFETCHING = true;
+    const taken = render(batteryFormOn('3'));
+    MOCK_TOPOLOGY = withBatteryOn(linkedTopology(), 3, 'PV_B');
+    MOCK_REFETCHING = false;
+    taken.rerender(batteryFormOn('3'));
+    expect(genSelect().value).toBe('');
+  });
+
+  it('keeps the generator it chose through a read that leaves it free', () => {
+    MOCK_TOPOLOGY = linkedTopology();
+    const view = render(batteryFormOn('3'));
+    MOCK_REFETCHING = true;
+    view.rerender(batteryFormOn('3'));
+    expect(genSelect().value).toBe('PV_B');
+    MOCK_TOPOLOGY = withGeneratorOnBus5();
+    MOCK_REFETCHING = false;
+    view.rerender(batteryFormOn('3'));
+    expect(genSelect().value).toBe('PV_B');
+    expect(screen.getByTestId('field-note-gen')).toBeInTheDocument();
   });
 });
 

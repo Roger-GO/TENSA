@@ -23,7 +23,8 @@
  *   IEEE 14 -> TDS tab: Frequency control says a battery is missing and has the
  *   button that opens its form -> the form says what stops an add (no static
  *   generator on the bus) and goes to the PV form on that bus -> the PV, then
- *   the battery on it -> the TDS tab offers the battery to a controller
+ *   the battery on it -> the form that comes back does not offer that generator
+ *   to a second battery -> the TDS tab offers the battery to a controller
  */
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 
@@ -270,6 +271,17 @@ test('frequency control on a case without a battery: the tab leads to one, step 
   await panel.getByRole('button', { name: 'Add ESD1' }).click();
   await expect(panel.getByTestId('add-element-success')).toContainText(
     'Added ESD1 battery ESD1_1 on bus 4.',
+  );
+
+  // ---- the form is back on the bus, whose generator is now the battery's -----
+  // A second battery on PV 6 would have to share it, so the form does not open
+  // with it again: another click on Add adds nothing.
+  await expect(panel.getByTestId('field-idx').locator('input')).toHaveValue('ESD1_2');
+  await expect(panel.getByTestId('bus-idx-select')).toHaveValue(String(BATTERY_BUS));
+  await expect(panel.getByTestId('gen-idx-select')).toHaveValue('');
+  await panel.getByRole('button', { name: 'Add ESD1' }).click();
+  await expect(panel.getByTestId('form-problems')).toHaveText(
+    'Nothing was added: gen is required and empty.',
   );
   await page.getByTestId('add-element-close').click();
   await expect(panel).toHaveCount(0);

@@ -26,6 +26,7 @@ import {
   useCpfQvRun,
   useCpfRun,
   useCreateSession,
+  useCurrentTopology,
   useDaeVariables,
   useListPmus,
   useListProfiles,
@@ -36,6 +37,7 @@ import {
   useSaveSnapshot,
   useTdsControllers,
   useTopology,
+  useTopologyRefetching,
   useUploadWorkspaceFile,
 } from '@/api/queries';
 import { parseSessionId } from '@/api/types';
@@ -1280,6 +1282,69 @@ describe('queries hooks', () => {
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  it('useTopologyRefetching says so while the topology of the session is read again', async () => {
+    const session = parseSessionId('sess-reread');
+    useSessionStore.setState({ sessionId: session });
+    useCaseStore.setState({
+      selection: { primaryPath: 'ieee14.xlsx' as WorkspacePath, addfiles: [] },
+    });
+    const topology = {
+      state: 'pre-setup',
+      buses: [],
+      lines: [],
+      transformers: [],
+      generators: [],
+      loads: [],
+    };
+    fetchSpy.mockResolvedValueOnce(jsonResponse(topology));
+    const { client, Wrapper } = makeWrapper();
+    const { result } = renderHook(
+      () => ({ topology: useCurrentTopology(), refetching: useTopologyRefetching() }),
+      { wrapper: Wrapper },
+    );
+    await waitFor(() => expect(result.current.topology).not.toBeNull());
+    expect(result.current.refetching).toBe(false);
+
+    // A read of another session's topology is not this one's.
+    await act(async () => {
+      void client.fetchQuery({
+        queryKey: queryKeys.topology(parseSessionId('sess-other')),
+        queryFn: () => new Promise<never>(() => {}),
+      });
+      await Promise.resolve();
+    });
+    expect(client.isFetching()).toBe(1);
+    expect(result.current.refetching).toBe(false);
+
+    let answer: (response: Response) => void = () => {};
+    fetchSpy.mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    act(() => {
+      void client.invalidateQueries({ queryKey: queryKeys.topology(session) });
+    });
+    await waitFor(() => expect(result.current.refetching).toBe(true));
+    // What the topology hook returns meanwhile is the earlier read.
+    expect(result.current.topology?.base_mva).toBeUndefined();
+
+    await act(async () => {
+      answer(jsonResponse({ ...topology, base_mva: 100 }));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.refetching).toBe(false));
+    expect(result.current.topology?.base_mva).toBe(100);
+  });
+
+  it('useTopologyRefetching is false without a session', () => {
+    useSessionStore.setState({ sessionId: null });
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useTopologyRefetching(), { wrapper: Wrapper });
+    expect(result.current).toBe(false);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('the landing-state list queries stay disabled when selection is null (no 409 noise)', () => {

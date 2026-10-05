@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { useCurrentTopology, useTopologySchema } from '@/api/queries';
+import { useCurrentTopology, useTopologyRefetching, useTopologySchema } from '@/api/queries';
 import type { ParamValue, TopologyEntry, TopologyParamMeta, TopologySummary } from '@/api/types';
 import { cn } from '@/lib/cn';
 import { BusIdxSelect } from './BusIdxSelect';
@@ -51,7 +51,9 @@ import {
  *
  * `seedBus` opens the form on a bus (the diagram's "Add element here"): the
  * first bus field starts there, and a device tied to a static generator gets
- * the one on that bus.
+ * the one on that bus while no device uses it. A generator the form chose
+ * that way is given up once the case says a device took it, so the form that
+ * comes back after a battery was added there asks for a generator again.
  */
 export interface ElementFormProps {
   model: string;
@@ -202,6 +204,8 @@ export function ElementForm({
   const baseId = useId();
   const schema = useTopologySchema();
   const topology = useCurrentTopology();
+  // The case is being read again, so `topology` may be behind it.
+  const refetching = useTopologyRefetching();
   const params: TopologyParamMeta[] = useMemo(
     () => schema.data?.models[model] ?? [],
     [schema.data, model],
@@ -220,13 +224,13 @@ export function ElementForm({
   );
   const busNotes = useMemo(() => generatorsByBus(staticGens), [staticGens]);
 
-  // What the form opens with, and what to say under the generator a seeded
-  // bus brought along.
+  // What the form opens with: the values, the generator a seeded bus brought
+  // along (`suggested`), and what to say under it.
   const seed = (
     metas: TopologyParamMeta[],
     topo: TopologySummary | null,
     defaults: Record<string, string | number | boolean> | undefined,
-  ): { values: Record<string, ParamValue>; note: LinkNote | null } => {
+  ): { values: Record<string, ParamValue>; suggested: string | null; note: LinkNote | null } => {
     const init: Record<string, ParamValue> = {};
     for (const m of metas) {
       if (m.name === 'idx') {
@@ -242,15 +246,18 @@ export function ElementForm({
     // A line has two bus fields: the bus it was opened on is where it starts.
     const busField = metas.find((m) => m.kind === 'bus_idx');
     const onCase = (topo?.buses ?? []).some((b) => String(b.idx) === seedBus);
-    if (!seedBus || busField === undefined || !onCase) return { values: init, note: null };
+    const plain = { values: init, suggested: null, note: null };
+    if (!seedBus || busField === undefined || !onCase) return plain;
     init[busField.name] = seedBus;
-    if (!linksGen || busField.name !== 'bus') return { values: init, note: null };
+    if (!linksGen || busField.name !== 'bus') return plain;
     // A seed is not a pick: the form opens like this again after each add, and
-    // a second battery on the first one's generator is not a default.
-    const linked = freeGeneratorOn(seedBus, staticGenerators(topo));
-    if (linked === null) return { values: init, note: null };
+    // a second battery on the first one's generator is not a default. That
+    // form is back before the case has been read again, when `topo` still
+    // calls the generator free, so nothing is chosen until the read is in.
+    const linked = refetching ? null : freeGeneratorOn(seedBus, staticGenerators(topo));
+    if (linked === null) return plain;
     init.gen = linked.gen;
-    return { values: init, note: linked.note };
+    return { values: init, suggested: linked.gen, note: linked.note };
   };
 
   // One seed for both pieces of state: `useState` reads its argument once.
@@ -265,6 +272,9 @@ export function ElementForm({
   const [touched, setTouched] = useState<Set<string>>(new Set());
   // The field a pick of `bus` or `gen` set besides itself, and why.
   const [linkNote, setLinkNote] = useState<LinkNote | null>(opening.note);
+  // The generator the form chose itself, for a bus it opened on or a bus that
+  // gained one, until the user picks a bus or a generator.
+  const [suggestedGen, setSuggestedGen] = useState<string | null>(opening.suggested);
   // The field a refused submit puts the cursor in. An object, so that a second
   // refusal of the same field moves the cursor back to it.
   const [focusRequest, setFocusRequest] = useState<{ name: string } | null>(null);
@@ -280,6 +290,7 @@ export function ElementForm({
     setValidationErrors({});
     setTouched(new Set());
     setLinkNote(fresh.note);
+    setSuggestedGen(fresh.suggested);
     setFocusRequest(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params, model, kindHint]);
@@ -315,17 +326,31 @@ export function ElementForm({
 
   // The same goes for the generator of the bus: a PV added for this device is
   // in the case a moment after the form that asked for it is back. A generator
-  // nobody picked yet follows the case, to the free one on the bus.
+  // nobody picked yet follows the case both ways. It goes to the free one on
+  // the bus once the case has it, though not while the case is being read
+  // again (`seed`). And it leaves the one the form chose once a device has
+  // taken it, so the field is empty and the add refused until the user picks.
+  // A generator the user picked, by itself or with its bus, stays.
   const genTouched = touched.has('gen');
   const busValue = String(values.bus ?? '');
   const genValue = String(values.gen ?? '');
   useEffect(() => {
-    if (!linksGen || genTouched || busValue === '' || genValue !== '') return;
-    const linked = freeGeneratorOn(busValue, staticGens);
-    if (linked === null) return;
-    setValues((curr) => ({ ...curr, gen: linked.gen }));
-    setLinkNote(linked.note);
-  }, [linksGen, genTouched, busValue, genValue, staticGens]);
+    if (!linksGen || genTouched || busValue === '') return;
+    if (genValue === '') {
+      if (refetching) return;
+      const linked = freeGeneratorOn(busValue, staticGens);
+      if (linked === null) return;
+      setValues((curr) => ({ ...curr, gen: linked.gen }));
+      setLinkNote(linked.note);
+      setSuggestedGen(linked.gen);
+      return;
+    }
+    if (genValue !== suggestedGen) return;
+    if (!staticGens.some((g) => g.idx === genValue && g.takenBy.length > 0)) return;
+    setValues((curr) => ({ ...curr, gen: '' }));
+    setLinkNote(null);
+    setSuggestedGen(null);
+  }, [linksGen, refetching, genTouched, busValue, genValue, suggestedGen, staticGens]);
 
   const warnings = useMemo<Record<string, string>>(
     () => ({
@@ -362,6 +387,8 @@ export function ElementForm({
       next.bus = linked.bus;
       next.gen = linked.gen;
       setLinkNote(linked.note);
+      // From here on the generator is the user's, whichever field was picked.
+      setSuggestedGen(null);
     }
     setValues(next);
     setTouched((curr) => {

@@ -515,6 +515,41 @@ describe('<AddElementPanel />', () => {
     expect(useCaseStore.getState().addPanelBus).toBe('5');
   });
 
+  it('asks for a generator after a battery took the one on the bus, and adds no second one on it', async () => {
+    const user = userEvent.setup();
+    MOCK_TOPOLOGY = twoBusTopology();
+    useCaseStore.getState().openAddPanelOnBus('4');
+    const view = render(withQueryClient(<AddElementPanel />));
+    await user.selectOptions(screen.getByTestId('add-element-kind'), 'ESD1');
+    await waitFor(() => screen.getByTestId('element-form-ESD1'));
+    // On a bus with a free generator the form is complete as it opens.
+    await user.click(screen.getByRole('button', { name: /add esd1/i }));
+    await screen.findByTestId('add-element-success');
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(postSpy.mock.calls[0]?.[1]).toMatchObject({
+      model: 'ESD1',
+      params: { idx: 'ESD1_1', bus: '4', gen: '6' },
+    });
+
+    // The form is back on the bus. The case has the battery a moment later,
+    // and with it the generator is no longer one to open the next form with.
+    MOCK_TOPOLOGY = {
+      ...twoBusTopology(),
+      controllers: [{ idx: 'ESD1_1', name: 'ESD1_1', kind: 'ESD1', params: { bus: 4, gen: 6 } }],
+    };
+    view.rerender(withQueryClient(<AddElementPanel />));
+    expect(screen.getByTestId('bus-idx-select')).toHaveValue('4');
+    expect(screen.getByTestId('gen-idx-select')).toHaveValue('');
+    expect(screen.queryByTestId('field-note-gen')).toBeNull();
+    expect(screen.getByTestId('field-idx').querySelector('input')).toHaveValue('ESD1_2');
+
+    await user.click(screen.getByRole('button', { name: /add esd1/i }));
+    expect(screen.getByTestId('form-problems')).toHaveTextContent(
+      'Nothing was added: gen is required and empty.',
+    );
+    expect(postSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('goes from a battery on a bus without a generator to the PV form on that bus', async () => {
     const user = userEvent.setup();
     MOCK_TOPOLOGY = twoBusTopology();
