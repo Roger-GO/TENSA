@@ -55,7 +55,7 @@ All of these must pass before a PR is merged (CI enforces them):
 | Web tests | `cd web && pnpm test` |
 | Web coverage | `cd web && pnpm test:coverage` (report in `web/coverage`) |
 | Web build | `cd web && pnpm build` |
-| Web e2e | `cd web && pnpm build`, start `tensa serve --port 8765 --workspace "$(mktemp -d)" --max-sessions 16`, then `E2E_BASE_URL=http://127.0.0.1:8765 E2E_NO_WEBSERVER=1 pnpm test:e2e` (a real browser against a real server; `pnpm exec playwright install chromium` once; the `e2e` job in `web.yml` does the same; other modes are described in `web/playwright.config.ts`) |
+| Web e2e | `cd web && pnpm build`, start `tensa serve --port 8765 --workspace "$(mktemp -d)" --max-sessions 32`, then `E2E_BASE_URL=http://127.0.0.1:8765 E2E_NO_WEBSERVER=1 pnpm test:e2e` (a real browser against a real server; `pnpm exec playwright install chromium` once; the `e2e` job in `web.yml` does the same; other modes are described in `web/playwright.config.ts`) |
 
 The table is written for a POSIX shell. In PowerShell, leave out the `PYTHONPATH=src` prefix (the editable install already puts `tensa` on the path), set environment variables on their own line (`$env:E2E_BASE_URL = "http://127.0.0.1:8765"`), and pass `--workspace` a directory you made yourself instead of `$(mktemp -d)`.
 
