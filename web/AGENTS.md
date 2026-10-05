@@ -91,6 +91,13 @@ Reasons map (ordered): No case loaded → Connecting → Sign in → Sweep in pr
 - Group by panel/feature, not by component nesting
 - Test-only — never used for styling or production behavior
 
+## What survives a reload
+
+- **Preferences** (layout, theme, units, recent cases) go to `localStorage`, each store with its own key and a reader that drops anything malformed.
+- **Results** (finished TDS runs, the power flows kept for comparison) go to IndexedDB. `src/lib/resultsArchive.ts` is the only code that touches the database; `src/store/resultsPersistence.ts` puts back what it holds when the page loads and mirrors the two slices into it afterwards, so the archive holds what History and the Compare tab list and nothing else. A run is written once, when it finishes. Changing the shape of a stored record means bumping `RESULTS_DB_VERSION` and handling the old shape in `onupgradeneeded`; a record the reader does not recognise is dropped and deleted, never guessed at.
+- **Never stored in the browser**: session ids, job records (`store/jobs.ts`), request payloads, server paths and server error text. The database is readable by anything served from the same origin later (see `SECURITY.md`).
+- `fake-indexeddb` (dev dependency) is the in-memory IndexedDB the unit tests run the archive against; pass a fresh `new IDBFactory()` per test. A typed array that comes back from it is from another realm, so check one with `ArrayBuffer.isView`, not `instanceof`.
+
 ## Codegen
 
 OpenAPI types regenerated via `pnpm regen-api-types` after every new endpoint. Hand-authored brand types (`SessionId`, `RunId`, `EigResult`, etc.) live in `web/src/api/types.ts`.

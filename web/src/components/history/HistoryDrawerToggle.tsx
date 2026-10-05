@@ -15,12 +15,12 @@ export function HistoryDrawerToggle({ className }: { className?: string }) {
   const closeDrawer = useHistoryStore((s) => s.closeDrawer);
   const runCount = useRunsStore((s) => Object.keys(s.runs).length);
   // Gate on session+case loaded — consistent with the other TopBar
-  // controls (BundleExport, Report, Snapshot). The History drawer's
-  // run list is session-scoped (the runs slice clears on session
-  // change), so an unloaded session would always show empty.
+  // controls (BundleExport, Report, Snapshot) — or on there being runs to
+  // list: the finished runs are kept across a reload of the page, so they
+  // can be there before any case is opened.
   const sessionId = useSessionStore((s) => s.sessionId);
   const caseSelection = useCaseStore((s) => s.selection);
-  const enabled = sessionId !== null && caseSelection !== null;
+  const enabled = (sessionId !== null && caseSelection !== null) || runCount > 0;
   return (
     <Button
       type="button"
@@ -35,7 +35,7 @@ export function HistoryDrawerToggle({ className }: { className?: string }) {
       title={
         enabled
           ? 'Run history: rename, pin or drop your runs'
-          : 'Load a case to see the runs of its session'
+          : 'No runs yet. Load a case and run a TDS to fill the history.'
       }
     >
       History{' '}

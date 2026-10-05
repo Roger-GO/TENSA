@@ -19,7 +19,9 @@
  *
  * Lifecycle: like the finished time-domain runs (``store/runs.ts``), the
  * results stay across a case change (comparing a case with a modified copy is
- * the point), and go when the session is discarded.
+ * the point), across a lost session and across a reload of the page
+ * (``store/resultsPersistence.ts`` keeps them in the browser and ``restore``
+ * puts them back), and go when the session is discarded.
  */
 import { create } from 'zustand';
 import type { PflowResult } from '@/api/types';
@@ -81,8 +83,8 @@ export interface PflowHistoryState extends PflowHistoryPayload {
   setBaseline: (id: string | null) => void;
   setCompared: (id: string | null) => void;
   /**
-   * Put back results that were set aside. They go in front of whatever has
-   * been recorded since, and a result already there wins over its copy.
+   * Put back results kept from before a reload. They go in front of whatever
+   * has been recorded since, and a result already there wins over its copy.
    */
   restore: (payload: PflowHistoryPayload) => void;
 }

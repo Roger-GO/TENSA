@@ -12,7 +12,9 @@
  * "Clear runs" drops every finished run at once (after a confirmation) and
  * leaves a run that is still streaming and the active run, which Reset run in
  * the top bar releases. Reset run drops none of them: a finished run stays
- * here, as an earlier run, until it is deleted.
+ * here, as an earlier run, until it is deleted. A reload of the page does not
+ * drop them either (``store/resultsPersistence.ts``), so what is deleted here
+ * is deleted from the browser's storage too.
  *
  * Sweep progress + bundle re-export-per-run are deferred to Unit 18
  * (the basic version only owns the run list + pin/unpin).
@@ -211,7 +213,7 @@ function HistoryDrawerInner() {
       <DialogTitle>{isRunsView ? 'Run history' : 'Job history'}</DialogTitle>
       <DialogDescription>
         {isRunsView
-          ? `Rename a run with its pencil to name it in the plot legend too, pin runs to the multi-run overlay, or delete them to free memory (Clear runs deletes every finished run but the active one). Reset run in the top bar reloads the case but keeps its run here as an earlier run, so run again and pin both to compare them. History holds up to ${retentionLimit} runs and a newer run pushes out the oldest finished one that is neither pinned nor named (Retention, in the TDS tab). The active run anchors the SLD animation regardless of the overlay set.`
+          ? `Rename a run with its pencil to name it in the plot legend too, pin runs to the multi-run overlay, or delete them to free memory (Clear runs deletes every finished run but the active one). Finished runs are kept in this browser, so they are still here after the page is reloaded: pin one to plot it. Reset run in the top bar reloads the case but keeps its run here as an earlier run, so run again and pin both to compare them. History holds up to ${retentionLimit} runs and a newer run pushes out the oldest finished one that is neither pinned nor named (Retention, in the TDS tab). The active run anchors the SLD animation regardless of the overlay set.`
           : 'Every job kind in one chronological list. TDS runs keep their scrub + overlay controls on the Runs filter.'}
       </DialogDescription>
 

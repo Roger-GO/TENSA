@@ -38,6 +38,7 @@ import { WorkspaceDropTarget } from '@/components/shell/WorkspaceDropTarget';
 // cascade (a case change clears the previous case's PF and analysis results).
 import '@/store';
 import { useCaseStore } from '@/store/case';
+import { startResultsPersistence } from '@/store/resultsPersistence';
 import { useSnapshotStore } from '@/store/snapshot';
 import { ComponentDropZone } from '@/components/sld/ComponentDropZone';
 import { LazyMount } from '@/components/ui/Lazy';
@@ -110,6 +111,12 @@ function AppInner({ children }: { children: React.ReactNode }) {
   // Ask before the tab is closed or reloaded with edits, a build or run results
   // that nothing has saved.
   useUnsavedWorkGuard();
+  // Put back the finished runs and the power flows the browser kept from the
+  // last visit, and keep the ones made from now on.
+  useEffect(() => {
+    const persistence = startResultsPersistence();
+    return () => persistence.stop();
+  }, []);
   // v3.1 Unit 11: own the per-session JobStream here (the mount Unit 6
   // deferred). One WS per active session feeds canonical job events into
   // ``useJobsStore`` REGARDLESS of whether the Activity panel is open, so

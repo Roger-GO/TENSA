@@ -5,8 +5,10 @@
  * recommended pattern for v5). This module's job is the cross-slice
  * cascade:
  *
- * - When `session` clears, `case` and `pflow` clear too, and so do the power
- *   flows kept for comparison, unless the session is being recovered.
+ * - When `session` clears, `case` and `pflow` clear too, and so do the
+ *   time-domain runs and the power flows kept for comparison, unless the
+ *   session is being recovered: then the finished runs and the kept power
+ *   flows stay.
  * - When `case` changes, `pflow` and the EIG / CPF / SE results clear
  *   (results don't carry across cases), the disturbances scheduled for the next
  *   TDS run clear (they name the old case's buses), the ANDES variables picked
@@ -77,15 +79,19 @@ export function wireStoreCascade(): void {
   // Subscribe to `sessionId`; when it transitions to null, cascade —
   // EXCEPT when the transition is part of an in-progress recovery (Unit 5),
   // in which case we want to preserve the case selection so the recovery
-  // effect can re-issue ``loadCase`` against the new session id. Runs are
-  // session-scoped (a run's frames only make sense against the worker that
-  // produced them), so they always clear on session change — recovery or
-  // not.
+  // effect can re-issue ``loadCase`` against the new session id. The runs
+  // follow the same line: a session the user discarded takes them all, and
+  // one that was lost (reaped, or gone with a server restart) takes only the
+  // runs still streaming and the active run's hold on the Run buttons. The
+  // finished ones are results, kept across a reload of the page too
+  // (``resultsPersistence.ts``), and a lost session is no reason to delete
+  // them.
   let prevSessionId = useSessionStore.getState().sessionId;
   useSessionStore.subscribe((state) => {
     const next = state.sessionId;
     if (prevSessionId !== null && next === null) {
-      useRunsStore.getState().clearRuns();
+      if (state.recoveryInProgress) useRunsStore.getState().dropUnfinishedRuns();
+      else useRunsStore.getState().clearRuns();
       useAnimationStore.getState().clearAll();
       useConnectivityStore.getState().clear();
       usePmuStore.getState().clear();

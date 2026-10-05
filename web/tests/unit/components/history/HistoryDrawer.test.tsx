@@ -131,7 +131,41 @@ describe('HistoryDrawerToggle', () => {
     render(<HistoryDrawerToggle />);
     const btn = screen.getByTestId('history-drawer-toggle');
     expect(btn).toBeDisabled();
-    expect(btn).toHaveAttribute('title', 'Load a case to see the runs of its session');
+    expect(btn).toHaveAttribute(
+      'title',
+      'No runs yet. Load a case and run a TDS to fill the history.',
+    );
+  });
+
+  it('is on before a case is loaded when there are runs to list, as after a reload', async () => {
+    const user = userEvent.setup();
+    useCaseStore.setState({ selection: null });
+    useRunsStore.getState().restoreRuns({
+      runs: [
+        {
+          runId: 'kept',
+          startedAt: 1,
+          tf: 1,
+          tCurrent: 1,
+          seqCount: 1,
+          t: new Float64Array([0]),
+          columns: { Bus_1_v: new Float64Array([1]) },
+          columnNames: ['Bus_1_v'],
+          ordinal: 1,
+          state: 'done',
+          connection: 'connected',
+          abortedLocally: false,
+          errorReason: null,
+          converged: true,
+        },
+      ],
+    });
+    render(<HistoryDrawerToggle />);
+    const btn = screen.getByTestId('history-drawer-toggle');
+    expect(btn).toBeEnabled();
+    expect(btn).toHaveTextContent('(1)');
+    await user.click(btn);
+    expect(useHistoryStore.getState().drawerOpen).toBe(true);
   });
 
   it('clicking again closes the drawer', async () => {

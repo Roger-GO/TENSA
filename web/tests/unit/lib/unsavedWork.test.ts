@@ -1,6 +1,8 @@
 /**
  * What counts as work a reload would lose: unsaved edits, and run or sweep results
- * that exist only in this tab.
+ * that exist only in this tab. Nothing here keeps results in the browser, so every
+ * run that holds data counts; `resultsPersistence.test.ts` covers the run that
+ * stops counting once the browser has it.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { hasUnsavedWork, unsavedWork } from '@/lib/unsavedWork';

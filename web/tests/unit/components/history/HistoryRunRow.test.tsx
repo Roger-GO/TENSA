@@ -52,6 +52,26 @@ describe('HistoryRunRow', () => {
     expect(row).toHaveTextContent('tf=5s');
   });
 
+  it('gives the time a run of today started, and the date too for one kept from an earlier day', () => {
+    const today = seedRun('today');
+    const earlier: RunRecord = {
+      ...seedRun('earlier'),
+      startedAt: new Date(2024, 2, 9, 14, 5, 30).getTime(),
+    };
+    render(
+      <>
+        <HistoryRunRow run={today} isActive={false} isOverlayPinned={false} />
+        <HistoryRunRow run={earlier} isActive={false} isOverlayPinned={false} />
+      </>,
+    );
+    expect(screen.getByTestId('history-run-row-timestamp-today')).toHaveTextContent(
+      /^\d{2}:\d{2}:\d{2}$/,
+    );
+    expect(screen.getByTestId('history-run-row-timestamp-earlier')).toHaveTextContent(
+      '2024-03-09 14:05',
+    );
+  });
+
   it('keeps the run id off the row, and on hover', () => {
     const run = seedRun('abcdef1234567890');
     render(<HistoryRunRow run={run} isActive={false} isOverlayPinned={false} />);

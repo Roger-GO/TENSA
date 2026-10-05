@@ -3,8 +3,8 @@
  *
  * Single row in the history drawer: shows the run's label ("TDS #3 -
  * fault bus 7"; the run id is on hover), state badge (streaming / done /
- * error / aborted), tf, the wall-clock timestamp it started at, and per-row
- * actions:
+ * error / aborted), tf, when it started (the time, with the date in front for
+ * a run kept from an earlier day), and per-row actions:
  *
  * - The pencil beside the label (or a double-click on the label) — renames the
  *   run. The name shows in the plot legend too; an empty name puts the default
@@ -15,7 +15,7 @@
  *
  * The row is visually distinct for the active run (bolder border); every other
  * run is marked "earlier", the badge a run takes on once Reset run, a case
- * change or a newer run has released it.
+ * change, a reload of the page or a newer run has released it.
  * Sweep progress (Unit 18) extends this row with a progress bar.
  */
 import { useRunsStore } from '@/store/runs';
@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button';
 import { RenameRunButton, RunRenameInput } from '@/components/plots/RunRename';
 import { runIdToStrokeStyle } from '@/lib/runIdToColor';
 import { autoRunLabel, runLabel } from '@/lib/runLabel';
+import { formatTakenAt } from '@/lib/takenAt';
 import { cn } from '@/lib/cn';
 
 export interface HistoryRunRowProps {
@@ -44,19 +45,6 @@ export interface HistoryRunRowProps {
    */
   onRename?: (runId: string, name: string | undefined) => void;
   className?: string;
-}
-
-/** Format a wall-clock timestamp as ``HH:MM:SS`` for the row timestamp. */
-function formatTime(epochMs: number): string {
-  try {
-    const d = new Date(epochMs);
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mm = String(d.getMinutes()).padStart(2, '0');
-    const ss = String(d.getSeconds()).padStart(2, '0');
-    return `${hh}:${mm}:${ss}`;
-  } catch {
-    return '—';
-  }
 }
 
 const STATE_LABEL: Record<RunRecord['state'], string> = {
@@ -189,7 +177,7 @@ export function HistoryRunRow({
             ) : isEarlier ? (
               <span
                 data-testid={`history-run-row-earlier-badge-${run.runId}`}
-                title="A newer run, Reset run or a case change has released this run. Its results stay here until you delete them."
+                title="A newer run, Reset run, a case change or a reload of the page has released this run. Its results stay here until you delete them."
                 className="text-muted-foreground text-[10px] font-medium"
               >
                 earlier
@@ -208,7 +196,7 @@ export function HistoryRunRow({
         )}
         <div className="text-muted-foreground flex items-center gap-2 text-[10px]">
           <span data-testid={`history-run-row-timestamp-${run.runId}`}>
-            {formatTime(run.startedAt)}
+            {formatTakenAt(run.startedAt)}
           </span>
           <span>tf={run.tf}s</span>
           <span>{run.seqCount} rows</span>

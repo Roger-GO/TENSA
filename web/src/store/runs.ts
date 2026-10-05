@@ -53,9 +53,13 @@
  * overlay set. The overlay set is purely a plot-side concern; selectors
  * elsewhere keep using ``activeRunId``.
  *
- * Lifecycle: cleared on auth clear (cross-slice cascade in
- * ``store/index.ts``). Cleared on session change. Run frames are NOT
- * persisted — they only matter for the current page.
+ * Lifecycle: cleared when the session is discarded (cross-slice cascade in
+ * ``store/index.ts``). A session that is lost and recovered keeps the finished
+ * runs and drops the ones still streaming (``dropUnfinishedRuns``). The
+ * finished runs are also kept across a reload of the page:
+ * ``store/resultsPersistence.ts`` writes them to the browser's IndexedDB as
+ * they finish and puts them back (``restoreRuns``) when the page loads. A run
+ * that was still streaming when the page was left is not kept.
  */
 import { create } from 'zustand';
 import type { UnitBases } from '@/lib/units';
@@ -137,16 +141,15 @@ export interface RunRecord {
    * Optional researcher-supplied label for this run (Unit 20, v2.0).
    * Surfaced by the ``RunLegendChip``, the plot legend and the history
    * list when present; falls back to the default label ("TDS #3 - fault
-   * bus 7", see ``runLabel``) otherwise. Session-scoped (never persisted
-   * across reloads).
+   * bus 7", see ``runLabel``) otherwise. Kept with the run across a reload.
    */
   displayName?: string;
   /**
    * Optional researcher-picked stroke colour override (Unit 20, v2.0).
    * Any valid CSS colour string. When set, ``runIdToColor`` returns
    * this value instead of the hash-derived hue, and the ``TimeSeriesPlot``
-   * + ``RunLegendChip`` swatches both pick it up automatically. Session-
-   * scoped.
+   * + ``RunLegendChip`` swatches both pick it up automatically. Kept with
+   * the run across a reload.
    */
   colorOverride?: string;
 }
@@ -195,6 +198,18 @@ export interface StartRunPayload {
   bases?: UnitBases;
   /** What the run does to the system, in words; see ``RunRecord.scenario``. */
   scenario?: string;
+}
+
+/** Runs kept from before a reload, and what went with them; see ``restoreRuns``. */
+export interface RestoreRunsPayload {
+  /** Finished runs, oldest first. */
+  runs: readonly RunRecord[];
+  /** The run counter as it stood, so a new run does not reuse a number. */
+  runCount?: number;
+  /** The runs that were pinned to the overlay. */
+  overlayRunIds?: Iterable<string>;
+  /** The retention limit the user had set. */
+  retentionLimit?: number;
 }
 
 export interface RunsState {
@@ -287,8 +302,26 @@ export interface RunsState {
    */
   clearFinishedRuns: () => void;
 
-  /** Clear every run (called by the auth-clear cascade in store/index.ts). */
+  /** Clear every run (called by the session-clear cascade in store/index.ts). */
   clearRuns: () => void;
+
+  /**
+   * Drop the runs that were still starting or streaming and release the active
+   * run, keeping every finished one. What a lost session leaves behind: its
+   * streams are dead and the System its active run stepped is gone, but the
+   * finished runs are results, and they are the user's to keep.
+   */
+  dropUnfinishedRuns: () => void;
+
+  /**
+   * Put back finished runs kept from before a reload. They go in front of
+   * whatever has started since (they are older), a run already in the store
+   * wins over its copy, and none of them becomes the active run: the session
+   * that stepped them is gone. A run that had not finished is not accepted.
+   * The retention policy is not applied here, so what was kept comes back
+   * whole; the next run that starts applies it as usual.
+   */
+  restoreRuns: (payload: RestoreRunsPayload) => void;
 
   /**
    * Stop treating a run as the active one without dropping any run. The runs
@@ -741,6 +774,49 @@ export const useRunsStore = create<RunsState>((set, get) => ({
 
   clearRuns: () =>
     set({ runs: {}, activeRunId: null, overlayRunIds: new Set<string>(), runCount: 0 }),
+
+  dropUnfinishedRuns: () => {
+    const { runs } = get();
+    const kept: Record<string, RunRecord> = {};
+    for (const id of Object.keys(runs)) {
+      const run = runs[id]!;
+      if (isCompletedState(run.state)) kept[id] = run;
+    }
+    set({
+      runs: kept,
+      activeRunId: null,
+      overlayRunIds: reconcileOverlay(get().overlayRunIds, kept),
+    });
+  },
+
+  restoreRuns: ({ runs: restored, runCount, overlayRunIds, retentionLimit }) => {
+    const current = get();
+    const next: Record<string, RunRecord> = {};
+    let highest = 0;
+    for (const run of restored) {
+      if (!isCompletedState(run.state) || current.runs[run.runId] !== undefined) continue;
+      next[run.runId] = run;
+      highest = Math.max(highest, run.ordinal ?? 0);
+    }
+    // The runs of this page load come after the ones it found.
+    for (const id of Object.keys(current.runs)) next[id] = current.runs[id]!;
+    const overlay = new Set(current.overlayRunIds);
+    for (const id of overlayRunIds ?? []) {
+      if (next[id] !== undefined) overlay.add(id);
+    }
+    const limit =
+      retentionLimit !== undefined && Number.isFinite(retentionLimit)
+        ? Math.max(1, Math.min(MAX_RETENTION_LIMIT, Math.floor(retentionLimit)))
+        : current.retentionLimit;
+    set({
+      runs: next,
+      runCount: Math.max(current.runCount, runCount ?? 0, highest),
+      overlayRunIds: overlay,
+      // A limit already changed on this page load is the newer wish.
+      retentionLimit:
+        current.retentionLimit === DEFAULT_RETENTION_LIMIT ? limit : current.retentionLimit,
+    });
+  },
 
   clearActiveRun: () => set({ activeRunId: null }),
 

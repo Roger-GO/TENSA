@@ -23,6 +23,7 @@ import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { useCaseStore } from '@/store/case';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useHistoryStore } from '@/store/history';
+import { useRunsStore } from '@/store/runs';
 import { useSessionStore } from '@/store/session';
 import { useThemeStore } from '@/store/theme';
 import { useUiStore } from '@/store/ui';
@@ -138,6 +139,19 @@ describe('<TopBarMoreMenu />', () => {
     useCaseStore.setState({ selection: null });
     await openMenu();
     expect(screen.getByTestId('topbar-menu-more-navigation.history')).toBeDisabled();
+  });
+
+  it('Open History is on with no case when there are runs to list, as after a reload', async () => {
+    useCaseStore.setState({ selection: null });
+    useRunsStore.getState().startRun({ runId: 'kept', tf: 1, columnNames: ['Bus_1_v'] });
+    useRunsStore.getState().markRunDone('kept', 1, true);
+    useRunsStore.getState().clearActiveRun();
+    try {
+      await openMenu();
+      expect(screen.getByTestId('topbar-menu-more-navigation.history')).toBeEnabled();
+    } finally {
+      useRunsStore.getState().clearRuns();
+    }
   });
 
   it('Toggle dark mode cycles the theme', async () => {

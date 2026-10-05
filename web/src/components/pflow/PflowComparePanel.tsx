@@ -232,8 +232,9 @@ export function PflowComparePanel({ className }: PflowComparePanelProps) {
         className="text-muted-foreground text-[11px] leading-snug"
       >
         Every difference is B minus A. B follows the latest power flow unless another is picked. The
-        last {MAX_PFLOW_SNAPSHOTS} converged results are kept; a named one stays while newer runs
-        come in. Time-domain runs are compared on the Plot tab, by pinning them in History.
+        last {MAX_PFLOW_SNAPSHOTS} converged results are kept, also across a reload of the page; a
+        named one stays while newer runs come in. Time-domain runs are compared on the Plot tab, by
+        pinning them in History.
       </p>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">

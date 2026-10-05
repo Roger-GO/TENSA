@@ -11,6 +11,7 @@ import {
   DEFAULT_RETENTION_LIMIT,
   MAX_RETENTION_LIMIT,
   useRunsStore,
+  type RunRecord,
 } from '@/store/runs';
 
 function reset(): void {
@@ -782,5 +783,159 @@ describe('runs store — per-run displayName + colorOverride (Unit 20 v2.0)', ()
     const r = useRunsStore.getState().runs.r1!;
     expect(r.displayName).toBe('Custom');
     expect(r.colorOverride).toBe('#ff00aa');
+  });
+});
+
+describe('runs store — dropUnfinishedRuns', () => {
+  beforeEach(reset);
+  afterEach(reset);
+
+  function frame(runId: string): void {
+    useRunsStore.getState().appendFrame(runId, {
+      t: new Float64Array([0, 0.1]),
+      columns: { Bus_1_v: new Float64Array([1, 0.99]) },
+    });
+  }
+
+  it('keeps every finished run and drops the ones still starting or streaming', () => {
+    const store = useRunsStore.getState();
+    for (const id of ['done', 'aborted', 'failed', 'streaming', 'starting']) {
+      store.startRun({ runId: id, tf: 1, columnNames: ['Bus_1_v'] });
+      if (id !== 'starting') frame(id);
+    }
+    store.markRunDone('done', 0.1, true);
+    store.markRunAborted('aborted');
+    store.markRunError('failed', 'diverged');
+
+    useRunsStore.getState().dropUnfinishedRuns();
+
+    expect(Object.keys(useRunsStore.getState().runs)).toEqual(['done', 'aborted', 'failed']);
+  });
+
+  it('releases the active run, and keeps it when it had finished', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1, columnNames: ['Bus_1_v'] });
+    frame('r1');
+    useRunsStore.getState().markRunDone('r1', 0.1, true);
+    expect(useRunsStore.getState().activeRunId).toBe('r1');
+
+    useRunsStore.getState().dropUnfinishedRuns();
+
+    expect(useRunsStore.getState().activeRunId).toBeNull();
+    expect(useRunsStore.getState().runs.r1?.state).toBe('done');
+  });
+
+  it('unpins a dropped run and keeps the pins and the numbering of the rest', () => {
+    const store = useRunsStore.getState();
+    store.startRun({ runId: 'kept', tf: 1, columnNames: ['Bus_1_v'] });
+    frame('kept');
+    store.markRunDone('kept', 0.1, true);
+    store.startRun({ runId: 'live', tf: 1, columnNames: ['Bus_1_v'] });
+    store.setOverlayRuns(['kept', 'live']);
+
+    useRunsStore.getState().dropUnfinishedRuns();
+
+    expect([...useRunsStore.getState().overlayRunIds]).toEqual(['kept']);
+    expect(useRunsStore.getState().runCount).toBe(2);
+  });
+});
+
+describe('runs store — restoreRuns', () => {
+  beforeEach(reset);
+  afterEach(reset);
+
+  function kept(runId: string, overrides: Partial<RunRecord> = {}): RunRecord {
+    return {
+      runId,
+      startedAt: 1_000,
+      tf: 1,
+      tCurrent: 0.1,
+      seqCount: 2,
+      t: new Float64Array([0, 0.1]),
+      columns: { Bus_1_v: new Float64Array([1, 0.99]) },
+      columnNames: ['Bus_1_v'],
+      ordinal: 1,
+      state: 'done',
+      connection: 'connected',
+      abortedLocally: false,
+      errorReason: null,
+      converged: true,
+      ...overrides,
+    };
+  }
+
+  it('puts finished runs back as earlier runs: none of them is the active one', () => {
+    useRunsStore.getState().restoreRuns({
+      runs: [kept('r1'), kept('r2', { ordinal: 2, displayName: 'Base case' })],
+    });
+    const { runs, activeRunId } = useRunsStore.getState();
+    expect(Object.keys(runs)).toEqual(['r1', 'r2']);
+    expect(runs.r2?.displayName).toBe('Base case');
+    expect(activeRunId).toBeNull();
+  });
+
+  it('goes on numbering after the highest number given out, kept or counted', () => {
+    useRunsStore.getState().restoreRuns({ runs: [kept('r1', { ordinal: 4 })], runCount: 6 });
+    useRunsStore.getState().startRun({ runId: 'next', tf: 1, columnNames: ['Bus_1_v'] });
+    expect(useRunsStore.getState().runs.next?.ordinal).toBe(7);
+
+    reset();
+    // A counter that was not kept: the runs' own numbers still hold.
+    useRunsStore.getState().restoreRuns({ runs: [kept('r1', { ordinal: 4 })] });
+    useRunsStore.getState().startRun({ runId: 'next', tf: 1, columnNames: ['Bus_1_v'] });
+    expect(useRunsStore.getState().runs.next?.ordinal).toBe(5);
+  });
+
+  it('puts back the overlay pins of the runs that came back, and no others', () => {
+    useRunsStore.getState().restoreRuns({
+      runs: [kept('r1'), kept('r2')],
+      overlayRunIds: ['r2', 'gone'],
+    });
+    expect([...useRunsStore.getState().overlayRunIds]).toEqual(['r2']);
+  });
+
+  it('goes in front of a run that started since, which stays the active one', () => {
+    useRunsStore.getState().startRun({ runId: 'live', tf: 1, columnNames: ['Bus_1_v'] });
+    useRunsStore.getState().addOverlayRun('live');
+
+    useRunsStore.getState().restoreRuns({ runs: [kept('old')], overlayRunIds: ['old'] });
+
+    const { runs, activeRunId, overlayRunIds } = useRunsStore.getState();
+    expect(Object.keys(runs)).toEqual(['old', 'live']);
+    expect(activeRunId).toBe('live');
+    expect([...overlayRunIds].sort()).toEqual(['live', 'old']);
+  });
+
+  it('does not replace a run the store already holds with its copy', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 9, columnNames: ['Bus_1_v'] });
+    useRunsStore.getState().restoreRuns({ runs: [kept('r1')] });
+    expect(useRunsStore.getState().runs.r1?.tf).toBe(9);
+  });
+
+  it('refuses a run that had not finished: its stream is not coming back', () => {
+    useRunsStore.getState().restoreRuns({
+      runs: [kept('r1', { state: 'streaming' }), kept('r2', { state: 'starting' }), kept('r3')],
+    });
+    expect(Object.keys(useRunsStore.getState().runs)).toEqual(['r3']);
+  });
+
+  it('brings back more runs than the default limit holds, with the limit that held them', () => {
+    const many = Array.from({ length: 8 }, (_, i) => kept(`r${i + 1}`, { ordinal: i + 1 }));
+    useRunsStore.getState().restoreRuns({ runs: many, retentionLimit: 10 });
+    expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(8);
+    expect(useRunsStore.getState().retentionLimit).toBe(10);
+
+    // The next run does not push any of them out.
+    useRunsStore.getState().startRun({ runId: 'next', tf: 1, columnNames: ['Bus_1_v'] });
+    expect(Object.keys(useRunsStore.getState().runs)).toHaveLength(9);
+  });
+
+  it('holds a restored limit to the range a limit may have, and leaves one already changed', () => {
+    useRunsStore.getState().restoreRuns({ runs: [], retentionLimit: 500 });
+    expect(useRunsStore.getState().retentionLimit).toBe(MAX_RETENTION_LIMIT);
+
+    reset();
+    useRunsStore.getState().setRetentionLimit(3);
+    useRunsStore.getState().restoreRuns({ runs: [], retentionLimit: 12 });
+    expect(useRunsStore.getState().retentionLimit).toBe(3);
   });
 });

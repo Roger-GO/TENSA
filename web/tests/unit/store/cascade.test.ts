@@ -12,6 +12,9 @@
  *    mounted to notice.
  *  - A session clear drops the case and PF result, except mid-recovery, when
  *    the case selection has to survive so it can be re-loaded.
+ *  - A session the user discarded takes every time-domain run. A session that
+ *    was lost and is being recovered takes the runs still streaming and
+ *    releases the active one; the finished runs stay.
  *  - A session clear drops the messages of the session that ended, recovery or not:
  *    they are that worker's log.
  *  - The power flows kept for comparison stay across a case change and a
@@ -316,8 +319,52 @@ describe('store cascade — session clear', () => {
   it('keeps the case selection while the session is being recovered', () => {
     useSessionStore.getState().resetSession();
     expect(useCaseStore.getState().selection).not.toBeNull();
-    // Runs are tied to the dead worker, so they go either way.
+    // The System the active run stepped went with the worker, so no run is active.
     expect(useRunsStore.getState().activeRunId).toBeNull();
+  });
+
+  describe('the time-domain runs', () => {
+    /** A finished run with a name and a pin, and a second run still streaming. */
+    function seedRuns(): void {
+      useRunsStore.getState().markRunDone('run-1', 1, true);
+      useRunsStore.getState().setRunDisplayName('run-1', 'Base case');
+      useRunsStore.getState().addOverlayRun('run-1');
+      useRunsStore.getState().startRun({ runId: 'run-2', tf: 5, columnNames: ['Bus_1_v'] });
+      useRunsStore.getState().appendFrame('run-2', {
+        t: new Float64Array([0, 0.1]),
+        columns: { Bus_1_v: new Float64Array([1, 1]) },
+      });
+    }
+
+    it('all go with a session the user discarded', () => {
+      seedRuns();
+      useSessionStore.getState().clearSession();
+      expect(useRunsStore.getState().runs).toEqual({});
+      expect(useRunsStore.getState().overlayRunIds.size).toBe(0);
+    });
+
+    it('stay, when finished, while a lost session is being recovered', () => {
+      seedRuns();
+      useSessionStore.getState().resetSession();
+
+      const { runs, activeRunId, overlayRunIds } = useRunsStore.getState();
+      // The finished run is a result and stays, with its name and its pin. The
+      // one that was streaming lost its stream with the worker.
+      expect(Object.keys(runs)).toEqual(['run-1']);
+      expect(runs['run-1']).toMatchObject({ state: 'done', displayName: 'Base case' });
+      expect(overlayRunIds.has('run-1')).toBe(true);
+      expect(activeRunId).toBeNull();
+    });
+
+    it('leave Run PF free on the recovered session', () => {
+      useAnalyzeStore.getState().clearEigResult();
+      useRunsStore.getState().markRunDone('run-1', 1, true);
+      useSessionStore.getState().resetSession();
+      useSessionStore.setState({ sessionId: parseSessionId('sess-2'), recoveryInProgress: false });
+
+      const { result } = renderHook(() => useRunReadiness('pflow'));
+      expect(result.current.disabledReason ?? '').not.toMatch(/Reset the run first/);
+    });
   });
 
   describe('the power flows kept for comparison', () => {
