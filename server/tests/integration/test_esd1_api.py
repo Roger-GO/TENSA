@@ -334,6 +334,43 @@ async def test_the_limit_is_per_unit_of_sn_and_the_set_point_per_unit_of_the_sys
     assert rate_after == pytest.approx(-after * 100.0 / 10.0, rel=1e-3)
 
 
+async def _initialization_failed(ac: httpx.AsyncClient, sid: str) -> bool:
+    """Whether a short run of the session logged that its dynamics did not initialize."""
+    run = await ac.post(f"/api/sessions/{sid}/tds", json={"tf": 0.1})
+    assert run.status_code == 200, run.text
+    messages = (await ac.get(f"/api/sessions/{sid}/messages")).json()["messages"]
+    return any(m["level"] == "error" and "Initialization FAILED" in m["text"] for m in messages)
+
+
+async def test_a_battery_on_a_generator_a_machine_takes_over_does_not_initialize(
+    client: httpx.AsyncClient,
+) -> None:
+    """What the web form warns about under ``gen``, measured.
+
+    The add is accepted: a case may share a static generator between devices
+    whose ``gammap`` and ``gammaq`` add up to 1, as ``ieee14_esd1.xlsx`` does.
+    Left at their defaults the machine and the battery each start at the
+    generator's whole output, which is not the operating point the power flow
+    solved, and the run says so. A battery on a generator of its own starts
+    clean.
+    """
+    sid = await _session(client, KUNDUR)
+    topology = (await client.get(f"/api/sessions/{sid}/topology")).json()
+    machine = next(g for g in topology["generators"] if g["kind"] == "GENROU")
+    shared = {
+        "idx": "ESD1_1", "name": "ESD1_1", "bus": str(machine["params"]["bus"]),
+        "gen": str(machine["params"]["gen"]), "pqflag": 1, "pmx": 1.0, "En": 10.0,
+    }
+    added = await _add(client, sid, "ESD1", shared)
+    assert added.status_code == 201, added.text
+    assert await _initialization_failed(client, sid)
+    await client.delete(f"/api/sessions/{sid}")
+
+    own, added = await _kundur_with_battery(client)
+    assert added.status_code == 201, added.text
+    assert not await _initialization_failed(client, own)
+
+
 async def test_the_power_set_points_are_offered_as_alter_sources(client: httpx.AsyncClient) -> None:
     sid, added = await _kundur_with_battery(client)
     assert added.status_code == 201, added.text
