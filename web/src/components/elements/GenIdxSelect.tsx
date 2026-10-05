@@ -1,12 +1,16 @@
 import { useCurrentTopology } from '@/api/queries';
 import { cn } from '@/lib/cn';
+import { staticGenerators, usedBy } from './genLink';
 
 /**
  * GenIdxSelect — dropdown of existing STATIC generators (PV/Slack), used by
- * ElementForm for any param marked `kind: 'gen_idx'`. The only such param is
- * the dynamic machines' (GENROU/GENCLS) mandatory `gen` link, which references
- * the static generator the dynamic model replaces in power flow. Each option
- * is `"<kind>-<idx> — <name>"` so the user can pick by either handle.
+ * ElementForm for any param marked `kind: 'gen_idx'`: the mandatory `gen` link
+ * of a dynamic machine (GENROU/GENCLS) or a battery (ESD1), which references
+ * the static generator the dynamic model replaces when a time-domain run
+ * starts. Each option is `"<kind>-<idx> — <name>"` so the user can pick by
+ * either handle, followed by the bus the generator is on and the device that
+ * already takes it over, `"(bus 2, used by GENROU_2)"`: the device being added
+ * has to be on that bus, and a generator is not shared by default (`genLink`).
  *
  * Empty state: when the system has no static generators yet, renders a
  * disabled select + an "Add a PV or Slack generator first" hint (a dynamic
@@ -32,9 +36,7 @@ export function GenIdxSelect({
   'aria-describedby': ariaDescribedBy,
 }: GenIdxSelectProps) {
   const topology = useCurrentTopology();
-  const staticGens = (topology?.generators ?? []).filter(
-    (g) => g.kind === 'PV' || g.kind === 'Slack',
-  );
+  const staticGens = staticGenerators(topology);
   if (staticGens.length === 0) {
     return (
       <div className="flex flex-col gap-1">
@@ -64,7 +66,7 @@ export function GenIdxSelect({
       onChange={(e) => onChange(e.target.value)}
       data-testid="gen-idx-select"
       className={cn(
-        'bg-background border-border h-7 rounded border px-2 font-mono text-xs',
+        'bg-background border-border h-7 max-w-full rounded border px-2 font-mono text-xs',
         className,
       )}
     >
@@ -72,10 +74,13 @@ export function GenIdxSelect({
         Pick a generator…
       </option>
       {staticGens.map((g) => {
-        const idx = String(g.idx);
+        const where = [g.bus === null ? null : `bus ${g.bus}`, usedBy(g)]
+          .filter((part) => part !== null)
+          .join(', ');
         return (
-          <option key={idx} value={idx}>
-            {g.kind}-{idx} — {g.name}
+          <option key={g.idx} value={g.idx}>
+            {g.kind}-{g.idx} — {g.name}
+            {where === '' ? '' : ` (${where})`}
           </option>
         );
       })}

@@ -326,7 +326,7 @@ function useCommandSets(): CommandSets {
         id: 'workspace.add-element',
         label: 'Add element…',
         group: 'workspace',
-        keywords: ['bus', 'line', 'generator', 'load', 'shunt', 'create'],
+        keywords: ['bus', 'line', 'generator', 'load', 'shunt', 'battery', 'storage', 'create'],
         action: () => openAddPanel(null),
         when: () => !editGateDisabled,
       },

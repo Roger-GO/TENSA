@@ -10,6 +10,7 @@ import type { ReactNode } from 'react';
 import { AddElementPanel } from '@/components/elements/AddElementPanel';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
+import { ProblemDetailsError } from '@/api/client';
 import { parseSessionId } from '@/api/types';
 import type { TopologySchema, TopologySummary } from '@/api/types';
 
@@ -58,6 +59,12 @@ const SCHEMA: TopologySchema = {
 };
 
 const postSpy = vi.fn();
+/** What the add answers with: the created element, unless a test says otherwise. */
+const created = () =>
+  Promise.resolve({
+    element: { idx: '1', name: 'BUS1', kind: 'Bus', params: { Vn: 110 } },
+  });
+let postResult: () => Promise<unknown> = created;
 
 vi.mock('@/api/client', async () => {
   const actual = await vi.importActual<typeof import('@/api/client')>('@/api/client');
@@ -67,9 +74,7 @@ vi.mock('@/api/client', async () => {
       get: () => Promise.resolve(SCHEMA),
       post: (path: string, opts: { body?: unknown }) => {
         postSpy(path, opts.body);
-        return Promise.resolve({
-          element: { idx: '1', name: 'BUS1', kind: 'Bus', params: { Vn: 110 } },
-        });
+        return postResult();
       },
       put: vi.fn(),
     },
@@ -96,6 +101,7 @@ function withQueryClient(ui: ReactNode) {
 
 beforeEach(() => {
   postSpy.mockClear();
+  postResult = created;
   MOCK_TOPOLOGY = {
     state: 'pre-setup',
     buses: [],
@@ -201,6 +207,7 @@ describe('<AddElementPanel />', () => {
     ['Generator', 'PV', 'PV generator', 'PV'],
     ['Load', 'PQ', 'PQ load', 'PQ'],
     ['Transformer', 'Transformer2W', 'Transformer (2W)', 'Line'],
+    ['Battery', 'ESD1', 'ESD1 battery', 'ESD1'],
   ])(
     'opens the %s tile on its most common model, with the picker on it and its form shown',
     async (family, pickerValue, pickerLabel, formModel) => {
@@ -252,6 +259,9 @@ describe('<AddElementPanel />', () => {
     await waitFor(() => expect(screen.getByTestId('element-form-ESD1')).toBeInTheDocument());
     expect(screen.getByTestId('field-Sn').querySelector('input')).toHaveValue(250);
     expect(screen.getByTestId('field-pqflag').querySelector('input')).toHaveValue(1);
+    // Limited to its rating and named after its idx: neither has to be typed.
+    expect(screen.getByTestId('field-pmx').querySelector('input')).toHaveValue(1);
+    expect(screen.getByTestId('field-name').querySelector('input')).toHaveValue('ESD1_1');
     expect(screen.getByRole('note')).toHaveTextContent(
       'Keep Sn equal to the system base (250 MVA).',
     );
@@ -270,10 +280,14 @@ describe('<AddElementPanel />', () => {
     useCaseStore.setState({ addPanelOpen: true, addPanelKind: 'ESD1' });
     render(withQueryClient(<AddElementPanel />));
     await waitFor(() => screen.getByTestId('element-form-ESD1'));
-    await user.type(screen.getByTestId('field-name').querySelector('input')!, 'BESS');
+    const name = screen.getByTestId('field-name').querySelector('input')!;
+    await user.clear(name);
+    await user.type(name, 'BESS');
     await user.selectOptions(screen.getByTestId('bus-idx-select'), '7');
     await user.selectOptions(screen.getByTestId('gen-idx-select'), 'PV_B');
-    await user.type(screen.getByTestId('field-pmx').querySelector('input')!, '0.4');
+    const pmx = screen.getByTestId('field-pmx').querySelector('input')!;
+    await user.clear(pmx);
+    await user.type(pmx, '0.4');
     await user.type(screen.getByTestId('field-En').querySelector('input')!, '80');
     await user.click(screen.getByRole('button', { name: /add esd1/i }));
     await waitFor(() => expect(postSpy).toHaveBeenCalled());
@@ -292,6 +306,77 @@ describe('<AddElementPanel />', () => {
         En: 80,
       },
     });
+  });
+
+  it('adds a battery from its tile with the generator and the energy alone', async () => {
+    const user = userEvent.setup();
+    MOCK_TOPOLOGY = {
+      ...(MOCK_TOPOLOGY as TopologySummary),
+      base_mva: 100,
+      buses: [{ idx: 7, name: 'B7', kind: 'Bus', params: {} }],
+      generators: [{ idx: 'PV_B', name: 'PV_B', kind: 'PV', params: { bus: 7 } }],
+    };
+    useCaseStore.setState({ addPanelOpen: true, addPanelKind: 'Battery' });
+    render(withQueryClient(<AddElementPanel />));
+    await waitFor(() => screen.getByTestId('element-form-ESD1'));
+    await user.selectOptions(screen.getByTestId('gen-idx-select'), 'PV_B');
+    await user.type(screen.getByTestId('field-En').querySelector('input')!, '80');
+    await user.click(screen.getByRole('button', { name: /add esd1/i }));
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    expect(postSpy.mock.calls[0]?.[1]).toEqual({
+      model: 'ESD1',
+      params: {
+        idx: 'ESD1_1',
+        name: 'ESD1_1',
+        bus: '7',
+        gen: 'PV_B',
+        Sn: 100,
+        pqflag: 1,
+        pmx: 1,
+        En: 80,
+      },
+    });
+  });
+
+  it('takes a refusal of the server away once the form is edited', async () => {
+    const user = userEvent.setup();
+    MOCK_TOPOLOGY = {
+      ...(MOCK_TOPOLOGY as TopologySummary),
+      base_mva: 100,
+      buses: [{ idx: 7, name: 'B7', kind: 'Bus', params: {} }],
+      generators: [{ idx: 'PV_B', name: 'PV_B', kind: 'PV', params: { bus: 7 } }],
+    };
+    postResult = () =>
+      Promise.reject(
+        new ProblemDetailsError({
+          type: 'about:blank',
+          status: 422,
+          title: 'Unprocessable Entity',
+          detail: 'ESD1 SOCinit must lie between SOCmin and SOCmax; got SOCinit=1.5',
+        }),
+      );
+    useCaseStore.setState({ addPanelOpen: true, addPanelKind: 'ESD1' });
+    render(withQueryClient(<AddElementPanel />));
+    await waitFor(() => screen.getByTestId('element-form-ESD1'));
+    await user.selectOptions(screen.getByTestId('gen-idx-select'), 'PV_B');
+    await user.type(screen.getByTestId('field-En').querySelector('input')!, '80');
+    await user.click(screen.getByText(/show advanced/i));
+    const soc = screen.getByTestId('field-SOCinit').querySelector('input')!;
+    await user.type(soc, '1.5');
+    // Said under the field before anything is sent, and by the server after.
+    expect(screen.getByTestId('field-warning-SOCinit')).toHaveTextContent(
+      '1.5 is outside SOCmin to SOCmax (0 to 1)',
+    );
+    await user.click(screen.getByRole('button', { name: /add esd1/i }));
+    expect(await screen.findByTestId('form-server-error')).toHaveTextContent(
+      'SOCinit must lie between SOCmin and SOCmax',
+    );
+    expect(useCaseStore.getState().addPanelOpen).toBe(true);
+
+    await user.clear(soc);
+    await user.type(soc, '0.5');
+    expect(screen.queryByTestId('form-server-error')).toBeNull();
+    expect(screen.queryByTestId('field-warning-SOCinit')).toBeNull();
   });
 
   // ---- v3 Unit 5 — dropCoord seed ---------------------------------------

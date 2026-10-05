@@ -273,6 +273,12 @@ describe('useCommandRegistry — when() filter', () => {
     expect(ids).not.toContain('workspace.import-profile');
   });
 
+  it('finds Add element under the kinds it adds, the battery among them', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'workspace.add-element');
+    expect(cmd?.keywords).toEqual(expect.arrayContaining(['generator', 'battery', 'storage']));
+  });
+
   it('omits session-scoped commands when sessionId is null', () => {
     useSessionStore.setState({
       sessionId: null,

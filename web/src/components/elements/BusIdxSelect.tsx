@@ -4,7 +4,9 @@ import { cn } from '@/lib/cn';
 /**
  * BusIdxSelect — dropdown of existing buses, used by ElementForm for
  * any param marked `kind: 'bus_idx'`. Each option is rendered as
- * `"<idx> — <name>"` so the user can pick by either handle.
+ * `"<idx> — <name>"` so the user can pick by either handle. `notes` adds
+ * what a form has to say about a bus, in brackets after its name (the
+ * generator on it, where the device being added has to share a bus with one).
  *
  * Empty state: when the loaded system has no buses yet, renders a
  * disabled select + an "Add a Bus first" inline message. The
@@ -18,6 +20,8 @@ export interface BusIdxSelectProps {
   required?: boolean;
   id?: string;
   'aria-describedby'?: string;
+  /** What to say about a bus after its name, by bus idx. */
+  notes?: ReadonlyMap<string, string>;
   className?: string;
 }
 
@@ -26,6 +30,7 @@ export function BusIdxSelect({
   onChange,
   required,
   id,
+  notes,
   className,
   'aria-describedby': ariaDescribedBy,
 }: BusIdxSelectProps) {
@@ -59,7 +64,7 @@ export function BusIdxSelect({
       onChange={(e) => onChange(e.target.value)}
       data-testid="bus-idx-select"
       className={cn(
-        'bg-background border-border h-7 rounded border px-2 font-mono text-xs',
+        'bg-background border-border h-7 max-w-full rounded border px-2 font-mono text-xs',
         className,
       )}
     >
@@ -68,9 +73,11 @@ export function BusIdxSelect({
       </option>
       {buses.map((b) => {
         const idx = String(b.idx);
+        const note = notes?.get(idx);
         return (
           <option key={idx} value={idx}>
             {idx} — {b.name}
+            {note === undefined ? '' : ` (${note})`}
           </option>
         );
       })}

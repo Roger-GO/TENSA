@@ -4,7 +4,12 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { elementDefaults, elementHelp, elementWarnings } from '@/components/elements/elementHelp';
+import {
+  elementDefaults,
+  elementHelp,
+  elementWarnings,
+  namedAfterIdx,
+} from '@/components/elements/elementHelp';
 
 describe('elementHelp', () => {
   it('has nothing to add for a model the schema describes well enough', () => {
@@ -44,9 +49,22 @@ describe('elementHelp', () => {
 
   it('explains the fields whose names do not', () => {
     const fields = elementHelp('ESD1', { baseMva: 100 })!.fields;
-    for (const name of ['gen', 'Sn', 'pqflag', 'pmx', 'En', 'SOCinit', 'EtaC', 'EtaD', 'fn']) {
+    for (const name of [
+      'bus',
+      'gen',
+      'Sn',
+      'pqflag',
+      'pmx',
+      'En',
+      'SOCinit',
+      'EtaC',
+      'EtaD',
+      'fn',
+    ]) {
       expect(fields[name], name).toBeTruthy();
     }
+    expect(fields.bus).toContain('picking the generator below sets the bus');
+    expect(fields.pmx).toContain('1 is the rating');
     expect(fields.pmx).toContain('9999');
     expect(fields.fn).toContain('between ft1 and ft2');
     // A field with nothing to explain has no line.
@@ -93,22 +111,55 @@ describe('elementWarnings', () => {
     );
   });
 
+  it('warns under SOCinit when the state of charge is outside its window', () => {
+    const warnings = elementWarnings('ESD1', { Sn: 100, SOCinit: '1.5' }, { baseMva: 100 });
+    expect(Object.keys(warnings)).toEqual(['SOCinit']);
+    // Left empty, the window is ANDES's own.
+    expect(warnings.SOCinit).toContain('1.5 is outside SOCmin to SOCmax (0 to 1)');
+    expect(warnings.SOCinit).toContain('The add is refused');
+    expect(elementWarnings('ESD1', { SOCinit: -0.1 }, { baseMva: 100 }).SOCinit).toBeDefined();
+  });
+
+  it('reads the window the form holds, and says nothing inside it or with no value', () => {
+    const window = { SOCmin: '0.2', SOCmax: '0.8' };
+    expect(
+      elementWarnings('ESD1', { ...window, SOCinit: '0.9' }, { baseMva: 100 }).SOCinit,
+    ).toContain('(0.2 to 0.8)');
+    for (const soc of ['0.2', '0.5', '0.8', '']) {
+      expect(elementWarnings('ESD1', { ...window, SOCinit: soc }, { baseMva: 100 })).toEqual({});
+    }
+    expect(elementWarnings('ESD1', { SOCinit: 1 }, { baseMva: 100 })).toEqual({});
+  });
+
   it('has no warnings for another model', () => {
-    expect(elementWarnings('PV', { Sn: 50 }, { baseMva: 100 })).toEqual({});
+    expect(elementWarnings('PV', { Sn: 50, SOCinit: 5 }, { baseMva: 100 })).toEqual({});
   });
 });
 
 describe('elementDefaults', () => {
-  it('opens a battery rated on the system base, with active power given priority', () => {
-    expect(elementDefaults('ESD1', { baseMva: 100 })).toEqual({ Sn: 100, pqflag: 1 });
-    expect(elementDefaults('ESD1', { baseMva: 250 })).toEqual({ Sn: 250, pqflag: 1 });
+  it('opens a battery rated on the system base, limited to its rating, active power first', () => {
+    expect(elementDefaults('ESD1', { baseMva: 100 })).toEqual({ Sn: 100, pqflag: 1, pmx: 1 });
+    expect(elementDefaults('ESD1', { baseMva: 250 })).toEqual({ Sn: 250, pqflag: 1, pmx: 1 });
   });
 
   it('leaves the rating empty when the case has no usable base', () => {
-    expect(elementDefaults('ESD1', { baseMva: null })).toEqual({ pqflag: 1 });
+    expect(elementDefaults('ESD1', { baseMva: null })).toEqual({ pqflag: 1, pmx: 1 });
+  });
+
+  it('leaves the energy for the user to give', () => {
+    expect(elementDefaults('ESD1', { baseMva: 100 })).not.toHaveProperty('En');
   });
 
   it('has none for another model', () => {
     expect(elementDefaults('Bus', { baseMva: 100 })).toBeUndefined();
+  });
+});
+
+describe('namedAfterIdx', () => {
+  it('names a battery after its idx, and leaves the name of anything else to the user', () => {
+    expect(namedAfterIdx('ESD1')).toBe(true);
+    for (const model of ['Bus', 'PV', 'GENROU', 'TGOV1']) {
+      expect(namedAfterIdx(model), model).toBe(false);
+    }
   });
 });

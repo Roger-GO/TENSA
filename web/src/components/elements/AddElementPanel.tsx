@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useAddElement, useCurrentTopology, useTopologySchema } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
@@ -93,11 +93,13 @@ const SUPPORTED_KINDS: ReadonlyArray<{
  * whether the user wants a PV, a Slack or a GENROU. The panel opens on the most
  * common model of the family, with the picker one click away, rather than on a
  * kind it has no form for (its own model names are the picker's values above).
+ * The Battery tile stands for the one storage model the picker has.
  */
 const DEFAULT_KIND_OF_FAMILY: Readonly<Record<string, string>> = {
   Generator: 'PV',
   Load: 'PQ',
   Transformer: 'Transformer2W',
+  Battery: 'ESD1',
 };
 
 /** The picker kind a requested kind stands for: the family's default, else itself. */
@@ -130,6 +132,8 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
   const schema = useTopologySchema();
   const baseMva = useCurrentTopology()?.base_mva ?? null;
   const [serverError, setServerError] = useState<string | null>(null);
+  // What the server refused goes once the form no longer holds it.
+  const clearServerError = useCallback(() => setServerError(null), []);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   // Building a system means adding many elements in a row, so the panel stays
   // OPEN after a successful add and resets the form for the next element
@@ -297,6 +301,7 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
             onSubmit={handleSubmit}
             onCancel={requestClose}
             onDirtyChange={setDirty}
+            onEdit={clearServerError}
           />
         ) : (
           <p className="text-muted-foreground text-xs">

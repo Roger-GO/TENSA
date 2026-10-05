@@ -2,8 +2,9 @@
  * Tests for `<ComponentLibrary />` (v3 Unit 5).
  *
  * Concerns:
- *  - Six tile testids render (Bus, Generator, Load, Shunt, Line,
- *    Transformer).
+ *  - Seven tile testids render (Bus, Generator, Load, Shunt, Line,
+ *    Transformer, Battery).
+ *  - The Battery tile is found under "battery" and under "storage".
  *  - Each tile is `draggable` (HTML5 attribute reflected to the DOM).
  *  - Firing a `dragstart` event on a tile sets the
  *    `application/andes-component-type` MIME on the DataTransfer to
@@ -88,11 +89,13 @@ describe('<ComponentLibrary />', () => {
     expect(screen.getByTestId('component-library')).toBeInTheDocument();
   });
 
-  it('renders all six tiles with stable testids', () => {
+  it('renders all seven tiles with stable testids', () => {
     render(<ComponentLibrary />);
-    for (const kind of ['Bus', 'Generator', 'Load', 'Shunt', 'Line', 'Transformer']) {
+    const kinds = ['Bus', 'Generator', 'Load', 'Shunt', 'Line', 'Transformer', 'Battery'];
+    for (const kind of kinds) {
       expect(screen.getByTestId(`component-library-tile-${kind}`)).toBeInTheDocument();
     }
+    expect(screen.getAllByRole('button')).toHaveLength(kinds.length);
   });
 
   it('marks each tile as draggable', () => {
@@ -130,12 +133,13 @@ describe('<ComponentLibrary />', () => {
 
   it('each tile sets its own kind on dragstart', () => {
     render(<ComponentLibrary />);
-    const cases: Array<['Bus' | 'Load' | 'Shunt' | 'Line' | 'Transformer', string]> = [
+    const cases: Array<['Bus' | 'Load' | 'Shunt' | 'Line' | 'Transformer' | 'Battery', string]> = [
       ['Bus', 'Bus'],
       ['Load', 'Load'],
       ['Shunt', 'Shunt'],
       ['Line', 'Line'],
       ['Transformer', 'Transformer'],
+      ['Battery', 'Battery'],
     ];
     for (const [kind, payload] of cases) {
       const tile = screen.getByTestId(`component-library-tile-${kind}`);
@@ -196,6 +200,30 @@ describe('<ComponentLibrary /> click to add', () => {
     );
     expect(screen.getByTestId('component-library-hint')).toHaveTextContent(
       'Click a tile to add that element, or drag it onto the diagram.',
+    );
+  });
+
+  it('has a Battery tile, named for the storage model it adds, that opens the add form', async () => {
+    openCase();
+    const user = userEvent.setup();
+    render(<ComponentLibrary />);
+    const tile = screen.getByTestId('component-library-tile-Battery');
+    expect(tile).toHaveTextContent('Battery');
+    // Found by either word a user looks for.
+    expect(screen.getByRole('button', { name: 'Add Battery (ESD1 storage)' })).toBe(tile);
+    expect(screen.getByRole('button', { name: /storage/i })).toBe(tile);
+    expect(tile.getAttribute('title')).toBe(
+      'Add a battery (ESD1 storage): click here, or drag it onto the diagram',
+    );
+    await user.click(tile);
+    expect(useCaseStore.getState()).toMatchObject({ addPanelOpen: true, addPanelKind: 'Battery' });
+  });
+
+  it('says where the models without a tile are', () => {
+    openCase();
+    render(<ComponentLibrary />);
+    expect(screen.getByTestId('component-library-hint')).toHaveTextContent(
+      "The form's Kind list has the other models: machines, exciters, governors.",
     );
   });
 

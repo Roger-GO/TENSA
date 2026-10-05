@@ -14,7 +14,7 @@ import { useAddComponent } from '@/lib/useAddComponent';
  * collision with browser-default DnD types (image, link, plain text)
  * that the canvas would otherwise inadvertently handle. The payload is
  * the kind string ("Bus", "Generator", "Load", "Shunt", "Line",
- * "Transformer"); the canvas decodes and routes to
+ * "Transformer", "Battery"); the canvas decodes and routes to
  * ``useCaseStore.openAddPanel(kind, dropCoord)``.
  *
  * A tile can also be clicked (or reached with Tab and pressed with Enter or
@@ -31,6 +31,12 @@ import { useAddComponent } from '@/lib/useAddComponent';
  * kind only (the panel opens a family on its most common model); the
  * user finishes the picker selection inside the form.
  *
+ * The Battery tile is the one that names a single model, ANDES's ESD1: storage
+ * is what a user looks for here, and the picker's Storage group is out of sight
+ * until a form is open. Its name and tooltip say "ESD1 storage" as well, so it
+ * is found under either word. The line under the tiles says where the models
+ * without a tile are.
+ *
  * Drag image: leaves the browser default for v3.0 (no
  * ``dataTransfer.setDragImage`` call). Design-iterator can polish in
  * a later phase per the v3 Risk table.
@@ -44,14 +50,23 @@ export const COMPONENT_DND_MIME = 'application/andes-component-type';
  * ``addPanelKind`` values the AddElementPanel kind picker accepts; the
  * panel reads ``addPanelKind`` and renders the matching ANDES-model
  * sub-picker (Generators → PV / Slack / GENROU / GENCLS; Loads → PQ /
- * ZIP). The Component Library only carries the top-level family
- * — the picker handles the rest.
+ * ZIP; Battery → ESD1). The Component Library only carries the top-level
+ * family — the picker handles the rest.
  */
-export type ComponentLibraryKind = 'Bus' | 'Generator' | 'Load' | 'Shunt' | 'Line' | 'Transformer';
+export type ComponentLibraryKind =
+  | 'Bus'
+  | 'Generator'
+  | 'Load'
+  | 'Shunt'
+  | 'Line'
+  | 'Transformer'
+  | 'Battery';
 
 interface TileSpec {
   kind: ComponentLibraryKind;
   label: string;
+  /** What else the tile is known as, added to its name and tooltip in brackets. */
+  detail?: string;
   /** Inline-SVG glyph rendered above the label. */
   glyph: ReactNode;
 }
@@ -63,7 +78,12 @@ const TILES: readonly TileSpec[] = [
   { kind: 'Shunt', label: 'Shunt', glyph: <ShuntGlyph /> },
   { kind: 'Line', label: 'Line', glyph: <LineGlyph /> },
   { kind: 'Transformer', label: 'Transformer', glyph: <TransformerGlyph /> },
+  { kind: 'Battery', label: 'Battery', detail: 'ESD1 storage', glyph: <BatteryGlyph /> },
 ];
+
+/** Shown under the tiles while a tile can add. */
+const HINT =
+  "Click a tile to add that element, or drag it onto the diagram. The form's Kind list has the other models: machines, exciters, governors.";
 
 export interface ComponentLibraryProps {
   className?: string;
@@ -85,7 +105,7 @@ export function ComponentLibrary({ className }: ComponentLibraryProps) {
           blockedReason === null ? 'text-muted-foreground' : 'text-foreground',
         )}
       >
-        {blockedReason ?? 'Click a tile to add that element, or drag it onto the diagram.'}
+        {blockedReason ?? HINT}
       </p>
     </div>
   );
@@ -97,8 +117,9 @@ interface TileProps extends TileSpec {
   onAdd: (kind: string) => void;
 }
 
-function Tile({ kind, label, glyph, blockedReason, onAdd }: TileProps) {
+function Tile({ kind, label, detail, glyph, blockedReason, onAdd }: TileProps) {
   const blocked = blockedReason !== null;
+  const also = detail === undefined ? '' : ` (${detail})`;
   return (
     <div
       role="button"
@@ -107,11 +128,11 @@ function Tile({ kind, label, glyph, blockedReason, onAdd }: TileProps) {
       aria-disabled={blocked ? true : undefined}
       data-testid={`component-library-tile-${kind}`}
       data-component-kind={kind}
-      aria-label={`Add ${label}`}
+      aria-label={`Add ${label}${also}`}
       title={
         blocked
           ? blockedReason
-          : `Add a ${label.toLowerCase()}: click here, or drag it onto the diagram`
+          : `Add a ${label.toLowerCase()}${also}: click here, or drag it onto the diagram`
       }
       onClick={() => {
         if (!blocked) onAdd(kind);
@@ -159,7 +180,7 @@ function Tile({ kind, label, glyph, blockedReason, onAdd }: TileProps) {
 
 // ---------------------------------------------------------------------------
 // Inline-SVG glyphs. Each is small + visually distinguishable so the user
-// can scan the 3x2 grid at a glance. Stroke=currentColor so the icons
+// can scan the 3-column grid at a glance. Stroke=currentColor so the icons
 // inherit `text-muted-foreground` from the wrapper.
 // ---------------------------------------------------------------------------
 
@@ -257,6 +278,27 @@ function TransformerGlyph() {
     >
       <circle cx="9" cy="12" r="5" />
       <circle cx="15" cy="12" r="5" />
+    </svg>
+  );
+}
+
+function BatteryGlyph() {
+  // A cell on its side with its terminal cap, and the two plates of the
+  // battery symbol inside it.
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-5 w-5"
+    >
+      <rect x="3" y="7" width="16" height="10" rx="1.5" />
+      <line x1="21.5" y1="10.5" x2="21.5" y2="13.5" />
+      <line x1="9.5" y1="9.5" x2="9.5" y2="14.5" />
+      <line x1="12.5" y1="11" x2="12.5" y2="13" />
     </svg>
   );
 }

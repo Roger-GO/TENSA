@@ -85,6 +85,21 @@ describe('<BusIdxSelect />', () => {
     expect(options[3]?.textContent).toContain('9 — BUS9');
   });
 
+  it('adds what the form says about a bus after its name, and nothing to the others', () => {
+    MOCK_TOPOLOGY = topology([bus(1, 'BUS1'), bus(2, 'BUS2'), bus('9', 'BUS9')]);
+    const notes = new Map([
+      ['2', 'generator: PV 2'],
+      ['9', 'generator: PV 7 used by GENROU_7'],
+    ]);
+    render(withQueryClient(<BusIdxSelect value="" onChange={() => {}} notes={notes} />));
+    const options = Array.from(screen.getByTestId('bus-idx-select').querySelectorAll('option'));
+    expect(options.slice(1).map((o) => [o.value, o.text])).toEqual([
+      ['1', '1 — BUS1'],
+      ['2', '2 — BUS2 (generator: PV 2)'],
+      ['9', '9 — BUS9 (generator: PV 7 used by GENROU_7)'],
+    ]);
+  });
+
   it('reflects the controlled `value` prop in the select', () => {
     MOCK_TOPOLOGY = topology([bus(1, 'BUS1'), bus(2, 'BUS2')]);
     render(withQueryClient(<BusIdxSelect value="2" onChange={() => {}} />));

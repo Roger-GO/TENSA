@@ -6,7 +6,8 @@ import { cn } from '@/lib/cn';
 import { BusIdxSelect } from './BusIdxSelect';
 import { GenIdxSelect } from './GenIdxSelect';
 import { SynIdxSelect } from './SynIdxSelect';
-import { elementHelp, elementWarnings } from './elementHelp';
+import { elementHelp, elementWarnings, namedAfterIdx } from './elementHelp';
+import { followLink, generatorsByBus, linkWarnings, staticGenerators } from './genLink';
 
 /**
  * ElementForm — polymorphic form generated from `_PARAMS_BY_MODEL`
@@ -26,6 +27,11 @@ import { elementHelp, elementWarnings } from './elementHelp';
  * above the fields, a line under the fields it explains, and a warning under a
  * field whose value is allowed but worth a second look.
  *
+ * A model that takes over a static generator has a `bus` and a `gen` that must
+ * agree (`genLink`). Its bus list names the generator on each bus, picking one
+ * of the two sets the other with a line that says so, and a bus without a
+ * generator or a generator a device already uses gets a warning.
+ *
  * Validation: client-side required checks before submit; the surface
  * for server-side rejections (422 ProblemDetails) is supplied by the
  * caller via `onError`.
@@ -44,6 +50,8 @@ export interface ElementFormProps {
   onSubmit: (params: Record<string, ParamValue>) => void;
   onCancel: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  /** A field was changed: what `serverError` says is about values no longer in the form. */
+  onEdit?: () => void;
   className?: string;
 }
 
@@ -123,6 +131,7 @@ export function ElementForm({
   onSubmit,
   onCancel,
   onDirtyChange,
+  onEdit,
   className,
 }: ElementFormProps) {
   const baseId = useId();
@@ -136,6 +145,15 @@ export function ElementForm({
   const existingIdxs = useMemo(() => existingIdxSetFor(topology, model), [topology, model]);
   const baseMva = topology?.base_mva ?? null;
   const help = useMemo(() => elementHelp(model, { baseMva }), [model, baseMva]);
+  // Only a form with both fields ties them: a PV has a bus and no `gen`.
+  const linksGen =
+    params.some((m) => m.name === 'bus' && m.kind === 'bus_idx') &&
+    params.some((m) => m.name === 'gen' && m.kind === 'gen_idx');
+  const staticGens = useMemo(
+    () => (linksGen ? staticGenerators(topology) : []),
+    [linksGen, topology],
+  );
+  const busNotes = useMemo(() => generatorsByBus(staticGens), [staticGens]);
 
   const seedValues = (
     metas: TopologyParamMeta[],
@@ -150,6 +168,7 @@ export function ElementForm({
         init[m.name] = emptyValueFor(m);
       }
     }
+    if (namedAfterIdx(model) && 'idx' in init && 'name' in init) init.name = init.idx;
     if (defaults) {
       for (const [k, v] of Object.entries(defaults)) init[k] = v;
     }
@@ -166,6 +185,8 @@ export function ElementForm({
   // values-vs-empty comparison so prefilled idxs don't trip the
   // CancelConfirmDialog.
   const [touched, setTouched] = useState<Set<string>>(new Set());
+  // The field a pick of `bus` or `gen` set besides itself, and why.
+  const [linkNote, setLinkNote] = useState<{ field: string; text: string } | null>(null);
 
   // Re-seed values when the model OR kindHint changes — kindHint
   // changes when the user picks a different option in the kind picker
@@ -176,6 +197,7 @@ export function ElementForm({
     setShowAdvanced(false);
     setValidationErrors({});
     setTouched(new Set());
+    setLinkNote(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params, model, kindHint]);
 
@@ -185,9 +207,30 @@ export function ElementForm({
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
 
-  const warnings = useMemo(
-    () => elementWarnings(model, values, { baseMva }),
-    [model, values, baseMva],
+  // The idx proposed is the next free one, and the case can gain an element
+  // while the form is open: the form is reset after an add a moment before the
+  // topology has the new element. The proposal follows the case until the
+  // user types an idx of their own.
+  const idxTouched = touched.has('idx');
+  const nameTouched = touched.has('name');
+  useEffect(() => {
+    if (idxTouched) return;
+    const proposed = nextAvailableIdx(model, topology);
+    setValues((curr) => {
+      if (!('idx' in curr) || curr.idx === proposed) return curr;
+      const follows = namedAfterIdx(model) && 'name' in curr && !nameTouched;
+      return follows ? { ...curr, idx: proposed, name: proposed } : { ...curr, idx: proposed };
+    });
+  }, [model, topology, idxTouched, nameTouched]);
+
+  const warnings = useMemo<Record<string, string>>(
+    () => ({
+      ...(linksGen
+        ? linkWarnings({ bus: String(values.bus ?? ''), gen: String(values.gen ?? '') }, staticGens)
+        : {}),
+      ...elementWarnings(model, values, { baseMva }),
+    }),
+    [model, values, baseMva, linksGen, staticGens],
   );
 
   const required = params.filter((m) => m.required);
@@ -196,18 +239,34 @@ export function ElementForm({
   const useDivider = params.length > ADVANCED_THRESHOLD;
 
   const setField = (name: string, value: ParamValue) => {
-    setValues((curr) => ({ ...curr, [name]: value }));
+    onEdit?.();
+    const next = { ...values, [name]: value };
+    // The name goes with the idx until the user gives it one of its own.
+    if (name === 'idx' && namedAfterIdx(model) && 'name' in values && !touched.has('name')) {
+      next.name = value;
+    }
+    if (linksGen && (name === 'bus' || name === 'gen')) {
+      const linked = followLink(
+        name,
+        { bus: String(next.bus ?? ''), gen: String(next.gen ?? '') },
+        staticGens,
+      );
+      next.bus = linked.bus;
+      next.gen = linked.gen;
+      setLinkNote(linked.note);
+    }
+    setValues(next);
     setTouched((curr) => {
       if (curr.has(name)) return curr;
-      const next = new Set(curr);
-      next.add(name);
-      return next;
+      const marked = new Set(curr);
+      marked.add(name);
+      return marked;
     });
     setValidationErrors((curr) => {
       if (!(name in curr)) return curr;
-      const next = { ...curr };
-      delete next[name];
-      return next;
+      const kept = { ...curr };
+      delete kept[name];
+      return kept;
     });
   };
 
@@ -269,23 +328,25 @@ export function ElementForm({
     const inputId = `${baseId}-${m.name}`;
     const errorId = `${inputId}-error`;
     const helpId = `${inputId}-help`;
+    const noteId = `${inputId}-note`;
     const warningId = `${inputId}-warning`;
     const value = values[m.name] ?? emptyValueFor(m);
     const error = validationErrors[m.name];
     const fieldHelp = help?.fields[m.name];
+    const note = linkNote?.field === m.name ? linkNote.text : undefined;
     const warning = warnings[m.name];
     // Everything said about the field is read out with it.
     const describedBy =
-      [fieldHelp ? helpId : null, warning ? warningId : null, error ? errorId : null]
+      [
+        fieldHelp ? helpId : null,
+        note ? noteId : null,
+        warning ? warningId : null,
+        error ? errorId : null,
+      ]
         .filter((id) => id !== null)
         .join(' ') || undefined;
     const field = (
-      <label
-        key={m.name}
-        htmlFor={inputId}
-        className="flex flex-col gap-0.5"
-        data-testid={`field-${m.name}`}
-      >
+      <label htmlFor={inputId} className="flex flex-col gap-0.5" data-testid={`field-${m.name}`}>
         <span className="text-muted-foreground flex items-center gap-1 font-mono text-xs">
           <span>{m.name}</span>
           {m.required ? (
@@ -302,6 +363,7 @@ export function ElementForm({
               onChange={(v) => setField(m.name, v)}
               required={m.required}
               aria-describedby={describedBy}
+              notes={linksGen && m.name === 'bus' ? busNotes : undefined}
             />
           ) : m.kind === 'gen_idx' ? (
             <GenIdxSelect
@@ -351,9 +413,9 @@ export function ElementForm({
         ) : null}
       </label>
     );
-    if (!fieldHelp && !warning) return field;
     // Beside the label, not in it: what is said here describes the field and
-    // is not part of its name.
+    // is not part of its name. The wrapper is there for every field, so that a
+    // line that turns up while a field is in use does not rebuild its input.
     return (
       <div key={m.name} className="flex flex-col gap-0.5">
         {field}
@@ -364,6 +426,16 @@ export function ElementForm({
             className="text-muted-foreground text-[10px] leading-snug"
           >
             {fieldHelp}
+          </p>
+        ) : null}
+        {note ? (
+          <p
+            id={noteId}
+            role="status"
+            data-testid={`field-note-${m.name}`}
+            className="text-foreground text-[10px] leading-snug"
+          >
+            {note}
           </p>
         ) : null}
         {warning ? (

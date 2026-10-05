@@ -32,7 +32,7 @@ import { cn } from '@/lib/cn';
  * section grows to fit its content rather than competing for fixed
  * heights. CaseNav's summary card is short, the saved-cases list grows
  * with workspace size (with internal scroll past N rows in Unit 4), and
- * the Component Library is fixed-grid 6 tiles.
+ * the Component Library is a fixed grid of 7 tiles.
  */
 export interface LeftSidebarProps {
   className?: string;

@@ -7,8 +7,8 @@ import type { ParamValue } from '@/api/types';
  * and gives its unit and nothing else. That is enough for a bus or a line. It
  * is not for a model whose values only mean something together, or whose
  * defaults describe no real device. Such a model gets an entry here: a note
- * shown above the form, a line under the fields that need one, and warnings
- * that follow what is typed.
+ * shown above the form, a line under the fields that need one, warnings that
+ * follow what is typed, and the values the form opens with.
  *
  * The one entry is the ESD1 battery. Every statement in it was checked against
  * ANDES 2.0 (`server/src/tensa/core/esd1.py` holds the reasoning and
@@ -39,10 +39,11 @@ function formatMva(value: number): string {
 }
 
 const ESD1_FIELDS: Readonly<Record<string, string>> = {
+  bus: 'The bus of the static generator the battery takes over. A bus that has one names it in the list, and picking the generator below sets the bus.',
   gen: 'The static generator (PV or Slack) on the same bus that the battery takes over. The battery starts at its power-flow P and Q, times gammap and gammaq.',
   pqflag:
     'Which power keeps its share of the current limit ialim: 1 for active power, 0 for reactive power.',
-  pmx: "Largest active power, discharging and charging, per unit of Sn. ANDES's own default is 9999, which is no limit.",
+  pmx: "Largest active power, discharging and charging, per unit of Sn: 1 is the rating. ANDES's own default is 9999, which is no limit.",
   En: 'Energy capacity. The state of charge moves by the delivered MW over En each hour.',
   qmx: 'Largest reactive power command, per unit of Sn.',
   qmn: 'Smallest reactive power command, per unit of Sn.',
@@ -94,8 +95,10 @@ function sameRating(a: number, b: number): boolean {
 
 /**
  * What to say under a field for the values as they stand, by parameter name.
- * A warning does not stop the add: the server takes the value, and says the
- * same in the Messages tab.
+ * A warning does not stop the add. A rating off the system base the server
+ * takes, and says the same in the Messages tab; a state of charge outside its
+ * window it refuses, and the line under the field says so before the add is
+ * sent.
  */
 export function elementWarnings(
   model: string,
@@ -114,17 +117,37 @@ export function elementWarnings(
         : '';
     warnings.Sn = `Sn is not the system base (${formatMva(base)} MVA): the limits are per unit of ${formatMva(sn)} MVA while the set-point and the output are per unit of ${formatMva(base)} MVA.${cap}`;
   }
+  // Left empty, the window is ANDES's own: 0 to 1.
+  const soc = asNumber(values.SOCinit);
+  const low = asNumber(values.SOCmin) ?? 0;
+  const high = asNumber(values.SOCmax) ?? 1;
+  if (soc !== null && (soc < low || soc > high)) {
+    warnings.SOCinit = `A state of charge of ${soc} is outside SOCmin to SOCmax (${low} to ${high}): 1 is a full battery. The add is refused until SOCinit lies between them.`;
+  }
   return warnings;
 }
 
 /**
  * The values the add form opens with for `model`, beyond the kind's own. A
- * battery opens rated on the system base, with active power given priority.
+ * battery opens rated on the system base, with active power given priority and
+ * limited to the rating. Its energy is left for the user: no value of it is
+ * the usual one.
  */
 export function elementDefaults(
   model: string,
   context: ElementHelpContext,
 ): Record<string, string | number | boolean> | undefined {
   if (model !== 'ESD1') return undefined;
-  return context.baseMva === null ? { pqflag: 1 } : { Sn: context.baseMva, pqflag: 1 };
+  const sized = { pqflag: 1, pmx: 1 };
+  return context.baseMva === null ? sized : { Sn: context.baseMva, ...sized };
+}
+
+/**
+ * Whether the add form opens with the name set to the idx it proposes, and
+ * keeps the two alike until the name is typed over. A battery is known by its
+ * idx wherever it is shown, and ANDES's own cases name theirs after it
+ * (`ESD1_1`), so an empty name is one more required field with nothing to ask.
+ */
+export function namedAfterIdx(model: string): boolean {
+  return model === 'ESD1';
 }
