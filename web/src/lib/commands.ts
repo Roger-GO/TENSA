@@ -46,6 +46,7 @@ import { useSessionStore } from '@/store/session';
 import { useSnapshotStore } from '@/store/snapshot';
 import { useBundleStore } from '@/store/bundle';
 import { usePflowStore } from '@/store/pflow';
+import { usePflowHistoryStore } from '@/store/pflowHistory';
 import { useRunModeStore } from '@/store/runMode';
 import { useRunsStore } from '@/store/runs';
 import { useAnalyzeStore } from '@/store/analyze';
@@ -67,6 +68,7 @@ import { useThemeStore } from '@/store/theme';
 import { useLayoutStore } from '@/store/layout';
 import { requestEigLogToggle, requestEigViewReset } from '@/lib/eigViewBus';
 import { reportAbortError } from '@/lib/abortRun';
+import { openPflowComparePanel } from '@/lib/openPflowPanel';
 import { useSaveOpenCase } from '@/lib/useSaveOpenCase';
 import { SHORTCUTS } from '@/lib/shortcuts';
 import type { RunRoutine } from '@/lib/useRunReadiness';
@@ -189,6 +191,7 @@ function useCommandSets(): CommandSets {
   const topology = useCurrentTopology();
   const isPfRunning = usePflowStore((s) => s.isRunning);
   const lastPfRun = usePflowStore((s) => s.lastRun);
+  const hasPflowHistory = usePflowHistoryStore((s) => s.snapshots.length > 0);
   const activeRoutine = useRunModeStore((s) => s.activeRoutine);
 
   // ---- store actions referenced from `action` closures ------------------
@@ -713,6 +716,26 @@ function useCommandSets(): CommandSets {
           layout.clearDrawerUnread();
         },
       },
+      // Two of the power flows kept, side by side: opens the BottomDrawer onto
+      // the Analysis tab's Compare sub-tab. Offered once a power flow has
+      // converged; the tab says what to do while there is only one to compare.
+      {
+        id: 'view.comparePflow',
+        label: 'Compare power flows',
+        group: 'view',
+        keywords: [
+          'compare',
+          'difference',
+          'diff',
+          'delta',
+          'power flow',
+          'pf',
+          'a vs b',
+          'before',
+        ],
+        action: openPflowComparePanel,
+        when: () => hasPflowHistory,
+      },
       // v3.1 — full-space results view. Toggles
       // ``useLayoutStore.resultsViewActive``, which makes the AppShell
       // short-circuit the diagram + inspector + drawer and render the
@@ -960,6 +983,7 @@ function useCommandSets(): CommandSets {
     reloadDisabled,
     undoDisabled,
     pfConverged,
+    hasPflowHistory,
     abortableRun,
     abortMutation,
     diagramVisible,

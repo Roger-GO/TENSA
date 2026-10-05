@@ -2,14 +2,16 @@
  * AnalysisTab (v3 Unit 14).
  *
  * Inner sub-tab strip for the Analysis bucket of the BottomDrawer:
- * Plot | PF | EIG | CPF | SE | TDS. Per F-FEAS-3 each sub-tab mounts an
- * existing chart component as-is — no rewrites:
+ * Plot | PF | Compare | EIG | CPF | SE | TDS. Per F-FEAS-3 each sub-tab mounts
+ * an existing chart component as-is — no rewrites:
  *
  *   - Plot → ``<TimeSeriesPlot /> + <ScrubControl /> + <VariableTreePicker />``
  *     (same composition that lived in App.tsx's PlotPanelContent
  *     before Unit 1 deleted it).
  *   - PF   → ``<PflowPanel />``: the options of the next power flow and the
  *     system summary of the last one.
+ *   - Compare → ``<PflowComparePanel />``: two of the power flows kept, and what
+ *     changed from one to the other.
  *   - EIG  → ``<AnalyzeEigSubMode />``  (the existing one, exported
  *     for re-use in v3 Unit 14).
  *   - CPF  → ``<AnalyzeCpfSubMode />``
@@ -42,10 +44,15 @@ import { useRunsStore } from '@/store/runs';
 import { TdsConfigPanel } from '@/components/tds/TdsConfigPanel';
 import { RunStatusBadge } from '@/components/tds/RunStatusBadge';
 
-// The PF view (the options form and the summary table) and the EIG, CPF and SE
-// views (their charts, tables and run forms) load the first time one of those
-// sub-tabs opens; the Plot sub-tab, which is the default, does not wait for them.
+// The PF view (the options form and the summary table), the comparison of two
+// power flows and the EIG, CPF and SE views (their charts, tables and run forms)
+// load the first time one of those sub-tabs opens; the Plot sub-tab, which is the
+// default, does not wait for them.
 const PflowPanel = lazyNamed(() => import('@/components/pflow/PflowPanel'), 'PflowPanel');
+const PflowComparePanel = lazyNamed(
+  () => import('@/components/pflow/PflowComparePanel'),
+  'PflowComparePanel',
+);
 const AnalyzeEigSubMode = lazyNamed(
   () => import('@/components/analyze/AnalyzePanel'),
   'AnalyzeEigSubMode',
@@ -69,6 +76,7 @@ const ResponseMetricsPanel = lazyNamed(
 const SUB_TAB_LABELS: Record<AnalysisSubTab, string> = {
   plot: 'Plot',
   pf: 'PF',
+  compare: 'Compare',
   eig: 'EIG',
   cpf: 'CPF',
   se: 'SE',
@@ -137,6 +145,15 @@ export function AnalysisTab({ activeSubTab, onSubTabChange, className }: Analysi
         >
           <Suspense fallback={<LoadingPanel />}>
             <PflowPanel />
+          </Suspense>
+        </TabsPrimitive.Content>
+        <TabsPrimitive.Content
+          value="compare"
+          data-testid="analysis-sub-tab-content-compare"
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <Suspense fallback={<LoadingPanel />}>
+            <PflowComparePanel />
           </Suspense>
         </TabsPrimitive.Content>
         <TabsPrimitive.Content

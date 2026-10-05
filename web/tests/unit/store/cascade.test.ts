@@ -14,6 +14,8 @@
  *    the case selection has to survive so it can be re-loaded.
  *  - A session clear drops the messages of the session that ended, recovery or not:
  *    they are that worker's log.
+ *  - The power flows kept for comparison stay across a case change and a
+ *    recovery, and go with a session the user discarded.
  */
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -24,12 +26,14 @@ import { useMessagesStore } from '@/store/messages';
 import { useCaseStore } from '@/store/case';
 import { blankFaultSpec, useDisturbanceStore } from '@/store/disturbance';
 import { usePflowStore } from '@/store/pflow';
+import { usePflowHistoryStore } from '@/store/pflowHistory';
 import { usePflowOptionsStore } from '@/store/pflowOptions';
 import { useRunsStore } from '@/store/runs';
 import { useSessionStore } from '@/store/session';
 import { DEFAULT_TDS_CONFIG, useUiStore } from '@/store/ui';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { CpfResult, EigResult, PflowResult } from '@/api/types';
+import { NO_ELEMENT_NAMES } from '@/lib/elementNames';
 
 const PF: PflowResult = {
   run_id: 'pf-1',
@@ -314,6 +318,35 @@ describe('store cascade — session clear', () => {
     expect(useCaseStore.getState().selection).not.toBeNull();
     // Runs are tied to the dead worker, so they go either way.
     expect(useRunsStore.getState().activeRunId).toBeNull();
+  });
+
+  describe('the power flows kept for comparison', () => {
+    function keepPf(): void {
+      usePflowHistoryStore
+        .getState()
+        .record(PF, { caseName: 'kundur_full', names: NO_ELEMENT_NAMES });
+    }
+
+    it('go with a session the user discarded', () => {
+      keepPf();
+      useSessionStore.getState().clearSession();
+      expect(usePflowHistoryStore.getState().snapshots).toEqual([]);
+    });
+
+    it('stay while the session is being recovered', () => {
+      keepPf();
+      useSessionStore.getState().resetSession();
+      expect(usePflowHistoryStore.getState().snapshots.map((s) => s.id)).toEqual(['pf-1']);
+    });
+
+    it('stay when another case is opened, to be compared with its result', () => {
+      keepPf();
+      useCaseStore.getState().setCase(caseOf('wscc9.xlsx'));
+      expect(usePflowStore.getState().lastRun).toBeNull();
+      expect(usePflowHistoryStore.getState().snapshots.map((s) => s.caseName)).toEqual([
+        'kundur_full',
+      ]);
+    });
   });
 
   describe('the messages ANDES logged', () => {

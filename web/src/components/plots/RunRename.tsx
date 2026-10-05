@@ -15,6 +15,8 @@ import { cn } from '@/lib/cn';
 export interface RenameRunButtonProps {
   /** Accessible name; says which run, since a list of them has one pencil each. */
   'aria-label': string;
+  /** Hover text; "Rename this run" when omitted. */
+  title?: string;
   onClick: () => void;
   'data-testid'?: string;
   className?: string;
@@ -23,6 +25,7 @@ export interface RenameRunButtonProps {
 /** A small pencil button. Inline glyph, as the rest of the app does, in place of an icon library. */
 export function RenameRunButton({
   'aria-label': ariaLabel,
+  title = 'Rename this run',
   onClick,
   'data-testid': testId,
   className,
@@ -35,7 +38,7 @@ export function RenameRunButton({
         e.stopPropagation();
         onClick();
       }}
-      title="Rename this run"
+      title={title}
       aria-label={ariaLabel}
       data-testid={testId}
       className={cn(

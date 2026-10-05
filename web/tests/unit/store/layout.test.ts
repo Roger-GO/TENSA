@@ -75,10 +75,10 @@ describe('useLayoutStore — defaults', () => {
   });
 
   it('exposes ANALYSIS_SUB_TABS as the canonical ordered list', () => {
-    expect(ANALYSIS_SUB_TABS).toEqual(['plot', 'pf', 'eig', 'cpf', 'se', 'tds']);
+    expect(ANALYSIS_SUB_TABS).toEqual(['plot', 'pf', 'compare', 'eig', 'cpf', 'se', 'tds']);
   });
 
-  it('says which sub-tabs have an Analyze sub-mode to be written in step: not Plot, not PF', () => {
+  it('says which sub-tabs have an Analyze sub-mode to be written in step: not Plot, PF or Compare', () => {
     expect(ANALYSIS_SUB_TABS.filter(isAnalyzeBackedSubTab)).toEqual(['eig', 'cpf', 'se', 'tds']);
   });
 });

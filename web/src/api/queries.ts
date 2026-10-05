@@ -73,6 +73,7 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useRecentCasesStore } from '@/store/recentCases';
 import { usePflowStore } from '@/store/pflow';
+import { usePflowHistoryStore } from '@/store/pflowHistory';
 import { usePflowOptionsStore } from '@/store/pflowOptions';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { useRunsStore } from '@/store/runs';
@@ -86,6 +87,8 @@ import { useMessagesStore } from '@/store/messages';
 import type { JobKind, JobRecord } from '@/store/jobs';
 import { toast } from '@/lib/toast';
 import { announceViolations } from '@/lib/announceViolations';
+import { elementNamesOf } from '@/lib/elementNames';
+import { stemOf } from '@/lib/paths';
 import { caseSettingsFromRun, pflowRequestBody } from '@/lib/pflowOptions';
 
 // ---- job registration glue (Unit 6) ---------------------------------------
@@ -742,10 +745,17 @@ export function useRunPflow(): UseMutationResult<PflowResult, Error, SessionId> 
       }
       // The buses, lines and generators the run is judged against, before the
       // invalidation below fetches the committed topology.
-      announceViolations(
-        solved,
-        queryClient.getQueryData<TopologySummary>(queryKeys.topology(sessionId)),
-      );
+      const topology = queryClient.getQueryData<TopologySummary>(queryKeys.topology(sessionId));
+      announceViolations(solved, topology);
+      // A converged result is kept, with the names its idx stand for now, so a
+      // later run (after an edit, or on another case) can be compared with it.
+      if (solved.converged) {
+        const primaryPath = useCaseStore.getState().selection?.primaryPath ?? null;
+        usePflowHistoryStore.getState().record(solved, {
+          caseName: primaryPath === null ? 'New system' : stemOf(primaryPath),
+          names: elementNamesOf(topology),
+        });
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
     },

@@ -69,16 +69,18 @@ export const BOTTOM_DRAWER_TABS: readonly BottomDrawerTab[] = [
 
 /**
  * Inner sub-tab identifier for the Analysis tab inside the BottomDrawer.
- * ``pf`` holds the power-flow options and the system summary of the last run.
+ * ``pf`` holds the power-flow options and the system summary of the last run,
+ * and ``compare`` the difference between two of the power flows kept.
  * The ``pflow`` sub-mode that exists on ``useAnalyzeStore.subMode`` stays
  * retired: ``pf`` is a layout tab only, and PF results are still read off the
  * always-available Buses grid + Inspector accordion as well.
  */
-export type AnalysisSubTab = 'plot' | 'pf' | 'eig' | 'cpf' | 'se' | 'tds';
+export type AnalysisSubTab = 'plot' | 'pf' | 'compare' | 'eig' | 'cpf' | 'se' | 'tds';
 
 export const ANALYSIS_SUB_TABS: readonly AnalysisSubTab[] = [
   'plot',
   'pf',
+  'compare',
   'eig',
   'cpf',
   'se',
@@ -88,10 +90,11 @@ export const ANALYSIS_SUB_TABS: readonly AnalysisSubTab[] = [
 /**
  * The sub-tabs that have an Analyze sub-mode of the same name, which the
  * layout sub-tab and `useAnalyzeStore.subMode` are written in step for.
- * `plot` and `pf` read from the runs and pflow slices instead.
+ * `plot`, `pf` and `compare` read from the runs, pflow and pflow-history
+ * slices instead.
  */
 export function isAnalyzeBackedSubTab(sub: AnalysisSubTab): sub is 'eig' | 'cpf' | 'se' | 'tds' {
-  return sub !== 'plot' && sub !== 'pf';
+  return sub !== 'plot' && sub !== 'pf' && sub !== 'compare';
 }
 
 /**

@@ -8,8 +8,8 @@
  * (the AppShell short-circuits the chassis) so plots/tables get the whole
  * content area.
  *
- * It reuses the existing ``<AnalysisTab />`` (the Plot | EIG | CPF | SE |
- * TDS sub-tab strip + charts) verbatim, driven by ``activeAnalysisSubTab``
+ * It reuses the existing ``<AnalysisTab />`` (the Plot | PF | Compare | EIG |
+ * CPF | SE | TDS sub-tab strip + charts) verbatim, driven by ``activeAnalysisSubTab``
  * from the layout store and the same dual-write ``onSubTabChange`` callback
  * the BottomDrawer passes — so a Run that auto-routes to a sub-tab lands on
  * the same content whether the user views it in the drawer or here.
@@ -26,6 +26,7 @@ import { LazyAnalysisTab } from '@/components/data-grid/LazyAnalysisTab';
 import { isAnalyzeBackedSubTab, useLayoutStore } from '@/store/layout';
 import { useAnalyzeStore } from '@/store/analyze';
 import { usePflowStore } from '@/store/pflow';
+import { usePflowHistoryStore } from '@/store/pflowHistory';
 import { useRunsStore } from '@/store/runs';
 
 export interface ResultsViewProps {
@@ -39,16 +40,18 @@ export function ResultsView({ className }: ResultsViewProps) {
   const setAnalyzeSubMode = useAnalyzeStore((s) => s.setSubMode);
 
   // "Has any results to show" gate. We surface the AnalysisTab whenever
-  // ANY routine has produced output: a PF result, a TDS run, or an
-  // EIG/CPF/SE analyze result. Otherwise the page shows an EmptyState
-  // pointing the user at the Run controls. The subscriptions are narrow
-  // booleans/counts so unrelated store churn doesn't re-render the view.
+  // ANY routine has produced output: a PF result (the last one, or one kept
+  // for comparison), a TDS run, or an EIG/CPF/SE analyze result. Otherwise
+  // the page shows an EmptyState pointing the user at the Run controls. The
+  // subscriptions are narrow booleans/counts so unrelated store churn doesn't
+  // re-render the view.
   const hasPfResult = usePflowStore((s) => s.lastRun !== null);
+  const hasPfHistory = usePflowHistoryStore((s) => s.snapshots.length > 0);
   const hasRuns = useRunsStore((s) => Object.keys(s.runs).length > 0);
   const hasEig = useAnalyzeStore((s) => s.eigResult !== null);
   const hasCpf = useAnalyzeStore((s) => s.cpfResult !== null);
   const hasSe = useAnalyzeStore((s) => s.seResult !== null);
-  const hasResults = hasPfResult || hasRuns || hasEig || hasCpf || hasSe;
+  const hasResults = hasPfResult || hasPfHistory || hasRuns || hasEig || hasCpf || hasSe;
 
   return (
     <div data-testid="results-view" className={cn('flex h-full min-h-0 flex-col', className)}>

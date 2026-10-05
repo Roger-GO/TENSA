@@ -36,6 +36,8 @@ import { useHistoryStore } from '@/store/history';
 import { subscribeSldCommand } from '@/store/sld';
 import type { SldCommand } from '@/store/sld';
 import { usePflowStore } from '@/store/pflow';
+import { usePflowHistoryStore } from '@/store/pflowHistory';
+import { NO_ELEMENT_NAMES } from '@/lib/elementNames';
 import { useAnalyzeStore } from '@/store/analyze';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
@@ -435,6 +437,48 @@ describe('useCommandRegistry: Open Messages command', () => {
     expect(layout.activeBottomDrawerTab).toBe('messages');
     expect(layout.bottomDrawerCollapsed).toBe(false);
     expect(layout.resultsViewActive).toBe(false);
+    expect(layout.drawerHasUnreadResults).toBe(false);
+  });
+});
+
+describe('useCommandRegistry: Compare power flows command', () => {
+  const PF: PflowResult = {
+    run_id: 'pf-1',
+    converged: true,
+    iterations: 3,
+    mismatch: 1e-8,
+    bus_voltages: {},
+    bus_angles: {},
+    line_flows: {},
+  };
+
+  afterEach(() => usePflowHistoryStore.getState().clear());
+
+  it('is not listed before a power flow has converged', () => {
+    usePflowHistoryStore.getState().clear();
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(result.current.find((c) => c.id === 'view.comparePflow')).toBeUndefined();
+  });
+
+  it('opens the drawer on the Compare sub-tab once there is a result', () => {
+    usePflowHistoryStore.getState().record(PF, { caseName: 'ieee14', names: NO_ELEMENT_NAMES });
+    useLayoutStore.setState({
+      bottomDrawerCollapsed: true,
+      activeBottomDrawerTab: 'buses',
+      activeAnalysisSubTab: 'plot',
+      drawerHasUnreadResults: true,
+    });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'view.comparePflow');
+    expect(cmd?.group).toBe('view');
+    expect(cmd?.keywords).toEqual(expect.arrayContaining(['compare', 'difference']));
+
+    cmd?.action();
+
+    const layout = useLayoutStore.getState();
+    expect(layout.activeBottomDrawerTab).toBe('analysis');
+    expect(layout.activeAnalysisSubTab).toBe('compare');
+    expect(layout.bottomDrawerCollapsed).toBe(false);
     expect(layout.drawerHasUnreadResults).toBe(false);
   });
 });

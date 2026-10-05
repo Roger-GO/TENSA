@@ -10,6 +10,9 @@ import { parseRunId, parseWorkspacePath } from '@/api/types';
 import type { PflowResult, PflowSettings, PflowSummary as Summary } from '@/api/types';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
+import { usePflowHistoryStore } from '@/store/pflowHistory';
+import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
+import { NO_ELEMENT_NAMES } from '@/lib/elementNames';
 import {
   captureDownloads,
   exportAs,
@@ -54,6 +57,8 @@ function result(overrides: Partial<PflowResult> = {}): PflowResult {
 
 beforeEach(() => {
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  usePflowHistoryStore.getState().clear();
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT });
   useCaseStore.setState({ selection: null });
 });
 
@@ -152,6 +157,37 @@ describe('<PflowSummary />', () => {
     usePflowStore.setState({ lastRun: bare });
     render(<PflowSummary />);
     expect(screen.queryByTestId('pflow-summary-table')).not.toBeInTheDocument();
+  });
+
+  describe('the way to the comparison', () => {
+    const keep = (id: string) =>
+      usePflowHistoryStore.getState().record(result({ run_id: parseRunId(id) }), {
+        caseName: 'ieee14',
+        names: NO_ELEMENT_NAMES,
+      });
+
+    it('is not offered while there is no earlier result to compare with', () => {
+      keep('run-1');
+      usePflowStore.setState({ lastRun: result() });
+      render(<PflowSummary />);
+      expect(screen.queryByTestId('pflow-summary-compare')).not.toBeInTheDocument();
+    });
+
+    it('opens the Compare tab once two power flows have converged', async () => {
+      const user = userEvent.setup();
+      keep('run-1');
+      keep('run-2');
+      usePflowStore.setState({ lastRun: result() });
+      useLayoutStore.setState({ bottomDrawerCollapsed: true, activeAnalysisSubTab: 'pf' });
+      render(<PflowSummary />);
+
+      await user.click(screen.getByTestId('pflow-summary-compare'));
+
+      const layout = useLayoutStore.getState();
+      expect(layout.activeBottomDrawerTab).toBe('analysis');
+      expect(layout.activeAnalysisSubTab).toBe('compare');
+      expect(layout.bottomDrawerCollapsed).toBe(false);
+    });
   });
 
   describe('export', () => {

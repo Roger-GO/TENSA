@@ -82,6 +82,8 @@ const LAZY_MODULES = [
   'components/data-grid/ShuntsGrid.tsx',
   'components/analyze/AnalyzePanel.tsx',
   'components/pflow/PflowPanel.tsx',
+  'components/pflow/PflowComparePanel.tsx',
+  'lib/pflowCompare.ts',
   'components/plots/TimeSeriesPlot.tsx',
   'components/plots/ResponseMetricsPanel.tsx',
   'components/sld/SldCanvas.tsx',

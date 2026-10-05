@@ -5,15 +5,17 @@
  * recommended pattern for v5). This module's job is the cross-slice
  * cascade:
  *
- * - When `session` clears, `case` and `pflow` clear too.
+ * - When `session` clears, `case` and `pflow` clear too, and so do the power
+ *   flows kept for comparison, unless the session is being recovered.
  * - When `case` changes, `pflow` and the EIG / CPF / SE results clear
  *   (results don't carry across cases), the disturbances scheduled for the next
  *   TDS run clear (they name the old case's buses), the ANDES variables picked
  *   for it clear (they name its devices), the power-flow options go back to the
  *   defaults, and the active TDS run is released.
- *   The finished runs themselves stay: they are results only this tab holds,
- *   and comparing a run on one case with a run on a modified copy is a normal
- *   workflow. They go when the session ends.
+ *   The finished runs themselves stay, and so do the power flows kept for
+ *   comparison: they are results only this tab holds, and comparing a run on
+ *   one case with a run on a modified copy is a normal workflow. They go when
+ *   the session ends.
  * - When `pflow` clears (case change, reload, run reset), the EIG / CPF / SE
  *   results clear with it: they were computed from that operating point.
  *
@@ -30,6 +32,7 @@
 import { useCaseStore } from './case';
 import { useSessionStore } from './session';
 import { usePflowStore } from './pflow';
+import { usePflowHistoryStore } from './pflowHistory';
 import { usePflowOptionsStore } from './pflowOptions';
 import { useRunsStore } from './runs';
 import { useAnimationStore } from './animation';
@@ -96,6 +99,9 @@ export function wireStoreCascade(): void {
       if (!state.recoveryInProgress) {
         useCaseStore.getState().clearCase();
         usePflowStore.getState().clearPflow();
+        // The power flows kept for comparison go with a session the user
+        // discarded. A recovery keeps them: they are results, not session state.
+        usePflowHistoryStore.getState().clear();
       }
     }
     prevSessionId = next;
@@ -174,6 +180,7 @@ export function __resetCascadeForTests(): void {
     selectedElement: null,
   });
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  usePflowHistoryStore.getState().clear();
   usePflowOptionsStore.getState().resetForNewCase();
   useAnalyzeStore.setState({
     eigResult: null,

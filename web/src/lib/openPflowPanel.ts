@@ -13,3 +13,16 @@ export function openPflowPanel(): void {
   layout.setBottomDrawerCollapsed(false);
   layout.clearDrawerUnread();
 }
+
+/**
+ * Bring the comparison of two power flows into view: the Analysis tab on its
+ * Compare sub-tab, with the drawer open. The results view shows the same tab
+ * when it is the one on screen, so it is left as it is.
+ */
+export function openPflowComparePanel(): void {
+  const layout = useLayoutStore.getState();
+  layout.setActiveBottomDrawerTab('analysis');
+  layout.setActiveAnalysisSubTab('compare');
+  layout.setBottomDrawerCollapsed(false);
+  layout.clearDrawerUnread();
+}

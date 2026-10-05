@@ -3,7 +3,7 @@
  *
  * Coverage:
  *
- *  - Renders all 6 sub-tab triggers + sub-tab routing.
+ *  - Renders all 7 sub-tab triggers + sub-tab routing.
  *  - Click writes via the onSubTabChange callback (caller wires both
  *    layout slice + analyze sub-mode atomically).
  */
@@ -42,6 +42,9 @@ vi.mock('@/components/tds/RunStatusBadge', () => ({
 vi.mock('@/components/pflow/PflowPanel', () => ({
   PflowPanel: () => <div data-testid="pflow-panel-stub" />,
 }));
+vi.mock('@/components/pflow/PflowComparePanel', () => ({
+  PflowComparePanel: () => <div data-testid="pflow-compare-stub" />,
+}));
 
 import { AnalysisTab } from '@/components/data-grid/AnalysisTab';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
@@ -62,10 +65,10 @@ afterEach(() => {
 });
 
 describe('<AnalysisTab />', () => {
-  it('renders all 6 sub-tab triggers', () => {
+  it('renders all 7 sub-tab triggers', () => {
     render(<AnalysisTab activeSubTab="eig" onSubTabChange={() => {}} />);
     expect(screen.getByTestId('analysis-tab')).toBeInTheDocument();
-    for (const sub of ['plot', 'pf', 'eig', 'cpf', 'se', 'tds']) {
+    for (const sub of ['plot', 'pf', 'compare', 'eig', 'cpf', 'se', 'tds']) {
       expect(screen.getByTestId(`analysis-sub-tab-${sub}`)).toBeInTheDocument();
     }
   });
@@ -82,12 +85,18 @@ describe('<AnalysisTab />', () => {
     expect(await screen.findByTestId('pflow-panel-stub')).toBeInTheDocument();
   });
 
-  it('puts PF second, after Plot, in the strip', () => {
+  it('renders the Compare sub-tab (two power flows side by side) as a lazily loaded chunk', async () => {
+    render(<AnalysisTab activeSubTab="compare" onSubTabChange={() => {}} />);
+    expect(screen.getByTestId('analysis-sub-tab-compare')).toHaveTextContent('Compare');
+    expect(await screen.findByTestId('pflow-compare-stub')).toBeInTheDocument();
+  });
+
+  it('puts PF second, after Plot, and Compare beside it in the strip', () => {
     render(<AnalysisTab activeSubTab="plot" onSubTabChange={() => {}} />);
     const order = screen
       .getAllByRole('tab')
       .map((tab) => tab.getAttribute('data-testid')?.replace('analysis-sub-tab-', ''));
-    expect(order).toEqual(['plot', 'pf', 'eig', 'cpf', 'se', 'tds']);
+    expect(order).toEqual(['plot', 'pf', 'compare', 'eig', 'cpf', 'se', 'tds']);
   });
 
   it('renders the active sub-tab content (Plot)', async () => {

@@ -149,10 +149,11 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
   const subMode = useAnalyzeStore((s) => s.subMode);
   const setAnalyzeSubMode = useAnalyzeStore((s) => s.setSubMode);
   useEffect(() => {
-    // Map layout sub-tab → analyze sub-mode. The 'plot' and 'pf' tabs have
-    // no analyze sub-mode equivalent (plotting reads from useRunsStore and
-    // the PF tab from the pflow slice, not the analyze slice) so we leave
-    // subMode alone in those cases; mounting them doesn't read subMode.
+    // Map layout sub-tab → analyze sub-mode. The 'plot', 'pf' and 'compare'
+    // tabs have no analyze sub-mode equivalent (plotting reads from
+    // useRunsStore and the PF tabs from the pflow slices, not the analyze
+    // slice) so we leave subMode alone in those cases; mounting them doesn't
+    // read subMode.
     if (!isAnalyzeBackedSubTab(activeAnalysisSubTab)) return;
     if (activeAnalysisSubTab !== subMode) {
       setAnalyzeSubMode(activeAnalysisSubTab);

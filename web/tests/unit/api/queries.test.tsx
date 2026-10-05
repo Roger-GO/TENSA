@@ -36,6 +36,7 @@ import { parseSessionId } from '@/api/types';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useRecentCasesStore } from '@/store/recentCases';
+import { usePflowHistoryStore } from '@/store/pflowHistory';
 import { usePflowOptionsStore } from '@/store/pflowOptions';
 import { useMessagesStore } from '@/store/messages';
 import { useJobsStore, LOCAL_ID_PREFIX, isTerminalStatus } from '@/store/jobs';
@@ -595,6 +596,80 @@ describe('queries hooks', () => {
     expect(rec.problem?.title).toBe('Session Busy');
     expect(rec.problem?.status).toBe(409);
     expect(rec.problem?.recovery).toEqual({ kind: 'retry', label: 'Retry' });
+  });
+
+  describe('useRunPflow keeps a converged result for comparison', () => {
+    const TOPOLOGY = {
+      state: 'pre-setup' as const,
+      buses: [{ idx: 1, name: 'North', kind: 'Bus' }],
+      lines: [{ idx: 'L1', name: 'North-South', kind: 'Line' }],
+      transformers: [{ idx: 'T1', name: 'Step-up', kind: 'Line' }],
+      generators: [
+        { idx: 'G1', name: 'Hydro', kind: 'Slack' },
+        { idx: 'M1', name: 'Hydro machine', kind: 'GENROU' },
+      ],
+      loads: [{ idx: 'D1', name: 'Town', kind: 'PQ' }],
+    };
+    const solved = (overrides: Record<string, unknown> = {}) => ({
+      run_id: 'pf-1',
+      converged: true,
+      iterations: 3,
+      mismatch: 1e-6,
+      bus_voltages: { '1': 1.02 },
+      bus_angles: { '1': 0 },
+      line_flows: {},
+      ...overrides,
+    });
+
+    beforeEach(() => usePflowHistoryStore.getState().clear());
+    afterEach(() => usePflowHistoryStore.getState().clear());
+
+    it('with the case it was solved on and the names of its elements', async () => {
+      fetchSpy.mockResolvedValueOnce(jsonResponse(solved()));
+      const { client, Wrapper } = makeWrapper();
+      const sessionId = 'sess-keep' as SessionId;
+      client.setQueryData(queryKeys.topology(sessionId), TOPOLOGY);
+      useCaseStore.setState({
+        selection: { primaryPath: 'cases/kundur_full.xlsx' as WorkspacePath, addfiles: [] },
+      });
+      const { result } = renderHook(() => useRunPflow(), { wrapper: Wrapper });
+
+      result.current.mutate(sessionId);
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      const [snapshot] = usePflowHistoryStore.getState().snapshots;
+      expect(snapshot).toMatchObject({ id: 'pf-1', ordinal: 1, caseName: 'kundur_full' });
+      expect(snapshot?.result.bus_voltages).toEqual({ '1': 1.02 });
+      expect(snapshot?.names).toEqual({
+        buses: { '1': 'North' },
+        lines: { L1: 'North-South', T1: 'Step-up' },
+        generators: { G1: 'Hydro' },
+        loads: { D1: 'Town' },
+      });
+    });
+
+    it('under "New system" for a system built from scratch', async () => {
+      fetchSpy.mockResolvedValueOnce(jsonResponse(solved()));
+      useCaseStore.setState({ selection: { primaryPath: null, addfiles: [], blank: true } });
+      const { Wrapper } = makeWrapper();
+      const { result } = renderHook(() => useRunPflow(), { wrapper: Wrapper });
+
+      result.current.mutate('sess-keep' as SessionId);
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      expect(usePflowHistoryStore.getState().snapshots[0]?.caseName).toBe('New system');
+    });
+
+    it('and keeps none for a run that did not converge', async () => {
+      fetchSpy.mockResolvedValueOnce(jsonResponse(solved({ converged: false, iterations: 26 })));
+      const { Wrapper } = makeWrapper();
+      const { result } = renderHook(() => useRunPflow(), { wrapper: Wrapper });
+
+      result.current.mutate('sess-keep' as SessionId);
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      expect(usePflowHistoryStore.getState().snapshots).toEqual([]);
+    });
   });
 
   it('useRunPflow sends the options store as the request body, only what was changed', async () => {

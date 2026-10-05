@@ -1,9 +1,12 @@
 import { useMemo } from 'react';
 import { cn } from '@/lib/cn';
+import { Button } from '@/components/ui/button';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { recordsToCsv } from '@/components/export/exportToCsv';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { usePflowStore } from '@/store/pflow';
+import { usePflowHistoryStore } from '@/store/pflowHistory';
+import { openPflowComparePanel } from '@/lib/openPflowPanel';
 import { describeSettings } from '@/lib/pflowOptions';
 import { lossShare, summaryRows } from '@/lib/pflowSummary';
 
@@ -16,6 +19,9 @@ import { lossShare, summaryRows } from '@/lib/pflowSummary';
  * It reads the last converged run from the pflow slice. After a time-domain run
  * that slice holds the end-state operating point instead (bus voltages only), which
  * has no totals, and the panel says so rather than showing a stale table.
+ *
+ * Once a second power flow has converged, a button leads to the Compare tab,
+ * where the result is set against an earlier one.
  */
 
 export interface PflowSummaryProps {
@@ -28,6 +34,7 @@ function mw(value: number | null): string {
 
 export function PflowSummary({ className }: PflowSummaryProps) {
   const lastRun = usePflowStore((s) => s.lastRun);
+  const comparable = usePflowHistoryStore((s) => s.snapshots.length > 1);
   const caseName = useExportCaseName();
   const summary = lastRun?.summary ?? null;
   const settings = lastRun?.settings ?? null;
@@ -64,15 +71,30 @@ export function PflowSummary({ className }: PflowSummaryProps) {
     >
       <header className="flex items-center justify-between gap-2">
         <h2 className="text-foreground text-sm font-semibold">System summary</h2>
-        <ExportMenu
-          formats={['csv']}
-          panel="pf-summary"
-          caseName={caseName}
-          disabled={summary === null}
-          disabledTooltip="Run a power flow to export its totals"
-          onExportCsv={onExportCsv}
-          label="Export summary"
-        />
+        <div className="flex items-center gap-1">
+          {comparable ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={openPflowComparePanel}
+              title="Set this result against an earlier power flow: what each voltage, angle and line flow changed by"
+              data-testid="pflow-summary-compare"
+              className="text-xs"
+            >
+              Compare with an earlier run
+            </Button>
+          ) : null}
+          <ExportMenu
+            formats={['csv']}
+            panel="pf-summary"
+            caseName={caseName}
+            disabled={summary === null}
+            disabledTooltip="Run a power flow to export its totals"
+            onExportCsv={onExportCsv}
+            label="Export summary"
+          />
+        </div>
       </header>
 
       <p data-testid="pflow-summary-status" className="text-muted-foreground text-xs leading-snug">
