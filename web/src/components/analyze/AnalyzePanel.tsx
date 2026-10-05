@@ -31,6 +31,7 @@ import {
 } from '@/api/queries';
 import { directionRows } from '@/lib/cpfOptions';
 import { useSessionStore } from '@/store/session';
+import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { ProblemDetailsError } from '@/api/client';
@@ -473,6 +474,9 @@ export function AnalyzeCpfNoseSubMode() {
   const topology = useCurrentTopology();
   // The devices a custom direction can name, with their solved power.
   const devices = useMemo(() => directionRows(topology, lastPf), [topology, lastPf]);
+  // The form starts over with each case, as the power-flow options do: a
+  // direction typed for one case's loads means nothing on another's.
+  const casePath = useCaseStore((s) => s.selection?.primaryPath ?? null);
 
   // When PF clears (case change cascade), drop the stale CPF result so
   // the empty-state shows.
@@ -492,6 +496,7 @@ export function AnalyzeCpfNoseSubMode() {
   return (
     <div className="flex flex-col gap-3">
       <CpfConfigPanel
+        key={casePath ?? 'no-case'}
         runLabel={cpfRun.isPending ? 'Running CPF…' : 'Run CPF'}
         runButtonTestId="analyze-run-cpf"
         runNote={<RunReadinessNote routine="cpf" testId="analyze-run-cpf" />}

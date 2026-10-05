@@ -188,6 +188,22 @@ describe('<AnalyzePanel />', () => {
     expect(matches.length).toBeGreaterThan(0);
   });
 
+  it('the CPF form starts over when another case is opened', async () => {
+    useAnalyzeStore.getState().setSubMode('cpf');
+    render(withQueryClient(<AnalyzePanel />));
+    await userEvent.click(screen.getByTestId('cpf-config-direction-gen'));
+    await userEvent.click(screen.getByTestId('cpf-config-lower-branch'));
+    expect(screen.getByTestId('cpf-config-direction-gen')).toBeChecked();
+
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('kundur_full.xlsx'), addfiles: [] },
+      });
+    });
+    expect(screen.getByTestId('cpf-config-direction-load')).toBeChecked();
+    expect(screen.getByTestId('cpf-config-lower-branch')).not.toBeChecked();
+  });
+
   it('Run SE is disabled with "Generate measurements first." when PF is converged but no measurements', async () => {
     useAnalyzeStore.getState().setSubMode('se');
     usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
