@@ -24,8 +24,9 @@
  *   counter and which two are compared).
  *
  * The database belongs to the page's origin, so every tab on one server address
- * shares it, like the recent cases, and so would anything else served from
- * that address later (``SECURITY.md``). What is written is results and the
+ * shares it, like the recent cases (what two tabs open at once do to each
+ * other's results is in ``store/resultsPersistence.ts``), and so would anything
+ * else served from that address later (``SECURITY.md``). What is written is results and the
  * labels that go with them: samples, solved values, element and case names, the
  * names the user gave. No request, no path and no error text of the server.
  * A browser without IndexedDB, or one that refuses it (some private modes),

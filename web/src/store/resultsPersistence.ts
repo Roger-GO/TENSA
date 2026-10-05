@@ -23,6 +23,19 @@
  * the unload guard needs to know (``lib/unsavedWork.ts``): a run that is safely
  * kept is no reason to ask before leaving.
  *
+ * **More than one tab.** The archive belongs to the address, so the tabs open
+ * on it share one, and each mirrors its own lists into it as if it were alone.
+ * A tab that loads takes what the others wrote for its own, and what it then
+ * deletes (Delete, Clear runs, Change case, its retention limit) is gone from
+ * the archive while another tab still lists it. So a tab says what it deleted
+ * on a ``BroadcastChannel``, and a tab that hears of a run it lists stops
+ * counting it as kept: the unload guard asks for it again, as for a run that
+ * could not be written, and the tab writes no more of it. That is all that is
+ * reconciled. The run is not written back, a kept power flow deleted elsewhere
+ * is not announced (nothing asks before one is lost), and the small records
+ * beside the results (the run counter, the overlay pins, the retention limit,
+ * which two power flows are compared) are those of the tab that wrote last.
+ *
  * Where IndexedDB is missing or refuses (some private modes), nothing is kept
  * and everything else works as before. A write that fails (the browser's
  * storage is full) leaves the run in the tab, says so once, and the unload
@@ -50,9 +63,52 @@ export interface ResultsPersistence {
   stop: () => void;
 }
 
+/** The name of the channel on which the tabs of one address say what they deleted. */
+export const RESULTS_CHANNEL_NAME = 'tensa-results';
+
+/** What a tab says once it has deleted a run from the archive. */
+export interface RunDeletedMessage {
+  type: 'run-deleted';
+  runId: string;
+}
+
+/** The channel to the other tabs: as much of a ``BroadcastChannel`` as is used. */
+export interface ResultsChannel {
+  post: (message: RunDeletedMessage) => void;
+  /** Hand what the other tabs post to ``handler``. It is not checked: see ``runDeletedIn``. */
+  listen: (handler: (message: unknown) => void) => void;
+  close: () => void;
+}
+
+/** The browser's channel, or ``null`` where it has none or will not open one. */
+function openResultsChannel(): ResultsChannel | null {
+  if (typeof BroadcastChannel === 'undefined') return null;
+  try {
+    const channel = new BroadcastChannel(RESULTS_CHANNEL_NAME);
+    return {
+      post: (message) => channel.postMessage(message),
+      listen: (handler) => {
+        channel.onmessage = (event: MessageEvent<unknown>) => handler(event.data);
+      },
+      close: () => channel.close(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** The run a message says was deleted, or ``null`` for anything else on the channel. */
+function runDeletedIn(message: unknown): string | null {
+  if (message === null || typeof message !== 'object') return null;
+  const { type, runId } = message as Partial<Record<keyof RunDeletedMessage, unknown>>;
+  return type === 'run-deleted' && typeof runId === 'string' ? runId : null;
+}
+
 export interface ResultsPersistenceOptions {
   /** Opens the archive; ``null`` for a browser that has none. */
   open?: () => Promise<ResultsArchive | null>;
+  /** Opens the channel to the other tabs; ``null`` for a browser that has none. */
+  channel?: () => ResultsChannel | null;
   /** Told about a write that failed. The default says so once per page load. */
   onWriteError?: (error: unknown) => void;
 }
@@ -94,7 +150,9 @@ export function startResultsPersistence(
   const open =
     options.open ?? (async () => (await import('@/lib/resultsArchive')).openResultsArchive());
   const onWriteError = options.onWriteError ?? warnOnce;
+  const openChannel = options.channel ?? openResultsChannel;
   let archive: ResultsArchive | null = null;
+  let channel: ResultsChannel | null = null;
   let stopped = false;
   const unsubscribe: Array<() => void> = [];
 
@@ -120,12 +178,40 @@ export function startResultsPersistence(
 
   const keptRuns = new Map<string, KeptRun>();
   let keptRunsState = '';
+  // The runs another tab has deleted from the archive. One that this tab still
+  // lists stays in this tab only: it is not counted as kept and not written.
+  const deletedElsewhere = new Set<string>();
+
+  /** Delete a run from the archive, and tell the other tabs, which may list it as kept. */
+  const deleteRun = (runId: string): void => {
+    void enqueue((a) => a.deleteRun(runId)).then((deleted) => {
+      if (!deleted) return;
+      try {
+        channel?.post({ type: 'run-deleted', runId });
+      } catch {
+        // The channel has closed: the page is going.
+      }
+    });
+  };
+
+  const onMessage = (message: unknown): void => {
+    const runId = runDeletedIn(message);
+    if (runId === null || stopped) return;
+    deletedElsewhere.add(runId);
+    keptRuns.delete(runId);
+    archivedRunIds.delete(runId);
+  };
 
   const syncRuns = (state: RunsState): void => {
+    // Once this tab no longer lists such a run either, there is nothing to remember.
+    for (const id of deletedElsewhere) {
+      if (state.runs[id] === undefined) deletedElsewhere.delete(id);
+    }
     for (const id of Object.keys(state.runs)) {
       const run = state.runs[id]!;
       // Nothing to keep of a run that is still going, or that ended with no rows.
       if (!isFinished(run) || run.seqCount === 0) continue;
+      if (deletedElsewhere.has(id)) continue;
       const kept = keptRuns.get(id);
       if (kept === undefined || kept.seqCount !== run.seqCount || kept.t !== run.t) {
         keptRuns.set(id, { record: run, seqCount: run.seqCount, t: run.t });
@@ -143,7 +229,7 @@ export function startResultsPersistence(
       if (state.runs[id] !== undefined) continue;
       keptRuns.delete(id);
       archivedRunIds.delete(id);
-      void enqueue((a) => a.deleteRun(id));
+      deleteRun(id);
     }
     const runsState = {
       runCount: state.runCount,
@@ -202,6 +288,10 @@ export function startResultsPersistence(
       return;
     }
     archive = opened;
+    // Listening before the archive is read: a run another tab deletes while it
+    // is being read would otherwise come back counted as kept.
+    channel = openChannel();
+    channel?.listen(onMessage);
 
     try {
       const contents = await opened.read();
@@ -222,12 +312,14 @@ export function startResultsPersistence(
       // from, so it is deleted here.
       const runs = useRunsStore.getState().runs;
       for (const read of contents.runs) {
+        // Deleted by another tab since it was read: neither kept nor to delete.
+        if (deletedElsewhere.has(read.runId)) continue;
         const run = runs[read.runId];
         if (run !== undefined && run.seqCount === read.seqCount) {
           keptRuns.set(run.runId, { record: run, seqCount: run.seqCount, t: run.t });
           archivedRunIds.add(run.runId);
         } else {
-          void enqueue((a) => a.deleteRun(read.runId));
+          deleteRun(read.runId);
         }
       }
       const snapshots = usePflowHistoryStore.getState().snapshots;
@@ -240,7 +332,7 @@ export function startResultsPersistence(
       // stay for good. (A build that changes what a record holds bumps the
       // database version, and an older build cannot open that database at all,
       // so this never deletes what a newer build wrote.)
-      for (const id of contents.staleRunIds) void enqueue((a) => a.deleteRun(id));
+      for (const id of contents.staleRunIds) deleteRun(id);
       for (const id of contents.stalePflowIds) void enqueue((a) => a.deletePflow(id));
     } catch (err) {
       // What was kept could not be read. Go on keeping what comes next.
@@ -266,9 +358,13 @@ export function startResultsPersistence(
       stopped = true;
       for (const off of unsubscribe) off();
       archivedRunIds.clear();
-      // Let the writes in flight finish before the connection goes.
+      // Let the writes in flight finish before the connection and the channel go.
       const closing = archive;
-      void queue.then(() => closing?.close());
+      const closingChannel = channel;
+      void queue.then(() => {
+        closing?.close();
+        closingChannel?.close();
+      });
     },
   };
 }

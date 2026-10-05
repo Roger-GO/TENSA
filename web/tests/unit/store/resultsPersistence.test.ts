@@ -19,14 +19,43 @@ import { usePflowHistoryStore } from '@/store/pflowHistory';
 import {
   __resetResultsPersistenceForTests,
   isRunArchived,
+  RESULTS_CHANNEL_NAME,
   startResultsPersistence,
+  type ResultsChannel,
   type ResultsPersistence,
 } from '@/store/resultsPersistence';
 import { DEFAULT_MEMORY_BUDGET_BYTES, DEFAULT_RETENTION_LIMIT, useRunsStore } from '@/store/runs';
 import { useSweepStore } from '@/store/sweep';
 import { finishedRun } from '../helpers/runs';
 
+/**
+ * The channel between the tabs of one address, as a test holds it: what one end
+ * posts, every other open end receives at once, as a copy.
+ */
+function channelHub(): { open: () => ResultsChannel } {
+  const listeners = new Map<ResultsChannel, (message: unknown) => void>();
+  return {
+    open: () => {
+      const end: ResultsChannel = {
+        post: (message) => {
+          for (const [other, handler] of [...listeners]) {
+            if (other !== end) handler(structuredClone(message));
+          }
+        },
+        listen: (handler) => {
+          listeners.set(end, handler);
+        },
+        close: () => {
+          listeners.delete(end);
+        },
+      };
+      return end;
+    },
+  };
+}
+
 let factory: IDBFactory;
+let hub: ReturnType<typeof channelHub>;
 let persistence: ResultsPersistence | null = null;
 const writeErrors: unknown[] = [];
 
@@ -44,10 +73,34 @@ function emptySlices(): void {
 
 async function start(
   open: () => Promise<ResultsArchive | null> = () => openResultsArchive(factory),
+  channel: () => ResultsChannel | null = () => hub.open(),
 ): Promise<ResultsPersistence> {
-  persistence = startResultsPersistence({ open, onWriteError: (err) => writeErrors.push(err) });
+  persistence = startResultsPersistence({
+    open,
+    channel,
+    onWriteError: (err) => writeErrors.push(err),
+  });
   await persistence.ready;
   return persistence;
+}
+
+/** Another tab on the same address: its end of the channel, and what it has heard. */
+function otherTab(): { channel: ResultsChannel; heard: unknown[] } {
+  const channel = hub.open();
+  const heard: unknown[] = [];
+  channel.listen((message) => heard.push(message));
+  return { channel, heard };
+}
+
+/** What that tab does to the archive when it deletes a run from its own list. */
+async function deleteInOtherTab(tab: { channel: ResultsChannel }, runId: string): Promise<void> {
+  const theirs = (await openResultsArchive(factory))!;
+  try {
+    await theirs.deleteRun(runId);
+  } finally {
+    theirs.close();
+  }
+  tab.channel.post({ type: 'run-deleted', runId });
 }
 
 /** What a reload does to the tab: the slices start empty and persistence starts again. */
@@ -102,6 +155,7 @@ function keepPf(id: string, v?: number): void {
 
 beforeEach(() => {
   factory = new IDBFactory();
+  hub = channelHub();
   writeErrors.length = 0;
   emptySlices();
   __resetResultsPersistenceForTests();
@@ -555,5 +609,162 @@ describe('results across a reload: the unload guard', () => {
     finish('r1');
     await reload();
     expect(unsavedWork().runs).toBe(false);
+  });
+});
+
+describe('results across a reload: more than one tab on the archive', () => {
+  beforeEach(() => {
+    useEditJournalStore.getState().reset();
+    useSweepStore.getState().clearSweeps();
+  });
+
+  it('tells the other tabs which run it deleted, once it is out of the browser', async () => {
+    const other = otherTab();
+    await start();
+    simulate('r1');
+    finish('r1');
+    simulate('r2');
+    finish('r2');
+    await persistence!.flushed();
+    // A run that is written is not news to anyone.
+    expect(other.heard).toEqual([]);
+
+    useRunsStore.getState().removeRun('r1');
+    expect(other.heard).toEqual([]);
+    await persistence!.flushed();
+
+    expect(other.heard).toEqual([{ type: 'run-deleted', runId: 'r1' }]);
+    expect((await archived()).runs.map((r) => r.runId)).toEqual(['r2']);
+  });
+
+  it('asks again for a run that another tab deleted, and does not write it back', async () => {
+    const other = otherTab();
+    await start();
+    simulate('r1');
+    finish('r1');
+    await persistence!.flushed();
+    expect(isRunArchived('r1')).toBe(true);
+    expect(unsavedWork().runs).toBe(false);
+
+    // The other tab took the run for its own when it loaded, and now clears its runs.
+    await deleteInOtherTab(other, 'r1');
+
+    // It is still listed here, and a reload would no longer bring it back.
+    expect(useRunsStore.getState().runs.r1).toBeDefined();
+    expect(isRunArchived('r1')).toBe(false);
+    expect(unsavedWork().runs).toBe(true);
+
+    // Nothing more of it is written, neither its samples nor a record without them.
+    useRunsStore.getState().setRunDisplayName('r1', 'Base case');
+    simulate('r2');
+    finish('r2');
+    const kept = await archived();
+    expect(kept.runs.map((r) => r.runId)).toEqual(['r2']);
+    expect(kept.staleRunIds).toEqual([]);
+    expect(isRunArchived('r1')).toBe(false);
+    expect(isRunArchived('r2')).toBe(true);
+
+    // Deleting it here leaves nothing to delete, and nothing to tell.
+    useRunsStore.getState().removeRun('r1');
+    await persistence!.flushed();
+    expect(other.heard).toEqual([]);
+    expect(unsavedWork().runs).toBe(false);
+    expect(writeErrors).toEqual([]);
+  });
+
+  it('does not count as kept a run another tab deletes while the archive is read', async () => {
+    const other = otherTab();
+    await start();
+    simulate('r1');
+    finish('r1');
+    simulate('r2');
+    finish('r2');
+    await persistence!.flushed();
+    persistence!.stop();
+    emptySlices();
+    __resetResultsPersistenceForTests();
+
+    await start(async () => {
+      const archive = (await openResultsArchive(factory))!;
+      return {
+        ...archive,
+        read: async () => {
+          const contents = await archive.read();
+          // Between the read and what is done with it.
+          await deleteInOtherTab(other, 'r1');
+          return contents;
+        },
+      };
+    });
+
+    // Both were read, so both are listed; only one is still in the browser.
+    expect(Object.keys(useRunsStore.getState().runs).sort()).toEqual(['r1', 'r2']);
+    expect(isRunArchived('r1')).toBe(false);
+    expect(isRunArchived('r2')).toBe(true);
+    expect(unsavedWork().runs).toBe(true);
+    expect((await archived()).runs.map((r) => r.runId)).toEqual(['r2']);
+  });
+
+  it('takes nothing else on the channel for a deletion', async () => {
+    const other = otherTab();
+    await start();
+    simulate('r1');
+    finish('r1');
+    await persistence!.flushed();
+
+    for (const message of [
+      null,
+      'run-deleted',
+      { type: 'run-deleted' },
+      { type: 'run-deleted', runId: 7 },
+      { type: 'run-written', runId: 'r1' },
+    ]) {
+      (other.channel.post as (message: unknown) => void)(message);
+    }
+
+    expect(isRunArchived('r1')).toBe(true);
+    expect(unsavedWork().runs).toBe(false);
+  });
+
+  it('keeps results the same way in a browser with no channel between tabs', async () => {
+    await start(undefined, () => null);
+    simulate('r1');
+    finish('r1');
+    simulate('r2');
+    finish('r2');
+    useRunsStore.getState().removeRun('r1');
+
+    expect((await archived()).runs.map((r) => r.runId)).toEqual(['r2']);
+    expect(isRunArchived('r2')).toBe(true);
+    expect(writeErrors).toEqual([]);
+  });
+
+  it("speaks on the browser's own channel when it is given no other", async () => {
+    persistence = startResultsPersistence({
+      open: () => openResultsArchive(factory),
+      onWriteError: (err) => writeErrors.push(err),
+    });
+    await persistence.ready;
+    simulate('r1');
+    finish('r1');
+    simulate('r2');
+    finish('r2');
+    await persistence.flushed();
+    expect(isRunArchived('r1')).toBe(true);
+
+    const other = new BroadcastChannel(RESULTS_CHANNEL_NAME);
+    try {
+      const heard: unknown[] = [];
+      other.onmessage = (event: MessageEvent<unknown>) => heard.push(event.data);
+
+      other.postMessage({ type: 'run-deleted', runId: 'r1' });
+      await vi.waitFor(() => expect(isRunArchived('r1')).toBe(false));
+
+      useRunsStore.getState().removeRun('r2');
+      await persistence.flushed();
+      await vi.waitFor(() => expect(heard).toEqual([{ type: 'run-deleted', runId: 'r2' }]));
+    } finally {
+      other.close();
+    }
   });
 });

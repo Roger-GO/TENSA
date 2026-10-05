@@ -14,6 +14,12 @@
  * page asks nothing on the way out once they are there, and that what is deleted
  * from the list is deleted from the browser too.
  *
+ * A second test opens two tabs, because the tabs on one address share that
+ * storage: the second tab starts with the first one's run and deletes it, and
+ * the first tab, which still lists it, then asks before it is left. The tabs
+ * tell each other over the browser's own `BroadcastChannel`, which the unit
+ * tests stand in for as well.
+ *
  * Kundur's own case file trips a line at 2 s, so a short run has something to
  * show without a fault being added.
  */
@@ -24,7 +30,8 @@ const CASE_FILE = 'kundur_full.xlsx';
 /** Key under which the UI remembers that the first-run coach was dismissed. */
 const FIRST_RUN_COACH_KEY = 'tensa:first-run-coach-v1';
 
-test.beforeEach(async ({ page }) => {
+/** Keep the first-run coach off a page, before it loads. */
+async function dismissFirstRunCoach(page: Page): Promise<void> {
   await page.addInitScript((key) => {
     try {
       window.localStorage.setItem(key, 'dismissed');
@@ -32,6 +39,10 @@ test.beforeEach(async ({ page }) => {
       // Storage unavailable: the coach shows, which does not block the test.
     }
   }, FIRST_RUN_COACH_KEY);
+}
+
+test.beforeEach(async ({ page }) => {
+  await dismissFirstRunCoach(page);
 });
 
 /** Open a case from the saved-cases list (see load-pf-flow.spec.ts for why this retries). */
@@ -192,5 +203,59 @@ test('a run and a power flow are still there after the page is reloaded', async 
   await expect(page.getByTestId('topbar-menu-more-navigation.history')).toBeDisabled();
 
   expect(leavePrompts).toEqual([]);
+  expect(uncaughtErrors).toEqual([]);
+});
+
+test('a tab asks before it is left once another tab has deleted its run', async ({
+  page,
+  context,
+}) => {
+  const uncaughtErrors: string[] = [];
+  page.on('pageerror', (error) => uncaughtErrors.push(error.message));
+  const leavePrompts: string[] = [];
+  page.on('dialog', (dialog) => {
+    leavePrompts.push(dialog.type());
+    void dialog.accept();
+  });
+
+  await page.goto('/');
+  await openCase(page, CASE_FILE);
+  await page.getByRole('tab', { name: 'Analysis' }).click();
+  await page.getByTestId('analysis-sub-tab-tds').click();
+  await page.locator('#tds-config-tf').fill('3');
+  await page.getByTestId('run-mode-tds').click();
+  await page.getByTestId('run-tds-button').click();
+  await expect(page.getByTestId('tds-run-status-badge')).toContainText(/done/i, {
+    timeout: 120_000,
+  });
+  const runId = await page.getByTestId('time-series-plot').getAttribute('data-run-id');
+  expect(runId).toBeTruthy();
+  await expect.poll(() => runsInBrowserStorage(page)).toBe(1);
+
+  // ---- a second tab on the same address starts with the run, and deletes it ------
+  const second = await context.newPage();
+  second.on('pageerror', (error) => uncaughtErrors.push(error.message));
+  await dismissFirstRunCoach(second);
+  await second.goto('/');
+  await openHistory(second);
+  await expect(second.getByTestId(`history-run-row-${runId}`)).toBeVisible();
+  await second.getByTestId(`history-run-row-delete-${runId}`).click();
+  await expect(second.getByTestId(`history-run-row-${runId}`)).toHaveCount(0);
+  await expect.poll(() => runsInBrowserStorage(second)).toBe(0);
+
+  // ---- the first tab still lists it, and is now the only place it is in ----------
+  await page.bringToFront();
+  await openHistory(page);
+  await expect(page.getByTestId(`history-run-row-${runId}`)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('history-drawer')).toBeHidden();
+
+  // So it asks before it goes, and once it has gone the run is gone with it.
+  await page.reload();
+  expect(leavePrompts).toEqual(['beforeunload']);
+  await expect(page.getByTestId(`saved-cases-row-${CASE_FILE}`)).toBeVisible();
+  await page.getByTestId('topbar-menu-more-trigger').click();
+  await expect(page.getByTestId('topbar-menu-more-navigation.history')).toBeDisabled();
+
   expect(uncaughtErrors).toEqual([]);
 });

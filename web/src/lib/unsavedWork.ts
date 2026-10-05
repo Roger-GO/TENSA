@@ -12,8 +12,9 @@
  *   ends it, and a finished one whose results the browser has not kept. A finished
  *   run is written to the browser's storage and comes back after a reload
  *   (``store/resultsPersistence.ts``), so it only counts until that write is done,
- *   or for good where the browser has no storage to give or it is full. A
- *   sensitivity sweep is not kept: one that is running or has results counts.
+ *   or for good where the browser has no storage to give or it is full, or once
+ *   another tab has deleted it from there. A sensitivity sweep is not kept: one
+ *   that is running or has results counts.
  */
 import { hasUnsavedEdits } from '@/store/editJournal';
 import { isRunArchived } from '@/store/resultsPersistence';
