@@ -82,6 +82,7 @@ import { usePmuStore } from '@/store/pmu';
 import { useProfilesStore } from '@/store/profiles';
 import { useEditJournalStore } from '@/store/editJournal';
 import { useJobsStore, mintLocalJobId, LOCAL_ID_PREFIX } from '@/store/jobs';
+import { useMessagesStore } from '@/store/messages';
 import type { JobKind, JobRecord } from '@/store/jobs';
 import { toast } from '@/lib/toast';
 import { announceViolations } from '@/lib/announceViolations';
@@ -499,7 +500,9 @@ export interface LoadCaseVars {
 
 /**
  * `POST /sessions/{id}/case`. Invalidates the topology query so the next
- * read picks up the new case.
+ * read picks up the new case, and drops the Messages tab's account of the case
+ * it replaces (what the load itself logs stays), so the tab and its warning
+ * count describe the case that is open. A load that fails changes nothing there.
  */
 export function useLoadCase(): UseMutationResult<TopologySummary, Error, LoadCaseVars> {
   const queryClient = useQueryClient();
@@ -510,11 +513,17 @@ export function useLoadCase(): UseMutationResult<TopologySummary, Error, LoadCas
         { body: request, timeoutMs: TIMEOUTS.caseLoad },
       );
     },
-    onMutate: ({ request }) => {
+    onMutate: ({ sessionId, request }) => {
       useCaseStore.getState().setLoadingPath(request.primary_path);
-      return { jobId: registerJob('case-load', { primary_path: request.primary_path }) };
+      // The newest message about the old case that has been read; the load's own come after.
+      const messages = useMessagesStore.getState();
+      return {
+        jobId: registerJob('case-load', { primary_path: request.primary_path }),
+        messagesBefore: messages.sessionId === sessionId ? messages.cursor : 0,
+      };
     },
     onSuccess: (data, { sessionId, request }, ctx) => {
+      if (ctx) useMessagesStore.getState().dropThrough(sessionId, ctx.messagesBefore);
       // Seed the topology cache with the load response (the substrate's
       // load handler returns the topology already; saves a round-trip).
       queryClient.setQueryData(queryKeys.topology(sessionId), data);

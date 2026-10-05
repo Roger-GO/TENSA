@@ -17,6 +17,19 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock('@/api/useSessionMessages', () => api);
 
+// The note about generators past a limit reads the violation report (a query over the
+// topology), the run's readiness and the run action; each is stood in for here.
+const power = vi.hoisted(() => ({
+  report: null as import('@/lib/violations').ViolationReport | null,
+  readiness: { ready: true, disabledReason: null as string | null },
+  run: vi.fn(),
+}));
+vi.mock('@/lib/useViolationReport', () => ({ useViolationReport: () => power.report }));
+vi.mock('@/lib/useRunReadiness', () => ({
+  useRunReadiness: () => ({ ...power.readiness, recovery: null }),
+}));
+vi.mock('@/lib/usePflowRunAction', () => ({ usePflowRunAction: () => power.run }));
+
 const toastMock = vi.hoisted(() => ({
   success: vi.fn(),
   info: vi.fn(),
@@ -27,8 +40,14 @@ const toastMock = vi.hoisted(() => ({
 vi.mock('@/lib/toast', () => ({ toast: toastMock }));
 
 import { MessagesPanel } from '@/components/messages/MessagesPanel';
+import { collectViolations } from '@/lib/violations';
+import { useLayoutStore } from '@/store/layout';
 import { DEFAULT_SHOWN_LEVELS, useMessagesStore } from '@/store/messages';
+import { usePflowStore } from '@/store/pflow';
+import { DEFAULT_PFLOW_OPTIONS } from '@/lib/pflowOptions';
+import { usePflowOptionsStore } from '@/store/pflowOptions';
 import { useSessionStore } from '@/store/session';
+import { LIMITS_TOPOLOGY, limitsPflow } from '../../helpers/limitsCase';
 
 function message(overrides: Partial<SessionMessage> & { seq: number }): SessionMessage {
   return {
@@ -87,12 +106,19 @@ beforeEach(() => {
   useMessagesStore.getState().reset();
   useMessagesStore.setState({ shownLevels: DEFAULT_SHOWN_LEVELS, query: '' });
   useSessionStore.setState({ sessionId: parseSessionId('sess-1') });
+  power.report = null;
+  power.readiness = { ready: true, disabledReason: null };
+  power.run.mockClear();
+  usePflowStore.getState().clearPflow();
+  usePflowOptionsStore.getState().resetForNewCase();
 });
 
 afterEach(() => {
   cleanup();
   useMessagesStore.getState().reset();
   useSessionStore.setState({ sessionId: null });
+  usePflowStore.getState().clearPflow();
+  usePflowOptionsStore.getState().resetForNewCase();
 });
 
 describe('<MessagesPanel /> the list', () => {
@@ -431,5 +457,111 @@ describe('<MessagesPanel /> the log it reads', () => {
     fill(SAMPLE);
     render(<MessagesPanel />);
     expect(screen.getByTestId('messages-hint')).toHaveTextContent('');
+  });
+});
+
+describe('<MessagesPanel /> generators past a limit that no warning names', () => {
+  /** A converged power flow with one generator past its qmax, run with or without Q limits enforced. */
+  function powerFlow(enforceQLimits: boolean, overrides = {}): void {
+    const result = limitsPflow({
+      settings: {
+        tolerance: 1e-6,
+        max_iterations: 25,
+        flat_start: false,
+        enforce_q_limits: enforceQLimits,
+      },
+      ...overrides,
+    });
+    usePflowStore.getState().setLastRun(result);
+    power.report = collectViolations(result, LIMITS_TOPOLOGY);
+  }
+
+  it('explains why there is no warning, and counts the generators', () => {
+    fill([message({ seq: 1 })]);
+    powerFlow(false);
+    render(<MessagesPanel />);
+
+    const note = screen.getByTestId('messages-qlimit-note');
+    expect(note).toHaveAccessibleName('Generators past a reactive limit');
+    expect(note).toHaveTextContent('1 generator is past a reactive limit (see the Violations tab)');
+    expect(note).toHaveTextContent('this power flow did not enforce Q limits');
+  });
+
+  it('is not there before a power flow has run', () => {
+    fill([message({ seq: 1 })]);
+    render(<MessagesPanel />);
+    expect(screen.queryByTestId('messages-qlimit-note')).toBeNull();
+  });
+
+  it('is not there when the power flow enforced Q limits', () => {
+    fill([message({ seq: 1 })]);
+    powerFlow(true);
+    render(<MessagesPanel />);
+    expect(screen.queryByTestId('messages-qlimit-note')).toBeNull();
+  });
+
+  it('is not there when no generator is past a limit', () => {
+    fill([message({ seq: 1 })]);
+    powerFlow(false, { generator_outputs: {} });
+    render(<MessagesPanel />);
+    expect(screen.queryByTestId('messages-qlimit-note')).toBeNull();
+  });
+
+  it('is not there when the power flow did not converge', () => {
+    fill([message({ seq: 1 })]);
+    powerFlow(false, { converged: false });
+    render(<MessagesPanel />);
+    expect(screen.queryByTestId('messages-qlimit-note')).toBeNull();
+  });
+
+  it('turns Q limits on and runs the power flow from its button', async () => {
+    const user = userEvent.setup();
+    fill([message({ seq: 1 })]);
+    powerFlow(false);
+    render(<MessagesPanel />);
+
+    await user.click(screen.getByRole('button', { name: 'Run PF with Q limits enforced' }));
+    expect(usePflowOptionsStore.getState().options.enforceQLimits).toBe(true);
+    expect(power.run).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the power flow options from its other button', async () => {
+    const user = userEvent.setup();
+    fill([message({ seq: 1 })]);
+    powerFlow(false);
+    useLayoutStore.setState({ activeBottomDrawerTab: 'messages', activeAnalysisSubTab: 'eig' });
+    render(<MessagesPanel />);
+
+    await user.click(screen.getByRole('button', { name: 'Power flow options' }));
+    expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('analysis');
+    expect(useLayoutStore.getState().activeAnalysisSubTab).toBe('pf');
+    expect(usePflowOptionsStore.getState().options).toEqual(DEFAULT_PFLOW_OPTIONS);
+  });
+
+  it('says why the run is not available, and does not offer it, while it cannot run', async () => {
+    const user = userEvent.setup();
+    fill([message({ seq: 1 })]);
+    powerFlow(false);
+    power.readiness = { ready: false, disabledReason: 'Reset the run before running PF.' };
+    render(<MessagesPanel />);
+
+    const run = screen.getByRole('button', { name: 'Run PF with Q limits enforced' });
+    expect(run).toBeDisabled();
+    expect(run).toHaveAttribute('title', 'Reset the run before running PF.');
+    expect(screen.getByTestId('messages-qlimit-disabled')).toHaveTextContent(
+      'Run PF is not available: Reset the run before running PF.',
+    );
+    await user.click(run);
+    expect(power.run).not.toHaveBeenCalled();
+  });
+});
+
+describe('<MessagesPanel /> what each level holds', () => {
+  it('says on the warnings toggle what a warning can be, the Q-limit and impedance notices included', () => {
+    render(<MessagesPanel />);
+    const title = screen.getByTestId('messages-level-warning').getAttribute('title') ?? '';
+    expect(title).toContain('Hide the warnings');
+    expect(title).toContain('held at a Q limit');
+    expect(title).toContain('constant impedance');
   });
 });

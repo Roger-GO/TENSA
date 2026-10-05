@@ -12,6 +12,12 @@
  * twice: the server adds the repeat to it and numbers it again, so a page that
  * brings it again replaces the one held, count and all.
  *
+ * A case that loads replaces the one the messages describe, so `dropThrough` forgets
+ * what was said before the load began; `floor` is the number it forgot through, and
+ * nothing at or below it is taken back by a read that was already in flight. What the
+ * load itself logs comes after the floor and stays. The server's own log is left
+ * alone (a script reading it by number sees every case); Clear empties that too.
+ *
  * Not persisted: the messages describe the live server session, which a reload
  * replaces. The level and text filters are in-memory too, so they last as long as
  * the tab does and not across a reload, like the grid filters.
@@ -53,6 +59,8 @@ export interface MessagesState {
   cursor: number;
   /** Messages the server lost to its caps over the session. */
   dropped: number;
+  /** Messages numbered up to here described a case that has since been replaced, and are not kept. */
+  floor: number;
   /**
    * How many times the messages were cleared here. A read that began before a clear
    * brings messages the clear removed, so `pullMessages` compares it before and after.
@@ -67,6 +75,11 @@ export interface MessagesState {
   receive: (sessionId: string, page: SessionMessages) => void;
   /** Forget the messages held, keeping the place the next read goes on from, and count the clear. */
   clearMessages: () => void;
+  /**
+   * A case loaded into `sessionId`: forget what was said up to message number
+   * `through`, the newest this slice had read when the load began.
+   */
+  dropThrough: (sessionId: string, through: number) => void;
   /** Forget everything, for a session that is gone. */
   reset: () => void;
   setLevelShown: (level: MessageLevel, shown: boolean) => void;
@@ -78,6 +91,7 @@ export const useMessagesStore = create<MessagesState>((set) => ({
   messages: [],
   cursor: 0,
   dropped: 0,
+  floor: 0,
   clears: 0,
   shownLevels: DEFAULT_SHOWN_LEVELS,
   query: '',
@@ -85,9 +99,11 @@ export const useMessagesStore = create<MessagesState>((set) => ({
   receive: (sessionId, page) =>
     set((state) => {
       const held = state.sessionId === sessionId ? state.messages : [];
+      const floor = state.sessionId === sessionId ? state.floor : 0;
       const lastHeld = held.length > 0 ? held[held.length - 1]!.seq : 0;
-      // Two reads that overlap bring the same message twice; keep it once.
-      const fresh = page.messages.filter((m) => m.seq > lastHeld);
+      // Two reads that overlap bring the same message twice; keep it once. One that
+      // began before a case loaded can bring what was said about the old case.
+      const fresh = page.messages.filter((m) => m.seq > lastHeld && m.seq > floor);
       const kept = held.filter((m) => m.seq >= page.first_seq);
       // The newest message, said again with a larger count, comes back under a new number.
       const newest = kept[kept.length - 1];
@@ -96,6 +112,7 @@ export const useMessagesStore = create<MessagesState>((set) => ({
       const merged = [...kept, ...fresh];
       return {
         sessionId,
+        floor,
         messages:
           merged.length > MAX_MESSAGES ? merged.slice(merged.length - MAX_MESSAGES) : merged,
         cursor: page.next_after,
@@ -105,7 +122,14 @@ export const useMessagesStore = create<MessagesState>((set) => ({
 
   clearMessages: () => set((state) => ({ messages: [], clears: state.clears + 1 })),
 
-  reset: () => set({ sessionId: null, messages: [], cursor: 0, dropped: 0 }),
+  dropThrough: (sessionId, through) =>
+    set((state) =>
+      state.sessionId !== sessionId || through <= state.floor
+        ? state
+        : { messages: state.messages.filter((m) => m.seq > through), floor: through },
+    ),
+
+  reset: () => set({ sessionId: null, messages: [], cursor: 0, dropped: 0, floor: 0 }),
 
   setLevelShown: (level, shown) =>
     set((state) => ({ shownLevels: { ...state.shownLevels, [level]: shown } })),

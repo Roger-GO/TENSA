@@ -165,6 +165,55 @@ describe('useMessagesStore', () => {
     ]);
   });
 
+  describe('when a case replaces the one the messages describe', () => {
+    it('forgets what was said through the newest message read before the load', () => {
+      const { receive } = useMessagesStore.getState();
+      receive('s1', page([message(1), message(2), message(3)]));
+      useMessagesStore.getState().dropThrough('s1', 3);
+      expect(seqs()).toEqual([]);
+
+      // What the load logs comes after, and stays.
+      useMessagesStore.getState().receive('s1', page([message(4), message(5)], { first_seq: 1 }));
+      expect(seqs()).toEqual([4, 5]);
+      expect(useMessagesStore.getState().cursor).toBe(5);
+    });
+
+    it('keeps what was said after that message', () => {
+      useMessagesStore.getState().receive('s1', page([message(1), message(2), message(3)]));
+      useMessagesStore.getState().dropThrough('s1', 2);
+      expect(seqs()).toEqual([3]);
+    });
+
+    it('does not take back old messages that a read begun before the load brings', () => {
+      useMessagesStore.getState().receive('s1', page([message(1), message(2)]));
+      useMessagesStore.getState().dropThrough('s1', 2);
+      useMessagesStore.getState().receive('s1', page([message(1), message(2), message(3)]));
+      expect(seqs()).toEqual([3]);
+    });
+
+    it('leaves a slice that holds another session alone', () => {
+      useMessagesStore.getState().receive('s1', page([message(1), message(2)]));
+      useMessagesStore.getState().dropThrough('s2', 2);
+      expect(seqs()).toEqual([1, 2]);
+      expect(useMessagesStore.getState().floor).toBe(0);
+    });
+
+    it('starts over with the next session, whose numbers have nothing to do with the old floor', () => {
+      useMessagesStore.getState().receive('s1', page([message(1), message(2), message(3)]));
+      useMessagesStore.getState().dropThrough('s1', 3);
+      useMessagesStore.getState().receive('s2', page([message(1), message(2)]));
+      expect(seqs()).toEqual([1, 2]);
+      expect(useMessagesStore.getState().floor).toBe(0);
+    });
+
+    it('is forgotten by a reset along with the rest', () => {
+      useMessagesStore.getState().receive('s1', page([message(1)]));
+      useMessagesStore.getState().dropThrough('s1', 1);
+      useMessagesStore.getState().reset();
+      expect(useMessagesStore.getState().floor).toBe(0);
+    });
+  });
+
   it('keeps the level and filter choices through a reset, which is about the session', () => {
     const { setLevelShown, setQuery } = useMessagesStore.getState();
     setLevelShown('info', true);

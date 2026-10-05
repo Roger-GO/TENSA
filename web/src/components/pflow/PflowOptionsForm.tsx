@@ -169,7 +169,7 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
         <CheckRow
           id="pflow-enforce-q-limits"
           label="Enforce generator Q limits"
-          hint="Hold a generator at its Qmin or Qmax when its reactive power goes past one, and let its voltage give. Without it the limits are only reported."
+          hint="Hold a generator at its Qmin or Qmax when its reactive power goes past one, and let its voltage give; the Messages tab then names each generator held. Without it the limits are only reported, in the Violations tab."
           checked={shownSwitch(options.enforceQLimits, caseSettings.enforceQLimits)}
           onChange={(checked) => setOptions({ enforceQLimits: checked })}
           note={caseNote(options.enforceQLimits, caseSettings.enforceQLimits)}

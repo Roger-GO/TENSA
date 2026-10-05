@@ -3,9 +3,11 @@
  *
  * Pure helpers over the messages `GET /sessions/{id}/messages` returns: the
  * level order, the label of the command a message came from, the clock time, the
- * filter, the count per level and the text the Copy button puts on the clipboard.
+ * filter, the count per level and the text the Copy button puts on the clipboard,
+ * and what to tell a reader who looks for a Q-limit warning that was never logged.
  */
-import type { MessageLevel, SessionMessage } from '@/api/types';
+import type { MessageLevel, PflowSettings, SessionMessage } from '@/api/types';
+import type { ViolationReport } from '@/lib/violations';
 
 /** Lowest first, the order the server ranks them in. */
 export const MESSAGE_LEVELS: readonly MessageLevel[] = ['info', 'warning', 'error'];
@@ -114,4 +116,31 @@ export function messagesToText(messages: readonly SessionMessage[]): string {
       return `${lead.join('  ')}  ${m.text}${repeat}`;
     })
     .join('\n');
+}
+
+/**
+ * How many generators the last power flow left past a reactive limit without
+ * holding them there, because it did not enforce Q limits. Such a generator is a
+ * finding of the Violations tab and no warning: ANDES only holds a generator at a
+ * limit, and the server only says so, when Q limits are enforced. Zero when the run
+ * did enforce them, or the run's settings are not known.
+ */
+export function unheldQLimitCount(
+  settings: PflowSettings | null | undefined,
+  report: ViolationReport | null,
+): number {
+  if (settings === null || settings === undefined || settings.enforce_q_limits) return 0;
+  if (report === null) return 0;
+  return report.items.filter((v) => v.kind === 'generator-q' && v.severity === 'violation').length;
+}
+
+/** What the Messages tab says about `count` generators past a limit that no warning names. */
+export function unheldQLimitText(count: number): string {
+  const one = count === 1;
+  return (
+    `${count} generator${one ? ' is' : 's are'} past a reactive limit (see the Violations tab), ` +
+    `but this power flow did not enforce Q limits, so ${one ? 'it was' : 'they were'} not held ` +
+    `at the limit and no warning names ${one ? 'it' : 'them'}. Run it again with Q limits ` +
+    'enforced and each generator held at a limit is named here.'
+  );
 }

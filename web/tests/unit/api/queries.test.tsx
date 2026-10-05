@@ -37,6 +37,7 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useRecentCasesStore } from '@/store/recentCases';
 import { usePflowOptionsStore } from '@/store/pflowOptions';
+import { useMessagesStore } from '@/store/messages';
 import { useJobsStore, LOCAL_ID_PREFIX, isTerminalStatus } from '@/store/jobs';
 import type { SessionId, WorkspacePath } from '@/api/types';
 
@@ -158,6 +159,91 @@ describe('queries hooks', () => {
     });
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(useRecentCasesStore.getState().cases).toEqual([]);
+  });
+
+  describe('useLoadCase and what ANDES said about the case it replaces', () => {
+    const topology = {
+      state: 'pre-setup' as const,
+      buses: [],
+      lines: [],
+      transformers: [],
+      generators: [],
+      loads: [],
+    };
+    const said = (seq: number, text: string) => ({
+      seq,
+      time: 1_700_000_000 + seq,
+      level: 'warning' as const,
+      logger: 'andes.test',
+      source: 'run_pflow',
+      text,
+      repeat: 1,
+    });
+    const page = (messages: ReturnType<typeof said>[]) => ({
+      messages,
+      first_seq: messages[0]?.seq ?? 1,
+      last_seq: messages[messages.length - 1]?.seq ?? 0,
+      next_after: messages[messages.length - 1]?.seq ?? 0,
+      dropped: 0,
+    });
+    const texts = () => useMessagesStore.getState().messages.map((m) => m.text);
+
+    afterEach(() => useMessagesStore.getState().reset());
+
+    it('forgets them once the new case has loaded, and keeps what the load logged', async () => {
+      useMessagesStore
+        .getState()
+        .receive('sess-msg', page([said(1, 'old case warning'), said(2, 'old case again')]));
+      let release: (r: Response) => void = () => {};
+      fetchSpy.mockReturnValueOnce(new Promise<Response>((resolve) => (release = resolve)));
+      const { Wrapper } = makeWrapper();
+      const { result } = renderHook(() => useLoadCase(), { wrapper: Wrapper });
+
+      result.current.mutate({
+        sessionId: 'sess-msg' as SessionId,
+        request: { primary_path: 'kundur.xlsx' },
+      });
+      await waitFor(() => expect(useCaseStore.getState().loadingPath).toBe('kundur.xlsx'));
+      // Still the old case's until the load lands, and the load's own messages are not lost
+      // whether they were read before or after it.
+      expect(texts()).toEqual(['old case warning', 'old case again']);
+      useMessagesStore.getState().receive('sess-msg', page([said(3, 'load message')]));
+
+      release(jsonResponse(topology));
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(texts()).toEqual(['load message']);
+    });
+
+    it('keeps them when the load fails, since the old case is still the one open', async () => {
+      useMessagesStore.getState().receive('sess-msg', page([said(1, 'old case warning')]));
+      fetchSpy.mockResolvedValueOnce(
+        jsonResponse(
+          { type: 'about:blank', title: 'Unprocessable', status: 422, detail: 'bad' },
+          422,
+        ),
+      );
+      const { Wrapper } = makeWrapper();
+      const { result } = renderHook(() => useLoadCase(), { wrapper: Wrapper });
+      result.current.mutate({
+        sessionId: 'sess-msg' as SessionId,
+        request: { primary_path: 'broken.raw' },
+      });
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(texts()).toEqual(['old case warning']);
+    });
+
+    it('leaves the messages of another session alone', async () => {
+      useMessagesStore.getState().receive('sess-other', page([said(1, 'other session')]));
+      fetchSpy.mockResolvedValueOnce(jsonResponse(topology));
+      const { Wrapper } = makeWrapper();
+      const { result } = renderHook(() => useLoadCase(), { wrapper: Wrapper });
+      result.current.mutate({
+        sessionId: 'sess-msg' as SessionId,
+        request: { primary_path: 'kundur.xlsx' },
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(texts()).toEqual(['other session']);
+    });
   });
 
   it('useLoadCase marks the case as loading while the request runs, and clears it after', async () => {

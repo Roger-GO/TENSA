@@ -3,7 +3,7 @@
  * counts and the text Copy puts on the clipboard.
  */
 import { describe, expect, it } from 'vitest';
-import type { MessageLevel, SessionMessage } from '@/api/types';
+import type { MessageLevel, PflowSettings, SessionMessage } from '@/api/types';
 import {
   countByLevel,
   filterWords,
@@ -11,8 +11,12 @@ import {
   matchesWords,
   messagesToText,
   sourceLabel,
+  unheldQLimitCount,
+  unheldQLimitText,
   visibleMessages,
 } from '@/lib/messages';
+import { collectViolations } from '@/lib/violations';
+import { LIMITS_TOPOLOGY, limitsPflow } from '../helpers/limitsCase';
 
 function message(overrides: Partial<SessionMessage> & { seq: number }): SessionMessage {
   return {
@@ -133,5 +137,59 @@ describe('messagesToText', () => {
 
   it('is empty for no messages', () => {
     expect(messagesToText([])).toBe('');
+  });
+});
+
+describe('unheldQLimitCount', () => {
+  const settings = (enforce_q_limits: boolean): PflowSettings => ({
+    tolerance: 1e-6,
+    max_iterations: 25,
+    flat_start: false,
+    enforce_q_limits,
+  });
+  // One generator past its qmax (PV 1) and one on its qmax (Slack 2, a warning).
+  const report = collectViolations(limitsPflow(), LIMITS_TOPOLOGY);
+
+  it('counts the generators past a limit when the power flow did not enforce Q limits', () => {
+    expect(unheldQLimitCount(settings(false), report)).toBe(1);
+  });
+
+  it('leaves out a generator that is only on its limit', () => {
+    const onLimit = collectViolations(
+      limitsPflow({
+        generator_outputs: { '2': { p: 10, q: 15, v: 0.95, bus: 2, q_min: -50, q_max: 15 } },
+      }),
+      LIMITS_TOPOLOGY,
+    );
+    expect(onLimit?.items.some((v) => v.kind === 'generator-q')).toBe(true);
+    expect(unheldQLimitCount(settings(false), onLimit)).toBe(0);
+  });
+
+  it('is zero when the run enforced Q limits, since the generators past one were held', () => {
+    expect(unheldQLimitCount(settings(true), report)).toBe(0);
+  });
+
+  it('is zero when the run settings or the report are not known', () => {
+    expect(unheldQLimitCount(null, report)).toBe(0);
+    expect(unheldQLimitCount(undefined, report)).toBe(0);
+    expect(unheldQLimitCount(settings(false), null)).toBe(0);
+  });
+});
+
+describe('unheldQLimitText', () => {
+  it('says why no warning names the generators, and how to get one', () => {
+    const text = unheldQLimitText(2);
+    expect(text).toContain('2 generators are past a reactive limit');
+    expect(text).toContain('did not enforce Q limits');
+    expect(text).toContain('they were not held');
+    expect(text).toContain('no warning names them');
+    expect(text).toContain('each generator held at a limit is named here');
+  });
+
+  it('is in the singular for one generator', () => {
+    const text = unheldQLimitText(1);
+    expect(text).toContain('1 generator is past a reactive limit');
+    expect(text).toContain('it was not held');
+    expect(text).toContain('no warning names it');
   });
 });

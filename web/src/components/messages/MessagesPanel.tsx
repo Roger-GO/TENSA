@@ -16,12 +16,17 @@
  * tab. The list stays at the newest message while it is scrolled to the end and
  * leaves the reader's place alone otherwise.
  *
+ * A generator is held at a reactive limit, and named in a warning, only when the
+ * power flow enforces Q limits. When the last one did not and generators are past a
+ * limit anyway (the Violations tab lists them), a note above the list says why no
+ * warning names them and offers to run the power flow again with Q limits enforced.
+ *
  * The messages come from `useMessagesStore`, kept current by
  * `useSessionMessagesSync` (mounted once at the app root).
  */
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { clearSessionMessages, pullMessages } from '@/api/useSessionMessages';
-import type { MessageLevel, SessionMessage } from '@/api/types';
+import type { MessageLevel, PflowSettings, SessionMessage } from '@/api/types';
 import { Button } from '@/components/ui/button';
 import { EmptyState, InboxIcon } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
@@ -33,10 +38,18 @@ import {
   formatMessageTime,
   messagesToText,
   sourceLabel,
+  unheldQLimitCount,
+  unheldQLimitText,
   visibleMessages,
 } from '@/lib/messages';
+import { openPflowPanel } from '@/lib/openPflowPanel';
 import { toast } from '@/lib/toast';
+import { useRunReadiness } from '@/lib/useRunReadiness';
+import { usePflowRunAction } from '@/lib/usePflowRunAction';
+import { useViolationReport } from '@/lib/useViolationReport';
 import { useMessagesStore } from '@/store/messages';
+import { usePflowStore } from '@/store/pflow';
+import { usePflowOptionsStore } from '@/store/pflowOptions';
 import { useSessionStore } from '@/store/session';
 
 /** How close to the end the list must be scrolled for new messages to keep it there. */
@@ -47,6 +60,14 @@ const LEVEL_TOGGLE_LABEL: Record<MessageLevel, string> = {
   error: 'Errors',
   warning: 'Warnings',
   info: 'Info',
+};
+
+/** What a level holds, for its toggle's tooltip, where a first-time reader looks for it. */
+const LEVEL_TOGGLE_ABOUT: Record<MessageLevel, string> = {
+  error: 'what ANDES could not do',
+  warning:
+    'what ANDES warns about, and after a power flow the generators held at a Q limit and the loads treated as constant impedance',
+  info: 'how each run went: iteration counts, the case file read, events such as a line trip',
 };
 
 const LEVEL_PILL: Record<MessageLevel, string> = {
@@ -140,7 +161,7 @@ function LevelToggle({
       aria-pressed={shown}
       onClick={onToggle}
       data-testid={`messages-level-${level}`}
-      title={`${shown ? 'Hide' : 'Show'} the ${LEVEL_TOGGLE_LABEL[level].toLowerCase()}`}
+      title={`${shown ? 'Hide' : 'Show'} the ${LEVEL_TOGGLE_LABEL[level].toLowerCase()}: ${LEVEL_TOGGLE_ABOUT[level]}`}
       className={cn(
         'inline-flex h-6 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 text-xs',
         'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
@@ -153,6 +174,75 @@ function LevelToggle({
         {count}
       </span>
     </button>
+  );
+}
+
+/**
+ * Why a power flow that left generators past a reactive limit logged no warning
+ * about them, with the way to get one. Draws nothing unless the last power flow
+ * converged without enforcing Q limits and the Violations tab lists a generator
+ * past a limit, so the report and the run hooks are only read then.
+ */
+function QLimitNote() {
+  const lastRun = usePflowStore((s) => s.lastRun);
+  const settings = lastRun?.converged === true ? lastRun.settings : null;
+  if (settings === null || settings === undefined || settings.enforce_q_limits) return null;
+  return <QLimitNoteBody settings={settings} />;
+}
+
+function QLimitNoteBody({ settings }: { settings: PflowSettings }) {
+  const report = useViolationReport();
+  const isRunning = usePflowStore((s) => s.isRunning);
+  const readiness = useRunReadiness('pflow');
+  const runPflow = usePflowRunAction();
+  const count = unheldQLimitCount(settings, report);
+  if (count === 0) return null;
+
+  const disabled = !readiness.ready || isRunning;
+  const onEnforce = () => {
+    usePflowOptionsStore.getState().setOptions({ enforceQLimits: true });
+    runPflow();
+  };
+  return (
+    <div
+      role="note"
+      aria-label="Generators past a reactive limit"
+      data-testid="messages-qlimit-note"
+      className="border-border bg-muted/30 text-muted-foreground flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b px-3 py-1.5 text-xs leading-snug"
+    >
+      <span className="min-w-0 flex-1 basis-80">{unheldQLimitText(count)}</span>
+      <span className="flex shrink-0 flex-wrap items-center gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={onEnforce}
+          title={
+            readiness.disabledReason ?? 'Tick Enforce generator Q limits and run the power flow'
+          }
+          data-testid="messages-qlimit-run"
+          className="h-6 px-2"
+        >
+          {isRunning ? 'Running PF…' : 'Run PF with Q limits enforced'}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={openPflowPanel}
+          data-testid="messages-qlimit-options"
+          className="h-6 px-2"
+        >
+          Power flow options
+        </Button>
+      </span>
+      {readiness.disabledReason !== null && !isRunning ? (
+        <span data-testid="messages-qlimit-disabled" className="basis-full">
+          Run PF is not available: {readiness.disabledReason}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -210,6 +300,7 @@ export function MessagesPanel() {
           title="No session yet"
           description="What ANDES says while it loads and runs a case shows up here."
           emptyStateKey="messages-no-session"
+          className="py-2"
         />
       );
     }
@@ -220,6 +311,7 @@ export function MessagesPanel() {
           title="ANDES has not said anything yet"
           description="Load a case or run something: its warnings and errors appear here."
           emptyStateKey="messages-none"
+          className="py-2"
         />
       );
     }
@@ -229,6 +321,7 @@ export function MessagesPanel() {
           title="No message matches the filter"
           description="Every word typed has to be in the message, the command or the ANDES module."
           emptyStateKey="messages-no-match"
+          className="py-2"
         />
       );
     }
@@ -243,6 +336,7 @@ export function MessagesPanel() {
             onClick: () => setLevelShown('info', true),
           }}
           emptyStateKey="messages-only-info"
+          className="py-2"
         />
       );
     }
@@ -251,6 +345,7 @@ export function MessagesPanel() {
         title="Nothing at the levels shown"
         description="Turn a level on above to list its messages."
         emptyStateKey="messages-none-shown"
+        className="py-2"
       />
     );
   })();
@@ -343,6 +438,7 @@ export function MessagesPanel() {
           Clear
         </Button>
       </div>
+      <QLimitNote />
       {visible.length === 0 ? (
         <div className="flex min-h-0 flex-1 items-center justify-center">{emptyList}</div>
       ) : (

@@ -5,8 +5,15 @@
  *   the tab carries a warning count -> the warning names the generators ->
  *   turn the information messages on -> filter them -> Clear
  *
+ *   load IEEE 14 -> run a power flow with the defaults -> generators are past a Q
+ *   limit but no warning names them -> the tab says why and runs it again with
+ *   Q limits enforced from its button -> the warning appears and the note is gone
+ *
  *   load Kundur -> run a time-domain simulation -> the line trip its case file
  *   schedules is listed among the information messages
+ *
+ *   run a power flow that warns -> open Kundur from the saved cases -> the old
+ *   case's warning and its count are gone and the load's own messages are listed
  *
  * It drives the real UI against a real `tensa serve` (see `playwright.config.ts`):
  * the messages are what ANDES logged in the session's worker, carried back on the
@@ -133,6 +140,78 @@ test('the events of a time-domain run are listed once it has run', async ({ page
   await expect(
     page.getByTestId('message-row').filter({ hasText: /Simulation to t=[\d.]+ sec completed/ }),
   ).toHaveCount(1);
+
+  expect(uncaughtErrors).toEqual([]);
+});
+
+test('a power flow that leaves generators past a limit says why no warning names them', async ({
+  page,
+}) => {
+  const uncaughtErrors: string[] = [];
+  page.on('pageerror', (error) => uncaughtErrors.push(error.message));
+
+  await openCase(page, 'ieee14_full.xlsx');
+
+  // The defaults do not enforce Q limits: the Violations tab lists generators past one.
+  await page.getByTestId('run-pflow-button').click();
+  await expect(
+    page.locator('[data-sonner-toast]').filter({ hasText: /PF converged in \d+ iterations/ }),
+  ).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByTestId('violations-tab-count')).toBeVisible();
+
+  // The Messages tab has no warning for them, and says why.
+  await page.getByTestId('bottom-drawer-tab-messages').click();
+  await expect(page.getByTestId('messages-tab-count')).toHaveCount(0);
+  const note = page.getByTestId('messages-qlimit-note');
+  await expect(note).toBeVisible();
+  await expect(note).toContainText('did not enforce Q limits');
+  await expect(note).toContainText(/\d+ generators are past a reactive limit/);
+
+  // One button runs the power flow again with Q limits enforced.
+  await page.getByTestId('messages-qlimit-run').click();
+  await expect(page.getByTestId('messages-tab-count')).toHaveText('1', { timeout: 90_000 });
+  const warning = page.getByTestId('message-row').filter({ hasText: 'Reactive limits' });
+  await expect(warning).toHaveCount(1);
+  await expect(warning).toContainText('switched from PV to PQ');
+  await expect(note).toHaveCount(0);
+
+  expect(uncaughtErrors).toEqual([]);
+});
+
+test('opening another case leaves the old case’s messages behind', async ({ page }) => {
+  const uncaughtErrors: string[] = [];
+  page.on('pageerror', (error) => uncaughtErrors.push(error.message));
+
+  await openCase(page, 'ieee14_full.xlsx');
+  await page.getByRole('tab', { name: 'Analysis' }).click();
+  await page.getByTestId('analysis-sub-tab-pf').click();
+  await page.getByTestId('pflow-enforce-q-limits').check();
+  await page.getByTestId('pflow-options-run').click();
+  await expect(page.getByTestId('messages-tab-count')).toHaveText('1', { timeout: 90_000 });
+
+  // Open Kundur from the saved cases; the session stays, the case is replaced.
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname.endsWith('/case'),
+      { timeout: 90_000 },
+    ),
+    page.getByTestId('saved-cases-row-kundur_full.xlsx').click(),
+  ]);
+  await expect(page.getByTestId('run-pflow-button')).toBeEnabled({ timeout: 90_000 });
+
+  await page.getByTestId('bottom-drawer-tab-messages').click();
+  await expect(page.getByTestId('messages-tab-count')).toHaveCount(0);
+  await page.getByTestId('messages-level-info').click();
+  await expect(
+    page.getByTestId('message-row').filter({ hasText: 'Parsing input file "kundur_full.xlsx"' }),
+  ).toHaveCount(1);
+  await expect(page.getByTestId('message-row').filter({ hasText: 'ieee14_full' })).toHaveCount(0);
+  await expect(page.getByTestId('message-row').filter({ hasText: 'Reactive limits' })).toHaveCount(
+    0,
+  );
+  await expect(page.getByTestId('message-row').filter({ hasText: /Converged in/ })).toHaveCount(0);
 
   expect(uncaughtErrors).toEqual([]);
 });
