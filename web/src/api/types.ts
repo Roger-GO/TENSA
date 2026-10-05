@@ -35,6 +35,7 @@ export type LineFlow = components['schemas']['LineFlow'];
 
 export type WorkspaceFile = components['schemas']['WorkspaceFile'];
 export type WorkspaceFileList = components['schemas']['WorkspaceFileList'];
+export type UploadedWorkspaceFile = components['schemas']['UploadedWorkspaceFile'];
 export type SidecarLayout = components['schemas']['SidecarLayout'];
 export type BusCoord = components['schemas']['BusCoord'];
 

@@ -72,6 +72,45 @@ describe('useOpenCase', () => {
     );
   });
 
+  it('loads the case with the dynamic files it is given, and records them', async () => {
+    const { result } = renderHook(() => useOpenCase());
+    result.current.openCase('ieee14.raw', ['ieee14.dyr']);
+    expect(mutateAsync.mock.calls[0]?.[0]).toEqual({
+      sessionId: 's1',
+      request: { primary_path: 'ieee14.raw', addfiles: ['ieee14.dyr'] },
+    });
+    await waitFor(() =>
+      expect(useCaseStore.getState().selection).toMatchObject({
+        primaryPath: 'ieee14.raw',
+        addfiles: ['ieee14.dyr'],
+      }),
+    );
+  });
+
+  it('loads nothing for the case that is already open with the same dynamic files', () => {
+    useCaseStore.setState({
+      selection: {
+        primaryPath: parseWorkspacePath('ieee14.raw'),
+        addfiles: [parseWorkspacePath('ieee14.dyr')],
+      },
+    });
+    const { result } = renderHook(() => useOpenCase());
+    result.current.openCase('ieee14.raw', ['ieee14.dyr']);
+    expect(mutateAsync).not.toHaveBeenCalled();
+    // Other files, or none, make it a different case to open.
+    result.current.openCase('ieee14.raw', ['other.dyr']);
+    result.current.openCase('ieee14.raw');
+    expect(mutateAsync).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a dynamic file path that leaves the workspace, with a toast', () => {
+    const error = vi.spyOn(toast, 'error').mockReturnValue('id');
+    const { result } = renderHook(() => useOpenCase());
+    result.current.openCase('ieee14.raw', ['../outside.dyr']);
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('Invalid workspace path'));
+  });
+
   it('loads nothing for the case that is already open', () => {
     useCaseStore.setState({
       selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },

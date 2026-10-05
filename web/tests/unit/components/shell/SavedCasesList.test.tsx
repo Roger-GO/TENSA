@@ -23,6 +23,7 @@ import type { ReactNode } from 'react';
 import { SavedCasesList } from '@/components/shell/SavedCasesList';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
+import { useRecentCasesStore } from '@/store/recentCases';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 
 // ---- mocks ---------------------------------------------------------------
@@ -104,6 +105,7 @@ beforeEach(() => {
   mockSnapshots = [];
   useSessionStore.setState({ sessionId: parseSessionId('test-session') });
   useCaseStore.setState({ selection: null, topology: null, layoutSidecar: null });
+  useRecentCasesStore.setState({ cases: [] });
 });
 
 afterEach(() => {
@@ -238,5 +240,118 @@ describe('<SavedCasesList />', () => {
     mockFiles = [];
     render(withClient(<SavedCasesList />));
     expect(screen.getByTestId('saved-cases-files-empty')).toBeInTheDocument();
+  });
+
+  it('offers to add files to the workspace, and says dropping works too, when there are none', () => {
+    mockFiles = [];
+    render(withClient(<SavedCasesList />));
+    expect(screen.getByTestId('add-case-files')).toBeInTheDocument();
+    expect(screen.getByTestId('saved-cases-files-empty')).toHaveTextContent(
+      'Drop a .raw / .xlsx / .json / .m file anywhere in this window, or use Add files.',
+    );
+  });
+
+  describe('recent cases', () => {
+    const recent = (primaryPath: string, addfiles: string[] = [], openedAt = 1) => ({
+      primaryPath,
+      addfiles,
+      openedAt,
+    });
+
+    it('shows no Recent group before anything has been opened', () => {
+      render(withClient(<SavedCasesList />));
+      expect(screen.queryByTestId('saved-cases-recent-group')).toBeNull();
+    });
+
+    it('lists the cases opened last, newest first, ahead of the workspace files', () => {
+      useRecentCasesStore.setState({
+        cases: [recent('demo.xlsx'), recent('kundur.raw')],
+      });
+      render(withClient(<SavedCasesList />));
+      const rows = screen
+        .getByRole('list', { name: 'Recent cases' })
+        .querySelectorAll('[data-testid^="saved-cases-recent-"]');
+      expect(Array.from(rows).map((r) => r.getAttribute('data-testid'))).toEqual([
+        'saved-cases-recent-demo.xlsx',
+        'saved-cases-recent-kundur.raw',
+      ]);
+      const group = screen.getByTestId('saved-cases-recent-group');
+      const workspace = screen.getByTestId('saved-cases-files-heading');
+      expect(
+        group.compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      // The same file is still in the workspace list, under its own test id.
+      expect(screen.getByTestId('saved-cases-row-demo.xlsx')).toBeInTheDocument();
+    });
+
+    it('leaves out a case whose file is no longer in the workspace', () => {
+      useRecentCasesStore.setState({ cases: [recent('gone.raw'), recent('kundur.raw')] });
+      render(withClient(<SavedCasesList />));
+      expect(screen.queryByTestId('saved-cases-recent-gone.raw')).toBeNull();
+      expect(screen.getByTestId('saved-cases-recent-kundur.raw')).toBeInTheDocument();
+    });
+
+    it('shows no more than five', () => {
+      mockFiles = Array.from({ length: 7 }, (_, i) => ({
+        name: `case${i}.raw`,
+        size_bytes: 1,
+        modified_iso: '2026-05-01T00:00:00Z',
+        format: 'raw',
+      }));
+      useRecentCasesStore.setState({
+        cases: mockFiles.map((f) => recent(f.name)),
+      });
+      render(withClient(<SavedCasesList />));
+      expect(screen.getByRole('list', { name: 'Recent cases' }).children).toHaveLength(5);
+    });
+
+    it('says which dynamic files a case was opened with, and opens it with them', async () => {
+      const user = userEvent.setup();
+      mockFiles = [
+        ...mockFiles,
+        {
+          name: 'kundur.dyr',
+          size_bytes: 1,
+          modified_iso: '2026-05-01T00:00:00Z',
+          format: 'dyr',
+        },
+      ];
+      useRecentCasesStore.setState({ cases: [recent('kundur.raw', ['kundur.dyr', 'lost.dyr'])] });
+      render(withClient(<SavedCasesList />));
+      const row = screen.getByTestId('saved-cases-recent-kundur.raw');
+      // The file that has left the workspace is not listed and not sent.
+      expect(row).toHaveTextContent('with kundur.dyr');
+      expect(row).not.toHaveTextContent('lost.dyr');
+      await user.click(row);
+      expect(loadCaseMutate.mock.calls[0]?.[0]).toEqual({
+        sessionId: 'test-session',
+        request: { primary_path: 'kundur.raw', addfiles: ['kundur.dyr'] },
+      });
+    });
+
+    it('opens a recent case with no dynamic files with none', async () => {
+      const user = userEvent.setup();
+      useRecentCasesStore.setState({ cases: [recent('ieee14.raw')] });
+      render(withClient(<SavedCasesList />));
+      expect(screen.getByTestId('saved-cases-recent-ieee14.raw')).not.toHaveTextContent('with');
+      await user.click(screen.getByTestId('saved-cases-recent-ieee14.raw'));
+      expect(loadCaseMutate.mock.calls[0]?.[0]).toEqual({
+        sessionId: 'test-session',
+        request: { primary_path: 'ieee14.raw', addfiles: null },
+      });
+    });
+
+    it('marks the open case, and a click on it is a no-op', async () => {
+      const user = userEvent.setup();
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('kundur.raw'), addfiles: [] },
+      });
+      useRecentCasesStore.setState({ cases: [recent('kundur.raw')] });
+      render(withClient(<SavedCasesList />));
+      const row = screen.getByTestId('saved-cases-recent-kundur.raw');
+      expect(row).toHaveAttribute('aria-current', 'true');
+      await user.click(row);
+      expect(loadCaseMutate).not.toHaveBeenCalled();
+    });
   });
 });

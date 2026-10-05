@@ -8,7 +8,7 @@ import { useCallback } from 'react';
 import { useLoadCase } from '@/api/queries';
 import { ProblemDetailsError } from '@/api/client';
 import { parseWorkspacePath } from '@/api/types';
-import type { WorkspaceFile } from '@/api/types';
+import type { WorkspaceFile, WorkspacePath } from '@/api/types';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { toast } from '@/lib/toast';
@@ -27,8 +27,11 @@ export function isPrimaryCase(file: WorkspaceFile): file is WorkspaceFile & {
 }
 
 export interface OpenCase {
-  /** Load `fileName` (a workspace-relative path) as the session's case. */
-  openCase: (fileName: string) => void;
+  /**
+   * Load `fileName` (a workspace-relative path) as the session's case, with the
+   * dynamic files `addfiles` (workspace-relative paths, default none).
+   */
+  openCase: (fileName: string, addfiles?: readonly string[]) => void;
   /** True while a load is in flight. */
   isPending: boolean;
 }
@@ -43,8 +46,9 @@ export interface OpenCase {
  *   3. Dispatch the load mutation and mirror the resolved selection into the
  *      case slice once it has loaded.
  *
- * There is no addfile here: the saved-cases list and the palette are "click to
- * load" surfaces, so a `.raw` opens without its `.dyr`.
+ * A click on a file in the saved-cases list or the palette passes no addfiles, so
+ * a `.raw` opens without its `.dyr`; a recent case, or files dropped together,
+ * pass the dynamic files the case was opened with.
  */
 export function useOpenCase(): OpenCase {
   const sessionId = useSessionStore((s) => s.sessionId);
@@ -53,11 +57,13 @@ export function useOpenCase(): OpenCase {
   const loadCase = useLoadCase();
 
   const openCase = useCallback(
-    (fileName: string) => {
+    (fileName: string, addfileNames: readonly string[] = []) => {
       if (!sessionId) return;
       let primary;
+      let addfiles: WorkspacePath[];
       try {
         primary = parseWorkspacePath(fileName);
+        addfiles = addfileNames.map(parseWorkspacePath);
       } catch (err) {
         toast.error(`Invalid workspace path: ${err instanceof Error ? err.message : String(err)}`);
         return;
@@ -65,7 +71,8 @@ export function useOpenCase(): OpenCase {
       if (
         caseSelection !== null &&
         caseSelection.primaryPath === primary &&
-        caseSelection.addfiles.length === 0
+        caseSelection.addfiles.length === addfiles.length &&
+        caseSelection.addfiles.every((path, i) => path === addfiles[i])
       ) {
         return;
       }
@@ -77,11 +84,11 @@ export function useOpenCase(): OpenCase {
       loadCase
         .mutateAsync({
           sessionId,
-          request: { primary_path: primary, addfiles: null },
+          request: { primary_path: primary, addfiles: addfiles.length > 0 ? addfiles : null },
         })
         .then(
           () => {
-            setCase({ primaryPath: primary, addfiles: [] });
+            setCase({ primaryPath: primary, addfiles });
           },
           (err: unknown) => {
             const detail =

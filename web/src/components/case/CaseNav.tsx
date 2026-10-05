@@ -211,8 +211,8 @@ export function CaseNav({ className }: CaseNavProps) {
           ) : (
             <>
               No case loaded. Pick a file from <span className="font-medium">Saved cases</span>{' '}
-              below, or click or drag a component from the Component library to start a blank
-              system.
+              below, drop a case file anywhere in this window, or click or drag a component from the
+              Component library to start a blank system.
             </>
           )}
         </div>

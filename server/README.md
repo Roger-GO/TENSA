@@ -15,7 +15,7 @@ tensa serve --workspace ~/tensa-cases --port 8000 --open
 tensa --version                   # tensa and ANDES versions
 ```
 
-Open the address `tensa serve` prints (`http://127.0.0.1:8000` above). On first run an empty workspace is seeded with three example cases (IEEE-14, Kundur, and WSCC-9). To use your own cases, drop any `.xlsx`, `.raw`, `.dyr`, or `.json` file into the workspace directory and it shows up in the file picker.
+Open the address `tensa serve` prints (`http://127.0.0.1:8000` above). On first run an empty workspace is seeded with three example cases (IEEE-14, Kundur, and WSCC-9). To use your own cases, drop `.xlsx`, `.raw`, `.dyr`, `.m` or `.json` files onto the browser window, or put them in the workspace directory, and they show up in the Saved cases list. Scripts add one with `POST /api/workspace/files?name=<file>`, sending the file's bytes as the body.
 
 The optional MCP server exposes sessions, case loading, power flow, time-domain simulation, and disturbances as [Model Context Protocol](https://modelcontextprotocol.io) tools, so an assistant such as Claude can run simulations directly:
 

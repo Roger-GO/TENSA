@@ -67,6 +67,20 @@ describe('andesClient', () => {
     expect(headers.get('Content-Type')).toBe('application/json');
   });
 
+  it('POST with a file sends it as the body, untouched, as octet-stream', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ name: 'ieee14.raw' }, { status: 201 }));
+    const file = new File(['\u00ff\u0000 raw bytes'], 'ieee14.raw');
+
+    await andesClient.post('/workspace/files', { query: { name: 'ieee14.raw' }, file });
+
+    const [url, init] = fetchSpy.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/workspace/files?name=ieee14.raw');
+    expect(init.method).toBe('POST');
+    // The very same File, not a JSON string of it.
+    expect(init.body).toBe(file);
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/octet-stream');
+  });
+
   it('appends query params when provided', async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({}));
     await andesClient.get('/workspace/layout', { query: { case_path: 'foo/bar.xlsx' } });

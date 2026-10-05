@@ -63,6 +63,7 @@ import type {
   TopologyEntry,
   TopologySchema,
   TopologySummary,
+  UploadedWorkspaceFile,
   UploadProfileResponse,
   VersionInfo,
   WorkspaceFileList,
@@ -70,6 +71,7 @@ import type {
 } from './types';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
+import { useRecentCasesStore } from '@/store/recentCases';
 import { usePflowStore } from '@/store/pflow';
 import { usePflowOptionsStore } from '@/store/pflowOptions';
 import { useDisturbanceStore } from '@/store/disturbance';
@@ -512,11 +514,12 @@ export function useLoadCase(): UseMutationResult<TopologySummary, Error, LoadCas
       useCaseStore.getState().setLoadingPath(request.primary_path);
       return { jobId: registerJob('case-load', { primary_path: request.primary_path }) };
     },
-    onSuccess: (data, { sessionId }, ctx) => {
+    onSuccess: (data, { sessionId, request }, ctx) => {
       // Seed the topology cache with the load response (the substrate's
       // load handler returns the topology already; saves a round-trip).
       queryClient.setQueryData(queryKeys.topology(sessionId), data);
       useCaseStore.getState().setTopology(data);
+      useRecentCasesStore.getState().record(request.primary_path, request.addfiles ?? []);
       // Snapshots are listed per-case (scanned from
       // ``<workspace>/snapshots/<case>/``). The snapshots query first runs
       // on session-create — before any case is loaded — and caches ``[]``;
@@ -813,6 +816,38 @@ export function useListWorkspaceFiles(): UseQueryResult<WorkspaceFileList, Error
       return await andesClient.get<WorkspaceFileList>('/workspace/files', {
         timeoutMs: TIMEOUTS.workspace,
       });
+    },
+  });
+}
+
+export interface UploadWorkspaceFileVars {
+  /** The file to add. It is stored under its own name. */
+  file: File;
+  /** Replace a file of the same name. Without it a name that is taken answers 409. */
+  overwrite?: boolean;
+}
+
+/**
+ * `POST /workspace/files?name=<file name>&overwrite=<bool>`. The file is the request
+ * body. Errors: 400 (an unsafe name), 409 (the name is taken), 413 (over 32 MiB),
+ * 422 (not a case format, or empty). Refreshes the workspace listing on success.
+ */
+export function useUploadWorkspaceFile(): UseMutationResult<
+  UploadedWorkspaceFile,
+  Error,
+  UploadWorkspaceFileVars
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ file, overwrite = false }: UploadWorkspaceFileVars) => {
+      return await andesClient.post<UploadedWorkspaceFile>('/workspace/files', {
+        query: { name: file.name, overwrite: overwrite ? 'true' : 'false' },
+        file,
+        timeoutMs: TIMEOUTS.upload,
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workspaceFiles });
     },
   });
 }

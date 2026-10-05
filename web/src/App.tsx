@@ -32,6 +32,7 @@ import { useJobEventsStream } from '@/streaming/useJobEventsStream';
 import { useSldFrameOverlay } from '@/components/sld/overlay';
 import { RecoveryBadge } from '@/components/shell/RecoveryBadge';
 import { JobAnnouncer } from '@/components/shell/JobAnnouncer';
+import { WorkspaceDropTarget } from '@/components/shell/WorkspaceDropTarget';
 // Imported for its side effect: the store entrypoint wires the cross-slice
 // cascade (a case change clears the previous case's PF and analysis results).
 import '@/store';
@@ -129,6 +130,8 @@ function AppInner({ children }: { children: React.ReactNode }) {
       {/* a11y: announce background job outcomes (done/failed/cancelled) to
           assistive tech regardless of whether the Activity panel is open. */}
       <JobAnnouncer />
+      {/* Case files dropped anywhere on the window are added to the workspace. */}
+      <WorkspaceDropTarget />
     </>
   );
 }
@@ -190,7 +193,7 @@ function CanvasSlot() {
           title="No case loaded"
           description={
             dropError ??
-            'Pick a case file from the left sidebar, or click or drag a component from the Component library to start a blank system.'
+            'Pick a case file from the left sidebar, drop one anywhere in this window, or click or drag a component from the Component library to start a blank system.'
           }
           emptyStateKey="app-shell-no-case"
         />

@@ -30,10 +30,12 @@ import {
   useRunPflow,
   useSaveSnapshot,
   useTopology,
+  useUploadWorkspaceFile,
 } from '@/api/queries';
 import { parseSessionId } from '@/api/types';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
+import { useRecentCasesStore } from '@/store/recentCases';
 import { usePflowOptionsStore } from '@/store/pflowOptions';
 import { useJobsStore, LOCAL_ID_PREFIX, isTerminalStatus } from '@/store/jobs';
 import type { SessionId, WorkspacePath } from '@/api/types';
@@ -109,6 +111,53 @@ describe('queries hooks', () => {
       expect(result.current.isSuccess).toBe(true);
     });
     expect(client.getQueryData(queryKeys.topology(sessionId))).toEqual(topology);
+  });
+
+  it('useLoadCase puts the case, and the dynamic files it loaded with, at the top of the recent cases', async () => {
+    useRecentCasesStore.setState({ cases: [] });
+    const topology = {
+      state: 'pre-setup' as const,
+      buses: [],
+      lines: [],
+      transformers: [],
+      generators: [],
+      loads: [],
+    };
+    fetchSpy.mockImplementation(async () => jsonResponse(topology));
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useLoadCase(), { wrapper: Wrapper });
+
+    const sessionId = 'sess-recent' as SessionId;
+    await act(async () => {
+      await result.current.mutateAsync({ sessionId, request: { primary_path: 'kundur.raw' } });
+      await result.current.mutateAsync({
+        sessionId,
+        request: { primary_path: 'ieee14.raw', addfiles: ['ieee14.dyr'] },
+      });
+    });
+    expect(useRecentCasesStore.getState().cases).toMatchObject([
+      { primaryPath: 'ieee14.raw', addfiles: ['ieee14.dyr'] },
+      { primaryPath: 'kundur.raw', addfiles: [] },
+    ]);
+    useRecentCasesStore.setState({ cases: [] });
+  });
+
+  it('useLoadCase does not record a case that failed to load', async () => {
+    useRecentCasesStore.setState({ cases: [] });
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(
+        { type: 'about:blank', title: 'Unprocessable', status: 422, detail: 'bad' },
+        422,
+      ),
+    );
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useLoadCase(), { wrapper: Wrapper });
+    result.current.mutate({
+      sessionId: 'sess-bad-recent' as SessionId,
+      request: { primary_path: 'broken.raw' },
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(useRecentCasesStore.getState().cases).toEqual([]);
   });
 
   it('useLoadCase marks the case as loading while the request runs, and clears it after', async () => {
@@ -689,5 +738,77 @@ describe('queries hooks', () => {
     expect(pmus.result.current.fetchStatus).toBe('idle');
     expect(profiles.result.current.fetchStatus).toBe('idle');
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('useUploadWorkspaceFile', () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
+      typeof vi.spyOn
+    >;
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+  });
+
+  const stored = {
+    name: 'ieee14.raw',
+    size_bytes: 11,
+    modified_iso: '2026-10-04T00:00:00+00:00',
+    format: 'raw',
+    replaced: false,
+  };
+
+  it('posts the file itself under its name, and refreshes the workspace listing', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(stored, 201));
+    const { client, Wrapper } = makeWrapper();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useUploadWorkspaceFile(), { wrapper: Wrapper });
+
+    const file = new File(['case data\n'], 'My Case.raw');
+    let reply: unknown;
+    await act(async () => {
+      reply = await result.current.mutateAsync({ file });
+    });
+
+    expect(reply).toEqual(stored);
+    const [url, init] = fetchSpy.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/workspace/files?name=My+Case.raw&overwrite=false');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe(file);
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/octet-stream');
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.workspaceFiles });
+  });
+
+  it('asks to replace a file of the same name only when told to', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ ...stored, replaced: true }, 201));
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useUploadWorkspaceFile(), { wrapper: Wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ file: new File(['x'], 'a.raw'), overwrite: true });
+    });
+    const [url] = fetchSpy.mock.calls[0]! as [string];
+    expect(url).toBe('/api/workspace/files?name=a.raw&overwrite=true');
+  });
+
+  it('leaves the listing alone and surfaces the problem when the server refuses', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(
+        { type: 'about:blank', title: 'Conflict', status: 409, detail: "'a.raw' already exists" },
+        409,
+      ),
+    );
+    const { client, Wrapper } = makeWrapper();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useUploadWorkspaceFile(), { wrapper: Wrapper });
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({ file: new File(['x'], 'a.raw') }),
+      ).rejects.toMatchObject({ status: 409, detail: "'a.raw' already exists" });
+    });
+    expect(invalidate).not.toHaveBeenCalled();
   });
 });

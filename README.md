@@ -101,7 +101,7 @@ The editable install does not need the UI, so steps 1 and 2 can run in either or
 
 Open `http://127.0.0.1:8000`. On first run an empty workspace is seeded with three example cases (IEEE-14, Kundur, and WSCC-9) so there is something to open right away. Load a case or build one from scratch, run a power flow, add a disturbance, and stream a time-domain simulation.
 
-To use your own cases, drop any `.xlsx`, `.raw`, `.dyr`, or `.json` file into the `--workspace` directory and it shows up in the file picker.
+To use your own cases, drop `.xlsx`, `.raw`, `.dyr`, `.m` or `.json` files onto the browser window (or use Add files above the case list), or put them in the `--workspace` directory yourself. Either way they show up in the Saved cases list, and a `.raw` dropped together with its `.dyr` opens as the pair.
 
 ### Platforms
 

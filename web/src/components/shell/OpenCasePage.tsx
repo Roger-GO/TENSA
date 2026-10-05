@@ -85,8 +85,8 @@ export function OpenCasePage() {
             data-testid="command-palette-open-case-none"
             className="text-muted-foreground px-3 py-6 text-center text-sm"
           >
-            No case files in the workspace. Put a .raw, .xlsx, .json or .m file in the workspace
-            folder.
+            No case files in the workspace. Drop a .raw, .xlsx, .json or .m file on the window, or
+            put one in the workspace folder.
           </div>
         ) : (
           <>

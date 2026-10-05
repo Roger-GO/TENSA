@@ -131,6 +131,11 @@ export class NetworkError extends Error {
 export interface RequestOptions {
   /** Optional JSON body. Will be `JSON.stringify`ed and `Content-Type` set. */
   body?: unknown;
+  /**
+   * A file sent as the request body, byte for byte, as `application/octet-stream`
+   * (an upload route takes the file itself, not a form). Used instead of `body`.
+   */
+  file?: Blob;
   /** Per-call timeout in ms. Defaults to 10s. */
   timeoutMs?: number;
   /** External AbortSignal — combined with the per-call timeout. */
@@ -242,10 +247,11 @@ async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const { body, timeoutMs = DEFAULT_TIMEOUT_MS, signal, query } = options;
+  const { body, file, timeoutMs = DEFAULT_TIMEOUT_MS, signal, query } = options;
   const url = buildUrl(path, query);
   const headers = new Headers();
-  if (body !== undefined) headers.set('Content-Type', 'application/json');
+  if (file !== undefined) headers.set('Content-Type', 'application/octet-stream');
+  else if (body !== undefined) headers.set('Content-Type', 'application/json');
 
   const { controller, cleanup, timedOut } = makeAbortController(timeoutMs, signal);
 
@@ -254,7 +260,7 @@ async function request<T>(
     response = await fetch(url, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: file ?? (body === undefined ? undefined : JSON.stringify(body)),
       signal: controller.signal,
     });
   } catch (err) {
@@ -313,4 +319,6 @@ export const TIMEOUTS = {
   topology: 10_000,
   /** Workspace lister scan. */
   workspace: 10_000,
+  /** A case file upload (up to the server's 32 MiB cap) to the local server. */
+  upload: 60_000,
 } as const;
