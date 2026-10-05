@@ -19,19 +19,32 @@
  *
  * A toast button acts on the session and the open case of the moment it is
  * pressed, which can be up to `DECISION_TOAST_MS` after the toast went up.
+ *
+ * A file that was turned away is also kept in the upload notice
+ * (`useUploadNoticeStore`), which the saved-cases list shows until it is
+ * dismissed or files are added again: it leaves nothing in the workspace list, so
+ * a toast that went by unseen would leave no sign that it was tried.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ProblemDetailsError } from '@/api/client';
 import { useReloadCase, useUploadWorkspaceFile } from '@/api/queries';
-import { planOpen, uploadProblem } from '@/lib/caseUpload';
+import { fileExtension, planOpen, uploadProblem } from '@/lib/caseUpload';
 import { useOpenCase } from '@/lib/openCase';
 import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
+import { useUploadNoticeStore } from '@/store/uploadNotice';
 
 /** How long a toast that asks for a decision stays up. */
 const DECISION_TOAST_MS = 15_000;
+
+/** How long a toast that has to be read, a refusal or a hint, stays up: longer than the 4 s default. */
+const READ_TOAST_MS = 10_000;
+
+/** What a lone `.dyr` needs, since the saved-cases list shows cases and not the `.dyr` files beside them. */
+const DYR_ALONE_HINT =
+  'A .dyr file opens together with its .raw. Add the two at once to open them.';
 
 export interface AddWorkspaceFiles {
   /** Try to add `files` to the workspace and report what became of each. */
@@ -111,7 +124,16 @@ export function useAddWorkspaceFiles(): AddWorkspaceFiles {
       }
       const plan = planOpen(group);
       if (plan === null) {
-        toast.success(message, { description });
+        // Nothing opens, and a `.dyr` is not listed on its own: say how it gets used.
+        if (group.every((name) => fileExtension(name) === '.dyr')) {
+          toast.success(message, {
+            description:
+              description === undefined ? DYR_ALONE_HINT : `${description}. ${DYR_ALONE_HINT}`,
+            duration: READ_TOAST_MS,
+          });
+        } else {
+          toast.success(message, { description });
+        }
         return;
       }
       const open = () => latest.current.openCase(plan.primary, plan.addfiles);
@@ -133,14 +155,19 @@ export function useAddWorkspaceFiles(): AddWorkspaceFiles {
   const replaceFiles = useCallback(
     async (files: readonly File[], group: readonly string[]) => {
       const replaced: string[] = [];
+      const failures: string[] = [];
+      useUploadNoticeStore.getState().dismiss();
       for (const file of files) {
         try {
           await latest.current.upload.mutateAsync({ file, overwrite: true });
           replaced.push(file.name);
         } catch (err) {
-          toast.error(`Could not replace ${file.name}: ${describeError(err)}`);
+          const failure = `Could not replace ${file.name}: ${describeError(err)}`;
+          failures.push(failure);
+          toast.error(failure, { duration: READ_TOAST_MS });
         }
       }
+      if (failures.length > 0) useUploadNoticeStore.getState().show(failures);
       if (replaced.length > 0) announceStored(replaced, 'Replaced', group);
     },
     [announceStored],
@@ -155,10 +182,14 @@ export function useAddWorkspaceFiles(): AddWorkspaceFiles {
         if (problem === null) candidates.push(file);
         else problems.push(problem);
       }
-      if (problems.length === 1) toast.error(problems[0] ?? '');
+      // Whatever the last attempt turned away is replaced by this one's.
+      const refused = [...problems];
+      useUploadNoticeStore.getState().dismiss();
+      if (problems.length === 1) toast.error(problems[0] ?? '', { duration: READ_TOAST_MS });
       else if (problems.length > 1) {
         toast.error(`${problems.length} files were not added.`, {
           description: problems.join(' '),
+          duration: READ_TOAST_MS,
         });
       }
 
@@ -178,7 +209,11 @@ export function useAddWorkspaceFiles(): AddWorkspaceFiles {
             if (err instanceof ProblemDetailsError && err.status === 409) {
               taken.push(file);
               present.push(file.name);
-            } else toast.error(`Could not add ${file.name}: ${describeError(err)}`);
+            } else {
+              const failure = `Could not add ${file.name}: ${describeError(err)}`;
+              refused.push(failure);
+              toast.error(failure, { duration: READ_TOAST_MS });
+            }
           }
         }
         if (stored.length > 0) announceStored(stored, 'Added', present);
@@ -194,6 +229,7 @@ export function useAddWorkspaceFiles(): AddWorkspaceFiles {
         }
       } finally {
         setRunning((n) => n - 1);
+        if (refused.length > 0) useUploadNoticeStore.getState().show(refused);
       }
     },
     [announceStored, replaceFiles],

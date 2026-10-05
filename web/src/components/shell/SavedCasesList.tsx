@@ -8,10 +8,12 @@ import { useSnapshotStore } from '@/store/snapshot';
 import { ProblemDetailsError } from '@/api/client';
 import type { WorkspaceFile } from '@/api/types';
 import { AddCaseFilesButton } from '@/components/case/AddCaseFilesButton';
+import { CASE_FILE_EXTENSIONS } from '@/lib/caseUpload';
 import { isPrimaryCase, useOpenCase } from '@/lib/openCase';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
 import { useRecentCasesStore } from '@/store/recentCases';
+import { useUploadNoticeStore } from '@/store/uploadNotice';
 
 /**
  * SavedCasesList (v3 Unit 4).
@@ -88,6 +90,8 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
         : [{ file, addfiles: c.addfiles.filter((a) => present.has(a)) }];
     })
     .slice(0, MAX_RECENT_SHOWN);
+  const refused = useUploadNoticeStore((s) => s.refused);
+  const dismissRefused = useUploadNoticeStore((s) => s.dismiss);
   const hasCaseLoaded = caseSelection !== null;
   const snapshots: readonly SnapshotListEntry[] = snapshotsQuery.data?.snapshots ?? [];
 
@@ -178,6 +182,38 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
           </p>
           <AddCaseFilesButton />
         </div>
+        {refused.length > 0 ? (
+          <div
+            role="group"
+            aria-label="Files not added"
+            data-testid="saved-cases-upload-notice"
+            className="border-danger/40 bg-danger/5 flex flex-col gap-1 rounded-[var(--radius-sm)] border px-2 py-1.5 text-[11px]"
+          >
+            <p className="text-foreground font-medium">
+              {refused.length === 1
+                ? '1 file was not added'
+                : `${refused.length} files were not added`}
+            </p>
+            <ul className="text-muted-foreground flex flex-col gap-0.5">
+              {refused.map((line, i) => (
+                <li key={i} className="break-words">
+                  {line}
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              data-testid="saved-cases-upload-notice-dismiss"
+              onClick={dismissRefused}
+              className={cn(
+                'text-primary self-start rounded-[var(--radius-sm)] px-1 text-[10px] font-medium hover:underline',
+                'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+              )}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
         {files.length === 0 ? (
           <div data-testid="saved-cases-files-empty">
             <EmptyState
@@ -188,22 +224,30 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
             />
           </div>
         ) : (
-          <ul className="flex flex-col gap-0.5" role="list" aria-label="Workspace files">
-            {files.map((file) => (
-              <li key={file.name}>
-                <CaseRow
-                  testId={`saved-cases-row-${file.name}`}
-                  name={file.name}
-                  detail={null}
-                  label={formatLabel(file.format)}
-                  current={isCurrent(file.name)}
-                  loading={loadingPath === file.name}
-                  disabled={loadPending}
-                  onClick={() => openCase(file.name)}
-                />
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="flex flex-col gap-0.5" role="list" aria-label="Workspace files">
+              {files.map((file) => (
+                <li key={file.name}>
+                  <CaseRow
+                    testId={`saved-cases-row-${file.name}`}
+                    name={file.name}
+                    detail={null}
+                    label={formatLabel(file.format)}
+                    current={isCurrent(file.name)}
+                    loading={loadingPath === file.name}
+                    disabled={loadPending}
+                    onClick={() => openCase(file.name)}
+                  />
+                </li>
+              ))}
+            </ul>
+            <p
+              data-testid="saved-cases-drop-hint"
+              className="text-muted-foreground px-1 text-[10px] leading-snug"
+            >
+              Drop {CASE_FILE_EXTENSIONS.join(', ')} files anywhere in this window to add them.
+            </p>
+          </>
         )}
       </div>
 

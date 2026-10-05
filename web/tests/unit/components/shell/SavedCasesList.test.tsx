@@ -24,6 +24,7 @@ import { SavedCasesList } from '@/components/shell/SavedCasesList';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { useRecentCasesStore } from '@/store/recentCases';
+import { useUploadNoticeStore } from '@/store/uploadNotice';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 
 // ---- mocks ---------------------------------------------------------------
@@ -106,6 +107,7 @@ beforeEach(() => {
   useSessionStore.setState({ sessionId: parseSessionId('test-session') });
   useCaseStore.setState({ selection: null, topology: null, layoutSidecar: null });
   useRecentCasesStore.setState({ cases: [] });
+  useUploadNoticeStore.getState().dismiss();
 });
 
 afterEach(() => {
@@ -249,6 +251,51 @@ describe('<SavedCasesList />', () => {
     expect(screen.getByTestId('saved-cases-files-empty')).toHaveTextContent(
       'Drop a .raw / .xlsx / .json / .m file anywhere in this window, or use Add files.',
     );
+  });
+
+  it('says under the list that files can be dropped on the window, and which kinds', () => {
+    render(withClient(<SavedCasesList />));
+    expect(screen.getByTestId('saved-cases-drop-hint')).toHaveTextContent(
+      'Drop .raw, .dyr, .m, .xlsx, .json files anywhere in this window to add them.',
+    );
+  });
+
+  describe('files that were turned away', () => {
+    it('shows no notice until a file was refused', () => {
+      render(withClient(<SavedCasesList />));
+      expect(screen.queryByTestId('saved-cases-upload-notice')).toBeNull();
+    });
+
+    it('lists each refused file with its reason, under the Workspace header, until dismissed', async () => {
+      const user = userEvent.setup();
+      useUploadNoticeStore
+        .getState()
+        .show([
+          'test.txt is not a case file. The workspace holds .raw, .dyr, .m, .xlsx, .json files.',
+        ]);
+      render(withClient(<SavedCasesList />));
+      const notice = screen.getByRole('group', { name: 'Files not added' });
+      expect(notice).toHaveTextContent('1 file was not added');
+      expect(notice).toHaveTextContent('test.txt is not a case file');
+      const heading = screen.getByTestId('saved-cases-files-heading');
+      expect(
+        heading.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+
+      await user.click(screen.getByRole('button', { name: 'Dismiss' }));
+      expect(screen.queryByTestId('saved-cases-upload-notice')).toBeNull();
+    });
+
+    it('counts several, and shows when the workspace is empty too', () => {
+      mockFiles = [];
+      useUploadNoticeStore.getState().show(['a.txt is empty.', 'b.zip is not a case file.']);
+      render(withClient(<SavedCasesList />));
+      const notice = screen.getByTestId('saved-cases-upload-notice');
+      expect(notice).toHaveTextContent('2 files were not added');
+      expect(notice).toHaveTextContent('a.txt is empty.');
+      expect(notice).toHaveTextContent('b.zip is not a case file.');
+      expect(screen.getByTestId('saved-cases-files-empty')).toBeInTheDocument();
+    });
   });
 
   describe('recent cases', () => {

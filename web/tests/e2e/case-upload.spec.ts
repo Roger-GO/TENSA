@@ -117,10 +117,14 @@ test('Add files lists the files, asks before replacing one, and refuses what is 
   await chooser.setInputFiles({ name: bad, mimeType: 'text/plain', buffer: Buffer.from('hello') });
   await expect(toast(page, `${bad} is not a case file`)).toBeVisible();
   await expect(page.getByTestId(`saved-cases-row-${bad}`)).toHaveCount(0);
+  // The refusal stays beside the button when its toast is gone, until the next add.
+  const notice = page.getByTestId('saved-cases-upload-notice');
+  await expect(notice).toContainText(`${bad} is not a case file`);
 
-  // A dynamic file is added, and stays unopened: it loads with a case.
+  // A dynamic file is added, and stays unopened: it loads with a case, as the toast says.
   await chooser.setInputFiles({ name: dyr, mimeType: 'text/plain', buffer: Buffer.from('dyr') });
-  await expect(toast(page, `Added ${dyr} to the workspace.`)).toBeVisible();
+  await expect(toast(page, `Added ${dyr} to the workspace.`)).toContainText('with its .raw');
+  await expect(notice).toBeHidden();
   await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(0);
 
   // The same name again is not replaced silently: the toast asks.

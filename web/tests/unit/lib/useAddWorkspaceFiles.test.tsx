@@ -14,6 +14,7 @@ import { useAddWorkspaceFiles } from '@/lib/useAddWorkspaceFiles';
 import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
+import { useUploadNoticeStore } from '@/store/uploadNotice';
 
 const upload = vi.fn();
 const loadCase = vi.fn();
@@ -29,6 +30,10 @@ vi.mock('@/api/queries', async () => {
 });
 
 const file = (name: string, content = 'case data') => new File([content], name);
+
+/** What a toast that has to be read lasts, and what a lone .dyr is told. */
+const READ = { duration: 10_000 };
+const DYR_ALONE = 'A .dyr file opens together with its .raw. Add the two at once to open them.';
 
 const stored = (name: string) => ({ name, size_bytes: 9, format: 'raw', replaced: false });
 
@@ -72,6 +77,7 @@ beforeEach(() => {
   reload.mockReset();
   useSessionStore.setState({ sessionId: parseSessionId('s1') });
   useCaseStore.setState({ selection: null });
+  useUploadNoticeStore.getState().dismiss();
   success = vi.spyOn(toast, 'success').mockReturnValue('id');
   warning = vi.spyOn(toast, 'warning').mockReturnValue('id');
   error = vi.spyOn(toast, 'error').mockReturnValue('id');
@@ -114,7 +120,8 @@ describe('useAddWorkspaceFiles', () => {
     expect(order.at(-1)).toBe('end b.dyr');
     expect(result.current.isUploading).toBe(false);
     expect(success).toHaveBeenCalledWith('Added 2 files to the workspace.', {
-      description: 'a.dyr and b.dyr',
+      description: `a.dyr and b.dyr. ${DYR_ALONE}`,
+      ...READ,
     });
   });
 
@@ -125,13 +132,27 @@ describe('useAddWorkspaceFiles', () => {
     expect(upload).toHaveBeenCalledWith({ file: f });
   });
 
-  it('says what a single file did and leaves a lone .dyr to be paired with a case', async () => {
+  it('says what a single file did and tells a lone .dyr that it needs its .raw', async () => {
     const { result } = renderHook(() => useAddWorkspaceFiles());
     await act(() => result.current.addFiles([file('ieee14.dyr')]));
     expect(success).toHaveBeenCalledWith('Added ieee14.dyr to the workspace.', {
-      description: undefined,
+      description: DYR_ALONE,
+      ...READ,
     });
     expect(loadCase).not.toHaveBeenCalled();
+  });
+
+  it('gives no .dyr hint when a case came with the files', async () => {
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('other.raw'), addfiles: [] },
+    });
+    const { result } = renderHook(() => useAddWorkspaceFiles());
+    await act(() => result.current.addFiles([file('a.xlsx'), file('b.xlsx'), file('c.dyr')]));
+    // Two cases and a .dyr: nothing opens, and the hint about a lone .dyr does not apply.
+    expect(success).toHaveBeenCalledTimes(1);
+    expect(success).toHaveBeenCalledWith('Added 3 files to the workspace.', {
+      description: 'a.xlsx, b.xlsx and c.dyr',
+    });
   });
 
   it('opens a case that was added while nothing is open', async () => {
@@ -201,15 +222,18 @@ describe('useAddWorkspaceFiles', () => {
     const { result } = renderHook(() => useAddWorkspaceFiles());
     await act(() => result.current.addFiles([file('notes.txt')]));
     expect(upload).not.toHaveBeenCalled();
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('notes.txt is not a case file'));
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('notes.txt is not a case file'),
+      READ,
+    );
 
     await act(() => result.current.addFiles([file('empty.raw', '')]));
-    expect(error).toHaveBeenLastCalledWith('empty.raw is empty.');
+    expect(error).toHaveBeenLastCalledWith('empty.raw is empty.', READ);
 
     const huge = file('huge.raw');
     Object.defineProperty(huge, 'size', { value: MAX_CASE_UPLOAD_BYTES + 1 });
     await act(() => result.current.addFiles([huge]));
-    expect(error).toHaveBeenLastCalledWith('huge.raw is larger than 32 MiB.');
+    expect(error).toHaveBeenLastCalledWith('huge.raw is larger than 32 MiB.', READ);
     expect(upload).not.toHaveBeenCalled();
   });
 
@@ -222,9 +246,11 @@ describe('useAddWorkspaceFiles', () => {
     expect(error).toHaveBeenCalledTimes(1);
     expect(error).toHaveBeenCalledWith('2 files were not added.', {
       description: expect.stringContaining('x.txt is not a case file'),
+      ...READ,
     });
     expect(success).toHaveBeenCalledWith('Added 2 files to the workspace.', {
-      description: 'a.dyr and b.dyr',
+      description: `a.dyr and b.dyr. ${DYR_ALONE}`,
+      ...READ,
     });
   });
 
@@ -238,9 +264,11 @@ describe('useAddWorkspaceFiles', () => {
     await act(() => result.current.addFiles([file('CON.raw'), file('a.dyr')]));
     expect(error).toHaveBeenCalledWith(
       "Could not add CON.raw: unsafe file name 'CON.raw': the name is a reserved device",
+      READ,
     );
     expect(success).toHaveBeenCalledWith('Added a.dyr to the workspace.', {
-      description: undefined,
+      description: DYR_ALONE,
+      ...READ,
     });
   });
 
@@ -250,7 +278,46 @@ describe('useAddWorkspaceFiles', () => {
     await act(() => result.current.addFiles([file('a.dyr')]));
     expect(error).toHaveBeenCalledWith(
       'Could not add a.dyr: Network error on POST /api/workspace/files',
+      READ,
     );
+  });
+
+  describe('the notice of what was turned away', () => {
+    const notice = () => useUploadNoticeStore.getState().refused;
+
+    it('keeps each file that was refused before it was sent, and why', async () => {
+      const { result } = renderHook(() => useAddWorkspaceFiles());
+      await act(() => result.current.addFiles([file('notes.txt'), file('empty.raw', '')]));
+      expect(notice()).toEqual([
+        'notes.txt is not a case file. The workspace holds .raw, .dyr, .m, .xlsx, .json files.',
+        'empty.raw is empty.',
+      ]);
+    });
+
+    it('keeps a file the server refused, beside the ones that were refused before', async () => {
+      upload.mockRejectedValueOnce(problem(400, 'unsafe file name'));
+      const { result } = renderHook(() => useAddWorkspaceFiles());
+      await act(() => result.current.addFiles([file('notes.txt'), file('CON.raw'), file('a.dyr')]));
+      expect(notice()).toEqual([
+        'notes.txt is not a case file. The workspace holds .raw, .dyr, .m, .xlsx, .json files.',
+        'Could not add CON.raw: unsafe file name',
+      ]);
+    });
+
+    it('is cleared by the next add, so it never describes an older attempt', async () => {
+      const { result } = renderHook(() => useAddWorkspaceFiles());
+      await act(() => result.current.addFiles([file('notes.txt')]));
+      expect(notice()).toHaveLength(1);
+      await act(() => result.current.addFiles([file('ieee14.xlsx')]));
+      expect(notice()).toEqual([]);
+    });
+
+    it('is not set by a name that is already taken, which has its own Replace button', async () => {
+      upload.mockRejectedValueOnce(problem(409, "'ieee14.raw' already exists in the workspace"));
+      const { result } = renderHook(() => useAddWorkspaceFiles());
+      await act(() => result.current.addFiles([file('ieee14.raw')]));
+      expect(notice()).toEqual([]);
+    });
   });
 
   describe('a name that is already in the workspace', () => {
@@ -328,7 +395,10 @@ describe('useAddWorkspaceFiles', () => {
         actionOf(warning)?.onClick();
         await Promise.resolve();
       });
-      expect(error).toHaveBeenLastCalledWith('Could not replace ieee14.raw: disk full');
+      expect(error).toHaveBeenLastCalledWith('Could not replace ieee14.raw: disk full', READ);
+      expect(useUploadNoticeStore.getState().refused).toEqual([
+        'Could not replace ieee14.raw: disk full',
+      ]);
     });
   });
 
