@@ -142,6 +142,23 @@ describe('VariableTreePicker', () => {
     expect(sel.has('Gen_1_omega')).toBe(false);
   });
 
+  it('offers the variables of a pinned run when no run is active, and picks its bus voltages', () => {
+    // After Reset run, a case change or a reload of the page: runs to read, none active.
+    seedRun('r1', ['Bus_1_v', 'Bus_5_v', 'Gen_1_omega']);
+    useRunsStore.getState().markRunDone('r1', 1);
+    useRunsStore.getState().clearActiveRun();
+    render(<VariableTreePicker />);
+    expect(screen.getByTestId('variable-tree-picker-empty')).toBeInTheDocument();
+    cleanup();
+
+    useRunsStore.getState().addOverlayRun('r1');
+    render(<VariableTreePicker />);
+
+    expect(screen.queryByTestId('variable-tree-picker-empty')).toBeNull();
+    const sel = usePlotStore.getState().selectedByRun['r1']!;
+    expect([...sel].sort()).toEqual(['Bus_1_v', 'Bus_5_v']);
+  });
+
   it('clicking a leaf checkbox toggles only that series in the plot store', async () => {
     const user = userEvent.setup();
     seedRun('r1', ['Bus_1_v', 'Bus_5_v']);

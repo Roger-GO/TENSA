@@ -40,7 +40,7 @@ import { ScrubControl } from '@/components/plots/ScrubControl';
 import { VariableTreePicker } from '@/components/plots/VariableTreePicker';
 import { useLayoutStore } from '@/store/layout';
 import { usePlotStore } from '@/store/plot';
-import { useRunsStore } from '@/store/runs';
+import { usePlotRunId } from '@/components/plots/overlayRuns';
 import { TdsConfigPanel } from '@/components/tds/TdsConfigPanel';
 import { RunStatusBadge } from '@/components/tds/RunStatusBadge';
 
@@ -222,9 +222,9 @@ function PlotPanelContent() {
   const [showMetrics, setShowMetrics] = useState(false);
   const resultsViewActive = useLayoutStore((s) => s.resultsViewActive);
   const setResultsViewActive = useLayoutStore((s) => s.setResultsViewActive);
-  const activeRunId = useRunsStore((s) => s.activeRunId);
+  const plotRun = usePlotRunId();
   const selectedCount = usePlotStore((s) =>
-    activeRunId === null ? 0 : (s.selectedByRun[activeRunId]?.size ?? 0),
+    plotRun === null ? 0 : (s.selectedByRun[plotRun]?.size ?? 0),
   );
   return (
     <div

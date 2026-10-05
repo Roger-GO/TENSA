@@ -18,7 +18,7 @@ import { UPlot } from './UPlot';
 import { RunLegendChip } from './RunLegendChip';
 import { alignRuns, resampleOnto } from './multiRunAlign';
 import type { AlignedRuns } from './multiRunAlign';
-import { resolveOverlayRuns } from './overlayRuns';
+import { resolveOverlayRuns, usePlotRunId } from './overlayRuns';
 import { SECONDARY_SCALE, planGroupAxes, scaleColumn } from './axes';
 import type { AxisPlan, GroupAxes, PlannedSeries } from './axes';
 import { deltaCursorPlugin } from './cursorPlugin';
@@ -592,8 +592,8 @@ export function TimeSeriesPlot({
   colorMode = 'hash',
   toolbar,
 }: TimeSeriesPlotProps) {
-  const activeRunId = useRunsStore((s) => s.activeRunId);
-  const effectiveRunId = runId ?? activeRunId;
+  // The active run, or the first pinned one when no run is active.
+  const effectiveRunId = usePlotRunId(runId);
   const { resolvedTheme } = useTheme();
 
   // Resolve the set of runs to render (see ``resolveOverlayRuns`` for the
@@ -614,8 +614,9 @@ export function TimeSeriesPlot({
 
   const isMultiRun = overlayRuns.length > 1;
   const primaryRun = overlayRuns[0];
-  // Runs kept after Reset run or a case change, which nothing plots until one
-  // is started or pinned: the empty plot points at where they are.
+  // Runs kept after Reset run, a case change or a reload of the page, which
+  // nothing plots until one is started or pinned: the empty plot points at
+  // where they are.
   const retainedRunCount = useRunsStore((s) => Object.keys(s.runs).length);
 
   const selected = usePlotStore((s) =>
@@ -824,7 +825,7 @@ export function TimeSeriesPlot({
         <EmptyPlotMessage
           message={
             retainedRunCount > 0
-              ? 'Run a TDS to see results. Earlier runs are in History.'
+              ? 'Run a TDS to see results. Earlier runs are in History: pin one to plot it.'
               : 'Run a TDS to see results'
           }
         />

@@ -50,6 +50,19 @@ describe('<PlotQuantityToggles />', () => {
     ]);
   });
 
+  it('acts on a pinned run when no run is active, as after a reload of the page', async () => {
+    const user = userEvent.setup();
+    seedRun(['Bus_1_v', 'Bus_1_a']);
+    useRunsStore.getState().markRunDone('r1', 1);
+    useRunsStore.getState().clearActiveRun();
+    useRunsStore.getState().addOverlayRun('r1');
+    render(<PlotQuantityToggles />);
+
+    await user.click(screen.getByRole('button', { name: 'Bus angle' }));
+
+    expect(selected()).toEqual(['Bus_1_a']);
+  });
+
   it('leaves out a quantity the run did not record', () => {
     // A run that streamed bus voltages only (the TDS variable groups were narrowed).
     seedRun(['Bus_1_v']);

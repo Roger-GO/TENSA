@@ -4,7 +4,7 @@ import { useRunsStore } from '@/store/runs';
 import { usePlotStore, parseColumnName, groupLabel } from '@/store/plot';
 import type { ParsedSeries, VarGroup } from '@/store/plot';
 import { RunLegendChip } from './RunLegendChip';
-import { resolveOverlayRuns } from './overlayRuns';
+import { resolveOverlayRuns, usePlotRunId } from './overlayRuns';
 import { cn } from '@/lib/cn';
 
 /**
@@ -178,8 +178,7 @@ function TriCheckbox({
 }
 
 export function VariableTreePicker({ runId, className }: VariableTreePickerProps) {
-  const activeRunId = useRunsStore((s) => s.activeRunId);
-  const effectiveRunId = runId ?? activeRunId;
+  const effectiveRunId = usePlotRunId(runId);
 
   // The picker needs only run ids and column names. A run keeps the same
   // ``columnNames`` array while it streams, so selecting those (with

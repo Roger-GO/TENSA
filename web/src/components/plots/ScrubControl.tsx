@@ -62,6 +62,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useRunsStore } from '@/store/runs';
 import { PLAYBACK_RATES, usePlotStore } from '@/store/plot';
+import { usePlotRunId } from './overlayRuns';
 import { Button } from '@/components/ui/button';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
@@ -94,8 +95,7 @@ function formatTime(t: number): string {
 }
 
 export function ScrubControl({ runId, className }: ScrubControlProps) {
-  const activeRunId = useRunsStore((s) => s.activeRunId);
-  const effectiveRunId = runId ?? activeRunId;
+  const effectiveRunId = usePlotRunId(runId);
   const run = useRunsStore((s) => (effectiveRunId ? s.runs[effectiveRunId] : undefined));
   const caseName = useExportCaseName();
 

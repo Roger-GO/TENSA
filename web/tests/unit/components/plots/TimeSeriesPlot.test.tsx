@@ -157,9 +157,33 @@ describe('TimeSeriesPlot', () => {
     useRunsStore.getState().clearActiveRun();
     const { getByTestId } = render(<TimeSeriesPlot />);
     expect(getByTestId('time-series-plot-empty')).toHaveTextContent(
-      'Run a TDS to see results. Earlier runs are in History.',
+      'Run a TDS to see results. Earlier runs are in History: pin one to plot it.',
     );
     expect(constructSpy).not.toHaveBeenCalled();
+  });
+
+  it('plots a pinned run when no run is active, as after Reset run or a reload of the page', () => {
+    seedRun('r1', ['Bus_1_v', 'Bus_5_v']);
+    appendRows('r1', [0, 0.1, 0.2], { Bus_1_v: [1.0, 1.0, 1.0], Bus_5_v: [0.99, 0.98, 0.97] });
+    useRunsStore.getState().markRunDone('r1', 0.2);
+    useRunsStore.getState().clearActiveRun();
+    useRunsStore.getState().addOverlayRun('r1');
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_5_v']));
+
+    const { getByTestId } = render(<TimeSeriesPlot />);
+
+    expect(getByTestId('time-series-plot')).toHaveAttribute('data-run-id', 'r1');
+    expect(getByTestId('time-series-plot-group-bus_v')).toBeInTheDocument();
+    expect(constructSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks for variables, not for a run, when a pinned run has none picked yet', () => {
+    seedRun('r1', ['Bus_1_v']);
+    useRunsStore.getState().markRunDone('r1', 0.2);
+    useRunsStore.getState().clearActiveRun();
+    useRunsStore.getState().addOverlayRun('r1');
+    const { getByTestId } = render(<TimeSeriesPlot />);
+    expect(getByTestId('time-series-plot-empty')).toHaveTextContent('Select variables to plot');
   });
 
   it('renders the "select variables" empty state when a run is active but no series picked', () => {

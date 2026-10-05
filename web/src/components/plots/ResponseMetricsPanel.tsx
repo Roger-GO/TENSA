@@ -16,7 +16,7 @@ import {
 } from '@/lib/responseMetrics';
 import { runLabel } from '@/lib/runLabel';
 import { cn } from '@/lib/cn';
-import { resolveOverlayRuns } from './overlayRuns';
+import { resolveOverlayRuns, usePlotRunId } from './overlayRuns';
 
 /**
  * ResponseMetricsPanel: how each plotted signal of the run responded, in a table:
@@ -129,7 +129,8 @@ function MetricsRow({ result, unit }: { result: SeriesMetrics; unit: string }) {
 }
 
 export function ResponseMetricsPanel({ className }: { className?: string }) {
-  const activeRunId = useRunsStore((s) => s.activeRunId);
+  // The run the plot keys its selection and cursors on.
+  const plotRun = usePlotRunId();
   // The run the plot draws first, as ``TimeSeriesPlot`` picks it.
   const primaryRunId = useRunsStore((s) => resolveOverlayRuns(s)[0]?.runId ?? null);
   const overlayCount = useRunsStore((s) => resolveOverlayRuns(s).length);
@@ -148,12 +149,8 @@ export function ResponseMetricsPanel({ className }: { className?: string }) {
     const run = primaryRunId === null ? undefined : s.runs[primaryRunId];
     return run !== undefined && FINISHED.has(run.state) ? run.seqCount : -1;
   });
-  const selected = usePlotStore((s) =>
-    activeRunId === null ? undefined : s.selectedByRun[activeRunId],
-  );
-  const cursors = usePlotStore((s) =>
-    activeRunId === null ? undefined : s.cursorsByRun[activeRunId],
-  );
+  const selected = usePlotStore((s) => (plotRun === null ? undefined : s.selectedByRun[plotRun]));
+  const cursors = usePlotStore((s) => (plotRun === null ? undefined : s.cursorsByRun[plotRun]));
   const mode = useUnitsStore((s) => s.mode);
   const window = metricsWindow(cursors);
 

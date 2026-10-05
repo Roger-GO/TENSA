@@ -182,6 +182,18 @@ describe('<ResponseMetricsPanel />: what it asks', () => {
     expect(screen.getByTestId('response-metrics-window')).toHaveTextContent('Over the whole run');
   });
 
+  it('describes a pinned run when no run is active, as after a reload of the page', async () => {
+    seed('r1', { Bus_1_v: [1, 0.99, 0.98, 0.97] });
+    useRunsStore.getState().clearActiveRun();
+    useRunsStore.getState().addOverlayRun('r1');
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v']));
+
+    renderPanel();
+    await screen.findByTestId('response-metrics-table');
+
+    expect(requests[0]!.series.map((s) => s.name)).toEqual(['Bus_1_v']);
+  });
+
   it('asks about the stretch between the cursors when both are placed, and again when one moves', async () => {
     seed('r1', { Bus_1_v: [1, 0.99, 0.98, 0.97] });
     usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v']));

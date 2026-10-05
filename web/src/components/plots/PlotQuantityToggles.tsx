@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useRunsStore } from '@/store/runs';
 import { usePlotStore } from '@/store/plot';
 import { cn } from '@/lib/cn';
+import { usePlotRunId } from './overlayRuns';
 import { MAX_ELEMENTS, QUANTITIES, isQuantityOn, seriesOf, toggleQuantity } from './plotQuantities';
 
 /**
@@ -21,8 +22,7 @@ export interface PlotQuantityTogglesProps {
 }
 
 export function PlotQuantityToggles({ runId, className }: PlotQuantityTogglesProps) {
-  const activeRunId = useRunsStore((s) => s.activeRunId);
-  const effectiveRunId = runId ?? activeRunId;
+  const effectiveRunId = usePlotRunId(runId);
   // The column names are fixed for a run, so a streamed frame leaves this alone.
   const columnNames = useRunsStore(
     useShallow((s) => (effectiveRunId ? (s.runs[effectiveRunId]?.columnNames ?? []) : [])),
