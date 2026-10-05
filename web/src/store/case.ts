@@ -128,6 +128,13 @@ export interface CaseState {
    * informational and the panel ignores it.
    */
   addPanelDropCoord: { x: number; y: number } | null;
+  /**
+   * The bus the AddElementPanel was opened from: "Add element here" in the
+   * diagram's right-click menu of a bus. The form of whichever kind is picked
+   * opens with that bus chosen, and keeps doing so for the next element until
+   * the panel is closed or opened another way. Null otherwise.
+   */
+  addPanelBus: string | null;
   /** Per-node coord overrides captured from user drags (Unit 13a). */
   dragOverrides: DragOverrides;
   /**
@@ -187,6 +194,12 @@ export interface CaseState {
    * leak into a fresh "+ Add element" click.
    */
   openAddPanel: (kind: string | null, dropCoord?: { x: number; y: number }) => void;
+  /**
+   * Open the AddElementPanel from a bus of the diagram: the bus goes to
+   * `addPanelBus`, for the form to open on. No kind is picked yet, unless the
+   * panel is already open, which keeps the kind it shows.
+   */
+  openAddPanelOnBus: (busIdx: string) => void;
   closeAddPanel: () => void;
   setAddPanelKind: (kind: string | null) => void;
   setAddPanelDirty: (dirty: boolean) => void;
@@ -208,6 +221,7 @@ export const useCaseStore = create<CaseState>((set) => ({
   addPanelKind: null,
   addPanelDirty: false,
   addPanelDropCoord: null,
+  addPanelBus: null,
   dragOverrides: {},
   pendingDependents: [],
   editMode: 'run',
@@ -227,6 +241,7 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelKind: null,
       addPanelDirty: false,
       addPanelDropCoord: null,
+      addPanelBus: null,
       dragOverrides: {},
       pendingDependents: [],
       editMode: 'run',
@@ -255,13 +270,25 @@ export const useCaseStore = create<CaseState>((set) => ({
       // button or palette), explicitly null the field so a stale coord
       // from an earlier drag-and-drop open doesn't leak into the form.
       addPanelDropCoord: dropCoord ?? null,
+      // Likewise the bus of an earlier "Add element here".
+      addPanelBus: null,
     }),
+  openAddPanelOnBus: (busIdx: string) =>
+    set((s) => ({
+      addPanelOpen: true,
+      // A panel that is open keeps the kind it shows: the same form, on this bus.
+      addPanelKind: s.addPanelOpen ? s.addPanelKind : null,
+      addPanelDirty: false,
+      addPanelDropCoord: null,
+      addPanelBus: busIdx,
+    })),
   closeAddPanel: () =>
     set({
       addPanelOpen: false,
       addPanelKind: null,
       addPanelDirty: false,
       addPanelDropCoord: null,
+      addPanelBus: null,
     }),
   setAddPanelKind: (kind: string | null) => set({ addPanelKind: kind, addPanelDirty: false }),
   setAddPanelDirty: (dirty: boolean) => set({ addPanelDirty: dirty }),
@@ -276,6 +303,7 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelKind: null,
       addPanelDirty: false,
       addPanelDropCoord: null,
+      addPanelBus: null,
       dragOverrides: {},
       pendingDependents: [],
       editMode: 'run',

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useAddElement, useCurrentTopology, useTopologySchema } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
@@ -25,9 +25,13 @@ import { elementDefaults } from './elementHelp';
  *
  *   pick kind → form renders → fill → Submit →
  *     Saving (button locks, spinner) →
- *     201 → topology re-fetch → close
+ *     201 → topology re-fetch → the form resets for the next element, under
+ *           a line that names what was added and says the panel stays open
  *     422 → inline error, panel stays open
  *     409 → close + caller surfaces reset banner
+ *
+ * Opened from a bus of the diagram ("Add element here"), the panel says which
+ * bus and every form with a bus field opens on it (`addPanelBus`).
  */
 
 /**
@@ -107,6 +111,15 @@ function pickerKindFor(kind: string | null): string | null {
   return kind === null ? null : (DEFAULT_KIND_OF_FAMILY[kind] ?? kind);
 }
 
+/** "PV generator 6 on bus 4": what an add made, for the line that confirms it. */
+function describeAdded(label: string, params: Readonly<Record<string, ParamValue>>): string {
+  const text = (value: ParamValue | undefined) =>
+    value === undefined || value === '' ? null : String(value);
+  const idx = text(params.idx);
+  const bus = text(params.bus);
+  return `${label}${idx === null ? '' : ` ${idx}`}${bus === null ? '' : ` on bus ${bus}`}`;
+}
+
 export interface AddElementPanelProps {
   className?: string;
 }
@@ -117,6 +130,7 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
   const dirty = useCaseStore((s) => s.addPanelDirty);
   const setKind = useCaseStore((s) => s.setAddPanelKind);
   const closeAddPanel = useCaseStore((s) => s.closeAddPanel);
+  const openAddPanelOnBus = useCaseStore((s) => s.openAddPanelOnBus);
   const setDirty = useCaseStore((s) => s.setAddPanelDirty);
   // v3 Unit 5: optional drop coordinate seeded by SldCanvas's onDrop
   // handler. For kind === 'Bus' this surfaces as a "drop position" hint
@@ -127,10 +141,13 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
   // it (non-Bus elements anchor to a parent bus, so a free coordinate
   // doesn't apply).
   const dropCoord = useCaseStore((s) => s.addPanelDropCoord);
+  // The bus "Add element here" was chosen on, which each form opens on.
+  const seedBus = useCaseStore((s) => s.addPanelBus);
   const sessionId = useSessionStore((s) => s.sessionId);
   const addMutation = useAddElement();
   const schema = useTopologySchema();
-  const baseMva = useCurrentTopology()?.base_mva ?? null;
+  const topology = useCurrentTopology();
+  const baseMva = topology?.base_mva ?? null;
   const [serverError, setServerError] = useState<string | null>(null);
   // What the server refused goes once the form no longer holds it.
   const clearServerError = useCallback(() => setServerError(null), []);
@@ -141,6 +158,13 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
   // remounts with fresh defaults; ``lastAdded`` drives a brief confirmation.
   const [addedCount, setAddedCount] = useState(0);
   const [lastAdded, setLastAdded] = useState<string | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
+
+  // The confirmation is about this visit to the panel: the next time it opens,
+  // the element it names was added a while ago.
+  useEffect(() => {
+    if (!open) setLastAdded(null);
+  }, [open]);
 
   if (!open) return null;
 
@@ -178,8 +202,11 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
           // a run of same-kind adds (e.g. 9 buses) is fast. ✕ closes manually.
           setServerError(null);
           setDirty(false);
-          setLastAdded(submitModel);
+          setLastAdded(describeAdded(kindEntry?.label ?? submitModel, finalParams));
           setAddedCount((c) => c + 1);
+          // The submit button is at the foot of a long form and the line that
+          // confirms the add at its head: bring the head back into view.
+          if (panelRef.current) panelRef.current.scrollTop = 0;
         },
         onError: (err) => {
           if (err instanceof ProblemDetailsError) {
@@ -198,6 +225,12 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
     );
   };
 
+  // The name of the bus the panel was opened from, or null once the case has no such bus.
+  const seedBusName =
+    seedBus === null
+      ? null
+      : ((topology?.buses ?? []).find((b) => String(b.idx) === seedBus)?.name ?? null);
+
   type KindEntry = (typeof SUPPORTED_KINDS)[number];
   const groupedKinds = SUPPORTED_KINDS.reduce<Record<string, KindEntry[]>>((acc, k) => {
     (acc[k.group] ??= []).push(k);
@@ -207,6 +240,7 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
   return (
     <>
       <aside
+        ref={panelRef}
         role="region"
         aria-label="Add element"
         data-testid="add-element-panel"
@@ -245,7 +279,11 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
             id="add-element-kind"
             data-testid="add-element-kind"
             value={kind ?? ''}
-            onChange={(e) => setKind(e.target.value || null)}
+            onChange={(e) => {
+              setKind(e.target.value || null);
+              // What the server refused was a value of the form this replaces.
+              setServerError(null);
+            }}
             className="bg-background border-border h-8 rounded border px-2 text-sm"
           >
             <option value="" disabled>
@@ -277,25 +315,52 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
           </div>
         ) : null}
 
+        {seedBus !== null && seedBusName !== null ? (
+          <div
+            data-testid="add-element-seed-bus"
+            className={cn(
+              'border-border bg-muted/40 text-muted-foreground',
+              'rounded-[var(--radius-sm)] border px-2 py-1 text-[11px] leading-snug',
+            )}
+          >
+            Adding on bus{' '}
+            <span className="text-foreground font-mono">
+              {seedBusName !== seedBus ? `${seedBusName} (idx ${seedBus})` : seedBus}
+            </span>
+            : a form that has a bus opens with it chosen.
+          </div>
+        ) : null}
+
         {lastAdded ? (
           <div
             role="status"
             data-testid="add-element-success"
             className={cn(
               'border-success/30 bg-success/10 text-foreground',
-              'rounded-[var(--radius-sm)] border px-2 py-1 text-[11px]',
+              'rounded-[var(--radius-sm)] border px-2 py-1 text-[11px] leading-snug',
             )}
           >
-            Added {lastAdded} ✓ — form reset for the next element.
+            Added {lastAdded}. The panel stays open for the next element: pick another Kind above,
+            or close the panel when you are done.
           </div>
         ) : null}
 
         {kind && schema.data && formModel ? (
           <ElementForm
-            key={`${formModel}-${addedCount}`}
+            // A fresh form after each add, and when it is sent to another bus.
+            key={`${formModel}-${addedCount}-${seedBus ?? ''}`}
             model={formModel}
             kindHint={kind}
             defaultParams={defaultParams}
+            seedBus={seedBus}
+            // From a battery or a machine on a bus without a static generator:
+            // the PV form on that bus. The panel stays on the bus, so the form
+            // that asked comes back with the bus and the new generator chosen.
+            onAddGenerator={(bus) => {
+              openAddPanelOnBus(bus);
+              setKind('PV');
+              setServerError(null);
+            }}
             saving={addMutation.isPending}
             serverError={serverError}
             onSubmit={handleSubmit}

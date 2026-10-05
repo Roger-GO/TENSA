@@ -24,6 +24,8 @@ export interface GenIdxSelectProps {
   required?: boolean;
   id?: string;
   'aria-describedby'?: string;
+  /** The form refused the value: set once a submit found the field empty or unusable. */
+  'aria-invalid'?: boolean;
   className?: string;
 }
 
@@ -34,6 +36,7 @@ export function GenIdxSelect({
   id,
   className,
   'aria-describedby': ariaDescribedBy,
+  'aria-invalid': ariaInvalid,
 }: GenIdxSelectProps) {
   const topology = useCurrentTopology();
   const staticGens = staticGenerators(topology);
@@ -61,12 +64,14 @@ export function GenIdxSelect({
     <select
       id={id}
       aria-describedby={ariaDescribedBy}
+      aria-invalid={ariaInvalid ? true : undefined}
       value={value}
       required={required}
       onChange={(e) => onChange(e.target.value)}
       data-testid="gen-idx-select"
       className={cn(
-        'bg-background border-border h-7 max-w-full rounded border px-2 font-mono text-xs',
+        'bg-background h-7 max-w-full rounded border px-2 font-mono text-xs',
+        ariaInvalid ? 'border-danger' : 'border-border',
         className,
       )}
     >

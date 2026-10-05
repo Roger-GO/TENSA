@@ -1,69 +1,40 @@
 import { Button } from '@/components/ui/button';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipPortal,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
 import { useCaseStore } from '@/store/case';
-import { useCurrentTopology } from '@/api/queries';
-import { usePflowStore } from '@/store/pflow';
 
 /**
- * "+ Add element" button that lives in the top bar's left slot.
+ * "+ Add element" button of the Case card, at the top of the left sidebar.
  *
- * Enabled whenever a topology is loaded (case file or blank session) AND
- * state is `pre-setup` AND PF is not currently running. Clicking opens
- * the AddElementPanel slide-over with no kind pre-selected.
+ * Clicking opens the AddElementPanel slide-over with no kind pre-selected. It
+ * is the way in that is always in view: the Component library's tiles do the
+ * same for one kind each, but sit at the foot of the sidebar, below the fold of
+ * a short window, and the Workspace menu's entry is behind a click.
  *
- * Disabled-state tooltip explains the cause:
- * - "Load or start a system first" — no topology
- * - "Reset the run to add elements" — committed
- * - "Wait for PF to finish" — running
+ * `blockedReason` is why nothing can be added now (`useAddComponent`), or
+ * `null`. The caller shows it as text and passes its id as `describedBy`, so
+ * the disabled button is read out with its reason.
  */
-export function AddElementButton() {
-  const topology = useCurrentTopology();
-  const isRunning = usePflowStore((s) => s.isRunning);
+export interface AddElementButtonProps {
+  blockedReason: string | null;
+  /** The id of the element that shows `blockedReason`. */
+  describedBy?: string;
+}
+
+export function AddElementButton({ blockedReason, describedBy }: AddElementButtonProps) {
   const openAddPanel = useCaseStore((s) => s.openAddPanel);
-
-  const noTopology = topology === null;
-  const committed = topology?.state === 'committed';
-
-  let disabledReason: string | null = null;
-  if (noTopology) disabledReason = 'Load or start a system first.';
-  else if (committed) disabledReason = 'Reset the run to add elements.';
-  else if (isRunning) disabledReason = 'Wait for PF to finish.';
-
-  const button = (
+  const blocked = blockedReason !== null;
+  return (
     <Button
       type="button"
       variant="outline"
       size="sm"
-      disabled={disabledReason !== null}
+      disabled={blocked}
       onClick={() => openAddPanel(null)}
+      aria-describedby={blocked ? describedBy : undefined}
       data-testid="add-element-button"
+      className="text-xs"
     >
-      <span aria-hidden="true">＋</span>
+      <span aria-hidden="true">+</span>
       <span className="ml-1">Add element</span>
     </Button>
   );
-
-  if (disabledReason !== null) {
-    return (
-      <TooltipProvider delayDuration={150}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span tabIndex={0} className="inline-block">
-              {button}
-            </span>
-          </TooltipTrigger>
-          <TooltipPortal>
-            <TooltipContent>{disabledReason}</TooltipContent>
-          </TooltipPortal>
-        </Tooltip>
-      </TooltipProvider>
-    );
-  }
-  return button;
 }

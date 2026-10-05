@@ -18,6 +18,12 @@
  *   generators, a pick of one sets the other, and a bus without a generator or
  *   a generator already in use is warned about.
  * - An edit tells the caller, so that a refusal of the old values can go.
+ * - A submit that cannot go says so itself (the browser's own validation is
+ *   off): under each field, in one line that names the fields, and by moving
+ *   to the first of them.
+ * - A static generator opens named after its idx, with a line under its numbers.
+ * - A form opened on a bus starts there, with the free generator of that bus.
+ * - A bus without a generator offers to add one there.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -69,6 +75,11 @@ const SCHEMA: TopologySchema = {
       { name: 'name', kind: 'string', required: true },
       { name: 'bus', kind: 'bus_idx', required: true },
       { name: 'p0', kind: 'number', required: true, unit: 'pu' },
+    ],
+    TGOV1: [
+      { name: 'idx', kind: 'string', required: true },
+      { name: 'name', kind: 'string', required: true },
+      { name: 'syn', kind: 'syn_idx', required: true },
     ],
   },
 };
@@ -831,6 +842,77 @@ describe('<ElementForm /> follows the case while it is open', () => {
     view.rerender(batteryForm());
     expect(inputOf('idx').value).toBe('BESS_A');
   });
+
+  /** `linkedTopology()` once a PV has been added on bus 5, which had no generator. */
+  function withGeneratorOnBus5(): TopologySummary {
+    const base = linkedTopology();
+    return {
+      ...base,
+      generators: [
+        ...(base.generators ?? []),
+        { idx: 8, name: '8', kind: 'PV', params: { bus: 5 } },
+      ],
+    };
+  }
+
+  function batteryFormOn(seedBus: string) {
+    return withQueryClient(
+      <ElementForm
+        model="ESD1"
+        defaultParams={{ Sn: 100, pqflag: 1, pmx: 1, En: 100 }}
+        saving={false}
+        serverError={null}
+        onSubmit={() => {}}
+        onCancel={() => {}}
+        seedBus={seedBus}
+      />,
+    );
+  }
+
+  it('takes the generator of its bus once the case has it, and says so', () => {
+    MOCK_TOPOLOGY = linkedTopology();
+    const view = render(batteryFormOn('5'));
+    expect(genSelect().value).toBe('');
+    expect(screen.getByTestId('field-warning-bus')).toBeInTheDocument();
+
+    // The PV that was added for this battery reaches the case a moment later.
+    MOCK_TOPOLOGY = withGeneratorOnBus5();
+    view.rerender(batteryFormOn('5'));
+    expect(genSelect().value).toBe('8');
+    expect(screen.getByTestId('field-note-gen')).toHaveTextContent(
+      'Set to PV 8, the static generator on bus 5.',
+    );
+    expect(screen.queryByTestId('field-warning-bus')).toBeNull();
+  });
+
+  it('does the same for a bus picked by hand before its generator was there', async () => {
+    const user = userEvent.setup();
+    MOCK_TOPOLOGY = linkedTopology();
+    const view = render(batteryForm());
+    await user.selectOptions(busSelect(), '5');
+    MOCK_TOPOLOGY = withGeneratorOnBus5();
+    view.rerender(batteryForm());
+    expect(genSelect().value).toBe('8');
+  });
+
+  it('leaves a generator the user picked, and one a device already takes over', async () => {
+    const user = userEvent.setup();
+    MOCK_TOPOLOGY = linkedTopology();
+    const view = render(batteryFormOn('4'));
+    // Two generators on bus 4: the user picks one, and the case changing leaves it.
+    await user.selectOptions(genSelect(), '7');
+    MOCK_TOPOLOGY = withGeneratorOnBus5();
+    view.rerender(batteryFormOn('4'));
+    expect(genSelect().value).toBe('7');
+    view.unmount();
+
+    // On bus 2 the one generator is GENROU_2's, before and after.
+    MOCK_TOPOLOGY = linkedTopology();
+    const taken = render(batteryFormOn('2'));
+    MOCK_TOPOLOGY = withGeneratorOnBus5();
+    taken.rerender(batteryFormOn('2'));
+    expect(genSelect().value).toBe('');
+  });
 });
 
 describe('<ElementForm /> tells its caller of an edit', () => {
@@ -852,5 +934,375 @@ describe('<ElementForm /> tells its caller of an edit', () => {
     expect(onEdit).not.toHaveBeenCalled();
     await user.type(inputOf('Vn'), '1');
     expect(onEdit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('<ElementForm /> says what stopped a submit', () => {
+  beforeEach(() => {
+    MOCK_TOPOLOGY = linkedTopology();
+  });
+
+  function renderForm(model: string, onSubmit: () => void = () => {}) {
+    return render(
+      withQueryClient(
+        <ElementForm
+          model={model}
+          saving={false}
+          serverError={null}
+          onSubmit={onSubmit}
+          onCancel={() => {}}
+        />,
+      ),
+    );
+  }
+
+  it("does the checking itself: the browser's bubble names one field and is gone on a click", () => {
+    renderForm('PV');
+    expect(screen.getByTestId('element-form-PV')).toHaveAttribute('novalidate');
+    // The fields still say they are required to a screen reader.
+    expect(busSelect()).toBeRequired();
+    expect(inputOf('p0')).toBeRequired();
+    expect(screen.queryByTestId('form-problems')).toBeNull();
+  });
+
+  it('says Required under each empty field, names them in one line and moves to the first', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderForm('PV', onSubmit);
+    await user.click(screen.getByRole('button', { name: /add pv/i }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    const summary = screen.getByTestId('form-problems');
+    expect(summary).toHaveAttribute('role', 'status');
+    expect(summary).toHaveTextContent('Nothing was added: bus and p0 are required and empty.');
+
+    const busError = screen.getByTestId('field-error-bus');
+    expect(busError).toHaveAttribute('role', 'alert');
+    expect(busError).toHaveTextContent('Required. Pick one from the list.');
+    expect(busSelect()).toHaveAttribute('aria-invalid', 'true');
+    expect(busSelect().getAttribute('aria-describedby')).toBe(busError.id);
+    // It describes the field and is no part of its name: the label is still "bus".
+    expect(screen.getByTestId('field-bus')).not.toContainElement(busError);
+    expect(screen.getByRole('combobox', { name: 'bus' })).toBe(busSelect());
+    expect(screen.getByTestId('field-error-p0')).toHaveTextContent('Required. Enter a value.');
+    expect(inputOf('p0')).toHaveAttribute('aria-invalid', 'true');
+    // The line under p0 that says what it is comes before what is wrong with it.
+    expect(inputOf('p0').getAttribute('aria-describedby')).toBe(
+      `${screen.getByTestId('field-help-p0').id} ${screen.getByTestId('field-error-p0').id}`,
+    );
+    // The fields that hold a value are left alone.
+    expect(inputOf('idx')).not.toHaveAttribute('aria-invalid');
+    // The cursor is in the first of them, which also scrolls it into view.
+    expect(document.activeElement).toBe(busSelect());
+  });
+
+  it('takes a field out of the line as it is filled in, and the line away with the last', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderForm('PV', onSubmit);
+    await user.click(screen.getByRole('button', { name: /add pv/i }));
+
+    await user.selectOptions(busSelect(), '3');
+    expect(screen.getByTestId('form-problems')).toHaveTextContent(
+      'Nothing was added: p0 is required and empty.',
+    );
+    expect(busSelect()).not.toHaveAttribute('aria-invalid');
+    await user.type(inputOf('p0'), '0.4');
+    expect(screen.queryByTestId('form-problems')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: /add pv/i }));
+    expect(onSubmit).toHaveBeenCalledWith({ idx: 'PV_5', name: 'PV_5', bus: '3', p0: 0.4 });
+  });
+
+  it('tells a value it refuses from a field left empty', async () => {
+    const user = userEvent.setup();
+    MOCK_TOPOLOGY = {
+      ...emptyTopology(),
+      buses: [{ idx: '99', name: 'B99', kind: 'Bus', params: {} }],
+    };
+    renderForm('Bus');
+    await user.clear(inputOf('idx'));
+    await user.type(inputOf('idx'), '99');
+    await user.click(screen.getByRole('button', { name: /add bus/i }));
+    expect(screen.getByTestId('form-problems')).toHaveTextContent(
+      'Nothing was added: name and Vn are required and empty, and idx holds a value that cannot be used.',
+    );
+    // In the order of the form: the idx comes first.
+    expect(document.activeElement).toBe(inputOf('idx'));
+  });
+
+  it('marks an unpicked generator and an unpicked machine the same way', async () => {
+    const user = userEvent.setup();
+    const battery = render(
+      withQueryClient(
+        <ElementForm
+          model="ESD1"
+          defaultParams={{ Sn: 100, pqflag: 1, pmx: 1, En: 100 }}
+          saving={false}
+          serverError={null}
+          onSubmit={() => {}}
+          onCancel={() => {}}
+        />,
+      ),
+    );
+    await user.selectOptions(busSelect(), '5');
+    await user.click(screen.getByRole('button', { name: /add esd1/i }));
+    expect(screen.getByTestId('form-problems')).toHaveTextContent(
+      'Nothing was added: gen is required and empty.',
+    );
+    expect(genSelect()).toHaveAttribute('aria-invalid', 'true');
+    expect(document.activeElement).toBe(genSelect());
+    battery.unmount();
+
+    renderForm('TGOV1');
+    await user.click(screen.getByRole('button', { name: /add tgov1/i }));
+    expect(screen.getByTestId('form-problems')).toHaveTextContent(
+      'Nothing was added: name and syn are required and empty.',
+    );
+    const machine = screen.getByTestId('syn-idx-select');
+    expect(machine).toHaveAttribute('aria-invalid', 'true');
+    expect(machine).toHaveClass('border-danger');
+    expect(screen.getByTestId('field-error-syn')).toHaveTextContent(
+      'Required. Pick one from the list.',
+    );
+    await user.selectOptions(machine, 'GENROU_1');
+    expect(screen.getByTestId('syn-idx-select')).not.toHaveAttribute('aria-invalid');
+  });
+
+  it('moves back to the field when the same submit is refused again', async () => {
+    const user = userEvent.setup();
+    renderForm('PV');
+    await user.click(screen.getByRole('button', { name: /add pv/i }));
+    inputOf('idx').focus();
+    await user.click(screen.getByRole('button', { name: /add pv/i }));
+    expect(document.activeElement).toBe(busSelect());
+  });
+
+  it('opens the advanced fields when the first problem is among them', async () => {
+    const user = userEvent.setup();
+    MOCK_TOPOLOGY = emptyTopology();
+    // A number box takes no text, so only a caller's opening value can be one.
+    render(
+      withQueryClient(
+        <ElementForm
+          model="Bus"
+          defaultParams={{ vmax: 'high' }}
+          saving={false}
+          serverError={null}
+          onSubmit={() => {}}
+          onCancel={() => {}}
+        />,
+      ),
+    );
+    await user.type(inputOf('name'), 'BUS1');
+    await user.type(inputOf('Vn'), '110');
+    expect(screen.getByTestId('form-advanced-disclosure')).not.toHaveAttribute('open');
+
+    await user.click(screen.getByRole('button', { name: /add bus/i }));
+    expect(screen.getByTestId('form-problems')).toHaveTextContent(
+      'Nothing was added: vmax holds a value that cannot be used.',
+    );
+    expect(screen.getByTestId('form-advanced-disclosure')).toHaveAttribute('open');
+    expect(document.activeElement).toBe(inputOf('vmax'));
+  });
+});
+
+describe('<ElementForm /> for a static generator', () => {
+  beforeEach(() => {
+    MOCK_TOPOLOGY = linkedTopology();
+  });
+
+  function renderPv(props: Partial<React.ComponentProps<typeof ElementForm>> = {}) {
+    return render(
+      withQueryClient(
+        <ElementForm
+          model="PV"
+          saving={false}
+          serverError={null}
+          onSubmit={() => {}}
+          onCancel={() => {}}
+          {...props}
+        />,
+      ),
+    );
+  }
+
+  it('opens named after the idx it proposes, like the generators of a case', () => {
+    renderPv();
+    expect(inputOf('idx').value).toBe('PV_5');
+    expect(inputOf('name').value).toBe('PV_5');
+  });
+
+  it('explains its numbers under them, and has no note above the fields', () => {
+    renderPv();
+    expect(screen.queryByTestId('element-form-note')).toBeNull();
+    const help = screen.getByTestId('field-help-p0');
+    expect(help).toHaveTextContent('per unit of the system base (100 MVA): 0.4 is 40 MW');
+    expect(inputOf('p0').getAttribute('aria-describedby')).toBe(help.id);
+  });
+});
+
+describe('<ElementForm /> opened on a bus', () => {
+  beforeEach(() => {
+    MOCK_TOPOLOGY = linkedTopology();
+  });
+
+  function renderOn(model: string, seedBus: string, onDirtyChange?: (dirty: boolean) => void) {
+    return render(
+      withQueryClient(
+        <ElementForm
+          model={model}
+          defaultParams={model === 'ESD1' ? { Sn: 100, pqflag: 1, pmx: 1, En: 100 } : undefined}
+          saving={false}
+          serverError={null}
+          onSubmit={() => {}}
+          onCancel={() => {}}
+          onDirtyChange={onDirtyChange}
+          seedBus={seedBus}
+        />,
+      ),
+    );
+  }
+
+  it('starts a device on that bus, which is not an edit', () => {
+    const onDirtyChange = vi.fn();
+    renderOn('PV', '5', onDirtyChange);
+    expect(busSelect().value).toBe('5');
+    expect(onDirtyChange).not.toHaveBeenCalledWith(true);
+  });
+
+  it('starts a line at that bus and leaves the far end to pick', () => {
+    renderOn('Line', '3');
+    const [from, to] = screen.getAllByTestId('bus-idx-select') as HTMLSelectElement[];
+    expect(from?.value).toBe('3');
+    expect(to?.value).toBe('');
+  });
+
+  it('ignores a bus the case does not have', () => {
+    renderOn('PV', '99');
+    expect(busSelect().value).toBe('');
+  });
+
+  it('has nothing to start in a form without a bus', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      withQueryClient(
+        <ElementForm
+          model="Bus"
+          saving={false}
+          serverError={null}
+          onSubmit={onSubmit}
+          onCancel={() => {}}
+          seedBus="3"
+        />,
+      ),
+    );
+    await user.type(inputOf('name'), 'BUS6');
+    await user.type(inputOf('Vn'), '69');
+    await user.click(screen.getByRole('button', { name: /add bus/i }));
+    expect(onSubmit).toHaveBeenCalledWith({ idx: '6', name: 'BUS6', Vn: 69 });
+  });
+
+  it('gives a battery the free generator of that bus, and says so under it', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      withQueryClient(
+        <ElementForm
+          model="ESD1"
+          defaultParams={{ Sn: 100, pqflag: 1, pmx: 1, En: 100 }}
+          saving={false}
+          serverError={null}
+          onSubmit={onSubmit}
+          onCancel={() => {}}
+          seedBus="3"
+        />,
+      ),
+    );
+    expect(busSelect().value).toBe('3');
+    expect(genSelect().value).toBe('PV_B');
+    expect(screen.getByTestId('field-note-gen')).toHaveTextContent(
+      'Set to PV_B, the static generator on bus 3.',
+    );
+    // Nothing is left to type: the form can be sent as it opened.
+    await user.click(screen.getByRole('button', { name: /add esd1/i }));
+    expect(onSubmit).toHaveBeenCalledWith({
+      idx: 'ESD1_1',
+      name: 'ESD1_1',
+      bus: '3',
+      gen: 'PV_B',
+      Sn: 100,
+      pqflag: 1,
+      pmx: 1,
+      En: 100,
+    });
+  });
+
+  it('leaves the generator to pick where a device already takes the one on that bus', () => {
+    renderOn('ESD1', '2');
+    expect(busSelect().value).toBe('2');
+    expect(genSelect().value).toBe('');
+    expect(screen.queryByTestId('field-note-gen')).toBeNull();
+    expect(screen.queryByTestId('field-warning-gen')).toBeNull();
+  });
+
+  it('leaves the generator to pick on a bus that has two, and warns on one that has none', () => {
+    const view = renderOn('ESD1', '4');
+    expect(genSelect().value).toBe('');
+    view.unmount();
+    renderOn('ESD1', '5');
+    expect(busSelect().value).toBe('5');
+    expect(screen.getByTestId('field-warning-bus')).toHaveTextContent(
+      'Bus 5 has no PV or Slack generator.',
+    );
+  });
+});
+
+describe('<ElementForm /> offers the generator a device lacks', () => {
+  beforeEach(() => {
+    MOCK_TOPOLOGY = linkedTopology();
+  });
+
+  function renderBattery(onAddGenerator?: (bus: string) => void) {
+    return render(
+      withQueryClient(
+        <ElementForm
+          model="ESD1"
+          defaultParams={{ Sn: 100, pqflag: 1, pmx: 1 }}
+          saving={false}
+          serverError={null}
+          onSubmit={() => {}}
+          onCancel={() => {}}
+          onAddGenerator={onAddGenerator}
+        />,
+      ),
+    );
+  }
+
+  it('puts a button under the warning of a bus without a generator, which names the bus', async () => {
+    const user = userEvent.setup();
+    const onAddGenerator = vi.fn();
+    renderBattery(onAddGenerator);
+    expect(screen.queryByTestId('field-action-add-generator')).toBeNull();
+
+    await user.selectOptions(busSelect(), '5');
+    const button = screen.getByRole('button', { name: 'Add a PV generator on bus 5' });
+    expect(button).toHaveAttribute('data-testid', 'field-action-add-generator');
+    await user.click(button);
+    expect(onAddGenerator).toHaveBeenCalledWith('5');
+  });
+
+  it('has no button on a bus that has a generator, or with no caller to go to', async () => {
+    const user = userEvent.setup();
+    const view = renderBattery(vi.fn());
+    await user.selectOptions(busSelect(), '3');
+    expect(screen.queryByTestId('field-action-add-generator')).toBeNull();
+    view.unmount();
+
+    renderBattery();
+    await user.selectOptions(busSelect(), '5');
+    expect(screen.getByTestId('field-warning-bus')).toBeInTheDocument();
+    expect(screen.queryByTestId('field-action-add-generator')).toBeNull();
   });
 });

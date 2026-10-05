@@ -39,9 +39,12 @@ const TOPOLOGY: TopologySummary = {
   shunts: [],
 };
 
+/** What the session's topology reads as: `TOPOLOGY`, unless a test says a run has locked it. */
+let currentTopology: TopologySummary = TOPOLOGY;
+
 vi.mock('@/api/queries', async () => {
   const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
-  return { ...actual, useCurrentTopology: () => TOPOLOGY };
+  return { ...actual, useCurrentTopology: () => currentTopology };
 });
 
 const onFitView = vi.fn();
@@ -69,8 +72,10 @@ const BRANCH: SldContextTarget = { kind: 'branch', idx: '5', name: 'Line 5', tra
 beforeEach(() => {
   onFitView.mockReset();
   onResetLayout.mockReset();
+  currentTopology = TOPOLOGY;
   useSessionStore.setState({ sessionId: parseSessionId('s') });
   useCaseStore.setState({ selectedElement: null, topology: TOPOLOGY });
+  useCaseStore.getState().closeAddPanel();
   useSldStore.setState({ selectedNodeId: null });
   useDisturbanceStore.getState().clearDisturbances();
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
@@ -84,12 +89,15 @@ afterEach(() => {
 });
 
 describe('menu for a bus', () => {
-  it('is titled with the bus, and offers Inspect, Fault here and Plot voltage', async () => {
+  it('is titled with the bus, and offers Inspect, Add element here, Fault here and Plot voltage', async () => {
     const menu = await openMenu(BUS);
     expect(within(menu).getByTestId('sld-context-menu-title')).toHaveTextContent(
       'Bus BUS1 (idx 1)',
     );
     expect(within(menu).getByTestId('sld-context-inspect')).toBeInTheDocument();
+    expect(within(menu).getByTestId('sld-context-add-element')).toHaveTextContent(
+      'Add element here…',
+    );
     expect(within(menu).getByTestId('sld-context-fault')).toHaveTextContent('Fault here');
     expect(within(menu).getByTestId('sld-context-plot-voltage')).toBeInTheDocument();
     expect(within(menu).queryByTestId('sld-context-trip-line')).toBeNull();
@@ -103,6 +111,29 @@ describe('menu for a bus', () => {
     expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'bus', idx: '1' });
     expect(useSldStore.getState().selectedNodeId).toBe('1');
     expect(useLayoutStore.getState().rightInspectorCollapsed).toBe(false);
+  });
+
+  it('Add element here opens the Add element panel on this bus, with the kind still to pick', async () => {
+    await openMenu(BUS);
+    await userEvent.click(screen.getByTestId('sld-context-add-element'));
+    expect(useCaseStore.getState()).toMatchObject({
+      addPanelOpen: true,
+      addPanelKind: null,
+      addPanelBus: '1',
+    });
+  });
+
+  it('Add element here is greyed out, with the reason, once a run has locked the system', async () => {
+    currentTopology = { ...TOPOLOGY, state: 'committed' };
+    const menu = await openMenu(BUS);
+    const item = within(menu).getByTestId('sld-context-add-element');
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    expect(item).toHaveTextContent('A run has locked the system.');
+    expect(item).toHaveTextContent('Reset run');
+    // The other items of the bus do not depend on it.
+    expect(within(menu).getByTestId('sld-context-fault')).not.toHaveAttribute('aria-disabled');
+    fireEvent.click(item);
+    expect(useCaseStore.getState().addPanelOpen).toBe(false);
   });
 
   it('Fault here opens the Add disturbance dialog on a fault at this bus, and Add schedules it', async () => {
@@ -280,11 +311,25 @@ describe('menu for the canvas', () => {
     expect(onResetLayout).toHaveBeenCalledTimes(1);
   });
 
+  it('offers Add element, which opens the Add element panel on no bus', async () => {
+    useCaseStore.setState({ addPanelBus: '1' });
+    const menu = await openMenu({ kind: 'canvas' });
+    const item = within(menu).getByTestId('sld-context-add-element');
+    expect(item).toHaveTextContent('Add element…');
+    expect(item).not.toHaveTextContent('here');
+    await userEvent.click(item);
+    expect(useCaseStore.getState()).toMatchObject({
+      addPanelOpen: true,
+      addPanelKind: null,
+      addPanelBus: null,
+    });
+  });
+
   it('offers nothing about a single element', async () => {
     const menu = await openMenu({ kind: 'canvas' });
     expect(within(menu).queryByTestId('sld-context-inspect')).toBeNull();
     expect(within(menu).queryByTestId('sld-context-fault')).toBeNull();
-    expect(within(menu).getAllByRole('menuitem')).toHaveLength(2);
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(3);
   });
 });
 

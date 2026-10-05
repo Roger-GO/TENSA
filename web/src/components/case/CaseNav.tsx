@@ -9,12 +9,14 @@ import {
 } from '@/components/ui/tooltip';
 import { ChangeCaseConfirmDialog } from './ChangeCaseConfirmDialog';
 import { DynamicContentBadge } from './DynamicContentBadge';
+import { AddElementButton } from '@/components/elements/AddElementButton';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
 import { useDeleteSession } from '@/api/queries';
 import { cn } from '@/lib/cn';
 import { baseName } from '@/lib/paths';
+import { useAddComponent } from '@/lib/useAddComponent';
 import type { CaseSelection } from '@/store/case';
 import type { TopologySummary } from '@/api/types';
 
@@ -25,10 +27,12 @@ import type { TopologySummary } from '@/api/types';
  *   `WorkspaceFilePicker`. The picker creates a session lazily and
  *   wires the case-load mutation.
  * - **Case loaded** (`case.selection !== null`): renders a summary card
- *   with the case name, addfiles, topology state badge, and a "Change
- *   case" button. Clicking the button opens
+ *   with the case name, addfiles, topology state badge, a "Change
+ *   case" button and an "Add element" button. Change case opens
  *   `ChangeCaseConfirmDialog` (R18: this is the appropriate use of a
- *   modal — destructive confirmation).
+ *   modal — destructive confirmation). Add element opens the Add element
+ *   panel; while nothing can be added, it is greyed out and the card says
+ *   why under it.
  *
  * "Change case" is disabled while `pflow.isRunning === true` (avoids
  * tearing down a session mid-RPC). A tooltip explains the disabled
@@ -70,6 +74,9 @@ function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: Summar
     </Button>
   );
 
+  // Why nothing can be added now (a run has locked the system, say), or null.
+  const { blockedReason: addBlockedReason } = useAddComponent();
+
   const isBlank = selection.blank === true;
   return (
     <div className={cn('flex flex-col gap-3 p-3')}>
@@ -109,27 +116,39 @@ function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: Summar
         <DynamicContentBadge />
       </div>
 
-      {pflowRunning ? (
-        <TooltipProvider delayDuration={150}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              {/* Wrap the disabled button in a span so hover/focus still
-                  reaches the trigger — disabled buttons don't fire pointer
-                  events, but the wrapping span does. */}
-              <span tabIndex={0} className="block">
-                {changeCaseButton}
-              </span>
-            </TooltipTrigger>
-            <TooltipPortal>
-              <TooltipContent id="change-case-disabled-reason">
-                Wait for power flow to finish.
-              </TooltipContent>
-            </TooltipPortal>
-          </Tooltip>
-        </TooltipProvider>
-      ) : (
-        changeCaseButton
-      )}
+      <div className="flex flex-wrap items-center gap-2">
+        {pflowRunning ? (
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* Wrap the disabled button in a span so hover/focus still
+                    reaches the trigger — disabled buttons don't fire pointer
+                    events, but the wrapping span does. */}
+                <span tabIndex={0} className="block">
+                  {changeCaseButton}
+                </span>
+              </TooltipTrigger>
+              <TooltipPortal>
+                <TooltipContent id="change-case-disabled-reason">
+                  Wait for power flow to finish.
+                </TooltipContent>
+              </TooltipPortal>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          changeCaseButton
+        )}
+        <AddElementButton blockedReason={addBlockedReason} describedBy="add-element-blocked" />
+      </div>
+      {addBlockedReason !== null ? (
+        <p
+          id="add-element-blocked"
+          data-testid="add-element-blocked"
+          className="text-muted-foreground text-[11px] leading-snug"
+        >
+          {addBlockedReason}
+        </p>
+      ) : null}
     </div>
   );
 }

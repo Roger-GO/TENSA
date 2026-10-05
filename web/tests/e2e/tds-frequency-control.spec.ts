@@ -16,8 +16,16 @@
  * the test first builds one over the API the UI itself uses: IEEE 14 with a
  * static generator and an `ESD1` on bus 4 and a generator that trips at 1 s,
  * saved under a name of its own.
+ *
+ * A second test starts where a first-time user does, on a case without a
+ * battery:
+ *
+ *   IEEE 14 -> TDS tab: Frequency control says a battery is missing and has the
+ *   button that opens its form -> the form says what stops an add (no static
+ *   generator on the bus) and goes to the PV form on that bus -> the PV, then
+ *   the battery on it -> the TDS tab offers the battery to a controller
  */
-import { test, expect, type APIRequestContext } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 
 /** Key under which the UI remembers that the first-run coach was dismissed. */
 const FIRST_RUN_COACH_KEY = 'tensa:first-run-coach-v1';
@@ -105,19 +113,10 @@ async function buildBatteryCase(request: APIRequestContext, name: string): Promi
   await request.delete(`/api/sessions/${sessionId}`);
 }
 
-test('frequency control: add a droop on the battery -> run TDS -> read what it did', async ({
-  page,
-  request,
-}) => {
-  const uncaughtErrors: string[] = [];
-  page.on('pageerror', (error) => uncaughtErrors.push(error.message));
-
-  const caseFile = `e2e-battery-${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}.xlsx`;
-  await buildBatteryCase(request, caseFile);
-
-  // ---- open the case (see load-pf-flow.spec.ts for why this retries) --------
+/** Open `caseFile` from the sidebar (see load-pf-flow.spec.ts for why this retries). */
+async function openCase(page: Page, caseFile: string): Promise<void> {
   await page.goto('/');
-  const caseRow = page.getByTestId(`saved-cases-row-${caseFile}`);
+  const caseRow = page.getByTestId(`saved-cases-row-${caseFile}`).first();
   await expect(caseRow).toBeVisible();
   await expect(async () => {
     await Promise.all([
@@ -129,6 +128,19 @@ test('frequency control: add a droop on the battery -> run TDS -> read what it d
     ]);
   }).toPass({ timeout: 30_000 });
   await expect(page.getByTestId('run-pflow-button')).toBeEnabled({ timeout: 90_000 });
+}
+
+test('frequency control: add a droop on the battery -> run TDS -> read what it did', async ({
+  page,
+  request,
+}) => {
+  const uncaughtErrors: string[] = [];
+  page.on('pageerror', (error) => uncaughtErrors.push(error.message));
+
+  const caseFile = `e2e-battery-${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}.xlsx`;
+  await buildBatteryCase(request, caseFile);
+
+  await openCase(page, caseFile);
 
   // ---- set a droop on the battery ------------------------------------------
   await page.getByRole('tab', { name: 'Analysis' }).click();
@@ -190,6 +202,83 @@ test('frequency control: add a droop on the battery -> run TDS -> read what it d
   await expect(
     page.getByTestId('message-row').filter({ hasText: 'Droop on ESD1_1 acted from t = 1.1 s' }),
   ).toHaveCount(1);
+
+  expect(uncaughtErrors).toEqual([]);
+});
+
+test('frequency control on a case without a battery: the tab leads to one, step by step', async ({
+  page,
+}) => {
+  const uncaughtErrors: string[] = [];
+  page.on('pageerror', (error) => uncaughtErrors.push(error.message));
+
+  await openCase(page, BASE_CASE);
+
+  // ---- the tab says what is missing, and has the way to it -------------------
+  await page.getByRole('tab', { name: 'Analysis' }).click();
+  await page.getByTestId('analysis-sub-tab-tds').click();
+  const editor = page.getByTestId('tds-config-controllers');
+  await editor.scrollIntoViewIfNeeded();
+  await expect(page.getByTestId('tds-controllers-status')).toContainText(
+    'This case has no device a controller can command.',
+  );
+  await page.getByRole('button', { name: 'Add a battery' }).click();
+
+  // ---- the battery's form: nothing to type, but bus 4 has no generator -------
+  const panel = page.getByTestId('add-element-panel');
+  await expect(panel.getByTestId('element-form-ESD1')).toBeVisible();
+  await expect(panel.getByTestId('field-En').locator('input')).toHaveValue('100');
+  await panel.getByTestId('bus-idx-select').selectOption(String(BATTERY_BUS));
+  await expect(panel.getByTestId('field-warning-bus')).toContainText(
+    'Bus 4 has no PV or Slack generator.',
+  );
+  // An add that cannot go says which field stops it, where the page can be read.
+  await panel.getByRole('button', { name: 'Add ESD1' }).click();
+  await expect(panel.getByTestId('form-problems')).toHaveText(
+    'Nothing was added: gen is required and empty.',
+  );
+  await expect(panel.getByTestId('gen-idx-select')).toBeFocused();
+
+  // ---- the generator it needs, on that bus -----------------------------------
+  await panel.getByRole('button', { name: 'Add a PV generator on bus 4' }).click();
+  await expect(panel.getByTestId('element-form-PV')).toBeVisible();
+  await expect(panel.getByTestId('add-element-seed-bus')).toContainText('Adding on bus BUS4');
+  await expect(panel.getByTestId('bus-idx-select')).toHaveValue(String(BATTERY_BUS));
+  await panel.getByRole('button', { name: 'Add PV' }).click();
+  await expect(panel.getByTestId('form-problems')).toHaveText(
+    'Nothing was added: Sn, Vn, p0 and v0 are required and empty.',
+  );
+  await expect(panel.getByTestId('field-Sn').locator('input')).toBeFocused();
+  await panel.getByTestId('field-Sn').locator('input').fill('100');
+  await panel.getByTestId('field-Vn').locator('input').fill('69');
+  await panel.getByTestId('field-p0').locator('input').fill('0');
+  await panel.getByTestId('field-v0').locator('input').fill('1.02');
+  await expect(panel.getByTestId('form-problems')).toHaveCount(0);
+  await panel.getByRole('button', { name: 'Add PV' }).click();
+  await expect(panel.getByTestId('add-element-success')).toContainText(
+    'Added PV generator 6 on bus 4. The panel stays open for the next element',
+  );
+
+  // ---- back to the battery: the bus and its new generator are chosen ---------
+  await page.getByTestId('add-element-kind').selectOption('ESD1');
+  await expect(panel.getByTestId('bus-idx-select')).toHaveValue(String(BATTERY_BUS));
+  // The form follows the case, which has the new generator a moment after the add.
+  await expect(panel.getByTestId('gen-idx-select')).toHaveValue('6');
+  await expect(panel.getByTestId('field-note-gen')).toHaveText(
+    'Set to PV 6, the static generator on bus 4.',
+  );
+  await panel.getByRole('button', { name: 'Add ESD1' }).click();
+  await expect(panel.getByTestId('add-element-success')).toContainText(
+    'Added ESD1 battery ESD1_1 on bus 4.',
+  );
+  await page.getByTestId('add-element-close').click();
+  await expect(panel).toHaveCount(0);
+
+  // ---- the tab now has a device to command -----------------------------------
+  await page.getByTestId('tds-controllers-add').click();
+  await expect(page.getByTestId('tds-controller-target').locator('option:checked')).toHaveText(
+    'ESD1_1 (bus 4, up to 100 MW)',
+  );
 
   expect(uncaughtErrors).toEqual([]);
 });

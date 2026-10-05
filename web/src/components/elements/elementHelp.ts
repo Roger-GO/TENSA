@@ -10,14 +10,20 @@ import type { ParamValue } from '@/api/types';
  * shown above the form, a line under the fields that need one, warnings that
  * follow what is typed, and the values the form opens with.
  *
- * The one entry is the ESD1 battery. Every statement in it was checked against
+ * The main entry is the ESD1 battery. Every statement in it was checked against
  * ANDES 2.0 (`server/src/tensa/core/esd1.py` holds the reasoning and
  * `server/tests/integration/test_esd1_api.py` the measurements), and the
  * server refuses the values a run cannot use, so the text here explains and
  * the server enforces.
+ *
+ * The PV and Slack generators have lines under their four numbers and no
+ * note. A battery needs a static generator on its bus first, so its form sends
+ * a first-time user to theirs, where `Sn`, `Vn`, `p0` and `v0` are all the
+ * form says. The lines give what ANDES's own parameter descriptions do
+ * (`andes/models/static/pv.py`): the powers are per unit of the system base.
  */
 export interface ElementHelp {
-  /** What the model is and what it needs before it can be added. */
+  /** What the model is and what it needs before it can be added. Empty for none. */
   note: readonly string[];
   /** One line per parameter whose name does not say what it holds. */
   fields: Readonly<Record<string, string>>;
@@ -44,7 +50,7 @@ const ESD1_FIELDS: Readonly<Record<string, string>> = {
   pqflag:
     'Which power keeps its share of the current limit ialim: 1 for active power, 0 for reactive power.',
   pmx: "Largest active power, discharging and charging, per unit of Sn: 1 is the rating. ANDES's own default is 9999, which is no limit.",
-  En: 'Energy capacity. The state of charge moves by the delivered MW over En each hour.',
+  En: 'Energy capacity. The form opens with one hour at the rating: set it to the energy of the battery you mean. The state of charge moves by the delivered MW over En each hour.',
   qmx: 'Largest reactive power command, per unit of Sn.',
   qmn: 'Smallest reactive power command, per unit of Sn.',
   ialim: 'Current limit of the converter, per unit of Sn.',
@@ -77,9 +83,26 @@ function esd1Help(context: ElementHelpContext): ElementHelp {
   };
 }
 
+function staticGeneratorHelp(model: 'PV' | 'Slack', context: ElementHelpContext): ElementHelp {
+  const base = baseText(context.baseMva);
+  const fields: Record<string, string> = {
+    Sn: `Power rating of the generator. The powers in this form are per unit of the system base${base}, whatever Sn is.`,
+    Vn: 'Rated voltage: the Vn of the bus it is on, which the Buses table lists.',
+    v0: 'Voltage it holds at its bus, per unit of the rated voltage: 1 is the rated voltage.',
+  };
+  if (model === 'PV') {
+    const example =
+      context.baseMva === null ? '' : `: 0.4 is ${formatMva(0.4 * context.baseMva)} MW`;
+    fields.p0 = `Active power it delivers, per unit of the system base${base}${example}. A battery that takes this generator over starts at this power, so 0 starts it idle.`;
+  }
+  return { note: [], fields };
+}
+
 /** The help for `model`, or `null` when the schema says all there is to say. */
 export function elementHelp(model: string, context: ElementHelpContext): ElementHelp | null {
-  return model === 'ESD1' ? esd1Help(context) : null;
+  if (model === 'ESD1') return esd1Help(context);
+  if (model === 'PV' || model === 'Slack') return staticGeneratorHelp(model, context);
+  return null;
 }
 
 function asNumber(value: ParamValue | undefined): number | null {
@@ -130,8 +153,11 @@ export function elementWarnings(
 /**
  * The values the add form opens with for `model`, beyond the kind's own. A
  * battery opens rated on the system base, with active power given priority and
- * limited to the rating. Its energy is left for the user: no value of it is
- * the usual one.
+ * limited to the rating, and holding one hour of that rating (`En` in MWh
+ * equal to `Sn` in MVA). No energy is the usual one, but an empty required
+ * field at the foot of a long form is where a first-time user's add stops,
+ * and an hour at the rating is a battery a study can start from; the line
+ * under the field says that it is the form's value and not the battery's.
  */
 export function elementDefaults(
   model: string,
@@ -139,15 +165,21 @@ export function elementDefaults(
 ): Record<string, string | number | boolean> | undefined {
   if (model !== 'ESD1') return undefined;
   const sized = { pqflag: 1, pmx: 1 };
-  return context.baseMva === null ? sized : { Sn: context.baseMva, ...sized };
+  return context.baseMva === null ? sized : { Sn: context.baseMva, ...sized, En: context.baseMva };
 }
+
+/** The models whose add form opens named after the idx it proposes. */
+const NAMED_AFTER_IDX: ReadonlySet<string> = new Set(['ESD1', 'PV', 'Slack']);
 
 /**
  * Whether the add form opens with the name set to the idx it proposes, and
  * keeps the two alike until the name is typed over. A battery is known by its
  * idx wherever it is shown, and ANDES's own cases name theirs after it
  * (`ESD1_1`), so an empty name is one more required field with nothing to ask.
+ * The same holds for the static generator a battery or a machine needs first:
+ * the bundled cases (IEEE 14, Kundur, WSCC 9) name their PV and Slack
+ * generators after the idx (`2`), and the lists that offer one show both.
  */
 export function namedAfterIdx(model: string): boolean {
-  return model === 'ESD1';
+  return NAMED_AFTER_IDX.has(model);
 }

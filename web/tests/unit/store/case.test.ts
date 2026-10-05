@@ -11,6 +11,8 @@
  *  - `closeAddPanelDropCoord` clears just the drop coord (defensive
  *    cleanup hook for SldCanvas dragend; documented as a no-op in the
  *    happy path).
+ *  - `openAddPanelOnBus(bus)` opens the panel with that bus kept for the
+ *    form, and every other way of opening or closing it forgets the bus.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { useCaseStore } from '@/store/case';
@@ -21,6 +23,7 @@ beforeEach(() => {
     addPanelKind: null,
     addPanelDirty: false,
     addPanelDropCoord: null,
+    addPanelBus: null,
   });
 });
 
@@ -30,6 +33,7 @@ afterEach(() => {
     addPanelKind: null,
     addPanelDirty: false,
     addPanelDropCoord: null,
+    addPanelBus: null,
   });
 });
 
@@ -85,5 +89,52 @@ describe('useCaseStore — AddElementPanel actions', () => {
     // opt into the seed without a store change.
     useCaseStore.getState().openAddPanel('Generator', { x: 1, y: 2 });
     expect(useCaseStore.getState().addPanelDropCoord).toEqual({ x: 1, y: 2 });
+  });
+
+  it('openAddPanelOnBus opens the panel on a bus, with the kind still to pick', () => {
+    useCaseStore.setState({ addPanelDropCoord: { x: 10, y: 20 } });
+    useCaseStore.getState().openAddPanelOnBus('4');
+    const s = useCaseStore.getState();
+    expect(s.addPanelOpen).toBe(true);
+    expect(s.addPanelKind).toBeNull();
+    expect(s.addPanelBus).toBe('4');
+    expect(s.addPanelDropCoord).toBeNull();
+    expect(s.addPanelDirty).toBe(false);
+  });
+
+  it('openAddPanelOnBus keeps the kind of a panel that is already open', () => {
+    useCaseStore.getState().openAddPanel('PV');
+    useCaseStore.getState().openAddPanelOnBus('4');
+    expect(useCaseStore.getState().addPanelKind).toBe('PV');
+    expect(useCaseStore.getState().addPanelBus).toBe('4');
+    // A panel that was closed in between starts without a kind again.
+    useCaseStore.getState().closeAddPanel();
+    useCaseStore.getState().openAddPanelOnBus('5');
+    expect(useCaseStore.getState().addPanelKind).toBeNull();
+    expect(useCaseStore.getState().addPanelBus).toBe('5');
+  });
+
+  it('setAddPanelKind keeps the bus: the next kind is built on it too', () => {
+    useCaseStore.getState().openAddPanelOnBus('4');
+    useCaseStore.getState().setAddPanelKind('ESD1');
+    expect(useCaseStore.getState().addPanelBus).toBe('4');
+  });
+
+  it('every other way of opening or closing the panel forgets the bus', () => {
+    useCaseStore.getState().openAddPanelOnBus('4');
+    useCaseStore.getState().openAddPanel('Bus');
+    expect(useCaseStore.getState().addPanelBus).toBeNull();
+
+    useCaseStore.getState().openAddPanelOnBus('4');
+    useCaseStore.getState().closeAddPanel();
+    expect(useCaseStore.getState().addPanelBus).toBeNull();
+
+    useCaseStore.getState().openAddPanelOnBus('4');
+    useCaseStore.getState().setCase({ primaryPath: null, addfiles: [], blank: true });
+    expect(useCaseStore.getState().addPanelBus).toBeNull();
+
+    useCaseStore.getState().openAddPanelOnBus('4');
+    useCaseStore.getState().clearCase();
+    expect(useCaseStore.getState().addPanelBus).toBeNull();
   });
 });

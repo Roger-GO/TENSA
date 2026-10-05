@@ -5,6 +5,7 @@ import type { TdsControllerCatalogue, TdsControllerTarget } from '@/api/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { cn } from '@/lib/cn';
+import { useAddComponent } from '@/lib/useAddComponent';
 import {
   CONTROLLER_TYPE_HINTS,
   CONTROLLER_TYPE_LABELS,
@@ -39,7 +40,9 @@ import { useUiStore } from '@/store/ui';
  * The devices a controller can command come from the substrate
  * (``GET /sessions/{id}/tds/controllers``): the batteries the element builder
  * adds and the distributed generation models of a case file. A case with none
- * says so and where to add one.
+ * says so and has the button that opens the battery's form, since the tile and
+ * the menu entry that do the same are a long way from this tab; while nothing
+ * can be added (a run has locked the system) the button says why.
  *
  * The list lives in ``useUiStore.tdsConfig.controllers``, which ``RunButton``
  * sends with the run together with the variables that show each controller at
@@ -48,6 +51,7 @@ import { useUiStore } from '@/store/ui';
  * (``useUiStore.tdsControllerResults``).
  *
  * Test hooks: ``tds-config-controllers``, ``tds-controllers-status``,
+ * ``tds-controllers-add-battery`` with ``-blocked``,
  * ``tds-controller-{i}`` with ``-edit`` / ``-remove`` / ``-result``,
  * ``tds-controllers-add``, ``tds-controller-form``, ``tds-controller-type-{type}``,
  * ``tds-controller-target``, ``tds-controller-frequency-{source}``,
@@ -219,8 +223,7 @@ function ControllerForms({
   } else if (catalogue === undefined) {
     status = 'Looking for devices a controller can command…';
   } else if (catalogue.targets.length === 0) {
-    status =
-      'This case has no device a controller can command. Add a battery (ESD1 battery, under Storage in the Add element panel) and it is listed here.';
+    return <NoDevices />;
   }
 
   if (status !== null || catalogue === undefined) {
@@ -274,6 +277,43 @@ function ControllerForms({
         setEditing(null);
       }}
     />
+  );
+}
+
+/**
+ * What a case with nothing to command shows: that a battery is what it lacks,
+ * and the button that opens the battery's form in the Add element panel.
+ */
+function NoDevices() {
+  const { blockedReason, add } = useAddComponent();
+  const blocked = blockedReason !== null;
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <p data-testid="tds-controllers-status" className="text-muted-foreground text-[10px]">
+        This case has no device a controller can command. Add a battery (ESD1 battery, under Storage
+        in the Add element panel) and it is listed here.
+      </p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={blocked}
+        onClick={() => add('Battery')}
+        aria-describedby={blocked ? 'tds-controllers-add-battery-blocked' : undefined}
+        data-testid="tds-controllers-add-battery"
+      >
+        Add a battery
+      </Button>
+      {blocked ? (
+        <p
+          id="tds-controllers-add-battery-blocked"
+          data-testid="tds-controllers-add-battery-blocked"
+          className="text-foreground text-[10px] leading-snug"
+        >
+          {blockedReason}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

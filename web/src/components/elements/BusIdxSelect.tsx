@@ -20,6 +20,8 @@ export interface BusIdxSelectProps {
   required?: boolean;
   id?: string;
   'aria-describedby'?: string;
+  /** The form refused the value: set once a submit found the field empty or unusable. */
+  'aria-invalid'?: boolean;
   /** What to say about a bus after its name, by bus idx. */
   notes?: ReadonlyMap<string, string>;
   className?: string;
@@ -33,6 +35,7 @@ export function BusIdxSelect({
   notes,
   className,
   'aria-describedby': ariaDescribedBy,
+  'aria-invalid': ariaInvalid,
 }: BusIdxSelectProps) {
   const topology = useCurrentTopology();
   const buses = topology?.buses ?? [];
@@ -59,12 +62,14 @@ export function BusIdxSelect({
     <select
       id={id}
       aria-describedby={ariaDescribedBy}
+      aria-invalid={ariaInvalid ? true : undefined}
       value={value}
       required={required}
       onChange={(e) => onChange(e.target.value)}
       data-testid="bus-idx-select"
       className={cn(
-        'bg-background border-border h-7 max-w-full rounded border px-2 font-mono text-xs',
+        'bg-background h-7 max-w-full rounded border px-2 font-mono text-xs',
+        ariaInvalid ? 'border-danger' : 'border-border',
         className,
       )}
     >

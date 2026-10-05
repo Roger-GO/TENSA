@@ -134,4 +134,17 @@ describe('<BusIdxSelect />', () => {
     const select = screen.getByTestId('bus-idx-select');
     expect(select).toBeRequired();
   });
+
+  it('marks the select as refused when the form says so, and not otherwise', () => {
+    MOCK_TOPOLOGY = topology([bus(1, 'BUS1')]);
+    const view = render(withQueryClient(<BusIdxSelect value="" onChange={() => {}} />));
+    expect(screen.getByTestId('bus-idx-select')).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByTestId('bus-idx-select')).toHaveClass('border-border');
+
+    view.rerender(withQueryClient(<BusIdxSelect value="" aria-invalid onChange={() => {}} />));
+    const select = screen.getByTestId('bus-idx-select');
+    expect(select).toHaveAttribute('aria-invalid', 'true');
+    expect(select).toHaveClass('border-danger');
+    expect(select).not.toHaveClass('border-border');
+  });
 });

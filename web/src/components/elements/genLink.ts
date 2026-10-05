@@ -151,6 +151,25 @@ export function followLink(
 }
 
 /**
+ * What a bus brings along when nobody picked it by hand: its one static
+ * generator, as long as no device takes that generator over yet, else `null`.
+ *
+ * A form can open on a bus (the diagram's "Add element here"), and the case
+ * can gain the generator of that bus while the form is open. Neither is a pick
+ * by the user, so neither chooses a generator that is already in use: that
+ * would make a second device on it the form's own suggestion, and two devices
+ * on one generator do not initialize as they stand (`linkWarnings`).
+ */
+export function freeGeneratorOn(
+  bus: string,
+  gens: readonly StaticGenerator[],
+): LinkedChange | null {
+  const linked = followLink('bus', { bus, gen: '' }, gens);
+  const free = gens.some((g) => g.idx === linked.gen && g.takenBy.length === 0);
+  return free ? linked : null;
+}
+
+/**
  * What to say under `bus` and `gen` for the values as they stand. Neither stops
  * the add: the server refuses what a run cannot use, and a shared generator is
  * a choice a case may make (ANDES's `ieee14_esd1.xlsx` puts ten batteries on

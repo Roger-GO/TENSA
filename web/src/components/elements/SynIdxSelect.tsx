@@ -19,6 +19,8 @@ export interface SynIdxSelectProps {
   required?: boolean;
   id?: string;
   'aria-describedby'?: string;
+  /** The form refused the value: set once a submit found the field empty or unusable. */
+  'aria-invalid'?: boolean;
   className?: string;
 }
 
@@ -29,6 +31,7 @@ export function SynIdxSelect({
   id,
   className,
   'aria-describedby': ariaDescribedBy,
+  'aria-invalid': ariaInvalid,
 }: SynIdxSelectProps) {
   const topology = useCurrentTopology();
   const machines = (topology?.generators ?? []).filter(
@@ -58,12 +61,14 @@ export function SynIdxSelect({
     <select
       id={id}
       aria-describedby={ariaDescribedBy}
+      aria-invalid={ariaInvalid ? true : undefined}
       value={value}
       required={required}
       onChange={(e) => onChange(e.target.value)}
       data-testid="syn-idx-select"
       className={cn(
-        'bg-background border-border h-7 rounded border px-2 font-mono text-xs',
+        'bg-background h-7 rounded border px-2 font-mono text-xs',
+        ariaInvalid ? 'border-danger' : 'border-border',
         className,
       )}
     >

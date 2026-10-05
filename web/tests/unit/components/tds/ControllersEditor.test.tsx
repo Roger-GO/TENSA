@@ -6,8 +6,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ProblemDetailsError } from '@/api/client';
-import type { TdsControllerCatalogue, TdsControllerTarget } from '@/api/types';
+import type { TdsControllerCatalogue, TdsControllerTarget, TopologySummary } from '@/api/types';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import { ControllersEditor } from '@/components/tds/ControllersEditor';
 import { MAX_TDS_CONTROLLERS, type TdsControllerEntry } from '@/lib/tdsControllers';
@@ -26,6 +27,8 @@ type Answer = {
 
 let answer: Answer;
 let asked = 0;
+/** The session's topology, which says whether an element can be added now. */
+let topology: TopologySummary | null = null;
 
 vi.mock('@/api/queries', async () => {
   const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
@@ -35,8 +38,31 @@ vi.mock('@/api/queries', async () => {
       asked += 1;
       return answer;
     },
+    useCurrentTopology: () => topology,
   };
 });
+
+function caseTopology(state: TopologySummary['state']): TopologySummary {
+  return {
+    state,
+    buses: [],
+    lines: [],
+    transformers: [],
+    generators: [],
+    loads: [],
+    shunts: [],
+  };
+}
+
+/** The editor of a case with no device to command, whose button reads the session. */
+function renderWithoutDevices() {
+  answer = listing([]);
+  return render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ControllersEditor />
+    </QueryClientProvider>,
+  );
+}
 
 function battery(idx: number | string, extra: Partial<TdsControllerTarget> = {}) {
   const label = `ESD1 ${idx}`;
@@ -95,6 +121,7 @@ async function typeInto(user: ReturnType<typeof userEvent.setup>, field: string,
 
 beforeEach(() => {
   asked = 0;
+  topology = caseTopology('pre-setup');
   answer = listing([battery(1), battery(2)]);
   useUiStore.setState({ tdsConfig: { ...DEFAULT_TDS_CONFIG }, tdsControllerResults: null });
   loadCase();
@@ -104,6 +131,7 @@ afterEach(() => {
   cleanup();
   useSessionStore.setState({ sessionId: null });
   useCaseStore.setState({ selection: null });
+  useCaseStore.getState().closeAddPanel();
 });
 
 describe('<ControllersEditor />', () => {
@@ -347,13 +375,48 @@ describe('<ControllersEditor />', () => {
   });
 
   it('tells a case without such a device where to get one', () => {
-    answer = listing([]);
-    render(<ControllersEditor />);
+    renderWithoutDevices();
 
     expect(screen.getByTestId('tds-controllers-status')).toHaveTextContent(
       'This case has no device a controller can command. Add a battery (ESD1 battery, under Storage in the Add element panel)',
     );
     expect(screen.queryByTestId('tds-controllers-add')).toBeNull();
+  });
+
+  it("has the button that opens the battery's form, right where it says a battery is missing", async () => {
+    const user = userEvent.setup();
+    renderWithoutDevices();
+
+    const button = screen.getByRole('button', { name: 'Add a battery' });
+    expect(button).toBeEnabled();
+    expect(screen.queryByTestId('tds-controllers-add-battery-blocked')).toBeNull();
+    await user.click(button);
+    // The Battery tile's own way in: the panel opens on the ESD1 form.
+    expect(useCaseStore.getState()).toMatchObject({ addPanelOpen: true, addPanelKind: 'Battery' });
+  });
+
+  it('greys the button out and says why once a run has locked the system', () => {
+    topology = caseTopology('committed');
+    renderWithoutDevices();
+
+    const button = screen.getByTestId('tds-controllers-add-battery');
+    expect(button).toBeDisabled();
+    const reason = screen.getByTestId('tds-controllers-add-battery-blocked');
+    expect(reason).toHaveTextContent('A run has locked the system.');
+    expect(reason).toHaveTextContent('Reset run');
+    expect(button).toHaveAttribute('aria-describedby', reason.id);
+    expect(useCaseStore.getState().addPanelOpen).toBe(false);
+  });
+
+  it('has no such button on a case that has a device, or while the list is not in', () => {
+    render(<ControllersEditor />);
+    expect(screen.queryByTestId('tds-controllers-add-battery')).toBeNull();
+    cleanup();
+
+    answer = { isError: false, error: null };
+    render(<ControllersEditor />);
+    expect(screen.getByTestId('tds-controllers-status')).toHaveTextContent('Looking for devices');
+    expect(screen.queryByTestId('tds-controllers-add-battery')).toBeNull();
   });
 
   it('only offers the bus frequency on a case with no synchronous machine', async () => {

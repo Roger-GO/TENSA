@@ -2,8 +2,8 @@
  * Tests for `<CaseNav />`.
  *
  * Covers the picker ↔ summary toggle, the Change-case destructive
- * confirmation flow, and the pflow-running disabled affordance with
- * tooltip.
+ * confirmation flow, the pflow-running disabled affordance with
+ * tooltip, and the Add element button of the summary card.
  *
  * Network is stubbed via `globalThis.fetch`. The case + session + pflow
  * slices are reset between tests to avoid cross-test contamination.
@@ -14,11 +14,12 @@ import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { CaseNav } from '@/components/case/CaseNav';
-import { makeQueryClient } from '@/api/queries';
+import { makeQueryClient, queryKeys } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
+import type { TopologySummary } from '@/api/types';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -58,6 +59,19 @@ function seedLoadedCase() {
   useSessionStore.setState({ sessionId: parseSessionId('sess-loaded') });
 }
 
+/** The session's topology as the query cache holds it once the case has loaded. */
+function loadedTopology(state: TopologySummary['state']): TopologySummary {
+  return {
+    state,
+    buses: [],
+    lines: [],
+    transformers: [],
+    generators: [],
+    loads: [],
+    shunts: [],
+  };
+}
+
 describe('<CaseNav />', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
@@ -67,6 +81,7 @@ describe('<CaseNav />', () => {
     >;
     useSessionStore.setState({ sessionId: null });
     useCaseStore.setState({ selection: null, topology: null, layoutSidecar: null });
+    useCaseStore.getState().closeAddPanel();
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
   });
 
@@ -221,5 +236,58 @@ describe('<CaseNav />', () => {
     // count is more deterministic than relying on the visible one.
     const matches = await screen.findAllByText('Wait for power flow to finish.');
     expect(matches.length).toBeGreaterThan(0);
+  });
+
+  it('has an Add element button that opens the Add element panel, the kind still to pick', async () => {
+    seedLoadedCase();
+    fetchSpy.mockImplementation(() => new Promise(() => {}));
+    const { client, Wrapper } = makeWrapper();
+    client.setQueryData(
+      queryKeys.topology(parseSessionId('sess-loaded')),
+      loadedTopology('pre-setup'),
+    );
+
+    render(<CaseNav />, { wrapper: Wrapper });
+
+    const add = screen.getByRole('button', { name: 'Add element' });
+    expect(add).toBeEnabled();
+    expect(screen.queryByTestId('add-element-blocked')).toBeNull();
+    await userEvent.click(add);
+    expect(useCaseStore.getState()).toMatchObject({ addPanelOpen: true, addPanelKind: null });
+  });
+
+  it('greys Add element out and says why under it once a run has locked the system', () => {
+    seedLoadedCase();
+    fetchSpy.mockImplementation(() => new Promise(() => {}));
+    const { client, Wrapper } = makeWrapper();
+    client.setQueryData(
+      queryKeys.topology(parseSessionId('sess-loaded')),
+      loadedTopology('committed'),
+    );
+
+    render(<CaseNav />, { wrapper: Wrapper });
+
+    const add = screen.getByRole('button', { name: 'Add element' });
+    expect(add).toBeDisabled();
+    const reason = screen.getByTestId('add-element-blocked');
+    expect(reason).toHaveTextContent('A run has locked the system.');
+    expect(reason).toHaveTextContent('Reset run');
+    // The reason is read out with the button, not only shown beside it.
+    expect(add).toHaveAttribute('aria-describedby', reason.id);
+    // Changing the case is another matter, and stays possible.
+    expect(screen.getByRole('button', { name: /change case/i })).toBeEnabled();
+  });
+
+  it('holds Add element back while the case is still loading', () => {
+    seedLoadedCase();
+    fetchSpy.mockImplementation(() => new Promise(() => {}));
+    const { Wrapper } = makeWrapper();
+
+    render(<CaseNav />, { wrapper: Wrapper });
+
+    expect(screen.getByRole('button', { name: 'Add element' })).toBeDisabled();
+    expect(screen.getByTestId('add-element-blocked')).toHaveTextContent(
+      'The case is still loading.',
+    );
   });
 });

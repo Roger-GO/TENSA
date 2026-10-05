@@ -1,13 +1,14 @@
 /**
  * genLink: the `bus` and `gen` of a device that takes over a static generator.
  * Which generators there are, on which bus and already used by what; what to
- * write beside a bus; what a pick of one field does to the other; what to warn
- * about.
+ * write beside a bus; what a pick of one field does to the other; what a bus
+ * brings along when nobody picked it; what to warn about.
  */
 import { describe, it, expect } from 'vitest';
 
 import {
   followLink,
+  freeGeneratorOn,
   generatorLabel,
   generatorsByBus,
   linkWarnings,
@@ -187,6 +188,30 @@ describe('followLink', () => {
     });
     const lost: StaticGenerator[] = [{ idx: '9', kind: 'PV', name: 'G9', bus: null, takenBy: [] }];
     expect(followLink('gen', { bus: '5', gen: '9' }, lost)).toMatchObject({ bus: '5', note: null });
+  });
+});
+
+describe('freeGeneratorOn', () => {
+  it('gives the one generator of a bus that no device takes over, with the line to say so', () => {
+    expect(freeGeneratorOn('3', GENS)).toEqual({
+      bus: '3',
+      gen: 'PV_B',
+      note: { field: 'gen', text: 'Set to PV_B, the static generator on bus 3.' },
+    });
+  });
+
+  it('gives none where a device already takes the one generator over', () => {
+    // A pick by hand would take it, with a warning: this is nobody's pick.
+    expect(followLink('bus', { bus: '2', gen: '' }, GENS).gen).toBe('2');
+    expect(freeGeneratorOn('2', GENS)).toBeNull();
+    expect(freeGeneratorOn('1', GENS)).toBeNull();
+  });
+
+  it('gives none on a bus with several generators, with none, or that the case lacks', () => {
+    expect(freeGeneratorOn('4', GENS)).toBeNull();
+    expect(freeGeneratorOn('5', GENS)).toBeNull();
+    expect(freeGeneratorOn('99', GENS)).toBeNull();
+    expect(freeGeneratorOn('', GENS)).toBeNull();
   });
 });
 

@@ -7,7 +7,13 @@ import { BusIdxSelect } from './BusIdxSelect';
 import { GenIdxSelect } from './GenIdxSelect';
 import { SynIdxSelect } from './SynIdxSelect';
 import { elementHelp, elementWarnings, namedAfterIdx } from './elementHelp';
-import { followLink, generatorsByBus, linkWarnings, staticGenerators } from './genLink';
+import {
+  followLink,
+  freeGeneratorOn,
+  generatorsByBus,
+  linkWarnings,
+  staticGenerators,
+} from './genLink';
 
 /**
  * ElementForm — polymorphic form generated from `_PARAMS_BY_MODEL`
@@ -30,11 +36,22 @@ import { followLink, generatorsByBus, linkWarnings, staticGenerators } from './g
  * A model that takes over a static generator has a `bus` and a `gen` that must
  * agree (`genLink`). Its bus list names the generator on each bus, picking one
  * of the two sets the other with a line that says so, and a bus without a
- * generator or a generator a device already uses gets a warning.
+ * generator or a generator a device already uses gets a warning. Under the
+ * warning of a bus without a generator is a button that goes and adds one
+ * there (`onAddGenerator`), which is the only way on for a device meant for
+ * that bus.
  *
- * Validation: client-side required checks before submit; the surface
- * for server-side rejections (422 ProblemDetails) is supplied by the
- * caller via `onError`.
+ * Validation is the form's own (`noValidate`): the browser's bubble on the
+ * first empty field is gone the moment it is clicked away, says nothing of
+ * the other fields, and never reaches a reader that works from the page's
+ * text. A submit that cannot go says "Required" under each empty field,
+ * names the fields in one line above the buttons, and puts the cursor in
+ * the first of them, which scrolls it into view. What the server refuses
+ * (422 ProblemDetails) is the caller's to show, via `serverError`.
+ *
+ * `seedBus` opens the form on a bus (the diagram's "Add element here"): the
+ * first bus field starts there, and a device tied to a static generator gets
+ * the one on that bus.
  */
 export interface ElementFormProps {
   model: string;
@@ -52,10 +69,23 @@ export interface ElementFormProps {
   onDirtyChange?: (dirty: boolean) => void;
   /** A field was changed: what `serverError` says is about values no longer in the form. */
   onEdit?: () => void;
+  /** The bus the form opens on, or nothing. A bus the case does not have is ignored. */
+  seedBus?: string | null;
+  /**
+   * The user asked for a static generator on `bus`, from the form of a device
+   * that needs one there and found none. Without it the form only warns.
+   */
+  onAddGenerator?: (bus: string) => void;
   className?: string;
 }
 
 const ADVANCED_THRESHOLD = 10;
+
+/** A line under a field that a pick elsewhere set, saying why. */
+interface LinkNote {
+  field: string;
+  text: string;
+}
 
 /**
  * Compute the next-available idx for a given model, used to prefill the
@@ -122,6 +152,39 @@ function emptyValueFor(meta: TopologyParamMeta): ParamValue {
   return '';
 }
 
+/** Whether the field is a list to pick from, not a box to type in. */
+function isPick(meta: TopologyParamMeta): boolean {
+  return meta.kind === 'bus_idx' || meta.kind === 'gen_idx' || meta.kind === 'syn_idx';
+}
+
+/** What an empty required field says under itself. */
+function missingText(meta: TopologyParamMeta): string {
+  return isPick(meta) ? 'Required. Pick one from the list.' : 'Required. Enter a value.';
+}
+
+/** "En", "Sn and Vn", "Sn, Vn and p0". */
+function listOf(names: readonly string[]): string {
+  if (names.length <= 1) return names.join('');
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/**
+ * The line above the buttons after a submit that could not go: which fields
+ * are empty, and which hold a value the form refuses, by name.
+ */
+function problemSummary(missing: readonly string[], refused: readonly string[]): string {
+  const parts: string[] = [];
+  if (missing.length > 0) {
+    parts.push(`${listOf(missing)} ${missing.length === 1 ? 'is' : 'are'} required and empty`);
+  }
+  if (refused.length > 0) {
+    parts.push(
+      `${listOf(refused)} ${refused.length === 1 ? 'holds' : 'hold'} a value that cannot be used`,
+    );
+  }
+  return `Nothing was added: ${parts.join(', and ')}.`;
+}
+
 export function ElementForm({
   model,
   kindHint,
@@ -132,6 +195,8 @@ export function ElementForm({
   onCancel,
   onDirtyChange,
   onEdit,
+  seedBus,
+  onAddGenerator,
   className,
 }: ElementFormProps) {
   const baseId = useId();
@@ -155,11 +220,13 @@ export function ElementForm({
   );
   const busNotes = useMemo(() => generatorsByBus(staticGens), [staticGens]);
 
-  const seedValues = (
+  // What the form opens with, and what to say under the generator a seeded
+  // bus brought along.
+  const seed = (
     metas: TopologyParamMeta[],
     topo: TopologySummary | null,
     defaults: Record<string, string | number | boolean> | undefined,
-  ): Record<string, ParamValue> => {
+  ): { values: Record<string, ParamValue>; note: LinkNote | null } => {
     const init: Record<string, ParamValue> = {};
     for (const m of metas) {
       if (m.name === 'idx') {
@@ -172,12 +239,23 @@ export function ElementForm({
     if (defaults) {
       for (const [k, v] of Object.entries(defaults)) init[k] = v;
     }
-    return init;
+    // A line has two bus fields: the bus it was opened on is where it starts.
+    const busField = metas.find((m) => m.kind === 'bus_idx');
+    const onCase = (topo?.buses ?? []).some((b) => String(b.idx) === seedBus);
+    if (!seedBus || busField === undefined || !onCase) return { values: init, note: null };
+    init[busField.name] = seedBus;
+    if (!linksGen || busField.name !== 'bus') return { values: init, note: null };
+    // A seed is not a pick: the form opens like this again after each add, and
+    // a second battery on the first one's generator is not a default.
+    const linked = freeGeneratorOn(seedBus, staticGenerators(topo));
+    if (linked === null) return { values: init, note: null };
+    init.gen = linked.gen;
+    return { values: init, note: linked.note };
   };
 
-  const [values, setValues] = useState<Record<string, ParamValue>>(() =>
-    seedValues(params, topology, defaultParams),
-  );
+  // One seed for both pieces of state: `useState` reads its argument once.
+  const [opening] = useState(() => seed(params, topology, defaultParams));
+  const [values, setValues] = useState<Record<string, ParamValue>>(opening.values);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   // Track which fields the USER has touched (vs. fields seeded by
@@ -186,20 +264,32 @@ export function ElementForm({
   // CancelConfirmDialog.
   const [touched, setTouched] = useState<Set<string>>(new Set());
   // The field a pick of `bus` or `gen` set besides itself, and why.
-  const [linkNote, setLinkNote] = useState<{ field: string; text: string } | null>(null);
+  const [linkNote, setLinkNote] = useState<LinkNote | null>(opening.note);
+  // The field a refused submit puts the cursor in. An object, so that a second
+  // refusal of the same field moves the cursor back to it.
+  const [focusRequest, setFocusRequest] = useState<{ name: string } | null>(null);
 
   // Re-seed values when the model OR kindHint changes — kindHint
   // changes when the user picks a different option in the kind picker
   // (e.g., Bus → Line) so the form should reset rather than keep stale
   // bus-form values.
   useEffect(() => {
-    setValues(seedValues(params, topology, defaultParams));
+    const fresh = seed(params, topology, defaultParams);
+    setValues(fresh.values);
     setShowAdvanced(false);
     setValidationErrors({});
     setTouched(new Set());
-    setLinkNote(null);
+    setLinkNote(fresh.note);
+    setFocusRequest(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params, model, kindHint]);
+
+  // After the render that shows the errors (and opens the advanced fields when
+  // the first of them is there), so the field exists and can take the cursor.
+  useEffect(() => {
+    if (focusRequest === null) return;
+    document.getElementById(`${baseId}-${focusRequest.name}`)?.focus();
+  }, [focusRequest, baseId]);
 
   const dirty = touched.size > 0;
 
@@ -223,6 +313,20 @@ export function ElementForm({
     });
   }, [model, topology, idxTouched, nameTouched]);
 
+  // The same goes for the generator of the bus: a PV added for this device is
+  // in the case a moment after the form that asked for it is back. A generator
+  // nobody picked yet follows the case, to the free one on the bus.
+  const genTouched = touched.has('gen');
+  const busValue = String(values.bus ?? '');
+  const genValue = String(values.gen ?? '');
+  useEffect(() => {
+    if (!linksGen || genTouched || busValue === '' || genValue !== '') return;
+    const linked = freeGeneratorOn(busValue, staticGens);
+    if (linked === null) return;
+    setValues((curr) => ({ ...curr, gen: linked.gen }));
+    setLinkNote(linked.note);
+  }, [linksGen, genTouched, busValue, genValue, staticGens]);
+
   const warnings = useMemo<Record<string, string>>(
     () => ({
       ...(linksGen
@@ -232,6 +336,10 @@ export function ElementForm({
     }),
     [model, values, baseMva, linksGen, staticGens],
   );
+
+  // The device needs a static generator on its bus, and the bus picked has none.
+  const busLacksGenerator =
+    linksGen && busValue !== '' && !staticGens.some((g) => g.bus === busValue);
 
   const required = params.filter((m) => m.required);
   const optional = params.filter((m) => !m.required);
@@ -281,7 +389,7 @@ export function ElementForm({
         if (m.kind === 'bool') {
           // Booleans always have a value; nothing to validate.
         } else if (v === '' || v === undefined) {
-          errs[m.name] = 'Required';
+          errs[m.name] = missingText(m);
           continue;
         }
       }
@@ -311,10 +419,22 @@ export function ElementForm({
     }
     if (Object.keys(errs).length > 0) {
       setValidationErrors(errs);
+      // In the order the fields are shown: the required ones, then the advanced.
+      const first = [...required, ...optional].find((m) => m.name in errs);
+      if (first !== undefined) {
+        if (!first.required) setShowAdvanced(true);
+        setFocusRequest({ name: first.name });
+      }
       return;
     }
     onSubmit(out);
   };
+
+  // Follows the fields as they are put right: an edit takes its field's error away.
+  const problems = [...required, ...optional].filter((m) => m.name in validationErrors);
+  const isEmpty = (m: TopologyParamMeta) => values[m.name] === '' || values[m.name] === undefined;
+  const missing = problems.filter(isEmpty).map((m) => m.name);
+  const refused = problems.filter((m) => !isEmpty(m)).map((m) => m.name);
 
   if (schema.isLoading || params.length === 0) {
     return (
@@ -363,6 +483,7 @@ export function ElementForm({
               onChange={(v) => setField(m.name, v)}
               required={m.required}
               aria-describedby={describedBy}
+              aria-invalid={error !== undefined}
               notes={linksGen && m.name === 'bus' ? busNotes : undefined}
             />
           ) : m.kind === 'gen_idx' ? (
@@ -372,6 +493,7 @@ export function ElementForm({
               onChange={(v) => setField(m.name, v)}
               required={m.required}
               aria-describedby={describedBy}
+              aria-invalid={error !== undefined}
             />
           ) : m.kind === 'syn_idx' ? (
             <SynIdxSelect
@@ -380,6 +502,7 @@ export function ElementForm({
               onChange={(v) => setField(m.name, v)}
               required={m.required}
               aria-describedby={describedBy}
+              aria-invalid={error !== undefined}
             />
           ) : m.kind === 'bool' ? (
             <input
@@ -401,24 +524,34 @@ export function ElementForm({
               disabled={saving}
               onChange={(e) => setField(m.name, e.target.value)}
               aria-describedby={describedBy}
-              className="bg-background border-border h-7 w-32 rounded border px-2 font-mono text-xs"
+              aria-invalid={error ? true : undefined}
+              className={cn(
+                'bg-background h-7 w-32 rounded border px-2 font-mono text-xs',
+                error ? 'border-danger' : 'border-border',
+              )}
             />
           )}
           {m.unit ? <span className="text-muted-foreground text-[10px]">{m.unit}</span> : null}
         </span>
-        {error ? (
-          <span id={errorId} role="alert" className="text-danger text-[10px]">
-            {error}
-          </span>
-        ) : null}
       </label>
     );
     // Beside the label, not in it: what is said here describes the field and
-    // is not part of its name. The wrapper is there for every field, so that a
-    // line that turns up while a field is in use does not rebuild its input.
+    // is not part of its name, the refusal of a submit included. The wrapper is
+    // there for every field, so that a line that turns up while a field is in
+    // use does not rebuild its input.
     return (
       <div key={m.name} className="flex flex-col gap-0.5">
         {field}
+        {error ? (
+          <p
+            id={errorId}
+            role="alert"
+            data-testid={`field-error-${m.name}`}
+            className="text-danger text-[10px] leading-snug"
+          >
+            {error}
+          </p>
+        ) : null}
         {fieldHelp ? (
           <p
             id={helpId}
@@ -451,6 +584,19 @@ export function ElementForm({
             {warning}
           </p>
         ) : null}
+        {m.name === 'bus' && busLacksGenerator && onAddGenerator ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={saving}
+            onClick={() => onAddGenerator(busValue)}
+            data-testid="field-action-add-generator"
+            className="self-start"
+          >
+            Add a PV generator on bus {busValue}
+          </Button>
+        ) : null}
       </div>
     );
   };
@@ -458,10 +604,11 @@ export function ElementForm({
   return (
     <form
       onSubmit={handleSubmit}
+      noValidate
       className={cn('flex flex-col gap-3', className)}
       data-testid={`element-form-${model}`}
     >
-      {help ? (
+      {help && help.note.length > 0 ? (
         <div
           role="note"
           data-testid="element-form-note"
@@ -494,6 +641,15 @@ export function ElementForm({
           </summary>
           <fieldset className="mt-2 flex flex-col gap-2">{optional.map(renderField)}</fieldset>
         </details>
+      ) : null}
+      {problems.length > 0 ? (
+        <div
+          role="status"
+          data-testid="form-problems"
+          className="border-danger/30 bg-danger/10 text-foreground rounded-[var(--radius-sm)] border px-2 py-1.5 text-xs"
+        >
+          {problemSummary(missing, refused)}
+        </div>
       ) : null}
       {serverError ? (
         <div

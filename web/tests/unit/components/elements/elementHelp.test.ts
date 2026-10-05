@@ -70,6 +70,39 @@ describe('elementHelp', () => {
     // A field with nothing to explain has no line.
     expect(fields.idx).toBeUndefined();
   });
+
+  it('says that the energy the form opens with is not the battery to study', () => {
+    expect(elementHelp('ESD1', { baseMva: 100 })!.fields.En).toContain(
+      'The form opens with one hour at the rating',
+    );
+  });
+
+  it('says what the four numbers of a PV generator are, with no note above them', () => {
+    const help = elementHelp('PV', { baseMva: 100 });
+    expect(help!.note).toEqual([]);
+    expect(help!.fields.Sn).toContain('per unit of the system base (100 MVA), whatever Sn is');
+    expect(help!.fields.Vn).toContain('the Vn of the bus it is on');
+    expect(help!.fields.p0).toContain('per unit of the system base (100 MVA): 0.4 is 40 MW');
+    expect(help!.fields.p0).toContain('0 starts it idle');
+    expect(help!.fields.v0).toContain('1 is the rated voltage');
+    expect(help!.fields.idx).toBeUndefined();
+  });
+
+  it("works the PV example out on the case's base, and leaves it out without one", () => {
+    expect(elementHelp('PV', { baseMva: 250 })!.fields.p0).toContain('(250 MVA): 0.4 is 100 MW');
+    const bare = elementHelp('PV', { baseMva: null })!.fields;
+    expect(bare.p0).toContain('per unit of the system base.');
+    expect(bare.p0).not.toContain('MW');
+    expect(bare.Sn).not.toContain('MVA)');
+  });
+
+  it('explains a Slack generator alike, but not its power, which the power flow finds', () => {
+    const fields = elementHelp('Slack', { baseMva: 100 })!.fields;
+    expect(fields.Sn).toBeTruthy();
+    expect(fields.Vn).toBeTruthy();
+    expect(fields.v0).toBeTruthy();
+    expect(fields.p0).toBeUndefined();
+  });
 });
 
 describe('elementWarnings', () => {
@@ -138,16 +171,22 @@ describe('elementWarnings', () => {
 
 describe('elementDefaults', () => {
   it('opens a battery rated on the system base, limited to its rating, active power first', () => {
-    expect(elementDefaults('ESD1', { baseMva: 100 })).toEqual({ Sn: 100, pqflag: 1, pmx: 1 });
-    expect(elementDefaults('ESD1', { baseMva: 250 })).toEqual({ Sn: 250, pqflag: 1, pmx: 1 });
+    expect(elementDefaults('ESD1', { baseMva: 100 })).toMatchObject({ Sn: 100, pqflag: 1, pmx: 1 });
+    expect(elementDefaults('ESD1', { baseMva: 250 })).toMatchObject({ Sn: 250, pqflag: 1, pmx: 1 });
   });
 
-  it('leaves the rating empty when the case has no usable base', () => {
+  it('opens a battery holding one hour of its rating, so no required field is empty', () => {
+    expect(elementDefaults('ESD1', { baseMva: 100 })).toEqual({
+      Sn: 100,
+      pqflag: 1,
+      pmx: 1,
+      En: 100,
+    });
+    expect(elementDefaults('ESD1', { baseMva: 250 })?.En).toBe(250);
+  });
+
+  it('leaves the rating and the energy empty when the case has no usable base', () => {
     expect(elementDefaults('ESD1', { baseMva: null })).toEqual({ pqflag: 1, pmx: 1 });
-  });
-
-  it('leaves the energy for the user to give', () => {
-    expect(elementDefaults('ESD1', { baseMva: 100 })).not.toHaveProperty('En');
   });
 
   it('has none for another model', () => {
@@ -156,9 +195,11 @@ describe('elementDefaults', () => {
 });
 
 describe('namedAfterIdx', () => {
-  it('names a battery after its idx, and leaves the name of anything else to the user', () => {
-    expect(namedAfterIdx('ESD1')).toBe(true);
-    for (const model of ['Bus', 'PV', 'GENROU', 'TGOV1']) {
+  it('names a battery and a static generator after the idx, and leaves other names to the user', () => {
+    for (const model of ['ESD1', 'PV', 'Slack']) {
+      expect(namedAfterIdx(model), model).toBe(true);
+    }
+    for (const model of ['Bus', 'Line', 'GENROU', 'TGOV1']) {
       expect(namedAfterIdx(model), model).toBe(false);
     }
   });

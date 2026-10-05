@@ -79,4 +79,16 @@ describe('<GenIdxSelect />', () => {
     await user.selectOptions(select, '2');
     expect(onChange).toHaveBeenCalledWith('2');
   });
+
+  it('marks the select as refused when the form says so, and not otherwise', () => {
+    MOCK_TOPOLOGY = topology([{ idx: 2, name: 'G2', kind: 'PV', params: { bus: 2 } }]);
+    const view = render(<GenIdxSelect value="" onChange={() => {}} />);
+    expect(screen.getByTestId('gen-idx-select')).not.toHaveAttribute('aria-invalid');
+
+    view.rerender(<GenIdxSelect value="" aria-invalid onChange={() => {}} />);
+    const select = screen.getByTestId('gen-idx-select');
+    expect(select).toHaveAttribute('aria-invalid', 'true');
+    expect(select).toHaveClass('border-danger');
+    expect(select).not.toHaveClass('border-border');
+  });
 });
