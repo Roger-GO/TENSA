@@ -15,9 +15,9 @@ export function HistoryDrawerToggle({ className }: { className?: string }) {
   const closeDrawer = useHistoryStore((s) => s.closeDrawer);
   const runCount = useRunsStore((s) => Object.keys(s.runs).length);
   // Gate on session+case loaded — consistent with the other TopBar
-  // controls (BundleExport, Report, Snapshot) — or on there being runs to
-  // list: the finished runs are kept across a reload of the page, so they
-  // can be there before any case is opened.
+  // controls (BundleExport, Report, Snapshot). Runs to list open it too:
+  // the finished runs are kept across a reload of the page, so they can be
+  // there before any case is opened.
   const sessionId = useSessionStore((s) => s.sessionId);
   const caseSelection = useCaseStore((s) => s.selection);
   const enabled = (sessionId !== null && caseSelection !== null) || runCount > 0;

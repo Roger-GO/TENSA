@@ -16,6 +16,10 @@ import { Button } from '@/components/ui/button';
  * subprocess + losing PF results) qualifies as destructive — hence the
  * Dialog here is the appropriate use of a modal.
  *
+ * It also takes the finished runs and the kept power flows, which survive
+ * everything else (a case change, a lost session, a reload), so the dialog
+ * says so, and says how to change case and keep them.
+ *
  * The dialog itself owns no logic beyond cancel/confirm wiring; the
  * caller (`CaseNav`) runs the DELETE+POST mutations and clears the
  * stores on confirm.
@@ -47,7 +51,9 @@ export function ChangeCaseConfirmDialog({
       <DialogContent>
         <DialogTitle>Change case?</DialogTitle>
         <DialogDescription className="mt-2">
-          Discard current session? Loaded case + PF results will be cleared.
+          Discard current session? Loaded case + PF results will be cleared. So will the runs in
+          History and the power flows kept for comparison, which a reload of the page would have
+          kept. To keep them, open the other case from Saved cases instead.
         </DialogDescription>
 
         <DialogFooter>

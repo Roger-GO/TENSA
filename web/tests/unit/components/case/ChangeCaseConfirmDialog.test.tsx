@@ -22,6 +22,15 @@ describe('<ChangeCaseConfirmDialog />', () => {
     expect(screen.getByRole('button', { name: /Discard & change case/i })).toBeInTheDocument();
   });
 
+  it('says that the kept runs and power flows go too, and how to keep them', () => {
+    render(<ChangeCaseConfirmDialog open={true} onCancel={() => {}} onConfirm={() => {}} />);
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent(
+      'So will the runs in History and the power flows kept for comparison, which a reload of the page would have kept.',
+    );
+    expect(dialog).toHaveTextContent('To keep them, open the other case from Saved cases instead.');
+  });
+
   it('does not render when closed', () => {
     render(<ChangeCaseConfirmDialog open={false} onCancel={() => {}} onConfirm={() => {}} />);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
