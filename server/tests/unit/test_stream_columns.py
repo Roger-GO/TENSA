@@ -280,3 +280,27 @@ def test_a_runs_rows_round_trip_through_encode_and_decode() -> None:
     assert column("Line_Line_1_p") == [12.5, 12.6]
     assert column("Line_Line_1_q") == [3.1, 3.2]
     assert column("Load_PQ_1_p") == [21.7, 21.7]
+
+
+# ---- named ANDES variables ----------------------------------------------------
+
+
+@pytest.mark.unit
+def test_andes_variables_follow_the_groups_in_the_order_asked() -> None:
+    """Each named ANDES variable is one column, named as ANDES names it, after
+    the groups' columns; a name asked for twice is one column."""
+    system = _fake_system(bus_idxes=[1])
+    assert var_column_names(
+        ["bus_v"], system, ["omega GENROU 2", "vf GENROU 1", "omega GENROU 2"]
+    ) == ["Bus_1_v", "Bus_1_a", "omega GENROU 2", "vf GENROU 1"]
+
+
+@pytest.mark.unit
+def test_andes_variables_alone_are_a_selection() -> None:
+    assert var_column_names([], _fake_system(), ["omega GENROU 1"]) == ["omega GENROU 1"]
+
+
+@pytest.mark.unit
+def test_no_groups_and_no_andes_variables_is_still_refused() -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        var_column_names([], _fake_system(), [])

@@ -9,6 +9,9 @@ values in ``metadata.var_columns`` order; the column names are sent only in
 
   --- new run ---
   client → server (text)  {"type":"start_tds","tf":1.0,"h":0.0083}  start the run
+                           (optional "vars": variable groups, "dae_vars": ANDES
+                           variable names such as "omega GENROU 1", each one more
+                           column named as given)
   server → client (text)  {"type":"stream_start","run_id":"...",    schema preamble +
                             "metadata":{...}}                       run identifier
   server → client (binary) <Arrow IPC stream chunk with frame_seq=N>
@@ -191,8 +194,22 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         )
         return
 
+    # Optional ``dae_vars``: ANDES variables to stream as columns of their own,
+    # by the names ``dae.x_name`` / ``dae.y_name`` give them. The shape is checked
+    # here; the worker checks the names against the loaded case before the run
+    # starts, and a bad one closes the socket with the reason.
+    dae_vars_raw = cfg.get("dae_vars", [])
+    if not isinstance(dae_vars_raw, list) or not all(isinstance(v, str) for v in dae_vars_raw):
+        await _close_with_error(
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            "'dae_vars' must be a list of ANDES variable names",
+        )
+        return
+
     # Optional ``vars`` selector — picks which variable groups (bus_v,
-    # gen_state, line_flow) appear as columns in each Arrow record batch.
+    # gen_state, gen_power, line_flow, load_pq) appear as columns in each Arrow
+    # record batch.
     # Validation lives here (not just in the schemas/Pydantic layer) because
     # the WS path doesn't go through FastAPI request-body machinery.
     vars_raw = cfg.get("vars", list(DEFAULT_VARS))
@@ -205,7 +222,7 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
             "'vars' must be a list of variable-group strings",
         )
         return
-    if not vars_raw:
+    if not vars_raw and not dae_vars_raw:
         await _close_with_error(
             websocket,
             WS_CLOSE_INTERNAL_ERROR,
@@ -258,6 +275,8 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         "vars": vars_raw,
         "integrator": integrator_raw,
     }
+    if dae_vars_raw:
+        run_args["dae_vars"] = dae_vars_raw
     if overrides_raw is not None:
         run_args["tds_config_overrides"] = overrides_raw
     try:

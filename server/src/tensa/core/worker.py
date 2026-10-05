@@ -69,12 +69,14 @@ from multiprocessing.connection import Connection
 from multiprocessing.synchronize import Event as EventType
 from typing import Any
 
+from tensa.core.dae_vars import as_dict, dae_variables, resolve_dae_vars, search_dae_variables
 from tensa.core.disturbance import AlterSpec, FaultSpec, ToggleSpec
 from tensa.core.errors import (
     AndesAppError,
     DisturbanceCommitError,
     ElementHasDependentsError,
     NoCaseLoadedError,
+    TdsRequestError,
     short_repr,
 )
 
@@ -88,6 +90,7 @@ from tensa.core.stream import (
     StreamAggregator,
     StreamCollector,
     StreamRow,
+    TraceRecorder,
     VarGroup,
     bus_idx_values_from_system,
     encode_batch,
@@ -1238,6 +1241,16 @@ def _handle_run_tds(
     # raises, asked for up front.
     wrapper.check_tds_request(integrator_raw, tds_config_overrides)
 
+    # The ANDES variables the run records beyond the streamed groups: each must be
+    # a variable of the loaded case, checked against the models' own definitions
+    # (no setup needed), so a bad name is refused before anything is written.
+    dae_vars_raw = args.get("dae_vars")
+    if dae_vars_raw is None:
+        dae_vars_raw = []
+    if not isinstance(dae_vars_raw, list) or not all(isinstance(v, str) for v in dae_vars_raw):
+        raise TdsRequestError("'dae_vars' must be a list of ANDES variable names")
+    dae_names = [v.name for v in resolve_dae_vars(wrapper._require_loaded(), dae_vars_raw)]  # noqa: SLF001
+
     abort_flag = threading.Event()
     if abort_event.is_set():
         abort_flag.set()
@@ -1278,7 +1291,7 @@ def _handle_run_tds(
                     f"unknown var group(s): {unknown!r}; expected one of "
                     f"{list(VAR_GROUPS)!r}"
                 )
-            if not vars_raw:
+            if not vars_raw and not dae_names:
                 raise AndesAppError(
                     "'vars' must be a non-empty list when provided"
                 )
@@ -1329,8 +1342,8 @@ def _handle_run_tds(
         syngen_idx_values = syngen_idx_values_from_system(ss)
         line_idx_values = line_idx_values_from_system(ss)
         pq_idx_values = pq_idx_values_from_system(ss)
-        var_columns = var_column_names(var_groups, ss)
-        collector = StreamCollector(ss, var_groups)
+        var_columns = var_column_names(var_groups, ss, dae_names)
+        collector = StreamCollector(ss, var_groups, dae_names)
 
         # Send the stream-start metadata BEFORE the run begins so the WS
         # sender can forward it as a text frame ahead of any binary frames.
@@ -1348,6 +1361,7 @@ def _handle_run_tds(
                         "fixed_step": fixed_step,
                     },
                     "vars": list(var_groups),
+                    "dae_vars": dae_names,
                     "var_columns": var_columns,
                     "bus_idx_values": [str(idx) for idx in bus_idx_values],
                     "syngen_idx_values": [str(idx) for idx in syngen_idx_values],
@@ -1387,6 +1401,16 @@ def _handle_run_tds(
 
         on_step = _emit
 
+    # A batch run has no frames to carry the values it was asked to record, so it
+    # keeps them and returns them with its summary.
+    recorder: TraceRecorder | None = None
+    if not stream and dae_names:
+        recorder = TraceRecorder(
+            StreamCollector(wrapper._require_loaded(), [], dae_names),  # noqa: SLF001
+            dae_names,
+        )
+        on_step = recorder.record
+
     # Started last, once nothing ahead of the run can refuse: only the run's
     # ``finally`` below sets ``abort_flag``, so a bridge started any earlier
     # would keep polling after a refusal.
@@ -1418,7 +1442,32 @@ def _handle_run_tds(
             _emit_rows(tail_rows, tail=True)
 
     abort_event.clear()
-    return _serialize_dataclass(result)
+    payload = _serialize_dataclass(result)
+    if recorder is not None:
+        payload["traces"] = recorder.result()
+    return payload
+
+
+def _handle_list_dae_variables(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """The ANDES variables of the loaded case (see ``tensa.core.dae_vars``), one
+    page of those matching ``q`` / ``kind`` / ``model``, with the total that match."""
+    try:
+        catalogue = dae_variables(wrapper._require_loaded())  # noqa: SLF001
+    except NoCaseLoadedError:
+        # A listing is a read: with no case loaded the truthful answer is none.
+        catalogue = []
+    matches = search_dae_variables(
+        catalogue,
+        query=args.get("q"),
+        kind=args.get("kind"),
+        model=args.get("model"),
+    )
+    offset = int(args.get("offset") or 0)
+    limit = int(args.get("limit") or 100)
+    return {
+        "total": len(matches),
+        "items": [as_dict(v) for v in matches[offset : offset + limit]],
+    }
 
 
 HANDLERS: dict[str, Callable[..., Any]] = {
@@ -1438,6 +1487,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "delete_element": _handle_delete_element,
     "run_pflow": _handle_run_pflow,
     "alterable_params": _handle_alterable_params,
+    "list_dae_variables": _handle_list_dae_variables,
     # Unit 21 — clone-on-write file edits (init / edit / undo / redo / save-as / reset).
     "init_clone": _handle_init_clone,
     "apply_clone_edit": _handle_apply_clone_edit,

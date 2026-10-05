@@ -146,6 +146,89 @@ def test_the_example_client_passes_power_flow_settings_through(
     assert json.loads(tuned["body"]) == {"flat_start": True, "tolerance": 1e-4}
 
 
+def test_the_example_client_lists_andes_variables_and_describes_signals(
+    recorder: tuple[str, list[dict[str, Any]]],
+) -> None:
+    base, seen = recorder
+    client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
+    app = client.AndesApp(base)
+    session = client.Session(app, "abc")
+
+    session.dae_variables()
+    session.dae_variables(q="omega gen", kind="x", limit=5, model=None)
+    session.run_tds(1.0, dae_vars=["omega GENROU 1"])
+    app.response_metrics([{"name": "w", "t": [0, 1, 2], "y": [1, 1, 1]}], t_start=0.5)
+
+    plain, filtered, run, metrics = seen
+    assert plain["path"] == "/api/sessions/abc/dae-variables"
+    assert filtered["path"] == "/api/sessions/abc/dae-variables?q=omega+gen&kind=x&limit=5"
+    assert json.loads(run["body"]) == {"tf": 1.0, "dae_vars": ["omega GENROU 1"]}
+    assert metrics["path"] == "/api/response-metrics"
+    assert metrics["content_type"] == _JSON
+    assert json.loads(metrics["body"])["t_start"] == 0.5
+
+
+def test_the_mcp_tds_tool_sends_the_variables_it_was_asked_to_record(
+    recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    from tensa import mcp_server
+
+    base, seen = recorder
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+
+    mcp_server.run_tds("abc", 2.0)
+    mcp_server.run_tds("abc", 2.0, dae_vars=["omega GENROU 1"])
+    mcp_server.list_dae_variables("abc", q="omega", kind="x")
+
+    plain, recording, listing = seen
+    assert json.loads(plain["body"]) == {"tf": 2.0}
+    assert json.loads(recording["body"]) == {"tf": 2.0, "dae_vars": ["omega GENROU 1"]}
+    assert listing["path"] == "/api/sessions/abc/dae-variables?q=omega&kind=x&limit=100"
+
+
+def test_the_mcp_metrics_tool_runs_the_simulation_and_returns_only_the_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    from tensa import mcp_server
+
+    calls: list[tuple[str, str, dict[str, Any] | None]] = []
+
+    def fake_api(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
+        calls.append((method, path, body))
+        if path.endswith("/tds"):
+            return {
+                "converged": True,
+                "final_t": 3.0,
+                "traces": {
+                    "t": [0.0, 1.0, 2.0],
+                    "variables": [{"name": "omega GENROU 1", "values": [1.0, 0.99, 1.0]}],
+                    "truncated": False,
+                },
+            }
+        return {"results": [{"name": "omega GENROU 1", "error": None}]}
+
+    monkeypatch.setattr(mcp_server, "_api", fake_api)
+
+    answer = mcp_server.get_response_metrics("abc", 3.0, ["omega GENROU 1"], t_start=1.0)
+
+    (_, tds_path, tds_body), (_, metrics_path, metrics_body) = calls
+    assert tds_path == "/sessions/abc/tds"
+    assert tds_body == {"tf": 3.0, "dae_vars": ["omega GENROU 1"]}
+    assert metrics_path == "/response-metrics"
+    assert metrics_body == {
+        "series": [{"name": "omega GENROU 1", "t": [0.0, 1.0, 2.0], "y": [1.0, 0.99, 1.0]}],
+        "t_start": 1.0,
+    }
+    assert answer == {
+        "converged": True,
+        "final_t": 3.0,
+        "truncated": False,
+        "metrics": [{"name": "omega GENROU 1", "error": None}],
+    }
+
+
 def _curl_commands(script: Path) -> list[str]:
     """The lines of a shell script that run ``curl``, continuation lines joined."""
     text = script.read_text(encoding="utf-8").replace("\\\n", " ")

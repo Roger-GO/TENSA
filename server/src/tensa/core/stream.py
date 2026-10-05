@@ -36,6 +36,12 @@ order) are:
 The default selection is ``bus_v`` + ``gen_state`` so voltages, angles,
 and the frequency proxy are always plottable without re-running.
 
+Beyond the groups, a run can name ANDES variables one by one (``dae_vars``, see
+``tensa.core.dae_vars``): ``omega GENROU 1``, ``vf GENROU 2``, any entry of
+``dae.x_name`` or ``dae.y_name``. Each adds one column, after the groups' and
+named exactly as ANDES names the variable, holding its value as ANDES stores it
+(per unit or radians for most, in ANDES's own units, with no scaling).
+
 Two streaming modes:
 
 - ``decimation="none"`` — every callpert step is one row. If
@@ -62,6 +68,7 @@ aggregator returns as one Arrow batch.
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
@@ -123,18 +130,21 @@ def _paired_columns(
 def var_column_names(
     var_groups: list[VarGroup] | tuple[VarGroup, ...],
     system: System,
+    dae_vars: Sequence[str] = (),
 ) -> list[str]:
     """The names of the columns a run streams for ``var_groups`` on ``system``.
 
-    ``var_groups`` is a non-empty subset of :data:`VAR_GROUPS`. The names come
+    ``var_groups`` is a subset of :data:`VAR_GROUPS`, empty only when
+    ``dae_vars`` names something. The names come
     in canonical :data:`VAR_GROUPS` order whatever order the groups were listed
     in, each group contributing its two columns per device in idx order (see
-    the module docstring), so the list fixes both the column count and the
+    the module docstring), followed by the ``dae_vars`` names in the order given
+    (each once), so the list fixes both the column count and the
     order of the values in every row. ``t`` is not among them. This is the list
     ``stream_start.metadata.var_columns`` sends the client, which is how it
     names the values of the frames that follow.
     """
-    if not var_groups:
+    if not var_groups and not dae_vars:
         raise ValueError("var_groups must be a non-empty subset of VAR_GROUPS")
     requested = set(var_groups)
     unknown = requested - set(VAR_GROUPS)
@@ -159,7 +169,7 @@ def var_column_names(
             names += _paired_columns("Load", pq_idx_values_from_system(system), "p", "q")
         else:  # pragma: no cover — exhaustively handled above
             raise ValueError(f"unexpected var group: {group!r}")
-    return names
+    return names + list(dict.fromkeys(dae_vars))
 
 
 # ---- encoding ---------------------------------------------------------------
@@ -301,6 +311,10 @@ _LINE_FLOW_ATTRS: tuple[str, ...] = (
 )
 
 _NAN = float("nan")
+_NO_ADDRESSES: tuple[NDArray[np.intp], NDArray[np.intp]] = (
+    np.empty(0, dtype=np.intp),
+    np.empty(0, dtype=np.intp),
+)
 
 
 def _mva_base(system: System) -> float:
@@ -508,8 +522,71 @@ class _LoadReader(_Reader):
             out[column::2] = scaled
 
 
+class _DaeReader(_Reader):
+    """``[value_0, value_1, ...]``: the ANDES variables named in ``names``, each
+    read from ``dae.x`` (a state) or ``dae.y`` (an algebraic variable) as ANDES
+    stores it, with no scaling.
+
+    Where a variable sits is looked up by name in ``dae.x_name`` and
+    ``dae.y_name`` and not from the model's own address arrays: those names
+    exist only once ANDES has set up the time-domain run (the collector is built
+    before that), and the addresses of a static device that a dynamic one
+    replaces are stale after it. The lookup is made when the first value is read,
+    and again if the name lists have changed length since, which is what
+    happens if a collector reads before ``TDS.init()`` has run. A name that is
+    not in either list reads as ``nan``, logged once.
+    """
+
+    def __init__(self, system: System, names: Sequence[str]) -> None:
+        super().__init__()
+        self._dae = system.dae
+        self._names = list(names)
+        self.width = len(self._names)
+        self._seen: tuple[int, int] | None = None
+        self._x: tuple[NDArray[np.intp], NDArray[np.intp]] = _NO_ADDRESSES
+        self._y: tuple[NDArray[np.intp], NDArray[np.intp]] = _NO_ADDRESSES
+
+    def _locate(self) -> None:
+        """(Re)build the columns and the ``dae`` addresses they read."""
+        dae = self._dae
+        self._seen = (len(dae.x_name), len(dae.y_name))
+        column_of = {name: column for column, name in enumerate(self._names)}
+        found: list[tuple[list[int], list[int]]] = []
+        for dae_names in (dae.x_name, dae.y_name):
+            columns: list[int] = []
+            addresses: list[int] = []
+            for address, name in enumerate(dae_names):
+                column = column_of.get(name)
+                if column is not None:
+                    columns.append(column)
+                    addresses.append(address)
+            found.append((columns, addresses))
+        (x_columns, x_addresses), (y_columns, y_addresses) = found
+        self._x = (np.array(x_columns, dtype=np.intp), np.array(x_addresses, dtype=np.intp))
+        self._y = (np.array(y_columns, dtype=np.intp), np.array(y_addresses, dtype=np.intp))
+
+    def read(self, out: NDArray[np.float64]) -> None:
+        dae = self._dae
+        if self._seen != (len(dae.x_name), len(dae.y_name)):
+            self._locate()
+            missing = self.width - len(self._x[0]) - len(self._y[0])
+            if missing and "dae_vars" not in self._warned:
+                self._warned.add("dae_vars")
+                log.warning(
+                    "%d of %d ANDES variables are not in dae.x_name or dae.y_name; "
+                    "emitting NaN columns for them",
+                    missing,
+                    self.width,
+                )
+        out[:] = _NAN
+        for (columns, addresses), values in ((self._x, dae.x), (self._y, dae.y)):
+            if len(columns):
+                out[columns] = np.asarray(values, dtype=np.float64)[addresses]
+
+
 class StreamCollector:
-    """Reads the selected variable groups' values off a System at each step.
+    """Reads the selected variable groups' values and named ANDES variables off a
+    System at each step.
 
     Built once per run, after the System is set up: the addresses of every
     value are resolved then (which SynGen model holds each generator and at
@@ -525,6 +602,7 @@ class StreamCollector:
         self,
         system: System,
         var_groups: list[VarGroup] | tuple[VarGroup, ...],
+        dae_vars: Sequence[str] = (),
     ) -> None:
         requested = set(var_groups)
         unknown = requested - set(VAR_GROUPS)
@@ -558,6 +636,9 @@ class StreamCollector:
                 readers.append(
                     _LoadReader(system, len(pq_idx_values_from_system(system)))
                 )
+        if dae_vars:
+            # Last, in the order asked, as ``var_column_names`` lists them.
+            readers.append(_DaeReader(system, list(dict.fromkeys(dae_vars))))
 
         # (reader, first column, one past its last column)
         self._slots: list[tuple[_Reader, int, int]] = []
@@ -574,6 +655,65 @@ class StreamCollector:
         for reader, start, stop in self._slots:
             reader.read(row[start:stop])
         return row
+
+
+# ---- batch recorder -----------------------------------------------------------
+
+# The most values (rows times columns) a batch run keeps and returns. A response
+# of this size is about 10 MB of JSON.
+MAX_TRACE_VALUES = 500_000
+
+
+class TraceRecorder:
+    """Keeps every step's row of a :class:`StreamCollector`, for a batch run that
+    returns the values it recorded, where a streaming run sends them as frames.
+
+    Rows are kept at full resolution (every step ANDES takes) until
+    ``max_values`` values are held; the rows after that are dropped and
+    :attr:`truncated` says so, so a long run on a big selection still returns
+    its summary.
+    """
+
+    def __init__(
+        self,
+        collector: StreamCollector,
+        names: Sequence[str],
+        max_values: int = MAX_TRACE_VALUES,
+    ) -> None:
+        self._collector = collector
+        self._names = list(names)
+        self._max_rows = max(1, max_values // max(1, collector.n_columns))
+        self._t: list[float] = []
+        self._rows: list[NDArray[np.float64]] = []
+        self.truncated = False
+
+    def record(self, t: float, system: object) -> None:
+        """Take the collector's row for the step at time ``t``."""
+        if len(self._t) >= self._max_rows:
+            self.truncated = True
+            return
+        self._t.append(float(t))
+        self._rows.append(self._collector.collect())
+
+    def result(self) -> dict[str, Any]:
+        """``{"t": [...], "variables": [{"name", "values"}, ...], "truncated": bool}``,
+        a value that is not a number (``nan``, ``inf``) as ``None``."""
+        values = (
+            np.vstack(self._rows) if self._rows else np.empty((0, len(self._names)), np.float64)
+        )
+        return {
+            "t": list(self._t),
+            "variables": [
+                {
+                    "name": name,
+                    "values": [
+                        float(v) if math.isfinite(v) else None for v in values[:, column]
+                    ],
+                }
+                for column, name in enumerate(self._names)
+            ],
+            "truncated": self.truncated,
+        }
 
 
 # ---- aggregator -------------------------------------------------------------
@@ -710,12 +850,14 @@ class StreamAggregator:
 
 __all__ = [
     "DEFAULT_VARS",
+    "MAX_TRACE_VALUES",
     "VAR_GROUPS",
     "DecimationAlgorithm",
     "DecimationMode",
     "StreamAggregator",
     "StreamCollector",
     "StreamRow",
+    "TraceRecorder",
     "VarGroup",
     "bus_idx_values_from_system",
     "decode_batch",

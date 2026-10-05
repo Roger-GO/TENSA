@@ -12,16 +12,20 @@ with ``callpert`` wired to count steps and check the abort flag.
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from tensa.api.error_mapping import map_worker_error
 from tensa.api.schemas import (
     AbortResponse,
+    DaeVariableInfo,
+    DaeVariableList,
     ProblemDetails,
     TdsBatchResult,
     TdsRunRequest,
+    TdsTraces,
+    TdsTraceSeries,
 )
 from tensa.core.errors import SetupFailedError
 from tensa.core.session import (
@@ -107,6 +111,8 @@ async def run_tds(
     }
     if body.tds_config_overrides is not None:
         args["tds_config_overrides"] = body.tds_config_overrides
+    if body.dae_vars:
+        args["dae_vars"] = body.dae_vars
 
     # v3.1 Unit 5c: mirror the batch run as a first-class job whose ``job_id``
     # EQUALS the response's ``run_id`` (same value across both fields — additive,
@@ -184,12 +190,22 @@ async def run_tds(
         registry.mark_done(run_id)
         _broadcast_job(mgr, session_id, run_id)
 
+    traces = payload.get("traces")
     return TdsBatchResult(
         run_id=run_id,
         job_id=run_id,
         converged=bool(payload["converged"]),
         final_t=float(payload["final_t"]),
         callpert_count=int(payload["callpert_count"]),
+        traces=(
+            TdsTraces(
+                t=traces["t"],
+                variables=[TdsTraceSeries(**v) for v in traces["variables"]],
+                truncated=bool(traces["truncated"]),
+            )
+            if traces
+            else None
+        ),
     )
 
 
@@ -202,6 +218,66 @@ def _broadcast_job(mgr: SessionManager, session_id: str, job_id: str) -> None:
     record = registry.get_job(job_id)
     if record is not None:
         mgr.broadcast_job_event(session_id, record)
+
+
+@router.get(
+    "/sessions/{session_id}/dae-variables",
+    openapi_extra={"x-tensa-gui-location": "run-controls"},
+    operation_id="listDaeVariables",
+    summary="List the ANDES variables of the loaded case that a TDS run can record.",
+    response_model=DaeVariableList,
+    responses={
+        404: {"model": ProblemDetails, "description": "Session not found or already closed."},
+    },
+)
+async def list_dae_variables(
+    session_id: str,
+    request: Request,
+    q: Annotated[
+        str | None,
+        Query(
+            max_length=200,
+            description=(
+                "Words that must all appear in the variable's name, whatever their "
+                "case: ``omega gen`` finds ``omega GENROU 1``."
+            ),
+        ),
+    ] = None,
+    kind: Annotated[
+        Literal["x", "y"] | None,
+        Query(description="``x`` for state variables only, ``y`` for algebraic ones only."),
+    ] = None,
+    model: Annotated[
+        str | None,
+        Query(max_length=100, description="Only this ANDES model's variables (``GENROU``)."),
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Page size.")] = 100,
+    offset: Annotated[int, Query(ge=0, description="Matches to skip.")] = 0,
+) -> DaeVariableList:
+    """The states and algebraic variables ANDES keeps for the loaded case's
+    devices, named as ``dae.x_name`` / ``dae.y_name`` name them, for the
+    ``dae_vars`` of a TDS request. Needs no setup, so asking does not close the
+    case to new disturbances. A static generator that a dynamic one replaces
+    keeps no algebraic variables in a TDS run and is left out. With no case
+    loaded the list is empty (a 200, as for the disturbance list)."""
+    mgr = _manager(request)
+    try:
+        payload = await mgr.invoke(
+            session_id,
+            "list_dae_variables",
+            {"q": q, "kind": kind, "model": model, "limit": limit, "offset": offset},
+        )
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except WorkerError as exc:
+        raise map_worker_error(exc) from exc
+    return DaeVariableList(
+        total=int(payload["total"]),
+        items=[DaeVariableInfo(**item) for item in payload["items"]],
+    )
 
 
 @router.post(

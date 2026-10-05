@@ -12,7 +12,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | --- | --- |
 | `about-dialog` | 1 |
 | `activity-panel` | 2 |
-| `analysis-panel` | 7 |
+| `analysis-panel` | 8 |
 | `auto` | 4 |
 | `bundle-dialog` | 2 |
 | `command-palette` | 5 |
@@ -24,16 +24,17 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
-| `run-controls` | 3 |
+| `run-controls` | 4 |
 | `snapshot-dialog` | 4 |
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
-| **total** | **59** |
+| **total** | **61** |
 
 ## OpenAPI routes
 
 | Method | Path | GUI location | Deferral reason |
 | --- | --- | --- | --- |
+| `POST` | `/api/response-metrics` | `analysis-panel` |  |
 | `GET` | `/api/sessions` | `auto` |  |
 | `POST` | `/api/sessions` | `auto` |  |
 | `GET` | `/api/sessions/{session_id}` | `auto` |  |
@@ -53,6 +54,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `GET` | `/api/sessions/{session_id}/connectivity` | `workspace` |  |
 | `POST` | `/api/sessions/{session_id}/cpf` | `analysis-panel` |  |
 | `POST` | `/api/sessions/{session_id}/cpf/qv` | `analysis-panel` |  |
+| `GET` | `/api/sessions/{session_id}/dae-variables` | `run-controls` |  |
 | `POST` | `/api/sessions/{session_id}/disturbances` | `disturbance-panel` |  |
 | `GET` | `/api/sessions/{session_id}/disturbances` | `none` | Recorded disturbances are mirrored in the disturbance-panel Zustand store and rehydrated from snapshot restore; the web client never re-reads them via this GET (read-back endpoint kept for API/agent parity). |
 | `POST` | `/api/sessions/{session_id}/eig` | `analysis-panel` |  |

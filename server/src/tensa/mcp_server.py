@@ -20,6 +20,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -190,12 +191,78 @@ def run_pflow(
 
 
 @mcp.tool()
-def run_tds(session_id: str, tf: float) -> Any:
+def run_tds(session_id: str, tf: float, dae_vars: list[str] | None = None) -> Any:
     """Run a time-domain simulation from t=0 to t=tf seconds (batch; registered disturbances apply).
 
     Synchronous — returns when the simulation finishes (server caps wall time at 300 s).
+    dae_vars names ANDES variables to record, as list_dae_variables gives them
+    ('omega GENROU 1'); their values at every step come back under "traces".
     """
-    return _api("POST", f"/sessions/{session_id}/tds", {"tf": tf})
+    body: dict[str, Any] = {"tf": tf}
+    if dae_vars:
+        body["dae_vars"] = dae_vars
+    return _api("POST", f"/sessions/{session_id}/tds", body)
+
+
+@mcp.tool()
+def list_dae_variables(
+    session_id: str,
+    q: str | None = None,
+    kind: str | None = None,
+    model: str | None = None,
+    limit: int = 100,
+) -> Any:
+    """List the ANDES variables of the loaded case that run_tds can record.
+
+    Names read '<variable> <Model> <idx>' ('omega GENROU 1', 'vf GENROU 2'); pass
+    them as dae_vars. q is words that must all appear in the name, whatever
+    their case; kind is 'x' (state) or 'y' (algebraic); model narrows to one
+    ANDES model ('GENROU'). Needs no run, and does not close the case to
+    disturbances.
+    """
+    params = {
+        key: value
+        for key, value in (("q", q), ("kind", kind), ("model", model), ("limit", limit))
+        if value is not None
+    }
+    query = urllib.parse.urlencode(params)
+    return _api("GET", f"/sessions/{session_id}/dae-variables?{query}")
+
+
+@mcp.tool()
+def get_response_metrics(
+    session_id: str,
+    tf: float,
+    dae_vars: list[str],
+    t_start: float | None = None,
+    t_end: float | None = None,
+) -> Any:
+    """Run a time-domain simulation and describe how each named ANDES variable responds.
+
+    Per variable: initial and final value, peak and nadir (with times), the
+    steepest rate of change over 0.5 s, settling time (2 % band), overshoot and
+    the damping ratio and frequency of its oscillation. t_start / t_end narrow
+    the window the metrics are read over (a fault applied at t=1 s: t_start=1).
+    The values are in ANDES's units (per unit for speed and voltage). The
+    traces themselves are not returned; use run_tds for them.
+    """
+    run = _api("POST", f"/sessions/{session_id}/tds", {"tf": tf, "dae_vars": dae_vars})
+    traces = run["traces"]
+    body: dict[str, Any] = {
+        "series": [
+            {"name": v["name"], "t": traces["t"], "y": v["values"]} for v in traces["variables"]
+        ]
+    }
+    for key, value in (("t_start", t_start), ("t_end", t_end)):
+        if value is not None:
+            body[key] = value
+    metrics = _api("POST", "/response-metrics", body)
+    return {
+        "converged": run["converged"],
+        "final_t": run["final_t"],
+        "truncated": traces["truncated"],
+        "metrics": metrics["results"],
+    }
 
 
 @mcp.tool()

@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from tensa.core.stream import VAR_GROUPS, StreamCollector
+from tensa.core.stream import VAR_GROUPS, StreamCollector, TraceRecorder
 
 pytestmark = pytest.mark.unit
 
@@ -369,3 +369,167 @@ def test_an_array_of_the_wrong_length_reads_as_nan() -> None:
 
     assert np.isnan(row[0::2]).all()
     assert row[1::2].tolist() == pytest.approx([10.0, 5.0])
+
+
+# ---- named ANDES variables ----------------------------------------------------
+
+
+def _dae(x_names: list[str], y_names: list[str]) -> SimpleNamespace:
+    """The part of ``System.dae`` the ANDES-variable reader uses: the two name
+    lists and the arrays they index."""
+    return SimpleNamespace(
+        x_name=list(x_names),
+        y_name=list(y_names),
+        x=np.arange(len(x_names), dtype=float) + 100.0,
+        y=np.arange(len(y_names), dtype=float) + 200.0,
+    )
+
+
+def _with_dae(dae: SimpleNamespace) -> SimpleNamespace:
+    system = _system()
+    system.dae = dae
+    return system
+
+
+def test_andes_variables_are_read_from_dae_x_and_dae_y_by_name() -> None:
+    dae = _dae(["delta GENROU 1", "omega GENROU 1"], ["a Bus 1", "v Bus 1", "Pe GENROU 1"])
+    collector = StreamCollector(
+        _with_dae(dae), [], ["Pe GENROU 1", "omega GENROU 1", "a Bus 1"]
+    )
+
+    assert collector.n_columns == 3
+    # x holds 100 + address and y holds 200 + address in this stand-in.
+    assert collector.collect().tolist() == [202.0, 101.0, 200.0]
+
+
+def test_andes_variables_follow_the_groups_in_the_order_asked() -> None:
+    dae = _dae([], ["a Bus 1", "v Bus 1"])
+    system = _with_dae(dae)
+
+    row = StreamCollector(system, ["bus_v"], ["v Bus 1", "a Bus 1", "v Bus 1"]).collect()
+
+    # six bus columns, then the two distinct variables, each once.
+    assert row.shape == (8,)
+    assert row[6:].tolist() == [201.0, 200.0]
+
+
+def test_the_values_are_whatever_dae_holds_at_each_step() -> None:
+    dae = _dae(["omega GENROU 1"], [])
+    collector = StreamCollector(_with_dae(dae), [], ["omega GENROU 1"])
+    before = collector.collect()
+
+    dae.x[0] = 1.002  # in place, as ANDES's step does
+
+    assert before.tolist() == [100.0]
+    assert collector.collect().tolist() == [1.002]
+
+
+def test_a_name_dae_does_not_have_reads_nan_and_says_so_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    collector = StreamCollector(
+        _with_dae(_dae([], ["a Bus 1"])), [], ["a Bus 1", "omega GENROU 9"]
+    )
+
+    with caplog.at_level(logging.WARNING, logger="tensa.stream"):
+        rows = [collector.collect() for _ in range(3)]
+
+    assert [row[0] for row in rows] == [200.0] * 3
+    assert all(math.isnan(row[1]) for row in rows)
+    assert len([r for r in caplog.records if "dae.x_name" in r.getMessage()]) == 1
+
+
+def test_names_are_looked_up_again_once_dae_has_been_named() -> None:
+    """ANDES fills ``dae.x_name`` when it sets up the time-domain run, after the
+    collector is built. A read before that is nan, and the first one after it
+    finds the variable."""
+    dae = _dae([], [])
+    collector = StreamCollector(_with_dae(dae), [], ["omega GENROU 1"])
+    assert math.isnan(collector.collect()[0])
+
+    dae.x_name.append("omega GENROU 1")
+    dae.x = np.array([1.0])
+
+    assert collector.collect().tolist() == [1.0]
+
+
+def test_the_names_are_looked_up_once_and_not_at_every_step() -> None:
+    dae = _dae(["omega GENROU 1"], ["a Bus 1"])
+
+    class Counting(list[str]):
+        reads = 0
+
+        def __iter__(self) -> Any:
+            Counting.reads += 1
+            return super().__iter__()
+
+    dae.x_name = Counting(dae.x_name)
+    dae.y_name = Counting(dae.y_name)
+    collector = StreamCollector(_with_dae(dae), [], ["omega GENROU 1", "a Bus 1"])
+
+    for _ in range(10):
+        collector.collect()
+
+    assert Counting.reads == 2  # one pass over each list, at the first step
+
+
+def test_only_andes_variables_can_be_a_runs_whole_selection() -> None:
+    collector = StreamCollector(_with_dae(_dae([], ["a Bus 1"])), [], ["a Bus 1"])
+
+    assert collector.n_columns == 1
+
+
+# ---- the batch recorder -------------------------------------------------------
+
+
+def _recorder(max_values: int | None = None) -> tuple[TraceRecorder, SimpleNamespace]:
+    dae = _dae([], ["a Bus 1", "v Bus 1"])
+    names = ["a Bus 1", "v Bus 1"]
+    collector = StreamCollector(_with_dae(dae), [], names)
+    if max_values is None:
+        return TraceRecorder(collector, names), dae
+    return TraceRecorder(collector, names, max_values=max_values), dae
+
+
+def test_the_recorder_keeps_every_step_in_full() -> None:
+    recorder, dae = _recorder()
+    for t in (0.0, 0.1, 0.2):
+        recorder.record(t, None)
+        dae.y += 1.0
+
+    result = recorder.result()
+
+    assert result["t"] == [0.0, 0.1, 0.2]
+    assert [v["name"] for v in result["variables"]] == ["a Bus 1", "v Bus 1"]
+    assert result["variables"][0]["values"] == [200.0, 201.0, 202.0]
+    assert result["variables"][1]["values"] == [201.0, 202.0, 203.0]
+    assert result["truncated"] is False
+
+
+def test_the_recorder_stops_at_its_limit_and_says_so() -> None:
+    recorder, _ = _recorder(max_values=4)  # two columns: two rows
+    for t in (0.0, 0.1, 0.2, 0.3):
+        recorder.record(t, None)
+
+    result = recorder.result()
+
+    assert result["t"] == [0.0, 0.1]
+    assert result["truncated"] is True
+
+
+def test_the_recorder_turns_values_that_are_not_numbers_into_none() -> None:
+    recorder, dae = _recorder()
+    dae.y[0] = np.nan
+    dae.y[1] = np.inf
+    recorder.record(0.0, None)
+
+    values = [v["values"] for v in recorder.result()["variables"]]
+
+    assert values == [[None], [None]]
+
+
+def test_an_empty_recording_is_an_empty_result() -> None:
+    result = _recorder()[0].result()
+
+    assert result["t"] == []
+    assert [v["values"] for v in result["variables"]] == [[], []]

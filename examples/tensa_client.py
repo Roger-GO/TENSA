@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 from contextlib import contextmanager
 from typing import Any, Iterator
@@ -78,6 +79,15 @@ class AndesApp:
     def workspace_files(self) -> list[dict[str, Any]]:
         return self.request("GET", "/workspace/files")["files"]
 
+    def response_metrics(self, series: list[dict[str, Any]], **options: Any) -> Any:
+        """Nadir, rate of change, settling time, overshoot and damping of signals.
+
+        ``series`` is a list of ``{"name": ..., "t": [...], "y": [...]}``, for
+        instance built from the ``traces`` of ``run_tds(..., dae_vars=[...])``.
+        Options: ``t_start``, ``t_end`` (the window), ``settling_band``,
+        ``rocof_window``. Needs no session."""
+        return self.request("POST", "/response-metrics", {"series": series, **options})
+
 
 class Session:
     """One isolated ANDES ``System`` living in its own server-side subprocess."""
@@ -129,8 +139,19 @@ class Session:
         return self._req("POST", "/pflow", settings)
 
     def run_tds(self, tf: float, **kwargs: Any) -> Any:
-        """Batch time-domain simulation (synchronous; server caps at 300 s wall time)."""
+        """Batch time-domain simulation (synchronous; server caps at 300 s wall time).
+
+        ``dae_vars=["omega GENROU 1", ...]`` records those ANDES variables at
+        every step and returns them under ``traces`` (see ``dae_variables``)."""
         return self._req("POST", "/tds", {"tf": tf, **kwargs})
+
+    def dae_variables(self, **filters: Any) -> Any:
+        """The ANDES variables of the loaded case that ``run_tds`` can record, named
+        as ANDES names them (``omega GENROU 1``). Filters: ``q`` (words that must
+        all appear in the name), ``kind`` (``x`` state, ``y`` algebraic), ``model``,
+        ``limit``, ``offset``."""
+        query = urllib.parse.urlencode({k: v for k, v in filters.items() if v is not None})
+        return self._req("GET", f"/dae-variables?{query}" if query else "/dae-variables")
 
     def operating_point(self) -> Any:
         return self._req("GET", "/operating-point")

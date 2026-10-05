@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from tensa.core.dae_vars import MAX_DAE_VARS
 from tensa.core.jobs import JobKind as JobKindLiteral
 from tensa.core.jobs import JobStatus as JobStatusLiteral
 from tensa.core.pflow_options import (
@@ -20,6 +21,7 @@ from tensa.core.pflow_options import (
     TOLERANCE_MAX,
     TOLERANCE_MIN,
 )
+from tensa.core.stream import MAX_TRACE_VALUES
 from tensa.core.wrapper import ParamValue
 
 # ---- error envelope ---------------------------------------------------------
@@ -1414,25 +1416,41 @@ class TdsRunRequest(BaseModel):
         gt=0.0,
         allow_inf_nan=False,
     )
-    vars: list[Literal["bus_v", "gen_state", "line_flow"]] | None = Field(
+    vars: list[Literal["bus_v", "gen_state", "gen_power", "line_flow", "load_pq"]] | None = Field(
         None,
         description=(
             "Optional selector for which variable groups appear as columns "
             "in each per-step Arrow record batch on the streaming path. "
-            "``bus_v`` covers bus voltage magnitudes (the default); "
+            "``bus_v`` covers bus voltage magnitudes and angles; "
             "``gen_state`` adds generator rotor angle ``delta`` and per-"
             "unit speed ``omega`` for every member of the ANDES ``SynGen`` "
-            "group (GENROU / GENCLS / PLBVFU1); ``line_flow`` adds active "
-            "power ``Line_<idx>_p`` (MW) at each line's bus1 terminal. "
+            "group (GENROU / GENCLS / PLBVFU1); ``gen_power`` adds their "
+            "electrical ``Pe`` / ``Qe``; ``line_flow`` adds active and "
+            "reactive power at each line's bus1 terminal; ``load_pq`` adds "
+            "each PQ load's consumption. "
             "Unknown values are rejected with 422; an empty list is "
             "rejected with 422. The batch path (``POST /tds``) ignores "
-            "this field at runtime — the streamed-only state values are "
-            "not surfaced in batch responses — but it is accepted on the "
-            "OpenAPI surface for symmetry with the WebSocket "
+            "this field at runtime: it returns the values of ``dae_vars`` "
+            "instead, and accepts this field for symmetry with the WebSocket "
             "``start_tds`` config so generated clients can share one "
-            "request shape. Defaults to ``[\"bus_v\"]`` when omitted."
+            "request shape. Defaults to ``[\"bus_v\", \"gen_state\"]`` when "
+            "omitted on the streaming path."
         ),
         min_length=1,
+    )
+    dae_vars: list[str] | None = Field(
+        None,
+        max_length=MAX_DAE_VARS,
+        description=(
+            "ANDES variables to record, by the names ``dae.x_name`` and "
+            "``dae.y_name`` give them (``omega GENROU 1``, ``vf GENROU 2``); "
+            "``GET /sessions/{id}/dae-variables`` lists them. A batch run returns "
+            "their values in ``traces``, at every step ANDES takes, with no "
+            "scaling. A name that is not a variable of the loaded case is "
+            "refused with 422 before anything runs. The streaming ``start_tds`` "
+            "frame takes the same field and adds one column per name, named "
+            "exactly so."
+        ),
     )
     integrator: Literal["trapezoidal", "qndf"] = Field(
         "trapezoidal",
@@ -1465,14 +1483,47 @@ class TdsRunRequest(BaseModel):
     )
 
 
+class TdsTraceSeries(BaseModel):
+    """One recorded ANDES variable of a batch run."""
+
+    name: str = Field(..., description="The variable, named as in ``dae_vars``.")
+    values: list[float | None] = Field(
+        ...,
+        description=(
+            "Its value at each time in ``traces.t``, as ANDES stores it. ``null`` "
+            "for a value that is not a number (a diverged step)."
+        ),
+    )
+
+
+class TdsTraces(BaseModel):
+    """The ANDES variables a batch run was asked to record (``dae_vars``)."""
+
+    t: list[float] = Field(
+        ..., description="Simulation time of each recorded step, in seconds."
+    )
+    variables: list[TdsTraceSeries] = Field(
+        ..., description="One series per requested variable, in the order asked."
+    )
+    truncated: bool = Field(
+        ...,
+        description=(
+            "``true`` when the run took more steps than a response holds "
+            f"({MAX_TRACE_VALUES} values in all) and the later steps were left "
+            "out. Raise ``h`` or ask for fewer variables."
+        ),
+    )
+
+
 class TdsBatchResult(BaseModel):
     """Result of a batch TDS run (post-completion delivery).
 
     Streaming TDS uses a different code path (the WebSocket at
     ``/ws/{session_id}``) that emits Arrow IPC frames per integration step.
     Batch mode blocks until completion and returns a summary; the per-step
-    state values are NOT returned in batch mode (use streaming mode if you
-    need them).
+    state values are NOT returned in batch mode unless the request names
+    ``dae_vars``, whose values come back in ``traces`` (use streaming mode for
+    the five variable groups).
     """
 
     run_id: str = Field(
@@ -1506,6 +1557,240 @@ class TdsBatchResult(BaseModel):
             "``JobRecord`` (kind ``tds-batch``). ``null`` only on legacy "
             "responses synthesised outside the job lifecycle."
         ),
+    )
+    traces: TdsTraces | None = Field(
+        default=None,
+        description=(
+            "The values of the request's ``dae_vars``, every step of the run. "
+            "``null`` when the request named none."
+        ),
+    )
+
+
+class DaeVariableInfo(BaseModel):
+    """One ANDES variable of one device of the loaded case."""
+
+    name: str = Field(
+        ...,
+        description=(
+            "``<variable> <Model> <idx>`` as ANDES spells it in ``dae.x_name`` / "
+            "``dae.y_name`` (``omega GENROU 1``): what ``dae_vars`` asks for it by, "
+            "and the name of its column in a stream."
+        ),
+    )
+    kind: Literal["x", "y"] = Field(
+        ...,
+        description="``x`` for a state variable, ``y`` for an algebraic one.",
+    )
+    model: str = Field(..., description="ANDES model the device belongs to.")
+    var: str = Field(..., description="The variable's name within the model.")
+    idx: int | str = Field(..., description="The device's idx.")
+    unit: str | None = Field(
+        default=None, description="ANDES's unit for the variable; ``null`` where it gives none."
+    )
+    info: str | None = Field(
+        default=None,
+        description="ANDES's description of the variable; ``null`` where it gives none.",
+    )
+
+
+class DaeVariableList(BaseModel):
+    """A page of the ANDES variables of the loaded case."""
+
+    total: int = Field(
+        ..., ge=0, description="How many variables match the filters, across all pages."
+    )
+    items: list[DaeVariableInfo] = Field(
+        ..., description="The requested page, in the models' own order."
+    )
+
+
+# ---- response metrics -----------------------------------------------------------
+
+# Bounds on one request: a 10-minute run at ANDES's finest usual step is far
+# below them, and a body of this size parses in well under a second.
+MAX_METRIC_SERIES = 64
+MAX_METRIC_SAMPLES = 200_000
+MAX_METRIC_SAMPLES_TOTAL = 1_000_000
+
+
+class MetricsSeries(BaseModel):
+    """One signal to describe."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="What the signal is called; echoed back on its result.",
+    )
+    t: list[float] = Field(
+        ...,
+        max_length=MAX_METRIC_SAMPLES,
+        description=(
+            "Sample times in seconds, not decreasing. Samples at one time count "
+            "as one, the last of them."
+        ),
+    )
+    y: list[float | None] = Field(
+        ...,
+        max_length=MAX_METRIC_SAMPLES,
+        description=(
+            "The signal's value at each time, in whatever unit the caller reads "
+            "it in. ``null`` marks a missing value (a diverged step); that sample "
+            "is left out."
+        ),
+    )
+
+    @field_validator("t")
+    @classmethod
+    def _t_is_finite(cls, v: list[float]) -> list[float]:
+        if not all(math.isfinite(x) for x in v):
+            raise ValueError("t must hold finite numbers")
+        return v
+
+
+class ResponseMetricsRequest(BaseModel):
+    """Request body for ``POST /response-metrics``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    series: list[MetricsSeries] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_METRIC_SERIES,
+        description="The signals to describe, each on its own timeline.",
+    )
+    t_start: float | None = Field(
+        None,
+        allow_inf_nan=False,
+        description=(
+            "Start of the window the metrics are read over, in seconds. A bound "
+            "that falls between two samples is interpolated. Defaults to the "
+            "first sample."
+        ),
+    )
+    t_end: float | None = Field(
+        None,
+        allow_inf_nan=False,
+        description="End of the window, in seconds. Defaults to the last sample.",
+    )
+    settling_band: float = Field(
+        0.02,
+        gt=0.0,
+        lt=1.0,
+        description=(
+            "The settling band as a fraction of the signal's largest distance from "
+            "its final value: 0.02 is 2 %."
+        ),
+    )
+    rocof_window: float = Field(
+        0.5,
+        gt=0.0,
+        allow_inf_nan=False,
+        description=(
+            "Width in seconds the rate of change is measured over: the steepest "
+            "slope of the line from ``y(s)`` to ``y(s + rocof_window)``. Cut to the "
+            "window when the window is shorter."
+        ),
+    )
+
+    @field_validator("series")
+    @classmethod
+    def _within_total(cls, v: list[MetricsSeries]) -> list[MetricsSeries]:
+        if sum(len(s.t) for s in v) > MAX_METRIC_SAMPLES_TOTAL:
+            raise ValueError(f"the series hold more than {MAX_METRIC_SAMPLES_TOTAL} samples in all")
+        return v
+
+
+class MetricExtremum(BaseModel):
+    """A value of the signal and when it is reached."""
+
+    value: float = Field(..., description="The value, in the signal's unit.")
+    t: float = Field(..., description="The time it is reached, in seconds.")
+
+
+class DampingEstimate(BaseModel):
+    """The oscillation of a signal, from the log decrement of its swings."""
+
+    ratio: float = Field(
+        ...,
+        description=(
+            "Damping ratio, ``d / sqrt(pi**2 + d**2)`` for the half-cycle log "
+            "decrement ``d``. Negative for a swing that grows."
+        ),
+    )
+    frequency_hz: float = Field(
+        ..., description="Frequency of the oscillation, in hertz."
+    )
+    extrema: int = Field(
+        ..., description="How many extremes of the signal the estimate rests on."
+    )
+
+
+class SeriesMetrics(BaseModel):
+    """What one signal's response metrics came to. Either ``error`` says why it
+    could not be described, or the rest is filled in."""
+
+    name: str = Field(..., description="The series' name, as sent.")
+    error: str | None = Field(
+        default=None,
+        description=(
+            "Why this signal has no metrics (too few samples, a window outside "
+            "it, times that run backwards); ``null`` when it has them."
+        ),
+    )
+    samples: int | None = Field(
+        default=None, description="Samples in the window, its two bounds included."
+    )
+    t_start: float | None = Field(
+        default=None, description="Start of the window used, in seconds."
+    )
+    t_end: float | None = Field(default=None, description="End of the window used, in seconds.")
+    initial: float | None = Field(default=None, description="Value at the start of the window.")
+    final: float | None = Field(
+        default=None,
+        description="Time-weighted mean over the last 10 % of the window: what it settled to.",
+    )
+    peak: MetricExtremum | None = Field(default=None, description="Largest value and when.")
+    nadir: MetricExtremum | None = Field(default=None, description="Smallest value and when.")
+    max_deviation: MetricExtremum | None = Field(
+        default=None,
+        description="Largest distance from ``initial``: ``value`` is signed (``y - initial``).",
+    )
+    rocof: MetricExtremum | None = Field(
+        default=None,
+        description=(
+            "Steepest rate of change over ``rocof_window``, in the signal's unit "
+            "per second, sign kept; ``t`` is the start of that window."
+        ),
+    )
+    settling_time: float | None = Field(
+        default=None,
+        description=(
+            "Seconds from the start of the window after which the signal stays "
+            "within the settling band; ``null`` when it had not settled by the end."
+        ),
+    )
+    overshoot_pct: float | None = Field(
+        default=None,
+        description=(
+            "How far the signal went past its final value, in percent of the step "
+            "from ``initial`` to ``final``; ``null`` when ``final`` is within the "
+            "settling band of ``initial``."
+        ),
+    )
+    damping: DampingEstimate | None = Field(
+        default=None, description="``null`` for a signal that does not oscillate."
+    )
+
+
+class ResponseMetricsResponse(BaseModel):
+    """Response body for ``POST /response-metrics``."""
+
+    results: list[SeriesMetrics] = Field(
+        ..., description="One entry per requested series, in the order sent."
     )
 
 

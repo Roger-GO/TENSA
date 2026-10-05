@@ -43,6 +43,7 @@ from tensa.api.routes.disturbances import router as disturbances_router
 from tensa.api.routes.eig import router as eig_router
 from tensa.api.routes.elements import router as elements_router
 from tensa.api.routes.jobs import router as jobs_router
+from tensa.api.routes.metrics import router as metrics_router
 from tensa.api.routes.pflow import router as pflow_router
 from tensa.api.routes.pmu import router as pmu_router
 from tensa.api.routes.profiles import router as profiles_router
@@ -335,6 +336,7 @@ def make_app(
     app.include_router(elements_router, prefix="/api", tags=["elements"])
     app.include_router(clone_router, prefix="/api", tags=["clone"])
     app.include_router(tds_router, prefix="/api", tags=["tds"])
+    app.include_router(metrics_router, prefix="/api", tags=["tds"])
     app.include_router(workspace_router, prefix="/api", tags=["workspace"])
     app.include_router(version_router, prefix="/api", tags=["version"])
     # Houses both the Unit-3 bundle-export endpoint AND the Unit-7
