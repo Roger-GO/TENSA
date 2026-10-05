@@ -3412,7 +3412,7 @@ export interface components {
         SessionMessageSchema: {
             /**
              * Seq
-             * @description Number of the message in the session, from 1, in the order the server received them. Numbers are never reused, not even after the log is cleared, so ``after=<seq>`` always reads what came next.
+             * @description Number of the message in the session, from 1, in the order the server received them. Numbers are never reused, not even after the log is cleared, so ``after=<seq>`` always reads what came next. A message that repeats the newest one is not added: its ``repeat`` grows and it takes the next number, so a reader that follows the log replaces the message it holds that says the same.
              */
             seq: number;
             /**
@@ -3428,7 +3428,7 @@ export interface components {
             level: "info" | "warning" | "error";
             /**
              * Logger
-             * @description Name of the ANDES logger that said it (``andes.routines.pflow``).
+             * @description Name of the logger that said it: an ANDES module (``andes.routines.pflow``), or ``tensa.notice`` for what the server worked out itself because ANDES does not log it (a generator switched from PV to PQ, a load turned into an impedance).
              */
             logger: string;
             /**
@@ -3438,12 +3438,12 @@ export interface components {
             source: string;
             /**
              * Text
-             * @description The message. It can span several lines: ANDES logs tables. A message longer than 20000 characters is cut.
+             * @description The message. It can span several lines: ANDES logs tables. A message longer than 20000 characters is cut. Paths of the server are not in it: the workspace is written relative to itself, the home directory as ``~`` and any other absolute path as ``<path>``.
              */
             text: string;
             /**
              * Repeat
-             * @description How many times in a row ANDES logged this exact message, which is kept once (a solver that warns on every step).
+             * @description How many times in a row ANDES logged this exact message, which is kept once (a solver that warns on every step). The count can grow after the message was read: it is then numbered again.
              */
             repeat: number;
         };

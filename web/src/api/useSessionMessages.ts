@@ -37,12 +37,15 @@ const MAX_PAGES_PER_PULL = 20;
  * Read what the session's log holds that the store does not, page by page until
  * the store has caught up. Gives up quietly on an error and when the active
  * session is no longer `sessionId`, so a late answer never writes into the store
- * of the session that replaced it.
+ * of the session that replaced it. A page that was read before the messages were
+ * cleared is thrown away and the read made again, so a clear that lands while a
+ * read is out does not bring the cleared messages back.
  */
 export async function pullMessages(sessionId: string): Promise<void> {
   for (let page = 0; page < MAX_PAGES_PER_PULL; page += 1) {
     const held = useMessagesStore.getState();
     const after = held.sessionId === sessionId ? held.cursor : 0;
+    const clears = held.clears;
     let result: SessionMessages;
     try {
       result = await andesClient.get<SessionMessages>(
@@ -53,6 +56,7 @@ export async function pullMessages(sessionId: string): Promise<void> {
       return;
     }
     if (useSessionStore.getState().sessionId !== sessionId) return;
+    if (useMessagesStore.getState().clears !== clears) continue;
     useMessagesStore.getState().receive(sessionId, result);
     if (result.next_after >= result.last_seq) return;
   }

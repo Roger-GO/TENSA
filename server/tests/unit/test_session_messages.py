@@ -184,6 +184,33 @@ def test_a_streamed_run_s_messages_arrive_with_its_frames_not_only_at_the_end() 
     ]
 
 
+def test_a_warning_on_every_frame_of_a_streamed_run_is_one_message_with_its_count() -> None:
+    def _step_warning() -> dict[str, Any]:
+        return _entry("Time step reduced to zero", level="warning", source="run_tds") | {
+            "repeat": 3
+        }
+
+    mgr, sess = _manager_with(
+        [
+            {"type": "stream_start", "seq": 1, "metadata": {}},
+            *(
+                {"type": "stream_frame", "seq": 1, "payload": b"frame", "log": [_step_warning()]}
+                for _ in range(4)
+            ),
+            {"type": "result", "seq": 1, "payload": None, "log": [_step_warning()]},
+        ]
+    )
+
+    async def _on_frame(payload: bytes) -> None:
+        return None
+
+    asyncio.run(mgr.invoke_streaming("s1", "run_tds", {}, on_frame=_on_frame))
+
+    page = sess.messages.page()
+    assert [(m.text, m.repeat) for m in page.messages] == [("Time step reduced to zero", 15)]
+    assert page.dropped == 0
+
+
 # ---- the routes ---------------------------------------------------------------
 
 

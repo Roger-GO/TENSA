@@ -66,6 +66,40 @@ describe('useMessagesStore', () => {
     expect(seqs()).toEqual([1, 2, 3]);
   });
 
+  it('replaces the newest message when the server brings it again with a larger count', () => {
+    const { receive } = useMessagesStore.getState();
+    receive('s1', page([message(1), message(2, 'Time step reduced')]));
+    // The server added a repeat to its newest message and numbered it again.
+    receive('s1', page([{ ...message(3, 'Time step reduced'), repeat: 40 }], { first_seq: 1 }));
+
+    const held = useMessagesStore.getState().messages;
+    expect(held.map((m) => [m.seq, m.repeat])).toEqual([
+      [1, 1],
+      [3, 40],
+    ]);
+    expect(useMessagesStore.getState().cursor).toBe(3);
+  });
+
+  it('replaces a message that is the only one the server holds, whose number moved past it', () => {
+    const { receive } = useMessagesStore.getState();
+    receive('s1', page([message(1, 'Time step reduced')]));
+    receive('s1', page([{ ...message(2, 'Time step reduced'), repeat: 6 }]));
+    expect(useMessagesStore.getState().messages.map((m) => [m.seq, m.repeat])).toEqual([[2, 6]]);
+  });
+
+  it('keeps both when a newer message only looks like the newest one held', () => {
+    const { receive } = useMessagesStore.getState();
+    receive('s1', page([message(1, 'same'), message(2, 'same text, other message')]));
+    // Same words but not the newest one held, a count that did not grow, or another command.
+    receive('s1', page([message(3, 'same')], { first_seq: 1 }));
+    receive('s1', page([message(4, 'same')], { first_seq: 1 }));
+    receive(
+      's1',
+      page([{ ...message(5, 'same'), source: 'run_tds', repeat: 9 }], { first_seq: 1 }),
+    );
+    expect(seqs()).toEqual([1, 2, 3, 4, 5]);
+  });
+
   it('drops the messages the server no longer holds', () => {
     const { receive } = useMessagesStore.getState();
     receive('s1', page([message(1), message(2), message(3)]));
@@ -113,6 +147,7 @@ describe('useMessagesStore', () => {
     expect(useMessagesStore.getState().messages).toEqual([]);
     expect(useMessagesStore.getState().cursor).toBe(2);
     expect(useMessagesStore.getState().sessionId).toBe('s1');
+    expect(useMessagesStore.getState().clears).toBe(1);
     // A read from the old place brings only what is new.
     useMessagesStore.getState().receive('s1', page([message(3)], { first_seq: 3 }));
     expect(seqs()).toEqual([3]);

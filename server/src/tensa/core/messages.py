@@ -22,7 +22,16 @@ Each message carries the level (``info``, ``warning`` or ``error``), the name of
 the logger that said it, the command that was running (``run_pflow``,
 ``load_case``), the time and the text, which may span lines (ANDES logs tables).
 A message that repeats the one before it, as a solver's warning does on every
-step, is kept once with a count.
+step, is kept once with a count: the worker merges the repeats of one reply, and
+the session's log merges a message into the newest one it holds, so a repeat that
+arrives in a later reply or frame adds to the count instead of taking a place.
+A message whose count grows is numbered again, so a reader that follows the log
+by number reads it once more with the larger count.
+
+ANDES prints the paths it works with (the working directory, the file it parses,
+the code cache under the home directory), and the text goes to a client, so the
+capture takes the server's own paths out of it (:class:`PathScrubber`), as the
+wrapper does for ANDES's exception messages.
 
 Two caps keep a flood from costing memory. The worker holds at most
 :data:`PENDING_CAPACITY` messages between two replies, and drops the oldest past
@@ -30,18 +39,22 @@ that; the session holds at most :data:`MESSAGE_LOG_CAPACITY`. Both count what
 they dropped, and the count is reported with the messages.
 
 Sensitivity sweeps and report generation are not captured: a sweep runs hundreds
-of power flows and time-domain runs whose messages would bury the user's own, and
-a report re-prints a summary ANDES logged when the run ended. A warning from
-either still goes to the server's console, as it did before.
+of power flows and time-domain runs whose messages would bury the user's own (the
+plan the server asks the worker for before it spreads one over sub-workers is part
+of the sweep), and a report re-prints a summary ANDES logged when the run ended. A
+warning from any of them still goes to the server's console, as it did before.
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import re
 import threading
 from collections import deque
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any, Final, Literal
 
 # What the worker says to the user itself, for what ANDES does and does not log
@@ -66,9 +79,10 @@ MESSAGE_LOG_CAPACITY: Final = 2000
 MAX_MESSAGE_CHARS: Final = 20_000
 
 # Commands whose messages are not captured (see the module docstring). Their
-# warnings and errors still reach stderr.
+# warnings and errors still reach stderr. ``sweep_plan`` is the check the server asks
+# the worker for before it spreads a sweep over sub-workers, so it is part of the sweep.
 UNCAPTURED_OPS: Final[frozenset[str]] = frozenset(
-    {"run_sweep", "run_sweep_iteration", "adopt_sweep_source", "generate_report"}
+    {"run_sweep", "run_sweep_iteration", "adopt_sweep_source", "generate_report", "sweep_plan"}
 )
 
 
@@ -86,6 +100,138 @@ def level_rank(level: str) -> int:
     return _LEVEL_RANK.get(level, 0)
 
 
+# ---- the server's own paths -----------------------------------------------------
+
+PATH_PLACEHOLDER: Final = "<path>"
+
+# What an absolute path in a message is. A quoted one (ANDES quotes the paths it
+# prints) runs to the closing quote, since a user name or a folder may hold spaces.
+_QUOTED_PATH: Final = re.compile(
+    r"""(?P<quote>["'`])(?:[A-Za-z]:[\\/]|\\\\|/)(?:(?!(?P=quote)).)+(?P=quote)"""
+)
+# A bare Windows path (a drive letter, or a UNC host and share) ends at white space or at
+# punctuation that does not belong to a path; one that holds spaces is only caught
+# when it is quoted.
+_BARE_WINDOWS_PATH: Final = re.compile(
+    r"""(?<!\w)(?:[A-Za-z]:[\\/]|\\\\(?=[\w.\-]+\\[\w.$\-]))"""
+    r"""[^\s"'`<>|*?]*[^\s"'`<>|*?.,;:!)\]}]"""
+)
+# A bare POSIX path needs two parts, so "kV/s", "1/2", "and/or" and a URL are left alone.
+_BARE_POSIX_PATH: Final = re.compile(r"(?<![\w.\-~/\\>$%])(?:/[\w.\-~@+%=]*[\w\-~@+%=]){2,}")
+_ROOT_BEHIND: Final = r"(?<![\w.\-~/\\>$%])"
+_ABSOLUTE_START: Final = re.compile(r"(?:[A-Za-z]:[\\/]|[\\/])")
+
+
+def _spellings(path: str | os.PathLike[str] | None) -> set[str]:
+    """The ways a directory can be written in a message: as given, made absolute,
+    with its links resolved, each with slashes, with backslashes and with backslashes
+    doubled the way ``repr`` writes them. Empty for a path that is not absolute or
+    that is only a drive or the file system root, which would match too much."""
+    if not path:
+        return set()
+    given = os.fspath(path)
+    forms = {given}
+    try:
+        forms.add(os.path.abspath(given))
+        forms.add(os.path.realpath(given))
+    except (OSError, ValueError):
+        pass
+    spellings: set[str] = set()
+    for form in forms:
+        form = form.rstrip("\\/")
+        if not _ABSOLUTE_START.match(form) or not any(sep in form for sep in "\\/"):
+            continue
+        spellings |= {form, form.replace("\\", "/"), form.replace("\\", "\\\\")}
+    return spellings
+
+
+def _home_dir() -> str | None:
+    try:
+        return str(Path.home())
+    except (RuntimeError, KeyError, OSError):
+        return None
+
+
+def _working_dir() -> str | None:
+    try:
+        return os.getcwd()
+    except OSError:
+        return None
+
+
+# What a root becomes. The workspace is written relative to itself, so the file ANDES
+# parses reads ``ieee14.raw``; the home directory is ``~``, as a shell writes it.
+_RELATIVE: Final = ""
+
+
+class PathScrubber:
+    """Takes the server's own paths out of a message, which goes to a client.
+
+    ANDES prints the directory the process works in, the file it parses and the
+    folder holding its generated code, so a message would otherwise give away the
+    server's layout and the name of the user it runs as. Where roots nest, the
+    longest wins (a workspace under the home directory is still the workspace):
+
+    - the workspace becomes a relative form (``<workspace>/ieee14.raw`` reads
+      ``ieee14.raw``, the workspace itself ``.``),
+    - the home directory becomes ``~``, and the working directory ``<path>``,
+    - any other absolute path, POSIX or Windows (``C:\\...``, ``C:/...``, a UNC
+      share, a path with its backslashes doubled), becomes ``<path>``.
+
+    A path with spaces is caught when it is quoted, the way ANDES prints one. The
+    scan is best effort, like the one the wrapper applies to ANDES's exception
+    messages: it leaves the rest of the message as it was.
+    """
+
+    def __init__(
+        self,
+        workspace: str | os.PathLike[str] | None = None,
+        *,
+        home: str | os.PathLike[str] | None = None,
+        cwd: str | os.PathLike[str] | None = None,
+        ignore_case: bool | None = None,
+    ) -> None:
+        """``home`` and ``cwd`` default to the process's own. ``ignore_case`` defaults
+        to whether the platform's file names are case-insensitive (Windows)."""
+        self._ignore_case = os.name == "nt" if ignore_case is None else ignore_case
+        home = _home_dir() if home is None else home
+        cwd = _working_dir() if cwd is None else cwd
+        self._tokens: dict[str, str] = {}
+        variants: set[str] = set()
+        # The first to claim a spelling keeps it: a working directory that is the
+        # home directory reads ``~``.
+        for root, token in ((workspace, _RELATIVE), (home, "~"), (cwd, PATH_PLACEHOLDER)):
+            for spelling in _spellings(root):
+                variants.add(spelling)
+                self._tokens.setdefault(self._key(spelling), token)
+        self._roots: re.Pattern[str] | None = None
+        if variants:
+            alternatives = "|".join(re.escape(v) for v in sorted(variants, key=len, reverse=True))
+            self._roots = re.compile(
+                rf"{_ROOT_BEHIND}(?P<root>{alternatives})(?:(?P<sep>[\\/]+)|(?![\w\-]|\.\w))",
+                re.IGNORECASE if self._ignore_case else 0,
+            )
+
+    def _key(self, spelling: str) -> str:
+        return spelling.casefold() if self._ignore_case else spelling
+
+    def _hide_root(self, match: re.Match[str]) -> str:
+        token = self._tokens[self._key(match.group("root"))]
+        separator = match.group("sep")
+        if token == _RELATIVE:
+            return "" if separator else "."
+        return token + (separator or "")
+
+    def __call__(self, text: str) -> str:
+        if "/" not in text and "\\" not in text:
+            return text
+        if self._roots is not None:
+            text = self._roots.sub(self._hide_root, text)
+        text = _QUOTED_PATH.sub(lambda m: f"{m['quote']}{PATH_PLACEHOLDER}{m['quote']}", text)
+        text = _BARE_WINDOWS_PATH.sub(PATH_PLACEHOLDER, text)
+        return _BARE_POSIX_PATH.sub(PATH_PLACEHOLDER, text)
+
+
 class WorkerLogCapture(logging.Handler):
     """Keeps what ANDES logs while the worker runs a command, until a reply
     carries it away (:meth:`attach`).
@@ -96,9 +242,14 @@ class WorkerLogCapture(logging.Handler):
     sent twice.
     """
 
-    def __init__(self, capacity: int = PENDING_CAPACITY) -> None:
+    def __init__(
+        self,
+        capacity: int = PENDING_CAPACITY,
+        workspace: str | os.PathLike[str] | None = None,
+    ) -> None:
         super().__init__(level=logging.INFO)
         self._capacity = capacity
+        self._scrub = PathScrubber(workspace)
         self._pending: deque[dict[str, Any]] = deque()
         self._dropped = 0
         self._source = ""
@@ -139,7 +290,8 @@ class WorkerLogCapture(logging.Handler):
                 logging.lastResort.handle(record)  # type: ignore[union-attr]
             if self._muted:
                 return
-            text = record.getMessage()
+            # Before the cut, so a path is never cut in two and left half hidden.
+            text = self._scrub(record.getMessage())
         except Exception:  # noqa: BLE001 - a log call must never break the command
             self.handleError(record)
             return
@@ -193,11 +345,12 @@ class WorkerLogCapture(logging.Handler):
 _capture: WorkerLogCapture | None = None
 
 
-def install_capture() -> WorkerLogCapture:
-    """Install the worker's capture (once per process) and return it."""
+def install_capture(workspace: str | os.PathLike[str] | None = None) -> WorkerLogCapture:
+    """Install the worker's capture (once per process) and return it. ``workspace``
+    is the root the messages' paths are written relative to (see :class:`PathScrubber`)."""
     global _capture  # noqa: PLW0603 - one capture per process, like the loggers it sits on
     if _capture is None:
-        _capture = WorkerLogCapture()
+        _capture = WorkerLogCapture(workspace=workspace)
         _capture.install()
     return _capture
 
@@ -226,7 +379,8 @@ def attach_log(message: dict[str, Any]) -> dict[str, Any]:
 
 @dataclass(frozen=True, slots=True)
 class SessionMessage:
-    """One message in a session's log, numbered in the order it arrived."""
+    """One message in a session's log, numbered in the order it arrived (or, for
+    one whose repeat count has grown, in the order it last did)."""
 
     seq: int
     time: float
@@ -254,6 +408,10 @@ class MessagePage:
     last_seq: int
     next_after: int
     dropped: int
+
+
+def _says_the_same(a: SessionMessage, b: SessionMessage) -> bool:
+    return (a.level, a.logger, a.source, a.text) == (b.level, b.logger, b.source, b.text)
 
 
 def _as_message(seq: int, entry: object) -> SessionMessage | None:
@@ -290,12 +448,26 @@ class MessageLog:
         self._dropped = 0
 
     def extend(self, entries: Sequence[object], dropped: int = 0) -> None:
-        """Add the entries a worker reply carried, and the count it lost."""
+        """Add the entries a worker reply carried, and the count it lost.
+
+        An entry that says what the newest message says (same level, logger,
+        command and text) is not a new message: its repeats are added to that one,
+        whichever reply or streamed frame it came with. The message keeps its place
+        and its time and takes the next number, so a reader that follows the log by
+        number reads it again with the larger count.
+        """
         with self._lock:
             self._dropped += max(0, dropped)
             for entry in entries:
                 message = _as_message(self._next_seq, entry)
                 if message is None:
+                    continue
+                newest = self._items[-1] if self._items else None
+                if newest is not None and _says_the_same(newest, message):
+                    self._items[-1] = replace(
+                        newest, seq=message.seq, repeat=newest.repeat + message.repeat
+                    )
+                    self._next_seq += 1
                     continue
                 self._next_seq += 1
                 self._items.append(message)

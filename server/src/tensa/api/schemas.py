@@ -264,7 +264,10 @@ class SessionMessageSchema(BaseModel):
         description=(
             "Number of the message in the session, from 1, in the order the "
             "server received them. Numbers are never reused, not even after the "
-            "log is cleared, so ``after=<seq>`` always reads what came next."
+            "log is cleared, so ``after=<seq>`` always reads what came next. A "
+            "message that repeats the newest one is not added: its ``repeat`` grows "
+            "and it takes the next number, so a reader that follows the log replaces "
+            "the message it holds that says the same."
         ),
     )
     time: float = Field(
@@ -299,7 +302,9 @@ class SessionMessageSchema(BaseModel):
         ...,
         description=(
             "The message. It can span several lines: ANDES logs tables. A "
-            f"message longer than {MAX_MESSAGE_CHARS} characters is cut."
+            f"message longer than {MAX_MESSAGE_CHARS} characters is cut. Paths of "
+            "the server are not in it: the workspace is written relative to itself, "
+            "the home directory as ``~`` and any other absolute path as ``<path>``."
         ),
     )
     repeat: int = Field(
@@ -307,7 +312,8 @@ class SessionMessageSchema(BaseModel):
         ge=1,
         description=(
             "How many times in a row ANDES logged this exact message, which is "
-            "kept once (a solver that warns on every step)."
+            "kept once (a solver that warns on every step). The count can grow "
+            "after the message was read: it is then numbered again."
         ),
     )
 

@@ -283,7 +283,9 @@ def get_messages(session_id: str, level: str = "warning", after: int = 0) -> Any
     not converge says why. level is the lowest to return: 'warning' (the default)
     gives warnings and errors, 'info' adds how each run went, 'error' only
     errors. Each message has its level, the command that was running (source),
-    the ANDES logger and the text. Pass next_after back as after to read only
+    the ANDES logger and the text. A message ANDES repeated is listed once, with
+    its repeat count; if the count grew after you read it, it comes back under a
+    new number with the larger count. Pass next_after back as after to read only
     what came since. Needs no run and does not wait for one in progress.
     """
     query = urllib.parse.urlencode({"level": level, "after": after})

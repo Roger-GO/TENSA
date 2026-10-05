@@ -11,6 +11,7 @@ their text.
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import time
 from collections.abc import AsyncIterator
@@ -106,6 +107,36 @@ async def test_loading_a_case_and_solving_it_log_what_andes_said(
     assert messages[0]["source"] == "load_case"
     assert messages[-1]["source"] == "run_pflow"
     assert all(m["time"] > 1e9 for m in messages)
+
+
+async def test_no_message_gives_away_a_path_of_the_server(
+    client: tuple[httpx.AsyncClient, SessionManager], tmp_path: Path
+) -> None:
+    """ANDES prints the working directory, the file it parses and the code cache under
+    the home directory. The text goes to the client, so none of those paths may reach it
+    in full: the workspace is written relative to itself and the home directory as ``~``."""
+    ac, _mgr = client
+    sid = await _loaded_session(ac)
+    solved = await ac.post(f"/api/sessions/{sid}/pflow", json={})
+    assert solved.status_code == 200, solved.text
+
+    messages = await _messages(ac, sid)
+
+    texts = [m["text"] for m in messages]
+    # Something printed a path to hide: the working directory comes first.
+    assert any(text.startswith("Working directory:") for text in texts)
+    for name, root in {
+        "workspace": str(tmp_path / "ws"),
+        "temporary directory": str(tmp_path),
+        "home directory": str(Path.home()),
+        "working directory": os.getcwd(),
+    }.items():
+        if len(root) > 1:  # a root of "/" is a prefix of every path
+            assert [t for t in texts if root in t] == [], name
+    # The file ANDES parsed is named relative to the workspace.
+    parsed = _by(messages, "load_case")
+    assert 'Parsing input file "ieee14.raw"...' in parsed
+    assert 'Parsing additional file "ieee14.dyr"...' in parsed
 
 
 async def test_a_power_flow_that_does_not_converge_leaves_an_error(

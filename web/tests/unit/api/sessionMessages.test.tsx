@@ -138,6 +138,27 @@ describe('pullMessages', () => {
     expect(reads(fetchSpy)[0]).toContain('/sess-new/messages?after=0&');
   });
 
+  it('throws away a page read before a clear and reads again, so the cleared messages stay gone', async () => {
+    useSessionStore.setState({ sessionId: parseSessionId(SESSION) });
+    useMessagesStore.getState().receive(SESSION, pageOf([message(1)]));
+    const answers = [
+      // Answered before the log was emptied: it still holds the message the clear removed.
+      pageOf([message(2), message(3)], { first_seq: 1, last_seq: 3, next_after: 3 }),
+      // The read made again, after the clear: only what came since.
+      pageOf([message(4)], { first_seq: 4, last_seq: 4, next_after: 4 }),
+    ];
+    fetchSpy.mockImplementation(async () => {
+      if (answers.length === 2) useMessagesStore.getState().clearMessages();
+      return json(answers.shift() ?? pageOf([]));
+    });
+
+    await pullMessages(SESSION);
+
+    expect(reads(fetchSpy).map((url) => /after=(\d+)/.exec(url)?.[1])).toEqual(['1', '1']);
+    expect(useMessagesStore.getState().messages.map((m) => m.seq)).toEqual([4]);
+    expect(useMessagesStore.getState().cursor).toBe(4);
+  });
+
   it('puts nothing in the store when the session changed while it was reading', async () => {
     useSessionStore.setState({ sessionId: parseSessionId(SESSION) });
     fetchSpy.mockImplementation(async () => {

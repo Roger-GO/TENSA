@@ -1587,8 +1587,9 @@ def worker_main(
     _spawn_orphan_detector()
     # What ANDES logs while a command runs goes back with its reply (see
     # ``tensa.core.messages``). Installed before anything imports ANDES, and taken
-    # off again when the loop ends so a worker run in-process leaves no handler.
-    install_capture()
+    # off again when the loop ends so a worker run in-process leaves no handler. The
+    # workspace is the root its paths are written relative to, so none is sent in full.
+    install_capture(workspace)
     try:
         # Import ANDES now, before the first ``recv``, so the first load does not. This
         # runs ahead of the audit hook on purpose: it reads only library files, and the
