@@ -6,13 +6,22 @@
  * `components/export/ExportMenu.tsx` (per-panel CSV/PNG/MAT trigger).
  * This file covers the TopBar variant at `components/shell/ExportMenu.tsx`.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
+const saveHtmlReport = vi.fn<() => Promise<void>>(() => Promise.resolve());
+vi.mock('@/lib/saveHtmlReport', () => ({
+  saveHtmlReport: () => saveHtmlReport(),
+}));
+
 import { ExportMenu } from '@/components/shell/ExportMenu';
+import { usePflowStore } from '@/store/pflow';
+import { usePflowHistoryStore } from '@/store/pflowHistory';
+import { useRunsStore } from '@/store/runs';
+import { useAnalyzeStore } from '@/store/analyze';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useBundleStore } from '@/store/bundle';
@@ -50,6 +59,11 @@ beforeEach(() => {
   });
   useBundleStore.getState().closeDialog();
   useSnapshotStore.getState().reset();
+  saveHtmlReport.mockClear();
+  usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  usePflowHistoryStore.getState().clear();
+  useRunsStore.setState({ runs: {}, activeRunId: null });
+  useAnalyzeStore.setState({ eigResult: null });
 });
 
 afterEach(() => {
@@ -103,6 +117,46 @@ describe('<ExportMenu />', () => {
     await screen.findByTestId('topbar-menu-export-content');
     expect(screen.queryByTestId('topbar-menu-export-bundle')).not.toBeInTheDocument();
     expect(screen.queryByTestId('topbar-menu-export-snapshot')).not.toBeInTheDocument();
+  });
+
+  it('keeps "Export HTML report" in view, greyed out with what to do first, before any result', async () => {
+    const user = userEvent.setup();
+    render(withProviders(<ExportMenu />));
+    await user.click(screen.getByTestId('topbar-menu-export-trigger'));
+    const item = await screen.findByTestId('topbar-menu-export-html-report');
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    expect(item).toHaveTextContent(
+      'Nothing to report yet. Run a power flow or a time-domain simulation first.',
+    );
+
+    await user.click(item);
+    expect(saveHtmlReport).not.toHaveBeenCalled();
+  });
+
+  it('"Export HTML report" saves the report once there is a result, and closes the menu', async () => {
+    usePflowStore.setState({
+      lastRun: {
+        run_id: 'pf-1',
+        converged: true,
+        iterations: 3,
+        mismatch: 1e-9,
+        bus_voltages: {},
+        bus_angles: {},
+        line_flows: {},
+      } as never,
+    });
+    const user = userEvent.setup();
+    render(withProviders(<ExportMenu />));
+    await user.click(screen.getByTestId('topbar-menu-export-trigger'));
+    const item = await screen.findByTestId('topbar-menu-export-html-report');
+    expect(item).not.toHaveAttribute('aria-disabled', 'true');
+
+    await user.click(item);
+
+    expect(saveHtmlReport).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.queryByTestId('topbar-menu-export-content')).not.toBeInTheDocument();
+    });
   });
 
   it('Escape closes the menu', async () => {

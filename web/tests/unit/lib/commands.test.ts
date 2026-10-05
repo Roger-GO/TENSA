@@ -43,6 +43,13 @@ import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary, PflowResult } from '@/api/types';
 
+// The report itself is built by a module loaded on demand; the registry only
+// has to call the one function that saves it.
+const saveHtmlReportMock = vi.fn<() => Promise<void>>(() => Promise.resolve());
+vi.mock('@/lib/saveHtmlReport', () => ({
+  saveHtmlReport: () => saveHtmlReportMock(),
+}));
+
 // `useCurrentTopology` is a TanStack-Query wrapper; mock it to feed
 // deterministic topology states without a network round-trip.
 let MOCK_TOPOLOGY: TopologySummary | null = null;
@@ -480,6 +487,89 @@ describe('useCommandRegistry: Compare power flows command', () => {
     expect(layout.activeAnalysisSubTab).toBe('compare');
     expect(layout.bottomDrawerCollapsed).toBe(false);
     expect(layout.drawerHasUnreadResults).toBe(false);
+  });
+});
+
+describe('useCommandRegistry: Export HTML report command', () => {
+  const PF: PflowResult = {
+    run_id: 'pf-1',
+    converged: true,
+    iterations: 3,
+    mismatch: 1e-8,
+    bus_voltages: {},
+    bus_angles: {},
+    line_flows: {},
+  };
+
+  beforeEach(() => {
+    saveHtmlReportMock.mockClear();
+    usePflowStore.setState({ lastRun: null });
+    usePflowHistoryStore.getState().clear();
+    useRunsStore.setState({ runs: {}, activeRunId: null });
+    useAnalyzeStore.setState({ eigResult: null });
+  });
+
+  afterEach(() => {
+    usePflowStore.setState({ lastRun: null });
+    usePflowHistoryStore.getState().clear();
+    useRunsStore.setState({ runs: {}, activeRunId: null });
+  });
+
+  const find = <T extends { id: string }>(list: readonly T[]) =>
+    list.find((c) => c.id === 'export.html-report');
+
+  it('is left out of the palette while there is nothing to report', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(result.current)).toBeUndefined();
+  });
+
+  it('stays in the menu, greyed out, with what to do first, once a case is open', () => {
+    useSessionStore.setState({ sessionId: parseSessionId('s1') });
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
+    });
+    const { result } = renderHook(() => useMenuCommands(), { wrapper });
+    expect(find(result.current)?.unavailable).toBe(
+      'Nothing to report yet. Run a power flow or a time-domain simulation first.',
+    );
+  });
+
+  it('is not listed at all with no case open and nothing to report', () => {
+    useSessionStore.setState({ sessionId: parseSessionId('s1') });
+    useCaseStore.setState({ selection: null });
+    const { result } = renderHook(() => useMenuCommands(), { wrapper });
+    expect(find(result.current)).toBeUndefined();
+  });
+
+  it('saves the report once a power flow has run', () => {
+    usePflowStore.setState({ lastRun: PF });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = find(result.current);
+    expect(cmd?.group).toBe('export');
+    expect(cmd?.label).toBe('Export HTML report');
+    expect(cmd?.keywords).toEqual(expect.arrayContaining(['report', 'html', 'print']));
+
+    cmd?.action();
+
+    expect(saveHtmlReportMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('is offered for a kept run or a kept power flow alone, with no case open', () => {
+    useCaseStore.setState({ selection: null });
+    useRunsStore.getState().startRun({ runId: 'kept', tf: 1, columnNames: ['Bus_1_v'] });
+    useRunsStore.getState().markRunDone('kept', 1, true);
+    let hook = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(hook.result.current)).toBeDefined();
+    hook.unmount();
+
+    useRunsStore.setState({ runs: {}, activeRunId: null });
+    hook = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(hook.result.current)).toBeUndefined();
+    hook.unmount();
+
+    usePflowHistoryStore.getState().record(PF, { caseName: 'ieee14', names: NO_ELEMENT_NAMES });
+    hook = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(hook.result.current)).toBeDefined();
   });
 });
 

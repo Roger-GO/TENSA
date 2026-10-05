@@ -69,6 +69,7 @@ import { useLayoutStore } from '@/store/layout';
 import { requestEigLogToggle, requestEigViewReset } from '@/lib/eigViewBus';
 import { reportAbortError } from '@/lib/abortRun';
 import { openPflowComparePanel } from '@/lib/openPflowPanel';
+import { saveHtmlReport } from '@/lib/saveHtmlReport';
 import { useSaveOpenCase } from '@/lib/useSaveOpenCase';
 import { SHORTCUTS } from '@/lib/shortcuts';
 import type { RunRoutine } from '@/lib/useRunReadiness';
@@ -192,6 +193,12 @@ function useCommandSets(): CommandSets {
   const isPfRunning = usePflowStore((s) => s.isRunning);
   const lastPfRun = usePflowStore((s) => s.lastRun);
   const hasPflowHistory = usePflowHistoryStore((s) => s.snapshots.length > 0);
+  // Something an HTML report would hold: a power flow (the last one, or one
+  // kept), a time-domain run or the eigenvalues. Booleans, so a streamed frame
+  // does not re-render consumers.
+  const hasRuns = useRunsStore((s) => Object.keys(s.runs).length > 0);
+  const hasEigResult = useAnalyzeStore((s) => s.eigResult !== null);
+  const hasReportContent = lastPfRun !== null || hasPflowHistory || hasRuns || hasEigResult;
   const activeRoutine = useRunModeStore((s) => s.activeRoutine);
 
   // ---- store actions referenced from `action` closures ------------------
@@ -639,6 +646,24 @@ function useCommandSets(): CommandSets {
         action: openSnapshotSave,
         when: () => !sessionScopeDisabled,
       },
+      // One file with what the study came to: the power flow tables, the
+      // comparison of two power flows, the charts of the plotted runs and
+      // ANDES's own reports. Offered once there is a result to put in it, which
+      // can be before a case is opened (the runs kept from an earlier visit).
+      {
+        id: 'export.html-report',
+        label: 'Export HTML report',
+        description:
+          "One file with the power flow tables, the comparison of two power flows, the charts of the plotted runs and ANDES's own reports. It opens in any browser and prints.",
+        group: 'export',
+        keywords: ['report', 'html', 'print', 'pdf', 'document', 'results', 'tables', 'charts'],
+        action: () => void saveHtmlReport(),
+        when: () => hasReportContent,
+        unavailableReason: () =>
+          sessionScopeDisabled
+            ? null
+            : 'Nothing to report yet. Run a power flow or a time-domain simulation first.',
+      },
 
       // ---- view ----------------------------------------------------------
       // v3 Unit 2 — IDE-style pane toggles. Each command mirrors a
@@ -984,6 +1009,7 @@ function useCommandSets(): CommandSets {
     undoDisabled,
     pfConverged,
     hasPflowHistory,
+    hasReportContent,
     abortableRun,
     abortMutation,
     diagramVisible,

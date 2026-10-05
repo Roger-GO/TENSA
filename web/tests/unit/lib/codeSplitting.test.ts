@@ -85,6 +85,8 @@ const LAZY_MODULES = [
   'components/pflow/PflowComparePanel.tsx',
   'lib/pflowCompare.ts',
   'lib/resultsArchive.ts',
+  'lib/exportHtmlReport.ts',
+  'lib/htmlReport.ts',
   'components/plots/TimeSeriesPlot.tsx',
   'components/plots/ResponseMetricsPanel.tsx',
   'components/sld/SldCanvas.tsx',

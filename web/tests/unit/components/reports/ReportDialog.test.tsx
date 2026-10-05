@@ -20,7 +20,14 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
+const saveHtmlReport = vi.fn<() => Promise<void>>();
+vi.mock('@/lib/saveHtmlReport', () => ({
+  saveHtmlReport: () => saveHtmlReport(),
+}));
+
 import { ReportDialog, ReportDialogButton } from '@/components/reports/ReportDialog';
+import { useAnalyzeStore } from '@/store/analyze';
+import { usePflowHistoryStore } from '@/store/pflowHistory';
 import { useReportDialogStore } from '@/store/reportDialog';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
@@ -107,8 +114,12 @@ beforeEach(() => {
     writable: true,
   });
 
+  saveHtmlReport.mockReset();
+  saveHtmlReport.mockResolvedValue(undefined);
   useSessionStore.setState({ sessionId: parseSessionId('test-session-id') });
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  usePflowHistoryStore.getState().clear();
+  useAnalyzeStore.setState({ eigResult: null });
   useRunsStore.setState({ runs: {}, activeRunId: null });
   useReportDialogStore.setState({ dialogOpen: false, activeRoutine: 'pflow' });
 });
@@ -307,5 +318,81 @@ describe('<ReportDialog /> — error path', () => {
     const alert = await screen.findByTestId('report-error-pflow');
     expect(alert).toHaveAttribute('role', 'alert');
     expect(alert).toHaveTextContent(/disk full/i);
+  });
+});
+
+// ---- Save as HTML ---------------------------------------------------------
+
+describe('<ReportDialog /> Save as HTML', () => {
+  function open() {
+    useReportDialogStore.setState({ dialogOpen: true, activeRoutine: 'pflow' });
+    render(withQueryClient(<ReportDialog />));
+  }
+
+  it('is off, and says what to do first, while there is no result to save', () => {
+    open();
+    expect(screen.getByTestId('report-save-html')).toBeDisabled();
+    expect(screen.getByTestId('report-save-html-hint')).toHaveTextContent(
+      'Run a power flow or a time-domain simulation to have something to save.',
+    );
+  });
+
+  it('saves the report when there is a power flow, and says what the file holds', async () => {
+    const user = userEvent.setup();
+    seedConvergedPflow();
+    fetchSpy.mockResolvedValue(makeJsonResponse(SAMPLE_REPORT_BODY));
+    open();
+
+    const button = screen.getByTestId('report-save-html');
+    expect(button).toBeEnabled();
+    expect(button).toHaveTextContent('Save as HTML');
+    expect(screen.getByTestId('report-save-html-hint')).toHaveTextContent(
+      /the power flow tables, the comparison of two power flows, a chart of each plotted quantity/,
+    );
+    await user.click(button);
+
+    expect(saveHtmlReport).toHaveBeenCalledTimes(1);
+  });
+
+  it('is on for a time-domain run alone, and for a power flow kept from before a reload', () => {
+    seedCompletedTdsRun();
+    fetchSpy.mockResolvedValue(makeJsonResponse(SAMPLE_TDS_BODY));
+    open();
+    expect(screen.getByTestId('report-save-html')).toBeEnabled();
+    cleanup();
+
+    useRunsStore.setState({ runs: {}, activeRunId: null });
+    usePflowHistoryStore.getState().record(
+      {
+        run_id: parseRunId('pf-kept'),
+        converged: true,
+        iterations: 3,
+        mismatch: 1e-9,
+        bus_voltages: { '1': 1 },
+        bus_angles: { '1': 0 },
+        line_flows: {},
+      },
+      { caseName: 'ieee14', names: { buses: {}, lines: {}, generators: {}, loads: {} } },
+    );
+    open();
+    expect(screen.getByTestId('report-save-html')).toBeEnabled();
+  });
+
+  it('shows that it is saving, and cannot be pressed twice, until the file is written', async () => {
+    const user = userEvent.setup();
+    seedConvergedPflow();
+    fetchSpy.mockResolvedValue(makeJsonResponse(SAMPLE_REPORT_BODY));
+    let finish: () => void = () => {};
+    saveHtmlReport.mockReturnValue(new Promise<void>((resolve) => (finish = resolve)));
+    open();
+
+    await user.click(screen.getByTestId('report-save-html'));
+    const button = screen.getByTestId('report-save-html');
+    expect(button).toBeDisabled();
+    expect(button).toHaveTextContent('Saving');
+
+    finish();
+    await waitFor(() => expect(screen.getByTestId('report-save-html')).toBeEnabled());
+    expect(screen.getByTestId('report-save-html')).toHaveTextContent('Save as HTML');
   });
 });

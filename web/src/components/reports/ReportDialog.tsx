@@ -7,6 +7,13 @@
  * body plus a :class:`LatexCopyButton` that serialises the structured
  * tables for paste into a paper.
  *
+ * **Save as HTML** writes one self-contained file that goes beyond the plain
+ * text: the power flow's tables (totals, limits, buses, lines, generators,
+ * loads), the comparison of two kept power flows, a chart of each quantity of
+ * the plotted runs, the eigenvalues, and ANDES's reports as an appendix
+ * (``lib/htmlReport.ts``). It is built from the results the UI holds, so it is
+ * offered whenever there is one, whichever tab is open.
+ *
  * Wiring:
  *
  * - Trigger: ``<ReportDialogButton />`` (mounted in the TopBar). On
@@ -24,7 +31,7 @@
  * tests of the trigger button (which don't mount a QueryClientProvider)
  * stay green.
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -36,6 +43,9 @@ import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';
 import { useReportDialogStore } from '@/store/reportDialog';
 import { LatexCopyButton, type LatexReportTable } from '@/components/reports/LatexCopyButton';
+import { useAnalyzeStore } from '@/store/analyze';
+import { usePflowHistoryStore } from '@/store/pflowHistory';
+import { saveHtmlReport } from '@/lib/saveHtmlReport';
 import { cn } from '@/lib/cn';
 
 // ---- trigger button -------------------------------------------------------
@@ -102,18 +112,57 @@ function ReportDialogInner() {
     return run.state === 'done' || run.state === 'aborted' || run.state === 'error';
   }, [activeRunId, runs]);
 
+  // Anything the HTML report would hold: a power flow (the last one, converged
+  // or not, or one kept), a time-domain run, or the eigenvalues.
+  const hasPflow = usePflowStore((s) => s.lastRun !== null);
+  const hasKeptPflow = usePflowHistoryStore((s) => s.snapshots.length > 0);
+  const hasRuns = Object.keys(runs).length > 0;
+  const hasEig = useAnalyzeStore((s) => s.eigResult !== null);
+  const reportable = hasPflow || hasKeptPflow || hasRuns || hasEig;
+  const [saving, setSaving] = useState(false);
+  const onSaveHtml = () => {
+    setSaving(true);
+    void saveHtmlReport().finally(() => setSaving(false));
+  };
+
   return (
-    <DialogContent data-testid="report-dialog" className="max-w-3xl">
+    <DialogContent
+      data-testid="report-dialog"
+      // The width goes through ``widthClassName``: as a class it would tie with
+      // the default width, and the narrower default won. The dialog is held to
+      // the height of the window and its report scrolls inside it, so the title
+      // and Save as HTML stay in reach under a report longer than the window.
+      widthClassName="max-w-3xl"
+      className="flex max-h-[90vh] flex-col"
+    >
       <DialogTitle>Reports</DialogTitle>
       <DialogDescription className="mt-2">
         Human-readable reports for the active session. Use <strong>Copy as LaTeX</strong> to paste a{' '}
         <code>tabular</code> block into your paper.
       </DialogDescription>
 
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={!reportable || saving}
+          onClick={onSaveHtml}
+          data-testid="report-save-html"
+        >
+          {saving ? 'Saving…' : 'Save as HTML'}
+        </Button>
+        <span data-testid="report-save-html-hint" className="text-muted-foreground text-xs">
+          {reportable
+            ? 'One file to read, print or send: the power flow tables, the comparison of two power flows, a chart of each plotted quantity of the time-domain runs, and the text below.'
+            : 'Run a power flow or a time-domain simulation to have something to save.'}
+        </span>
+      </div>
+
       <Tabs
         value={activeRoutine}
         onValueChange={(value) => setActiveRoutine(value as ReportRoutine)}
-        className="mt-4 flex flex-col gap-3"
+        className="mt-4 flex min-h-0 flex-1 flex-col gap-3"
       >
         <TabsList>
           <TabsTrigger value="pflow" data-testid="report-tab-pflow">
@@ -124,14 +173,14 @@ function ReportDialogInner() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="pflow">
+        <TabsContent value="pflow" className="min-h-0 flex-1 overflow-y-auto">
           <ReportTabBody
             routine="pflow"
             hasRun={pflowConverged}
             emptyHint="Run PFlow first to populate the power-flow report."
           />
         </TabsContent>
-        <TabsContent value="tds">
+        <TabsContent value="tds" className="min-h-0 flex-1 overflow-y-auto">
           <ReportTabBody
             routine="tds"
             hasRun={tdsRunCompleted}

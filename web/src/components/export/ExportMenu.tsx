@@ -20,13 +20,14 @@
  *   "Exporting…" label) while a handler is in flight.
  *
  * File naming: `{caseName}_{runIdPrefix}_{panel}_{timestamp}.{ext}`
- * per the v2.0 plan. The caller passes `caseName`, optional
+ * (`exportFilename.ts`). The caller passes `caseName`, optional
  * `runIdPrefix` (8-char default slice of a run id), `panel` (kebab-case
  * panel name like `time-series` / `results-table` / `sld`); the menu
  * fills in `timestamp` and `ext`.
  */
 import { useCallback, useState } from 'react';
 import { downloadBlob } from './downloadBlob';
+import { buildFilename, makeTimestamp } from './exportFilename';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Tooltip,
@@ -117,54 +118,6 @@ const FORMAT_LABEL: Record<ExportFormat, string> = {
   mat: 'MAT (.mat)',
 };
 
-const FORMAT_EXT: Record<ExportFormat, string> = {
-  csv: 'csv',
-  png: 'png',
-  mat: 'mat',
-};
-
-/**
- * Sanitise a string into a filesystem-safe slug. Keeps `[A-Za-z0-9_-]`
- * verbatim, replaces everything else with `-`, collapses runs of `-`,
- * and trims leading/trailing `-`. An empty result falls back to `panel`.
- */
-function slugify(s: string, fallback: string): string {
-  const slug = s
-    .normalize('NFKD')
-    .replace(/[^A-Za-z0-9_-]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return slug.length > 0 ? slug : fallback;
-}
-
-/** ISO-ish timestamp suitable for filenames: `2026-05-09T13-45-22`. */
-function makeTimestamp(d: Date = new Date()): string {
-  const pad = (n: number, w = 2) => String(n).padStart(w, '0');
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-    `T${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`
-  );
-}
-
-/**
- * Compose `{caseName}_{runIdPrefix}_{panel}_{timestamp}.{ext}` per the
- * plan. `runIdPrefix` is omitted (and the surrounding `_` collapsed)
- * when the caller didn't supply a run id.
- */
-function buildFilename(args: {
-  caseName: string;
-  runId: string | undefined;
-  panel: string;
-  format: ExportFormat;
-  timestamp: string;
-}): string {
-  const caseSlug = slugify(args.caseName, 'case');
-  const panelSlug = slugify(args.panel, 'panel');
-  const ext = FORMAT_EXT[args.format];
-  const runPart = args.runId ? `_${slugify(args.runId.slice(0, 8), 'run')}` : '';
-  return `${caseSlug}${runPart}_${panelSlug}_${args.timestamp}.${ext}`;
-}
-
 export function ExportMenu({
   formats,
   disabled = false,
@@ -202,7 +155,8 @@ export function ExportMenu({
           caseName,
           runId,
           panel,
-          format,
+          // The format names double as the file extensions.
+          ext: format,
           timestamp: makeTimestamp(),
         });
         downloadBlob(blob, filename);
