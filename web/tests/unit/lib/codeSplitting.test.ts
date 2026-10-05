@@ -83,6 +83,7 @@ const LAZY_MODULES = [
   'components/analyze/AnalyzePanel.tsx',
   'components/pflow/PflowPanel.tsx',
   'components/plots/TimeSeriesPlot.tsx',
+  'components/plots/ResponseMetricsPanel.tsx',
   'components/sld/SldCanvas.tsx',
   'components/snapshot/SaveSnapshotDialog.tsx',
   'components/snapshot/LoadSnapshotDialog.tsx',

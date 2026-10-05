@@ -14,8 +14,21 @@
  */
 import { create } from 'zustand';
 
-/** Variable groups the picker recognises (matches ``RunStream.VarGroup``). */
-export type VarGroup = 'bus_v' | 'gen_state' | 'gen_power' | 'line_flow' | 'load_pq';
+/**
+ * Variable groups the picker recognises: the five a run streams as groups
+ * (``RunStream.VarGroup``), and ``dae``, the ANDES variables a run was asked for
+ * by name (``omega GENROU 1``, see ``parseColumnName``).
+ */
+export type VarGroup = 'bus_v' | 'gen_state' | 'gen_power' | 'line_flow' | 'load_pq' | 'dae';
+
+/**
+ * Where the ruler that measures between two instants of a run stands: cursor
+ * A and cursor B, each a simulation time or ``null`` while not placed.
+ */
+export interface DeltaCursors {
+  a: number | null;
+  b: number | null;
+}
 
 /** Set of selected series names per run id. */
 export type SelectionByRun = Record<string, ReadonlySet<string>>;
@@ -75,6 +88,17 @@ export interface PlotState {
    * playback loop reads it on every frame, so a change takes effect at once.
    */
   playbackRate: number;
+  /**
+   * Per-run A/B cursors, the instants the delta readout and the response metrics
+   * measure between. Absent (or both ``null``) while none is placed.
+   */
+  cursorsByRun: Record<string, DeltaCursors>;
+  /**
+   * Whether a click on a chart places a cursor. One flag for every run and chart,
+   * not persisted: it is a mode of the pointer, off until the user asks for it so
+   * that a stray click on a chart does not draw a line across it.
+   */
+  cursorsArmed: boolean;
 
   /** Toggle a single series. Idempotent — adds if absent, removes if present. */
   toggleSeries: (runId: string, name: string) => void;
@@ -100,6 +124,18 @@ export interface PlotState {
    * ignored, so a bad rate can never reach the animation loop.
    */
   setPlaybackRate: (rate: number) => void;
+  /**
+   * Put the next cursor at ``t``: A first, then B, and a third placement starts
+   * again from A with B cleared. The two are kept as placed, not sorted, so A
+   * can be the later one.
+   */
+  placeCursor: (runId: string, t: number) => void;
+  /** Move one cursor, or take it off the plot with ``null``. */
+  setCursor: (runId: string, which: keyof DeltaCursors, t: number | null) => void;
+  /** Take both cursors off the plot. */
+  clearCursors: (runId: string) => void;
+  /** Turn the click-to-place mode on or off. */
+  setCursorsArmed: (armed: boolean) => void;
   /** Drop a run's plot state entirely (called when a run is reset). */
   resetRun: (runId: string) => void;
   /** Clear every run's plot state (session cascade). */
@@ -113,6 +149,8 @@ export const usePlotStore = create<PlotState>((set, get) => ({
   scrubByRun: {},
   playingByRun: {},
   playbackRate: DEFAULT_PLAYBACK_RATE,
+  cursorsByRun: {},
+  cursorsArmed: false,
 
   toggleSeries: (runId, name) => {
     const current = get().selectedByRun[runId] ?? new Set<string>();
@@ -151,23 +189,50 @@ export const usePlotStore = create<PlotState>((set, get) => ({
     set({ playbackRate: rate });
   },
 
+  placeCursor: (runId, t) => {
+    const current = get().cursorsByRun[runId] ?? { a: null, b: null };
+    const next: DeltaCursors =
+      current.a === null
+        ? { a: t, b: null }
+        : current.b === null
+          ? { a: current.a, b: t }
+          : { a: t, b: null };
+    set({ cursorsByRun: { ...get().cursorsByRun, [runId]: next } });
+  },
+
+  setCursor: (runId, which, t) => {
+    const current = get().cursorsByRun[runId] ?? { a: null, b: null };
+    set({ cursorsByRun: { ...get().cursorsByRun, [runId]: { ...current, [which]: t } } });
+  },
+
+  clearCursors: (runId) => {
+    const next = { ...get().cursorsByRun };
+    delete next[runId];
+    set({ cursorsByRun: next });
+  },
+
+  setCursorsArmed: (armed) => set({ cursorsArmed: armed }),
+
   resetRun: (runId) => {
     const sel = { ...get().selectedByRun };
     const flt = { ...get().filterByRun };
     const exp = { ...get().expandedByRun };
     const scrub = { ...get().scrubByRun };
     const playing = { ...get().playingByRun };
+    const cursors = { ...get().cursorsByRun };
     delete sel[runId];
     delete flt[runId];
     delete exp[runId];
     delete scrub[runId];
     delete playing[runId];
+    delete cursors[runId];
     set({
       selectedByRun: sel,
       filterByRun: flt,
       expandedByRun: exp,
       scrubByRun: scrub,
       playingByRun: playing,
+      cursorsByRun: cursors,
     });
   },
 
@@ -178,6 +243,7 @@ export const usePlotStore = create<PlotState>((set, get) => ({
       expandedByRun: {},
       scrubByRun: {},
       playingByRun: {},
+      cursorsByRun: {},
     }),
 }));
 
@@ -220,6 +286,10 @@ export function findClosestFrameIdx(t: Float64Array, length: number, target: num
  * ``Gen_<idx>_(Pe|Qe)``; line flows match ``Line_<idx>_(p|q)``; load
  * consumption matches ``Load_<idx>_(p|q)``.
  *
+ * An ANDES variable the run was asked for by name (``omega GENROU 1``, from
+ * ``dae_vars``) is the ``dae`` group: its ``field`` is the variable (``omega``)
+ * and its ``elementIdx`` the device (``GENROU 1``).
+ *
  * Unknown column shapes are dropped — the picker only surfaces the
  * documented groups. (Forward-compat: a future schema field just won't
  * appear in the picker; the UI falls back to no-op.)
@@ -234,13 +304,16 @@ export interface ParsedSeries {
   name: string;
   /** Group bucket. */
   group: VarGroup;
-  /** Element identifier (e.g., ``"5"`` for ``Bus_5_v``). */
+  /**
+   * Element identifier (e.g., ``"5"`` for ``Bus_5_v``; the device, ``"GENROU 1"``,
+   * for the ANDES variable ``omega GENROU 1``).
+   */
   elementIdx: string;
   /**
    * Field name within the group. ``bus_v`` → ``"v"`` (voltage pu) or
    * ``"a"`` (angle rad); ``gen_state`` → ``"omega"`` / ``"delta"``;
    * ``gen_power`` → ``"Pe"`` / ``"Qe"``; ``line_flow`` + ``load_pq`` →
-   * ``"p"`` / ``"q"``.
+   * ``"p"`` / ``"q"``; ``dae`` → the ANDES variable (``"omega"``, ``"vf"``).
    */
   field: string;
 }
@@ -249,6 +322,13 @@ const BUS_RE = /^Bus_(.+)_(v|a)$/;
 const GEN_RE = /^Gen_(.+)_(omega|delta|Pe|Qe)$/;
 const LINE_RE = /^Line_(.+)_(p|q)$/;
 const LOAD_RE = /^Load_(.+)_(p|q)$/;
+/**
+ * An ANDES variable, named as ``dae.x_name`` / ``dae.y_name`` name it:
+ * ``<variable> <Model> <idx>``. The variable is one word (a Python identifier),
+ * the rest is the device (``GENROU 1``). No streamed group's column holds a
+ * space before its final field, so this is only tried after theirs.
+ */
+const DAE_RE = /^(\S+) (\S+ .+)$/;
 
 /**
  * Classify a column name into a ``ParsedSeries`` or ``null`` when the
@@ -271,7 +351,19 @@ export function parseColumnName(name: string): ParsedSeries | null {
   if (line) return { name, group: 'line_flow', elementIdx: line[1]!, field: line[2]! };
   const load = LOAD_RE.exec(name);
   if (load) return { name, group: 'load_pq', elementIdx: load[1]!, field: load[2]! };
+  const dae = DAE_RE.exec(name);
+  if (dae) return { name, group: 'dae', elementIdx: dae[2]!, field: dae[1]! };
   return null;
+}
+
+/**
+ * Which chart a series is drawn on. The streamed groups each have one chart; the
+ * ANDES variables have one per variable (every ``omega`` together, every ``vf``
+ * together), since two of them share a unit and a scale only when they are the
+ * same quantity.
+ */
+export function chartKeyOf(series: Pick<ParsedSeries, 'group' | 'field'>): string {
+  return series.group === 'dae' ? `dae:${series.field}` : series.group;
 }
 
 /** Human-readable label for a variable group (used in the picker header). */
@@ -287,6 +379,8 @@ export function groupLabel(group: VarGroup): string {
       return 'Line flows';
     case 'load_pq':
       return 'Load power';
+    case 'dae':
+      return 'ANDES variables';
   }
 }
 
@@ -311,6 +405,8 @@ export function chartTitle(group: VarGroup, fields: ReadonlySet<string>): string
       if (omega && delta) return 'Generator speed and rotor angle';
       return delta ? 'Generator rotor angle' : 'Generator speed';
     }
+    case 'dae':
+      return `${[...fields].join(', ')} · ANDES variable`;
     default:
       return groupLabel(group);
   }

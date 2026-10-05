@@ -40,6 +40,7 @@ import type {
   CloneSaveAsResponse,
   ConnectivityResult,
   CpfResult,
+  DaeVariableList,
   DisturbanceSpec,
   EditElementRequest,
   EigParticipationResponse,
@@ -50,6 +51,8 @@ import type {
   LoadCaseRequest,
   ParamValue,
   PflowResult,
+  ResponseMetricsRequest,
+  ResponseMetricsResponse,
   SaveCaseRequest,
   SaveCaseResponse,
   SeMeasurementsGeneratedResponse,
@@ -294,6 +297,13 @@ export const queryKeys = {
   pmus: (id: SessionId) => ['pmus', id] as const,
   /** TimeSeries profile assignments, scoped per session (Unit 15). */
   profiles: (id: SessionId) => ['profiles', id] as const,
+  /**
+   * The ANDES variables a TDS run can record, scoped per (session, case, search
+   * words, page size). The case is part of the key because the list is a
+   * property of what is loaded.
+   */
+  daeVariables: (id: SessionId, casePath: string, q: string, limit: number) =>
+    ['dae-variables', id, casePath, q, limit] as const,
   /** Clone-vs-original param diff, scoped per (session, model, idx) (Unit 23). */
   cloneDiff: (id: SessionId, model: string, idx: string) => ['clone-diff', id, model, idx] as const,
 } as const;
@@ -626,6 +636,61 @@ export function useAlterableParams(
         { timeoutMs: TIMEOUTS.topology },
       );
     },
+  });
+}
+
+// ---- ANDES variables and response metrics ----------------------------------
+
+/**
+ * `GET /sessions/{id}/dae-variables`: one page of the ANDES variables of the
+ * loaded case that a TDS run can record, the ones whose names hold every word
+ * of ``q``. Reads the models' own definitions, so it needs no run and does not
+ * close the case to disturbances. Disabled without a session or a case; with no
+ * ``q`` it lists the first ``limit`` variables.
+ *
+ * The session is busy while a run streams, so asking then is refused with a 409:
+ * the caller shows that as a message and the list comes back once the run ends.
+ */
+export function useDaeVariables(q: string, limit: number): UseQueryResult<DaeVariableList, Error> {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const selection = useCaseStore((s) => s.selection);
+  const enabled = sessionId !== null && selection !== null;
+  // A blank system has no file; its list is still its own.
+  const casePath = selection?.primaryPath ?? 'blank';
+  return useQuery({
+    queryKey: enabled
+      ? queryKeys.daeVariables(sessionId, casePath, q, limit)
+      : ['dae-variables', 'noop'],
+    enabled,
+    // What is loaded can change under the same case path (an element added or
+    // deleted), so a list a few seconds old is the most to rely on.
+    staleTime: 5_000,
+    queryFn: async () => {
+      if (!sessionId) throw new Error('useDaeVariables enabled without a session');
+      return await andesClient.get<DaeVariableList>(
+        `/sessions/${encodeURIComponent(sessionId)}/dae-variables`,
+        {
+          query: { limit: String(limit), ...(q.trim() === '' ? {} : { q: q.trim() }) },
+          timeoutMs: TIMEOUTS.topology,
+        },
+      );
+    },
+  });
+}
+
+/**
+ * `POST /response-metrics`: nadir, rate of change, settling time, overshoot and
+ * damping of the signals in ``body``. Holds no session, so it works on a run
+ * the substrate has forgotten, which is every run once the worker restarts.
+ */
+export async function fetchResponseMetrics(
+  body: ResponseMetricsRequest,
+  signal?: AbortSignal,
+): Promise<ResponseMetricsResponse> {
+  return await andesClient.post<ResponseMetricsResponse>('/response-metrics', {
+    body,
+    timeoutMs: 30_000,
+    ...(signal === undefined ? {} : { signal }),
   });
 }
 

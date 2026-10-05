@@ -18,6 +18,7 @@ import type {
   TdsVarGroup,
 } from '@/store/ui';
 import { Input } from '@/components/ui/Input';
+import { DaeVariablePicker } from './DaeVariablePicker';
 import { Button } from '@/components/ui/button';
 import { useRunsStore, MAX_RETENTION_LIMIT } from '@/store/runs';
 
@@ -35,6 +36,9 @@ import { useRunsStore, MAX_RETENTION_LIMIT } from '@/store/runs';
  *   the remaining groups stay opt-in to keep default memory + plot
  *   clutter low. The set is fixed at run-start — pick groups BEFORE
  *   clicking Run TDS.
+ * - ``daeVars`` (ANDES variables to record by name): picked in
+ *   ``DaeVariablePicker``, any state or algebraic variable of the loaded models,
+ *   fixed at run-start like the groups. Empty by default.
  * - ``max_rate_hz`` (UI clamp): default 30. Power-users only.
  *
  * Persistence: writes through ``useUiStore.setTdsConfig`` so the value
@@ -420,6 +424,8 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
           </span>
         ) : null}
       </fieldset>
+
+      <DaeVariablePicker />
 
       <NumberField
         id="tds-config-max-rate"

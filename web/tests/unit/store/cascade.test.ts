@@ -24,6 +24,7 @@ import { usePflowStore } from '@/store/pflow';
 import { usePflowOptionsStore } from '@/store/pflowOptions';
 import { useRunsStore } from '@/store/runs';
 import { useSessionStore } from '@/store/session';
+import { DEFAULT_TDS_CONFIG, useUiStore } from '@/store/ui';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { CpfResult, EigResult, PflowResult } from '@/api/types';
 
@@ -75,6 +76,7 @@ function seedResults(): void {
 
 beforeEach(() => {
   __resetCascadeForTests();
+  useUiStore.setState({ tdsConfig: { ...DEFAULT_TDS_CONFIG } });
   wireStoreCascade();
 });
 
@@ -229,6 +231,38 @@ describe('store cascade — scheduled disturbances', () => {
     scheduleFault();
     usePflowStore.getState().clearPflow();
     expect(useDisturbanceStore.getState().disturbances).toHaveLength(1);
+  });
+});
+
+describe('store cascade — ANDES variables picked for the next run', () => {
+  const pick = () => useUiStore.getState().setTdsConfig({ daeVars: ['omega GENROU 1'] });
+
+  it('are names of devices of the old case, so another case empties the list', () => {
+    seedResults();
+    pick();
+
+    useCaseStore.getState().setCase(caseOf('wscc9.xlsx'));
+
+    expect(useUiStore.getState().tdsConfig.daeVars).toEqual([]);
+  });
+
+  it('are emptied when the case is cleared, and the rest of the run settings stay', () => {
+    seedResults();
+    useUiStore.getState().setTdsConfig({ tf: 25, daeVars: ['omega GENROU 1'] });
+
+    useCaseStore.getState().clearCase();
+
+    expect(useUiStore.getState().tdsConfig.daeVars).toEqual([]);
+    expect(useUiStore.getState().tdsConfig.tf).toBe(25);
+  });
+
+  it('stay while a PF result is replaced or cleared on the same case', () => {
+    seedResults();
+    pick();
+
+    usePflowStore.getState().clearPflow();
+
+    expect(useUiStore.getState().tdsConfig.daeVars).toEqual(['omega GENROU 1']);
   });
 });
 

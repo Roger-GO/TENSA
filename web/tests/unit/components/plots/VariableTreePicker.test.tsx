@@ -300,6 +300,101 @@ describe('VariableTreePicker', () => {
   });
 });
 
+describe('VariableTreePicker: ANDES variables', () => {
+  beforeEach(() => {
+    useRunsStore.setState({ runs: {}, activeRunId: null, overlayRunIds: new Set() });
+    usePlotStore.setState({ selectedByRun: {}, filterByRun: {}, expandedByRun: {} });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  const ANDES = ['Bus_1_v', 'omega GENROU 10', 'omega GENROU 2', 'omega GENROU 1', 'vf GENROU 1'];
+
+  it('lists the ANDES variables of a run as a group of their own, last', () => {
+    seedRun('r1', ['omega GENROU 1', 'Bus_1_v', 'Load_3_p']);
+    render(<VariableTreePicker />);
+
+    const group = screen.getByTestId('variable-tree-picker-group-dae');
+    expect(group).toBeInTheDocument();
+    expect(screen.getByText('ANDES variables')).toBeInTheDocument();
+    const load = screen.getByTestId('variable-tree-picker-group-load_pq');
+    expect(load.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('puts the variables of a device under the device, named for it', async () => {
+    const user = userEvent.setup();
+    seedRun('r1', ['omega GENROU 1', 'vf GENROU 1', 'omega GENROU 2']);
+    render(<VariableTreePicker />);
+
+    await user.click(screen.getByTestId('variable-tree-picker-expand-dae'));
+
+    expect(screen.getByTestId('variable-tree-picker-element-dae-GENROU 1')).toBeInTheDocument();
+    expect(screen.getByTestId('variable-tree-picker-element-dae-GENROU 2')).toBeInTheDocument();
+    expect(screen.getByTestId('variable-tree-picker-leaf-omega GENROU 1')).toBeInTheDocument();
+    expect(screen.getByTestId('variable-tree-picker-leaf-vf GENROU 1')).toBeInTheDocument();
+  });
+
+  it('sorts the devices numerically, so GENROU 10 follows GENROU 2', () => {
+    seedRun('r1', ANDES);
+    usePlotStore.getState().toggleExpanded('r1', 'dae');
+    render(<VariableTreePicker />);
+
+    const labels = screen
+      .getAllByLabelText(/Toggle ANDES variables element/)
+      .map((el) => el.getAttribute('aria-label'));
+
+    expect(labels).toEqual([
+      'Toggle ANDES variables element GENROU 1',
+      'Toggle ANDES variables element GENROU 2',
+      'Toggle ANDES variables element GENROU 10',
+    ]);
+  });
+
+  it('selects the variables the run was asked for beside the bus voltages, for its first plot', () => {
+    seedRun('r1', ['Bus_1_v', 'Bus_1_a', 'Gen_1_omega', 'omega GENROU 1', 'vf GENROU 1']);
+    render(<VariableTreePicker />);
+
+    const selected = usePlotStore.getState().selectedByRun['r1']!;
+
+    expect([...selected].sort()).toEqual(['Bus_1_v', 'omega GENROU 1', 'vf GENROU 1']);
+  });
+
+  it('does not flood the first plot: at most twelve of each kind', () => {
+    const columns = [
+      ...Array.from({ length: 20 }, (_, i) => `Bus_${i + 1}_v`),
+      ...Array.from({ length: 20 }, (_, i) => `omega GENROU ${i + 1}`),
+    ];
+    seedRun('r1', columns);
+    render(<VariableTreePicker />);
+
+    const selected = [...usePlotStore.getState().selectedByRun['r1']!];
+
+    expect(selected.filter((n) => n.startsWith('Bus_'))).toHaveLength(12);
+    expect(selected.filter((n) => n.startsWith('omega'))).toHaveLength(12);
+  });
+
+  it('leaves a selection the user already made alone', () => {
+    seedRun('r1', ['Bus_1_v', 'omega GENROU 1']);
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v']));
+    render(<VariableTreePicker />);
+
+    expect([...usePlotStore.getState().selectedByRun['r1']!]).toEqual(['Bus_1_v']);
+  });
+
+  it('finds an ANDES variable by the words of its name', async () => {
+    const user = userEvent.setup();
+    seedRun('r1', ANDES);
+    render(<VariableTreePicker />);
+
+    await user.type(screen.getByTestId('variable-tree-picker-filter'), 'vf GENROU');
+
+    expect(screen.getByTestId('variable-tree-picker-leaf-vf GENROU 1')).toBeInTheDocument();
+    expect(screen.queryByTestId('variable-tree-picker-leaf-omega GENROU 1')).toBeNull();
+  });
+});
+
 describe('VariableTreePicker — streaming frames', () => {
   beforeEach(() => {
     useRunsStore.setState({ runs: {}, activeRunId: null, overlayRunIds: new Set() });

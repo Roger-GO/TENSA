@@ -470,6 +470,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/dae-variables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the ANDES variables of the loaded case that a TDS run can record.
+         * @description The states and algebraic variables ANDES keeps for the loaded case's
+         *     devices, named as ``dae.x_name`` / ``dae.y_name`` name them, for the
+         *     ``dae_vars`` of a TDS request. Needs no setup, so asking does not close the
+         *     case to new disturbances. A static generator that a dynamic one replaces
+         *     keeps no algebraic variables in a TDS run and is left out. With no case
+         *     loaded the list is empty (a 200, as for the disturbance list).
+         */
+        get: operations["listDaeVariables"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/abort": {
         parameters: {
             query?: never;
@@ -492,6 +517,32 @@ export interface paths {
          *     never consumed; subsequent runs will see and clear it).
          */
         post: operations["abortRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/response-metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Describe the response of sampled signals: nadir, rate of change, settling time, overshoot, damping.
+         * @description For each series: its initial and final value, its peak and nadir, the
+         *     steepest rate of change over ``rocof_window``, the time it takes to settle,
+         *     how far it overshoots, and the damping ratio and frequency of its oscillation.
+         *     A series that cannot be described (too few samples, a window outside it)
+         *     carries an ``error`` and the rest of the request is answered. The definitions
+         *     are in each field's description. Needs no session: send the columns of a
+         *     streamed run, or the ``traces`` of a batch run.
+         */
+        post: operations["computeResponseMetrics"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2052,6 +2103,85 @@ export interface components {
             max_iter?: number | null;
         };
         /**
+         * DaeVariableInfo
+         * @description One ANDES variable of one device of the loaded case.
+         */
+        DaeVariableInfo: {
+            /**
+             * Name
+             * @description ``<variable> <Model> <idx>`` as ANDES spells it in ``dae.x_name`` / ``dae.y_name`` (``omega GENROU 1``): what ``dae_vars`` asks for it by, and the name of its column in a stream.
+             */
+            name: string;
+            /**
+             * Kind
+             * @description ``x`` for a state variable, ``y`` for an algebraic one.
+             * @enum {string}
+             */
+            kind: "x" | "y";
+            /**
+             * Model
+             * @description ANDES model the device belongs to.
+             */
+            model: string;
+            /**
+             * Var
+             * @description The variable's name within the model.
+             */
+            var: string;
+            /**
+             * Idx
+             * @description The device's idx.
+             */
+            idx: number | string;
+            /**
+             * Unit
+             * @description ANDES's unit for the variable; ``null`` where it gives none.
+             */
+            unit?: string | null;
+            /**
+             * Info
+             * @description ANDES's description of the variable; ``null`` where it gives none.
+             */
+            info?: string | null;
+        };
+        /**
+         * DaeVariableList
+         * @description A page of the ANDES variables of the loaded case.
+         */
+        DaeVariableList: {
+            /**
+             * Total
+             * @description How many variables match the filters, across all pages.
+             */
+            total: number;
+            /**
+             * Items
+             * @description The requested page, in the models' own order.
+             */
+            items: components["schemas"]["DaeVariableInfo"][];
+        };
+        /**
+         * DampingEstimate
+         * @description The oscillation of a signal, from the log decrement of its swings.
+         */
+        DampingEstimate: {
+            /**
+             * Ratio
+             * @description Damping ratio, ``d / sqrt(pi**2 + d**2)`` for the half-cycle log decrement ``d``. Negative for a swing that grows.
+             */
+            ratio: number;
+            /**
+             * Frequency Hz
+             * @description Frequency of the oscillation, in hertz.
+             */
+            frequency_hz: number;
+            /**
+             * Extrema
+             * @description How many extremes of the signal the estimate rests on.
+             */
+            extrema: number;
+        };
+        /**
          * DeleteBlockedResponse
          * @description Response body for ``DELETE /sessions/{id}/elements/{model}/{idx}``
          *     when the deletion is blocked by cascade dependents (HTTP 422).
@@ -2514,6 +2644,43 @@ export interface components {
             bus: number | string;
         };
         /**
+         * MetricExtremum
+         * @description A value of the signal and when it is reached.
+         */
+        MetricExtremum: {
+            /**
+             * Value
+             * @description The value, in the signal's unit.
+             */
+            value: number;
+            /**
+             * T
+             * @description The time it is reached, in seconds.
+             */
+            t: number;
+        };
+        /**
+         * MetricsSeries
+         * @description One signal to describe.
+         */
+        MetricsSeries: {
+            /**
+             * Name
+             * @description What the signal is called; echoed back on its result.
+             */
+            name: string;
+            /**
+             * T
+             * @description Sample times in seconds, not decreasing. Samples at one time count as one, the last of them.
+             */
+            t: number[];
+            /**
+             * Y
+             * @description The signal's value at each time, in whatever unit the caller reads it in. ``null`` marks a missing value (a diverged step); that sample is left out.
+             */
+            y: (number | null)[];
+        };
+        /**
          * ParticipationFactorModel
          * @description One per-state participation factor row entry.
          */
@@ -2834,6 +3001,50 @@ export interface components {
             rows: string[][];
         };
         /**
+         * ResponseMetricsRequest
+         * @description Request body for ``POST /response-metrics``.
+         */
+        ResponseMetricsRequest: {
+            /**
+             * Series
+             * @description The signals to describe, each on its own timeline.
+             */
+            series: components["schemas"]["MetricsSeries"][];
+            /**
+             * T Start
+             * @description Start of the window the metrics are read over, in seconds. A bound that falls between two samples is interpolated. Defaults to the first sample.
+             */
+            t_start?: number | null;
+            /**
+             * T End
+             * @description End of the window, in seconds. Defaults to the last sample.
+             */
+            t_end?: number | null;
+            /**
+             * Settling Band
+             * @description The settling band as a fraction of the signal's largest distance from its final value: 0.02 is 2 %.
+             * @default 0.02
+             */
+            settling_band: number;
+            /**
+             * Rocof Window
+             * @description Width in seconds the rate of change is measured over: the steepest slope of the line from ``y(s)`` to ``y(s + rocof_window)``. Cut to the window when the window is shorter.
+             * @default 0.5
+             */
+            rocof_window: number;
+        };
+        /**
+         * ResponseMetricsResponse
+         * @description Response body for ``POST /response-metrics``.
+         */
+        ResponseMetricsResponse: {
+            /**
+             * Results
+             * @description One entry per requested series, in the order sent.
+             */
+            results: components["schemas"]["SeriesMetrics"][];
+        };
+        /**
          * RestoreSnapshotRequest
          * @description Request body for ``POST /sessions/{id}/snapshot/restore``.
          */
@@ -3063,6 +3274,68 @@ export interface components {
          *     compatibly.
          */
         SeRunRequest: Record<string, never>;
+        /**
+         * SeriesMetrics
+         * @description What one signal's response metrics came to. Either ``error`` says why it
+         *     could not be described, or the rest is filled in.
+         */
+        SeriesMetrics: {
+            /**
+             * Name
+             * @description The series' name, as sent.
+             */
+            name: string;
+            /**
+             * Error
+             * @description Why this signal has no metrics (too few samples, a window outside it, times that run backwards); ``null`` when it has them.
+             */
+            error?: string | null;
+            /**
+             * Samples
+             * @description Samples in the window, its two bounds included.
+             */
+            samples?: number | null;
+            /**
+             * T Start
+             * @description Start of the window used, in seconds.
+             */
+            t_start?: number | null;
+            /**
+             * T End
+             * @description End of the window used, in seconds.
+             */
+            t_end?: number | null;
+            /**
+             * Initial
+             * @description Value at the start of the window.
+             */
+            initial?: number | null;
+            /**
+             * Final
+             * @description Time-weighted mean over the last 10 % of the window: what it settled to.
+             */
+            final?: number | null;
+            /** @description Largest value and when. */
+            peak?: components["schemas"]["MetricExtremum"] | null;
+            /** @description Smallest value and when. */
+            nadir?: components["schemas"]["MetricExtremum"] | null;
+            /** @description Largest distance from ``initial``: ``value`` is signed (``y - initial``). */
+            max_deviation?: components["schemas"]["MetricExtremum"] | null;
+            /** @description Steepest rate of change over ``rocof_window``, in the signal's unit per second, sign kept; ``t`` is the start of that window. */
+            rocof?: components["schemas"]["MetricExtremum"] | null;
+            /**
+             * Settling Time
+             * @description Seconds from the start of the window after which the signal stays within the settling band; ``null`` when it had not settled by the end.
+             */
+            settling_time?: number | null;
+            /**
+             * Overshoot Pct
+             * @description How far the signal went past its final value, in percent of the step from ``initial`` to ``final``; ``null`` when ``final`` is within the settling band of ``initial``.
+             */
+            overshoot_pct?: number | null;
+            /** @description ``null`` for a signal that does not oscillate. */
+            damping?: components["schemas"]["DampingEstimate"] | null;
+        };
         /**
          * SessionDescriptor
          * @description Response shape for session create / read.
@@ -3340,8 +3613,9 @@ export interface components {
          *     Streaming TDS uses a different code path (the WebSocket at
          *     ``/ws/{session_id}``) that emits Arrow IPC frames per integration step.
          *     Batch mode blocks until completion and returns a summary; the per-step
-         *     state values are NOT returned in batch mode (use streaming mode if you
-         *     need them).
+         *     state values are NOT returned in batch mode unless the request names
+         *     ``dae_vars``, whose values come back in ``traces`` (use streaming mode for
+         *     the five variable groups).
          */
         TdsBatchResult: {
             /**
@@ -3369,6 +3643,8 @@ export interface components {
              * @description Job-registry id mirroring this TDS run. Additive and IDENTICAL to ``run_id`` — the two fields alias the same value, with ``run_id`` preserved for backward compatibility. ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``tds-batch``). ``null`` only on legacy responses synthesised outside the job lifecycle.
              */
             job_id?: string | null;
+            /** @description The values of the request's ``dae_vars``, every step of the run. ``null`` when the request named none. */
+            traces?: components["schemas"]["TdsTraces"] | null;
         };
         /**
          * TdsRunRequest
@@ -3390,9 +3666,14 @@ export interface components {
             h?: number | null;
             /**
              * Vars
-             * @description Optional selector for which variable groups appear as columns in each per-step Arrow record batch on the streaming path. ``bus_v`` covers bus voltage magnitudes (the default); ``gen_state`` adds generator rotor angle ``delta`` and per-unit speed ``omega`` for every member of the ANDES ``SynGen`` group (GENROU / GENCLS / PLBVFU1); ``line_flow`` adds active power ``Line_<idx>_p`` (MW) at each line's bus1 terminal. Unknown values are rejected with 422; an empty list is rejected with 422. The batch path (``POST /tds``) ignores this field at runtime — the streamed-only state values are not surfaced in batch responses — but it is accepted on the OpenAPI surface for symmetry with the WebSocket ``start_tds`` config so generated clients can share one request shape. Defaults to ``["bus_v"]`` when omitted.
+             * @description Optional selector for which variable groups appear as columns in each per-step Arrow record batch on the streaming path. ``bus_v`` covers bus voltage magnitudes and angles; ``gen_state`` adds generator rotor angle ``delta`` and per-unit speed ``omega`` for every member of the ANDES ``SynGen`` group (GENROU / GENCLS / PLBVFU1); ``gen_power`` adds their electrical ``Pe`` / ``Qe``; ``line_flow`` adds active and reactive power at each line's bus1 terminal; ``load_pq`` adds each PQ load's consumption. Unknown values are rejected with 422; an empty list is rejected with 422. The batch path (``POST /tds``) ignores this field at runtime: it returns the values of ``dae_vars`` instead, and accepts this field for symmetry with the WebSocket ``start_tds`` config so generated clients can share one request shape. Defaults to ``["bus_v", "gen_state"]`` when omitted on the streaming path.
              */
-            vars?: ("bus_v" | "gen_state" | "line_flow")[] | null;
+            vars?: ("bus_v" | "gen_state" | "gen_power" | "line_flow" | "load_pq")[] | null;
+            /**
+             * Dae Vars
+             * @description ANDES variables to record, by the names ``dae.x_name`` and ``dae.y_name`` give them (``omega GENROU 1``, ``vf GENROU 2``); ``GET /sessions/{id}/dae-variables`` lists them. A batch run returns their values in ``traces``, at every step ANDES takes, with no scaling. A name that is not a variable of the loaded case is refused with 422 before anything runs. The streaming ``start_tds`` frame takes the same field and adds one column per name, named exactly so.
+             */
+            dae_vars?: string[] | null;
             /**
              * Integrator
              * @description DAE integrator. ``"trapezoidal"`` (default) maps to ANDES's fixed-step Implicit Trapezoidal Method (``ss.TDS.config.method = "trapezoid"``). ``"qndf"`` selects the variable-order, variable-step QNDF (NDF) method and forces ``fixt = 0`` so ANDES enables LTE-driven step control. Combine ``integrator="qndf"`` with the Auto preset (``rtol=1e-3, atol=1e-6, max_step=0.05``) by passing the values via ``tds_config_overrides``.
@@ -3407,6 +3688,43 @@ export interface components {
             tds_config_overrides?: {
                 [key: string]: number;
             } | null;
+        };
+        /**
+         * TdsTraceSeries
+         * @description One recorded ANDES variable of a batch run.
+         */
+        TdsTraceSeries: {
+            /**
+             * Name
+             * @description The variable, named as in ``dae_vars``.
+             */
+            name: string;
+            /**
+             * Values
+             * @description Its value at each time in ``traces.t``, as ANDES stores it. ``null`` for a value that is not a number (a diverged step).
+             */
+            values: (number | null)[];
+        };
+        /**
+         * TdsTraces
+         * @description The ANDES variables a batch run was asked to record (``dae_vars``).
+         */
+        TdsTraces: {
+            /**
+             * T
+             * @description Simulation time of each recorded step, in seconds.
+             */
+            t: number[];
+            /**
+             * Variables
+             * @description One series per requested variable, in the order asked.
+             */
+            variables: components["schemas"]["TdsTraceSeries"][];
+            /**
+             * Truncated
+             * @description ``true`` when the run took more steps than a response holds (500000 values in all) and the later steps were left out. Raise ``h`` or ask for fewer variables.
+             */
+            truncated: boolean;
         };
         /**
          * ToggleSpec
@@ -5042,6 +5360,57 @@ export interface operations {
             };
         };
     };
+    listDaeVariables: {
+        parameters: {
+            query?: {
+                /** @description Words that must all appear in the variable's name, whatever their case: ``omega gen`` finds ``omega GENROU 1``. */
+                q?: string | null;
+                /** @description ``x`` for state variables only, ``y`` for algebraic ones only. */
+                kind?: ("x" | "y") | null;
+                /** @description Only this ANDES model's variables (``GENROU``). */
+                model?: string | null;
+                /** @description Page size. */
+                limit?: number;
+                /** @description Matches to skip. */
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaeVariableList"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     abortRun: {
         parameters: {
             query?: never;
@@ -5078,6 +5447,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    computeResponseMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResponseMetricsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseMetricsResponse"];
+                };
+            };
+            /** @description The body is malformed, or a limit is exceeded: more than 64 series, more than 200000 samples in one, or a setting out of range. A series that is only too short to describe is not an error: it is answered with its own ``error``. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
         };

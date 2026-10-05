@@ -12,14 +12,16 @@
  * isolate cache state.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import {
   makeQueryClient,
   queryKeys,
+  fetchResponseMetrics,
   useAlterableParams,
   useCreateSession,
+  useDaeVariables,
   useListPmus,
   useListProfiles,
   useListSnapshots,
@@ -258,6 +260,109 @@ describe('queries hooks', () => {
     // with fetchStatus "idle".
     expect(result.current.fetchStatus).toBe('idle');
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('useDaeVariables asks for a page of the matches of the words, scoped to the session', async () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-dae') });
+    useCaseStore.setState({
+      selection: { primaryPath: 'kundur_full.xlsx' as WorkspacePath, addfiles: [] },
+    });
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ total: 1, items: [] }));
+
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useDaeVariables(' omega gen ', 50), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const url = new URL(String(fetchSpy.mock.calls[0]?.[0] ?? ''), 'http://localhost');
+    expect(url.pathname).toBe('/api/sessions/sess-dae/dae-variables');
+    // The words are trimmed, and the page size is asked for.
+    expect(url.searchParams.get('q')).toBe('omega gen');
+    expect(url.searchParams.get('limit')).toBe('50');
+  });
+
+  it('useDaeVariables sends no q for no words', async () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-dae') });
+    useCaseStore.setState({
+      selection: { primaryPath: 'kundur_full.xlsx' as WorkspacePath, addfiles: [] },
+    });
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ total: 0, items: [] }));
+
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useDaeVariables('  ', 25), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const url = new URL(String(fetchSpy.mock.calls[0]?.[0] ?? ''), 'http://localhost');
+    expect(url.searchParams.has('q')).toBe(false);
+    expect(url.searchParams.get('limit')).toBe('25');
+  });
+
+  it('useDaeVariables lists a blank system too: it has no file but it has devices', async () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-dae') });
+    useCaseStore.setState({ selection: { primaryPath: null, addfiles: [], blank: true } });
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ total: 0, items: [] }));
+
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useDaeVariables('', 10), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('useDaeVariables stays disabled without a session or without a case', () => {
+    const { Wrapper } = makeWrapper();
+    useSessionStore.setState({ sessionId: null });
+    useCaseStore.setState({
+      selection: { primaryPath: 'kundur_full.xlsx' as WorkspacePath, addfiles: [] },
+    });
+    const noSession = renderHook(() => useDaeVariables('', 10), { wrapper: Wrapper });
+    expect(noSession.result.current.fetchStatus).toBe('idle');
+
+    useSessionStore.setState({ sessionId: parseSessionId('sess-dae') });
+    useCaseStore.setState({ selection: null });
+    const noCase = renderHook(() => useDaeVariables('', 10), { wrapper: Wrapper });
+    expect(noCase.result.current.fetchStatus).toBe('idle');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('useDaeVariables asks again for another case, and for other words', async () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-dae') });
+    useCaseStore.setState({
+      selection: { primaryPath: 'kundur_full.xlsx' as WorkspacePath, addfiles: [] },
+    });
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({ total: 0, items: [] })));
+    const { Wrapper } = makeWrapper();
+    const { result, rerender } = renderHook(({ q }) => useDaeVariables(q, 10), {
+      wrapper: Wrapper,
+      initialProps: { q: 'omega' },
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    rerender({ q: 'vf' });
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+
+    act(() =>
+      useCaseStore.setState({
+        selection: { primaryPath: 'wscc9.xlsx' as WorkspacePath, addfiles: [] },
+      }),
+    );
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+  });
+
+  it('fetchResponseMetrics posts the series as JSON to a route that needs no session', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ results: [{ name: 'w', error: null }] }));
+
+    const answer = await fetchResponseMetrics({
+      series: [{ name: 'w', t: [0, 1, 2], y: [1, 1, 1] }],
+      settling_band: 0.02,
+      rocof_window: 0.5,
+    });
+
+    expect(answer.results[0]!.name).toBe('w');
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/response-metrics');
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
+    expect(JSON.parse(String(init.body))).toMatchObject({ series: [{ name: 'w' }] });
   });
 
   it('useRunPflow onMutate registers a pending placeholder; onSuccess re-keys to the server job_id', async () => {

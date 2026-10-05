@@ -7,7 +7,13 @@
  * retired in v3 Unit 15 — the layout slice now owns dock state.)
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEFAULT_TDS_CONFIG, TDS_VAR_GROUPS, useUiStore, validateTdsConfig } from '@/store/ui';
+import {
+  DEFAULT_TDS_CONFIG,
+  MAX_TDS_DAE_VARS,
+  TDS_VAR_GROUPS,
+  useUiStore,
+  validateTdsConfig,
+} from '@/store/ui';
 import type { TdsConfig } from '@/store/ui';
 
 function resetUiStore() {
@@ -45,11 +51,12 @@ describe('useUiStore — TDS config (v0.2 Unit 8)', () => {
     resetUiStore();
   });
 
-  it('defaults: tf=10, h=null, vars=["bus_v","gen_state"] (voltage + freq), max_rate_hz=30', () => {
+  it('defaults: tf=10, h=null, vars=["bus_v","gen_state"] (voltage + freq), no ANDES variables, max_rate_hz=30', () => {
     expect(DEFAULT_TDS_CONFIG).toEqual({
       tf: 10,
       h: null,
       vars: ['bus_v', 'gen_state'],
+      daeVars: [],
       maxRateHz: 30,
     });
     expect(useUiStore.getState().tdsConfig).toEqual(DEFAULT_TDS_CONFIG);
@@ -100,6 +107,14 @@ describe('validateTdsConfig', () => {
     expect(validateTdsConfig(valid({ h: null }))).not.toHaveProperty('h');
     expect(validateTdsConfig(valid({ h: 0 }))).toHaveProperty('h');
     expect(validateTdsConfig(valid({ h: -0.01 }))).toHaveProperty('h');
+  });
+
+  it('accepts up to the substrate limit of ANDES variables and rejects more', () => {
+    const names = (n: number) => Array.from({ length: n }, (_, i) => `omega GENROU ${i}`);
+    expect(validateTdsConfig(valid({ daeVars: names(MAX_TDS_DAE_VARS) }))).toEqual({});
+    expect(validateTdsConfig(valid({ daeVars: names(MAX_TDS_DAE_VARS + 1) }))).toHaveProperty(
+      'daeVars',
+    );
   });
 
   it('rejects empty vars list', () => {

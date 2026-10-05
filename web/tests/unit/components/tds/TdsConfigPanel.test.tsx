@@ -150,6 +150,23 @@ describe('<TdsConfigPanel />', () => {
     expect(screen.getByTestId('field-tds-config-tf')).toHaveValue('10');
   });
 
+  it('offers the ANDES variables beside the groups, and Reset forgets the ones picked', async () => {
+    const user = userEvent.setup();
+    useUiStore.getState().setTdsConfig({ daeVars: ['omega GENROU 1'] });
+    render(<TdsConfigPanel />);
+
+    const picker = screen.getByTestId('tds-config-dae-vars');
+    expect(picker).toBeInTheDocument();
+    expect(within(picker).getByTestId('tds-config-dae-chip-omega GENROU 1')).toBeInTheDocument();
+    // Without a case loaded there is nothing to list from, and it says so.
+    expect(within(picker).getByTestId('tds-config-dae-status')).toHaveTextContent('Load a case');
+
+    await user.click(screen.getByTestId('tds-config-reset'));
+
+    expect(useUiStore.getState().tdsConfig.daeVars).toEqual([]);
+    expect(screen.queryByTestId('tds-config-dae-chip-omega GENROU 1')).toBeNull();
+  });
+
   it('shows a validation error when max_rate_hz is non-positive', async () => {
     const user = userEvent.setup();
     render(<TdsConfigPanel />);

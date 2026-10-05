@@ -62,6 +62,14 @@ export type SaveCaseRequest = components['schemas']['SaveCaseRequest'];
 export type SaveCaseResponse = components['schemas']['SaveCaseResponse'];
 export type GeneratorOutput = components['schemas']['GeneratorOutput'];
 export type LoadConsumption = components['schemas']['LoadConsumption'];
+
+export type DaeVariableInfo = components['schemas']['DaeVariableInfo'];
+export type DaeVariableList = components['schemas']['DaeVariableList'];
+export type MetricsSeries = components['schemas']['MetricsSeries'];
+export type ResponseMetricsRequest = components['schemas']['ResponseMetricsRequest'];
+export type ResponseMetricsResponse = components['schemas']['ResponseMetricsResponse'];
+export type SeriesMetrics = components['schemas']['SeriesMetrics'];
+export type MetricExtremum = components['schemas']['MetricExtremum'];
 /** ANDES param value types in API request/response payloads. */
 export type ParamValue = number | string | boolean;
 

@@ -35,6 +35,11 @@ describe('seriesQuantity', () => {
       expect(seriesQuantity({ group, field: 'p' })).toBe('power');
     }
   });
+
+  it('calls an ANDES variable other, whatever its name: it has no unit the plot knows', () => {
+    expect(seriesQuantity({ group: 'dae', field: 'omega' })).toBe('other');
+    expect(seriesQuantity({ group: 'dae', field: 'vf' })).toBe('other');
+  });
 });
 
 describe('planGroupAxes', () => {
@@ -153,5 +158,26 @@ describe('scaleColumn', () => {
     expect(Array.from(scaled.slice(0, 2))).toEqual([10, 20]);
     expect(scaled[2]).toBeNaN();
     expect(Array.from(values.slice(0, 2))).toEqual([1, 2]);
+  });
+});
+
+describe('planGroupAxes: ANDES variables', () => {
+  it('gives the variable an axis named for it, unscaled, whatever the unit mode', () => {
+    for (const mode of ['pu', 'actual'] as const) {
+      const series = [planned('vf GENROU 1'), planned('vf GENROU 2')];
+      const plan = planGroupAxes('dae', series, mode);
+      expect(plan.axes).toEqual([
+        { quantity: 'other', scale: 'y', side: 'left', unit: '', label: 'vf' },
+      ]);
+      expect(plan.place(series[0]!)).toEqual({ scale: 'y', factor: 1 });
+    }
+  });
+
+  it('does not turn the speed of an ANDES variable named omega into hertz', () => {
+    // The bases are there and the mode asks for Hz: ``omega GENROU 1`` is still drawn as ANDES holds it.
+    const series = [planned('omega GENROU 1')];
+    const plan = planGroupAxes('dae', series, 'actual');
+    expect(plan.place(series[0]!).factor).toBe(1);
+    expect(plan.axes[0]!.label).toBe('omega');
   });
 });

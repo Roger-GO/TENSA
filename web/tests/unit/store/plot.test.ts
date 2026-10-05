@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_PLAYBACK_RATE,
   PLAYBACK_RATES,
+  chartKeyOf,
   chartTitle,
   findClosestFrameIdx,
   groupLabel,
@@ -27,6 +28,8 @@ function reset(): void {
     scrubByRun: {},
     playingByRun: {},
     playbackRate: DEFAULT_PLAYBACK_RATE,
+    cursorsByRun: {},
+    cursorsArmed: false,
   });
 }
 
@@ -257,6 +260,114 @@ describe('parseColumnName (smoke — full coverage lives in TimeSeriesPlot tests
   });
 });
 
+describe('parseColumnName: ANDES variables named as dae.x_name / dae.y_name name them', () => {
+  it('splits <variable> <Model> <idx> into the variable and the device', () => {
+    expect(parseColumnName('omega GENROU 1')).toEqual({
+      name: 'omega GENROU 1',
+      group: 'dae',
+      elementIdx: 'GENROU 1',
+      field: 'omega',
+    });
+    expect(parseColumnName('LL_x TGOV1 2')).toMatchObject({
+      group: 'dae',
+      elementIdx: 'TGOV1 2',
+      field: 'LL_x',
+    });
+    // A string idx that does not hold the model name keeps all of it.
+    expect(parseColumnName('delta GENROU G 2')).toMatchObject({
+      elementIdx: 'GENROU G 2',
+      field: 'delta',
+    });
+  });
+
+  it('leaves the streamed groups alone, whatever an idx holds', () => {
+    expect(parseColumnName('Bus_1_v')).toMatchObject({ group: 'bus_v' });
+    expect(parseColumnName('Gen_GENROU_1_omega')).toMatchObject({ group: 'gen_state' });
+    // A space inside an idx still belongs to the group's own column.
+    expect(parseColumnName('Bus_A 1_v')).toMatchObject({ group: 'bus_v', elementIdx: 'A 1' });
+  });
+
+  it('does not take a lone word or a variable and a model without a device for one', () => {
+    expect(parseColumnName('omega')).toBeNull();
+    expect(parseColumnName('omega GENROU')).toBeNull();
+  });
+});
+
+describe('chartKeyOf: which chart a series is drawn on', () => {
+  it('is the group for a streamed group', () => {
+    expect(chartKeyOf({ group: 'bus_v', field: 'a' })).toBe('bus_v');
+    expect(chartKeyOf({ group: 'line_flow', field: 'p' })).toBe('line_flow');
+  });
+
+  it('is one chart per variable for ANDES variables, so only like quantities share a scale', () => {
+    expect(chartKeyOf({ group: 'dae', field: 'omega' })).toBe('dae:omega');
+    expect(chartKeyOf({ group: 'dae', field: 'vf' })).toBe('dae:vf');
+  });
+});
+
+describe('plot store: A/B cursors', () => {
+  beforeEach(reset);
+  afterEach(reset);
+
+  it('places A, then B, and a third click starts over from A', () => {
+    const { placeCursor } = usePlotStore.getState();
+    placeCursor('r1', 1.0);
+    expect(usePlotStore.getState().cursorsByRun['r1']).toEqual({ a: 1.0, b: null });
+    placeCursor('r1', 3.0);
+    expect(usePlotStore.getState().cursorsByRun['r1']).toEqual({ a: 1.0, b: 3.0 });
+    placeCursor('r1', 2.0);
+    expect(usePlotStore.getState().cursorsByRun['r1']).toEqual({ a: 2.0, b: null });
+  });
+
+  it('keeps the cursors as placed: B may sit before A', () => {
+    usePlotStore.getState().placeCursor('r1', 5);
+    usePlotStore.getState().placeCursor('r1', 2);
+    expect(usePlotStore.getState().cursorsByRun['r1']).toEqual({ a: 5, b: 2 });
+  });
+
+  it('moves one cursor without touching the other, and takes one off with null', () => {
+    usePlotStore.getState().placeCursor('r1', 1);
+    usePlotStore.getState().placeCursor('r1', 2);
+    usePlotStore.getState().setCursor('r1', 'b', 2.5);
+    expect(usePlotStore.getState().cursorsByRun['r1']).toEqual({ a: 1, b: 2.5 });
+    usePlotStore.getState().setCursor('r1', 'a', null);
+    expect(usePlotStore.getState().cursorsByRun['r1']).toEqual({ a: null, b: 2.5 });
+  });
+
+  it('is per run', () => {
+    usePlotStore.getState().placeCursor('r1', 1);
+    usePlotStore.getState().placeCursor('r2', 9);
+    expect(usePlotStore.getState().cursorsByRun['r1']).toEqual({ a: 1, b: null });
+    expect(usePlotStore.getState().cursorsByRun['r2']).toEqual({ a: 9, b: null });
+  });
+
+  it('clearCursors takes both off one run', () => {
+    usePlotStore.getState().placeCursor('r1', 1);
+    usePlotStore.getState().placeCursor('r2', 2);
+    usePlotStore.getState().clearCursors('r1');
+    expect(usePlotStore.getState().cursorsByRun['r1']).toBeUndefined();
+    expect(usePlotStore.getState().cursorsByRun['r2']).toBeDefined();
+  });
+
+  it('click-to-place is off until asked for, for every run', () => {
+    expect(usePlotStore.getState().cursorsArmed).toBe(false);
+    usePlotStore.getState().setCursorsArmed(true);
+    expect(usePlotStore.getState().cursorsArmed).toBe(true);
+  });
+
+  it('resetRun and clearAll drop the cursors with the rest of the run, and leave the mode', () => {
+    usePlotStore.getState().setCursorsArmed(true);
+    usePlotStore.getState().placeCursor('r1', 1);
+    usePlotStore.getState().placeCursor('r2', 2);
+    usePlotStore.getState().resetRun('r1');
+    expect(usePlotStore.getState().cursorsByRun['r1']).toBeUndefined();
+    expect(usePlotStore.getState().cursorsByRun['r2']).toBeDefined();
+    usePlotStore.getState().clearAll();
+    expect(usePlotStore.getState().cursorsByRun).toEqual({});
+    expect(usePlotStore.getState().cursorsArmed).toBe(true);
+  });
+});
+
 describe('group labels are exhaustive over VarGroup', () => {
   const ALL_GROUPS: readonly VarGroup[] = [
     'bus_v',
@@ -264,6 +375,7 @@ describe('group labels are exhaustive over VarGroup', () => {
     'gen_power',
     'line_flow',
     'load_pq',
+    'dae',
   ];
 
   it('groupLabel returns a non-empty string for every group', () => {
@@ -345,6 +457,10 @@ describe('chartTitle', () => {
     expect(chartTitle('gen_state', fields('omega', 'delta'))).toBe(
       'Generator speed and rotor angle',
     );
+  });
+
+  it('names the chart of an ANDES variable for the variable', () => {
+    expect(chartTitle('dae', fields('omega'))).toBe('omega · ANDES variable');
   });
 
   it('leaves the groups that hold one kind of quantity with their group label', () => {

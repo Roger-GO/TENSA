@@ -27,11 +27,15 @@ import {
 export const PRIMARY_SCALE = 'y';
 export const SECONDARY_SCALE = 'y2';
 
-/** What a series measures. A chart gives each quantity it carries its own axis. */
-export type Quantity = 'voltage' | 'speed' | 'power' | 'angle';
+/**
+ * What a series measures. A chart gives each quantity it carries its own axis.
+ * ``other`` is an ANDES variable the run was asked for by name: it is drawn as
+ * ANDES holds it, in whatever unit that is, on an axis named for the variable.
+ */
+export type Quantity = 'voltage' | 'speed' | 'power' | 'angle' | 'other';
 
 /** The order axes are drawn in: the group's main quantity on the left, the angle on the right. */
-const AXIS_ORDER: readonly Quantity[] = ['voltage', 'speed', 'power', 'angle'];
+const AXIS_ORDER: readonly Quantity[] = ['voltage', 'speed', 'power', 'angle', 'other'];
 
 /** The quantity a series measures, from its group and field. */
 export function seriesQuantity(series: Pick<ParsedSeries, 'group' | 'field'>): Quantity {
@@ -40,6 +44,8 @@ export function seriesQuantity(series: Pick<ParsedSeries, 'group' | 'field'>): Q
       return series.field === 'a' ? 'angle' : 'voltage';
     case 'gen_state':
       return series.field === 'delta' ? 'angle' : 'speed';
+    case 'dae':
+      return 'other';
     default:
       return 'power';
   }
@@ -56,7 +62,7 @@ export interface AxisPlan {
   quantity: Quantity;
   /** The uPlot scale key the axis reads and the series on it name. */
   scale: string;
-  unit: DisplayUnit | '°' | 'MW';
+  unit: DisplayUnit | '°' | 'MW' | '';
   /** The axis title. */
   label: string;
   side: 'left' | 'right';
@@ -114,6 +120,14 @@ export function planGroupAxes(
         return { quantity, scale, side, unit: '°', label: angleLabel(group) };
       case 'power':
         return { quantity, scale, side, unit: 'MW', label: 'P (MW) / Q (MVAr)' };
+      case 'other':
+        return {
+          quantity,
+          scale,
+          side,
+          unit: '',
+          label: ofQuantity('other')[0]?.series.field ?? 'value',
+        };
     }
   });
 
@@ -131,6 +145,7 @@ export function planGroupAxes(
         case 'speed':
           return { scale, factor: inHz ? (bases?.freqHz ?? 1) : 1 };
         case 'power':
+        case 'other':
           return { scale, factor: 1 };
       }
     },

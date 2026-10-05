@@ -5,7 +5,7 @@
  *
  * 1. Open WS to ``/api/ws/{sessionId}`` (``binaryType = "arraybuffer"``).
  * 2. Wait for ``{type: "ready"}`` (the server sends it unprompted on connect).
- * 3. Send ``{type: "start_tds", tf, h, decimation: "mean", max_rate_hz: 30, vars}``
+ * 3. Send ``{type: "start_tds", tf, h, decimation: "mean", max_rate_hz: 30, vars, dae_vars}``
  *    OR (on resume) ``{type: "resume", run_id, last_seq}``.
  * 4. Wait for ``{type: "stream_start", run_id, metadata}`` — capture
  *    ``run_id`` and ``metadata.var_columns`` from the substrate. The column
@@ -106,6 +106,12 @@ export interface TdsArgs {
   /** Variable groups to stream. Defaults to ``["bus_v", "gen_state"]`` (voltage + frequency). */
   vars?: readonly VarGroup[];
   /**
+   * ANDES variables to stream as columns of their own, by the names
+   * ``dae.x_name`` / ``dae.y_name`` give them (``omega GENROU 1``). Each column
+   * is named exactly so in ``var_columns``. Left out when empty.
+   */
+  daeVars?: readonly string[];
+  /**
    * Unit 16 integrator selection. Optional — defaults to ``trapezoidal``
    * on the substrate. ``qndf`` enables the variable-step NDF method
    * (``ss.TDS.config.method = "qndf"``).
@@ -163,6 +169,8 @@ export interface StreamStartMetadata {
     fixed_step: number | null;
   };
   vars: VarGroup[];
+  /** The ANDES variables the run records, in column order (they are the last columns). */
+  dae_vars?: string[];
   var_columns: string[];
   bus_idx_values?: string[];
   syngen_idx_values?: string[];
@@ -528,7 +536,7 @@ export class RunStream {
       }
       this.send({ type: 'resume', run_id: this.runId, last_seq: this.rowCount });
     } else {
-      const { tf, h, vars, integrator, tdsConfigOverrides } = this.opts.tdsArgs;
+      const { tf, h, vars, daeVars, integrator, tdsConfigOverrides } = this.opts.tdsArgs;
       const payload: Record<string, unknown> = {
         type: 'start_tds',
         tf,
@@ -537,6 +545,7 @@ export class RunStream {
       };
       if (h !== undefined) payload.h = h;
       if (vars !== undefined) payload.vars = vars;
+      if (daeVars !== undefined && daeVars.length > 0) payload.dae_vars = daeVars;
       // Unit 16: integrator + adaptive overrides. Both are optional;
       // omit when undefined so the wire stays minimal for the default
       // trapezoidal-fixed-step path.

@@ -361,6 +361,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     const tdsArgs = {
       tf,
       vars,
+      ...(tdsConfig.daeVars.length === 0 ? {} : { daeVars: tdsConfig.daeVars }),
       ...(h === undefined ? {} : { h }),
       integrator: wireIntegrator,
       ...(tdsConfigOverrides === undefined ? {} : { tdsConfigOverrides }),

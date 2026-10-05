@@ -25,6 +25,9 @@ vi.mock('@/components/plots/ScrubControl', () => ({
 vi.mock('@/components/plots/VariableTreePicker', () => ({
   VariableTreePicker: () => <div data-testid="var-picker-stub" />,
 }));
+vi.mock('@/components/plots/ResponseMetricsPanel', () => ({
+  ResponseMetricsPanel: () => <div data-testid="metrics-stub" />,
+}));
 vi.mock('@/components/analyze/AnalyzePanel', () => ({
   AnalyzeEigSubMode: () => <div data-testid="analyze-eig-stub" />,
   AnalyzeCpfSubMode: () => <div data-testid="analyze-cpf-stub" />,
@@ -160,6 +163,34 @@ describe('<AnalysisTab />', () => {
       await user.click(screen.getByRole('button', { name: 'Expand plot' }));
 
       expect(useLayoutStore.getState().resultsViewActive).toBe(true);
+    });
+
+    it('keeps the response metrics closed until asked: they cost a request each time the plot changes', async () => {
+      const user = userEvent.setup();
+      render(<AnalysisTab activeSubTab="plot" onSubTabChange={() => {}} />);
+      const toggle = screen.getByTestId('plot-metrics-toggle');
+      expect(toggle).toHaveAccessibleName(/^Response metrics/);
+      expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByTestId('metrics-stub')).toBeNull();
+
+      await user.click(toggle);
+      expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      // The table is a chunk of its own, fetched when it is first opened.
+      expect(await screen.findByTestId('metrics-stub')).toBeInTheDocument();
+
+      await user.click(toggle);
+      expect(screen.queryByTestId('metrics-stub')).toBeNull();
+    });
+
+    it('keeps the variable picker mounted while it is closed, so the first plot is not empty', async () => {
+      const user = userEvent.setup();
+      render(<AnalysisTab activeSubTab="plot" onSubTabChange={() => {}} />);
+      const toggle = screen.getByTestId('plot-variables-toggle');
+
+      expect(screen.getByTestId('var-picker-stub')).toBeInTheDocument();
+      expect(screen.getByTestId('var-picker-stub').parentElement).toHaveClass('hidden');
+      await user.click(toggle);
+      expect(screen.getByTestId('var-picker-stub').parentElement).not.toHaveClass('hidden');
     });
 
     it('does not offer to expand a plot that already has the whole window', () => {

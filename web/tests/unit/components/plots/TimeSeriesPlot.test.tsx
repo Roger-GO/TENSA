@@ -12,13 +12,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, screen, act } from '@testing-library/react';
 
-const { constructSpy, destroySpy, setDataSpy, setCursorSpy, valToPosSpy, FakeUPlot } = vi.hoisted(
-  () => {
+const { constructSpy, destroySpy, setDataSpy, setCursorSpy, valToPosSpy, redrawSpy, FakeUPlot } =
+  vi.hoisted(() => {
     const constructSpy = vi.fn();
     const destroySpy = vi.fn();
     const setDataSpy = vi.fn();
     const setCursorSpy = vi.fn();
     const valToPosSpy = vi.fn();
+    const redrawSpy = vi.fn();
     class FakeUPlot {
       root: HTMLElement;
       constructor(opts: unknown, data: unknown, target: HTMLElement) {
@@ -40,15 +41,25 @@ const { constructSpy, destroySpy, setDataSpy, setCursorSpy, valToPosSpy, FakeUPl
         // was called with the right idx-derived t.)
         return val * 100;
       }
+      redraw(rebuildPaths?: boolean, recalcAxes?: boolean) {
+        redrawSpy(rebuildPaths, recalcAxes);
+      }
       setSize() {}
       destroy() {
         destroySpy();
         this.root.remove();
       }
     }
-    return { constructSpy, destroySpy, setDataSpy, setCursorSpy, valToPosSpy, FakeUPlot };
-  },
-);
+    return {
+      constructSpy,
+      destroySpy,
+      setDataSpy,
+      setCursorSpy,
+      valToPosSpy,
+      redrawSpy,
+      FakeUPlot,
+    };
+  });
 
 vi.mock('uplot', () => ({
   default: FakeUPlot,
@@ -168,6 +179,27 @@ describe('TimeSeriesPlot', () => {
     );
     expect(syncKeys[0]).toBe('tds-run-r1');
     expect(syncKeys[1]).toBe('tds-run-r1');
+  });
+
+  it('syncs the time axis between the stacked plots, and not the y scale', () => {
+    // The pointer, a drag-zoom and a double-click reset follow the time axis in
+    // every chart. A synced y scale would draw the pointer's horizontal line at
+    // the same y value in a chart of another quantity, where it means nothing.
+    seedRun('r1', ['Bus_1_v', 'Gen_1_omega']);
+    appendRows('r1', [0, 0.1], { Bus_1_v: [1.0, 1.0], Gen_1_omega: [1.0, 1.001] });
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v', 'Gen_1_omega']));
+    render(<TimeSeriesPlot />);
+
+    for (const call of constructSpy.mock.calls) {
+      const cursor = (
+        call[0] as {
+          cursor: { sync: { scales: unknown }; drag: { x: boolean; y: boolean } };
+        }
+      ).cursor;
+      expect(cursor.sync.scales).toEqual(['x', null]);
+      // A drag zooms time only.
+      expect(cursor.drag).toMatchObject({ x: true, y: false });
+    }
   });
 
   it('passes typed-array slices (zero-copy) into uPlot data', () => {
@@ -980,5 +1012,396 @@ describe('TimeSeriesPlot chart titles and toolbar', () => {
     seedBus(['Bus_1_v']);
     render(<TimeSeriesPlot />);
     expect(screen.getByRole('button', { name: 'Export plot' })).toBeInTheDocument();
+  });
+});
+
+describe('TimeSeriesPlot: ANDES variables', () => {
+  beforeEach(() => {
+    constructSpy.mockClear();
+    useRunsStore.setState({ runs: {}, activeRunId: null, overlayRunIds: new Set() });
+    usePlotStore.setState({
+      selectedByRun: {},
+      filterByRun: {},
+      expandedByRun: {},
+      scrubByRun: {},
+      playingByRun: {},
+      cursorsByRun: {},
+      cursorsArmed: false,
+    });
+    useUnitsStore.setState({ mode: 'pu' });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  function seedAndes() {
+    seedRun('r1', ['Bus_1_v', 'omega GENROU 1', 'omega GENROU 2', 'vf GENROU 1', 'vf GENROU 2']);
+    appendRows('r1', [0, 1], {
+      Bus_1_v: [1, 1],
+      'omega GENROU 1': [1, 1.001],
+      'omega GENROU 2': [1, 1.002],
+      'vf GENROU 1': [2.0, 2.1],
+      'vf GENROU 2': [2.0, 2.2],
+    });
+  }
+
+  it('draws one chart per ANDES variable, the devices of a variable together', () => {
+    seedAndes();
+    usePlotStore
+      .getState()
+      .setSelection(
+        'r1',
+        new Set(['omega GENROU 1', 'omega GENROU 2', 'vf GENROU 1', 'vf GENROU 2']),
+      );
+
+    render(<TimeSeriesPlot />);
+
+    expect(screen.getByTestId('time-series-plot-group-dae:omega')).toHaveTextContent(
+      'omega · ANDES variable',
+    );
+    expect(screen.getByTestId('time-series-plot-group-dae:vf')).toHaveTextContent(
+      'vf · ANDES variable',
+    );
+    expect(constructSpy).toHaveBeenCalledTimes(2);
+    const labels = constructSpy.mock.calls.map((c) =>
+      (c[0] as { series: { label: string }[] }).series.slice(1).map((s) => s.label),
+    );
+    expect(labels).toEqual([
+      ['omega GENROU 1', 'omega GENROU 2'],
+      ['vf GENROU 1', 'vf GENROU 2'],
+    ]);
+  });
+
+  it('draws them as ANDES holds them: an axis named for the variable, no scaling', () => {
+    seedRunWithBases('r1', ['omega GENROU 1'], { busKv: {}, freqHz: 60 });
+    appendRows('r1', [0, 1], { 'omega GENROU 1': [1, 1.001] });
+    usePlotStore.getState().setSelection('r1', new Set(['omega GENROU 1']));
+    // Actual units turn a streamed speed into hertz and leave this one alone.
+    useUnitsStore.setState({ mode: 'actual' });
+
+    render(<TimeSeriesPlot />);
+
+    const data = constructSpy.mock.calls[0]?.[1] as Float64Array[];
+    expect(Array.from(data[1]!)).toEqual([1, 1.001]);
+    const axes = (constructSpy.mock.calls[0]?.[0] as { axes: { label?: string }[] }).axes;
+    expect(axes.map((a) => a.label)).toEqual(['t (s)', 'omega']);
+  });
+
+  it('ranges the y axes so that a signal at rest, a hair off its value, cannot hang the ticks of uPlot', () => {
+    seedAndes();
+    usePlotStore.getState().setSelection('r1', new Set(['omega GENROU 1', 'Bus_1_v']));
+    render(<TimeSeriesPlot />);
+
+    const scalesOf = constructSpy.mock.calls.map(
+      (c) => (c[0] as { scales: Record<string, { range?: unknown }> }).scales,
+    );
+    expect(scalesOf).toHaveLength(2);
+    for (const scales of scalesOf) {
+      expect(typeof scales['y']!.range).toBe('function');
+      expect(scales['x']).toEqual({ time: false });
+    }
+  });
+
+  it('draws them beside the streamed groups of the same run', () => {
+    seedAndes();
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v', 'vf GENROU 1']));
+
+    render(<TimeSeriesPlot />);
+
+    expect(screen.getByTestId('time-series-plot-group-bus_v')).toBeInTheDocument();
+    expect(screen.getByTestId('time-series-plot-group-dae:vf')).toBeInTheDocument();
+  });
+});
+
+describe('TimeSeriesPlot: A/B cursors', () => {
+  beforeEach(() => {
+    constructSpy.mockClear();
+    redrawSpy.mockClear();
+    useRunsStore.setState({ runs: {}, activeRunId: null, overlayRunIds: new Set() });
+    usePlotStore.setState({
+      selectedByRun: {},
+      filterByRun: {},
+      expandedByRun: {},
+      scrubByRun: {},
+      playingByRun: {},
+      cursorsByRun: {},
+      cursorsArmed: false,
+    });
+    useUnitsStore.setState({ mode: 'pu' });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  function seedVolts() {
+    seedRun('r1', ['Bus_1_v', 'Bus_1_a']);
+    appendRows('r1', [0, 1, 2], {
+      Bus_1_v: [1.0, 0.9, 0.8],
+      Bus_1_a: [0, Math.PI / 18, Math.PI / 9],
+    });
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v', 'Bus_1_a']));
+  }
+
+  it('shows no readout until a cursor is placed', () => {
+    seedVolts();
+    render(<TimeSeriesPlot />);
+
+    expect(screen.getByTestId('plot-cursors-toggle')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByTestId('cursor-readout')).toBeNull();
+    expect(screen.queryByTestId('plot-cursors-clear')).toBeNull();
+  });
+
+  it('shows the readout from the moment the mode is on, so placing A does not move the charts', async () => {
+    seedVolts();
+    const user = userEvent.setup();
+    render(<TimeSeriesPlot />);
+    expect(screen.queryByTestId('cursor-readout')).toBeNull();
+
+    await user.click(screen.getByTestId('plot-cursors-toggle'));
+
+    expect(screen.getByTestId('cursor-readout')).toBeInTheDocument();
+    // The rows are there, blank, with the same number of lines they will have.
+    const before = screen.getAllByRole('row').length;
+    expect(
+      screen.getByTestId('cursor-readout-row-bus_v:1').querySelectorAll('td')[1],
+    ).toHaveTextContent('–');
+    act(() => usePlotStore.getState().placeCursor('r1', 0.5));
+    expect(screen.getAllByRole('row')).toHaveLength(before);
+    expect(
+      screen.getByTestId('cursor-readout-row-bus_v:1').querySelectorAll('td')[1],
+    ).toHaveTextContent('0.95');
+
+    // Turning the mode off with nothing placed takes the readout away again.
+    act(() => usePlotStore.getState().clearCursors('r1'));
+    await user.click(screen.getByTestId('plot-cursors-toggle'));
+    expect(screen.queryByTestId('cursor-readout')).toBeNull();
+  });
+
+  it('keeps the readout of cursors that are placed after the mode is turned off', async () => {
+    seedVolts();
+    const user = userEvent.setup();
+    render(<TimeSeriesPlot />);
+    await user.click(screen.getByTestId('plot-cursors-toggle'));
+    act(() => usePlotStore.getState().placeCursor('r1', 1));
+
+    await user.click(screen.getByTestId('plot-cursors-toggle'));
+
+    expect(screen.getByTestId('cursor-readout-a')).toHaveTextContent('A 1 s');
+  });
+
+  it('turns the click-to-place mode on and off, and says what a click does', async () => {
+    seedVolts();
+    const user = userEvent.setup();
+    render(<TimeSeriesPlot />);
+
+    await user.click(screen.getByTestId('plot-cursors-toggle'));
+
+    expect(usePlotStore.getState().cursorsArmed).toBe(true);
+    expect(screen.getByTestId('plot-cursors-toggle')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('plot-cursors-hint')).toHaveTextContent(
+      'Click the plot to place cursor A',
+    );
+    expect(screen.getByTestId('time-series-plot-group-bus_v')).toHaveAttribute(
+      'data-cursors-armed',
+      'true',
+    );
+
+    act(() => usePlotStore.getState().placeCursor('r1', 0.5));
+    expect(screen.getByTestId('plot-cursors-hint')).toHaveTextContent(
+      'Click again to place cursor B',
+    );
+
+    await user.click(screen.getByTestId('plot-cursors-toggle'));
+    expect(usePlotStore.getState().cursorsArmed).toBe(false);
+    expect(screen.queryByTestId('plot-cursors-hint')).toBeNull();
+  });
+
+  it('says how to zoom time on every chart while the mode is off, and what a click does while it is on', async () => {
+    seedVolts();
+    const user = userEvent.setup();
+    render(<TimeSeriesPlot />);
+    expect(screen.getByTestId('plot-zoom-hint')).toHaveTextContent(
+      'Drag a chart to zoom time on all of them, double-click to reset',
+    );
+
+    await user.click(screen.getByTestId('plot-cursors-toggle'));
+
+    expect(screen.queryByTestId('plot-zoom-hint')).toBeNull();
+    expect(screen.getByTestId('plot-cursors-hint')).toBeInTheDocument();
+  });
+
+  it('keeps the controls out of a PNG export, and the readout in it', () => {
+    seedVolts();
+    act(() => usePlotStore.getState().placeCursor('r1', 0.5));
+    render(<TimeSeriesPlot />);
+
+    expect(screen.getByTestId('plot-cursor-controls')).toHaveAttribute('data-export-ignore');
+    expect(screen.getByTestId('cursor-readout').closest('[data-export-ignore]')).toBeNull();
+  });
+
+  it('reads every plotted series at each cursor, in the units the chart shows', () => {
+    seedVolts();
+    act(() => {
+      usePlotStore.getState().placeCursor('r1', 0.5);
+      usePlotStore.getState().placeCursor('r1', 1.5);
+    });
+    render(<TimeSeriesPlot />);
+
+    expect(screen.getByTestId('cursor-readout-a')).toHaveTextContent('A 0.5 s');
+    expect(screen.getByTestId('cursor-readout-b')).toHaveTextContent('B 1.5 s');
+    expect(screen.getByTestId('cursor-readout-dt')).toHaveTextContent('Δt 1 s');
+    const volts = screen.getByTestId('cursor-readout-row-bus_v:1');
+    expect(volts).toHaveTextContent('Bus_1_v');
+    expect(volts).toHaveTextContent('V (pu)');
+    // 0.95 at A, 0.85 at B: down 0.1 over 1 s.
+    const cells = Array.from(volts.querySelectorAll('td')).map((td) => td.textContent);
+    expect(cells.slice(1)).toEqual(['0.95', '0.85', '-0.1', '-0.1']);
+    // The angle is plotted in degrees, so it is read in degrees: 5 and 15 at A and B.
+    const angle = screen.getByTestId('cursor-readout-row-bus_v:2');
+    expect(angle).toHaveTextContent('θ (°)');
+    expect(
+      Array.from(angle.querySelectorAll('td'))
+        .map((td) => td.textContent)
+        .slice(1, 4),
+    ).toEqual(['5', '15', '10']);
+  });
+
+  it('reads in kV where the chart is in kV', () => {
+    seedRunWithBases('r1', ['Bus_1_v'], { busKv: { '1': 230 }, freqHz: 60 });
+    appendRows('r1', [0, 1], { Bus_1_v: [1.0, 0.9] });
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v']));
+    useUnitsStore.setState({ mode: 'actual' });
+    act(() => usePlotStore.getState().placeCursor('r1', 0));
+    render(<TimeSeriesPlot />);
+
+    const row = screen.getByTestId('cursor-readout-row-bus_v:1');
+    expect(row).toHaveTextContent('V (kV)');
+    expect(row.querySelectorAll('td')[1]).toHaveTextContent('230');
+  });
+
+  it('shows what one cursor has and leaves the difference blank', () => {
+    seedVolts();
+    act(() => usePlotStore.getState().placeCursor('r1', 1));
+    render(<TimeSeriesPlot />);
+
+    expect(screen.getByTestId('cursor-readout-b')).toHaveTextContent('B –');
+    expect(screen.getByTestId('cursor-readout-dt')).toHaveTextContent('Δt –');
+    const cells = Array.from(
+      screen.getByTestId('cursor-readout-row-bus_v:1').querySelectorAll('td'),
+    ).map((td) => td.textContent);
+    expect(cells.slice(1)).toEqual(['0.9', '–', '–', '–']);
+  });
+
+  it('reads B minus A, so a B placed before A shows negative time and the opposite change', () => {
+    seedVolts();
+    act(() => {
+      usePlotStore.getState().placeCursor('r1', 1.5);
+      usePlotStore.getState().placeCursor('r1', 0.5);
+    });
+    render(<TimeSeriesPlot />);
+
+    expect(screen.getByTestId('cursor-readout-dt')).toHaveTextContent('Δt -1 s');
+    const cells = Array.from(
+      screen.getByTestId('cursor-readout-row-bus_v:1').querySelectorAll('td'),
+    ).map((td) => td.textContent);
+    expect(cells.slice(1)).toEqual(['0.85', '0.95', '0.1', '-0.1']);
+  });
+
+  it('clears the cursors with the Clear button', async () => {
+    seedVolts();
+    act(() => usePlotStore.getState().placeCursor('r1', 1));
+    const user = userEvent.setup();
+    render(<TimeSeriesPlot />);
+
+    await user.click(screen.getByTestId('plot-cursors-clear'));
+
+    expect(usePlotStore.getState().cursorsByRun['r1']).toBeUndefined();
+    expect(screen.queryByTestId('cursor-readout')).toBeNull();
+  });
+
+  it('gives every chart a cursor plugin that places cursors on the active run', () => {
+    seedVolts();
+    act(() => usePlotStore.getState().setCursorsArmed(true));
+    render(<TimeSeriesPlot />);
+
+    const options = constructSpy.mock.calls[0]?.[0] as {
+      plugins?: { hooks: { ready?: (u: unknown) => void } }[];
+    };
+    expect(options.plugins).toHaveLength(1);
+    const over = document.createElement('div');
+    over.getBoundingClientRect = () => ({ left: 0 }) as DOMRect;
+    options.plugins![0]!.hooks.ready!({ over, posToVal: (px: number) => px / 100 });
+    over.dispatchEvent(new MouseEvent('mousedown', { clientX: 150, bubbles: true }));
+    over.dispatchEvent(new MouseEvent('mouseup', { clientX: 150, bubbles: true }));
+
+    expect(usePlotStore.getState().cursorsByRun['r1']).toEqual({ a: 1.5, b: null });
+  });
+
+  it('does not rebuild the chart to move a cursor: the plugin is redrawn instead', () => {
+    seedVolts();
+    render(<TimeSeriesPlot />);
+    expect(constructSpy).toHaveBeenCalledTimes(1);
+    redrawSpy.mockClear();
+
+    act(() => usePlotStore.getState().placeCursor('r1', 1));
+
+    expect(constructSpy).toHaveBeenCalledTimes(1);
+    // Without rebuilding the paths, and with the axes measured again.
+    expect(redrawSpy).toHaveBeenCalledTimes(1);
+    expect(redrawSpy).toHaveBeenCalledWith(false, true);
+  });
+
+  it('does not redraw a chart it has just built: uPlot has still to make its first draw', () => {
+    // A redraw that skips the axes, right after construction, left uPlot drawing axes
+    // it had never measured (a TypeError in the browser, not in a stand-in).
+    seedVolts();
+    act(() => usePlotStore.getState().placeCursor('r1', 1));
+    redrawSpy.mockClear();
+
+    render(<TimeSeriesPlot />);
+
+    expect(constructSpy).toHaveBeenCalled();
+    expect(redrawSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not redraw for a render in which no cursor moved', () => {
+    seedVolts();
+    render(<TimeSeriesPlot />);
+    redrawSpy.mockClear();
+
+    act(() =>
+      useRunsStore.getState().appendFrame('r1', {
+        t: Float64Array.of(3),
+        columns: { Bus_1_v: Float64Array.of(0.7), Bus_1_a: Float64Array.of(1) },
+      }),
+    );
+
+    expect(redrawSpy).not.toHaveBeenCalled();
+  });
+
+  it('follows the mode and the cursors through the plugin without being rebuilt', () => {
+    seedVolts();
+    render(<TimeSeriesPlot />);
+    const plugin = (
+      constructSpy.mock.calls[0]?.[0] as {
+        plugins: { hooks: { draw: (u: unknown) => void; ready: (u: unknown) => void } }[];
+      }
+    ).plugins[0]!;
+    // Mode off at build time; turned on afterwards: a click must still place.
+    const over = document.createElement('div');
+    over.getBoundingClientRect = () => ({ left: 0 }) as DOMRect;
+    plugin.hooks.ready({ over, posToVal: (px: number) => px / 100 });
+    over.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, bubbles: true }));
+    over.dispatchEvent(new MouseEvent('mouseup', { clientX: 100, bubbles: true }));
+    expect(usePlotStore.getState().cursorsByRun['r1']).toBeUndefined();
+
+    act(() => usePlotStore.getState().setCursorsArmed(true));
+    over.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, bubbles: true }));
+    over.dispatchEvent(new MouseEvent('mouseup', { clientX: 100, bubbles: true }));
+
+    expect(usePlotStore.getState().cursorsByRun['r1']).toEqual({ a: 1, b: null });
+    expect(constructSpy).toHaveBeenCalledTimes(1);
   });
 });

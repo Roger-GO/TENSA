@@ -8,8 +8,9 @@
  * - When `session` clears, `case` and `pflow` clear too.
  * - When `case` changes, `pflow` and the EIG / CPF / SE results clear
  *   (results don't carry across cases), the disturbances scheduled for the next
- *   TDS run clear (they name the old case's buses), the power-flow options go
- *   back to the defaults, and the active TDS run is released.
+ *   TDS run clear (they name the old case's buses), the ANDES variables picked
+ *   for it clear (they name its devices), the power-flow options go back to the
+ *   defaults, and the active TDS run is released.
  *   The finished runs themselves stay: they are results only this tab holds,
  *   and comparing a run on one case with a run on a modified copy is a normal
  *   workflow. They go when the session ends.
@@ -39,6 +40,7 @@ import { useDisturbanceStore } from './disturbance';
 import { useSweepStore } from './sweep';
 import { useJobsStore } from './jobs';
 import { useAnalyzeStore } from './analyze';
+import { useUiStore } from './ui';
 
 // Re-export slices so consumers have one import surface.
 export { useSessionStore } from './session';
@@ -97,7 +99,8 @@ export function wireStoreCascade(): void {
   });
 
   // case change → pflow + analysis results + connectivity + pmu + profiles +
-  // scheduled disturbances clear, the power-flow options go back to the defaults
+  // scheduled disturbances + the ANDES variables picked for the next run clear,
+  // the power-flow options go back to the defaults
   // (a setting made to rescue one case should not follow the user to the next),
   // and the active TDS run is released. Triggered on selection change
   // OR clear. Connectivity is bus-idx keyed and a new case has a new bus set,
@@ -124,6 +127,9 @@ export function wireStoreCascade(): void {
       usePmuStore.getState().clear();
       useProfilesStore.getState().clear();
       useDisturbanceStore.getState().clearDisturbances();
+      // The ANDES variables picked for the next run are names of the old
+      // case's devices.
+      useUiStore.getState().setTdsConfig({ daeVars: [] });
     }
     prevSelection = next;
   });
@@ -182,6 +188,7 @@ export function __resetCascadeForTests(): void {
   usePmuStore.setState({ pmus: [] });
   useProfilesStore.setState({ profiles: [] });
   useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
+  useUiStore.getState().setTdsConfig({ daeVars: [] });
   useSweepStore.setState({ sweeps: {}, activeSweepId: null });
   useJobsStore.setState({ jobs: {} });
 }

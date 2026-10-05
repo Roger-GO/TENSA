@@ -44,14 +44,25 @@ export interface TdsConfig {
   h: number | null;
   /** Variable groups to stream. At least one required. */
   vars: readonly TdsVarGroup[];
+  /**
+   * ANDES variables to stream on top of the groups, by the names ``dae.x_name`` /
+   * ``dae.y_name`` give them (``omega GENROU 1``); each becomes a column named
+   * exactly that. Names belong to the loaded case, so the case-change cascade
+   * (``store/index.ts``) empties the list.
+   */
+  daeVars: readonly string[];
   /** UI-side output-rate clamp forwarded to the substrate. */
   maxRateHz: number;
 }
+
+/** The most ANDES variables one run records (the substrate refuses more). */
+export const MAX_TDS_DAE_VARS = 1000;
 
 export const DEFAULT_TDS_CONFIG: TdsConfig = {
   tf: 10,
   h: null,
   vars: ['bus_v', 'gen_state'],
+  daeVars: [],
   maxRateHz: 30,
 };
 
@@ -243,6 +254,9 @@ export function validateTdsConfig(draft: TdsConfig): Record<string, string> {
   }
   if (draft.vars.length === 0) {
     out.vars = 'Select at least one variable group';
+  }
+  if (draft.daeVars.length > MAX_TDS_DAE_VARS) {
+    out.daeVars = `A run records at most ${MAX_TDS_DAE_VARS} ANDES variables`;
   }
   if (!Number.isFinite(draft.maxRateHz)) {
     out.maxRateHz = 'Enter a finite number';

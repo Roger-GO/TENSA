@@ -1646,18 +1646,18 @@ describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () =>
    * tests never exercise: the RunButton merge of the structured QNDF preset
    * with the free-form editor dict + the trapezoidal/empty gating.
    */
-  async function captureStartTdsOverrides(): Promise<unknown> {
+  async function captureStartTds(): Promise<Record<string, unknown>> {
     seedReady();
     useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
     fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
 
-    const captured: { value: unknown; seen: boolean } = { value: undefined, seen: false };
+    const captured: { value: Record<string, unknown>; seen: boolean } = { value: {}, seen: false };
     server.on('connection', (socket) => {
       socket.send(JSON.stringify({ type: 'ready' }));
       socket.on('message', (raw: unknown) => {
         const msg = JSON.parse(String(raw)) as Record<string, unknown>;
         if (msg.type === 'start_tds') {
-          captured.value = msg.tds_config_overrides;
+          captured.value = msg;
           captured.seen = true;
           socket.close({ code: 1000 });
         }
@@ -1670,6 +1670,10 @@ describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () =>
     await userEvent.click(screen.getByTestId('run-tds-button'));
     await waitFor(() => expect(captured.seen).toBe(true));
     return captured.value;
+  }
+
+  async function captureStartTdsOverrides(): Promise<unknown> {
+    return (await captureStartTds()).tds_config_overrides;
   }
 
   beforeEach(async () => {
@@ -1746,6 +1750,23 @@ describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () =>
     useUiStore.getState().setTdsConfigOverrides({ max_iter: 25 });
     const overrides = await captureStartTdsOverrides();
     expect(overrides).toEqual({ max_iter: 25 });
+  });
+
+  it('no ANDES variables picked → no dae_vars key on the wire', async () => {
+    const start = await captureStartTds();
+    expect(start).not.toHaveProperty('dae_vars');
+  });
+
+  it('ANDES variables picked → sent as dae_vars, in the order picked, beside the groups', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsConfig({ daeVars: ['vf GENROU 2', 'omega GENROU 1'] });
+    try {
+      const start = await captureStartTds();
+      expect(start.dae_vars).toEqual(['vf GENROU 2', 'omega GENROU 1']);
+      expect(start.vars).toEqual(['bus_v', 'gen_state']);
+    } finally {
+      useUiStore.getState().setTdsConfig({ daeVars: [] });
+    }
   });
 });
 

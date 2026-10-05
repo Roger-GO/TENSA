@@ -3,8 +3,14 @@ import type { ReactNode } from 'react';
 import type uPlot from 'uplot';
 import { useShallow } from 'zustand/react/shallow';
 import { useRunsStore } from '@/store/runs';
-import { usePlotStore, parseColumnName, chartTitle, findClosestFrameIdx } from '@/store/plot';
-import type { ParsedSeries, VarGroup } from '@/store/plot';
+import {
+  usePlotStore,
+  parseColumnName,
+  chartKeyOf,
+  chartTitle,
+  findClosestFrameIdx,
+} from '@/store/plot';
+import type { DeltaCursors, ParsedSeries, VarGroup } from '@/store/plot';
 import type { RunRecord } from '@/store/runs';
 import { useUnitsStore } from '@/store/units';
 import type { UnitMode } from '@/lib/units';
@@ -15,6 +21,10 @@ import type { AlignedRuns } from './multiRunAlign';
 import { resolveOverlayRuns } from './overlayRuns';
 import { SECONDARY_SCALE, planGroupAxes, scaleColumn } from './axes';
 import type { AxisPlan, GroupAxes, PlannedSeries } from './axes';
+import { deltaCursorPlugin } from './cursorPlugin';
+import { CursorControls, CursorReadout } from './CursorReadout';
+import { buildCursorRows } from './cursorRows';
+import { yScales } from './yRange';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { RUN_VALUES_UNITS_COMMENT, timeSeriesToCsv } from '@/components/export/exportToCsv';
@@ -153,6 +163,21 @@ export const PALETTE_DARK: readonly string[] = [
   'oklch(0.65 0.16 295)', // purple
 ];
 
+/**
+ * What the stacked charts share through their sync key: the time axis, so the
+ * pointer, a drag-zoom and a double-click reset in one chart apply to every chart.
+ * Not the y scale: each chart reads a different quantity, so the same y value
+ * means nothing in another chart, and uPlot would draw the pointer's horizontal
+ * line at that value there (its default syncs the first series' scale).
+ */
+const SYNC_SCALES: [string, null] = ['x', null];
+
+/** Stroke colours of the A and B cursor lines on each theme. */
+const CURSOR_COLORS: Record<ResolvedTheme, { a: string; b: string }> = {
+  light: { a: 'oklch(0.5 0.2 265)', b: 'oklch(0.55 0.22 28)' },
+  dark: { a: 'oklch(0.75 0.17 265)', b: 'oklch(0.75 0.17 28)' },
+};
+
 /** Pick a stable color from the palette by series-name hash. */
 function colorFor(name: string, theme: ResolvedTheme): string {
   const palette = theme === 'dark' ? PALETTE_DARK : PALETTE_LIGHT;
@@ -234,10 +259,11 @@ function buildGroupChart(
     series,
     scales: {
       x: { time: false },
+      ...yScales(plan.axes),
     },
     axes: axesOptions(plan),
     cursor: {
-      sync: { key: syncKey, setSeries: false },
+      sync: { key: syncKey, setSeries: false, scales: SYNC_SCALES },
       drag: { x: true, y: false, uni: 50 },
     },
     legend: { show: true },
@@ -328,10 +354,11 @@ function buildMultiRunGroupChart(
     series,
     scales: {
       x: { time: false },
+      ...yScales(plan.axes),
     },
     axes: axesOptions(plan),
     cursor: {
-      sync: { key: syncKey, setSeries: false },
+      sync: { key: syncKey, setSeries: false, scales: SYNC_SCALES },
       drag: { x: true, y: false, uni: 50 },
     },
     legend: { show: true },
@@ -388,7 +415,9 @@ function EmptyPlotMessage({ message }: { message: string }) {
  * the chart (series labels and colours, scales, axes, the sync key), so
  * comparing their JSON is enough to tell "same chart, new data" from "the
  * series set, theme or sync key changed". Options must stay plain data
- * (no formatter functions) for this to be a faithful comparison.
+ * (no formatter functions) for this to be a faithful comparison; the one
+ * function they hold, the y range (``yRange.ts``), is the same module-level
+ * function every time, so leaving it out of the comparison hides nothing.
  */
 function useStableOptions(options: uPlot.Options): uPlot.Options {
   const stable = useRef<{ key: string; options: uPlot.Options } | null>(null);
@@ -408,24 +437,65 @@ function useStableOptions(options: uPlot.Options): uPlot.Options {
  * pointer, and the plot's data tail is the head of stream.
  */
 function GroupChart({
-  group,
+  chartKey,
   title,
   note,
   options,
   data,
   run,
   scrubT,
+  cursors,
+  cursorsArmed,
+  onPlaceCursor,
+  theme,
 }: {
-  group: VarGroup;
+  chartKey: string;
   title: string;
   note: string | null;
   options: uPlot.Options;
   data: uPlot.AlignedData;
   run: RunRecord;
   scrubT: number | null;
+  cursors: DeltaCursors;
+  cursorsArmed: boolean;
+  onPlaceCursor: (t: number) => void;
+  theme: ResolvedTheme;
 }) {
   const uplotRef = useRef<uPlot | null>(null);
   const stableOptions = useStableOptions(options);
+
+  // The cursor plugin is built once per chart and reads what it needs from this
+  // ref when it draws or is clicked, so the cursors, the mode and the theme can
+  // change without rebuilding the chart (``options`` must stay plain data for
+  // ``useStableOptions``, and the plugin is functions).
+  const cursorSource = useRef({ cursors, armed: cursorsArmed, place: onPlaceCursor, theme });
+  cursorSource.current = { cursors, armed: cursorsArmed, place: onPlaceCursor, theme };
+  const withCursors = useMemo<uPlot.Options>(
+    () => ({
+      ...stableOptions,
+      plugins: [
+        deltaCursorPlugin({
+          cursors: () => cursorSource.current.cursors,
+          armed: () => cursorSource.current.armed,
+          place: (t) => cursorSource.current.place(t),
+          colors: () => CURSOR_COLORS[cursorSource.current.theme],
+        }),
+      ],
+    }),
+    [stableOptions],
+  );
+  // The lines are drawn by the plugin; a moved cursor needs one more draw. Not
+  // when the chart has just been built: uPlot is still to make its first draw, and
+  // a ``redraw`` that does not recalculate the axes would cancel the sizing that
+  // draw does, leaving it with axes it never measured. When it is needed the axes
+  // are recalculated, as they are for the first draw.
+  const drawnFor = useRef({ a: cursors.a, b: cursors.b, theme });
+  useEffect(() => {
+    const was = drawnFor.current;
+    if (was.a === cursors.a && was.b === cursors.b && was.theme === theme) return;
+    drawnFor.current = { a: cursors.a, b: cursors.b, theme };
+    uplotRef.current?.redraw(false, true);
+  }, [cursors.a, cursors.b, theme]);
 
   useEffect(() => {
     const inst = uplotRef.current;
@@ -466,9 +536,13 @@ function GroupChart({
 
   return (
     <div
-      key={group}
-      data-testid={`time-series-plot-group-${group}`}
-      className="border-border flex min-h-[260px] flex-1 flex-col overflow-hidden rounded border"
+      key={chartKey}
+      data-testid={`time-series-plot-group-${chartKey}`}
+      data-cursors-armed={cursorsArmed ? 'true' : 'false'}
+      className={cn(
+        'border-border flex min-h-[260px] flex-1 flex-col overflow-hidden rounded border',
+        cursorsArmed ? '[&_.u-over]:cursor-crosshair' : '',
+      )}
     >
       <div
         className={cn(
@@ -479,7 +553,7 @@ function GroupChart({
         <span className="text-foreground font-medium whitespace-nowrap">{title}</span>
         {note !== null ? (
           <span
-            data-testid={`time-series-plot-axes-${group}`}
+            data-testid={`time-series-plot-axes-${chartKey}`}
             className="text-muted-foreground truncate"
           >
             {note}
@@ -491,12 +565,7 @@ function GroupChart({
           absolutely: ``UPlot`` sizes itself to this box, and a box that grew
           with the chart would make it grow again. */}
       <div className="relative min-h-0 flex-1">
-        <UPlot
-          options={stableOptions}
-          data={data}
-          uplotRef={uplotRef}
-          className="absolute inset-0"
-        />
+        <UPlot options={withCursors} data={data} uplotRef={uplotRef} className="absolute inset-0" />
       </div>
     </div>
   );
@@ -540,20 +609,38 @@ export function TimeSeriesPlot({
   const scrubT = usePlotStore((s) =>
     effectiveRunId ? (s.scrubByRun[effectiveRunId] ?? null) : null,
   );
+  const storedCursors = usePlotStore((s) =>
+    effectiveRunId ? s.cursorsByRun[effectiveRunId] : undefined,
+  );
+  const cursorsArmed = usePlotStore((s) => s.cursorsArmed);
+  const placeCursor = usePlotStore((s) => s.placeCursor);
+  const cursors = useMemo<DeltaCursors>(
+    () => ({ a: storedCursors?.a ?? null, b: storedCursors?.b ?? null }),
+    [storedCursors],
+  );
+  const onPlaceCursor = useCallback(
+    (t: number) => {
+      if (effectiveRunId) placeCursor(effectiveRunId, t);
+    },
+    [effectiveRunId, placeCursor],
+  );
   const caseName = useExportCaseName();
   const containerRef = useRef<HTMLDivElement>(null);
   const unitMode = useUnitsStore((s) => s.mode);
 
-  // Group the selected series by VarGroup using the column-name parser.
-  // In single-run mode we use the run's columnNames for stable order;
+  // Group the selected series by chart (``chartKeyOf``: a streamed group is one
+  // chart, an ANDES variable is one chart per variable) using the column-name
+  // parser. In single-run mode we use the run's columnNames for stable order;
   // in multi-run mode we use the union of column names across overlay
   // runs (still ordered by primary run first, then any extras).
   //
   // Keyed on the column lists rather than the runs, so a streamed frame does
   // not redo the walk over every column name (1208 on the WECC case).
   const groupedSelections = useMemo(() => {
-    if (columnLists.length === 0 || !selected) return new Map<VarGroup, ParsedSeries[]>();
-    const groups = new Map<VarGroup, ParsedSeries[]>();
+    if (columnLists.length === 0 || !selected) {
+      return new Map<string, { group: VarGroup; series: ParsedSeries[] }>();
+    }
+    const groups = new Map<string, { group: VarGroup; series: ParsedSeries[] }>();
     const seen = new Set<string>();
     const orderedNames: string[] = [];
     for (const columnNames of columnLists) {
@@ -567,9 +654,10 @@ export function TimeSeriesPlot({
       if (!selected.has(name)) continue;
       const parsed = parseColumnName(name);
       if (!parsed) continue;
-      const bucket = groups.get(parsed.group);
-      if (bucket) bucket.push(parsed);
-      else groups.set(parsed.group, [parsed]);
+      const key = chartKeyOf(parsed);
+      const bucket = groups.get(key);
+      if (bucket) bucket.series.push(parsed);
+      else groups.set(key, { group: parsed.group, series: [parsed] });
     }
     return groups;
   }, [columnLists, selected]);
@@ -634,16 +722,17 @@ export function TimeSeriesPlot({
   const charts = useMemo(() => {
     if (overlayRuns.length === 0) return [];
     const out: Array<{
-      group: VarGroup;
+      key: string;
       title: string;
       note: string | null;
       options: uPlot.Options;
       data: uPlot.AlignedData;
+      axes: readonly AxisPlan[];
     }> = [];
     // One time axis serves every stacked chart, so merge the runs' timelines
     // once here and not once per group.
     const aligned = isMultiRun && groupedSelections.size > 0 ? alignRuns(overlayRuns) : null;
-    for (const [group, series] of groupedSelections) {
+    for (const [key, { group, series }] of groupedSelections) {
       const title = chartTitle(group, new Set(series.map((p) => p.field)));
       if (aligned) {
         const { axes, ...chart } = buildMultiRunGroupChart(
@@ -655,7 +744,7 @@ export function TimeSeriesPlot({
           colorMode,
           unitMode,
         );
-        out.push({ group, title, note: axesNote(axes, false), ...chart });
+        out.push({ key, title, note: axesNote(axes, false), axes, ...chart });
       } else {
         const { axes, ...chart } = buildGroupChart(
           primaryRun!,
@@ -665,7 +754,7 @@ export function TimeSeriesPlot({
           resolvedTheme,
           unitMode,
         );
-        out.push({ group, title, note: axesNote(axes, true), ...chart });
+        out.push({ key, title, note: axesNote(axes, true), axes, ...chart });
       }
     }
     return out;
@@ -684,6 +773,17 @@ export function TimeSeriesPlot({
     resolvedTheme,
     unitMode,
   ]);
+
+  // The value of every plotted series under each cursor, in the units the charts
+  // show. Read from the charts' own data, so it needs no unit logic of its own.
+  // The readout is there from the moment the mode is turned on, not from the
+  // first click: it sits above the charts, and one that appeared when A was placed
+  // would push them down from under the pointer on its way to placing B.
+  const showReadout = cursorsArmed || cursors.a !== null || cursors.b !== null;
+  const cursorRows = useMemo(
+    () => (showReadout ? buildCursorRows(charts, cursors) : []),
+    [charts, cursors, showReadout],
+  );
 
   if (!effectiveRunId || overlayRuns.length === 0) {
     return (
@@ -728,6 +828,7 @@ export function TimeSeriesPlot({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Toolbar>{toolbar}</Toolbar>
+          <CursorControls runId={effectiveRunId} />
           {isMultiRun ? (
             <div
               data-testid="time-series-plot-legend"
@@ -749,16 +850,21 @@ export function TimeSeriesPlot({
           onExportPng={onExportPng}
         />
       </div>
-      {charts.map(({ group, title, note, options, data }) => (
+      {showReadout ? <CursorReadout cursors={cursors} rows={cursorRows} /> : null}
+      {charts.map(({ key, title, note, options, data }) => (
         <GroupChart
-          key={group}
-          group={group}
+          key={key}
+          chartKey={key}
           title={title}
           note={note}
           options={options}
           data={data}
           run={primaryRun!}
           scrubT={scrubT}
+          cursors={cursors}
+          cursorsArmed={cursorsArmed}
+          onPlaceCursor={onPlaceCursor}
+          theme={resolvedTheme}
         />
       ))}
     </div>

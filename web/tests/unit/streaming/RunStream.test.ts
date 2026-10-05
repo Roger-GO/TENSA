@@ -244,6 +244,94 @@ describe('RunStream — frames name no columns', () => {
     expect(Array.from(r.columns.Gen_1_omega!.subarray(0, 3))).toEqual([1.0, 1.001, 1.002]);
   });
 
+  it('asks for ANDES variables by name and files their columns under those names', async () => {
+    const onDone = vi.fn();
+    const sent: Record<string, unknown>[] = [];
+    server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.on('message', (raw: unknown) => {
+        const msg = JSON.parse(String(raw)) as Record<string, unknown>;
+        sent.push(msg);
+        if (msg.type !== 'start_tds') return;
+        socket.send(
+          JSON.stringify({
+            type: 'stream_start',
+            run_id: 'r1',
+            metadata: {
+              schema_version: '2.0',
+              vars: ['bus_v'],
+              dae_vars: ['omega GENROU 1', 'vf GENROU 2'],
+              var_columns: ['Bus_1_v', 'Bus_1_a', 'omega GENROU 1', 'vf GENROU 2'],
+            },
+          }),
+        );
+        socket.send(
+          batch([0.0, 0.1], {
+            Bus_1_v: [1.0, 0.99],
+            Bus_1_a: [0, -0.1],
+            'omega GENROU 1': [1.0, 1.001],
+            'vf GENROU 2': [2.5, 2.6],
+          }),
+        );
+        socket.send(JSON.stringify({ type: 'done', converged: true, final_t: 0.1 }));
+        socket.close({ code: 1000 });
+      });
+    });
+
+    const stream = new RunStream(
+      {
+        sessionId: SESSION_ID,
+        wsUrl: WS_URL,
+        tdsArgs: { tf: 0.1, vars: ['bus_v'], daeVars: ['omega GENROU 1', 'vf GENROU 2'] },
+        onDone,
+      },
+      { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
+    );
+    stream.start();
+    for (let i = 0; i < 10 && onDone.mock.calls.length === 0; i += 1) await tick();
+
+    expect(sent[0]).toMatchObject({
+      type: 'start_tds',
+      vars: ['bus_v'],
+      dae_vars: ['omega GENROU 1', 'vf GENROU 2'],
+    });
+    const r = useRunsStore.getState().runs.r1!;
+    expect(r.columnNames).toEqual(['Bus_1_v', 'Bus_1_a', 'omega GENROU 1', 'vf GENROU 2']);
+    expect(Array.from(r.columns['omega GENROU 1']!.subarray(0, 2))).toEqual([1.0, 1.001]);
+    expect(Array.from(r.columns['vf GENROU 2']!.subarray(0, 2))).toEqual([2.5, 2.6]);
+  });
+
+  it('leaves dae_vars off the wire when there are none to ask for', async () => {
+    const onDone = vi.fn();
+    const sent: Record<string, unknown>[] = [];
+    server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.on('message', (raw: unknown) => {
+        const msg = JSON.parse(String(raw)) as Record<string, unknown>;
+        sent.push(msg);
+        if (msg.type !== 'start_tds') return;
+        socket.send(
+          JSON.stringify({
+            type: 'stream_start',
+            run_id: 'r1',
+            metadata: { schema_version: '2.0', vars: ['bus_v'], var_columns: ['Bus_1_v'] },
+          }),
+        );
+        socket.send(JSON.stringify({ type: 'done', converged: true, final_t: 0.1 }));
+        socket.close({ code: 1000 });
+      });
+    });
+
+    const stream = new RunStream(
+      { sessionId: SESSION_ID, wsUrl: WS_URL, tdsArgs: { tf: 0.1, daeVars: [] }, onDone },
+      { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
+    );
+    stream.start();
+    for (let i = 0; i < 10 && onDone.mock.calls.length === 0; i += 1) await tick();
+
+    expect(sent[0]).not.toHaveProperty('dae_vars');
+  });
+
   it('records the unit bases the run was launched with on the run', async () => {
     const onDone = vi.fn();
     serveRun(['Bus_1_v'], [batch([0.0], { Bus_1_v: [1.0] })]);

@@ -34,6 +34,9 @@ import { cn } from '@/lib/cn';
  * idx when parseable, falling back to lexicographic. Series within an
  * element are sorted by their stable column-list order in the run.
  */
+/** Series of one kind (bus voltages, named ANDES variables) a run's plot starts with. */
+const MAX_DEFAULT_SERIES = 12;
+
 export interface VariableTreePickerProps {
   /** Override active run id (mostly for tests). */
   runId?: string;
@@ -61,7 +64,9 @@ function compareElementIdx(a: string, b: string): number {
   const na = Number(a);
   const nb = Number(b);
   if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
-  return a.localeCompare(b);
+  // Numeric collation, so ``GENROU 10`` follows ``GENROU 9`` (ANDES variables
+  // name their device ``<Model> <idx>``).
+  return a.localeCompare(b, undefined, { numeric: true });
 }
 
 /**
@@ -123,7 +128,7 @@ function buildTree(columnNames: readonly string[], filter: string): GroupBucket[
     else elementMap.set(parsed.elementIdx, [parsed]);
   }
 
-  const groupOrder: VarGroup[] = ['bus_v', 'gen_state', 'gen_power', 'line_flow', 'load_pq'];
+  const groupOrder: VarGroup[] = ['bus_v', 'gen_state', 'gen_power', 'line_flow', 'load_pq', 'dae'];
   const out: GroupBucket[] = [];
   for (const g of groupOrder) {
     const elementMap = groupMap.get(g);
@@ -216,18 +221,24 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
   }, [pickerRunIds, pickerColumns, filter]);
 
   // Auto-select bus voltages the first time a run's columns appear, so the
-  // plot shows the headline result immediately instead of an empty chart.
-  // Only fires when nothing has been selected yet (``selected === undefined``)
-  // so it never overrides the user's choices, and caps the count so a large
-  // system doesn't flood the plot.
+  // plot shows the headline result immediately instead of an empty chart, and
+  // the ANDES variables the run was asked for by name, which the user picked
+  // for this plot. Only fires when nothing has been selected yet
+  // (``selected === undefined``) so it never overrides the user's choices, and
+  // caps each count so a large system doesn't flood the plot.
   useEffect(() => {
     if (!effectiveRunId || !columnNames || selected !== undefined) return;
     const defaults: string[] = [];
+    let buses = 0;
+    let named = 0;
     for (const name of columnNames) {
       const p = parseColumnName(name);
-      if (p && p.group === 'bus_v' && p.field === 'v') {
+      if (p && p.group === 'bus_v' && p.field === 'v' && buses < MAX_DEFAULT_SERIES) {
         defaults.push(name);
-        if (defaults.length >= 12) break;
+        buses += 1;
+      } else if (p && p.group === 'dae' && named < MAX_DEFAULT_SERIES) {
+        defaults.push(name);
+        named += 1;
       }
     }
     if (defaults.length > 0) setSelection(effectiveRunId, new Set(defaults));

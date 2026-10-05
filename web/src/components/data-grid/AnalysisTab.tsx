@@ -26,6 +26,7 @@
  * ``onSubTabChange`` callback that performs the dual write.
  */
 import { Suspense, useState } from 'react';
+import type { ReactNode } from 'react';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { cn } from '@/lib/cn';
 import { lazyNamed } from '@/lib/lazyNamed';
@@ -56,6 +57,13 @@ const AnalyzeCpfSubMode = lazyNamed(
 const AnalyzeSeSubMode = lazyNamed(
   () => import('@/components/analyze/AnalyzePanel'),
   'AnalyzeSeSubMode',
+);
+
+// The response-metrics table is opened on demand, from the Plot sub-tab, and
+// asks the substrate for its numbers: it loads when it is first opened.
+const ResponseMetricsPanel = lazyNamed(
+  () => import('@/components/plots/ResponseMetricsPanel'),
+  'ResponseMetricsPanel',
 );
 
 const SUB_TAB_LABELS: Record<AnalysisSubTab, string> = {
@@ -194,6 +202,7 @@ export function AnalysisTab({ activeSubTab, onSubTabChange, className }: Analysi
  */
 function PlotPanelContent() {
   const [showVars, setShowVars] = useState(false);
+  const [showMetrics, setShowMetrics] = useState(false);
   const resultsViewActive = useLayoutStore((s) => s.resultsViewActive);
   const setResultsViewActive = useLayoutStore((s) => s.setResultsViewActive);
   const activeRunId = useRunsStore((s) => s.activeRunId);
@@ -231,46 +240,104 @@ function PlotPanelContent() {
         />
       </div>
       <ScrubControl />
-      <div className="border-border shrink-0 rounded border">
-        <button
-          type="button"
-          onClick={() => setShowVars((v) => !v)}
-          data-testid="plot-variables-toggle"
-          aria-expanded={showVars}
+      <PlotSection
+        toggleTestId="plot-variables-toggle"
+        title="Choose variables"
+        detail={`${selectedCount} selected`}
+        open={showVars}
+        onToggle={() => setShowVars((v) => !v)}
+        // Keep the picker MOUNTED even while collapsed (just hidden) so its
+        // auto-select-bus-voltages effect still runs and the chart isn't
+        // empty on first view.
+        keepMounted
+        bodyClassName="max-h-44"
+      >
+        <VariableTreePicker />
+      </PlotSection>
+      <PlotSection
+        toggleTestId="plot-metrics-toggle"
+        title="Response metrics"
+        detail="nadir, rate of change, settling, overshoot, damping"
+        open={showMetrics}
+        onToggle={() => setShowMetrics((v) => !v)}
+        bodyClassName="max-h-64"
+      >
+        <Suspense fallback={<LoadingPanel />}>
+          <ResponseMetricsPanel />
+        </Suspense>
+      </PlotSection>
+    </div>
+  );
+}
+
+/**
+ * A collapsible box under the plot: a header button that opens and closes it, and
+ * the body. A section the plot depends on while closed (the variable picker)
+ * stays mounted and is only hidden; one that does work while shown (the response
+ * metrics ask the substrate) is not mounted until it is opened.
+ */
+function PlotSection({
+  toggleTestId,
+  title,
+  detail,
+  open,
+  onToggle,
+  keepMounted = false,
+  bodyClassName,
+  children,
+}: {
+  toggleTestId: string;
+  title: string;
+  detail: string;
+  open: boolean;
+  onToggle: () => void;
+  keepMounted?: boolean;
+  bodyClassName: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="border-border shrink-0 rounded border">
+      <button
+        type="button"
+        onClick={onToggle}
+        data-testid={toggleTestId}
+        aria-expanded={open}
+        className={cn(
+          'text-muted-foreground hover:text-foreground flex w-full items-center justify-between',
+          'px-2.5 py-1.5 text-xs font-medium',
+          'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+        )}
+      >
+        <span>
+          {title}
+          <span className="font-normal"> · {detail}</span>
+        </span>
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 16 16"
+          width="12"
+          height="12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={cn('transition-transform', open ? 'rotate-180' : '')}
+        >
+          <path d="M4 6l4 4 4-4" />
+        </svg>
+      </button>
+      {open || keepMounted ? (
+        <div
           className={cn(
-            'text-muted-foreground hover:text-foreground flex w-full items-center justify-between',
-            'px-2.5 py-1.5 text-xs font-medium',
-            'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+            'border-border overflow-auto border-t',
+            bodyClassName,
+            open ? '' : 'hidden',
           )}
         >
-          <span>
-            Choose variables
-            <span className="font-normal"> · {selectedCount} selected</span>
-          </span>
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 16 16"
-            width="12"
-            height="12"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={cn('transition-transform', showVars ? 'rotate-180' : '')}
-          >
-            <path d="M4 6l4 4 4-4" />
-          </svg>
-        </button>
-        {/* Keep the picker MOUNTED even while collapsed (just hidden) so its
-            auto-select-bus-voltages effect still runs and the chart isn't
-            empty on first view. */}
-        <div
-          className={cn('border-border max-h-44 overflow-auto border-t', showVars ? '' : 'hidden')}
-        >
-          <VariableTreePicker />
+          {children}
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
