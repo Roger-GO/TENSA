@@ -123,6 +123,31 @@ export function compactJournal(
   return out.filter((e, i) => !(e.op === 'reload' && out[i + 1]?.op === 'reload'));
 }
 
+/**
+ * Params the substrate holds as one value though the schema lists them as two. A
+ * GENROU's inertia is ``M`` (= 2H) and an edit may name it as either, but not both
+ * in one request, so the newer of the two replaces the older when edits merge.
+ */
+const ONE_VALUE: Readonly<Record<string, readonly string[]>> = { GENROU: ['H', 'M'] };
+
+/**
+ * The params of two back-to-back edits to one element as one edit: the newer value
+ * of a param wins, and so does the newer of two names for one value (H typed, then
+ * M: only M is replayed, since the pair is refused). Pure.
+ */
+export function mergeEditParams(
+  model: string,
+  older: Record<string, ParamValue>,
+  newer: Record<string, ParamValue>,
+): Record<string, ParamValue> {
+  const merged = { ...older };
+  const names = ONE_VALUE[model];
+  if (names?.some((name) => name in newer)) {
+    for (const name of names) delete merged[name];
+  }
+  return { ...merged, ...newer };
+}
+
 /** True when ``op`` is the user's own work rather than bookkeeping. */
 export function isWorkOp(op: JournalOp): boolean {
   return WORK_OPS.has(op.op);
@@ -215,7 +240,11 @@ export const useEditJournalStore = create<EditJournalState>((set, get) => ({
     const prev = entries[entries.length - 1];
     if (op.op === 'edit' && prev?.op === 'edit' && prev.model === op.model && prev.idx === op.idx) {
       // Edits to one element, back to back, are one edit.
-      entries[entries.length - 1] = { ...prev, params: { ...prev.params, ...op.params }, rev };
+      entries[entries.length - 1] = {
+        ...prev,
+        params: mergeEditParams(op.model, prev.params, op.params),
+        rev,
+      };
     } else {
       entries.push({ ...op, rev });
     }

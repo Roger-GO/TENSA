@@ -61,6 +61,28 @@ describe('record', () => {
     expect(entries[0]).toMatchObject({ op: 'edit', params: { Vn: 230, v0: 1.02 }, rev: 2 });
   });
 
+  it('keeps one name for the inertia of a machine when edits to it merge, the newer winning', () => {
+    // The server refuses H and M in one request, so a merged {H, M} would stop a replay.
+    record(
+      { op: 'edit', model: 'GENROU', idx: 'G1', params: { H: 7, D: 1 } },
+      { op: 'edit', model: 'GENROU', idx: 'G1', params: { M: 15 } },
+    );
+    expect(useEditJournalStore.getState().entries).toHaveLength(1);
+    expect(useEditJournalStore.getState().entries[0]).toMatchObject({
+      params: { D: 1, M: 15 },
+    });
+
+    useEditJournalStore.getState().reset();
+    record(
+      { op: 'edit', model: 'GENROU', idx: 'G1', params: { M: 15 } },
+      { op: 'edit', model: 'GENROU', idx: 'G1', params: { H: 7 } },
+      { op: 'edit', model: 'GENROU', idx: 'G1', params: { xd: 1.9 } },
+    );
+    expect(useEditJournalStore.getState().entries[0]).toMatchObject({
+      params: { H: 7, xd: 1.9 },
+    });
+  });
+
   it('does not merge edits to different elements, or edits with something between them', () => {
     record(
       { op: 'edit', model: 'Bus', idx: '1', params: { Vn: 230 } },

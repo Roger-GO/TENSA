@@ -16,7 +16,8 @@
  * of the case file: the switch is in the bar.
  *
  * ANDES holds a GENROU's inertia as ``M`` (= 2H), and engineers think in ``H``, so
- * a GENROU has both columns: ``H`` is ``M`` over two, and typing one sets ``M``.
+ * a GENROU has both columns: ``H`` is ``M`` over two, and typing one sets ``M``. A
+ * block that covers both is written as one of them (``settleInertia``).
  *
  * Row click selects the device in the diagram and the Inspector as a click on it
  * there does: a machine as the generator at its idx (the Generators table does the
@@ -86,7 +87,45 @@ const FAMILIES: Record<ModelFamily, FamilySpec> = {
   },
 };
 
-const MACHINE_TARGET: GridEditTarget<ModelRow> = { model: (r) => r.kind, idx: (r) => r.idx };
+/** Two numbers that say the same inertia, allowing for the rounding a spreadsheet adds. */
+function sameInertia(a: number, b: number): boolean {
+  return a === b || Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b));
+}
+
+/**
+ * A GENROU's table has H and M, and a block that covers both (a copy of the table
+ * pasted back, a row of it) names the inertia twice, which the server refuses in one
+ * edit. One of them goes, and it is the one that says nothing new:
+ *
+ * - they agree (M = 2H): M goes on its own;
+ * - one still matches the machine's held value and the other does not: the one that
+ *   changed is the edit, so H tweaked in a spreadsheet beside an old M is H;
+ * - both changed and disagree: there is no telling which was meant, so nothing is
+ *   written and the reason says so.
+ */
+function settleInertia(
+  row: ModelRow,
+  params: Record<string, ParamValue>,
+): Record<string, ParamValue> {
+  const { H: h, M: m, ...rest } = params;
+  if (row.kind !== 'GENROU' || typeof h !== 'number' || typeof m !== 'number') return params;
+  if (sameInertia(2 * h, m)) return { ...rest, M: m };
+  const held = row.params.M;
+  if (typeof held === 'number') {
+    if (sameInertia(m, held)) return { ...rest, H: h };
+    if (sameInertia(2 * h, held)) return { ...rest, M: m };
+  }
+  throw new Error(
+    `H and M disagree (M is 2H): H of ${h} makes M ${2 * h}, and M is ${m}. Change one of them.`,
+  );
+}
+
+const MACHINE_TARGET: GridEditTarget<ModelRow> = {
+  model: (r) => r.kind,
+  idx: (r) => r.idx,
+  dynamic: true,
+  settle: settleInertia,
+};
 const CONTROLLER_TARGET: GridEditTarget<ModelRow> = { ...MACHINE_TARGET, controllers: true };
 
 /**

@@ -40,6 +40,15 @@ vi.mock('@/api/queries', async () => {
   return { ...actual, useCurrentTopology: () => mockTopology };
 });
 
+const toastMock = vi.hoisted(() => ({
+  success: vi.fn(),
+  info: vi.fn(),
+  warning: vi.fn(),
+  error: vi.fn(),
+  dismiss: vi.fn(),
+}));
+vi.mock('@/lib/toast', () => ({ toast: toastMock }));
+
 interface Row {
   id: string;
   model: string;
@@ -157,6 +166,41 @@ describe('useGridEditing: writing before a run', () => {
     ]);
     expect(result).toEqual({ applied: 3, failed: false });
     expect(latest.error).toBeNull();
+  });
+
+  it('lets the table settle the cells of each device before the first is written, and writes nothing when it cannot', async () => {
+    const settle = vi.fn((row: Row, params: Record<string, number | string | boolean>) => {
+      if (row.id === 'G2') throw new Error('H and M disagree.');
+      const { H: _h, ...rest } = params;
+      return rest;
+    });
+    mount({ ...TARGET, settle });
+    let result;
+    await act(async () => {
+      result = await latest.commit([
+        edit(GENROU, 'H', 7),
+        edit(GENROU, 'M', 14),
+        edit(GENROU, 'D', 1),
+      ]);
+    });
+    // The device's cells went to settle as one set, and what it returned was sent.
+    expect(settle).toHaveBeenCalledWith(GENROU, { H: 7, M: 14, D: 1 });
+    expect(puts()).toEqual([['/sessions/s1/elements/GENROU/G1', { params: { M: 14, D: 1 } }]]);
+    expect(result).toEqual({ applied: 3, failed: false });
+
+    client.put.mockClear();
+    const clash: Row = { id: 'G2', model: 'GENROU' };
+    await act(async () => {
+      result = await latest.commit([
+        edit(GENROU, 'D', 2),
+        edit(clash, 'H', 7),
+        edit(clash, 'M', 15),
+      ]);
+    });
+    // G1 comes first in the batch and is fine, but G2 cannot be settled: nothing is written.
+    expect(client.put).not.toHaveBeenCalled();
+    expect(result).toEqual({ applied: 0, failed: true });
+    expect(latest.error).toMatch(/^Could not set H, M of GENROU G2\. H and M disagree\./);
   });
 
   it('sends one request per device, in the order given', async () => {
@@ -414,6 +458,16 @@ describe('useGridEditing: after a run', () => {
     expect(latest.lockedReason).toBeNull();
     expect(latest.hint).toBeUndefined();
   });
+
+  it('says that a dynamic model reads on the system base once the case is set up, and a static table does not', () => {
+    const { unmount } = mount({ ...TARGET, dynamic: true });
+    expect(latest.lockedReason).toMatch(/The case is set up for a run/);
+    expect(latest.lockedReason).toMatch(/shown on the system base/);
+    unmount();
+
+    mount();
+    expect(latest.lockedReason).not.toMatch(/system base/);
+  });
 });
 
 describe('useGridEditing: controllers', () => {
@@ -447,6 +501,31 @@ describe('useGridEditing: controllers', () => {
     expect(result).toEqual({ applied: 2, failed: false });
     // The reset button is for a locked table, and this one is not.
     expect(screen.queryByTestId('grid-reset-run')).not.toBeInTheDocument();
+  });
+
+  it('warns that a block pasted once the case is set up is written as typed, not on the system base the table shows', async () => {
+    mockTopology = topology('committed');
+    useCaseStore.setState({ editMode: 'edit' });
+    mount(CONTROLLER_TARGET);
+    await act(async () => {
+      await latest.commit([edit(EXCITER, 'KA', 50)]);
+    });
+    // One typed value is what its author means.
+    expect(toastMock.warning).not.toHaveBeenCalled();
+    await act(async () => {
+      await latest.commit([edit(EXCITER, 'KA', 50), edit(EXCITER, 'TA', 0.1)]);
+    });
+    expect(toastMock.warning).toHaveBeenCalledTimes(1);
+    expect(toastMock.warning).toHaveBeenCalledWith(expect.stringContaining('system base'));
+  });
+
+  it('does not warn about the base while the case is not set up yet', async () => {
+    useCaseStore.setState({ editMode: 'edit' });
+    mount(CONTROLLER_TARGET);
+    await act(async () => {
+      await latest.commit([edit(EXCITER, 'KA', 50), edit(EXCITER, 'TA', 0.1)]);
+    });
+    expect(toastMock.warning).not.toHaveBeenCalled();
   });
 
   it('is locked after a run outside Edit mode, and says how to unlock it both ways', () => {

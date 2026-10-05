@@ -7,7 +7,9 @@
  * - **Not started.** The values are written to the System in memory with
  *   ``PUT /elements/{model}/{idx}`` (``useEditElement``). The cells of one
  *   device are sent in one request, so a set that has to be in order (the
- *   reactances of a machine) is judged as a set.
+ *   reactances of a machine) is judged as a set. A table whose model has two
+ *   columns for one value (a machine's H and M) settles them first, through
+ *   ``GridEditTarget.settle``, since the server refuses both in one request.
  * - **Controllers in Edit mode.** An exciter or a governor is written to a copy
  *   of the case file with ``PUT /case/clone/params/...`` (``useCloneEdit``), which
  *   reads the case again from the copy, so it works after a run too. The clone
@@ -36,6 +38,7 @@ import {
 import type { ParamValue } from '@/api/types';
 import { Button } from '@/components/ui/button';
 import { EditModeToggle } from '@/components/inspector/EditModeToggle';
+import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';
@@ -54,6 +57,21 @@ export interface GridEditTarget<Row> {
    * the Edit mode switch.
    */
   controllers?: boolean;
+  /**
+   * The rows are dynamic models (machines, exciters, governors; set with
+   * ``controllers``). ANDES holds their values on the machine's own base and a
+   * case that is set up reads them on the system base, so a locked table says so,
+   * and so does a block pasted into controllers in Edit mode.
+   */
+  dynamic?: boolean;
+  /**
+   * Settles the params of one device's cells before they are sent as one request,
+   * for a model whose table has two columns that set one value (a machine's H and
+   * M). ``row`` is the device as the table shows it. It throws an ``Error`` whose
+   * message is the reason when the cells cannot be settled, and then nothing of
+   * the batch is written.
+   */
+  settle?: (row: Row, params: Record<string, ParamValue>) => Record<string, ParamValue>;
 }
 
 const EDIT_HINT = 'Double-click a value to change it, or paste values copied from a spreadsheet.';
@@ -62,6 +80,9 @@ const CONTROLLER_EDIT_HINT = `${EDIT_HINT} Edit mode keeps controller changes th
 
 const CLONE_HINT =
   'Edit mode: double-click a value to change it. A change goes to a copy of the case file and the case is read again from it, which drops values changed before Edit mode was on. Once the case is set up its values are shown on the system base, so a value can read differently from the one typed.';
+
+const PASTE_BASE_WARNING =
+  "Pasted values are written as typed, on each controller's own base. This table shows the case on the system base, so values copied from it come back different wherever the two bases differ.";
 
 const STREAMING_REASON = 'A run is streaming. Values can be changed when it ends.';
 
@@ -72,6 +93,9 @@ const LOCKED_REASON =
 
 const CONTROLLER_LOCKED_REASON =
   'The case is set up for a run (a run or a change in Edit mode does that), which locks these values. Turn on Edit mode to change controller values, or reset the run to change them as before; resetting discards the changes made so far.';
+
+const BASE_NOTE =
+  'The values of a case that is set up are shown on the system base, which can differ from the ones in the file.';
 
 /** What the server or the client said about a refused write, as a sentence. */
 function reasonOf(err: unknown): string {
@@ -84,15 +108,17 @@ function reasonOf(err: unknown): string {
   return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
-interface ElementGroup {
+interface ElementGroup<Row> {
   model: string;
   idx: string;
+  /** The device's row, as the table showed it when the cells were edited. */
+  row: Row;
   params: Record<string, ParamValue>;
   count: number;
 }
 
 export function useGridEditing<Row>(target: GridEditTarget<Row>): GridEditing<Row> {
-  const { model: modelOf, idx: idxOf, controllers = false } = target;
+  const { model: modelOf, idx: idxOf, controllers = false, dynamic = controllers, settle } = target;
   const queryClient = useQueryClient();
   const topology = useCurrentTopology();
   const schema = useTopologySchema();
@@ -128,6 +154,7 @@ export function useGridEditing<Row>(target: GridEditTarget<Row>): GridEditing<Ro
       route = 'element';
     } else {
       lockedReason = controllers ? CONTROLLER_LOCKED_REASON : LOCKED_REASON;
+      if (dynamic) lockedReason = `${lockedReason} ${BASE_NOTE}`;
       lockedByRun = true;
     }
   }
@@ -164,15 +191,23 @@ export function useGridEditing<Row>(target: GridEditTarget<Row>): GridEditing<Ro
             throw new Error('The values cannot be changed now.');
           }
           if (route === 'element') {
-            const groups = new Map<string, ElementGroup>();
+            const groups = new Map<string, ElementGroup<Row>>();
             for (const e of edits) {
               const model = modelOf(e.row);
               const idx = idxOf(e.row);
               const key = `${model}\u0000${idx}`;
-              const group = groups.get(key) ?? { model, idx, params: {}, count: 0 };
+              const group = groups.get(key) ?? { model, idx, row: e.row, params: {}, count: 0 };
               group.params[e.column.edit?.param ?? e.column.key] = e.value;
               group.count += 1;
               groups.set(key, group);
+            }
+            // Every device's cells are settled before the first is written, so a
+            // block that cannot be settled writes nothing.
+            if (settle !== undefined) {
+              for (const group of groups.values()) {
+                writing = `${Object.keys(group.params).join(', ')} of ${group.model} ${group.idx}`;
+                group.params = settle(group.row, group.params);
+              }
             }
             for (const group of groups.values()) {
               writing = `${Object.keys(group.params).join(', ')} of ${group.model} ${group.idx}`;
@@ -185,6 +220,9 @@ export function useGridEditing<Row>(target: GridEditTarget<Row>): GridEditing<Ro
               applied += group.count;
             }
           } else {
+            if (dynamic && edits.length > 1 && state !== 'pre-setup') {
+              toast.warning(PASTE_BASE_WARNING);
+            }
             for (const e of edits) {
               const model = modelOf(e.row);
               const idx = idxOf(e.row);
@@ -223,7 +261,7 @@ export function useGridEditing<Row>(target: GridEditTarget<Row>): GridEditing<Ro
       chain.current = result;
       return result;
     },
-    [sessionId, route, modelOf, idxOf, editElement, cloneEdit, queryClient],
+    [sessionId, route, state, dynamic, settle, modelOf, idxOf, editElement, cloneEdit, queryClient],
   );
 
   const dismissError = useCallback(() => setError(null), []);

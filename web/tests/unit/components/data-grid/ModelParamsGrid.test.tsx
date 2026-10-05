@@ -268,6 +268,100 @@ describe('<MachinesGrid />', () => {
     ]);
   });
 
+  describe('a block that covers both H and M', () => {
+    /** The text of the first machine's row, as a copy of the table would carry it. */
+    async function pasteAtH(user: ReturnType<typeof userEvent.setup>, text: string) {
+      // Heading order: idx, name, bus, gen, Sn, Vn, H, D, M, ...
+      await user.click(cell('machines', 'GENROU-G1', 'H'));
+      fireEvent.paste(screen.getByTestId('machines-grid'), {
+        clipboardData: { getData: () => text },
+      });
+      await waitFor(() => expect(client.put).toHaveBeenCalled());
+    }
+
+    it('sends M alone when the two agree, as a pasted copy of the row does', async () => {
+      const user = userEvent.setup();
+      render(<MachinesGrid />);
+      await pasteAtH(user, '6.5\t0.5\t13\n');
+      expect(puts()).toEqual([['/sessions/s1/elements/GENROU/G1', { params: { D: 0.5, M: 13 } }]]);
+    });
+
+    it('sends H when H was changed beside an M that still reads as held', async () => {
+      const user = userEvent.setup();
+      render(<MachinesGrid />);
+      await pasteAtH(user, '7\t0\t13\n');
+      expect(puts()).toEqual([['/sessions/s1/elements/GENROU/G1', { params: { D: 0, H: 7 } }]]);
+    });
+
+    it('sends M when M was changed beside an H that still reads as held', async () => {
+      const user = userEvent.setup();
+      render(<MachinesGrid />);
+      await pasteAtH(user, '6.5\t0\t15\n');
+      expect(puts()).toEqual([['/sessions/s1/elements/GENROU/G1', { params: { D: 0, M: 15 } }]]);
+    });
+
+    it("takes a spreadsheet's rounding of M = 2H as agreement", async () => {
+      const user = userEvent.setup();
+      render(<MachinesGrid />);
+      await pasteAtH(user, '7\t0\t14.000000000000002\n');
+      expect(puts()).toEqual([
+        ['/sessions/s1/elements/GENROU/G1', { params: { D: 0, M: 14.000000000000002 } }],
+      ]);
+    });
+
+    it('writes nothing, and says why, when both changed and disagree', async () => {
+      const user = userEvent.setup();
+      render(<MachinesGrid />);
+      await user.click(cell('machines', 'GENROU-G1', 'H'));
+      fireEvent.paste(screen.getByTestId('machines-grid'), {
+        // G1's block (a reactance that would have been fine) and G2's, whose H and M clash.
+        clipboardData: { getData: () => '6.5\t0\t13\n7\t\t15\n' },
+      });
+      expect(await screen.findByTestId('machines-grid-edit-error')).toHaveTextContent(
+        'Could not set H, M of GENROU G2. H and M disagree (M is 2H): H of 7 makes M 14, and M is 15. Change one of them.',
+      );
+      expect(client.put).not.toHaveBeenCalled();
+    });
+
+    it('puts a copy of the whole table back as one accepted request for each machine', async () => {
+      const user = userEvent.setup();
+      render(<MachinesGrid />);
+      const first = cell('machines', 'GENROU-G1', 'idx');
+      await user.click(first);
+      await user.keyboard('{Control>}a{/Control}');
+      const setData = vi.fn();
+      fireEvent.copy(screen.getByTestId('machines-grid'), {
+        clipboardData: { setData },
+      });
+      const copied = setData.mock.calls[0]?.[1] as string;
+      expect(copied).toContain('6.5');
+
+      await user.click(first);
+      fireEvent.paste(screen.getByTestId('machines-grid'), {
+        clipboardData: { getData: () => copied },
+      });
+      await waitFor(() => expect(client.put).toHaveBeenCalledTimes(2));
+      const sent = puts();
+      expect(sent.map(([path]) => path)).toEqual([
+        '/sessions/s1/elements/GENROU/G1',
+        '/sessions/s1/elements/GENROU/G2',
+      ]);
+      for (const [, body] of sent) {
+        const params = (body as { params: Record<string, number> }).params;
+        expect('H' in params && 'M' in params).toBe(false);
+      }
+      expect((sent[0]?.[1] as { params: Record<string, number> }).params).toMatchObject({
+        M: 13,
+        xd: 1.8,
+      });
+      expect((sent[1]?.[1] as { params: Record<string, number> }).params).toEqual({
+        M: 12.35,
+        xd: 1.8,
+      });
+      expect(screen.queryByTestId('machines-grid-edit-error')).not.toBeInTheDocument();
+    });
+  });
+
   it('shows the reason when the server keeps a reactance out of order', async () => {
     const user = userEvent.setup();
     const { ProblemDetailsError } = await import('@/api/client');
