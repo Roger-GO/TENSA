@@ -453,6 +453,8 @@ def _refused(test_client: TestClient, sid: str, controllers: Any) -> dict[str, A
         ([{**DROOP, "gain": -1}], "controllers[0].gain: Input should be greater than 0"),
         ([{**DROOP, "eval": "x"}], "controllers[0].eval: Extra inputs are not permitted"),
         ([DROOP, {**DROOP, "idx": 99}], "controllers[1]: the loaded case has no ESD1 with idx 99"),
+        # A kind the server does not have, of any length: named by its place, not repeated.
+        ([{**DROOP, "type": "pid" * 400}], "controllers[0].type: must be 'droop' or 'ffr'"),
     ],
 )
 def test_a_streamed_run_with_controllers_that_cannot_be_used_starts_no_stream(
@@ -461,6 +463,7 @@ def test_a_streamed_run_with_controllers_that_cannot_be_used_starts_no_stream(
     test_client, sid = live
     frame = _refused(test_client, sid, controllers)
     assert reason in frame["reason"]
+    assert len(frame["reason"]) < 200
     assert "reload" not in frame["reason"].lower()
     # Nothing was set up or written: the same session still runs.
     ok = test_client.post(f"/api/sessions/{sid}/tds", json={"tf": 0.2, "controllers": [DROOP]})

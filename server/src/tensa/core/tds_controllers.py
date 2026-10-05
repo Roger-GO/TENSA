@@ -273,15 +273,31 @@ ControllerSpec = Annotated[DroopController | FfrController, Field(discriminator=
 _SPECS: Final[TypeAdapter[list[ControllerSpec]]] = TypeAdapter(list[ControllerSpec])
 
 
+# The longest field name a refusal repeats. The models' own are shorter; a key
+# a client made up is as long as the client likes.
+_MAX_FIELD_NAME: Final = 40
+
+
 def _first_problem(exc: ValidationError) -> str:
-    """The first thing wrong with a ``controllers`` list, as one sentence."""
+    """The first thing wrong with a ``controllers`` list, as one sentence.
+
+    Nothing a client sent is repeated at length. Pydantic's message for a
+    ``type`` it does not know quotes the value in full, so that one is written
+    here, and a key that is not a field is part of the location, so it is cut.
+    """
     error = exc.errors(include_url=False, include_context=False, include_input=False)[0]
     where = "controllers"
     for part in error.get("loc", ()):
         if isinstance(part, int):
             where += f"[{part}]"
         elif part not in CONTROLLER_TYPES:  # the discriminator's tag is not a field
-            where += f".{part}"
+            name = str(part)
+            if len(name) > _MAX_FIELD_NAME:
+                name = f"{name[: _MAX_FIELD_NAME - 3]}..."
+            where += f".{name}"
+    if error.get("type") in ("union_tag_invalid", "union_tag_not_found"):
+        kinds = " or ".join(repr(kind) for kind in CONTROLLER_TYPES)
+        return f"{where}.type: must be {kinds}"
     message = str(error.get("msg", "is not valid")).removeprefix("Value error, ")
     return f"{where}: {message}"
 

@@ -217,8 +217,12 @@ def test_parsed_models_pass_through_unchanged() -> None:
         ("droop", "'controllers' must be a list of controller objects"),
         ({"type": "droop"}, "'controllers' must be a list of controller objects"),
         ([_droop()] * (MAX_CONTROLLERS + 1), f"a run takes at most {MAX_CONTROLLERS}"),
-        ([{"model": "ESD1", "idx": 1}], "controllers[0]: Unable to extract tag"),
-        ([{"type": "pid", "model": "ESD1", "idx": 1}], "controllers[0]: Input tag 'pid'"),
+        ([{"model": "ESD1", "idx": 1}], "controllers[0].type: must be 'droop' or 'ffr'"),
+        (
+            [{"type": "pid", "model": "ESD1", "idx": 1}],
+            "controllers[0].type: must be 'droop' or 'ffr'",
+        ),
+        ([_droop(), {"type": ["ffr"]}], "controllers[1].type: must be 'droop' or 'ffr'"),
         ([{"type": "droop", "model": "ESD1", "idx": 1}], "controllers[0].gain: Field required"),
         ([_droop(gain=0)], "controllers[0].gain: Input should be greater than 0"),
         ([_droop(gain=float("nan"))], "controllers[0].gain"),
@@ -246,12 +250,35 @@ def test_a_request_that_breaks_a_rule_is_refused_with_where_and_why(
     assert message in str(refused.value)
 
 
-def test_a_refusal_does_not_repeat_what_was_sent() -> None:
+@pytest.mark.parametrize(
+    "controller",
+    [
+        _droop(model="x" * 5000),
+        _droop(frequency="x" * 5000),
+        _droop(gain="9" * 5000),
+        # Pydantic quotes a kind it does not know, whatever it is.
+        _droop(type="x" * 5000),
+        _droop(type={"kind": "x" * 5000}),
+        # A key that is no field is named in the refusal, by its start.
+        _droop(**{"x" * 5000: 1}),
+        "x" * 5000,
+    ],
+)
+def test_a_refusal_does_not_repeat_what_was_sent(controller: Any) -> None:
     """The reason goes to a client and into a WebSocket close; a long value a
     caller sent must not ride along."""
     with pytest.raises(TdsRequestError) as refused:
-        parse_controllers([_droop(model="x" * 5000)])
+        parse_controllers([controller])
     assert len(str(refused.value)) < 200
+    assert "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" not in str(refused.value)
+
+
+def test_a_key_that_is_no_field_is_named_by_its_start() -> None:
+    with pytest.raises(TdsRequestError) as refused:
+        parse_controllers([_droop(**{"k" * 100: 1})])
+    assert str(refused.value) == (
+        f"controllers[0].{'k' * 37}...: Extra inputs are not permitted"
+    )
 
 
 # ---- binding to the case -------------------------------------------------------
