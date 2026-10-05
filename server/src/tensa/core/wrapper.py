@@ -1033,6 +1033,9 @@ class Wrapper:
                 f"no {model} with idx={idx!r}"
             ) from exc
 
+        if model == "GENROU":
+            params = self._genrou_edit_params(model_obj, i, params)
+
         for pname, value in params.items():
             if pname in ("idx", "name"):
                 # idx / name updates are not safe at the array-write level —
@@ -1064,6 +1067,45 @@ class Wrapper:
                 f"could not read back {model} idx={idx!r} after edit"
             )
         return entry
+
+    @staticmethod
+    def _genrou_edit_params(
+        model_obj: Any, i: int, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """The params of a GENROU edit as ANDES holds them.
+
+        The schema offers the inertia constant ``H``, which ANDES has no param
+        for: it holds ``M`` (= 2H), as ``add_element`` converts it. A table
+        that lists ``H`` has to be able to write it back, so the edit takes it
+        too. An edit giving both ``H`` and ``M`` is refused, since the two say
+        the same thing and could disagree. A change to a reactance is checked
+        against the ordering the machine needs (see
+        ``_validate_genrou_reactance_edit``) on the values the machine holds.
+        """
+        edited = dict(params)
+        if "H" in edited:
+            if "M" in edited:
+                raise ElementValidationError(
+                    "set the inertia as H or as M (M = 2H), not both in one edit"
+                )
+            raw_h = edited.pop("H")
+            try:
+                edited["M"] = 2.0 * float(raw_h)
+            except (TypeError, ValueError) as exc:
+                raise ElementValidationError(
+                    f"GENROU param 'H' must be a number; got {raw_h!r}"
+                ) from exc
+        if any(name in edited for name in _GENROU_REACTANCE_NAMES):
+            current: dict[str, float] = {}
+            for name in _GENROU_REACTANCE_NAMES:
+                param = getattr(model_obj, name, None)
+                values = getattr(param, "v", None)
+                if values is not None and i < len(values):
+                    current[name] = float(values[i])
+                else:
+                    current[name] = float(getattr(param, "default", 0.0))
+            _validate_genrou_reactance_edit(current, edited)
+        return edited
 
     def undo_last_edit(self) -> TopologySnapshot:
         """Drop the most recent add() from the replay buffer and rebuild
@@ -4769,6 +4811,41 @@ def _validate_genrou_reactances(
                 "Set xd2/xq2 (and Td10/Td20/Tq10/Tq20 as needed) explicitly "
                 "to match your machine data, or leave the whole reactance "
                 "set at defaults."
+            )
+
+
+def _validate_genrou_reactance_edit(
+    current: Mapping[str, float], edits: Mapping[str, Any]
+) -> None:
+    """Refuse an edit that breaks the GENROU reactance ordering.
+
+    ``current`` holds the machine's reactances as it has them; ``edits`` is the
+    edit's params. Only an ordering the edit takes part in is checked, so a case
+    whose data already breaks a pair elsewhere does not block an unrelated
+    change. Raises :class:`ElementValidationError` (HTTP 422) on a violation,
+    naming the pair.
+    """
+    merged = dict(current)
+    edited: set[str] = set()
+    for name in _GENROU_REACTANCE_NAMES:
+        if name in edits and edits[name] is not None:
+            try:
+                merged[name] = float(edits[name])
+            except (TypeError, ValueError) as exc:
+                raise ElementValidationError(
+                    f"GENROU param {name!r} must be a number; got {edits[name]!r}"
+                ) from exc
+            edited.add(name)
+    for chain in _GENROU_REACTANCE_CHAINS:
+        for hi, lo in zip(chain, chain[1:], strict=False):
+            if hi not in edited and lo not in edited:
+                continue
+            if merged[hi] > merged[lo]:
+                continue
+            raise ElementValidationError(
+                f"GENROU reactances must satisfy {' > '.join(chain)}; this edit "
+                f"leaves {hi}={merged[hi]:g} <= {lo}={merged[lo]:g}. Change the "
+                "other reactances in the same edit, so the set stays in order."
             )
 
 

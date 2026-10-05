@@ -19,6 +19,7 @@ from tensa.core.disturbance import FaultSpec
 from tensa.core.errors import (
     CaseLoadError,
     DisturbanceCommitError,
+    ElementValidationError,
     NoCaseLoadedError,
 )
 from tensa.core.wrapper import Wrapper
@@ -826,3 +827,81 @@ def test_reload_case_without_prior_load_raises() -> None:
     w = Wrapper()
     with pytest.raises(NoCaseLoadedError):
         w.reload_case()
+
+
+# ---- editing a GENROU that the case file holds ------------------------------
+
+
+def _ieee14_full_wrapper() -> Wrapper:
+    pytest.importorskip("andes")
+    import andes
+
+    w = Wrapper()
+    w.load_case(andes.get_case("ieee14/ieee14_full.xlsx"))
+    return w
+
+
+@pytest.mark.integration
+def test_edit_genrou_inertia_as_h_writes_m() -> None:
+    """The schema lists ``H`` for a GENROU but ANDES holds ``M`` (= 2H), so an
+    edit giving ``H`` lands as ``M``; before, it was refused as not editable."""
+    w = _ieee14_full_wrapper()
+    idx = w._ss.GENROU.idx.v[0]
+    entry = w.edit_element("GENROU", idx, {"H": 6.5})
+    uid = w._ss.GENROU.idx2uid(idx)
+    assert w._ss.GENROU.M.v[uid] == 13.0
+    assert entry.params["M"] == 13.0
+
+
+@pytest.mark.integration
+def test_edit_genrou_h_and_m_together_is_refused() -> None:
+    w = _ieee14_full_wrapper()
+    idx = w._ss.GENROU.idx.v[0]
+    before = float(w._ss.GENROU.M.v[w._ss.GENROU.idx2uid(idx)])
+    with pytest.raises(ElementValidationError) as ei:
+        w.edit_element("GENROU", idx, {"H": 6.5, "M": 20.0})
+    assert "not both" in str(ei.value)
+    assert float(w._ss.GENROU.M.v[w._ss.GENROU.idx2uid(idx)]) == before
+
+
+@pytest.mark.integration
+def test_edit_genrou_h_that_is_not_a_number_is_refused() -> None:
+    w = _ieee14_full_wrapper()
+    idx = w._ss.GENROU.idx.v[0]
+    with pytest.raises(ElementValidationError) as ei:
+        w.edit_element("GENROU", idx, {"H": "heavy"})
+    assert "'H' must be a number" in str(ei.value)
+
+
+@pytest.mark.integration
+def test_edit_genrou_reactance_that_breaks_the_order_is_refused_and_leaves_the_machine() -> None:
+    """xd1 above xd breaks xd > xd1; nothing is written, not even another param
+    in the same edit that was fine."""
+    w = _ieee14_full_wrapper()
+    gen = w._ss.GENROU
+    idx = gen.idx.v[0]
+    uid = gen.idx2uid(idx)
+    xd, xd1, d = float(gen.xd.v[uid]), float(gen.xd1.v[uid]), float(gen.D.v[uid])
+    with pytest.raises(ElementValidationError) as ei:
+        w.edit_element("GENROU", idx, {"D": d + 1.0, "xd1": xd + 0.5})
+    assert "xd > xd1 > xd2 > xl" in str(ei.value)
+    assert float(gen.xd1.v[uid]) == xd1
+    assert float(gen.D.v[uid]) == d
+
+
+@pytest.mark.integration
+def test_edit_genrou_reactance_set_in_one_edit_is_accepted() -> None:
+    """The ordering is judged on the merged set: lowering xd1 below the held
+    xd2 works when xd2 comes down in the same edit."""
+    w = _ieee14_full_wrapper()
+    gen = w._ss.GENROU
+    idx = gen.idx.v[0]
+    uid = gen.idx2uid(idx)
+    xd2, xl = float(gen.xd2.v[uid]), float(gen.xl.v[uid])
+    xd1_new, xd2_new = xd2 - 0.05, xd2 - 0.07
+    assert xd2_new > xl, "the case must leave room between xd2 and xl"
+    with pytest.raises(ElementValidationError):
+        w.edit_element("GENROU", idx, {"xd1": xd1_new})
+    w.edit_element("GENROU", idx, {"xd1": xd1_new, "xd2": xd2_new})
+    assert float(gen.xd1.v[uid]) == pytest.approx(xd1_new)
+    assert float(gen.xd2.v[uid]) == pytest.approx(xd2_new)
