@@ -597,6 +597,19 @@ class TopologySummary(BaseModel):
             "has no usable value."
         ),
     )
+    base_mva: float | None = Field(
+        default=None,
+        description=(
+            "System MVA base, as the case sets it: the header of a PSS/E RAW "
+            "file, ``baseMVA`` of a MATPOWER file, or the ``_config`` section "
+            "of an xlsx or json file. Any other case, and a blank system, "
+            "keeps ANDES's default of 100. A power in per unit on the system "
+            "base times this is the power in MW or MVAr. A device with its own "
+            "rating ``Sn`` gives some values per unit of that instead; an "
+            "``ESD1`` battery reads alike on both only when its ``Sn`` equals "
+            "this. ``null`` when the configuration has no usable value."
+        ),
+    )
     buses_without_vn: list[int | str] = Field(
         default_factory=list,
         description=(

@@ -205,6 +205,11 @@ class TopologySnapshot:
     # ``None`` when the System carries no usable value, so a client never
     # converts with a guess.
     freq_hz: float | None = None
+    # System MVA base (``ss.config.mva``): what a per-unit power on the system
+    # base times this is in MW. The case sets it (a RAW header, a MATPOWER
+    # ``baseMVA``, the ``_config`` of an xlsx / json file); any other case has
+    # ANDES's default of 100. ``None`` when the System carries no usable value.
+    base_mva: float | None = None
     # Idx of the buses whose rated voltage (``Vn``) the case does not give:
     # ANDES holds its 110 kV fill-in there, which a client must not read as
     # the bus's voltage base. See ``tensa.core.rated_voltage``.
@@ -689,6 +694,7 @@ class Wrapper:
             shunts=_collect_models(ss, ["Shunt"]),
             controllers=_collect_models(ss, list(_CONTROLLER_MODEL_NAMES)),
             freq_hz=_system_frequency_hz(ss),
+            base_mva=_system_base_mva(ss),
             buses_without_vn=still_without_rated_voltage(ss, self._buses_without_vn),
             events=[*self._case_events, *self._restored_events],
         )
@@ -5140,6 +5146,17 @@ def _system_frequency_hz(ss: System) -> float | None:
     except (TypeError, ValueError):
         return None
     return freq if math.isfinite(freq) and freq > 0 else None
+
+
+def _system_base_mva(ss: System) -> float | None:
+    """The system MVA base, or ``None`` when ``ss.config.mva`` is missing, not
+    a number, or not a positive finite value."""
+    configured: Any = getattr(ss.config, "mva", None)
+    try:
+        mva = float(configured)
+    except (TypeError, ValueError):
+        return None
+    return mva if math.isfinite(mva) and mva > 0 else None
 
 
 def _split_lines_transformers(
