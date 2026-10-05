@@ -168,6 +168,29 @@ def test_the_example_client_lists_andes_variables_and_describes_signals(
     assert json.loads(metrics["body"])["t_start"] == 0.5
 
 
+def test_the_example_client_uploads_a_case_file_as_its_own_bytes(
+    recorder: tuple[str, list[dict[str, Any]]], tmp_path: Path
+) -> None:
+    base, seen = recorder
+    client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
+    app = client.AndesApp(base)
+    case = tmp_path / "My Case.raw"
+    case.write_bytes(b"\xff\x00 not text \r\n")
+
+    app.upload_case(case)
+    app.upload_case(case, name="renamed.raw", overwrite=True)
+
+    plain, renamed = seen
+    # The file is the body, labelled as raw bytes (not JSON, not multipart); the name
+    # and the overwrite choice travel in the query, escaped.
+    assert plain["method"] == "POST"
+    assert plain["path"] == "/api/workspace/files?name=My+Case.raw&overwrite=false"
+    assert plain["content_type"] == "application/octet-stream"
+    assert plain["body"] == b"\xff\x00 not text \r\n"
+    assert renamed["path"] == "/api/workspace/files?name=renamed.raw&overwrite=true"
+    assert renamed["body"] == plain["body"]
+
+
 def test_the_mcp_tds_tool_sends_the_variables_it_was_asked_to_record(
     recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:

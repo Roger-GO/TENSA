@@ -564,7 +564,17 @@ export interface paths {
          */
         get: operations["listWorkspaceFiles"];
         put?: never;
-        post?: never;
+        /**
+         * Add a case file to the workspace; the request body is the file.
+         * @description Store the request body as ``<workspace>/<name>``.
+         *
+         *     The body is the file itself (``curl --data-binary @ieee14.raw``), written
+         *     atomically, so a half-written case never shows up in the lister. The name goes
+         *     through the portable-name rule, and a name that exists is never replaced
+         *     unless ``overwrite=true``: the check happens when the file is put in place, so
+         *     two uploads of one name cannot both win.
+         */
+        post: operations["uploadWorkspaceFile"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3928,6 +3938,39 @@ export interface components {
              */
             job_id?: string | null;
         };
+        /**
+         * UploadedWorkspaceFile
+         * @description Response shape for ``POST /workspace/files``: the file as it now sits in
+         *     the workspace, as the lister would report it.
+         */
+        UploadedWorkspaceFile: {
+            /**
+             * Name
+             * @description File name relative to the workspace root (no directory components; the lister does not recurse).
+             */
+            name: string;
+            /**
+             * Size Bytes
+             * @description File size in bytes as reported by ``os.stat``.
+             */
+            size_bytes: number;
+            /**
+             * Modified Iso
+             * @description Last-modified time in ISO 8601 format with timezone (UTC). Computed from ``stat.st_mtime`` at list time.
+             */
+            modified_iso: string;
+            /**
+             * Format
+             * @description Detected file format from the extension. Matches one of the ANDES-supported formats; non-matching files are excluded by the lister.
+             * @enum {string}
+             */
+            format: "xlsx" | "raw" | "dyr" | "json" | "m";
+            /**
+             * Replaced
+             * @description ``true`` when the upload replaced a file of the same name (``overwrite=true``), ``false`` when it created a new one.
+             */
+            replaced: boolean;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -5500,6 +5543,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceFileList"];
+                };
+            };
+        };
+    };
+    uploadWorkspaceFile: {
+        parameters: {
+            query: {
+                /** @description File name to store the upload under, in the workspace root. A single name (no directories) with one of the case extensions (``.xlsx``, ``.raw``, ``.dyr``, ``.json``, ``.m``). */
+                name: string;
+                /** @description Replace a file of the same name. When ``false`` (the default) an existing file is left alone and the request answers 409. */
+                overwrite?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The file's bytes, verbatim. Not multipart form data: a ``multipart/*`` body is refused with 415. */
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadedWorkspaceFile"];
+                };
+            };
+            /** @description The name is unsafe or is not a single file name: a path, a leading dot, a character or device name Windows would misread (``CON.raw``, ``a:b.raw``), a trailing dot or space, or too long. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The workspace already has a file of that name and ``overwrite`` was not set (or the name is a directory). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is larger than 32 MiB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body was sent as multipart form data instead of the raw file. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The extension is not one of ``.xlsx``, ``.raw``, ``.dyr``, ``.json``, ``.m``, or the file is empty. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The file could not be written (full disk, permissions). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
         };

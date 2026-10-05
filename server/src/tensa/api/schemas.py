@@ -1896,6 +1896,19 @@ class WorkspaceFile(BaseModel):
     )
 
 
+class UploadedWorkspaceFile(WorkspaceFile):
+    """Response shape for ``POST /workspace/files``: the file as it now sits in
+    the workspace, as the lister would report it."""
+
+    replaced: bool = Field(
+        ...,
+        description=(
+            "``true`` when the upload replaced a file of the same name "
+            "(``overwrite=true``), ``false`` when it created a new one."
+        ),
+    )
+
+
 class VersionInfo(BaseModel):
     """Response shape for ``GET /version``: the packages this server runs on."""
 

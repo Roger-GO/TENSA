@@ -19,7 +19,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `data-grid` | 1 |
 | `disturbance-panel` | 2 |
 | `inspector` | 9 |
-| `left-sidebar` | 2 |
+| `left-sidebar` | 3 |
 | `none` | 3 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
@@ -28,7 +28,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `snapshot-dialog` | 4 |
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
-| **total** | **61** |
+| **total** | **62** |
 
 ## OpenAPI routes
 
@@ -93,6 +93,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `GET` | `/api/topology/schema` | `inspector` |  |
 | `GET` | `/api/version` | `about-dialog` |  |
 | `GET` | `/api/workspace/files` | `left-sidebar` |  |
+| `POST` | `/api/workspace/files` | `left-sidebar` |  |
 | `GET` | `/api/workspace/layout` | `workspace` |  |
 | `PUT` | `/api/workspace/layout` | `workspace` |  |
 

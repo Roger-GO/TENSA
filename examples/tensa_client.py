@@ -24,6 +24,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Iterator
 
 
@@ -45,13 +46,26 @@ class AndesApp:
         self.api = base_url.rstrip("/") + "/api"
         self.timeout = timeout
 
-    def request(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
-        data = json.dumps(body).encode() if body is not None else None
+    def request(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        raw: bytes | None = None,
+    ) -> Any:
+        """Send ``body`` as JSON, or ``raw`` bytes as the file they are."""
+        if raw is not None:
+            data: bytes | None = raw
+            headers = {"Content-Type": "application/octet-stream"}
+        else:
+            data = json.dumps(body).encode() if body is not None else None
+            headers = {"Content-Type": "application/json"} if data else {}
         req = urllib.request.Request(
             self.api + path,
             data=data,
             method=method,
-            headers={"Content-Type": "application/json"} if data else {},
+            headers=headers,
         )
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
@@ -78,6 +92,18 @@ class AndesApp:
 
     def workspace_files(self) -> list[dict[str, Any]]:
         return self.request("GET", "/workspace/files")["files"]
+
+    def upload_case(
+        self, path: str | Path, name: str | None = None, overwrite: bool = False
+    ) -> dict[str, Any]:
+        """Copy a local case file (.xlsx .raw .dyr .json .m, up to 32 MiB) into the
+        server's workspace, under ``name`` (default: the file's own name), so a
+        session can load it by that name. An existing file of that name is left
+        alone and raises 409 unless ``overwrite`` is true."""
+        query = urllib.parse.urlencode(
+            {"name": name or Path(path).name, "overwrite": "true" if overwrite else "false"}
+        )
+        return self.request("POST", f"/workspace/files?{query}", raw=Path(path).read_bytes())
 
     def response_metrics(self, series: list[dict[str, Any]], **options: Any) -> Any:
         """Nadir, rate of change, settling time, overshoot and damping of signals.

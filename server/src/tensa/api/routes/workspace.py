@@ -1,9 +1,14 @@
-"""Workspace lister + SLD layout sidecar endpoints.
+"""Workspace lister, case-file upload + SLD layout sidecar endpoints.
 
-Three endpoints:
+Four endpoints:
 
 - ``GET /workspace/files`` — enumerate supported case files in the workspace
   root (non-recursive, alphabetical, dotfiles + symlinks excluded).
+- ``POST /workspace/files?name=<file>[&overwrite=true]`` — add a case file to
+  the workspace root. The request body IS the file (not multipart): the cap is
+  enforced while the body streams in, so an oversized upload is never buffered
+  or spooled to disk first. 32 MiB cap, a file name that is safe on every
+  platform and has a supported extension, and no clobbering unless asked.
 - ``GET /workspace/layout?case_path=<rel>`` — read the layout sidecar JSON
   adjacent to the case file (``<case_path>.layout.json``). 200 with a JSON
   ``null`` body when absent (a missing sidecar is the normal first-run
@@ -13,7 +18,7 @@ Three endpoints:
 
 Path validation reuses the helpers in ``security.paths``: ``_reject_unsafe_input``
 for the client-supplied ``case_path``, ``open_workspace_file_for_write`` for
-the write path, and the existing within-workspace check on read.
+the write path (uploads too), and the existing within-workspace check on read.
 """
 
 from __future__ import annotations
@@ -21,20 +26,24 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import stat
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
+from starlette.requests import ClientDisconnect
 
 from tensa.api.schemas import (
     ProblemDetails,
     SidecarLayout,
+    UploadedWorkspaceFile,
     WorkspaceFile,
     WorkspaceFileList,
 )
-from tensa.security.names import legacy_names_possible
+from tensa.security.names import legacy_names_possible, portable_name_problem
 from tensa.security.paths import (
     WorkspacePathError,
     _check_within_workspace,
@@ -52,6 +61,13 @@ _ALLOWED_EXTENSIONS: frozenset[str] = frozenset({".xlsx", ".raw", ".dyr", ".json
 
 # Layout sidecar body cap: 256 KB. Computed once.
 _MAX_LAYOUT_BYTES = 256 * 1024
+
+# Case-file upload cap: 32 MiB. A RAW, xlsx or MATPOWER case of tens of thousands
+# of buses is a few MB; the cap only stops a runaway body.
+MAX_UPLOAD_BYTES = 32 * 1024 * 1024
+
+# The longest file name the common file systems accept, in UTF-8 bytes.
+_MAX_NAME_BYTES = 255
 
 
 def _workspace(request: Request) -> Path:
@@ -152,6 +168,257 @@ async def list_files(
             )
         )
     return WorkspaceFileList(files=files)
+
+
+class _UploadConflictError(Exception):
+    """The name an upload targets is taken (or is not a file), and the caller did
+    not ask to replace it."""
+
+
+def _check_upload_name(name: str) -> None:
+    """Refuse an upload name that is not a plain, listed, loadable file name.
+
+    400 when the name is unsafe or is not one file name: the same portable-name
+    rule as every other client-supplied name (``security.names``), plus no
+    separators (the lister does not recurse, and the write check looks only at the
+    last component, so it would accept ``sub/x.raw``), no leading dot (the lister
+    hides such files) and the length a file system takes. 422 when the name is
+    well formed but not a case format.
+    """
+    if "/" in name or "\\" in name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"unsafe file name {name!r}: the name is a path, not a file name",
+        )
+    problem = portable_name_problem(name)
+    if problem is None and name.startswith("."):
+        problem = "starts with a dot, so the workspace would not list it"
+    if problem is None and len(name.encode("utf-8")) > _MAX_NAME_BYTES:
+        problem = f"is longer than {_MAX_NAME_BYTES} bytes"
+    if problem is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"unsafe file name {name!r}: the name {problem}",
+        )
+    suffix = Path(name).suffix.lower()
+    if suffix not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"unsupported file type {suffix or '(no extension)'!r} for {name!r}: "
+                f"the workspace holds {', '.join(sorted(_ALLOWED_EXTENSIONS))} files"
+            ),
+        )
+
+
+async def _read_upload_body(request: Request) -> bytes:
+    """The request body, refused with 413 as soon as it passes ``MAX_UPLOAD_BYTES``.
+
+    A declared ``Content-Length`` over the cap is refused before a byte is read,
+    and a body with none (chunked) is counted as it arrives, so neither is ever
+    held in memory or spooled to disk past the cap.
+    """
+    declared = request.headers.get("content-length", "")
+    too_large = HTTPException(
+        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+        detail=f"upload exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)} MiB",
+    )
+    if declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES:
+        raise too_large
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > MAX_UPLOAD_BYTES:
+                raise too_large
+            chunks.append(chunk)
+    except ClientDisconnect as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="the upload was interrupted before the whole file arrived",
+        ) from exc
+    return b"".join(chunks)
+
+
+@router.post(
+    "/workspace/files",
+    openapi_extra={
+        "x-tensa-gui-location": "left-sidebar",
+        "requestBody": {
+            "required": True,
+            "description": (
+                "The file's bytes, verbatim. Not multipart form data: a "
+                "``multipart/*`` body is refused with 415."
+            ),
+            "content": {
+                "application/octet-stream": {"schema": {"type": "string", "format": "binary"}}
+            },
+        },
+    },
+    operation_id="uploadWorkspaceFile",
+    summary="Add a case file to the workspace; the request body is the file.",
+    response_model=UploadedWorkspaceFile,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        400: {
+            "model": ProblemDetails,
+            "description": (
+                "The name is unsafe or is not a single file name: a path, a "
+                "leading dot, a character or device name Windows would misread "
+                "(``CON.raw``, ``a:b.raw``), a trailing dot or space, or too long."
+            ),
+        },
+        409: {
+            "model": ProblemDetails,
+            "description": (
+                "The workspace already has a file of that name and "
+                "``overwrite`` was not set (or the name is a directory)."
+            ),
+        },
+        413: {
+            "model": ProblemDetails,
+            "description": f"The body is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MiB.",
+        },
+        415: {
+            "model": ProblemDetails,
+            "description": "The body was sent as multipart form data instead of the raw file.",
+        },
+        422: {
+            "model": ProblemDetails,
+            "description": (
+                "The extension is not one of ``.xlsx``, ``.raw``, ``.dyr``, "
+                "``.json``, ``.m``, or the file is empty."
+            ),
+        },
+        500: {
+            "model": ProblemDetails,
+            "description": "The file could not be written (full disk, permissions).",
+        },
+    },
+)
+async def upload_file(
+    request: Request,
+    name: str = Query(
+        ...,
+        description=(
+            "File name to store the upload under, in the workspace root. A "
+            "single name (no directories) with one of the case extensions "
+            "(``.xlsx``, ``.raw``, ``.dyr``, ``.json``, ``.m``)."
+        ),
+    ),
+    overwrite: bool = Query(
+        False,
+        description=(
+            "Replace a file of the same name. When ``false`` (the default) an "
+            "existing file is left alone and the request answers 409."
+        ),
+    ),
+) -> UploadedWorkspaceFile:
+    """Store the request body as ``<workspace>/<name>``.
+
+    The body is the file itself (``curl --data-binary @ieee14.raw``), written
+    atomically, so a half-written case never shows up in the lister. The name goes
+    through the portable-name rule, and a name that exists is never replaced
+    unless ``overwrite=true``: the check happens when the file is put in place, so
+    two uploads of one name cannot both win.
+    """
+    workspace = _workspace(request)
+    _check_upload_name(name)
+    if request.headers.get("content-type", "").lower().startswith("multipart/"):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=(
+                "send the file's bytes as the request body, not as multipart form "
+                "data (for curl: --data-binary @file)"
+            ),
+        )
+    data = await _read_upload_body(request)
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"{name!r} is empty",
+        )
+    try:
+        with open_workspace_file_for_write(workspace, name) as target:
+            replaced = await run_in_threadpool(_store_upload, target, data, overwrite=overwrite)
+            info = target.stat()
+    except WorkspacePathError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except _UploadConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except OSError as exc:
+        log.warning("could not store upload %r: %s", name, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"could not store {name!r}: {exc}",
+        ) from exc
+    fmt = _format_for(target)
+    assert fmt is not None  # the extension was checked above
+    return UploadedWorkspaceFile(
+        name=target.name,
+        size_bytes=int(info.st_size),
+        modified_iso=datetime.fromtimestamp(info.st_mtime, tz=UTC).isoformat(),
+        format=fmt,  # type: ignore[arg-type]
+        replaced=replaced,
+    )
+
+
+def _store_upload(target: Path, data: bytes, *, overwrite: bool) -> bool:
+    """Write ``data`` as ``target`` and say whether it replaced a file.
+
+    The bytes go to a temp file beside the target first, so a reader never sees a
+    partial case. A new name is claimed with a hard link, which fails if the name
+    appeared in the meantime, instead of a rename, which would replace it.
+    """
+    try:
+        existing: os.stat_result | None = os.lstat(target)
+    except FileNotFoundError:
+        existing = None
+    if existing is not None:
+        if not stat.S_ISREG(existing.st_mode):
+            raise _UploadConflictError(f"{target.name!r} exists and is not a regular file")
+        if not overwrite:
+            raise _UploadConflictError(
+                f"{target.name!r} already exists in the workspace; "
+                "send overwrite=true to replace it"
+            )
+    tmp_path = _write_temp(target.parent, data, prefix=".upload.")
+    try:
+        if existing is None:
+            _publish_new(tmp_path, target)
+        else:
+            os.replace(tmp_path, target)
+    finally:
+        # Gone after a rename; still there after the link that claimed a new name.
+        with contextlib.suppress(OSError):
+            tmp_path.unlink()
+    return existing is not None
+
+
+def _publish_new(tmp_path: Path, target: Path) -> None:
+    """Give ``tmp_path``'s content the name ``target``, which must not exist.
+
+    ``os.link`` fails with ``FileExistsError`` when another request created the
+    name first. A file system with no hard links (FAT, some network mounts) falls
+    back to a check and a rename, which leaves a small window between the two.
+    """
+    try:
+        os.link(tmp_path, target)
+    except FileExistsError as exc:
+        raise _UploadConflictError(f"{target.name!r} already exists in the workspace") from exc
+    except OSError:
+        if os.path.lexists(target):
+            raise _UploadConflictError(
+                f"{target.name!r} already exists in the workspace"
+            ) from None
+        os.replace(tmp_path, target)
 
 
 @router.get(
@@ -314,21 +581,19 @@ def _is_existing_case_file(workspace: Path, case_path: str) -> bool:
         return False
 
 
-def _atomic_write_json(target: Path, layout: SidecarLayout) -> None:
-    """Write ``layout`` to ``target`` atomically with mode 0600.
+def _write_temp(parent: Path, data: bytes, *, prefix: str) -> Path:
+    """Write ``data`` to a new temp file in ``parent``, mode 0600, and return its path.
 
-    Uses ``tempfile.NamedTemporaryFile`` in the same directory (so
-    ``os.replace`` is a same-filesystem rename) and chmods the temp file via
-    its fd before flush where the platform has ``fchmod``. On any exception the
-    temp file is unlinked.
+    The temp file sits in the target's own directory so the ``os.replace`` that
+    follows is a same-filesystem rename. ``os.fchmod`` is applied through the fd
+    where the platform has it, before any data is written. The bytes are fsynced
+    before the caller moves the file into place. On any exception the temp file is
+    unlinked.
     """
-    parent = target.parent
-    serialized = layout.model_dump_json(indent=2)
     tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115 — context manager would auto-delete
-        mode="w",
-        encoding="utf-8",
+        mode="wb",
         dir=parent,
-        prefix=".layout.",
+        prefix=prefix,
         suffix=".tmp",
         delete=False,
     )
@@ -341,17 +606,34 @@ def _atomic_write_json(target: Path, layout: SidecarLayout) -> None:
         if fchmod is not None:
             with contextlib.suppress(OSError):
                 fchmod(tmp.fileno(), 0o600)
-        tmp.write(serialized)
+        tmp.write(data)
         tmp.flush()
         os.fsync(tmp.fileno())
         tmp.close()
         with contextlib.suppress(OSError):
             os.chmod(tmp_path, 0o600)
-        os.replace(tmp_path, target)
     except Exception:
         # Best-effort cleanup; never mask the original exception.
         with contextlib.suppress(Exception):
             tmp.close()
+        with contextlib.suppress(OSError):
+            tmp_path.unlink()
+        raise
+    return tmp_path
+
+
+def _atomic_write_json(target: Path, layout: SidecarLayout) -> None:
+    """Write ``layout`` to ``target`` atomically with mode 0600.
+
+    Writes a temp file in the same directory (see ``_write_temp``) and renames it
+    over ``target``. On any exception the temp file is unlinked.
+    """
+    tmp_path = _write_temp(
+        target.parent, layout.model_dump_json(indent=2).encode("utf-8"), prefix=".layout."
+    )
+    try:
+        os.replace(tmp_path, target)
+    except Exception:
         with contextlib.suppress(OSError):
             tmp_path.unlink()
         raise
