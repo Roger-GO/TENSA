@@ -167,6 +167,40 @@ describe('<TdsConfigPanel />', () => {
     expect(screen.queryByTestId('tds-config-dae-chip-omega GENROU 1')).toBeNull();
   });
 
+  it('offers frequency control beside the variables, and Reset forgets the controllers set', async () => {
+    const user = userEvent.setup();
+    useUiStore.getState().setTdsConfig({
+      controllers: [
+        {
+          spec: {
+            type: 'droop',
+            model: 'ESD1',
+            idx: 1,
+            frequency: 'coi',
+            period: 0.1,
+            t_start: 0,
+            ramp: null,
+            gain: 50,
+            deadband: 0.02,
+            p_max: null,
+          },
+          record: ['Pext ESD1 1'],
+        },
+      ],
+    });
+    render(<TdsConfigPanel />);
+
+    const editor = screen.getByTestId('tds-config-controllers');
+    expect(within(editor).getByTestId('tds-controller-0')).toHaveTextContent('Droop on ESD1 1');
+    // Without a case loaded there is no device to command, and it says so.
+    expect(within(editor).getByTestId('tds-controllers-status')).toHaveTextContent('Load a case');
+
+    await user.click(screen.getByTestId('tds-config-reset'));
+
+    expect(useUiStore.getState().tdsConfig.controllers).toEqual([]);
+    expect(screen.queryByTestId('tds-controller-0')).toBeNull();
+  });
+
   it('shows a validation error when max_rate_hz is non-positive', async () => {
     const user = userEvent.setup();
     render(<TdsConfigPanel />);

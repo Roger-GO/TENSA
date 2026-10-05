@@ -276,6 +276,52 @@ describe('store cascade — ANDES variables picked for the next run', () => {
   });
 });
 
+describe('store cascade — frequency controllers set for the next run', () => {
+  const controller = {
+    spec: {
+      type: 'droop' as const,
+      model: 'ESD1',
+      idx: 1,
+      frequency: 'coi' as const,
+      period: 0.1,
+      t_start: 0,
+      ramp: null,
+      gain: 50,
+      deadband: 0.02,
+      p_max: null,
+    },
+    record: ['Pext ESD1 1'],
+  };
+  const set = () => useUiStore.getState().setTdsConfig({ controllers: [controller] });
+
+  it('command devices of the old case, so another case empties the list', () => {
+    seedResults();
+    set();
+
+    useCaseStore.getState().setCase(caseOf('wscc9.xlsx'));
+
+    expect(useUiStore.getState().tdsConfig.controllers).toEqual([]);
+  });
+
+  it('are emptied when the case is cleared', () => {
+    seedResults();
+    set();
+
+    useCaseStore.getState().clearCase();
+
+    expect(useUiStore.getState().tdsConfig.controllers).toEqual([]);
+  });
+
+  it('stay while a PF result is cleared on the same case', () => {
+    seedResults();
+    set();
+
+    usePflowStore.getState().clearPflow();
+
+    expect(useUiStore.getState().tdsConfig.controllers).toEqual([controller]);
+  });
+});
+
 describe('store cascade — PF result cleared on its own', () => {
   it('drops the EIG / CPF / SE results computed from it', () => {
     seedResults();

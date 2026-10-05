@@ -71,6 +71,15 @@ export type MessageLevel = SessionMessage['level'];
 
 export type DaeVariableInfo = components['schemas']['DaeVariableInfo'];
 export type DaeVariableList = components['schemas']['DaeVariableList'];
+/** A frequency droop on a device, one of a TDS run's `controllers`. */
+export type DroopController = components['schemas']['DroopController'];
+/** A fast frequency response on a device, one of a TDS run's `controllers`. */
+export type FfrController = components['schemas']['FfrController'];
+/** `GET /sessions/{id}/tds/controllers`: what a run's controllers can command. */
+export type TdsControllerCatalogue = components['schemas']['TdsControllerCatalogue'];
+export type TdsControllerTarget = components['schemas']['TdsControllerTarget'];
+/** What one controller did, from a batch result or a stream's `done` frame. */
+export type TdsControllerResult = components['schemas']['TdsControllerResult'];
 export type MetricsSeries = components['schemas']['MetricsSeries'];
 export type ResponseMetricsRequest = components['schemas']['ResponseMetricsRequest'];
 export type ResponseMetricsResponse = components['schemas']['ResponseMetricsResponse'];

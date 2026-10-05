@@ -114,7 +114,8 @@ export function wireStoreCascade(): void {
   });
 
   // case change → pflow + analysis results + connectivity + pmu + profiles +
-  // scheduled disturbances + the ANDES variables picked for the next run clear,
+  // scheduled disturbances + the ANDES variables picked for the next run and
+  // its frequency controllers clear,
   // the power-flow options go back to the defaults
   // (a setting made to rescue one case should not follow the user to the next),
   // and the active TDS run is released. Triggered on selection change
@@ -142,9 +143,9 @@ export function wireStoreCascade(): void {
       usePmuStore.getState().clear();
       useProfilesStore.getState().clear();
       useDisturbanceStore.getState().clearDisturbances();
-      // The ANDES variables picked for the next run are names of the old
-      // case's devices.
-      useUiStore.getState().setTdsConfig({ daeVars: [] });
+      // The ANDES variables picked for the next run, and the devices its
+      // frequency controllers command, are the old case's.
+      useUiStore.getState().setTdsConfig({ daeVars: [], controllers: [] });
     }
     prevSelection = next;
   });
@@ -204,7 +205,7 @@ export function __resetCascadeForTests(): void {
   usePmuStore.setState({ pmus: [] });
   useProfilesStore.setState({ profiles: [] });
   useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
-  useUiStore.getState().setTdsConfig({ daeVars: [] });
+  useUiStore.getState().setTdsConfig({ daeVars: [], controllers: [] });
   useSweepStore.setState({ sweeps: {}, activeSweepId: null });
   useJobsStore.setState({ jobs: {} });
 }

@@ -32,6 +32,7 @@ import {
   useRestoreSnapshot,
   useRunPflow,
   useSaveSnapshot,
+  useTdsControllers,
   useTopology,
   useUploadWorkspaceFile,
 } from '@/api/queries';
@@ -445,6 +446,100 @@ describe('queries hooks', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('useTdsControllers asks the session for what a controller can command', async () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-ctl') });
+    useCaseStore.setState({
+      selection: { primaryPath: 'ieee14_esd1.xlsx' as WorkspacePath, addfiles: [] },
+    });
+    const catalogue = {
+      types: ['droop', 'ffr'],
+      coi_available: true,
+      freq_hz: 60,
+      base_mva: 100,
+      targets: [],
+    };
+    fetchSpy.mockResolvedValueOnce(jsonResponse(catalogue));
+
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useTdsControllers(), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual(catalogue);
+    const url = new URL(String(fetchSpy.mock.calls[0]?.[0] ?? ''), 'http://localhost');
+    expect(url.pathname).toBe('/api/sessions/sess-ctl/tds/controllers');
+  });
+
+  it('useTdsControllers stays disabled without a session or without a case', () => {
+    const { Wrapper } = makeWrapper();
+    useCaseStore.setState({
+      selection: { primaryPath: 'ieee14_esd1.xlsx' as WorkspacePath, addfiles: [] },
+    });
+    const noSession = renderHook(() => useTdsControllers(), { wrapper: Wrapper });
+    expect(noSession.result.current.fetchStatus).toBe('idle');
+
+    useSessionStore.setState({ sessionId: parseSessionId('sess-ctl') });
+    useCaseStore.setState({ selection: null });
+    const noCase = renderHook(() => useTdsControllers(), { wrapper: Wrapper });
+    expect(noCase.result.current.fetchStatus).toBe('idle');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('useTdsControllers asks again once a battery has been added to the case', async () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-ctl') });
+    useCaseStore.setState({
+      selection: { primaryPath: 'ieee14.raw' as WorkspacePath, addfiles: [] },
+      topology: null,
+    });
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(
+        jsonResponse({ types: [], coi_available: false, freq_hz: 60, base_mva: 100, targets: [] }),
+      ),
+    );
+
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useTdsControllers(), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      useCaseStore.setState({
+        topology: {
+          state: 'pre-setup',
+          buses: [],
+          lines: [],
+          transformers: [],
+          generators: [],
+          loads: [],
+          controllers: [{ idx: 'ESD1_1', name: 'ESD1_1', kind: 'ESD1', params: {} }],
+        },
+      });
+    });
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    useCaseStore.setState({ topology: null });
+  });
+
+  it('useTdsControllers asks again when another request held the session', async () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-busy') });
+    useCaseStore.setState({
+      selection: { primaryPath: 'ieee14_esd1.xlsx' as WorkspacePath, addfiles: [] },
+    });
+    // The TDS tab asks for the variables and the controllers at once; one is refused.
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse({ type: 'about:blank', title: 'Conflict', status: 409, detail: 'busy' }, 409),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ types: [], coi_available: true, freq_hz: 60, base_mva: 100, targets: [] }),
+      );
+
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useTdsControllers(), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true), { timeout: 3_000 });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it('a list refused because another request held the session is asked for again', async () => {

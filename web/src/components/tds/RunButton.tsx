@@ -23,7 +23,7 @@ import { usePflowStore } from '@/store/pflow';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { useLayoutStore } from '@/store/layout';
 import { useRunsStore } from '@/store/runs';
-import { useUiStore } from '@/store/ui';
+import { MAX_TDS_DAE_VARS, useUiStore } from '@/store/ui';
 import { RunStream } from '@/streaming/RunStream';
 import type { RunStreamError, VarGroup } from '@/streaming/RunStream';
 import { buildRunStreamWsUrl } from '@/streaming/wsUrl';
@@ -32,6 +32,7 @@ import { reportAbortError } from '@/lib/abortRun';
 import { toast } from '@/lib/toast';
 import { unitBasesOf } from '@/lib/units';
 import { describeScenario, runLabel } from '@/lib/runLabel';
+import { runDaeVars, summariseResults } from '@/lib/tdsControllers';
 import { stemOf } from '@/lib/paths';
 import { cn } from '@/lib/cn';
 
@@ -359,10 +360,16 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       baseOverrides === undefined && !hasCustomOverrides
         ? undefined
         : { ...(baseOverrides ?? {}), ...tdsConfigOverridesCustom };
+    // The frequency controllers set in the TDS tab go with the run, and so do
+    // the variables that show each one at work on its device (the command it
+    // received, its current, its state of charge), after the user's own picks.
+    const controllers = tdsConfig.controllers;
+    const daeVars = runDaeVars(tdsConfig.daeVars, controllers, MAX_TDS_DAE_VARS);
     const tdsArgs = {
       tf,
       vars,
-      ...(tdsConfig.daeVars.length === 0 ? {} : { daeVars: tdsConfig.daeVars }),
+      ...(daeVars.length === 0 ? {} : { daeVars }),
+      ...(controllers.length === 0 ? {} : { controllers: controllers.map((c) => c.spec) }),
       ...(h === undefined ? {} : { h }),
       integrator: wireIntegrator,
       ...(tdsConfigOverrides === undefined ? {} : { tdsConfigOverrides }),
@@ -396,11 +403,24 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
         layout.setActiveAnalysisSubTab('plot');
         if (layout.bottomDrawerCollapsed) layout.setDrawerHasUnreadResults(true);
       },
-      onDone: () => {
+      onDone: (event) => {
         // RunStream marked the run done in the slice; cleanup the stream
         // handle so a stale instance doesn't dangle.
         streamRef.current?.dispose();
         streamRef.current = null;
+        // What the run's controllers did: kept beside them in the TDS tab,
+        // and said once here, since the plot is what is on screen now. Only
+        // while the list is still the one the run was started with.
+        if (
+          event.controllers !== undefined &&
+          useUiStore.getState().tdsConfig.controllers === controllers
+        ) {
+          useUiStore.getState().setTdsControllerResults(event.controllers);
+          toast.info('Frequency control', {
+            description: `${summariseResults(event.controllers)} Under ANDES variables, the plot has each device's Pext (the power it was told to add, per unit) and current. The Messages tab says the same in words.`,
+            duration: 10000,
+          });
+        }
         // Surface the post-TDS operating point in the data grid. TDS never
         // writes usePflowStore.lastRun, so without this the Buses grid sits
         // empty after a TDS-only run. Best-effort, read-only.

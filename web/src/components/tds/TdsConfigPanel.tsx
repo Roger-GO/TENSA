@@ -18,6 +18,7 @@ import type {
   TdsVarGroup,
 } from '@/store/ui';
 import { Input } from '@/components/ui/Input';
+import { ControllersEditor } from './ControllersEditor';
 import { DaeVariablePicker } from './DaeVariablePicker';
 import { Button } from '@/components/ui/button';
 import { useRunsStore, MAX_RETENTION_LIMIT } from '@/store/runs';
@@ -39,6 +40,9 @@ import { useRunsStore, MAX_RETENTION_LIMIT } from '@/store/runs';
  * - ``daeVars`` (ANDES variables to record by name): picked in
  *   ``DaeVariablePicker``, any state or algebraic variable of the loaded models,
  *   fixed at run-start like the groups. Empty by default.
+ * - ``controllers`` (frequency controllers the run closes a loop with): set in
+ *   ``ControllersEditor``, a droop or a fast frequency response on a battery
+ *   or another distributed generation device. Empty by default.
  * - ``max_rate_hz`` (UI clamp): default 30. Power-users only.
  *
  * Persistence: writes through ``useUiStore.setTdsConfig`` so the value
@@ -426,6 +430,8 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
       </fieldset>
 
       <DaeVariablePicker />
+
+      <ControllersEditor />
 
       <NumberField
         id="tds-config-max-rate"

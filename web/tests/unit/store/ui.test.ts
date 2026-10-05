@@ -51,15 +51,60 @@ describe('useUiStore — TDS config (v0.2 Unit 8)', () => {
     resetUiStore();
   });
 
-  it('defaults: tf=10, h=null, vars=["bus_v","gen_state"] (voltage + freq), no ANDES variables, max_rate_hz=30', () => {
+  it('defaults: tf=10, h=null, vars=["bus_v","gen_state"] (voltage + freq), no ANDES variables, no controllers, max_rate_hz=30', () => {
     expect(DEFAULT_TDS_CONFIG).toEqual({
       tf: 10,
       h: null,
       vars: ['bus_v', 'gen_state'],
       daeVars: [],
+      controllers: [],
       maxRateHz: 30,
     });
     expect(useUiStore.getState().tdsConfig).toEqual(DEFAULT_TDS_CONFIG);
+    expect(useUiStore.getState().tdsControllerResults).toBeNull();
+  });
+
+  it("keeps a run's controller results until the list of controllers changes", () => {
+    const entry = {
+      spec: {
+        type: 'droop' as const,
+        model: 'ESD1',
+        idx: 1,
+        frequency: 'coi' as const,
+        period: 0.1,
+        t_start: 0,
+        ramp: null,
+        gain: 50,
+        deadband: 0,
+        p_max: null,
+      },
+      record: ['Pext ESD1 1'],
+    };
+    const result = {
+      type: 'droop' as const,
+      model: 'ESD1',
+      idx: 1,
+      samples: 10,
+      first_action_t: 1.1,
+      released_t: null,
+      peak_command: 5,
+      final_command: 4,
+    };
+    useUiStore.getState().setTdsConfig({ controllers: [entry] });
+    useUiStore.getState().setTdsControllerResults([result]);
+
+    // Another setting of the run leaves them.
+    useUiStore.getState().setTdsConfig({ tf: 20 });
+    expect(useUiStore.getState().tdsControllerResults).toEqual([result]);
+
+    // The results line up with the list by position, so a changed list drops them.
+    useUiStore.getState().setTdsConfig({ controllers: [entry, entry] });
+    expect(useUiStore.getState().tdsControllerResults).toBeNull();
+
+    useUiStore.getState().setTdsControllerResults([result, result]);
+    useUiStore.getState().resetTdsConfig();
+    expect(useUiStore.getState().tdsConfig.controllers).toEqual([]);
+    expect(useUiStore.getState().tdsControllerResults).toBeNull();
   });
 
   it('exposes TDS_VAR_GROUPS in canonical order with the new power/load groups', () => {

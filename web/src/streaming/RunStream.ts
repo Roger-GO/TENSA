@@ -5,7 +5,7 @@
  *
  * 1. Open WS to ``/api/ws/{sessionId}`` (``binaryType = "arraybuffer"``).
  * 2. Wait for ``{type: "ready"}`` (the server sends it unprompted on connect).
- * 3. Send ``{type: "start_tds", tf, h, decimation: "mean", max_rate_hz: 30, vars, dae_vars}``
+ * 3. Send ``{type: "start_tds", tf, h, decimation: "mean", max_rate_hz: 30, vars, dae_vars, controllers}``
  *    OR (on resume) ``{type: "resume", run_id, last_seq}``.
  * 4. Wait for ``{type: "stream_start", run_id, metadata}`` — capture
  *    ``run_id`` and ``metadata.var_columns`` from the substrate. The column
@@ -56,6 +56,8 @@ import {
   shouldGiveUp,
 } from './reconnect';
 import { useRunsStore } from '@/store/runs';
+import type { TdsControllerResult } from '@/api/types';
+import type { TdsControllerSpec } from '@/lib/tdsControllers';
 import type { UnitBases } from '@/lib/units';
 
 const log = console;
@@ -111,6 +113,12 @@ export interface TdsArgs {
    * is named exactly so in ``var_columns``. Left out when empty.
    */
   daeVars?: readonly string[];
+  /**
+   * Frequency controllers the run closes a loop with (a droop or a fast
+   * frequency response on a device), forwarded as ``controllers``. Left out
+   * when empty.
+   */
+  controllers?: readonly TdsControllerSpec[];
   /**
    * Unit 16 integrator selection. Optional — defaults to ``trapezoidal``
    * on the substrate. ``qndf`` enables the variable-step NDF method
@@ -189,6 +197,8 @@ export interface DoneEvent {
   converged: boolean;
   finalT: number;
   callpertCount: number;
+  /** What each of the run's controllers did, in the order sent; absent for a run without any. */
+  controllers?: TdsControllerResult[];
 }
 
 export interface RunStreamOptions {
@@ -483,6 +493,7 @@ export class RunStream {
             converged?: boolean;
             final_t?: number;
             callpert_count?: number;
+            controllers?: unknown;
           },
         );
         return;
@@ -542,7 +553,8 @@ export class RunStream {
       }
       this.send({ type: 'resume', run_id: this.runId, last_seq: this.rowCount });
     } else {
-      const { tf, h, vars, daeVars, integrator, tdsConfigOverrides } = this.opts.tdsArgs;
+      const { tf, h, vars, daeVars, controllers, integrator, tdsConfigOverrides } =
+        this.opts.tdsArgs;
       const payload: Record<string, unknown> = {
         type: 'start_tds',
         tf,
@@ -552,6 +564,7 @@ export class RunStream {
       if (h !== undefined) payload.h = h;
       if (vars !== undefined) payload.vars = vars;
       if (daeVars !== undefined && daeVars.length > 0) payload.dae_vars = daeVars;
+      if (controllers !== undefined && controllers.length > 0) payload.controllers = controllers;
       // Unit 16: integrator + adaptive overrides. Both are optional;
       // omit when undefined so the wire stays minimal for the default
       // trapezoidal-fixed-step path.
@@ -651,6 +664,7 @@ export class RunStream {
     converged?: boolean;
     final_t?: number;
     callpert_count?: number;
+    controllers?: unknown;
   }): void {
     if (this.runId === null) return;
     const event: DoneEvent = {
@@ -658,6 +672,9 @@ export class RunStream {
       converged: Boolean(msg.converged),
       finalT: typeof msg.final_t === 'number' ? msg.final_t : 0,
       callpertCount: typeof msg.callpert_count === 'number' ? msg.callpert_count : 0,
+      ...(Array.isArray(msg.controllers)
+        ? { controllers: msg.controllers as TdsControllerResult[] }
+        : {}),
     };
     useRunsStore.getState().markRunDone(this.runId, event.finalT, event.converged);
     this.opts.onDone?.(event);

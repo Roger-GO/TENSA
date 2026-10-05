@@ -1805,6 +1805,147 @@ describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () =>
       useUiStore.getState().setTdsConfig({ daeVars: [] });
     }
   });
+
+  const DROOP = {
+    type: 'droop' as const,
+    model: 'ESD1',
+    idx: 1,
+    frequency: 'coi' as const,
+    period: 0.1,
+    t_start: 0,
+    ramp: null,
+    gain: 50,
+    deadband: 0.02,
+    p_max: null,
+  };
+  const DROOP_ENTRY = { spec: DROOP, record: ['Pext ESD1 1', 'Ipout_y ESD1 1', 'pIG_y ESD1 1'] };
+
+  it('no frequency controllers set → no controllers key on the wire', async () => {
+    const start = await captureStartTds();
+    expect(start).not.toHaveProperty('controllers');
+  });
+
+  it('frequency controllers set → sent as controllers, with the variables that show them at work', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore
+      .getState()
+      .setTdsConfig({ daeVars: ['omega GENROU 1', 'Pext ESD1 1'], controllers: [DROOP_ENTRY] });
+    try {
+      const start = await captureStartTds();
+      // What the substrate is sent is the controller alone, not what the UI keeps beside it.
+      expect(start.controllers).toEqual([DROOP]);
+      // The user's own picks first, then the controller's, each once.
+      expect(start.dae_vars).toEqual([
+        'omega GENROU 1',
+        'Pext ESD1 1',
+        'Ipout_y ESD1 1',
+        'pIG_y ESD1 1',
+      ]);
+    } finally {
+      useUiStore.getState().setTdsConfig({ daeVars: [], controllers: [] });
+    }
+  });
+
+  it('a run with controllers → what each did is kept beside them and said once', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    seedReady();
+    useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+    useUiStore.getState().setTdsConfig({ controllers: [DROOP_ENTRY] });
+    const did = {
+      type: 'droop',
+      model: 'ESD1',
+      idx: 1,
+      samples: 50,
+      first_action_t: 1.1001,
+      released_t: null,
+      peak_command: 15.9,
+      final_command: 15.5,
+    };
+    server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.on('message', (raw: unknown) => {
+        const msg = JSON.parse(String(raw)) as { type: string };
+        if (msg.type !== 'start_tds') return;
+        socket.send(
+          JSON.stringify({
+            type: 'stream_start',
+            run_id: 'run-ctl-1',
+            metadata: { schema_version: '2.0', vars: ['bus_v'], var_columns: ['Bus_1_v'] },
+          }),
+        );
+        socket.send(
+          JSON.stringify({
+            type: 'done',
+            run_id: 'run-ctl-1',
+            converged: true,
+            final_t: 5,
+            controllers: [did],
+          }),
+        );
+        socket.close({ code: 1000 });
+      });
+    });
+
+    try {
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      await userEvent.click(screen.getByTestId('run-mode-tds'));
+      await userEvent.click(screen.getByTestId('run-tds-button'));
+      await waitFor(() => {
+        expect(useRunsStore.getState().runs['run-ctl-1']?.state).toBe('done');
+      });
+
+      expect(useUiStore.getState().tdsControllerResults).toEqual([did]);
+      const said = toastInfoMock.mock.calls.find(([title]) => title === 'Frequency control') as
+        | [string, { description: string }]
+        | undefined;
+      expect(said?.[1].description).toContain(
+        'Droop on ESD1 1 acted from t = 1.1 s, peaked at 15.9 MW, 15.5 MW at the end.',
+      );
+      // It says where to look: the plot's ANDES variables and the Messages tab.
+      expect(said?.[1].description).toContain('Pext');
+      expect(said?.[1].description).toContain('Messages');
+    } finally {
+      useUiStore.getState().setTdsConfig({ controllers: [] });
+    }
+  });
+
+  it('a run without controllers says nothing about frequency control', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    seedReady();
+    useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+    server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.on('message', (raw: unknown) => {
+        const msg = JSON.parse(String(raw)) as { type: string };
+        if (msg.type !== 'start_tds') return;
+        socket.send(
+          JSON.stringify({
+            type: 'stream_start',
+            run_id: 'run-plain-1',
+            metadata: { schema_version: '2.0', vars: ['bus_v'], var_columns: ['Bus_1_v'] },
+          }),
+        );
+        socket.send(
+          JSON.stringify({ type: 'done', run_id: 'run-plain-1', converged: true, final_t: 5 }),
+        );
+        socket.close({ code: 1000 });
+      });
+    });
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-plain-1']?.state).toBe('done');
+    });
+
+    expect(useUiStore.getState().tdsControllerResults).toBeNull();
+    expect(toastInfoMock).not.toHaveBeenCalledWith('Frequency control', expect.anything());
+  });
 });
 
 describe('<RunButton /> v0.2 — abort + reset', () => {

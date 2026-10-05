@@ -62,6 +62,7 @@ import type {
   SessionDescriptor,
   SidecarLayout,
   SessionId,
+  TdsControllerCatalogue,
   TopologyEntry,
   TopologySchema,
   TopologySummary,
@@ -313,6 +314,13 @@ export const queryKeys = {
    */
   daeVariables: (id: SessionId, casePath: string, q: string, limit: number) =>
     ['dae-variables', id, casePath, q, limit] as const,
+  /**
+   * The devices a TDS run's controllers can command, scoped per (session,
+   * case, number of dynamic devices): a property of what is loaded, like the
+   * variables above. The count makes a battery added or deleted a new list.
+   */
+  tdsControllers: (id: SessionId, casePath: string, devices: number) =>
+    ['tds-controllers', id, casePath, devices] as const,
   /** Clone-vs-original param diff, scoped per (session, model, idx) (Unit 23). */
   cloneDiff: (id: SessionId, model: string, idx: string) => ['clone-diff', id, model, idx] as const,
 } as const;
@@ -666,10 +674,11 @@ function isSessionBusy(error: unknown): boolean {
 
 /**
  * Query options for a list the substrate answers in milliseconds but refuses
- * (409) while anything else holds the session. A list that collides with
- * another request asks again a few times, a little later each time. While a run
- * holds the session the refusal stands, and the list is then asked for every two
- * seconds until it comes back, so it is there again when the run ends.
+ * (409) while anything else holds the session. Two such lists asked for in the
+ * same moment, as the TDS tab does when it opens, collide: the one that loses
+ * asks again a few times, a little later each time. While a run holds the
+ * session the refusal stands, and the list is then asked for every two seconds
+ * until it comes back, so it is there again when the run ends.
  */
 const BUSY_READ = {
   retry: (failureCount: number, error: Error) =>
@@ -715,6 +724,42 @@ export function useDaeVariables(q: string, limit: number): UseQueryResult<DaeVar
           query: { limit: String(limit), ...(q.trim() === '' ? {} : { q: q.trim() }) },
           timeoutMs: TIMEOUTS.topology,
         },
+      );
+    },
+  });
+}
+
+/**
+ * `GET /sessions/{id}/tds/controllers`: the kinds of controller a TDS run takes
+ * and the devices of the loaded case they can command (batteries and other
+ * distributed generation), each with its limit and the ANDES variables that
+ * show a controller at work on it. Needs no run and does not close the case to
+ * disturbances. Disabled without a session or a case.
+ *
+ * Refused with a 409 while a run streams, as the variable list is, and asked
+ * for again the same way (``BUSY_READ``).
+ */
+export function useTdsControllers(): UseQueryResult<TdsControllerCatalogue, Error> {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const selection = useCaseStore((s) => s.selection);
+  // The batteries the element builder adds are in the topology's controllers.
+  const devices = useCaseStore((s) => s.topology?.controllers?.length ?? 0);
+  const enabled = sessionId !== null && selection !== null;
+  const casePath = selection?.primaryPath ?? 'blank';
+  return useQuery({
+    queryKey: enabled
+      ? queryKeys.tdsControllers(sessionId, casePath, devices)
+      : ['tds-controllers', 'noop'],
+    enabled,
+    // A battery added in the meantime is a device to list: do not rely on an
+    // old answer for long.
+    staleTime: 5_000,
+    ...BUSY_READ,
+    queryFn: async () => {
+      if (!sessionId) throw new Error('useTdsControllers enabled without a session');
+      return await andesClient.get<TdsControllerCatalogue>(
+        `/sessions/${encodeURIComponent(sessionId)}/tds/controllers`,
+        { timeoutMs: TIMEOUTS.topology },
       );
     },
   });

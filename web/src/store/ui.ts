@@ -16,6 +16,8 @@
  */
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import type { TdsControllerResult } from '@/api/types';
+import type { TdsControllerEntry } from '@/lib/tdsControllers';
 
 /** Variable group selector forwarded by ``RunStream`` to ``start_tds``. */
 export type TdsVarGroup = 'bus_v' | 'gen_state' | 'gen_power' | 'line_flow' | 'load_pq';
@@ -51,6 +53,13 @@ export interface TdsConfig {
    * (``store/index.ts``) empties the list.
    */
   daeVars: readonly string[];
+  /**
+   * Frequency controllers the next run closes a loop with: a droop or a fast
+   * frequency response on a battery or another distributed generation device
+   * (``lib/tdsControllers``). They name devices of the loaded case, so the
+   * case-change cascade empties the list.
+   */
+  controllers: readonly TdsControllerEntry[];
   /** UI-side output-rate clamp forwarded to the substrate. */
   maxRateHz: number;
 }
@@ -63,6 +72,7 @@ export const DEFAULT_TDS_CONFIG: TdsConfig = {
   h: null,
   vars: ['bus_v', 'gen_state'],
   daeVars: [],
+  controllers: [],
   maxRateHz: 30,
 };
 
@@ -151,6 +161,15 @@ export interface UiState {
   resetTdsConfig: () => void;
 
   /**
+   * What each of ``tdsConfig.controllers`` did in the last run that had any, in
+   * their order, as the run's ``done`` frame reported it; ``null`` before such
+   * a run. Emptied when the list of controllers changes, since the results
+   * line up with it by position.
+   */
+  tdsControllerResults: readonly TdsControllerResult[] | null;
+  setTdsControllerResults: (results: readonly TdsControllerResult[] | null) => void;
+
+  /**
    * Unit 16 integrator preset. Persisted to sessionStorage so the
    * choice survives a refresh mid-study.
    */
@@ -189,8 +208,19 @@ export const useUiStore = create<UiState>()(
       toggleHideLabels: () => set((s) => ({ hideLabels: !s.hideLabels })),
 
       tdsConfig: { ...DEFAULT_TDS_CONFIG },
-      setTdsConfig: (next) => set((s) => ({ tdsConfig: { ...s.tdsConfig, ...next } })),
-      resetTdsConfig: () => set({ tdsConfig: { ...DEFAULT_TDS_CONFIG } }),
+      setTdsConfig: (next) =>
+        set((s) => ({
+          tdsConfig: { ...s.tdsConfig, ...next },
+          // Results belong to the controllers they were reported for.
+          ...(next.controllers === undefined || next.controllers === s.tdsConfig.controllers
+            ? {}
+            : { tdsControllerResults: null }),
+        })),
+      resetTdsConfig: () =>
+        set({ tdsConfig: { ...DEFAULT_TDS_CONFIG }, tdsControllerResults: null }),
+
+      tdsControllerResults: null,
+      setTdsControllerResults: (results) => set({ tdsControllerResults: results }),
 
       tdsIntegrator: DEFAULT_TDS_INTEGRATOR,
       setTdsIntegrator: (next) => set({ tdsIntegrator: next }),

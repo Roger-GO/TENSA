@@ -332,6 +332,94 @@ describe('RunStream — frames name no columns', () => {
     expect(sent[0]).not.toHaveProperty('dae_vars');
   });
 
+  it('sends the frequency controllers with the start and hands back what each did', async () => {
+    const onDone = vi.fn();
+    const sent: Record<string, unknown>[] = [];
+    const droop = {
+      type: 'droop' as const,
+      model: 'ESD1',
+      idx: 1,
+      frequency: 'coi' as const,
+      period: 0.1,
+      t_start: 0,
+      ramp: null,
+      gain: 50,
+      deadband: 0.02,
+      p_max: null,
+    };
+    const did = {
+      type: 'droop',
+      model: 'ESD1',
+      idx: 1,
+      samples: 1,
+      first_action_t: 0.1,
+      released_t: null,
+      peak_command: 5,
+      final_command: 4,
+    };
+    server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.on('message', (raw: unknown) => {
+        const msg = JSON.parse(String(raw)) as Record<string, unknown>;
+        sent.push(msg);
+        if (msg.type !== 'start_tds') return;
+        socket.send(
+          JSON.stringify({
+            type: 'stream_start',
+            run_id: 'r1',
+            metadata: { schema_version: '2.0', vars: ['bus_v'], var_columns: ['Bus_1_v'] },
+          }),
+        );
+        socket.send(
+          JSON.stringify({ type: 'done', converged: true, final_t: 0.1, controllers: [did] }),
+        );
+        socket.close({ code: 1000 });
+      });
+    });
+
+    const stream = new RunStream(
+      { sessionId: SESSION_ID, wsUrl: WS_URL, tdsArgs: { tf: 0.1, controllers: [droop] }, onDone },
+      { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
+    );
+    stream.start();
+    for (let i = 0; i < 10 && onDone.mock.calls.length === 0; i += 1) await tick();
+
+    expect(sent[0]).toMatchObject({ type: 'start_tds', controllers: [droop] });
+    expect(onDone).toHaveBeenCalledWith(expect.objectContaining({ controllers: [did] }));
+  });
+
+  it('leaves controllers off the wire, and off the done event, for a run without any', async () => {
+    const onDone = vi.fn();
+    const sent: Record<string, unknown>[] = [];
+    server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.on('message', (raw: unknown) => {
+        const msg = JSON.parse(String(raw)) as Record<string, unknown>;
+        sent.push(msg);
+        if (msg.type !== 'start_tds') return;
+        socket.send(
+          JSON.stringify({
+            type: 'stream_start',
+            run_id: 'r1',
+            metadata: { schema_version: '2.0', vars: ['bus_v'], var_columns: ['Bus_1_v'] },
+          }),
+        );
+        socket.send(JSON.stringify({ type: 'done', converged: true, final_t: 0.1 }));
+        socket.close({ code: 1000 });
+      });
+    });
+
+    const stream = new RunStream(
+      { sessionId: SESSION_ID, wsUrl: WS_URL, tdsArgs: { tf: 0.1, controllers: [] }, onDone },
+      { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
+    );
+    stream.start();
+    for (let i = 0; i < 10 && onDone.mock.calls.length === 0; i += 1) await tick();
+
+    expect(sent[0]).not.toHaveProperty('controllers');
+    expect(onDone.mock.calls[0]?.[0]).not.toHaveProperty('controllers');
+  });
+
   it('records the unit bases the run was launched with on the run', async () => {
     const onDone = vi.fn();
     serveRun(['Bus_1_v'], [batch([0.0], { Bus_1_v: [1.0] })]);
