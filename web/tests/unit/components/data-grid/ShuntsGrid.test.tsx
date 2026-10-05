@@ -2,7 +2,8 @@
  * Tests for ``<ShuntsGrid />`` (v3 Unit 13).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, screen } from '@testing-library/react';
+import { renderWithQuery as render } from '../../helpers/gridQuery';
 import userEvent from '@testing-library/user-event';
 
 import { useCaseStore } from '@/store/case';

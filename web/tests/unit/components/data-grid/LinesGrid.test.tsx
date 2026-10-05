@@ -7,7 +7,8 @@
  * so the data-grid row highlight stays in sync.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, screen } from '@testing-library/react';
+import { renderWithQuery as render } from '../../helpers/gridQuery';
 import userEvent from '@testing-library/user-event';
 
 import { useCaseStore } from '@/store/case';
@@ -90,47 +91,42 @@ function solved(): PflowResult {
   };
 }
 
-function cells(rowId: string): (string | null)[] {
-  return [...screen.getByTestId(`lines-grid-row-${rowId}`).querySelectorAll('[role=cell]')].map(
-    (c) => c.textContent,
-  );
+/** The text of the named columns of a row, found by column key so a new column shifts nothing. */
+function cells(rowId: string, ...keys: string[]): (string | null)[] {
+  return keys.map((key) => screen.getByTestId(`lines-grid-cell-${rowId}-${key}`).textContent);
 }
+
+const ENDS = ['p_from', 'q_from', 'p_to', 'q_to', 'loss'];
+const RATING = ['rate_a', 'loading', 'loading_check'];
 
 describe('<LinesGrid /> both ends, loss and loading', () => {
   it('reads the power at both ends and the loss from the PF result', () => {
     mockTopology = TOPOLOGY;
     usePflowStore.setState({ lastRun: solved(), isRunning: false, error: null });
     render(<LinesGrid />);
-    // idx, from, to, P_from, Q_from, P_to, Q_to, loss, rating, loading, check
-    expect(cells('line-L1').slice(3, 8)).toEqual([
-      '112.400',
-      '10.000',
-      '-110.200',
-      '-5.000',
-      '2.200',
-    ]);
+    expect(cells('line-L1', ...ENDS)).toEqual(['112.400', '10.000', '-110.200', '-5.000', '2.200']);
   });
 
   it('shows the rating, the loading and the verdict of a rated line', () => {
     mockTopology = TOPOLOGY;
     usePflowStore.setState({ lastRun: solved(), isRunning: false, error: null });
     render(<LinesGrid />);
-    expect(cells('line-L1').slice(8)).toEqual(['100.000', '112.400', 'Over rating']);
+    expect(cells('line-L1', ...RATING)).toEqual(['100', '112.400', 'Over rating']);
   });
 
   it('leaves the rating, loading and verdict of an unrated line empty', () => {
     mockTopology = TOPOLOGY;
     usePflowStore.setState({ lastRun: solved(), isRunning: false, error: null });
     render(<LinesGrid />);
-    expect(cells('line-L2').slice(8)).toEqual(['—', '—', '—']);
+    expect(cells('line-L2', ...RATING)).toEqual(['—', '—', '—']);
     // The two ends and the loss are there all the same.
-    expect(cells('line-L2').slice(3, 8)).toEqual(['20.000', '2.000', '-19.900', '-1.500', '0.100']);
+    expect(cells('line-L2', ...ENDS)).toEqual(['20.000', '2.000', '-19.900', '-1.500', '0.100']);
   });
 
   it('leaves every figure empty before a power flow and after one that did not converge', () => {
     mockTopology = TOPOLOGY;
     const { unmount } = render(<LinesGrid />);
-    expect(cells('line-L1').slice(3)).toEqual(Array(8).fill('—'));
+    expect(cells('line-L1', ...ENDS, ...RATING)).toEqual(Array(8).fill('—'));
     unmount();
     usePflowStore.setState({
       lastRun: { ...solved(), converged: false },
@@ -138,7 +134,7 @@ describe('<LinesGrid /> both ends, loss and loading', () => {
       error: null,
     });
     render(<LinesGrid />);
-    expect(cells('line-L1').slice(3)).toEqual(Array(8).fill('—'));
+    expect(cells('line-L1', ...ENDS, ...RATING)).toEqual(Array(8).fill('—'));
   });
 });
 
@@ -155,8 +151,8 @@ describe('<LinesGrid /> rating', () => {
     mockTopology = RATED;
     render(<LinesGrid />);
     // rating, loading, check: only the rating is there until a run solves the case.
-    expect(cells('line-L1').slice(8)).toEqual(['10.000', '—', '—']);
-    expect(cells('line-L2').slice(8)).toEqual(['—', '—', '—']);
+    expect(cells('line-L1', ...RATING)).toEqual(['10', '—', '—']);
+    expect(cells('line-L2', ...RATING)).toEqual(['—', '—', '—']);
   });
 
   it('keeps the rating of the run once a power flow has solved the case', () => {
@@ -164,35 +160,33 @@ describe('<LinesGrid /> rating', () => {
     usePflowStore.setState({ lastRun: solved(), isRunning: false, error: null });
     render(<LinesGrid />);
     // The run's own rating (100) wins over the case's, so it matches the loading beside it.
-    expect(cells('line-L1').slice(8)).toEqual(['100.000', '112.400', 'Over rating']);
+    expect(cells('line-L1', ...RATING)).toEqual(['100', '112.400', 'Over rating']);
   });
 });
 
-describe('<LinesGrid /> saying how to rate a line', () => {
+describe('<LinesGrid /> table', () => {
   it('names the table, so a screen reader or a test driver finds it', () => {
     mockTopology = TOPOLOGY;
     render(<LinesGrid />);
     expect(screen.getByRole('table', { name: 'Lines' })).toBeInTheDocument();
   });
 
-  it('says where rate_a is edited while the case has not been run', () => {
-    mockTopology = TOPOLOGY;
+  it("shows the line's own parameters as the case gives them, in full", () => {
+    mockTopology = {
+      ...TOPOLOGY,
+      lines: [
+        {
+          idx: 'L1',
+          name: 'Line1-2',
+          kind: 'Line',
+          params: { bus1: 1, bus2: 2, r: 0.00043, x: 0.0281, b: 0.04, u: 1 },
+        },
+        { idx: 'L2', name: 'Line2-3', kind: 'Line', params: { bus1: 2, bus2: 3 } },
+      ],
+    };
     render(<LinesGrid />);
-    const hint = screen.getByTestId('lines-grid-hint');
-    expect(hint).toHaveTextContent('A dash means no rating, so no overload check.');
-    expect(hint).toHaveTextContent('click the pencil beside rate_a in the Inspector');
-  });
-
-  it('says how to unlock the rating once a run has locked the case', () => {
-    mockTopology = { ...TOPOLOGY, state: 'committed' };
-    render(<LinesGrid />);
-    const hint = screen.getByTestId('lines-grid-hint');
-    expect(hint).toHaveTextContent('Ratings are locked once a run has started.');
-    expect(hint).toHaveTextContent('use Reset run in the Inspector to change rate_a');
-  });
-
-  it('has no hint without a case', () => {
-    render(<LinesGrid />);
-    expect(screen.queryByTestId('lines-grid-hint')).not.toBeInTheDocument();
+    // Three decimals would show the resistance as 0.000.
+    expect(cells('line-L1', 'r', 'x', 'b', 'u')).toEqual(['0.00043', '0.0281', '0.04', '1']);
+    expect(cells('line-L2', 'r', 'x', 'b', 'u')).toEqual(['—', '—', '—', '—']);
   });
 });

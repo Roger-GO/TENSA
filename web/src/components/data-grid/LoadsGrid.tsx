@@ -17,12 +17,15 @@
  *
  * P / Q are what the load draws (MW / MVAr) from the last converged power
  * flow, the same figures the diagram and the inspector print, and read
- * ``—`` until power flow has run. The case's own ``p0`` / ``q0`` are not
- * shown: they are per-unit setpoints on the system base, so labelling them
- * MW read 9.670 where the diagram showed 967.0 MW (Kundur).
+ * ``—`` until power flow has run. The case's own ``p0`` / ``q0`` stand beside
+ * them as what they are, per-unit set-points on the system base: labelled MW
+ * they read 9.670 where the diagram showed 967.0 MW (Kundur). They can be
+ * changed in the table, before the case has been run.
  */
 import { useMemo } from 'react';
 import { DataGrid, type ColumnConfig } from './DataGrid';
+import { formatParamValue } from './gridCells';
+import { useGridEditing, type GridEditTarget } from './useGridEditing';
 import { useCurrentTopology } from '@/api/queries';
 import { usePflowStore } from '@/store/pflow';
 import { useSldStore } from '@/store/sld';
@@ -33,7 +36,11 @@ interface LoadRow {
   rowId: string;
   idx: string;
   name: string;
+  /** The ANDES model of the load (`PQ` or `ZIP`). */
+  kind: string;
   bus: string | null;
+  p0: number | null;
+  q0: number | null;
   p: number | null;
   q: number | null;
   status: string;
@@ -45,6 +52,11 @@ function paramString(entry: TopologyEntry, key: string): string | null {
   return String(v);
 }
 
+function paramNumber(entry: TopologyEntry, key: string): number | null {
+  const v = entry.params?.[key];
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
 function finiteOrNull(v: number | undefined): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
@@ -52,14 +64,38 @@ function finiteOrNull(v: number | undefined): number | null {
 const CONSUMPTION_TITLE =
   'What the load draws in the last power flow run. Shows a dash until power flow has run.';
 
+const SET_POINT_TITLE =
+  'Set-point the case gives, in per unit on the system base: multiply by the system MVA base for MW or MVAr. Type a value to change it before a run; power flow solves what the load draws beside it.';
+
 const COLUMNS: ColumnConfig<LoadRow>[] = [
-  { key: 'idx', label: 'idx', accessor: (r) => r.idx },
-  { key: 'name', label: 'name', accessor: (r) => r.name },
-  { key: 'bus', label: 'bus', accessor: (r) => r.bus },
+  { key: 'idx', label: 'idx', minWidth: 72, accessor: (r) => r.idx },
+  { key: 'name', label: 'name', minWidth: 96, accessor: (r) => r.name },
+  { key: 'bus', label: 'bus', minWidth: 56, accessor: (r) => r.bus },
+  {
+    key: 'p0',
+    label: 'p0 (pu)',
+    title: `Active power set-point. ${SET_POINT_TITLE}`,
+    minWidth: 84,
+    numeric: true,
+    format: formatParamValue,
+    accessor: (r) => r.p0,
+    edit: { param: 'p0' },
+  },
+  {
+    key: 'q0',
+    label: 'q0 (pu)',
+    title: `Reactive power set-point. ${SET_POINT_TITLE}`,
+    minWidth: 84,
+    numeric: true,
+    format: formatParamValue,
+    accessor: (r) => r.q0,
+    edit: { param: 'q0' },
+  },
   {
     key: 'p',
     label: 'P (MW)',
     title: CONSUMPTION_TITLE,
+    minWidth: 84,
     numeric: true,
     accessor: (r) => r.p,
   },
@@ -67,11 +103,14 @@ const COLUMNS: ColumnConfig<LoadRow>[] = [
     key: 'q',
     label: 'Q (MVAr)',
     title: CONSUMPTION_TITLE,
+    minWidth: 92,
     numeric: true,
     accessor: (r) => r.q,
   },
-  { key: 'status', label: 'status', accessor: (r) => r.status },
+  { key: 'status', label: 'status', minWidth: 72, accessor: (r) => r.status },
 ];
+
+const EDIT_TARGET: GridEditTarget<LoadRow> = { model: (r) => r.kind, idx: (r) => r.idx };
 
 export interface LoadsGridProps {
   className?: string;
@@ -83,6 +122,7 @@ export function LoadsGrid({ className }: LoadsGridProps) {
   const setSelectedNodeId = useSldStore((s) => s.setSelectedNodeId);
   const selectedNodeId = useSldStore((s) => s.selectedNodeId);
   const setSelectedElement = useCaseStore((s) => s.setSelectedElement);
+  const editing = useGridEditing(EDIT_TARGET);
 
   const rows = useMemo<LoadRow[]>(() => {
     if (!topology) return [];
@@ -94,7 +134,10 @@ export function LoadsGrid({ className }: LoadsGridProps) {
         rowId: `load-${idx}`,
         idx,
         name: load.name,
+        kind: load.kind,
         bus: paramString(load, 'bus'),
+        p0: paramNumber(load, 'p0'),
+        q0: paramNumber(load, 'q0'),
         p: finiteOrNull(row?.p),
         q: finiteOrNull(row?.q),
         status: paramString(load, 'u') === '0' ? 'off' : 'online',
@@ -119,6 +162,9 @@ export function LoadsGrid({ className }: LoadsGridProps) {
       testId="loads-grid"
       ariaLabel="Loads"
       exportPanel="loads"
+      filterable
+      copyable
+      editing={editing}
       className={className}
     />
   );

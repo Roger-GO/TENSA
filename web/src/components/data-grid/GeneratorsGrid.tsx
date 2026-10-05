@@ -20,9 +20,17 @@
  * PV generator has no ``q0``. The reactive limits (``qmin`` / ``qmax``, in
  * MVAr) sit beside Q with the verdict in words, since the power flow does not
  * hold a generator to them: an output can lie past one.
+ *
+ * The set-points of the static generators, the active power `p0` and the
+ * voltage `v0` in per unit, stand beside those results and can be changed in
+ * the table, before the case has been run. A dynamic machine has neither (its
+ * parameters are in the Machines table), so its cells read `—` and stay as they
+ * are.
  */
 import { useMemo } from 'react';
 import { DataGrid, type ColumnConfig } from './DataGrid';
+import { formatParamValue } from './gridCells';
+import { useGridEditing, type GridEditTarget } from './useGridEditing';
 import { useCurrentTopology } from '@/api/queries';
 import { usePflowStore } from '@/store/pflow';
 import { useSldStore } from '@/store/sld';
@@ -37,6 +45,8 @@ interface GeneratorRow {
   name: string;
   bus: string | null;
   kind: string;
+  p0: number | null;
+  v0: number | null;
   p: number | null;
   q: number | null;
   q_min: number | null;
@@ -51,6 +61,11 @@ function paramString(entry: TopologyEntry, key: string): string | null {
   return String(v);
 }
 
+function paramNumber(entry: TopologyEntry, key: string): number | null {
+  const v = entry.params?.[key];
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
 function finiteOrNull(v: number | undefined): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
@@ -60,15 +75,39 @@ const OUTPUT_TITLE = 'Output from the last power flow run. Shows a dash until po
 const Q_LIMIT_TITLE =
   'The reactive power limit the case sets. Power flow does not enforce it unless Enforce generator Q limits is ticked in the PF options, so Q can lie past it. A dash for a generator that is switched off, and until power flow has run.';
 
+const SET_POINT_TITLE =
+  'Set-point the case gives, in per unit on the system base (a static generator only). Type a value to change it before a run; power flow solves the output beside it.';
+
 const COLUMNS: ColumnConfig<GeneratorRow>[] = [
-  { key: 'idx', label: 'idx', accessor: (r) => r.idx },
-  { key: 'name', label: 'name', accessor: (r) => r.name },
-  { key: 'bus', label: 'bus', accessor: (r) => r.bus },
-  { key: 'kind', label: 'kind', accessor: (r) => r.kind },
+  { key: 'idx', label: 'idx', minWidth: 72, accessor: (r) => r.idx },
+  { key: 'name', label: 'name', minWidth: 96, accessor: (r) => r.name },
+  { key: 'bus', label: 'bus', minWidth: 56, accessor: (r) => r.bus },
+  { key: 'kind', label: 'kind', minWidth: 72, accessor: (r) => r.kind },
+  {
+    key: 'p0',
+    label: 'p0 (pu)',
+    title: `Active power set-point. ${SET_POINT_TITLE}`,
+    minWidth: 84,
+    numeric: true,
+    format: formatParamValue,
+    accessor: (r) => r.p0,
+    edit: { param: 'p0' },
+  },
+  {
+    key: 'v0',
+    label: 'v0 (pu)',
+    title: `Voltage set-point. ${SET_POINT_TITLE}`,
+    minWidth: 84,
+    numeric: true,
+    format: formatParamValue,
+    accessor: (r) => r.v0,
+    edit: { param: 'v0' },
+  },
   {
     key: 'p',
     label: 'P (MW)',
     title: OUTPUT_TITLE,
+    minWidth: 84,
     numeric: true,
     accessor: (r) => r.p,
   },
@@ -76,6 +115,7 @@ const COLUMNS: ColumnConfig<GeneratorRow>[] = [
     key: 'q',
     label: 'Q (MVAr)',
     title: OUTPUT_TITLE,
+    minWidth: 92,
     numeric: true,
     accessor: (r) => r.q,
   },
@@ -83,6 +123,7 @@ const COLUMNS: ColumnConfig<GeneratorRow>[] = [
     key: 'q_min',
     label: 'Qmin (MVAr)',
     title: Q_LIMIT_TITLE,
+    minWidth: 108,
     numeric: true,
     accessor: (r) => r.q_min,
   },
@@ -90,6 +131,7 @@ const COLUMNS: ColumnConfig<GeneratorRow>[] = [
     key: 'q_max',
     label: 'Qmax (MVAr)',
     title: Q_LIMIT_TITLE,
+    minWidth: 108,
     numeric: true,
     accessor: (r) => r.q_max,
   },
@@ -98,11 +140,16 @@ const COLUMNS: ColumnConfig<GeneratorRow>[] = [
     label: 'Q check',
     title:
       'Where Q stands against Qmin and Qmax: within them, on one, or past one. Filled in once a power flow has run.',
-    width: 104,
+    minWidth: 104,
     accessor: (r) => r.q_check,
   },
-  { key: 'status', label: 'status', accessor: (r) => r.status },
+  { key: 'status', label: 'status', minWidth: 72, accessor: (r) => r.status },
 ];
+
+const EDIT_TARGET: GridEditTarget<GeneratorRow> = {
+  model: (r) => r.kind,
+  idx: (r) => r.idx,
+};
 
 export interface GeneratorsGridProps {
   className?: string;
@@ -120,6 +167,7 @@ export function GeneratorsGrid({ className }: GeneratorsGridProps) {
   // and both records belong to it. DataGrid takes a single selectedRowId
   // string, so we pass the idx-only suffix and adjust the row matcher.
   const selectedNodeId = useSldStore((s) => s.selectedNodeId);
+  const editing = useGridEditing(EDIT_TARGET);
   const selectedIdx = selectedNodeId?.startsWith('generator-')
     ? selectedNodeId.replace(/^generator-/, '')
     : null;
@@ -154,6 +202,8 @@ export function GeneratorsGrid({ className }: GeneratorsGridProps) {
         name: gen.name,
         bus: paramString(gen, 'bus'),
         kind,
+        p0: paramNumber(gen, 'p0'),
+        v0: paramNumber(gen, 'v0'),
         p,
         q,
         q_min: qMin,
@@ -200,6 +250,9 @@ export function GeneratorsGrid({ className }: GeneratorsGridProps) {
       testId="generators-grid"
       ariaLabel="Generators"
       exportPanel="generators"
+      filterable
+      copyable
+      editing={editing}
       className={className}
     />
   );

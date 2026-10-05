@@ -2,7 +2,8 @@
  * Tests for ``<LoadsGrid />`` (v3 Unit 13).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, screen } from '@testing-library/react';
+import { renderWithQuery as render } from '../../helpers/gridQuery';
 import userEvent from '@testing-library/user-event';
 
 import { useCaseStore } from '@/store/case';
@@ -60,11 +61,9 @@ function pfWithLoads(): PflowResult {
   } as unknown as PflowResult;
 }
 
-/** The P and Q cells (the 4th and 5th of idx, name, bus, P, Q, status) of a row. */
+/** The P and Q cells of a row, found by column key so a new column shifts nothing. */
 function pq(rowId: string): (string | null)[] {
-  return [...screen.getByTestId(`loads-grid-row-${rowId}`).querySelectorAll('[role=cell]')]
-    .slice(3, 5)
-    .map((c) => c.textContent);
+  return ['p', 'q'].map((key) => screen.getByTestId(`loads-grid-cell-${rowId}-${key}`).textContent);
 }
 
 beforeEach(() => {

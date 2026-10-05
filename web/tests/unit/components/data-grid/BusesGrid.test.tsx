@@ -10,7 +10,8 @@
  *    per the F-DESIGN-7 dual-write pattern.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, screen } from '@testing-library/react';
+import { renderWithQuery as render } from '../../helpers/gridQuery';
 import userEvent from '@testing-library/user-event';
 
 import { useCaseStore } from '@/store/case';
@@ -178,12 +179,11 @@ describe('<BusesGrid />', () => {
 });
 
 describe('<BusesGrid /> voltage limits', () => {
-  /** The cell texts of one row, in column order. */
-  function cells(busIdx: string): string[] {
-    const row = screen.getByTestId(`buses-grid-row-${busIdx}`);
-    return within(row)
-      .getAllByRole('cell')
-      .map((cell) => cell.textContent ?? '');
+  /** The texts of the named columns of one row, found by column key so a new column shifts nothing. */
+  function cells(busIdx: string, ...keys: string[]): string[] {
+    return keys.map(
+      (key) => screen.getByTestId(`buses-grid-cell-${busIdx}-${key}`).textContent ?? '',
+    );
   }
 
   const LIMITED: TopologySummary = {
@@ -202,24 +202,26 @@ describe('<BusesGrid /> voltage limits', () => {
     mockTopology = LIMITED;
     render(<BusesGrid />);
     const headers = screen.getAllByRole('columnheader').map((h) => h.textContent ?? '');
-    expect(headers.slice(0, 6).map((h) => h.replace(/[·▲▼]/g, ''))).toEqual([
+    expect(headers.slice(0, 7).map((h) => h.replace(/[·▲▼]/g, ''))).toEqual([
       'idx',
       'name',
+      'Vn (kV)',
       'V (pu)',
       'vmin (pu)',
       'vmax (pu)',
       'Limit check',
     ]);
-    expect(cells('1').slice(3, 5)).toEqual(['0.900', '1.100']);
-    expect(cells('2').slice(3, 5)).toEqual(['1.000', '1.020']);
+    // A limit reads as the case holds it, not to three decimals.
+    expect(cells('1', 'vmin', 'vmax')).toEqual(['0.9', '1.1']);
+    expect(cells('2', 'vmin', 'vmax')).toEqual(['1', '1.02']);
     // A bus whose case sets none shows the default it is judged on.
-    expect(cells('3').slice(3, 5)).toEqual(['0.950', '1.050']);
+    expect(cells('3', 'vmin', 'vmax')).toEqual(['0.95', '1.05']);
   });
 
   it('shows no verdict before a power flow has converged', () => {
     mockTopology = LIMITED;
     render(<BusesGrid />);
-    expect(cells('1')[5]).toBe('—');
+    expect(cells('1', 'limit_check')).toEqual(['—']);
   });
 
   it('reads each bus against its own limits in words', () => {
@@ -233,9 +235,9 @@ describe('<BusesGrid /> voltage limits', () => {
       } as PflowResult,
     });
     render(<BusesGrid />);
-    expect(cells('1')[5]).toBe('Within limits');
-    expect(cells('2')[5]).toBe('Above vmax');
-    expect(cells('3')[5]).toBe('Below vmin');
+    expect(cells('1', 'limit_check')).toEqual(['Within limits']);
+    expect(cells('2', 'limit_check')).toEqual(['Above vmax']);
+    expect(cells('3', 'limit_check')).toEqual(['Below vmin']);
   });
 
   it('marks a bus near a limit', () => {
@@ -247,40 +249,17 @@ describe('<BusesGrid /> voltage limits', () => {
       } as PflowResult,
     });
     render(<BusesGrid />);
-    expect(cells('1')[5]).toBe('Near vmin');
-    expect(cells('3')[5]).toBe('Near vmax');
-  });
-
-  it('says how to change a limit while the case has not been run', () => {
-    mockTopology = LIMITED;
-    render(<BusesGrid />);
-    const hint = screen.getByTestId('buses-grid-hint');
-    expect(hint).toHaveTextContent("To change a bus's vmin or vmax");
-    expect(hint).toHaveTextContent('click the pencil');
-  });
-
-  it('says how to unlock the limits once a run has locked the case', () => {
-    mockTopology = { ...LIMITED, state: 'committed' };
-    render(<BusesGrid />);
-    const hint = screen.getByTestId('buses-grid-hint');
-    expect(hint).toHaveTextContent('vmin and vmax are locked once a run has started');
-    expect(hint).toHaveTextContent('Reset run');
-  });
-
-  it('has no hint before a case is loaded', () => {
-    mockTopology = null;
-    render(<BusesGrid />);
-    expect(screen.queryByTestId('buses-grid-hint')).not.toBeInTheDocument();
+    expect(cells('1', 'limit_check')).toEqual(['Near vmin']);
+    expect(cells('3', 'limit_check')).toEqual(['Near vmax']);
   });
 });
 
 describe('<BusesGrid /> units', () => {
-  /** The cell texts of one row, in column order. */
-  function cells(busIdx: string): string[] {
-    const row = screen.getByTestId(`buses-grid-row-${busIdx}`);
-    return within(row)
-      .getAllByRole('cell')
-      .map((cell) => cell.textContent ?? '');
+  /** The texts of the named columns of one row, found by column key so a new column shifts nothing. */
+  function cells(busIdx: string, ...keys: string[]): string[] {
+    return keys.map(
+      (key) => screen.getByTestId(`buses-grid-cell-${busIdx}-${key}`).textContent ?? '',
+    );
   }
 
   /** The column headers without the sort glyphs. */
@@ -290,10 +269,10 @@ describe('<BusesGrid /> units', () => {
       .map((h) => (h.textContent ?? '').replace(/[·▲▼↕↑↓]/g, ''));
   }
 
-  // Columns: idx, name, V, vmin, vmax, Limit check, theta, P, Q, area, zone.
-  const V = 2;
-  const VMAX = 4;
-  const THETA = 6;
+  // Columns: idx, name, Vn, V, vmin, vmax, Limit check, theta, P, Q, area, zone.
+  const V = 3;
+  const VMAX = 5;
+  const THETA = 7;
 
   const KV_TOPOLOGY: TopologySummary = {
     ...TOPOLOGY,
@@ -309,14 +288,14 @@ describe('<BusesGrid /> units', () => {
     render(<BusesGrid />);
     expect(headers()[THETA]).toBe('θ (°)');
     // -0.087 rad is -4.985 degrees.
-    expect(cells('1')[THETA]).toBe('0.000');
-    expect(cells('2')[THETA]).toBe('-4.985');
+    expect(cells('1', 'theta')).toEqual(['0.000']);
+    expect(cells('2', 'theta')).toEqual(['-4.985']);
   });
 
   it('shows no angle before a power flow has converged', () => {
     mockTopology = TOPOLOGY;
     render(<BusesGrid />);
-    expect(cells('2')[THETA]).toBe('—');
+    expect(cells('2', 'theta')).toEqual(['—']);
   });
 
   it('reads V and its limits in pu by default', () => {
@@ -324,7 +303,7 @@ describe('<BusesGrid /> units', () => {
     usePflowStore.setState({ lastRun: pfConverged() });
     render(<BusesGrid />);
     expect(headers().slice(V, VMAX + 1)).toEqual(['V (pu)', 'vmin (pu)', 'vmax (pu)']);
-    expect(cells('1').slice(V, VMAX + 1)).toEqual(['1.060', '0.900', '1.100']);
+    expect(cells('1', 'v', 'vmin', 'vmax')).toEqual(['1.060', '0.9', '1.1']);
   });
 
   it('reads V and its limits in kV, each bus times its rated voltage, in the actual mode', () => {
@@ -334,11 +313,11 @@ describe('<BusesGrid /> units', () => {
     render(<BusesGrid />);
     expect(headers().slice(V, VMAX + 1)).toEqual(['V (kV)', 'vmin (kV)', 'vmax (kV)']);
     // Bus 1: 1.06 pu on 230 kV, limits 0.9 and 1.1 pu.
-    expect(cells('1').slice(V, VMAX + 1)).toEqual(['243.800', '207.000', '253.000']);
+    expect(cells('1', 'v', 'vmin', 'vmax')).toEqual(['243.800', '207', '253']);
     // Bus 2: 1.045 pu on 13.8 kV, the 0.95 / 1.05 default limits.
-    expect(cells('2').slice(V, VMAX + 1)).toEqual(['14.421', '13.110', '14.490']);
+    expect(cells('2', 'v', 'vmin', 'vmax')).toEqual(['14.421', '13.11', '14.49']);
     // The angle is degrees in either mode.
-    expect(cells('2')[THETA]).toBe('-4.985');
+    expect(cells('2', 'theta')).toEqual(['-4.985']);
   });
 
   it('judges the limits in pu whatever unit they are shown in', () => {
@@ -348,8 +327,8 @@ describe('<BusesGrid /> units', () => {
       lastRun: { ...pfConverged(), bus_voltages: { '1': 1.12, '2': 1.0 } } as PflowResult,
     });
     render(<BusesGrid />);
-    expect(cells('1')[5]).toBe('Above vmax');
-    expect(cells('2')[5]).toBe('Within limits');
+    expect(cells('1', 'limit_check')).toEqual(['Above vmax']);
+    expect(cells('2', 'limit_check')).toEqual(['Within limits']);
   });
 
   it('keeps the whole column per unit when a bus has no rated voltage', () => {
@@ -365,7 +344,7 @@ describe('<BusesGrid /> units', () => {
     usePflowStore.setState({ lastRun: pfConverged() });
     render(<BusesGrid />);
     expect(headers().slice(V, VMAX + 1)).toEqual(['V (pu)', 'vmin (pu)', 'vmax (pu)']);
-    expect(cells('1')[V]).toBe('1.060');
+    expect(cells('1', 'v')).toEqual(['1.060']);
   });
 
   it('keeps every bus per unit when the case gives none a rated voltage, whatever Vn holds', () => {
@@ -383,7 +362,7 @@ describe('<BusesGrid /> units', () => {
     usePflowStore.setState({ lastRun: pfConverged() });
     render(<BusesGrid />);
     expect(headers().slice(V, VMAX + 1)).toEqual(['V (pu)', 'vmin (pu)', 'vmax (pu)']);
-    expect(cells('1')[V]).toBe('1.060');
+    expect(cells('1', 'v')).toEqual(['1.060']);
   });
 
   it('exports the angle in degrees and V in the unit it shows', async () => {

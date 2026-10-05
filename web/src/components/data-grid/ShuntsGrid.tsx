@@ -11,10 +11,13 @@
  *
  * Columns: idx, bus, B (susceptance), G (conductance). Mirrors the
  * retired v2 SHUNT_COLUMNS shape (idx, name, bus, g, b, Vn) trimmed
- * to the v3 spec's columns + bus.
+ * to the v3 spec's columns + bus. B and G are the case's own values and can be
+ * changed in the table, before the case has been run.
  */
 import { useMemo } from 'react';
 import { DataGrid, type ColumnConfig } from './DataGrid';
+import { formatParamValue } from './gridCells';
+import { useGridEditing, type GridEditTarget } from './useGridEditing';
 import { useCurrentTopology } from '@/api/queries';
 import { useSldStore } from '@/store/sld';
 import { useCaseStore } from '@/store/case';
@@ -45,11 +48,29 @@ function paramNumber(entry: TopologyEntry, key: string): number | null {
 }
 
 const COLUMNS: ColumnConfig<ShuntRow>[] = [
-  { key: 'idx', label: 'idx', accessor: (r) => r.idx },
-  { key: 'bus', label: 'bus', accessor: (r) => r.bus },
-  { key: 'b', label: 'B (pu)', numeric: true, accessor: (r) => r.b },
-  { key: 'g', label: 'G (pu)', numeric: true, accessor: (r) => r.g },
+  { key: 'idx', label: 'idx', minWidth: 72, accessor: (r) => r.idx },
+  { key: 'bus', label: 'bus', minWidth: 56, accessor: (r) => r.bus },
+  {
+    key: 'b',
+    label: 'B (pu)',
+    minWidth: 88,
+    numeric: true,
+    format: formatParamValue,
+    accessor: (r) => r.b,
+    edit: { param: 'b' },
+  },
+  {
+    key: 'g',
+    label: 'G (pu)',
+    minWidth: 88,
+    numeric: true,
+    format: formatParamValue,
+    accessor: (r) => r.g,
+    edit: { param: 'g' },
+  },
 ];
+
+const EDIT_TARGET: GridEditTarget<ShuntRow> = { model: () => 'Shunt', idx: (r) => r.idx };
 
 export interface ShuntsGridProps {
   className?: string;
@@ -60,6 +81,7 @@ export function ShuntsGrid({ className }: ShuntsGridProps) {
   const setSelectedNodeId = useSldStore((s) => s.setSelectedNodeId);
   const selectedNodeId = useSldStore((s) => s.selectedNodeId);
   const setSelectedElement = useCaseStore((s) => s.setSelectedElement);
+  const editing = useGridEditing(EDIT_TARGET);
 
   const rows = useMemo<ShuntRow[]>(() => {
     if (!topology) return [];
@@ -93,6 +115,9 @@ export function ShuntsGrid({ className }: ShuntsGridProps) {
       testId="shunts-grid"
       ariaLabel="Shunts"
       exportPanel="shunts"
+      filterable
+      copyable
+      editing={editing}
       className={className}
     />
   );

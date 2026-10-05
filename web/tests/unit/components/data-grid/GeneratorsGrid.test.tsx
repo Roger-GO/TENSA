@@ -2,7 +2,8 @@
  * Tests for ``<GeneratorsGrid />`` (v3 Unit 13).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, screen } from '@testing-library/react';
+import { renderWithQuery as render } from '../../helpers/gridQuery';
 import userEvent from '@testing-library/user-event';
 
 import { useCaseStore } from '@/store/case';
@@ -80,6 +81,11 @@ afterEach(() => {
   mockTopology = null;
 });
 
+/** The text of the named columns of a row, found by column key so a new column shifts nothing. */
+function cellTexts(rowId: string, ...keys: string[]): (string | null)[] {
+  return keys.map((key) => screen.getByTestId(`generators-grid-cell-${rowId}-${key}`).textContent);
+}
+
 describe('<GeneratorsGrid />', () => {
   it('renders rows with kind-namespaced rowIds (avoids dup keys when PV+GENROU share idx)', () => {
     mockTopology = TOPOLOGY;
@@ -106,10 +112,7 @@ describe('<GeneratorsGrid />', () => {
     mockTopology = MACHINE_TOPOLOGY;
     render(<GeneratorsGrid />);
     for (const id of ['pv-2', 'slack-1', 'genrou-GENROU_2', 'genrou-GENROU_1']) {
-      const cells = screen.getByTestId(`generators-grid-row-${id}`).querySelectorAll('[role=cell]');
-      // idx, name, bus, kind, P, Q, status
-      expect(cells[4]?.textContent).toBe('—');
-      expect(cells[5]?.textContent).toBe('—');
+      expect(cellTexts(id, 'p', 'q')).toEqual(['—', '—']);
     }
   });
 
@@ -117,10 +120,7 @@ describe('<GeneratorsGrid />', () => {
     mockTopology = MACHINE_TOPOLOGY;
     usePflowStore.setState({ lastRun: pfWithGenerators(), isRunning: false, error: null });
     render(<GeneratorsGrid />);
-    const pq = (id: string) =>
-      [...screen.getByTestId(`generators-grid-row-${id}`).querySelectorAll('[role=cell]')]
-        .slice(4, 6)
-        .map((c) => c.textContent);
+    const pq = (id: string) => cellTexts(id, 'p', 'q');
     expect(pq('pv-2')).toEqual(['700.000', '185.250']);
     expect(pq('slack-1')).toEqual(['745.900', '-12.500']);
     // A machine has no PF row of its own: it shows the one of the generator it names.
@@ -142,9 +142,7 @@ describe('<GeneratorsGrid />', () => {
       error: null,
     });
     render(<GeneratorsGrid />);
-    const cells = screen.getByTestId('generators-grid-row-pv-2').querySelectorAll('[role=cell]');
-    expect(cells[4]?.textContent).toBe('—');
-    expect(cells[5]?.textContent).toBe('—');
+    expect(cellTexts('pv-2', 'p', 'q')).toEqual(['—', '—']);
   });
 
   it('leaves a generator the PF result has no row for empty', () => {
@@ -153,10 +151,8 @@ describe('<GeneratorsGrid />', () => {
     delete (pf.generator_outputs as Record<string, unknown>)['2'];
     usePflowStore.setState({ lastRun: pf, isRunning: false, error: null });
     render(<GeneratorsGrid />);
-    const cells = screen.getByTestId('generators-grid-row-pv-2').querySelectorAll('[role=cell]');
-    expect(cells[4]?.textContent).toBe('—');
-    const slack = screen.getByTestId('generators-grid-row-slack-1').querySelectorAll('[role=cell]');
-    expect(slack[4]?.textContent).toBe('745.900');
+    expect(cellTexts('pv-2', 'p')).toEqual(['—']);
+    expect(cellTexts('slack-1', 'p')).toEqual(['745.900']);
   });
 
   it('explains on the P and Q headings where the figures come from', () => {
@@ -183,11 +179,7 @@ describe('<GeneratorsGrid /> reactive limits', () => {
       },
     } as unknown as PflowResult;
   }
-  // idx, name, bus, kind, P, Q, Qmin, Qmax, Q check, status
-  const limitCells = (id: string) =>
-    [...screen.getByTestId(`generators-grid-row-${id}`).querySelectorAll('[role=cell]')]
-      .slice(6, 9)
-      .map((c) => c.textContent);
+  const limitCells = (id: string) => cellTexts(id, 'q_min', 'q_max', 'q_check');
 
   it('shows the limits and where Q stands against them', () => {
     mockTopology = MACHINE_TOPOLOGY;

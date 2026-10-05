@@ -124,6 +124,12 @@ export interface ColumnConfig<Row = unknown> {
   numeric?: boolean;
   /** Optional fixed pixel width (column flexes by default). */
   width?: number;
+  /**
+   * The narrowest the column gets: it grows to share the width left over, and the
+   * table scrolls sideways before the column goes below this. For a table with more
+   * columns than a narrow panel holds, so no heading is cut.
+   */
+  minWidth?: number;
   /** Defaults to ``true``; pass ``false`` to lock the column out of sort. */
   sortable?: boolean;
   /** How the cell reads, in place of three decimals for a number: a parameter that is small. */
@@ -203,6 +209,13 @@ export interface DataGridProps<Row = unknown> {
 /** A cell as it reads: the column's own format when it has one. */
 function displayOf<Row>(col: ColumnConfig<Row>, raw: string | number | null): string {
   return col.format ? col.format(raw) : formatCellValue(raw, col.numeric === true);
+}
+
+/** The width a column takes: fixed, or from its minimum up, or its share of what is left. */
+function columnStyle<Row>(col: ColumnConfig<Row>): CSSProperties | undefined {
+  if (col.width) return { width: col.width, flex: '0 0 auto' };
+  if (col.minWidth) return { flex: `1 1 ${col.minWidth}px`, minWidth: col.minWidth };
+  return undefined;
 }
 
 function compareValues(
@@ -344,7 +357,7 @@ function GridRow<Row>({ row, index, style, shared }: GridRowProps<Row>) {
             data-active-cell={isCursor ? 'true' : undefined}
             data-in-range={inRange ? 'true' : undefined}
             data-pending={isPending ? 'true' : undefined}
-            style={col.width ? { width: col.width, flex: '0 0 auto' } : undefined}
+            style={columnStyle(col)}
             onClick={cells ? (e) => cells.onCellClick(index, c, e.shiftKey) : undefined}
             onDoubleClick={editable ? () => cells?.onCellDoubleClick(index, c) : undefined}
             className={cn(
@@ -352,7 +365,7 @@ function GridRow<Row>({ row, index, style, shared }: GridRowProps<Row>) {
               col.numeric
                 ? 'text-foreground text-right font-mono tabular-nums'
                 : 'text-foreground font-mono',
-              !col.width ? 'flex-1' : '',
+              !col.width && !col.minWidth ? 'flex-1' : '',
               editable ? 'cursor-text' : '',
               inRange ? 'bg-primary/10' : '',
               isCursor ? 'shadow-[inset_0_0_0_2px_var(--color-primary)]' : '',
@@ -962,10 +975,11 @@ export function DataGrid<Row>({
       </div>
     );
 
-  // A table whose columns all have a width is as wide as they add up to, and
-  // scrolls sideways in a narrower panel; the rest share the width there is.
-  const columnsWidth = columns.every((col) => col.width !== undefined)
-    ? columns.reduce((sum, col) => sum + (col.width ?? 0), 0)
+  // A table whose columns all have a width (or a least width) is as wide as they
+  // add up to at the least, and scrolls sideways in a narrower panel; the rest
+  // share the width there is.
+  const columnsWidth = columns.every((col) => (col.width ?? col.minWidth) !== undefined)
+    ? columns.reduce((sum, col) => sum + (col.width ?? col.minWidth ?? 0), 0)
     : undefined;
 
   const frame = (body: React.ReactNode) => (
@@ -1075,11 +1089,11 @@ function Header<Row>({ columns, sort, onHeaderClick, testId }: HeaderProps<Row>)
             key={col.key}
             role="columnheader"
             aria-sort={aria}
-            style={col.width ? { width: col.width, flex: '0 0 auto' } : undefined}
+            style={columnStyle(col)}
             className={cn(
               'px-2 py-1 select-none',
               col.numeric ? 'text-right' : 'text-left',
-              !col.width ? 'flex-1' : '',
+              !col.width && !col.minWidth ? 'flex-1' : '',
             )}
           >
             {sortable ? (
