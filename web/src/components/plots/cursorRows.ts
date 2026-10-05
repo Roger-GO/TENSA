@@ -60,3 +60,21 @@ export function cursorHint(cursors: DeltaCursors | undefined): string {
   if (cursors.b === null) return 'Click again to place cursor B';
   return 'Click to start over from A';
 }
+
+/**
+ * ``t`` held to the stretch of time the runs cover, so a time typed for a
+ * cursor lands on the plot and not past its end, where nothing draws it.
+ */
+export function clampToRuns(
+  t: number,
+  runs: readonly { t: ArrayLike<number>; seqCount: number }[],
+): number {
+  let first = Infinity;
+  let last = -Infinity;
+  for (const run of runs) {
+    if (run.seqCount === 0) continue;
+    first = Math.min(first, run.t[0] ?? Infinity);
+    last = Math.max(last, run.t[run.seqCount - 1] ?? -Infinity);
+  }
+  return first <= last ? Math.min(last, Math.max(first, t)) : t;
+}

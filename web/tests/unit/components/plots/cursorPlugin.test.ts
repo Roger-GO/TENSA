@@ -1,5 +1,5 @@
 /**
- * The A/B cursor plugin of a chart: which presses place a cursor, and what is
+ * The A/B cursor plugin of a chart: which clicks place a cursor, and what is
  * drawn. Driven with a stand-in for the uPlot instance (an ``over`` element and a
  * recording canvas), since jsdom has no canvas.
  */
@@ -10,8 +10,16 @@ import type { CursorPluginSource } from '@/components/plots/cursorPlugin';
 import type { DeltaCursors } from '@/store/plot';
 
 /** A uPlot stand-in with the parts the plugin touches. ``posToVal`` maps 100 px to 1 s. */
-function fakeChart(scale: { min: number; max: number } | null = { min: 0, max: 10 }) {
+function fakeChart(
+  scale: { min: number; max: number } | null = { min: 0, max: 10 },
+  pointerLeft = -10,
+) {
+  // uPlot's own layers: the root holds a wrapper, which holds the element over the plot.
+  const root = document.createElement('div');
+  const wrap = document.createElement('div');
   const over = document.createElement('div');
+  root.appendChild(wrap);
+  wrap.appendChild(over);
   over.getBoundingClientRect = () => ({ left: 20 }) as DOMRect;
   const ctx = {
     save: vi.fn(),
@@ -29,15 +37,18 @@ function fakeChart(scale: { min: number; max: number } | null = { min: 0, max: 1
     textBaseline: '',
   };
   const u = {
+    root,
     over,
     ctx,
     width: 600,
     bbox: { left: 0, top: 10, width: 600, height: 200 },
     scales: { x: scale ?? {} },
+    // uPlot keeps the crosshair's x at -10 while the pointer is not over the chart.
+    cursor: { left: pointerLeft },
     posToVal: (px: number) => px / 100,
     valToPos: (t: number) => t * 100,
   } as unknown as uPlot;
-  return { u, over, ctx };
+  return { u, root, wrap, over, ctx };
 }
 
 function source(overrides: Partial<CursorPluginSource> = {}): CursorPluginSource {
@@ -61,9 +72,11 @@ function hooksOf(src: CursorPluginSource): {
   };
 }
 
-function press(over: HTMLElement, from: number, to: number): void {
+/** A press and release on the chart, as a browser reports them: down, up, then the click. */
+function press(over: HTMLElement, from: number, to: number, detail = 1): void {
   over.dispatchEvent(new MouseEvent('mousedown', { clientX: from, bubbles: true }));
   over.dispatchEvent(new MouseEvent('mouseup', { clientX: to, bubbles: true }));
+  over.dispatchEvent(new MouseEvent('click', { clientX: to, detail, bubbles: true }));
 }
 
 describe('deltaCursorPlugin: placing a cursor', () => {
@@ -117,9 +130,80 @@ describe('deltaCursorPlugin: placing a cursor', () => {
   });
 
   it('ignores a release that no press on the chart began (the drag started outside it)', () => {
+    // The browser sends no click for a press and a release on different elements.
     over.dispatchEvent(new MouseEvent('mouseup', { clientX: 220, bubbles: true }));
 
     expect(src.place).not.toHaveBeenCalled();
+  });
+
+  it('places a cursor for a click that no press led to, as a script or assistive technology makes', () => {
+    over.dispatchEvent(new MouseEvent('click', { clientX: 320, detail: 1, bubbles: true }));
+
+    expect(src.place).toHaveBeenCalledWith(3);
+  });
+
+  it('puts a click that carries no position where the crosshair is', () => {
+    const chart = fakeChart({ min: 0, max: 10 }, 250);
+    hooksOf(src).ready(chart.u);
+
+    chart.over.click();
+
+    expect(src.place).toHaveBeenCalledWith(2.5);
+  });
+
+  it('puts a click that carries no position in the middle of the time shown when the pointer is elsewhere', () => {
+    const chart = fakeChart({ min: 4, max: 10 });
+    hooksOf(src).ready(chart.u);
+
+    chart.over.click();
+
+    expect(src.place).toHaveBeenCalledWith(7);
+  });
+
+  it('places nothing for a click that carries no position on a chart with no x scale yet', () => {
+    const chart = fakeChart(null);
+    hooksOf(src).ready(chart.u);
+
+    chart.over.click();
+
+    expect(src.place).not.toHaveBeenCalled();
+  });
+
+  it('places a click that uPlot would swallow as the end of a drag, and still not the end of a drag', () => {
+    // uPlot stops a click on the chart in the capture phase on its wrapper when the
+    // pointer is not where the last press left it, which a script's click never is.
+    const chart = fakeChart();
+    chart.wrap.addEventListener(
+      'click',
+      (e) => {
+        if (e.target === chart.over) e.stopImmediatePropagation();
+      },
+      true,
+    );
+    hooksOf(src).ready(chart.u);
+
+    chart.over.click();
+    expect(src.place).toHaveBeenCalledTimes(1);
+
+    press(chart.over, 100, 100 + CLICK_SLOP_PX + 1);
+    expect(src.place).toHaveBeenCalledTimes(1);
+  });
+
+  it('places nothing for a click on the root that is not on the chart itself', () => {
+    const chart = fakeChart();
+    hooksOf(src).ready(chart.u);
+
+    chart.root.click();
+    chart.wrap.click();
+
+    expect(src.place).not.toHaveBeenCalled();
+  });
+
+  it('does not count the second click of a double-click, which puts the zoom back', () => {
+    press(over, 220, 220, 1);
+    press(over, 220, 220, 2);
+
+    expect(src.place).toHaveBeenCalledTimes(1);
   });
 
   it('does not place a time that is not a number', () => {

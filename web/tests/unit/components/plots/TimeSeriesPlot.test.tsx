@@ -1188,7 +1188,7 @@ describe('TimeSeriesPlot: A/B cursors', () => {
 
     await user.click(screen.getByTestId('plot-cursors-toggle'));
 
-    expect(screen.getByTestId('cursor-readout-a')).toHaveTextContent('A 1 s');
+    expect(screen.getByTestId('cursor-readout-a')).toHaveValue('1');
   });
 
   it('turns the click-to-place mode on and off, and says what a click does', async () => {
@@ -1249,8 +1249,8 @@ describe('TimeSeriesPlot: A/B cursors', () => {
     });
     render(<TimeSeriesPlot />);
 
-    expect(screen.getByTestId('cursor-readout-a')).toHaveTextContent('A 0.5 s');
-    expect(screen.getByTestId('cursor-readout-b')).toHaveTextContent('B 1.5 s');
+    expect(screen.getByTestId('cursor-readout-a')).toHaveValue('0.5');
+    expect(screen.getByTestId('cursor-readout-b')).toHaveValue('1.5');
     expect(screen.getByTestId('cursor-readout-dt')).toHaveTextContent('Δt 1 s');
     const volts = screen.getByTestId('cursor-readout-row-bus_v:1');
     expect(volts).toHaveTextContent('Bus_1_v');
@@ -1286,7 +1286,8 @@ describe('TimeSeriesPlot: A/B cursors', () => {
     act(() => usePlotStore.getState().placeCursor('r1', 1));
     render(<TimeSeriesPlot />);
 
-    expect(screen.getByTestId('cursor-readout-b')).toHaveTextContent('B –');
+    expect(screen.getByTestId('cursor-readout-b')).toHaveValue('');
+    expect(screen.getByTestId('cursor-readout-b')).toHaveAttribute('placeholder', '–');
     expect(screen.getByTestId('cursor-readout-dt')).toHaveTextContent('Δt –');
     const cells = Array.from(
       screen.getByTestId('cursor-readout-row-bus_v:1').querySelectorAll('td'),
@@ -1309,13 +1310,150 @@ describe('TimeSeriesPlot: A/B cursors', () => {
     expect(cells.slice(1)).toEqual(['0.85', '0.95', '0.1', '-0.1']);
   });
 
-  it('clears the cursors with the Clear button', async () => {
+  it('puts the strip of times above the charts and the table of values under them', () => {
+    seedVolts();
+    act(() => usePlotStore.getState().setCursorsArmed(true));
+    render(<TimeSeriesPlot />);
+
+    const strip = screen.getByTestId('cursor-readout');
+    const chart = screen.getByTestId('time-series-plot-group-bus_v');
+    const table = screen.getByTestId('cursor-readout-table');
+    // In the bottom drawer a table above the charts left none of them in view.
+    expect(strip.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(chart.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(table).toHaveTextContent('Values at the cursors');
+    expect(screen.getByRole('table', { name: 'Values at the cursors' })).toBeInTheDocument();
+  });
+
+  it('names each chart and says what a click on it does while the mode is on', async () => {
+    seedVolts();
+    const user = userEvent.setup();
+    render(<TimeSeriesPlot />);
+    expect(screen.getByRole('group', { name: 'Bus voltage and angle chart' })).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('plot-cursors-toggle'));
+    expect(
+      screen.getByRole('group', {
+        name: 'Bus voltage and angle chart. Click the plot to place cursor A',
+      }),
+    ).toBeInTheDocument();
+
+    act(() => usePlotStore.getState().placeCursor('r1', 0.5));
+    expect(
+      screen.getByRole('group', {
+        name: 'Bus voltage and angle chart. Click again to place cursor B',
+      }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('plot-cursors-toggle'));
+    expect(screen.getByRole('group', { name: 'Bus voltage and angle chart' })).toBeInTheDocument();
+  });
+
+  describe('typing a time', () => {
+    async function open() {
+      seedVolts();
+      act(() => usePlotStore.getState().setCursorsArmed(true));
+      const user = userEvent.setup();
+      render(<TimeSeriesPlot />);
+      return user;
+    }
+    const box = (which: 'A' | 'B') =>
+      screen.getByRole('textbox', { name: `Cursor ${which} time in seconds` });
+    const stored = () => usePlotStore.getState().cursorsByRun['r1'];
+
+    it('places a cursor at a time typed in its box and set with Enter', async () => {
+      const user = await open();
+
+      await user.type(box('A'), '1.5{Enter}');
+      await user.type(box('B'), '0.5{Enter}');
+
+      expect(stored()).toEqual({ a: 1.5, b: 0.5 });
+      expect(screen.getByTestId('cursor-readout-dt')).toHaveTextContent('Δt -1 s');
+      expect(
+        Array.from(screen.getByTestId('cursor-readout-row-bus_v:1').querySelectorAll('td'))
+          .map((td) => td.textContent)
+          .slice(1),
+      ).toEqual(['0.85', '0.95', '0.1', '-0.1']);
+    });
+
+    it('sets it when the box is left, and takes a comma for the decimal point', async () => {
+      const user = await open();
+
+      await user.type(box('A'), '1,25');
+      expect(stored()).toBeUndefined();
+      await user.tab();
+
+      expect(stored()?.a).toBe(1.25);
+    });
+
+    it('holds a time past the end of the run to the end, and shows where it went', async () => {
+      const user = await open();
+
+      await user.type(box('B'), '99{Enter}');
+      await user.type(box('A'), '-4{Enter}');
+
+      // The run covers 0 to 2 s.
+      expect(stored()).toEqual({ a: 0, b: 2 });
+      expect(box('B')).toHaveValue('2');
+      expect(box('A')).toHaveValue('0');
+    });
+
+    it('takes the cursor off when its box is emptied', async () => {
+      const user = await open();
+      act(() => {
+        usePlotStore.getState().placeCursor('r1', 0.5);
+        usePlotStore.getState().placeCursor('r1', 1.5);
+      });
+
+      await user.clear(box('A'));
+      await user.tab();
+
+      expect(stored()).toEqual({ a: null, b: 1.5 });
+      expect(screen.getByTestId('cursor-readout-dt')).toHaveTextContent('Δt –');
+    });
+
+    it('puts back what it showed when the text is not a number, or Escape is pressed', async () => {
+      const user = await open();
+      act(() => usePlotStore.getState().placeCursor('r1', 0.5));
+
+      await user.clear(box('A'));
+      await user.type(box('A'), 'soon{Enter}');
+      expect(box('A')).toHaveValue('0.5');
+      await user.clear(box('A'));
+      await user.type(box('A'), '1{Escape}');
+
+      expect(box('A')).toHaveValue('0.5');
+      expect(stored()).toEqual({ a: 0.5, b: null });
+    });
+
+    it('leaves a cursor where it is when its box is entered and left without a change', async () => {
+      const user = await open();
+      // Shown as 0.33333, but placed at 1/3: a click that moved it to 0.33333 would be a change.
+      act(() => usePlotStore.getState().placeCursor('r1', 1 / 3));
+
+      await user.click(box('A'));
+      await user.tab();
+
+      expect(stored()?.a).toBe(1 / 3);
+    });
+
+    it('follows a cursor placed with a click while the box is not being typed in', async () => {
+      await open();
+      expect(box('A')).toHaveValue('');
+
+      act(() => usePlotStore.getState().placeCursor('r1', 1));
+
+      expect(box('A')).toHaveValue('1');
+    });
+  });
+
+  it('clears the cursors with the Clear cursors button', async () => {
     seedVolts();
     act(() => usePlotStore.getState().placeCursor('r1', 1));
     const user = userEvent.setup();
     render(<TimeSeriesPlot />);
 
-    await user.click(screen.getByTestId('plot-cursors-clear'));
+    await user.click(screen.getByRole('button', { name: 'Clear cursors' }));
 
     expect(usePlotStore.getState().cursorsByRun['r1']).toBeUndefined();
     expect(screen.queryByTestId('cursor-readout')).toBeNull();
@@ -1330,11 +1468,16 @@ describe('TimeSeriesPlot: A/B cursors', () => {
       plugins?: { hooks: { ready?: (u: unknown) => void } }[];
     };
     expect(options.plugins).toHaveLength(1);
+    const root = document.createElement('div');
     const over = document.createElement('div');
+    root.appendChild(over);
     over.getBoundingClientRect = () => ({ left: 0 }) as DOMRect;
-    options.plugins![0]!.hooks.ready!({ over, posToVal: (px: number) => px / 100 });
-    over.dispatchEvent(new MouseEvent('mousedown', { clientX: 150, bubbles: true }));
-    over.dispatchEvent(new MouseEvent('mouseup', { clientX: 150, bubbles: true }));
+    options.plugins![0]!.hooks.ready!({ root, over, posToVal: (px: number) => px / 100 });
+    act(() => {
+      over.dispatchEvent(new MouseEvent('mousedown', { clientX: 150, bubbles: true }));
+      over.dispatchEvent(new MouseEvent('mouseup', { clientX: 150, bubbles: true }));
+      over.dispatchEvent(new MouseEvent('click', { clientX: 150, detail: 1, bubbles: true }));
+    });
 
     expect(usePlotStore.getState().cursorsByRun['r1']).toEqual({ a: 1.5, b: null });
   });
@@ -1390,16 +1533,22 @@ describe('TimeSeriesPlot: A/B cursors', () => {
       }
     ).plugins[0]!;
     // Mode off at build time; turned on afterwards: a click must still place.
+    const root = document.createElement('div');
     const over = document.createElement('div');
+    root.appendChild(over);
     over.getBoundingClientRect = () => ({ left: 0 }) as DOMRect;
-    plugin.hooks.ready({ over, posToVal: (px: number) => px / 100 });
-    over.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, bubbles: true }));
-    over.dispatchEvent(new MouseEvent('mouseup', { clientX: 100, bubbles: true }));
+    plugin.hooks.ready({ root, over, posToVal: (px: number) => px / 100 });
+    const click = () =>
+      act(() => {
+        over.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, bubbles: true }));
+        over.dispatchEvent(new MouseEvent('mouseup', { clientX: 100, bubbles: true }));
+        over.dispatchEvent(new MouseEvent('click', { clientX: 100, detail: 1, bubbles: true }));
+      });
+    click();
     expect(usePlotStore.getState().cursorsByRun['r1']).toBeUndefined();
 
     act(() => usePlotStore.getState().setCursorsArmed(true));
-    over.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, bubbles: true }));
-    over.dispatchEvent(new MouseEvent('mouseup', { clientX: 100, bubbles: true }));
+    click();
 
     expect(usePlotStore.getState().cursorsByRun['r1']).toEqual({ a: 1, b: null });
     expect(constructSpy).toHaveBeenCalledTimes(1);

@@ -4,7 +4,7 @@
  *
  *   load Kundur -> TDS tab: find and add `omega GENROU` -> run TDS ->
  *   a chart of its own for the variable -> zoom time on every chart ->
- *   cursors A and B -> metrics table
+ *   cursors A and B (clicked, then one typed) -> metrics table
  *
  * It drives the real UI against a real `tensa serve` (see
  * `playwright.config.ts`): the list of variables comes from the models the
@@ -117,11 +117,25 @@ test('ANDES variables: pick omega GENROU -> run TDS -> zoom -> cursors -> respon
   // ---- cursors: A, then B, and the readout reads the difference -------------
   await page.getByTestId('plot-cursors-toggle').click();
   await over.click({ position: { x: box!.width * 0.3, y: box!.height / 2 } });
-  await expect(page.getByTestId('cursor-readout-a')).not.toContainText('–');
-  await expect(page.getByTestId('cursor-readout-b')).toContainText('–');
+  await expect(page.getByTestId('cursor-readout-a')).not.toHaveValue('');
+  await expect(page.getByTestId('cursor-readout-b')).toHaveValue('');
   await over.click({ position: { x: box!.width * 0.7, y: box!.height / 2 } });
   const dt = await page.getByTestId('cursor-readout-dt').textContent();
   expect(Number(dt?.replace(/[^\d.-]/g, ''))).toBeGreaterThan(1);
+  // A cursor can also be put at a time that is typed, which is how it is placed
+  // without a pointer; the readout follows it.
+  await page.getByRole('textbox', { name: 'Cursor A time in seconds' }).fill('2');
+  await page.getByRole('textbox', { name: 'Cursor A time in seconds' }).press('Enter');
+  await expect(page.getByTestId('cursor-readout-a')).toHaveValue('2');
+  await expect(page.getByTestId('cursor-readout-dt')).toContainText(/Δt [\d.]+ s/);
+  // A click that a script or assistive technology makes, with no press before it,
+  // counts too. uPlot would take it for the end of a drag once the pointer has moved.
+  await page.getByRole('button', { name: 'Clear cursors' }).click();
+  await expect(page.getByTestId('cursor-readout-a')).toHaveValue('');
+  await over.hover({ position: { x: box!.width * 0.4, y: box!.height / 2 } });
+  await over.evaluate((element) => (element as HTMLElement).click());
+  await expect(page.getByTestId('cursor-readout-a')).not.toHaveValue('');
+  await over.click({ position: { x: box!.width * 0.7, y: box!.height / 2 } });
   const row = page.getByTestId('cursor-readout-row-dae:omega:1');
   await expect(row).toContainText('omega GENROU 1');
   // A, B, B - A and the rate: four numbers that are not dashes.

@@ -22,8 +22,8 @@ import { resolveOverlayRuns } from './overlayRuns';
 import { SECONDARY_SCALE, planGroupAxes, scaleColumn } from './axes';
 import type { AxisPlan, GroupAxes, PlannedSeries } from './axes';
 import { deltaCursorPlugin } from './cursorPlugin';
-import { CursorControls, CursorReadout } from './CursorReadout';
-import { buildCursorRows } from './cursorRows';
+import { CursorControls, CursorTable, CursorTimes } from './CursorReadout';
+import { buildCursorRows, clampToRuns, cursorHint } from './cursorRows';
 import { yScales } from './yRange';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
@@ -564,7 +564,13 @@ function GroupChart({
           card (flex), not sized from its own content, and the chart fills it
           absolutely: ``UPlot`` sizes itself to this box, and a box that grew
           with the chart would make it grow again. */}
-      <div className="relative min-h-0 flex-1">
+      <div
+        role="group"
+        // The chart is a canvas, which a screen reader or a script cannot find or
+        // press; this names it and says what a click on it does.
+        aria-label={cursorsArmed ? `${title} chart. ${cursorHint(cursors)}` : `${title} chart`}
+        className="relative min-h-0 flex-1"
+      >
         <UPlot options={withCursors} data={data} uplotRef={uplotRef} className="absolute inset-0" />
       </div>
     </div>
@@ -614,6 +620,7 @@ export function TimeSeriesPlot({
   );
   const cursorsArmed = usePlotStore((s) => s.cursorsArmed);
   const placeCursor = usePlotStore((s) => s.placeCursor);
+  const setCursor = usePlotStore((s) => s.setCursor);
   const cursors = useMemo<DeltaCursors>(
     () => ({ a: storedCursors?.a ?? null, b: storedCursors?.b ?? null }),
     [storedCursors],
@@ -623,6 +630,18 @@ export function TimeSeriesPlot({
       if (effectiveRunId) placeCursor(effectiveRunId, t);
     },
     [effectiveRunId, placeCursor],
+  );
+  // The runs as of the latest frame, for a time typed into a cursor's box to be
+  // held to what they cover without the callback changing with every frame.
+  const runsRef = useRef(overlayRuns);
+  runsRef.current = overlayRuns;
+  const onSetCursor = useCallback(
+    (which: keyof DeltaCursors, t: number | null) => {
+      if (effectiveRunId) {
+        setCursor(effectiveRunId, which, t === null ? null : clampToRuns(t, runsRef.current));
+      }
+    },
+    [effectiveRunId, setCursor],
   );
   const caseName = useExportCaseName();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -777,8 +796,9 @@ export function TimeSeriesPlot({
   // The value of every plotted series under each cursor, in the units the charts
   // show. Read from the charts' own data, so it needs no unit logic of its own.
   // The readout is there from the moment the mode is turned on, not from the
-  // first click: it sits above the charts, and one that appeared when A was placed
-  // would push them down from under the pointer on its way to placing B.
+  // first click: the strip of times sits above the charts, and one that appeared
+  // when A was placed would push them down from under the pointer on its way to
+  // placing B. The table of values goes under them, out of the pointer's way.
   const showReadout = cursorsArmed || cursors.a !== null || cursors.b !== null;
   const cursorRows = useMemo(
     () => (showReadout ? buildCursorRows(charts, cursors) : []),
@@ -850,7 +870,7 @@ export function TimeSeriesPlot({
           onExportPng={onExportPng}
         />
       </div>
-      {showReadout ? <CursorReadout cursors={cursors} rows={cursorRows} /> : null}
+      {showReadout ? <CursorTimes cursors={cursors} onSet={onSetCursor} /> : null}
       {charts.map(({ key, title, note, options, data }) => (
         <GroupChart
           key={key}
@@ -867,6 +887,7 @@ export function TimeSeriesPlot({
           theme={resolvedTheme}
         />
       ))}
+      {showReadout ? <CursorTable cursors={cursors} rows={cursorRows} /> : null}
     </div>
   );
 }

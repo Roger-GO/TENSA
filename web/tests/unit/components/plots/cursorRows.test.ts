@@ -1,10 +1,11 @@
 /**
  * ``buildCursorRows``: the value of every plotted series under each A/B cursor,
- * read from the charts' own data.
+ * read from the charts' own data; ``clampToRuns``, which holds a typed time to the
+ * stretch the runs cover.
  */
 import { describe, expect, it } from 'vitest';
 import type uPlot from 'uplot';
-import { buildCursorRows, cursorHint } from '@/components/plots/cursorRows';
+import { buildCursorRows, clampToRuns, cursorHint } from '@/components/plots/cursorRows';
 import type { CursorChart } from '@/components/plots/cursorRows';
 import type { AxisPlan } from '@/components/plots/axes';
 
@@ -101,5 +102,38 @@ describe('cursorHint', () => {
     expect(cursorHint({ a: null, b: null })).toBe('Click the plot to place cursor A');
     expect(cursorHint({ a: 1, b: null })).toBe('Click again to place cursor B');
     expect(cursorHint({ a: 1, b: 2 })).toBe('Click to start over from A');
+  });
+});
+
+describe('clampToRuns', () => {
+  const run = (times: number[], seqCount = times.length) => ({
+    t: Float64Array.from(times),
+    seqCount,
+  });
+
+  it('leaves a time inside the run alone and holds one outside to its ends', () => {
+    const runs = [run([1, 2, 3])];
+
+    expect(clampToRuns(2.5, runs)).toBe(2.5);
+    expect(clampToRuns(0, runs)).toBe(1);
+    expect(clampToRuns(9, runs)).toBe(3);
+  });
+
+  it('covers the whole stretch of several runs', () => {
+    const runs = [run([0, 1]), run([0.5, 6])];
+
+    expect(clampToRuns(5, runs)).toBe(5);
+    expect(clampToRuns(7, runs)).toBe(6);
+  });
+
+  it('counts only the rows a run has received, not the room its arrays keep', () => {
+    const runs = [run([0, 1, 2, 0, 0], 3)];
+
+    expect(clampToRuns(4, runs)).toBe(2);
+  });
+
+  it('leaves the time as it is when no run has rows', () => {
+    expect(clampToRuns(4, [])).toBe(4);
+    expect(clampToRuns(4, [run([], 0)])).toBe(4);
   });
 });
