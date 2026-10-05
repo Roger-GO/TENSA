@@ -5857,14 +5857,13 @@ def _build_cpf_result(
         # "nose" is the maximum reactive injection before voltage
         # collapse — treat the same way.
         nose_idx = -1
-        max_lam = float(getattr(cpf, "max_lam", 0.0) or 0.0)
-        if not math.isfinite(max_lam):
-            max_lam = 0.0
         if lambdas and ok:
             nose_idx = int(_argmax(lambdas))
         truncated = (not ok) or nose_idx < 0
-        if not max_lam and lambdas:
-            max_lam = max(lambdas)
+        # The axis of a QV result is the reactive power at the bus, so its
+        # peak is the largest of those. ``CPF.max_lam`` is the routine's own
+        # parameter, a fraction of the swept range, and not on that axis.
+        max_lam = max(lambdas) if lambdas else 0.0
         generators, limit_events = _generators(lambdas, nose_idx)
         return CpfResult(
             lambdas=lambdas,

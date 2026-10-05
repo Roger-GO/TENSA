@@ -452,6 +452,16 @@ def test_a_qv_curve_reads_the_generators_and_takes_the_limits() -> None:
     assert (last.model, last.limit, last.at_nose) == ("Slack", "qmax", True)
 
 
+def test_a_qv_curves_peak_is_the_largest_reactive_power_it_reached() -> None:
+    """``lambdas`` of a QV curve holds the reactive power at the bus. The peak
+    used to be the routine's own parameter, a fraction of the swept range: 1.17
+    for a curve that reached 5.87 pu."""
+    result = _solved().run_cpf_qv(bus_idx="5")
+    assert result.max_lam == pytest.approx(max(result.lambdas))
+    assert result.max_lam == pytest.approx(result.lambdas[result.nose_idx])
+    assert result.max_lam == pytest.approx(5.87, abs=0.01)
+
+
 def test_a_qv_curve_with_limits_is_refused_when_the_power_flow_broke_them() -> None:
     w = _solved()
     with pytest.raises(CpfPrerequisiteError, match="past a reactive limit"):

@@ -97,7 +97,7 @@ CPF:             POST /sessions/{id}/cpf · POST /sessions/{id}/cpf/qv  (needs a
                  would_release_step: from that step its voltage is back across the set-point and a real exciter would leave the limit,
                  which ANDES's limiter does not, so the curve from there is the one for a generator pinned at its limit),
                  q_limits_enforced, stop_at, complete (false: a full curve whose lower branch broke off), direction.
-                 cpf/qv body: {"bus_idx": "5", "q_range": 5.0, "enforce_q_limits": false}; same response, lambdas holding Q at the bus.
+                 cpf/qv body: {"bus_idx": "5", "q_range": 5.0, "enforce_q_limits": false}; same response, lambdas holding Q at the bus and max_lam the largest of them.
 State estimation:POST /sessions/{id}/se/measurements/generate · POST /sessions/{id}/se
 PMU placement:   POST/GET /sessions/{id}/pmu · DELETE /sessions/{id}/pmu/{pmu_idx} · GET .../pmu/{run_id}/export.csv
 Profiles:        POST /sessions/{id}/profiles/upload · POST/GET/DELETE /sessions/{id}/profiles

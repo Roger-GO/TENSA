@@ -235,6 +235,9 @@ async def test_cpf_qv_returns_single_bus_trace(
     assert list(body["voltages_per_bus"].keys()) == ["5"]
     assert len(body["lambdas"]) > 1
     assert len(body["voltages_per_bus"]["5"]) == len(body["lambdas"])
+    # The peak is on the axis the curve is on: reactive power, not the
+    # routine's own continuation parameter.
+    assert body["max_lam"] == pytest.approx(max(body["lambdas"]))
 
 
 # ---- QV without PFlow → 409 -----------------------------------------------

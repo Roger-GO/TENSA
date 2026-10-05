@@ -112,8 +112,10 @@ class CpfResult:
       (the nose point). ``-1`` when the run was truncated before
       reaching the nose (no NOSE event in ``CPF.events``). On a full
       curve the steps after it are the lower branch.
-    - ``max_lam``: peak lambda value reached. Echo of ``CPF.max_lam``
-      (always populated, even on truncation).
+    - ``max_lam``: lambda at the nose, and the largest value reached when
+      there is no nose (always populated, even on truncation). For a QV
+      curve it is on the axis ``lambdas`` is on: the largest reactive
+      power at the bus.
     - ``truncated``: ``True`` when the run terminated without finding a
       nose point (e.g. hit ``max_steps`` or diverged). When ``True``,
       ``nose_idx == -1``.

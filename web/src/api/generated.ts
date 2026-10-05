@@ -2323,7 +2323,7 @@ export interface components {
             nose_idx: number;
             /**
              * Max Lam
-             * @description Lambda at the nose, which is the largest value reached on the way up. Without a nose, the largest value reached. Always populated, even on truncation.
+             * @description Lambda at the nose, which is the largest value reached on the way up. Without a nose, the largest value reached. For a QV curve, the largest reactive power at the bus (the axis ``lambdas`` is on). Always populated, even on truncation.
              */
             max_lam: number;
             /**
