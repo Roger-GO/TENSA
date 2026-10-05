@@ -1911,6 +1911,82 @@ describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () =>
     }
   });
 
+  it('a run whose controllers were changed while it went → its results are dropped', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    seedReady();
+    useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+    useUiStore.getState().setTdsConfig({ controllers: [DROOP_ENTRY] });
+    // The run stays open until the test ends it.
+    let endRun: () => void = () => undefined;
+    server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.on('message', (raw: unknown) => {
+        const msg = JSON.parse(String(raw)) as { type: string };
+        if (msg.type !== 'start_tds') return;
+        socket.send(
+          JSON.stringify({
+            type: 'stream_start',
+            run_id: 'run-ctl-2',
+            metadata: { schema_version: '2.0', vars: ['bus_v'], var_columns: ['Bus_1_v'] },
+          }),
+        );
+        endRun = () => {
+          socket.send(
+            JSON.stringify({
+              type: 'done',
+              run_id: 'run-ctl-2',
+              converged: true,
+              final_t: 5,
+              // What the droop the run was started with did.
+              controllers: [
+                {
+                  type: 'droop',
+                  model: 'ESD1',
+                  idx: 1,
+                  samples: 50,
+                  first_action_t: 1.1001,
+                  released_t: null,
+                  peak_command: 15.9,
+                  final_command: 15.5,
+                },
+              ],
+            }),
+          );
+          socket.close({ code: 1000 });
+        };
+      });
+    });
+
+    try {
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      await userEvent.click(screen.getByTestId('run-mode-tds'));
+      await userEvent.click(screen.getByTestId('run-tds-button'));
+      await waitFor(() => {
+        expect(useRunsStore.getState().runs['run-ctl-2']).toBeDefined();
+      });
+
+      // The list is edited while the run goes: it now holds another controller
+      // in the place of the one the results are about.
+      act(() => {
+        useUiStore
+          .getState()
+          .setTdsConfig({ controllers: [{ ...DROOP_ENTRY, spec: { ...DROOP, gain: 80 } }] });
+      });
+      endRun();
+      await waitFor(() => {
+        expect(useRunsStore.getState().runs['run-ctl-2']?.state).toBe('done');
+      });
+
+      // Results line up with the list by position, so these belong to nothing in it.
+      expect(useUiStore.getState().tdsControllerResults).toBeNull();
+      expect(toastInfoMock).not.toHaveBeenCalledWith('Frequency control', expect.anything());
+    } finally {
+      useUiStore.getState().setTdsConfig({ controllers: [] });
+    }
+  });
+
   it('a run without controllers says nothing about frequency control', async () => {
     const { useUiStore } = await import('@/store/ui');
     seedReady();
