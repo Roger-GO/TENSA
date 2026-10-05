@@ -148,6 +148,12 @@ response and needs no Arrow decoding.
 - A reference to another device ("bus", "gen", "syn") may be sent as "5" or 5: the add and edit routes match it
   to the idx the case holds.
 - An add that leaves out a parameter ANDES has no default for ("gen" of a GENROU) is a 422 and adds nothing.
+- ESD1 battery: needs "bus", "gen" (a PV or Slack on the same bus, which it takes over when TDS starts; that
+  generator's p0 is the power it starts at, negative to charge) and "pqflag" (1 = active power has priority).
+  "Sn" defaults to the system base (topology "base_mva"); keep it there: pmx/qmx/qmn/ialim are pu of Sn while the
+  set-point and the output are pu of the system base. The state of charge is the dae var "pIG_y ESD1 <idx>"
+  (name it in dae_vars); it moves by the delivered MW over En (MWh) each hour. Step the power during a run with
+  an Alter on "Pext0" (system-base pu, added to the set-point).
 - Line/Transformer impedances are pu on (Sn, Vn1); the add-element endpoint derives
   Vn1/Vn2 from the connected buses automatically.
 - TDS batch endpoint is synchronous with a 300 s server-side cap; for long runs use the WS stream.
@@ -158,7 +164,7 @@ response and needs no Arrow decoding.
   ANDES solver-state blob is opt-in on both ends: "include_dill": true on POST .../snapshot writes it
   and "use_dill_optimization": true on POST .../snapshot/restore tries it first.
 - model names are ANDES model names: Bus, Line, PQ, PV, Slack, Shunt, GENROU, GENCLS,
-  IEEEX1, ESDC2A, EXST1, SEXS, TGOV1, IEEEG1, Fault, Toggle, Alter, ...
+  IEEEX1, ESDC2A, EXST1, SEXS, TGOV1, IEEEG1, ESD1, Fault, Toggle, Alter, ...
   GET /api/topology/schema lists every model the builder supports with typed params.
 
 ## MCP

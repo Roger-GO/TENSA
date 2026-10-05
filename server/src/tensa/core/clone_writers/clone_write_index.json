@@ -7,6 +7,225 @@
     "raw": "PSS/E steady-state: holds NO dynamic-controller params; controller edits never route here."
   },
   "models": {
+    "ESD1": {
+      "xlsx": {
+        "sheet": "ESD1",
+        "idx_column": "idx"
+      },
+      "dyr": null,
+      "params": {
+        "Sn": {
+          "xlsx": {
+            "column": "Sn"
+          },
+          "dyr": null
+        },
+        "fn": {
+          "xlsx": {
+            "column": "fn"
+          },
+          "dyr": null
+        },
+        "xc": {
+          "xlsx": {
+            "column": "xc"
+          },
+          "dyr": null
+        },
+        "pqflag": {
+          "xlsx": {
+            "column": "pqflag"
+          },
+          "dyr": null
+        },
+        "qmx": {
+          "xlsx": {
+            "column": "qmx"
+          },
+          "dyr": null
+        },
+        "qmn": {
+          "xlsx": {
+            "column": "qmn"
+          },
+          "dyr": null
+        },
+        "pmx": {
+          "xlsx": {
+            "column": "pmx"
+          },
+          "dyr": null
+        },
+        "v0": {
+          "xlsx": {
+            "column": "v0"
+          },
+          "dyr": null
+        },
+        "v1": {
+          "xlsx": {
+            "column": "v1"
+          },
+          "dyr": null
+        },
+        "dqdv": {
+          "xlsx": {
+            "column": "dqdv"
+          },
+          "dyr": null
+        },
+        "fdbd": {
+          "xlsx": {
+            "column": "fdbd"
+          },
+          "dyr": null
+        },
+        "ddn": {
+          "xlsx": {
+            "column": "ddn"
+          },
+          "dyr": null
+        },
+        "ialim": {
+          "xlsx": {
+            "column": "ialim"
+          },
+          "dyr": null
+        },
+        "vt0": {
+          "xlsx": {
+            "column": "vt0"
+          },
+          "dyr": null
+        },
+        "vt1": {
+          "xlsx": {
+            "column": "vt1"
+          },
+          "dyr": null
+        },
+        "vt2": {
+          "xlsx": {
+            "column": "vt2"
+          },
+          "dyr": null
+        },
+        "vt3": {
+          "xlsx": {
+            "column": "vt3"
+          },
+          "dyr": null
+        },
+        "vrflag": {
+          "xlsx": {
+            "column": "vrflag"
+          },
+          "dyr": null
+        },
+        "ft0": {
+          "xlsx": {
+            "column": "ft0"
+          },
+          "dyr": null
+        },
+        "ft1": {
+          "xlsx": {
+            "column": "ft1"
+          },
+          "dyr": null
+        },
+        "ft2": {
+          "xlsx": {
+            "column": "ft2"
+          },
+          "dyr": null
+        },
+        "ft3": {
+          "xlsx": {
+            "column": "ft3"
+          },
+          "dyr": null
+        },
+        "frflag": {
+          "xlsx": {
+            "column": "frflag"
+          },
+          "dyr": null
+        },
+        "tip": {
+          "xlsx": {
+            "column": "tip"
+          },
+          "dyr": null
+        },
+        "tiq": {
+          "xlsx": {
+            "column": "tiq"
+          },
+          "dyr": null
+        },
+        "gammap": {
+          "xlsx": {
+            "column": "gammap"
+          },
+          "dyr": null
+        },
+        "gammaq": {
+          "xlsx": {
+            "column": "gammaq"
+          },
+          "dyr": null
+        },
+        "recflag": {
+          "xlsx": {
+            "column": "recflag"
+          },
+          "dyr": null
+        },
+        "Tf": {
+          "xlsx": {
+            "column": "Tf"
+          },
+          "dyr": null
+        },
+        "SOCmin": {
+          "xlsx": {
+            "column": "SOCmin"
+          },
+          "dyr": null
+        },
+        "SOCmax": {
+          "xlsx": {
+            "column": "SOCmax"
+          },
+          "dyr": null
+        },
+        "SOCinit": {
+          "xlsx": {
+            "column": "SOCinit"
+          },
+          "dyr": null
+        },
+        "En": {
+          "xlsx": {
+            "column": "En"
+          },
+          "dyr": null
+        },
+        "EtaC": {
+          "xlsx": {
+            "column": "EtaC"
+          },
+          "dyr": null
+        },
+        "EtaD": {
+          "xlsx": {
+            "column": "EtaD"
+          },
+          "dyr": null
+        }
+      }
+    },
     "ESDC2A": {
       "xlsx": {
         "sheet": "ESDC2A",

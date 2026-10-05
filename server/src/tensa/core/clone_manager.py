@@ -37,6 +37,9 @@ from tensa.core.errors import (
     ElementValidationError,
     NoCaseLoadedError,
 )
+from tensa.core.esd1 import MODEL as ESD1_MODEL
+from tensa.core.esd1 import check_edit as check_esd1_edit
+from tensa.core.esd1 import log_base_notice as log_esd1_base_notice
 from tensa.core.session_dirs import (
     SESSIONS_DIRNAME,
     remove_tree,
@@ -44,6 +47,7 @@ from tensa.core.session_dirs import (
 )
 from tensa.core.wrapper import (
     _CONTROLLER_MODEL_NAMES,
+    _system_base_mva,
     allowed_param_names,
 )
 from tensa.security.names import user_name_problem
@@ -254,6 +258,8 @@ class CloneManager:
         clone state is unchanged (atomic from the caller's view).
         """
         self._validate_whitelist(model, param)
+        if model == ESD1_MODEL:
+            self._check_esd1_edit(idx, param, value)
         if not self.is_initialized:
             self.init_clone()
 
@@ -276,6 +282,10 @@ class CloneManager:
 
         self._push_undo(CloneSnapshot(path=target, data=prior_bytes))
         self.redo_stack = []
+
+        if model == ESD1_MODEL and param == "Sn":
+            ss = getattr(self._wrapper, "_ss", None)
+            log_esd1_base_notice(idx, value, None if ss is None else _system_base_mva(ss))
 
         new_value = self._read_back_value(model, idx, param)
         return CloneEditResult(
@@ -304,6 +314,24 @@ class CloneManager:
                 f"param {param!r} is not editable on {model}; allowed: "
                 f"{list(allowed_param_names(model))}"
             )
+
+    def _check_esd1_edit(self, idx: str, param: str, value: Any) -> None:
+        """Check a battery's new value as an add or a pre-setup edit checks it.
+
+        The clone file would take a zero ``En`` or a ``SOCinit`` outside its
+        window as readily as ANDES does (``tensa.core.esd1``). The value is read
+        against what the device holds now; a device the System does not have is
+        left for the writer to report.
+        """
+        ss = getattr(self._wrapper, "_ss", None)
+        if ss is None:
+            raise NoCaseLoadedError("no case loaded")
+        idx_values = _values_of(getattr(ss, ESD1_MODEL, None), "idx")
+        idx_str = str(idx)
+        for position, held in enumerate(idx_values):
+            if str(held) == idx_str:
+                check_esd1_edit(ss, position, {param: value})
+                return
 
     def _target_clone_file(self, model: str, param: str) -> Path:
         """Pick the clone file that holds ``(model, param)``.

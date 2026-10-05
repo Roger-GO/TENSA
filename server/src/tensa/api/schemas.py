@@ -581,7 +581,9 @@ class TopologySummary(BaseModel):
             "``SEXS``), governors (``IEEEG1``, ``TGOV1``), the ``IEEEST`` "
             "PSS, and the ``REGCA1`` renewable-converter model. Surfaces "
             "the seven Unit-8 whitelist additions so the disturbance editor "
-            "can populate device pickers when the case includes them. Empty "
+            "can populate device pickers when the case includes them. An "
+            "``ESD1`` battery is listed here as well: like ``REGCA1`` it takes "
+            "over a static generator (its ``gen``) in a time-domain run. Empty "
             "for cases that carry no dynamics addfile (stock IEEE 14 .raw "
             "alone)."
         ),
@@ -1085,8 +1087,9 @@ class AddElementRequest(BaseModel):
         description=(
             "ANDES model class name. It must be one of the buildable models "
             "listed by ``GET /api/topology/schema`` (buses, lines, "
-            "generators, loads, shunts, exciters, governors, and other "
-            "controllers). Unknown models are rejected with 422."
+            "generators, loads, shunts, exciters, governors, the ``ESD1`` "
+            "battery, and other controllers). Unknown models are rejected "
+            "with 422."
         ),
         min_length=1,
     )

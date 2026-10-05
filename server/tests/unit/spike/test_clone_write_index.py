@@ -98,8 +98,12 @@ def test_dyr_field_index_matches_live_yaml(index: dict, dyr_yaml: dict) -> None:
 
 
 def test_coverage_meets_gate(index: dict) -> None:
-    total = sum(len(m["params"]) for m in index["models"].values())
-    dyr_ok = sum(1 for m in index["models"].values() for p in m["params"].values() if p["dyr"])
+    # Counted over the models PSS/E has a .dyr record for. A model without one
+    # (PMU, REGCP1, TimeSeries, ESD1) is never in a .dyr file, so it has nothing
+    # to edit there and its params reach a case through xlsx alone.
+    with_record = [m for m in index["models"].values() if m["dyr"] is not None]
+    total = sum(len(m["params"]) for m in with_record)
+    dyr_ok = sum(1 for m in with_record for p in m["params"].values() if p["dyr"])
     # xlsx is total; dyr must clear the spike's 80% gate.
     assert total > 0
     assert dyr_ok / total >= 0.80, f"dyr coverage {dyr_ok}/{total} below 80% gate"

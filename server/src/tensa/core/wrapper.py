@@ -76,6 +76,10 @@ from tensa.core.errors import (
     TdsRequestError,
     short_repr,
 )
+from tensa.core.esd1 import MODEL as ESD1_MODEL
+from tensa.core.esd1 import check_edit as check_esd1_edit
+from tensa.core.esd1 import log_base_notice as log_esd1_base_notice
+from tensa.core.esd1 import prepare_add as prepare_esd1_add
 from tensa.core.pflow_options import (
     PflowSettings,
     pflow_options_applied,
@@ -132,6 +136,10 @@ _CONTROLLER_MODEL_NAMES: tuple[str, ...] = (
     "REGCP1",
     "REECA1",
     "REPCA1",
+    # ESD1, ANDES's distributed energy storage: a converter with a state of
+    # charge that takes over a static generator on its bus, as REGCA1 does.
+    # ``tensa.core.esd1`` holds what an add or an edit of one is checked for.
+    "ESD1",
     # Unit 14: PMU instances (PhasorMeasurement group) appear in the
     # controllers bucket so the SLD/topology view can surface their
     # placement alongside exciters/governors. PMU has ``flags.tds=True``
@@ -153,6 +161,11 @@ _CONTROLLER_MODEL_NAMES: tuple[str, ...] = (
 # whitelist; extend per model as needed.
 _ALTERABLE_SERVICES: dict[str, tuple[str, ...]] = {
     "PQ": ("Ppf", "Qpf"),
+    # A battery's power in a run is its set-point ``pref0`` (taken from the
+    # static generator at the start) plus the external signal ``Pext0``, both
+    # per unit of the system base. Altering either steps what it delivers; its
+    # NumParams only move the limits on that.
+    "ESD1": ("pref0", "Pext0"),
 }
 
 if TYPE_CHECKING:
@@ -1012,6 +1025,12 @@ class Wrapper:
             }
             _validate_genrou_reactances(params, genrou_defaults)
 
+        # An ESD1 battery left without a rating gets the system base, and its
+        # values and its static generator are checked here: ANDES takes them
+        # all and the run fails, or misleads, later (``tensa.core.esd1``).
+        if model == ESD1_MODEL:
+            prepare_esd1_add(ss, params, _system_base_mva(ss))
+
         # ANDES counts the device in before it reads the params, so an add it
         # refuses for a missing mandatory one leaves a half-built device on the
         # System (an idx with param lists one short), and the next setup, power
@@ -1047,6 +1066,9 @@ class Wrapper:
                 REPLAY_BUFFER_MAX, dropped,
             )
         self._replay_buffer.append((model, replay_snapshot))
+
+        if model == ESD1_MODEL:
+            log_esd1_base_notice(idx, replay_snapshot.get("Sn"), _system_base_mva(ss))
 
         # Build the TopologyEntry from the just-added device.
         entry = self._lookup_topology_entry(model, idx)
@@ -1145,6 +1167,9 @@ class Wrapper:
                 value = _edit_number(model, pname, value)
             writes.append((pname, param_v, value))
 
+        if model == ESD1_MODEL:
+            check_esd1_edit(ss, i, {pname: value for pname, _, value in writes})
+
         for pname, param_v, value in writes:
             try:
                 # ANDES service params expose .v as a numpy array — direct
@@ -1156,6 +1181,9 @@ class Wrapper:
                     f"ANDES rejected {model}.{pname}={value!r}: "
                     f"{_sanitize_message(str(exc))}"
                 ) from exc
+
+        if model == ESD1_MODEL and "Sn" in params:
+            log_esd1_base_notice(idx_values[i], params["Sn"], _system_base_mva(ss))
 
         entry = self._lookup_topology_entry(model, idx_values[i])
         if entry is None:  # pragma: no cover — should never happen post-write
@@ -4211,6 +4239,9 @@ _REFERENCE_ATTRS: dict[str, tuple[str, ...]] = {
     "ST2CUT": (),
     "REECA1": (),
     "REPCA1": (),
+    # ESD1 sits on a Bus through its mandatory ``bus`` IdxParam (pvd1.py, the
+    # PVD1Data it extends), so a Bus deletion must surface it as a dependent.
+    "ESD1": ("bus",),
     # Unit 15: TimeSeries references a target device via the (model,
     # dev) pair, not a Bus directly. The cascade walker only triggers
     # on Bus deletion today; this entry is present to satisfy the
@@ -4818,6 +4849,58 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         ParamMeta("Tg", "number"),
         ParamMeta("Ddn", "number"),
         ParamMeta("Dup", "number"),
+    ),
+    # ESD1, the distributed energy storage model: PVD1's converter params
+    # (pvd1.py, PVD1Data) followed by the state-of-charge ones (esd1.py,
+    # ESD1Data), in ANDES's order and with its units. ``gen`` is the static
+    # generator the battery takes over, picked like a machine's. Required here
+    # are the two links, ``pqflag`` (ANDES has no default for it) and what
+    # sizes the battery: ANDES's defaults for ``pmx`` (9999, no limit) and
+    # ``En`` (100 MWh) describe no real device. ``Sn`` is required in the form
+    # and filled with the system base by ``add_element`` when a request leaves
+    # it out; ``tensa.core.esd1`` says why that is the value to keep.
+    "ESD1": (
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("bus", "bus_idx", required=True),
+        ParamMeta("gen", "gen_idx", required=True),
+        ParamMeta("Sn", "number", required=True, unit="MVA"),
+        ParamMeta("fn", "number", unit="Hz"),
+        ParamMeta("busf", "string"),
+        ParamMeta("xc", "number", unit="pu"),
+        ParamMeta("pqflag", "number", required=True),
+        ParamMeta("igreg", "string"),
+        ParamMeta("qmx", "number", unit="pu"),
+        ParamMeta("qmn", "number", unit="pu"),
+        ParamMeta("pmx", "number", required=True, unit="pu"),
+        ParamMeta("v0", "number", unit="pu"),
+        ParamMeta("v1", "number", unit="pu"),
+        ParamMeta("dqdv", "number"),
+        ParamMeta("fdbd", "number", unit="Hz"),
+        ParamMeta("ddn", "number", unit="pu/Hz"),
+        ParamMeta("ialim", "number", unit="pu"),
+        ParamMeta("vt0", "number", unit="pu"),
+        ParamMeta("vt1", "number", unit="pu"),
+        ParamMeta("vt2", "number", unit="pu"),
+        ParamMeta("vt3", "number", unit="pu"),
+        ParamMeta("vrflag", "number"),
+        ParamMeta("ft0", "number", unit="Hz"),
+        ParamMeta("ft1", "number", unit="Hz"),
+        ParamMeta("ft2", "number", unit="Hz"),
+        ParamMeta("ft3", "number", unit="Hz"),
+        ParamMeta("frflag", "number"),
+        ParamMeta("tip", "number", unit="s"),
+        ParamMeta("tiq", "number", unit="s"),
+        ParamMeta("gammap", "number"),
+        ParamMeta("gammaq", "number"),
+        ParamMeta("recflag", "number"),
+        ParamMeta("Tf", "number"),
+        ParamMeta("SOCmin", "number"),
+        ParamMeta("SOCmax", "number"),
+        ParamMeta("SOCinit", "number"),
+        ParamMeta("En", "number", required=True, unit="MWh"),
+        ParamMeta("EtaC", "number"),
+        ParamMeta("EtaD", "number"),
     ),
     # Unit 14: PMU (PhasorMeasurement). Tracks bus voltage magnitude
     # (vm) + angle (am) via low-pass filters during TDS. Mirrors
