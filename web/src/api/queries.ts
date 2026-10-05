@@ -659,6 +659,28 @@ export function useAlterableParams(
 
 // ---- ANDES variables and response metrics ----------------------------------
 
+/** A read the substrate refused because something else holds the session. */
+function isSessionBusy(error: unknown): boolean {
+  return error instanceof ProblemDetailsError && error.status === 409;
+}
+
+/**
+ * Query options for a list the substrate answers in milliseconds but refuses
+ * (409) while anything else holds the session. A list that collides with
+ * another request asks again a few times, a little later each time. While a run
+ * holds the session the refusal stands, and the list is then asked for every two
+ * seconds until it comes back, so it is there again when the run ends.
+ */
+const BUSY_READ = {
+  retry: (failureCount: number, error: Error) =>
+    isSessionBusy(error)
+      ? failureCount < 3
+      : !(error instanceof ProblemDetailsError) && failureCount < 1,
+  retryDelay: (attempt: number) => 150 * 2 ** attempt,
+  refetchInterval: (query: { state: { error: unknown } }) =>
+    isSessionBusy(query.state.error) ? 2_000 : false,
+} as const;
+
 /**
  * `GET /sessions/{id}/dae-variables`: one page of the ANDES variables of the
  * loaded case that a TDS run can record, the ones whose names hold every word
@@ -667,7 +689,8 @@ export function useAlterableParams(
  * ``q`` it lists the first ``limit`` variables.
  *
  * The session is busy while a run streams, so asking then is refused with a 409:
- * the caller shows that as a message and the list comes back once the run ends.
+ * the caller shows that as a message and the list comes back once the run ends
+ * (see ``BUSY_READ``).
  */
 export function useDaeVariables(q: string, limit: number): UseQueryResult<DaeVariableList, Error> {
   const sessionId = useSessionStore((s) => s.sessionId);
@@ -683,6 +706,7 @@ export function useDaeVariables(q: string, limit: number): UseQueryResult<DaeVar
     // What is loaded can change under the same case path (an element added or
     // deleted), so a list a few seconds old is the most to rely on.
     staleTime: 5_000,
+    ...BUSY_READ,
     queryFn: async () => {
       if (!sessionId) throw new Error('useDaeVariables enabled without a session');
       return await andesClient.get<DaeVariableList>(

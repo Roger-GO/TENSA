@@ -447,6 +447,45 @@ describe('queries hooks', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('a list refused because another request held the session is asked for again', async () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-busy') });
+    useCaseStore.setState({
+      selection: { primaryPath: 'kundur_full.xlsx' as WorkspacePath, addfiles: [] },
+    });
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse({ type: 'about:blank', title: 'Conflict', status: 409, detail: 'busy' }, 409),
+      )
+      .mockResolvedValueOnce(jsonResponse({ total: 0, items: [] }));
+
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useDaeVariables('', 10), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true), { timeout: 3_000 });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    // The refusal never showed as an error.
+    expect(result.current.isError).toBe(false);
+  });
+
+  it('a list still refused after a few tries says so, as it is while a run holds the session', async () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-busy') });
+    useCaseStore.setState({
+      selection: { primaryPath: 'kundur_full.xlsx' as WorkspacePath, addfiles: [] },
+    });
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(
+        jsonResponse({ type: 'about:blank', title: 'Conflict', status: 409, detail: 'busy' }, 409),
+      ),
+    );
+
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useDaeVariables('', 10), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 5_000 });
+    // The first try and three more.
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
   it('useDaeVariables stays disabled without a session or without a case', () => {
     const { Wrapper } = makeWrapper();
     useSessionStore.setState({ sessionId: null });
