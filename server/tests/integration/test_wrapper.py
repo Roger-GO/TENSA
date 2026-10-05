@@ -664,6 +664,71 @@ def test_build_genrou_untouched_reactance_defaults_accepted() -> None:
 
 
 @pytest.mark.integration
+def test_add_line_on_an_integer_idx_case_takes_its_voltage_base_from_text_bus_refs() -> None:
+    """IEEE 14 as a RAW file holds integer bus idx. A line added with the
+    buses as text ("5", "4"), as a JSON client sends them, found no bus to
+    read the rated voltage from and kept ANDES's 110 kV, so its impedance was
+    rebased against the wrong voltage; setup then failed on the bus anyway."""
+    raw, _ = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw)
+    entry = w.add_element(
+        "Line",
+        {"idx": "L_new", "name": "L_new", "bus1": "5", "bus2": "4", "r": 0.01, "x": 0.05},
+    )
+    assert entry.params["bus1"] == 5 and entry.params["bus2"] == 4
+    line = w._ss.Line
+    uid = line.idx2uid("L_new")
+    bus_kv = float(w._ss.Bus.Vn.v[w._ss.Bus.idx2uid(5)])
+    assert bus_kv != 110.0
+    assert float(line.Vn1.v[uid]) == bus_kv
+    assert float(line.Vn2.v[uid]) == bus_kv
+    # Undo and delete replay what was recorded, so that holds the bus's own idx too.
+    assert w._replay_buffer[-1][1]["bus1"] == 5
+    assert w.run_pflow().converged
+
+
+@pytest.mark.integration
+def test_add_machine_and_exciter_on_an_integer_idx_case_with_text_refs() -> None:
+    """The same for the references to a static generator (``gen``, the
+    StaticGen group) and to a machine (``syn``, the SynGen group), which a
+    case can hold as integers too."""
+    pytest.importorskip("andes")
+    import andes
+
+    w = Wrapper()
+    w.load_case(andes.get_case("kundur/kundur.raw"))
+    ss = w._ss
+    assert isinstance(ss.PV.idx.v[0], int) and ss.GENROU.n == 0
+    gen = ss.PV.idx.v[0]
+    bus = ss.PV.bus.v[0]
+    machine = w.add_element(
+        "GENROU",
+        {"idx": "G_new", "name": "G_new", "bus": str(bus), "gen": str(gen),
+         "Sn": 900, "Vn": 20, "H": 6},
+    )
+    assert machine.params["bus"] == bus and machine.params["gen"] == gen
+    w.add_element("GENROU", {"idx": 7, "name": "G7", "bus": str(ss.PV.bus.v[1]),
+                             "gen": str(ss.PV.idx.v[1]), "Sn": 900, "Vn": 20, "H": 6})
+    exciter = w.add_element("SEXS", {"idx": "X_new", "name": "X_new", "syn": "7"})
+    assert exciter.params["syn"] == 7
+    assert w.run_pflow().converged
+
+
+@pytest.mark.integration
+def test_add_element_leaves_a_reference_to_no_device_as_it_was_sent() -> None:
+    """A reference that names nothing is not rewritten: ANDES refuses it in its
+    own words at setup, as before."""
+    raw, _ = _ieee14_paths()
+    w = Wrapper()
+    w.load_case(raw)
+    entry = w.add_element(
+        "PQ", {"idx": "PQ_x", "name": "PQ_x", "bus": "999", "Vn": 69, "p0": 0.1, "q0": 0.0}
+    )
+    assert entry.params["bus"] == "999"
+
+
+@pytest.mark.integration
 def test_controller_schema_syn_link_uses_syn_idx() -> None:
     """An exciter/governor's machine link renders as a machine picker."""
     from tensa.core.wrapper import _PARAMS_BY_MODEL

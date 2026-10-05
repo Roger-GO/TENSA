@@ -145,6 +145,8 @@ response and needs no Arrow decoding.
   parsed and the route answers 422.
 - GENROU machines: ANDES uses M (=2H); the add-element endpoint accepts H and converts.
 - Exciters/governors link to machines via the "syn" parameter (a SynGen idx).
+- A reference to another device ("bus", "gen", "syn") may be sent as "5" or 5: the add and edit routes match it
+  to the idx the case holds.
 - Line/Transformer impedances are pu on (Sn, Vn1); the add-element endpoint derives
   Vn1/Vn2 from the connected buses automatically.
 - TDS batch endpoint is synchronous with a 300 s server-side cap; for long runs use the WS stream.

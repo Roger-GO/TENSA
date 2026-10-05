@@ -1082,6 +1082,9 @@ class AddElementRequest(BaseModel):
         description=(
             "Flat dict of model parameters. Keys are validated against the "
             "per-model whitelist; values pass through to ``ss.add()``. "
+            "A reference to another device (``bus``, ``gen``, ``syn``) may be "
+            "sent as text or as a number: it is matched to the idx the case "
+            "holds. "
             "Required keys vary per model — query "
             "``GET /api/topology/schema`` for the live form metadata."
         ),

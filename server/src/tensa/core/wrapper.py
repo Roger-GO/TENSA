@@ -844,6 +844,58 @@ class Wrapper:
 
     # ----- topology mutation (Unit 2) -----
 
+    @classmethod
+    def _native_references(cls, ss: Any, model: str, params: dict[str, Any]) -> None:
+        """Give each device reference in ``params`` the idx the case holds, in place.
+
+        A reference names another device by its idx: a load's ``bus``, a
+        machine's ``gen``, an exciter's ``syn``. A JSON client sends an idx as
+        text (the web form sends every one that way) while a RAW or xlsx case
+        holds integers. ANDES takes the text at ``add()`` and fails only inside
+        ``setup()`` ("device not exist with idx=5"), which leaves the session
+        needing a reload. Which params are references, and to which group or
+        model, is read from the model's own ``IdxParam`` declarations, so every
+        model the builder takes is covered. A value that names no device is
+        left as it is, for ANDES to refuse in its own words.
+        """
+        idx_params = getattr(getattr(ss, model, None), "idx_params", None)
+        if not isinstance(idx_params, dict):
+            return
+        for name, param in idx_params.items():
+            raw = params.get(name)
+            if raw is None or isinstance(raw, bool):
+                continue
+            candidates = cls._reference_targets(ss, getattr(param, "model", None))
+            if not candidates:
+                continue
+            try:
+                if raw in candidates:
+                    continue
+            except (TypeError, ValueError):  # pragma: no cover - exotic idx types
+                pass
+            raw_str = str(raw)
+            for candidate in candidates:
+                if str(candidate) == raw_str:
+                    params[name] = candidate
+                    break
+
+    @staticmethod
+    def _reference_targets(ss: Any, target: Any) -> list[Any]:
+        """The idx of every device a reference to ``target`` can name.
+
+        ``target`` is what ANDES's ``IdxParam.model`` holds: a group
+        (``ACNode``, ``StaticGen``, ``SynGen``) or a single model (``Bus``).
+        Empty when it is neither, or when nothing of that kind exists yet.
+        """
+        if not isinstance(target, str):
+            return []
+        group = getattr(ss, "groups", {}).get(target)
+        if group is not None:
+            return list(group.get_all_idxes())
+        target_model = getattr(ss, "models", {}).get(target)
+        idx_values = getattr(getattr(target_model, "idx", None), "v", None)
+        return list(idx_values) if idx_values else []
+
     def _inject_line_voltage_base(self, ss: Any, params: dict[str, Any]) -> None:
         """Fill a Line/Transformer's Vn1/Vn2 from its connected buses and Sn
         from the system MVA base, in-place, when the caller omitted them.
@@ -912,6 +964,11 @@ class Wrapper:
                 f"unknown param keys for {model}: {unknown}; "
                 f"allowed keys: {list(allowed)}"
             )
+
+        # A reference sent as text ("5") must name the device the case holds as
+        # an integer (5), or setup() fails later. Done before anything reads a
+        # reference, the line's voltage base below included.
+        self._native_references(ss, model, params)
 
         # A Line/Transformer's r/x/b are per-unit on the line's own voltage base
         # (Vn1/Vn2) and MVA base (Sn). When a researcher builds from scratch and
@@ -1039,6 +1096,10 @@ class Wrapper:
             raise ElementNotFoundError(
                 f"no {model} with idx={idx!r}"
             ) from exc
+
+        # A changed reference gets the idx the case holds, as an add's does.
+        params = dict(params)
+        self._native_references(ss, model, params)
 
         if model == "GENROU":
             params = self._genrou_edit_params(model_obj, i, params)

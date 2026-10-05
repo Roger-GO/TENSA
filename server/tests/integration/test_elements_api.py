@@ -270,6 +270,58 @@ async def test_add_transformer_via_line_with_tap(
 
 
 @pytest.mark.integration
+async def test_add_element_takes_a_reference_sent_as_text_on_an_integer_idx_case(
+    client: httpx.AsyncClient,
+) -> None:
+    """A RAW case holds its bus idx as integers, and a JSON client (the web
+    form among them) sends ``"5"``. ANDES took the text at ``add()`` and failed
+    inside ``setup()`` with "device not exist with idx=5", so nothing could be
+    added to a loaded case and then solved."""
+    sid = await _create_session(client)
+    await _load_ieee14(client, sid)
+    resp = await client.post(
+        f"/api/sessions/{sid}/elements",
+        json={
+            "model": "PQ",
+            "params": {
+                "idx": "PQ_new", "name": "PQ_new", "bus": "5",
+                "Vn": 69.0, "p0": 0.05, "q0": 0.01,
+            },
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    # The reference is held the way the case holds the bus: as the integer 5.
+    assert resp.json()["element"]["params"]["bus"] == 5
+
+    pf = await client.post(f"/api/sessions/{sid}/pflow", json={})
+    assert pf.status_code == 200, pf.text
+    assert pf.json()["converged"] is True
+    assert pf.json()["load_consumption"]["PQ_new"]["p"] == pytest.approx(5.0)
+
+
+@pytest.mark.integration
+async def test_edit_element_takes_a_reference_sent_as_text_on_an_integer_idx_case(
+    client: httpx.AsyncClient,
+) -> None:
+    """Moving a device to another bus writes the bus's own integer idx, not
+    the text the client sent, so the case still sets up."""
+    sid = await _create_session(client)
+    await _load_ieee14(client, sid)
+    topo = (await client.get(f"/api/sessions/{sid}/topology")).json()
+    load_idx = str(topo["loads"][0]["idx"])
+    resp = await client.put(
+        f"/api/sessions/{sid}/elements/PQ/{load_idx}",
+        json={"params": {"bus": "5"}},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["params"]["bus"] == 5
+
+    pf = await client.post(f"/api/sessions/{sid}/pflow", json={})
+    assert pf.status_code == 200, pf.text
+    assert pf.json()["converged"] is True
+
+
+@pytest.mark.integration
 async def test_add_element_post_pf_returns_409(client: httpx.AsyncClient) -> None:
     sid = await _create_session(client)
     await _load_ieee14(client, sid)
