@@ -16,8 +16,9 @@
  * The file needs nothing else to open: its style is inline, its charts are
  * inline SVG, and it carries no script. Everything written into it that came
  * from a case file or from the user (element names, case names, run names) is
- * escaped, and the document's own content policy forbids scripts and network
- * requests besides, since case files are other people's data.
+ * escaped, and so is a count that is only a number by its type. The document's
+ * own content policy forbids scripts, network requests and forms besides, since
+ * case files are other people's data.
  */
 import type { EigResult, PflowResult } from '@/api/types';
 import type { ElementNames } from '@/lib/elementNames';
@@ -461,7 +462,7 @@ function pflowSection({ result, names, violations, origin }: ReportPflow): Secti
   const parts: string[] = [];
   if (!result.converged) {
     parts.push(
-      `<p>The power flow did not converge in ${result.iterations} iterations (last mismatch ${escapeHtml(result.mismatch.toExponential(2))}), so it has no results to report.</p>`,
+      `<p>The power flow did not converge in ${escapeHtml(result.iterations)} iterations (last mismatch ${escapeHtml(result.mismatch.toExponential(2))}), so it has no results to report.</p>`,
     );
     return { id: 'power-flow', title: 'Power flow', html: parts.join('\n') };
   }
@@ -481,7 +482,7 @@ function pflowSection({ result, names, violations, origin }: ReportPflow): Secti
   if (summary !== null) {
     const settings = result.settings ? ` It ran with ${describeSettings(result.settings)}.` : '';
     parts.push(
-      `<p>Converged in ${result.iterations} iterations, final mismatch ${escapeHtml(result.mismatch.toExponential(2))}.${escapeHtml(settings)}</p>`,
+      `<p>Converged in ${escapeHtml(result.iterations)} iterations, final mismatch ${escapeHtml(result.mismatch.toExponential(2))}.${escapeHtml(settings)}</p>`,
     );
     const share = lossShare(summary);
     parts.push(
@@ -717,7 +718,7 @@ function eigSection(eig: EigResult): Section {
     (x, y) => (x.damping ?? Number.POSITIVE_INFINITY) - (y.damping ?? Number.POSITIVE_INFINITY),
   );
   const html = [
-    `<p>${eig.mode_count} modes of ${eig.state_count} states. ${unstable === 0 ? 'None has a positive real part.' : `${unstable} ${unstable === 1 ? 'has' : 'have'} a positive real part.`} Least damped first.</p>`,
+    `<p>${escapeHtml(eig.mode_count)} modes of ${escapeHtml(eig.state_count)} states. ${unstable === 0 ? 'None has a positive real part.' : `${unstable} ${unstable === 1 ? 'has' : 'have'} a positive real part.`} Least damped first.</p>`,
     table(
       [
         { label: 'mode', numeric: true },
@@ -782,6 +783,10 @@ footer { margin-top: 48px; padding-top: 10px; border-top: 1px solid #d0d7de; }
 }
 `.trim();
 
+/** What the document allows itself: its own inline style and inline images, nothing else. */
+const CONTENT_POLICY =
+  "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'";
+
 /** The report as one HTML document. */
 export function buildHtmlReport(data: HtmlReportData): string {
   const sections: Section[] = [];
@@ -814,8 +819,10 @@ export function buildHtmlReport(data: HtmlReportData): string {
     '<html lang="en">',
     '<head>',
     '<meta charset="utf-8">',
-    // No script runs and nothing is fetched, whatever a case file's names hold.
-    `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">`,
+    // No script runs, nothing is fetched and no form is sent, whatever a case
+    // file's names hold. Forms and the base address are named because
+    // ``default-src`` does not cover them.
+    `<meta http-equiv="Content-Security-Policy" content="${CONTENT_POLICY}">`,
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="generator" content="TENSA">',
     `<title>${escapeHtml(title)}</title>`,

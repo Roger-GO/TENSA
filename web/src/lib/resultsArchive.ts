@@ -179,6 +179,8 @@ function isPflowSnapshot(value: unknown): value is PflowSnapshot {
   if (value.name !== undefined && typeof value.name !== 'string') return false;
   const { result, names } = value;
   if (!isRecord(result) || result.converged !== true) return false;
+  // What is printed of how it converged, as numbers and not as whatever is there.
+  if (typeof result.iterations !== 'number' || typeof result.mismatch !== 'number') return false;
   if (!isRecord(result.bus_voltages) || !isRecord(result.bus_angles)) return false;
   if (!isRecord(names)) return false;
   return ['buses', 'lines', 'generators', 'loads'].every((bucket) => isRecord(names[bucket]));

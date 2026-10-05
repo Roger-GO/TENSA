@@ -246,6 +246,24 @@ describe('resultsArchive', () => {
       expect(contents.runsState).toBeNull();
       expect(contents.pflowState).toBeNull();
     });
+
+    it('a power flow whose iteration count or mismatch is not a number', async () => {
+      await archive.putPflow(snapshot('pf-1', 1));
+      const whole = snapshot('pf-2', 2);
+      await putRaw(factory, 'pflow', {
+        ...whole,
+        id: 'text-iterations',
+        result: { ...whole.result, iterations: '<b>3</b>' },
+      });
+      await putRaw(factory, 'pflow', {
+        ...whole,
+        id: 'no-mismatch',
+        result: { ...whole.result, mismatch: undefined },
+      });
+      const contents = await archive.read();
+      expect(contents.pflow.map((s) => s.id)).toEqual(['pf-1']);
+      expect(contents.stalePflowIds.sort()).toEqual(['no-mismatch', 'text-iterations']);
+    });
   });
 });
 

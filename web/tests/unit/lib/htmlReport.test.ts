@@ -116,11 +116,14 @@ describe('buildHtmlReport: the document', () => {
     expect(doc.querySelector('link')).toBeNull();
     expect(doc.querySelector('img')).toBeNull();
     expect(html).not.toMatch(/\bsrc=|url\(|@import|https?:\/\/(?!www\.w3\.org\/2000\/svg)/);
-    // Its own policy forbids scripts and requests, whatever a name in it holds.
+    // Its own policy forbids scripts and requests, whatever a name in it holds,
+    // and forms and a base address, which the default does not cover.
     const policy = doc.querySelector('meta[http-equiv="Content-Security-Policy"]');
     expect(policy?.getAttribute('content')).toBe(
-      "default-src 'none'; style-src 'unsafe-inline'; img-src data:",
+      "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'",
     );
+    expect(doc.querySelector('form')).toBeNull();
+    expect(doc.querySelector('base')).toBeNull();
     expect(doc.querySelector('meta[charset]')?.getAttribute('charset')).toBe('utf-8');
     expect(doc.querySelector('style')?.textContent).toContain('@media print');
   });
@@ -229,6 +232,40 @@ describe('buildHtmlReport: a name from a case file cannot become markup', () => 
     expect(rowsOf(tableAfter(doc, 'Buses'))[0]?.[1]).toBe(hostile);
     expect(doc.querySelector('pre')?.textContent).toContain('</pre><script>alert(3)</script>');
     expect(doc.querySelector('svg')?.getAttribute('aria-label')).toContain(hostile);
+  });
+
+  it('escapes a count that should be a number and is not', () => {
+    // A result read back from the browser's storage is only what its type says
+    // it is as far as it was checked.
+    const markup = '<form action="//x"><base href="//x">' as unknown as number;
+    const eig: EigResult = {
+      eigenvalues: [{ real: -1, imag: 0 }],
+      damping_ratios: [1],
+      frequencies_hz: [0],
+      mode_count: markup,
+      state_count: markup,
+      state_names: ['delta'],
+      tds_initialized: true,
+    };
+    for (const converged of [true, false]) {
+      const html = buildHtmlReport(
+        data({
+          pflow: {
+            result: pf({ converged, iterations: markup }),
+            names: NAMES,
+            violations: null,
+          },
+          eig,
+        }),
+      );
+      const doc = parse(html);
+      expect(doc.querySelector('form')).toBeNull();
+      expect(doc.querySelector('base')).toBeNull();
+      expect(html).not.toContain('<form');
+      expect(html).not.toContain('<base');
+      expect(doc.querySelector('#power-flow p')?.textContent).toContain('<form action="//x">');
+      expect(doc.querySelector('#eigenvalues p')?.textContent).toContain('<base href="//x">');
+    }
   });
 
   it('escapeHtml covers what ends an element or an attribute', () => {
