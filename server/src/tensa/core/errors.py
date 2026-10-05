@@ -215,6 +215,20 @@ class CpfPrerequisiteError(AndesAppError):
     recovery_kind: str | None = "run-pflow"
 
 
+class CpfRequestError(AndesAppError):
+    """Raised when a continuation power flow request asks for something that
+    cannot be run: a direction the routine does not know, a step that is not a
+    positive number, an increase given to a device the case does not have, or a
+    direction that moves nothing.
+
+    Like :class:`PflowRequestError`, the check runs before anything is written
+    to the System, so there is nothing to recover from: the caller fixes the
+    request and sends it again. The response is a 422 without a recovery action.
+    """
+
+    recovery_kind: str | None = "none"
+
+
 class CpfDivergedError(AndesAppError):
     """Raised when ``ss.CPF.run()`` / ``ss.CPF.run_qv()`` itself raises an
     exception (e.g., singular Jacobian, KLU segfault, internal LinAlg

@@ -81,7 +81,23 @@ Clone editing:   POST /sessions/{id}/case/clone (start copy-on-write edit)
                  POST .../case/clone/undo · .../case/clone/redo · .../case/clone/reset · .../case/clone/save-as
                  GET .../case/clone/diff/{model}/{idx}
 Eigenanalysis:   POST /sessions/{id}/eig · GET .../eig/modes/{mode_idx}/participation · GET .../eig/state-matrix.mat
-CPF:             POST /sessions/{id}/cpf · POST /sessions/{id}/cpf/qv
+CPF:             POST /sessions/{id}/cpf · POST /sessions/{id}/cpf/qv  (needs a converged pflow; every setting is for that run only)
+                 cpf body, all optional: {"direction": "load", "enforce_q_limits": false, "stop_at": "nose", "step": 0.1, "max_iter": 500}
+                 direction: load (every load and PV generator in proportion, the default) | load-only (the slack supplies the increase) |
+                 gen (PV generators only) | custom, with "load_increase": [{"idx":"PQ_1","p":10,"q":3}] and
+                 "generator_increase": [{"idx":2,"p":10}] in MW / MVAr per unit of lambda (the slack cannot be named).
+                 With load, load-only and gen, lambda = 1 is twice the base value.
+                 enforce_q_limits true switches a PV or slack generator to PQ at qmin/qmax along the path; solve pflow with
+                 enforce_q_limits first, or the answer is 409 when a generator is already past a limit. A generator held at a limit
+                 stays held. stop_at full also traces the lower branch back to lambda = 0 (the steps after nose_idx).
+                 → lambdas, voltages_per_bus, nose_idx (-1 and truncated true when no nose was reached), max_lam (lambda at the nose),
+                 "generators": [{"model","idx","bus","q":[MVAr per step],"q_min","q_max"}], "limit_events":
+                 [{"step","lam","model","idx","bus","limit":"qmax|qmin","at_nose","would_release_step"}] (step 0: held by the power flow;
+                 at_nose true: the nose is where that generator ran out of reactive power, a limit-induced collapse and not a smooth fold;
+                 would_release_step: from that step its voltage is back across the set-point and a real exciter would leave the limit,
+                 which ANDES's limiter does not, so the curve from there is the one for a generator pinned at its limit),
+                 q_limits_enforced, stop_at, complete (false: a full curve whose lower branch broke off), direction.
+                 cpf/qv body: {"bus_idx": "5", "q_range": 5.0, "enforce_q_limits": false}; same response, lambdas holding Q at the bus.
 State estimation:POST /sessions/{id}/se/measurements/generate · POST /sessions/{id}/se
 PMU placement:   POST/GET /sessions/{id}/pmu · DELETE /sessions/{id}/pmu/{pmu_idx} · GET .../pmu/{run_id}/export.csv
 Profiles:        POST /sessions/{id}/profiles/upload · POST/GET/DELETE /sessions/{id}/profiles

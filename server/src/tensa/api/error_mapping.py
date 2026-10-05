@@ -116,6 +116,7 @@ WORKER_ERROR_HTTP_MAP: dict[str, int] = {
     "PflowRequestError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "EigDirtyDaeError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "EigComputationError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "CpfRequestError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "CpfDivergedError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "SeNonConvergentError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "SeUnderDeterminedError": status.HTTP_422_UNPROCESSABLE_CONTENT,

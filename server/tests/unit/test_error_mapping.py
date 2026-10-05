@@ -136,6 +136,18 @@ def test_map_worker_error_dependents_is_422_with_extras_and_no_recovery() -> Non
     assert detail["recovery"] is None
 
 
+def test_map_worker_error_cpf_request_is_422_with_no_recovery() -> None:
+    """A direction the case cannot take is the caller's to fix, like a bad tolerance."""
+    http = map_worker_error(
+        WorkerError("CpfRequestError", "load_increase names 'PQ_99', which is not a PQ load")
+    )
+    assert http.status_code == 422
+    detail = http.detail
+    assert isinstance(detail, dict)
+    assert detail["detail"].startswith("load_increase names")
+    assert detail["recovery"] is None
+
+
 def test_map_worker_error_pflow_request_is_422_with_no_recovery() -> None:
     """A power-flow setting out of range is the caller's to fix: no reload helps."""
     http = map_worker_error(

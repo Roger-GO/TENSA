@@ -31,6 +31,65 @@ import dataclasses
 
 
 @dataclasses.dataclass(frozen=True)
+class CpfGeneratorTrace:
+    """One static generator (PV or Slack) along a continuation path.
+
+    - ``idx`` / ``bus``: the generator's ANDES idx and the bus it sits on, as
+      text.
+    - ``model``: ``"PV"`` or ``"Slack"``.
+    - ``q``: its reactive output in MVAr at every step, index-aligned with
+      :attr:`CpfResult.lambdas`.
+    - ``q_min`` / ``q_max``: the reactive limits the case sets, in MVAr;
+      ``None`` for one that is not finite.
+
+    A generator that is out of service has no entry.
+    """
+
+    idx: str
+    model: str
+    bus: str
+    q: list[float]
+    q_min: float | None
+    q_max: float | None
+
+
+@dataclasses.dataclass(frozen=True)
+class CpfLimitEvent:
+    """The first step at which a generator is held at a reactive limit.
+
+    - ``step``: index into :attr:`CpfResult.lambdas`. ``0`` means the power
+      flow the continuation started from already held the generator there.
+    - ``lam``: the value of ``lambdas`` at that step.
+    - ``idx`` / ``model`` / ``bus``: the generator, as in
+      :class:`CpfGeneratorTrace`.
+    - ``limit``: ``"qmax"`` or ``"qmin"``.
+    - ``at_nose``: ``True`` when the nose is where this generator switched.
+      The path then has no way on with the generator either holding its
+      voltage (it would be past the limit) or held at the limit (its voltage
+      would be on the wrong side of the set-point), so the loadability ends
+      at the switch and not at a smooth fold.
+    - ``would_release_step``: the first step, from ``step`` on, at which the
+      generator's terminal voltage is back across its set-point (above it
+      for one held at ``qmax``, below for ``qmin``), where a real exciter
+      would take the voltage up again and leave the limit. ANDES keeps the
+      generator at the limit all the same, so from that step the curve is
+      the one for a generator pinned there. ``None`` when it does not happen.
+
+    A generator has at most one event: ANDES's limiter does not let go of a
+    generator it holds.
+    """
+
+    step: int
+    lam: float
+    idx: str
+    model: str
+    bus: str
+    limit: str  # "qmax" or "qmin"
+    at_nose: bool = False
+    would_release_step: int | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class CpfResult:
     """Continuation power flow result returned by ``Wrapper.run_cpf``.
 
@@ -51,7 +110,8 @@ class CpfResult:
       the canonical render order without dict-key iteration ambiguity.
     - ``nose_idx``: index into ``lambdas`` where lambda is maximised
       (the nose point). ``-1`` when the run was truncated before
-      reaching the nose (no NOSE event in ``CPF.events``).
+      reaching the nose (no NOSE event in ``CPF.events``). On a full
+      curve the steps after it are the lower branch.
     - ``max_lam``: peak lambda value reached. Echo of ``CPF.max_lam``
       (always populated, even on truncation).
     - ``truncated``: ``True`` when the run terminated without finding a
@@ -64,6 +124,24 @@ class CpfResult:
       (``CPF.run``) and ``"qv"`` for a single-bus QV-curve
       (``CPF.run_qv``). The wire shape is the same; the UI uses ``mode``
       to label axes ("Voltage vs lambda" vs "Voltage vs Q").
+    - ``generators``: every in-service PV and Slack generator's reactive
+      output along the path (:class:`CpfGeneratorTrace`). Empty when the
+      readings could not be matched to the steps.
+    - ``limit_events``: the generators held at a reactive limit, each with
+      the first step at which it is (:class:`CpfLimitEvent`), in step
+      order. An event marked ``at_nose`` means the nose is where that
+      generator ran out of reactive power, not a smooth fold.
+    - ``q_limits_enforced``: whether generators were switched from PV to PQ
+      at their limits along the path. When ``False`` only the generators
+      the base power flow already held are held (the events at step 0).
+    - ``stop_at``: ``"nose"`` for a run that stops at the nose, ``"full"``
+      for one that goes on along the lower branch back to ``lambda = 0``.
+    - ``complete``: whether the run ended the way ``stop_at`` asked. A full
+      curve whose lower branch broke off has a nose (``truncated`` is
+      ``False``) and is not complete; ``done_msg`` says where it stopped.
+    - ``direction``: the direction of the increase a PV run was asked for
+      (``"load"``, ``"load-only"``, ``"gen"`` or ``"custom"``); ``None`` for
+      a QV curve, which moves the reactive load of one bus.
     """
 
     lambdas: list[float]
@@ -74,6 +152,12 @@ class CpfResult:
     truncated: bool
     done_msg: str
     mode: str  # "pv" or "qv"
+    generators: list[CpfGeneratorTrace] = dataclasses.field(default_factory=list)
+    limit_events: list[CpfLimitEvent] = dataclasses.field(default_factory=list)
+    q_limits_enforced: bool = False
+    stop_at: str = "nose"  # "nose" or "full"
+    complete: bool = True
+    direction: str | None = None
 
 
-__all__ = ["CpfResult"]
+__all__ = ["CpfGeneratorTrace", "CpfLimitEvent", "CpfResult"]

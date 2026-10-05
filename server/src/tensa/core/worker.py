@@ -574,18 +574,22 @@ def _handle_eig_state_matrix(wrapper: Wrapper, args: dict[str, Any]) -> Any:
 def _handle_run_cpf(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     """Wire ``Wrapper.run_cpf`` for Unit 12.
 
-    Forwards ``direction`` / ``step`` / ``max_iter`` from the request
-    body. Returns a serialized :class:`CpfResult` dict
-    (``lambdas``, ``voltages_per_bus``, ``bus_idxes``, ``nose_idx``,
-    ``max_lam``, ``truncated``, ``done_msg``, ``mode``).
+    Forwards ``direction`` / ``step`` / ``max_iter`` and the settings of
+    :mod:`tensa.core.cpf_options` (``load_increase``,
+    ``generator_increase``, ``enforce_q_limits``, ``stop_at``) from the
+    request body as they are; ``run_cpf`` checks them. Returns a
+    serialized :class:`CpfResult` dict.
     """
-    direction = str(args.get("direction", "load"))
-    step_raw = args.get("step")
-    step = float(step_raw) if step_raw is not None else None
-    max_iter_raw = args.get("max_iter")
-    max_iter = int(max_iter_raw) if max_iter_raw is not None else None
     return _serialize_dataclass(
-        wrapper.run_cpf(direction=direction, step=step, max_iter=max_iter)
+        wrapper.run_cpf(
+            direction=args.get("direction", "load"),
+            step=args.get("step"),
+            max_iter=args.get("max_iter"),
+            load_increase=args.get("load_increase"),
+            generator_increase=args.get("generator_increase"),
+            enforce_q_limits=args.get("enforce_q_limits"),
+            stop_at=args.get("stop_at", "nose"),
+        )
     )
 
 
@@ -593,13 +597,17 @@ def _handle_run_cpf_qv(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     """Wire ``Wrapper.run_cpf_qv`` for Unit 12.
 
     The bus_idx is required; ``q_range`` is optional (default 5.0
-    matches ANDES's own default).
+    matches ANDES's own default), and so is ``enforce_q_limits``.
     """
     bus_idx = str(args["bus_idx"])
     q_range_raw = args.get("q_range")
     q_range = float(q_range_raw) if q_range_raw is not None else 5.0
     return _serialize_dataclass(
-        wrapper.run_cpf_qv(bus_idx=bus_idx, q_range=q_range)
+        wrapper.run_cpf_qv(
+            bus_idx=bus_idx,
+            q_range=q_range,
+            enforce_q_limits=args.get("enforce_q_limits"),
+        )
     )
 
 

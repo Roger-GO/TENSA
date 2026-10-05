@@ -43,6 +43,7 @@ from tensa.core.errors import (
     CaseLoadError,
     CpfDivergedError,
     CpfPrerequisiteError,
+    CpfRequestError,
     DisturbanceCommitError,
     DisturbanceValidationError,
     EigComputationError,
@@ -94,6 +95,7 @@ _EXPECTED_MAPPING: list[tuple[type[AndesAppError], str]] = [
     (DisturbanceValidationError, "none"),
     (TdsRequestError, "none"),
     (PflowRequestError, "none"),
+    (CpfRequestError, "none"),
 ]
 
 

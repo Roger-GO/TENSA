@@ -44,10 +44,17 @@ from typing import TYPE_CHECKING, Any, Literal
 from tensa.core.case_events import CaseEvent, event_from_spec, events_in_case
 from tensa.core.codegen_cache import wait_for_background_warm
 from tensa.core.connectivity_result import ConnectivityResult
-from tensa.core.cpf_result import CpfResult
+from tensa.core.cpf_options import (
+    CpfRun,
+    cpf_run_applied,
+    direction_targets,
+    validate_cpf_options,
+)
+from tensa.core.cpf_result import CpfGeneratorTrace, CpfLimitEvent, CpfResult
 from tensa.core.disturbance import AlterSpec, DisturbanceSpec, FaultSpec, ToggleSpec
 from tensa.core.eig_result import ComplexNumber, EigResult
 from tensa.core.errors import (
+    AndesAppError,
     CaseLoadError,
     CaseSaveError,
     CpfDivergedError,
@@ -2156,24 +2163,48 @@ class Wrapper:
         direction: str = "load",
         step: float | None = None,
         max_iter: int | None = None,
+        load_increase: list[dict[str, Any]] | None = None,
+        generator_increase: list[dict[str, Any]] | None = None,
+        enforce_q_limits: bool | None = None,
+        stop_at: str = "nose",
     ) -> CpfResult:
         """Run continuation power flow — Unit 12.
 
         Args:
-            direction: ``"load"`` (default) scales loads up via
-                ``ss.CPF.run(load_scale=2.0)``. ``"gen"`` scales
-                generation up via ``pg_target=2.0``. Any other value
-                raises ``ValueError``.
-            step: optional initial continuation step size. Pushed onto
-                ``ss.CPF.config.step`` before the run when not None.
+            direction: what lambda increases. ``"load"`` (default) scales
+                every load and every PV generator in proportion
+                (``ss.CPF.run(load_scale=2.0)``), ``"load-only"`` the
+                loads alone, ``"gen"`` the PV generators alone, and
+                ``"custom"`` the devices ``load_increase`` and
+                ``generator_increase`` name. With the first three
+                ``lambda = 1`` is twice the base value.
+            step: optional initial continuation step size. Written to
+                ``ss.CPF.config.step`` for this run when not None.
             max_iter: optional cap on the number of continuation steps.
-                Pushed onto ``ss.CPF.config.max_steps`` before the run
+                Written to ``ss.CPF.config.max_steps`` for this run
                 when not None. ANDES's own ``max_iter`` config is the
                 Newton corrector iterations per step, *not* the total
                 continuation count — we map the user-facing parameter
                 name (which the plan inherits from natural-language
                 terminology) onto the ANDES ``max_steps`` field where
                 it actually controls truncation.
+            load_increase: for a custom direction, ``{"idx", "p", "q"}``
+                per PQ load: the MW and MVAr it gains for each unit of
+                lambda.
+            generator_increase: for a custom direction, ``{"idx", "p"}``
+                per PV generator, in MW for each unit of lambda.
+            enforce_q_limits: switch a PV or slack generator to a PQ bus
+                held at ``qmin`` or ``qmax`` when its reactive output
+                reaches one along the path. ``None`` keeps the case's
+                own setting. Refused when the solved power flow leaves a
+                generator past a limit.
+            stop_at: ``"nose"`` (default) stops at the nose; ``"full"``
+                goes on along the lower branch back to ``lambda = 0``.
+
+        The settings apply to this run only and everything written to the
+        System is put back (:mod:`tensa.core.cpf_options`, which also says
+        how each of them reaches ANDES). A value out of range raises
+        :class:`CpfRequestError` before anything is written.
 
         Substrate-side gate (per Unit 1a spike): ``CPF.init`` only logs
         a warning when ``system.PFlow.converged`` is False. We MUST gate
@@ -2187,16 +2218,23 @@ class Wrapper:
         failure (try/finally at cpf.py:255-259). The substrate does not
         have to clean up after a CPF run.
 
-        A clean ``False`` return (``ok=False``) does NOT raise — it
-        means the run completed but did not reach a nose point (e.g.,
-        hit ``max_steps``, or branch-switched). The result is returned
-        with ``truncated=True`` and ``nose_idx=-1`` so the UI can
-        surface the truncation note.
+        A clean ``False`` return (``ok=False``) does NOT raise. Without a
+        nose (e.g., hit ``max_steps``) the result is returned with
+        ``truncated=True`` and ``nose_idx=-1`` so the UI can surface the
+        truncation note; a full curve that breaks off on the lower branch
+        keeps its nose and has ``complete=False``.
 
         An unexpected exception inside ``ss.CPF.run()`` raises
         :class:`CpfDivergedError` so the routes layer can return 422
         with the ANDES detail.
         """
+        validate_cpf_options(
+            direction=direction,
+            stop_at=stop_at,
+            step=step,
+            max_steps=max_iter,
+            enforce_q_limits=enforce_q_limits,
+        )
         ss = self._require_loaded()
         self._ensure_setup()
         # Independent PF gate — ANDES's own check is unsafe (only warns).
@@ -2204,47 +2242,38 @@ class Wrapper:
             raise CpfPrerequisiteError(
                 "Run PFlow first; CPF requires a converged operating point."
             )
-
-        if direction not in ("load", "gen"):
-            raise ValueError(
-                f"direction must be 'load' or 'gen', got {direction!r}"
-            )
-
-        # Push optional config knobs. ANDES exposes ``step`` /
-        # ``max_steps`` as config attrs, not run() kwargs.
-        if step is not None:
-            try:
-                ss.CPF.config.step = float(step)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"invalid CPF step: {exc}") from exc
-        if max_iter is not None:
-            try:
-                ss.CPF.config.max_steps = int(max_iter)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"invalid CPF max_iter: {exc}") from exc
-
-        # Default scaling factor for both directions: 2.0 (load doubled
-        # / generation doubled). The plan's body does not specify the
-        # scaling magnitude; this matches the Unit 1a spike's empirical
-        # baseline.
-        kwargs: dict[str, Any] = {}
-        if direction == "load":
-            kwargs["load_scale"] = 2.0
-        else:  # direction == "gen"
-            kwargs["pg_target"] = 2.0
+        targets = direction_targets(
+            ss,
+            direction=direction,
+            load_increase=load_increase,
+            generator_increase=generator_increase,
+        )
 
         try:
-            ok = bool(ss.CPF.run(**kwargs))
-        except CpfPrerequisiteError:
+            with cpf_run_applied(
+                ss,
+                enforce_q_limits=enforce_q_limits,
+                stop_at=stop_at,
+                step=step,
+                max_steps=max_iter,
+            ) as run:
+                ok = bool(ss.CPF.run(**targets))
+        except AndesAppError:
             raise
         except Exception as exc:  # noqa: BLE001
             raise CpfDivergedError(
                 f"Continuation power flow failed: {exc}"
             ) from exc
 
-        return _build_cpf_result(ss, mode="pv", ok=ok)
+        return _build_cpf_result(ss, mode="pv", ok=ok, run=run, direction=direction)
 
-    def run_cpf_qv(self, *, bus_idx: str, q_range: float = 5.0) -> CpfResult:
+    def run_cpf_qv(
+        self,
+        *,
+        bus_idx: str,
+        q_range: float = 5.0,
+        enforce_q_limits: bool | None = None,
+    ) -> CpfResult:
         """Run a single-bus QV-curve continuation — Unit 12.
 
         Args:
@@ -2253,6 +2282,7 @@ class Wrapper:
             q_range: passed through to ``CPF.run_qv(q_range=...)``.
                 Default 5.0 matches ANDES's own default
                 (``cpf.py:273``).
+            enforce_q_limits: as in :meth:`run_cpf`.
 
         Same prerequisite gate as :meth:`run_cpf`. ``CPF.run_qv``
         requires at least one PQ device at ``bus_idx``; ANDES raises a
@@ -2263,8 +2293,9 @@ class Wrapper:
         bus key in ``voltages_per_bus`` keyed off ``bus_idx``.
         ``lambdas`` carries the ``qv_q`` array (reactive-power axis);
         the UI labels the X-axis "Q (pu)" instead of "lambda" based on
-        ``mode``.
+        ``mode``. The curve stops at its nose.
         """
+        validate_cpf_options(enforce_q_limits=enforce_q_limits)
         ss = self._require_loaded()
         self._ensure_setup()
         if not bool(getattr(ss.PFlow, "converged", False)):
@@ -2282,15 +2313,16 @@ class Wrapper:
             coerced_idx = str(bus_idx)
 
         try:
-            ss.CPF.run_qv(coerced_idx, q_range=float(q_range))
-        except CpfPrerequisiteError:
+            with cpf_run_applied(ss, enforce_q_limits=enforce_q_limits) as run:
+                ss.CPF.run_qv(coerced_idx, q_range=float(q_range))
+        except AndesAppError:
             raise
         except Exception as exc:  # noqa: BLE001
             raise CpfDivergedError(
                 f"QV-curve run failed for bus {bus_idx!r}: {exc}"
             ) from exc
 
-        return _build_cpf_result(ss, mode="qv", ok=True, qv_bus=str(bus_idx))
+        return _build_cpf_result(ss, mode="qv", ok=True, qv_bus=str(bus_idx), run=run)
 
     # ----- SE (Unit 13) -----
 
@@ -5741,7 +5773,13 @@ def _eig_state_names(ss: System, mode_count: int) -> list[str]:
 
 
 def _build_cpf_result(
-    ss: System, *, mode: str, ok: bool, qv_bus: str | None = None
+    ss: System,
+    *,
+    mode: str,
+    ok: bool,
+    qv_bus: str | None = None,
+    run: CpfRun | None = None,
+    direction: str | None = None,
 ) -> CpfResult:
     """Build a :class:`CpfResult` from the post-run ``ss.CPF`` state.
 
@@ -5755,14 +5793,23 @@ def _build_cpf_result(
     - PV: ``CPF.lam`` (1-D length nsteps), ``CPF.V`` (nbus, nsteps).
     - QV: ``CPF.qv_q`` (1-D), ``CPF.qv_v`` (1-D, single bus).
 
-    Truncation detection: a successful nose-finding run carries a
-    ``NOSE`` event in ``CPF.events``. When ``ok=False`` OR no NOSE event
-    is present, ``nose_idx=-1`` and ``truncated=True`` so the UI can
-    surface the "did not reach nose" note.
+    Truncation detection: a nose-finding run carries a ``NOSE`` event in
+    ``CPF.events``. Without one, ``nose_idx=-1`` and ``truncated=True``
+    so the UI can surface the "did not reach nose" note. ``ok`` is
+    ANDES's own verdict and becomes ``complete``: a full curve that
+    breaks off on the lower branch has its nose and is not complete.
+
+    ``run`` is what read the generators while the routine ran
+    (:class:`~tensa.core.cpf_options.CpfRun`); it gives each generator's
+    reactive output at every step and the steps at which one is held at
+    a limit.
     """
     cpf = ss.CPF
     done_msg = str(getattr(cpf, "done_msg", "") or "")
     events = list(getattr(cpf, "events", None) or [])
+    path = run.path(getattr(cpf, "V", None)) if run is not None else None
+    q_limits_enforced = run.enforce_q_limits if run is not None else False
+    stop_at = run.stop_at if run is not None else "nose"
 
     def _finite_prefix_len(series: list[float]) -> int:
         """Length of the leading run of finite values.
@@ -5778,6 +5825,11 @@ def _build_cpf_result(
                 return i
         return len(series)
 
+    def _generators(
+        lambdas: list[float], nose_idx: int
+    ) -> tuple[list[CpfGeneratorTrace], list[CpfLimitEvent]]:
+        return path.traces(lambdas, nose_idx) if path is not None else ([], [])
+
     if mode == "qv":
         q_arr = getattr(cpf, "qv_q", None)
         v_arr = getattr(cpf, "qv_v", None)
@@ -5790,6 +5842,8 @@ def _build_cpf_result(
         except (TypeError, ValueError):
             voltages = []
         keep = min(_finite_prefix_len(lambdas), _finite_prefix_len(voltages))
+        if path is not None:
+            keep = min(keep, path.finite_steps())
         lambdas = lambdas[:keep]
         voltages = voltages[:keep]
         bus_label = qv_bus if qv_bus is not None else str(
@@ -5811,6 +5865,7 @@ def _build_cpf_result(
         truncated = (not ok) or nose_idx < 0
         if not max_lam and lambdas:
             max_lam = max(lambdas)
+        generators, limit_events = _generators(lambdas, nose_idx)
         return CpfResult(
             lambdas=lambdas,
             voltages_per_bus=voltages_per_bus,
@@ -5820,6 +5875,11 @@ def _build_cpf_result(
             truncated=truncated,
             done_msg=done_msg,
             mode="qv",
+            generators=generators,
+            limit_events=limit_events,
+            q_limits_enforced=q_limits_enforced,
+            stop_at=stop_at,
+            complete=not truncated,
         )
 
     # PV-curve path.
@@ -5860,26 +5920,34 @@ def _build_cpf_result(
     keep = _finite_prefix_len(lambdas)
     for row in voltages_per_bus.values():
         keep = min(keep, _finite_prefix_len(row))
+    if path is not None:
+        keep = min(keep, path.finite_steps())
     lambdas = lambdas[:keep]
     voltages_per_bus = {k: v[:keep] for k, v in voltages_per_bus.items()}
 
     # Nose detection: a NOSE event in CPF.events tells us the run hit
-    # the maximum-loadability point. argmax over the lambda series
-    # mirrors what ANDES reports as ``max_lam``.
+    # the maximum-loadability point. A run that stops at the nose and
+    # reports failure never left the base case (one point, no curve);
+    # one that goes on past the nose and then fails still has it.
     has_nose_event = any(
         isinstance(ev, dict) and ev.get("type") == "NOSE" for ev in events
     )
-    nose_idx = -1
-    if lambdas and ok and has_nose_event:
-        nose_idx = int(_argmax(lambdas))
-    truncated = (not ok) or (not has_nose_event)
+    nose_found = has_nose_event and (ok or len(lambdas) > 1)
+    nose_idx = _first_turn(lambdas) if lambdas and nose_found else -1
+    truncated = nose_idx < 0
 
+    # The loadability is lambda at the nose. A lower branch can climb back
+    # above it (generators switching at their limits on the way down), and
+    # those points are not reached from the base case by adding load.
     max_lam = float(getattr(cpf, "max_lam", 0.0) or 0.0)
+    if nose_idx >= 0:
+        max_lam = lambdas[nose_idx]
     if not math.isfinite(max_lam):
         max_lam = 0.0
     if not max_lam and lambdas:
         max_lam = max(lambdas)
 
+    generators, limit_events = _generators(lambdas, nose_idx)
     return CpfResult(
         lambdas=lambdas,
         voltages_per_bus=voltages_per_bus,
@@ -5889,7 +5957,27 @@ def _build_cpf_result(
         truncated=truncated,
         done_msg=done_msg,
         mode="pv",
+        generators=generators,
+        limit_events=limit_events,
+        q_limits_enforced=q_limits_enforced,
+        stop_at=stop_at,
+        complete=ok and not truncated,
+        direction=direction,
     )
+
+
+def _first_turn(lambdas: list[float]) -> int:
+    """The index of the point after which lambda first goes down: the nose.
+
+    A run that stops at the nose has at most one point past it, so this is
+    where lambda is largest. A full curve is the upper branch up to here and
+    the lower branch after. The margin is the one ANDES itself uses to call
+    a nose (``cpf.py:681``). A series that never goes down ends at its nose.
+    """
+    for i in range(len(lambdas) - 1):
+        if lambdas[i + 1] < lambdas[i] - 1e-8:
+            return i
+    return len(lambdas) - 1
 
 
 def _argmax(values: list[float]) -> int:

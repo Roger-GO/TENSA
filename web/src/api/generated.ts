@@ -2143,6 +2143,133 @@ export interface components {
             islanded_bus_idxes: string[];
         };
         /**
+         * CpfGeneratorIncrease
+         * @description What one PV generator gains for each unit of lambda in a custom direction.
+         */
+        CpfGeneratorIncrease: {
+            /**
+             * Idx
+             * @description The generator's ``PV`` idx. The slack generator cannot be named: it supplies whatever the rest of the direction leaves.
+             */
+            idx: number | string;
+            /**
+             * P
+             * @description Active power added per unit of lambda, in MW.
+             */
+            p: number;
+        };
+        /**
+         * CpfGeneratorTraceSchema
+         * @description One PV or slack generator along the path. Mirrors
+         *     :class:`tensa.core.cpf_result.CpfGeneratorTrace`.
+         */
+        CpfGeneratorTraceSchema: {
+            /**
+             * Idx
+             * @description The generator's idx.
+             */
+            idx: string;
+            /**
+             * Model
+             * @description Its ANDES model.
+             * @enum {string}
+             */
+            model: "PV" | "Slack";
+            /**
+             * Bus
+             * @description The idx of the bus it sits on.
+             */
+            bus: string;
+            /**
+             * Q
+             * @description Reactive output in MVAr at every step, index-aligned with ``lambdas``.
+             */
+            q: number[];
+            /**
+             * Q Min
+             * @description Lower reactive limit in MVAr; ``null`` when not finite.
+             */
+            q_min?: number | null;
+            /**
+             * Q Max
+             * @description Upper reactive limit in MVAr; ``null`` when not finite.
+             */
+            q_max?: number | null;
+        };
+        /**
+         * CpfLimitEventSchema
+         * @description The first step at which a generator is held at a reactive limit. Mirrors
+         *     :class:`tensa.core.cpf_result.CpfLimitEvent`.
+         */
+        CpfLimitEventSchema: {
+            /**
+             * Step
+             * @description Index into ``lambdas``. ``0`` means the power flow the continuation started from already held the generator there.
+             */
+            step: number;
+            /**
+             * Lam
+             * @description The value of ``lambdas`` at that step.
+             */
+            lam: number;
+            /**
+             * Idx
+             * @description The generator's idx.
+             */
+            idx: string;
+            /**
+             * Model
+             * @description Its ANDES model.
+             * @enum {string}
+             */
+            model: "PV" | "Slack";
+            /**
+             * Bus
+             * @description The idx of the bus it sits on.
+             */
+            bus: string;
+            /**
+             * Limit
+             * @description The limit it is held at.
+             * @enum {string}
+             */
+            limit: "qmax" | "qmin";
+            /**
+             * At Nose
+             * @description ``true`` when the nose is where this generator switched: lambda turned at the switch or in the step after it, or the path could not get past the switch at all. The loadability then ends because the generator ran out of reactive power (a limit-induced collapse), not at a smooth fold.
+             * @default false
+             */
+            at_nose: boolean;
+            /**
+             * Would Release Step
+             * @description The first step, from ``step`` on, at which the generator's terminal voltage is back across its set-point (above it for ``qmax``, below for ``qmin``), where a real exciter would take the voltage up again and leave the limit. ANDES keeps a generator at a limit once it is there, so from that step the curve is the one for a generator pinned at its limit. ``null`` when it does not happen.
+             */
+            would_release_step?: number | null;
+        };
+        /**
+         * CpfLoadIncrease
+         * @description What one PQ load gains for each unit of lambda in a custom direction.
+         */
+        CpfLoadIncrease: {
+            /**
+             * Idx
+             * @description The load's ``PQ`` idx.
+             */
+            idx: number | string;
+            /**
+             * P
+             * @description Active power added per unit of lambda, in MW. Negative takes load off.
+             * @default 0
+             */
+            p: number;
+            /**
+             * Q
+             * @description Reactive power added per unit of lambda, in MVAr.
+             * @default 0
+             */
+            q: number;
+        };
+        /**
          * CpfQvRunRequest
          * @description Request body for ``POST /sessions/{id}/cpf/qv``.
          */
@@ -2157,6 +2284,11 @@ export interface components {
              * @description Reactive-power range for the QV continuation. Default matches ANDES's own ``q_range=5.0``.
              */
             q_range?: number | null;
+            /**
+             * Enforce Q Limits
+             * @description Hold generators to their reactive limits along the curve, as ``enforce_q_limits`` of ``POST /sessions/{id}/cpf`` does.
+             */
+            enforce_q_limits?: boolean | null;
         };
         /**
          * CpfResultResponse
@@ -2186,12 +2318,12 @@ export interface components {
             bus_idxes: string[];
             /**
              * Nose Idx
-             * @description Index into ``lambdas`` where lambda is maximised (the nose point / voltage-collapse margin). ``-1`` when the run was truncated before reaching the nose.
+             * @description Index into ``lambdas`` of the nose point (the voltage-collapse margin): the point after which lambda first goes down. ``-1`` when the run was truncated before reaching the nose. On a full curve the steps after it are the lower branch.
              */
             nose_idx: number;
             /**
              * Max Lam
-             * @description Peak lambda value reached. Echo of ``CPF.max_lam``. Always populated, even on truncation.
+             * @description Lambda at the nose, which is the largest value reached on the way up. Without a nose, the largest value reached. Always populated, even on truncation.
              */
             max_lam: number;
             /**
@@ -2210,6 +2342,40 @@ export interface components {
              */
             mode: string;
             /**
+             * Generators
+             * @description Every in-service PV and slack generator's reactive output along the path, with its limits. Empty only when the readings could not be matched to the steps.
+             */
+            generators?: components["schemas"]["CpfGeneratorTraceSchema"][];
+            /**
+             * Limit Events
+             * @description The generators held at a reactive limit, each with the first step at which it is, in step order. Those at step 0 are held by the power flow the run started from. A generator has at most one entry: one that is held stays held for the rest of the path.
+             */
+            limit_events?: components["schemas"]["CpfLimitEventSchema"][];
+            /**
+             * Q Limits Enforced
+             * @description Whether generators were switched to PQ at their reactive limits along the path. When ``false`` only the generators the base power flow held are held.
+             * @default false
+             */
+            q_limits_enforced: boolean;
+            /**
+             * Stop At
+             * @description What the run was asked to trace: up to the nose, or the full curve.
+             * @default nose
+             * @enum {string}
+             */
+            stop_at: "nose" | "full";
+            /**
+             * Complete
+             * @description Whether the run ended the way ``stop_at`` asked. ``false`` with ``truncated: false`` is a full curve whose lower branch broke off; ``done_msg`` says where.
+             * @default true
+             */
+            complete: boolean;
+            /**
+             * Direction
+             * @description The direction of the increase a PV run was asked for; ``null`` for a QV curve.
+             */
+            direction?: ("load" | "load-only" | "gen" | "custom") | null;
+            /**
              * Job Id
              * @description Job-registry id mirroring this CPF routine (kind ``cpf`` for the PV sweep, ``cpf-qv`` for the QV curve). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
              */
@@ -2219,25 +2385,50 @@ export interface components {
          * CpfRunRequest
          * @description Request body for ``POST /sessions/{id}/cpf``.
          *
-         *     All fields are optional. ``direction`` toggles between scaling
-         *     loads vs generation up; ``step`` and ``max_iter`` push the
-         *     corresponding ``ss.CPF.config`` values before the run.
+         *     All fields are optional, and each applies to this run only.
+         *     ``direction`` says what lambda increases, ``enforce_q_limits`` holds
+         *     generators to their reactive limits along the path, ``stop_at`` asks
+         *     for the lower branch as well, and ``step`` and ``max_iter`` set the
+         *     corresponding ``ss.CPF.config`` values for the run.
          */
         CpfRunRequest: {
             /**
              * Direction
-             * @description Continuation direction. ``'load'`` (default) scales loads via ``CPF.run(load_scale=2.0)``. ``'gen'`` scales generation via ``pg_target=2.0``.
+             * @description What lambda increases. ``'load'`` (default) scales every load and every PV generator's output in proportion to its base value (``CPF.run(load_scale=2.0)``). ``'load-only'`` scales the loads and leaves the PV generators where they are, so the slack generator supplies the increase. ``'gen'`` scales the PV generators and leaves the loads. With these three, ``lambda = 1`` is twice the base value. ``'custom'`` moves the devices named in ``load_increase`` and ``generator_increase`` by the amounts given there, and ``lambda`` counts multiples of them. The slack generator is never part of a direction.
              * @default load
+             * @enum {string}
              */
-            direction: string;
+            direction: "load" | "load-only" | "gen" | "custom";
+            /**
+             * Load Increase
+             * @description For ``direction: 'custom'``: the MW and MVAr each named PQ load gains per unit of lambda. A load left out does not move.
+             */
+            load_increase?: components["schemas"]["CpfLoadIncrease"][] | null;
+            /**
+             * Generator Increase
+             * @description For ``direction: 'custom'``: the MW each named PV generator gains per unit of lambda. A generator left out does not move, and what the loads gain beyond the generators is supplied by the slack.
+             */
+            generator_increase?: components["schemas"]["CpfGeneratorIncrease"][] | null;
+            /**
+             * Enforce Q Limits
+             * @description Switch a PV or slack generator to a PQ bus held at ``qmin`` or ``qmax`` when its reactive output reaches one along the path. Left out, the case's own setting stands (off unless the case file turns ``pv2pq`` on). The continuation starts from the power flow as solved, so run that with ``enforce_q_limits`` as well: the request is refused with 409 when the solved power flow leaves a generator past a limit. Without it, the generators the power flow holds at a limit stay held and no other switches.
+             */
+            enforce_q_limits?: boolean | null;
+            /**
+             * Stop At
+             * @description ``'nose'`` (default) stops at the nose. ``'full'`` turns there and follows the lower-voltage solutions back to ``lambda = 0`` (``CPF.config.stop_at = 'FULL'``); the steps after ``nose_idx`` are that lower branch.
+             * @default nose
+             * @enum {string}
+             */
+            stop_at: "nose" | "full";
             /**
              * Step
-             * @description Optional initial continuation step size for lambda (pushed onto ``ss.CPF.config.step``). Default uses ANDES's own default (0.1).
+             * @description Optional initial continuation step size for lambda (``ss.CPF.config.step`` for this run). Default uses ANDES's own default (0.1).
              */
             step?: number | null;
             /**
              * Max Iter
-             * @description Optional cap on the number of continuation steps (pushed onto ``ss.CPF.config.max_steps``). This maps the user-facing parameter name onto ANDES's ``max_steps`` field, which actually controls truncation; ANDES's own ``max_iter`` config is the Newton corrector iterations per step. Default uses ANDES's own default (500).
+             * @description Optional cap on the number of continuation steps (``ss.CPF.config.max_steps`` for this run). This maps the user-facing parameter name onto ANDES's ``max_steps`` field, which actually controls truncation; ANDES's own ``max_iter`` config is the Newton corrector iterations per step. Default uses ANDES's own default (500).
              */
             max_iter?: number | null;
         };
@@ -6553,7 +6744,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No case loaded OR the session has no converged PFlow result. Run /pflow first; ``CPF.init`` only warns and would otherwise fall through to a non-actionable internal error. */
+            /** @description No case loaded OR the session has no converged PFlow result. Run /pflow first; ``CPF.init`` only warns and would otherwise fall through to a non-actionable internal error. Also when ``enforce_q_limits`` is on and the solved power flow leaves a generator past a reactive limit: run /pflow with ``enforce_q_limits`` first. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6562,7 +6753,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description ANDES CPF routine raised (e.g., singular Jacobian, KLU segfault, internal LinAlg failure). */
+            /** @description The request cannot be run on this case (an increase names a device the case does not have, or the direction moves nothing), OR the ANDES CPF routine raised (e.g., singular Jacobian, KLU segfault, internal LinAlg failure). */
             422: {
                 headers: {
                     [name: string]: unknown;
