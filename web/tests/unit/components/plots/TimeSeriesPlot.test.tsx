@@ -90,6 +90,8 @@ vi.mock('uplot/dist/uPlot.min.css', () => ({}));
 import { TimeSeriesPlot } from '@/components/plots/TimeSeriesPlot';
 import * as alignModule from '@/components/plots/multiRunAlign';
 import { useRunsStore } from '@/store/runs';
+import { useHistoryStore } from '@/store/history';
+import { useLayoutStore } from '@/store/layout';
 import * as plotModule from '@/store/plot';
 import { usePlotStore } from '@/store/plot';
 import { useThemeStore } from '@/store/theme';
@@ -147,8 +149,9 @@ describe('TimeSeriesPlot', () => {
   });
 
   it('does not point at the history while there is nothing in it', () => {
-    const { getByTestId } = render(<TimeSeriesPlot />);
-    expect(getByTestId('time-series-plot-empty')).not.toHaveTextContent('History');
+    const { getByTestId, queryByTestId } = render(<TimeSeriesPlot />);
+    expect(getByTestId('time-series-plot-empty')).not.toHaveTextContent(/history/i);
+    expect(queryByTestId('time-series-plot-open-history')).toBeNull();
   });
 
   it('points at the history when runs are kept but none is active, as after Reset run', () => {
@@ -157,9 +160,55 @@ describe('TimeSeriesPlot', () => {
     useRunsStore.getState().clearActiveRun();
     const { getByTestId } = render(<TimeSeriesPlot />);
     expect(getByTestId('time-series-plot-empty')).toHaveTextContent(
-      'Run a TDS to see results. Earlier runs are in History: pin one to plot it.',
+      'No run is plotted. 1 earlier run is kept in the run history: pin it there to plot it, or run a TDS.',
     );
     expect(constructSpy).not.toHaveBeenCalled();
+  });
+
+  it('counts the runs kept, and its button opens the run history on them', async () => {
+    const user = userEvent.setup();
+    for (const id of ['r1', 'r2']) {
+      seedRun(id, ['Bus_1_v']);
+      useRunsStore.getState().markRunDone(id, 1);
+    }
+    useRunsStore.getState().clearActiveRun();
+    // The drawer was last left on the job list, which a reload empties.
+    useLayoutStore.setState({ historyKindFilter: 'all' });
+    useHistoryStore.getState().reset();
+    try {
+      const { getByTestId } = render(<TimeSeriesPlot />);
+      expect(getByTestId('time-series-plot-empty')).toHaveTextContent(
+        '2 earlier runs are kept in the run history: pin one there to plot it, or run a TDS.',
+      );
+      const open = screen.getByRole('button', { name: 'Open run history' });
+      expect(open).toBe(getByTestId('time-series-plot-open-history'));
+      await user.click(open);
+      expect(useHistoryStore.getState().drawerOpen).toBe(true);
+      expect(useLayoutStore.getState().historyKindFilter).toBe('runs');
+    } finally {
+      useHistoryStore.getState().reset();
+      useLayoutStore.setState({ historyKindFilter: 'runs' });
+    }
+  });
+
+  it('draws the actions it is given beside the export menu, in the empty states and over a chart', () => {
+    const actions = <button type="button">Run history</button>;
+    // No run at all.
+    const { rerender } = render(<TimeSeriesPlot actions={actions} />);
+    const before = screen.getByRole('button', { name: 'Run history' });
+    // Controls are not part of the picture: a PNG export leaves them out.
+    expect(before.closest('[data-export-ignore]')).not.toBeNull();
+    expect(before.closest('[data-testid="time-series-plot-empty"]')).toBeNull();
+
+    // A run with a series plotted.
+    seedRun('r1', ['Bus_1_v']);
+    appendRows('r1', [0, 0.1], { Bus_1_v: [1.0, 1.0] });
+    act(() => usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v'])));
+    rerender(<TimeSeriesPlot actions={actions} />);
+    const plot = screen.getByTestId('time-series-plot');
+    const over = screen.getByRole('button', { name: 'Run history' });
+    expect(plot).toContainElement(over);
+    expect(over.closest('[data-export-ignore]')).not.toBeNull();
   });
 
   it('plots a pinned run when no run is active, as after Reset run or a reload of the page', () => {

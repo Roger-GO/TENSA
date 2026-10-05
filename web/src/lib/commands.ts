@@ -69,6 +69,7 @@ import { useLayoutStore } from '@/store/layout';
 import { requestEigLogToggle, requestEigViewReset } from '@/lib/eigViewBus';
 import { reportAbortError } from '@/lib/abortRun';
 import { openPflowComparePanel } from '@/lib/openPflowPanel';
+import { openRunHistory } from '@/lib/runHistory';
 import { saveHtmlReport } from '@/lib/saveHtmlReport';
 import { useSaveOpenCase } from '@/lib/useSaveOpenCase';
 import { SHORTCUTS } from '@/lib/shortcuts';
@@ -213,7 +214,6 @@ function useCommandSets(): CommandSets {
   const togglePalette = useCommandPaletteStore((s) => s.togglePalette);
   const openPalettePage = useCommandPaletteStore((s) => s.openPage);
   const toggleCheatsheet = useShortcutCheatsheetStore((s) => s.toggleCheatsheet);
-  const openHistoryDrawer = useHistoryStore((s) => s.openDrawer);
   const startRenamingRun = useHistoryStore((s) => s.startRenaming);
   // The run "Rename run" acts on: the active one, else the latest started. A
   // string, so a streamed frame does not re-render consumers.
@@ -413,11 +413,15 @@ function useCommandSets(): CommandSets {
         action: () => __requestPaletteDialog('import-bundle'),
         when: () => sessionId !== null,
       },
+      // The Reports dialog. The Export menu lists it too, under Export HTML
+      // report, since that is where a first-time user looks for a report.
       {
         id: 'workspace.report',
-        label: 'Report',
+        label: 'Reports…',
+        description:
+          "ANDES's plain-text reports of the power flow, the time-domain run and the eigenvalues, to read or copy as LaTeX. Save as HTML is there too.",
         group: 'workspace',
-        keywords: ['report', 'summary', 'pdf', 'export'],
+        keywords: ['report', 'reports', 'summary', 'text', 'latex', 'pdf', 'export'],
         action: () => openReportDialog(),
         when: () => !reportDisabled,
       },
@@ -812,13 +816,16 @@ function useCommandSets(): CommandSets {
       // Sequence shortcut "g h" — opens the run-history drawer.
       // Mirrors the "g s" pattern for the snapshot dialog. Always
       // surfaced (the drawer renders its own empty state if there
-      // are no runs yet).
+      // are no runs yet). It opens on the list of runs, whatever the
+      // drawer was last set to show (`openRunHistory`).
       {
         id: 'navigation.history',
-        label: 'Open History',
+        label: 'Open run history',
+        description:
+          'The time-domain runs kept in this browser, also after the page is reloaded: pin one to plot it, rename or delete it.',
         group: 'navigation',
-        keywords: ['history', 'runs', 'drawer', 'past'],
-        action: openHistoryDrawer,
+        keywords: ['history', 'runs', 'drawer', 'past', 'earlier', 'kept', 'pin', 'reload'],
+        action: openRunHistory,
         shortcut: 'g>h',
       },
       // Opens the History drawer with the run's name ready to type, the same
@@ -987,7 +994,6 @@ function useCommandSets(): CommandSets {
     togglePalette,
     openPalettePage,
     toggleCheatsheet,
-    openHistoryDrawer,
     startRenamingRun,
     renameTargetRunId,
     reloadMutation,

@@ -448,6 +448,40 @@ describe('useCommandRegistry: Open Messages command', () => {
   });
 });
 
+describe('useCommandRegistry: Open run history command', () => {
+  afterEach(() => {
+    useHistoryStore.getState().reset();
+  });
+
+  it('is named for the runs it lists, and findable by what brings a user to it', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'navigation.history');
+    expect(cmd?.label).toBe('Open run history');
+    expect(cmd?.description).toMatch(/kept in this browser, also after the page is reloaded/);
+    expect(cmd?.keywords).toEqual(expect.arrayContaining(['runs', 'earlier', 'reload', 'pin']));
+    expect(cmd?.shortcut).toBe('g>h');
+  });
+
+  it('opens the drawer on its runs, whatever it was last set to show', () => {
+    useLayoutStore.setState({ historyKindFilter: 'all' });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    act(() => result.current.find((c) => c.id === 'navigation.history')?.action());
+    expect(useHistoryStore.getState().drawerOpen).toBe(true);
+    expect(useLayoutStore.getState().historyKindFilter).toBe('runs');
+  });
+});
+
+describe('useCommandRegistry: Reports command', () => {
+  it('is named for the dialog it opens and says what the dialog holds', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'workspace.report');
+    expect(cmd?.label).toBe('Reports…');
+    expect(cmd?.description).toMatch(/plain-text reports/);
+    expect(cmd?.description).toMatch(/Save as HTML/);
+    expect(cmd?.keywords).toEqual(expect.arrayContaining(['report', 'reports', 'text', 'latex']));
+  });
+});
+
 describe('useCommandRegistry: Compare power flows command', () => {
   const PF: PflowResult = {
     run_id: 'pf-1',

@@ -1,8 +1,9 @@
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '@/App';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
+import { useRunsStore } from '@/store/runs';
 import { useSnapshotStore } from '@/store/snapshot';
 import { parseWorkspacePath } from '@/api/types';
 
@@ -12,6 +13,7 @@ describe('App scaffold', () => {
     useCaseStore.getState().clearCase();
     useCaseStore.getState().setLoadingPath(null);
     usePflowStore.getState().clearPflow();
+    useRunsStore.getState().clearRuns();
   });
 
   it('mounts the AppShell with the top bar landmark', () => {
@@ -47,6 +49,29 @@ describe('App scaffold', () => {
     render(<App />);
     expect(screen.getAllByText(/Loading wscc9\.xlsx/).length).toBeGreaterThan(0);
     expect(screen.queryByText('No case loaded')).not.toBeInTheDocument();
+  });
+
+  it('says on the "No case loaded" page what the browser kept, as after a reload', () => {
+    // A reload starts with no case and nothing plotted. A run the browser kept
+    // is named where the eye lands, so the page does not read as a loss.
+    useRunsStore.getState().startRun({ runId: 'kept', tf: 1, columnNames: ['Bus_1_v'] });
+    useRunsStore.getState().markRunDone('kept', 1, true);
+    useRunsStore.getState().clearActiveRun();
+    render(<App />);
+    const page = screen
+      .getAllByTestId('empty-state')
+      .find((el) => el.getAttribute('data-empty-state-key') === 'app-shell-no-case')!;
+    expect(within(page).getByText('No case loaded')).toBeInTheDocument();
+    expect(within(page).getByTestId('kept-results-note')).toHaveTextContent(
+      'Kept in this browser: 1 time-domain run.',
+    );
+    expect(within(page).getByRole('button', { name: 'Open run history' })).toBeInTheDocument();
+  });
+
+  it('has no such note while nothing is kept', () => {
+    render(<App />);
+    expect(screen.getByText('No case loaded')).toBeInTheDocument();
+    expect(screen.queryByTestId('kept-results-note')).not.toBeInTheDocument();
   });
 
   it('renders the snapshot save dialog when its store flag opens', async () => {

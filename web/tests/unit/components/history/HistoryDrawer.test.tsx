@@ -13,7 +13,7 @@
  * portaled content fine).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { act, render, screen, cleanup } from '@testing-library/react';
+import { act, render, screen, cleanup, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const toastInfoMock = vi.fn();
@@ -555,6 +555,37 @@ describe('HistoryDrawer', () => {
     await user.click(screen.getByTestId('history-job-row-view-error-j-fail'));
 
     expect(screen.getByTestId('history-drawer-error-modal')).toBeInTheDocument();
+  });
+
+  it('an empty job list says the runs are kept and shows them, as after a reload', async () => {
+    // The drawer was left on All jobs, the page was reloaded: the jobs are
+    // those of this page load, so there are none, and two runs were kept.
+    const user = userEvent.setup();
+    seedRun('r1');
+    seedRun('r2');
+    useLayoutStore.getState().setHistoryKindFilter('all');
+    useHistoryStore.getState().openDrawer();
+    render(<HistoryDrawer />);
+
+    const empty = screen.getByTestId('history-drawer-empty');
+    expect(empty).toHaveTextContent('No jobs yet');
+    expect(empty).toHaveTextContent(
+      'a reload of the page empties this list. The runs are kept: they are under Runs.',
+    );
+    await user.click(within(empty).getByRole('button', { name: 'Show runs (2)' }));
+
+    expect(useLayoutStore.getState().historyKindFilter).toBe('runs');
+    expect(screen.getByTestId('history-run-row-r1')).toBeInTheDocument();
+    expect(screen.getByTestId('history-run-row-r2')).toBeInTheDocument();
+  });
+
+  it('an empty job list with no runs either offers nothing to show', () => {
+    useLayoutStore.getState().setHistoryKindFilter('all');
+    useHistoryStore.getState().openDrawer();
+    render(<HistoryDrawer />);
+    const empty = screen.getByTestId('history-drawer-empty');
+    expect(empty).toHaveTextContent('Routines and edits appear here once you run them.');
+    expect(within(empty).queryByRole('button')).toBeNull();
   });
 
   it('the kind filter persists to localStorage', async () => {

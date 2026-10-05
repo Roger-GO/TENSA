@@ -48,13 +48,22 @@ async function openCase(page: Page, caseFile: string): Promise<void> {
   await expect(page.getByTestId('run-pflow-button')).toBeEnabled({ timeout: 90_000 });
 }
 
-/** Reports -> Save as HTML: the file the browser was handed, saved at `path`. */
+/**
+ * Reports -> Save as HTML: the file the browser was handed, saved at `path`.
+ * The Reports dialog is listed in the Workspace menu and in the Export menu;
+ * `from` says which one opens it.
+ */
 async function saveReport(
   page: Page,
   path: string,
+  from: 'workspace' | 'export' = 'workspace',
 ): Promise<{ file: string; html: string; name: string }> {
-  await page.getByTestId('topbar-menu-workspace-trigger').click();
-  await page.getByTestId('topbar-menu-workspace-report').click();
+  await page.getByTestId(`topbar-menu-${from}-trigger`).click();
+  await page
+    .getByTestId(
+      from === 'workspace' ? 'topbar-menu-workspace-report' : 'topbar-menu-export-reports',
+    )
+    .click();
   await expect(page.getByTestId('report-dialog')).toBeVisible();
   // The dialog fits the window, so the button is in reach above a long report.
   const save = page.getByTestId('report-save-html');
@@ -113,7 +122,7 @@ test('a power flow, a comparison and a run are saved as one HTML report', async 
   await expect(page.getByTestId('time-series-plot-group-bus_v')).toBeVisible();
 
   // ---- the report of the whole study ------------------------------------------------
-  const { file, html, name } = await saveReport(page, testInfo.outputPath('study.html'));
+  const { file, html, name } = await saveReport(page, testInfo.outputPath('study.html'), 'export');
   expect(name).toMatch(/^ieee14_full_report_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.html$/);
   expect(html.startsWith('<!doctype html>')).toBe(true);
   expect(html).not.toContain('<script');

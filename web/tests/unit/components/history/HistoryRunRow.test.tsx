@@ -52,6 +52,20 @@ describe('HistoryRunRow', () => {
     expect(row).toHaveTextContent('tf=5s');
   });
 
+  it('says on hover what Pin does, and what Unpin does once it is pinned', () => {
+    const run = seedRun('r1');
+    const { rerender } = render(
+      <HistoryRunRow run={run} isActive={false} isOverlayPinned={false} />,
+    );
+    const pin = screen.getByTestId('history-run-row-pin-r1');
+    expect(pin).toHaveTextContent('Pin');
+    expect(pin).toHaveAttribute('title', expect.stringContaining('Plot this run'));
+
+    rerender(<HistoryRunRow run={run} isActive={false} isOverlayPinned />);
+    expect(pin).toHaveTextContent('Unpin');
+    expect(pin).toHaveAttribute('title', 'Take this run off the plot');
+  });
+
   it('gives the time a run of today started, and the date too for one kept from an earlier day', () => {
     const today = seedRun('today');
     const earlier: RunRecord = {

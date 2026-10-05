@@ -93,7 +93,7 @@ describe('<TopBarMoreMenu />', () => {
     const items = [...content.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent);
     expect(items).toEqual([
       'Open command palette' + 'Ctrl+K',
-      'Open History' + 'G then H',
+      'Open run history' + 'G then H',
       'Toggle dark mode' + 'Ctrl+Shift+L',
       'Toggle left sidebar' + 'Ctrl+B',
       'Toggle inspector' + 'Ctrl+\\',
@@ -129,26 +129,40 @@ describe('<TopBarMoreMenu />', () => {
     expect(useCommandPaletteStore.getState().open).toBe(true);
   });
 
-  it('Open History opens the drawer, as the History button does, and is off with no case', async () => {
+  it('Open run history opens the drawer on its runs, and is off with no case, saying why', async () => {
+    // The drawer was last left on the job list, which a reload empties.
+    useLayoutStore.setState({ historyKindFilter: 'all' });
     const user = await openMenu();
     await user.click(screen.getByTestId('topbar-menu-more-navigation.history'));
     expect(useHistoryStore.getState().drawerOpen).toBe(true);
+    expect(useLayoutStore.getState().historyKindFilter).toBe('runs');
     cleanup();
     useHistoryStore.getState().closeDrawer();
 
     useCaseStore.setState({ selection: null });
-    await openMenu();
-    expect(screen.getByTestId('topbar-menu-more-navigation.history')).toBeDisabled();
+    const again = await openMenu();
+    const item = screen.getByTestId('topbar-menu-more-navigation.history');
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByTestId('topbar-menu-more-navigation.history-reason')).toHaveTextContent(
+      'No runs yet. Load a case and run a time-domain simulation first.',
+    );
+    await again.click(item);
+    expect(useHistoryStore.getState().drawerOpen).toBe(false);
   });
 
-  it('Open History is on with no case when there are runs to list, as after a reload', async () => {
+  it('Open run history is on with no case when there are runs to list, as after a reload', async () => {
     useCaseStore.setState({ selection: null });
     useRunsStore.getState().startRun({ runId: 'kept', tf: 1, columnNames: ['Bus_1_v'] });
     useRunsStore.getState().markRunDone('kept', 1, true);
     useRunsStore.getState().clearActiveRun();
     try {
       await openMenu();
-      expect(screen.getByTestId('topbar-menu-more-navigation.history')).toBeEnabled();
+      const item = screen.getByTestId('topbar-menu-more-navigation.history');
+      expect(item).toBeEnabled();
+      expect(item).not.toHaveAttribute('aria-disabled');
+      expect(
+        screen.queryByTestId('topbar-menu-more-navigation.history-reason'),
+      ).not.toBeInTheDocument();
     } finally {
       useRunsStore.getState().clearRuns();
     }

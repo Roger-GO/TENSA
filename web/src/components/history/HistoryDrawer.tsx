@@ -356,10 +356,24 @@ function HistoryDrawerInner() {
           )
         ) : orderedJobs.length === 0 ? (
           <div data-testid="history-drawer-empty">
+            {/* The jobs are those of this page load. After a reload there are
+                none, while the runs the browser kept are a filter away. */}
             <EmptyState
               icon={<HistoryIcon />}
               title="No jobs yet"
-              description="Routines and edits appear here once you run them."
+              description={
+                orderedRuns.length > 0
+                  ? 'Routines and edits appear here once you run them, and a reload of the page empties this list. The runs are kept: they are under Runs.'
+                  : 'Routines and edits appear here once you run them.'
+              }
+              {...(orderedRuns.length > 0
+                ? {
+                    action: {
+                      label: `Show runs (${orderedRuns.length})`,
+                      onClick: () => setFilter('runs'),
+                    },
+                  }
+                : {})}
               emptyStateKey="history-drawer-jobs"
             />
           </div>

@@ -11,12 +11,19 @@
  *   ``started_at`` desc. Each row shows kind, status, live progress, and a
  *   Cancel button when ``can_cancel`` (fires ``DELETE /sessions/{id}/jobs/{job_id}``
  *   via ``useCancelJob``).
- * - **History** — terminal jobs (``done`` / ``failed`` / ``cancelled``)
- *   ordered by ``ended_at`` desc. ``failed`` rows show an error icon + a
- *   "Retry" button (re-fires the original mutation from
+ * - **Finished** (the ``history`` tab) — terminal jobs (``done`` / ``failed``
+ *   / ``cancelled``) ordered by ``ended_at`` desc. ``failed`` rows show an
+ *   error icon + a "Retry" button (re-fires the original mutation from
  *   ``JobRecord.request_summary`` + kind) and a "View error" button that
  *   opens ``<ProblemDetailsErrorSurface variant="modal">`` with the
  *   captured ``problem``.
+ *
+ * The second tab read "History", which is also what the list of time-domain
+ * runs is called. The jobs are those of this page load only, so after a reload
+ * it said "No history yet" while the runs were safely kept in the run history,
+ * and that read as the runs being lost. It is now named for what it lists, and
+ * a line above the list says that it starts again on a reload and has a button
+ * to the run history.
  *
  * This generalises ``HistoryDrawer``'s rows-of-runs pattern. The store is
  * the single source of truth; the panel never re-implements job state.
@@ -41,6 +48,13 @@ import { useLayoutStore, ACTIVITY_PANEL_TABS, type ActivityPanelTab } from '@/st
 import { useSessionStore } from '@/store/session';
 import { useCancelJob, useRunPflow, useEigRun, useSeRun, useReloadCase } from '@/api/queries';
 import { kindLabel } from '@/components/shell/jobLabels';
+import { RunHistoryButton } from '@/components/history/RunHistoryButton';
+
+/** What each sub-tab is called. ``history`` is the tab's id, kept for the stored layout. */
+const TAB_LABELS: Record<ActivityPanelTab, string> = {
+  active: 'Active',
+  history: 'Finished',
+};
 
 const STATUS_LABELS: Record<JobStatus, string> = {
   pending: 'Pending',
@@ -282,7 +296,7 @@ export function ActivityPanel() {
             value={tab}
             data-testid={`activity-panel-subtab-${tab}`}
             className={cn(
-              'relative inline-flex items-center gap-1.5 px-3 text-xs font-medium capitalize',
+              'relative inline-flex items-center gap-1.5 px-3 text-xs font-medium',
               'text-muted-foreground hover:text-foreground',
               'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
               'data-[state=active]:bg-background data-[state=active]:text-foreground',
@@ -290,7 +304,7 @@ export function ActivityPanel() {
               'transition-colors duration-[var(--duration-fast)]',
             )}
           >
-            {tab}
+            {TAB_LABELS[tab]}
             {tab === 'active' && active.length > 0 ? (
               <span
                 data-testid="activity-panel-active-count"
@@ -330,6 +344,18 @@ export function ActivityPanel() {
         data-testid="activity-panel-content-history"
         className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-2"
       >
+        {/* Always there, above the list or its empty state, so the way to the
+            runs is in view however short the drawer is. */}
+        <p
+          data-testid="activity-panel-history-note"
+          className="text-muted-foreground flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px]"
+        >
+          <span>
+            Jobs that ended since this page was loaded. A reload empties this list but not your
+            results: time-domain runs are kept, with their plots, in
+          </span>
+          <RunHistoryButton testId="activity-panel-run-history" />
+        </p>
         {history.length === 0 ? (
           <div
             data-testid="activity-panel-history-empty"
@@ -337,8 +363,8 @@ export function ActivityPanel() {
           >
             <EmptyState
               icon={<HistoryIcon />}
-              title="No history yet"
-              description="Completed, failed, and cancelled jobs land here."
+              title="No finished jobs yet"
+              description="Completed, failed and cancelled jobs are listed here while the page is open."
               emptyStateKey="activity-history"
             />
           </div>

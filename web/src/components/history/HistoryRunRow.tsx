@@ -209,6 +209,11 @@ export function HistoryRunRow({
         onClick={handleTogglePin}
         data-testid={`history-run-row-pin-${run.runId}`}
         aria-pressed={isOverlayPinned}
+        title={
+          isOverlayPinned
+            ? 'Take this run off the plot'
+            : 'Plot this run. Pin more than one to compare them on the same plot.'
+        }
       >
         {isOverlayPinned ? 'Unpin' : 'Pin'}
       </Button>

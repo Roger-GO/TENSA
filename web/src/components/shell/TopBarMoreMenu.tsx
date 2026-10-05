@@ -10,10 +10,8 @@
 import { TopBarMenu, TopBarMenuItem } from './TopBarMenu';
 import { MORE_BELOW_MEDIUM, MORE_BELOW_NARROW, MORE_BELOW_WIDE } from './topBarLayout';
 import { useCommandRegistry } from '@/lib/commands';
+import { NO_RUNS_YET, useRunHistory } from '@/lib/runHistory';
 import { shortcutLabel } from '@/lib/shortcutFormatter';
-import { useCaseStore } from '@/store/case';
-import { useRunsStore } from '@/store/runs';
-import { useSessionStore } from '@/store/session';
 import { useUiStore } from '@/store/ui';
 import { useUnitsStore } from '@/store/units';
 
@@ -46,11 +44,9 @@ const MORE_ITEMS: ReadonlyArray<{ id: string; pane?: true }> = [
 export function TopBarMoreMenu() {
   const commands = useCommandRegistry();
   // History is off until a case is loaded or there are runs to list (the ones
-  // kept from before a reload), as its inline button is.
-  const sessionId = useSessionStore((s) => s.sessionId);
-  const caseSelection = useCaseStore((s) => s.selection);
-  const hasRuns = useRunsStore((s) => Object.keys(s.runs).length > 0);
-  const historyOn = (sessionId !== null && caseSelection !== null) || hasRuns;
+  // kept from before a reload), as its inline button is. The item stays in the
+  // menu and says what to do first.
+  const historyOn = useRunHistory().available;
   // The two display toggles that stand in the bar below the narrowest width.
   const hideLabels = useUiStore((s) => s.hideLabels);
   const toggleHideLabels = useUiStore((s) => s.toggleHideLabels);
@@ -68,7 +64,7 @@ export function TopBarMoreMenu() {
         testId={`topbar-menu-more-${id}`}
         title={cmd.description}
         shortcut={cmd.shortcut ? shortcutLabel(cmd.shortcut) : undefined}
-        disabled={id === 'navigation.history' && !historyOn}
+        unavailableReason={id === 'navigation.history' && !historyOn ? NO_RUNS_YET : undefined}
         className={pane ? MORE_BELOW_MEDIUM : undefined}
         onClick={() => cmd.action()}
       >

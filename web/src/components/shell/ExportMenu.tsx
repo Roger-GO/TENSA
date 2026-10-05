@@ -7,7 +7,10 @@
  * Both the menu and the ⌘K palette read the same registry.
  *
  * Export bundle and Save snapshot open their dialogs; Export HTML report
- * saves a file straight away (`lib/saveHtmlReport.ts`).
+ * saves a file straight away (`lib/saveHtmlReport.ts`). Reports, which opens
+ * the dialog with ANDES's plain-text reports, is a Workspace command and is
+ * listed here as well, under the HTML report: a report is something to take
+ * out of the app, and this is the menu a first-time user opens to find one.
  *
  * Note on naming: there's an existing `<ExportMenu />` at
  * `components/export/ExportMenu.tsx` which is the per-panel
@@ -21,6 +24,7 @@ const TESTID_BY_ID: Record<string, string> = {
   'export.bundle': 'topbar-menu-export-bundle',
   'export.snapshot': 'topbar-menu-export-snapshot',
   'export.html-report': 'topbar-menu-export-html-report',
+  'workspace.report': 'topbar-menu-export-reports',
 };
 
 /** The items a rule is drawn above: each starts a group of its own. */
@@ -31,6 +35,8 @@ export function ExportMenu() {
   // report before there is a result) is kept, greyed out, with its reason.
   const commands = useMenuCommands();
   const exportCommands = commands.filter((c) => c.group === 'export');
+  const reports = commands.find((c) => c.id === 'workspace.report');
+  if (reports !== undefined) exportCommands.push(reports);
 
   return (
     <TopBarMenu label="Export" testId="topbar-menu-export" alignEnd>

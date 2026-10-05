@@ -38,6 +38,7 @@ import { TimeSeriesPlot } from '@/components/plots/TimeSeriesPlot';
 import { PlotQuantityToggles } from '@/components/plots/PlotQuantityToggles';
 import { ScrubControl } from '@/components/plots/ScrubControl';
 import { VariableTreePicker } from '@/components/plots/VariableTreePicker';
+import { RunHistoryButton } from '@/components/history/RunHistoryButton';
 import { useLayoutStore } from '@/store/layout';
 import { usePlotStore } from '@/store/plot';
 import { usePlotRunId } from '@/components/plots/overlayRuns';
@@ -205,7 +206,9 @@ export function AnalysisTab({ activeSubTab, onSubTabChange, className }: Analysi
  * The quantity toggles above the chart (bus voltage, bus angle, generator speed,
  * generator angle) are the quick way to choose what is drawn, and the button
  * beside them opens the plot in the full-space results view, since the drawer is
- * ~35% of the window and shows little more than one chart.
+ * ~35% of the window and shows little more than one chart. Run history, beside
+ * the export menu, opens the list of runs: an earlier run is plotted by pinning
+ * it there, and this is where someone with an empty plot looks for one.
  *
  * The variable tree is COLLAPSIBLE and collapsed by default, for picking single
  * elements. In a short container (the bottom drawer is ~35% of the window) an
@@ -254,6 +257,7 @@ function PlotPanelContent() {
               )}
             </>
           }
+          actions={<RunHistoryButton testId="plot-run-history" />}
         />
       </div>
       <ScrubControl />

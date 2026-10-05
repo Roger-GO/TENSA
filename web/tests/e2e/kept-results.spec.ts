@@ -2,10 +2,10 @@
  * Results that outlive a reload of the page.
  *
  *   load Kundur -> run a power flow -> run a time-domain simulation -> name the
- *   run -> reload the page -> no "leave site?" prompt -> History still lists the
- *   run, as an earlier one -> pin it -> the plot draws it, with no case open ->
- *   the Compare tab still has the power flow -> delete the run -> reload ->
- *   it is gone for good
+ *   run -> reload the page -> no "leave site?" prompt -> the page says what it
+ *   kept -> History still lists the run, as an earlier one -> pin it -> the plot
+ *   draws it, with no case open -> the Compare tab still has the power flow ->
+ *   delete the run -> reload -> it is gone for good
  *
  * It drives the real UI against a real `tensa serve` (see `playwright.config.ts`)
  * in a real browser, which is the point: the results are kept in the browser's
@@ -70,6 +70,12 @@ async function openHistory(page: Page): Promise<void> {
   await page.getByTestId('topbar-menu-more-trigger').click();
   await page.getByTestId('topbar-menu-more-navigation.history').click();
   await expect(page.getByTestId('history-drawer')).toBeVisible();
+}
+
+/** Close the run history, which is a dialog over the page. */
+async function closeHistory(page: Page): Promise<void> {
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('history-drawer')).toBeHidden();
 }
 
 /** How many runs the browser's own storage holds, read behind the UI's back. */
@@ -157,7 +163,38 @@ test('a run and a power flow are still there after the page is reloaded', async 
   // No case is open, and the run is listed all the same.
   await expect(page.getByTestId(`saved-cases-row-${CASE_FILE}`)).toBeVisible();
   await expect(page.getByTestId('run-pflow-button')).toBeDisabled();
-  await openHistory(page);
+
+  // ---- the page says what it kept, wherever an earlier run is looked for --------
+  // Where the eye lands: the page shown before a case is opened.
+  await expect(page.getByTestId('kept-results-note')).toContainText(
+    'Kept in this browser: 1 time-domain run and 1 power flow.',
+  );
+  // The Activity tab lists the jobs of this page load, so it is empty now. It
+  // says that this is no loss, and leads to the runs.
+  await page.getByRole('tab', { name: 'Activity' }).click();
+  await page.getByTestId('activity-panel-subtab-history').click();
+  await expect(page.getByTestId('activity-panel-history-empty')).toBeVisible();
+  await expect(page.getByTestId('activity-panel-history-note')).toContainText(
+    'A reload empties this list but not your results',
+  );
+  await page.getByTestId('activity-panel-run-history').click();
+  await expect(page.getByTestId(`history-run-row-${runId}`)).toBeVisible();
+  await closeHistory(page);
+  // The Run menu, and the empty plot.
+  await page.getByTestId('topbar-menu-run-trigger').click();
+  await expect(page.getByTestId('topbar-menu-run-history')).toHaveText('Run history (1)');
+  await page.keyboard.press('Escape');
+  await page.getByRole('tab', { name: 'Analysis' }).click();
+  await page.getByTestId('analysis-sub-tab-plot').click();
+  await expect(page.getByTestId('time-series-plot-empty')).toContainText(
+    '1 earlier run is kept in the run history',
+  );
+  await page.getByTestId('time-series-plot-open-history').click();
+  await expect(page.getByTestId(`history-run-row-${runId}`)).toBeVisible();
+  await closeHistory(page);
+
+  await page.getByTestId('kept-results-open-history').click();
+  await expect(page.getByTestId('history-drawer')).toBeVisible();
   const row = page.getByTestId(`history-run-row-${runId}`);
   await expect(row).toBeVisible();
   await expect(page.getByTestId(`history-run-row-label-${runId}`)).toHaveText(
@@ -198,9 +235,18 @@ test('a run and a power flow are still there after the page is reloaded', async 
 
   await page.reload();
   await expect(page.getByTestId(`saved-cases-row-${CASE_FILE}`)).toBeVisible();
-  // Nothing to list, and no case open: History is off again.
+  // Nothing to list, and no case open: History is off again, and says why. The
+  // power flow is still kept, so the note is there for it alone.
   await page.getByTestId('topbar-menu-more-trigger').click();
   await expect(page.getByTestId('topbar-menu-more-navigation.history')).toBeDisabled();
+  await expect(page.getByTestId('topbar-menu-more-navigation.history-reason')).toContainText(
+    'No runs yet',
+  );
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('kept-results-note')).toContainText(
+    'Kept in this browser: 1 power flow.',
+  );
+  await expect(page.getByTestId('kept-results-open-history')).toHaveCount(0);
 
   expect(leavePrompts).toEqual([]);
   expect(uncaughtErrors).toEqual([]);

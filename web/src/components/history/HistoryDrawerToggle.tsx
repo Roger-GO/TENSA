@@ -1,8 +1,6 @@
 import { Button } from '@/components/ui/button';
+import { useRunHistory } from '@/lib/runHistory';
 import { useHistoryStore } from '@/store/history';
-import { useRunsStore } from '@/store/runs';
-import { useSessionStore } from '@/store/session';
-import { useCaseStore } from '@/store/case';
 
 /**
  * Trigger for the run-history drawer, mounted in the TopBar. It is a module of
@@ -13,14 +11,11 @@ export function HistoryDrawerToggle({ className }: { className?: string }) {
   const open = useHistoryStore((s) => s.drawerOpen);
   const openDrawer = useHistoryStore((s) => s.openDrawer);
   const closeDrawer = useHistoryStore((s) => s.closeDrawer);
-  const runCount = useRunsStore((s) => Object.keys(s.runs).length);
   // Gate on session+case loaded — consistent with the other TopBar
   // controls (BundleExport, Report, Snapshot). Runs to list open it too:
   // the finished runs are kept across a reload of the page, so they can be
   // there before any case is opened.
-  const sessionId = useSessionStore((s) => s.sessionId);
-  const caseSelection = useCaseStore((s) => s.selection);
-  const enabled = (sessionId !== null && caseSelection !== null) || runCount > 0;
+  const { runCount, available: enabled } = useRunHistory();
   return (
     <Button
       type="button"

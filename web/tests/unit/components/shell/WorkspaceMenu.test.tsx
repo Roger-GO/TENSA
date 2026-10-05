@@ -134,11 +134,14 @@ describe('<WorkspaceMenu /> — actions', () => {
     expect(useCaseStore.getState().addPanelOpen).toBe(true);
   });
 
-  it('"Report" opens the report dialog via the local report store', async () => {
+  it('"Reports…" opens the Reports dialog via the local report store', async () => {
     const user = userEvent.setup();
     render(withProviders(<WorkspaceMenu />));
     await user.click(screen.getByTestId('topbar-menu-workspace-trigger'));
-    await user.click(await screen.findByTestId('topbar-menu-workspace-report'));
+    const item = await screen.findByTestId('topbar-menu-workspace-report');
+    // Named for the dialog it opens, with the dots of an item that opens one.
+    expect(item).toHaveTextContent('Reports…');
+    await user.click(item);
     expect(useReportDialogStore.getState().dialogOpen).toBe(true);
   });
 });

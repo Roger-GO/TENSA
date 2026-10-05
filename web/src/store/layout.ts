@@ -100,7 +100,8 @@ export function isAnalyzeBackedSubTab(sub: AnalysisSubTab): sub is 'eig' | 'cpf'
 /**
  * Active tab in the Activity panel (Unit 11). ``active`` shows in-flight +
  * pending jobs; ``history`` shows the terminal (done/failed/cancelled)
- * rolling log. Display-state — safe to persist (the actual JobRecord data
+ * rolling log, in a tab that reads "Finished" (the id is kept for the stored
+ * layout). Display-state — safe to persist (the actual JobRecord data
  * lives in the in-memory ``useJobsStore``, never persisted).
  */
 export type ActivityPanelTab = 'active' | 'history';

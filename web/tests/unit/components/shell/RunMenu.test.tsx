@@ -11,6 +11,8 @@
  *   wrapper appearing in the DOM).
  * - Keyboard nav: ArrowDown / ArrowUp / Enter close + activate.
  * - Escape closes the menu.
+ * - Run history, under the routines, opens the History drawer on its runs,
+ *   and says what to do first while there is nothing to list.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
@@ -22,9 +24,13 @@ import { RunMenu } from '@/components/shell/RunMenu';
 import { useRunModeStore } from '@/store/runMode';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useUiStore, DEFAULT_TDS_CONFIG } from '@/store/ui';
-import { useLayoutStore } from '@/store/layout';
+import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';
+import { useCaseStore } from '@/store/case';
+import { useHistoryStore } from '@/store/history';
+import { useSessionStore } from '@/store/session';
+import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { PflowResult } from '@/api/types';
 
 function withProviders(ui: ReactElement) {
@@ -211,5 +217,86 @@ describe('<RunMenu /> — keyboard interaction', () => {
       expect(screen.queryByTestId('topbar-menu-run-content')).not.toBeInTheDocument();
     });
     expect(useRunModeStore.getState().activeRoutine).toBe('pflow');
+  });
+});
+
+describe('<RunMenu /> — run history', () => {
+  beforeEach(() => {
+    useSessionStore.setState({ sessionId: parseSessionId('s1') });
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('kundur_full.xlsx'), addfiles: [] },
+    });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT });
+    useHistoryStore.getState().reset();
+    useRunsStore.getState().clearRuns();
+  });
+
+  afterEach(() => {
+    useSessionStore.setState({ sessionId: null });
+    useCaseStore.setState({ selection: null });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT });
+    useHistoryStore.getState().reset();
+    useRunsStore.getState().clearRuns();
+  });
+
+  /** A finished run that is no longer the active one, as a reload brings it back. */
+  function seedKeptRun(runId: string): void {
+    useRunsStore.getState().startRun({ runId, tf: 1, columnNames: ['Bus_1_v'] });
+    useRunsStore.getState().markRunDone(runId, 1, true);
+    useRunsStore.getState().clearActiveRun();
+  }
+
+  it('lists Run history last, after the routines', async () => {
+    const user = userEvent.setup();
+    render(withProviders(<RunMenu />));
+    await user.click(screen.getByTestId('topbar-menu-run-trigger'));
+    const content = await screen.findByTestId('topbar-menu-run-content');
+    const items = [...content.querySelectorAll('[role="menuitem"]')];
+    expect(items[items.length - 1]).toBe(screen.getByTestId('topbar-menu-run-history'));
+    expect(screen.getByTestId('topbar-menu-run-history')).toHaveTextContent('Run history');
+    expect(within(content).getByRole('separator')).toBeInTheDocument();
+  });
+
+  it('names how many runs there are and opens the drawer on them', async () => {
+    const user = userEvent.setup();
+    seedKeptRun('kept-1');
+    seedKeptRun('kept-2');
+    // The drawer was last left on the job list, which a reload empties.
+    useLayoutStore.setState({ historyKindFilter: 'all' });
+    render(withProviders(<RunMenu />));
+    await user.click(screen.getByTestId('topbar-menu-run-trigger'));
+    const item = await screen.findByTestId('topbar-menu-run-history');
+    expect(item).toHaveTextContent('Run history (2)');
+    await user.click(item);
+    expect(useHistoryStore.getState().drawerOpen).toBe(true);
+    expect(useLayoutStore.getState().historyKindFilter).toBe('runs');
+    await waitFor(() => {
+      expect(screen.queryByTestId('topbar-menu-run-content')).not.toBeInTheDocument();
+    });
+  });
+
+  it('is on with no case open when runs were kept, as after a reload', async () => {
+    const user = userEvent.setup();
+    useCaseStore.setState({ selection: null });
+    seedKeptRun('kept-1');
+    render(withProviders(<RunMenu />));
+    await user.click(screen.getByTestId('topbar-menu-run-trigger'));
+    const item = await screen.findByTestId('topbar-menu-run-history');
+    expect(item).not.toHaveAttribute('aria-disabled');
+    expect(item).toHaveTextContent('Run history (1)');
+  });
+
+  it('is off with no case and no runs, and says what to do first', async () => {
+    const user = userEvent.setup();
+    useCaseStore.setState({ selection: null });
+    render(withProviders(<RunMenu />));
+    await user.click(screen.getByTestId('topbar-menu-run-trigger'));
+    const item = await screen.findByTestId('topbar-menu-run-history');
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByTestId('topbar-menu-run-history-reason')).toHaveTextContent(
+      'No runs yet. Load a case and run a time-domain simulation first.',
+    );
+    await user.click(item);
+    expect(useHistoryStore.getState().drawerOpen).toBe(false);
   });
 });

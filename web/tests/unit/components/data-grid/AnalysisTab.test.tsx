@@ -14,9 +14,13 @@ import userEvent from '@testing-library/user-event';
 
 // Stub the heavy chart components — same pattern as BottomDrawer.test.tsx.
 vi.mock('@/components/plots/TimeSeriesPlot', () => ({
-  // The real plot draws the toolbar it is given beside its export menu.
-  TimeSeriesPlot: ({ toolbar }: { toolbar?: ReactNode }) => (
-    <div data-testid="ts-plot-stub">{toolbar}</div>
+  // The real plot draws the toolbar and the actions it is given on the row of
+  // its export menu.
+  TimeSeriesPlot: ({ toolbar, actions }: { toolbar?: ReactNode; actions?: ReactNode }) => (
+    <div data-testid="ts-plot-stub">
+      {toolbar}
+      {actions}
+    </div>
   ),
 }));
 vi.mock('@/components/plots/ScrubControl', () => ({
@@ -48,6 +52,7 @@ vi.mock('@/components/pflow/PflowComparePanel', () => ({
 
 import { AnalysisTab } from '@/components/data-grid/AnalysisTab';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
+import { useHistoryStore } from '@/store/history';
 import { usePlotStore } from '@/store/plot';
 import { useRunsStore } from '@/store/runs';
 
@@ -172,6 +177,21 @@ describe('<AnalysisTab />', () => {
       await user.click(screen.getByRole('button', { name: 'Expand plot' }));
 
       expect(useLayoutStore.getState().resultsViewActive).toBe(true);
+    });
+
+    it('has a Run history button on the plot, which opens the list of runs', async () => {
+      // The top bar's History button is in the More menu on most windows, and
+      // the plot is where an earlier run is looked for.
+      const user = userEvent.setup();
+      useHistoryStore.getState().reset();
+      render(<AnalysisTab activeSubTab="plot" onSubTabChange={() => {}} />);
+      const button = screen.getByRole('button', { name: 'Run history' });
+      expect(screen.getByTestId('ts-plot-stub')).toContainElement(button);
+
+      await user.click(button);
+
+      expect(useHistoryStore.getState().drawerOpen).toBe(true);
+      useHistoryStore.getState().reset();
     });
 
     it('keeps the response metrics closed until asked: they cost a request each time the plot changes', async () => {

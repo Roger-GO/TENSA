@@ -23,6 +23,7 @@ import { RightInspector } from '@/components/inspector/RightInspector';
 import { BottomDrawer } from '@/components/shell/BottomDrawer';
 import { ResultsView } from '@/components/shell/ResultsView';
 import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
+import { KeptResultsNote } from '@/components/history/KeptResultsNote';
 import { makeQueryClient, wireGlobalErrorRecovery, useCurrentTopology } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
 import { useSessionHeartbeat } from '@/api/useSessionHeartbeat';
@@ -208,7 +209,10 @@ function CanvasSlot() {
             'Pick a case file from the left sidebar, drop one anywhere in this window, or click or drag a component from the Component library to start a blank system.'
           }
           emptyStateKey="app-shell-no-case"
-        />
+        >
+          {/* What the browser kept from before a reload, which needs no case. */}
+          <KeptResultsNote />
+        </EmptyState>
       )}
     </ComponentDropZone>
   );

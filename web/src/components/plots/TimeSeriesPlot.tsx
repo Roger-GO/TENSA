@@ -29,6 +29,8 @@ import { ExportMenu } from '@/components/export/ExportMenu';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { RUN_VALUES_UNITS_COMMENT, timeSeriesToCsv } from '@/components/export/exportToCsv';
 import { elementToPng } from '@/components/export/exportToPng';
+import { Button } from '@/components/ui/button';
+import { openRunHistory } from '@/lib/runHistory';
 import { runIdToStrokeStyle } from '@/lib/runIdToColor';
 import { runLabel } from '@/lib/runLabel';
 import { useTheme } from '@/lib/useTheme';
@@ -105,6 +107,12 @@ export interface TimeSeriesPlotProps {
    * the way to get something drawn.
    */
   toolbar?: ReactNode;
+  /**
+   * Controls drawn beside the export menu, at the end of that row, where they
+   * do not push the toolbar onto another line of a narrow panel. Like the
+   * toolbar, they are left out of a PNG export and show in the empty states.
+   */
+  actions?: ReactNode;
 }
 
 /**
@@ -389,17 +397,37 @@ function Toolbar({ children }: { children: ReactNode }) {
   );
 }
 
-/** Empty-state placeholder shown when no series are selected (or no run). */
-function EmptyPlotMessage({ message }: { message: string }) {
+/** The caller's ``actions`` and the export menu, at the end of the toolbar's row. */
+function RowEnd({ actions, children }: { actions: ReactNode; children: ReactNode }) {
+  if (actions === undefined || actions === null) return children;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div data-export-ignore="" className="flex flex-wrap items-center gap-2">
+        {actions}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Empty-state placeholder shown when no series are selected (or no run).
+ * ``children`` is a control under the message, for the state that has one way
+ * out worth a button (the runs kept in the run history). It takes the height
+ * left under the toolbar's row and no less than its own, so in a short panel
+ * it pushes what follows down and does not lie over it.
+ */
+function EmptyPlotMessage({ message, children }: { message: string; children?: ReactNode }) {
   return (
     <div
       data-testid="time-series-plot-empty"
       className={cn(
-        'flex h-full w-full items-center justify-center',
+        'flex w-full flex-1 flex-col items-center justify-center gap-2 py-2 text-center',
         'text-muted-foreground text-sm',
       )}
     >
-      {message}
+      <span>{message}</span>
+      {children}
     </div>
   );
 }
@@ -591,6 +619,7 @@ export function TimeSeriesPlot({
   className,
   colorMode = 'hash',
   toolbar,
+  actions,
 }: TimeSeriesPlotProps) {
   // The active run, or the first pinned one when no run is active.
   const effectiveRunId = usePlotRunId(runId);
@@ -615,8 +644,8 @@ export function TimeSeriesPlot({
   const isMultiRun = overlayRuns.length > 1;
   const primaryRun = overlayRuns[0];
   // Runs kept after Reset run, a case change or a reload of the page, which
-  // nothing plots until one is started or pinned: the empty plot points at
-  // where they are.
+  // nothing plots until one is started or pinned: the empty plot says how many
+  // there are and has a button that opens the run history.
   const retainedRunCount = useRunsStore((s) => Object.keys(s.runs).length);
 
   const selected = usePlotStore((s) =>
@@ -817,28 +846,46 @@ export function TimeSeriesPlot({
 
   if (!effectiveRunId || overlayRuns.length === 0) {
     return (
-      <div className={cn('h-full w-full', className)}>
+      <div className={cn('flex h-full w-full flex-col', className)}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Toolbar>{toolbar}</Toolbar>
-          <ExportMenu formats={['csv', 'png']} disabled panel="time-series" label="Export plot" />
+          <RowEnd actions={actions}>
+            <ExportMenu formats={['csv', 'png']} disabled panel="time-series" label="Export plot" />
+          </RowEnd>
         </div>
-        <EmptyPlotMessage
-          message={
-            retainedRunCount > 0
-              ? 'Run a TDS to see results. Earlier runs are in History: pin one to plot it.'
-              : 'Run a TDS to see results'
-          }
-        />
+        {retainedRunCount > 0 ? (
+          <EmptyPlotMessage
+            message={`No run is plotted. ${
+              retainedRunCount === 1
+                ? '1 earlier run is kept in the run history: pin it there to plot it'
+                : `${retainedRunCount} earlier runs are kept in the run history: pin one there to plot it`
+            }, or run a TDS.`}
+          >
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={openRunHistory}
+              data-testid="time-series-plot-open-history"
+            >
+              Open run history
+            </Button>
+          </EmptyPlotMessage>
+        ) : (
+          <EmptyPlotMessage message="Run a TDS to see results" />
+        )}
       </div>
     );
   }
 
   if (charts.length === 0) {
     return (
-      <div className={cn('h-full w-full', className)}>
+      <div className={cn('flex h-full w-full flex-col', className)}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Toolbar>{toolbar}</Toolbar>
-          <ExportMenu formats={['csv', 'png']} disabled panel="time-series" label="Export plot" />
+          <RowEnd actions={actions}>
+            <ExportMenu formats={['csv', 'png']} disabled panel="time-series" label="Export plot" />
+          </RowEnd>
         </div>
         <EmptyPlotMessage message="Select variables to plot" />
       </div>
@@ -870,15 +917,17 @@ export function TimeSeriesPlot({
             </div>
           ) : null}
         </div>
-        <ExportMenu
-          formats={['csv', 'png']}
-          label="Export plot"
-          panel="time-series"
-          caseName={caseName}
-          runId={effectiveRunId}
-          onExportCsv={onExportCsv}
-          onExportPng={onExportPng}
-        />
+        <RowEnd actions={actions}>
+          <ExportMenu
+            formats={['csv', 'png']}
+            label="Export plot"
+            panel="time-series"
+            caseName={caseName}
+            runId={effectiveRunId}
+            onExportCsv={onExportCsv}
+            onExportPng={onExportPng}
+          />
+        </RowEnd>
       </div>
       {showReadout ? <CursorTimes cursors={cursors} onSet={onSetCursor} /> : null}
       {charts.map(({ key, title, note, options, data }) => (

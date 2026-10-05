@@ -16,14 +16,25 @@
  * - Selecting Sweep opens the SweepDialog (whose open state is local
  *   to this component); the registry posts to the palette-dialog
  *   bridge and the subscription below toggles the dialog.
+ *
+ * Under the routines, Run history opens the History drawer on its runs. The
+ * top bar's own History button is in the More menu on all but the widest
+ * windows, and the Run menu is where someone looks for a run they made.
  */
 import { useEffect, useState } from 'react';
-import { TopBarMenu, TopBarMenuItem, TopBarMenuLabel } from './TopBarMenu';
+import { TopBarMenu, TopBarMenuItem, TopBarMenuLabel, TopBarMenuSeparator } from './TopBarMenu';
 import { LazyMount } from '@/components/ui/Lazy';
 import { lazyNamed } from '@/lib/lazyNamed';
 import { useRunModeStore } from '@/store/runMode';
 import type { RunRoutine } from '@/lib/useRunReadiness';
 import { useCommandRegistry, subscribePaletteDialog } from '@/lib/commands';
+import {
+  NO_RUNS_YET,
+  RUN_HISTORY_HINT,
+  openRunHistory,
+  runHistoryLabel,
+  useRunHistory,
+} from '@/lib/runHistory';
 
 // The sweep dialog is its own chunk, fetched the first time it opens.
 const SweepDialog = lazyNamed(
@@ -46,6 +57,7 @@ export function RunMenu() {
   // Abort run (Esc) is a run command but not a routine to pick.
   const runCommands = commands.filter((c) => c.group === 'run' && c.id !== 'run.abort');
   const activeRoutine = useRunModeStore((s) => s.activeRoutine);
+  const history = useRunHistory();
 
   const [sweepOpen, setSweepOpen] = useState(false);
 
@@ -82,6 +94,15 @@ export function RunMenu() {
             </TopBarMenuItem>
           );
         })}
+        <TopBarMenuSeparator />
+        <TopBarMenuItem
+          testId="topbar-menu-run-history"
+          title={RUN_HISTORY_HINT}
+          unavailableReason={history.available ? undefined : NO_RUNS_YET}
+          onClick={openRunHistory}
+        >
+          {runHistoryLabel(history.runCount)}
+        </TopBarMenuItem>
       </TopBarMenu>
       <LazyMount when={sweepOpen} onLoadFailed={() => setSweepOpen(false)}>
         <SweepDialog open={sweepOpen} onOpenChange={setSweepOpen} />

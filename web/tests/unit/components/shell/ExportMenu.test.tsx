@@ -26,6 +26,7 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useBundleStore } from '@/store/bundle';
 import { useSnapshotStore } from '@/store/snapshot';
+import { useReportDialogStore } from '@/store/reportDialog';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 
 function withProviders(ui: ReactNode) {
@@ -59,6 +60,7 @@ beforeEach(() => {
   });
   useBundleStore.getState().closeDialog();
   useSnapshotStore.getState().reset();
+  useReportDialogStore.getState().closeDialog();
   saveHtmlReport.mockClear();
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
   usePflowHistoryStore.getState().clear();
@@ -117,6 +119,37 @@ describe('<ExportMenu />', () => {
     await screen.findByTestId('topbar-menu-export-content');
     expect(screen.queryByTestId('topbar-menu-export-bundle')).not.toBeInTheDocument();
     expect(screen.queryByTestId('topbar-menu-export-snapshot')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('topbar-menu-export-reports')).not.toBeInTheDocument();
+  });
+
+  it('lists "Reports…" last, under the HTML report, and it opens the Reports dialog', async () => {
+    // The dialog with ANDES's plain-text reports is a Workspace command; a
+    // first-time user looks for a report here, so it is listed here as well.
+    const user = userEvent.setup();
+    render(withProviders(<ExportMenu />));
+    await user.click(screen.getByTestId('topbar-menu-export-trigger'));
+    const content = await screen.findByTestId('topbar-menu-export-content');
+    const items = [...content.querySelectorAll('[role="menuitem"]')].map(
+      (el) => el.getAttribute('data-testid') ?? '',
+    );
+    expect(items).toEqual([
+      'topbar-menu-export-bundle',
+      'topbar-menu-export-snapshot',
+      'topbar-menu-export-html-report',
+      'topbar-menu-export-reports',
+    ]);
+    const reports = screen.getByTestId('topbar-menu-export-reports');
+    expect(reports).toHaveTextContent('Reports…');
+    expect(reports).toHaveAttribute(
+      'aria-description',
+      expect.stringContaining('plain-text reports'),
+    );
+
+    await user.click(reports);
+    expect(useReportDialogStore.getState().dialogOpen).toBe(true);
+    await waitFor(() => {
+      expect(screen.queryByTestId('topbar-menu-export-content')).not.toBeInTheDocument();
+    });
   });
 
   it('keeps "Export HTML report" in view, greyed out with what to do first, before any result', async () => {
