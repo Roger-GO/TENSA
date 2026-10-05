@@ -205,23 +205,46 @@ const MAX_CHART_POINTS = 800;
 
 const CHART = { width: 760, height: 250, left: 64, right: 14, top: 10, bottom: 32 } as const;
 
+/** The significant digits a tick value is rounded to. */
+const TICK_DIGITS = 12;
+
+/**
+ * A signal whose range is within this share of its size is drawn as flat: its
+ * values differ only in the last digits a tick holds or past them, which is
+ * too little for an axis of round ticks that differ.
+ */
+const FLAT_SPAN = 10 ** (2 - TICK_DIGITS);
+
 /**
  * Round tick values covering ``min..max``: about ``count`` of them, each a
- * multiple of 1, 2 or 5 times a power of ten.
+ * multiple of 1, 2 or 5 times a power of ten. A range too narrow for its ticks
+ * to differ in ``TICK_DIGITS`` digits gets one tick, and a range whose step a
+ * number cannot hold gets none.
  */
 export function niceTicks(min: number, max: number, count = 5): number[] {
   if (!Number.isFinite(min) || !Number.isFinite(max)) return [];
   if (min === max) return [min];
   const span = max - min;
-  const raw = span / Math.max(1, count);
+  const wanted = Math.max(1, count);
+  const raw = span / wanted;
   const power = 10 ** Math.floor(Math.log10(raw));
   const fraction = raw / power;
   const step = (fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10) * power;
-  const ticks: number[] = [];
+  // The span overflowed, or its step underflowed to nothing.
+  if (!Number.isFinite(step) || step <= 0) return [];
   const first = Math.ceil(min / step - 1e-9) * step;
-  for (let v = first; v <= max + step * 1e-9; v += step) {
-    // Snap away the rounding of repeated addition (0.30000000000000004).
-    ticks.push(Number(v.toPrecision(12)));
+  // The ticks are counted, not added up until one passes ``max``: in a range
+  // only a rounding error or two wide the step is too small to change the
+  // value it is added to, and such a loop never ends. The step is at least
+  // ``span / wanted``, so there are never more than about ``wanted`` of them;
+  // the cap holds whatever the rounding does.
+  const last = Math.min(Math.floor((max - first) / step + 1e-9), 2 * wanted);
+  const ticks: number[] = [];
+  for (let i = 0; i <= last; i += 1) {
+    // Snap away the rounding of the arithmetic (0.30000000000000004).
+    const tick = Number((first + i * step).toPrecision(TICK_DIGITS));
+    // Ticks the snap cannot tell apart are one tick.
+    if (tick !== ticks[ticks.length - 1]) ticks.push(tick);
   }
   return ticks;
 }
@@ -294,9 +317,13 @@ export function svgLineChart(chart: ReportChart): string {
   if (!Number.isFinite(tMin) || !Number.isFinite(yMin)) {
     return `<figure><figcaption>${escapeHtml(title)}</figcaption><p class="meta">No samples to draw.</p></figure>`;
   }
-  // A flat signal still needs a band to be drawn in.
-  if (yMin === yMax) {
-    const margin = Math.abs(yMin) > 0 ? Math.abs(yMin) * 0.01 : 1;
+  // A flat signal still needs a band to be drawn in. So does one that is flat
+  // but for its last digits (a steady state as the solver left it): its range
+  // is narrower than the axis has ticks for, and a margin of a twentieth of
+  // it would not widen it.
+  const scale = Math.max(Math.abs(yMin), Math.abs(yMax));
+  if (yMax - yMin <= scale * FLAT_SPAN) {
+    const margin = scale > 0 ? scale * 0.01 : 1;
     yMin -= margin;
     yMax += margin;
   } else {

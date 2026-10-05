@@ -701,6 +701,42 @@ describe('niceTicks', () => {
     expect(niceTicks(2, 2)).toEqual([2]);
     expect(niceTicks(Number.NaN, 1)).toEqual([]);
   });
+
+  it('ends on a range only a rounding error wide, with the one tick it has', () => {
+    // The step such a range asks for is too small to change a value it is
+    // added to, so ticks added up until one passes the end would never get there.
+    const ulp = 2 ** -52;
+    expect(niceTicks(1.03, 1.03 + ulp)).toEqual([1.03]);
+    expect(niceTicks(1, 1 + ulp)).toEqual([1]);
+    expect(niceTicks(-1.03 - ulp, -1.03)).toEqual([-1.03]);
+    expect(niceTicks(1e16, 1e16 + 2)).toEqual([1e16]);
+    expect(niceTicks(60, 60 + 1e-13, 8)).toEqual([60]);
+  });
+
+  it('gives no tick for a range whose step a number cannot hold', () => {
+    expect(niceTicks(0, Number.MIN_VALUE)).toEqual([]);
+    expect(niceTicks(-Number.MAX_VALUE, Number.MAX_VALUE)).toEqual([]);
+  });
+
+  it('gives about as many ticks as were asked for, however narrow or wide the range', () => {
+    for (const [min, max] of [
+      [0, 1e-300],
+      [1, 1 + 1e-9],
+      [-3e-7, 2e-7],
+      [59.8, 60.2],
+      [-1e300, 1e300],
+    ] as const) {
+      for (const count of [1, 5, 8]) {
+        const ticks = niceTicks(min, max, count);
+        expect(ticks.length).toBeLessThanOrEqual(2 * count + 1);
+        expect(new Set(ticks).size).toBe(ticks.length);
+        for (const tick of ticks) {
+          expect(tick).toBeGreaterThanOrEqual(min - (max - min) * 1e-6);
+          expect(tick).toBeLessThanOrEqual(max + (max - min) * 1e-6);
+        }
+      }
+    }
+  });
 });
 
 describe('thinSeries', () => {
@@ -755,6 +791,45 @@ describe('svgLineChart', () => {
     expect(ys[0]).toBeGreaterThan(10);
     expect(ys[0]).toBeLessThan(218);
     expect(points).not.toContain('NaN');
+  });
+
+  it('draws a steady state that differs only in its last digit as the flat signal it is', () => {
+    // What a run with no disturbance leaves of a generator speed: one value,
+    // and now and then the next number above it.
+    const speed = 1.03;
+    const doc = parseSvg(
+      svgLineChart({
+        title: 'Generator speed',
+        unit: 'pu',
+        series: [
+          { name: 'Gen_1_omega', t: [0, 1, 2, 3], y: [speed, speed + 2 ** -52, speed, speed] },
+        ],
+      }),
+    );
+    const points = doc.querySelector('polyline')?.getAttribute('points') ?? '';
+    expect(points).not.toContain('NaN');
+    const ys = points.split(' ').map((p) => Number(p.split(',')[1]));
+    expect(ys).toHaveLength(4);
+    expect(new Set(ys).size).toBe(1);
+    expect(ys[0]).toBeGreaterThan(10);
+    expect(ys[0]).toBeLessThan(218);
+    // The band it is drawn in has an axis of its own, in numbers that differ.
+    const labels = [...doc.querySelectorAll('svg text')].map((el) => el.textContent);
+    expect(labels).toEqual(expect.arrayContaining(['1.02', '1.03', '1.04']));
+  });
+
+  it('still draws a small change that is more than rounding at full height', () => {
+    const doc = parseSvg(
+      svgLineChart({
+        title: 'Bus voltage',
+        unit: 'pu',
+        series: [{ name: 'Bus_1_v', t: [0, 1], y: [1, 1 + 1e-6] }],
+      }),
+    );
+    const points = doc.querySelector('polyline')?.getAttribute('points') ?? '';
+    const ys = points.split(' ').map((p) => Number(p.split(',')[1]));
+    // From near the foot of the plot to near its top (it is 208 high).
+    expect(ys[0]! - ys[1]!).toBeGreaterThan(150);
   });
 
   it('says there is nothing to draw for a series with no samples', () => {
