@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { useAddElement, useTopologySchema } from '@/api/queries';
+import { useAddElement, useCurrentTopology, useTopologySchema } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { ProblemDetailsError } from '@/api/client';
@@ -8,6 +8,7 @@ import type { ParamValue } from '@/api/types';
 import { cn } from '@/lib/cn';
 import { ElementForm } from './ElementForm';
 import { CancelConfirmDialog } from './CancelConfirmDialog';
+import { elementDefaults } from './elementHelp';
 
 /**
  * AddElementPanel — compact slide-over from the right edge of the dock
@@ -43,7 +44,15 @@ import { CancelConfirmDialog } from './CancelConfirmDialog';
 const SUPPORTED_KINDS: ReadonlyArray<{
   value: string;
   label: string;
-  group: 'Network' | 'Transformers' | 'Generators' | 'Exciters' | 'Governors' | 'Loads' | 'Shunts';
+  group:
+    | 'Network'
+    | 'Transformers'
+    | 'Generators'
+    | 'Exciters'
+    | 'Governors'
+    | 'Storage'
+    | 'Loads'
+    | 'Shunts';
   submitModel: string;
   defaultParams?: Record<string, string | number | boolean>;
 }> = [
@@ -70,6 +79,10 @@ const SUPPORTED_KINDS: ReadonlyArray<{
   { value: 'SEXS', label: 'SEXS exciter (simple)', group: 'Exciters', submitModel: 'SEXS' },
   { value: 'TGOV1', label: 'TGOV1 governor', group: 'Governors', submitModel: 'TGOV1' },
   { value: 'IEEEG1', label: 'IEEEG1 governor', group: 'Governors', submitModel: 'IEEEG1' },
+  // A battery takes over a static generator on its bus (the ``gen`` link, a
+  // GenIdxSelect dropdown) when a time-domain run starts. The form says what
+  // its parameters mean, and opens rated on the system base (`elementHelp`).
+  { value: 'ESD1', label: 'ESD1 battery', group: 'Storage', submitModel: 'ESD1' },
   { value: 'PQ', label: 'PQ load', group: 'Loads', submitModel: 'PQ' },
   { value: 'ZIP', label: 'ZIP load', group: 'Loads', submitModel: 'ZIP' },
   { value: 'Shunt', label: 'Shunt', group: 'Shunts', submitModel: 'Shunt' },
@@ -115,6 +128,7 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
   const addMutation = useAddElement();
   const schema = useTopologySchema();
+  const baseMva = useCurrentTopology()?.base_mva ?? null;
   const [serverError, setServerError] = useState<string | null>(null);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   // Building a system means adding many elements in a row, so the panel stays
@@ -140,7 +154,9 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
   const kindEntry = SUPPORTED_KINDS.find((k) => k.value === kind);
   const submitModel = kindEntry?.submitModel ?? kind ?? '';
   const formModel = submitModel; // ElementForm renders fields from this model's schema.
-  const defaultParams = kindEntry?.defaultParams;
+  // What the kind itself sets (a transformer's tap), then what the model opens
+  // with for this case (a battery's rating is the system base).
+  const defaultParams = kindEntry?.defaultParams ?? elementDefaults(submitModel, { baseMva });
 
   const handleSubmit = (params: Record<string, ParamValue>) => {
     if (!sessionId || !submitModel) return;

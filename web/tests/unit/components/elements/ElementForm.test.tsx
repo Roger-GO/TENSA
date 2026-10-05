@@ -9,6 +9,10 @@
  * - Defaults injection (kind-pick prefill, e.g., transformer tap=1.05).
  * - Cancel + dirty-change tracking.
  * - Optional fields collapse under "Show advanced".
+ * - A model with help (the ESD1 battery) gets a note, a line under the fields it
+ *   explains, and a warning under a rating that is not the system base.
+ * - A controller's idx is prefilled and checked against the controllers the
+ *   case already has.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -35,6 +39,18 @@ const SCHEMA: TopologySchema = {
       { name: 'r', kind: 'number', required: true, unit: 'pu' },
       { name: 'x', kind: 'number', required: true, unit: 'pu' },
       { name: 'tap', kind: 'number', required: false },
+    ],
+    ESD1: [
+      { name: 'idx', kind: 'string', required: true },
+      { name: 'name', kind: 'string', required: true },
+      { name: 'bus', kind: 'bus_idx', required: true },
+      { name: 'gen', kind: 'gen_idx', required: true },
+      { name: 'Sn', kind: 'number', required: true, unit: 'MVA' },
+      { name: 'pqflag', kind: 'number', required: true },
+      { name: 'pmx', kind: 'number', required: true, unit: 'pu' },
+      { name: 'En', kind: 'number', required: true, unit: 'MWh' },
+      { name: 'xc', kind: 'number', required: false, unit: 'pu' },
+      { name: 'SOCinit', kind: 'number', required: false },
     ],
   },
 };
@@ -324,5 +340,158 @@ describe('<ElementForm />', () => {
     );
     const submit = screen.getByRole('button', { name: /Saving/i });
     expect(submit).toBeDisabled();
+  });
+});
+
+/** A case with a bus, a static generator on it, and a 100 MVA base. */
+function batteryTopology(): TopologySummary {
+  return {
+    ...emptyTopology(),
+    base_mva: 100,
+    buses: [{ idx: 7, name: 'B7', kind: 'Bus', params: { Vn: 230 } }],
+    generators: [{ idx: 'PV_B', name: 'PV_B', kind: 'PV', params: { bus: 7 } }],
+  };
+}
+
+function renderBatteryForm(onSubmit: (params: Record<string, unknown>) => void = () => {}) {
+  return render(
+    withQueryClient(
+      <ElementForm
+        model="ESD1"
+        defaultParams={{ Sn: 100, pqflag: 1 }}
+        saving={false}
+        serverError={null}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    ),
+  );
+}
+
+function inputOf(name: string): HTMLInputElement {
+  return screen.getByTestId(`field-${name}`).querySelector('input') as HTMLInputElement;
+}
+
+describe('<ElementForm /> for a model with help (the ESD1 battery)', () => {
+  beforeEach(() => {
+    MOCK_TOPOLOGY = batteryTopology();
+  });
+
+  it('has no note, field help or warning for a model without help', () => {
+    render(
+      withQueryClient(
+        <ElementForm
+          model="Bus"
+          saving={false}
+          serverError={null}
+          onSubmit={() => {}}
+          onCancel={() => {}}
+        />,
+      ),
+    );
+    expect(screen.queryByTestId('element-form-note')).toBeNull();
+    expect(screen.queryByTestId('field-help-Vn')).toBeNull();
+    expect(inputOf('Vn')).not.toHaveAttribute('aria-describedby');
+  });
+
+  it("says above the fields to keep Sn on the system base, with the case's base", () => {
+    renderBatteryForm();
+    const note = screen.getByRole('note');
+    expect(note).toHaveTextContent('Keep Sn equal to the system base (100 MVA).');
+    expect(note).toHaveTextContent('add a PV generator there first');
+    expect(note).toHaveTextContent('pIG_y');
+  });
+
+  it('puts a line under the fields it explains, tied to the input and not to its name', () => {
+    renderBatteryForm();
+    const help = screen.getByTestId('field-help-Sn');
+    expect(help).toHaveTextContent('keep Sn equal to it so the two read alike');
+    expect(inputOf('Sn').getAttribute('aria-describedby')).toBe(help.id);
+    // The label still names the field by its parameter name alone.
+    expect(screen.getByTestId('field-Sn')).not.toContainElement(help);
+    expect(screen.getByTestId('field-help-En')).toHaveTextContent('delivered MW over En');
+    // A field with nothing to explain has no line.
+    expect(screen.queryByTestId('field-help-idx')).toBeNull();
+    expect(screen.queryByTestId('field-help-xc')).toBeNull();
+  });
+
+  it('describes the static-generator picker with its help too', () => {
+    renderBatteryForm();
+    const help = screen.getByTestId('field-help-gen');
+    expect(help).toHaveTextContent('static generator');
+    expect(screen.getByTestId('gen-idx-select').getAttribute('aria-describedby')).toBe(help.id);
+  });
+
+  it('opens rated on the system base and warns once Sn is another number', async () => {
+    const user = userEvent.setup();
+    renderBatteryForm();
+    expect(inputOf('Sn').value).toBe('100');
+    expect(inputOf('pqflag').value).toBe('1');
+    expect(screen.queryByTestId('field-warning-Sn')).toBeNull();
+
+    await user.clear(inputOf('Sn'));
+    await user.type(inputOf('Sn'), '50');
+    await user.type(inputOf('pmx'), '1');
+    const warning = screen.getByTestId('field-warning-Sn');
+    expect(warning).toHaveAttribute('role', 'status');
+    expect(warning).toHaveTextContent('Sn is not the system base (100 MVA)');
+    expect(warning).toHaveTextContent('at most 0.5 pu on the system base (50 MW)');
+    expect(inputOf('Sn').getAttribute('aria-describedby')).toBe(
+      `${screen.getByTestId('field-help-Sn').id} ${warning.id}`,
+    );
+
+    await user.clear(inputOf('Sn'));
+    await user.type(inputOf('Sn'), '100');
+    expect(screen.queryByTestId('field-warning-Sn')).toBeNull();
+  });
+
+  it('adds a battery rated off the system base all the same: the warning does not block', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderBatteryForm(onSubmit);
+    await user.type(inputOf('name'), 'BESS');
+    await user.selectOptions(screen.getByTestId('bus-idx-select'), '7');
+    await user.selectOptions(screen.getByTestId('gen-idx-select'), 'PV_B');
+    await user.clear(inputOf('Sn'));
+    await user.type(inputOf('Sn'), '50');
+    await user.type(inputOf('pmx'), '1');
+    await user.type(inputOf('En'), '20');
+    await user.click(screen.getByRole('button', { name: /add esd1/i }));
+    expect(onSubmit).toHaveBeenCalledWith({
+      idx: 'ESD1_1',
+      name: 'BESS',
+      bus: '7',
+      gen: 'PV_B',
+      Sn: 50,
+      pqflag: 1,
+      pmx: 1,
+      En: 20,
+    });
+  });
+
+  it('prefills the idx after the batteries the case already has, and refuses one that is taken', async () => {
+    const user = userEvent.setup();
+    MOCK_TOPOLOGY = {
+      ...batteryTopology(),
+      controllers: [
+        { idx: 'ESD1_1', name: 'ESD1_1', kind: 'ESD1', params: {} },
+        // Another model's idx does not count, whatever it is.
+        { idx: 'ESD1_7', name: 'odd', kind: 'TGOV1', params: {} },
+      ],
+    };
+    const onSubmit = vi.fn();
+    renderBatteryForm(onSubmit);
+    expect(inputOf('idx').value).toBe('ESD1_2');
+
+    await user.clear(inputOf('idx'));
+    await user.type(inputOf('idx'), 'ESD1_1');
+    await user.type(inputOf('name'), 'BESS');
+    await user.selectOptions(screen.getByTestId('bus-idx-select'), '7');
+    await user.selectOptions(screen.getByTestId('gen-idx-select'), 'PV_B');
+    await user.type(inputOf('pmx'), '1');
+    await user.type(inputOf('En'), '20');
+    await user.click(screen.getByRole('button', { name: /add esd1/i }));
+    expect(screen.getByRole('alert')).toHaveTextContent('idx "ESD1_1" is already taken');
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });

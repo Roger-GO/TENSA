@@ -6,6 +6,7 @@ import { cn } from '@/lib/cn';
 import { BusIdxSelect } from './BusIdxSelect';
 import { GenIdxSelect } from './GenIdxSelect';
 import { SynIdxSelect } from './SynIdxSelect';
+import { elementHelp, elementWarnings } from './elementHelp';
 
 /**
  * ElementForm — polymorphic form generated from `_PARAMS_BY_MODEL`
@@ -20,6 +21,10 @@ import { SynIdxSelect } from './SynIdxSelect';
  * Each numeric input shows its `unit` suffix inline. Each `bus_idx`
  * field renders BusIdxSelect (dropdown of existing buses). Each `bool`
  * field renders a checkbox.
+ *
+ * A model whose parameters need more than a name (`elementHelp`) gets a note
+ * above the fields, a line under the fields it explains, and a warning under a
+ * field whose value is allowed but worth a second look.
  *
  * Validation: client-side required checks before submit; the surface
  * for server-side rejections (422 ProblemDetails) is supplied by the
@@ -85,7 +90,9 @@ function bucketForModel(topology: TopologySummary, model: string): TopologyEntry
     return (topology.generators ?? []).filter((g) => g.kind === model);
   if (['PQ', 'ZIP'].includes(model)) return (topology.loads ?? []).filter((l) => l.kind === model);
   if (model === 'Shunt') return topology.shunts ?? [];
-  return [];
+  // Everything else the form adds is a controller: an exciter, a governor, a
+  // battery. They are listed together, each under its own model.
+  return (topology.controllers ?? []).filter((c) => c.kind === model);
 }
 
 function defaultPrefixFor(model: string): string {
@@ -127,6 +134,8 @@ export function ElementForm({
   );
 
   const existingIdxs = useMemo(() => existingIdxSetFor(topology, model), [topology, model]);
+  const baseMva = topology?.base_mva ?? null;
+  const help = useMemo(() => elementHelp(model, { baseMva }), [model, baseMva]);
 
   const seedValues = (
     metas: TopologyParamMeta[],
@@ -175,6 +184,11 @@ export function ElementForm({
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
+
+  const warnings = useMemo(
+    () => elementWarnings(model, values, { baseMva }),
+    [model, values, baseMva],
+  );
 
   const required = params.filter((m) => m.required);
   const optional = params.filter((m) => !m.required);
@@ -254,9 +268,18 @@ export function ElementForm({
   const renderField = (m: TopologyParamMeta) => {
     const inputId = `${baseId}-${m.name}`;
     const errorId = `${inputId}-error`;
+    const helpId = `${inputId}-help`;
+    const warningId = `${inputId}-warning`;
     const value = values[m.name] ?? emptyValueFor(m);
     const error = validationErrors[m.name];
-    return (
+    const fieldHelp = help?.fields[m.name];
+    const warning = warnings[m.name];
+    // Everything said about the field is read out with it.
+    const describedBy =
+      [fieldHelp ? helpId : null, warning ? warningId : null, error ? errorId : null]
+        .filter((id) => id !== null)
+        .join(' ') || undefined;
+    const field = (
       <label
         key={m.name}
         htmlFor={inputId}
@@ -278,7 +301,7 @@ export function ElementForm({
               value={String(value)}
               onChange={(v) => setField(m.name, v)}
               required={m.required}
-              aria-describedby={error ? errorId : undefined}
+              aria-describedby={describedBy}
             />
           ) : m.kind === 'gen_idx' ? (
             <GenIdxSelect
@@ -286,7 +309,7 @@ export function ElementForm({
               value={String(value)}
               onChange={(v) => setField(m.name, v)}
               required={m.required}
-              aria-describedby={error ? errorId : undefined}
+              aria-describedby={describedBy}
             />
           ) : m.kind === 'syn_idx' ? (
             <SynIdxSelect
@@ -294,7 +317,7 @@ export function ElementForm({
               value={String(value)}
               onChange={(v) => setField(m.name, v)}
               required={m.required}
-              aria-describedby={error ? errorId : undefined}
+              aria-describedby={describedBy}
             />
           ) : m.kind === 'bool' ? (
             <input
@@ -315,7 +338,7 @@ export function ElementForm({
               required={m.required}
               disabled={saving}
               onChange={(e) => setField(m.name, e.target.value)}
-              aria-describedby={error ? errorId : undefined}
+              aria-describedby={describedBy}
               className="bg-background border-border h-7 w-32 rounded border px-2 font-mono text-xs"
             />
           )}
@@ -328,6 +351,36 @@ export function ElementForm({
         ) : null}
       </label>
     );
+    if (!fieldHelp && !warning) return field;
+    // Beside the label, not in it: what is said here describes the field and
+    // is not part of its name.
+    return (
+      <div key={m.name} className="flex flex-col gap-0.5">
+        {field}
+        {fieldHelp ? (
+          <p
+            id={helpId}
+            data-testid={`field-help-${m.name}`}
+            className="text-muted-foreground text-[10px] leading-snug"
+          >
+            {fieldHelp}
+          </p>
+        ) : null}
+        {warning ? (
+          <p
+            id={warningId}
+            role="status"
+            data-testid={`field-warning-${m.name}`}
+            className={cn(
+              'border-warning/30 bg-warning/10 text-foreground',
+              'rounded-[var(--radius-sm)] border px-1.5 py-1 text-[10px] leading-snug',
+            )}
+          >
+            {warning}
+          </p>
+        ) : null}
+      </div>
+    );
   };
 
   return (
@@ -336,6 +389,21 @@ export function ElementForm({
       className={cn('flex flex-col gap-3', className)}
       data-testid={`element-form-${model}`}
     >
+      {help ? (
+        <div
+          role="note"
+          data-testid="element-form-note"
+          className={cn(
+            'border-border bg-muted/40 text-foreground',
+            'flex flex-col gap-1.5 rounded-[var(--radius-sm)] border px-2 py-1.5',
+            'text-[11px] leading-snug',
+          )}
+        >
+          {help.note.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+        </div>
+      ) : null}
       {required.length > 0 ? (
         <fieldset className="flex flex-col gap-2">
           <legend className="text-foreground text-xs font-semibold">Required</legend>

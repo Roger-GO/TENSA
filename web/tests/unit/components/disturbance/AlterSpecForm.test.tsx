@@ -295,6 +295,34 @@ describe('<AlterSpecForm />', () => {
     expect(options).toEqual(['REGCA_1']);
   });
 
+  it('offers a battery to alter, listing the ESD1 devices of the controllers bucket', () => {
+    MOCK_TOPOLOGY = {
+      ...(MOCK_TOPOLOGY as TopologySummary),
+      controllers: [
+        { idx: 'ESD1_1', name: 'BESS', kind: 'ESD1', params: {} },
+        { idx: 'REGCA_1', name: 'REGCA1_1', kind: 'REGCA1', params: {} },
+      ],
+    };
+    render(
+      withQueryClient(
+        <AlterSpecForm spec={{ ...blankAlterSpec(), model: 'ESD1' }} onChange={() => {}} />,
+      ),
+    );
+    const models = Array.from(
+      (screen.getByTestId('alter-model') as HTMLSelectElement).querySelectorAll('option'),
+    ).map((o) => o.value);
+    expect(models).toContain('ESD1');
+    // What can be altered on it is the server's list for the model, which
+    // holds the power set-points pref0 and Pext0.
+    expect(useAlterableParamsMock).toHaveBeenCalledWith('ESD1');
+    const dev = screen.getByTestId('alter-dev-idx') as HTMLSelectElement;
+    expect(dev).not.toBeDisabled();
+    const options = Array.from(dev.querySelectorAll('option'))
+      .map((o) => o.value)
+      .filter((v) => v.length > 0);
+    expect(options).toEqual(['ESD1_1']);
+  });
+
   it('flags missing src as required', async () => {
     let validity: Record<string, string> = {};
     render(

@@ -43,6 +43,17 @@ const SCHEMA: TopologySchema = {
       { name: 'bus', kind: 'bus_idx', required: true },
       { name: 'p0', kind: 'number', required: true, unit: 'pu' },
     ],
+    ESD1: [
+      { name: 'idx', kind: 'string', required: true },
+      { name: 'name', kind: 'string', required: true },
+      { name: 'bus', kind: 'bus_idx', required: true },
+      { name: 'gen', kind: 'gen_idx', required: true },
+      { name: 'Sn', kind: 'number', required: true, unit: 'MVA' },
+      { name: 'pqflag', kind: 'number', required: true },
+      { name: 'pmx', kind: 'number', required: true, unit: 'pu' },
+      { name: 'En', kind: 'number', required: true, unit: 'MWh' },
+      { name: 'SOCinit', kind: 'number', required: false },
+    ],
   },
 };
 
@@ -212,6 +223,75 @@ describe('<AddElementPanel />', () => {
     await user.selectOptions(screen.getByTestId('add-element-kind'), 'Bus');
     expect(useCaseStore.getState().addPanelKind).toBe('Bus');
     await waitFor(() => expect(screen.getByTestId('element-form-Bus')).toBeInTheDocument());
+  });
+
+  // ---- the ESD1 battery ---------------------------------------------------
+
+  it('offers the battery under Storage in the kind picker', () => {
+    useCaseStore.setState({ addPanelOpen: true, addPanelKind: null });
+    render(withQueryClient(<AddElementPanel />));
+    const picker = screen.getByTestId('add-element-kind') as HTMLSelectElement;
+    const storage = Array.from(picker.querySelectorAll('optgroup')).find(
+      (group) => group.label === 'Storage',
+    );
+    expect(storage).toBeDefined();
+    expect(Array.from(storage!.querySelectorAll('option')).map((o) => [o.value, o.text])).toEqual([
+      ['ESD1', 'ESD1 battery'],
+    ]);
+  });
+
+  it("opens the battery form rated on the case's system base, with its help", async () => {
+    MOCK_TOPOLOGY = {
+      ...(MOCK_TOPOLOGY as TopologySummary),
+      base_mva: 250,
+      buses: [{ idx: 7, name: 'B7', kind: 'Bus', params: {} }],
+      generators: [{ idx: 'PV_B', name: 'PV_B', kind: 'PV', params: {} }],
+    };
+    useCaseStore.setState({ addPanelOpen: true, addPanelKind: 'ESD1' });
+    render(withQueryClient(<AddElementPanel />));
+    await waitFor(() => expect(screen.getByTestId('element-form-ESD1')).toBeInTheDocument());
+    expect(screen.getByTestId('field-Sn').querySelector('input')).toHaveValue(250);
+    expect(screen.getByTestId('field-pqflag').querySelector('input')).toHaveValue(1);
+    expect(screen.getByRole('note')).toHaveTextContent(
+      'Keep Sn equal to the system base (250 MVA).',
+    );
+    // Opening on the base is not a change the user made: closing asks nothing.
+    expect(useCaseStore.getState().addPanelDirty).toBe(false);
+  });
+
+  it('submits the battery with the rating and the priority the form opened with', async () => {
+    const user = userEvent.setup();
+    MOCK_TOPOLOGY = {
+      ...(MOCK_TOPOLOGY as TopologySummary),
+      base_mva: 100,
+      buses: [{ idx: 7, name: 'B7', kind: 'Bus', params: {} }],
+      generators: [{ idx: 'PV_B', name: 'PV_B', kind: 'PV', params: {} }],
+    };
+    useCaseStore.setState({ addPanelOpen: true, addPanelKind: 'ESD1' });
+    render(withQueryClient(<AddElementPanel />));
+    await waitFor(() => screen.getByTestId('element-form-ESD1'));
+    await user.type(screen.getByTestId('field-name').querySelector('input')!, 'BESS');
+    await user.selectOptions(screen.getByTestId('bus-idx-select'), '7');
+    await user.selectOptions(screen.getByTestId('gen-idx-select'), 'PV_B');
+    await user.type(screen.getByTestId('field-pmx').querySelector('input')!, '0.4');
+    await user.type(screen.getByTestId('field-En').querySelector('input')!, '80');
+    await user.click(screen.getByRole('button', { name: /add esd1/i }));
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    const [path, body] = postSpy.mock.calls[0] ?? [];
+    expect(path).toContain('/sessions/test-session-id/elements');
+    expect(body).toEqual({
+      model: 'ESD1',
+      params: {
+        idx: 'ESD1_1',
+        name: 'BESS',
+        bus: '7',
+        gen: 'PV_B',
+        Sn: 100,
+        pqflag: 1,
+        pmx: 0.4,
+        En: 80,
+      },
+    });
   });
 
   // ---- v3 Unit 5 — dropCoord seed ---------------------------------------

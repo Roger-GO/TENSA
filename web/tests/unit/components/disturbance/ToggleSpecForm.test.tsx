@@ -109,6 +109,31 @@ describe('<ToggleSpecForm />', () => {
     expect(dev).toBeDisabled();
     expect(dev.querySelector('option')?.textContent).toMatch(/No Shunts/i);
   });
+
+  it('offers a battery to trip, listing the ESD1 devices of the controllers bucket', () => {
+    MOCK_TOPOLOGY = {
+      ...(MOCK_TOPOLOGY as TopologySummary),
+      controllers: [
+        { idx: 'ESD1_1', name: 'BESS', kind: 'ESD1', params: {} },
+        { idx: 'GOV_1', name: 'TGOV1_1', kind: 'TGOV1', params: {} },
+      ],
+    };
+    render(
+      withQueryClient(
+        <ToggleSpecForm spec={{ ...blankToggleSpec(), model: 'ESD1' }} onChange={() => {}} />,
+      ),
+    );
+    const models = Array.from(
+      (screen.getByTestId('toggle-model') as HTMLSelectElement).querySelectorAll('option'),
+    ).map((o) => o.value);
+    expect(models).toContain('ESD1');
+    const dev = screen.getByTestId('toggle-dev-idx') as HTMLSelectElement;
+    expect(dev).not.toBeDisabled();
+    const options = Array.from(dev.querySelectorAll('option'))
+      .map((o) => o.value)
+      .filter((v) => v.length > 0);
+    expect(options).toEqual(['ESD1_1']);
+  });
 });
 
 describe('<ToggleSpecForm /> typing', () => {

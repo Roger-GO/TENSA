@@ -45,6 +45,7 @@ const ALTERABLE_MODELS: ReadonlyArray<{ value: string; label: string }> = [
   { value: 'TGOV1', label: 'TGOV1 (single-lag governor)' },
   { value: 'IEEEST', label: 'IEEEST (PSS)' },
   { value: 'REGCA1', label: 'REGCA1 (renewable converter)' },
+  { value: 'ESD1', label: 'ESD1 (battery)' },
 ];
 
 const CONTROLLER_MODELS: ReadonlySet<string> = new Set([
@@ -55,6 +56,7 @@ const CONTROLLER_MODELS: ReadonlySet<string> = new Set([
   'TGOV1',
   'IEEEST',
   'REGCA1',
+  'ESD1',
 ]);
 
 /**
