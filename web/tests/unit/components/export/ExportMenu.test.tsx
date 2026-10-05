@@ -35,6 +35,8 @@ vi.mock('@/lib/toast', () => ({
 
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { downloadBlob } from '@/components/export/downloadBlob';
+import { ExportRefusedError } from '@/components/export/exportError';
+import { NetworkError, ProblemDetailsError } from '@/api/client';
 
 const originalCreate = URL.createObjectURL;
 const originalRevoke = URL.revokeObjectURL;
@@ -238,6 +240,103 @@ describe('<ExportMenu /> — MAT and PNG capture', () => {
     rerender(<ExportMenu formats={['png']} panel="p" disabled />);
     expect(screen.getByTestId('export-menu-trigger')).toHaveAttribute('data-export-ignore');
     expect(screen.getByTestId('export-menu-disabled')).toHaveAttribute('data-export-ignore');
+  });
+});
+
+describe('<ExportMenu /> — COMTRADE', () => {
+  it('is offered only where the panel asks for it, and waits for its handler', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ExportMenu
+        formats={['csv', 'comtrade']}
+        panel="scrub"
+        onExportCsv={() => new Blob(['x'])}
+      />,
+    );
+    await user.click(screen.getByTestId('export-menu-trigger'));
+    const button = await screen.findByTestId('export-menu-comtrade');
+    expect(button).toHaveTextContent('COMTRADE (.zip)');
+    expect(button).toBeDisabled();
+
+    rerender(<ExportMenu formats={['csv']} panel="scrub" onExportCsv={() => new Blob(['x'])} />);
+    expect(screen.queryByTestId('export-menu-comtrade')).toBeNull();
+  });
+
+  it('says on hover that the download is a record of two files', async () => {
+    const user = userEvent.setup();
+    render(<ExportMenu formats={['comtrade']} panel="scrub" onExportComtrade={vi.fn()} />);
+    await user.click(screen.getByTestId('export-menu-trigger'));
+    await user.hover(await screen.findByTestId('export-menu-comtrade'));
+    expect(
+      (await screen.findAllByText(/IEEE C37\.111 record of the run: a \.cfg and an ASCII \.dat/))
+        .length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('downloads the record as a .zip whose name says it is a COMTRADE record', async () => {
+    const user = userEvent.setup();
+    const onExportComtrade = vi.fn(async () => new Blob(['PK'], { type: 'application/zip' }));
+    render(
+      <ExportMenu
+        formats={['csv', 'comtrade']}
+        panel="scrub"
+        caseName="ieee14"
+        runId="abcd1234ef"
+        onExportCsv={() => new Blob(['x'])}
+        onExportComtrade={onExportComtrade}
+      />,
+    );
+    await user.click(screen.getByTestId('export-menu-trigger'));
+    await user.click(await screen.findByTestId('export-menu-comtrade'));
+
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledTimes(1));
+    expect(onExportComtrade).toHaveBeenCalledTimes(1);
+    expect(String(toastSuccessMock.mock.calls[0]![0])).toMatch(
+      /^Exported ieee14_abcd1234_scrub-comtrade_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.zip$/,
+    );
+    expect((createObjectUrlMock.mock.calls[0]![0] as Blob).type).toBe('application/zip');
+    // The other formats keep their own names.
+    await user.click(screen.getByTestId('export-menu-trigger'));
+    await user.click(await screen.findByTestId('export-menu-csv'));
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledTimes(2));
+    expect(String(toastSuccessMock.mock.calls[1]![0])).toMatch(
+      /^Exported ieee14_abcd1234_scrub_.*\.csv$/,
+    );
+  });
+
+  it('gives the reason of an export that was refused, without blaming the browser', async () => {
+    const user = userEvent.setup();
+    const refusals: Error[] = [
+      new ExportRefusedError('7,500,000 values, and one COMTRADE export takes at most 5,000,000.'),
+      new ProblemDetailsError({
+        type: 'about:blank',
+        title: 'Unprocessable Content',
+        status: 422,
+        detail: 't must not decrease',
+        instance: null,
+      }),
+      new NetworkError('Network error on POST /api/comtrade', new TypeError('Failed to fetch')),
+    ];
+    const onExportComtrade = vi.fn(async () => {
+      throw refusals.shift()!;
+    });
+    render(<ExportMenu formats={['comtrade']} panel="scrub" onExportComtrade={onExportComtrade} />);
+
+    // A failed export leaves the menu open on its formats, to try again.
+    await user.click(screen.getByTestId('export-menu-trigger'));
+    for (const description of [
+      '7,500,000 values, and one COMTRADE export takes at most 5,000,000.',
+      'Unprocessable Content: t must not decrease',
+      'Network error on POST /api/comtrade',
+    ]) {
+      toastErrorMock.mockReset();
+      await user.click(await screen.findByTestId('export-menu-comtrade'));
+      await waitFor(() =>
+        expect(toastErrorMock).toHaveBeenCalledWith('Export failed', { description }),
+      );
+      await waitFor(() => expect(screen.getByTestId('export-menu-comtrade')).toBeEnabled());
+    }
+    expect(createObjectUrlMock).not.toHaveBeenCalled();
   });
 });
 

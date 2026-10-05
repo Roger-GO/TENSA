@@ -14,8 +14,8 @@
  * callback with the new timestamp, mirroring the way React's
  * scheduler would normally invoke it.
  */
-import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest';
-import { render, cleanup, fireEvent, act, screen, within } from '@testing-library/react';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from 'vitest';
+import { render, cleanup, fireEvent, act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { captureDownloads, exportAs, readBlob } from '../../helpers/downloads';
 
@@ -646,6 +646,59 @@ describe('ScrubControl export', () => {
       ]);
       expect(screen.queryByTestId('export-menu')).toBeNull();
     } finally {
+      downloads.restore();
+    }
+  });
+
+  it('exports every column of the run as a COMTRADE record the substrate writes', async () => {
+    const downloads = captureDownloads();
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/zip' },
+      }),
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+    try {
+      useRunsStore.setState({ runs: {}, activeRunId: null });
+      useRunsStore.getState().startRun({
+        runId: 'r1',
+        tf: 10,
+        columnNames: ['Bus_1_v', 'Bus_1_a', 'omega GENROU 1'],
+        caseName: 'ieee14',
+        scenario: 'fault bus 7',
+      });
+      appendRows('r1', [0, 1], {
+        Bus_1_v: [1, 1.05],
+        Bus_1_a: [0, 0.5],
+        'omega GENROU 1': [1, 1.002],
+      });
+      render(<ScrubControl />);
+
+      await exportAs(userEvent.setup(), 'comtrade');
+
+      await waitFor(() => expect(downloads.filenames).toHaveLength(1));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+      expect(url).toBe('/api/comtrade');
+      expect(init.method).toBe('POST');
+      const sent = JSON.parse(String(init.body)) as { channels: unknown[]; device: string };
+      expect(sent).toMatchObject({ t: [0, 1], name: 'ieee14_r1', station: 'ieee14' });
+      expect(sent.device).toMatch(/^TENSA TDS #\d+ - fault bus 7$/);
+      expect(sent.channels).toEqual([
+        { name: 'Bus_1_v', unit: 'pu', values: [1, 1.05] },
+        { name: 'Bus_1_a', unit: 'rad', values: [0, 0.5] },
+        { name: 'omega GENROU 1', values: [1, 1.002] },
+      ]);
+      // The archive the substrate answered with is what is saved, named for the run's case.
+      expect(downloads.blobs[0]!.type).toBe('application/zip');
+      expect(downloads.filenames[0]).toMatch(
+        /^ieee14_r1_scrub-comtrade_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.zip$/,
+      );
+      expect(screen.queryByTestId('export-menu')).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
       downloads.restore();
     }
   });

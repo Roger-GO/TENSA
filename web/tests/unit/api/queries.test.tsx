@@ -18,6 +18,7 @@ import type { ReactNode } from 'react';
 import {
   makeQueryClient,
   queryKeys,
+  fetchComtradeRecord,
   fetchResponseMetrics,
   useAlterableParams,
   useCreateSession,
@@ -499,6 +500,35 @@ describe('queries hooks', () => {
     expect(init.method).toBe('POST');
     expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
     expect(JSON.parse(String(init.body))).toMatchObject({ series: [{ name: 'w' }] });
+  });
+
+  it('fetchComtradeRecord posts the signals as JSON to a route that needs no session and returns the archive', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(new Uint8Array([0x50, 0x4b]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/zip' },
+      }),
+    );
+
+    const archive = await fetchComtradeRecord({
+      t: [0, 1],
+      channels: [{ name: 'Bus_1_v', unit: 'pu', values: [1, 0.9] }],
+      name: 'ieee14_1a2b3c4d',
+      station: 'ieee14',
+      frequency_hz: 60,
+    });
+
+    expect(archive).toBeInstanceOf(Blob);
+    expect(archive.type).toBe('application/zip');
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/comtrade');
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      t: [0, 1],
+      channels: [{ name: 'Bus_1_v', unit: 'pu', values: [1, 0.9] }],
+      name: 'ieee14_1a2b3c4d',
+    });
   });
 
   it('useRunPflow onMutate registers a pending placeholder; onSuccess re-keys to the server job_id', async () => {

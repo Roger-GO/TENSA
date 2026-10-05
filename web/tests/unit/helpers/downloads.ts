@@ -46,7 +46,7 @@ export function captureDownloads(): DownloadCapture {
 /** Open the export menu and pick a format. `scope` narrows the lookup when several menus are mounted. */
 export async function exportAs(
   user: UserEvent,
-  format: 'csv' | 'png' | 'mat',
+  format: 'csv' | 'png' | 'mat' | 'comtrade',
   scope?: HTMLElement,
 ): Promise<void> {
   const trigger = scope

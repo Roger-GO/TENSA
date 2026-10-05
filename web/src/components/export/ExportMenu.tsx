@@ -1,6 +1,6 @@
 /**
- * ExportMenu — dropdown trigger that exposes CSV / PNG / MAT export
- * options for a panel (chart, table, SVG canvas).
+ * ExportMenu — dropdown trigger that exposes CSV / PNG / MAT / COMTRADE
+ * export options for a panel (chart, table, SVG canvas).
  *
  * Design:
  *
@@ -8,10 +8,11 @@
  *   The trigger lives inside a `<TooltipProvider>` so the disabled
  *   state surfaces "No data to export" without any extra wiring.
  * - The dropdown body is a Radix Popover. The format buttons are
- *   gated by the `formats` prop (CSV / PNG / MAT) so a panel that has
- *   no PNG path (e.g., ScrubControl) doesn't show the option.
+ *   gated by the `formats` prop (CSV / PNG / MAT / COMTRADE) so a panel
+ *   that has no PNG path (e.g., ScrubControl) doesn't show the option.
  * - When the user picks a format, the menu calls one of the supplied
- *   handler props (`onExportCsv`, `onExportPng`, `onExportMat`). Each
+ *   handler props (`onExportCsv`, `onExportPng`, `onExportMat`,
+ *   `onExportComtrade`). Each
  *   handler returns a `Blob` (or null on "nothing to export"); the
  *   menu turns the Blob into a download via `URL.createObjectURL` +
  *   anchor click + revoke.
@@ -23,7 +24,9 @@
  * (`exportFilename.ts`). The caller passes `caseName`, optional
  * `runIdPrefix` (8-char default slice of a run id), `panel` (kebab-case
  * panel name like `time-series` / `results-table` / `sld`); the menu
- * fills in `timestamp` and `ext`.
+ * fills in `timestamp` and `ext`. A COMTRADE record is a `.zip` of two
+ * files, so its name says what it is after the panel:
+ * `{caseName}_{runIdPrefix}_{panel}-comtrade_{timestamp}.zip`.
  */
 import { useCallback, useState } from 'react';
 import { downloadBlob } from './downloadBlob';
@@ -37,11 +40,16 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { NetworkError, ProblemDetailsError } from '@/api/client';
+import { ExportRefusedError } from './exportError';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
 
 /** Supported export formats. The set of buttons rendered is `formats`. */
-export type ExportFormat = 'csv' | 'png' | 'mat';
+export type ExportFormat = 'csv' | 'png' | 'mat' | 'comtrade';
+
+/** What a format's handler does: hand back the file, or nothing when there is none to make. */
+type ExportHandler = () => Promise<Blob | null | undefined> | Blob | null | undefined;
 
 export interface ExportMenuProps {
   /**
@@ -68,6 +76,11 @@ export interface ExportMenuProps {
    */
   matTooltip?: string;
   /**
+   * Tooltip shown for the COMTRADE button. Defaults to a line saying what
+   * the download is, since the name alone does not say it is two files.
+   */
+  comtradeTooltip?: string;
+  /**
    * Stable case name used in the auto-generated filename. Pass the
    * basename (no extension); the menu sanitises into a filesystem-safe
    * slug. Defaults to "case" for blank sessions.
@@ -91,16 +104,22 @@ export interface ExportMenuProps {
    * path instead). The menu does not pass any args — the caller
    * captures the panel's data in the closure.
    */
-  onExportCsv?: () => Promise<Blob | null | undefined> | Blob | null | undefined;
+  onExportCsv?: ExportHandler;
   /**
    * PNG handler. Mirrors `onExportCsv`. Used by chart and SVG panels.
    */
-  onExportPng?: () => Promise<Blob | null | undefined> | Blob | null | undefined;
+  onExportPng?: ExportHandler;
   /**
    * MAT handler. Mirrors `onExportCsv`. Only supplied for the EIG
    * panel, which downloads the state matrix from the substrate.
    */
-  onExportMat?: () => Promise<Blob | null | undefined> | Blob | null | undefined;
+  onExportMat?: ExportHandler;
+  /**
+   * COMTRADE handler. Mirrors `onExportCsv`. Supplied by the panels that
+   * hold a time-domain run, whose samples the substrate writes as an IEEE
+   * C37.111 record; the Blob is a `.zip` of the record's two files.
+   */
+  onExportComtrade?: ExportHandler;
   /** Optional class on the trigger button. */
   className?: string;
   /**
@@ -116,6 +135,15 @@ const FORMAT_LABEL: Record<ExportFormat, string> = {
   csv: 'CSV',
   png: 'PNG',
   mat: 'MAT (.mat)',
+  comtrade: 'COMTRADE (.zip)',
+};
+
+/** The extension a format's file is saved under. */
+const FORMAT_EXTENSION: Record<ExportFormat, string> = {
+  csv: 'csv',
+  png: 'png',
+  mat: 'mat',
+  comtrade: 'zip',
 };
 
 export function ExportMenu({
@@ -123,12 +151,14 @@ export function ExportMenu({
   disabled = false,
   disabledTooltip = 'No data to export',
   matTooltip = 'MATLAB file with the state matrix (As) and the eigenvalues (mu)',
+  comtradeTooltip = 'IEEE C37.111 record of the run: a .cfg and an ASCII .dat file, in one .zip',
   caseName = 'case',
   runId,
   panel,
   onExportCsv,
   onExportPng,
   onExportMat,
+  onExportComtrade,
   className,
   label = 'Export',
 }: ExportMenuProps) {
@@ -137,7 +167,13 @@ export function ExportMenu({
 
   const runFormat = useCallback(
     async (format: ExportFormat) => {
-      const handler = format === 'csv' ? onExportCsv : format === 'png' ? onExportPng : onExportMat;
+      const handlers: Record<ExportFormat, ExportHandler | undefined> = {
+        csv: onExportCsv,
+        png: onExportPng,
+        mat: onExportMat,
+        comtrade: onExportComtrade,
+      };
+      const handler = handlers[format];
       if (!handler) return;
       setBusy(true);
       try {
@@ -154,9 +190,9 @@ export function ExportMenu({
         const filename = buildFilename({
           caseName,
           runId,
-          panel,
-          // The format names double as the file extensions.
-          ext: format,
+          // A .zip does not say what is in it, so the name does.
+          panel: format === 'comtrade' ? `${panel}-comtrade` : panel,
+          ext: FORMAT_EXTENSION[format],
           timestamp: makeTimestamp(),
         });
         downloadBlob(blob, filename);
@@ -168,14 +204,31 @@ export function ExportMenu({
         // Surface as toast.error with the underlying detail in the
         // description so the user can paste it into a bug report.
         const detail = err instanceof Error ? err.message : 'unknown error';
-        toast.error('Export failed; check browser settings.', {
+        // An export the handler refused, or one the substrate refused or
+        // could not be reached for, says why itself. Anything else is taken
+        // for the browser's doing (a blocked download, a canvas that would
+        // not rasterise).
+        const explained =
+          err instanceof ExportRefusedError ||
+          err instanceof ProblemDetailsError ||
+          err instanceof NetworkError;
+        toast.error(explained ? 'Export failed' : 'Export failed; check browser settings.', {
           description: detail,
         });
       } finally {
         setBusy(false);
       }
     },
-    [caseName, runId, panel, onExportCsv, onExportPng, onExportMat, disabledTooltip],
+    [
+      caseName,
+      runId,
+      panel,
+      onExportCsv,
+      onExportPng,
+      onExportMat,
+      onExportComtrade,
+      disabledTooltip,
+    ],
   );
 
   const triggerButton = (
@@ -271,6 +324,29 @@ export function ExportMenu({
                 </TooltipTrigger>
                 <TooltipPortal>
                   <TooltipContent>{matTooltip}</TooltipContent>
+                </TooltipPortal>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          {formats.includes('comtrade') && (
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void runFormat('comtrade')}
+                    disabled={busy || !onExportComtrade}
+                    className="justify-start"
+                    data-testid="export-menu-comtrade"
+                  >
+                    {FORMAT_LABEL.comtrade}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipPortal>
+                  {/* Beside the menu, so the hint does not cover the format above. */}
+                  <TooltipContent side="left">{comtradeTooltip}</TooltipContent>
                 </TooltipPortal>
               </Tooltip>
             </TooltipProvider>

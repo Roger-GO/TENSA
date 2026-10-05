@@ -549,6 +549,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/comtrade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write sampled signals as a COMTRADE (IEEE C37.111) record: a .cfg and an ASCII .dat in a .zip.
+         * @description Each signal becomes an analog channel named and given the unit the request
+         *     gives it, scaled over its own range onto the integers a 1999 data file holds,
+         *     so a channel resolves about 1 / 200 000 of its range. The record declares a
+         *     sampling rate only when the samples are evenly spaced; otherwise a reader goes
+         *     by the time stamps, as it must for a run with an event in it. The values are
+         *     the caller's own (per unit, MW, radians), and for a time-domain run they are
+         *     phasor quantities, not instantaneous waveforms. Needs no session: send the
+         *     columns of a streamed run, or ``t`` and ``variables`` of a batch run's
+         *     ``traces``.
+         */
+        post: operations["exportComtrade"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspace/files": {
         parameters: {
             query?: never;
@@ -2016,6 +2044,77 @@ export interface components {
              * @description Imaginary part of the eigenvalue.
              */
             imag: number;
+        };
+        /**
+         * ComtradeChannelSeries
+         * @description One signal of a COMTRADE export. A batch run's ``traces.variables`` entries
+         *     have this shape.
+         */
+        ComtradeChannelSeries: {
+            /**
+             * Name
+             * @description What the signal is called; it becomes the channel's identifier, reduced to ASCII without commas and cut to 64 characters.
+             */
+            name: string;
+            /**
+             * Unit
+             * @description The unit the values are in (``pu``, ``MW``, ``rad``), reduced to ASCII and cut to 32 characters. A channel given none is written with the unit ``NONE``, since the field cannot be empty.
+             */
+            unit?: string | null;
+            /**
+             * Values
+             * @description The signal's value at each time in ``t``. ``null`` marks a missing value (a diverged step), which the data file holds as 99999.
+             */
+            values: (number | null)[];
+        };
+        /**
+         * ComtradeExportRequest
+         * @description Request body for ``POST /comtrade``.
+         */
+        ComtradeExportRequest: {
+            /**
+             * T
+             * @description Sample times in seconds, not decreasing, at least one. Times need not be evenly spaced: the record carries a time stamp per sample.
+             */
+            t: number[];
+            /**
+             * Channels
+             * @description The signals, each with one value per time in ``t``. At most 5000000 values in all (channels times samples).
+             */
+            channels: components["schemas"]["ComtradeChannelSeries"][];
+            /**
+             * Name
+             * @description File name the record's two files share: the archive holds ``<name>.cfg`` and ``<name>.dat``. 1-64 chars of [A-Za-z0-9._-] starting with an alphanumeric, not ending in a dot, and not a Windows device name (CON, NUL, COM1, ...).
+             * @default tensa
+             */
+            name: string;
+            /**
+             * Station
+             * @description The record's station name, for instance the case the run was made on. Reduced to ASCII without commas and cut to 64 characters.
+             * @default
+             */
+            station: string;
+            /**
+             * Device
+             * @description The record's recording device, for instance a name for the run. Reduced as ``station`` is. Defaults to ``TENSA`` and its version.
+             */
+            device?: string | null;
+            /**
+             * Frequency Hz
+             * @description The system's nominal frequency in Hz, the record's line frequency.
+             * @default 60
+             */
+            frequency_hz: number;
+            /**
+             * Start Time
+             * @description The date and time simulated time zero stands for (ISO 8601). The record's first date line is this plus the first time in ``t``. The format carries no time zone, so the clock reading is written as given. Defaults to the server's local time when the request arrives.
+             */
+            start_time?: string | null;
+            /**
+             * Trigger T
+             * @description Simulated time of the trigger point in seconds, for instance when a fault is applied; it must lie inside the record. Defaults to the first time in ``t``.
+             */
+            trigger_t?: number | null;
         };
         /**
          * ConnectivityResponse
@@ -5621,6 +5720,48 @@ export interface operations {
                 };
             };
             /** @description The body is malformed, or a limit is exceeded: more than 64 series, more than 200000 samples in one, or a setting out of range. A series that is only too short to describe is not an error: it is answered with its own ``error``. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    exportComtrade: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComtradeExportRequest"];
+            };
+        };
+        responses: {
+            /** @description A ``.zip`` holding ``<name>.cfg`` and ``<name>.dat``: the 1999 revision of the standard, ASCII data, one analog channel per signal and a time stamp per sample. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": unknown;
+                };
+            };
+            /** @description The request holds more than 5000000 values (channels times samples). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is malformed, or the signals make no record: no sample, times that decrease, a channel whose length is not that of ``t``, a ``trigger_t`` outside the record, or a ``name`` that is not a plain file name. */
             422: {
                 headers: {
                     [name: string]: unknown;

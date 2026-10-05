@@ -38,6 +38,7 @@ import type {
   CloneResetResponse,
   CloneSaveAsRequest,
   CloneSaveAsResponse,
+  ComtradeExportRequest,
   ConnectivityResult,
   CpfResult,
   DaeVariableList,
@@ -705,6 +706,22 @@ export async function fetchResponseMetrics(
   return await andesClient.post<ResponseMetricsResponse>('/response-metrics', {
     body,
     timeoutMs: 30_000,
+    ...(signal === undefined ? {} : { signal }),
+  });
+}
+
+/**
+ * `POST /comtrade`: the signals in ``body`` as an IEEE C37.111 record, a `.zip`
+ * of its `.cfg` and its ASCII `.dat`. Holds no session, so a run kept from an
+ * earlier session or another case exports like the active one.
+ */
+export async function fetchComtradeRecord(
+  body: ComtradeExportRequest,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  return await andesClient.postBlob('/comtrade', {
+    body,
+    timeoutMs: TIMEOUTS.comtradeExport,
     ...(signal === undefined ? {} : { signal }),
   });
 }

@@ -226,4 +226,55 @@ describe('andesClient', () => {
     const result = await andesClient.delete<undefined>('/sessions/abc');
     expect(result).toBeUndefined();
   });
+
+  it('postBlob sends a JSON body and hands the answer back as the file it is', async () => {
+    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04]); // the first bytes of a .zip
+    fetchSpy.mockResolvedValueOnce(
+      new Response(bytes, { status: 200, headers: { 'Content-Type': 'application/zip' } }),
+    );
+
+    const blob = await andesClient.postBlob('/comtrade', { body: { t: [0, 1] } });
+
+    expect(blob).toBeInstanceOf(Blob);
+    expect(blob.size).toBe(4);
+    expect(blob.type).toBe('application/zip');
+    const [url, init] = fetchSpy.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe('/api/comtrade');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe(JSON.stringify({ t: [0, 1] }));
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
+  });
+
+  it('postBlob throws the typed error of a refusal, whose body is still JSON', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          type: 'about:blank',
+          title: 'Content Too Large',
+          status: 413,
+          detail: 'the request holds 6000000 values',
+        },
+        { status: 413 },
+      ),
+    );
+
+    await expect(andesClient.postBlob('/comtrade', { body: {} })).rejects.toMatchObject({
+      name: 'ProblemDetailsError',
+      status: 413,
+      detail: 'the request holds 6000000 values',
+      requestPath: '/api/comtrade',
+    });
+  });
+
+  it('postBlob reports a server error and a failed fetch like every other call', async () => {
+    fetchSpy.mockResolvedValueOnce(new Response('boom', { status: 500 }));
+    await expect(andesClient.postBlob('/comtrade', { body: {} })).rejects.toBeInstanceOf(
+      ServerError,
+    );
+
+    fetchSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await expect(andesClient.postBlob('/comtrade', { body: {} })).rejects.toBeInstanceOf(
+      NetworkError,
+    );
+  });
 });

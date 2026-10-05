@@ -76,6 +76,8 @@ export type ResponseMetricsRequest = components['schemas']['ResponseMetricsReque
 export type ResponseMetricsResponse = components['schemas']['ResponseMetricsResponse'];
 export type SeriesMetrics = components['schemas']['SeriesMetrics'];
 export type MetricExtremum = components['schemas']['MetricExtremum'];
+export type ComtradeChannelSeries = components['schemas']['ComtradeChannelSeries'];
+export type ComtradeExportRequest = components['schemas']['ComtradeExportRequest'];
 /** ANDES param value types in API request/response payloads. */
 export type ParamValue = number | string | boolean;
 

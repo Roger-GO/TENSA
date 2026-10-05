@@ -29,6 +29,7 @@ import { ExportMenu } from '@/components/export/ExportMenu';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { RUN_VALUES_UNITS_COMMENT, timeSeriesToCsv } from '@/components/export/exportToCsv';
 import { elementToPng } from '@/components/export/exportToPng';
+import { exportRunToComtrade } from '@/components/export/exportToComtrade';
 import { Button } from '@/components/ui/button';
 import { openRunHistory } from '@/lib/runHistory';
 import { runIdToStrokeStyle } from '@/lib/runIdToColor';
@@ -36,6 +37,9 @@ import { runLabel } from '@/lib/runLabel';
 import { useTheme } from '@/lib/useTheme';
 import type { ResolvedTheme } from '@/store/theme';
 import { cn } from '@/lib/cn';
+
+/** What the plot exports as: its series as text or as a COMTRADE record, or its picture. */
+const PLOT_FORMATS = ['csv', 'png', 'comtrade'] as const;
 
 /**
  * Stacked uPlot instances — one per non-empty variable group — sharing
@@ -762,6 +766,14 @@ export function TimeSeriesPlot({
     });
   }, [primaryRun, selected]);
 
+  // COMTRADE export of the same series: the substrate writes them as an IEEE
+  // C37.111 record. Single-run, like the CSV.
+  const onExportComtrade = useCallback(() => {
+    const run = primaryRun;
+    if (!run || !selected || selected.size === 0) return null;
+    return exportRunToComtrade(run, [...selected]);
+  }, [primaryRun, selected]);
+
   // PNG export rasterises the chart container (uPlot canvas + axis
   // labels + legend) via html-to-image. Returns null when the chart
   // hasn't laid out yet so the menu surfaces "No data to export".
@@ -850,7 +862,7 @@ export function TimeSeriesPlot({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Toolbar>{toolbar}</Toolbar>
           <RowEnd actions={actions}>
-            <ExportMenu formats={['csv', 'png']} disabled panel="time-series" label="Export plot" />
+            <ExportMenu formats={PLOT_FORMATS} disabled panel="time-series" label="Export plot" />
           </RowEnd>
         </div>
         {retainedRunCount > 0 ? (
@@ -884,7 +896,7 @@ export function TimeSeriesPlot({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Toolbar>{toolbar}</Toolbar>
           <RowEnd actions={actions}>
-            <ExportMenu formats={['csv', 'png']} disabled panel="time-series" label="Export plot" />
+            <ExportMenu formats={PLOT_FORMATS} disabled panel="time-series" label="Export plot" />
           </RowEnd>
         </div>
         <EmptyPlotMessage message="Select variables to plot" />
@@ -919,13 +931,15 @@ export function TimeSeriesPlot({
         </div>
         <RowEnd actions={actions}>
           <ExportMenu
-            formats={['csv', 'png']}
+            formats={PLOT_FORMATS}
             label="Export plot"
             panel="time-series"
-            caseName={caseName}
+            // A run kept from another case is named for its own case.
+            caseName={primaryRun?.caseName ?? caseName}
             runId={effectiveRunId}
             onExportCsv={onExportCsv}
             onExportPng={onExportPng}
+            onExportComtrade={onExportComtrade}
           />
         </RowEnd>
       </div>

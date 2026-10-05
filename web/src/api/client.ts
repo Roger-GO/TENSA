@@ -242,11 +242,17 @@ async function readJson(response: Response): Promise<unknown> {
   }
 }
 
-async function request<T>(
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
+
+/**
+ * Send the request and hand back the response, whatever its status. A fetch
+ * that fails or times out is a `NetworkError`.
+ */
+async function send(
+  method: Method,
   path: string,
-  options: RequestOptions = {},
-): Promise<T> {
+  options: RequestOptions,
+): Promise<{ response: Response; url: string }> {
   const { body, file, timeoutMs = DEFAULT_TIMEOUT_MS, signal, query } = options;
   const url = buildUrl(path, query);
   const headers = new Headers();
@@ -271,6 +277,29 @@ async function request<T>(
     throw new NetworkError(`Network error on ${method} ${url}`, err);
   }
   cleanup();
+  return { response, url };
+}
+
+/** The typed error for a non-2xx `response` whose body read as `parsed`. */
+function problemError(response: Response, parsed: unknown, url: string): ProblemDetailsError {
+  const problem = coerceProblemDetails(response.status, parsed);
+
+  if (response.status === 429) {
+    return new RateLimitedError(
+      problem,
+      parseRetryAfter(response.headers.get('Retry-After')),
+      parsed,
+      url,
+    );
+  }
+  if (response.status >= 500) {
+    return new ServerError(problem, parsed, url);
+  }
+  return new ProblemDetailsError(problem, parsed, url);
+}
+
+async function request<T>(method: Method, path: string, options: RequestOptions = {}): Promise<T> {
+  const { response, url } = await send(method, path, options);
 
   if (response.status === 204) {
     // No body; cast through unknown for the rare endpoint that returns 204.
@@ -283,20 +312,22 @@ async function request<T>(
     return parsed as T;
   }
 
-  const problem = coerceProblemDetails(response.status, parsed);
+  throw problemError(response, parsed, url);
+}
 
-  if (response.status === 429) {
-    throw new RateLimitedError(
-      problem,
-      parseRetryAfter(response.headers.get('Retry-After')),
-      parsed,
-      url,
-    );
-  }
-  if (response.status >= 500) {
-    throw new ServerError(problem, parsed, url);
-  }
-  throw new ProblemDetailsError(problem, parsed, url);
+/**
+ * A request whose answer is a file (a `.zip`), handed back as the `Blob` it is.
+ * A non-2xx answer is still JSON ProblemDetails and throws the same typed
+ * errors as every other call.
+ */
+async function requestBlob(
+  method: Method,
+  path: string,
+  options: RequestOptions = {},
+): Promise<Blob> {
+  const { response, url } = await send(method, path, options);
+  if (!response.ok) throw problemError(response, await readJson(response), url);
+  return await response.blob();
 }
 
 /** Public client surface — verb-named methods returning typed bodies. */
@@ -305,6 +336,8 @@ export const andesClient = {
   post: <T>(path: string, opts?: RequestOptions) => request<T>('POST', path, opts),
   put: <T>(path: string, opts?: RequestOptions) => request<T>('PUT', path, opts),
   delete: <T>(path: string, opts?: RequestOptions) => request<T>('DELETE', path, opts),
+  /** `POST` a JSON body and take the answer as a file. */
+  postBlob: (path: string, opts?: RequestOptions) => requestBlob('POST', path, opts),
 };
 
 /** Per-endpoint timeout knobs, exported so the queries layer can pass them. */
@@ -321,4 +354,6 @@ export const TIMEOUTS = {
   workspace: 10_000,
   /** A case file upload (up to the server's 32 MiB cap) to the local server. */
   upload: 60_000,
+  /** A run sent to be written as a COMTRADE record: seconds for a long run of many columns. */
+  comtradeExport: 120_000,
 } as const;

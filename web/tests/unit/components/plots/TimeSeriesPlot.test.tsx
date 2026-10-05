@@ -10,7 +10,7 @@
  * Unit 9 (v2.0) extends with multi-run overlay scenarios.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, screen, act, fireEvent } from '@testing-library/react';
+import { render, cleanup, screen, act, fireEvent, waitFor } from '@testing-library/react';
 
 const { constructSpy, destroySpy, setDataSpy, setCursorSpy, valToPosSpy, redrawSpy, FakeUPlot } =
   vi.hoisted(() => {
@@ -988,6 +988,68 @@ describe('TimeSeriesPlot axes and units', () => {
         '1,Bus_1_v,1.05',
         '1,Bus_1_a,0.5',
       ]);
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  it('exports the plotted series as a COMTRADE record the substrate writes', async () => {
+    const downloads = captureDownloads();
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/zip' },
+      }),
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+    try {
+      // As for the CSV: the plot is in kV and degrees, the record holds the stream.
+      useUnitsStore.setState({ mode: 'actual' });
+      seedRunWithBases('r1', ['Bus_1_v', 'Bus_1_a', 'Bus_2_v'], {
+        busKv: { '1': 230 },
+        freqHz: 50,
+      });
+      appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.05], Bus_1_a: [0, 0.5], Bus_2_v: [1, 1] });
+      usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v', 'Bus_1_a']));
+      render(<TimeSeriesPlot />);
+
+      await exportAs(userEvent.setup(), 'comtrade');
+
+      await waitFor(() => expect(downloads.filenames).toHaveLength(1));
+      const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+      expect(url).toBe('/api/comtrade');
+      const sent = JSON.parse(String(init.body)) as { channels: unknown[] };
+      expect(sent).toMatchObject({ t: [0, 1], frequency_hz: 50 });
+      // What is plotted, and not the bus that is not.
+      expect(sent.channels).toEqual([
+        { name: 'Bus_1_v', unit: 'pu', values: [1, 1.05] },
+        { name: 'Bus_1_a', unit: 'rad', values: [0, 0.5] },
+      ]);
+      expect(downloads.filenames[0]).toMatch(/_r1_time-series-comtrade_.*\.zip$/);
+      expect(downloads.blobs[0]!.type).toBe('application/zip');
+    } finally {
+      globalThis.fetch = originalFetch;
+      downloads.restore();
+    }
+  });
+
+  it('names the files of a run kept from another case for the case it was computed on', async () => {
+    const downloads = captureDownloads();
+    try {
+      useRunsStore.getState().startRun({
+        runId: 'r1',
+        tf: 10,
+        columnNames: ['Bus_1_v'],
+        caseName: 'kundur_full',
+      });
+      appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.05] });
+      usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v']));
+      render(<TimeSeriesPlot />);
+
+      await exportAs(userEvent.setup(), 'csv');
+
+      expect(downloads.filenames[0]).toMatch(/^kundur_full_r1_time-series_/);
     } finally {
       downloads.restore();
     }

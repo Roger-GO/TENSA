@@ -67,7 +67,11 @@ import { Button } from '@/components/ui/button';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { RUN_VALUES_UNITS_COMMENT, timeSeriesToCsv } from '@/components/export/exportToCsv';
+import { exportRunToComtrade } from '@/components/export/exportToComtrade';
 import { cn } from '@/lib/cn';
+
+/** What the run's data exports as: every column, as text or as a COMTRADE record. */
+const RUN_DATA_FORMATS = ['csv', 'comtrade'] as const;
 
 export interface ScrubControlProps {
   /**
@@ -300,6 +304,13 @@ export function ScrubControl({ runId, className }: ScrubControlProps) {
     });
   }, [run]);
 
+  // The same columns as a COMTRADE record (IEEE C37.111), which the substrate
+  // writes from the samples sent to it: the form fault-record viewers read.
+  const onExportComtrade = useCallback(
+    () => (run ? exportRunToComtrade(run, run.columnNames) : null),
+    [run],
+  );
+
   if (!effectiveRunId || !run) {
     return (
       <div
@@ -310,7 +321,7 @@ export function ScrubControl({ runId, className }: ScrubControlProps) {
         )}
       >
         <span>No active run</span>
-        <ExportMenu formats={['csv']} disabled panel="scrub" label="Export run data" />
+        <ExportMenu formats={RUN_DATA_FORMATS} disabled panel="scrub" label="Export run data" />
       </div>
     );
   }
@@ -450,13 +461,15 @@ export function ScrubControl({ runId, className }: ScrubControlProps) {
         </Button>
       )}
       <ExportMenu
-        formats={['csv']}
+        formats={RUN_DATA_FORMATS}
         label="Export run data"
         disabled={isEmptyRange}
         panel="scrub"
-        caseName={caseName}
+        // A run kept from another case is named for its own case.
+        caseName={run.caseName ?? caseName}
         runId={effectiveRunId}
         onExportCsv={onExportCsv}
+        onExportComtrade={onExportComtrade}
       />
       {/* Frame-count debug attribute (testing convenience). */}
       <span data-testid="scrub-control-seq" className="sr-only">
