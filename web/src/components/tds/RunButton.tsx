@@ -32,6 +32,7 @@ import { reportAbortError } from '@/lib/abortRun';
 import { toast } from '@/lib/toast';
 import { unitBasesOf } from '@/lib/units';
 import { describeScenario, runLabel } from '@/lib/runLabel';
+import { stemOf } from '@/lib/paths';
 import { cn } from '@/lib/cn';
 
 /**
@@ -368,6 +369,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     };
 
     const scenario = describeScenario(disturbances.map((d) => d.spec));
+    const casePath = useCaseStore.getState().selection?.primaryPath ?? null;
     const stream = new RunStream({
       sessionId,
       wsUrl: buildRunStreamWsUrl(),
@@ -378,6 +380,9 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       // What the run does to the system, so the legend and the history can
       // name it ("TDS #3 - fault bus 7") and not show its id.
       ...(scenario === undefined ? {} : { scenario }),
+      // Which case the run is of, so an export of it says so after another
+      // case is opened. A system with no file behind it has no name to keep.
+      ...(casePath === null ? {} : { caseName: stemOf(casePath) }),
       maxRateHz: tdsConfig.maxRateHz,
       onStart: () => {
         // ``RunStream`` already populated the runs slice via

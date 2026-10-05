@@ -844,6 +844,43 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     });
   });
 
+  it('records the name of the open case on the run it starts', async () => {
+    seedReady();
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('studies/kundur_full.xlsx'), addfiles: [] },
+    });
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+    serveShortRun(server, 'run-of-kundur');
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-of-kundur']?.state).toBe('done');
+    });
+    // The file's name without its directory or extension, as an export names a case.
+    expect(useRunsStore.getState().runs['run-of-kundur']?.caseName).toBe('kundur_full');
+  });
+
+  it('records no case name for a system with no file behind it', async () => {
+    seedReady();
+    useCaseStore.setState({ selection: { primaryPath: null, addfiles: [] } });
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+    serveShortRun(server, 'run-of-blank');
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-of-blank']?.state).toBe('done');
+    });
+    expect(useRunsStore.getState().runs['run-of-blank']).not.toHaveProperty('caseName');
+  });
+
   describe('naming the run it starts', () => {
     it('numbers the run and says which disturbance it was started with', async () => {
       seedReady({ withDisturbances: true });

@@ -194,6 +194,15 @@ describe('runs store — run numbers and scenarios', () => {
     expect(useRunsStore.getState().runs.a?.scenario).toBe('fault bus 7');
     expect(useRunsStore.getState().runs.b).not.toHaveProperty('scenario');
   });
+
+  it('keeps the name of the case it is given on the record, and none when it is given none', () => {
+    useRunsStore
+      .getState()
+      .startRun({ runId: 'a', tf: 1.0, columnNames: ['Bus_1_v'], caseName: 'ieee14' });
+    start('b');
+    expect(useRunsStore.getState().runs.a?.caseName).toBe('ieee14');
+    expect(useRunsStore.getState().runs.b).not.toHaveProperty('caseName');
+  });
 });
 
 describe('runs store — done / error / aborted / connection', () => {

@@ -117,6 +117,14 @@ export interface RunRecord {
    * the disturbances scheduled when it started. Absent when there were none.
    */
   scenario?: string;
+  /**
+   * The case the run was computed on: its file name without directory or
+   * extension (``ieee14``). Kept on the run for the same reason as ``bases``:
+   * an export of a kept run must name its own case, not the one open now.
+   * Absent for a system with no file behind it, and on a run recorded before
+   * this was kept.
+   */
+  caseName?: string;
   state: RunState;
   connection: RunConnectionStatus;
   /**
@@ -198,6 +206,8 @@ export interface StartRunPayload {
   bases?: UnitBases;
   /** What the run does to the system, in words; see ``RunRecord.scenario``. */
   scenario?: string;
+  /** The case the run is computed on; see ``RunRecord.caseName``. */
+  caseName?: string;
 }
 
 /** Runs kept from before a reload, and what went with them; see ``restoreRuns``. */
@@ -563,7 +573,7 @@ export const useRunsStore = create<RunsState>((set, get) => ({
   runCount: 0,
   retentionLimit: DEFAULT_RETENTION_LIMIT,
 
-  startRun: ({ runId, tf, columnNames, bases, scenario }) => {
+  startRun: ({ runId, tf, columnNames, bases, scenario, caseName }) => {
     const columns: Record<string, Float64Array> = {};
     for (const name of columnNames) columns[name] = new Float64Array(0);
     const runCount = get().runCount + 1;
@@ -579,6 +589,7 @@ export const useRunsStore = create<RunsState>((set, get) => ({
       ...(bases === undefined ? {} : { bases }),
       ordinal: runCount,
       ...(scenario === undefined ? {} : { scenario }),
+      ...(caseName === undefined ? {} : { caseName }),
       state: 'starting',
       connection: 'connected',
       abortedLocally: false,

@@ -212,6 +212,12 @@ export interface RunStreamOptions {
    * schedules nothing.
    */
   scenario?: string;
+  /**
+   * The name of the case the run is computed on (``ieee14``); recorded on the
+   * run so an export of it names its own case after another one is opened.
+   * Left off for a system with no file behind it.
+   */
+  caseName?: string;
   onStart?: (event: StreamStartEvent) => void;
   onFrame?: (frame: DecodedFrame) => void;
   onDone?: (event: DoneEvent) => void;
@@ -589,6 +595,7 @@ export class RunStream {
         columnNames,
         bases: this.opts.bases,
         ...(this.opts.scenario === undefined ? {} : { scenario: this.opts.scenario }),
+        ...(this.opts.caseName === undefined ? {} : { caseName: this.opts.caseName }),
       });
       this.opts.onStart?.({ runId, metadata });
     } else {

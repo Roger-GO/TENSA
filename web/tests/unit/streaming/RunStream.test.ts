@@ -397,6 +397,35 @@ describe('RunStream — frames name no columns', () => {
     expect(useRunsStore.getState().runs.r1).not.toHaveProperty('scenario');
   });
 
+  it('records the case the run is computed on, so an export of it can name it', async () => {
+    const onDone = vi.fn();
+    serveRun(['Bus_1_v'], [batch([0.0], { Bus_1_v: [1.0] })]);
+
+    const stream = new RunStream(
+      { sessionId: SESSION_ID, wsUrl: WS_URL, tdsArgs: { tf: 0.2 }, caseName: 'ieee14', onDone },
+      { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
+    );
+    stream.start();
+    for (let i = 0; i < 10 && onDone.mock.calls.length === 0; i += 1) await tick();
+
+    expect(useRunsStore.getState().runs.r1?.caseName).toBe('ieee14');
+  });
+
+  it('leaves the case name off a run of a system with no file behind it', async () => {
+    const onDone = vi.fn();
+    serveRun(['Bus_1_v'], [batch([0.0], { Bus_1_v: [1.0] })]);
+
+    const stream = new RunStream(
+      { sessionId: SESSION_ID, wsUrl: WS_URL, tdsArgs: { tf: 0.2 }, onDone },
+      { webSocketCtor: MockWebSocket as unknown as typeof WebSocket },
+    );
+    stream.start();
+    for (let i = 0; i < 10 && onDone.mock.calls.length === 0; i += 1) await tick();
+
+    expect(useRunsStore.getState().runs.r1).toBeDefined();
+    expect(useRunsStore.getState().runs.r1).not.toHaveProperty('caseName');
+  });
+
   it('reports a protocol error for a frame that is not as wide as var_columns', async () => {
     const onError = vi.fn();
     // stream_start names one column; the frame carries two values per row, so
