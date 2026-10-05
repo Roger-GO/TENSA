@@ -20,8 +20,8 @@
  *
  * The rated voltage (`Vn`), the two limits, area and zone are the case's own
  * values and can be changed in the table, before the case has been run: a limit
- * shown in kV is typed in kV and written per unit on the bus's rated voltage.
- * The rest are results.
+ * shown in kV is typed in kV and written per unit on the bus's rated voltage (the new
+ * one, when the same edit sets it). The rest are results.
  * p_inj / q_inj are computed client-side from the PF result's
  * per-device ``generator_outputs`` / ``load_consumption`` maps:
  * the net bus injection is Σ gen P − Σ load P at the bus (same for
@@ -44,7 +44,7 @@ import {
   busVoltageLimits,
   voltageStatusText,
 } from '@/components/sld/voltage';
-import type { PflowResult, TopologyEntry } from '@/api/types';
+import type { ParamValue, PflowResult, TopologyEntry } from '@/api/types';
 
 interface BusRow {
   idx: string;
@@ -187,7 +187,29 @@ function columnsFor(voltageUnit: DisplayUnit): ColumnConfig<BusRow>[] {
   ];
 }
 
-const EDIT_TARGET: GridEditTarget<BusRow> = { model: () => 'Bus', idx: (r) => r.idx };
+/**
+ * A limit typed in kV is turned to per unit on the rated voltage the row held when the
+ * cell was edited. A batch that also gives the bus a new ``Vn`` (a row pasted back
+ * from a spreadsheet) means the new one, so the limits are redone on it and land at
+ * the kV that were typed.
+ */
+function settleLimits(row: BusRow, params: Record<string, ParamValue>): Record<string, ParamValue> {
+  const vn = params.Vn;
+  if (row.toShown === 1 || typeof vn !== 'number' || !(vn > 0)) return params;
+  const settled = { ...params };
+  for (const key of ['vmin', 'vmax']) {
+    const pu = params[key];
+    // Twelve digits drop the rounding the two divisions add.
+    if (typeof pu === 'number') settled[key] = Number(((pu * row.toShown) / vn).toPrecision(12));
+  }
+  return settled;
+}
+
+const EDIT_TARGET: GridEditTarget<BusRow> = {
+  model: () => 'Bus',
+  idx: (r) => r.idx,
+  settle: settleLimits,
+};
 
 export interface BusesGridProps {
   className?: string;

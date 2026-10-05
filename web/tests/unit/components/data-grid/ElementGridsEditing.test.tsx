@@ -188,6 +188,35 @@ describe('<BusesGrid /> editing', () => {
     expect(second?.params.vmin).toBeCloseTo(0.95, 10);
   });
 
+  it('writes the limits of a kV paste on the rated voltage the same paste gives the bus', async () => {
+    const user = userEvent.setup();
+    useUnitsStore.setState({ mode: 'actual' });
+    render(<BusesGrid />);
+    // Bus 1 is rated 230 kV; the block rates it 220 kV with limits of 198 and 242 kV, which
+    // are 0.9 and 1.1 pu on the new rating (on the old one they would be 0.861 and 1.052).
+    await user.click(cell('buses', '1', 'vn'));
+    fireEvent.paste(screen.getByTestId('buses-grid'), {
+      clipboardData: { getData: () => '220\t\t198\t242\n' },
+    });
+    await waitFor(() => expect(client.put).toHaveBeenCalled());
+    expect(puts()).toEqual([
+      ['/sessions/s1/elements/Bus/1', { params: { Vn: 220, vmin: 0.9, vmax: 1.1 } }],
+    ]);
+  });
+
+  it('writes a per-unit paste of the rated voltage and limits as typed', async () => {
+    const user = userEvent.setup();
+    render(<BusesGrid />);
+    await user.click(cell('buses', '1', 'vn'));
+    fireEvent.paste(screen.getByTestId('buses-grid'), {
+      clipboardData: { getData: () => '220\t\t0.95\t1.05\n' },
+    });
+    await waitFor(() => expect(client.put).toHaveBeenCalled());
+    expect(puts()).toEqual([
+      ['/sessions/s1/elements/Bus/1', { params: { Vn: 220, vmin: 0.95, vmax: 1.05 } }],
+    ]);
+  });
+
   it('writes the rated voltage, area and zone', async () => {
     const user = userEvent.setup();
     render(<BusesGrid />);
