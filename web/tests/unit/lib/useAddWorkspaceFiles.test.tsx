@@ -50,6 +50,16 @@ function actionOf(spy: ToastSpy) {
   return opts.action;
 }
 
+/** The action labelled `label` on the most recent toast of `spy` that has one. */
+function actionLabelled(spy: ToastSpy, label: string) {
+  for (const call of [...spy.mock.calls].reverse()) {
+    const action = (call[1] as { action?: { label: string; onClick: () => void } } | undefined)
+      ?.action;
+    if (action?.label === label) return action;
+  }
+  return undefined;
+}
+
 let success: ToastSpy;
 let warning: ToastSpy;
 let error: ToastSpy;
@@ -255,13 +265,14 @@ describe('useAddWorkspaceFiles', () => {
     it('is left alone, with a Replace button that sends it again over the old one', async () => {
       const { result } = renderHook(() => useAddWorkspaceFiles());
       const f = file('ieee14.raw');
-      await act(() => result.current.addFiles([f, file('a.dyr')]));
+      await act(() => result.current.addFiles([f, file('b.xlsx')]));
       expect(warning).toHaveBeenCalledWith(
         'ieee14.raw is already in the workspace.',
         expect.objectContaining({ duration: 15_000 }),
       );
-      // The other file was added all the same, and the taken one did not open.
-      expect(success).toHaveBeenCalledWith('Added a.dyr to the workspace.', expect.anything());
+      // The other file was added all the same. The taken case counts as dropped, so
+      // two cases came together and neither opens.
+      expect(success).toHaveBeenCalledWith('Added b.xlsx to the workspace.', expect.anything());
       expect(loadCase).not.toHaveBeenCalled();
       expect(upload).toHaveBeenCalledTimes(2);
 
@@ -318,6 +329,185 @@ describe('useAddWorkspaceFiles', () => {
         await Promise.resolve();
       });
       expect(error).toHaveBeenLastCalledWith('Could not replace ieee14.raw: disk full');
+    });
+  });
+
+  describe('a drop where only some of the names are taken', () => {
+    /** An upload that answers 409 for the names in `taken` until they are replaced. */
+    function taking(...taken: string[]) {
+      upload.mockImplementation(({ file: f, overwrite }: { file: File; overwrite?: boolean }) =>
+        taken.includes(f.name) && !overwrite
+          ? Promise.reject(problem(409, `'${f.name}' already exists in the workspace`))
+          : Promise.resolve({ ...stored(f.name), replaced: overwrite === true }),
+      );
+    }
+    const pair = { primary_path: 'x.raw', addfiles: ['x.dyr'] };
+
+    it('opens a new .raw with the .dyr that is already there, and says the .dyr is the old copy once replaced', async () => {
+      taking('x.dyr');
+      const { result } = renderHook(() => useAddWorkspaceFiles());
+      await act(() => result.current.addFiles([file('x.raw'), file('x.dyr')]));
+      expect(loadCase).toHaveBeenCalledTimes(1);
+      expect(loadCase.mock.calls[0]?.[0]).toEqual({ sessionId: 's1', request: pair });
+      expect(success).toHaveBeenCalledWith('Added x.raw to the workspace.', expect.anything());
+      expect(warning).toHaveBeenCalledWith(
+        'x.dyr is already in the workspace.',
+        expect.objectContaining({ action: expect.objectContaining({ label: 'Replace' }) }),
+      );
+
+      // Replace the .dyr that the open case was loaded with: the case holds the old one.
+      await act(async () => {
+        actionLabelled(warning, 'Replace')?.onClick();
+        await Promise.resolve();
+      });
+      expect(warning).toHaveBeenLastCalledWith(
+        'Replaced x.dyr. The open case still holds the old copy.',
+        expect.objectContaining({ action: expect.objectContaining({ label: 'Reload case' }) }),
+      );
+      act(() => actionLabelled(warning, 'Reload case')?.onClick());
+      expect(reload).toHaveBeenCalledWith('s1');
+    });
+
+    it('offers to open the new .raw with the .dyr that is already there when another case is open', async () => {
+      taking('x.dyr');
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('kundur.raw'), addfiles: [] },
+      });
+      const { result } = renderHook(() => useAddWorkspaceFiles());
+      await act(() => result.current.addFiles([file('x.raw'), file('x.dyr')]));
+      expect(loadCase).not.toHaveBeenCalled();
+      await act(async () => {
+        actionLabelled(success, 'Open')?.onClick();
+        await Promise.resolve();
+      });
+      expect(loadCase.mock.calls[0]?.[0]).toEqual({ sessionId: 's1', request: pair });
+    });
+
+    it('opens a .raw that is already there with the new .dyr dropped with it', async () => {
+      taking('x.raw');
+      const { result } = renderHook(() => useAddWorkspaceFiles());
+      await act(() => result.current.addFiles([file('x.raw'), file('x.dyr')]));
+      expect(success).toHaveBeenCalledWith('Added x.dyr to the workspace.', expect.anything());
+      expect(loadCase.mock.calls[0]?.[0]).toEqual({ sessionId: 's1', request: pair });
+      expect(warning).toHaveBeenCalledWith(
+        'x.raw is already in the workspace.',
+        expect.objectContaining({ action: expect.objectContaining({ label: 'Replace' }) }),
+      );
+    });
+
+    it('offers the .raw it replaced together with the .dyr that came with it, not on its own', async () => {
+      taking('x.raw');
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('kundur.raw'), addfiles: [] },
+      });
+      const { result } = renderHook(() => useAddWorkspaceFiles());
+      await act(() => result.current.addFiles([file('x.raw'), file('x.dyr')]));
+      await act(async () => {
+        actionLabelled(warning, 'Replace')?.onClick();
+        await Promise.resolve();
+      });
+      expect(success).toHaveBeenLastCalledWith(
+        'Replaced x.raw in the workspace.',
+        expect.anything(),
+      );
+      expect(loadCase).not.toHaveBeenCalled();
+      await act(async () => {
+        actionLabelled(success, 'Open')?.onClick();
+        await Promise.resolve();
+      });
+      expect(loadCase.mock.calls[0]?.[0]).toEqual({ sessionId: 's1', request: pair });
+    });
+
+    it('opens nothing when the whole pair is taken, until it is replaced, and then opens the pair', async () => {
+      taking('x.raw', 'x.dyr');
+      const { result } = renderHook(() => useAddWorkspaceFiles());
+      await act(() => result.current.addFiles([file('x.raw'), file('x.dyr')]));
+      expect(loadCase).not.toHaveBeenCalled();
+      expect(success).not.toHaveBeenCalled();
+      await act(async () => {
+        actionLabelled(warning, 'Replace')?.onClick();
+        await Promise.resolve();
+      });
+      expect(success).toHaveBeenLastCalledWith('Replaced 2 files in the workspace.', {
+        description: 'x.raw and x.dyr',
+      });
+      expect(loadCase.mock.calls[0]?.[0]).toEqual({ sessionId: 's1', request: pair });
+    });
+  });
+
+  describe('a toast button that is pressed later', () => {
+    const other = { primaryPath: parseWorkspacePath('kundur.raw'), addfiles: [] };
+
+    it('opens in the session that is current when it is pressed', async () => {
+      useCaseStore.setState({ selection: other });
+      const { result } = renderHook(() => useAddWorkspaceFiles());
+      await act(() => result.current.addFiles([file('ieee14.raw')]));
+      const open = actionLabelled(success, 'Open');
+      // The session is recreated while the toast is up.
+      act(() => useSessionStore.setState({ sessionId: parseSessionId('s2') }));
+      await act(async () => {
+        open?.onClick();
+        await Promise.resolve();
+      });
+      expect(loadCase.mock.calls[0]?.[0]).toMatchObject({ sessionId: 's2' });
+    });
+
+    it('does not load a case that has been opened since', async () => {
+      useCaseStore.setState({ selection: other });
+      const { result } = renderHook(() => useAddWorkspaceFiles());
+      await act(() => result.current.addFiles([file('ieee14.raw')]));
+      const open = actionLabelled(success, 'Open');
+      act(() =>
+        useCaseStore.setState({
+          selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
+        }),
+      );
+      await act(async () => {
+        open?.onClick();
+        await Promise.resolve();
+      });
+      expect(loadCase).not.toHaveBeenCalled();
+    });
+
+    const stale = {
+      selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
+    };
+
+    async function replaceOpenCase() {
+      upload.mockImplementation(({ file: f, overwrite }: { file: File; overwrite?: boolean }) =>
+        overwrite
+          ? Promise.resolve({ ...stored(f.name), replaced: true })
+          : Promise.reject(problem(409, 'taken')),
+      );
+      useCaseStore.setState(stale);
+      const { result } = renderHook(() => useAddWorkspaceFiles());
+      await act(() => result.current.addFiles([file('ieee14.raw')]));
+      await act(async () => {
+        actionLabelled(warning, 'Replace')?.onClick();
+        await Promise.resolve();
+      });
+      return actionLabelled(warning, 'Reload case');
+    }
+
+    it('reloads in the session that is current when it is pressed', async () => {
+      const reloadAction = await replaceOpenCase();
+      act(() => useSessionStore.setState({ sessionId: parseSessionId('s2') }));
+      act(() => reloadAction?.onClick());
+      expect(reload).toHaveBeenCalledWith('s2');
+    });
+
+    it('does not reload a different case that was opened since', async () => {
+      const reloadAction = await replaceOpenCase();
+      act(() => useCaseStore.setState({ selection: other }));
+      act(() => reloadAction?.onClick());
+      expect(reload).not.toHaveBeenCalled();
+    });
+
+    it('does not reload when the session has gone', async () => {
+      const reloadAction = await replaceOpenCase();
+      act(() => useSessionStore.setState({ sessionId: null }));
+      act(() => reloadAction?.onClick());
+      expect(reload).not.toHaveBeenCalled();
     });
   });
 });

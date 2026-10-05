@@ -125,6 +125,56 @@ describe('<WorkspaceDropTarget />', () => {
     expect(addFiles).not.toHaveBeenCalled();
   });
 
+  describe('while a dialog is open', () => {
+    const raw = () => new File(['raw'], 'ieee14.raw');
+
+    it('refuses the drag, with no hint and no files added, but still cancels the drop', () => {
+      render(<div role="dialog" data-state="open" data-testid="dialog" />);
+      const dialog = screen.getByTestId('dialog');
+      const files = dataTransfer(['Files'], [raw()]);
+      expect(drag('dragEnter', dialog, files).defaultPrevented).toBe(true);
+      expect(overlay()).toBeNull();
+      expect(drag('dragOver', dialog, files).defaultPrevented).toBe(true);
+      expect(files.dropEffect).toBe('none');
+      expect(drag('drop', dialog, files).defaultPrevented).toBe(true);
+      expect(addFiles).not.toHaveBeenCalled();
+    });
+
+    it('refuses a drop beside the dialog as well, wherever on the window it lands', () => {
+      render(<div role="dialog" data-state="open" />);
+      drag('drop', screen.getByTestId('somewhere'), dataTransfer(['Files'], [raw()]));
+      expect(addFiles).not.toHaveBeenCalled();
+    });
+
+    it('leaves a file input in the dialog to take its own drop', () => {
+      render(
+        <div role="dialog" data-state="open">
+          <input type="file" data-testid="profile-input" />
+        </div>,
+      );
+      const input = screen.getByTestId('profile-input');
+      const files = dataTransfer(['Files'], [new File(['a,b'], 'profile.csv')]);
+      expect(drag('drop', input, files).defaultPrevented).toBe(false);
+      expect(addFiles).not.toHaveBeenCalled();
+    });
+
+    it('takes the drop again once the dialog has closed', () => {
+      const { rerender } = render(<div role="dialog" data-state="open" />);
+      rerender(<div role="dialog" data-state="closed" />);
+      drag('drop', screen.getByTestId('somewhere'), dataTransfer(['Files'], [raw()]));
+      expect(addFiles).toHaveBeenCalledTimes(1);
+    });
+
+    it('takes the drop with a popover open, which is not modal', () => {
+      render(<div role="dialog" data-state="open" data-side="bottom" />);
+      const files = dataTransfer(['Files'], [raw()]);
+      drag('dragOver', screen.getByTestId('somewhere'), files);
+      expect(files.dropEffect).toBe('copy');
+      drag('drop', screen.getByTestId('somewhere'), files);
+      expect(addFiles).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('stops listening when it unmounts', () => {
     cleanup();
     const raw = new File(['raw'], 'ieee14.raw');

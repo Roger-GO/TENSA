@@ -11,7 +11,10 @@ import { useAddWorkspaceFiles } from '@/lib/useAddWorkspaceFiles';
  * own type and goes on to the canvas's drop zone), and a drag over a file input is
  * left to the input, which takes a drop itself. Claiming the drag at all matters
  * as much as acting on it: a drop the page does not cancel makes the browser leave
- * the app to show the file, and with it the case, the runs and the plots.
+ * the app to show the file, and with it the case, the runs and the plots. While a
+ * modal dialog is open the drag is still claimed but refused (no hint, a "no drop"
+ * cursor, nothing added): the dialog is what the user is answering, and a file
+ * dropped for it (the profile import takes a `.csv` or `.xlsx`) is not a case.
  *
  * While files are over the window a hint covers it. The drag events fire on every
  * element the pointer crosses, so enters and leaves are counted: the hint goes
@@ -23,6 +26,16 @@ function hasFiles(event: DragEvent): boolean {
 
 function overFileInput(event: DragEvent): boolean {
   return event.target instanceof Element && event.target.closest('input[type="file"]') !== null;
+}
+
+/**
+ * An open modal dialog. Radix gives a popover `role="dialog"` as well, but it is
+ * not modal, carries `data-side`, and has no business turning a drop away.
+ */
+const MODAL_DIALOG_OPEN = '[role="dialog"][data-state="open"]:not([data-side])';
+
+function modalDialogOpen(): boolean {
+  return document.querySelector(MODAL_DIALOG_OPEN) !== null;
 }
 
 export function WorkspaceDropTarget() {
@@ -43,6 +56,7 @@ export function WorkspaceDropTarget() {
     const onDragEnter = (event: DragEvent) => {
       if (!hasFiles(event) || overFileInput(event)) return;
       event.preventDefault();
+      if (modalDialogOpen()) return;
       depth += 1;
       setDragging(true);
     };
@@ -50,7 +64,9 @@ export function WorkspaceDropTarget() {
       if (!hasFiles(event) || overFileInput(event)) return;
       // Without this the browser shows "no drop" and never fires `drop`.
       event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = modalDialogOpen() ? 'none' : 'copy';
+      }
     };
     const onDragLeave = (event: DragEvent) => {
       if (!hasFiles(event) || overFileInput(event)) return;
@@ -61,6 +77,7 @@ export function WorkspaceDropTarget() {
       if (!hasFiles(event) || overFileInput(event)) return;
       event.preventDefault();
       end();
+      if (modalDialogOpen()) return;
       const files = Array.from(event.dataTransfer?.files ?? []);
       if (files.length > 0) void latest.current(files);
     };
