@@ -729,6 +729,59 @@ describe('<DataGrid /> paste', () => {
   });
 });
 
+describe('<DataGrid /> cells on the virtualized path', () => {
+  // More than 50 rows (an IEEE 118 or 300 case) are drawn by a windowed list, and the
+  // editor lives inside one of its rows.
+  const MANY: Row[] = Array.from({ length: 60 }, (_, i) => ({
+    id: `r${i}`,
+    name: `Row ${i}`,
+    kind: 'PV',
+    p: i + 0.5,
+    q: 0.25,
+    kv: 230,
+  }));
+
+  it('is the windowed list that is drawn', () => {
+    const { editing } = makeEditing();
+    renderGrid({ editing, rows: MANY });
+    expect(screen.getByTestId('dg-virtual')).toBeInTheDocument();
+  });
+
+  it('edits a cell, carries Tab on to the next one in the row, and writes both', async () => {
+    const user = userEvent.setup();
+    const { editing, commit } = makeEditing();
+    renderGrid({ editing, rows: MANY });
+    await user.dblClick(cell('r3', 'p'));
+    expect(cell('r3', 'p')).toContainElement(screen.getByTestId('dg-editor'));
+    await user.keyboard('9.5{Tab}');
+    expect(cell('r3', 'q')).toContainElement(screen.getByTestId('dg-editor'));
+    await user.keyboard('1.25{Enter}');
+    const written = commit.mock.calls.map((call) =>
+      (call[0] as CellEdit<Row>[]).map((e) => `${e.rowId}.${e.column.key}=${e.value}`),
+    );
+    expect(written).toEqual([['r3.p=9.5'], ['r3.q=1.25']]);
+    expect(screen.queryByTestId('dg-editor')).not.toBeInTheDocument();
+  });
+
+  it('pastes a block down the rows from the cursor cell', async () => {
+    const user = userEvent.setup();
+    const { editing, commit } = makeEditing();
+    renderGrid({ editing, rows: MANY });
+    await user.click(cell('r2', 'p'));
+    fireEvent.paste(screen.getByTestId('dg'), {
+      clipboardData: { getData: () => '10\t20\n30\t40\n' },
+    });
+    await vi.waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
+    const edits = commit.mock.calls[0]?.[0] as CellEdit<Row>[];
+    expect(edits.map((e) => `${e.rowId}.${e.column.key}=${e.value}`)).toEqual([
+      'r2.p=10',
+      'r2.q=20',
+      'r3.p=30',
+      'r3.q=40',
+    ]);
+  });
+});
+
 describe('<DataGrid /> width', () => {
   it('scrolls sideways when every column has a width, and the table is as wide as they add up to', () => {
     const wide: ColumnConfig<Row>[] = COLUMNS.map((c) => ({ ...c, width: 100 }));
