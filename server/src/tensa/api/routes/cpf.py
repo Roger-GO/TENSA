@@ -113,7 +113,9 @@ class CpfRunRequest(BaseModel):
             "``lambda = 1`` is twice the base value. ``'custom'`` moves the "
             "devices named in ``load_increase`` and ``generator_increase`` by "
             "the amounts given there, and ``lambda`` counts multiples of "
-            "them. The slack generator is never part of a direction."
+            "them. The slack generator is never part of a direction, and "
+            "only PQ loads and PV generators move: ANDES's routine leaves "
+            "every other load model as it is."
         ),
     )
     load_increase: list[CpfLoadIncrease] | None = Field(
@@ -143,7 +145,11 @@ class CpfRunRequest(BaseModel):
             "flow as solved, so run that with ``enforce_q_limits`` as well: "
             "the request is refused with 409 when the solved power flow "
             "leaves a generator past a limit. Without it, the generators the "
-            "power flow holds at a limit stay held and no other switches."
+            "power flow holds at a limit stay held and no other switches. A "
+            "generator held at a limit stays held for the rest of the path "
+            "(ANDES's limiter does not let go); ``would_release_step`` of its "
+            "entry in ``limit_events`` says from where a real exciter would "
+            "have."
         ),
     )
     stop_at: Literal["nose", "full"] = Field(

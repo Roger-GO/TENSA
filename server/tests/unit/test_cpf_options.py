@@ -29,7 +29,7 @@ from tensa.core.cpf_options import (
     validate_cpf_options,
 )
 from tensa.core.errors import CpfPrerequisiteError, CpfRequestError
-from tensa.core.wrapper import _first_turn
+from tensa.core.wrapper import _build_cpf_result, _first_turn
 
 pytestmark = pytest.mark.unit
 
@@ -782,6 +782,23 @@ def test_a_generator_with_one_value_for_both_limits_has_nothing_to_release_to() 
     assert path is not None
     _, events = path.traces([0.0, 0.1, 0.2], nose_idx=-1)
     assert events[0].would_release_step is None
+
+
+def test_a_qv_run_that_traced_nothing_reports_no_generators() -> None:
+    """``run_qv`` leaves its arrays unset when the continuation fails. The
+    generators were still read at the points the routine kept, but there is no
+    curve to put them on, and a list of generators with nothing in it would say
+    otherwise."""
+    ss = _studied()
+    with cpf_run_applied(ss, enforce_q_limits=False) as run:
+        _three_points(ss, run)
+    cpf = ss.CPF
+    cpf.V = np.array([[1.0, 1.0, 1.0], [0.98, 0.96, 0.94]])
+    cpf.qv_q, cpf.qv_v, cpf.qv_bus = None, None, None
+    cpf.done_msg, cpf.events, cpf.max_lam = "Corrector failed at lambda=0.4", [], 0.4
+    result = _build_cpf_result(ss, mode="qv", ok=True, qv_bus="5", run=run)  # type: ignore[arg-type]
+    assert result.lambdas == [] and result.truncated is True
+    assert result.generators == [] and result.limit_events == []
 
 
 # ---- where the nose is ------------------------------------------------------

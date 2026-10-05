@@ -5828,7 +5828,10 @@ def _build_cpf_result(
     def _generators(
         lambdas: list[float], nose_idx: int
     ) -> tuple[list[CpfGeneratorTrace], list[CpfLimitEvent]]:
-        return path.traces(lambdas, nose_idx) if path is not None else ([], [])
+        # No steps, no traces: a QV run that failed has no curve to read them on.
+        if path is None or not lambdas:
+            return [], []
+        return path.traces(lambdas, nose_idx)
 
     if mode == "qv":
         q_arr = getattr(cpf, "qv_q", None)
