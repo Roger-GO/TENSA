@@ -80,6 +80,7 @@ from tensa.core.errors import (
     short_repr,
 )
 from tensa.core.messages import attach_log, begin_command, install_capture, uninstall_capture
+from tensa.core.pflow_notices import log_pflow_notices
 
 # AndesAppError catches the new ElementValidationError /
 # ElementNotFoundError / SystemAlreadyLoadedError subclasses and forwards
@@ -485,7 +486,12 @@ def _handle_run_pflow(wrapper: Wrapper, args: dict[str, Any]) -> Any:
         for key in ("tolerance", "max_iterations", "flat_start", "enforce_q_limits")
         if args.get(key) is not None
     }
-    return _serialize_dataclass(wrapper.run_pflow(**options))
+    result = wrapper.run_pflow(**options)
+    if result.converged:
+        # Two effects of a solved power flow that ANDES does not log (a generator held
+        # at a reactive limit, a load turned into an impedance): say them as warnings.
+        log_pflow_notices(wrapper._require_loaded())  # noqa: SLF001
+    return _serialize_dataclass(result)
 
 
 def _handle_generate_report(wrapper: Wrapper, args: dict[str, Any]) -> Any:

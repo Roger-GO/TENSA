@@ -282,7 +282,11 @@ class SessionMessageSchema(BaseModel):
     )
     logger: str = Field(
         ...,
-        description="Name of the ANDES logger that said it (``andes.routines.pflow``).",
+        description=(
+            "Name of the logger that said it: an ANDES module (``andes.routines.pflow``), or "
+            "``tensa.notice`` for what the server worked out itself because ANDES does not "
+            "log it (a generator switched from PV to PQ, a load turned into an impedance)."
+        ),
     )
     source: str = Field(
         ...,

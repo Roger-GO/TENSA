@@ -130,6 +130,28 @@ async def test_a_power_flow_that_does_not_converge_leaves_an_error(
     assert len(everything) > 1
 
 
+async def test_a_generator_held_at_a_reactive_limit_is_a_warning(
+    client: tuple[httpx.AsyncClient, SessionManager],
+) -> None:
+    ac, _mgr = client
+    sid = await _loaded_session(ac)
+    solved = await ac.post(f"/api/sessions/{sid}/pflow", json={"enforce_q_limits": True})
+    assert solved.status_code == 200, solved.text
+    assert solved.json()["converged"] is True
+
+    warnings = await _messages(ac, sid, level="warning")
+
+    (notice,) = warnings
+    assert notice["level"] == "warning"
+    assert notice["source"] == "run_pflow"
+    assert notice["logger"] == "tensa.notice"
+    assert "switched from PV to PQ" in notice["text"]
+    # Without enforcement the same case says nothing of the kind.
+    plain = await _loaded_session(ac)
+    await ac.post(f"/api/sessions/{plain}/pflow", json={})
+    assert await _messages(ac, plain, level="warning") == []
+
+
 async def test_the_events_of_a_time_domain_run_are_logged(
     client: tuple[httpx.AsyncClient, SessionManager],
 ) -> None:

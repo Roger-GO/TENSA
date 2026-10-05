@@ -15,8 +15,11 @@ too, so a long run's messages arrive while it goes on. The server side
 (:class:`MessageLog`, one per session) numbers the messages as they arrive and
 keeps the latest, and ``GET /sessions/{id}/messages`` serves them.
 
+The capture also listens to ``tensa.notice``, where the worker says what ANDES
+does not log itself (:mod:`tensa.core.pflow_notices`).
+
 Each message carries the level (``info``, ``warning`` or ``error``), the name of
-the ANDES logger that said it, the command that was running (``run_pflow``,
+the logger that said it, the command that was running (``run_pflow``,
 ``load_case``), the time and the text, which may span lines (ANDES logs tables).
 A message that repeats the one before it, as a solver's warning does on every
 step, is kept once with a count.
@@ -41,9 +44,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
+# What the worker says to the user itself, for what ANDES does and does not log
+# (``core/pflow_notices.py``): a PV bus held at a reactive limit, a load turned into
+# an impedance.
+NOTICE_LOGGER: Final = "tensa.notice"
+
 # The loggers whose records the worker captures. ANDES's own modules log under
 # ``andes.<package>.<module>``, so the one handler on the parent sees them all.
-CAPTURED_LOGGERS: Final[tuple[str, ...]] = ("andes",)
+CAPTURED_LOGGERS: Final[tuple[str, ...]] = ("andes", NOTICE_LOGGER)
 
 MessageLevel = Literal["info", "warning", "error"]
 LEVELS: Final[tuple[MessageLevel, ...]] = ("info", "warning", "error")

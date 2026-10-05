@@ -67,7 +67,8 @@ Jobs:            GET /sessions/{id}/jobs[?kind=&status=] · GET/DELETE /sessions
 Messages:        GET /sessions/{id}/messages[?after=&level=&limit=] · DELETE /sessions/{id}/messages  (what ANDES logged while a command ran:
                  {"messages":[{"seq","time","level","logger","source","text","repeat"}],"first_seq","last_seq","next_after","dropped"};
                  level is info, warning or error, source the command (load_case, run_pflow, run_tds, ...); level=warning returns warnings and
-                 errors only; pass next_after back as after to read on; a read does not wait for a run in progress)
+                 errors only; logger tensa.notice marks what the server worked out itself, a generator held at a Q limit or a load turned into an impedance, which ANDES does not log;
+                 pass next_after back as after to read on; a read does not wait for a run in progress)
 Clone editing:   POST /sessions/{id}/case/clone (start copy-on-write edit)
                  PUT /sessions/{id}/case/clone/params/{model}/{idx}/{param} (edit one param)
                  POST .../case/clone/undo · .../case/clone/redo · .../case/clone/reset · .../case/clone/save-as

@@ -14,6 +14,7 @@ the rows themselves.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
@@ -123,18 +124,48 @@ def test_the_request_body_refuses_what_the_wrapper_would(payload: dict[str, Any]
         PflowRunRequest(**payload)
 
 
+@dataclass(frozen=True)
+class _Solved:
+    """The one field of a ``PflowResult`` the worker's handler reads."""
+
+    converged: bool = False
+
+
 def test_the_worker_forwards_only_the_settings_the_request_names() -> None:
     calls: list[dict[str, Any]] = []
 
     class _Wrapper:
         def run_pflow(self, **options: Any) -> Any:
             calls.append(options)
-            return PflowSettings(1e-6, 25, False, False)
+            return _Solved()
 
     handler = worker._handle_run_pflow
     handler(_Wrapper(), {})  # type: ignore[arg-type]
     handler(_Wrapper(), {"tolerance": None, "flat_start": False, "max_iterations": 40})  # type: ignore[arg-type]
     assert calls == [{}, {"flat_start": False, "max_iterations": 40}]
+
+
+def test_the_worker_reads_the_limiter_flags_only_after_a_converged_solve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = object()
+    read: list[object] = []
+    monkeypatch.setattr(worker, "log_pflow_notices", read.append)
+
+    class _Wrapper:
+        def __init__(self, converged: bool) -> None:
+            self.converged = converged
+
+        def run_pflow(self, **options: Any) -> Any:
+            return _Solved(self.converged)
+
+        def _require_loaded(self) -> object:
+            return system
+
+    worker._handle_run_pflow(_Wrapper(False), {})  # type: ignore[arg-type]
+    assert read == []
+    worker._handle_run_pflow(_Wrapper(True), {})  # type: ignore[arg-type]
+    assert read == [system]
 
 
 # ---- applying and restoring ------------------------------------------------
