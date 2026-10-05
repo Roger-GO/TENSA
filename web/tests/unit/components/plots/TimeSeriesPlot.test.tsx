@@ -10,7 +10,7 @@
  * Unit 9 (v2.0) extends with multi-run overlay scenarios.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, screen, act } from '@testing-library/react';
+import { render, cleanup, screen, act, fireEvent } from '@testing-library/react';
 
 const { constructSpy, destroySpy, setDataSpy, setCursorSpy, valToPosSpy, redrawSpy, FakeUPlot } =
   vi.hoisted(() => {
@@ -22,10 +22,30 @@ const { constructSpy, destroySpy, setDataSpy, setCursorSpy, valToPosSpy, redrawS
     const redrawSpy = vi.fn();
     class FakeUPlot {
       root: HTMLElement;
+      /** The element over the plot area, which is where uPlot takes the pointer. */
+      over: HTMLElement;
+      scales: Record<string, { min?: number; max?: number }>;
+      cursor = { left: -10 };
       constructor(opts: unknown, data: unknown, target: HTMLElement) {
         constructSpy(opts, data, target);
         this.root = document.createElement('div');
+        const wrap = document.createElement('div');
+        this.over = document.createElement('div');
+        this.over.className = 'u-over';
+        wrap.appendChild(this.over);
+        this.root.appendChild(wrap);
         target.appendChild(this.root);
+        const t = (data as ArrayLike<number>[])[0] ?? [];
+        this.scales = { x: { min: t[0], max: t[t.length - 1] } };
+        // The plugins are the code under test where a chart is clicked: run their
+        // ``ready`` hook as uPlot does, on this stand-in.
+        const { plugins = [] } = opts as { plugins?: { hooks: Record<string, unknown> }[] };
+        for (const plugin of plugins) {
+          (plugin.hooks['ready'] as ((u: unknown) => void) | undefined)?.(this);
+        }
+      }
+      posToVal(px: number): number {
+        return px / 100;
       }
       setData(data: unknown) {
         setDataSpy(data);
@@ -1347,6 +1367,52 @@ describe('TimeSeriesPlot: A/B cursors', () => {
 
     await user.click(screen.getByTestId('plot-cursors-toggle'));
     expect(screen.getByRole('group', { name: 'Bus voltage and angle chart' })).toBeInTheDocument();
+  });
+
+  it('names the element over the plot, the one a click lands on, and a click on it places a cursor', () => {
+    seedVolts();
+    act(() => usePlotStore.getState().setCursorsArmed(true));
+    render(<TimeSeriesPlot />);
+    const chart = () => screen.getByRole('group', { name: /^Bus voltage and angle chart/ });
+    const stored = () => usePlotStore.getState().cursorsByRun['r1'];
+
+    // The name is on the plot area, not on the box around it, whose middle can be
+    // an axis once a legend wraps.
+    expect(chart()).toHaveClass('u-over');
+
+    // A click 150 px into the plot, which maps 100 px to one second.
+    fireEvent.click(chart(), { clientX: 150, detail: 1 });
+    expect(stored()).toEqual({ a: 1.5, b: null });
+    expect(chart()).toHaveAccessibleName(
+      'Bus voltage and angle chart. Click again to place cursor B',
+    );
+
+    // What a script's click, or one that assistive technology makes, is: no position
+    // at all, which stands for the middle of the time shown (the run covers 0 to 2 s).
+    act(() => chart().click());
+    expect(stored()).toEqual({ a: 1.5, b: 1 });
+  });
+
+  it('keeps the name on the plot area when a chart is rebuilt', () => {
+    seedRun('r1', ['Bus_1_v', 'Bus_1_a', 'Bus_2_v']);
+    appendRows('r1', [0, 1], { Bus_1_v: [1, 1], Bus_1_a: [0, 0], Bus_2_v: [1, 1] });
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v', 'Bus_1_a']));
+    render(<TimeSeriesPlot />);
+    const built = constructSpy.mock.calls.length;
+    expect(screen.getByRole('group', { name: 'Bus voltage and angle chart' })).toHaveClass(
+      'u-over',
+    );
+
+    // Another series on the same chart: the chart is built again, with a new
+    // element over its plot, and its title has not changed.
+    act(() =>
+      usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v', 'Bus_1_a', 'Bus_2_v'])),
+    );
+
+    expect(constructSpy.mock.calls.length).toBeGreaterThan(built);
+    expect(screen.getByRole('group', { name: 'Bus voltage and angle chart' })).toHaveClass(
+      'u-over',
+    );
   });
 
   describe('typing a time', () => {

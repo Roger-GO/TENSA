@@ -497,6 +497,21 @@ function GroupChart({
     uplotRef.current?.redraw(false, true);
   }, [cursors.a, cursors.b, theme]);
 
+  // The chart is a canvas, which a screen reader or a script cannot find or press.
+  // What takes a click is the element over the plot area (``over``), so that is the
+  // element that is named: a click aimed at the name lands where the cursor plugin
+  // listens, and the box it clicks in the middle of is the plot, not the legend and
+  // axes around it (a chart whose legend wraps has those at the middle of the whole
+  // chart). It says what the next click does while the mode is on. A chart that has
+  // just been rebuilt has a new ``over``, so ``withCursors`` is a dependency too.
+  const chartName = cursorsArmed ? `${title} chart. ${cursorHint(cursors)}` : `${title} chart`;
+  useEffect(() => {
+    const over = uplotRef.current?.over;
+    if (!over) return;
+    over.setAttribute('role', 'group');
+    over.setAttribute('aria-label', chartName);
+  }, [withCursors, chartName]);
+
   useEffect(() => {
     const inst = uplotRef.current;
     if (!inst) return;
@@ -564,13 +579,7 @@ function GroupChart({
           card (flex), not sized from its own content, and the chart fills it
           absolutely: ``UPlot`` sizes itself to this box, and a box that grew
           with the chart would make it grow again. */}
-      <div
-        role="group"
-        // The chart is a canvas, which a screen reader or a script cannot find or
-        // press; this names it and says what a click on it does.
-        aria-label={cursorsArmed ? `${title} chart. ${cursorHint(cursors)}` : `${title} chart`}
-        className="relative min-h-0 flex-1"
-      >
+      <div className="relative min-h-0 flex-1">
         <UPlot options={withCursors} data={data} uplotRef={uplotRef} className="absolute inset-0" />
       </div>
     </div>

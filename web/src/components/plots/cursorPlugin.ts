@@ -46,6 +46,10 @@ function timeOfClick(u: uPlot, e: MouseEvent): number {
  * when the pointer has hardly moved. The second click of a double-click, which
  * puts the zoom back, places nothing, so one double-click does not put A and B
  * on the same instant.
+ *
+ * Clicks are taken on ``u.over``, the element over the plot area; that is the
+ * element ``GroupChart`` names, so a click aimed at the chart's name is one this
+ * sees.
  */
 export function deltaCursorPlugin(source: CursorPluginSource): uPlot.Plugin {
   return {

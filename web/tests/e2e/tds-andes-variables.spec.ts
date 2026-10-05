@@ -90,8 +90,12 @@ test('ANDES variables: pick omega GENROU -> run TDS -> zoom -> cursors -> respon
   await expect(page.getByTestId('time-series-plot-group-bus_v')).toBeVisible();
 
   // ---- zoom: a drag on one chart zooms time on all of them -------------------
-  const over = omega.locator('.u-over');
-  const busOver = page.getByTestId('time-series-plot-group-bus_v').locator('.u-over');
+  // A chart is found the way a user of a screen reader or a script finds it, by
+  // its name: the group over its plot, which is what takes the pointer.
+  const over = omega.getByRole('group', { name: /chart/ });
+  const busOver = page
+    .getByTestId('time-series-plot-group-bus_v')
+    .getByRole('group', { name: /chart/ });
   const box = await over.boundingBox();
   expect(box).not.toBeNull();
   /** The time the pointer is at, read from a chart's legend, for the pointer 60% along `chart`. */
@@ -128,8 +132,9 @@ test('ANDES variables: pick omega GENROU -> run TDS -> zoom -> cursors -> respon
   await page.getByRole('textbox', { name: 'Cursor A time in seconds' }).press('Enter');
   await expect(page.getByTestId('cursor-readout-a')).toHaveValue('2');
   await expect(page.getByTestId('cursor-readout-dt')).toContainText(/Δt [\d.]+ s/);
-  // A click that a script or assistive technology makes, with no press before it,
-  // counts too. uPlot would take it for the end of a drag once the pointer has moved.
+  // A click that a script or assistive technology makes on the named chart, with no
+  // press before it, counts too. uPlot would take it for the end of a drag once the
+  // pointer has moved.
   await page.getByRole('button', { name: 'Clear cursors' }).click();
   await expect(page.getByTestId('cursor-readout-a')).toHaveValue('');
   await over.hover({ position: { x: box!.width * 0.4, y: box!.height / 2 } });
