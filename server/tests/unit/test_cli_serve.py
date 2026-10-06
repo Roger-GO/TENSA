@@ -24,6 +24,7 @@ from typing import Any
 from unittest import mock
 
 import pytest
+import typer.main
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 from typer.testing import CliRunner
@@ -583,6 +584,33 @@ def test_serve_log_level_above_info_hides_the_startup_line(
     )
     assert result.exit_code == 0, result.output
     assert "serving http" not in result.stderr
+
+
+def test_serve_at_debug_says_that_debug_is_on_and_what_it_adds(
+    tmp_path: Path, fake_server: type[_FakeServer]
+) -> None:
+    """The first debug line is the confirmation a reader of the log file looks for."""
+    result = runner.invoke(
+        cli.app, ["serve", "--workspace", str(tmp_path / "ws"), "--log-level", "debug"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "[DEBUG] tensa.serve: debug logging is on: each HTTP request is logged" in result.stderr
+
+
+def test_serve_at_info_writes_no_debug_line(
+    tmp_path: Path, fake_server: type[_FakeServer]
+) -> None:
+    result = runner.invoke(cli.app, ["serve", "--workspace", str(tmp_path / "ws")])
+    assert result.exit_code == 0, result.output
+    assert "[DEBUG]" not in result.stderr
+
+
+def test_the_log_level_help_says_what_debug_adds() -> None:
+    serve = typer.main.get_command(cli.app).commands["serve"]  # type: ignore[attr-defined]
+    (option,) = [p for p in serve.params if "--log-level" in p.opts]
+    help_text = " ".join(option.help.split())
+    assert "debug adds one line for each HTTP request" in help_text
+    assert "serving URL" in help_text
 
 
 def test_serve_refuses_a_log_level_it_does_not_have(

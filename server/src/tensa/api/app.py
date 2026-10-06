@@ -4,19 +4,21 @@ Middleware ordering is load-bearing — the Host/Origin check is pure ASGI
 (not BaseHTTPMiddleware), so it applies uniformly to HTTP and
 WebSocket-upgrade scopes. The execution order (outermost → innermost) is:
 
-    1. Security headers (stamps every HTTP response, so the 400 that step 2
+    1. Request log (one ``DEBUG`` line per request, outside everything else so
+       the requests the next steps turn away are in it too)
+    2. Security headers (stamps every HTTP response, so the 400 that step 3
        sends carries them too)
-    2. Host/Origin check (rejects bad-host before any FastAPI code runs)
-    3. CORS (FastAPI's middleware — allows preflights and validates origins)
-    4. GZip (compresses a response only when the client sent
+    3. Host/Origin check (rejects bad-host before any FastAPI code runs)
+    4. CORS (FastAPI's middleware — allows preflights and validates origins)
+    5. GZip (compresses a response only when the client sent
        ``Accept-Encoding: gzip``; it sits inside CORS so a rejected preflight is
        never compressed, and outside the router so every route, the error
        envelopes and the SPA files share it)
-    5. FastAPI router
+    6. FastAPI router
 
 There is no authentication: the server is a local-first tool that binds to
-loopback by default. uvicorn's default access log is disabled at startup;
-the substrate is local-only and the access logger is SaaS-phase work.
+loopback by default. uvicorn's own access log is disabled at startup; the request
+log in step 1 stands in for it, and only writes anything under ``--log-level debug``.
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ from starlette.types import Scope
 
 from tensa import __version__
 from tensa.api.error_mapping import recovery_for
+from tensa.api.request_log import make_request_log_middleware
 from tensa.api.routes.bundle import router as bundle_import_router
 from tensa.api.routes.cases import router as cases_router
 from tensa.api.routes.clone import router as clone_router
@@ -338,6 +341,8 @@ def make_app(
     )
     # Added after it, so it is outermost and stamps the Host/Origin rejections too.
     app.add_middleware(_PureASGIWrapper, wrap=make_security_headers_middleware)
+    # Added last, so it is outermost and also logs the requests the two above reject.
+    app.add_middleware(_PureASGIWrapper, wrap=make_request_log_middleware)
 
     # Routers — all substrate routes are namespaced under ``/api`` so the
     # SPA mount at ``/`` (added below) doesn't shadow them. ``/openapi.json``

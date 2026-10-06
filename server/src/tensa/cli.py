@@ -8,9 +8,10 @@ Subcommands:
   access log is disabled; the substrate emits its own lines to stderr via
   ``logging``, at the level ``--log-level`` sets, as plain text or, with
   ``--log-json``, as JSON lines, and ``--log-file`` adds a rotating file (see
-  ``core/logging_setup.py``). When ANDES's generated code is missing or
-  unchecked, it is generated in a background process while the server runs (see
-  ``core/codegen_cache.py``).
+  ``core/logging_setup.py``). Under ``--log-level debug`` it also logs one line per
+  request (``api/request_log.py``), which uvicorn's access log would have. When
+  ANDES's generated code is missing or unchecked, it is generated in a background
+  process while the server runs (see ``core/codegen_cache.py``).
 - ``--version`` — print the tensa and ANDES versions and exit.
 - ``warm-cache`` — run ANDES's symbolic-equation code generation
   (``andes.prepare()``) so the cache is populated; ``serve`` runs it in the
@@ -181,7 +182,12 @@ def serve(
         LogLevel.info,
         "--log-level",
         case_sensitive=False,
-        help="Least severe message the server logs: debug, info, warning, error or critical.",
+        help=(
+            "How much the server logs. info logs the startup, the serving URL and "
+            "anything that goes wrong. debug adds one line for each HTTP request "
+            "(method, path, status, time taken) and for each WebSocket. warning and "
+            "above hide the serving URL. Upper or lower case both work."
+        ),
     ),
     log_file: str | None = typer.Option(
         None,
@@ -231,6 +237,9 @@ def serve(
     log = logging.getLogger("tensa.serve")
     if log_path is not None:
         log.info("writing the log to %s", log_path)
+    log.debug(
+        "debug logging is on: each HTTP request is logged as METHOD path -> status (time taken)"
+    )
 
     # Windows: emit the trust-model caveat (workspace boundary is best-effort
     # on Windows).
@@ -385,11 +394,12 @@ def serve(
         extra_allowed_origins=frozenset(extra_origins),
     )
 
-    # ``access_log=False`` disables uvicorn's default access logger (per the
-    # trust-model docstring; the structured logger is SaaS-phase work).
-    # ``log_config=None`` keeps uvicorn from configuring logging itself, so what it
-    # logs (an unhandled exception in a route, with its traceback) goes through the
-    # handlers ``configure_logging`` installed, in their format and into the log file.
+    # ``access_log=False`` disables uvicorn's default access logger; the requests are
+    # logged at DEBUG by ``tensa.api.request_log`` instead, so the default level stays
+    # quiet while the UI polls. ``log_config=None`` keeps uvicorn from configuring
+    # logging itself, so what it logs (an unhandled exception in a route, with its
+    # traceback) goes through the handlers ``configure_logging`` installed, in their
+    # format and into the log file.
     server = uvicorn.Server(
         uvicorn.Config(
             fastapi_app,
