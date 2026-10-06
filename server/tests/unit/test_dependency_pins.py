@@ -22,6 +22,7 @@ import pytest
 from packaging.requirements import Requirement
 from packaging.version import Version
 
+from tensa.desktop import PYWEBVIEW_REQUIREMENT
 from tests._repo import WEB_DIR, pyproject
 
 pytestmark = pytest.mark.unit
@@ -88,6 +89,14 @@ def test_desktop_extra_is_pywebview_from_the_release_with_settings_below_the_nex
     assert not requirement.specifier.contains("7.0.0")
     # Nothing but pywebview: the toolkit on Linux is the user's choice (GTK or Qt).
     assert set(_requirements("desktop")) == {"pywebview"}
+
+
+def test_the_hint_for_an_install_without_the_desktop_extra_asks_for_the_same_pywebview() -> None:
+    """``tensa desktop`` names pywebview itself when the installed tensa has no ``desktop``
+    extra, and the range it names is the extra's."""
+    named = Requirement(PYWEBVIEW_REQUIREMENT)
+    assert named.name == "pywebview"
+    assert named.specifier == _requirements("desktop")["pywebview"].specifier
 
 
 def _package_json() -> dict[str, Any]:

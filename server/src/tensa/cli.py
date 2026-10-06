@@ -58,9 +58,11 @@ from tensa.core.logging_setup import configure_logging, resolve_log_file
 from tensa.desktop import (
     MIN_HEIGHT,
     MIN_WIDTH,
+    TOOLKIT_HELP,
     DesktopUnavailable,
     ServerNotStarted,
     WindowFailed,
+    check_window_support,
     load_webview,
     run_window,
 )
@@ -718,8 +720,15 @@ def desktop(
     the window, everything works as it does under "tensa serve", and the
     options that both commands have are the same.
 
-    Needs the optional extra: pip install "tensa\[desktop]". On Linux the
-    window also needs GTK or Qt: pip install "pywebview\[qt]" adds Qt.
+    Needs pywebview, which the desktop extra installs: pip install
+    "tensa\[desktop]".
+
+    On Linux the window also needs a display and a GUI toolkit, which pip does
+    not bring. Qt: pip install "pywebview\[qt]" (on X11 it also needs the system
+    library libxcb-cursor0, for example sudo apt install libxcb-cursor0). GTK:
+    WebKitGTK and PyGObject from the distribution (a virtual environment sees
+    them only when it was created with --system-site-packages). Without a
+    display, as over SSH, run "tensa serve" and open its address in a browser.
     """
     # A bundled executable (PyInstaller) starts each worker process by running
     # itself again with arguments only this call understands; it has to come
@@ -733,9 +742,19 @@ def desktop(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
+    # Before the workspace is made or anything listens: a machine that cannot show
+    # a window should leave nothing behind (and Qt, when it cannot start, aborts
+    # the whole process without a word of ours).
+    support = check_window_support()
+    if support.problem is not None:
+        typer.echo(support.problem, err=True)
+        raise typer.Exit(code=1)
+
     log, _ = _start_logging(
         "tensa.desktop", log_level, json_lines=log_json, log_file=log_file
     )
+    for warning in support.warnings:
+        log.warning("%s", warning)
     _warn_if_windows(log)
     canonical_workspace = _prepare_workspace(workspace, log)
 
@@ -791,6 +810,7 @@ def desktop(
                 height=height,
                 devtools=devtools,
                 log=log,
+                gui=support.gui,
                 close=_end_sessions,
             )
     except ServerNotStarted as exc:
@@ -799,10 +819,7 @@ def desktop(
     except WindowFailed as exc:
         log.error("cannot open the window: %s", exc)
         if sys.platform.startswith("linux"):
-            log.error(
-                "On Linux pywebview needs GTK (WebKitGTK and PyGObject, from the "
-                "distribution) or Qt (pip install 'pywebview[qt]')."
-            )
+            log.error("%s", TOOLKIT_HELP)
         raise typer.Exit(code=1) from exc
     finally:
         sock.close()

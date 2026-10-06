@@ -31,8 +31,15 @@ from websockets.sync.client import ClientConnection, connect
 
 from tensa import cli
 from tensa.core.logging_setup import reset_logging
+from tensa.desktop import WindowSupport
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def _a_window_can_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A headless Linux machine has no display, which the command would refuse."""
+    monkeypatch.setattr(cli, "check_window_support", lambda: WindowSupport())
 
 
 @pytest.fixture(autouse=True)

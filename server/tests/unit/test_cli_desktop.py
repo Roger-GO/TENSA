@@ -4,12 +4,15 @@ pywebview is replaced by a fake module that records what it is asked to do, and
 uvicorn's ``Server`` by one that runs in the thread ``run_window`` gives it, comes
 up when asked to, and stops when ``should_exit`` is set. What is checked is the
 order of events: the server listens before the window opens, and is stopped when
-the window has closed, however it closed.
+the window has closed, however it closed. Whether this machine can show a window at
+all (a display, a toolkit) is what ``check_window_support`` answers; the tests here
+stand in for it, and its own tests are at the end.
 """
 
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import logging
 import socket
 import sys
@@ -32,6 +35,13 @@ from tensa.core.logging_setup import reset_logging
 pytestmark = pytest.mark.unit
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _a_window_can_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A headless Linux machine has no display, which the command would refuse."""
+    monkeypatch.setattr(cli, "check_window_support", lambda: desktop.WindowSupport())
+    monkeypatch.setattr(desktop, "_provided_extras", lambda: ["desktop"])
 
 
 @pytest.fixture(autouse=True)
@@ -426,6 +436,219 @@ def test_load_webview_names_the_extra_when_pywebview_is_missing(
     monkeypatch.setitem(sys.modules, "webview", None)
     with pytest.raises(desktop.DesktopUnavailable, match=r"tensa\[desktop\]"):
         desktop.load_webview()
+
+
+def test_the_install_hint_names_the_extra_only_when_this_install_has_it() -> None:
+    assert "pip install 'tensa[desktop]'" in desktop.install_hint(extras=["mcp", "desktop"])
+    # An install made before the extra existed: pip would only warn that tensa has no
+    # such extra and install nothing, so the hint names pywebview itself.
+    without = desktop.install_hint(extras=["mcp", "dev"])
+    assert f"pip install '{desktop.PYWEBVIEW_REQUIREMENT}'" in without
+    assert "tensa[desktop]" not in without
+    assert "tensa[desktop]" not in desktop.install_hint(extras=[])
+
+
+def test_the_install_hint_reads_the_extras_of_the_installed_package(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.undo()  # the autouse stand-in for what the install declares
+    declared = importlib.metadata.metadata("tensa").get_all("Provides-Extra") or []
+    expected = "tensa[desktop]" if "desktop" in declared else desktop.PYWEBVIEW_REQUIREMENT
+    assert expected in desktop.install_hint()
+
+
+def test_the_install_hint_is_pywebview_alone_when_tensa_has_no_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.undo()
+
+    def _missing(_name: str) -> Any:
+        raise importlib.metadata.PackageNotFoundError("tensa")
+
+    monkeypatch.setattr(desktop.importlib.metadata, "metadata", _missing)
+    assert desktop.PYWEBVIEW_REQUIREMENT in desktop.install_hint()
+
+
+def test_the_install_hint_adds_the_toolkit_on_linux_only() -> None:
+    linux = desktop.install_hint(platform="linux", extras=["desktop"])
+    assert "pywebview[qt]" in linux
+    assert "pywebview[qt]" not in desktop.install_hint(platform="win32", extras=["desktop"])
+    assert "pywebview[qt]" not in desktop.install_hint(platform="darwin", extras=["desktop"])
+
+
+# ------------------------------------------------- a machine without a window
+
+
+def test_desktop_stops_before_starting_anything_when_no_window_can_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+    webview: _FakeWebview,
+    built_apps: list[dict[str, Any]],
+) -> None:
+    monkeypatch.setattr(
+        cli, "check_window_support", lambda: desktop.WindowSupport(problem="no display here")
+    )
+    result = _desktop(tmp_path)
+    assert result.exit_code == 1
+    assert "no display here" in result.output
+    # Nothing was left behind: no workspace, no server, no window.
+    assert built_apps == [] and fake_server.instances == [] and webview.windows == []
+    assert not (tmp_path / "ws").exists()
+
+
+def test_desktop_says_what_will_probably_go_wrong_and_goes_on(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+    webview: _FakeWebview,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "check_window_support",
+        lambda: desktop.WindowSupport(warnings=("libxcb-cursor0 is missing",)),
+    )
+    with caplog.at_level("WARNING", logger="tensa.desktop"):
+        result = _desktop(tmp_path)
+    assert result.exit_code == 0, result.output
+    assert "libxcb-cursor0 is missing" in caplog.text
+    assert len(webview.windows) == 1
+
+
+def test_desktop_asks_pywebview_for_the_toolkit_the_check_chose(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+    webview: _FakeWebview,
+) -> None:
+    assert _desktop(tmp_path).exit_code == 0
+    # Left to pywebview unless the check had a reason.
+    assert webview.starts == [{"debug": False}]
+
+    monkeypatch.setattr(cli, "check_window_support", lambda: desktop.WindowSupport(gui="qt"))
+    webview.starts.clear()
+    assert _desktop(tmp_path).exit_code == 0
+    assert webview.starts == [{"debug": False, "gui": "qt"}]
+
+
+def test_the_toolkit_hint_follows_a_window_that_could_not_open_on_linux(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+    webview: _FakeWebview,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(cli.sys, "platform", "linux")
+    webview.start_error = RuntimeError("no toolkit")
+    with caplog.at_level("ERROR", logger="tensa.desktop"):
+        assert _desktop(tmp_path).exit_code == 1
+    assert desktop.TOOLKIT_HELP in caplog.text
+
+
+# ---------------------------------------------- what check_window_support finds
+
+_X11 = {"DISPLAY": ":0"}
+
+
+def _support(
+    env: dict[str, str],
+    *,
+    modules: tuple[str, ...] = ("qtpy",),
+    libraries: tuple[str, ...] = ("libxcb-cursor.so.0",),
+    platform: str = "linux",
+) -> desktop.WindowSupport:
+    return desktop.check_window_support(
+        platform=platform,
+        env=env,
+        has_module=lambda name: name in modules,
+        library_loads=lambda name: name in libraries,
+    )
+
+
+def test_a_session_without_a_display_cannot_open_a_window() -> None:
+    found = _support({})
+    assert found.problem == desktop.NO_DISPLAY
+    # It says what to do instead, and the commands it gives exist.
+    assert "tensa serve --port 8000" in desktop.NO_DISPLAY
+    assert "--port" in _options("serve")
+
+
+@pytest.mark.parametrize(
+    "env",
+    [{"DISPLAY": ":0"}, {"WAYLAND_DISPLAY": "wayland-0"}, {"QT_QPA_PLATFORM": "offscreen"}],
+)
+def test_a_display_or_a_qt_platform_chosen_by_hand_is_enough(env: dict[str, str]) -> None:
+    assert _support(env).problem is None
+
+
+def test_a_machine_with_no_toolkit_is_told_both_ways_to_get_one() -> None:
+    found = _support(_X11, modules=())
+    assert found.problem == desktop.NO_TOOLKIT
+    assert "pywebview[qt]" in desktop.NO_TOOLKIT
+    assert "python3-gi" in desktop.NO_TOOLKIT
+    assert "libxcb-cursor0" in desktop.NO_TOOLKIT
+    assert "--system-site-packages" in desktop.NO_TOOLKIT
+
+
+def test_only_linux_is_checked() -> None:
+    # Windows and macOS always have a display and a web view of their own.
+    for platform in ("win32", "darwin"):
+        assert _support({}, modules=(), libraries=(), platform=platform) == desktop.WindowSupport()
+
+
+def test_qt_alone_is_asked_for_by_name_so_pywebview_does_not_try_gtk_first() -> None:
+    assert _support(_X11, modules=("qtpy",)).gui == "qt"
+
+
+def test_pywebview_keeps_the_choice_when_both_toolkits_are_there() -> None:
+    both = _support(_X11, modules=("gi", "qtpy"))
+    assert both.problem is None and both.gui is None
+    assert both.warnings == ()  # GTK goes first, and needs no Qt library
+    assert _support(_X11, modules=("gi",)) == desktop.WindowSupport()
+
+
+def test_a_toolkit_chosen_with_pywebview_gui_stands() -> None:
+    assert _support({**_X11, "PYWEBVIEW_GUI": "qt"}, modules=("gi", "qtpy")).gui is None
+    # CEF and the like are pywebview's to check.
+    assert _support({**_X11, "PYWEBVIEW_GUI": "cef"}, modules=()) == desktop.WindowSupport()
+
+
+def test_qt_without_its_x11_library_is_warned_about_with_the_package_to_install() -> None:
+    found = _support(_X11, libraries=())
+    assert found.problem is None
+    assert found.warnings == (desktop.QT_NEEDS_XCB_CURSOR,)
+    assert "sudo apt install libxcb-cursor0" in desktop.QT_NEEDS_XCB_CURSOR
+    assert _support(_X11, libraries=("libxcb-cursor.so.0",)).warnings == ()
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        # Qt takes its Wayland plugin there, which needs no such library.
+        {"DISPLAY": ":0", "WAYLAND_DISPLAY": "wayland-0"},
+        # The platform was chosen by hand.
+        {"DISPLAY": ":0", "QT_QPA_PLATFORM": "xcb"},
+    ],
+)
+def test_the_x11_library_is_not_asked_for_where_qt_will_not_load_it(env: dict[str, str]) -> None:
+    assert _support(env, libraries=()).warnings == ()
+
+
+def test_a_kde_session_prefers_qt_even_when_gtk_is_there() -> None:
+    found = _support({**_X11, "KDE_FULL_SESSION": "true"}, modules=("gi", "qtpy"), libraries=())
+    assert found.warnings == (desktop.QT_NEEDS_XCB_CURSOR,)
+    assert found.gui is None  # pywebview already puts Qt first there
+
+
+def test_gtk_only_needs_no_qt_library() -> None:
+    assert _support(_X11, modules=("gi",), libraries=()) == desktop.WindowSupport()
+
+
+def test_the_real_checks_find_a_module_and_a_library_or_say_they_are_not_there() -> None:
+    assert desktop._importable("sys")
+    assert not desktop._importable("no_such_module_for_tensa")
+    assert not desktop._library_loads("libno-such-library-for-tensa.so.9")
 
 
 # ------------------------------------------------------- freeze_support

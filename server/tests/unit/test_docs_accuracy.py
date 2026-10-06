@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 import typer
 
-from tensa import cli
+from tensa import cli, desktop
 from tensa.api.app import make_app
 from tests._repo import REPO_ROOT, pyproject
 
@@ -117,6 +117,22 @@ def test_server_readme_states_the_real_desktop_defaults() -> None:
     # The window sizes the readme gives as least are the ones the command refuses to go below.
     assert f"at least `{options['--width'].type.min}`" in bullets["--width"]
     assert f"at least `{options['--height'].type.min}`" in bullets["--height"]
+
+
+def test_server_readme_gives_the_linux_fixes_the_desktop_command_gives() -> None:
+    """The package a Linux user is told to install when Qt cannot start, and the way to
+    make a virtual environment see GTK, read the same in the README as in the command's
+    own messages (a message that moves on without the README sends people to a package
+    that is no longer the answer)."""
+    readme = _read("server/README.md")
+    for message in (desktop.QT_NEEDS_XCB_CURSOR, desktop.TOOLKIT_HELP):
+        for command in re.findall(
+            r"sudo (?:apt install|dnf install|pacman -S) [\w.-]+(?: [\w.-]+)*(?=[ ,)]|\.$|\.\s|$)",
+            message,
+        ):
+            assert command in readme, command
+    assert "--system-site-packages" in readme
+    assert "pywebview[qt]" in readme
 
 
 @pytest.mark.parametrize(

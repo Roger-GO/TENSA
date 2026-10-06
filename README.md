@@ -48,7 +48,7 @@ tensa warm-cache                                   # optional, about 30 s (serve
 tensa serve --workspace ~/tensa-cases --port 8000 --open
 ```
 
-To get the app in a window of its own instead of a browser tab, add the desktop extra and run `tensa desktop` (details in the [server README](./server/README.md#desktop-window)):
+To get the app in a window of its own instead of a browser tab, add the desktop extra and run `tensa desktop`. On Linux the window also needs a GUI toolkit and a display, which pip does not bring, so add Qt there: `pip install "tensa[desktop]" "pywebview[qt]"` and, on Debian or Ubuntu, `sudo apt install libxcb-cursor0`. The [server README](./server/README.md#desktop-window) has the details for every system:
 
 ```bash
 pip install "tensa[desktop]"
