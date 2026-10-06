@@ -30,6 +30,7 @@ import { useGridEditing, type GridEditTarget } from './useGridEditing';
 import { useCurrentTopology, useTopologySchema } from '@/api/queries';
 import type { ParamValue, TopologyEntry, TopologyParamMeta, TopologySummary } from '@/api/types';
 import { cn } from '@/lib/cn';
+import { finiteOrNull, isFiniteNumber } from '@/lib/finite';
 import { subKindForControllerClass } from '@/lib/controllers';
 import { DYNAMIC_GENERATOR_KINDS } from '@/lib/topology';
 import { useCaseStore } from '@/store/case';
@@ -138,7 +139,7 @@ const DERIVED: Record<
   Record<string, (params: Readonly<Record<string, ParamValue>>) => number | null>
 > = {
   GENROU: {
-    H: (p) => (typeof p.M === 'number' && Number.isFinite(p.M) ? p.M / 2 : null),
+    H: (p) => (isFiniteNumber(p.M) ? p.M / 2 : null),
   },
 };
 
@@ -184,8 +185,7 @@ function columnsFor(
         format: formatParamValue,
         accessor: (r) => {
           if (derive) return derive(r.params);
-          const v = r.params[meta.name];
-          return typeof v === 'number' && Number.isFinite(v) ? v : null;
+          return finiteOrNull(r.params[meta.name]);
         },
         edit: { param: meta.name },
       });

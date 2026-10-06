@@ -65,7 +65,7 @@ export function useOpenCase(): OpenCase {
         primary = parseWorkspacePath(fileName);
         addfiles = addfileNames.map(parseWorkspacePath);
       } catch (err) {
-        toast.error(`Invalid workspace path: ${err instanceof Error ? err.message : String(err)}`);
+        toast.error(`Invalid workspace path: ${describeError(err)}`);
         return;
       }
       if (

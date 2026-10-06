@@ -23,6 +23,7 @@ import { useSldStore } from '@/store/sld';
 import { useCaseStore } from '@/store/case';
 import type { TopologyEntry } from '@/api/types';
 import { paramString } from './entryParams';
+import { isFiniteNumber } from '@/lib/finite';
 
 interface ShuntRow {
   rowId: string;
@@ -35,7 +36,7 @@ interface ShuntRow {
 /** A shunt's `b` or `g`, which unlike the other tables' numbers may come as text. */
 function numberOrNumeral(entry: TopologyEntry, key: string): number | null {
   const v = entry.params?.[key];
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (isFiniteNumber(v)) return v;
   if (typeof v === 'string') {
     const n = Number(v);
     return Number.isFinite(n) ? n : null;

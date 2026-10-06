@@ -6,6 +6,7 @@
  * The code that gathers the results and writes the document is fetched here,
  * the first time a report is asked for, and is not part of the first load.
  */
+import { describeError } from '@/lib/describeError';
 import { toast } from '@/lib/toast';
 
 export async function saveHtmlReport(): Promise<void> {
@@ -21,7 +22,7 @@ export async function saveHtmlReport(): Promise<void> {
     toast.success(`Exported ${filename}`);
   } catch (err) {
     toast.error('The report could not be saved', {
-      description: err instanceof Error ? err.message : 'unknown error',
+      description: describeError(err),
     });
   }
 }

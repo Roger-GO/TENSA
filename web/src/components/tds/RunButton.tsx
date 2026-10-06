@@ -33,6 +33,7 @@ import type { RunStreamError, VarGroup } from '@/streaming/RunStream';
 import { buildRunStreamWsUrl } from '@/streaming/wsUrl';
 import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { reportAbortError } from '@/lib/abortRun';
+import { describeError } from '@/lib/describeError';
 import { toast } from '@/lib/toast';
 import { unitBasesOf } from '@/lib/units';
 import { describeScenario } from '@/lib/runLabel';
@@ -261,8 +262,8 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     if (disturbances.length > 0) {
       const reportCommitError = (err: unknown) => {
         setTdsStarting(false);
+        const detail = describeError(err);
         if (err instanceof ProblemDetailsError) {
-          const detail = err.detail ?? err.title ?? `HTTP ${err.status}`;
           toast.error('TDS error', {
             description:
               err.status === 422
@@ -270,9 +271,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
                 : `Could not commit disturbances: ${detail}`,
           });
         } else {
-          toast.error('TDS error', {
-            description: err instanceof Error ? err.message : 'Could not commit disturbances.',
-          });
+          toast.error('TDS error', { description: detail });
         }
       };
       const commit = () =>

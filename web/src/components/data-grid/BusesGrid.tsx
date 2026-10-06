@@ -46,6 +46,7 @@ import {
 } from '@/components/sld/voltage';
 import type { ParamValue, PflowResult } from '@/api/types';
 import { paramNumber, paramString } from './entryParams';
+import { finiteOrNull, isFiniteNumber } from '@/lib/finite';
 
 interface BusRow {
   idx: string;
@@ -229,7 +230,7 @@ export function BusesGrid({ className }: BusesGridProps) {
       // this bus). ``null`` (→ "—") when no generator/load attaches
       // here or PF hasn't converged yet.
       const inj = injections.get(idx) ?? null;
-      const volts = typeof v === 'number' && Number.isFinite(v) ? v : null;
+      const volts = finiteOrNull(v);
       const limits = busVoltageLimits(bus);
       // The verdict is judged in pu; only what is shown changes unit.
       const toShown = voltageUnit === 'kV' ? (busBaseKv(bases, bus.idx) ?? 1) : 1;
@@ -242,7 +243,7 @@ export function BusesGrid({ className }: BusesGridProps) {
         vmin: limits.vmin * toShown,
         vmax: limits.vmax * toShown,
         limit_check: volts === null ? null : voltageStatusText(assessVoltage(volts, limits)),
-        theta: typeof theta === 'number' && Number.isFinite(theta) ? radToDeg(theta) : null,
+        theta: isFiniteNumber(theta) ? radToDeg(theta) : null,
         p_inj: inj !== null && Number.isFinite(inj.p) ? inj.p : null,
         q_inj: inj !== null && Number.isFinite(inj.q) ? inj.q : null,
         area: paramString(bus, 'area'),

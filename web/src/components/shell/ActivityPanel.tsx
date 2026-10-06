@@ -34,6 +34,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { cn } from '@/lib/cn';
+import { pad2 } from '@/lib/pad2';
 import { Button } from '@/components/ui/button';
 import { EmptyState, InboxIcon, HistoryIcon } from '@/components/ui/EmptyState';
 import { ProblemDetailsErrorSurface } from '@/components/error/ProblemDetailsErrorSurface';
@@ -70,7 +71,7 @@ function formatElapsed(seconds: number): string {
   if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
   const m = Math.floor(seconds / 60);
   const s = Math.round(seconds % 60);
-  return `${m}m ${String(s).padStart(2, '0')}s`;
+  return `${m}m ${pad2(s)}s`;
 }
 
 /** Elapsed for a terminal row (ended − started) or in-flight (now − started). */

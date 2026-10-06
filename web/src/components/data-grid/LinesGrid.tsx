@@ -34,7 +34,7 @@ import { useCaseStore } from '@/store/case';
 import { loadingCheckText } from '@/components/sld/loading';
 import type { TopologyEntry } from '@/api/types';
 import { paramNumber, paramString } from './entryParams';
-import { finiteOrNull } from '@/lib/finite';
+import { finiteOrNull, isFiniteNumber } from '@/lib/finite';
 
 interface LineRow {
   rowId: string;
@@ -58,7 +58,7 @@ interface LineRow {
 /** The rating the case sets for a line (`rate_a`, MVA); `null` for a rating of 0, which means none. */
 function ratingParam(entry: TopologyEntry): number | null {
   const v = entry.params?.rate_a;
-  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
+  return isFiniteNumber(v) && v > 0 ? v : null;
 }
 
 const PU_TITLE = "Per unit on the line's own voltage and MVA base, as the case gives it";

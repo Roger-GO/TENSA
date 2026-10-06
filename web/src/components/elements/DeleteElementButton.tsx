@@ -27,6 +27,7 @@ import type {
   TopologyEntry,
 } from '@/api/types';
 import { cn } from '@/lib/cn';
+import { describeError } from '@/lib/describeError';
 import { toast } from '@/lib/toast';
 
 /**
@@ -244,20 +245,8 @@ export function DeleteElementButton({
               setMode({ kind: 'blocked', body });
               return;
             }
-            setMode({ kind: 'error-other', message: err.detail ?? err.title });
-            return;
           }
-          if (err instanceof ProblemDetailsError) {
-            setMode({
-              kind: 'error-other',
-              message: err.detail ?? err.title ?? 'Delete failed',
-            });
-            return;
-          }
-          setMode({
-            kind: 'error-other',
-            message: err instanceof Error ? err.message : 'Delete failed',
-          });
+          setMode({ kind: 'error-other', message: describeError(err) });
         },
       );
     },

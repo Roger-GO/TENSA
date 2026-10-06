@@ -28,6 +28,7 @@
  */
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { describeError } from '@/lib/describeError';
 import { toast } from '@/lib/toast';
 
 /**
@@ -188,8 +189,7 @@ export function LatexCopyButton({ tables, testIdSuffix, disabled }: LatexCopyBut
       setCopied(true);
       toast.success('Copied LaTeX tables to clipboard.');
     } catch (err) {
-      const detail = err instanceof Error ? err.message : 'unknown clipboard error';
-      toast.error('Copy failed.', { description: detail });
+      toast.error('Copy failed.', { description: describeError(err) });
     }
   };
 

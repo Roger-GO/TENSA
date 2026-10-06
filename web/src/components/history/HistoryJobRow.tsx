@@ -20,6 +20,7 @@ import { isTerminalStatus, type JobRecord, type JobStatus } from '@/store/jobs';
 import { Button } from '@/components/ui/button';
 import { kindLabel } from '@/components/shell/jobLabels';
 import { cn } from '@/lib/cn';
+import { pad2 } from '@/lib/pad2';
 
 export interface HistoryJobRowProps {
   job: JobRecord;
@@ -48,10 +49,7 @@ const STATUS_CLASS: Record<JobStatus, string> = {
 function formatTime(epochSeconds: number): string {
   try {
     const d = new Date(epochSeconds * 1000);
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mm = String(d.getMinutes()).padStart(2, '0');
-    const ss = String(d.getSeconds()).padStart(2, '0');
-    return `${hh}:${mm}:${ss}`;
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
   } catch {
     return '—';
   }
@@ -63,7 +61,7 @@ function formatElapsed(seconds: number): string {
   if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
   const m = Math.floor(seconds / 60);
   const s = Math.round(seconds % 60);
-  return `${m}m ${String(s).padStart(2, '0')}s`;
+  return `${m}m ${pad2(s)}s`;
 }
 
 function elapsedFor(job: JobRecord): number {
