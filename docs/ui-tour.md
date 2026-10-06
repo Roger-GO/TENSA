@@ -45,12 +45,12 @@ Below about 1800 px of window width, the search button, the theme switch and His
 - **Case** shows the loaded case and its state: `pre-setup` before a run, `committed` after one. A second badge says whether the case has dynamic models (`Dynamic`) or not (`Static-only`). **Change case** loads another, and **Add element** opens the element builder.
 - **Disturbances** lists what the next time-domain run will do to the system: the faults, trips and parameter changes you added, plus any the case file itself holds. **Add fault** (or **Add disturbance**) opens a form for a fault on a bus, a line or device trip (a toggle), or a scheduled parameter change (an alter).
 - **Saved cases** lists the case files of the workspace, and the ones you opened recently. **Add files** copies files into the workspace, and so does dropping them anywhere on the window: `.raw`, `.dyr`, `.m`, `.xlsx` and `.json` files. A `.raw` dropped together with its `.dyr` opens as the pair.
-- **Snapshots** lists the snapshots you saved for this case. A snapshot records the case and its disturbances, and restoring one reloads the case, adds the disturbances again and solves the power flow.
+- **Snapshots** lists the snapshots you saved for this case. A snapshot records the case, its disturbances and the diagram as it was placed, and restoring one reloads the case, adds the disturbances again, solves the power flow and puts the diagram back.
 - **Component library** has a tile for each kind of element: bus, generator, load, shunt, line, transformer and battery. Click a tile, or drag it onto the diagram, to open the element form with that kind selected.
 
 ## Diagram
 
-The diagram is a traditional busbar one-line. Drag a bus to move it: where you leave it is saved in a layout file beside the case, so it is there when you open the case again. Right-click a bus, a line or the background for more actions, such as putting a fault on a bus.
+The diagram is a traditional busbar one-line. Drag a bus, a generator, a load or a shunt to move it: where you leave it is saved in a layout file beside the case, so it is there when you open the case again. The file holds the whole diagram as it is drawn, the lines included, and every way of saving the system takes it along, so a case saved under a new name, a restored snapshot and an imported bundle all open with the picture they were saved with. Right-click a bus, a line or the background for more actions, such as putting a fault on a bus.
 
 After a power flow the diagram carries the results. Each bus shows its voltage and angle, each line and transformer its flow, and each machine and load its power. Buses turn amber when they are within 0.02 pu of a limit and red beyond it, each against its own limits, and lines turn amber and red as they near and pass their rating. A small triangle marks the side of the limit, and a generator held at a reactive limit is marked too. The legends at the top left say which is which.
 
@@ -95,9 +95,9 @@ A parameter sweep is started from **Run** and is shown with its progress.
 
 ## Saving and exporting
 
-- **Save system as** writes the case, with the edits you made, to a file in the workspace. An `.xlsx` or a `.json` file holds the whole case. A `.raw` file holds the power-flow data only, as the format does: the machines, the controllers and the other dynamic models are left out of it.
-- A **snapshot** stores the operating point and the disturbances, so that you can restore them later.
-- A **bundle** is a `.zip` with the case file, the disturbances, the simulation settings and the results as CSV, which reproduces a study on another machine. **Import bundle** in the Workspace menu reads one back.
+- **Save system as** writes the case, with the edits you made, to a file in the workspace. An `.xlsx` or a `.json` file holds the whole case. A `.raw` file holds the power-flow data only, as the format does: the machines, the controllers and the other dynamic models are left out of it. The diagram's layout is written beside the file, whichever format it is. A `.raw` file numbers its generators, loads and lines afresh when it is read, and the layout finds them again by the buses they are on.
+- A **snapshot** stores the operating point, the disturbances and the diagram's layout, so that you can restore them later. If you have rearranged the diagram since the snapshot was saved, the restore says so and **Keep my layout** brings your arrangement back.
+- A **bundle** is a `.zip` with the case file, the disturbances, the simulation settings, the results as CSV and the diagram's layout, which reproduces a study on another machine. **Import bundle** in the Workspace menu reads one back.
 - The **HTML report** is one self-contained file with the power flow tables, the limits it breaks, the comparison of two power flows, a chart of each plotted quantity, the eigenvalues and ANDES's own reports. It opens in any browser and prints.
 - A time-domain run exports as **COMTRADE** (IEEE C37.111): a `.cfg` and an ASCII `.dat` in one `.zip`.
 

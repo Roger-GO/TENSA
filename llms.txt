@@ -123,9 +123,17 @@ PMU placement:   POST/GET /sessions/{id}/pmu · DELETE /sessions/{id}/pmu/{pmu_i
 Profiles:        POST /sessions/{id}/profiles/upload · POST/GET/DELETE /sessions/{id}/profiles
 Sweeps:          POST /sessions/{id}/sweep (param sweep over disturbance/sim values; per-iteration TDS results)
 Snapshots:       POST /sessions/{id}/snapshot · POST .../snapshot/restore · GET .../snapshots · DELETE .../snapshot/{name}
-Bundles:         POST /sessions/{id}/bundle/export (zip: case+disturbances+params) · POST .../bundle/import
+                 (a snapshot keeps the diagram layout: "layout" in the save body, else the one beside the case file;
+                 a restore writes it back beside the case and returns it as "layout")
+Bundles:         POST /sessions/{id}/bundle/export (zip: case+disturbances+params+layout.json) · POST .../bundle/import
+                 (export takes "layout" like a snapshot does; import writes layout.json beside the case, "layout_restored")
 Reports:         GET /sessions/{id}/report
 Workspace:       GET /workspace/files · GET/PUT /workspace/layout?case_path=<rel>
+                 (the layout of a case's diagram, <case>.layout.json, schema_version "2": positions of buses, devices
+                 and placed controllers, branch routes, busbars, label offsets, connection faces, figure settings;
+                 a device position carries "bus" and a route "bus1"/"bus2", and is used only for an element on
+                 those buses; 2 MiB; a version 1 document is accepted and upgraded. POST /sessions/{id}/save and
+                 .../case/clone/save-as copy the open case's layout to the new name)
                  POST /workspace/files?name=<file>[&overwrite=true]  (adds a case file; the body IS the file's bytes
                  as in curl --data-binary @ieee14.raw ..., not multipart, which answers 415; 32 MiB; xlsx raw dyr json m;
                  409 if the name exists and overwrite is not true; a <case>.layout.json name is refused, PUT /workspace/layout writes those)

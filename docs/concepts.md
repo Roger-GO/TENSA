@@ -29,7 +29,7 @@ TENSA reads these formats:
 
 A case with no dynamic models is `Static-only`. It can run a power flow, a continuation power flow and state estimation. A time-domain simulation or an eigenvalue analysis needs dynamic models, and has nothing to work on without them. The UI's case badge says which kind the loaded case is, and a `.raw` case gets its dynamic models from a `.dyr` file loaded with it.
 
-Beside a case, the server keeps the layout of its diagram (`<case>.layout.json`, written when you move a bus) and, under `snapshots/`, the snapshots you save.
+Beside a case, the server keeps the layout of its diagram (`<case>.layout.json`) and, under `snapshots/`, the snapshots you save. The layout holds where everything on the diagram is placed. It is written when you move something and whenever the system is saved, and it goes where the system goes: a case saved under a new name gets a copy, a snapshot keeps the one it was saved with, and a bundle carries it as `layout.json`.
 
 To add a case, use **Add files** in the UI, drop files on the window, copy them into the directory, or send them with `POST /api/workspace/files?name=<file>`.
 
