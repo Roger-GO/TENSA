@@ -43,6 +43,14 @@ import type { AnalysisSubTab } from '@/store/layout';
 
 afterEach(() => cleanup());
 
+/**
+ * How long the first render may take to load the tab's chunk. The module is
+ * transformed on its first import, which on a busy machine takes longer than
+ * the second `findBy` waits by default; the test then failed now and then.
+ */
+const COLD_LOAD_MS = 15_000;
+vi.setConfig({ testTimeout: 2 * COLD_LOAD_MS });
+
 function Harness() {
   const [sub, setSub] = useState<AnalysisSubTab>('plot');
   return <LazyAnalysisTab activeSubTab={sub} onSubTabChange={setSub} />;
@@ -54,7 +62,9 @@ describe('<LazyAnalysisTab />', () => {
     expect(screen.getByTestId('lazy-loading')).toBeInTheDocument();
     expect(screen.queryByTestId('analysis-tab')).not.toBeInTheDocument();
 
-    expect(await screen.findByTestId('analysis-tab')).toBeInTheDocument();
+    expect(
+      await screen.findByTestId('analysis-tab', undefined, { timeout: COLD_LOAD_MS }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId('ts-plot-stub')).toBeInTheDocument();
     expect(screen.queryByTestId('lazy-loading')).not.toBeInTheDocument();
   });

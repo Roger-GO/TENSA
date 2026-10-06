@@ -787,7 +787,9 @@ describe('queries hooks', () => {
       frequency_hz: 60,
     });
 
-    expect(archive).toBeInstanceOf(Blob);
+    // Not `toBeInstanceOf(Blob)`: see the `postBlob` test in client.test.ts.
+    expect(Object.prototype.toString.call(archive)).toBe('[object Blob]');
+    expect(archive.size).toBe(2);
     expect(archive.type).toBe('application/zip');
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('/api/comtrade');

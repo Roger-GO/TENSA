@@ -235,7 +235,9 @@ describe('andesClient', () => {
 
     const blob = await andesClient.postBlob('/comtrade', { body: { t: [0, 1] } });
 
-    expect(blob).toBeInstanceOf(Blob);
+    // Not `toBeInstanceOf(Blob)`: on Node 22 a `Response` makes Node's own Blob,
+    // which is not jsdom's, the one this file sees as `Blob`.
+    expect(Object.prototype.toString.call(blob)).toBe('[object Blob]');
     expect(blob.size).toBe(4);
     expect(blob.type).toBe('application/zip');
     const [url, init] = fetchSpy.mock.calls[0]! as [string, RequestInit];
