@@ -479,6 +479,35 @@ async def test_a_bundle_of_an_edited_case_carries_the_layout_to_the_exported_fil
         await mgr.shutdown()
 
 
+async def test_a_bundle_with_no_layout_that_replaces_a_case_leaves_it_no_layout(
+    client: httpx.AsyncClient, workspace: Path
+) -> None:
+    """The workspace has another system under the bundle's file name, with a
+    layout of its own. Once the bundle's case has taken its place, that layout
+    describes a file that is gone, and must not be drawn over the new one."""
+    sid = await _open(client)
+    bundle = await _export(client, sid)  # nothing placed yet: no layout.json
+    (workspace / "ieee14.raw").write_bytes(b"--- another system ---")
+    await _put_layout(client, "ieee14.raw", _placement(shift=5000.0))
+
+    resp = await client.post("/api/sessions")
+    sid_b = str(resp.json()["session_id"])
+    resp = await client.post(
+        f"/api/sessions/{sid_b}/bundle/import",
+        files={"file": ("bundle.zip", bundle, "application/zip")},
+        data={"force_resolve": "true", "use_bundle_case": "true"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "committed"
+    assert body["layout_restored"] is False
+    assert body["warnings"][-1] == (
+        "the diagram layout beside workspace 'ieee14.raw' was removed: "
+        "it was made for the file the bundle's copy replaced"
+    )
+    assert await _get_layout(client, "ieee14.raw") is None
+
+
 async def test_bundle_export_refuses_a_layout_that_is_not_one(client: httpx.AsyncClient) -> None:
     sid = await _open(client)
     bad = _placement()

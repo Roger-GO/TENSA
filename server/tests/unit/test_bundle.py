@@ -729,6 +729,77 @@ def test_a_layout_entry_holding_a_layout_over_the_cap_is_left_out(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "bundle_layout",
+    [None, b"{not json"],
+    ids=["no-layout", "a-layout-that-does-not-validate"],
+)
+def test_a_case_replaced_by_a_bundle_with_no_layout_does_not_keep_the_old_one(
+    tmp_path: Path, bundle_layout: bytes | None
+) -> None:
+    """The layout beside the workspace's file was made for the system that
+    file held. Left there, it would be drawn over the bundle's system."""
+    (tmp_path / "ieee14.raw").write_bytes(b"another system under the same name")
+    sidecar = tmp_path / "ieee14.raw.layout.json"
+    sidecar.write_text(json.dumps(_layout()), encoding="utf-8")
+    zip_bytes = assemble_bundle(_minimal_inputs())
+    if bundle_layout is not None:
+        zip_bytes = _with_entry(zip_bytes, "layout.json", bundle_layout)
+
+    result = _extract(zip_bytes, tmp_path, use_bundle_case=True)
+    assert (tmp_path / "ieee14.raw").read_bytes() == b"BUS 1\nLINE 1 2\n"
+    assert not sidecar.exists()
+    assert result["layout_restored"] is False
+    assert result["warnings"][-1] == (
+        "the diagram layout beside workspace 'ieee14.raw' was removed: "
+        "it was made for the file the bundle's copy replaced"
+    )
+    assert len(result["warnings"]) == (2 if bundle_layout is None else 3)
+
+
+@pytest.mark.unit
+def test_a_bundle_with_no_layout_leaves_the_layout_of_a_case_it_does_not_change(
+    tmp_path: Path,
+) -> None:
+    """The workspace already holds the bundle's case, byte for byte, with a
+    layout of its own: that layout still describes the file."""
+    (tmp_path / "ieee14.raw").write_bytes(b"BUS 1\nLINE 1 2\n")
+    mine = json.dumps(_layout())
+    (tmp_path / "ieee14.raw.layout.json").write_text(mine, encoding="utf-8")
+    result = _extract(assemble_bundle(_minimal_inputs()), tmp_path)
+    assert result["warnings"] == []
+    assert (tmp_path / "ieee14.raw.layout.json").read_text(encoding="utf-8") == mine
+
+
+@pytest.mark.unit
+def test_keeping_the_workspace_case_keeps_its_layout_when_the_bundle_has_none(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "ieee14.raw").write_bytes(b"workspace copy")
+    mine = json.dumps(_layout(coordinates={"7": {"x": 7.0, "y": 7.0}}))
+    (tmp_path / "ieee14.raw.layout.json").write_text(mine, encoding="utf-8")
+    result = _extract(assemble_bundle(_minimal_inputs()), tmp_path, use_bundle_case=False)
+    assert (tmp_path / "ieee14.raw").read_bytes() == b"workspace copy"
+    assert (tmp_path / "ieee14.raw.layout.json").read_text(encoding="utf-8") == mine
+    assert len(result["warnings"]) == 1  # the copy saved for comparison
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_symlink_where_the_replaced_case_layout_would_be_is_left_alone(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "ieee14.raw").write_bytes(b"another system under the same name")
+    planted = tmp_path / "planted.json"
+    planted.write_text(json.dumps(_layout()), encoding="utf-8")
+    (workspace / "ieee14.raw.layout.json").symlink_to(planted)
+    result = _extract(assemble_bundle(_minimal_inputs()), workspace, use_bundle_case=True)
+    assert planted.exists()
+    assert (workspace / "ieee14.raw.layout.json").is_symlink()
+    assert result["warnings"] == ["workspace 'ieee14.raw' overwritten with bundle copy"]
+
+
+@pytest.mark.unit
 def test_keeping_the_workspace_case_keeps_its_layout_too(tmp_path: Path) -> None:
     (tmp_path / "ieee14.raw").write_bytes(b"workspace copy")
     mine = json.dumps(_layout(coordinates={"7": {"x": 7.0, "y": 7.0}}))

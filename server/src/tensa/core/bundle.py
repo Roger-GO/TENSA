@@ -891,7 +891,9 @@ def extract_bundle(
     The bundle's ``layout.json``, when it has one, is written beside the
     case as its layout, replacing any that was there. With the sha-mismatch
     resolved as "keep the workspace file", the workspace's layout is kept
-    along with its case.
+    along with its case. Resolved the other way by a bundle that brings no
+    layout it can use, the layout beside the replaced file is removed: it was
+    made for the system that file held, not for the one now under its name.
 
     Returns a dict with ``primary_path`` (the path the caller should
     pass to :meth:`Wrapper.load_case`), ``addfile_paths`` (the same
@@ -982,6 +984,25 @@ def extract_bundle(
             layout_restored = True
         except (OSError, LayoutError, BundleValidationError) as exc:
             warnings.append(f"the bundle's diagram layout could not be written: {exc}")
+    elif sha_conflict is not None and not keep_workspace_copy:
+        # The workspace's case was replaced by one of other content, and the
+        # bundle has no layout to put beside it. The one that is there would be
+        # applied to a system it was not made for (a save over another case
+        # removes it for the same reason, see ``carry_layout_sidecar``). A
+        # symlink in its place was not put by this server and is never read.
+        stale = primary_target.with_name(primary_target.name + LAYOUT_SIDECAR_SUFFIX)
+        try:
+            if stale.is_file() and not stale.is_symlink():
+                stale.unlink()
+                warnings.append(
+                    f"the diagram layout beside workspace {primary!r} was removed: "
+                    "it was made for the file the bundle's copy replaced"
+                )
+        except OSError as exc:
+            warnings.append(
+                f"the diagram layout beside workspace {primary!r} was made for the "
+                f"file the bundle's copy replaced and could not be removed: {exc}"
+            )
 
     return {
         "primary_path": str(primary_path),
