@@ -621,6 +621,80 @@ export function freeColumn(
   return best;
 }
 
+/**
+ * How far past the outermost tap of its bar the middle of a device may be
+ * put to keep it clear of the branches that pass through its row. Further
+ * out it would no longer read as a device of that bus.
+ */
+export const DEVICE_DETOUR_LIMIT = BAR_LENGTH;
+
+/** A straight run of a branch: level (`y0 === y1`) or upright (`x0 === x1`). */
+interface BranchRun {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
+/** The height of the bands `branchColumns` sorts the runs into. */
+const RUN_BAND = 64;
+
+/**
+ * What a device has to stand clear of among the branches drawn along
+ * `routes`, as columns for `freeColumn`. The answer is a lookup by the row
+ * the device stands in, from `top` to `bottom`:
+ *
+ * - `upright`: the upright runs that pass through the row, or end within
+ *   `DEVICE_COLUMN_GAP` of it, each a column with no width;
+ * - `level`: the level runs that lie in the row, each a column as wide as
+ *   the run is long. A level run above or below the row does not count,
+ *   however near: a device cannot step out from under it without leaving
+ *   its bus, and the automatic layout keeps the default row clear of the
+ *   first run it makes there (`LAYER_GAP` in `layout.ts`).
+ */
+export function branchColumns(
+  routes: Iterable<{ points: readonly (readonly [number, number])[] }>,
+): (top: number, bottom: number) => { upright: Column[]; level: Column[] } {
+  // The level and the upright runs, by the bands of height they reach into.
+  const bands = new Map<number, BranchRun[]>();
+  for (const { points } of routes) {
+    for (let i = 1; i < points.length; i += 1) {
+      const [a, b] = [points[i - 1]!, points[i]!];
+      if (a[0] !== b[0] && a[1] !== b[1]) continue;
+      const run: BranchRun = {
+        x0: Math.min(a[0], b[0]),
+        x1: Math.max(a[0], b[0]),
+        y0: Math.min(a[1], b[1]),
+        y1: Math.max(a[1], b[1]),
+      };
+      const first = Math.floor((run.y0 - DEVICE_COLUMN_GAP) / RUN_BAND);
+      const last = Math.floor((run.y1 + DEVICE_COLUMN_GAP) / RUN_BAND);
+      for (let band = first; band <= last; band += 1) {
+        const list = bands.get(band);
+        if (list) list.push(run);
+        else bands.set(band, [run]);
+      }
+    }
+  }
+  return (top, bottom) => {
+    const found = new Set<BranchRun>();
+    for (let band = Math.floor(top / RUN_BAND); band <= Math.floor(bottom / RUN_BAND); band += 1) {
+      for (const run of bands.get(band) ?? []) {
+        const reach = run.x0 === run.x1 ? DEVICE_COLUMN_GAP : 0;
+        if (run.y1 > top - reach && run.y0 < bottom + reach) found.add(run);
+      }
+    }
+    const upright: Column[] = [];
+    const level: Column[] = [];
+    for (const run of found) {
+      const column = { x: (run.x0 + run.x1) / 2, half: (run.x1 - run.x0) / 2 };
+      if (run.x0 === run.x1) upright.push(column);
+      else level.push(column);
+    }
+    return { upright, level };
+  };
+}
+
 /** React Flow node-type strings for the non-bus kinds. Mirrors `NODE_TYPES`. */
 const NON_BUS_NODE_TYPE = {
   generator: 'generator',
@@ -883,13 +957,16 @@ export function buildGraph(
         })();
   const deviceSides = computeDeviceVerticalSides(topology, effCoords);
 
-  // Where the branches land on each bar, from a pass over the buses and the
-  // branches alone: a device that is placed here stands clear of them.
-  const branchBars = layoutConnections(
+  // Where the branches land on each bar and how they run, from a pass over
+  // the buses and the branches alone: a device that is placed here stands
+  // clear of them.
+  const branches = layoutConnections(
     nodes.map((n) => ({ ...n, position: effCoords[n.id] ?? n.position })),
     edges,
     { barLengths: opts.barLengths },
-  ).bars;
+  );
+  const branchBars = branches.bars;
+  const branchesThrough = branchColumns(branches.routes.values());
 
   // What stands on each face of each bar (`<bus>|<face>`): the branches
   // that land there, the devices the layout or a drag put there, and the
@@ -985,8 +1062,25 @@ export function buildGraph(
 
   // The rest take the free place nearest their column: over the bar where
   // there is room, so the connector drops square onto it, and beside what
-  // is already there otherwise.
-  for (const device of pending) {
+  // is already there otherwise. The narrow ones go first, so that as many
+  // as the bar has room for stand over it, and it is the widest that goes
+  // past a tip. A machine and the static generator it names go one after
+  // the other, as wide as the wider of the two, so they stand side by side.
+  const unitOf = (device: PendingDevice): string =>
+    device.kind === 'generator'
+      ? `${device.parentIdx}|${generatorRowKey(device.entry)}`
+      : device.nodeId;
+  const units = new Map<string, { width: number; first: number }>();
+  pending.forEach((device, i) => {
+    const unit = units.get(unitOf(device));
+    if (unit === undefined) units.set(unitOf(device), { width: device.size.width, first: i });
+    else unit.width = Math.max(unit.width, device.size.width);
+  });
+  const byWidth = [...pending].sort((a, b) => {
+    const [ua, ub] = [units.get(unitOf(a))!, units.get(unitOf(b))!];
+    return ua.width - ub.width || ua.first - ub.first;
+  });
+  for (const device of byWidth) {
     if (device.position !== undefined) continue;
     const { parentIdx, parentCoord, size } = device;
     const face = deviceSides.get(parentIdx) ?? BUS_SIDE_FOR_KIND[device.kind];
@@ -1004,13 +1098,22 @@ export function buildGraph(
       .map((c) => c.x)
       .filter((x) => x >= lo && x <= hi);
     const preferred = Math.min(hi, Math.max(lo, middle + rowParity * DEVICE_COLUMN_OFFSET));
-    const x = freeColumn(preferred, size.width / 2, taken, lo, hi, middle, across);
-    taken.push({ x, half: size.width / 2 });
+    const y = parentCoord.y + (face === 'north' ? -DEVICE_ROW_OFFSET : DEVICE_ROW_OFFSET);
+    const half = size.width / 2;
+    // The branches that pass through the row the device stands in, whichever
+    // buses they are of: it stands clear of those as well. Where that would
+    // take it too far from its bus it stands clear of the upright runs only,
+    // which take less room to step aside from, and failing that where it
+    // would have stood without them.
+    const passing = branchesThrough(y, y + size.height);
+    let x = preferred;
+    for (const inTheWay of [[...passing.upright, ...passing.level], passing.upright, []]) {
+      x = freeColumn(preferred, half, [...taken, ...inTheWay], lo, hi, middle, across);
+      if (Math.max(lo - x, x - hi) <= DEVICE_DETOUR_LIMIT) break;
+    }
+    taken.push({ x, half });
     device.face = face;
-    device.position = {
-      x: x - size.width / 2,
-      y: parentCoord.y + (face === 'north' ? -DEVICE_ROW_OFFSET : DEVICE_ROW_OFFSET),
-    };
+    device.position = { x: x - half, y };
   }
 
   for (const device of pending) {

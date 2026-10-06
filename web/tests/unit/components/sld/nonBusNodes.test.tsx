@@ -4,17 +4,19 @@
  * Verifies that `buildGraph` produces React Flow nodes for generators,
  * loads, and shunts anchored to their parent bus, plus stub edges
  * connecting each non-bus node to its bus, and that a device the layout
- * does not place is put over a free part of the bar. Transformers stay as
- * edges (TransformerEdge) — these tests cover that they don't accidentally
- * emit a node.
+ * does not place is put over a free part of the bar, clear of the branches
+ * that pass through its row. Transformers stay as edges (TransformerEdge) —
+ * these tests cover that they don't accidentally emit a node.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+  branchColumns,
   buildGraph,
   deviceBoxSize,
   freeColumn,
   DEVICE_COLUMN_GAP,
   DEVICE_COLUMN_OFFSET,
+  DEVICE_DETOUR_LIMIT,
   DEVICE_ROW_OFFSET,
   DEVICE_VALUE_LABEL,
   NODE_FOOTPRINT,
@@ -653,6 +655,66 @@ describe('freeColumn', () => {
   });
 });
 
+describe('branchColumns', () => {
+  /** One run, as the route of a branch. */
+  const run = (a: [number, number], b: [number, number]) => ({ points: [a, b] });
+
+  it('counts an upright run that passes through the row, as a column with no width', () => {
+    const through = branchColumns([run([100, 0], [100, 300]), run([220, 300], [220, 120])]);
+    expect(through(100, 141)).toEqual({
+      upright: [
+        { x: 100, half: 0 },
+        { x: 220, half: 0 },
+      ],
+      level: [],
+    });
+  });
+
+  it('counts an upright run that ends nearer to the row than the gap, and not one that ends the gap away', () => {
+    const above = (to: number) => branchColumns([run([100, 0], [100, to])])(100, 141).upright;
+    expect(above(100 - DEVICE_COLUMN_GAP)).toEqual([]);
+    expect(above(100 - DEVICE_COLUMN_GAP + 1)).toEqual([{ x: 100, half: 0 }]);
+    const below = (from: number) => branchColumns([run([100, from], [100, 400])])(100, 141).upright;
+    expect(below(141 + DEVICE_COLUMN_GAP)).toEqual([]);
+    expect(below(141 + DEVICE_COLUMN_GAP - 1)).toEqual([{ x: 100, half: 0 }]);
+  });
+
+  it('counts a level run that lies in the row over its whole length, and none above or below it', () => {
+    const at = (y: number) => branchColumns([run([300, y], [380, y])])(100, 141).level;
+    expect(at(120)).toEqual([{ x: 340, half: 40 }]);
+    expect(at(101)).toEqual([{ x: 340, half: 40 }]);
+    // On the edge of the row, or just outside it: a device cannot step out
+    // from under a run without leaving its bus.
+    expect(at(100)).toEqual([]);
+    expect(at(141)).toEqual([]);
+    expect(at(96)).toEqual([]);
+  });
+
+  it('finds the runs of every route, each once, however long the run and wherever the row', () => {
+    // A run 5000 long, a route with a bend, and a run at an angle, which is no column.
+    const through = branchColumns([
+      run([40, -2000], [40, 3000]),
+      {
+        points: [
+          [500, 1000],
+          [500, 1100],
+          [700, 1100],
+        ],
+      },
+      run([0, 0], [300, 300]),
+    ]);
+    expect(through(-1500, -1459)).toEqual({ upright: [{ x: 40, half: 0 }], level: [] });
+    expect(through(1080, 1121)).toEqual({
+      upright: [
+        { x: 40, half: 0 },
+        { x: 500, half: 0 },
+      ],
+      level: [{ x: 600, half: 100 }],
+    });
+    expect(through(5000, 5041)).toEqual({ upright: [], level: [] });
+  });
+});
+
 describe('buildGraph: where a device the layout does not place is put', () => {
   /** The middle of a device node's box along x. */
   const middleOf = (n: { position: { x: number }; initialWidth?: number }): number =>
@@ -814,6 +876,107 @@ describe('buildGraph: where a device the layout does not place is put', () => {
       }
       // The fourth stands clear of the tip: a diagonal, or down and into the tip.
       expect(routes.get('stub-load-PQ_1')!.points).toHaveLength(connectorStyle === 'elbow' ? 3 : 2);
+    }
+  });
+
+  it('stands a device clear of a branch of other buses that passes through its row', () => {
+    // The line from bus 1 down to bus 2 passes 14 right of the tip of the
+    // bar of bus 3, through the row where the load of bus 3 hangs.
+    const topology = makeTopology({
+      buses: [bus(1), bus(2), bus(3)],
+      lines: [trafo('L12', 1, 2)],
+      loads: [{ ...load('A', 3), name: 'A load' }],
+    });
+    const coords = { '1': { x: 300, y: 0 }, '2': { x: 300, y: 400 }, '3': { x: 240, y: 200 } };
+    const { nodes, edges } = buildGraph(topology, coords);
+    const { routes } = layoutConnections(nodes, edges);
+    expect(routes.get('line-L12')!.points).toEqual([
+      [346, 3],
+      [346, 403],
+    ]);
+    const placed = nodes.find((n) => n.id === 'load-A')!;
+    const half = placed.initialWidth! / 2;
+    expect(placed.position.y).toBe(200 + DEVICE_ROW_OFFSET);
+    // Its box is a gap from the line, and not over the third of the bar it
+    // would take with no line there (240 + 46 + 33).
+    expect(middleOf(placed)).toBe(346 - half - DEVICE_COLUMN_GAP);
+    const alone = buildGraph({ ...topology, lines: [] }, coords).nodes;
+    expect(middleOf(alone.find((n) => n.id === 'load-A')!)).toBe(240 + 46 + DEVICE_COLUMN_OFFSET);
+  });
+
+  it('keeps a device by its bus when stepping out from under a level run would take it further than the limit', () => {
+    // A line runs level through the row under bus 1, as a saved route has
+    // it. A fourth bus, far off, keeps the load of bus 1 below its bar.
+    const drawn = (from: number, to: number) => {
+      const topology = makeTopology({
+        buses: [bus(1), bus(2), bus(3), bus(4)],
+        lines: [trafo('L23', 2, 3)],
+        loads: [{ ...load('A', 1), name: 'A' }],
+      });
+      const coords = {
+        '1': { x: 0, y: 0 },
+        '2': { x: from - 46, y: 180 },
+        '3': { x: to - 46, y: 180 },
+        '4': { x: 2000, y: -400 },
+      };
+      const route: [number, number][] = [
+        [from, 180],
+        [from, 90],
+        [to, 90],
+        [to, 180],
+      ];
+      const { nodes } = buildGraph(topology, coords, {
+        bendPoints: new Map([['line-L23', route]]),
+      });
+      const placed = nodes.find((n) => n.id === 'load-A')!;
+      expect(placed.position.y).toBe(DEVICE_ROW_OFFSET);
+      return middleOf(placed);
+    };
+    // A short run, from 46 to 146: the load stands a gap left of where it starts.
+    expect(drawn(46, 146)).toBe(46 - 19 - DEVICE_COLUMN_GAP);
+    // A run that reaches 300 either side: clear of it the load would stand
+    // further past a tip than the limit, so it keeps its third of the bar...
+    expect(300 - 19 - DEVICE_COLUMN_GAP).toBeGreaterThan(DEVICE_DETOUR_LIMIT);
+    expect(drawn(-254, 346)).toBe(46 + DEVICE_COLUMN_OFFSET);
+    // ...and still steps aside for the upright run of the same line, where that is near.
+    expect(drawn(-254, 90)).toBe(90 + 19 + DEVICE_COLUMN_GAP);
+  });
+
+  it('places the narrow devices first, and a machine beside the static generator it names', () => {
+    // A generator, its machine and a load, all above bus 1 because its line
+    // goes down: three do not fit over the bar. The load and the generator
+    // stand over it, and the machine, the widest, is the one past a tip,
+    // next to its generator.
+    const topology = makeTopology({
+      buses: [bus(1), bus(2)],
+      lines: [trafo('L', 1, 2)],
+      generators: [
+        { ...gen(7, 1), name: '7' },
+        { ...gen('GENROU_7', 1, 'GENROU'), name: 'GENROU_7', params: { bus: 1, gen: 7 } },
+      ],
+      loads: [{ ...load('PQ_1', 1), name: 'PQ_1' }],
+    });
+    const { nodes, edges } = buildGraph(topology, { '1': { x: 0, y: 0 }, '2': { x: 0, y: 200 } });
+    const at = (id: string): number => middleOf(nodes.find((n) => n.id === id)!);
+    const [machine, generator, pq] = [at('generator-GENROU_7'), at('generator-7'), at('load-PQ_1')];
+    for (const x of [generator, pq]) {
+      expect(x).toBeGreaterThanOrEqual(3);
+      expect(x).toBeLessThanOrEqual(89);
+    }
+    expect(machine).toBeLessThan(3);
+    expect(machine).toBeLessThan(generator);
+    expect(generator).toBeLessThan(pq);
+    // The nodes are still built in the order of the topology.
+    expect(nodes.filter((n) => n.type !== 'bus').map((n) => n.id)).toEqual([
+      'generator-7',
+      'generator-GENROU_7',
+      'load-PQ_1',
+    ]);
+    // Every one of them drops square: the bar reaches out under the machine.
+    const { routes } = layoutConnections(nodes, edges);
+    for (const id of ['stub-generator-7', 'stub-generator-GENROU_7', 'stub-load-PQ_1']) {
+      const points = routes.get(id)!.points;
+      expect(points[0]![0], id).toBe(points[1]![0]);
     }
   });
 

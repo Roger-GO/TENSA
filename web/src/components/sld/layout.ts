@@ -25,10 +25,11 @@
  * - `elk.direction = DOWN` puts the slack bus near the top — matches
  *   the canonical IEEE 14 / 39 reference layouts so the auto-layout
  *   degrades gracefully when no curated layout exists.
- * - Spacing chosen empirically: `nodeNode=60` + `nodeNodeBetweenLayers
- *   =80` gives buses room to render their IEC 60617 icons + name
- *   labels without overlap, while still fitting IEEE 39 in a single
- *   viewport at default zoom.
+ * - Spacing: `nodeNode=60` gives buses room to render their IEC 60617
+ *   icons + name labels without overlap, while still fitting IEEE 39 in
+ *   a single viewport at default zoom. Between two layers there is
+ *   `LAYER_GAP`, which is what the row of devices above a bus needs to
+ *   stand clear of the branches ELK routes over it.
  * - ELK runs in a Web Worker (see `elkClient.ts`), so a layout never
  *   blocks the UI thread and the engine is not part of the main chunk.
  * - Fallback: if ELK throws on either pass (rare; the worker failing to
@@ -39,8 +40,28 @@
 import type { ElkNode, LayoutOptions } from 'elkjs/lib/elk-api';
 import type { TopologySummary } from '@/api/types';
 import type { CoordsByIdx } from './sidecar';
-import { NODE_FOOTPRINT, computeHandleAssignments, type Side } from './graph';
+import { DEVICE_ROW_OFFSET, NODE_FOOTPRINT, computeHandleAssignments, type Side } from './graph';
+import { RUN_CLEARANCE } from './connections';
 import { elkLayout } from './elkClient';
+
+/**
+ * How far under the box of a bus ELK runs the first branch that turns
+ * between that layer and the next. It is ELK's default, set here as well so
+ * that `LAYER_GAP` can count on it.
+ */
+const EDGE_NODE_GAP = 10;
+
+/**
+ * The room between two layers of buses. The devices of a bus stand in a row
+ * `DEVICE_ROW_OFFSET` above it when the layout does not place them, and the
+ * first branch that turns between two layers runs `EDGE_NODE_GAP` under the
+ * upper one. With this much between the layers that run passes
+ * `RUN_CLEARANCE` above the row, as far as a run keeps from a bar it is not
+ * connected to. With the 80 this used to be, it lay exactly on the top edge
+ * of the device boxes, and a branch that came down and turned there looked
+ * wired to the corner of one.
+ */
+export const LAYER_GAP = EDGE_NODE_GAP + RUN_CLEARANCE + DEVICE_ROW_OFFSET;
 
 /**
  * Tunable layout options. Exported so tests can vary spacing without
@@ -52,7 +73,8 @@ export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
   'elk.direction': 'DOWN',
   'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
   'elk.spacing.nodeNode': '60',
-  'elk.layered.spacing.nodeNodeBetweenLayers': '80',
+  'elk.layered.spacing.nodeNodeBetweenLayers': String(LAYER_GAP),
+  'elk.layered.spacing.edgeNodeBetweenLayers': String(EDGE_NODE_GAP),
   'elk.edgeRouting': 'ORTHOGONAL',
 };
 

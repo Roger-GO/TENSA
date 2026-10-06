@@ -9,9 +9,10 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ElkNode } from 'elkjs/lib/elk-api';
-import { autoLayout, gridLayout, layoutSignature } from '@/components/sld/layout';
+import { LAYER_GAP, autoLayout, gridLayout, layoutSignature } from '@/components/sld/layout';
 import { elkLayout } from '@/components/sld/elkClient';
-import { BAR_LENGTH } from '@/components/sld/connections';
+import { BAR_LENGTH, RUN_CLEARANCE } from '@/components/sld/connections';
+import { DEVICE_ROW_OFFSET } from '@/components/sld/graph';
 import type { TopologySummary, TopologyEntry } from '@/api/types';
 
 vi.mock('@/components/sld/elkClient', async () => {
@@ -195,6 +196,29 @@ describe('autoLayout', () => {
       expect(end[0]).toBeGreaterThanOrEqual(coords[target]!.x);
       expect(end[0]).toBeLessThanOrEqual(coords[target]!.x + BAR_LENGTH);
     }
+  });
+
+  it('leaves room between two layers for the devices above a bus, clear of the branches that turn over them', async () => {
+    // A fan again: each branch leaves bus 1 downwards, turns, and runs
+    // level over the row where the devices of the bus it goes to stand.
+    const topology = makeTopology(
+      [bus(1, 'b1'), bus(2, 'b2'), bus(3, 'b3'), bus(4, 'b4')],
+      [line(1, 1, 2), line(2, 1, 3), line(3, 1, 4)],
+    );
+    const { coords, bendPoints } = await autoLayout(topology);
+    // The box of a bus is 40 high, and the next layer starts the gap under it.
+    expect(coords['2']!.y - coords['1']!.y).toBe(40 + LAYER_GAP);
+    const rowTop = coords['2']!.y - DEVICE_ROW_OFFSET;
+    const levelRuns = [...bendPoints.values()].flatMap((route) =>
+      route.flatMap((point, i) => (i > 0 && route[i - 1]![1] === point[1] ? [point[1]] : [])),
+    );
+    expect(levelRuns.length).toBeGreaterThan(0);
+    for (const y of levelRuns) {
+      expect(rowTop - y).toBeGreaterThanOrEqual(RUN_CLEARANCE);
+    }
+    // The nearest of them is exactly the clearance above the row: the gap
+    // is no wider than it needs to be.
+    expect(rowTop - Math.max(...levelRuns)).toBe(RUN_CLEARANCE);
   });
 
   it('skips edges with bus references that are not in the topology', async () => {

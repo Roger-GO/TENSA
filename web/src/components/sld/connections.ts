@@ -108,9 +108,10 @@ const BRIDGE_CLEARANCE: Record<Side, number> = { north: 24, south: 44, east: 24,
 
 /**
  * How far a run across keeps from the line of a bar it is not connected to,
- * so that it is not taken for part of that bar.
+ * so that it is not taken for part of that bar. The automatic layout leaves
+ * as much between the runs it makes and the devices under them (`layout.ts`).
  */
-const RUN_CLEARANCE = 16;
+export const RUN_CLEARANCE = 16;
 
 /**
  * How near a run that moved along with its tap may come to a bar it is not
