@@ -15,19 +15,14 @@ import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';
 import { useSessionStore } from '@/store/session';
 import { useUnitsStore } from '@/store/units';
-import {
-  useCloneDiff,
-  useCloneEdit,
-  useCurrentTopology,
-  useReloadCase,
-  useTopologySchema,
-} from '@/api/queries';
+import { useCloneDiff, useCloneEdit, useCurrentTopology, useTopologySchema } from '@/api/queries';
 import type { CloneDiffPair, ParamValue, TopologyEntry, TopologyParamMeta } from '@/api/types';
 import type { SelectedElement } from '@/store/case';
 import { findTopologyEntry } from '@/lib/topology';
 import { announceEdit } from '@/lib/announceEdit';
 import { cn } from '@/lib/cn';
 import { entryBaseKv, formatDisplayed, unratedBusIdx, voltageDisplay } from '@/lib/units';
+import { useResetRunAction } from '@/lib/useResetRunAction';
 import { assessVoltage, busVoltageLimits, voltageStatusText } from '@/components/sld/voltage';
 import { formatLoading, loadingCheckText } from '@/components/sld/loading';
 import { ModifiedFromOriginalDot } from './ModifiedFromOriginalDot';
@@ -502,8 +497,9 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
   const tdsStreaming = useRunsStore((s) =>
     Object.values(s.runs).some((r) => r.state === 'starting' || r.state === 'streaming'),
   );
-  const sessionId = useSessionStore((s) => s.sessionId);
-  const reloadCase = useReloadCase();
+  // The reset says what the top bar's does, and that it happened: the banner is
+  // gone once the case is unlocked.
+  const resetRun = useResetRunAction({ errorTitle: 'Reset run', confirm: true });
   const schema = useTopologySchema();
   const pflow = usePflowStore((s) => s.lastRun);
 
@@ -593,17 +589,12 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
       return meta !== undefined && !isIdentifierParam(key, meta);
     });
 
-  const onResetRun = () => {
-    if (!sessionId) return;
-    reloadCase.mutate(sessionId);
-  };
-
   return (
     <div data-testid="element-form-fields" className={cn('flex min-h-0 flex-col gap-2', className)}>
       {isCommitted && !cloneEditable ? (
         <ResetBanner
-          onReset={onResetRun}
-          resetting={reloadCase.isPending}
+          onReset={resetRun.reset}
+          resetting={resetRun.isPending}
           controller={isController}
         />
       ) : null}

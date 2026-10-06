@@ -57,7 +57,7 @@ vi.mock('@/api/client', async () => {
 });
 
 let mockTopology: TopologySummary | null = null;
-const reloadMutate = vi.fn();
+const resetMutate = vi.fn();
 vi.mock('@/api/queries', async () => {
   const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
   return {
@@ -79,7 +79,7 @@ vi.mock('@/api/queries', async () => {
         },
       },
     }),
-    useReloadCase: () => ({ mutate: reloadMutate, isPending: false }),
+    useResetRun: () => ({ mutate: resetMutate, isPending: false }),
   };
 });
 
@@ -127,8 +127,10 @@ function select(kind: 'bus' | 'line' | 'load', idx: string) {
 describe('<ElementFormFields />', () => {
   beforeEach(() => {
     putSpy.mockClear();
-    reloadMutate.mockClear();
+    resetMutate.mockClear();
     toastMock.success.mockClear();
+    toastMock.info.mockClear();
+    toastMock.error.mockClear();
     mockTopology = topology();
     useSessionStore.setState({ sessionId: parseSessionId('test-session-id') });
     useCaseStore.setState({
@@ -204,7 +206,33 @@ describe('<ElementFormFields />', () => {
       expect(banner).toHaveTextContent('Reset the run to edit values again');
       expect(banner).toHaveTextContent('the edits you made so far are discarded');
       await user.click(within(banner).getByRole('button', { name: 'Reset run' }));
-      expect(reloadMutate).toHaveBeenCalledWith('test-session-id');
+      // The reset the top bar and the tables make: it releases the run as well.
+      expect(resetMutate).toHaveBeenCalledWith('test-session-id', expect.anything());
+    });
+
+    it('answers the reset with a toast, since the banner is gone once it has worked', async () => {
+      const user = userEvent.setup();
+      mockTopology = topology('committed');
+      select('bus', '1');
+      render(withQueryClient(<ElementFormFields />));
+      await user.click(
+        within(screen.getByTestId('inspector-reset-banner')).getByRole('button', {
+          name: 'Reset run',
+        }),
+      );
+      const outcome = resetMutate.mock.calls[0]?.[1] as {
+        onSuccess: () => void;
+        onError: (err: Error) => void;
+      };
+      act(() => outcome.onSuccess());
+      expect(toastMock.info).toHaveBeenCalledWith('Run reset', {
+        description: 'The results are cleared and the values can be changed again.',
+      });
+      // And a reset that failed is not silent either.
+      act(() => outcome.onError(new Error('worker is gone')));
+      expect(toastMock.error).toHaveBeenCalledWith('Reset run', {
+        description: 'Could not reset: worker is gone',
+      });
     });
   });
 
