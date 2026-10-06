@@ -11,6 +11,8 @@
  *  - Same-file no-op guard: clicking a row that matches the
  *    currently-loaded case does NOT fire loadCase.
  *  - No-case-loaded hides the snapshot section entirely.
+ *  - The snapshot section has the button that saves one, with and
+ *    without snapshots, and says what a click on a row does.
  *  - Empty workspace renders the EmptyState (with the
  *    `saved-cases-files-empty` test id).
  */
@@ -23,6 +25,7 @@ import type { ReactNode } from 'react';
 import { SavedCasesList } from '@/components/shell/SavedCasesList';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
+import { useSnapshotStore } from '@/store/snapshot';
 import { useRecentCasesStore } from '@/store/recentCases';
 import { useUploadNoticeStore } from '@/store/uploadNotice';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
@@ -108,6 +111,7 @@ beforeEach(() => {
   useCaseStore.setState({ selection: null, topology: null, layoutSidecar: null });
   useRecentCasesStore.setState({ cases: [] });
   useUploadNoticeStore.getState().dismiss();
+  useSnapshotStore.getState().reset();
 });
 
 afterEach(() => {
@@ -167,6 +171,53 @@ describe('<SavedCasesList />', () => {
     mockSnapshots = [];
     render(withClient(<SavedCasesList />));
     expect(screen.getByTestId('saved-cases-snapshots-empty')).toBeInTheDocument();
+  });
+
+  it('has a Save snapshot button in the snapshot section, which the empty state points to', async () => {
+    const user = userEvent.setup();
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('kundur.raw'), addfiles: [] },
+    });
+    mockSnapshots = [];
+    render(withClient(<SavedCasesList />));
+    expect(screen.getByTestId('saved-cases-snapshots-empty')).toHaveTextContent(
+      'Use Save snapshot to keep the operating point and the diagram as it is placed now',
+    );
+    expect(useSnapshotStore.getState().saveDialogOpen).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'Save snapshot…' }));
+    // The dialog itself is mounted at the app's root and opens from this flag.
+    expect(useSnapshotStore.getState().saveDialogOpen).toBe(true);
+  });
+
+  it('keeps the Save snapshot button once there are snapshots, and says what a click on one does', () => {
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('kundur.raw'), addfiles: [] },
+    });
+    mockSnapshots = [
+      {
+        name: 'baseline',
+        saved_at: '2026-05-01T00:00:00Z',
+        has_pflow: true,
+        has_tds: false,
+        has_dill: false,
+        andes_version: '1.9.0',
+        disturbance_count: 0,
+      },
+    ];
+    render(withClient(<SavedCasesList />));
+    expect(screen.getByTestId('saved-cases-save-snapshot')).toBeInTheDocument();
+    // The row is named for what it does, not only for the snapshot.
+    expect(screen.getByRole('button', { name: /^Restore snapshot\s*baseline/ })).toBe(
+      screen.getByTestId('saved-cases-row-snapshot-baseline'),
+    );
+    expect(screen.getByTestId('saved-cases-snapshots-hint')).toHaveTextContent(
+      'Click a snapshot to restore its operating point and diagram layout.',
+    );
+  });
+
+  it('has no Save snapshot button while no case is loaded', () => {
+    render(withClient(<SavedCasesList />));
+    expect(screen.queryByTestId('saved-cases-save-snapshot')).toBeNull();
   });
 
   it('clicking a workspace file row fires loadCase with the parsed path + no addfiles', async () => {

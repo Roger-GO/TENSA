@@ -40,6 +40,10 @@ import { useUploadNoticeStore } from '@/store/uploadNotice';
  *    to restore via ``useRestoreSnapshot`` (replays the snapshot's
  *    disturbances and re-solves the power flow; same as the
  *    ``LoadSnapshotDialog`` Restore button with its default options).
+ *    The group's header has the button that saves one (it opens
+ *    ``SaveSnapshotDialog``): a list of snapshots is where a first-time
+ *    user looks for the way to make one, and the Workspace menu's item
+ *    is a menu away.
  *
  * Empty states use the canonical ``<EmptyState />`` component (per the
  * v3 plan IA spec). The two sections render their own empty state so
@@ -76,6 +80,7 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
   const markRestorePending = useSnapshotStore((s) => s.markRestorePending);
   const markRestoreSuccess = useSnapshotStore((s) => s.markRestoreSuccess);
   const markRestoreError = useSnapshotStore((s) => s.markRestoreError);
+  const openSaveSnapshot = useSnapshotStore((s) => s.openSaveDialog);
 
   const files = (filesQuery.data?.files ?? []).filter(isPrimaryCase);
   const recentCases = useRecentCasesStore((s) => s.cases);
@@ -254,51 +259,80 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
       {/* Snapshots group — gated on a loaded case ----------------------- */}
       {hasCaseLoaded ? (
         <div className="flex flex-col gap-1" data-testid="saved-cases-snapshots-group">
-          <p
-            className="text-muted-foreground px-1 pt-2 pb-0.5 text-[10px] font-medium tracking-wide uppercase"
-            data-testid="saved-cases-snapshots-heading"
-          >
-            Snapshots
-          </p>
+          <div className="flex items-center justify-between gap-2 pt-2">
+            <p
+              className="text-muted-foreground px-1 pb-0.5 text-[10px] font-medium tracking-wide uppercase"
+              data-testid="saved-cases-snapshots-heading"
+            >
+              Snapshots
+            </p>
+            <button
+              type="button"
+              data-testid="saved-cases-save-snapshot"
+              onClick={openSaveSnapshot}
+              title="Save the operating point, the disturbances and the diagram as it is placed now under a name, to restore later."
+              className={cn(
+                'border-border text-primary rounded-[var(--radius-sm)] border px-2 py-0.5',
+                'text-[11px] font-medium',
+                'hover:bg-muted transition-colors duration-[var(--duration-fast)]',
+                'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+              )}
+            >
+              Save snapshot…
+            </button>
+          </div>
           {snapshots.length === 0 ? (
             <div data-testid="saved-cases-snapshots-empty">
               <EmptyState
                 icon={<SnapshotIcon />}
                 title="No snapshots"
-                description="Save the current operating point to restore it later."
+                description="Use Save snapshot to keep the operating point and the diagram as it is placed now, and restore them later."
                 emptyStateKey="saved-cases-snapshots-empty"
               />
             </div>
           ) : (
-            <ul className="flex flex-col gap-0.5" role="list" aria-label="Saved snapshots">
-              {snapshots.map((snap) => (
-                <li key={snap.name}>
-                  <button
-                    type="button"
-                    data-testid={`saved-cases-row-snapshot-${snap.name}`}
-                    onClick={() => void handleRestoreSnapshot(snap.name)}
-                    disabled={restoreSnapshot.isPending}
-                    className={cn(
-                      'group flex w-full items-center justify-between gap-2',
-                      'rounded-[var(--radius-sm)] px-2 py-1.5 text-left text-xs',
-                      'transition-colors duration-[var(--duration-fast)]',
-                      'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
-                      'disabled:cursor-not-allowed disabled:opacity-60',
-                      'text-foreground hover:bg-muted/60',
-                    )}
-                  >
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <SnapshotGlyph />
-                      <span className="truncate font-mono">{snap.name}</span>
-                    </span>
-                    <span className="text-muted-foreground shrink-0 font-mono text-[10px]">
-                      {snap.andes_version}
-                      {snap.has_pflow ? ' · PF' : ''}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="flex flex-col gap-0.5" role="list" aria-label="Saved snapshots">
+                {snapshots.map((snap) => (
+                  <li key={snap.name}>
+                    <button
+                      type="button"
+                      data-testid={`saved-cases-row-snapshot-${snap.name}`}
+                      onClick={() => void handleRestoreSnapshot(snap.name)}
+                      disabled={restoreSnapshot.isPending}
+                      title={`Restore ${snap.name}: the operating point and the diagram as they were when it was saved`}
+                      className={cn(
+                        'group flex w-full items-center justify-between gap-2',
+                        'rounded-[var(--radius-sm)] px-2 py-1.5 text-left text-xs',
+                        'transition-colors duration-[var(--duration-fast)]',
+                        'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+                        'disabled:cursor-not-allowed disabled:opacity-60',
+                        'text-foreground hover:bg-muted/60',
+                      )}
+                    >
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <SnapshotGlyph />
+                        {/* The row shows only the name; what a click does is in its
+                            accessible name too, not just in the hint under the list. */}
+                        <span className="sr-only">Restore snapshot</span>
+                        <span className="truncate font-mono">{snap.name}</span>
+                      </span>
+                      <span className="text-muted-foreground shrink-0 font-mono text-[10px]">
+                        {snap.andes_version}
+                        {snap.has_pflow ? ' · PF' : ''}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <p
+                data-testid="saved-cases-snapshots-hint"
+                className="text-muted-foreground px-1 text-[10px] leading-snug"
+              >
+                Click a snapshot to restore its operating point and diagram layout. To delete one,
+                open Load snapshot in the Workspace menu.
+              </p>
+            </>
           )}
         </div>
       ) : null}
