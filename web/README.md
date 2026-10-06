@@ -8,7 +8,11 @@ release is in the [CHANGELOG](../CHANGELOG.md).
 ## Prerequisites
 
 - Node 22 LTS or newer. Install via [`nvm`](https://github.com/nvm-sh/nvm) or
-  your platform package manager.
+  your platform package manager. CI runs the checks on Node 22, which
+  `.nvmrc` names: `nvm use` in this directory selects it. A newer Node works
+  for development, but the two do not give a test the same globals (on Node 22
+  `Response.blob()` answers with Node's own `Blob`, not jsdom's), so run
+  `pnpm test` on Node 22 before pushing a change to the tests.
 - `pnpm` 11 or newer. Install with `npm install -g pnpm` or `corepack enable`.
 - The substrate running locally (`tensa serve` from the `server/` package; see
   the repo root README).

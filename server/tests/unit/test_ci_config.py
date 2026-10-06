@@ -15,6 +15,7 @@ refuses from passing on the systems the whole suite runs on.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -224,6 +225,31 @@ def _read_required(path: Path) -> str:
         pytest.skip("the repository files are not next to the tests")
     assert path.is_file(), f"{path.relative_to(REPO_ROOT)} is missing"
     return path.read_text(encoding="utf-8")
+
+
+def test_the_node_version_is_the_same_wherever_it_is_named() -> None:
+    """``web/.nvmrc`` is what ``nvm use`` gives a developer, the workflows' ``node-version``
+    what CI runs, and ``engines`` in ``web/package.json`` the oldest that is supported. A
+    test that passes on a newer Node can fail on the one CI runs (the two expose different
+    globals), so the local default must be CI's, and both the oldest supported."""
+    nvmrc = REPO_ROOT / "web" / ".nvmrc"
+    package = REPO_ROOT / "web" / "package.json"
+    if not nvmrc.is_file() or not package.is_file():
+        pytest.skip("web/ is not next to the tests")
+    local = nvmrc.read_text(encoding="utf-8").strip().removeprefix("v")
+    assert re.fullmatch(r"\d+", local), f"web/.nvmrc should name a major version, not {local!r}"
+
+    used: dict[str, set[str]] = {}
+    for path in sorted(_WORKFLOWS.glob("*.yml")):
+        for job in _load(path).get("jobs", {}).values():
+            for step in job.get("steps", []):
+                if "actions/setup-node" in str(step.get("uses", "")):
+                    used.setdefault(str(step["with"]["node-version"]), set()).add(path.name)
+    assert used, "no workflow sets up Node"
+    assert set(used) == {local}, f"web/.nvmrc says {local}, the workflows use {used}"
+
+    engines = json.loads(package.read_text(encoding="utf-8"))["engines"]["node"]
+    assert engines == f">={local}"
 
 
 def test_no_e2e_file_depends_on_the_removed_auth_token() -> None:
