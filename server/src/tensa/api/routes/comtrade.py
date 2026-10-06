@@ -13,12 +13,19 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
 from tensa import __version__
+from tensa.api.body_limit import body_limited_route, json_number_bytes
 from tensa.api.schemas import MAX_COMTRADE_VALUES, ComtradeExportRequest, ProblemDetails
 from tensa.core.comtrade import ComtradeChannel, ComtradeError, comtrade_record, comtrade_zip
 from tensa.core.errors import short_repr
 from tensa.security.names import user_name_problem
 
-router = APIRouter()
+# The most bytes a body within ``MAX_COMTRADE_VALUES`` can be: the values, and
+# with a single channel as many times. A larger one is refused before it is
+# read (``tensa.api.body_limit``); the count below still answers for a body that
+# is short in bytes and long in values.
+MAX_COMTRADE_BYTES = json_number_bytes(2 * MAX_COMTRADE_VALUES)
+
+router = APIRouter(route_class=body_limited_route(MAX_COMTRADE_BYTES, "a COMTRADE export"))
 
 
 def _record_zip(body: ComtradeExportRequest) -> bytes:

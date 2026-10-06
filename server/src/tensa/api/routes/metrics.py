@@ -11,8 +11,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from tensa.api.body_limit import body_limited_route, json_number_bytes
 from tensa.api.schemas import (
     MAX_METRIC_SAMPLES,
+    MAX_METRIC_SAMPLES_TOTAL,
     MAX_METRIC_SERIES,
     DampingEstimate,
     MetricExtremum,
@@ -28,7 +30,13 @@ from tensa.core.response_metrics import (
     response_metrics,
 )
 
-router = APIRouter()
+# The most bytes a body within the limits can be: a time and a value for each
+# of ``MAX_METRIC_SAMPLES_TOTAL`` samples. A larger one is answered 413 before
+# it is read (``tensa.api.body_limit``), where it would otherwise be read,
+# parsed and checked on the event loop to be answered 422 for its length.
+MAX_METRICS_BYTES = json_number_bytes(2 * MAX_METRIC_SAMPLES_TOTAL)
+
+router = APIRouter(route_class=body_limited_route(MAX_METRICS_BYTES, "a response-metrics request"))
 
 
 def _extremum(found: Extremum | None) -> MetricExtremum | None:
