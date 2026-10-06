@@ -88,6 +88,7 @@ The trust model lives in the top-level docstring of `server/src/tensa/__init__.p
 - `server/tests/acceptance/walkthrough.sh` — the curl-only end-to-end acceptance test
 - `server/hatch_build.py`: the hatch build hook that bundles the built UI (`web/dist`) into the sdist and the wheel without source maps, skips it for editable installs, and fails the build when there is no UI; `server/LICENSE` is a copy of the root license so the sdist builds on its own (a test keeps them identical)
 - `scripts/check_dist.py`: the checks `publish.yml` runs on the built sdist and wheel (tag equals version, UI bundled, no source maps, license included)
+- `scripts/check_large_files.py`: the check `.github/workflows/large-files.yml` runs on every pull request and push. It fails a change that adds a file over 1 MiB or makes one bigger, comparing with the commit the change started from, so the demo video and GIF the README embeds (`docs/demo/ieee9-agent-demo.mp4`, `docs/img/demo.gif`) pass while they are left alone. `.github/large-files-allowed.txt` lists the paths exempt from it, one per line, and a line there is a decision for the reviewer. Recordings do not go in the repository (CONTRIBUTING.md, "Media and other large files")
 - `examples/` — copy-paste API walkthroughs (curl + Python)
 - `llms.txt` — condensed API map for LLM agents (update when routes change)
 
