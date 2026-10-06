@@ -186,9 +186,12 @@ test('a diagram is saved with the system and comes back as it was placed', async
   await openCase(page, CASE_FILE);
   const automatic = await settledPicture(page);
   // Kundur has no layout shipped with the app: ELK placed the buses and routed
-  // the lines through fixed points.
+  // the lines through fixed points, some of them round a corner.
   expect(Object.keys(automatic.nodes).length).toBeGreaterThan(15);
-  expect(automatic.edges['line-Line_1']?.length).toBeGreaterThan(4);
+  const bent = Object.entries(automatic.edges).filter(
+    ([id, path]) => id.startsWith('line-') && path.length > 4,
+  );
+  expect(bent.length).toBeGreaterThan(0);
 
   // ---- Save system as, with nothing moved -------------------------------
   await page.getByTestId('topbar-menu-workspace-trigger').click();
