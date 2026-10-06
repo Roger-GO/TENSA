@@ -4,17 +4,20 @@
  * The hooks that save take the layout of the diagram as it is drawn
  * (`diagramLayout` in the case store) and the hooks that bring a system back
  * redraw from the layout that came with it. `fetch` is stubbed; what is asserted
- * is the request each hook sends and what the canvas would then read.
+ * is the request each hook sends and what the canvas would then read. The write
+ * a drag asks for is here too, for the one case the canvas tests cannot show with
+ * a stand-in for the mutation: sent while the canvas unmounts.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { render, renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import { useCallback, useEffect, type ReactNode } from 'react';
 
 import {
   makeQueryClient,
   queryKeys,
   useImportBundle,
+  usePutSidecar,
   useRestoreSnapshot,
   useSaveSnapshot,
 } from '@/api/queries';
@@ -24,6 +27,7 @@ import {
   __clearAllPendingForTests,
   buildSidecarLayout,
   debouncedPutSidecar,
+  flushPendingSidecarPut,
 } from '@/components/sld/sidecar';
 import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
@@ -98,6 +102,44 @@ describe('the layout travels with what is saved', () => {
     vi.useRealTimers();
     __clearAllPendingForTests();
     useCaseStore.setState({ selection: null, dragOverrides: {}, diagramLayout: null });
+  });
+
+  describe('a drag', () => {
+    it('whose write is sent as the canvas unmounts still reaches the file and the cache', async () => {
+      // The canvas sends a write that is still waiting from an effect cleanup,
+      // when the component that owns the mutation is on its way out as well.
+      // The request has to go out all the same, and the cached layout, which
+      // the canvas reads when it comes back, has to follow.
+      const layout = buildSidecarLayout({ '1': { x: 9, y: 9 } });
+      function Inner({ put }: { put: (drawn: SidecarLayout) => void }) {
+        useEffect(() => {
+          debouncedPutSidecar(CASE, layout, put);
+          return () => flushPendingSidecarPut(CASE);
+        }, [put]);
+        return null;
+      }
+      function Canvas() {
+        const { mutate } = usePutSidecar();
+        const put = useCallback(
+          (drawn: SidecarLayout) => mutate({ casePath: CASE, layout: drawn }),
+          [mutate],
+        );
+        return <Inner put={put} />;
+      }
+      fetchSpy.mockResolvedValue(new Response(null, { status: 204 }));
+      const { client, Wrapper } = makeWrapper();
+      const view = render(<Canvas />, { wrapper: Wrapper });
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      view.unmount();
+
+      await waitFor(() => expect(client.getQueryData(queryKeys.sidecar(CASE))).toEqual(layout));
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchSpy.mock.calls[0]!;
+      expect(String(url)).toContain('/workspace/layout?case_path=ieee14.raw');
+      expect((init as RequestInit).method).toBe('PUT');
+      expect(JSON.parse(String((init as RequestInit).body))).toEqual(layout);
+    });
   });
 
   describe('a snapshot', () => {

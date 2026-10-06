@@ -11,7 +11,9 @@
  *   coords the canvas renders.
  * - On user drag (debounced ~500 ms): `PUT /workspace/layout?case_path=
  *   <rel>` with the whole diagram as it now stands (`captureLayout`).
- *   `debouncedPutSidecar` below coalesces rapid drags into a single PUT.
+ *   `debouncedPutSidecar` below coalesces rapid drags into a single PUT,
+ *   and `flushPendingSidecarPut` sends one that is still waiting when the
+ *   canvas goes away.
  * - On every save (Save, Save system as, a snapshot, a bundle): the same
  *   capture goes with the saved system, so it reopens as it was placed.
  *
@@ -906,8 +908,8 @@ export function dragOverridesFromLayout(layout: SidecarLayout): Record<string, B
 
 type PutFn = (layout: SidecarLayout) => void | Promise<void>;
 
-/** Internal handle for the most recent debounced timer per case path. */
-const pending = new Map<string, ReturnType<typeof setTimeout>>();
+/** The debounced write waiting per case path: its timer, and the write itself. */
+const pending = new Map<string, { handle: ReturnType<typeof setTimeout>; send: () => void }>();
 
 /**
  * Schedule a debounced sidecar PUT. Subsequent calls within `delayMs`
@@ -926,31 +928,47 @@ export function debouncedPutSidecar(
 ): void {
   const existing = pending.get(casePath);
   if (existing) {
-    clearTimeout(existing);
+    clearTimeout(existing.handle);
   }
-  const handle = setTimeout(() => {
+  const send = () => {
     pending.delete(casePath);
     void put(layout);
-  }, delayMs);
-  pending.set(casePath, handle);
+  };
+  pending.set(casePath, { handle: setTimeout(send, delayMs), send });
 }
 
 /**
- * Cancel any pending debounced PUT for a case path. Called when the
- * user changes case (no point flushing the prior layout to a stale
- * path) or the canvas unmounts.
+ * Drop the debounced PUT waiting for a case path, unsent. For when what
+ * it would write is no longer wanted: the layout was reset, or a restored
+ * snapshot brought its own.
  */
 export function cancelPendingSidecarPut(casePath: string): void {
   const existing = pending.get(casePath);
   if (existing) {
-    clearTimeout(existing);
+    clearTimeout(existing.handle);
     pending.delete(casePath);
+  }
+}
+
+/**
+ * Send the debounced PUT waiting for a case path now, without waiting
+ * out its delay. Called when the canvas goes away (another view is shown,
+ * another case is opened): the drag it holds is on screen and in the
+ * store, and dropping the write would leave the file a drag behind what
+ * the diagram shows, until the next drag or save. It goes to the path it
+ * was scheduled for, whatever is open by now.
+ */
+export function flushPendingSidecarPut(casePath: string): void {
+  const existing = pending.get(casePath);
+  if (existing) {
+    clearTimeout(existing.handle);
+    existing.send();
   }
 }
 
 /** Test helper: clear all pending timers (used by sidecar.test.ts). */
 export function __clearAllPendingForTests(): void {
-  for (const handle of pending.values()) {
+  for (const { handle } of pending.values()) {
     clearTimeout(handle);
   }
   pending.clear();

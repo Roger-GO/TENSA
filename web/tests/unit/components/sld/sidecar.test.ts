@@ -20,6 +20,7 @@ import {
   samePlacement,
   debouncedPutSidecar,
   cancelPendingSidecarPut,
+  flushPendingSidecarPut,
   __clearAllPendingForTests,
   MAX_BEND_POINTS,
   SIDECAR_SCHEMA_VERSION,
@@ -1218,6 +1219,41 @@ describe('debouncedPutSidecar', () => {
     cancelPendingSidecarPut('case.raw');
     vi.advanceTimersByTime(1_000);
     expect(put).not.toHaveBeenCalled();
+  });
+
+  it('flushPendingSidecarPut sends the waiting write at once, and only once', () => {
+    const put = vi.fn();
+    const layout = buildSidecarLayout({ '1': { x: 5, y: 5 } });
+    debouncedPutSidecar('case.raw', layout, put, 500);
+    vi.advanceTimersByTime(100);
+    flushPendingSidecarPut('case.raw');
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put).toHaveBeenCalledWith(layout);
+    // The timer it was waiting on does not send it again, nor does a second flush.
+    vi.advanceTimersByTime(1_000);
+    flushPendingSidecarPut('case.raw');
+    expect(put).toHaveBeenCalledTimes(1);
+  });
+
+  it('flushPendingSidecarPut sends nothing when no write is waiting, or one that was cancelled', () => {
+    const put = vi.fn();
+    flushPendingSidecarPut('case.raw');
+    debouncedPutSidecar('case.raw', buildSidecarLayout({}), put, 500);
+    cancelPendingSidecarPut('case.raw');
+    flushPendingSidecarPut('case.raw');
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it('flushPendingSidecarPut leaves the write of another case waiting', () => {
+    const putA = vi.fn();
+    const putB = vi.fn();
+    debouncedPutSidecar('a.raw', buildSidecarLayout({ '1': { x: 1, y: 1 } }), putA, 500);
+    debouncedPutSidecar('b.raw', buildSidecarLayout({ '2': { x: 2, y: 2 } }), putB, 500);
+    flushPendingSidecarPut('a.raw');
+    expect(putA).toHaveBeenCalledTimes(1);
+    expect(putB).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(500);
+    expect(putB).toHaveBeenCalledTimes(1);
   });
 
   it('keeps PUTs for different case paths independent', () => {

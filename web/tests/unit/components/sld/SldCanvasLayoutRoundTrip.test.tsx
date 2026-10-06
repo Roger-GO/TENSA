@@ -308,6 +308,48 @@ describe('place, save, reload', () => {
     expect(picture()).toEqual(placed);
   });
 
+  it('a drag still waiting to be written when the canvas goes away is written then', async () => {
+    // The write waits out a delay, so that a run of drags is one request. When
+    // another view takes the canvas's place inside that delay, the drag stays
+    // in the store and is drawn again when the canvas comes back, so the file
+    // has to get it too: dropped, it would be a drag behind the diagram.
+    open('kundur.xlsx');
+    await draw();
+    const movedTo = { x: -80.5, y: 45.25 };
+    dropAt('1', movedTo);
+    await waitFor(() => expect(drawn.nodes.find((n) => n.id === '1')?.position).toEqual(movedTo));
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+
+    cleanup(); // the canvas is gone; the case is still open
+
+    expect(putSidecarSpy).toHaveBeenCalledTimes(1);
+    const [vars] = putSidecarSpy.mock.calls[0] as [{ casePath: string; layout: SidecarLayout }];
+    expect(vars.casePath).toBe('kundur.xlsx');
+    expect(vars.layout.coordinates['1']).toEqual(movedTo);
+
+    // Back on the diagram, it shows what the file now holds.
+    drawn.nodes = [];
+    await draw();
+    expect(drawn.nodes.find((n) => n.id === '1')?.position).toEqual(movedTo);
+    expect(putSidecarSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('opening another case writes the drag still waiting, beside the case it was made in', async () => {
+    open('kundur.xlsx');
+    await draw();
+    const movedTo = { x: -80.5, y: 45.25 };
+    dropAt('1', movedTo);
+    await waitFor(() => expect(drawn.nodes.find((n) => n.id === '1')?.position).toEqual(movedTo));
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+
+    act(() => open('other.xlsx'));
+
+    await waitFor(() => expect(putSidecarSpy).toHaveBeenCalledTimes(1));
+    const [vars] = putSidecarSpy.mock.calls[0] as [{ casePath: string; layout: SidecarLayout }];
+    expect(vars.casePath).toBe('kundur.xlsx');
+    expect(vars.layout.coordinates['1']).toEqual(movedTo);
+  });
+
   it('a second drag after a reload moves only what was dragged', async () => {
     open('kundur.xlsx');
     await draw();

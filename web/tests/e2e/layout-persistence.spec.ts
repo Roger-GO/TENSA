@@ -17,6 +17,10 @@
  *
  * Everything is dragged in a copy saved under a name of this run's own, so the
  * example cases the other specs open keep their automatic layout.
+ *
+ * A second test leaves the diagram for the results view right after a drag,
+ * inside the delay the layout write waits out, and checks that the file still
+ * got the drag.
  */
 import { test, expect, type Page } from './fixtures';
 
@@ -127,9 +131,16 @@ async function settledPicture(page: Page): Promise<Picture> {
 /**
  * Drag the node `id` by a real pointer drag, and wait for the layout to be
  * written. The view is fitted first: a node outside the pane cannot be grabbed,
- * and fitting moves the view, not the nodes.
+ * and fitting moves the view, not the nodes. `thenAtOnce` runs as soon as the
+ * pointer is let go, before the write is waited for.
  */
-async function dragNode(page: Page, id: string, dx: number, dy: number): Promise<void> {
+async function dragNode(
+  page: Page,
+  id: string,
+  dx: number,
+  dy: number,
+  thenAtOnce?: () => Promise<void>,
+): Promise<void> {
   await page.locator('.react-flow__controls-fitview').click();
   const node = page.locator(`.react-flow__node[data-id="${id}"]`);
   const pane = await page.getByTestId('sld-canvas-surface').boundingBox();
@@ -157,6 +168,7 @@ async function dragNode(page: Page, id: string, dx: number, dy: number): Promise
   await page.mouse.move(startX + dx / 2, startY + dy / 2, { steps: 5 });
   await page.mouse.move(startX + dx, startY + dy, { steps: 5 });
   await page.mouse.up();
+  await thenAtOnce?.();
   expect((await written).status()).toBe(204);
 }
 
@@ -279,4 +291,45 @@ test('a diagram is saved with the system and comes back as it was placed', async
   await settledPicture(page);
   await openCase(page, copy);
   await expectPicture(page, rearranged);
+});
+
+test('a drag made a moment before the diagram is left is still written to the file', async ({
+  page,
+}) => {
+  const stem = `layout-leave-e2e-${Date.now()}`;
+  const copy = `${stem}.xlsx`;
+
+  await page.goto('/');
+  await openCase(page, OTHER_CASE);
+  await settledPicture(page);
+  await page.getByTestId('topbar-menu-workspace-trigger').click();
+  await page.getByTestId('topbar-menu-workspace-save-system').click();
+  await page.getByTestId('save-filename').fill(stem);
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === 'PUT' &&
+        new URL(response.url()).pathname === '/api/workspace/layout',
+    ),
+    page.getByTestId('save-confirm').click(),
+  ]);
+  await openCase(page, copy);
+  const before = await settledPicture(page);
+
+  // The write of a drag waits half a second, so that a run of drags is one
+  // request. The results view takes the diagram's place before that is up.
+  await dragNode(page, '5', 60, 14, async () => {
+    await page.keyboard.press('Control+Shift+M');
+    await expect(page.locator('.react-flow__node')).toHaveCount(0);
+  });
+
+  // Back on the diagram, the drag is shown: the session remembers it.
+  await page.keyboard.press('Control+Shift+M');
+  const dragged = await settledPicture(page);
+  expect(differences(before, dragged)).toContain('5');
+
+  // And the file has it: a page loaded afresh has nothing else to draw from.
+  await page.reload();
+  await openCase(page, copy);
+  await expectPicture(page, dragged);
 });

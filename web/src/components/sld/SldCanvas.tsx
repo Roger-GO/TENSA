@@ -70,6 +70,7 @@ import {
   captureLayout,
   controllerCoordsAsMap,
   debouncedPutSidecar,
+  flushPendingSidecarPut,
   hasSavedPositions,
   mergeWithDrift,
   resolveDeviceCoords,
@@ -570,11 +571,14 @@ function SldCanvasInner({
     setDiagramLayout,
   ]);
 
-  // Cleanup pending PUT on unmount.
+  // A write still waiting out its delay when the canvas goes away (another
+  // view, another case) is sent then, not dropped: the drag stays on screen
+  // through `dragOverrides`, and the file would otherwise be a drag behind
+  // the diagram until the next one.
   useEffect(() => {
     if (!primaryPath) return;
     const path = primaryPath;
-    return () => cancelPendingSidecarPut(path);
+    return () => flushPendingSidecarPut(path);
   }, [primaryPath]);
 
   const onNodeClick: NodeMouseHandler = useCallback(
