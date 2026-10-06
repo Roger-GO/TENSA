@@ -230,8 +230,10 @@ describe('what the canvas hands React Flow', () => {
       sourceHandle: DEVICE_PORT[connector.sourceSide],
       targetHandle: TARGET_HANDLE.north,
     });
-    // The device knows which face its connector leaves by.
+    // The device knows which face its connector leaves by, and which way it
+    // goes from there: to the left, to the tip of the bar.
     expect(node('load-PQ').data.connectorFace).toBe(connector.sourceSide);
+    expect(node('load-PQ').data.connectorLean).toBe(-1);
   });
 
   it('draws a bar at the length the saved layout sets for it', async () => {
@@ -307,6 +309,13 @@ describe('while a node is dragged', () => {
     });
     expect(barOf('2').taps).toContainEqual({ x: middle, side: 'south' });
     expect(node('load-PQ').data.connectorFace).toBe('north');
+    // Straight up: it goes neither way.
+    expect(node('load-PQ').data.connectorLean).toBeUndefined();
+
+    // Under the bar's level but past its west tip: up and to the right.
+    dragTo('load-PQ', { x: -100, y: 300 });
+    expect(node('load-PQ').data.connectorFace).toBe('north');
+    expect(node('load-PQ').data.connectorLean).toBe(1);
     // Nothing is kept until the drag ends.
     expect(useCaseStore.getState().dragOverrides).toEqual({});
   });

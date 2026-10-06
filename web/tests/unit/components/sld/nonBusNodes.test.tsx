@@ -437,6 +437,21 @@ describe('buildGraph — non-bus nodes', () => {
       expect(dataOf(nodes, 'load-PQ_1').valueSide).toBe('below');
     });
 
+    it('puts the readout on the far side of a device that hangs close under its bus', () => {
+      // Under a bus, the strip between the two is where the label of the
+      // bus hangs. The default row leaves room for both; nearer than that
+      // the readout goes below the device.
+      const topology = makeTopology({ buses: [bus(1)], loads: [load('PQ_1', 1)] });
+      const coords = { '1': { x: 0, y: 100 } };
+      const at = (y: number) =>
+        buildGraph(topology, coords, { dragOverrides: { 'load-PQ_1': { x: 0, y } } }).nodes;
+      expect(dataOf(at(100 + DEVICE_ROW_OFFSET), 'load-PQ_1').valueSide).toBe('above');
+      expect(dataOf(at(100 + DEVICE_ROW_OFFSET - 1), 'load-PQ_1').valueSide).toBe('below');
+      expect(dataOf(at(120), 'load-PQ_1').valueSide).toBe('below');
+      // Above its bus the readout faces the bus however near the device is.
+      expect(dataOf(at(40), 'load-PQ_1').valueSide).toBe('below');
+    });
+
     it('follows a sidecar position and a moved bus', () => {
       const topology = makeTopology({
         buses: [bus(1)],

@@ -19,13 +19,17 @@ export interface DeviceValueLabelProps {
  * the node's measured box: the ports, the layout footprint and the
  * push-out math are the same with or without values. It is centred on the
  * node unless the connector leaves by that same face (`data.connectorFace`),
- * in which case it starts beside the connector. The far side of a
- * device is where the neighbouring buses, devices and controller badges
- * crowd in; this strip is clear of them in the default layout
- * (`DEVICE_VALUE_LABEL`, `CONTROLLER_DOCK` in `graph.ts`). Shown only after a converged PF that has
- * a row for the device, never under "Hide labels", and, on a case with many
- * devices, only while the canvas is zoomed in far enough to read it
- * (`labelDensity.ts`).
+ * in which case it stands beside the connector: to its right, or to its
+ * left when the connector itself goes off to the right
+ * (`data.connectorLean`), so a connector drawn at an angle does not run
+ * through the values. The far side of a device is where the neighbouring
+ * buses, devices and controller badges crowd in; this strip is clear of
+ * them in the default layout (`DEVICE_VALUE_LABEL`, `CONTROLLER_DOCK` in
+ * `graph.ts`). The one device that gets its readout on the far side is one
+ * that hangs close under its bus, where the strip holds the label of the
+ * bus. Shown only after a converged PF that has a row for the device, never
+ * under "Hide labels", and, on a case with many devices, only while the
+ * canvas is zoomed in far enough to read it (`labelDensity.ts`).
  *
  * The values are the steady-state PF reading, like the bus voltage
  * labels: they stay put while a TDS run streams.
@@ -48,16 +52,21 @@ export const DeviceValueLabel = memo(function DeviceValueLabel({
   // Default: the generator sits above its bus, the load below it.
   const side = data.valueSide ?? (kind === 'generator' ? 'below' : 'above');
   // The connector leaves from the middle of a face. When that is the face
-  // the readout hangs off, the readout starts just right of the connector
-  // and does not sit on it.
+  // the readout hangs off, the readout stands just beside the connector and
+  // not on it: on the right, unless that is the way the connector goes.
   const besideConnector = data.connectorFace === (side === 'below' ? 'south' : 'north');
+  const leftOfConnector = besideConnector && data.connectorLean === 1;
   return (
     <span
       data-testid={`${kind}-values-${data.idx}`}
-      data-beside-connector={besideConnector ? 'true' : undefined}
+      data-beside-connector={besideConnector ? (leftOfConnector ? 'left' : 'true') : undefined}
       className={cn(
-        'bg-background/80 pointer-events-none absolute left-1/2 rounded px-1',
-        besideConnector ? 'ml-1 text-left' : '-translate-x-1/2 text-center',
+        'bg-background/80 pointer-events-none absolute rounded px-1',
+        leftOfConnector
+          ? 'right-1/2 mr-1 text-right'
+          : besideConnector
+            ? 'left-1/2 ml-1 text-left'
+            : 'left-1/2 -translate-x-1/2 text-center',
         'font-mono text-[9px] leading-[10px] whitespace-nowrap',
         side === 'below' ? 'top-full mt-0.5' : 'bottom-full mb-0.5',
       )}

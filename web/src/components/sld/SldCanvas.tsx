@@ -766,9 +766,14 @@ function SldCanvasInner({
         // What the connection pass worked out for this node: the bar of a
         // bus with its taps, and the face a device's connector leaves by.
         const bar = isBus ? connections.bars.get(n.id) : undefined;
-        const connectorFace = isBus
-          ? undefined
-          : connections.routes.get(`stub-${n.id}`)?.sourceSide;
+        const connector = isBus ? undefined : connections.routes.get(`stub-${n.id}`);
+        const connectorFace = connector?.sourceSide;
+        // Which way the connector goes from that face: to the left, to the
+        // right, or neither (straight out of it).
+        const connectorLean =
+          connector === undefined
+            ? 0
+            : Math.sign(Math.round(connector.points[1]![0] - connector.points[0]![0]));
         // A node object without its measured size makes React Flow measure
         // the node again, and report the size again, each time the object is
         // replaced. Handing the size back keeps one measurement per node.
@@ -782,6 +787,7 @@ function SldCanvasInner({
             ...(n.data as Record<string, unknown>),
             ...(bar !== undefined ? { bar } : {}),
             ...(connectorFace !== undefined ? { connectorFace } : {}),
+            ...(connectorLean !== 0 ? { connectorLean } : {}),
             // Attribute echoed onto BusNode's wrapper via the spread
             // pattern in the React Flow node mapping; tests assert on
             // this exact attribute rather than the className so the

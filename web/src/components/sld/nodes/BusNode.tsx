@@ -66,8 +66,9 @@ export interface SldNodeData extends Record<string, unknown> {
   baseKv?: number;
   /**
    * Generator / load nodes: which side of the node its P / Q readout hangs
-   * off, the side facing the parent bus given where the device finally
-   * sits. Stamped by `buildGraph`.
+   * off: the side facing the parent bus given where the device finally
+   * sits, or the far side of a device that hangs so close under its bus
+   * that the label of the bus is in between. Stamped by `buildGraph`.
    */
   valueSide?: 'above' | 'below';
   /**
@@ -82,6 +83,13 @@ export interface SldNodeData extends Record<string, unknown> {
    * Stamped by `SldCanvas`.
    */
   connectorFace?: Side;
+  /**
+   * Generator / load / shunt nodes: which way the connector goes from the
+   * middle of that face, `-1` to the left and `1` to the right; absent when
+   * it runs straight out. The P / Q readout stands on the other side of it.
+   * Stamped by `SldCanvas`.
+   */
+  connectorLean?: number;
 }
 
 /**

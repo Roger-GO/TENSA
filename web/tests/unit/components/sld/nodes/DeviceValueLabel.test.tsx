@@ -279,6 +279,56 @@ describe('GeneratorNode P / Q label', () => {
     expect(above.getByTestId('load-values-PQ_1')).toHaveAttribute('data-beside-connector', 'true');
   });
 
+  it('stands on the other side of a connector that goes off to the right', () => {
+    // A connector drawn at an angle from the middle of the face: beside it
+    // on the right the readout would sit on the line.
+    setPflow(makePflow());
+    const leaning = (connectorLean: number | undefined) =>
+      render(
+        <GeneratorNode
+          {...props<typeof GeneratorNode>({
+            idx: '2',
+            kind: 'PV',
+            valueSide: 'below',
+            connectorFace: 'south',
+            connectorLean,
+          })}
+        />,
+      ).getByTestId('generator-values-2');
+    const right = leaning(1);
+    expect(right).toHaveAttribute('data-beside-connector', 'left');
+    expect(right.className).toContain('right-1/2');
+    expect(right.className).toContain('mr-1');
+    expect(right.className).not.toContain('left-1/2');
+    cleanup();
+    // To the left, or straight down, it stays on the right of the connector.
+    for (const lean of [-1, undefined]) {
+      const label = leaning(lean);
+      expect(label).toHaveAttribute('data-beside-connector', 'true');
+      expect(label.className).toContain('left-1/2');
+      expect(label.className).not.toContain('right-1/2');
+      cleanup();
+    }
+  });
+
+  it('takes no notice of which way the connector goes when it leaves by another face', () => {
+    setPflow(makePflow());
+    const { getByTestId } = render(
+      <GeneratorNode
+        {...props<typeof GeneratorNode>({
+          idx: '2',
+          kind: 'PV',
+          valueSide: 'below',
+          connectorFace: 'east',
+          connectorLean: 1,
+        })}
+      />,
+    );
+    const label = getByTestId('generator-values-2');
+    expect(label).not.toHaveAttribute('data-beside-connector');
+    expect(label.className).toContain('-translate-x-1/2');
+  });
+
   it('keeps the label outside the normal flow so the node box does not grow', () => {
     setPflow(makePflow());
     const { getByTestId } = render(

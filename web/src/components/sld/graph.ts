@@ -1145,6 +1145,9 @@ export function buildGraph(
   // leave clear. It is judged by where the device finally sits (push-out and
   // drag overrides applied) and not by the bus face its stub targets, so a
   // device the user moved across its bus keeps the readout between the two.
+  // A device that hangs under its bus nearer than the default row is the
+  // exception: the label of the bus is in that strip, and the readout goes
+  // on the far side of the device.
   const busPositions = new Map<string, { x: number; y: number }>();
   for (const n of nodes) {
     if (n.type === 'bus') busPositions.set(n.id, branchDragOverrides[n.id] ?? n.position);
@@ -1155,7 +1158,9 @@ export function buildGraph(
     const parent = busPositions.get((n.data as { parentBus: string }).parentBus);
     if (parent === undefined) continue;
     const at = branchDragOverrides[n.id] ?? n.position;
-    nodes[i] = { ...n, data: { ...n.data, valueSide: at.y < parent.y ? 'below' : 'above' } };
+    const under = at.y >= parent.y;
+    const valueSide = under && at.y - parent.y >= DEVICE_ROW_OFFSET ? 'above' : 'below';
+    nodes[i] = { ...n, data: { ...n.data, valueSide } };
   }
 
   // ---- Dynamic controllers (Unit 19) ----------------------------------
