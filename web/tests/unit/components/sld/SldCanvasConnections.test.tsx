@@ -1,12 +1,15 @@
 /**
  * What the canvas hands React Flow for the connections of the diagram: the
  * route of every connector and branch, the bar of every bus, and how these
- * follow a drag, a measured node, and the choice of connector style.
+ * follow a drag, a measured node, and the choice of connector style. Also
+ * which connector it marks to be drawn picked out: that of the device that
+ * is selected, or under the pointer in a drag.
  *
  * The canvas is rendered against a stand-in for React Flow that records the
  * nodes and edges it is asked to draw and hands back `onNodesChange`, so a
  * test can move a node the way a drag does (before it is dropped) and report
- * a measured size the way React Flow does.
+ * a measured size the way React Flow does, and the two handlers React Flow
+ * calls when a drag starts and when it stops.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
@@ -30,6 +33,7 @@ interface DrawnEdge {
   targetHandle?: string | null;
   data?: Record<string, unknown>;
 }
+type OnDrag = (event: unknown, node: DrawnNode, nodes: DrawnNode[]) => void;
 type Change =
   | { id: string; type: 'position'; position: { x: number; y: number }; dragging: boolean }
   | { id: string; type: 'dimensions'; dimensions: { width: number; height: number } };
@@ -38,17 +42,23 @@ const drawn: {
   nodes: DrawnNode[];
   edges: DrawnEdge[];
   onNodesChange: ((changes: Change[]) => void) | null;
-} = { nodes: [], edges: [], onNodesChange: null };
+  onNodeDragStart: OnDrag | null;
+  onNodeDragStop: OnDrag | null;
+} = { nodes: [], edges: [], onNodesChange: null, onNodeDragStart: null, onNodeDragStop: null };
 
 vi.mock('@xyflow/react', () => ({
   ReactFlow: (props: {
     nodes: DrawnNode[];
     edges: DrawnEdge[];
     onNodesChange: (changes: Change[]) => void;
+    onNodeDragStart: OnDrag;
+    onNodeDragStop: OnDrag;
   }) => {
     drawn.nodes = props.nodes;
     drawn.edges = props.edges;
     drawn.onNodesChange = props.onNodesChange;
+    drawn.onNodeDragStart = props.onNodeDragStart;
+    drawn.onNodeDragStop = props.onNodeDragStop;
     return null;
   },
   ReactFlowProvider: ({ children }: { children: ReactNode }) => children,
@@ -86,7 +96,7 @@ import {
 import { DEVICE_PORT, SOURCE_HANDLE, TARGET_HANDLE } from '@/components/sld/graph';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
-import { __requestSldCommand } from '@/store/sld';
+import { __requestSldCommand, useSldStore } from '@/store/sld';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { SidecarLayout, TopologyEntry, TopologySummary } from '@/api/types';
 
@@ -183,12 +193,14 @@ beforeEach(() => {
   drawn.onNodesChange = null;
   useSessionStore.setState({ sessionId: parseSessionId('sess-connections') });
   useCaseStore.getState().clearCase();
+  useSldStore.getState().clearSelectedNodeId();
 });
 
 afterEach(() => {
   cleanup();
   __clearAllPendingForTests();
   useCaseStore.getState().clearCase();
+  useSldStore.getState().clearSelectedNodeId();
 });
 
 describe('what the canvas hands React Flow', () => {
@@ -610,5 +622,56 @@ describe('the connector style', () => {
     act(() => __requestSldCommand('connectors-elbow'));
     act(() => open('other.xlsx'));
     expect(useCaseStore.getState().connectorStyle).toBeNull();
+  });
+});
+
+describe('the connector that is picked out', () => {
+  it('is that of the selected device, and of no bus that is selected', async () => {
+    open('pair.xlsx');
+    await draw();
+    expect(edge('stub-load-PQ').data?.active).toBeUndefined();
+
+    // What a click on the load, or on its row in the Loads table, writes.
+    act(() => useSldStore.getState().setSelectedNodeId('load-PQ'));
+    expect(edge('stub-load-PQ').data?.active).toBe(true);
+    expect(edge('line-L').data?.active).toBeUndefined();
+    // The route is still there for the edge to draw.
+    expect(routeOf('stub-load-PQ').targetSide).toBe('north');
+
+    // Selecting its bus picks out the bus, not the connectors that land on it.
+    act(() => useSldStore.getState().setSelectedNodeId('2'));
+    expect(edge('stub-load-PQ').data?.active).toBeUndefined();
+    expect(edge('line-L').data?.active).toBeUndefined();
+  });
+
+  it('is that of a device while it is dragged, and no longer once it is dropped', async () => {
+    open('pair.xlsx');
+    await draw();
+    const load = node('load-PQ');
+
+    // React Flow calls this with the press, before the first move.
+    act(() => drawn.onNodeDragStart?.({}, load, [load]));
+    expect(edge('stub-load-PQ').data?.active).toBe(true);
+
+    // It stays picked out, on its new route, as the device moves.
+    dragTo('load-PQ', { x: 0, y: 300 });
+    expect(edge('stub-load-PQ').data?.active).toBe(true);
+    expect(routeOf('stub-load-PQ').targetSide).toBe('south');
+
+    act(() => drawn.onNodeDragStop?.({}, load, [load]));
+    expect(edge('stub-load-PQ').data?.active).toBeUndefined();
+  });
+
+  it('hands back the same edge while neither its route nor its mark changes', async () => {
+    open('pair.xlsx');
+    await draw();
+    act(() => useSldStore.getState().setSelectedNodeId('load-PQ'));
+    const marked = edge('stub-load-PQ');
+    const line = edge('line-L');
+
+    // The other bus is moved: the load's connector is not redrawn for it.
+    dragTo('1', { x: 0, y: -40 });
+    expect(edge('stub-load-PQ')).toBe(marked);
+    expect(edge('line-L')).not.toBe(line);
   });
 });

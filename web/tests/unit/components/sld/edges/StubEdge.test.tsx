@@ -45,6 +45,7 @@ interface RenderEdgeProps {
     route?: ConnectorRoute;
     bucket?: 'generator' | 'load' | 'shunt';
     kind?: string;
+    active?: boolean;
   };
 }
 
@@ -116,6 +117,16 @@ describe('<StubEdge />', () => {
     const branch = lineStrokeStyle(null);
     expect(base.getAttribute('data-stroke')).toBe(branch.stroke);
     expect(base.getAttribute('data-stroke-width')).toBe(String(branch.strokeWidth));
+    expect(base.getAttribute('data-stroke-dasharray')).toBeNull();
+  });
+
+  it('is picked out, heavier and in the accent colour, while its device is selected or dragged', () => {
+    const { getByTestId } = renderEdge({ data: { active: true } });
+    const base = getByTestId('stub-edge-base');
+    const plain = lineStrokeStyle(null);
+    expect(base.getAttribute('data-stroke')).toBe('var(--color-primary)');
+    expect(Number(base.getAttribute('data-stroke-width'))).toBeGreaterThan(plain.strokeWidth);
+    // Still solid: it is the same conductor.
     expect(base.getAttribute('data-stroke-dasharray')).toBeNull();
   });
 

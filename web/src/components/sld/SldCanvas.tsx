@@ -539,6 +539,15 @@ function SldCanvasInner({
   );
   // How many connectors pass through a box, for the readouts below.
   const connectorsThrough = useMemo(() => routesThrough(connections.routes), [connections]);
+  // The devices whose connector is picked out (`StubEdge`): the one that is
+  // selected and the ones under the pointer in a drag, so it shows which
+  // connector is the device's and that it follows the device to the bar.
+  const [draggedIds, setDraggedIds] = useState<readonly string[]>(NO_IDS);
+  const activeDeviceIds = useMemo(() => {
+    const ids = new Set(draggedIds);
+    if (selectedNodeId !== null) ids.add(selectedNodeId);
+    return ids;
+  }, [draggedIds, selectedNodeId]);
   // The edges with their routes. An edge whose route did not change keeps its
   // object, so React Flow redraws only the connectors that moved.
   const routedEdgesRef = useRef<Map<string, RoutedEdgeEntry>>(new Map());
@@ -547,18 +556,19 @@ function SldCanvasInner({
     const out = edges.map((edge) => {
       const route = connections.routes.get(edge.id);
       if (!route) return edge;
-      const signature = JSON.stringify(route);
+      const active = edge.type === 'stub' && activeDeviceIds.has(edge.source);
+      const signature = `${active ? 'active' : ''}${JSON.stringify(route)}`;
       const held = routedEdgesRef.current.get(edge.id);
       const entry =
         held !== undefined && held.base === edge && held.signature === signature
           ? held
-          : { base: edge, signature, edge: withRoute(edge, route) };
+          : { base: edge, signature, edge: withRoute(edge, route, active) };
       next.set(edge.id, entry);
       return entry.edge;
     });
     routedEdgesRef.current = next;
     return out;
-  }, [edges, connections]);
+  }, [edges, connections, activeDeviceIds]);
 
   // On drag stop, persist the updated coords. Two channels:
   //
@@ -586,9 +596,11 @@ function SldCanvasInner({
   const dragOriginRef = useRef<Map<string, { x: number; y: number }> | null>(null);
   const onNodeDragStart: OnNodeDrag = useCallback((_event, _node, dragged) => {
     dragOriginRef.current = new Map(dragged.map((n) => [n.id, { ...n.position }]));
+    setDraggedIds(dragged.map((n) => n.id));
   }, []);
   const onNodeDragStop: OnNodeDrag = useCallback(() => {
     dragOriginRef.current = null;
+    setDraggedIds(NO_IDS);
   }, []);
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
@@ -1261,6 +1273,7 @@ function ConnectivityRecomputeButton() {
 }
 
 const NO_SIZES: ReadonlyMap<string, NodeSize> = new Map();
+const NO_IDS: readonly string[] = [];
 
 /**
  * Whether `node` is the one that is selected: the element the inspector shows
@@ -1299,15 +1312,20 @@ interface RoutedEdgeEntry {
  * `edge` with its route, and attached to the handles on the sides the route
  * leaves and lands by: the port of the device's face, the face or end of the
  * bar. The components draw from the route; the handles keep what React Flow
- * itself knows of the edge true to the picture.
+ * itself knows of the edge true to the picture. `active` marks the connector
+ * of a device that is selected or being dragged, which is drawn picked out.
  */
-function withRoute(edge: Edge, route: ConnectorRoute): Edge {
+function withRoute(edge: Edge, route: ConnectorRoute, active: boolean): Edge {
   return {
     ...edge,
     sourceHandle:
       edge.type === 'stub' ? DEVICE_PORT[route.sourceSide] : SOURCE_HANDLE[route.sourceSide],
     targetHandle: TARGET_HANDLE[route.targetSide],
-    data: { ...(edge.data as Record<string, unknown> | undefined), route },
+    data: {
+      ...(edge.data as Record<string, unknown> | undefined),
+      route,
+      ...(active ? { active: true } : {}),
+    },
   };
 }
 

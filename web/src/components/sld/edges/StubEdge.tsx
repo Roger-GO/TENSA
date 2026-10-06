@@ -14,15 +14,23 @@ import { lineStrokeStyle } from '../overlay';
  * read as the same kind of conductor. The dot where it lands is the bar's
  * (`BusNode` draws every tap), which keeps it on top of the bar.
  *
+ * The connector of a device that is selected, or under the pointer in a
+ * drag, is picked out (`data.active`): heavier, and in the accent colour,
+ * the one the ring of a selected node is a tint of. Among the connectors of
+ * a crowded bus that shows which one is the device's, and during a drag
+ * that it follows the device and where on the bar it lands.
+ *
  * No flow overlay, no arrow, no label.
  */
 interface StubData {
   kind?: string;
   bucket?: 'generator' | 'load' | 'shunt';
   route?: ConnectorRoute;
+  active?: boolean;
 }
 
 const STROKE = lineStrokeStyle(null);
+const ACTIVE_STROKE = { stroke: 'var(--color-primary)', strokeWidth: 2.5 };
 
 export const StubEdge = memo(function StubEdge({
   sourceX,
@@ -31,12 +39,13 @@ export const StubEdge = memo(function StubEdge({
   targetY,
   data,
 }: EdgeProps) {
-  const route = (data as StubData | undefined)?.route;
+  const stub = data as StubData | undefined;
+  const route = stub?.route;
   // Without a route (the pass has not placed this connector) fall back to
   // the two handles React Flow resolved.
   const points: Point[] = route?.points ?? [
     [sourceX, sourceY],
     [targetX, targetY],
   ];
-  return <BaseEdge path={routePath(points)} style={STROKE} />;
+  return <BaseEdge path={routePath(points)} style={stub?.active ? ACTIVE_STROKE : STROKE} />;
 });
