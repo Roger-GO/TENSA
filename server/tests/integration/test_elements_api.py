@@ -1122,6 +1122,26 @@ async def test_delete_warns_about_the_disturbances_that_act_on_the_element(
     assert [d["kind"] for d in listed] == ["fault", "toggle", "fault"]
     assert listed[0]["bus_idx"] == 14 and listed[2]["bus_idx"] == 5
 
+    # Putting the delete back takes those two again and no more: a fault
+    # committed on the bus since stands in the way, and is what the 422 lists.
+    late = {"kind": "fault", "bus_idx": 14, "tf": 4.0, "tc": 4.1}
+    committed = await client.post(
+        f"/api/sessions/{sid}/disturbances", json={"disturbances": [late]}
+    )
+    assert committed.status_code == 200, committed.text
+    refused = await client.post(f"/api/sessions/{sid}/redo-edit")
+    assert refused.status_code == 422, refused.text
+    body = refused.json()
+    assert body["dependents"] == [] and body["total"] == 0
+    assert [(d["source"], d["kind"], d["dev_idx"], d["t"]) for d in body["disturbances"]] == [
+        ("committed", "fault", 14, 4.0)
+    ]
+    assert body["disturbances_total"] == 1
+    listed = (await client.get(f"/api/sessions/{sid}/disturbances")).json()["disturbances"]
+    assert len(listed) == 4
+    topo = (await client.get(f"/api/sessions/{sid}/topology")).json()
+    assert topo["redo"]["op"] == "delete" and topo["redo"]["idx"] == 14
+
 
 @pytest.mark.integration
 async def test_delete_after_pf_returns_409(client: httpx.AsyncClient) -> None:

@@ -600,6 +600,33 @@ def test_redoing_a_delete_something_has_come_to_depend_on_is_refused() -> None:
     assert len(w._redo_log) == 1 and w._edit_log == []
 
 
+def test_redoing_a_cascade_takes_what_it_took_before_and_is_refused_over_anything_new() -> None:
+    """The cascade a redo makes is the one the delete made. A disturbance committed
+    on the element since the undo is not part of it, and would go without a word."""
+    w = _wrapper("kundur/kundur_full.xlsx")
+    trip = ToggleSpec(model="Line", dev_idx="Line_0", t=2.0)
+    w.add_disturbance(trip)
+    first = w.delete_element("Bus", 5, cascade=True)
+    assert [d.source for d in first.disturbances] == ["committed"]
+    assert len(first.deleted) > 1
+    w.undo_last_edit()
+    fault = FaultSpec(bus_idx=5, tf=1.0, tc=1.1)
+    w.add_disturbance(fault)
+
+    with pytest.raises(ElementHasDependentsError) as refused:
+        w.redo_edit()
+
+    # Only what is new: the elements and the trip went with the bus before.
+    assert refused.value.total == 0 and refused.value.dependents == []
+    assert [(d["source"], d["kind"], d["dev_idx"]) for d in refused.value.disturbances] == [
+        ("committed", "fault", 5)
+    ]
+    assert w.list_disturbances() == [trip, fault]
+    ss = w._ss
+    assert ss is not None and 5 in ss.Bus.idx.v
+    assert len(w._redo_log) == 1 and w._edit_log == []
+
+
 def test_undoing_the_add_of_an_element_a_pending_disturbance_acts_on_is_refused() -> None:
     w = _wrapper()
     w.add_element("Bus", {"idx": "100", "name": "B100", "Vn": 69.0})
@@ -662,6 +689,76 @@ def test_a_blank_sessions_reload_keeps_its_edits_and_deletes() -> None:
     assert [str(b.idx) for b in w.undo_last_edit().buses] == ["1", "2", "3"]
 
 
+def test_a_blank_sessions_reload_drops_the_committed_disturbances() -> None:
+    """As a case file's reload does. Left in the log, the next delete, undo or redo
+    put them on the System it built, and a client that committed its list again
+    after the reload had every disturbance twice: two toggles of one line at one
+    time, which leave the line in."""
+    pytest.importorskip("andes")
+    w = Wrapper()
+    w.create_blank()
+    w.add_element("Bus", {"idx": "1", "name": "B1", "Vn": 110.0})
+    w.add_element("Bus", {"idx": "2", "name": "B2", "Vn": 110.0})
+    w.add_element("Slack", {"idx": "S1", "name": "S1", "bus": "1", "Sn": 100, "Vn": 110, "v0": 1.0})
+    w.add_element("Line", {"idx": "L1", "name": "L1", "bus1": "1", "bus2": "2", "r": 0.01, "x": 0.06})
+    w.add_element("Line", {"idx": "L2", "name": "L2", "bus1": "1", "bus2": "2", "r": 0.01, "x": 0.06})
+    w.add_element("PQ", {"idx": "P1", "name": "P1", "bus": "2", "Vn": 110, "p0": 0.3, "q0": 0.1})
+    w.add_element("PQ", {"idx": "P2", "name": "P2", "bus": "2", "Vn": 110, "p0": 0.2, "q0": 0.1})
+    trip = ToggleSpec(model="Line", dev_idx="L2", t=1.0)
+    w.add_disturbance(trip)
+    w._restored_events.append(event_from_spec(trip))
+    assert w.run_pflow().converged
+
+    topo = w.reload_case()
+
+    assert w.list_disturbances() == [] and topo.events == []
+
+    def toggles() -> int:
+        ss = w._ss
+        assert ss is not None
+        return int(ss.Toggle.n)
+
+    assert toggles() == 0
+    # None of the three rebuilds brings the trip back.
+    w.delete_element("PQ", "P2")
+    assert toggles() == 0
+    w.undo_last_edit()
+    assert toggles() == 0
+    w.redo_edit()
+    assert toggles() == 0 and w.list_disturbances() == []
+    # Committed again, it is on the System once.
+    w.add_disturbance(trip)
+    ss = w._ss
+    assert ss is not None
+    assert list(ss.Toggle.dev.v) == ["L2"] and w.list_disturbances() == [trip]
+
+
+def test_a_snapshot_restored_onto_a_blank_session_lists_its_disturbances_once(
+    tmp_path: Path,
+) -> None:
+    """The restore reloads and adds the snapshot's disturbances. The reload left
+    the session's own in the log, so the list held them twice and the System once."""
+    pytest.importorskip("andes")
+    w = Wrapper(workspace=tmp_path)
+    w.create_blank()
+    w.add_element("Bus", {"idx": "1", "name": "B1", "Vn": 110.0})
+    w.add_element("Bus", {"idx": "2", "name": "B2", "Vn": 110.0})
+    w.add_element("Slack", {"idx": "S1", "name": "S1", "bus": "1", "Sn": 100, "Vn": 110, "v0": 1.0})
+    w.add_element("Line", {"idx": "L1", "name": "L1", "bus1": "1", "bus2": "2", "r": 0.01, "x": 0.06})
+    w.add_element("PQ", {"idx": "P1", "name": "P1", "bus": "2", "Vn": 110, "p0": 0.3, "q0": 0.1})
+    fault = FaultSpec(bus_idx="2", tf=0.2, tc=0.3, xf=0.01, rf=0.0)
+    w.add_disturbance(fault)
+    assert w.run_pflow().converged
+    w.save_snapshot("held")
+
+    w.restore_snapshot("held")
+
+    assert w.list_disturbances() == [fault]
+    ss = w._ss
+    assert ss is not None and ss.Fault.n == 1
+    assert [e.source for e in w.topology_snapshot().events] == ["restored"]
+
+
 def test_an_element_added_without_an_idx_is_replayed_with_the_one_it_got() -> None:
     w = _wrapper()
     first = w.add_element("PQ", {"bus": "5", "Vn": 69, "p0": 0.1, "q0": 0.0})
@@ -706,6 +803,61 @@ def test_an_edit_the_log_has_no_room_for_is_refused_before_it_is_made(
     # Taking one back makes room again.
     w.undo_last_edit()
     w.add_element("Bus", {"idx": "101", "name": "B101", "Vn": 69.0})
+
+
+def test_an_edit_refused_at_its_second_value_is_recorded_with_the_first() -> None:
+    """The first value is on the System by then. An edit that left no entry would
+    lose it at the next rebuild, and an undo would take back the edit before it."""
+    w = _wrapper()
+    w.add_element("Bus", {"idx": "100", "name": "B100", "Vn": 69.0})
+    w.undo_last_edit()
+    ss = w._ss
+    assert ss is not None
+    before = float(ss.Bus.vmin.v[ss.Bus.idx2uid(3)])
+
+    class _Refusing(list[Any]):
+        def __setitem__(self, *_args: Any) -> None:
+            raise ValueError("synthetic")
+
+    ss.Bus.vmin.v = _Refusing(ss.Bus.vmin.v)
+
+    with pytest.raises(ElementValidationError, match="ANDES rejected Bus.vmin"):
+        w.edit_element("Bus", "3", {"vmax": 1.2, "vmin": 0.8})
+
+    assert w._edit_log == [EditOp(model="Bus", idx=3, params={"vmax": 1.2})]
+    # A new edit, as far as it went: there is nothing to redo after it.
+    assert w._redo_log == []
+    # The next rebuild gives what the System held, and an undo takes it back.
+    w.delete_element("Line", "Line_3")
+    ss = w._ss
+    assert ss is not None
+    assert float(ss.Bus.vmax.v[ss.Bus.idx2uid(3)]) == 1.2
+    assert float(ss.Bus.vmin.v[ss.Bus.idx2uid(3)]) == before
+    w.undo_last_edit()
+    w.undo_last_edit()
+    ss = w._ss
+    assert ss is not None
+    assert float(ss.Bus.vmax.v[ss.Bus.idx2uid(3)]) != 1.2 and w._edit_log == []
+
+
+def test_an_edit_refused_at_its_first_value_is_not_recorded() -> None:
+    w = _wrapper()
+    w.add_element("Bus", {"idx": "100", "name": "B100", "Vn": 69.0})
+    w.undo_last_edit()
+    ss = w._ss
+    assert ss is not None
+
+    class _Refusing(list[Any]):
+        def __setitem__(self, *_args: Any) -> None:
+            raise ValueError("synthetic")
+
+    ss.Bus.vmax.v = _Refusing(ss.Bus.vmax.v)
+
+    with pytest.raises(ElementValidationError, match="ANDES rejected Bus.vmax"):
+        w.edit_element("Bus", "3", {"vmax": 1.2, "vmin": 0.8})
+
+    # Nothing was written, so nothing is recorded and the redo stands.
+    assert w._edit_log == [] and len(w._redo_log) == 1
 
 
 def test_a_rebuild_a_disturbance_does_not_survive_leaves_the_session_as_it_was(

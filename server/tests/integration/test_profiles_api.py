@@ -468,6 +468,49 @@ async def test_profile_delete_pre_setup_returns_204(
 
 
 @pytest.mark.integration
+async def test_profile_the_case_file_brought_is_deleted_like_one_staged_here(
+    client: httpx.AsyncClient,
+) -> None:
+    """A TimeSeries saved with a case is one of that case's devices when it is
+    opened again. The route used to refuse it; it takes it now."""
+    author = await _create_session_and_load(client)
+    profile_bytes = _make_profile_xlsx_bytes([(0.0, 0.5), (0.1, 0.55)])
+    upload = (await client.post(
+        f"/api/sessions/{author}/profiles/upload",
+        files={"file": ("p.xlsx", profile_bytes,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )).json()
+    add = await client.post(
+        f"/api/sessions/{author}/profiles",
+        json={
+            "profile_path": upload["profile_path"],
+            "sheet": "profile",
+            "fields": "p0",
+            "tkey": "t",
+            "model": "PQ",
+            "dev": "PQ_5",
+            "dests": "p0",
+            "mode": 1,
+        },
+    )
+    assert add.status_code == 201, add.text
+    profile_idx = str(add.json()["idx"])
+    save = await client.post(
+        f"/api/sessions/{author}/save",
+        json={"filename": "with_profile.xlsx", "format": "xlsx"},
+    )
+    assert save.status_code == 201, save.text
+
+    sid = await _create_session_and_load(client, "with_profile.xlsx")
+    listed = (await client.get(f"/api/sessions/{sid}/profiles")).json()["profiles"]
+    assert [str(p["idx"]) for p in listed] == [profile_idx]
+
+    delete = await client.delete(f"/api/sessions/{sid}/profiles/{profile_idx}")
+    assert delete.status_code == 204, delete.text
+    assert (await client.get(f"/api/sessions/{sid}/profiles")).json() == {"profiles": []}
+
+
+@pytest.mark.integration
 async def test_profile_delete_unknown_idx_returns_404(
     client: httpx.AsyncClient,
 ) -> None:

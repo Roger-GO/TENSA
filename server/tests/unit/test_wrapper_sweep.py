@@ -272,36 +272,6 @@ def test_sweep_aborted_before_the_first_value_runs_nothing(
     assert rec.tds_calls == []
 
 
-def test_sweep_resets_the_log_a_blank_session_reload_leaves_behind(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``reload_case`` clears the disturbance log for a case file but not when it
-    rebuilds a blank session, so the sweep clears it itself and each iteration
-    adds the recorded disturbances exactly once."""
-    w, rec = _stubbed_wrapper(tmp_path, monkeypatch)
-    _save_snapshot(tmp_path / "ws", [FaultSpec(bus_idx=5, tf=1.0, tc=1.1)])
-    stale = ToggleSpec(model="Line", dev_idx="L9", t=9.0)
-
-    def _blank_reload() -> None:
-        rec.reloads += 1
-        rec.added.append([])
-        # A blank-session reload keeps whatever the log held.
-        w._disturbance_log = [stale]  # noqa: SLF001
-
-    monkeypatch.setattr(w, "reload_case", _blank_reload)
-
-    w.run_sweep(
-        snapshot_name="base",
-        parameter_kind=FAULT_TC,
-        parameter_target=0,
-        values=[1.05, 1.15],
-        tf=0.2,
-    )
-
-    assert w.list_disturbances() == [FaultSpec(bus_idx=5, tf=1.0, tc=1.15)]
-    assert [len(added) for added in rec.added] == [1, 1]
-
-
 # ---- the pieces a parallel sweep runs on --------------------------------------
 
 

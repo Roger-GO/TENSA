@@ -341,6 +341,9 @@ async def test_a_blank_session_sweeps_in_parallel_from_its_recorded_additions(
     await manager.invoke(sid, "save_snapshot", {"name": "blank"})
     values = [0.25, 0.3, 0.35, 0.4]
     sim = {"tf": 1.0, "h": 0.01}
+    # The reference holds the fault too. Each iteration's reload has to drop what
+    # is committed, or the fault would be on the System once more per value.
+    reference.add_disturbance(fault)
     expected = reference.run_sweep(
         snapshot_name="blank",
         parameter_kind="disturbance.fault.tc",
@@ -349,6 +352,8 @@ async def test_a_blank_session_sweeps_in_parallel_from_its_recorded_additions(
         tf=sim["tf"],
         h=sim["h"],
     )["iterations"]
+    assert reference.list_disturbances() == [fault.model_copy(update={"tc": values[-1]})]
+    assert reference._ss is not None and reference._ss.Fault.n == 1
 
     sweep_id = await manager.start_sweep(
         sid,

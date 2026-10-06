@@ -324,6 +324,37 @@ async def test_undo_after_a_save_over_the_open_case_drops_only_what_came_after(
     assert await _bus_idxes(client, sid) == saved
 
 
+async def test_a_save_over_the_open_case_leaves_nothing_to_redo(
+    client: httpx.AsyncClient,
+) -> None:
+    """The file is the base now. An edit taken back before the save was recorded
+    against the base before it: put back, it would be replayed on a file that
+    was written without it, after edits the file already holds."""
+    sid = await _new_session(client)
+    await _send(
+        client,
+        sid,
+        [
+            _load("kundur_full.xlsx"),
+            _bus("100", 230.0),
+            _bus("101", 230.0),
+            ("POST", "/undo-last-edit", None),
+        ],
+    )
+    assert (await _topology(client, sid))["redo"]["idx"] == "101"
+
+    await _send(client, sid, [_save_over("kundur_full.xlsx")])
+
+    topology = await _topology(client, sid)
+    assert topology["undo"] is None and topology["redo"] is None
+    saved = await _bus_idxes(client, sid)
+    assert "100" in saved and "101" not in saved
+    nothing = await client.post(f"/api/sessions/{sid}/redo-edit")
+    assert nothing.status_code == 422, nothing.text
+    assert "no edits to redo" in nothing.json()["detail"]
+    assert await _bus_idxes(client, sid) == saved
+
+
 async def test_a_saved_element_is_the_cases_to_delete_like_any_other(
     client: httpx.AsyncClient,
 ) -> None:

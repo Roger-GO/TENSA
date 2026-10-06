@@ -80,7 +80,8 @@ Elements:        GET /topology/schema (every buildable model + typed params) · 
                  "disturbances" when other elements name it or disturbances act on it: delete those first, or send cascade=true to
                  delete them with it. The 200 body is the topology plus "deleted" and "disturbances", what went)
                  POST /sessions/{id}/undo-last-edit · POST /sessions/{id}/redo-edit (take back / put back the last add, edit or delete;
-                 the topology's "undo" and "redo" name the edit each would act on, null when there is none)
+                 the topology's "undo" and "redo" name the edit each would act on, null when there is none; a delete put back takes
+                 what it took the first time, and is refused with 422 and the list if anything else has come to depend on the element)
                  POST /sessions/{id}/blank (start empty system) · POST /sessions/{id}/save (write case file; format xlsx, json or raw)
 Jobs:            GET /sessions/{id}/jobs[?kind=&status=] · GET/DELETE /sessions/{id}/jobs/{job_id}
                  (statuses: pending running done failed cancelled)

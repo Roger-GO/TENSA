@@ -626,6 +626,9 @@ class Wrapper:
         replays leave the wrapper in a partial state and raise
         ``ElementValidationError`` — caller can retry ``create_blank()`` to
         start over.
+
+        Either way the committed disturbances are gone: the new System has
+        none, so the log of them is emptied with it.
         """
         if self._case_path is None:
             if not self._edit_log:
@@ -649,7 +652,13 @@ class Wrapper:
         self._ss = ss
         self._setup_failed = False
         self._edit_log = []
+        # As ``load_case`` does for a case file: the disturbances committed on
+        # the prior System are not on this one. Left in the log, the next
+        # delete, undo or redo would add them to the System it builds.
+        self._disturbance_log = []
         self._client_events = []
+        self._restored_events = []
+        self._se_measurements = None
         for op in replay:
             try:
                 apply_op(ss, op)
@@ -1513,10 +1522,11 @@ class Wrapper:
         """Put back the edit ``undo_last_edit`` took back last.
 
         The System is built again with the edit as the last one. A delete is
-        done again as a delete: if something has come to depend on the element
-        since (a disturbance committed in between), it is refused as a first
-        delete would be. Raises ``ElementValidationError`` when there is
-        nothing to redo.
+        done again as a delete, and takes with it what it took the first time.
+        If something else has come to depend on the element since (a
+        disturbance committed in between), it is refused with that, as a first
+        delete would be (``ElementHasDependentsError``). Raises
+        ``ElementValidationError`` when there is nothing to redo.
         """
         self._require_editable()
         if not self._redo_log:
@@ -1524,9 +1534,7 @@ class Wrapper:
         op = self._redo_log[-1]
         remaining = self._redo_log[:-1]
         if isinstance(op, DeleteOp):
-            self._delete(
-                op.model, op.idx, cascade=len(op.devices) > 1 or bool(op.dropped)
-            )
+            self._delete(op.model, op.idx, cascade=True, again=op)
             self._redo_log = remaining
         else:
             ops = [*self._edit_log, op]
@@ -1573,8 +1581,20 @@ class Wrapper:
         self._redo_log = []
         return result
 
-    def _delete(self, model: str, idx: int | str, *, cascade: bool) -> DeleteResult:
-        """``delete_element`` without its gates, shared with ``redo_edit``."""
+    def _delete(
+        self,
+        model: str,
+        idx: int | str,
+        *,
+        cascade: bool,
+        again: DeleteOp | None = None,
+    ) -> DeleteResult:
+        """``delete_element`` without its gates, shared with ``redo_edit``.
+
+        ``again`` is the recorded delete a redo does again. The cascade a
+        redo asks for is the one that delete made: anything else that would
+        have to go with the element now is in the way.
+        """
         live = self._require_loaded()
         # Membership in ``ss.models`` is the whitelist: the name never reaches
         # an attribute lookup unless ANDES has a model called that.
@@ -1633,7 +1653,24 @@ class Wrapper:
             if entry is not None
         ]
 
-        if (entries or disturbances) and not cascade:
+        # What the caller did not ask to lose: all of it without ``cascade``,
+        # and for a redo what the delete did not take the first time.
+        unasked_entries, unasked_disturbances = entries, disturbances
+        if again is not None:
+            taken = set(again.devices)
+            taken_specs = [d.spec for d in again.dropped]
+            unasked_entries = [e for e in entries if (e.kind, e.idx) not in taken]
+            unasked_disturbances = [
+                self._deleted_event(live, ref) for ref in case_events if ref not in taken
+            ]
+            for d in dropped:
+                if d.spec in taken_specs:
+                    taken_specs.remove(d.spec)
+                else:
+                    unasked_disturbances.append(self._deleted_spec(d))
+        elif cascade:
+            unasked_entries, unasked_disturbances = [], []
+        if unasked_entries or unasked_disturbances:
             raise ElementHasDependentsError(
                 model=model,
                 idx=target_idx,
@@ -1641,11 +1678,13 @@ class Wrapper:
                 # a dataclass import on the parent side.
                 dependents=[
                     {"idx": e.idx, "name": e.name, "kind": e.kind, "params": dict(e.params)}
-                    for e in entries[:DELETE_DEPENDENTS_CAP]
+                    for e in unasked_entries[:DELETE_DEPENDENTS_CAP]
                 ],
-                total=len(entries),
-                disturbances=[asdict(d) for d in disturbances[:DELETE_DEPENDENTS_CAP]],
-                disturbances_total=len(disturbances),
+                total=len(unasked_entries),
+                disturbances=[
+                    asdict(d) for d in unasked_disturbances[:DELETE_DEPENDENTS_CAP]
+                ],
+                disturbances_total=len(unasked_disturbances),
             )
 
         target_entry = self._lookup_topology_entry(model, target_idx)
@@ -4083,11 +4122,7 @@ class Wrapper:
                 update={spec_field: float(value)}
             )
             # 2. Re-add the snapshot's disturbances with the target
-            #    replaced. ``reload_case`` clears the log for a case
-            #    file but not for a blank session, so reset it here to
-            #    keep the in-memory state matching what we're about to
-            #    commit.
-            self._disturbance_log = []
+            #    replaced, onto the log the reload left empty.
             for j, spec in enumerate(snap_log):
                 self.add_disturbance(mutated if j == parameter_target else spec)
 

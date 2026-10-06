@@ -260,6 +260,38 @@ async def test_pmu_delete_pre_setup_returns_204(
 
 
 @pytest.mark.integration
+async def test_pmu_the_case_file_brought_is_deleted_like_one_placed_here(
+    client: httpx.AsyncClient,
+) -> None:
+    """A PMU saved with a case is one of that case's devices when it is opened
+    again. The route used to refuse it; it takes it now, and leaves the file
+    as it is."""
+    author = await _create_session_and_load(client)
+    add = await client.post(f"/api/sessions/{author}/pmu", json={"bus_idx": "1"})
+    assert add.status_code == 201, add.text
+    pmu_idx = str(add.json()["idx"])
+    save = await client.post(
+        f"/api/sessions/{author}/save",
+        json={"filename": "with_pmu.xlsx", "format": "xlsx"},
+    )
+    assert save.status_code == 201, save.text
+
+    sid = await _create_session_and_load(client, "with_pmu.xlsx")
+    listed = (await client.get(f"/api/sessions/{sid}/pmu")).json()["pmus"]
+    assert [str(p["idx"]) for p in listed] == [pmu_idx]
+
+    delete = await client.delete(f"/api/sessions/{sid}/pmu/{pmu_idx}")
+    assert delete.status_code == 204, delete.text
+    assert (await client.get(f"/api/sessions/{sid}/pmu")).json() == {"pmus": []}
+
+    # The file still holds it: a reload is the file again.
+    reload = await client.post(f"/api/sessions/{sid}/reload")
+    assert reload.status_code == 200, reload.text
+    listed = (await client.get(f"/api/sessions/{sid}/pmu")).json()["pmus"]
+    assert [str(p["idx"]) for p in listed] == [pmu_idx]
+
+
+@pytest.mark.integration
 async def test_pmu_delete_unknown_idx_returns_404(
     client: httpx.AsyncClient,
 ) -> None:
