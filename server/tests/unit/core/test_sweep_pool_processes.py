@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
-import time
 from collections.abc import Callable
 from typing import Any
 
@@ -35,7 +34,9 @@ pytestmark = pytest.mark.unit
 
 class FakeConn:
     """One end of a pipe. What it sends is recorded in ``sent`` and shows up in the
-    other end's ``received``; what ``recv`` answers is queued in ``replies``."""
+    other end's ``received``; what ``recv`` answers is queued in ``replies``. A
+    queued callable is called for the answer, so a test can hold a reply back until
+    something has happened, and ``on_send`` is told of every message sent."""
 
     def __init__(self) -> None:
         self.sent: list[Any] = []
@@ -44,7 +45,7 @@ class FakeConn:
         self.replies: list[Any] = []
         self.closed = False
         self.send_error: Exception | None = None
-        self.recv_delay = 0.0
+        self.on_send: Callable[[Any], None] | None = None
 
     def send(self, message: Any) -> None:
         if self.send_error is not None:
@@ -52,13 +53,15 @@ class FakeConn:
         self.sent.append(message)
         if self.peer is not None:
             self.peer.received.append(message)
+        if self.on_send is not None:
+            self.on_send(message)
 
     def recv(self) -> Any:
-        if self.recv_delay:
-            time.sleep(self.recv_delay)
         if not self.replies:
             raise EOFError
         reply = self.replies.pop(0)
+        if callable(reply):
+            reply = reply()
         if isinstance(reply, BaseException):
             raise reply
         return reply
@@ -142,6 +145,11 @@ def fakes(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     attached: list[int] = []
     monkeypatch.setattr(sweep_pool, "attach_kill_on_close_job", lambda pid: attached.append(pid))
     return attached
+
+
+# How long a test waits for something another thread is due to do. Far longer than
+# any step here takes, so reaching it means the step never happened.
+_SIGNAL_TIMEOUT = 10.0
 
 
 def _pool(ctx: FakeContext, size: int = 2) -> SweepWorkerPool:
@@ -416,36 +424,82 @@ def test_aborting_a_worker_whose_pipe_is_gone_does_not_raise() -> None:
 
 
 async def test_an_abort_is_forwarded_to_every_worker_while_the_sweep_runs() -> None:
-    """The abort comes in the middle of every worker's first iteration, which lasts
-    long enough (0.4 s) for the pool, polling every 0.05 s, to forward it."""
+    """The abort comes while every worker is inside its first iteration. Nothing
+    here is timed: the sweep is aborted by the last worker to be handed an
+    iteration, and each worker holds its answer until its abort pipe has been
+    written to, so the run cannot end before the pool has forwarded the abort."""
     pool = _pool(FakeContext(), size=2)
     await pool.start()
-    process_workers = pool._workers  # noqa: SLF001
+    process_workers = list(pool._workers)  # noqa: SLF001
+    stop = threading.Event()
+    in_iteration: list[int] = []
+
+    def handed_out(message: Any) -> None:
+        if message["op"] == "run_sweep_iteration":
+            in_iteration.append(message["args"]["index"])
+            if len(in_iteration) == len(process_workers):
+                stop.set()
+
+    def held_until(aborted: threading.Event) -> Callable[[], dict[str, Any]]:
+        def answer() -> dict[str, Any]:
+            assert aborted.wait(_SIGNAL_TIMEOUT), "the abort never reached this worker"
+            return {"type": "result", "seq": 2, "payload": _row(0)}
+
+        return answer
+
     for worker in process_workers:
-        worker.data.recv_delay = 0.4
+        aborted = threading.Event()
+        worker.ctrl.on_send = handed_out
+        worker.abort_conn.on_send = lambda _message, aborted=aborted: aborted.set()
         worker.data.replies = [
             {"type": "result", "seq": 1, "payload": None},
-            *[{"type": "result", "seq": n, "payload": _row(n)} for n in range(2, 12)],
+            held_until(aborted),
         ]
-    stop = threading.Event()
-    # The adoption takes 0.4 s, so at 0.5 s each worker is a little way into its
-    # iteration, with 0.3 s to go.
-    timer = threading.Timer(0.5, stop.set)
-    timer.start()
     rows: list[int] = []
 
     async def on_row(index: int, _row_: dict[str, Any]) -> None:
         rows.append(index)
 
     tasks = [{"index": i, "value": float(i)} for i in range(8)]
-    try:
-        done = await pool.run(tasks, source={}, on_row=on_row, should_stop=stop.is_set)
-    finally:
-        timer.cancel()
+    done = await pool.run(tasks, source={}, on_row=on_row, should_stop=stop.is_set)
 
-    assert done >= 1 and rows[:1] == [0]
+    # Both iterations in flight were stopped and answered; no other was handed out.
+    assert done == 2 and rows == [0, 1]
+    assert sorted(in_iteration) == [0, 1]
     for worker in process_workers:
         assert worker.abort_conn.sent == [True]
+        assert [message["op"] for message in worker.ctrl.sent] == [
+            "adopt_sweep_source",
+            "run_sweep_iteration",
+        ]
+    await pool.close(graceful=False)
+
+
+async def test_an_abort_before_any_iteration_is_handed_out_runs_none() -> None:
+    """The abort lands while the workers are still taking the case. No iteration is
+    started, so there are no rows, and that is not a failure of the workers."""
+    pool = _pool(FakeContext(), size=2)
+    await pool.start()
+    process_workers = list(pool._workers)  # noqa: SLF001
+    stop = threading.Event()
+
+    def adopted() -> dict[str, Any]:
+        stop.set()
+        return {"type": "result", "seq": 1, "payload": None}
+
+    for worker in process_workers:
+        worker.data.replies = [adopted]
+    rows: list[int] = []
+
+    async def on_row(index: int, _row_: dict[str, Any]) -> None:
+        rows.append(index)
+
+    tasks = [{"index": i, "value": float(i)} for i in range(8)]
+    done = await pool.run(tasks, source={}, on_row=on_row, should_stop=stop.is_set)
+
+    assert done == 0 and rows == []
+    for worker in process_workers:
+        assert [message["op"] for message in worker.ctrl.sent] == ["adopt_sweep_source"]
     await pool.close(graceful=False)
 
 

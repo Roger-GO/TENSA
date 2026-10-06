@@ -152,7 +152,10 @@ async def test_signals_that_make_no_record_are_a_422_that_says_why(
         "run.",
         ".hidden",
         "x" * 65,
-        "x" * 100_000,
+        # Without an id of its own the whole name would be the test's id, which
+        # pytest keeps in an environment variable, and Windows caps one at
+        # 32767 characters.
+        pytest.param("x" * 100_000, id="100000-characters"),
         "two words",
         'q"uote',
     ],

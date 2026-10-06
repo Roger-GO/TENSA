@@ -9,6 +9,8 @@ workflows and must build, check, and smoke-test the packages before uploading
 them. The acceptance job and the web workflow's end-to-end job are checked for
 being real (a placeholder that only echoed once passed as green). These tests read
 the repository files directly, so they skip when the tests run away from a checkout.
+The last one reads the test run itself: it keeps a test id that only Windows
+refuses from passing on the systems the whole suite runs on.
 """
 
 from __future__ import annotations
@@ -343,3 +345,24 @@ def test_audit_workflow_checks_both_halves_on_a_schedule() -> None:
     assert "pnpm audit --prod" in _run_text(jobs["web"])
     # The audited packages are what a user installs, so the mcp extra is in.
     assert '"./server[mcp]"' in _run_text(jobs["python"])
+
+
+# Windows caps one environment variable, name and value together, at 32767
+# characters, and pytest keeps the id of the running test in one.
+_WINDOWS_ENV_MAX = 32767
+
+
+def test_every_test_id_fits_in_a_windows_environment_variable(
+    request: pytest.FixtureRequest,
+) -> None:
+    """A parametrized value is part of its test's id unless the case is given an
+    ``id``. An id past the limit runs everywhere but on Windows, where pytest
+    cannot set ``PYTEST_CURRENT_TEST`` and the test errors at setup and at
+    teardown. This fails on every system instead, for the tests this run
+    collected."""
+    too_long = [
+        f"{item.nodeid[:100]}... ({len(item.nodeid)} characters)"
+        for item in request.session.items
+        if len(f"PYTEST_CURRENT_TEST={item.nodeid} (teardown)") > _WINDOWS_ENV_MAX
+    ]
+    assert too_long == []

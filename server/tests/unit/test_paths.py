@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import os
+import stat
 import sys
 import types
 from collections.abc import Callable
@@ -679,8 +680,14 @@ def test_open_workspace_file_wraps_canonicalization_failure(
     workspace = ensure_workspace(tmp_path / "ws")
     (workspace / "ieee14.raw").write_text("x", encoding="utf-8")
     seen_fds: list[int] = []
+    real = paths._canonical_path_from_fd  # noqa: SLF001
 
     def boom(fd: int) -> Path:
+        # macOS resolves the workspace directory through an fd of its own
+        # first. That one is answered, so that the lookup which fails is the
+        # file's, on every platform.
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            return real(fd)
         seen_fds.append(fd)
         raise FileNotFoundError(errno.ENOENT, "gone")
 
@@ -690,8 +697,53 @@ def test_open_workspace_file_wraps_canonicalization_failure(
         open_workspace_file_for_andes(workspace, "ieee14.raw"),
     ):
         pass
+    assert len(seen_fds) == 1
     with pytest.raises(OSError):  # EBADF: the fd was closed
         os.fstat(seen_fds[0])
+
+
+def _no_answer(_path: str) -> str:
+    return ""
+
+
+def _fcntl_fails(_path: str) -> str:
+    raise OSError(errno.EIO, "F_GETPATH failed")
+
+
+def _file_is_gone(path: str) -> str:
+    return path + ".gone"
+
+
+@pytest.mark.unit
+@_linux_only
+@pytest.mark.parametrize("answer", [_no_answer, _fcntl_fails, _file_is_gone])
+def test_a_file_whose_fd_cannot_be_resolved_on_macos_is_a_canonicalization_error(
+    tmp_path: Path,
+    fake_macos: Callable[..., _FakeMacos],
+    answer: Callable[[str], str],
+) -> None:
+    """The same failure on the macOS branch, where the workspace directory and
+    the file are both resolved with ``F_GETPATH``: the directory's lookup
+    succeeds, and the file's comes back empty, fails, or names a path that is
+    no longer there. Each is the file's error, not a missing workspace."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "ieee14.raw").write_text("x", encoding="utf-8")
+
+    def respell(path: str) -> str:
+        return answer(path) if path.endswith("ieee14.raw") else path
+
+    fake = fake_macos(respell)
+    with (
+        pytest.raises(WorkspacePathError, match="cannot canonicalize") as caught,
+        open_workspace_file_for_andes(workspace, "ieee14.raw"),
+    ):
+        pass
+    assert "directory does not exist" not in str(caught.value)
+    # One lookup for the workspace, one for the file, whose fd is then closed.
+    assert len(fake.calls) == 2
+    with pytest.raises(OSError):  # EBADF
+        os.fstat(fake.calls[-1][0])
 
 
 @pytest.mark.unit
