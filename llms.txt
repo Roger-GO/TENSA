@@ -124,15 +124,19 @@ Profiles:        POST /sessions/{id}/profiles/upload · POST/GET/DELETE /session
 Sweeps:          POST /sessions/{id}/sweep (param sweep over disturbance/sim values; per-iteration TDS results)
 Snapshots:       POST /sessions/{id}/snapshot · POST .../snapshot/restore · GET .../snapshots · DELETE .../snapshot/{name}
                  (a snapshot keeps the diagram layout: "layout" in the save body, else the one beside the case file;
-                 a restore writes it back beside the case and returns it as "layout")
+                 a restore writes it back beside the case and returns it as "layout"; 413 for a "layout" over the layout cap)
 Bundles:         POST /sessions/{id}/bundle/export (zip: case+disturbances+params+layout.json) · POST .../bundle/import
-                 (export takes "layout" like a snapshot does; import writes layout.json beside the case, "layout_restored")
+                 (export takes "layout" like a snapshot does, 413 over the cap; import writes layout.json beside the case,
+                 "layout_restored"; a bundle with no layout that replaces a workspace case of other content removes the
+                 layout that was beside it, and says so in "warnings")
 Reports:         GET /sessions/{id}/report
 Workspace:       GET /workspace/files · GET/PUT /workspace/layout?case_path=<rel>
                  (the layout of a case's diagram, <case>.layout.json, schema_version "2": positions of buses, devices
                  and placed controllers, branch routes, busbars, label offsets, connection faces, figure settings;
                  a device position carries "bus" and a route "bus1"/"bus2", and is used only for an element on
-                 those buses; 2 MiB; a version 1 document is accepted and upgraded. POST /sessions/{id}/save and
+                 those buses; a version 1 document is accepted and upgraded. Cap 2 MiB, on the request body and on
+                 the layout as the server stores it: compact JSON with every field written out, so a field left
+                 to its default still counts; 413 over it. POST /sessions/{id}/save and
                  .../case/clone/save-as copy the open case's layout to the new name)
                  POST /workspace/files?name=<file>[&overwrite=true]  (adds a case file; the body IS the file's bytes
                  as in curl --data-binary @ieee14.raw ..., not multipart, which answers 415; 32 MiB; xlsx raw dyr json m;
