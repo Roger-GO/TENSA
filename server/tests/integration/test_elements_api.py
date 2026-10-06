@@ -1307,14 +1307,22 @@ async def test_the_parameters_the_builder_lists_are_the_models_own() -> None:
         if meta.name not in getattr(ss, model_name).params
     }
     assert foreign == renamed
-    # And nothing ANDES holds mandatory is missing from a form.
-    for model_name, metas in _PARAMS_BY_MODEL.items():
-        listed = {meta.name for meta in metas}
-        mandatory = {
+    # And nothing ANDES holds mandatory is missing from a form. The flag is a
+    # property of the param, not an attribute of it (contract 12 in
+    # ``ANDES_VERSIONS.md``), and a reading that finds none passes whatever the
+    # forms list, so the ZIP's own are named.
+    mandatory_of = {
+        model_name: {
             name
             for name, param in getattr(ss, model_name).params.items()
-            if getattr(param, "mandatory", False) and getattr(param, "export", True)
+            if param.get_property("mandatory") and getattr(param, "export", True)
         }
+        for model_name in _PARAMS_BY_MODEL
+    }
+    assert mandatory_of["ZIP"] == {"pq", "kpp", "kpi", "kpz", "kqp", "kqi", "kqz"}
+    for model_name, metas in _PARAMS_BY_MODEL.items():
+        listed = {meta.name for meta in metas}
+        mandatory = mandatory_of[model_name]
         assert mandatory <= listed, f"{model_name} lacks {sorted(mandatory - listed)}"
 
 
