@@ -14,7 +14,11 @@ Four endpoints:
   ``null`` body when absent (a missing sidecar is the normal first-run
   state, not an error — a 404 only fills the browser console with noise).
 - ``PUT /workspace/layout?case_path=<rel>`` — write the layout sidecar
-  atomically via tempfile + ``os.replace``, mode 0600. 256 KB cap.
+  atomically via tempfile + ``os.replace``, mode 0600. 2 MiB cap.
+
+The layout's schema, its versions and the file handling live in
+``tensa.core.layout``; both endpoints answer with and store the current schema
+version, whichever version the file or the body was written in.
 
 Path validation reuses the helpers in ``security.paths``: ``_reject_unsafe_input``
 for the client-supplied ``case_path``, ``open_workspace_file_for_write`` for
@@ -27,12 +31,10 @@ import contextlib
 import logging
 import os
 import stat
-import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
-from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import ClientDisconnect
 
@@ -43,6 +45,13 @@ from tensa.api.schemas import (
     WorkspaceFile,
     WorkspaceFileList,
 )
+from tensa.core.layout import (
+    LAYOUT_SIDECAR_SUFFIX,
+    MAX_LAYOUT_BYTES,
+    LayoutError,
+    parse_layout,
+    write_layout_file,
+)
 from tensa.security.names import legacy_names_possible, portable_name_problem
 from tensa.security.paths import (
     WorkspacePathError,
@@ -52,6 +61,7 @@ from tensa.security.paths import (
     list_workspace_files,
     open_workspace_file_for_write,
 )
+from tensa.security.paths import write_private_temp as _write_temp
 
 router = APIRouter()
 
@@ -59,11 +69,10 @@ log = logging.getLogger("tensa.workspace")
 
 _ALLOWED_EXTENSIONS: frozenset[str] = frozenset({".xlsx", ".raw", ".dyr", ".json", ".m"})
 
-# Layout sidecar body cap: 256 KB. Computed once.
-_MAX_LAYOUT_BYTES = 256 * 1024
-
-# What a layout sidecar's name adds to its case's: ``ieee14.raw.layout.json``.
-_LAYOUT_SIDECAR_SUFFIX = ".layout.json"
+# Layout sidecar body cap, and what a sidecar's name adds to its case's
+# (``ieee14.raw.layout.json``); both belong to the layout module.
+_MAX_LAYOUT_BYTES = MAX_LAYOUT_BYTES
+_LAYOUT_SIDECAR_SUFFIX = LAYOUT_SIDECAR_SUFFIX
 
 # Case-file upload cap: 32 MiB. A RAW, xlsx or MATPOWER case of tens of thousands
 # of buses is a few MB; the cap only stops a runaway body.
@@ -487,11 +496,13 @@ async def get_layout(
             detail=f"could not read sidecar: {exc}",
         ) from exc
     try:
-        return SidecarLayout.model_validate_json(raw)
-    except ValidationError as exc:
+        # Validated, and brought to the current schema version when the file
+        # was written in an older one.
+        return parse_layout(raw)
+    except LayoutError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"sidecar is malformed: {exc.errors()}",
+            detail=f"sidecar is malformed: {exc}",
         ) from exc
 
 
@@ -530,7 +541,9 @@ def _enforce_layout_content_length(request: Request) -> None:
         },
         413: {
             "model": ProblemDetails,
-            "description": "Body exceeds the 256 KB sidecar cap.",
+            "description": (
+                f"Body exceeds the {_MAX_LAYOUT_BYTES // (1024 * 1024)} MiB sidecar cap."
+            ),
         },
         422: {
             "model": ProblemDetails,
@@ -566,7 +579,7 @@ async def put_layout(
             # of a case file that is already in the workspace inherits its name.
             require_portable_name=not _is_existing_case_file(workspace, case_path),
         ) as target:
-            _atomic_write_json(target, layout)
+            write_layout_file(target, layout)
     except WorkspacePathError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -593,61 +606,3 @@ def _is_existing_case_file(workspace: Path, case_path: str) -> bool:
         return (workspace / case_path).is_file()
     except (OSError, ValueError):
         return False
-
-
-def _write_temp(parent: Path, data: bytes, *, prefix: str) -> Path:
-    """Write ``data`` to a new temp file in ``parent``, mode 0600, and return its path.
-
-    The temp file sits in the target's own directory so the ``os.replace`` that
-    follows is a same-filesystem rename. ``os.fchmod`` is applied through the fd
-    where the platform has it, before any data is written. The bytes are fsynced
-    before the caller moves the file into place. On any exception the temp file is
-    unlinked.
-    """
-    tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115 — context manager would auto-delete
-        mode="wb",
-        dir=parent,
-        prefix=prefix,
-        suffix=".tmp",
-        delete=False,
-    )
-    tmp_path = Path(tmp.name)
-    try:
-        # ``os.fchmod`` does not exist at all on Windows before Python 3.13 (an
-        # AttributeError, not an OSError), and unusual filesystems may refuse it;
-        # either way the post-close chmod below still applies the mode.
-        fchmod = getattr(os, "fchmod", None)
-        if fchmod is not None:
-            with contextlib.suppress(OSError):
-                fchmod(tmp.fileno(), 0o600)
-        tmp.write(data)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-        tmp.close()
-        with contextlib.suppress(OSError):
-            os.chmod(tmp_path, 0o600)
-    except Exception:
-        # Best-effort cleanup; never mask the original exception.
-        with contextlib.suppress(Exception):
-            tmp.close()
-        with contextlib.suppress(OSError):
-            tmp_path.unlink()
-        raise
-    return tmp_path
-
-
-def _atomic_write_json(target: Path, layout: SidecarLayout) -> None:
-    """Write ``layout`` to ``target`` atomically with mode 0600.
-
-    Writes a temp file in the same directory (see ``_write_temp``) and renames it
-    over ``target``. On any exception the temp file is unlinked.
-    """
-    tmp_path = _write_temp(
-        target.parent, layout.model_dump_json(indent=2).encode("utf-8"), prefix=".layout."
-    )
-    try:
-        os.replace(tmp_path, target)
-    except Exception:
-        with contextlib.suppress(OSError):
-            tmp_path.unlink()
-        raise

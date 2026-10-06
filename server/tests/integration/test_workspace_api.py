@@ -165,7 +165,8 @@ async def test_put_then_get_roundtrip(
     )
     assert get.status_code == 200, get.text
     parsed = get.json()
-    assert parsed["schema_version"] == "1.0"
+    # The body was a version 1 document; it is stored and answered as version 2.
+    assert parsed["schema_version"] == "2"
     assert parsed["coordinates"]["1"] == {"x": 0.0, "y": 0.0}
 
 
@@ -187,7 +188,7 @@ async def test_put_layout_succeeds_where_os_has_no_fchmod(
     )
     assert put.status_code == 204, put.text
     sidecar = ws / "ieee14.raw.layout.json"
-    assert json.loads(sidecar.read_text(encoding="utf-8"))["schema_version"] == "1.0"
+    assert json.loads(sidecar.read_text(encoding="utf-8"))["schema_version"] == "2"
     if sys.platform != "win32":
         # The post-close chmod still applies the mode without fchmod.
         assert sidecar.stat().st_mode & 0o777 == 0o600
@@ -268,7 +269,7 @@ async def test_put_layout_keeps_working_for_an_existing_case_with_an_unportable_
     assert (ws / f"{name}.layout.json").is_file()
     got = await client.get("/api/workspace/layout", params={"case_path": name})
     assert got.status_code == 200, got.text
-    assert got.json()["schema_version"] == "1.0"
+    assert got.json()["schema_version"] == "2"
 
 
 @pytest.mark.integration
@@ -296,13 +297,13 @@ async def test_put_layout_too_large_returns_413(
     client_workspace: tuple[httpx.AsyncClient, Path],
 ) -> None:
     client, _ws = client_workspace
-    # Build a 300 KB payload via a giant coordinates dict.
+    # Build a payload over the 2 MiB cap via a giant coordinates dict.
     big_coords = {
-        str(i): {"x": float(i), "y": float(i + 1)} for i in range(20000)
+        str(i): {"x": float(i), "y": float(i + 1)} for i in range(80000)
     }
     body = _layout_body(coordinates=big_coords)
     serialized = json.dumps(body)
-    assert len(serialized) > 256 * 1024
+    assert len(serialized) > 2 * 1024 * 1024
     resp = await client.put(
         "/api/workspace/layout",
         params={"case_path": "ieee14.raw"},
@@ -459,11 +460,13 @@ async def test_put_then_get_layout_with_non_bus_coordinates(
     )
     assert get.status_code == 200, get.text
     parsed = get.json()
+    # The body gave each position without the bus its device hangs off, as a
+    # version 1 client does; it reads back as not recorded.
     assert parsed["non_bus_coordinates"] == {
-        "PV": {"1": {"x": 100.0, "y": 200.0}},
-        "generator": {"1": {"x": 100.0, "y": 200.0}},
-        "PQ": {"3": {"x": 50.0, "y": 60.0}},
-        "load": {"3": {"x": 50.0, "y": 60.0}},
+        "PV": {"1": {"x": 100.0, "y": 200.0, "bus": None}},
+        "generator": {"1": {"x": 100.0, "y": 200.0, "bus": None}},
+        "PQ": {"3": {"x": 50.0, "y": 60.0, "bus": None}},
+        "load": {"3": {"x": 50.0, "y": 60.0, "bus": None}},
     }
 
 
@@ -512,3 +515,115 @@ async def test_put_layout_non_bus_coordinates_nan_rejected(
         content=raw,
     )
     assert resp.status_code == 422, resp.text
+
+
+# ---- schema version 2 -------------------------------------------------------
+
+
+def _layout_v2_body() -> dict[str, object]:
+    """A version 2 document with something in every section."""
+    return {
+        "schema_version": "2",
+        "andes_version": "2.0.0",
+        "coordinates": {"1": {"x": 0.0, "y": 0.0}, "2": {"x": 100.0, "y": 50.0}},
+        "non_bus_coordinates": {"generator": {"1": {"x": 0.0, "y": -70.0, "bus": "1"}}},
+        "controller_coordinates": {"EXST1": {"1": {"x": 64.0, "y": -88.0}}},
+        "units": {"1": {"expanded": True}},
+        "busbars": {"2": {"length": 180.0, "orientation": "vertical"}},
+        "branches": {
+            "line": {
+                "Line_1": {
+                    "routing": "polyline",
+                    "bend_points": [{"x": 30.0, "y": 6.0}, {"x": 130.0, "y": 50.0}],
+                    "bus1": "1",
+                    "bus2": "2",
+                    "source_face": "south",
+                    "target_face": None,
+                }
+            }
+        },
+        "label_offsets": {"bus": {"1": {"dx": 4.0, "dy": -12.0}}},
+        "connections": {"generator": {"1": {"device_face": "south", "bus_face": "north"}}},
+        "figure": {"monochrome": True, "line_width": 1.5, "font": "serif"},
+        "last_modified": "2026-10-06T08:00:00+00:00",
+    }
+
+
+@pytest.mark.integration
+async def test_a_version_2_layout_round_trips_with_every_section(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    client, ws = client_workspace
+    body = _layout_v2_body()
+    put = await client.put("/api/workspace/layout", params={"case_path": "kundur.xlsx"}, json=body)
+    assert put.status_code == 204, put.text
+    assert json.loads((ws / "kundur.xlsx.layout.json").read_text(encoding="utf-8")) == body
+    got = await client.get("/api/workspace/layout", params={"case_path": "kundur.xlsx"})
+    assert got.status_code == 200, got.text
+    assert got.json() == body
+
+
+@pytest.mark.integration
+async def test_a_version_1_file_on_disk_is_answered_as_version_2(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """A layout saved by an earlier release: positions only, and (from a save
+    after a drag) a controller badge filed among the buses."""
+    client, ws = client_workspace
+    v1 = _layout_body()
+    v1["schema_version"] = "1"
+    v1["coordinates"]["controller-EXST1-1"] = {"x": 136.0, "y": 12.0}  # type: ignore[index]
+    (ws / "ieee14.raw.layout.json").write_text(json.dumps(v1), encoding="utf-8")
+    got = await client.get("/api/workspace/layout", params={"case_path": "ieee14.raw"})
+    assert got.status_code == 200, got.text
+    parsed = got.json()
+    assert parsed["schema_version"] == "2"
+    assert parsed["coordinates"] == {"1": {"x": 0.0, "y": 0.0}, "2": {"x": 100.0, "y": 50.0}}
+    for section in ("controller_coordinates", "units", "busbars", "branches"):
+        assert parsed[section] == {}
+    assert parsed["figure"] == {}
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("section", "value"),
+    [
+        ("busbars", {"1": {"orientation": "diagonal"}}),
+        ("branches", {"line": {"1": {"bend_points": [{"x": 1.0}]}}}),
+        ("figure", {"palette": ["black", "white"]}),
+        ("units", {"1": {"expanded": True, "x": 3.0}}),
+    ],
+)
+async def test_put_layout_refuses_a_section_the_schema_does_not_hold(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+    section: str,
+    value: object,
+) -> None:
+    client, ws = client_workspace
+    body = _layout_v2_body()
+    body[section] = value
+    resp = await client.put("/api/workspace/layout", params={"case_path": "kundur.xlsx"}, json=body)
+    assert resp.status_code == 422, resp.text
+    assert not (ws / "kundur.xlsx.layout.json").exists()
+
+
+@pytest.mark.integration
+async def test_a_layout_with_the_bends_of_every_branch_fits_under_the_cap(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """The cap was 256 kB when a layout held positions only. A few thousand
+    branches with their bend points are well past that and must still save."""
+    client, _ws = client_workspace
+    body = _layout_v2_body()
+    body["branches"] = {
+        "line": {
+            f"Line_{i}": {
+                "routing": "polyline",
+                "bend_points": [{"x": float(i + k), "y": float(i - k)} for k in range(4)],
+            }
+            for i in range(3000)
+        }
+    }
+    assert len(json.dumps(body)) > 256 * 1024
+    resp = await client.put("/api/workspace/layout", params={"case_path": "big.raw"}, json=body)
+    assert resp.status_code == 204, resp.text

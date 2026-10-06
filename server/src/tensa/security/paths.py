@@ -33,6 +33,7 @@ import errno
 import os
 import re
 import sys
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -319,6 +320,47 @@ def open_workspace_file_for_write(
             f"path rejected (cannot resolve): {client_path!r}: {exc}"
         ) from exc
     yield target
+
+
+def write_private_temp(parent: Path, data: bytes, *, prefix: str) -> Path:
+    """Write ``data`` to a new temp file in ``parent``, mode 0600, and return its path.
+
+    The temp file sits in the target's own directory so the ``os.replace`` that
+    follows is a same-filesystem rename. ``os.fchmod`` is applied through the fd
+    where the platform has it, before any data is written. The bytes are fsynced
+    before the caller moves the file into place. On any exception the temp file is
+    unlinked.
+    """
+    tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115 — context manager would auto-delete
+        mode="wb",
+        dir=parent,
+        prefix=prefix,
+        suffix=".tmp",
+        delete=False,
+    )
+    tmp_path = Path(tmp.name)
+    try:
+        # ``os.fchmod`` does not exist at all on Windows before Python 3.13 (an
+        # AttributeError, not an OSError), and unusual filesystems may refuse it;
+        # either way the post-close chmod below still applies the mode.
+        fchmod = getattr(os, "fchmod", None)
+        if fchmod is not None:
+            with contextlib.suppress(OSError):
+                fchmod(tmp.fileno(), 0o600)
+        tmp.write(data)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp.close()
+        with contextlib.suppress(OSError):
+            os.chmod(tmp_path, 0o600)
+    except Exception:
+        # Best-effort cleanup; never mask the original exception.
+        with contextlib.suppress(Exception):
+            tmp.close()
+        with contextlib.suppress(OSError):
+            tmp_path.unlink()
+        raise
+    return tmp_path
 
 
 def _reject_unportable_leaf(client_path: str) -> None:
