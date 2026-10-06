@@ -116,9 +116,11 @@ function SaveAsCustomCaseDialogInner({ onClose }: { onClose: () => void }) {
           // The first file written is the case file itself (the others are its
           // addfiles), and that is the one a layout is kept beside. The server
           // has copied the layout saved with the open case; this replaces it
-          // with the diagram as it is drawn now.
+          // with the diagram as it is drawn now. The new files are copies of
+          // the open case's, so they read back with the idx values the diagram
+          // has, a `.raw` included: the whole layout goes, not the cut one.
           const primary = data.files?.[0];
-          if (primary !== undefined) writeLayoutBeside(baseName(primary));
+          if (primary !== undefined) writeLayoutBeside(baseName(primary), { renumbered: false });
           setSaved(true);
           schedule(onClose, 600);
         },

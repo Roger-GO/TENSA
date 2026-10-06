@@ -34,17 +34,24 @@ import { describeError } from '@/lib/describeError';
  * there is nothing to write, and the copy the server made of the open case's layout
  * stands.
  *
- * A `.raw` file keeps no idx: the system read back from it has its devices and
- * branches numbered afresh. The layout written beside one is therefore cut down to
- * what can still be matched then (`layoutForRenumberedCopy`).
+ * A `.raw` file the PSS/E writer wrote keeps no idx: the system read back from it
+ * has its devices and branches numbered afresh. The layout written beside one is
+ * therefore cut down to what can still be matched then (`layoutForRenumberedCopy`),
+ * and that is what a `.raw` name gets unless the caller says otherwise. A copy of the
+ * open case's own files (Save parameter edits as case) reads back with the idx values
+ * the session has, whatever its format, and passes `renumbered: false` to keep the
+ * whole layout, as the server does for the copy it makes.
  */
-export function useWriteLayoutSidecar(): (caseFilename: string) => void {
+export function useWriteLayoutSidecar(): (
+  caseFilename: string,
+  options?: { renumbered?: boolean },
+) => void {
   const { mutate: putSidecar } = usePutSidecar();
   return useCallback(
-    (caseFilename: string) => {
+    (caseFilename: string, options: { renumbered?: boolean } = {}) => {
       const drawn = diagramLayoutForSave();
       if (drawn === null) return;
-      const renumbered = extensionOf(caseFilename).toLowerCase() === '.raw';
+      const renumbered = options.renumbered ?? extensionOf(caseFilename).toLowerCase() === '.raw';
       const layout = renumbered ? layoutForRenumberedCopy(drawn) : drawn;
       try {
         putSidecar({ casePath: parseWorkspacePath(caseFilename), layout });

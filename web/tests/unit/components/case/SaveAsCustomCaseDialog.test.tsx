@@ -195,6 +195,51 @@ describe('<SaveAsCustomCaseDialog /> — confirm flow', () => {
     });
   });
 
+  it('writes the whole layout beside the copy of a .raw case, not the one cut for a renumbered file', async () => {
+    // The new files are copies of the open case's, so the system read back from
+    // them has the idx values the diagram has. Only a .raw the PSS/E writer wrote
+    // (Save system as) comes back numbered afresh; the cut made for that one
+    // drops the placed controllers, the unit state and the connection faces.
+    const user = userEvent.setup();
+    const drawn = buildSidecarLayout(
+      { '1': { x: 10, y: 20 }, '2': { x: 210, y: 20 } },
+      {
+        nonBusCoords: { generator: { '1': { x: 10, y: -50 } } },
+        sections: {
+          controller_coordinates: { TGOV1: { '1': { x: 74, y: -68 } } },
+          units: { '1': { expanded: true } },
+          label_offsets: { generator: { '1': { dx: 4, dy: -12 } } },
+          connections: { generator: { '1': { device_face: 'south', bus_face: 'north' } } },
+        },
+      },
+    );
+    useCaseStore.setState({ diagramLayout: drawn });
+    const filesWritten = { name: 'tuned', files: ['/ws/tuned.raw', '/ws/tuned.dyr'], job_id: 'j1' };
+    fetchSpy.mockImplementation((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes('/case/clone/save-as')
+        ? Promise.resolve(makeJsonResponse(201, filesWritten))
+        : routeFetch()(input, init),
+    );
+    render(withQueryClient(<SaveAsCustomCaseDialog open onOpenChange={() => {}} />));
+    await user.type(screen.getByTestId('save-as-custom-name-input'), 'tuned');
+    await user.click(screen.getByTestId('save-as-custom-confirm'));
+
+    await waitFor(() => {
+      const put = fetchSpy.mock.calls.find(
+        ([u, i]) =>
+          String(u).includes('/workspace/layout') &&
+          ((i as RequestInit | undefined)?.method ?? 'GET').toUpperCase() === 'PUT',
+      );
+      expect(put).toBeDefined();
+      expect(String(put![0])).toContain('case_path=tuned.raw');
+      const { last_modified: _stamp, ...sent } = JSON.parse(
+        String((put![1] as RequestInit).body),
+      ) as Record<string, unknown>;
+      const { last_modified: _drawnAt, ...whole } = drawn;
+      expect(sent).toEqual(whole);
+    });
+  });
+
   it('writes no layout when no diagram has been drawn', async () => {
     const user = userEvent.setup();
     fetchSpy.mockImplementation(routeFetch());
