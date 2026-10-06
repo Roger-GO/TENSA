@@ -17,7 +17,7 @@ clean up after it without touching a directory a live server is still using:
 - **Robust removal.** ``remove_tree`` is ``shutil.rmtree`` that clears the
   read-only bit Windows refuses to delete through.
 
-``core/session.py`` (the parent) and ``core/clone_manager.py`` (inside the
+``core/session/`` (the parent) and ``core/clone_manager.py`` (inside the
 worker) both import from here, so this module stays free of heavy imports.
 """
 

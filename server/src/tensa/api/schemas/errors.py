@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # Canonical recovery-action discriminator. Each ``AndesAppError`` subclass
 # declares a matching plain-``str`` ``recovery_kind`` attribute in
-# ``core/errors.py`` / ``core/session.py`` (a plain ``str`` there, NOT this
+# ``core/errors.py`` / ``core/session/errors.py`` (a plain ``str`` there, NOT this
 # Literal — importing it into ``core/`` would create a core->api import
 # cycle). A reflection test cross-checks the two for drift. The shared error
 # mapper (Unit 4a) translates an error's ``recovery_kind`` into a

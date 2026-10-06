@@ -22,8 +22,8 @@ import pytest
 from starlette.testclient import TestClient
 
 from tensa.api.app import make_app
-from tensa.core import session as session_module
 from tensa.core.session import SessionManager, _Session
+from tensa.core.session import registry as registry_module
 
 LONG_AGO = 1000.0
 
@@ -66,7 +66,7 @@ def _manager_with_idle_session(session_id: str = "s1") -> tuple[SessionManager, 
 async def _let_the_reaper_run(mgr: SessionManager, ticks: int = 3) -> None:
     """Run the idle reaper for a few ticks (the module's tick is patched short)."""
     task = asyncio.create_task(mgr._reap_loop())
-    await asyncio.sleep(session_module.IDLE_REAP_TICK * ticks)
+    await asyncio.sleep(registry_module.IDLE_REAP_TICK * ticks)
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await task
@@ -74,7 +74,7 @@ async def _let_the_reaper_run(mgr: SessionManager, ticks: int = 3) -> None:
 
 @pytest.fixture(autouse=True)
 def _short_reap_tick(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(session_module, "IDLE_REAP_TICK", 0.02)
+    monkeypatch.setattr(registry_module, "IDLE_REAP_TICK", 0.02)
 
 
 def test_touch_stamps_a_live_session() -> None:

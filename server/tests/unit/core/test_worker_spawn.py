@@ -17,8 +17,8 @@ from typing import Any
 
 import pytest
 
-from tensa.core import session, worker_spawn
-from tensa.core.session import SessionManager
+from tensa.core import worker_spawn
+from tensa.core.session import SessionManager, registry
 from tensa.core.worker_spawn import (
     DEFAULT_WORKER_THREADS,
     THREAD_ENV_VARS,
@@ -232,7 +232,7 @@ def test_a_new_worker_is_started_with_the_caps_and_the_server_pid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     attached: list[int] = []
-    monkeypatch.setattr(session, "attach_kill_on_close_job", attached.append)
+    monkeypatch.setattr(registry, "attach_kill_on_close_job", attached.append)
     mgr = _manager_with_recording_ctx()
     sid = asyncio.run(mgr.create_session())
     try:
@@ -253,7 +253,7 @@ def test_a_worker_without_a_pid_is_not_attached_to_a_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     attached: list[int] = []
-    monkeypatch.setattr(session, "attach_kill_on_close_job", attached.append)
+    monkeypatch.setattr(registry, "attach_kill_on_close_job", attached.append)
     mgr = _manager_with_recording_ctx(pid=None)
     asyncio.run(mgr.create_session())
     try:

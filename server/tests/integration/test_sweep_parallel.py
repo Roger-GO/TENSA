@@ -24,9 +24,9 @@ from typing import Any
 
 import pytest
 
-from tensa.core import session as session_module
 from tensa.core.disturbance import FaultSpec
 from tensa.core.session import SessionManager, _SweepBuffer
+from tensa.core.session import sweeps as sweeps_module
 from tensa.core.wrapper import Wrapper
 
 pytestmark = pytest.mark.integration
@@ -130,7 +130,7 @@ def _fail_if_a_pool_is_built(monkeypatch: pytest.MonkeyPatch) -> None:
     def _no_pool(**_kwargs: Any) -> None:
         raise AssertionError("this sweep must run on the session's worker")
 
-    monkeypatch.setattr(session_module, "SweepWorkerPool", _no_pool)
+    monkeypatch.setattr(sweeps_module, "SweepWorkerPool", _no_pool)
 
 
 # ---- the same results, the session left alone ---------------------------------
@@ -261,13 +261,13 @@ async def test_a_pool_that_cannot_start_falls_back_to_the_session_worker(
     manager: SessionManager, workspace: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sid = await _seed(manager, workspace)
-    real_pool = session_module.SweepWorkerPool
+    real_pool = sweeps_module.SweepWorkerPool
 
     class _NoStart(real_pool):  # type: ignore[valid-type, misc]
         async def start(self) -> None:
             raise OSError("cannot fork")
 
-    monkeypatch.setattr(session_module, "SweepWorkerPool", _NoStart)
+    monkeypatch.setattr(sweeps_module, "SweepWorkerPool", _NoStart)
 
     sweep_id = await manager.start_sweep(sid, _sweep_args(QUICK_VALUES[:4], QUICK_SIM))
     buf = await _finished(manager, sweep_id)
@@ -285,7 +285,7 @@ async def test_workers_that_die_before_taking_the_case_fall_back_to_the_session_
     import, a kill by the OS), so no iteration ever runs on them. That is not a
     sweep that lost its workers: the session's own worker runs it."""
     sid = await _seed(manager, workspace)
-    real_pool = session_module.SweepWorkerPool
+    real_pool = sweeps_module.SweepWorkerPool
 
     class _DiesOnStart(real_pool):  # type: ignore[valid-type, misc]
         async def start(self) -> None:
@@ -294,7 +294,7 @@ async def test_workers_that_die_before_taking_the_case_fall_back_to_the_session_
                 worker.process.kill()
                 worker.process.join()
 
-    monkeypatch.setattr(session_module, "SweepWorkerPool", _DiesOnStart)
+    monkeypatch.setattr(sweeps_module, "SweepWorkerPool", _DiesOnStart)
 
     sweep_id = await manager.start_sweep(sid, _sweep_args(QUICK_VALUES[:4], QUICK_SIM))
     buf = await _finished(manager, sweep_id)

@@ -16,7 +16,6 @@ from typing import Any
 
 import pytest
 
-from tensa.core import session as session_module
 from tensa.core.session import (
     SWEEP_WORKERS_LOST_CATEGORY,
     WORKER_DIED_CATEGORY,
@@ -26,6 +25,7 @@ from tensa.core.session import (
     _Session,
     _SweepBuffer,
 )
+from tensa.core.session import sweeps as sweeps_module
 from tensa.core.sweep_pool import SweepWorkersLostError
 
 pytestmark = pytest.mark.unit
@@ -357,7 +357,7 @@ def fake_pool(monkeypatch: pytest.MonkeyPatch) -> None:
     FakePool.rows_reported = 8
     FakePool.run_error = None
     FakePool.during_run = None
-    monkeypatch.setattr(session_module, "SweepWorkerPool", FakePool)
+    monkeypatch.setattr(sweeps_module, "SweepWorkerPool", FakePool)
 
 
 async def _run_parallel(

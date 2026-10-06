@@ -141,9 +141,9 @@ def test_liveness_loop_fires_within_short_tick(monkeypatch: pytest.MonkeyPatch) 
     interval."""
 
     async def _run() -> None:
-        import tensa.core.session as session_mod
+        import tensa.core.session.jobs as jobs_mod
 
-        monkeypatch.setattr(session_mod, "JOB_LIVENESS_TICK", 0.05)
+        monkeypatch.setattr(jobs_mod, "JOB_LIVENESS_TICK", 0.05)
         mgr = SessionManager()
         sess = _session("s1", alive=False)
         job_id = sess.job_registry.register_job(kind="eig", can_cancel=False)

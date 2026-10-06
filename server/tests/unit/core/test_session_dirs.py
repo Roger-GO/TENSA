@@ -894,12 +894,12 @@ def test_manager_without_a_workspace_has_nothing_to_sweep() -> None:
 def test_a_failing_sweep_does_not_stop_startup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    from tensa.core import session
+    from tensa.core.session import registry
 
     def boom(*args: Any, **kwargs: Any) -> list[str]:
         raise RuntimeError("disk on fire")
 
-    monkeypatch.setattr(session, "sweep_stale_session_dirs", boom)
+    monkeypatch.setattr(registry, "sweep_stale_session_dirs", boom)
     caplog.set_level("WARNING", logger="tensa.session")
 
     async def run() -> bool:
