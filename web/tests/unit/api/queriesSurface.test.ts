@@ -104,6 +104,7 @@ export type PublicTypes = [
 
 /** Every value `@/api/queries` exports: the hooks, the fetchers, the keys and the recovery wiring. */
 const PUBLIC_VALUES = [
+  'CLONE_EDIT_BUSY_RETRY_DELAYS_MS',
   'SAVE_CASE_MUTATION_KEY',
   '__resetRecoveryDebounceForTests',
   'fetchComtradeRecord',
