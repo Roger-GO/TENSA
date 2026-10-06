@@ -132,7 +132,8 @@ Bundles:         POST /sessions/{id}/bundle/export (zip: case+disturbances+param
 Reports:         GET /sessions/{id}/report
 Workspace:       GET /workspace/files · GET/PUT /workspace/layout?case_path=<rel>
                  (the layout of a case's diagram, <case>.layout.json, schema_version "2": positions of buses, devices
-                 and placed controllers, branch routes, busbars, label offsets, connection faces, figure settings;
+                 and placed controllers, branch routes, busbars, label offsets, connection faces, figure settings
+                 ("figure.connector_style": "straight" or "elbow", how the UI draws device connectors);
                  a device position carries "bus" and a route "bus1"/"bus2", and is used only for an element on
                  those buses; a version 1 document is accepted and upgraded. Cap 2 MiB, on the request body and on
                  the layout as the server stores it: compact JSON with every field written out, so a field left
