@@ -1,0 +1,92 @@
+# Build the documentation site (MkDocs, Material theme; see mkdocs.yml) and, once the
+# repository owner has turned on GitHub Pages, publish it.
+#
+# `mkdocs build --strict` fails on any warning, so a broken link or a page that is not in
+# the navigation is a red check on the pull request. The API and command line reference
+# pages are written while the site builds, from the server's OpenAPI schema and its CLI,
+# which is why TENSA is installed beside MkDocs. The UI does not need to be built.
+#
+# Publishing is off until the owner opts in, because enabling Pages is a repository
+# setting and not something a workflow can do for itself. To turn it on, set Pages'
+# source to GitHub Actions and add a repository variable DOCS_DEPLOY with the value true
+# (docs/contributing.md has the steps). Until then the `deploy` job is skipped, and the
+# built site is still available as the `github-pages` artifact of each run.
+name: docs
+
+on:
+  push:
+    branches: [main, "improve/**"]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "scripts/docs_reference.py"
+      # The reference pages are written from these.
+      - "server/src/**"
+      - "server/pyproject.toml"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "scripts/docs_reference.py"
+      - "server/src/**"
+      - "server/pyproject.toml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build the site
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Material prints a long notice about MkDocs 2.0 on every build otherwise.
+      NO_MKDOCS_2_WARNING: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            docs/requirements.txt
+            server/pyproject.toml
+
+      # TENSA is installed editable and without the UI: the hook only imports the app to
+      # read its schema, and builds nothing.
+      - name: Install MkDocs and TENSA
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r docs/requirements.txt -e ./server
+
+      - name: Build the site
+        run: mkdocs build --strict --site-dir site
+
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+          retention-days: 7
+
+  deploy:
+    name: publish on GitHub Pages
+    needs: build
+    # Only from main, and only once the owner has opted in (see the header).
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DOCS_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
