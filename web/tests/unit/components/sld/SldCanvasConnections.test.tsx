@@ -360,6 +360,89 @@ describe('while a node is dragged', () => {
   });
 });
 
+describe('a route the saved layout holds for a branch', () => {
+  /**
+   * `pair()` with bus 2 below and to the right of bus 1, and a route for the
+   * line as the automatic layout leaves one: out of the middle of the south
+   * side of the box around bus 1, across half way down, and onto the middle
+   * of the north side of bus 2.
+   */
+  function routed(): SidecarLayout {
+    return buildSidecarLayout(
+      { '1': { x: 0, y: 0 }, '2': { x: 200, y: 200 } },
+      {
+        nonBusCoords: { load: { PQ: { x: 350, y: 120, bus: '2' } } },
+        sections: {
+          branches: {
+            line: {
+              L: {
+                routing: 'polyline',
+                bend_points: [
+                  { x: 46, y: 40 },
+                  { x: 46, y: 120 },
+                  { x: 246, y: 120 },
+                  { x: 246, y: 200 },
+                ],
+                bus1: '1',
+                bus2: '2',
+              },
+            },
+          },
+        },
+      },
+    );
+  }
+
+  /** The line routed from where the two bars are: tip to tip, across half way. */
+  const fromTapToTap = (bus2X: number): [number, number][] => [
+    [89, 3],
+    [89, 103],
+    [bus2X + 3, 103],
+    [bus2X + 3, 203],
+  ];
+
+  it('is drawn through its bends, with its two ends brought onto taps of the bars', async () => {
+    mockSidecar = routed();
+    open('pair.xlsx');
+    await draw();
+
+    // The bends are the stored ones (at y = 120, not half way at 103), and
+    // the ends are on the lines of the bars and not on the box around each.
+    expect(routeOf('line-L')).toEqual({
+      points: [
+        [46, 3],
+        [46, 120],
+        [246, 120],
+        [246, 203],
+      ],
+      sourceSide: 'south',
+      targetSide: 'north',
+    });
+    expect(routeOf('line-L').points).not.toEqual(fromTapToTap(200));
+    expect(barOf('1').taps).toEqual([{ x: 46, side: 'south' }]);
+    expect(barOf('2').taps).toContainEqual({ x: 46, side: 'north' });
+  });
+
+  it('gives way to a route from tap to tap while one of its buses is away from where the route was made', async () => {
+    mockSidecar = routed();
+    open('pair.xlsx');
+    await draw();
+
+    // The pointer is still down on bus 2, 100 to the right.
+    dragTo('2', { x: 300, y: 200 });
+    expect(routeOf('line-L').points).toEqual(fromTapToTap(300));
+
+    // Back where the route was made for, the route is drawn again.
+    dragTo('2', { x: 200, y: 200 });
+    expect(routeOf('line-L').points).toEqual([
+      [46, 3],
+      [46, 120],
+      [246, 120],
+      [246, 203],
+    ]);
+  });
+});
+
 describe('the connector style', () => {
   it('is straight until something says otherwise', async () => {
     open('pair.xlsx');

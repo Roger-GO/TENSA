@@ -13,22 +13,37 @@
  *   One that comes from above or below lands on a long face (`north`,
  *   `south`): at the foot of the perpendicular from where it comes from
  *   when that falls on the bar, and at the nearest end of the bar
- *   otherwise. A device that sits level with the bar, beyond one of its
- *   ends, runs straight into that end. An end of the bar is the middle of
- *   its rounded tip (`TAP_INSET` in), so a connection lands on the bar and
- *   not on its corner.
+ *   otherwise. A device whose box still stands over a tip of the bar drops
+ *   square as well, onto a bar that reaches out under its middle. A device
+ *   that sits level with the bar, beyond one of its ends, runs straight
+ *   into that end. An end of the bar is the middle of its rounded tip
+ *   (`TAP_INSET` in), so a connection lands on the bar and not on its
+ *   corner.
  * - The taps of one face keep `TAP_SPACING` between them (`spreadTaps`).
- *   Two faces do not compete: a generator above a bar and a load below it
- *   may share a tap. A bar that has no room for the taps of a face grows,
- *   about its middle, until it has. Where a branch could run straight down
- *   from one bar to the other but for its two taps being out of line, the
- *   one that is free to move is brought in line with the other.
+ *   Where two ask for places closer than that, the one that holds its place
+ *   less firmly gives way (`TAP_HOLD`): a device that stands over the bar
+ *   drops square onto it, and the end of a branch beside it moves aside. A
+ *   bar that has no room for the taps of a face grows, about its middle,
+ *   until it has, and a bar grows at a tip to hold a tap that was moved
+ *   past it.
+ * - A tap on one face and a tap on the other are either in one place, where
+ *   they share a dot (a generator above a bar and a load below it, a line
+ *   that comes down onto a bar and one that leaves under it), or a spacing
+ *   apart like two taps of one face. Several that ask for the very same
+ *   place stand whole spacings from it for that reason, and where two faces
+ *   still crowd each other the taps of the one that gives way more easily
+ *   are moved in line or clear.
+ * - Where a branch could run straight down from one bar to the other but
+ *   for its two taps being out of line, the one that is free to move is
+ *   brought in line with the other.
  * - A device has a port at the middle of each of its four faces. Its
  *   connector leaves from the port on the face that points at its tap, so
  *   never from a corner and never from the far side.
  * - A device connector is a straight line (`straight`), which is a diagonal
  *   when the device does not sit square to its tap, or one horizontal and
- *   one vertical run with a right angle between them (`elbow`).
+ *   one vertical run with a right angle between them (`elbow`). Neither
+ *   runs through another device or a controller badge where there is a way
+ *   round: the connector then leaves by the face that looks at the bar.
  * - A branch is drawn with right angles. One with a stored route (from the
  *   auto-layout, or a saved layout) keeps its bends, and its two ends are
  *   brought onto the bars: the route was computed for a box around the bus,
@@ -164,30 +179,73 @@ export interface ConnectionLayout {
 
 // ---- taps -------------------------------------------------------------------
 
+/**
+ * How firmly a tap holds the place it asks for. Of two that are too close
+ * the one that holds less gives way, and two that hold alike share the move.
+ *
+ * - `free`: an end of a branch routed from where its buses sit, and the
+ *   connector of a device beyond a tip of the bar. Either lands as well a
+ *   little further along.
+ * - `route`: an end of a stored route that has bends. Its first bend slides
+ *   along with it.
+ * - `square`: the connector of a device that stands over the bar, which
+ *   drops square onto the bar at this place and at no other.
+ * - `straight`: an end of a stored route that runs straight from one bar to
+ *   the next. Moved, it would have to step across.
+ */
+export const TAP_HOLD = { free: 0, route: 1, square: 2, straight: 3 } as const;
+
 /** Where one connection would like to land on a face. */
 export interface TapWish {
   /** The position along the bar it asks for. */
   desired: number;
-  /**
-   * `true` for the end of a stored route, which stays where the route has
-   * it: the others make room.
-   */
-  pinned?: boolean;
+  /** How firmly it holds that place (`TAP_HOLD`). Default: `free`. */
+  hold?: number;
 }
 
-const PINNED_WEIGHT = 1e6;
+/**
+ * What each of `wishes` asks for, moved for those that ask for the very same
+ * place so that, spread about their middle, the ones that hold it most stand
+ * whole spacings from it: an even number of them would stand half a spacing
+ * either side. They are moved by the part of a spacing that is over.
+ */
+function sameSpotOnWholeSpacings(wishes: readonly TapWish[], spacing: number): number[] {
+  const asked = wishes.map((wish) => wish.desired);
+  for (let start = 0, end = 1; start < wishes.length; start = end, end += 1) {
+    while (end < wishes.length && Math.abs(asked[end]! - asked[start]!) < 1e-9) end += 1;
+    if (end - start < 2) continue;
+    const together = wishes.slice(start, end).map((wish) => wish.hold ?? TAP_HOLD.free);
+    const most = Math.max(...together);
+    // Where, among those of this place, the ones that hold it most stand on average.
+    const places = together.flatMap((hold, i) => (hold === most ? [i] : []));
+    const middle = places.reduce((sum, i) => sum + i, 0) / places.length;
+    const over = (middle - Math.floor(middle)) * spacing;
+    for (let i = start; i < end; i += 1) asked[i] = asked[i]! + over;
+  }
+  return asked;
+}
 
 /**
  * Positions for the taps of one face: as close to what each asks for as
  * `spacing` between neighbours allows, in the order given, and inside
  * `[lo, hi]` when they fit there. When they do not fit, they are centred on
  * the span and run over both ends alike (the caller sizes the bar so that
- * they fit). A pinned tap keeps its place; one that sits outside the span
- * widens it.
+ * they fit). A tap that holds its place keeps it against the span as well:
+ * the span widens to let it, and to let the ones it pushed aside stand
+ * beside it.
  *
- * The least-squares answer: taps that crowd each other are spread about the
- * middle of what they asked for, so two that ask for the same spot end up
- * half a spacing either side of it.
+ * The least-squares answer among taps that hold alike: those that crowd
+ * each other are spread about the middle of what they asked for. Among taps
+ * that do not, the ones that hold most have their places and the rest are
+ * spread from there.
+ *
+ * Several that ask for the very same place are the exception: one of them
+ * has it, and the others stand whole spacings to either side (two at `x` and
+ * `x + spacing`, not half a spacing either side of `x`). Whatever asked for
+ * that place on the other face of the bar, however many, then stands in
+ * line with them or a whole spacing away: the automatic layout runs every
+ * branch of one side of a bus through the middle of that side, so the taps
+ * of the two faces of a bar ask for one place more often than not.
  */
 export function spreadTaps(
   wishes: readonly TapWish[],
@@ -199,23 +257,33 @@ export function spreadTaps(
   if (n === 0) return [];
   // With `q[i] = position[i] - i * spacing` the spacing rule reads "q never
   // falls", which is an isotonic regression: pool neighbours that break it.
-  const blocks: { weight: number; sum: number; count: number }[] = [];
-  let pinnedLo = Infinity;
-  let pinnedHi = -Infinity;
+  // A pool sits at the mean of what its members that hold most ask for
+  // (`sum` over `weight` of them), which is where the weighted answer goes
+  // as their weight grows without bound.
+  const blocks: { hold: number; weight: number; sum: number; count: number }[] = [];
+  let heldLo = Infinity;
+  let heldHi = -Infinity;
+  const asked = sameSpotOnWholeSpacings(wishes, spacing);
   wishes.forEach((wish, i) => {
-    const z = wish.desired - i * spacing;
-    const weight = wish.pinned ? PINNED_WEIGHT : 1;
-    if (wish.pinned) {
-      pinnedLo = Math.min(pinnedLo, z);
-      pinnedHi = Math.max(pinnedHi, z);
+    const z = asked[i]! - i * spacing;
+    const hold = wish.hold ?? TAP_HOLD.free;
+    if (hold > TAP_HOLD.free) {
+      heldLo = Math.min(heldLo, z);
+      heldHi = Math.max(heldHi, z);
     }
-    blocks.push({ weight, sum: weight * z, count: 1 });
+    blocks.push({ hold, weight: 1, sum: z, count: 1 });
     while (blocks.length > 1) {
       const last = blocks[blocks.length - 1]!;
       const before = blocks[blocks.length - 2]!;
       if (before.sum / before.weight <= last.sum / last.weight) break;
-      before.weight += last.weight;
-      before.sum += last.sum;
+      if (last.hold > before.hold) {
+        before.hold = last.hold;
+        before.weight = last.weight;
+        before.sum = last.sum;
+      } else if (last.hold === before.hold) {
+        before.weight += last.weight;
+        before.sum += last.sum;
+      }
       before.count += last.count;
       blocks.pop();
     }
@@ -223,8 +291,8 @@ export function spreadTaps(
   let qLo = lo;
   let qHi = hi - (n - 1) * spacing;
   if (qHi < qLo) qLo = qHi = (qLo + qHi) / 2;
-  qLo = Math.min(qLo, pinnedLo);
-  qHi = Math.max(qHi, pinnedHi);
+  qLo = Math.min(qLo, heldLo);
+  qHi = Math.max(qHi, heldHi);
   const out: number[] = [];
   for (const block of blocks) {
     const q = Math.min(qHi, Math.max(qLo, block.sum / block.weight));
@@ -344,7 +412,7 @@ interface Bar {
   cy: number;
   /** Half the bar's length. */
   half: number;
-  /** Tips the bar reaches beyond `half` to hold a pinned tap. */
+  /** Its two tips: `half` either side of the centre, or further out to hold a tap. */
   start: number;
   end: number;
   /** Whether a connection runs into the west end, and into the east end. */
@@ -368,11 +436,13 @@ interface Request {
   side: Side;
   /** Where along the bar it comes from, which orders the taps of a face. */
   from: number;
-  /** Orders two that come from the same place. */
+  /** Orders two that come from the same place, and `tie` two that are still level. */
   rank: number;
-  /** The position it asks for; set once every bar has its length. */
-  desired: (bar: Bar) => number;
-  pinned: boolean;
+  tie: number;
+  /** The place it asks for and how firmly; read once every bar has its length. */
+  wish: (bar: Bar) => TapWish;
+  /** How firmly it holds its place (`TAP_HOLD`); set with the tap. */
+  hold: number;
   /** Where it lands; set by the allocation. */
   tap: Point;
 }
@@ -389,7 +459,20 @@ interface Terminal {
   x: number;
   /** Whether the first bend can slide along the run after it, to follow a tap that moved. */
   slides: boolean;
+  /**
+   * Orders the routes that leave a face at one place (the automatic layout
+   * runs every branch of one side of a bus through one port), so that they
+   * part without crossing: the ones that turn left, then the ones that run
+   * on, then the ones that turn right, and of two that turn the same way
+   * the one that turns nearer the bar on the outside.
+   */
+  turn: number;
+  /** Where the run after the first bend goes, which orders two that turn at one height. */
+  towards: number;
 }
+
+/** More than any route runs before its first bend. */
+const TURN_BASE = 1e7;
 
 /**
  * The first and the last place along `bar` a face can have a tap: the
@@ -452,17 +535,43 @@ function straightRoute(box: Box, tap: Point): { points: Point[]; face: Side } {
   return { points: [port(box, face), tap], face };
 }
 
+/** Whether the run from `a` to `b` passes through `box`, and not just along its edge. */
+function runsThrough(a: Point, b: Point, box: Box): boolean {
+  // The part of the run that is inside the box, as a range of the way along it.
+  let from = 0;
+  let to = 1;
+  const within = (delta: number, near: number, far: number): boolean => {
+    if (Math.abs(delta) < 1e-9) return near < 0 && far > 0;
+    from = Math.max(from, Math.min(near / delta, far / delta));
+    to = Math.min(to, Math.max(near / delta, far / delta));
+    return from < to;
+  };
+  const hw = box.hw - EPS;
+  const hh = box.hh - EPS;
+  return (
+    within(b[0] - a[0], box.cx - hw - a[0], box.cx + hw - a[0]) &&
+    within(b[1] - a[1], box.cy - hh - a[1], box.cy + hh - a[1])
+  );
+}
+
 /**
  * The connector of a device at `box` to its `tap`, which is on `side` of
  * `bar`.
  *
  * Into an end of the bar: straight, from the face that looks at it. Onto a
  * face: straight down (or up) when the device stands square over its tap.
- * Otherwise a straight line, or for an elbow one right angle: sideways out
- * of the device to over the tap and square onto the bar, or, for a device
- * past the tip of the bar with its tap too close for that, down to the
- * bar's level and along it into the tip. Where neither turn has room the
- * elbow is drawn straight too.
+ * Otherwise there are several ways, and the first that `blocked` does not
+ * refuse is taken (the first of them all when it refuses every one):
+ *
+ * - for an elbow, sideways out of the device to over the tap and square
+ *   onto the bar, where the tap is far enough aside for a run and a turn;
+ * - for an elbow, from a device past the tip of the bar whose tap is the
+ *   one at that tip (`atTip`), down to the bar's level and along it into
+ *   the tip;
+ * - the straight line from the face it crosses on its way from the middle
+ *   of the device;
+ * - the straight line from the face that looks at the bar, which is the way
+ *   out from between two neighbours.
  */
 function deviceRoute(
   box: Box,
@@ -470,6 +579,8 @@ function deviceRoute(
   side: Side,
   tap: Point,
   style: ConnectorStyle,
+  atTip: boolean,
+  blocked: (points: Point[]) => boolean,
 ): { points: Point[]; face: Side } {
   if (!isVertical(side)) {
     const face: Side = side === 'east' ? 'west' : 'east';
@@ -478,19 +589,25 @@ function deviceRoute(
   const dx = tap[0] - box.cx;
   const towardsBar: Side = side === 'north' ? 'south' : 'north';
   if (Math.abs(dx) <= EPS) return { points: [port(box, towardsBar), tap], face: towardsBar };
+  const ways: { points: Point[]; face: Side }[] = [];
   if (style === 'elbow') {
     if (Math.abs(dx) >= box.hw + ELBOW_MIN_RUN) {
       const face: Side = dx > 0 ? 'east' : 'west';
       const from = port(box, face);
-      return { points: [from, [tap[0], from[1]], tap], face };
+      ways.push({ points: [from, [tap[0], from[1]], tap], face });
     }
     const pastTip = box.cx > bar.end || box.cx < bar.start;
     const clearOfBar = Math.abs(box.cy - bar.cy) > box.hh + BAR_THICKNESS / 2;
-    if (pastTip && clearOfBar) {
-      return { points: [port(box, towardsBar), [box.cx, tap[1]], tap], face: towardsBar };
+    if (pastTip && clearOfBar && atTip) {
+      ways.push({ points: [port(box, towardsBar), [box.cx, tap[1]], tap], face: towardsBar });
     }
   }
-  return straightRoute(box, tap);
+  const straight = straightRoute(box, tap);
+  ways.push(straight);
+  if (straight.face !== towardsBar) {
+    ways.push({ points: [port(box, towardsBar), tap], face: towardsBar });
+  }
+  return ways.find((way) => !blocked(way.points)) ?? ways[0]!;
 }
 
 /**
@@ -511,11 +628,15 @@ function readTerminal(points: Point[], bar: Bar): Terminal {
   const next = points[1]!;
   const after = points[2];
   if (sameX(first, next) && !sameY(first, next)) {
+    const slides = after !== undefined && sameY(next, after);
+    const way = !slides || sameX(next, after) ? 0 : Math.sign(after[0] - next[0]);
     return {
       kind: 'face',
       side: next[1] < bar.cy ? 'north' : 'south',
       x: first[0],
-      slides: after !== undefined && sameY(next, after),
+      slides,
+      turn: way * (TURN_BASE - Math.abs(next[1] - first[1])),
+      towards: slides ? after[0] : first[0],
     };
   }
   if (sameY(first, next) && !sameX(first, next)) {
@@ -524,9 +645,18 @@ function readTerminal(points: Point[], bar: Bar): Terminal {
       side: next[0] >= bar.cx ? 'east' : 'west',
       x: first[0],
       slides: after !== undefined && sameX(next, after),
+      turn: 0,
+      towards: first[0],
     };
   }
-  return { kind: 'free', side: next[1] < bar.cy ? 'north' : 'south', x: next[0], slides: false };
+  return {
+    kind: 'free',
+    side: next[1] < bar.cy ? 'north' : 'south',
+    x: next[0],
+    slides: false,
+    turn: 0,
+    towards: next[0],
+  };
 }
 
 /** Put the first point of `points` on `tap`, and keep the first run square to the bar. */
@@ -556,6 +686,79 @@ interface Anchor {
 
 function sits(at: { x: number; y: number }, anchorPoint: Anchor): boolean {
   return Math.abs(at.x - anchorPoint.x) < 0.01 && Math.abs(at.y - anchorPoint.y) < 0.01;
+}
+
+/** Whether two taps are too close: not in one place, and less than a spacing apart. */
+function crowd(a: number, b: number): boolean {
+  const apart = Math.abs(a - b);
+  return apart > EPS && apart < TAP_SPACING - EPS;
+}
+
+/** What moving a tap costs for each unit, squared, by how firmly it holds its place (`TAP_HOLD`). */
+const MOVE_COST = [1, 1e3, 1e6, 1e9];
+
+/**
+ * Places for the taps of one face (`moving`, in order along the bar) at
+ * which none crowds a tap of the other face (`fixed`): each is in line with
+ * one of those or a spacing clear of them all. The taps keep their order
+ * and the spacing between them, stay within `[low, high]`, and move as
+ * little as that allows, the ones that hold their place least first. `null`
+ * when there are no such places.
+ */
+function clearOfFace(
+  moving: readonly Request[],
+  fixed: readonly number[],
+  low: number,
+  high: number,
+): { cost: number; taps: number[] } | null {
+  // A tap ends up where it is, in line with a tap of the other face, or a
+  // whole number of spacings from one of those: as far as a neighbour or
+  // the other face pushed it.
+  const candidates: number[] = [];
+  for (const base of [...moving.map((r) => r.tap[0]), ...fixed]) {
+    for (let k = -moving.length; k <= moving.length; k += 1) {
+      const x = base + k * TAP_SPACING;
+      if (x < low - 1e-6 || x > high + 1e-6 || fixed.some((f) => crowd(f, x))) continue;
+      candidates.push(x);
+    }
+  }
+  candidates.sort((a, b) => a - b);
+  const places = candidates.filter((x, i) => i === 0 || x - candidates[i - 1]! > 1e-6);
+  // `cost[j][c]`: the least it costs to place the taps up to the `j`th with
+  // that one at `places[c]`, and `before[j][c]` where the tap before it is
+  // then: the cheapest place a spacing or more to its left.
+  const cost: number[][] = [];
+  const before: number[][] = [];
+  moving.forEach((r, j) => {
+    const weight = MOVE_COST[r.hold] ?? 1;
+    const earlier = cost[j - 1];
+    const row: number[] = [];
+    const back: number[] = [];
+    let least = earlier === undefined ? 0 : Infinity;
+    let leastAt = -1;
+    let reached = 0;
+    places.forEach((x, c) => {
+      for (; earlier !== undefined && places[reached]! <= x - TAP_SPACING + 1e-6; reached += 1) {
+        if (earlier[reached]! < least) {
+          least = earlier[reached]!;
+          leastAt = reached;
+        }
+      }
+      row[c] = least + weight * (x - r.tap[0]) ** 2;
+      back[c] = leastAt;
+    });
+    cost.push(row);
+    before.push(back);
+  });
+  const last = cost[moving.length - 1] ?? [];
+  let at = -1;
+  last.forEach((total, c) => {
+    if (total < (at < 0 ? Infinity : last[at]!)) at = c;
+  });
+  if (at < 0) return null;
+  const taps: number[] = [];
+  for (let j = moving.length - 1, c = at; j >= 0; c = before[j]![c]!, j -= 1) taps[j] = places[c]!;
+  return { cost: last[at]!, taps };
 }
 
 /**
@@ -612,26 +815,31 @@ export function layoutConnections(
     bar: Bar,
     side: Side,
     from: number,
-    desired: (bar: Bar) => number,
-    extra: { rank?: number; pinned?: boolean } = {},
+    wish: (bar: Bar) => TapWish,
+    order: { rank?: number; tie?: number } = {},
   ): Request => {
     const made: Request = {
       bar,
       side,
       from,
-      rank: extra.rank ?? 0,
-      desired,
-      pinned: extra.pinned ?? false,
+      rank: order.rank ?? 0,
+      tie: order.tie ?? 0,
+      wish,
+      hold: TAP_HOLD.free,
       tap: [bar.cx, bar.cy],
     };
     requests.push(made);
     return made;
   };
+  /** An end of the bar is one place: there is nothing to ask for. */
+  const theEnd = (): TapWish => ({ desired: 0 });
 
   // ---- branches with a stored route ----
   interface Routed {
     edge: ConnectionEdge;
     points: Point[];
+    /** One run, straight from a face of one bar to a face of the other. */
+    straight: boolean;
     source: { terminal: Terminal; request: Request };
     target: { terminal: Terminal; request: Request };
   }
@@ -640,23 +848,23 @@ export function layoutConnections(
   const claimedEnds = new Set<string>();
   const stubs: { edge: ConnectionEdge; box: Box; bar: Bar }[] = [];
 
-  const routeEnd = (points: Point[], bar: Bar): { terminal: Terminal; request: Request } => {
-    const terminal = readTerminal(points, bar);
+  // The end of a stored route stays where the route has it, and the others
+  // make room; one drawn at an angle lands under where it heads.
+  const routeEnd = (bar: Bar, terminal: Terminal, straight: boolean): Request => {
     if (terminal.kind === 'end') {
       claimedEnds.add(`${bar.id}|${terminal.side}`);
-      return { terminal, request: ask(bar, terminal.side, terminal.x, () => 0) };
+      return ask(bar, terminal.side, terminal.x, theEnd);
     }
-    const pinned = terminal.kind === 'face';
-    return {
-      terminal,
-      request: ask(
-        bar,
-        terminal.side,
-        terminal.x,
-        pinned ? () => terminal.x : (b) => clamp(terminal.x, lo(b), hi(b)),
-        { pinned },
-      ),
-    };
+    if (terminal.kind === 'free') {
+      return ask(bar, terminal.side, terminal.x, (b) => ({
+        desired: clamp(terminal.x, lo(b), hi(b)),
+      }));
+    }
+    const hold = straight ? TAP_HOLD.straight : TAP_HOLD.route;
+    return ask(bar, terminal.side, terminal.x, () => ({ desired: terminal.x, hold }), {
+      rank: terminal.turn,
+      tie: terminal.towards,
+    });
   };
 
   for (const edge of edges) {
@@ -681,11 +889,19 @@ export function layoutConnections(
       continue;
     }
     // Each end is read with the route turned to start at its bus.
-    const sourceEnd = routeEnd(stored, source);
+    const sourceTerminal = readTerminal(stored, source);
     stored.reverse();
-    const targetEnd = routeEnd(stored, target);
+    const targetTerminal = readTerminal(stored, target);
     stored.reverse();
-    routed.push({ edge, points: stored, source: sourceEnd, target: targetEnd });
+    const straight =
+      stored.length === 2 && sourceTerminal.kind === 'face' && targetTerminal.kind === 'face';
+    routed.push({
+      edge,
+      points: stored,
+      straight,
+      source: { terminal: sourceTerminal, request: routeEnd(source, sourceTerminal, straight) },
+      target: { terminal: targetTerminal, request: routeEnd(target, targetTerminal, straight) },
+    });
   }
 
   // ---- branches routed from where their buses sit ----
@@ -707,12 +923,12 @@ export function layoutConnections(
       isVertical(assigned.sourceSide) &&
       isVertical(assigned.targetSide) &&
       assigned.sourceSide !== assigned.targetSide;
-    const wish = (own: Bar, other: Bar) => (): number => {
+    const wish = (own: Bar, other: Bar) => (): TapWish => {
       // Read when the bars have their final lengths.
       const low = Math.max(lo(own), lo(other));
       const high = Math.min(hi(own), hi(other));
-      if (facing && low <= high) return (low + high) / 2;
-      return clamp(other.cx, lo(own), hi(own));
+      if (facing && low <= high) return { desired: (low + high) / 2 };
+      return { desired: clamp(other.cx, lo(own), hi(own)) };
     };
     stepped.push({
       edge,
@@ -736,7 +952,12 @@ export function layoutConnections(
         bar,
         box.cy <= bar.cy ? 'north' : 'south',
         box.cx,
-        (b) => clamp(box.cx, lo(b), hi(b)),
+        // Over the bar, or with its box over a tip of it, it drops square
+        // onto the bar; further out it lands on the tip.
+        (b) =>
+          Math.abs(box.cx - b.cx) <= b.half + box.hw
+            ? { desired: box.cx, hold: TAP_HOLD.square }
+            : { desired: clamp(box.cx, lo(b), hi(b)) },
         // Of two devices beyond the same tip, the nearer takes the outer tap.
         { rank: left ? off : -off },
       ),
@@ -766,7 +987,7 @@ export function layoutConnections(
         return;
       }
       const side: Side = key.endsWith('|east') ? 'east' : 'west';
-      connectors.push({ edge, box, request: ask(bar, side, box.cx, () => 0) });
+      connectors.push({ edge, box, request: ask(bar, side, box.cx, theEnd) });
     });
   }
 
@@ -785,9 +1006,10 @@ export function layoutConnections(
   }
   for (const list of byFace.values()) {
     const bar = list[0]!.bar;
-    // Room for the taps of this face, and for the ends a connection runs into.
-    const ends = (bar.westTaken ? 1 : 0) + (bar.eastTaken ? 1 : 0);
-    bar.half = Math.max(bar.half, (barLengthFor(list.length) + ends * TAP_SPACING) / 2);
+    // Room for the taps of this face. Where an end is taken as well they do
+    // not all fit between the two, run over both alike, and the bar is
+    // brought out to them below.
+    bar.half = Math.max(bar.half, barLengthFor(list.length) / 2);
   }
   for (const bar of bars.values()) {
     bar.start = bar.cx - bar.half;
@@ -795,39 +1017,61 @@ export function layoutConnections(
   }
   for (const list of byFace.values()) {
     const bar = list[0]!.bar;
-    // Stable: two that tie on both keys keep the order they were asked in.
-    list.sort((a, b) => a.from - b.from || a.rank - b.rank);
-    const positions = spreadTaps(
-      list.map((r) => ({ desired: r.desired(bar), pinned: r.pinned })),
-      lo(bar),
-      hi(bar),
-    );
+    // Stable: two that tie on every key keep the order they were asked in.
+    list.sort((a, b) => a.from - b.from || a.rank - b.rank || a.tie - b.tie);
+    const wishes = list.map((r) => r.wish(bar));
+    const positions = spreadTaps(wishes, lo(bar), hi(bar));
     list.forEach((r, i) => {
+      r.hold = wishes[i]!.hold ?? TAP_HOLD.free;
       r.tap = [positions[i]!, bar.cy];
-      // A tap that had to stay outside the bar takes the bar with it.
-      bar.start = Math.min(bar.start, r.tap[0] - TAP_INSET);
-      bar.end = Math.max(bar.end, r.tap[0] + TAP_INSET);
     });
   }
-  for (const r of requests) {
-    if (isVertical(r.side)) continue;
-    r.tap = [r.side === 'east' ? r.bar.end - TAP_INSET : r.bar.start + TAP_INSET, r.bar.cy];
+
+  // ---- the two faces of a bar ----
+  // A tap of one face that stands less than a spacing from a tap of the
+  // other, and not on it, would have its dot run into that one's. The taps
+  // of one of the two faces are then moved, each in line with a tap of the
+  // other face or a spacing clear of them all: the face that it costs less
+  // to move, and of two that cost the same the one with fewer taps.
+  for (const bar of bars.values()) {
+    const north = byFace.get(`${bar.id}|north`);
+    const south = byFace.get(`${bar.id}|south`);
+    if (!north || !south) continue;
+    if (!north.some((n) => south.some((s) => crowd(n.tap[0], s.tap[0])))) continue;
+    const at = (list: readonly Request[]): number[] => list.map((r) => r.tap[0]);
+    const low = Math.min(lo(bar), ...at(north), ...at(south));
+    const high = Math.max(hi(bar), ...at(north), ...at(south));
+    const options = [
+      { face: south, placed: clearOfFace(south, at(north), low, high) },
+      { face: north, placed: clearOfFace(north, at(south), low, high) },
+    ].filter((option) => option.placed !== null);
+    options.sort((a, b) => a.placed!.cost - b.placed!.cost || a.face.length - b.face.length);
+    const chosen = options[0];
+    if (!chosen) continue;
+    chosen.face.forEach((r, i) => {
+      r.tap = [chosen.placed!.taps[i]!, bar.cy];
+    });
   }
 
   // ---- straighten ----
   // A branch that would run straight down from one bar to the other, were
   // its two taps in line, has them brought in line where one of them is
   // free to move: within its bar, a spacing clear of the other taps of its
-  // face, and without changing places with any of them. The tap on the
-  // face with fewer taps is the one that moves.
+  // face, without changing places with any of them, and not to where it
+  // would crowd a tap of the other face. The tap on the face with fewer
+  // taps is the one that moves.
   const faceOf = (r: Request): Request[] => byFace.get(`${r.bar.id}|${r.side}`) ?? [];
+  const acrossFrom = (r: Request): Request[] =>
+    byFace.get(`${r.bar.id}|${r.side === 'north' ? 'south' : 'north'}`) ?? [];
   const canMoveTo = (r: Request, x: number): boolean => {
     if (x < lo(r.bar) - EPS || x > hi(r.bar) + EPS) return false;
     const [from, to] = [Math.min(r.tap[0], x), Math.max(r.tap[0], x)];
-    return faceOf(r).every(
-      (q) =>
-        q === r ||
-        (Math.abs(q.tap[0] - x) >= TAP_SPACING - EPS && (q.tap[0] < from || q.tap[0] > to)),
+    return (
+      faceOf(r).every(
+        (q) =>
+          q === r ||
+          (Math.abs(q.tap[0] - x) >= TAP_SPACING - EPS && (q.tap[0] < from || q.tap[0] > to)),
+      ) && acrossFrom(r).every((q) => !crowd(q.tap[0], x))
     );
   };
   const straighten = (a: Request, b: Request): void => {
@@ -838,10 +1082,21 @@ export function layoutConnections(
     else if (canMoveTo(other, freer.tap[0])) other.tap = [freer.tap[0], other.tap[1]];
   };
   for (const { source, target } of stepped) straighten(source, target);
-  for (const { points, source, target } of routed) {
-    const straightDown =
-      points.length === 2 && source.terminal.kind === 'face' && target.terminal.kind === 'face';
-    if (straightDown) straighten(source.request, target.request);
+  for (const { straight, source, target } of routed) {
+    if (straight) straighten(source.request, target.request);
+  }
+
+  // ---- the tips ----
+  for (const { bar, side, tap } of requests) {
+    if (!isVertical(side)) continue;
+    // A tap that had to stay outside the bar takes the bar with it, and
+    // keeps a spacing from an end that a connection runs into.
+    bar.start = Math.min(bar.start, tap[0] - TAP_INSET - (bar.westTaken ? TAP_SPACING : 0));
+    bar.end = Math.max(bar.end, tap[0] + TAP_INSET + (bar.eastTaken ? TAP_SPACING : 0));
+  }
+  for (const r of requests) {
+    if (isVertical(r.side)) continue;
+    r.tap = [r.side === 'east' ? r.bar.end - TAP_INSET : r.bar.start + TAP_INSET, r.bar.cy];
   }
 
   // ---- routes ----
@@ -923,8 +1178,62 @@ export function layoutConnections(
     }
     routes.set(edge.id, { points, sourceSide: source.side, targetSide: target.side });
   }
+  // What a device connector keeps out of: every device and controller badge
+  // but its own. They are kept in the order of their middles, so that a
+  // connector is held against the ones along its way and not against every
+  // box of the diagram.
+  const inTheWay = [...boxes.values()].sort((a, b) => a.cx - b.cx);
+  const widest = inTheWay.reduce((most, box) => Math.max(most, box.hw), 0);
+  const blockedFor =
+    (own: Box) =>
+    (points: Point[]): boolean => {
+      const xs = points.map((p) => p[0]);
+      const ys = points.map((p) => p[1]);
+      const [left, right] = [Math.min(...xs), Math.max(...xs)];
+      const [top, bottom] = [Math.min(...ys), Math.max(...ys)];
+      // The first box that reaches as far right as where the connector starts.
+      let first = 0;
+      for (let last = inTheWay.length; first < last; ) {
+        const middle = (first + last) >> 1;
+        if (inTheWay[middle]!.cx < left - widest) first = middle + 1;
+        else last = middle;
+      }
+      for (let i = first; i < inTheWay.length && inTheWay[i]!.cx <= right + widest; i += 1) {
+        const box = inTheWay[i]!;
+        const apart =
+          box === own ||
+          box.cx + box.hw <= left ||
+          box.cx - box.hw >= right ||
+          box.cy + box.hh <= top ||
+          box.cy - box.hh >= bottom;
+        if (apart) continue;
+        if (points.some((p, k) => k > 0 && runsThrough(points[k - 1]!, p, box))) return true;
+      }
+      return false;
+    };
+  // The outermost taps of each bar: a connector may run along the line of
+  // the bar into a tip only to the tap that is first there.
+  const outermost = new Map<Bar, { first: number; last: number }>();
+  for (const r of requests) {
+    const held = outermost.get(r.bar);
+    if (held === undefined) outermost.set(r.bar, { first: r.tap[0], last: r.tap[0] });
+    else {
+      held.first = Math.min(held.first, r.tap[0]);
+      held.last = Math.max(held.last, r.tap[0]);
+    }
+  }
   for (const { edge, box, request: asked } of connectors) {
-    const { points, face } = deviceRoute(box, asked.bar, asked.side, asked.tap, style);
+    const { first, last } = outermost.get(asked.bar)!;
+    const atTip = box.cx < asked.bar.cx ? asked.tap[0] <= first + EPS : asked.tap[0] >= last - EPS;
+    const { points, face } = deviceRoute(
+      box,
+      asked.bar,
+      asked.side,
+      asked.tap,
+      style,
+      atTip,
+      blockedFor(box),
+    );
     routes.set(edge.id, { points, sourceSide: face, targetSide: asked.side });
   }
 

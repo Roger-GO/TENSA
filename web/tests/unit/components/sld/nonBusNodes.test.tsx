@@ -19,7 +19,7 @@ import {
   DEVICE_VALUE_LABEL,
   NODE_FOOTPRINT,
 } from '@/components/sld/graph';
-import { layoutConnections } from '@/components/sld/connections';
+import { TAP_SPACING, layoutConnections } from '@/components/sld/connections';
 import type { TopologySummary, TopologyEntry } from '@/api/types';
 
 function bus(idx: number | string, name = `b${idx}`): TopologyEntry {
@@ -612,6 +612,30 @@ describe('freeColumn', () => {
     const x = freeColumn(66, 19, taken, lo, hi, middle);
     expect(x).toBe(66 + 19 + 19 + DEVICE_COLUMN_GAP);
   });
+
+  it('stands in line with a tap of the other face, or a tap spacing clear of it', () => {
+    // A tap under the bar at 72, 7 from the place it prefers: in line with
+    // it (72) and a spacing past it (86) are as near, and 72 is nearer the
+    // middle of the bar.
+    expect(freeColumn(79, 19, [], lo, hi, middle, [72])).toBe(72);
+    // In line is taken by a branch on its own face: a spacing clear, then.
+    expect(freeColumn(79, 19, [{ x: 58, half: 0 }], lo, hi, middle, [72])).toBe(72 + TAP_SPACING);
+    // A tap that is a spacing away already leaves it where it prefers.
+    expect(freeColumn(79, 19, [], lo, hi, middle, [79 - TAP_SPACING])).toBe(79);
+    expect(freeColumn(79, 19, [], lo, hi, middle, [79])).toBe(79);
+  });
+
+  it('does not look at the other face for a place past a tip, where the connector lands on the tip', () => {
+    // The bar is full, and the nearest free place is past its tip (112). A
+    // tap of the other face 7 from there does not move it...
+    const taken = [
+      { x: 20, half: 19 },
+      { x: 66, half: 19 },
+    ];
+    expect(freeColumn(66, 19, taken, lo, 96, middle, [105])).toBe(112);
+    // ...as it does on a bar long enough for that place to be over it.
+    expect(freeColumn(66, 19, taken, lo, 120, middle, [105])).toBe(105 + TAP_SPACING);
+  });
 });
 
 describe('buildGraph: where a device the layout does not place is put', () => {
@@ -687,6 +711,115 @@ describe('buildGraph: where a device the layout does not place is put', () => {
     // The box does not sit on the line: its near edge is a gap away from it.
     const half = wide.initialWidth! / 2;
     expect(Math.abs(middleOf(wide) - 46)).toBeCloseTo(half + DEVICE_COLUMN_GAP);
+  });
+
+  it('stands a device in line with what lands on the other face of its bar, or a spacing clear of it', () => {
+    // Bus 2 is between bus 1, straight above it, and bus 3, below and 52 to
+    // the right. The line from above lands on its north face at 46, the line
+    // down leaves its south face at 72, the middle of what the two bars
+    // share. The generator goes above the bar and the load below it.
+    const topology = makeTopology({
+      buses: [bus(1), bus(2), bus(3)],
+      lines: [trafo('L12', 1, 2), trafo('L23', 2, 3)],
+      generators: [{ ...gen('G', 2), name: 'G' }],
+      loads: [{ ...load('L', 2), name: 'L' }],
+    });
+    const { nodes, edges } = buildGraph(topology, {
+      '1': { x: 0, y: 0 },
+      '2': { x: 0, y: 200 },
+      '3': { x: 52, y: 400 },
+    });
+    // The generator would stand over 79, 7 from the line under the bar; in
+    // line with that it would be too close to the line that lands beside it.
+    expect(middleOf(nodes.find((n) => n.id === 'generator-G')!)).toBe(72 + TAP_SPACING);
+    // The load keeps clear of the line on its own face, and a spacing from
+    // the line above the bar.
+    expect(middleOf(nodes.find((n) => n.id === 'load-L')!)).toBe(46 - TAP_SPACING);
+    const { bars, routes } = layoutConnections(nodes, edges);
+    expect(bars.get('2')!.taps).toEqual([
+      { x: 32, side: 'south' },
+      { x: 46, side: 'north' },
+      { x: 72, side: 'south' },
+      { x: 86, side: 'north' },
+    ]);
+    for (const id of ['stub-generator-G', 'stub-load-L']) {
+      const points = routes.get(id)!.points;
+      expect(points[0]![0], id).toBe(points[1]![0]);
+    }
+  });
+
+  it('connects a row of devices that is wider than the bar without running through any of them', () => {
+    // Two generators and two loads, all above bus 1 because its line goes
+    // down: more than stand over a bar of the default length.
+    const topology = makeTopology({
+      buses: [bus(1), bus(2)],
+      lines: [trafo('L', 1, 2)],
+      generators: [
+        { ...gen('G0', 1), name: 'G0' },
+        { ...gen('G1', 1), name: 'G1' },
+      ],
+      loads: [
+        { ...load('PQ_0', 1), name: 'PQ_0' },
+        { ...load('PQ_1', 1), name: 'PQ_1' },
+      ],
+    });
+    const { nodes, edges } = buildGraph(topology, { '1': { x: 0, y: 0 }, '2': { x: 0, y: 200 } });
+    const devices = nodes.filter((n) => n.type !== 'bus');
+    expect(devices.map((n) => n.position.y)).toEqual([-70, -70, -70, -70]);
+    /** Whether the run from `a` to `b` passes through the inside of the box of `n`. */
+    const passesThrough = (a: number[], b: number[], n: (typeof nodes)[number]): boolean => {
+      for (let i = 0; i <= 100; i += 1) {
+        const x = a[0]! + (i / 100) * (b[0]! - a[0]!);
+        const y = a[1]! + (i / 100) * (b[1]! - a[1]!);
+        const inX = x > n.position.x + 1 && x < n.position.x + n.initialWidth! - 1;
+        if (inX && y > n.position.y + 1 && y < n.position.y + n.initialHeight! - 1) return true;
+      }
+      return false;
+    };
+    for (const connectorStyle of ['straight', 'elbow'] as const) {
+      const { routes, bars } = layoutConnections(nodes, edges, { connectorStyle });
+      for (const device of devices) {
+        const points = routes.get(`stub-${device.id}`)!.points;
+        for (const other of devices) {
+          if (other === device) continue;
+          const through = points.some((p, i) => i > 0 && passesThrough(points[i - 1]!, p, other));
+          expect(through, `${connectorStyle}: ${device.id} through ${other.id}`).toBe(false);
+        }
+        // Each lands on a tap of the bar, which reaches under them all.
+        const tap = points[points.length - 1]!;
+        expect(tap[1]).toBe(3);
+        expect(tap[0]).toBeGreaterThanOrEqual(bars.get('1')!.start + 3);
+        expect(tap[0]).toBeLessThanOrEqual(bars.get('1')!.end - 3);
+      }
+      // The three with their box over the bar or over a tip of it drop square.
+      for (const id of ['generator-G0', 'generator-G1', 'load-PQ_0']) {
+        const points = routes.get(`stub-${id}`)!.points;
+        expect(points, `${connectorStyle}: ${id}`).toHaveLength(2);
+        expect(points[0]![0], `${connectorStyle}: ${id}`).toBe(points[1]![0]);
+      }
+      // The fourth stands clear of the tip: a diagonal, or down and into the tip.
+      expect(routes.get('stub-load-PQ_1')!.points).toHaveLength(connectorStyle === 'elbow' ? 3 : 2);
+    }
+  });
+
+  it('leaves two devices of different widths that stand a gap apart where they are', () => {
+    // A narrow one and a wide one side by side over the bar, 8 apart. Their
+    // boxes do not touch, so nothing is pushed out of the way; measured
+    // corner to corner as if that were middle to middle, they would seem to.
+    const topology = makeTopology({
+      buses: [bus(1)],
+      generators: [
+        { ...gen('A', 1), name: 'A' },
+        { ...gen('B', 1), name: 'a wide one' },
+      ],
+    });
+    const coords = { '1': { x: 0, y: 100 } };
+    const placed = buildGraph(topology, coords, { applyPushOut: false }).nodes;
+    const [narrow, wide] = placed.filter((n) => n.type === 'generator');
+    expect(narrow!.initialWidth).toBeLessThan(wide!.initialWidth!);
+    expect(wide!.position.x - (narrow!.position.x + narrow!.initialWidth!)).toBe(DEVICE_COLUMN_GAP);
+    const pushed = buildGraph(topology, coords).nodes;
+    expect(pushed.map((n) => n.position)).toEqual(placed.map((n) => n.position));
   });
 
   it('takes a device a drag has placed as standing where it was dropped', () => {

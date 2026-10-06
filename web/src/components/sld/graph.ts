@@ -12,7 +12,14 @@ import { DYNAMIC_GENERATOR_KINDS, generatorRowKey } from '@/lib/topology';
 import { entryBaseKv, unratedBusIdx } from '@/lib/units';
 import { busVoltageLimits } from './voltage';
 import type { CoordsByIdx } from './sidecar';
-import { BAR_LENGTH, BAR_THICKNESS, TAP_INSET, faceSpan, layoutConnections } from './connections';
+import {
+  BAR_LENGTH,
+  BAR_THICKNESS,
+  TAP_INSET,
+  TAP_SPACING,
+  faceSpan,
+  layoutConnections,
+} from './connections';
 import {
   DEVICE_PORT,
   TARGET_HANDLE,
@@ -570,6 +577,11 @@ export interface Column {
  * the bar (`[lo, hi]`) is one the connector drops square onto the bar from,
  * so each pixel past a tip counts as several of distance, and of two places
  * that come out equal the one closer to `middle` is taken.
+ *
+ * `across` is where the other face of the bar has its taps. A connector
+ * that drops onto the bar lands in line with one of them, on the same dot,
+ * or a tap spacing clear of them all, so that no two dots run into each
+ * other.
  */
 export function freeColumn(
   preferred: number,
@@ -578,11 +590,21 @@ export function freeColumn(
   lo: number,
   hi: number,
   middle: number,
+  across: readonly number[] = [],
 ): number {
   const reach = (c: Column): number => c.half + half + DEVICE_COLUMN_GAP;
-  const fits = (x: number): boolean => taken.every((c) => Math.abs(x - c.x) >= reach(c) - 1e-6);
+  const crowds = (x: number, tap: number): boolean =>
+    Math.abs(x - tap) > 1e-6 && Math.abs(x - tap) < TAP_SPACING - 1e-6;
+  const fits = (x: number): boolean =>
+    taken.every((c) => Math.abs(x - c.x) >= reach(c) - 1e-6) &&
+    // Past a tip the connector lands on the tip, wherever the device stands.
+    (x < lo || x > hi || !across.some((tap) => crowds(x, tap)));
   // Beside each thing in the way is the nearest free place on that side of it.
-  const candidates = [preferred, ...taken.flatMap((c) => [c.x - reach(c), c.x + reach(c)])];
+  const candidates = [
+    preferred,
+    ...taken.flatMap((c) => [c.x - reach(c), c.x + reach(c)]),
+    ...across.flatMap((tap) => [tap - TAP_SPACING, tap, tap + TAP_SPACING]),
+  ];
   const cost = (x: number): number =>
     Math.abs(x - preferred) + PAST_TIP_COST * Math.max(0, lo - x, x - hi);
   let best = preferred;
@@ -977,8 +999,12 @@ export function buildGraph(
     // Two buses one above the other put their devices in different columns.
     const rowParity = Math.round(parentCoord.y / 100) % 2 === 0 ? 1 : -1;
     const taken = columnsOf(parentIdx, face, parentCoord.x);
+    // What lands on the other face: a branch, or a device that stands there.
+    const across = columnsOf(parentIdx, face === 'north' ? 'south' : 'north', parentCoord.x)
+      .map((c) => c.x)
+      .filter((x) => x >= lo && x <= hi);
     const preferred = Math.min(hi, Math.max(lo, middle + rowParity * DEVICE_COLUMN_OFFSET));
-    const x = freeColumn(preferred, size.width / 2, taken, lo, hi, middle);
+    const x = freeColumn(preferred, size.width / 2, taken, lo, hi, middle, across);
     taken.push({ x, half: size.width / 2 });
     device.face = face;
     device.position = {
