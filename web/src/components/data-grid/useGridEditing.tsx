@@ -22,7 +22,9 @@
  *
  * Writes go one after another, since the server holds one request per session,
  * and each ends once the topology has been read again, so a cell shows the value
- * that was written and not the one before it.
+ * that was written and not the one before it. A value typed into a cell is then
+ * confirmed with a toast that says Undo takes it back (``announceEdit``), as one
+ * changed with the Inspector's pencil is.
  */
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -38,6 +40,7 @@ import {
 import type { ParamValue } from '@/api/types';
 import { Button } from '@/components/ui/button';
 import { EditModeToggle } from '@/components/inspector/EditModeToggle';
+import { announceEdit } from '@/lib/announceEdit';
 import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
@@ -264,6 +267,16 @@ export function useGridEditing<Row>(target: GridEditTarget<Row>): GridEditing<Ro
     [sessionId, route, state, dynamic, settle, modelOf, idxOf, editElement, cloneEdit, queryClient],
   );
 
+  // Named by the column that was typed into, which for a machine's H is not the
+  // param the request carried (``settle`` sends M).
+  const confirmTyped = useCallback(
+    (edit: CellEdit<Row>) =>
+      announceEdit(modelOf(edit.row), idxOf(edit.row), [
+        edit.column.edit?.param ?? edit.column.key,
+      ]),
+    [modelOf, idxOf],
+  );
+
   const dismissError = useCallback(() => setError(null), []);
 
   let hint: string | undefined;
@@ -294,5 +307,15 @@ export function useGridEditing<Row>(target: GridEditTarget<Row>): GridEditing<Ro
       </>
     ) : undefined;
 
-  return { canEdit, commit, pending, error, dismissError, lockedReason, hint, barExtra };
+  return {
+    canEdit,
+    commit,
+    confirmTyped,
+    pending,
+    error,
+    dismissError,
+    lockedReason,
+    hint,
+    barExtra,
+  };
 }

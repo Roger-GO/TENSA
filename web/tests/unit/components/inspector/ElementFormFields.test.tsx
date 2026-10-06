@@ -20,15 +20,31 @@ import { lineFlow } from '../../helpers/lineFlow';
 
 const putSpy = vi.fn();
 
+const toastMock = vi.hoisted(() => ({
+  success: vi.fn(),
+  info: vi.fn(),
+  warning: vi.fn(),
+  error: vi.fn(),
+  dismiss: vi.fn(),
+}));
+vi.mock('@/lib/toast', () => ({ toast: toastMock }));
+
 vi.mock('@/api/client', async () => {
   const actual = await vi.importActual<typeof import('@/api/client')>('@/api/client');
   return {
     ...actual,
     andesClient: {
-      get: vi.fn(),
+      // The one read these tests let through: what a controller's copy differs in.
+      get: vi.fn(() => Promise.resolve({ params: {} })),
       post: vi.fn(),
-      put: (path: string, opts: { body?: { params?: Record<string, unknown> } }) => {
+      put: (
+        path: string,
+        opts: { body?: { params?: Record<string, unknown>; value?: unknown } },
+      ) => {
         putSpy(path, opts.body);
+        if (path.includes('/case/clone/')) {
+          return Promise.resolve({ new_value: opts.body?.value, undo_depth: 1, redo_depth: 0 });
+        }
         return Promise.resolve({
           idx: 1,
           name: 'BUS1',
@@ -112,6 +128,7 @@ describe('<ElementFormFields />', () => {
   beforeEach(() => {
     putSpy.mockClear();
     reloadMutate.mockClear();
+    toastMock.success.mockClear();
     mockTopology = topology();
     useSessionStore.setState({ sessionId: parseSessionId('test-session-id') });
     useCaseStore.setState({
@@ -128,7 +145,14 @@ describe('<ElementFormFields />', () => {
     cleanup();
     mockTopology = null;
     useSessionStore.setState({ sessionId: null });
-    useCaseStore.setState({ selection: null, selectedElement: null, editMode: 'run' });
+    useCaseStore.setState({
+      selection: null,
+      selectedElement: null,
+      editMode: 'run',
+      cloneInitialized: false,
+      cloneUndoDepth: 0,
+      cloneRedoDepth: 0,
+    });
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
     useUnitsStore.setState({ mode: 'pu' });
   });
@@ -201,6 +225,34 @@ describe('<ElementFormFields />', () => {
     const banner = screen.getByTestId('inspector-reset-banner');
     expect(banner).toHaveTextContent('Turn on Edit mode to change controller parameters');
     expect(banner).toHaveTextContent('reset the run to edit other values');
+  });
+
+  it('confirms a controller value changed in Edit mode with a toast that names it', async () => {
+    const user = userEvent.setup();
+    mockTopology = {
+      ...topology('committed'),
+      controllers: [{ idx: 'EXST1_1', name: 'EXST1 1', kind: 'EXST1', params: { Ka: 200 } }],
+    };
+    useCaseStore.setState({
+      editMode: 'edit',
+      selectedElement: {
+        kind: 'controller',
+        idx: 'EXST1_1',
+        subKind: 'exciter',
+        modelClass: 'EXST1',
+      },
+    });
+    render(withQueryClient(<ElementFormFields />));
+    const input = screen.getByTestId('clone-edit-input-Ka');
+    await user.clear(input);
+    await user.type(input, '150{Enter}');
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
+    expect(putSpy.mock.calls[0]?.[0]).toContain('/case/clone/params/EXST1/EXST1_1/Ka');
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalledTimes(1));
+    expect(toastMock.success).toHaveBeenCalledWith(
+      'Changed Ka of EXST1 EXST1_1',
+      expect.objectContaining({ description: 'Undo in the Edit menu takes it back.' }),
+    );
   });
 
   describe('a solved bus', () => {

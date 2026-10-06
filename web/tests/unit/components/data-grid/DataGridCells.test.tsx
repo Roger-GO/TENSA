@@ -437,6 +437,36 @@ describe('<DataGrid /> cell editor', () => {
     expect(edits[0]?.value).toBeCloseTo(1.05, 10);
   });
 
+  it('has the editing confirm a typed value once it is written', async () => {
+    const user = userEvent.setup();
+    const confirmTyped = vi.fn();
+    const { editing, commit } = makeEditing({ confirmTyped });
+    let written: (result: { applied: number; failed: boolean }) => void = () => {};
+    commit.mockReturnValueOnce(new Promise((resolve) => (written = resolve)));
+    renderGrid({ editing });
+    await user.dblClick(cell('b', 'q'));
+    await user.keyboard('0.75{Enter}');
+    expect(commit).toHaveBeenCalledTimes(1);
+    // Not while the write is on its way.
+    expect(confirmTyped).not.toHaveBeenCalled();
+    written({ applied: 1, failed: false });
+    await vi.waitFor(() => expect(confirmTyped).toHaveBeenCalledTimes(1));
+    expect(confirmTyped.mock.calls[0]?.[0]).toBe((commit.mock.calls[0]?.[0] as CellEdit<Row>[])[0]);
+  });
+
+  it('confirms nothing for a typed value the write refused', async () => {
+    const user = userEvent.setup();
+    const confirmTyped = vi.fn();
+    const { editing, commit } = makeEditing({ confirmTyped });
+    commit.mockResolvedValueOnce({ applied: 0, failed: true });
+    renderGrid({ editing });
+    await user.dblClick(cell('b', 'q'));
+    await user.keyboard('0.75{Enter}');
+    await vi.waitFor(() => expect(commit).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(confirmTyped).not.toHaveBeenCalled();
+  });
+
   it('opens on F2 for the cell under the cursor', async () => {
     const user = userEvent.setup();
     const { editing } = makeEditing();
@@ -600,6 +630,17 @@ describe('<DataGrid /> paste', () => {
       'b.q=40',
     ]);
     await vi.waitFor(() => expect(toastMock.success).toHaveBeenCalledWith('Pasted 4 values.'));
+  });
+
+  it('announces a pasted value itself, with its count, and not as a typed one', async () => {
+    const user = userEvent.setup();
+    const confirmTyped = vi.fn();
+    const { editing } = makeEditing({ confirmTyped });
+    renderGrid({ editing });
+    await user.click(cell('a', 'p'));
+    paste('10');
+    await vi.waitFor(() => expect(toastMock.success).toHaveBeenCalledWith('Pasted 1 value.'));
+    expect(confirmTyped).not.toHaveBeenCalled();
   });
 
   it('follows the order on screen, not the order of the rows', async () => {

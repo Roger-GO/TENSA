@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { describeStep } from '@/lib/editSteps';
+import { describeChanged, describeStep } from '@/lib/editSteps';
 import type { EditStep } from '@/api/types';
 
 const step = (over: Partial<EditStep> & Pick<EditStep, 'op'>): EditStep => ({
@@ -39,5 +39,17 @@ describe('describeStep', () => {
 
   it('falls back to the model for an element without an idx', () => {
     expect(describeStep(step({ op: 'add', idx: null }))).toBe('add Bus');
+  });
+});
+
+describe('describeChanged', () => {
+  it('names the values and the element, as the edit step does after "change"', () => {
+    expect(describeChanged({ model: 'Line', idx: 'Line_1', params: ['r'] })).toBe(
+      'r of Line Line_1',
+    );
+    expect(describeChanged({ model: 'Bus', idx: 3, params: ['r', 'x', 'b', 'g'] })).toBe(
+      'r, x, b and 1 more of Bus 3',
+    );
+    expect(describeChanged({ model: 'Bus', idx: 3 })).toBe('Bus 3');
   });
 });

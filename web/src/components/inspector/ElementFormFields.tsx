@@ -25,6 +25,7 @@ import {
 import type { CloneDiffPair, ParamValue, TopologyEntry, TopologyParamMeta } from '@/api/types';
 import type { SelectedElement } from '@/store/case';
 import { findTopologyEntry } from '@/lib/topology';
+import { announceEdit } from '@/lib/announceEdit';
 import { cn } from '@/lib/cn';
 import { entryBaseKv, formatDisplayed, unratedBusIdx, voltageDisplay } from '@/lib/units';
 import { assessVoltage, busVoltageLimits, voltageStatusText } from '@/components/sld/voltage';
@@ -92,7 +93,8 @@ interface CloneEditFieldProps {
 /**
  * One clone-editable controller param (Unit 22). Commits via ``useCloneEdit``
  * on blur / Enter; shows a spinner while the write + reload + setup round-trip
- * is in flight; on success the value updates from the substrate's ``new_value``;
+ * is in flight; on success the value updates from the substrate's ``new_value``
+ * and a toast confirms it (``announceEdit``);
  * on failure the local edit reverts and an inline ``ProblemDetailsErrorSurface``
  * banner renders below the input. While a TDS run streams the input is disabled
  * with a tooltip.
@@ -139,6 +141,7 @@ function CloneEditField({ model, idx, param, value, streamingLock, diff }: Clone
           const applied = resp.new_value ?? next;
           setCommitted(applied);
           setDraft(String(applied));
+          announceEdit(model, idx, [param]);
         },
         onError: (err) => {
           // Revert the draft to the last committed value + surface the banner.

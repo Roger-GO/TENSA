@@ -1,7 +1,7 @@
 /**
  * Editable tables e2e: change the values of a case in its tables.
  *
- *   rate a line in the Lines table -> run PF -> the loading is judged against it
+ *   rate a line in the Lines table (a toast confirms it) -> run PF -> the loading is judged against it
  *   a run locks the table -> Reset run in its bar opens it again, edits discarded
  *   change a machine's inertia as H in the Machines table -> the case holds M = 2H
  *   filter a table
@@ -77,6 +77,12 @@ test('rate a line in its table, run PF, and the loading is judged against the ra
   // reads what the server holds.
   await expect(rating).toHaveText('10');
   await expect(rating).not.toHaveAttribute('data-pending', 'true');
+  // A toast confirms the change, and says how to take it back.
+  const confirmation = page
+    .locator('[data-sonner-toast]')
+    .filter({ hasText: 'Changed rate_a of Line Line_1' });
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation).toContainText('Undo in the Edit menu takes it back');
 
   await page.getByTestId('run-pflow-button').click();
   await expect(

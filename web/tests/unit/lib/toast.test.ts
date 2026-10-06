@@ -80,6 +80,11 @@ describe('toast.success', () => {
       action: { label: 'Undo', onClick },
     });
   });
+
+  it('forwards an id of the caller, which is what dismiss takes', () => {
+    toast.success('Changed r of Line 1', { id: 'value-changed-1' });
+    expect(successMock).toHaveBeenCalledWith('Changed r of Line 1', { id: 'value-changed-1' });
+  });
 });
 
 describe('toast.error', () => {

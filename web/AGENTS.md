@@ -47,6 +47,8 @@ toast.error('Snapshot save failed: disk full', {
 
 `<Toaster />` is mounted once at AppShell root. The lib (`sonner`) is lazy — DOM only renders after first toast fires.
 
+A value the user changes (the Inspector's pencil, a cell of a table, a controller field in Edit mode) is confirmed through `announceEdit` in `src/lib/announceEdit.ts`, which names the change as Undo does and points at Undo. It dismisses the toast of the change before it, so an action the user repeats quickly leaves one toast and not a pile; do the same for any other such action, with a toast of its own each time (a toast that is leaving takes with it whatever is written into it).
+
 The toasts come up in the top right corner, below the top bar, and are drawn above a dialog and under an open top bar menu (`src/components/ui/layers.ts` holds the numbers and the reason). A toast under the pointer does not time out, so a surface that opens into that corner and has to stay in reach goes above the toasts the way `TopBarMenu` does.
 
 ## Keyboard shortcuts (Unit 6)

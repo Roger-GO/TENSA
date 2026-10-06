@@ -17,6 +17,17 @@ import { parseSessionId } from '@/api/types';
 import type { TopologyParamMeta } from '@/api/types';
 
 const putSpy = vi.fn();
+/** What the next writes are refused with; `null` lets them through. */
+let putError: Error | null = null;
+
+const toastMock = vi.hoisted(() => ({
+  success: vi.fn(),
+  info: vi.fn(),
+  warning: vi.fn(),
+  error: vi.fn(),
+  dismiss: vi.fn(),
+}));
+vi.mock('@/lib/toast', () => ({ toast: toastMock }));
 
 vi.mock('@/api/client', async () => {
   const actual = await vi.importActual<typeof import('@/api/client')>('@/api/client');
@@ -27,6 +38,7 @@ vi.mock('@/api/client', async () => {
       post: vi.fn(),
       put: (path: string, opts: { body?: unknown }) => {
         putSpy(path, opts.body);
+        if (putError !== null) return Promise.reject(putError);
         return Promise.resolve({
           idx: '1',
           name: 'BUS1',
@@ -55,6 +67,8 @@ const VnMeta: TopologyParamMeta = {
 describe('EditElementButton', () => {
   beforeEach(() => {
     putSpy.mockClear();
+    putError = null;
+    vi.clearAllMocks();
     useSessionStore.setState({ sessionId: parseSessionId('test-session-id') });
   });
 
@@ -103,6 +117,37 @@ describe('EditElementButton', () => {
     expect(path).toContain('/sessions/test-session-id/elements/Bus/1');
     expect(body).toEqual({ params: { Vn: 110 } });
     expect(onUpdated).toHaveBeenCalledWith(110);
+  });
+
+  it('confirms a saved value with a toast that names it and says how to take it back', async () => {
+    const user = userEvent.setup();
+    render(
+      withQueryClient(<EditElementButton model="Bus" idx="1" meta={VnMeta} value={100} enabled />),
+    );
+    await user.click(screen.getByLabelText('Edit Vn'));
+    expect(toastMock.success).not.toHaveBeenCalled();
+    const input = screen.getByTestId('edit-input-Vn').querySelector('input');
+    await user.clear(input!);
+    await user.type(input!, '110{Enter}');
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalledTimes(1));
+    expect(toastMock.success).toHaveBeenCalledWith(
+      'Changed Vn of Bus 1',
+      expect.objectContaining({ description: 'Undo in the Edit menu takes it back.' }),
+    );
+  });
+
+  it('confirms nothing for a value the server refused, and says why beside it', async () => {
+    const user = userEvent.setup();
+    putError = new Error('Vn must be positive');
+    render(
+      withQueryClient(<EditElementButton model="Bus" idx="1" meta={VnMeta} value={100} enabled />),
+    );
+    await user.click(screen.getByLabelText('Edit Vn'));
+    const input = screen.getByTestId('edit-input-Vn').querySelector('input');
+    await user.clear(input!);
+    await user.type(input!, '-5{Enter}');
+    expect(await screen.findByTestId('edit-error-Vn')).toHaveTextContent('Vn must be positive');
+    expect(toastMock.success).not.toHaveBeenCalled();
   });
 
   it('rejects non-numeric input on a number field with inline error', async () => {

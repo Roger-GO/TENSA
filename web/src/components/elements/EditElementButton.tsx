@@ -3,6 +3,7 @@ import { useEditElement } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { ProblemDetailsError } from '@/api/client';
 import type { ParamValue, TopologyParamMeta } from '@/api/types';
+import { announceEdit } from '@/lib/announceEdit';
 import { cn } from '@/lib/cn';
 
 /**
@@ -15,6 +16,9 @@ import { cn } from '@/lib/cn';
  * - editing — input replaces the value; Enter saves, Esc cancels.
  * - saving — input locks, spinner adjacent to it; mutation in flight.
  * - error — inline message above the input; user can retry or cancel.
+ *
+ * A saved value is confirmed with a toast that says Undo takes it back
+ * (`announceEdit`).
  *
  * The `onUpdated` callback fires after a successful save with the
  * server-confirmed value, letting the parent re-render with the fresh
@@ -104,6 +108,7 @@ export function EditElementButton({
             onUpdated?.(updated);
             setDraft(String(updated));
           }
+          announceEdit(model, idx, [meta.name]);
         },
         onError: (err) => {
           if (err instanceof ProblemDetailsError) {

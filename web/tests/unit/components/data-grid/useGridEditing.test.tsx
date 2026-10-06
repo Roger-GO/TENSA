@@ -232,6 +232,30 @@ describe('useGridEditing: writing before a run', () => {
     expect(puts()).toEqual([['/sessions/s1/elements/Bus/1', { params: { vmin: 0.9 } }]]);
   });
 
+  it('confirms a typed value with a toast that names it by its column and says how to take it back', () => {
+    mount();
+    const shown: ColumnConfig<Row> = {
+      key: 'v_limit_low',
+      label: 'vmin (pu)',
+      accessor: () => null,
+      edit: { param: 'vmin' },
+    };
+    latest.confirmTyped?.({ rowId: '1', row: BUS1, column: shown, value: 0.9 });
+    expect(toastMock.success).toHaveBeenCalledTimes(1);
+    expect(toastMock.success).toHaveBeenCalledWith(
+      'Changed vmin of Bus 1',
+      expect.objectContaining({ description: 'Undo in the Edit menu takes it back.' }),
+    );
+  });
+
+  it('says nothing of its own for a write, which a paste goes through too', async () => {
+    mount();
+    await act(async () => {
+      await latest.commit([edit(BUS1, 'vmin', 0.9), edit(BUS2, 'vmin', 0.91)]);
+    });
+    expect(toastMock.success).not.toHaveBeenCalled();
+  });
+
   it('keeps the cells pending until the topology has been read again, so they show what was written', async () => {
     let releaseRead: () => void = () => undefined;
     client.get.mockImplementation(

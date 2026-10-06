@@ -163,6 +163,11 @@ export interface GridEditing<Row = unknown> {
   canEdit: (row: Row, column: ColumnConfig<Row>) => boolean;
   /** Writes the values, in order, and resolves once they are in or one is refused. */
   commit: (edits: ReadonlyArray<CellEdit<Row>>) => Promise<CommitResult>;
+  /**
+   * Says that a value typed into a cell is in, once it is. A paste the grid
+   * announces itself, with its counts.
+   */
+  confirmTyped?: (edit: CellEdit<Row>) => void;
   /** The cells being written, as ``cellKey(rowId, columnKey)``. */
   pending: ReadonlySet<string>;
   /** Why the last write was refused, until it is dismissed. */
@@ -677,7 +682,10 @@ export function DataGrid<Row>({
         return;
       }
       const value = col.edit?.toParam ? col.edit.toParam(shown, row) : shown;
-      void editing.commit([{ rowId: ed.rowId, row, column: col, value }]);
+      const typed: CellEdit<Row> = { rowId: ed.rowId, row, column: col, value };
+      void editing.commit([typed]).then((result) => {
+        if (!result.failed) editing.confirmTyped?.(typed);
+      });
     }
     setLocalError(null);
     setEditor(null);

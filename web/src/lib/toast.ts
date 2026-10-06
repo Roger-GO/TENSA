@@ -50,8 +50,13 @@ import { toast as sonnerToast } from 'sonner';
  * - `action`: a single button rendered to the right of the message.
  *   The label is the visible text; `onClick` fires when the user
  *   activates it. Sonner auto-dismisses on action click.
+ * - `id`: a name of the caller's own for the toast, which is what
+ *   `toast.dismiss` takes. Without one sonner numbers the toast, and
+ *   the string a call returns for that number does not dismiss it.
  */
 export interface ToastOpts {
+  /** The id the toast goes by, for `toast.dismiss`. */
+  id?: string;
   /** Auto-dismiss after this many ms. Defaults to sonner's 4000ms. */
   duration?: number;
   /** Secondary text rendered below the message. */
@@ -76,6 +81,7 @@ function toIdString(id: number | string): string {
 function mapOpts(opts: ToastOpts | undefined): Record<string, unknown> {
   if (opts === undefined) return {};
   const out: Record<string, unknown> = {};
+  if (opts.id !== undefined) out.id = opts.id;
   if (opts.duration !== undefined) out.duration = opts.duration;
   if (opts.description !== undefined) out.description = opts.description;
   if (opts.action !== undefined) {
@@ -105,7 +111,10 @@ export const toast = {
   info(message: string, opts?: ToastOpts): string {
     return toIdString(sonnerToast.info(message, mapOpts(opts)));
   },
-  /** Programmatic dismiss; rarely needed since toasts auto-dismiss. */
+  /**
+   * Programmatic dismiss; rarely needed since toasts auto-dismiss. Takes the
+   * `id` a toast was sent with.
+   */
   dismiss(id?: string): void {
     sonnerToast.dismiss(id);
   },
