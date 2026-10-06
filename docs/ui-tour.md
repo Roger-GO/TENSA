@@ -60,6 +60,8 @@ After a power flow the diagram carries the results. Each bus shows its voltage a
 
 Zoom with the buttons at the bottom left or the mouse wheel. The minimap at the bottom right shows where you are, and **Search** (`Ctrl+/`) jumps to a bus or an element by name. **Recompute connectivity** counts the electrical islands of the system after a run.
 
+A diagram opens fitted whole to its pane, so in a short window, or under a tall bottom drawer, it can be too small to read. The line above the diagram then says so and gives the zoom, and the button beside it, **Zoom to 100%**, brings the diagram to full size. With a bus or a device selected the button is named for it (**Zoom to PQ_1**) and goes there. Picking a bus or a device in a table of the bottom drawer, or in **Search**, also shows it at full size when the diagram is that small; otherwise the zoom stays as you set it. The connector of a selected generator, load or shunt is drawn heavier and in blue, and so is the connector of one you are dragging, so you can tell it from its neighbours and watch where it lands on the bar.
+
 ## Inspector
 
 Click an element on the diagram, or a row of a table, and the inspector shows its properties, the plots of its variables from the last run, and the disturbances that act on it. Before a run, a pencil beside a value changes it, and the bin in the header deletes the element. The mode button in the header, which reads **Run** or **Edit**, switches Edit mode on and off. In Edit mode the parameters of the case's controllers can be changed. Those changes are made on a copy of the case, so nothing touches the loaded system until you commit them with **Save parameter edits as case**.
