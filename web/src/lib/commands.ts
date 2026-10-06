@@ -458,7 +458,9 @@ function useCommandSets(): CommandSets {
       // ---- edit ----------------------------------------------------------
       // Undo and Redo (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z) act on whichever history
       // holds the newest change: the elements added, changed or deleted before
-      // a run, else the controller parameters changed in Edit mode.
+      // a run, else the controller parameters changed in Edit mode. Redo is on
+      // Ctrl+Y as well, the key Windows gives it. Cmd+Y is left to the browser,
+      // which opens its history with it.
       {
         id: 'edit.undo',
         label:
@@ -519,7 +521,7 @@ function useCommandSets(): CommandSets {
         },
         when: () =>
           sessionId !== null && !undoRedoPending && (elementRedo !== null || parameterRedo),
-        shortcut: 'ctrl+shift+z, meta+shift+z',
+        shortcut: 'ctrl+shift+z, meta+shift+z, ctrl+y',
       },
       {
         id: 'edit.reload',

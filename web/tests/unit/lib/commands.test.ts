@@ -191,7 +191,7 @@ describe('useCommandRegistry: one Undo and one Redo', () => {
     expect(undo?.label).toBe('Undo: delete Line Line_3 and 2 more');
     expect(redo?.label).toBe('Redo: add Bus 15');
     expect(undo?.shortcut).toBe('ctrl+z, meta+z');
-    expect(redo?.shortcut).toBe('ctrl+shift+z, meta+shift+z');
+    expect(redo?.shortcut).toBe('ctrl+shift+z, meta+shift+z, ctrl+y');
     expect(undo?.description).toMatch(/added, changed or deleted/);
     // There is no second pair of commands for the parameter edits any more.
     expect(byId(result.current, 'clone.undo')).toBeUndefined();

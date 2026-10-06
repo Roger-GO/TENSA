@@ -33,14 +33,19 @@ import { useAnalyzeStore } from '@/store/analyze';
 import { useThemeStore } from '@/store/theme';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
-import type { TopologySummary, PflowResult } from '@/api/types';
+import type { EditStep, TopologySummary, PflowResult } from '@/api/types';
 
+// Undo and Redo send a request each; stand-ins show which key sent which.
 let MOCK_TOPOLOGY: TopologySummary | null = null;
+const undoMutate = vi.hoisted(() => vi.fn());
+const redoMutate = vi.hoisted(() => vi.fn());
 vi.mock('@/api/queries', async () => {
   const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
   return {
     ...actual,
     useCurrentTopology: () => MOCK_TOPOLOGY,
+    useUndoLastEdit: () => ({ mutateAsync: undoMutate, isPending: false }),
+    useRedoEdit: () => ({ mutateAsync: redoMutate, isPending: false }),
   };
 });
 
@@ -83,6 +88,10 @@ function pressKey(key: string, code: string, target: EventTarget = document): vo
 
 beforeEach(() => {
   MOCK_TOPOLOGY = emptyTopology();
+  for (const mutate of [undoMutate, redoMutate]) {
+    mutate.mockReset();
+    mutate.mockResolvedValue(emptyTopology());
+  }
   useShortcutCheatsheetStore.setState({ open: false });
   useCommandPaletteStore.setState({ open: false });
   useHistoryStore.getState().reset();
@@ -380,6 +389,85 @@ describe('<GlobalShortcuts /> — v3 Unit 2 view toggles', () => {
         input.dispatchEvent(event);
       });
       expect(useLayoutStore.getState().leftSidebarCollapsed).toBe(false);
+    } finally {
+      input.remove();
+    }
+  });
+});
+
+describe('<GlobalShortcuts /> — Undo and Redo', () => {
+  const DELETE: EditStep = { op: 'delete', model: 'Line', idx: 'Line_4', params: [], also: 0 };
+
+  function press(
+    key: string,
+    code: string,
+    mods: KeyboardEventInit,
+    target: EventTarget = document,
+  ): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', {
+      key,
+      code,
+      bubbles: true,
+      cancelable: true,
+      ...mods,
+    });
+    act(() => {
+      target.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  it('Ctrl+Z and Cmd+Z take the last change back', () => {
+    MOCK_TOPOLOGY = { ...emptyTopology(), undo: DELETE };
+    render(withProviders(<GlobalShortcuts />));
+    press('z', 'KeyZ', { ctrlKey: true });
+    press('z', 'KeyZ', { metaKey: true });
+    expect(undoMutate).toHaveBeenCalledTimes(2);
+    expect(redoMutate).not.toHaveBeenCalled();
+  });
+
+  it('Ctrl+Shift+Z, Cmd+Shift+Z and Ctrl+Y each put it back', () => {
+    MOCK_TOPOLOGY = { ...emptyTopology(), redo: DELETE };
+    render(withProviders(<GlobalShortcuts />));
+    press('Z', 'KeyZ', { ctrlKey: true, shiftKey: true });
+    expect(redoMutate).toHaveBeenCalledTimes(1);
+    press('Z', 'KeyZ', { metaKey: true, shiftKey: true });
+    expect(redoMutate).toHaveBeenCalledTimes(2);
+    // The Redo key of Windows, which a press out of habit reaches for.
+    const event = press('y', 'KeyY', { ctrlKey: true });
+    expect(redoMutate).toHaveBeenCalledTimes(3);
+    expect(redoMutate).toHaveBeenLastCalledWith('test-session');
+    expect(event.defaultPrevented).toBe(true);
+    expect(undoMutate).not.toHaveBeenCalled();
+  });
+
+  it('leaves Cmd+Y to the browser, which opens its history with it', () => {
+    MOCK_TOPOLOGY = { ...emptyTopology(), redo: DELETE };
+    render(withProviders(<GlobalShortcuts />));
+    const event = press('y', 'KeyY', { metaKey: true });
+    expect(redoMutate).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('leaves Ctrl+Y alone while there is nothing to put back', () => {
+    MOCK_TOPOLOGY = { ...emptyTopology(), undo: DELETE };
+    render(withProviders(<GlobalShortcuts />));
+    const event = press('y', 'KeyY', { ctrlKey: true });
+    expect(redoMutate).not.toHaveBeenCalled();
+    expect(undoMutate).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('leaves Ctrl+Y to a text field, where it redoes the typing', () => {
+    MOCK_TOPOLOGY = { ...emptyTopology(), redo: DELETE };
+    render(withProviders(<GlobalShortcuts />));
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+    try {
+      const event = press('y', 'KeyY', { ctrlKey: true }, input);
+      expect(redoMutate).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
     } finally {
       input.remove();
     }

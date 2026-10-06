@@ -3,7 +3,7 @@
  * them back.
  *
  *   delete a line the case file brought -> Undo brings it back -> Redo deletes it again
- *   delete a bus with what is on it, as one change -> Ctrl+Z brings it all back
+ *   delete a bus with what is on it, as one change -> Ctrl+Z brings it all back -> Ctrl+Y deletes it again
  *   delete the line the case itself trips -> the dialog warns, and the trip goes too
  *
  * It drives the real UI against a real `tensa serve` (nothing is mocked), so it is
@@ -104,7 +104,7 @@ test('delete a line of the case file, take it back with Undo, and put it back wi
   expect(uncaughtErrors).toEqual([]);
 });
 
-test('delete a bus with what is on it as one change, and Ctrl+Z brings it all back', async ({
+test('delete a bus with what is on it as one change, Ctrl+Z brings it all back, and Ctrl+Y deletes it again', async ({
   page,
 }) => {
   await openCase(page, 'ieee14_full.xlsx', 14);
@@ -147,6 +147,14 @@ test('delete a bus with what is on it as one change, and Ctrl+Z brings it all ba
   await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(14);
   await page.getByTestId('bottom-drawer-tab-lines').click();
   await expect(line).toHaveCount(1);
+
+  // And one Redo, on the key Windows has for it, takes the five out again.
+  await page.keyboard.press('Control+y');
+  await expect(toast(page, 'Redone: delete Bus 14 and 4 more')).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(13);
+  await expect(line).toHaveCount(0);
 });
 
 test('deleting the line the case trips warns about the trip and takes it too', async ({ page }) => {
