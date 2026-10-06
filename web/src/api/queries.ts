@@ -27,6 +27,7 @@ import {
 } from '@tanstack/react-query';
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import { andesClient, NetworkError, ProblemDetailsError, TIMEOUTS } from './client';
+import { retryWhileBusy } from './replayJournal';
 import { parseSessionId, parseRunId } from './types';
 import type {
   AbortResponse,
@@ -3013,6 +3014,12 @@ export interface CloneEditVars {
 }
 
 /**
+ * How long a clone edit waits before each new attempt while the session is
+ * busy: about a second in all, which outlasts a read and not a run.
+ */
+export const CLONE_EDIT_BUSY_RETRY_DELAYS_MS: readonly number[] = [150, 300, 600];
+
+/**
  * ``PUT /sessions/{id}/case/clone/params/{model}/{idx}/{param}`` — commit one
  * whitelisted controller-param edit to the clone (write + reload + setup). On
  * success the response carries the post-setup ``new_value`` plus the undo/redo
@@ -3025,9 +3032,15 @@ export function useCloneEdit(): UseMutationResult<CloneEditResponse, Error, Clon
   return useMutation({
     mutationFn: async ({ sessionId, model, idx, param, value }: CloneEditVars) => {
       const body: CloneEditRequest = { value };
-      return await andesClient.put<CloneEditResponse>(
-        `/sessions/${encodeURIComponent(sessionId)}/case/clone/params/${encodeURIComponent(model)}/${encodeURIComponent(idx)}/${encodeURIComponent(param)}`,
-        { body, timeoutMs: TIMEOUTS.caseLoad },
+      // Selecting a controller reads its diff, which holds the session for a
+      // moment: an edit committed within it is sent again, not refused.
+      return await retryWhileBusy(
+        () =>
+          andesClient.put<CloneEditResponse>(
+            `/sessions/${encodeURIComponent(sessionId)}/case/clone/params/${encodeURIComponent(model)}/${encodeURIComponent(idx)}/${encodeURIComponent(param)}`,
+            { body, timeoutMs: TIMEOUTS.caseLoad },
+          ),
+        CLONE_EDIT_BUSY_RETRY_DELAYS_MS,
       );
     },
     onMutate: ({ model, idx, param }) => ({

@@ -17,6 +17,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
+from tensa.api._run_as_job import busy_with_another
 from tensa.api.error_mapping import map_worker_error
 from tensa.api.schemas import (
     AbortResponse,
@@ -182,14 +183,19 @@ async def run_tds(
         # SweepInProgressError→503, TimeoutError→500) still render unchanged.
         # NOT BaseException — CancelledError/KeyboardInterrupt/SystemExit are
         # lifecycle signals, left to propagate untouched.
+        # A session that is busy is busy with another request, not with this
+        # run, whose own job is the newest in flight (``busy_with_another``).
+        failure = busy_with_another(exc, mgr, session_id, run_id)
         if registry is not None:
             survivor_id = registry.mark_failed(
                 run_id,
                 problem=_job_error_problem(
-                    "tds-batch", ("WorkerInternalError", str(exc))
+                    "tds-batch", ("WorkerInternalError", str(failure))
                 ),
             )
             _broadcast_job(mgr, session_id, survivor_id)
+        if failure is not exc:
+            raise failure from exc
         raise
 
     if registry is not None:

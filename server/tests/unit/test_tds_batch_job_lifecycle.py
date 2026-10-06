@@ -20,6 +20,7 @@ Run via ``asyncio.run`` so they need no pytest-asyncio.
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Any
 
 import pytest
@@ -102,3 +103,62 @@ def test_tds_batch_record_reconciles_to_failed_on_escaping_exception(
         f"tds-batch left {record.status!r} after {type(exc).__name__}"
     )
     assert record.problem is not None
+
+
+def test_a_batch_run_refused_for_a_busy_session_is_not_told_it_is_in_its_own_way() -> None:
+    """With the real gate: the session's lock is held by something that is no
+    job (a read), and the run's own job is the only one in flight. The refusal
+    named that job, the one it was refusing."""
+    mgr = _make_manager_with_session()
+    sess = mgr._sessions["s1"]
+    held, release = threading.Event(), threading.Event()
+
+    def _hold() -> None:
+        with sess.lock:
+            held.set()
+            release.wait(timeout=10.0)
+
+    holder = threading.Thread(target=_hold, daemon=True)
+    holder.start()
+    assert held.wait(timeout=5.0)
+    try:
+        with pytest.raises(SessionBusyError) as refused:
+            _run_tds_call(mgr)
+    finally:
+        release.set()
+        holder.join(timeout=5.0)
+
+    assert refused.value.current_job is None
+    assert str(refused.value) == "session is busy with an in-flight operation"
+    record = _only_record(mgr)
+    assert record.status == "failed"
+    assert record.problem is not None
+    assert record.id not in record.problem["detail"]
+
+
+def test_a_batch_run_refused_for_a_busy_session_names_the_job_that_holds_it() -> None:
+    mgr = _make_manager_with_session()
+    registry = mgr.session_job_registry("s1")
+    pflow = registry.register_job(kind="pflow", can_cancel=False)
+    registry.mark_running(pflow)
+    sess = mgr._sessions["s1"]
+    held, release = threading.Event(), threading.Event()
+
+    def _hold() -> None:
+        with sess.lock:
+            held.set()
+            release.wait(timeout=10.0)
+
+    holder = threading.Thread(target=_hold, daemon=True)
+    holder.start()
+    assert held.wait(timeout=5.0)
+    try:
+        with pytest.raises(SessionBusyError) as refused:
+            _run_tds_call(mgr)
+    finally:
+        release.set()
+        holder.join(timeout=5.0)
+
+    assert refused.value.current_job is not None
+    assert refused.value.current_job.id == pflow
+    assert f"in-flight pflow operation (job {pflow})" in str(refused.value)

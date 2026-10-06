@@ -39,12 +39,12 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from tensa.api.error_mapping import WORKER_ERROR_HTTP_MAP
-from tensa.core.errors import WorkerDiedError
+from tensa.core.errors import SessionBusyError, WorkerDiedError
 from tensa.core.jobs import _stamp
 from tensa.core.session import WORKER_DIED_CATEGORY, WorkerError
 
 if TYPE_CHECKING:
-    from tensa.core.jobs import JobKind, _JobRegistry
+    from tensa.core.jobs import JobKind, JobStatus, _JobRegistry
     from tensa.core.session import SessionManager
 
 # Wire category stamped onto the synthesized ProblemDetails when a NON-WorkerError
@@ -96,6 +96,36 @@ def _internal_error_problem(kind: JobKind, exc: Exception) -> dict[str, Any]:
         "detail": str(exc),
         "recovery": None,
     }
+
+
+def busy_with_another(
+    exc: Exception, mgr: SessionManager, session_id: str, own_job_id: str
+) -> Exception:
+    """``exc``, or the same refusal naming the job that does hold the session.
+
+    A route registers its job, and marks it running, before it asks for the
+    session. When the session turns out to be held, the session's gate names
+    the newest job in flight as the one in the way, and that is the job of the
+    request it is refusing: "busy with an in-flight clone-edit operation (job
+    <the refused request's own id>)", with a recovery that waits for a job that
+    has already failed. The refusal is rebuilt here around the newest job in
+    flight that is not the caller's, or around none when what holds the session
+    is a read, which registers no job.
+    """
+    if not isinstance(exc, SessionBusyError):
+        return exc
+    if exc.current_job is None or exc.current_job.id != own_job_id:
+        return exc
+    try:
+        registry = mgr.session_job_registry(session_id)
+    except Exception:  # noqa: BLE001 - the session went away; say no more than is known
+        return SessionBusyError()
+    statuses: tuple[JobStatus, ...] = ("running", "pending")
+    for status in statuses:
+        others = [job for job in registry.list_jobs(status=status) if job.id != own_job_id]
+        if others:
+            return SessionBusyError(current_job=max(others, key=lambda job: job.updated_at))
+    return SessionBusyError()
 
 
 @contextlib.asynccontextmanager
@@ -167,7 +197,9 @@ async def _run_as_job(
         # record (deleting THIS job_id); broadcast the SURVIVOR it returns so
         # the terminal transition still reaches WS subscribers instead of being
         # dropped (a re-read of the deleted id would yield None).
-        problem = _internal_error_problem(kind, exc)
+        # A session that is busy is busy with another request, not with this one.
+        failure = busy_with_another(exc, mgr, session_id, job_id)
+        problem = _internal_error_problem(kind, failure)
         # Snapshot the (still-``running``) record BEFORE mark_failed coalesces it
         # away, so we can synthesize a terminal envelope for THIS id if it gets
         # deleted. Without this, a client that saw ``job_id`` go ``running`` over
@@ -183,6 +215,8 @@ async def _run_as_job(
             pre.ended_at = pre.updated_at = _stamp()
             mgr.broadcast_job_event(session_id, pre)
         _broadcast(mgr, session_id, registry, survivor_id)
+        if failure is not exc:
+            raise failure from exc
         raise
     else:
         registry.mark_done(job_id, result_ref=result_ref)
