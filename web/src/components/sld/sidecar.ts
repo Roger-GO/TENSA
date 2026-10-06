@@ -95,6 +95,10 @@ const BRANCH_BUCKETS: ReadonlySet<string> = new Set(['line', 'transformer']);
 /** The most points one branch route holds; the server refuses a longer one. */
 export const MAX_BEND_POINTS = 256;
 
+/** The most settings `figure` holds, and the longest text one can be; the server's limits. */
+export const MAX_FIGURE_SETTINGS = 64;
+export const MAX_FIGURE_TEXT = 256;
+
 const SIDES: ReadonlySet<string> = new Set(['north', 'east', 'south', 'west']);
 
 /**
@@ -204,10 +208,21 @@ function routeAt(value: unknown, path: string): LayoutBranchRoute {
 }
 
 function figureAt(value: unknown, path: string): FullSidecarLayout['figure'] {
-  return mapAt(value, path, (setting, settingPath) => {
-    if (typeof setting === 'boolean' || typeof setting === 'string') return setting;
+  const figure = mapAt(value, path, (setting, settingPath) => {
+    if (typeof setting === 'boolean') return setting;
+    if (typeof setting === 'string') {
+      // Counted in characters, as the server counts them, not in UTF-16 units.
+      if ([...setting].length > MAX_FIGURE_TEXT) {
+        throw new TypeError(`${settingPath}: at most ${MAX_FIGURE_TEXT} characters`);
+      }
+      return setting;
+    }
     return finiteAt(setting, settingPath);
   });
+  if (Object.keys(figure).length > MAX_FIGURE_SETTINGS) {
+    throw new TypeError(`${path}: at most ${MAX_FIGURE_SETTINGS} settings`);
+  }
+  return figure;
 }
 
 /** The leading number of a schema version; 1 for anything unreadable. */

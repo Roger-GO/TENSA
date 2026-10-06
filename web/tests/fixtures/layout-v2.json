@@ -1,0 +1,320 @@
+{
+  "about": "A version 2 layout with something in every section, and what of it goes beside a copy whose idx values will change (a PSS/E .raw file). The server tests and the web tests both read this file, so the two copies of the schema and of the cut cannot drift apart unnoticed.",
+  "document": {
+    "schema_version": "2",
+    "andes_version": "2.0.0",
+    "coordinates": {
+      "1": {
+        "x": 0,
+        "y": 0
+      },
+      "2": {
+        "x": 120.5,
+        "y": 40.25
+      },
+      "7": {
+        "x": 310,
+        "y": -80
+      }
+    },
+    "non_bus_coordinates": {
+      "GENROU": {
+        "1": {
+          "x": 0,
+          "y": -70,
+          "bus": "1"
+        }
+      },
+      "generator": {
+        "1": {
+          "x": 0,
+          "y": -70,
+          "bus": "1"
+        }
+      },
+      "PQ": {
+        "PQ_0": {
+          "x": 310,
+          "y": -10,
+          "bus": "7"
+        },
+        "PQ_9": {
+          "x": 99,
+          "y": 99,
+          "bus": null
+        }
+      },
+      "load": {
+        "PQ_0": {
+          "x": 310,
+          "y": -10,
+          "bus": "7"
+        },
+        "PQ_9": {
+          "x": 99,
+          "y": 99,
+          "bus": null
+        }
+      },
+      "shunt": {
+        "Shunt_1": {
+          "x": 180.5,
+          "y": 110,
+          "bus": null
+        }
+      }
+    },
+    "controller_coordinates": {
+      "EXST1": {
+        "1": {
+          "x": 64,
+          "y": -88
+        }
+      },
+      "TGOV1": {
+        "1": {
+          "x": 64,
+          "y": -52
+        }
+      }
+    },
+    "units": {
+      "1": {
+        "expanded": true
+      }
+    },
+    "busbars": {
+      "2": {
+        "length": 180,
+        "orientation": "vertical"
+      },
+      "7": {
+        "length": null,
+        "orientation": "horizontal"
+      }
+    },
+    "branches": {
+      "line": {
+        "Line_1": {
+          "routing": "polyline",
+          "bend_points": [
+            {
+              "x": 30,
+              "y": 6
+            },
+            {
+              "x": 30,
+              "y": 40.25
+            },
+            {
+              "x": 150.5,
+              "y": 40.25
+            }
+          ],
+          "bus1": "1",
+          "bus2": "2",
+          "source_face": "south",
+          "target_face": "north"
+        },
+        "Line_2": {
+          "routing": "polyline",
+          "bend_points": [
+            {
+              "x": 150.5,
+              "y": 46.25
+            },
+            {
+              "x": 310,
+              "y": 46.25
+            },
+            {
+              "x": 310,
+              "y": -74
+            }
+          ],
+          "bus1": null,
+          "bus2": null,
+          "source_face": null,
+          "target_face": null
+        },
+        "Line_3": {
+          "routing": "auto",
+          "bend_points": [],
+          "bus1": "2",
+          "bus2": "7",
+          "source_face": "east",
+          "target_face": null
+        }
+      },
+      "transformer": {
+        "T1": {
+          "routing": "polyline",
+          "bend_points": [
+            {
+              "x": 0,
+              "y": 6
+            },
+            {
+              "x": 120.5,
+              "y": 34.25
+            }
+          ],
+          "bus1": "1",
+          "bus2": null,
+          "source_face": null,
+          "target_face": null
+        }
+      }
+    },
+    "label_offsets": {
+      "bus": {
+        "1": {
+          "dx": 4,
+          "dy": -12
+        }
+      },
+      "load": {
+        "PQ_0": {
+          "dx": 1.5,
+          "dy": 1
+        }
+      },
+      "line": {
+        "Line_1": {
+          "dx": -6,
+          "dy": 8
+        }
+      }
+    },
+    "connections": {
+      "generator": {
+        "1": {
+          "device_face": "south",
+          "bus_face": "north"
+        }
+      },
+      "load": {
+        "PQ_0": {
+          "device_face": null,
+          "bus_face": "south"
+        }
+      }
+    },
+    "figure": {
+      "monochrome": true,
+      "line_width": 1.5,
+      "font": "serif",
+      "dpi": 300
+    },
+    "last_modified": "2026-10-06T08:00:00+00:00"
+  },
+  "renumbered_copy": {
+    "schema_version": "2",
+    "andes_version": "2.0.0",
+    "coordinates": {
+      "1": {
+        "x": 0,
+        "y": 0
+      },
+      "2": {
+        "x": 120.5,
+        "y": 40.25
+      },
+      "7": {
+        "x": 310,
+        "y": -80
+      }
+    },
+    "non_bus_coordinates": {
+      "GENROU": {
+        "1": {
+          "x": 0,
+          "y": -70,
+          "bus": "1"
+        }
+      },
+      "generator": {
+        "1": {
+          "x": 0,
+          "y": -70,
+          "bus": "1"
+        }
+      },
+      "PQ": {
+        "PQ_0": {
+          "x": 310,
+          "y": -10,
+          "bus": "7"
+        }
+      },
+      "load": {
+        "PQ_0": {
+          "x": 310,
+          "y": -10,
+          "bus": "7"
+        }
+      }
+    },
+    "controller_coordinates": {},
+    "units": {},
+    "busbars": {
+      "2": {
+        "length": 180,
+        "orientation": "vertical"
+      },
+      "7": {
+        "length": null,
+        "orientation": "horizontal"
+      }
+    },
+    "branches": {
+      "line": {
+        "Line_1": {
+          "routing": "polyline",
+          "bend_points": [
+            {
+              "x": 30,
+              "y": 6
+            },
+            {
+              "x": 30,
+              "y": 40.25
+            },
+            {
+              "x": 150.5,
+              "y": 40.25
+            }
+          ],
+          "bus1": "1",
+          "bus2": "2",
+          "source_face": "south",
+          "target_face": "north"
+        },
+        "Line_3": {
+          "routing": "auto",
+          "bend_points": [],
+          "bus1": "2",
+          "bus2": "7",
+          "source_face": "east",
+          "target_face": null
+        }
+      }
+    },
+    "label_offsets": {
+      "bus": {
+        "1": {
+          "dx": 4,
+          "dy": -12
+        }
+      }
+    },
+    "connections": {},
+    "figure": {
+      "monochrome": true,
+      "line_width": 1.5,
+      "font": "serif",
+      "dpi": 300
+    },
+    "last_modified": "2026-10-06T08:00:00+00:00"
+  }
+}

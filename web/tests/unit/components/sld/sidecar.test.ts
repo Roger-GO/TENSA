@@ -3,6 +3,8 @@
  * the diagram as drawn, and debounced PUT helpers. The debounced-PUT tests
  * use vitest fake timers for deterministic flushing.
  */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   parseSidecar,
@@ -23,6 +25,8 @@ import {
   flushPendingSidecarPut,
   __clearAllPendingForTests,
   MAX_BEND_POINTS,
+  MAX_FIGURE_SETTINGS,
+  MAX_FIGURE_TEXT,
   SIDECAR_SCHEMA_VERSION,
   type DiagramEdge,
   type DiagramNode,
@@ -226,6 +230,22 @@ describe('parseSidecar', () => {
     });
     expect(() => parseSidecar(withRoute(points))).toThrow(/at most 256 points/);
     expect(() => parseSidecar(withRoute(points.slice(1)))).not.toThrow();
+  });
+
+  it('rejects more figure settings, or a longer one, than the server takes', () => {
+    const settings = (count: number) =>
+      Object.fromEntries(Array.from({ length: count }, (_, i) => [`setting_${i}`, i]));
+    const withFigure = (figure: unknown) => ({ ...fullLayout(), figure });
+    expect(() => parseSidecar(withFigure(settings(MAX_FIGURE_SETTINGS + 1)))).toThrow(
+      'sidecar.figure: at most 64 settings',
+    );
+    expect(() => parseSidecar(withFigure(settings(MAX_FIGURE_SETTINGS)))).not.toThrow();
+    expect(() => parseSidecar(withFigure({ title: 'x'.repeat(MAX_FIGURE_TEXT + 1) }))).toThrow(
+      'sidecar.figure[title]: at most 256 characters',
+    );
+    expect(() => parseSidecar(withFigure({ title: 'x'.repeat(MAX_FIGURE_TEXT) }))).not.toThrow();
+    // Characters, as the server counts them: each of these is two UTF-16 units.
+    expect(() => parseSidecar(withFigure({ title: '\u{1D11E}'.repeat(200) }))).not.toThrow();
   });
 
   it('says where in the document the problem is', () => {
@@ -1174,6 +1194,43 @@ describe('dragOverridesFromLayout', () => {
       'generator-G1': { x: 0, y: -70 },
       'load-PQ-1': { x: 9, y: 9 },
     });
+  });
+});
+
+describe('the fixture the server tests read too', () => {
+  // One file, held to by both copies of the schema: here `parseSidecar` and
+  // `layoutForRenumberedCopy`, in `server/tests/unit/test_layout_web_schema.py`
+  // the server's models and `for_renumbered_copy`. A change to one side that
+  // the other does not follow fails one of the two.
+  const shared = JSON.parse(
+    readFileSync(path.resolve(process.cwd(), 'tests/fixtures/layout-v2.json'), 'utf8'),
+  ) as { document: SidecarLayout; renumbered_copy: SidecarLayout };
+
+  /**
+   * `value` with the fields that are `null` left out: the server writes every
+   * optional field, and this side leaves some of them off when they are unset.
+   */
+  const set = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(set);
+    if (value === null || typeof value !== 'object') return value;
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, inner]) => inner !== null)
+        .map(([key, inner]) => [key, set(inner)]),
+    );
+  };
+
+  it('is read whole: every section, every entry, every field that is set', () => {
+    const parsed = parseSidecar(shared.document);
+    expect(set(parsed)).toEqual(set(shared.document));
+    // Read again from what was read, it is the same: nothing is lost on a write.
+    expect(parseSidecar(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+  });
+
+  it('is cut down for a renumbered copy to what the server cuts it down to', () => {
+    const copy = layoutForRenumberedCopy(parseSidecar(shared.document));
+    expect(set(copy)).toEqual(set(shared.renumbered_copy));
+    expect(samePlacement(copy, shared.renumbered_copy)).toBe(true);
   });
 });
 
