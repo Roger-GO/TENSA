@@ -63,7 +63,7 @@ function ensureExtension(filename: string, format: Format): string {
 export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDialogProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
   const saveMutation = useSaveCase();
-  // Writes the dragged positions beside the case file (reading them at click time).
+  // Writes the diagram's layout beside the case file (reading it at click time).
   const writeSidecarAlongside = useWriteLayoutSidecar();
   // Why Save did not write the open file, when this dialog is open because it could not.
   const selection = useCaseStore((s) => s.selection);
@@ -130,8 +130,8 @@ export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDi
       },
       {
         onSuccess: (resp) => {
-          // Auto-save the layout sidecar alongside the case file so
-          // reload preserves the user's drag positions (Unit 13a). The file
+          // Auto-save the layout sidecar alongside the case file so the
+          // saved case reopens as it is placed now (Unit 13a). The file
           // is on disk whether or not the modal is still the one that saved.
           writeSidecarAlongside(resp.filename);
           if (modalEpoch.current !== epoch) return;
@@ -166,8 +166,8 @@ export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDi
           <DialogTitle>Save system as</DialogTitle>
           <DialogDescription className="mt-2">
             Write the current topology to the workspace as a new file you can re-load later. The
-            case you opened is left as it is. The current layout (drag positions) saves
-            automatically alongside the case file as
+            case you opened is left as it is. The diagram&apos;s layout (where everything is placed)
+            saves automatically alongside the case file as
             <code> &lt;filename&gt;.layout.json</code>.
           </DialogDescription>
           {whySaveAsks !== null ? (

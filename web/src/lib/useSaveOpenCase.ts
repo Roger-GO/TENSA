@@ -5,21 +5,18 @@
  *
  * Save system as (a dialog, a new file in a chosen format) and Save (no dialog, the
  * open file) are different commands that end the same way: the file is written, the
- * edit journal counts the edits as saved, and the positions the user dragged nodes to
- * are written as `<file>.layout.json`. A write over the open file also makes it the
- * base the edit journal and the server rebuild from (see `useSaveCase`).
+ * edit journal counts the edits as saved, and the layout of the diagram as it is
+ * drawn is written as `<file>.layout.json`. A write over the open file also makes it
+ * the base the edit journal and the server rebuild from (see `useSaveCase`).
  */
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 
-import {
-  SAVE_CASE_MUTATION_KEY,
-  useCurrentTopology,
-  usePutSidecar,
-  useSaveCase,
-} from '@/api/queries';
+import { SAVE_CASE_MUTATION_KEY, usePutSidecar, useSaveCase } from '@/api/queries';
 import { parseWorkspacePath } from '@/api/types';
-import { sidecarFromDragOverrides } from '@/components/sld/sidecar';
+import { layoutForRenumberedCopy } from '@/components/sld/sidecar';
+import { diagramLayoutForSave } from '@/lib/diagramLayout';
+import { extensionOf } from '@/lib/paths';
 import { saveInPlaceTarget, type SaveInPlaceTarget } from '@/lib/saveInPlace';
 import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
@@ -29,21 +26,26 @@ import { describeError } from '@/lib/describeError';
 
 /**
  * Returns a function that writes the layout sidecar of a case file just saved, from
- * the drag positions at the time it is called, or does nothing when nothing was
- * dragged. The case file is on disk whether or not this succeeds, so a failure is not
- * reported.
+ * the diagram as it is drawn at the time it is called. Not only what was dragged: a
+ * case opened in its curated or automatic layout and saved under a new name would
+ * otherwise come back laid out differently, since the curated layout goes by the
+ * file's name and the automatic one is worked out again. The case file is on disk
+ * whether or not this succeeds, so a failure is not reported. With no diagram drawn
+ * there is nothing to write, and the copy the server made of the open case's layout
+ * stands.
  *
- * The drag positions are read when the function runs, not subscribed to: a component
- * that subscribed would re-render when the canvas prunes them, in the same tick the
- * canvas is still rendering (a setState-during-render warning under StrictMode).
+ * A `.raw` file keeps no idx: the system read back from it has its devices and
+ * branches numbered afresh. The layout written beside one is therefore cut down to
+ * what can still be matched then (`layoutForRenumberedCopy`).
  */
 export function useWriteLayoutSidecar(): (caseFilename: string) => void {
-  const topology = useCurrentTopology();
   const { mutate: putSidecar } = usePutSidecar();
   return useCallback(
     (caseFilename: string) => {
-      const layout = sidecarFromDragOverrides(useCaseStore.getState().dragOverrides, topology);
-      if (layout === null) return;
+      const drawn = diagramLayoutForSave();
+      if (drawn === null) return;
+      const renumbered = extensionOf(caseFilename).toLowerCase() === '.raw';
+      const layout = renumbered ? layoutForRenumberedCopy(drawn) : drawn;
       try {
         putSidecar({ casePath: parseWorkspacePath(caseFilename), layout });
       } catch {
@@ -51,7 +53,7 @@ export function useWriteLayoutSidecar(): (caseFilename: string) => void {
         // already refused, so the case file itself was not written either.
       }
     },
-    [topology, putSidecar],
+    [putSidecar],
   );
 }
 

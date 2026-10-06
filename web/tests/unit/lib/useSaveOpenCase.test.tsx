@@ -13,7 +13,8 @@ import type { ReactNode } from 'react';
 
 import { ProblemDetailsError } from '@/api/client';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
-import type { ProblemDetails, TopologySummary } from '@/api/types';
+import type { ProblemDetails } from '@/api/types';
+import { buildSidecarLayout } from '@/components/sld/sidecar';
 import { toast } from '@/lib/toast';
 import { useSaveOpenCase } from '@/lib/useSaveOpenCase';
 import { useCaseStore } from '@/store/case';
@@ -42,20 +43,6 @@ vi.mock('@/api/client', async () => {
       },
     },
   };
-});
-
-const TOPOLOGY: TopologySummary = {
-  state: 'pre-setup',
-  buses: [],
-  lines: [],
-  transformers: [],
-  generators: [],
-  loads: [],
-  shunts: [],
-};
-vi.mock('@/api/queries', async () => {
-  const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
-  return { ...actual, useCurrentTopology: () => TOPOLOGY };
 });
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -91,6 +78,7 @@ beforeEach(() => {
     selection: { primaryPath: parseWorkspacePath('ieee14_full.xlsx'), addfiles: [] },
     cloneInitialized: false,
     dragOverrides: {},
+    diagramLayout: null,
   });
   useEditJournalStore.getState().reset();
 });
@@ -98,7 +86,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  useCaseStore.setState({ selection: null, dragOverrides: {} });
+  useCaseStore.setState({ selection: null, dragOverrides: {}, diagramLayout: null });
   useEditJournalStore.getState().reset();
 });
 
@@ -142,9 +130,33 @@ describe('useSaveOpenCase', () => {
     await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(2));
   });
 
-  it('writes the positions the user dragged nodes to beside the file', async () => {
+  it('writes the diagram as it is drawn beside the file, dragged or not', async () => {
     editSomething();
-    useCaseStore.setState({ dragOverrides: { '3': { x: 10, y: 20 } } });
+    // What the canvas keeps in the store: every position and route on screen.
+    // Nothing was dragged in this visit (`dragOverrides` is empty), which used
+    // to mean no layout was written at all.
+    const drawn = buildSidecarLayout(
+      { '3': { x: 10, y: 20 }, '4': { x: 210, y: 20 } },
+      {
+        nonBusCoords: { load: { PQ_1: { x: 10, y: 90 } } },
+        sections: {
+          branches: {
+            line: {
+              L1: {
+                routing: 'polyline',
+                bend_points: [
+                  { x: 40, y: 26 },
+                  { x: 240, y: 26 },
+                ],
+                source_face: null,
+                target_face: null,
+              },
+            },
+          },
+        },
+      },
+    );
+    useCaseStore.setState({ diagramLayout: drawn });
     const { result } = renderHook(() => useSaveOpenCase(), { wrapper });
 
     act(() => result.current.save());
@@ -152,11 +164,27 @@ describe('useSaveOpenCase', () => {
     await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
     expect(putSpy.mock.calls[0]?.[0]).toBe('/workspace/layout');
     expect(putSpy.mock.calls[0]?.[2]).toEqual({ case_path: 'ieee14_full.xlsx' });
-    expect(putSpy.mock.calls[0]?.[1]).toMatchObject({ coordinates: { '3': { x: 10, y: 20 } } });
+    const sent = putSpy.mock.calls[0]?.[1] as typeof drawn;
+    expect({ ...sent, last_modified: drawn.last_modified }).toEqual(drawn);
+    // The time is the save's, not the last redraw's.
+    expect(Number.isNaN(Date.parse(sent.last_modified))).toBe(false);
   });
 
-  it('writes no layout when nothing was dragged', async () => {
+  it('writes no layout while the diagram of the case has not been drawn', async () => {
     editSomething();
+    // The server has the layout saved beside the file; there is nothing newer to send.
+    useCaseStore.setState({ dragOverrides: { '3': { x: 10, y: 20 } } });
+    const { result } = renderHook(() => useSaveOpenCase(), { wrapper });
+
+    act(() => result.current.save());
+
+    await waitFor(() => expect(success).toHaveBeenCalled());
+    expect(putSpy).not.toHaveBeenCalled();
+  });
+
+  it('writes no layout for a diagram with nothing placed on it', async () => {
+    editSomething();
+    useCaseStore.setState({ diagramLayout: buildSidecarLayout({}) });
     const { result } = renderHook(() => useSaveOpenCase(), { wrapper });
 
     act(() => result.current.save());

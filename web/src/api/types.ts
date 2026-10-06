@@ -38,6 +38,12 @@ export type WorkspaceFileList = components['schemas']['WorkspaceFileList'];
 export type UploadedWorkspaceFile = components['schemas']['UploadedWorkspaceFile'];
 export type SidecarLayout = components['schemas']['SidecarLayout'];
 export type BusCoord = components['schemas']['BusCoord'];
+/** Where a generator, load or shunt is drawn, with the bus it hangs off. */
+export type LayoutDeviceCoord = components['schemas']['LayoutDeviceCoord'];
+/** How one line or transformer is drawn, in a layout's `branches`. */
+export type LayoutBranchRoute = components['schemas']['LayoutBranchRoute'];
+/** A face of a bus or of a device symbol, as a layout names it. */
+export type LayoutSide = NonNullable<LayoutBranchRoute['source_face']>;
 
 export type AddElementRequest = components['schemas']['AddElementRequest'];
 export type EditElementRequest = components['schemas']['EditElementRequest'];

@@ -8,8 +8,8 @@
  * - submit fires POST /sessions/{id}/save with the right body.
  * - on 409 with overwrite=false, the inline error suggests ticking
  *   overwrite; toggling and re-submitting passes overwrite=true.
- * - sidecar auto-write fires PUT /workspace/layout when there are
- *   drag overrides.
+ * - sidecar auto-write fires PUT /workspace/layout with the diagram as
+ *   it is drawn.
  * - the modal closes itself a beat after a save, and that beat never
  *   closes a modal opened since.
  */
@@ -21,6 +21,7 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { SaveSystemDialog } from '@/components/case/SaveSystemDialog';
+import { buildNonBusCoordinates, buildSidecarLayout } from '@/components/sld/sidecar';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
@@ -74,16 +75,6 @@ vi.mock('@/api/client', async () => {
   };
 });
 
-let MOCK_TOPOLOGY: TopologySummary | null = null;
-
-vi.mock('@/api/queries', async () => {
-  const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
-  return {
-    ...actual,
-    useCurrentTopology: () => MOCK_TOPOLOGY,
-  };
-});
-
 function withQueryClient(ui: ReactNode) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -96,7 +87,6 @@ beforeEach(() => {
   putSpy.mockClear();
   nextPost = () => Promise.resolve({ filename: 'my-system.xlsx', bytes_written: 1024 });
   nextPut = () => Promise.resolve(undefined);
-  MOCK_TOPOLOGY = emptyTopology();
   useSessionStore.setState({ sessionId: parseSessionId('test-session-id') });
   useCaseStore.setState({
     selection: null,
@@ -107,6 +97,7 @@ beforeEach(() => {
     addPanelKind: null,
     addPanelDirty: false,
     dragOverrides: {},
+    diagramLayout: null,
     pendingDependents: [],
     cloneInitialized: false,
   });
@@ -201,13 +192,14 @@ describe('<SaveSystemDialog />', () => {
     expect(body).toMatchObject({ overwrite: true });
   });
 
-  it('auto-writes a sidecar via PUT /workspace/layout when drag overrides exist', async () => {
+  it('auto-writes the diagram as drawn via PUT /workspace/layout, beside the new file', async () => {
     const user = userEvent.setup();
+    // Nothing was dragged in this visit: the diagram shows the layout the case
+    // opened with. The new file must get it all the same, or it reopens in a
+    // different layout from the one it was saved in.
     useCaseStore.setState({
-      dragOverrides: {
-        // bus drag (no kind prefix) → goes under coordinates
-        '1': { x: 10, y: 20 },
-      },
+      dragOverrides: {},
+      diagramLayout: buildSidecarLayout({ '1': { x: 10, y: 20 }, '2': { x: 210, y: 20 } }),
     });
     render(withQueryClient(<Owner />));
     await user.click(screen.getByTestId('save-system-button'));
@@ -215,17 +207,19 @@ describe('<SaveSystemDialog />', () => {
     await waitFor(() => {
       expect(putSpy).toHaveBeenCalled();
     });
-    const [path, body] = putSpy.mock.calls[0] ?? [];
+    const [path, body, query] = putSpy.mock.calls[0] ?? [];
     expect(path).toBe('/workspace/layout');
-    // The sidecar payload includes the bus coords.
+    expect(query).toEqual({ case_path: 'my-system.xlsx' });
+    // The sidecar payload includes every bus coord.
     expect(body).toMatchObject({
-      coordinates: { '1': { x: 10, y: 20 } },
+      schema_version: '2',
+      coordinates: { '1': { x: 10, y: 20 }, '2': { x: 210, y: 20 } },
     });
   });
 
-  it('skips the sidecar write entirely when there are no drag overrides', async () => {
+  it('skips the sidecar write entirely when no diagram has been drawn', async () => {
     const user = userEvent.setup();
-    useCaseStore.setState({ dragOverrides: {} });
+    useCaseStore.setState({ dragOverrides: {}, diagramLayout: null });
     render(withQueryClient(<Owner />));
     await user.click(screen.getByTestId('save-system-button'));
     await user.click(screen.getByTestId('save-confirm'));
@@ -248,17 +242,18 @@ describe('<SaveSystemDialog />', () => {
     expect(postSpy).not.toHaveBeenCalled();
   });
 
-  it('partitions non-bus drag overrides into the non_bus_coordinates side of the sidecar', async () => {
+  it('sends the device positions and the routes of the diagram along with the buses', async () => {
     const user = userEvent.setup();
-    MOCK_TOPOLOGY = {
-      ...emptyTopology(),
-      generators: [{ idx: '1', name: 'G1', kind: 'PV', params: {} }],
-    };
     useCaseStore.setState({
-      dragOverrides: {
-        // non-bus drag uses the `${uiCategory}-${idx}` shape
-        'generator-1': { x: 50, y: 60 },
-      },
+      diagramLayout: buildSidecarLayout(
+        {},
+        {
+          nonBusCoords: buildNonBusCoordinates([
+            { uiCategory: 'generator', idx: '1', modelClass: 'PV', coord: { x: 50, y: 60 } },
+          ]),
+          sections: { figure: { monochrome: true } },
+        },
+      ),
     });
     render(withQueryClient(<Owner />));
     await user.click(screen.getByTestId('save-system-button'));
@@ -275,6 +270,53 @@ describe('<SaveSystemDialog />', () => {
         PV: { '1': { x: 50, y: 60 } },
         generator: { '1': { x: 50, y: 60 } },
       },
+      figure: { monochrome: true },
+    });
+  });
+});
+
+describe('<SaveSystemDialog /> saving as .raw', () => {
+  it('writes beside the .raw only the placement that survives its devices being renumbered', async () => {
+    // A .raw file keeps no idx: reading it back numbers the devices and the
+    // branches afresh. A position that says which bus it belongs to can be
+    // found again; the rest would land on whatever has its idx by then.
+    const user = userEvent.setup();
+    const anchored = { x: 50, y: 60, bus: '3' };
+    useCaseStore.setState({
+      diagramLayout: buildSidecarLayout(
+        { '3': { x: 10, y: 20 } },
+        {
+          nonBusCoords: {
+            PQ: { PQ_0: anchored, PQ_9: { x: 9, y: 9 } },
+            load: { PQ_0: anchored, PQ_9: { x: 9, y: 9 } },
+          },
+          sections: {
+            controller_coordinates: { EXST1: { E1: { x: 1, y: 1 } } },
+            units: { G1: { expanded: true } },
+            figure: { monochrome: true },
+          },
+        },
+      ),
+    });
+    nextPost = () => Promise.resolve({ filename: 'my-system.raw', bytes_written: 512 });
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    await user.click(screen.getByRole('radio', { name: /raw/i }));
+    await user.click(screen.getByTestId('save-confirm'));
+    await waitFor(() => {
+      expect(putSpy).toHaveBeenCalled();
+    });
+    const [, body, query] = putSpy.mock.calls[0] ?? [];
+    expect(query).toEqual({ case_path: 'my-system.raw' });
+    expect(body).toMatchObject({
+      coordinates: { '3': { x: 10, y: 20 } },
+      non_bus_coordinates: { PQ: { PQ_0: anchored }, load: { PQ_0: anchored } },
+      controller_coordinates: {},
+      units: {},
+      figure: { monochrome: true },
+    });
+    expect((body as { non_bus_coordinates: { load: object } }).non_bus_coordinates.load).toEqual({
+      PQ_0: anchored,
     });
   });
 });
@@ -323,7 +365,7 @@ describe('<Owner /> — auto-close beat', () => {
   it('starts no beat when the modal was dismissed before the save answered', async () => {
     const user = startBeatClock();
     // A layout to write: the sidecar belongs to the file, not to the modal.
-    useCaseStore.setState({ dragOverrides: { '1': { x: 10, y: 20 } } });
+    useCaseStore.setState({ diagramLayout: buildSidecarLayout({ '1': { x: 10, y: 20 } }) });
     let answer: (value: unknown) => void = () => {};
     nextPost = () =>
       new Promise((resolve) => {

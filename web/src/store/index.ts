@@ -184,6 +184,7 @@ export function __resetCascadeForTests(): void {
     selection: null,
     topology: null,
     layoutSidecar: null,
+    diagramLayout: null,
     selectedElement: null,
   });
   usePflowStore.setState({ lastRun: null, lastSolved: null, isRunning: false, error: null });

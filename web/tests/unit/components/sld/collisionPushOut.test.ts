@@ -347,50 +347,56 @@ describe('buildGraph — push-out integration', () => {
   });
 
   it('applies push-out by default (the canvas default path)', () => {
-    // The IEEE-300-style canary: with three close-stacked devices on
-    // one bus that the fan-stack can't fully separate (e.g., all three
-    // forced into col=0 by sidecar overrides), push-out must produce
-    // a non-overlapping output.
+    // The saved layout puts G1 exactly where the fan-stack would put G2,
+    // which the layout does not place (it was added since). Push-out must
+    // move G2 clear of it.
+    const topology = makeTopology({
+      buses: [bus(1)],
+      generators: [gen('G1', 1), gen('G2', 1)],
+    });
+    const coords = { '1': { x: 0, y: 100 } };
+    const unplaced = buildGraph(topology, coords, { applyPushOut: false });
+    const g2Default = unplaced.nodes.find((n) => n.id === 'generator-G2')!.position;
+    const nonBusCoords = new Map([['PV|G1', { ...g2Default }]]);
+
+    const { nodes } = buildGraph(topology, coords, { nonBusCoords });
+    const g1 = nodes.find((n) => n.id === 'generator-G1')!;
+    const g2 = nodes.find((n) => n.id === 'generator-G2')!;
+    const box = (n: typeof g1): PushOutNode => ({
+      id: n.id,
+      kind: 'generator',
+      x: n.position.x,
+      y: n.position.y,
+      width: NODE_FOOTPRINT.generator.width,
+      height: NODE_FOOTPRINT.generator.height,
+      locked: false,
+      parentBusId: null,
+    });
+    expect(overlaps(box(g1), box(g2))).toBe(false);
+    // The one the layout places is the one that stays.
+    expect(g1.position).toEqual(g2Default);
+  });
+
+  it('leaves devices where the saved layout has them, overlapping or not', () => {
+    // A saved position is where the device was when the layout was written.
+    // Shifting it on the next open would redraw the diagram differently from
+    // how it was saved, so push-out does not touch it: three generators the
+    // layout stacks on one point stay on that point.
     const topology = makeTopology({
       buses: [bus(1)],
       generators: [gen('G1', 1), gen('G2', 1), gen('G3', 1)],
     });
-    // Sidecar coords force all three generators to the same point —
-    // which is what push-out is designed to fix.
     const nonBusCoords = new Map([
       ['PV|G1', { x: 0, y: 30 }],
       ['PV|G2', { x: 0, y: 30 }],
-      ['PV|G3', { x: 0, y: 30 }],
+      ['generator|G3', { x: 10, y: 35 }],
     ]);
     const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } }, { nonBusCoords });
-    const gens = nodes.filter((n) => n.type === 'generator');
-    expect(gens).toHaveLength(3);
-    // After push-out, no pair shares a bounding-box overlap.
-    for (let i = 0; i < gens.length; i += 1) {
-      for (let j = i + 1; j < gens.length; j += 1) {
-        const a: PushOutNode = {
-          id: gens[i]!.id,
-          kind: 'generator',
-          x: gens[i]!.position.x,
-          y: gens[i]!.position.y,
-          width: NODE_FOOTPRINT.generator.width,
-          height: NODE_FOOTPRINT.generator.height,
-          locked: false,
-          parentBusId: null,
-        };
-        const b: PushOutNode = {
-          id: gens[j]!.id,
-          kind: 'generator',
-          x: gens[j]!.position.x,
-          y: gens[j]!.position.y,
-          width: NODE_FOOTPRINT.generator.width,
-          height: NODE_FOOTPRINT.generator.height,
-          locked: false,
-          parentBusId: null,
-        };
-        expect(overlaps(a, b)).toBe(false);
-      }
-    }
+    const at = (id: string) => nodes.find((n) => n.id === id)!.position;
+    expect(at('generator-G1')).toEqual({ x: 0, y: 30 });
+    expect(at('generator-G2')).toEqual({ x: 0, y: 30 });
+    // Found by its UI category (the fallback key) or by its model class alike.
+    expect(at('generator-G3')).toEqual({ x: 10, y: 35 });
   });
 
   it('does not apply push-out to a non-bus node referencing a missing parent bus', () => {
@@ -411,18 +417,19 @@ describe('buildGraph — push-out integration', () => {
   });
 
   it('shunt push direction is south-west (kind-specific direction)', () => {
-    // Two shunts on the same bus stacked perfectly. The default kind
-    // direction for shunts is left-and-down; after push-out one of
-    // them moves toward smaller-x and larger-y from the other.
+    // Two shunts on the same bus stacked perfectly: the saved layout has S1
+    // where the fan-stack puts S2, which it does not place. The default kind
+    // direction for shunts is left-and-down; after push-out S2 has moved
+    // toward smaller-x and larger-y from S1.
     const topology = makeTopology({
       buses: [bus(1)],
       shunts: [shunt('S1', 1), shunt('S2', 1)],
     });
-    const nonBusCoords = new Map([
-      ['Shunt|S1', { x: 0, y: 0 }],
-      ['Shunt|S2', { x: 0, y: 0 }],
-    ]);
-    const { nodes } = buildGraph(topology, { '1': { x: 0, y: 200 } }, { nonBusCoords });
+    const coords = { '1': { x: 0, y: 200 } };
+    const unplaced = buildGraph(topology, coords, { applyPushOut: false });
+    const s2Default = unplaced.nodes.find((n) => n.id === 'shunt-S2')!.position;
+    const nonBusCoords = new Map([['Shunt|S1', { ...s2Default }]]);
+    const { nodes } = buildGraph(topology, coords, { nonBusCoords });
     const shunts = nodes.filter((n) => n.type === 'shunt');
     expect(shunts).toHaveLength(2);
     // After push-out the boxes don't overlap.
@@ -447,5 +454,8 @@ describe('buildGraph — push-out integration', () => {
       parentBusId: null,
     };
     expect(overlaps(s1, s2)).toBe(false);
+    expect(shunts[0]!.position).toEqual(s2Default);
+    expect(shunts[1]!.position.x).toBeLessThan(s2Default.x);
+    expect(shunts[1]!.position.y).toBeGreaterThan(s2Default.y);
   });
 });

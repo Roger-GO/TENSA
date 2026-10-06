@@ -77,9 +77,9 @@ export type SelectedElement =
 /**
  * Per-node coordinate overrides captured from user drags on the SLD
  * canvas. Lives in the case store (rather than a `useState` inside
- * SldCanvasInner) so the SaveSystemDialog can snapshot the current
- * layout into the auto-saved sidecar without prop-drilling. Cleared on
- * case change.
+ * SldCanvasInner) so they outlive the canvas when the results view takes
+ * its place, and so a restored snapshot can set them. Cleared on case
+ * change.
  */
 export type DragOverrides = Record<string, { x: number; y: number }>;
 
@@ -102,6 +102,15 @@ export interface CaseState {
   topology: TopologySummary | null;
   /** Last sidecar layout read, if any. `null` if no sidecar exists yet. */
   layoutSidecar: SidecarLayout | null;
+  /**
+   * The layout of the diagram as it is drawn now: every position and every
+   * fixed route, whatever placed them (a drag, a saved or curated layout, or
+   * auto-layout). The canvas writes it each time it rebuilds the diagram, and
+   * it stays after the canvas unmounts (the full-space results view). It is what
+   * a save sends with the system: Save, Save system as, a snapshot, a bundle.
+   * `null` until the diagram of the open case has been drawn once.
+   */
+  diagramLayout: SidecarLayout | null;
   /**
    * The element currently being inspected on the SLD canvas, or null if
    * nothing is selected. Single source of truth for "what's clicked"
@@ -171,6 +180,7 @@ export interface CaseState {
   clearDragOverrides: () => void;
   setTopology: (topology: TopologySummary | null) => void;
   setLayoutSidecar: (sidecar: SidecarLayout | null) => void;
+  setDiagramLayout: (layout: SidecarLayout | null) => void;
   setSelectedElement: (element: SelectedElement | null) => void;
   setPendingDependents: (entries: TopologyEntry[]) => void;
   clearPendingDependents: () => void;
@@ -216,6 +226,7 @@ export const useCaseStore = create<CaseState>((set) => ({
   loadingPath: null,
   topology: null,
   layoutSidecar: null,
+  diagramLayout: null,
   selectedElement: null,
   addPanelOpen: false,
   addPanelKind: null,
@@ -236,6 +247,7 @@ export const useCaseStore = create<CaseState>((set) => ({
       selection,
       topology: null,
       layoutSidecar: null,
+      diagramLayout: null,
       selectedElement: null,
       addPanelOpen: false,
       addPanelKind: null,
@@ -254,6 +266,7 @@ export const useCaseStore = create<CaseState>((set) => ({
   clearDragOverrides: () => set({ dragOverrides: {} }),
   setTopology: (topology: TopologySummary | null) => set({ topology }),
   setLayoutSidecar: (sidecar: SidecarLayout | null) => set({ layoutSidecar: sidecar }),
+  setDiagramLayout: (layout: SidecarLayout | null) => set({ diagramLayout: layout }),
   setSelectedElement: (element: SelectedElement | null) => set({ selectedElement: element }),
   setPendingDependents: (entries: TopologyEntry[]) => set({ pendingDependents: entries }),
   clearPendingDependents: () => set({ pendingDependents: [] }),
@@ -298,6 +311,7 @@ export const useCaseStore = create<CaseState>((set) => ({
       selection: null,
       topology: null,
       layoutSidecar: null,
+      diagramLayout: null,
       selectedElement: null,
       addPanelOpen: false,
       addPanelKind: null,

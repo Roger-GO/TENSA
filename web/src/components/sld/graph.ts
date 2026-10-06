@@ -422,12 +422,19 @@ export interface BuildGraphOptions {
   handleAssignments?: Map<string, HandleAssignment>;
   stubAssignments?: Map<string, StubAssignment>;
   /**
-   * Per-edge polyline coords from ELK (auto-layout case). Includes the
-   * start and end points; the edge component renders `M start L bend1
-   * ... L end`. Edges absent from this map render via `TopologyEdge`
-   * (curated/sidecar smooth-step path).
+   * Per-edge polyline coords: from ELK in the auto-layout case, or the
+   * routes a saved layout holds. Includes the start and end points; the
+   * edge component renders `M start L bend1 ... L end`. Edges absent from
+   * this map render via `TopologyEdge` (the smooth-step path), and so does
+   * an edge whose polyline no longer fits its buses (`routeFitsBuses`).
    */
   bendPoints?: Map<string, [number, number][]>;
+  /**
+   * Positions of controllers a saved layout places on their own, keyed
+   * `${modelClass}|${idx}`. A controller absent from this map is docked
+   * beside the device it references and follows it.
+   */
+  controllerCoords?: Map<string, BusCoord>;
   /**
    * Optional per-(model, idx) coordinate overrides for non-bus elements
    * (generators, loads, shunts). Keys are `${model}|${idx}` matching the
@@ -499,6 +506,46 @@ export const PUSH_OUT_SAFETY_GAP = 8;
  * demo set + the synthetic worst-case scenarios in `R34`.
  */
 export const PUSH_OUT_MAX_PASSES = 4;
+
+/**
+ * How far outside its bus's footprint (px) the end of a stored route may
+ * sit and still count as being at that bus. ELK ends a route on the
+ * boundary of the bus's box, inside the footprint; the slack is for a
+ * router that lands a hair outside it.
+ */
+const ROUTE_END_TOLERANCE = 12;
+
+function routeEndsAtBus(point: [number, number], bus: { x: number; y: number }): boolean {
+  const { width, height } = NODE_FOOTPRINT.bus;
+  return (
+    point[0] >= bus.x - ROUTE_END_TOLERANCE &&
+    point[0] <= bus.x + width + ROUTE_END_TOLERANCE &&
+    point[1] >= bus.y - ROUTE_END_TOLERANCE &&
+    point[1] <= bus.y + height + ROUTE_END_TOLERANCE
+  );
+}
+
+/**
+ * Whether a polyline computed for a branch still belongs on it: its two ends
+ * sit at the branch's buses where the layout has them (`coord`), and neither
+ * bus has been moved since (`moved`). A route is a list of fixed
+ * points, so a bus that moved would leave it hanging in mid-air, and a
+ * route stored for an idx that now names a branch between other buses (the
+ * element was deleted and another added) would be drawn across the
+ * diagram. Either way the branch goes back to routing that follows the
+ * live node positions.
+ */
+export function routeFitsBuses(
+  polyline: [number, number][],
+  from: { coord: { x: number; y: number } | undefined; moved: boolean },
+  to: { coord: { x: number; y: number } | undefined; moved: boolean },
+): boolean {
+  const first = polyline[0];
+  const last = polyline[polyline.length - 1];
+  if (polyline.length < 2 || first === undefined || last === undefined) return false;
+  if (from.coord === undefined || to.coord === undefined || from.moved || to.moved) return false;
+  return routeEndsAtBus(first, from.coord) && routeEndsAtBus(last, to.coord);
+}
 
 /**
  * Push-direction unit vector per kind. Drives where a colliding non-bus
@@ -937,15 +984,31 @@ export function buildGraph(
     if (seen.has(id)) return;
     seen.add(id);
     const handleAssignment = handles.get(id);
-    // If either endpoint bus was moved by the user (drag override), the
-    // ELK bend-points are stale — they were computed for the auto-layout
-    // grid position, not where the bus now sits — so a routed polyline
-    // would render disconnected, floating in space. Drop the polyline so
-    // the edge falls back to dynamic routing that follows the live node
-    // positions (and reaches the moved bus's handle).
-    const endpointMoved =
-      branchDragOverrides[t.from] !== undefined || branchDragOverrides[t.to] !== undefined;
-    const polyline = endpointMoved ? undefined : bends.get(id);
+    // A polyline was computed for where its two buses sat. If the user has
+    // since moved either one (a drag override that differs from the layout
+    // coord; the canvas records an override for every node at the end of any
+    // drag, so the mere presence of one says nothing), or its ends are not at
+    // these buses at all, it would render disconnected, floating in space.
+    // Drop it so the edge falls back to dynamic routing that follows the
+    // live node positions (and reaches the moved bus's handle).
+    const movedByDrag = (busId: string): boolean => {
+      const override = branchDragOverrides[busId];
+      const laidOut = coords[busId];
+      return (
+        override !== undefined &&
+        (laidOut === undefined || override.x !== laidOut.x || override.y !== laidOut.y)
+      );
+    };
+    const candidate = bends.get(id);
+    const polyline =
+      candidate !== undefined &&
+      routeFitsBuses(
+        candidate,
+        { coord: coords[t.from], moved: movedByDrag(t.from) },
+        { coord: coords[t.to], moved: movedByDrag(t.to) },
+      )
+        ? candidate
+        : undefined;
     // Transformers always render via TransformerEdge (which carries the
     // 2W/3W icon at the midpoint); routed-or-smooth-step is decided
     // inside that component based on whether bend points are present.
@@ -1030,6 +1093,9 @@ export function buildGraph(
   // Per-(parentBus, kind) stack counter so two generators on the same bus
   // don't render at the same coord.
   const stackCounts = new Map<string, number>();
+  // Devices whose position comes from the saved layout. That is where they
+  // were when the layout was written, so the push-out pass leaves them there.
+  const placedByLayout = new Set<string>();
   for (const bucket of nonBusBuckets) {
     const offset = NON_BUS_OFFSETS[bucket.kind];
     for (const entry of bucket.entries) {
@@ -1098,6 +1164,7 @@ export function buildGraph(
       const x = sidecar?.x ?? parentCoord.x + offset.x + offset.stackDx * colSigned + rowStagger;
       const y = sidecar?.y ?? parentCoord.y + offsetY + stackDy * row;
       const nodeId = `${bucket.kind}-${String(entry.idx)}`;
+      if (sidecar !== undefined) placedByLayout.add(nodeId);
       const deviceLabel = elementAriaLabel(
         bucket.kind.charAt(0).toUpperCase() + bucket.kind.slice(1),
         String(entry.idx),
@@ -1152,10 +1219,15 @@ export function buildGraph(
   // fan-stack emission and any sidecar overrides have placed every
   // non-bus node. Pre-applies drag overrides so the user's chosen
   // position is treated as stationary; other nodes shift around them.
+  // A position the saved layout holds is stationary too: it is where the
+  // device was when the layout was written, overlapping a neighbour or
+  // not, and shifting it would reopen the diagram differently from how it
+  // was saved. Only a device the layout does not place (one added since)
+  // is moved out of the way.
   const applyPushOut = opts.applyPushOut ?? true;
   if (applyPushOut) {
     const dragOverrides = opts.dragOverrides ?? {};
-    const lockedIds = new Set(Object.keys(dragOverrides));
+    const lockedIds = new Set([...Object.keys(dragOverrides), ...placedByLayout]);
     // Build the push-out input. Each non-bus node carries its parent
     // bus id so the push-out skips the parent collision (a generator
     // touching the north face of its bus is the design, not a bug).
@@ -1230,7 +1302,7 @@ export function buildGraph(
   // resolves the same way. Runs after collision push-out so anchors use
   // each parent's final position. A controller whose reference can't be
   // resolved renders as an orphan badge in the gutter.
-  appendControllerNodes(nodes, topology.controllers ?? []);
+  appendControllerNodes(nodes, topology.controllers ?? [], opts.controllerCoords);
 
   return { nodes, edges };
 }
@@ -1306,12 +1378,17 @@ function resolveControllerParent(
 }
 
 /**
- * Append a docked badge node for each controller in `controllers`,
- * mutating `nodes` in place. Iterative passes resolve controller→controller
- * reference chains; anything still unresolved after the passes (a dangling
- * idx) is placed as an orphan.
+ * Append a badge node for each controller in `controllers`, mutating `nodes`
+ * in place. A controller is docked beside the device it references, unless
+ * `placedCoords` (a saved layout) puts it somewhere of its own. Iterative
+ * passes resolve controller→controller reference chains; anything still
+ * unresolved after the passes (a dangling idx) is placed as an orphan.
  */
-function appendControllerNodes(nodes: Node[], controllers: readonly TopologyEntry[]): void {
+function appendControllerNodes(
+  nodes: Node[],
+  controllers: readonly TopologyEntry[],
+  placedCoords: ReadonlyMap<string, BusCoord> = new Map(),
+): void {
   if (controllers.length === 0) return;
   const nodeById = new Map<string, Node>(nodes.map((n) => [n.id, n] as const));
   const stackCounts = new Map<string, number>();
@@ -1330,25 +1407,28 @@ function appendControllerNodes(nodes: Node[], controllers: readonly TopologyEntr
     const nodeId = `controller-${entry.kind}-${idx}`;
     const subKind = subKindForControllerClass(entry.kind);
     const parent = parentId !== null ? nodeById.get(parentId) : undefined;
+    // A controller the layout places takes no slot in its parent's dock
+    // stack, so the docked ones beside it close up.
+    const placedAt = placedCoords.get(`${entry.kind}|${idx}`);
     const stackKey = parent ? parentId! : '__orphan__';
     const stackIndex = stackCounts.get(stackKey) ?? 0;
-    stackCounts.set(stackKey, stackIndex + 1);
+    if (placedAt === undefined) stackCounts.set(stackKey, stackIndex + 1);
 
     let position: { x: number; y: number };
-    let connectorDx = 0;
-    let connectorDy = 0;
-    if (parent) {
+    if (placedAt !== undefined) {
+      position = { x: placedAt.x, y: placedAt.y };
+    } else if (parent) {
       position = {
         x: parent.position.x + CONTROLLER_DOCK.x,
         y: parent.position.y + CONTROLLER_DOCK.y + stackIndex * CONTROLLER_DOCK.stackDy,
       };
-      // Vector (controller origin → parent origin) so ControllerNode can
-      // draw an exact tether back to the device for any stack row.
-      connectorDx = parent.position.x - position.x;
-      connectorDy = parent.position.y - position.y;
     } else {
       position = { x: 24, y: 24 + stackIndex * CONTROLLER_DOCK.stackDy };
     }
+    // Vector (controller origin → parent origin) so ControllerNode can
+    // draw an exact tether back to the device, wherever the badge sits.
+    const connectorDx = parent ? parent.position.x - position.x : 0;
+    const connectorDy = parent ? parent.position.y - position.y : 0;
 
     const node: Node = {
       id: nodeId,
@@ -1359,8 +1439,8 @@ function appendControllerNodes(nodes: Node[], controllers: readonly TopologyEntr
       // approximate the small badge glyph with a 28×28 box.
       initialWidth: CONTROLLER_GLYPH_FOOTPRINT,
       initialHeight: CONTROLLER_GLYPH_FOOTPRINT,
-      // Docked badges aren't free-dragged (no sidecar persistence for
-      // controllers); they follow their parent device.
+      // Badges aren't free-dragged: a docked one follows its parent device,
+      // and one the layout places stays where the layout has it.
       draggable: false,
       data: {
         idx,
@@ -1371,6 +1451,9 @@ function appendControllerNodes(nodes: Node[], controllers: readonly TopologyEntr
         connectorDx,
         connectorDy,
         parentNodeId: parentId ?? undefined,
+        // Set only for a badge the layout places, so a capture of the
+        // diagram keeps its entry and writes none for a docked one.
+        ...(placedAt !== undefined ? { placed: true } : {}),
       },
     };
     nodes.push(node);

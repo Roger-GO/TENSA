@@ -752,8 +752,9 @@ export interface paths {
          *
          *     The substrate gathers the case file (verbatim or canonical xlsx),
          *     builds the manifest, and zips the lot together with the
-         *     request-body-supplied disturbances / sim_params / results.csv. The
-         *     response is the raw zip bytes with ``Content-Type: application/zip``
+         *     request-body-supplied disturbances / sim_params / results.csv and the
+         *     diagram's layout (the request's, else the one saved beside the case).
+         *     The response is the raw zip bytes with ``Content-Type: application/zip``
          *     and a ``Content-Disposition`` header that suggests a sensible
          *     filename.
          *
@@ -783,7 +784,8 @@ export interface paths {
          *     Writes sidecar JSON metadata under
          *     ``<workspace>/snapshots/<case_basename>/<name>.json`` and, when
          *     ``include_dill`` is true, ANDES's ``andes.utils.snapshot.save_ss`` blob
-         *     beside it as ``<name>.dill``.
+         *     beside it as ``<name>.dill``. The metadata holds the diagram's layout,
+         *     so a restore brings the placement back with the operating point.
          */
         post: operations["saveSnapshot"];
         delete?: never;
@@ -810,6 +812,8 @@ export interface paths {
          *     ``PFlow.run``. With ``use_dill_optimization`` it first tries to
          *     substitute the dill-loaded System (when the snapshot has a blob and
          *     the ANDES version matches) and falls back to the replay otherwise.
+         *     The diagram's layout the snapshot holds is put back beside the case
+         *     file and returned.
          */
         post: operations["restoreSnapshot"];
         delete?: never;
@@ -1748,6 +1752,8 @@ export interface components {
              * @description Run id of the most recent TDS run. Surfaced in the manifest for cross-referencing with run-history exports.
              */
             run_id?: string | null;
+            /** @description The diagram's layout as the client shows it, written to the bundle as ``layout.json`` so an import opens with the same picture. ``null`` uses the layout saved beside the case file; with neither, the bundle holds no ``layout.json``. */
+            layout?: components["schemas"]["SidecarLayout"] | null;
         };
         /**
          * BundleImportPlanModel
@@ -1817,6 +1823,12 @@ export interface components {
              */
             disturbances_replayed: number;
             /**
+             * Layout Restored
+             * @description ``true`` when the bundle held the diagram's layout (``layout.json``) and it is now saved beside the imported case, replacing any layout that was there. ``false`` on ``status=plan``, for a bundle with no layout, and when the workspace's own case file was kept.
+             * @default false
+             */
+            layout_restored: boolean;
+            /**
              * Job Id
              * @description Job-registry id mirroring the bundle-import routine (kind ``bundle-import``). Recorded in the manager-wide global registry so it survives the session being replaced on a committed import. Present on both the ``committed`` (200) body and the ``plan`` (409) body. ``null`` on legacy responses.
              */
@@ -1861,7 +1873,7 @@ export interface components {
         };
         /**
          * BusCoord
-         * @description One bus's 2D coordinate in the layout sidecar.
+         * @description One position on the diagram.
          *
          *     Coordinates are in arbitrary canvas units; the UI rescales them at render
          *     time. Infinity / NaN are rejected at validation time.
@@ -1869,12 +1881,12 @@ export interface components {
         BusCoord: {
             /**
              * X
-             * @description Bus X coordinate, finite (no NaN/Inf).
+             * @description X coordinate, finite (no NaN/Inf).
              */
             x: number;
             /**
              * Y
-             * @description Bus Y coordinate, finite (no NaN/Inf).
+             * @description Y coordinate, finite (no NaN/Inf).
              */
             y: number;
         };
@@ -3273,6 +3285,127 @@ export interface components {
             repeated_count: number;
         };
         /**
+         * LayoutBranchRoute
+         * @description How one line or transformer is drawn between its two buses.
+         */
+        LayoutBranchRoute: {
+            /**
+             * Routing
+             * @description ``auto``: the branch is drawn from where its two buses are now, and ``bend_points`` is not used. ``polyline``: it is drawn through ``bend_points`` as they are stored.
+             * @default auto
+             * @enum {string}
+             */
+            routing: "auto" | "polyline";
+            /**
+             * Bend Points
+             * @description The points of a ``polyline`` route in order: where it leaves the first bus, each bend, and where it reaches the second bus. A route is only drawn while both ends still sit on their buses, so moving a bus sends its branches back to ``auto``.
+             */
+            bend_points?: components["schemas"]["BusCoord"][];
+            /**
+             * Bus1
+             * @description idx of the bus the route starts at, with ``bus2`` what the route is anchored to: a reader draws it only for a branch between those two buses. ``null``: not recorded.
+             */
+            bus1?: string | null;
+            /**
+             * Bus2
+             * @description idx of the bus the route ends at. ``null``: not recorded.
+             */
+            bus2?: string | null;
+            /**
+             * Source Face
+             * @description Face of the first bus (``bus1``) the branch leaves from, when it was chosen. ``null`` lets the renderer pick the face that points at the other bus.
+             */
+            source_face?: ("north" | "east" | "south" | "west") | null;
+            /**
+             * Target Face
+             * @description Face of the second bus (``bus2``) the branch arrives on, when it was chosen. ``null`` lets the renderer pick.
+             */
+            target_face?: ("north" | "east" | "south" | "west") | null;
+        };
+        /**
+         * LayoutBusbar
+         * @description The bar a bus is drawn as.
+         */
+        LayoutBusbar: {
+            /**
+             * Length
+             * @description Length of the bar in canvas units. ``null`` leaves it to the renderer, which sizes the bar to what connects to it.
+             */
+            length?: number | null;
+            /**
+             * Orientation
+             * @description Whether the bar lies across the diagram or stands upright.
+             * @default horizontal
+             * @enum {string}
+             */
+            orientation: "horizontal" | "vertical";
+        };
+        /**
+         * LayoutConnection
+         * @description Where the connector between a device and its bus attaches.
+         */
+        LayoutConnection: {
+            /**
+             * Device Face
+             * @description Face of the device symbol the connector leaves from, when it was chosen. ``null`` lets the renderer use the face that points at the bus.
+             */
+            device_face?: ("north" | "east" | "south" | "west") | null;
+            /**
+             * Bus Face
+             * @description Face of the bus the connector lands on, when it was chosen. ``null`` lets the renderer pick.
+             */
+            bus_face?: ("north" | "east" | "south" | "west") | null;
+        };
+        /**
+         * LayoutDeviceCoord
+         * @description Where a generator, load or shunt is drawn, and the bus it hangs off.
+         */
+        LayoutDeviceCoord: {
+            /**
+             * X
+             * @description X coordinate, finite (no NaN/Inf).
+             */
+            x: number;
+            /**
+             * Y
+             * @description Y coordinate, finite (no NaN/Inf).
+             */
+            y: number;
+            /**
+             * Bus
+             * @description idx of the bus the device was connected to when it was placed. A reader uses the position only for a device on that bus, so an idx that has come to name another element (a ``.raw`` file numbers its devices afresh) does not put it somewhere it never was. ``null``: not recorded (a version 1 document); the idx alone is trusted.
+             */
+            bus?: string | null;
+        };
+        /**
+         * LayoutLabelOffset
+         * @description How far a label sits from where the renderer would put it.
+         */
+        LayoutLabelOffset: {
+            /**
+             * Dx
+             * @description Shift to the right, in canvas units.
+             */
+            dx: number;
+            /**
+             * Dy
+             * @description Shift downwards, in canvas units.
+             */
+            dy: number;
+        };
+        /**
+         * LayoutUnit
+         * @description How one generating unit is drawn.
+         */
+        LayoutUnit: {
+            /**
+             * Expanded
+             * @description ``true`` when the unit's control chain (exciter, governor, stabiliser) is drawn out; ``false`` when the unit is collapsed to its machine symbol.
+             * @default false
+             */
+            expanded: boolean;
+        };
+        /**
          * LineFlow
          * @description Per-line active and reactive power flow at both terminals: ``p`` / ``q``
          *     at terminal 1 (``bus1``) and ``p_to`` / ``q_to`` at terminal 2 (``bus2``),
@@ -3866,6 +3999,8 @@ export interface components {
             disturbances_replayed: number;
             /** @description Sidecar metadata of the restored snapshot. */
             metadata: components["schemas"]["SnapshotMetadataModel"];
+            /** @description The diagram's layout the snapshot held, in the current schema version, or ``null`` when it held none. For a case loaded from a file the server has already written it beside that file, replacing the layout that was there; a system built from scratch has no file, so the layout is only returned here. */
+            layout?: components["schemas"]["SidecarLayout"] | null;
             /**
              * Job Id
              * @description Job-registry id mirroring the snapshot-restore routine (kind ``snapshot-restore``). Recorded in the manager-wide global registry so it survives the session being replaced, yet still surfaces via ``GET /sessions/{id}/jobs/{job_id}``. ``null`` on legacy responses.
@@ -3943,6 +4078,8 @@ export interface components {
              * @default false
              */
             include_dill: boolean;
+            /** @description The diagram's layout as the client shows it. It is kept in the snapshot and put back beside the case when the snapshot is restored. ``null`` keeps the layout saved beside the case file, if there is one. */
+            layout?: components["schemas"]["SidecarLayout"] | null;
         };
         /**
          * SaveSnapshotResponse
@@ -4223,16 +4360,17 @@ export interface components {
         };
         /**
          * SidecarLayout
-         * @description Persisted SLD layout sidecar (one file per case).
+         * @description The layout of one case's diagram (one file per case).
          *
          *     Stored on disk as ``<case_path>.layout.json`` adjacent to the case file.
-         *     The PUT endpoint validates this body, then writes atomically with mode
-         *     0600.
+         *     Every section but ``coordinates`` is optional and reads as empty when
+         *     absent, which is how a version 1 document (bus and device positions only)
+         *     is still accepted; the server stores and answers with version 2.
          */
         SidecarLayout: {
             /**
              * Schema Version
-             * @description Sidecar schema version (e.g., ``"1.0"``). Bumped on any incompatible shape change so the UI can fall back to defaults.
+             * @description Schema version of the document. The server writes and answers with ``"2"``; a version 1 document (``"1"``, ``"1.0"``) is accepted and upgraded.
              */
             schema_version: string;
             /**
@@ -4249,12 +4387,69 @@ export interface components {
             };
             /**
              * Non Bus Coordinates
-             * @description Per-non-bus-element coordinates, two-level dict keyed by ANDES model class (e.g., ``PV``, ``GENROU``, ``PQ``, ``Shunt``) OR by UI category (``generator``, ``load``, ``shunt``), then by element idx (stringified). The writer emits BOTH the model-class-keyed entry and the UI-category-keyed entry for every dragged non-bus element so kind-edits (e.g., ``PV`` → ``GENROU``) survive: the model-class entry becomes orphaned but the UI-category entry still resolves on read. Optional + additive — old sidecars without this field read as ``{}`` and the renderer falls back to kind-default offsets.
+             * @description Per-non-bus-element coordinates, two-level dict keyed by ANDES model class (e.g., ``PV``, ``GENROU``, ``PQ``, ``Shunt``) OR by UI category (``generator``, ``load``, ``shunt``), then by element idx (stringified). The writer emits BOTH the model-class-keyed entry and the UI-category-keyed entry for every non-bus element so kind-edits (e.g., ``PV`` → ``GENROU``) survive: the model-class entry becomes orphaned but the UI-category entry still resolves on read. Optional + additive — old sidecars without this field read as ``{}`` and the renderer falls back to kind-default offsets.
              */
             non_bus_coordinates?: {
                 [key: string]: {
+                    [key: string]: components["schemas"]["LayoutDeviceCoord"];
+                };
+            };
+            /**
+             * Controller Coordinates
+             * @description Positions of controllers that were placed on their own, keyed by ANDES model class (``EXST1``, ``TGOV1``), then by idx. A controller with no entry is drawn docked beside the device it acts on and moves with it.
+             */
+            controller_coordinates?: {
+                [key: string]: {
                     [key: string]: components["schemas"]["BusCoord"];
                 };
+            };
+            /**
+             * Units
+             * @description Per generating unit (a generator with its machine and their controllers), keyed by the idx of the unit's generator symbol, the same idx its position has under ``generator`` in ``non_bus_coordinates``.
+             */
+            units?: {
+                [key: string]: components["schemas"]["LayoutUnit"];
+            };
+            /**
+             * Busbars
+             * @description The bar of a bus where it differs from the default, keyed by bus idx.
+             */
+            busbars?: {
+                [key: string]: components["schemas"]["LayoutBusbar"];
+            };
+            /**
+             * Branches
+             * @description How branches are drawn, keyed by ``line`` or ``transformer``, then by idx. A branch with no entry is routed automatically.
+             */
+            branches?: {
+                [key: string]: {
+                    [key: string]: components["schemas"]["LayoutBranchRoute"];
+                };
+            };
+            /**
+             * Label Offsets
+             * @description Labels that were moved, keyed like ``non_bus_coordinates`` with ``bus``, ``line`` and ``transformer`` as further outer keys, then by idx.
+             */
+            label_offsets?: {
+                [key: string]: {
+                    [key: string]: components["schemas"]["LayoutLabelOffset"];
+                };
+            };
+            /**
+             * Connections
+             * @description Where the connector of a generator, load or shunt attaches, keyed like ``non_bus_coordinates``. A device with no entry has both ends worked out from where it sits.
+             */
+            connections?: {
+                [key: string]: {
+                    [key: string]: components["schemas"]["LayoutConnection"];
+                };
+            };
+            /**
+             * Figure
+             * @description Display settings of a figure made from this diagram (for example a monochrome style, a line width, which labels are shown), by name. Values are booleans, finite numbers or short text; at most 64 settings.
+             */
+            figure?: {
+                [key: string]: boolean | number | string;
             };
             /**
              * Last Modified
@@ -4350,6 +4545,12 @@ export interface components {
              * @description Whether a TDS run had completed at save time.
              */
             has_tds: boolean;
+            /**
+             * Has Layout
+             * @description Whether the snapshot holds the diagram's layout. The layout itself is left out of this echo; a restore returns it.
+             * @default false
+             */
+            has_layout: boolean;
         } & {
             [key: string]: unknown;
         };
@@ -6899,7 +7100,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Body exceeds the 256 KB sidecar cap. */
+            /** @description Body exceeds the 2 MiB sidecar cap. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -6974,7 +7175,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Bundle stream. Body is a ``.zip`` containing case + disturbances.json + sim_params.json + results.csv + manifest.json (each optional except case + manifest). Snapshots are NOT included. */
+            /** @description Bundle stream. Body is a ``.zip`` containing case + disturbances.json + sim_params.json + results.csv + layout.json + manifest.json (each optional except case + manifest). Snapshots are NOT included. */
             200: {
                 headers: {
                     [name: string]: unknown;

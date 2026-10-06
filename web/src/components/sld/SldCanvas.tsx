@@ -64,15 +64,16 @@ import { SldVoltageLegend } from './SldVoltageLegend';
 import { SldLimitsLegend } from './SldLimitsLegend';
 import { useAutoLayout } from './useAutoLayout';
 import {
+  branchPolylines,
   buildSidecarLayout,
-  buildNonBusCoordinates,
   cancelPendingSidecarPut,
+  captureLayout,
+  controllerCoordsAsMap,
   debouncedPutSidecar,
   hasSavedPositions,
   mergeWithDrift,
-  nonBusCoordsAsMap,
+  resolveDeviceCoords,
   type CoordsByIdx,
-  type NonBusOverride,
 } from './sidecar';
 import { curatedLayoutFor } from './curated';
 import { buildGraph, computeHandleAssignments } from './graph';
@@ -227,6 +228,12 @@ interface InnerProps {
   primaryPath: string | null;
   /** The saved layout, or `null` when none holds a position (see `hasSavedPositions`). */
   storedSidecar: SidecarLayout | null;
+  /**
+   * The saved layout as it is on disk, positions or not. What the canvas does
+   * not draw from (figure settings, say) is carried over from here into every
+   * layout it writes.
+   */
+  savedLayout: SidecarLayout | null;
   putSidecar: PutSidecar;
 }
 
@@ -245,7 +252,13 @@ type PutSidecar = (
  * (we still want a fallback for unmatched buses + drift detection) →
  * merge with stored sidecar coords → render.
  */
-function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: InnerProps) {
+function SldCanvasInner({
+  topology,
+  primaryPath,
+  storedSidecar,
+  savedLayout,
+  putSidecar,
+}: InnerProps) {
   const setSelectedElement = useCaseStore((s) => s.setSelectedElement);
   const selectedElement = useCaseStore((s) => s.selectedElement);
   const selectedNodeId = useSldStore((s) => s.selectedNodeId);
@@ -270,6 +283,10 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
     [],
   );
   const [coords, setCoords] = useState<CoordsByIdx | null>(null);
+  // The topology `coords` was composed for. A new topology arrives a render
+  // before its coords do, and the graph built in between pairs the new
+  // elements with the old positions; nothing is saved from that one.
+  const [coordsTopology, setCoordsTopology] = useState<TopologySummary | null>(null);
   const [showLargeBanner, setShowLargeBanner] = useState<boolean>(false);
   const [showDriftBanner, setShowDriftBanner] = useState<boolean>(false);
 
@@ -298,6 +315,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
     if (autoLayoutNeeded && autoCoords === null) return;
     const merged = mergeWithDrift(baseSidecar, topology, autoCoords ?? {});
     setCoords(merged.coords);
+    setCoordsTopology(topology);
     setShowDriftBanner(merged.hasDrift);
     // >30-bus banner: only when there's no curated layout AND no
     // stored sidecar AND the case is large.
@@ -315,14 +333,22 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   // running on auto-layout (no curated, no sidecar) — otherwise the
   // bend points reference pass-2 ELK coords that diverge from the
   // curated/sidecar coords React Flow renders, and the polyline would
-  // hang in mid-air. The handle assignments still flow through both
-  // paths so co-handle stride works for curated cases too.
+  // hang in mid-air. A saved layout brings its own routes instead: the
+  // ones that were on screen when it was written, so a diagram saved from
+  // auto-layout comes back with the same lines. The handle assignments
+  // still flow through both paths so co-handle stride works for curated
+  // cases too.
   const usingAutoLayout = curated === null && storedSidecar === null;
+  const storedBends = useMemo(
+    () => branchPolylines(storedSidecar, topology),
+    [storedSidecar, topology],
+  );
+  const controllerCoords = useMemo(() => controllerCoordsAsMap(storedSidecar), [storedSidecar]);
   // Drag overrides — per-node coordinate overrides applied AFTER
   // buildGraph so user drags persist across topology re-fetches (Unit 9
-  // fix). Lives on the case store (Unit 13a) so the SaveSystemDialog
-  // can snapshot the current layout into the auto-saved sidecar
-  // alongside the case file.
+  // fix). Lives on the case store (Unit 13a) so the drags outlive this
+  // component when the results view takes its place, and so a restored
+  // snapshot can set them.
   const dragOverrides = useCaseStore((s) => s.dragOverrides);
   const setDragOverrides = useCaseStore((s) => s.setDragOverrides);
   // Animation bookkeeping for collision push-out (Unit 3, v0.1.y).
@@ -338,13 +364,14 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   //   when the user explicitly drag-overrides the node.
   const priorPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const relocatedIdsRef = useRef<Set<string>>(new Set());
-  // Merge the sidecar's `non_bus_coordinates` (curated layout OR
-  // user-saved on disk) into the graph builder's `nonBusCoords` opt.
-  // The merge prefers model-class keys but folds UI-category keys
-  // alongside, so a kind-edited element resolves via the fallback.
+  // Where the saved layout puts each generator, load and shunt of this
+  // topology, for the graph builder's `nonBusCoords` opt. An entry is found
+  // by its idx (model class first, UI category as the fallback for a
+  // kind-edited element) or, when the idx values have changed, by the bus it
+  // was placed against.
   const nonBusCoordsMap = useMemo(
-    () => nonBusCoordsAsMap(storedSidecar?.non_bus_coordinates),
-    [storedSidecar],
+    () => resolveDeviceCoords(storedSidecar?.non_bus_coordinates, topology),
+    [storedSidecar, topology],
   );
   const baseGraph = useMemo(() => {
     if (!coords) return null;
@@ -363,12 +390,13 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
             return merged;
           })();
     const { branches, stubs } = computeHandleAssignments(topology, effectiveCoords);
-    const bendPoints = usingAutoLayout && autoBendPoints ? autoBendPoints : undefined;
+    const bendPoints = usingAutoLayout ? (autoBendPoints ?? undefined) : storedBends;
     const built = buildGraph(topology, coords, {
       handleAssignments: branches,
       stubAssignments: stubs,
       bendPoints,
       nonBusCoords: nonBusCoordsMap,
+      controllerCoords,
       // Drag overrides flow into buildGraph so the push-out pass
       // treats user-placed nodes as stationary obstacles. The override
       // is also re-applied below as a defensive cosmetic — the
@@ -434,7 +462,16 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
     }
     priorPositionsRef.current = nextPrior;
     return { nodes: animatedNodes, edges: built.edges };
-  }, [topology, coords, autoBendPoints, usingAutoLayout, dragOverrides, nonBusCoordsMap]);
+  }, [
+    topology,
+    coords,
+    autoBendPoints,
+    usingAutoLayout,
+    storedBends,
+    controllerCoords,
+    dragOverrides,
+    nonBusCoordsMap,
+  ]);
 
   // Prune drag overrides for nodes that no longer exist (user reloaded,
   // or removed an element via a future delete API). Keeps the override
@@ -453,9 +490,15 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   }, [baseGraph, setDragOverrides]);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
+  // The nodes as last set, readable from an event handler before the render
+  // that follows. `onNodesChange` builds on it, so that what a drag does
+  // besides moving nodes (recording the overrides) happens in the handler and
+  // not inside a state updater, which React runs while rendering.
+  const nodesRef = useRef<Node[]>([]);
 
   useEffect(() => {
     if (!baseGraph) return;
+    nodesRef.current = baseGraph.nodes;
     setNodes(baseGraph.nodes);
     setEdges(baseGraph.edges);
   }, [baseGraph]);
@@ -466,79 +509,66 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   //   so the override survives topology re-fetches (the bug Unit 9
   //   fixes — previously every successful add() snapped dragged nodes
   //   back to their kind-default positions).
-  // - Disk sidecar (only for sessions with a primaryPath): persists
-  //   bus coordinates AND non-bus coordinates across page reloads. The
-  //   non-bus entries are written under the dual-key shape (model
-  //   class + UI category) per the sidecar schema (Unit 4, v0.1.y).
-  //
-  // Look up the model class per non-bus idx by walking the topology
-  // buckets. The map is rebuilt on every render to track topology
-  // edits (kind-changes, idx remappings); the work is O(non-bus
-  // count) so the cost is negligible.
-  const nonBusModelByCategoryIdx = useMemo(() => {
-    const map = new Map<string, string>();
-    const fold = (entries: ReadonlyArray<{ idx: number | string; kind: string }>, cat: string) => {
-      for (const e of entries) {
-        map.set(`${cat}-${String(e.idx)}`, e.kind);
-      }
-    };
-    fold(topology.generators ?? [], 'generator');
-    fold(topology.loads ?? [], 'load');
-    fold(topology.shunts ?? [], 'shunt');
-    return map;
-  }, [topology]);
+  // - Disk sidecar (only for sessions with a primaryPath): persists the
+  //   whole diagram across page reloads. It is written by the effect below
+  //   from the graph the overrides produce, not from here: the edges in
+  //   hand at this point still carry the routes of the buses that just
+  //   moved.
+  const persistRequestedRef = useRef(false);
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
-      setNodes((curr) => {
-        const next = applyPositionChanges(curr, changes);
-        const dragEnded = changes.some(
-          (c): c is NodePositionChange =>
-            c.type === 'position' && c.dragging === false && c.position !== undefined,
-        );
-        if (dragEnded) {
-          // Capture every node's current position into the override map.
-          // The map keys by React Flow node id (bus idx for buses,
-          // `${kind}-${idx}` for non-bus nodes).
-          const overrides: Record<string, { x: number; y: number }> = {};
-          for (const n of next) {
-            overrides[n.id] = { x: n.position.x, y: n.position.y };
-          }
-          setDragOverrides(overrides);
-
-          // Persist to the disk sidecar. Loaded sessions only.
-          if (primaryPath) {
-            const busCoords: CoordsByIdx = {};
-            const nonBusOverrides: NonBusOverride[] = [];
-            for (const n of next) {
-              if (n.type === 'bus') {
-                busCoords[n.id] = { x: n.position.x, y: n.position.y };
-                continue;
-              }
-              if (n.type === 'generator' || n.type === 'load' || n.type === 'shunt') {
-                const data = n.data as { idx?: string };
-                const idx = data.idx ?? n.id.replace(/^(generator|load|shunt)-/, '');
-                const modelClass = nonBusModelByCategoryIdx.get(n.id) ?? null;
-                nonBusOverrides.push({
-                  uiCategory: n.type,
-                  idx: String(idx),
-                  modelClass,
-                  coord: { x: n.position.x, y: n.position.y },
-                });
-              }
-            }
-            if (Object.keys(busCoords).length > 0 || nonBusOverrides.length > 0) {
-              const layout = buildSidecarLayout(busCoords, {
-                nonBusCoords: buildNonBusCoordinates(nonBusOverrides),
-              });
-              debouncedPutSidecar(primaryPath, layout, putSidecar);
-            }
-          }
-        }
-        return next;
-      });
+      const next = applyPositionChanges(nodesRef.current, changes);
+      if (next !== nodesRef.current) {
+        nodesRef.current = next;
+        setNodes(next);
+      }
+      const dragEnded = changes.some(
+        (c): c is NodePositionChange =>
+          c.type === 'position' && c.dragging === false && c.position !== undefined,
+      );
+      if (!dragEnded) return;
+      // Capture the current position of every node that can be dragged
+      // into the override map. The map keys by React Flow node id (bus
+      // idx for buses, `${kind}-${idx}` for non-bus nodes). A controller
+      // badge cannot be dragged: its place follows from its device's, and
+      // an override would pin it where the device used to be.
+      const overrides: Record<string, { x: number; y: number }> = {};
+      for (const n of next) {
+        if (n.draggable === false) continue;
+        overrides[n.id] = { x: n.position.x, y: n.position.y };
+      }
+      setDragOverrides(overrides);
+      persistRequestedRef.current = true;
     },
-    [primaryPath, putSidecar, setDragOverrides, nonBusModelByCategoryIdx],
+    [setDragOverrides],
   );
+
+  // Keep the layout of the diagram as drawn where a save can reach it
+  // (`diagramLayout`), and write it beside the case after a drag. Loaded
+  // sessions only for the write: a system built from scratch has no file to
+  // keep a layout beside until it is saved.
+  const setDiagramLayout = useCaseStore((s) => s.setDiagramLayout);
+  const coordsAreCurrent = coordsTopology === topology;
+  useEffect(() => {
+    // A graph whose coords belong to the topology of a render ago is redrawn
+    // at once; a write asked for meanwhile waits for the graph that follows.
+    if (!baseGraph || !coordsAreCurrent) return;
+    const layout = captureLayout(baseGraph, topology, savedLayout);
+    setDiagramLayout(layout);
+    if (!persistRequestedRef.current) return;
+    persistRequestedRef.current = false;
+    if (primaryPath && hasSavedPositions(layout)) {
+      debouncedPutSidecar(primaryPath, layout, putSidecar);
+    }
+  }, [
+    baseGraph,
+    coordsAreCurrent,
+    topology,
+    savedLayout,
+    primaryPath,
+    putSidecar,
+    setDiagramLayout,
+  ]);
 
   // Cleanup pending PUT on unmount.
   useEffect(() => {
@@ -751,8 +781,9 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
   // and the layout saved beside the case. The diagram is then laid out as when
   // the case first opened, with the case's own curated layout if it has one and
   // ELK otherwise. The server has no way to delete a sidecar, so it is replaced by
-  // an empty one, which the canvas reads as none (``hasSavedPositions``). A layout
-  // placed by hand is work, so the toast offers Undo, which puts both back.
+  // one with no placement in it, which the canvas reads as none
+  // (``hasSavedPositions``); the figure settings are not placement and stay. A
+  // layout placed by hand is work, so the toast offers Undo, which puts both back.
   const resetLayout = useCallback(() => {
     const previousOverrides = useCaseStore.getState().dragOverrides;
     const previousSaved = storedSidecar;
@@ -777,7 +808,7 @@ function SldCanvasInner({ topology, primaryPath, storedSidecar, putSidecar }: In
       reported();
       return;
     }
-    putSidecar(buildSidecarLayout({}), {
+    putSidecar(buildSidecarLayout({}, { sections: { figure: previousSaved.figure } }), {
       onSuccess: reported,
       onError: (err) => {
         setDragOverrides(previousOverrides);
@@ -1084,6 +1115,7 @@ export function SldCanvas() {
         topology={topology}
         primaryPath={selection.primaryPath}
         storedSidecar={hasSavedPositions(savedSidecar) ? savedSidecar : null}
+        savedLayout={savedSidecar}
         putSidecar={putSidecar}
       />
     </ReactFlowProvider>
