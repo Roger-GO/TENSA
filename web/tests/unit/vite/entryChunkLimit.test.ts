@@ -1,7 +1,14 @@
 /**
  * The build's entry chunk limit: an entry chunk over it is a build error, so
  * the first load cannot grow past it without someone deciding that it should.
+ *
+ * Runs in Node, not in jsdom: the last test resolves `vite.config.ts`, and
+ * the esbuild Vite reads it with refuses jsdom's `TextEncoder`.
+ *
+ * @vitest-environment node
  */
+import path from 'node:path';
+import { resolveConfig, type Plugin } from 'vite';
 import { describe, expect, it } from 'vitest';
 import {
   ENTRY_CHUNK_LIMIT_KB,
@@ -61,28 +68,51 @@ describe('entryChunkProblems', () => {
   });
 });
 
+/** Hands `bundle` to the plugin as Rollup does once the files are written. */
+function writeBundle(plugin: Plugin, bundle: Record<string, BundlePart>, errors: string[] = []) {
+  const hook = plugin.writeBundle as unknown as (
+    this: { error: (message: string) => never },
+    options: unknown,
+    bundle: Record<string, BundlePart>,
+  ) => void;
+  const context = {
+    error: (message: string): never => {
+      errors.push(message);
+      throw new Error(message);
+    },
+  };
+  hook.call(context, {}, bundle);
+}
+
 describe('entryChunkLimit', () => {
   it('stops the build with the problems it found, and lets a build within the limit through', () => {
     const plugin = entryChunkLimit(1);
-    const writeBundle = plugin.writeBundle as unknown as (
-      this: { error: (message: string) => never },
-      options: unknown,
-      bundle: Record<string, BundlePart>,
-    ) => void;
     const errors: string[] = [];
-    const context = {
-      error: (message: string): never => {
-        errors.push(message);
-        throw new Error(message);
-      },
-    };
     expect(() =>
-      writeBundle.call(context, {}, { a: chunk('assets/index-abc.js', 1_001, true) }),
+      writeBundle(plugin, { a: chunk('assets/index-abc.js', 1_001, true) }, errors),
     ).toThrow(/over the limit of 1 kB/);
     expect(errors).toHaveLength(1);
     expect(() =>
-      writeBundle.call(context, {}, { a: chunk('assets/index-abc.js', 999, true) }),
+      writeBundle(plugin, { a: chunk('assets/index-abc.js', 999, true) }, errors),
     ).not.toThrow();
     expect(plugin.apply).toBe('build');
+  });
+});
+
+describe('vite.config.ts', () => {
+  // Everything above, and a build of today's bundle, passes with the plugin
+  // left out of the configuration, so this reads the plugins a build runs.
+  it('holds a build to the limit', async () => {
+    const configFile = path.resolve(process.cwd(), 'vite.config.ts');
+    const { plugins } = await resolveConfig({ configFile }, 'build');
+    const wired = plugins.filter((plugin) => plugin.name === entryChunkLimit().name);
+    expect(wired).toHaveLength(1);
+    const plugin = wired[0]!;
+    expect(() => writeBundle(plugin, { a: chunk('assets/index-abc.js', 500_001, true) })).toThrow(
+      /over the limit of 500 kB/,
+    );
+    expect(() =>
+      writeBundle(plugin, { a: chunk('assets/index-abc.js', 500_000, true) }),
+    ).not.toThrow();
   });
 });
