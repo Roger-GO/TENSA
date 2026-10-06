@@ -1,11 +1,13 @@
 """Unit tests for the worker-side hygiene helpers in ``tensa.core.worker``:
-the path test behind the ``sys.audit`` hook and SIGINT handling.
+the path test behind the ``sys.audit`` hook, SIGINT handling and ``faulthandler``.
 """
 
 from __future__ import annotations
 
+import faulthandler
 import os
 import signal
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -215,3 +217,71 @@ def test_ignoring_ctrl_c_off_the_main_thread_is_harmless(restore_sigint: None) -
     thread.start()
     thread.join()
     assert errors == []
+
+
+# ---- faulthandler -----------------------------------------------------------
+
+
+@pytest.fixture
+def fault_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Stand-ins for ``faulthandler``, so no test changes what the interpreter's
+    crash handler does. Starts as if none were installed."""
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(faulthandler, "is_enabled", lambda: False)
+    monkeypatch.setattr(faulthandler, "enable", lambda **kw: calls.append(kw))
+    return calls
+
+
+def test_the_worker_asks_for_the_stacks_of_every_thread(
+    fault_calls: list[dict[str, Any]],
+) -> None:
+    worker._enable_faulthandler()
+    assert fault_calls == [{"all_threads": True}]
+
+
+def test_a_handler_that_is_already_installed_is_left_alone(
+    fault_calls: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """pytest installs its own, and a test may run the worker in its process."""
+    monkeypatch.setattr(faulthandler, "is_enabled", lambda: True)
+    worker._enable_faulthandler()
+    assert fault_calls == []
+
+
+@pytest.mark.parametrize(
+    "error",
+    [RuntimeError("sys.stderr is None"), ValueError("closed"), OSError("no fileno")],
+)
+def test_a_worker_with_no_usable_stderr_runs_without_it(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    def refuse(**kwargs: Any) -> None:
+        raise error
+
+    monkeypatch.setattr(faulthandler, "is_enabled", lambda: False)
+    monkeypatch.setattr(faulthandler, "enable", refuse)
+    worker._enable_faulthandler()  # does not raise
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="os.kill cannot deliver SIGSEGV on Windows")
+def test_a_native_crash_prints_the_python_stack() -> None:
+    """A real process killed the way a crashing C extension dies: without the
+    handler the interpreter says nothing at all."""
+    code = (
+        "import os, signal\n"
+        "from tensa.core import worker\n"
+        "worker._enable_faulthandler()\n"
+        "os.kill(os.getpid(), signal.SIGSEGV)\n"
+    )
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONFAULTHANDLER"}
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert proc.returncode == -signal.SIGSEGV
+    assert "Fatal Python error: Segmentation fault" in proc.stderr
+    assert "most recent call first" in proc.stderr

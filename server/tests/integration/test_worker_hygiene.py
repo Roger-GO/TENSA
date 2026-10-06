@@ -1,6 +1,7 @@
 """Integration tests for worker hygiene against real worker processes.
 
 - A worker ignores Ctrl+C (SIGINT) and stays up and responsive.
+- A worker that dies in native code leaves the Python stack of its threads on stderr.
 - The clone scratch dir records the server (pid, pid space, start time), so a later
   server can tell it was abandoned, and closing the session removes it.
 """
@@ -88,3 +89,27 @@ async def test_the_clone_dir_records_the_server_as_its_owner(
 
     await manager.close_session(sid)
     assert not session_root.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="os.kill cannot deliver SIGSEGV on Windows")
+async def test_a_worker_that_crashes_natively_prints_its_stack(
+    manager: SessionManager, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A segfault in a C extension kills the process outright; before the worker
+    enabled ``faulthandler`` the server's log said nothing about why a session's
+    worker was gone. SIGSEGV is sent from outside, which the handler cannot tell from
+    a crash, and the worker inherits this test's stderr, which ``capfd`` reads."""
+    monkeypatch.delenv("PYTHONFAULTHANDLER", raising=False)  # the worker must enable it itself
+    sid = await manager.create_session()
+    # A round trip proves the worker is serving, so ``worker_main`` has run its setup.
+    assert await manager.invoke(sid, "list_disturbances", {}) == []
+
+    proc = manager._sessions[sid].process
+    assert proc.pid is not None
+    os.kill(proc.pid, signal.SIGSEGV)
+    proc.join(30)
+
+    assert proc.exitcode == -signal.SIGSEGV
+    err = capfd.readouterr().err
+    assert "Fatal Python error: Segmentation fault" in err
+    assert "most recent call first" in err

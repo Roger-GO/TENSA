@@ -33,6 +33,11 @@ client that falls behind is sent a ``resync`` (see
 The worker ignores SIGINT: a terminal sends Ctrl+C to every process in the
 foreground group, and the parent alone decides when workers stop.
 
+The worker enables ``faulthandler``: a crash inside a C extension (a segfault in
+the sparse solver, an abort from a BLAS thread) otherwise kills the process
+without a word, and the parent only learns that the pipe broke. With it, the
+Python stack of every thread goes to the worker's stderr, which is the server's.
+
 Wire protocol on the control Pipe (parent → worker):
 
     {"op": "load_case", "args": {"path": ..., "addfiles": [...]}, "seq": N}
@@ -57,6 +62,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import faulthandler
 import os
 import signal
 import site
@@ -165,6 +171,24 @@ def _ignore_sigint() -> None:
     # ValueError: not the main thread. OSError: the platform refuses.
     with contextlib.suppress(ValueError, OSError):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
+def _enable_faulthandler() -> None:
+    """Have a native crash print the stack of every Python thread to stderr.
+
+    Covers SIGSEGV, SIGFPE, SIGABRT, SIGBUS and SIGILL, and on Windows an access
+    violation. A handler that is already installed (pytest's, when a test runs the
+    worker in its own process, or ``PYTHONFAULTHANDLER``) is left as it is.
+
+    Best effort: with no usable stderr (a Windows ``pythonw`` process has none) there
+    is nowhere to write, and the worker runs without it.
+    """
+    if faulthandler.is_enabled():
+        return
+    # RuntimeError: ``sys.stderr`` is None. OSError and ValueError: it has no file
+    # descriptor (``io.UnsupportedOperation`` is both), or it is closed.
+    with contextlib.suppress(RuntimeError, OSError, ValueError, AttributeError):
+        faulthandler.enable(all_threads=True)
 
 
 def _warm_andes() -> None:
@@ -1670,6 +1694,7 @@ def worker_main(
 
     Returns the process exit code (0 = clean shutdown).
     """
+    _enable_faulthandler()
     _ignore_sigint()
     _set_parent_death_signal()
     _spawn_orphan_detector()
