@@ -79,10 +79,13 @@ class SaveCaseRequest(BaseModel):
             "Output format. ``xlsx`` is the ANDES-native Excel layout. "
             "``json`` is the ANDES JSON serialization. ``raw`` is "
             "PSS/E v33 emitted by the substrate's hand-rolled writer; "
-            "it covers Bus, PQ/ZIP loads, Shunt, PV/Slack/GENROU/"
-            "GENCLS generators, Line, and 2W transformers. 3W "
+            "it covers the power-flow data: Bus, PQ loads, Shunt, PV "
+            "and Slack generators, Line, and 2W transformers. 3W "
             "transformers and other PSS/E sections are emitted as "
-            "empty terminators."
+            "empty terminators. A ``.raw`` holds no dynamic data, so "
+            "the dynamic models of the case (machines, exciters, a "
+            "ZIP load) are left out: save as ``xlsx`` or ``json`` to "
+            "keep them."
         ),
     )
     overwrite: bool = Field(

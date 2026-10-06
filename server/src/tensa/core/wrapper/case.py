@@ -282,9 +282,11 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
         - ``json`` — ANDES JSON, via ``andes.io.json.write``.
         - ``raw`` — PSS/E v33, via the substrate's hand-rolled writer
           (``tensa.core.psse_writer.write_raw``). ANDES 2.0 has no
-          built-in PSS/E writer; the substrate ships one for the model
-          classes it can emit (Bus, PQ/ZIP, Shunt, PV/Slack/GENROU/
-          GENCLS, Line, 2W transformer).
+          built-in PSS/E writer; the substrate ships one for the
+          power-flow data (Bus, PQ, Shunt, PV/Slack, Line, 2W
+          transformer). A ``.raw`` holds no dynamic data, so the dynamic
+          models of the case (a ZIP on its PQ, a machine on its PV or
+          Slack) are not in it.
 
         Writing over the file the case was loaded from makes that file the new
         base of the session: it now holds the edits made since the load, so

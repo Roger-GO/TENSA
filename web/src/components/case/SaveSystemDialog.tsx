@@ -33,7 +33,9 @@ import { useWriteLayoutSidecar } from '@/lib/useSaveOpenCase';
  *   format).
  * - Format radio: xlsx (ANDES native), raw, or json. ANDES 2.0 has no PSS/E
  *   writer, so .raw comes from the substrate's own v33 writer
- *   (`server/src/tensa/core/psse_writer.py`).
+ *   (`server/src/tensa/core/psse_writer.py`). A .raw holds no dynamic data,
+ *   and the option says so: the machines and controllers of the case are
+ *   left out of it.
  * - Submit fires `useSaveCase()`. On 409 (file exists) the modal flips
  *   to an "Overwrite?" confirmation.
  */
@@ -216,7 +218,7 @@ export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDi
                   disabled={saveMutation.isPending}
                 />
                 <span>
-                  <strong>raw</strong> — PSS/E v33 (round-trips through ANDES's reader)
+                  <strong>raw</strong> — PSS/E v33, the power-flow data only (no dynamic models)
                 </span>
               </label>
               <label className="flex items-center gap-2 text-sm">

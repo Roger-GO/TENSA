@@ -5,12 +5,22 @@ module fills the gap for the v0.1.x save flow: when the user picks
 ``raw`` as the export format, the substrate calls ``write_raw(ss,
 path)`` instead of ANDES's xlsx/json writers.
 
-Coverage: the model classes the substrate's ``_PARAMS_BY_MODEL`` table
-emits — Bus, PQ/ZIP→Load, Shunt→Fixed Shunt, PV/Slack/GENROU/GENCLS→
-Generator, Line→Branch, Line+tap→Transformer (2W). 3W transformers,
-DC lines, FACTS, switched shunts, and other PSS/E sections are emitted
-as empty terminators (``0 / END OF X DATA, BEGIN Y DATA``) so the file
-round-trips through ANDES's reader cleanly.
+Coverage: the power-flow data of the case — Bus, PQ→Load, Shunt→Fixed
+Shunt, PV/Slack→Generator, Line→Branch, Line+tap→Transformer (2W). 3W
+transformers, DC lines, FACTS, switched shunts, and other PSS/E sections
+are emitted as empty terminators (``0 / END OF X DATA, BEGIN Y DATA``) so
+the file round-trips through ANDES's reader cleanly.
+
+A ``.raw`` file holds no dynamic data, and a dynamic model is not a device
+of its own: a ``ZIP`` load stands on a ``PQ`` (its ``pq``) and a ``GENROU``
+or ``GENCLS`` machine on a ``PV`` or ``Slack`` (its ``gen``), which it
+replaces when a time-domain run starts. None of them is written. Writing
+one as a load or a generator beside the device it stands on gave the bus
+two of them: a second generator with no output, on which the power flow of
+the file read back did not converge, and, once a time-domain run had
+filled the dynamic model's ``p0`` and ``q0`` from the solved power flow,
+the load or the generation twice. The dynamic data belongs in a ``.dyr``
+file, or the case is saved as ``xlsx`` or ``json``, which hold both.
 
 Sign / unit conventions match PSS/E v33:
 
@@ -125,18 +135,15 @@ def _bus_block(ss: System) -> list[str]:
     v = _safe_list(bus, "v")
     a = _safe_list(bus, "a")
 
-    # Determine bus type by checking which generator buses exist.
+    # Determine bus type by checking which generator buses exist. The static
+    # generators say it all: a machine (GENROU, GENCLS) is on the bus of the
+    # PV or Slack it stands on.
     pv_buses = set()
     slack_buses = set()
     pv_model = getattr(ss, "PV", None)
     if pv_model is not None:
         for b in _safe_list(pv_model, "bus"):
             pv_buses.add(str(b))
-    for gen_class in ("GENROU", "GENCLS"):
-        m = getattr(ss, gen_class, None)
-        if m is not None:
-            for b in _safe_list(m, "bus"):
-                pv_buses.add(str(b))
     slack_model = getattr(ss, "Slack", None)
     if slack_model is not None:
         for b in _safe_list(slack_model, "bus"):
@@ -198,8 +205,9 @@ def _load_block(ss: System) -> list[str]:
                 f"{pl:.5f}, {ql:.5f}, 0.0, 0.0, 0.0, 0.0, 1, 1, 0"
             )
 
+    # The static loads only. A ZIP (or another dynamic load) is the PQ it
+    # names seen by a time-domain run, not a load beside it.
     _emit_load("PQ", "p0", "q0")
-    _emit_load("ZIP", "p0", "q0")
     lines.append("0 / END OF LOAD DATA, BEGIN FIXED SHUNT DATA")
     return lines
 
@@ -236,6 +244,9 @@ def _generator_block(ss: System) -> list[str]:
     lines: list[str] = []
     mva_base = _f(getattr(ss.config, "mva", 100.0), 100.0)
     counter_per_bus: dict[int, int] = {}
+    # ``p`` and ``q`` hold a generator's output only once a power flow has
+    # solved them; before that they are zero.
+    solved = bool(getattr(getattr(ss, "PFlow", None), "converged", False))
 
     def _emit_gen(model_name: str) -> None:
         m = getattr(ss, model_name, None)
@@ -246,10 +257,11 @@ def _generator_block(ss: System) -> list[str]:
         Sn = _safe_list(m, "Sn")
         v0 = _safe_list(m, "v0")
         p0 = _safe_list(m, "p0")
-        # Q values: ANDES has q0 on Slack but not PV; PV's Q is computed.
-        # Use the post-PF q if available, else 0.
-        qs = _safe_list(m, "q") or _safe_list(m, "q0")
-        ps = _safe_list(m, "p") or _safe_list(m, "p0") or p0
+        q0 = _safe_list(m, "q0")
+        us = _safe_list(m, "u")
+        # The solved output where there is one, else the case's own values.
+        qs = (_safe_list(m, "q") if solved else []) or q0
+        ps = (_safe_list(m, "p") if solved else []) or p0
         pmax = _safe_list(m, "pmax")
         pmin = _safe_list(m, "pmin")
         qmax = _safe_list(m, "qmax")
@@ -263,8 +275,14 @@ def _generator_block(ss: System) -> list[str]:
             gen_id = f"{counter_per_bus[i_int]:>2}"
             mbase = _f(Sn[i] if i < len(Sn) else 100.0, 100.0)
             vs = _f(v0[i] if i < len(v0) else 1.0, 1.0)
-            pg = _f(ps[i] if i < len(ps) else 0.0) * mva_base
-            qg = _f(qs[i] if i < len(qs) else 0.0) * mva_base
+            # A generator a machine has taken over is switched off by the
+            # time-domain run (``u`` is 0 and its ``p`` and ``q`` with it), so
+            # its record takes the case's own values too.
+            off = _f(us[i] if i < len(us) else 1.0, 1.0) == 0.0
+            p_pu = p0[i] if off and i < len(p0) else (ps[i] if i < len(ps) else 0.0)
+            q_pu = q0[i] if off and i < len(q0) else (qs[i] if i < len(qs) else 0.0)
+            pg = _f(p_pu) * mva_base
+            qg = _f(q_pu) * mva_base
             qt = _f(qmax[i] if i < len(qmax) else 9999.0, 9999.0) * mva_base
             qb = _f(qmin[i] if i < len(qmin) else -9999.0, -9999.0) * mva_base
             pt = _f(pmax[i] if i < len(pmax) else 9999.0, 9999.0) * mva_base
@@ -278,10 +296,10 @@ def _generator_block(ss: System) -> list[str]:
                 f"1, 1.0, 0, 1.0, 0, 1.0, 0, 1.0, 0, 1.0"
             )
 
+    # The static generators only: a GENROU or a GENCLS is the PV or Slack it
+    # names seen by a time-domain run, not a generator beside it.
     _emit_gen("PV")
     _emit_gen("Slack")
-    _emit_gen("GENROU")
-    _emit_gen("GENCLS")
     lines.append("0 / END OF GENERATOR DATA, BEGIN BRANCH DATA")
     return lines
 

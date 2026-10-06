@@ -95,7 +95,7 @@ A parameter sweep is started from **Run** and is shown with its progress.
 
 ## Saving and exporting
 
-- **Save system as** writes the case, with the edits you made, to a file in the workspace.
+- **Save system as** writes the case, with the edits you made, to a file in the workspace. An `.xlsx` or a `.json` file holds the whole case. A `.raw` file holds the power-flow data only, as the format does: the machines, the controllers and the other dynamic models are left out of it.
 - A **snapshot** stores the operating point and the disturbances, so that you can restore them later.
 - A **bundle** is a `.zip` with the case file, the disturbances, the simulation settings and the results as CSV, which reproduces a study on another machine. **Import bundle** in the Workspace menu reads one back.
 - The **HTML report** is one self-contained file with the power flow tables, the limits it breaks, the comparison of two power flows, a chart of each plotted quantity, the eigenvalues and ANDES's own reports. It opens in any browser and prints.

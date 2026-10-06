@@ -587,6 +587,45 @@ async def test_save_raw_format_round_trips_through_andes_reader(
 
 
 @pytest.mark.integration
+async def test_save_raw_of_a_case_with_machines_after_a_run_is_the_same_power_flow_case(
+    client: httpx.AsyncClient,
+    tmp_path: Path,
+) -> None:
+    """A ``.raw`` holds the power-flow data. The machines the ``.dyr`` file brought stand
+    on the static generators and are not generators beside them: written as such, every
+    generator bus had two, the load a time-domain run had touched was there twice, and
+    the power flow of the saved file did not converge."""
+    sid = await _create_session(client)
+    await _load_ieee14_with_machines(client, sid)
+    pflow = (await client.post(f"/api/sessions/{sid}/pflow", json={})).json()
+    assert pflow["converged"] is True
+    tds = await client.post(f"/api/sessions/{sid}/tds", json={"tf": 0.2})
+    assert tds.status_code == 200, tds.text
+    resp = await client.post(
+        f"/api/sessions/{sid}/save",
+        json={"filename": "after-run.raw", "format": "raw"},
+    )
+    assert resp.status_code == 201, resp.text
+
+    import andes
+
+    source = andes.load(
+        str(tmp_path / "ws" / "ieee14.raw"), setup=False, no_output=True, default_config=True
+    )
+    saved = andes.load(
+        str(tmp_path / "ws" / "after-run.raw"), setup=True, no_output=True, default_config=True
+    )
+    assert (saved.PV.n, saved.Slack.n, saved.PQ.n) == (source.PV.n, source.Slack.n, source.PQ.n)
+    assert float(sum(saved.PQ.p0.v)) == pytest.approx(float(sum(source.PQ.p0.v)), abs=1e-6)
+    assert float(sum(saved.PV.p0.v)) == pytest.approx(float(sum(source.PV.p0.v)), abs=1e-6)
+    saved.PFlow.run()
+    assert saved.PFlow.converged
+    # The same solution the session's own power flow found.
+    for idx, voltage in zip(saved.Bus.idx.v, saved.Bus.v.v, strict=True):
+        assert float(voltage) == pytest.approx(pflow["bus_voltages"][str(idx)], abs=1e-3), idx
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("filename", "fmt"),
     [

@@ -147,6 +147,15 @@ describe('<SaveSystemDialog />', () => {
     expect(screen.getByText(/my-system\.raw/)).toBeInTheDocument();
   });
 
+  it('says that a raw file holds the power-flow data and no dynamic models', async () => {
+    const user = userEvent.setup();
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    expect(
+      screen.getByRole('radio', { name: /raw.*power-flow data only \(no dynamic models\)/i }),
+    ).toBeInTheDocument();
+  });
+
   it('happy path: submitting posts to /sessions/{id}/save with the right body', async () => {
     const user = userEvent.setup();
     render(withQueryClient(<Owner />));
