@@ -115,7 +115,8 @@ def _stored_arrays(
     """The states and the algebraic variables ANDES stored for the step at
     ``at``, or ``None`` when it did not keep that step whole: nothing is stored
     (``save_every``), only a selection is (an ``Output`` device), or the storage
-    has been written out (``max_store``)."""
+    has been written out and emptied (``limit_store``). None of the three is
+    ANDES's default."""
     dae = system.dae
     series = getattr(dae, "ts", None)
     found = []

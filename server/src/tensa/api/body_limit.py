@@ -11,8 +11,9 @@ is counted as it arrives and refused the moment it passes the cap.
 
 The cap is in bytes because that is all there is to go by before parsing.
 :func:`json_number_bytes` turns a route's own cap on how many numbers it takes
-into one: no body within the first can be over the second, so the byte cap
-only ever refuses what the route would have refused after reading it.
+into one with room to spare: a body within the first, written the way a client
+writes JSON, is not over the second, so the byte cap refuses what the route
+would have refused after reading it.
 """
 
 from __future__ import annotations
