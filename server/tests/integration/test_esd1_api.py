@@ -83,18 +83,25 @@ async def _add(ac: httpx.AsyncClient, sid: str, model: str, params: dict[str, An
     return await ac.post(f"/api/sessions/{sid}/elements", json={"model": model, "params": params})
 
 
+# What ``_bus_voltage`` found: the case file is the same for every test, and
+# finding it takes a session of its own (a worker, a load and a power flow).
+_BUS_VOLTAGE: list[float] = []
+
+
 async def _bus_voltage(ac: httpx.AsyncClient) -> float:
     """The voltage the battery's bus has before anything is added to it.
 
     A static generator that holds this voltage asks for next to no reactive
     power, so the battery that takes it over starts within its current limit.
+    Solved once, by the first test that needs it.
     """
-    sid = await _session(ac, KUNDUR)
-    pf = await ac.post(f"/api/sessions/{sid}/pflow", json={})
-    assert pf.status_code == 200, pf.text
-    voltage = float(pf.json()["bus_voltages"][str(BUS)])
-    await ac.delete(f"/api/sessions/{sid}")
-    return voltage
+    if not _BUS_VOLTAGE:
+        sid = await _session(ac, KUNDUR)
+        pf = await ac.post(f"/api/sessions/{sid}/pflow", json={})
+        assert pf.status_code == 200, pf.text
+        _BUS_VOLTAGE.append(float(pf.json()["bus_voltages"][str(BUS)]))
+        await ac.delete(f"/api/sessions/{sid}")
+    return _BUS_VOLTAGE[0]
 
 
 async def _kundur_with_battery(
