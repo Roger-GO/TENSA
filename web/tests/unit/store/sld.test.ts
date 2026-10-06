@@ -20,7 +20,7 @@ import {
 
 beforeEach(() => {
   // Reset the store to initial defaults before each test.
-  useSldStore.setState({ selectedNodeId: null });
+  useSldStore.setState({ selectedNodeId: null, selectedOnDiagram: false });
 });
 
 afterEach(() => {
@@ -47,6 +47,28 @@ describe('useSldStore — selectedNodeId', () => {
     useSldStore.getState().setSelectedNodeId('generator-5');
     useSldStore.getState().clearSelectedNodeId();
     expect(useSldStore.getState().selectedNodeId).toBeNull();
+  });
+
+  it('takes a pick for one made away from the diagram unless told otherwise', () => {
+    useSldStore.getState().setSelectedNodeId('generator-5');
+    expect(useSldStore.getState().selectedOnDiagram).toBe(false);
+  });
+
+  it('records a pick made on the diagram, until the next pick or a clear', () => {
+    useSldStore.getState().setSelectedNodeId('generator-5', 'diagram');
+    expect(useSldStore.getState().selectedOnDiagram).toBe(true);
+
+    // The same node picked again from a table row is a request to be shown it.
+    useSldStore.getState().setSelectedNodeId('generator-5');
+    expect(useSldStore.getState().selectedOnDiagram).toBe(false);
+
+    useSldStore.getState().setSelectedNodeId('generator-5', 'diagram');
+    useSldStore.getState().clearSelectedNodeId();
+    expect(useSldStore.getState().selectedOnDiagram).toBe(false);
+
+    useSldStore.getState().setSelectedNodeId('generator-5', 'diagram');
+    useSldStore.getState().setSelectedNodeId(null, 'diagram');
+    expect(useSldStore.getState().selectedOnDiagram).toBe(false);
   });
 });
 

@@ -42,14 +42,25 @@ export interface SldState {
    * Read by `BusNode` (visual highlight) and `SldCanvas` (pan effect).
    */
   selectedNodeId: string | null;
-  setSelectedNodeId: (id: string | null) => void;
+  /**
+   * True when the node was picked on the diagram itself: a click on it, or an
+   * item of its right-click menu. The canvas then leaves the zoom alone, since
+   * the user is pointing at what they see. A pick made anywhere else (a table
+   * row, the search, the inspector) is a request to be shown the node, and
+   * the canvas zooms in on it when the diagram is too small to read.
+   */
+  selectedOnDiagram: boolean;
+  /** `from: 'diagram'` marks a pick made on the diagram (`selectedOnDiagram`). */
+  setSelectedNodeId: (id: string | null, from?: 'diagram') => void;
   clearSelectedNodeId: () => void;
 }
 
 export const useSldStore = create<SldState>((set) => ({
   selectedNodeId: null,
-  setSelectedNodeId: (id: string | null) => set({ selectedNodeId: id }),
-  clearSelectedNodeId: () => set({ selectedNodeId: null }),
+  selectedOnDiagram: false,
+  setSelectedNodeId: (id: string | null, from?: 'diagram') =>
+    set({ selectedNodeId: id, selectedOnDiagram: id !== null && from === 'diagram' }),
+  clearSelectedNodeId: () => set({ selectedNodeId: null, selectedOnDiagram: false }),
 }));
 
 // ---------------------------------------------------------------------------

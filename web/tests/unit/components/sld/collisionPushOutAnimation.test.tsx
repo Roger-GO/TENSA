@@ -66,6 +66,10 @@ vi.mock('@xyflow/react', async () => {
     BaseEdge: () => null,
     Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
     SelectionMode: { Partial: 'partial', Full: 'full' },
+    // The line above the diagram reads the zoom to say when the diagram is
+    // too small to read (`SldCanvasHint`). 1x: it can be read.
+    useStore: (selector: (s: { transform: [number, number, number] }) => unknown) =>
+      selector({ transform: [0, 0, 1] }),
     // Unit 11 — `useReactFlow` is consumed by SldCanvas and the search
     // popover. Animation tests don't exercise it, but the hook must
     // resolve to something callable so the canvas mounts.

@@ -28,6 +28,7 @@ let mockNodes: Array<{
   type: string;
   data: { idx: string; name: string };
   position: { x: number; y: number };
+  measured?: { width: number; height: number };
 }> = [];
 const mockSetCenter = vi.fn();
 const mockGetZoom = vi.fn(() => 1.5);
@@ -167,6 +168,27 @@ describe('SldNodeSearch — happy path (14 buses)', () => {
     expect(mockSetCenter).toHaveBeenCalledWith(300, 150, expect.objectContaining({ zoom: 1.5 }));
     expect(useSldStore.getState().selectedNodeId).toBe('3');
     expect(screen.queryByTestId('sld-node-search-input')).not.toBeInTheDocument();
+  });
+
+  it('centres on the middle of a node React Flow has measured', async () => {
+    mockNodes = makeBusNodes(3).map((n) => ({ ...n, measured: { width: 92, height: 30 } }));
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    await user.click(screen.getByTestId('sld-node-search-row-2'));
+    expect(mockSetCenter).toHaveBeenCalledWith(246, 115, expect.objectContaining({ zoom: 1.5 }));
+  });
+
+  it('shows the node at full size when the diagram is too small to read', async () => {
+    // A tall diagram fitted to a short pane: a bus is a few pixels long.
+    mockGetZoom.mockReturnValue(0.19);
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    await user.click(screen.getByTestId('sld-node-search-row-3'));
+    expect(mockSetCenter).toHaveBeenCalledWith(300, 150, expect.objectContaining({ zoom: 1 }));
+    // Asked for away from the diagram, so the canvas zooms in on it too.
+    expect(useSldStore.getState().selectedOnDiagram).toBe(false);
   });
 });
 

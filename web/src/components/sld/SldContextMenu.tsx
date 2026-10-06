@@ -97,7 +97,7 @@ function titleOf(target: SldContextTarget): string {
 /** Show `element` in the Inspector, opening the Inspector if it is folded away. */
 function inspect(element: SelectedElement, nodeId: string | null): void {
   useCaseStore.getState().setSelectedElement(element);
-  if (nodeId !== null) useSldStore.getState().setSelectedNodeId(nodeId);
+  if (nodeId !== null) useSldStore.getState().setSelectedNodeId(nodeId, 'diagram');
   useLayoutStore.getState().setRightInspectorCollapsed(false);
 }
 
@@ -254,7 +254,7 @@ export function SldContextMenuBody({
   const moveNodeRef = useRef<string | null>(null);
   const move = (element: SelectedElement, nodeId: string) => {
     useCaseStore.getState().setSelectedElement(element);
-    useSldStore.getState().setSelectedNodeId(nodeId);
+    useSldStore.getState().setSelectedNodeId(nodeId, 'diagram');
     moveNodeRef.current = nodeId;
   };
 

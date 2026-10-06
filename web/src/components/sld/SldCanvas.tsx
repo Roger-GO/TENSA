@@ -25,6 +25,7 @@ import type {
 import '@xyflow/react/dist/style.css';
 
 import { useCaseStore } from '@/store/case';
+import type { SelectedElement } from '@/store/case';
 import { subKindForControllerClass } from '@/lib/controllers';
 import type { ControllerSubKind } from '@/lib/controllers';
 import { useSessionStore } from '@/store/session';
@@ -59,6 +60,7 @@ import { ControllerNode } from './nodes/ControllerNode';
 import { TopologyEdge } from './edges/TopologyEdge';
 import { TransformerEdge } from './edges/TransformerEdge';
 import { StubEdge } from './edges/StubEdge';
+import { SldCanvasHint } from './SldCanvasHint';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
 import { SldEmptySystem } from './SldEmptySystem';
 import { SldVoltageLegend } from './SldVoltageLegend';
@@ -90,6 +92,7 @@ import {
   type ConnectorStyle,
   type NodeSize,
 } from './connections';
+import { FULL_ZOOM, locateZoom } from './zoom';
 import { cn } from '@/lib/cn';
 
 const NODE_TYPES: NodeTypes = {
@@ -140,13 +143,6 @@ const ARIA_LABELS_UNLOCKED = {
 const ARIA_LABELS_LOCKED = {
   'controls.interactive.ariaLabel': 'Unlock the diagram (dragging and selecting are off)',
 };
-
-/**
- * What the diagram offers that nothing on it shows: the drag, the arrow keys and
- * the right-click menu, and that an arrangement is kept.
- */
-const INTERACTION_HINT =
-  'Drag a bus or device to move it, or click it and press the arrow keys. Your layout is saved with the case. Right-click a bus, line or the background for more actions.';
 
 /**
  * Per-kind color hint for the React Flow MiniMap. Uses semantic CSS
@@ -692,15 +688,16 @@ function SldCanvasInner({
         const modelClass = cd.kind ?? '';
         const subKind = cd.subKind ?? subKindForControllerClass(modelClass);
         setSelectedElement({ kind: 'controller', subKind, modelClass, idx: String(idx) });
-        setSelectedNodeId(node.id);
+        setSelectedNodeId(node.id, 'diagram');
         return;
       }
       const kind = rawKind as 'bus' | 'line' | 'generator' | 'load' | 'shunt';
       setSelectedElement({ kind, idx: String(idx) });
       // Unit 11: also write the SLD store's selectedNodeId so the
       // canvas + bus-node visual highlight follow the click. The
-      // inspector-row → SLD-pan path goes through the same slot.
-      setSelectedNodeId(node.id);
+      // inspector-row → SLD-pan path goes through the same slot, without
+      // the `'diagram'` that says the user is already looking at the node.
+      setSelectedNodeId(node.id, 'diagram');
     },
     [setSelectedElement, setSelectedNodeId],
   );
@@ -750,11 +747,7 @@ function SldCanvasInner({
         //     11). Either one alone is enough; we union them so the
         //     visual stays consistent regardless of which channel
         //     wrote.
-        const selected =
-          (selectedElement !== null &&
-            selectedElement.idx === n.id &&
-            selectedElement.kind === (n.type ?? 'bus')) ||
-          selectedNodeId === n.id;
+        const selected = isSelectedNode(n, selectedElement, selectedNodeId);
         // Greying only applies to bus nodes — non-bus device nodes are
         // children of buses for the purposes of energisation, but
         // their own grey-out cascade is handled by the connectivity
@@ -847,7 +840,12 @@ function SldCanvasInner({
 
   // Pan-on-selection effect (Unit 11). When `selectedNodeId` flips,
   // centre the React Flow viewport on the matching node — keeping the
-  // current zoom level so users don't lose context. The effect runs
+  // current zoom level so users don't lose context. The one exception
+  // is a node picked away from the diagram (a table row, the search)
+  // while the diagram is too small to read: the pick asks where the
+  // node is, and a highlight a few pixels across does not answer that,
+  // so the view goes to full size as well (`locateZoom`). A click on
+  // the diagram itself keeps the zoom whatever it is. The effect runs
   // for every change including the canvas's own click writes, but
   // panning to a node that's already centred is a no-op so the cost
   // is negligible. Skipped when the selected id doesn't match a
@@ -857,8 +855,9 @@ function SldCanvasInner({
     const node = nodes.find((n) => n.id === selectedNodeId);
     if (!node) return;
     const currentZoom = rf.getZoom();
-    rf.setCenter(node.position.x, node.position.y, {
-      zoom: currentZoom,
+    const centre = centreOf(node, sizes.get(node.id));
+    rf.setCenter(centre.x, centre.y, {
+      zoom: useSldStore.getState().selectedOnDiagram ? currentZoom : locateZoom(currentZoom),
       duration: 250,
     });
     // We intentionally depend on `selectedNodeId` only — re-running on
@@ -924,6 +923,31 @@ function SldCanvasInner({
   const fitView = useCallback(() => {
     void rf.fitView({ duration: 250 });
   }, [rf]);
+
+  // The button above a diagram that is too small to read (`SldCanvasHint`):
+  // full size, on the selected bus or device when there is one, and about
+  // the middle of the view otherwise.
+  const selectedName = useMemo(() => {
+    const node = baseGraph?.nodes.find((n) => isSelectedNode(n, selectedElement, selectedNodeId));
+    if (!node) return null;
+    const data = node.data as { name?: string; idx?: string };
+    return data.name || data.idx || node.id;
+  }, [baseGraph, selectedElement, selectedNodeId]);
+  const zoomToFullSize = useCallback(() => {
+    const node = nodesRef.current.find((n) =>
+      isSelectedNode(
+        n,
+        useCaseStore.getState().selectedElement,
+        useSldStore.getState().selectedNodeId,
+      ),
+    );
+    if (!node) {
+      void rf.zoomTo(FULL_ZOOM, { duration: 250 });
+      return;
+    }
+    const centre = centreOf(node, sizes.get(node.id));
+    void rf.setCenter(centre.x, centre.y, { zoom: FULL_ZOOM, duration: 250 });
+  }, [rf, sizes]);
 
   // Forget where things were put: the drags of this visit (``dragOverrides``)
   // and the layout saved beside the case. The diagram is then laid out as when
@@ -1070,26 +1094,7 @@ function SldCanvasInner({
   return (
     <div className="flex h-full w-full flex-col" data-testid="sld-canvas">
       <div className="flex items-center gap-2 px-2 py-1">
-        {/* Two lines at most, which is the height the buttons beside it give
-            the row anyway; the title has the whole text where it is cut. */}
-        {locked ? (
-          <p
-            role="status"
-            data-testid="sld-canvas-locked"
-            className="text-foreground line-clamp-2 min-w-0 flex-1 text-xs"
-          >
-            <span className="font-semibold">The diagram is locked.</span> Nothing can be dragged or
-            selected until you press the padlock button at the bottom left of the diagram again.
-          </p>
-        ) : (
-          <p
-            data-testid="sld-canvas-hint"
-            title={INTERACTION_HINT}
-            className="text-muted-foreground line-clamp-2 min-w-0 flex-1 text-xs"
-          >
-            {INTERACTION_HINT}
-          </p>
-        )}
+        <SldCanvasHint locked={locked} selectedName={selectedName} onZoomIn={zoomToFullSize} />
         <ConnectivityRecomputeButton />
         <ExportMenu formats={['png']} panel="sld" caseName={caseName} onExportPng={onExportPng} />
       </div>
@@ -1256,6 +1261,32 @@ function ConnectivityRecomputeButton() {
 }
 
 const NO_SIZES: ReadonlyMap<string, NodeSize> = new Map();
+
+/**
+ * Whether `node` is the one that is selected: the element the inspector shows
+ * (`element`, which names a bus by its node id), or the node the diagram's own
+ * selection holds (`nodeId`: a click, the search, a table row).
+ */
+function isSelectedNode(
+  node: Node,
+  element: SelectedElement | null,
+  nodeId: string | null,
+): boolean {
+  return (
+    (element !== null && element.idx === node.id && element.kind === (node.type ?? 'bus')) ||
+    nodeId === node.id
+  );
+}
+
+/**
+ * The middle of `node`'s box, which is what the view is centred on: its
+ * measured size when React Flow has reported one, its size hint until then.
+ */
+function centreOf(node: Node, size: NodeSize | undefined): { x: number; y: number } {
+  const width = size?.width ?? node.initialWidth ?? 0;
+  const height = size?.height ?? node.initialHeight ?? 0;
+  return { x: node.position.x + width / 2, y: node.position.y + height / 2 };
+}
 
 /** An edge as the canvas last handed it to React Flow, and what it was made from. */
 interface RoutedEdgeEntry {

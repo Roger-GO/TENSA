@@ -1,0 +1,50 @@
+/**
+ * When the diagram is too small to read, and what it is zoomed to then.
+ *
+ * A diagram opens fitted to its pane, whole. In a short pane (a small
+ * window, or a tall bottom drawer) that fit can be a fifth of full size: a
+ * bus is a dash, a device a dot, and a connector cannot be followed. The
+ * names are 9 and 10 px text and a device's symbol is 24 px, so under
+ * `LEGIBLE_ZOOM` a name is under 4 px on screen and a symbol under 10, and
+ * the diagram counts as too small to read. The canvas says so above the
+ * diagram and offers a button that zooms in (`SldCanvasHint`), and asking
+ * to be shown an element (a table row, the search) zooms in on it as well
+ * as centring it (`locateZoom`).
+ *
+ * The line is drawn low on purpose. Between it and full size the names are
+ * small but the symbols can be told apart and a drag can be aimed, which is
+ * how a case of a few dozen buses is looked at whole, and a pick in a table
+ * there should not take that view away.
+ */
+import { useStore } from '@xyflow/react';
+
+/** Zoom factor under which the names on the diagram are too small to read. */
+export const LEGIBLE_ZOOM = 0.4;
+
+/** Full size: the zoom the symbols and their names are drawn for. */
+export const FULL_ZOOM = 1;
+
+/** True when a diagram at `zoom` is too small to read. */
+export function isTooSmallToRead(zoom: number): boolean {
+  return zoom < LEGIBLE_ZOOM;
+}
+
+/**
+ * The zoom to show an element at when the user asks where it is: the zoom
+ * the diagram has, unless that is too small to read, in which case full size.
+ */
+export function locateZoom(zoom: number): number {
+  return isTooSmallToRead(zoom) ? FULL_ZOOM : zoom;
+}
+
+/**
+ * The zoom of the diagram in percent while it is too small to read, and
+ * `null` otherwise. One value for the selector, so a reader re-renders when
+ * the percentage it shows changes and not on every frame of a pan or zoom.
+ */
+export function useTooSmallZoomPercent(): number | null {
+  return useStore((s) => {
+    const zoom = s.transform[2];
+    return isTooSmallToRead(zoom) ? Math.round(zoom * 100) : null;
+  });
+}

@@ -107,7 +107,7 @@ beforeEach(() => {
   useSessionStore.setState({ sessionId: parseSessionId('s') });
   useCaseStore.setState({ selectedElement: null, topology: TOPOLOGY });
   useCaseStore.getState().closeAddPanel();
-  useSldStore.setState({ selectedNodeId: null });
+  useSldStore.setState({ selectedNodeId: null, selectedOnDiagram: false });
   useDisturbanceStore.getState().clearDisturbances();
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
   usePlotStore.getState().clearAll();
@@ -144,6 +144,8 @@ describe('menu for a bus', () => {
     await userEvent.click(screen.getByTestId('sld-context-inspect'));
     expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'bus', idx: '1' });
     expect(useSldStore.getState().selectedNodeId).toBe('1');
+    // Picked on the diagram, where the user is looking at it: the zoom stays.
+    expect(useSldStore.getState().selectedOnDiagram).toBe(true);
     expect(useLayoutStore.getState().rightInspectorCollapsed).toBe(false);
   });
 
@@ -216,6 +218,7 @@ describe('Move with arrow keys', () => {
     // Selected, which is what lets React Flow's arrow keys move the node.
     expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'bus', idx: '1' });
     expect(useSldStore.getState().selectedNodeId).toBe('1');
+    expect(useSldStore.getState().selectedOnDiagram).toBe(true);
     // The keys go to the node that has the focus.
     await waitFor(() => expect(screen.getByTestId('node-1')).toHaveFocus());
     expect(info).toHaveBeenCalledWith(

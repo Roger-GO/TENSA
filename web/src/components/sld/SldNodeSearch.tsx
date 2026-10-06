@@ -11,8 +11,10 @@
  *
  * Once open, the user types a substring; the list narrows to matching
  * `idx` or `name` (case-insensitive). Selecting a row pans the React
- * Flow viewport to centre that node (no zoom change) and writes the
- * node's id to the SLD store so the bus-node visual highlight follows.
+ * Flow viewport to centre that node and writes the node's id to the SLD
+ * store so the bus-node visual highlight follows. The zoom stays as it
+ * is, unless the diagram is too small to read, in which case the node
+ * is shown at full size (`locateZoom`).
  *
  * The popover does NOT scroll the inspector or write to
  * `case.selectedElement`. The inspector follows the node-click event
@@ -35,6 +37,7 @@ import { useSldStore, subscribeOpenSldSearch } from '@/store/sld';
 import { SHORTCUTS } from '@/lib/shortcuts';
 import { withShortcut } from '@/lib/shortcutFormatter';
 import { cn } from '@/lib/cn';
+import { locateZoom } from './zoom';
 
 /** Per-row payload surfaced in the list. Mirrors React Flow node shape. */
 export interface SldSearchEntry {
@@ -46,6 +49,7 @@ export interface SldSearchEntry {
   idx: string;
   /** Node type (`bus`, `generator`, `load`, `shunt`, `line`). */
   type: string;
+  /** The middle of the node's box, which is what the view is centred on. */
   x: number;
   y: number;
 }
@@ -97,8 +101,8 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
         idx: String(idx),
         name,
         type: n.type ?? 'bus',
-        x: n.position.x,
-        y: n.position.y,
+        x: n.position.x + (n.measured?.width ?? 0) / 2,
+        y: n.position.y + (n.measured?.height ?? 0) / 2,
       });
     }
     // Stable display order: buses first, then by idx ascending. The
@@ -120,9 +124,12 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
       // Centre the viewport on the node WITHOUT changing the zoom — per
       // the plan's spec ("pans + (no-zoom) centres that node"). React
       // Flow's `setCenter` lets us pin the zoom by reading the current
-      // value first; passing `zoom: undefined` would default to 1.
+      // value first; passing `zoom: undefined` would default to 1. A
+      // diagram too small to read is the exception: the node searched
+      // for is shown at full size, as the canvas shows any node picked
+      // away from the diagram.
       const currentZoom = rf.getZoom();
-      rf.setCenter(entry.x, entry.y, { zoom: currentZoom, duration: 250 });
+      rf.setCenter(entry.x, entry.y, { zoom: locateZoom(currentZoom), duration: 250 });
       setSelectedNodeId(entry.id);
       setOpen(false);
       setQuery('');
