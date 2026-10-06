@@ -4,10 +4,11 @@
  *   open WSCC 9, Kundur and IEEE 14, drawn in their automatic layout -> each
  *   device connector leaves from the middle of a face of its device and
  *   lands on a tap of its bus's bar without running through another symbol,
- *   each line and transformer runs at right angles from a tap to a tap, and
- *   every tap has a dot that stands clear of the next -> ask for right
- *   angles on IEEE 14, where more devices stand in a row than its bars are
- *   long -> still no connector runs through a symbol -> drag a load round
+ *   each line and transformer runs at right angles from a tap to a tap,
+ *   clear of every bar but its own two and of every generator, load and
+ *   shunt, and every tap has a dot that stands clear of the next -> ask for
+ *   right angles on IEEE 14, where more devices stand in a row than its
+ *   bars are long -> still nothing runs through a symbol -> drag a load round
  *   its bus -> the connector follows while the pointer is still down -> ask
  *   for right angles from the right-click menu -> the connector turns once
  *   -> reload the page -> the placement and the style are still there
@@ -137,6 +138,29 @@ const TAP_SPACING = 14;
 /** The kinds of node a connector must not run through: the symbols, and the controller badges. */
 const SYMBOLS = new Set(['generator', 'load', 'shunt', 'controller']);
 
+/** The kinds of node the automatic placement keeps clear of the branches: the devices. */
+const DEVICES = new Set(['generator', 'load', 'shunt']);
+
+/**
+ * How near a line or transformer may come to a bar it is not connected to,
+ * or to a device, before it reads as running into it. The diagram keeps 8
+ * (`SLIDE_CLEARANCE` in `connections.ts`, `DEVICE_COLUMN_GAP` in
+ * `graph.ts`); the browser may measure a device a pixel or two wider than
+ * the diagram took it to be when it placed it.
+ */
+const CLEAR_OF_BRANCH = 4;
+
+/** How far the level or upright run from `a` to `b` is from a box; 0 when it touches or enters it. */
+function distanceToBox(
+  a: [number, number],
+  b: [number, number],
+  box: { x: number; y: number; width: number; height: number },
+): number {
+  const dx = Math.max(box.x - Math.max(a[0], b[0]), Math.min(a[0], b[0]) - (box.x + box.width), 0);
+  const dy = Math.max(box.y - Math.max(a[1], b[1]), Math.min(a[1], b[1]) - (box.y + box.height), 0);
+  return Math.hypot(dx, dy);
+}
+
 /** Whether the run from `a` to `b` passes through `box`, a pixel or more inside its edge. */
 function passesThrough(a: [number, number], b: [number, number], box: DrawnNode): boolean {
   const steps = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]));
@@ -213,6 +237,19 @@ function problems({ nodes, edges }: Drawing): string[] {
       if (Math.abs(a[0] - b[0]) > NEAR && Math.abs(a[1] - b[1]) > NEAR) {
         found.push(`${id}: a run at an angle from ${a} to ${b}`);
       }
+      // It runs into no bar but the two it is connected to.
+      for (const [busId, bus] of Object.entries(nodes)) {
+        if (bus.type !== 'bus' || bus === from || bus === to) continue;
+        const bar = {
+          x: bus.x + (bus.barLeft ?? 0),
+          y: bus.y,
+          width: bus.barLength ?? 0,
+          height: 6,
+        };
+        if (distanceToBox(a, b, bar) < CLEAR_OF_BRANCH) {
+          found.push(`${id}: runs into the bar of bus ${busId} between ${a} and ${b}`);
+        }
+      }
     }
   }
   for (const [id, node] of Object.entries(nodes)) {
@@ -232,6 +269,27 @@ function problems({ nodes, edges }: Drawing): string[] {
       if (apart > NEAR && apart < TAP_SPACING - NEAR) {
         found.push(`bus ${id}: taps at ${dots[i - 1]} and ${dots[i]} run into each other`);
       }
+    }
+  }
+  return found;
+}
+
+/**
+ * Every line and transformer that runs through a generator, load or shunt, or
+ * along the edge of one, as text. A rule for a diagram as the automatic
+ * layout draws it: a device that was dragged stands where it was dropped,
+ * on a line or not.
+ */
+function branchesIntoDevices({ nodes, edges }: Drawing): string[] {
+  const found: string[] = [];
+  for (const [id, edge] of Object.entries(edges)) {
+    if (id.startsWith('stub-')) continue;
+    for (const [deviceId, device] of Object.entries(nodes)) {
+      if (!DEVICES.has(device.type)) continue;
+      const near = edge.points.some(
+        (point, i) => i > 0 && distanceToBox(edge.points[i - 1]!, point, device) < CLEAR_OF_BRANCH,
+      );
+      if (near) found.push(`${id}: runs into ${deviceId}`);
     }
   }
   return found;
@@ -270,6 +328,7 @@ for (const caseFile of ['wscc9.xlsx', 'kundur_full.xlsx', 'ieee14_full.xlsx']) {
     expect(ids.filter((id) => id.startsWith('stub-')).length).toBeGreaterThan(3);
     expect(ids.filter((id) => id.startsWith('line-')).length).toBeGreaterThan(5);
     expect(problems(drawn)).toEqual([]);
+    expect(branchesIntoDevices(drawn)).toEqual([]);
   });
 }
 
@@ -287,6 +346,10 @@ test('no connector of IEEE 14 runs through another symbol, drawn straight or at 
   const devices = Object.values(first.nodes).filter((node) => SYMBOLS.has(node.type));
   expect(devices.length).toBeGreaterThan(20);
   expect(problems(first)).toEqual([]);
+  // Four branches land on one port of bus 5, and two of them come down a
+  // corridor beside the bars of buses 3 and 4, where three devices stand in
+  // a row: no branch is in a bar or a device on its way.
+  expect(branchesIntoDevices(first)).toEqual([]);
 
   // The style is chosen in a copy, which takes the placement with it.
   await page.getByTestId('topbar-menu-workspace-trigger').click();
@@ -312,6 +375,7 @@ test('no connector of IEEE 14 runs through another symbol, drawn straight or at 
   ]);
   const turned = await settled(page);
   expect(problems(turned)).toEqual([]);
+  expect(branchesIntoDevices(turned)).toEqual([]);
   // Every connector that was a diagonal now turns once, and every run of
   // every connector is level or upright.
   expect(diagonal.filter((id) => turned.edges[id]!.points.length !== 3)).toEqual([]);
