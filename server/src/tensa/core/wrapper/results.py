@@ -10,7 +10,7 @@ from tensa.core.edit_log import EditStep
 from tensa.core.pflow_options import PflowSettings
 
 # JSON-friendly scalar union surfaced through topology / line-flow APIs.
-# Mirrored on the API layer (``schemas.TopologyEntry.params``); see schemas.py.
+# Mirrored on the API layer (``schemas.TopologyEntry.params``); see api/schemas/topology.py.
 ParamValue = float | int | str | bool
 
 

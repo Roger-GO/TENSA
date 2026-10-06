@@ -252,7 +252,7 @@ def make_app(
     )
 
     # ProblemDetails error envelope (RFC 7807). Wrap any HTTPException raised
-    # by routes/dependencies into the schema declared in ``schemas.py`` so the
+    # by routes/dependencies into the schema declared in ``schemas/errors.py`` so the
     # OpenAPI ``responses`` declarations match the wire shape. Registered
     # before the routers so the handler is in place before any route fires.
     app.add_exception_handler(HTTPException, _problem_details_handler)

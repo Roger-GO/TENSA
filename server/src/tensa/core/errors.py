@@ -30,7 +30,7 @@ class AndesAppError(Exception):
     ``recovery_kind`` is the single source of truth the shared error mapper
     (Unit 4a) consults to attach a ``RecoveryDescriptor`` to the response. It
     is a plain ``str`` here (NOT the ``RecoveryKind`` Literal in
-    ``api/schemas.py`` — importing that into ``core/`` would create a
+    ``api/schemas/errors.py`` — importing that into ``core/`` would create a
     core->api import cycle); the string values must match that Literal, and a
     reflection test cross-checks for drift. The base default ``None`` means
     'unclassified / no CTA'; the string ``'none'`` means 'considered, no
