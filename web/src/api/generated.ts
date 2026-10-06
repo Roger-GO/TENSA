@@ -276,7 +276,14 @@ export interface paths {
         /** Edit parameters on an existing pre-setup element. */
         put: operations["editElement"];
         post?: never;
-        /** Delete a previously-added pre-setup element. */
+        /**
+         * Delete an element of a pre-setup session.
+         * @description Deletes any element of the loaded system: one the case file brought as
+         *     well as one added since. The case file is not written. The delete is one
+         *     edit, which ``POST /sessions/{id}/undo-last-edit`` takes back whole, with
+         *     the dependents and the disturbances that went with it. The disturbances
+         *     committed for the next run that act on nothing deleted are kept.
+         */
         delete: operations["deleteElement"];
         options?: never;
         head?: never;
@@ -326,8 +333,37 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Drop the last add() and rebuild the System. */
+        /**
+         * Take back the last element added, changed or deleted.
+         * @description Takes back the newest edit made since the case was loaded, whether it
+         *     added an element, changed its params or deleted it (with everything a
+         *     cascade took). The edits before it stay, and so do the committed
+         *     disturbances; the ones a delete had removed come back with it. The
+         *     summary's ``undo`` names the edit that is now the newest, and ``redo``
+         *     the one just taken back.
+         */
         post: operations["undoLastEdit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/redo-edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Put back the edit that was taken back last.
+         * @description Applies again the edit ``POST /sessions/{id}/undo-last-edit`` took back
+         *     last. Any new edit empties what there is to redo.
+         */
+        post: operations["redoEdit"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1080,7 +1116,7 @@ export interface paths {
         post?: never;
         /**
          * Remove a PMU from the pre-setup session.
-         * @description Delete a PMU previously added via ``POST /pmu``.
+         * @description Delete a PMU, whether ``POST /pmu`` placed it or the case file brought it.
          *
          *     Returns 204 on success. 404 when the idx isn't a known PMU. 409
          *     when the session is post-setup (call /reload first).
@@ -1182,7 +1218,8 @@ export interface paths {
         post?: never;
         /**
          * Remove a staged TimeSeries from the pre-setup session.
-         * @description Delete a TimeSeries previously staged via ``POST /profiles``.
+         * @description Delete a TimeSeries, whether ``POST /profiles`` staged it or the case
+         *     file brought it.
          *
          *     Returns 204 on success. 404 when the idx isn't a known TimeSeries.
          *     409 when the session is post-setup (call /reload first).
@@ -2539,15 +2576,18 @@ export interface components {
         /**
          * DeleteBlockedResponse
          * @description Response body for ``DELETE /sessions/{id}/elements/{model}/{idx}``
-         *     when the deletion is blocked by cascade dependents (HTTP 422).
+         *     when the element cannot be deleted alone (HTTP 422): other elements
+         *     depend on it, or disturbances act on it or on one of those.
          *
-         *     The list is capped at 25 entries; ``total`` reports the full count so
-         *     the UI can render a "Showing 25 of N dependents" footer when truncated.
+         *     Sending the delete again with ``cascade=true`` deletes them all with it.
+         *     Each list is capped at 25 entries; ``total`` and ``disturbances_total``
+         *     report the full counts so the UI can render a "Showing 25 of N" footer
+         *     when truncated.
          */
         DeleteBlockedResponse: {
             /**
              * Dependents
-             * @description Up to 25 dependent topology entries that reference the target element (e.g., Lines and generators attached to a Bus the caller tried to delete). The UI surfaces these as clickable rows the user must clear before re-issuing the delete.
+             * @description Up to 25 of the elements that cannot stay without the target: the ones that name it (the lines and generators on a bus, the machine on a static generator), the ones that name those, and so on. The nearest come first. Empty when only disturbances stand in the way.
              */
             dependents: components["schemas"]["TopologyEntry"][];
             /**
@@ -2555,6 +2595,147 @@ export interface components {
              * @description Full count of dependent elements. Equals ``len(dependents)`` when ``total <= 25``; greater when the list was truncated.
              */
             total: number;
+            /**
+             * Disturbances
+             * @description Up to 25 of the disturbances that act on the target or on one of its dependents, and would be removed with them.
+             */
+            disturbances?: components["schemas"]["DeletedDisturbance"][];
+            /**
+             * Disturbances Total
+             * @description Full count of those disturbances.
+             * @default 0
+             */
+            disturbances_total: number;
+            /**
+             * Detail
+             * @description The refusal in one sentence, with the way out.
+             */
+            detail?: string | null;
+        };
+        /**
+         * DeleteElementResponse
+         * @description Response body for ``DELETE /sessions/{id}/elements/{model}/{idx}``: the
+         *     topology after the delete, with what the delete removed.
+         */
+        DeleteElementResponse: {
+            /**
+             * State
+             * @description ``pre-setup`` if disturbances can still be added; ``committed`` after PF or TDS has triggered ``ss.setup()``. Once committed, callers must POST /sessions/{id}/reload to add more disturbances.
+             * @enum {string}
+             */
+            state: "pre-setup" | "committed";
+            /**
+             * Buses
+             * @description Bus elements.
+             */
+            buses: components["schemas"]["TopologyEntry"][];
+            /**
+             * Lines
+             * @description Line elements.
+             */
+            lines: components["schemas"]["TopologyEntry"][];
+            /**
+             * Transformers
+             * @description Transformer elements split out from the ANDES ``Line`` bucket via the ``tap != 1.0 OR phi != 0.0`` heuristic. Pure transmission lines remain in ``lines``; off-nominal-tap and phase-shifting branches move here.
+             */
+            transformers: components["schemas"]["TopologyEntry"][];
+            /**
+             * Generators
+             * @description Generator elements (PV, Slack, GENROU, GENCLS, etc.).
+             */
+            generators: components["schemas"]["TopologyEntry"][];
+            /**
+             * Loads
+             * @description Load elements — both static (PQ) and dynamic (ZIP).
+             */
+            loads: components["schemas"]["TopologyEntry"][];
+            /**
+             * Shunts
+             * @description Shunt elements (capacitors and reactors). Modeled as ANDES ``Shunt`` devices; rendered with the IEC 60617 shunt-cap or shunt-reactor icon depending on the sign of ``b``.
+             */
+            shunts?: components["schemas"]["TopologyEntry"][];
+            /**
+             * Controllers
+             * @description Dynamic controller devices: exciters (``IEEEX1``, ``ESDC2A``, ``SEXS``), governors (``IEEEG1``, ``TGOV1``), the ``IEEEST`` PSS, and the ``REGCA1`` renewable-converter model. Surfaces the seven Unit-8 whitelist additions so the disturbance editor can populate device pickers when the case includes them. An ``ESD1`` battery is listed here as well: like ``REGCA1`` it takes over a static generator (its ``gen``) in a time-domain run. Empty for cases that carry no dynamics addfile (stock IEEE 14 .raw alone).
+             */
+            controllers?: components["schemas"]["TopologyEntry"][];
+            /**
+             * Freq Hz
+             * @description System nominal frequency in Hz, as the case sets it: the header of a PSS/E RAW file, or the ``_config`` section of an xlsx or json file. A MATPOWER file, and any other case that sets none, keeps ANDES's default of 60. A per-unit rotor speed ``omega`` times this is the speed in Hz. ``null`` when the configuration has no usable value.
+             */
+            freq_hz?: number | null;
+            /**
+             * Base Mva
+             * @description System MVA base, as the case sets it: the header of a PSS/E RAW file, ``baseMVA`` of a MATPOWER file, or the ``_config`` section of an xlsx or json file. Any other case, and a blank system, keeps ANDES's default of 100. A power in per unit on the system base times this is the power in MW or MVAr. A device with its own rating ``Sn`` gives some values per unit of that instead; an ``ESD1`` battery reads alike on both only when its ``Sn`` equals this. ``null`` when the configuration has no usable value.
+             */
+            base_mva?: number | null;
+            /**
+             * Buses Without Vn
+             * @description Idx of the buses whose rated voltage (``Vn`` in the bus's params) the case file does not give: it is absent, blank or zero there, and ANDES fills in 110 kV. That 110 is not the bus's voltage base, so a client must not use it to turn a per-unit voltage into kV. Empty when every bus has a rated voltage. A bus whose ``Vn`` has been edited since the case was loaded is no longer listed.
+             */
+            buses_without_vn?: (number | string)[];
+            /**
+             * Events
+             * @description Timed events the next time-domain run applies besides the disturbances a client commits through ``POST /sessions/{id}/disturbances``: the ``Fault``, ``Toggle`` and ``Alter`` devices the case's files define (the bundled ``kundur_full.xlsx`` trips ``Line_8`` at 2 s), and the disturbances a bundle import or snapshot restore replayed. A client that says what a run will do must count these. A device that cannot act (switched off with ``u = 0``, or a time below zero) is not listed. Empty when there are none.
+             */
+            events?: components["schemas"]["CaseEvent"][];
+            /** @description The edit ``POST /sessions/{id}/undo-last-edit`` would take back: the last element added, changed or deleted since the case was loaded. ``null`` when there is none. Edits are taken back while ``state`` is ``pre-setup``. */
+            undo?: components["schemas"]["EditStep"] | null;
+            /** @description The edit ``POST /sessions/{id}/redo-edit`` would put back: the one taken back last. ``null`` when there is none, which is the case after any new edit. */
+            redo?: components["schemas"]["EditStep"] | null;
+            /**
+             * Job Id
+             * @description Job-registry id mirroring the routine that produced this topology snapshot: case load / reload, element delete / undo / redo, or blank-system create. ``null`` when the summary is a plain read (``GET /topology``).
+             */
+            job_id?: string | null;
+            /**
+             * Deleted
+             * @description Every element the delete removed, as it was: the dependents a ``cascade`` took, then the element asked for, last.
+             */
+            deleted?: components["schemas"]["TopologyEntry"][];
+            /**
+             * Disturbances
+             * @description Every disturbance the delete removed because it acted on one of ``deleted``. A client that keeps its own list of disturbances to commit should drop the matching ones too.
+             */
+            disturbances?: components["schemas"]["DeletedDisturbance"][];
+        };
+        /**
+         * DeletedDisturbance
+         * @description A disturbance that acts on an element a delete removes, or would remove.
+         */
+        DeletedDisturbance: {
+            /**
+             * Source
+             * @description ``case``: a ``Fault``, ``Toggle`` or ``Alter`` device the case's files define. ``restored``: one a bundle import or a snapshot restore replayed. ``committed``: one a client committed through ``POST /sessions/{id}/disturbances``.
+             * @enum {string}
+             */
+            source: "case" | "restored" | "committed";
+            /**
+             * Kind
+             * @description Which ANDES event model it is.
+             * @enum {string}
+             */
+            kind: "fault" | "toggle" | "alter";
+            /**
+             * Model
+             * @description ANDES model of the device it acts on: ``Bus`` for a fault.
+             */
+            model?: string | null;
+            /**
+             * Dev Idx
+             * @description Idx of the device it acts on.
+             */
+            dev_idx?: number | string | null;
+            /**
+             * T
+             * @description Time it starts, in seconds: a fault's ``tf``. ``null`` for a device of the case that never fires (switched off, or a time below zero); it names the element all the same, so it goes too.
+             */
+            t?: number | null;
+            /**
+             * Name
+             * @description The device's name in the case file, for a ``case`` one.
+             */
+            name?: string | null;
         };
         /**
          * DisturbanceAck
@@ -2652,6 +2833,40 @@ export interface components {
             params: {
                 [key: string]: number | string | boolean;
             };
+        };
+        /**
+         * EditStep
+         * @description One edit to the system made before a run: an element added, changed or
+         *     deleted. What ``undo`` and ``redo`` of a topology summary name.
+         */
+        EditStep: {
+            /**
+             * Op
+             * @description What the edit did to the element.
+             * @enum {string}
+             */
+            op: "add" | "edit" | "delete";
+            /**
+             * Model
+             * @description ANDES model of the element.
+             */
+            model: string;
+            /**
+             * Idx
+             * @description The element's idx.
+             */
+            idx?: number | string | null;
+            /**
+             * Params
+             * @description ``edit`` only: the params whose values it changed.
+             */
+            params?: string[];
+            /**
+             * Also
+             * @description ``delete`` only: how many more devices went with the element because they depended on it.
+             * @default 0
+             */
+            also: number;
         };
         /**
          * EigParticipationResponse
@@ -2920,7 +3135,7 @@ export interface components {
              * @description Discriminator for the routine kind (``pflow``, ``tds-stream``, ``eig``, ``cpf``, ``cpf-qv``, ``se``, ``sweep``, ``snapshot-*``, ``bundle-*``, ``element-*``, ``clone-*``, etc.). The full enum lives in ``tensa.core.jobs.JobKind``.
              * @enum {string}
              */
-            kind: "pflow" | "tds-batch" | "tds-stream" | "eig" | "cpf" | "cpf-qv" | "se" | "se-measurements" | "sweep" | "snapshot-save" | "snapshot-restore" | "snapshot-delete" | "bundle-export" | "bundle-import" | "case-load" | "case-reload" | "case-save" | "element-add" | "element-edit" | "element-delete" | "element-undo" | "disturbance-commit" | "pmu-add" | "pmu-delete" | "profile-upload" | "profile-add" | "profile-delete" | "clone-init" | "clone-edit" | "clone-undo" | "clone-redo" | "clone-save-as" | "clone-reset";
+            kind: "pflow" | "tds-batch" | "tds-stream" | "eig" | "cpf" | "cpf-qv" | "se" | "se-measurements" | "sweep" | "snapshot-save" | "snapshot-restore" | "snapshot-delete" | "bundle-export" | "bundle-import" | "case-load" | "case-reload" | "case-save" | "element-add" | "element-edit" | "element-delete" | "element-undo" | "element-redo" | "disturbance-commit" | "pmu-add" | "pmu-delete" | "profile-upload" | "profile-add" | "profile-delete" | "clone-init" | "clone-edit" | "clone-undo" | "clone-redo" | "clone-save-as" | "clone-reset";
             /**
              * Status
              * @description Lifecycle state: ``pending`` (registered), ``running`` (worker actively executing), ``done`` (completed successfully), ``failed`` (worker raised; ``problem`` populated), or ``cancelled`` (cooperative-abort succeeded).
@@ -4660,9 +4875,13 @@ export interface components {
              * @description Timed events the next time-domain run applies besides the disturbances a client commits through ``POST /sessions/{id}/disturbances``: the ``Fault``, ``Toggle`` and ``Alter`` devices the case's files define (the bundled ``kundur_full.xlsx`` trips ``Line_8`` at 2 s), and the disturbances a bundle import or snapshot restore replayed. A client that says what a run will do must count these. A device that cannot act (switched off with ``u = 0``, or a time below zero) is not listed. Empty when there are none.
              */
             events?: components["schemas"]["CaseEvent"][];
+            /** @description The edit ``POST /sessions/{id}/undo-last-edit`` would take back: the last element added, changed or deleted since the case was loaded. ``null`` when there is none. Edits are taken back while ``state`` is ``pre-setup``. */
+            undo?: components["schemas"]["EditStep"] | null;
+            /** @description The edit ``POST /sessions/{id}/redo-edit`` would put back: the one taken back last. ``null`` when there is none, which is the case after any new edit. */
+            redo?: components["schemas"]["EditStep"] | null;
             /**
              * Job Id
-             * @description Job-registry id mirroring the routine that produced this topology snapshot: case load / reload, element delete / undo, or blank-system create. ``null`` when the summary is a plain read (``GET /topology``).
+             * @description Job-registry id mirroring the routine that produced this topology snapshot: case load / reload, element delete / undo / redo, or blank-system create. ``null`` when the summary is a plain read (``GET /topology``).
              */
             job_id?: string | null;
         };
@@ -5516,7 +5735,10 @@ export interface operations {
     };
     deleteElement: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Delete with the element everything that cannot stay without it: the elements that depend on it and the disturbances that act on any of them. Without it, a delete that would leave any of those behind is refused with the list. */
+                cascade?: boolean;
+            };
             header?: never;
             path: {
                 session_id: string;
@@ -5533,7 +5755,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TopologySummary"];
+                    "application/json": components["schemas"]["DeleteElementResponse"];
                 };
             };
             /** @description Session not found, or no element of the given model+idx exists in the loaded System. */
@@ -5554,7 +5776,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Deletion is blocked. Three sub-cases share this status: (a) cascade dependents exist (body matches ``DeleteBlockedResponse``); (b) the element came from the loaded case file, not from ``add_element`` (body matches ``ProblemDetails`` with the 'reload to revert' message); (c) unknown model name (body matches ``ProblemDetails``). */
+            /** @description Deletion is refused. Two sub-cases share this status: (a) other elements depend on the element, or disturbances act on it or on one of those, and ``cascade`` is not set (body matches ``DeleteBlockedResponse``); (b) unknown model name, or the device is a committed disturbance (body matches ``ProblemDetails``). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -5714,13 +5936,62 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No edits to undo on this session. */
+            /** @description No edits to undo on this session, or the edit added an element a committed disturbance acts on. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    redoEdit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopologySummary"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Session has been committed (PF / TDS already ran); reset the run before redoing. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No edits to redo on this session (body matches ``ProblemDetails``), or the edit is a delete that something has come to depend on since (body matches ``DeleteBlockedResponse``). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteBlockedResponse"];
                 };
             };
         };
@@ -7457,7 +7728,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description PMU originated from the loaded case file (not removable via this endpoint — reload to reset). */
+            /** @description A disturbance acts on the PMU (a toggle of it), and would be left naming a device that is gone. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7728,7 +7999,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description TimeSeries originated from the loaded case file (not removable via this endpoint — reload to reset). */
+            /** @description A disturbance acts on the TimeSeries (a toggle of it), and would be left naming a device that is gone. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7795,7 +8066,7 @@ export interface operations {
     listJobs: {
         parameters: {
             query?: {
-                kind?: ("pflow" | "tds-batch" | "tds-stream" | "eig" | "cpf" | "cpf-qv" | "se" | "se-measurements" | "sweep" | "snapshot-save" | "snapshot-restore" | "snapshot-delete" | "bundle-export" | "bundle-import" | "case-load" | "case-reload" | "case-save" | "element-add" | "element-edit" | "element-delete" | "element-undo" | "disturbance-commit" | "pmu-add" | "pmu-delete" | "profile-upload" | "profile-add" | "profile-delete" | "clone-init" | "clone-edit" | "clone-undo" | "clone-redo" | "clone-save-as" | "clone-reset") | null;
+                kind?: ("pflow" | "tds-batch" | "tds-stream" | "eig" | "cpf" | "cpf-qv" | "se" | "se-measurements" | "sweep" | "snapshot-save" | "snapshot-restore" | "snapshot-delete" | "bundle-export" | "bundle-import" | "case-load" | "case-reload" | "case-save" | "element-add" | "element-edit" | "element-delete" | "element-undo" | "element-redo" | "disturbance-commit" | "pmu-add" | "pmu-delete" | "profile-upload" | "profile-add" | "profile-delete" | "clone-init" | "clone-edit" | "clone-undo" | "clone-redo" | "clone-save-as" | "clone-reset") | null;
                 /** @description Optional lifecycle-state filter (pending/running/done/failed/cancelled). */
                 status?: ("pending" | "running" | "done" | "failed" | "cancelled") | null;
             };

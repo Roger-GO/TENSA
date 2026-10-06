@@ -27,6 +27,12 @@
  *   immediately after a successful commit; the next add/update/remove
  *   flips it back to false (because the local list has diverged again).
  *
+ * - Deleting an element takes the disturbances that act on it off the list
+ *   (``removeWith``): committed, they would name a device that is gone, and
+ *   the run would fail on it. They are remembered by the element deleted, so
+ *   undoing the delete puts them back (``restoreWith``) and redoing it takes
+ *   them off again (``removeAgainWith``).
+ *
  * NO commit happens in this slice. Unit 7 wires the actual
  * ``POST /sessions/{id}/disturbances`` call when "Run TDS" fires; this
  * slice exposes ``markCommitted`` so Unit 7 can report success back.
@@ -152,9 +158,41 @@ export function disturbanceSummary(spec: DisturbanceSpec): string {
   return `Alter ${spec.model}.${dev} ${src} ${verb} ${spec.amount} at t=${spec.t.toFixed(3)}s`;
 }
 
+/** A device as a delete names it: its ANDES model and its idx. */
+export interface DeviceRef {
+  model: string;
+  idx: string | number;
+}
+
+/** Whether a disturbance acts on ``device``: a fault on that bus, a toggle or an alter of that device. */
+export function actsOn(spec: DisturbanceSpec, device: DeviceRef): boolean {
+  if (spec.kind === 'fault') {
+    return device.model === 'Bus' && String(spec.bus_idx) === String(device.idx);
+  }
+  return spec.model === device.model && String(spec.dev_idx) === String(device.idx);
+}
+
+/** The disturbances of ``list`` that act on one of ``devices``, in list order. */
+export function disturbancesActingOn(
+  list: readonly DisturbanceLocal[],
+  devices: readonly DeviceRef[],
+): DisturbanceLocal[] {
+  return list.filter((d) => devices.some((device) => actsOn(d.spec, device)));
+}
+
+/** The key ``removeWith`` and its two counterparts remember a deleted element by. */
+export function deletedElementKey(model: string, idx: string | number): string {
+  return `${model} ${String(idx)}`;
+}
+
 export interface DisturbanceState {
   /** Current local disturbance list, in insertion order. */
   disturbances: DisturbanceLocal[];
+  /**
+   * The disturbances a delete took off the list, by the element deleted
+   * (``deletedElementKey``), each with the place it had in the list.
+   */
+  removedWith: Record<string, { index: number; disturbance: DisturbanceLocal }[]>;
   /** True when the local list has changes not yet committed to the substrate. */
   dirty: boolean;
   /** True when the current list (or a superset thereof) was committed. */
@@ -179,6 +217,24 @@ export interface DisturbanceState {
 
   /** Drop everything. Resets dirty AND committed (clean slate). */
   clearDisturbances: () => void;
+
+  /**
+   * Take the disturbances with these ``ids`` off the list because the element
+   * ``key`` names was deleted, and remember them under it.
+   */
+  removeWith: (key: string, ids: readonly string[]) => void;
+
+  /**
+   * Put back what ``removeWith`` took off for ``key`` (the delete was undone).
+   * Returns how many came back. They stay remembered, for a redo.
+   */
+  restoreWith: (key: string) => number;
+
+  /**
+   * Take off again what ``restoreWith`` put back for ``key`` (the delete was
+   * redone). Returns how many went.
+   */
+  removeAgainWith: (key: string) => number;
 
   /** Mark the current list as committed (called from Unit 7 on commit success). */
   markCommitted: () => void;
@@ -213,6 +269,7 @@ export function __setUuidFactoryForTests(fn: (() => string) | null): void {
 
 export const useDisturbanceStore = create<DisturbanceState>((set, get) => ({
   disturbances: [],
+  removedWith: {},
   dirty: false,
   committed: false,
 
@@ -254,7 +311,49 @@ export const useDisturbanceStore = create<DisturbanceState>((set, get) => ({
   },
 
   clearDisturbances: () => {
-    set({ disturbances: [], dirty: false, committed: false });
+    set({ disturbances: [], removedWith: {}, dirty: false, committed: false });
+  },
+
+  removeWith: (key, ids) => {
+    const list = get().disturbances;
+    const wanted = new Set(ids);
+    const removed = list
+      .map((disturbance, index) => ({ index, disturbance }))
+      .filter(({ disturbance }) => wanted.has(disturbance.id));
+    if (removed.length === 0) return;
+    set({
+      disturbances: list.filter((d) => !wanted.has(d.id)),
+      removedWith: { ...get().removedWith, [key]: removed },
+      dirty: true,
+      committed: false,
+    });
+  },
+
+  restoreWith: (key) => {
+    const remembered = get().removedWith[key];
+    if (remembered === undefined) return 0;
+    const next = [...get().disturbances];
+    const present = new Set(next.map((d) => d.id));
+    let restored = 0;
+    // Lowest place first, so each lands where it stood among the ones before it.
+    for (const { index, disturbance } of [...remembered].sort((a, b) => a.index - b.index)) {
+      if (present.has(disturbance.id)) continue;
+      next.splice(Math.min(index, next.length), 0, disturbance);
+      restored += 1;
+    }
+    if (restored > 0) set({ disturbances: next, dirty: true, committed: false });
+    return restored;
+  },
+
+  removeAgainWith: (key) => {
+    const remembered = get().removedWith[key];
+    if (remembered === undefined) return 0;
+    const ids = new Set(remembered.map((r) => r.disturbance.id));
+    const list = get().disturbances;
+    const next = list.filter((d) => !ids.has(d.id));
+    if (next.length === list.length) return 0;
+    set({ disturbances: next, dirty: true, committed: false });
+    return list.length - next.length;
   },
 
   markCommitted: () => {

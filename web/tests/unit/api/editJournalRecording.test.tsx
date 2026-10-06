@@ -21,6 +21,7 @@ import {
   useDeleteElement,
   useEditElement,
   useInitClone,
+  useRedoEdit,
   useReloadCase,
   useResetRun,
   useRestoreSnapshot,
@@ -29,6 +30,7 @@ import {
 } from '@/api/queries';
 import { parseSessionId } from '@/api/types';
 import { useCaseStore } from '@/store/case';
+import { useDisturbanceStore } from '@/store/disturbance';
 import { hasUnsavedEdits, useEditJournalStore } from '@/store/editJournal';
 import { useJobsStore } from '@/store/jobs';
 import { parseWorkspacePath } from '@/api/types';
@@ -126,17 +128,113 @@ describe('edit journal recording', () => {
     expect(journalOps()).toEqual([{ op: 'edit', model: 'Bus', idx: '1', params: { Vn: 230 } }]);
   });
 
-  it('records an element delete, an undo, and a reload', async () => {
+  it('records an element delete, an undo, a redo, and a reload', async () => {
     fetchSpy.mockImplementation(async () => jsonResponse(TOPOLOGY));
 
     await run(useDeleteElement, { sessionId: SESSION, model: 'Bus', idx: '9' });
     await run(useUndoLastEdit, SESSION);
+    await run(useRedoEdit, SESSION);
+    await run(useDeleteElement, { sessionId: SESSION, model: 'Bus', idx: '3', cascade: true });
 
-    expect(journalOps()).toEqual([{ op: 'delete', model: 'Bus', idx: '9' }, { op: 'undo' }]);
+    expect(journalOps()).toEqual([
+      { op: 'delete', model: 'Bus', idx: '9' },
+      { op: 'undo' },
+      { op: 'redo' },
+      { op: 'delete', model: 'Bus', idx: '3', cascade: true },
+    ]);
+    const sent = (fetchSpy.mock.calls as [unknown, RequestInit | undefined][]).map(
+      ([url, init]) => `${init?.method} ${String(url)}`,
+    );
+    expect(sent).toEqual([
+      'DELETE /api/sessions/sess-1/elements/Bus/9',
+      'POST /api/sessions/sess-1/undo-last-edit',
+      'POST /api/sessions/sess-1/redo-edit',
+      'DELETE /api/sessions/sess-1/elements/Bus/3?cascade=true',
+    ]);
 
     await run(useReloadCase, SESSION);
     // A reload on a file-backed case reverts the adds and deletes before it.
     expect(journalOps()).toEqual([]);
+  });
+
+  it('keeps what a delete removed out of the topology it stores', async () => {
+    const deleted = [
+      { idx: 'L1', name: 'L1', kind: 'Line' },
+      { idx: 3, name: 'B3', kind: 'Bus' },
+    ];
+    fetchSpy.mockImplementation(async () =>
+      jsonResponse({ ...TOPOLOGY, deleted, disturbances: [], undo: null }),
+    );
+
+    await run(useDeleteElement, { sessionId: SESSION, model: 'Bus', idx: '3', cascade: true });
+
+    const stored = useCaseStore.getState().topology;
+    expect(stored).toMatchObject({ state: 'pre-setup', buses: [] });
+    expect(stored).not.toHaveProperty('deleted');
+    expect(stored).not.toHaveProperty('disturbances');
+  });
+
+  it('takes the timeline disturbances on a deleted element off, and an undo and a redo follow', async () => {
+    const timeline = useDisturbanceStore.getState();
+    timeline.clearDisturbances();
+    const elsewhere = timeline.addDisturbance({
+      kind: 'fault',
+      bus_idx: '5',
+      tf: 1,
+      tc: 1.1,
+      xf: 0.05,
+      rf: 0,
+    });
+    const onTheBus = timeline.addDisturbance({
+      kind: 'fault',
+      bus_idx: '3',
+      tf: 2,
+      tc: 2.1,
+      xf: 0.05,
+      rf: 0,
+    });
+    const onItsLine = timeline.addDisturbance({
+      kind: 'toggle',
+      model: 'Line',
+      dev_idx: 'L1',
+      t: 3,
+    });
+    useDisturbanceStore.getState().markCommitted();
+    const list = () => useDisturbanceStore.getState().disturbances;
+    const step = { op: 'delete', model: 'Bus', idx: 3, params: [], also: 1 };
+
+    // The delete took the line with the bus: what acted on either goes.
+    fetchSpy.mockImplementation(async () =>
+      jsonResponse({
+        ...TOPOLOGY,
+        deleted: [
+          { idx: 'L1', name: 'L1', kind: 'Line' },
+          { idx: 3, name: 'B3', kind: 'Bus' },
+        ],
+        undo: step,
+      }),
+    );
+    await run(useDeleteElement, { sessionId: SESSION, model: 'Bus', idx: '3', cascade: true });
+    expect(list()).toEqual([elsewhere]);
+    // The list is no longer what was committed.
+    expect(useDisturbanceStore.getState().committed).toBe(false);
+
+    // The undo's topology names the delete as what can now be redone.
+    fetchSpy.mockImplementation(async () => jsonResponse({ ...TOPOLOGY, redo: step }));
+    await run(useUndoLastEdit, SESSION);
+    expect(list()).toEqual([elsewhere, onTheBus, onItsLine]);
+
+    fetchSpy.mockImplementation(async () => jsonResponse({ ...TOPOLOGY, undo: step }));
+    await run(useRedoEdit, SESSION);
+    expect(list()).toEqual([elsewhere]);
+
+    // An undo of something else leaves the timeline alone.
+    fetchSpy.mockImplementation(async () =>
+      jsonResponse({ ...TOPOLOGY, redo: { op: 'add', model: 'Bus', idx: 9, params: [], also: 0 } }),
+    );
+    await run(useUndoLastEdit, SESSION);
+    expect(list()).toEqual([elsewhere]);
+    useDisturbanceStore.getState().clearDisturbances();
   });
 
   it('records the Reset run reload the same way as a reload', async () => {

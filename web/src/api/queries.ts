@@ -49,6 +49,7 @@ import type {
   CpfQvRunRequest,
   CpfResult,
   DaeVariableList,
+  DeleteElementResponse,
   DisturbanceSpec,
   EditElementRequest,
   EigParticipationResponse,
@@ -84,7 +85,7 @@ import { useRecentCasesStore } from '@/store/recentCases';
 import { usePflowStore } from '@/store/pflow';
 import { usePflowHistoryStore } from '@/store/pflowHistory';
 import { usePflowOptionsStore } from '@/store/pflowOptions';
-import { useDisturbanceStore } from '@/store/disturbance';
+import { deletedElementKey, disturbancesActingOn, useDisturbanceStore } from '@/store/disturbance';
 import { useRunsStore } from '@/store/runs';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useConnectivityStore } from '@/store/connectivity';
@@ -97,6 +98,7 @@ import type { JobKind, JobRecord } from '@/store/jobs';
 import { toast } from '@/lib/toast';
 import { announceViolations } from '@/lib/announceViolations';
 import { elementNamesOf } from '@/lib/elementNames';
+import { findTopologyEntry } from '@/lib/topology';
 import { stemOf } from '@/lib/paths';
 import { caseSettingsFromRun, pflowRequestBody } from '@/lib/pflowOptions';
 import { cpfRequestBody, type CpfRunOptions } from '@/lib/cpfOptions';
@@ -1163,56 +1165,74 @@ export interface DeleteElementVars {
   sessionId: SessionId;
   model: string;
   idx: string;
+  /** Delete with the element what depends on it, instead of being refused. */
+  cascade?: boolean;
 }
 
 /**
- * ``DELETE /sessions/{id}/elements/{model}/{idx}``. Removes a previously-
- * added pre-setup element via the substrate's reload-and-replay path.
- * Returns the post-delete ``TopologySummary`` so the SLD updates without
- * an extra GET round-trip.
+ * ``DELETE /sessions/{id}/elements/{model}/{idx}``. Removes an element of the
+ * pre-setup system, whether the case file brought it or it was added since.
+ * Returns the post-delete topology with what went (``deleted``,
+ * ``disturbances``), so the SLD updates without an extra GET round-trip.
  *
- * The 422 ``DeleteBlockedResponse`` (cascade dependents) and 422
- * ``ProblemDetails`` (case-file-originated, unknown model) come back as
- * thrown ``ProblemDetailsError``s — the caller (``DeleteElementButton``)
- * narrows on ``status === 422`` and reads the typed body off
- * ``error.rawBody``.
+ * The 422 ``DeleteBlockedResponse`` (other elements depend on it, or
+ * disturbances act on it; send ``cascade`` to delete them too) and 422
+ * ``ProblemDetails`` (unknown model) come back as thrown
+ * ``ProblemDetailsError``s — the caller (``DeleteElementButton``) narrows on
+ * ``status === 422`` and reads the typed body off ``error.rawBody``.
  *
- * On success: seed the topology cache with the new summary AND clear
+ * On success: seed the topology cache with the new summary, clear
  * ``case.selectedElement`` if the deleted element was the one being
  * inspected (otherwise the inspector's findEntry would silently render
- * a stale snapshot until the next click).
+ * a stale snapshot until the next click), and take the disturbances of the
+ * timeline that act on anything deleted off it: committed for the next run,
+ * they would name a device that is gone.
  */
-export function useDeleteElement(): UseMutationResult<TopologySummary, Error, DeleteElementVars> {
+export function useDeleteElement(): UseMutationResult<
+  DeleteElementResponse,
+  Error,
+  DeleteElementVars
+> {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ sessionId, model, idx }: DeleteElementVars) => {
-      return await andesClient.delete<TopologySummary>(
+    mutationFn: async ({ sessionId, model, idx, cascade }: DeleteElementVars) => {
+      return await andesClient.delete<DeleteElementResponse>(
         `/sessions/${encodeURIComponent(sessionId)}/elements/${encodeURIComponent(model)}/${encodeURIComponent(idx)}`,
-        { timeoutMs: TIMEOUTS.workspace },
+        {
+          // The system is built again from the case file, as for a reload.
+          timeoutMs: TIMEOUTS.caseLoad,
+          query: cascade === true ? { cascade: 'true' } : undefined,
+        },
       );
     },
     onMutate: ({ model, idx }) => ({ jobId: registerJob('element-delete', { model, idx }) }),
-    onSuccess: (data, { sessionId, model, idx }, ctx) => {
-      useEditJournalStore.getState().record({ op: 'delete', model, idx });
+    onSuccess: (data, { sessionId, model, idx, cascade }, ctx) => {
+      useEditJournalStore
+        .getState()
+        .record(
+          cascade === true
+            ? { op: 'delete', model, idx, cascade: true }
+            : { op: 'delete', model, idx },
+        );
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
-      queryClient.setQueryData(queryKeys.topology(sessionId), data);
-      useCaseStore.getState().setTopology(data);
-      // If the deleted element was the one being inspected, fall back to
-      // the "no element selected" empty state. Match by lower-cased kind
-      // because SelectedElement carries the inspector taxonomy
-      // ("bus"/"line"/...) while the API uses the ANDES model class
-      // ("Bus"/"Line"/"PV"/...). Compare structurally on idx + a kind
-      // family prefix.
+      const { deleted = [], disturbances: _removed, ...topology } = data;
+      queryClient.setQueryData(queryKeys.topology(sessionId), topology);
+      useCaseStore.getState().setTopology(topology);
+      const timeline = useDisturbanceStore.getState();
+      const acting = disturbancesActingOn(
+        timeline.disturbances,
+        deleted.map((entry) => ({ model: entry.kind, idx: entry.idx })),
+      );
+      timeline.removeWith(
+        deletedElementKey(model, idx),
+        acting.map((d) => d.id),
+      );
+      // If the element being inspected went (the one deleted, or one a
+      // cascade took with it), fall back to the "no element selected" empty
+      // state rather than leave the inspector on something that is not there.
       const selected = useCaseStore.getState().selectedElement;
-      if (selected !== null && selected.idx === String(idx)) {
-        const modelLower = model.toLowerCase();
-        const kindMatchesModel =
-          modelLower === selected.kind ||
-          modelLower.startsWith(selected.kind) ||
-          selected.kind.startsWith(modelLower);
-        if (kindMatchesModel) {
-          useCaseStore.getState().setSelectedElement(null);
-        }
+      if (selected !== null && findTopologyEntry(topology, selected) === null) {
+        useCaseStore.getState().setSelectedElement(null);
       }
       // Clear pending dependents — the cascade chain may have changed,
       // and the next 422 (if any) will repopulate the list with the
@@ -1294,10 +1314,12 @@ export function useSaveCase(): UseMutationResult<SaveCaseResponse, Error, SaveCa
 }
 
 /**
- * `POST /sessions/{id}/undo-last-edit`. Drops the last add() and
- * rebuilds the System from the remaining replay-buffer history. Returns
- * the post-undo topology snapshot, which we seed into the topology
- * cache so the SLD updates without a re-fetch round-trip.
+ * `POST /sessions/{id}/undo-last-edit`. Takes back the newest edit made before a
+ * run, whatever it was: an element added, changed or deleted. Returns the
+ * post-undo topology snapshot, which we seed into the topology cache so the SLD
+ * updates without a re-fetch round-trip; its `redo` names the edit just taken
+ * back. When that was a delete, the timeline's disturbances the delete took off
+ * come back with the element.
  */
 export function useUndoLastEdit(): UseMutationResult<TopologySummary, Error, SessionId> {
   const queryClient = useQueryClient();
@@ -1305,7 +1327,7 @@ export function useUndoLastEdit(): UseMutationResult<TopologySummary, Error, Ses
     mutationFn: async (sessionId: SessionId) => {
       return await andesClient.post<TopologySummary>(
         `/sessions/${encodeURIComponent(sessionId)}/undo-last-edit`,
-        { body: {}, timeoutMs: TIMEOUTS.workspace },
+        { body: {}, timeoutMs: TIMEOUTS.caseLoad },
       );
     },
     onMutate: () => ({ jobId: registerJob('element-undo') }),
@@ -1313,6 +1335,41 @@ export function useUndoLastEdit(): UseMutationResult<TopologySummary, Error, Ses
       useEditJournalStore.getState().record({ op: 'undo' });
       queryClient.setQueryData(queryKeys.topology(sessionId), data);
       useCaseStore.getState().setTopology(data);
+      const undone = data.redo;
+      if (undone?.op === 'delete' && undone.idx != null) {
+        useDisturbanceStore.getState().restoreWith(deletedElementKey(undone.model, undone.idx));
+      }
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
+    },
+  });
+}
+
+/**
+ * `POST /sessions/{id}/redo-edit`. Puts back the edit the last undo took back.
+ * The returned topology's `undo` names it. A delete that is redone takes the
+ * timeline's disturbances on the element off again.
+ */
+export function useRedoEdit(): UseMutationResult<TopologySummary, Error, SessionId> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sessionId: SessionId) => {
+      return await andesClient.post<TopologySummary>(
+        `/sessions/${encodeURIComponent(sessionId)}/redo-edit`,
+        { body: {}, timeoutMs: TIMEOUTS.caseLoad },
+      );
+    },
+    onMutate: () => ({ jobId: registerJob('element-redo') }),
+    onSuccess: (data, sessionId, ctx) => {
+      useEditJournalStore.getState().record({ op: 'redo' });
+      queryClient.setQueryData(queryKeys.topology(sessionId), data);
+      useCaseStore.getState().setTopology(data);
+      const redone = data.undo;
+      if (redone?.op === 'delete' && redone.idx != null) {
+        useDisturbanceStore.getState().removeAgainWith(deletedElementKey(redone.model, redone.idx));
+      }
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
     },
     onError: (err, _vars, ctx) => {

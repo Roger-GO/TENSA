@@ -6,6 +6,8 @@ import type { SelectedElement } from '@/store/case';
 import { controllerSubKindLabel } from '@/lib/controllers';
 import { findTopologyEntry } from '@/lib/topology';
 import { useCurrentTopology } from '@/api/queries';
+import { usePflowStore } from '@/store/pflow';
+import { DeleteElementButton } from '@/components/elements/DeleteElementButton';
 import { cn } from '@/lib/cn';
 import { PropertiesAccordion } from './PropertiesAccordion';
 import { PlotsAccordion } from './PlotsAccordion';
@@ -33,8 +35,15 @@ import { EditModeToggle } from './EditModeToggle';
  * selection).
  *
  * Header: small element-kind glyph + ``<Kind> <name>`` (or just
- * ``<Kind> <idx>`` when the topology hasn't resolved a name).
+ * ``<Kind> <idx>`` when the topology hasn't resolved a name), the Edit/Run
+ * switch, and the button that deletes the element. The delete works while
+ * the case is not set up; after a run the button stays, greyed out, and says
+ * that the run has to be reset first.
  */
+
+const DELETE_LOCKED_BY_RUN =
+  'The case is set up for a run, which locks its elements. Reset the run to delete this one.';
+const DELETE_LOCKED_BY_PF = 'A power flow is running. Wait for it to end.';
 
 const STORAGE_PREFIX = 'tensa:layout-v1:rightInspector:openSections';
 
@@ -261,11 +270,13 @@ export function RightInspector({ className }: RightInspectorProps) {
     writePersistedOpen(kind, filtered);
   };
 
-  const headerName = useMemo(() => {
+  const isPflowRunning = usePflowStore((s) => s.isRunning);
+  const entry = useMemo(() => {
     if (!selectedElement || !topology) return null;
     // Shared lookup disambiguates controllers by (modelClass, idx).
-    return findTopologyEntry(topology, selectedElement)?.name ?? null;
+    return findTopologyEntry(topology, selectedElement);
   }, [selectedElement, topology]);
+  const headerName = entry?.name ?? null;
 
   if (!selectedElement) {
     return (
@@ -308,6 +319,20 @@ export function RightInspector({ className }: RightInspectorProps) {
             every selection so the mode is always discoverable; the per-param
             inputs gate themselves on both the mode AND the element kind. */}
         <EditModeToggle className="ml-auto" />
+        {entry !== null ? (
+          <DeleteElementButton
+            model={entry.kind}
+            idx={String(entry.idx)}
+            kind={headerKindLabel(selectedElement).toLowerCase()}
+            disabledReason={
+              topology?.state !== 'pre-setup'
+                ? DELETE_LOCKED_BY_RUN
+                : isPflowRunning
+                  ? DELETE_LOCKED_BY_PF
+                  : undefined
+            }
+          />
+        ) : null}
       </header>
       <AccordionPrimitive.Root
         type="multiple"

@@ -9,9 +9,11 @@
  *   - Per-element-kind open-state persists across selections via
  *     localStorage under
  *     ``tensa:layout-v1:rightInspector:openSections:<kind>``.
+ *   - The header's delete button: there for the element shown, and
+ *     greyed out with the reason once the case is set up.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -20,7 +22,9 @@ import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';
 import { useDisturbanceStore } from '@/store/disturbance';
-import { parseWorkspacePath } from '@/api/types';
+import { useSessionStore } from '@/store/session';
+import { toast } from '@/lib/toast';
+import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary } from '@/api/types';
 
 function withQueryClient(ui: ReactNode) {
@@ -111,6 +115,86 @@ describe('<RightInspector />', () => {
     expect(screen.getByTestId('right-inspector-section-properties')).toBeInTheDocument();
     expect(screen.getByTestId('right-inspector-section-plots')).toBeInTheDocument();
     expect(screen.getByTestId('right-inspector-section-disturbances')).toBeInTheDocument();
+  });
+
+  it('has the delete button for the element it shows, named for what the element is', async () => {
+    const user = userEvent.setup();
+    seedLoadedCase();
+    useCaseStore.setState({ selectedElement: { kind: 'generator', idx: 'G1' } });
+    render(withQueryClient(<RightInspector />));
+    const button = screen.getByTestId('delete-element-button');
+    // The request names the ANDES model of the entry, the text the kind shown.
+    expect(button).toHaveAttribute('aria-label', 'Delete generator G1');
+    expect(button).not.toHaveAttribute('aria-disabled');
+    await user.click(button);
+    expect(screen.getByTestId('delete-element-dialog')).toHaveTextContent('Delete generator G1?');
+  });
+
+  it('keeps the delete button in place after a run, greyed out, saying the run has to be reset', async () => {
+    const user = userEvent.setup();
+    seedLoadedCase();
+    mockTopology = { ...TOPOLOGY, state: 'committed' };
+    useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '5' } });
+    render(withQueryClient(<RightInspector />));
+    const button = screen.getByTestId('delete-element-button');
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    expect(button.getAttribute('title')).toMatch(/Reset the run to delete this one/);
+    await user.click(button);
+    expect(screen.queryByTestId('delete-element-dialog')).toBeNull();
+  });
+
+  it('holds the delete while a power flow is running', () => {
+    seedLoadedCase();
+    usePflowStore.setState({ isRunning: true });
+    useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '5' } });
+    render(withQueryClient(<RightInspector />));
+    const button = screen.getByTestId('delete-element-button');
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    expect(button.getAttribute('title')).toMatch(/power flow is running/);
+  });
+
+  it('says what was deleted although the delete takes the button away with the selection', async () => {
+    // The delete clears the selection, the header goes, and the button with it.
+    // What it does after the answer must not depend on it still being there.
+    const user = userEvent.setup();
+    const success = vi.spyOn(toast, 'success').mockImplementation(() => '');
+    const { generators: _generators, ...rest } = TOPOLOGY;
+    const fetchSpy = vi
+      .spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch')
+      .mockImplementation(
+        async () =>
+          new Response(JSON.stringify({ ...rest, generators: [], deleted: TOPOLOGY.generators }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      );
+    seedLoadedCase();
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1') });
+    useCaseStore.setState({ selectedElement: { kind: 'generator', idx: 'G1' } });
+    render(withQueryClient(<RightInspector />));
+
+    await user.click(screen.getByTestId('delete-element-button'));
+    await user.click(screen.getByTestId('delete-confirm'));
+
+    await waitFor(() => expect(useCaseStore.getState().selectedElement).toBeNull());
+    expect(screen.queryByTestId('delete-element-button')).toBeNull();
+    await waitFor(() =>
+      expect(success).toHaveBeenCalledWith('Deleted PV G1', {
+        description: 'Undo in the Edit menu brings it back.',
+      }),
+    );
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/sessions/sess-1/elements/PV/G1');
+    fetchSpy.mockRestore();
+    success.mockRestore();
+    useSessionStore.setState({ sessionId: null });
+  });
+
+  it('has no delete button for a selection the case no longer holds', () => {
+    seedLoadedCase();
+    useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '99' } });
+    render(withQueryClient(<RightInspector />));
+    expect(screen.getByTestId('right-inspector-header')).toBeInTheDocument();
+    expect(screen.queryByTestId('delete-element-button')).toBeNull();
   });
 
   it('Properties opens by default; clicking Plots trigger reveals plots-accordion', async () => {

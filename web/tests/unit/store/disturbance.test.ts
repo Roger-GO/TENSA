@@ -2,17 +2,21 @@
  * Tests for the disturbance editor slice (Unit 6 of v0.2).
  *
  * Covers add/update/remove/clear flows, dirty + committed bookkeeping,
- * the substrate-shape spec contract, and the sortedDisturbances helper
- * (time order with insertion-order tie-break).
+ * the substrate-shape spec contract, the sortedDisturbances helper
+ * (time order with insertion-order tie-break), and what a deleted element
+ * does to the disturbances that act on it.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   __setUuidFactoryForTests,
+  actsOn,
   blankAlterSpec,
   blankFaultSpec,
   blankToggleSpec,
+  deletedElementKey,
   disturbanceSummary,
   disturbanceTime,
+  disturbancesActingOn,
   sortedDisturbances,
   useDisturbanceStore,
 } from '@/store/disturbance';
@@ -22,7 +26,12 @@ let counter = 0;
 function reset() {
   counter = 0;
   __setUuidFactoryForTests(() => `id-${++counter}`);
-  useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
+  useDisturbanceStore.setState({
+    disturbances: [],
+    removedWith: {},
+    dirty: false,
+    committed: false,
+  });
 }
 
 beforeEach(reset);
@@ -224,5 +233,109 @@ describe('sortedDisturbances — time order with insertion-order tie-break', () 
     const third = useDisturbanceStore.getState().addDisturbance({ ...blankAlterSpec(), t: 1.0 });
     const sorted = sortedDisturbances(useDisturbanceStore.getState().disturbances);
     expect(sorted.map((d) => d.id)).toEqual([first.id, second.id, third.id]);
+  });
+});
+
+describe('disturbances and a deleted element', () => {
+  const fault = (bus: string): FaultSpec => ({ ...blankFaultSpec(), bus_idx: bus });
+  const trip = (model: string, dev: string): ToggleSpec => ({
+    ...blankToggleSpec(),
+    model,
+    dev_idx: dev,
+  });
+  const store = () => useDisturbanceStore.getState();
+
+  it('a fault acts on its bus, a toggle and an alter on their device, whatever type the idx has', () => {
+    expect(actsOn(fault('3'), { model: 'Bus', idx: 3 })).toBe(true);
+    expect(actsOn(fault('3'), { model: 'Bus', idx: '30' })).toBe(false);
+    // The same idx in another model is another device.
+    expect(actsOn(fault('3'), { model: 'PV', idx: 3 })).toBe(false);
+    expect(actsOn(trip('Line', 'Line_3'), { model: 'Line', idx: 'Line_3' })).toBe(true);
+    expect(actsOn(trip('PQ', 'Line_3'), { model: 'Line', idx: 'Line_3' })).toBe(false);
+    const alter: AlterSpec = { ...blankAlterSpec(), model: 'PQ', dev_idx: 4, src: 'Ppf' };
+    expect(actsOn(alter, { model: 'PQ', idx: '4' })).toBe(true);
+  });
+
+  it('finds the disturbances on any of the devices, in list order', () => {
+    const a = store().addDisturbance(fault('3'));
+    store().addDisturbance(fault('5'));
+    const c = store().addDisturbance(trip('Line', 'L1'));
+    const found = disturbancesActingOn(store().disturbances, [
+      { model: 'Line', idx: 'L1' },
+      { model: 'Bus', idx: 3 },
+    ]);
+    expect(found).toEqual([a, c]);
+    expect(disturbancesActingOn(store().disturbances, [])).toEqual([]);
+  });
+
+  it('removeWith takes them off as an uncommitted change and remembers them by the element', () => {
+    const a = store().addDisturbance(fault('3'));
+    const b = store().addDisturbance(fault('5'));
+    const c = store().addDisturbance(trip('Line', 'L1'));
+    store().markCommitted();
+    const key = deletedElementKey('Bus', 3);
+
+    store().removeWith(key, [a.id, c.id]);
+
+    expect(store().disturbances).toEqual([b]);
+    expect(store().dirty).toBe(true);
+    expect(store().committed).toBe(false);
+    expect(store().removedWith[key]?.map((r) => r.disturbance.id)).toEqual([a.id, c.id]);
+  });
+
+  it('removeWith with nothing to take leaves the list, and what it holds as committed, alone', () => {
+    store().addDisturbance(fault('5'));
+    store().markCommitted();
+    const before = store();
+
+    store().removeWith(deletedElementKey('Bus', 3), []);
+
+    expect(store().disturbances).toBe(before.disturbances);
+    expect(store().committed).toBe(true);
+    expect(store().removedWith).toEqual({});
+  });
+
+  it('restoreWith puts them back where they stood, and removeAgainWith takes them off again', () => {
+    const a = store().addDisturbance(fault('3'));
+    const b = store().addDisturbance(fault('5'));
+    const c = store().addDisturbance(trip('Line', 'L1'));
+    const key = deletedElementKey('Bus', '3');
+    store().removeWith(key, [a.id, c.id]);
+    // The timeline goes on being edited while the element is gone.
+    const d = store().addDisturbance(fault('7'));
+
+    expect(store().restoreWith(key)).toBe(2);
+    expect(store().disturbances).toEqual([a, b, c, d]);
+    // Restoring twice does not double them.
+    expect(store().restoreWith(key)).toBe(0);
+    expect(store().disturbances).toHaveLength(4);
+
+    expect(store().removeAgainWith(key)).toBe(2);
+    expect(store().disturbances).toEqual([b, d]);
+    expect(store().removeAgainWith(key)).toBe(0);
+  });
+
+  it('an element nothing was removed with restores nothing', () => {
+    store().addDisturbance(fault('5'));
+    expect(store().restoreWith(deletedElementKey('Bus', 9))).toBe(0);
+    expect(store().removeAgainWith(deletedElementKey('Bus', 9))).toBe(0);
+    expect(store().disturbances).toHaveLength(1);
+  });
+
+  it('a number and its text name the same deleted element', () => {
+    // The request carries the idx as text; the undo step may carry a number.
+    expect(deletedElementKey('Bus', 3)).toBe(deletedElementKey('Bus', '3'));
+    expect(deletedElementKey('Bus', 3)).not.toBe(deletedElementKey('PV', 3));
+  });
+
+  it('clearDisturbances forgets what was removed with deleted elements', () => {
+    const a = store().addDisturbance(fault('3'));
+    const key = deletedElementKey('Bus', 3);
+    store().removeWith(key, [a.id]);
+
+    store().clearDisturbances();
+
+    expect(store().removedWith).toEqual({});
+    expect(store().restoreWith(key)).toBe(0);
   });
 });

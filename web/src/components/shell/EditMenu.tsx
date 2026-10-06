@@ -15,8 +15,8 @@
  * paths (menu click + palette pick) open the same dialog.
  *
  * A command the Edit menu would hide only because nothing has been edited yet
- * (Undo parameter edit, Save parameter edits as case) is kept in it greyed out,
- * with what to do first under it, so a user looking for it finds it.
+ * (Undo, Save parameter edits as case) is kept in it greyed out, with what to
+ * do first under it, so a user looking for it finds it.
  *
  * The `<WorkflowToolbar />` component itself is no longer mounted
  * here — its tests (`tests/unit/components/case/WorkflowToolbar.test.tsx`)
@@ -41,10 +41,9 @@ import { SaveAsCustomCaseDialog } from '@/components/case/SaveAsCustomCaseDialog
 
 const TESTID_BY_ID: Record<string, string> = {
   'edit.undo': 'topbar-menu-edit-undo',
+  'edit.redo': 'topbar-menu-edit-redo',
   'edit.reload': 'topbar-menu-edit-reload',
   'inspector.toggle-edit-mode': 'topbar-menu-edit-toggle-edit-mode',
-  'clone.undo': 'topbar-menu-edit-clone-undo',
-  'clone.redo': 'topbar-menu-edit-clone-redo',
   'clone.save-as': 'topbar-menu-edit-clone-save-as',
   'clone.reset': 'topbar-menu-edit-clone-reset',
 };
@@ -67,7 +66,7 @@ export function EditMenu() {
   // The registry's `edit.reload` action posts the bridge event; the
   // menu's onClick path hits the same registry action so both surfaces
   // converge on the same open path. The Undo command runs the
-  // mutation directly (no confirm needed — it drops one item).
+  // mutation directly (no confirm needed — Redo puts the change back).
   const handleClick = (id: string) => {
     const cmd = editCommands.find((c) => c.id === id);
     cmd?.action();
@@ -115,8 +114,9 @@ export function EditMenu() {
         <DialogContent>
           <DialogTitle>Reload from file?</DialogTitle>
           <DialogDescription className="mt-2">
-            Reloading will re-parse the case from disk and discard every element you&apos;ve added
-            or edited since loading. Any PF results will be cleared. This cannot be undone.
+            Reloading will re-parse the case from disk and discard every change made since loading:
+            the elements you&apos;ve added, edited or deleted. Any PF results will be cleared. This
+            cannot be undone.
           </DialogDescription>
           {error ? (
             <p

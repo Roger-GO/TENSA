@@ -44,18 +44,24 @@ export type EditElementRequest = components['schemas']['EditElementRequest'];
 export type ElementCreated = components['schemas']['ElementCreated'];
 export type BlankSystemResponse = components['schemas']['BlankSystemResponse'];
 /**
- * Successful body of ``DELETE /sessions/{id}/elements/{model}/{idx}``.
- * Transparent alias for ``TopologySummary`` — the substrate returns the
- * post-delete topology snapshot so the client can refresh without an
- * extra GET round-trip. Aliased here for self-documenting call sites.
+ * Successful body of ``DELETE /sessions/{id}/elements/{model}/{idx}``: the
+ * post-delete topology snapshot, so the client can refresh without an extra
+ * GET round-trip, with the elements (``deleted``) and the disturbances
+ * (``disturbances``) the delete removed.
  */
-export type DeleteElementResponse = TopologySummary;
+export type DeleteElementResponse = components['schemas']['DeleteElementResponse'];
 /**
  * 422 body of ``DELETE /sessions/{id}/elements/{model}/{idx}`` when the
- * deletion is blocked by cascade dependents. ``dependents`` is capped at
- * 25 entries; ``total`` reports the full count for the truncation footer.
+ * element cannot go alone: other elements depend on it (``dependents``), or
+ * disturbances act on it or on one of those (``disturbances``). Each list is
+ * capped at 25 entries; ``total`` and ``disturbances_total`` report the full
+ * counts for the truncation footer.
  */
 export type DeleteBlockedResponse = components['schemas']['DeleteBlockedResponse'];
+/** A disturbance a delete removes, or would remove, with the element it acts on. */
+export type DeletedDisturbance = components['schemas']['DeletedDisturbance'];
+/** One edit made before a run, as the topology's ``undo`` and ``redo`` name it. */
+export type EditStep = components['schemas']['EditStep'];
 export type TopologySchema = components['schemas']['TopologySchema'];
 export type VersionInfo = components['schemas']['VersionInfo'];
 export type TopologyParamMeta = components['schemas']['TopologyParamMeta'];

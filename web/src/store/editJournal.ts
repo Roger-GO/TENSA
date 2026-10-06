@@ -7,7 +7,7 @@
  * file-backed case as it was on disk and nothing else: the elements and parameter
  * edits made since are gone, and a system built from scratch has no file at all.
  * The journal records every successful topology mutation (add, edit, delete,
- * undo, the clone-on-write controller edits, and the reloads that revert them), and
+ * undo, redo, the clone-on-write controller edits, and the reloads that revert them), and
  * ``replayJournal`` re-sends them to the new session in the same order. Replaying
  * the operations through the same endpoints, rather than modelling their result,
  * is what keeps the rebuilt session the same as the lost one whatever the
@@ -16,12 +16,15 @@
  * What it keeps small:
  *
  * - A reload on a file-backed case throws away everything before it that was not a
- *   clone edit (the substrate re-parses the file and clears its replay buffer), and
+ *   clone edit (the substrate re-parses the file and empties its edit log), and
  *   a clone reset throws away everything, so ``compactJournal`` drops those entries
  *   instead of replaying work the substrate would undo. A long session of
  *   "edit, run, reset" therefore does not turn into a long replay of re-parses.
- * - Consecutive edits to one element merge.
  * - Past ``MAX_JOURNAL_ENTRIES`` the journal gives up and keeps only a flag.
+ *
+ * It keeps one entry per request, and does not fold two edits of one element into
+ * one: the substrate takes back one request per undo, so an undo replayed after a
+ * folded edit would take back both.
  *
  * What it cannot replay: PMU and profile placements, a snapshot restore and a bundle
  * import. They mark the journal not ``replayable``, and recovery falls back to
@@ -46,9 +49,12 @@ import { useCaseStore } from './case';
 export type JournalOp =
   | { op: 'add'; model: string; params: Record<string, ParamValue> }
   | { op: 'edit'; model: string; idx: string; params: Record<string, ParamValue> }
-  | { op: 'delete'; model: string; idx: string }
-  /** ``POST /undo-last-edit``: drops the last add and rebuilds the system. */
+  /** ``cascade``: the delete took with it what depended on the element. */
+  | { op: 'delete'; model: string; idx: string; cascade?: boolean }
+  /** ``POST /undo-last-edit``: takes back the newest add, edit or delete. */
   | { op: 'undo' }
+  /** ``POST /redo-edit``: puts back what the last undo took back. */
+  | { op: 'redo' }
   /** ``POST /reload``: back to the pre-setup system. */
   | { op: 'reload' }
   | { op: 'clone-init' }
@@ -84,6 +90,7 @@ const WORK_OPS: ReadonlySet<JournalOp['op']> = new Set([
   'edit',
   'delete',
   'undo',
+  'redo',
   'clone-edit',
   'clone-undo',
   'clone-redo',
@@ -121,31 +128,6 @@ export function compactJournal(
   }
   // Collapse a run of reloads into its newest.
   return out.filter((e, i) => !(e.op === 'reload' && out[i + 1]?.op === 'reload'));
-}
-
-/**
- * Params the substrate holds as one value though the schema lists them as two. A
- * GENROU's inertia is ``M`` (= 2H) and an edit may name it as either, but not both
- * in one request, so the newer of the two replaces the older when edits merge.
- */
-const ONE_VALUE: Readonly<Record<string, readonly string[]>> = { GENROU: ['H', 'M'] };
-
-/**
- * The params of two back-to-back edits to one element as one edit: the newer value
- * of a param wins, and so does the newer of two names for one value (H typed, then
- * M: only M is replayed, since the pair is refused). Pure.
- */
-export function mergeEditParams(
-  model: string,
-  older: Record<string, ParamValue>,
-  newer: Record<string, ParamValue>,
-): Record<string, ParamValue> {
-  const merged = { ...older };
-  const names = ONE_VALUE[model];
-  if (names?.some((name) => name in newer)) {
-    for (const name of names) delete merged[name];
-  }
-  return { ...merged, ...newer };
 }
 
 /** True when ``op`` is the user's own work rather than bookkeeping. */
@@ -199,7 +181,7 @@ export interface EditJournalState {
   markSaved: () => void;
   /**
    * The system was just written over the open case's own file. The file holds every
-   * edit up to now, so the substrate (which empties its replay buffer for the same
+   * edit up to now, so the substrate (which empties its edit log for the same
    * reason) and a session recovery start from it: the entries are dropped as a
    * file-backed reload drops them, and replaying them onto the file would apply each
    * twice. A clone's operations stay, since its files and stacks are not in the file.
@@ -236,18 +218,7 @@ export const useEditJournalStore = create<EditJournalState>((set, get) => ({
       });
       return;
     }
-    let entries = [...state.entries];
-    const prev = entries[entries.length - 1];
-    if (op.op === 'edit' && prev?.op === 'edit' && prev.model === op.model && prev.idx === op.idx) {
-      // Edits to one element, back to back, are one edit.
-      entries[entries.length - 1] = {
-        ...prev,
-        params: mergeEditParams(op.model, prev.params, op.params),
-        rev,
-      };
-    } else {
-      entries.push({ ...op, rev });
-    }
+    let entries = [...state.entries, { ...op, rev }];
     if (op.op === 'reload' || op.op === 'clone-reset') {
       const selection = useCaseStore.getState().selection;
       entries = compactJournal(entries, selection !== null && selection.primaryPath !== null);

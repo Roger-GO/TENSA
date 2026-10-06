@@ -4,9 +4,9 @@
  * ``useSessionRecovery`` calls this after it has loaded the case (or created the
  * blank system) into the replacement session, with the entries the edit journal
  * (``store/editJournal.ts``) holds. Each entry becomes the request that made it,
- * sent one at a time and in order: the substrate answers an add, an undo or a
- * reload the way it did the first time, so the rebuilt session ends up where the
- * lost one was without this module knowing what any operation does.
+ * sent one at a time and in order: the substrate answers an add, an undo, a redo
+ * or a reload the way it did the first time, so the rebuilt session ends up where
+ * the lost one was without this module knowing what any operation does.
  *
  * It stops at the first request the substrate refuses (a model it no longer
  * accepts, a session that vanished again), after retrying one that found the session
@@ -87,13 +87,21 @@ async function send(sessionId: SessionId, entry: JournalEntry): Promise<unknown>
         timeoutMs: TIMEOUTS.workspace,
       });
     case 'delete':
+      // A delete, an undo and a redo each build the system again from the
+      // case file, as a reload does.
       return await andesClient.delete(element(entry.model, entry.idx), {
-        timeoutMs: TIMEOUTS.workspace,
+        timeoutMs: TIMEOUTS.caseLoad,
+        query: entry.cascade === true ? { cascade: 'true' } : undefined,
       });
     case 'undo':
       return await andesClient.post(`${base}/undo-last-edit`, {
         body: {},
-        timeoutMs: TIMEOUTS.workspace,
+        timeoutMs: TIMEOUTS.caseLoad,
+      });
+    case 'redo':
+      return await andesClient.post(`${base}/redo-edit`, {
+        body: {},
+        timeoutMs: TIMEOUTS.caseLoad,
       });
     case 'reload':
       return await andesClient.post(`${base}/reload`, { body: {}, timeoutMs: TIMEOUTS.caseLoad });

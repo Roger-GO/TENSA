@@ -15,7 +15,8 @@ import { cn } from '@/lib/cn';
 
 /**
  * Workflow toolbar (Unit 12): "Reload" reverts to the on-disk case (or
- * the empty-blank state); "Undo addition" drops the most recent add().
+ * the empty-blank state); "Undo" takes back the newest edit made before a
+ * run (an element added, changed or deleted).
  *
  * Sits in the top-bar's left slot next to AddElement / Save System.
  *
@@ -89,9 +90,9 @@ export function WorkflowToolbar({ className }: WorkflowToolbarProps) {
           onClick={handleUndo}
           data-testid="undo-last-edit-button"
           className="text-xs"
-          title="Remove the element, PMU or profile you added last"
+          title="Take back your last change: an element added, changed or deleted"
         >
-          {undo.isPending ? 'Undoing…' : 'Undo addition'}
+          {undo.isPending ? 'Undoing…' : 'Undo'}
         </Button>
         <Button
           type="button"
@@ -123,8 +124,9 @@ export function WorkflowToolbar({ className }: WorkflowToolbarProps) {
         <DialogContent>
           <DialogTitle>Reload from file?</DialogTitle>
           <DialogDescription className="mt-2">
-            Reloading will re-parse the case from disk and discard every element you've added or
-            edited since loading. Any PF results will be cleared. This cannot be undone.
+            Reloading will re-parse the case from disk and discard every change made since loading:
+            the elements you&apos;ve added, edited or deleted. Any PF results will be cleared. This
+            cannot be undone.
           </DialogDescription>
           <DialogFooter className="mt-4">
             <Button

@@ -94,53 +94,71 @@ describe('<EditMenu />', () => {
     expect(screen.getByTestId('topbar-menu-edit-reload')).toBeInTheDocument();
   });
 
-  it('names the two undos for what each one undoes, and explains them on hover', async () => {
+  it('has one Undo and one Redo, each naming the change it would act on', async () => {
+    MOCK_TOPOLOGY = {
+      ...MOCK_TOPOLOGY!,
+      undo: { op: 'delete', model: 'Bus', idx: 3, params: [], also: 4 },
+      redo: { op: 'add', model: 'Line', idx: 'L_new', params: [], also: 0 },
+    };
+    const user = userEvent.setup();
+    render(withProviders(<EditMenu />));
+    await user.click(screen.getByTestId('topbar-menu-edit-trigger'));
+    const undo = await screen.findByTestId('topbar-menu-edit-undo');
+    const redo = screen.getByTestId('topbar-menu-edit-redo');
+    expect(undo).toHaveTextContent('Undo: delete Bus 3 and 4 more');
+    expect(redo).toHaveTextContent('Redo: add Line L_new');
+    expect(undo).not.toHaveAttribute('aria-disabled');
+    // The parameter edits have no Undo of their own any more.
+    expect(screen.queryByTestId('topbar-menu-edit-clone-undo')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('topbar-menu-edit-clone-redo')).not.toBeInTheDocument();
+    // The hover text says everything Undo takes back, and is on the screen while
+    // the pointer is over the item, where a browser's own tooltip is not in the
+    // page for anything to read.
+    expect(undo.getAttribute('aria-description')).toMatch(/added, changed or deleted/);
+    expect(undo.getAttribute('aria-description')).toMatch(/controller parameter/);
+    await user.hover(undo);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/added, changed or deleted/);
+  });
+
+  it('names a controller parameter edit when that is what Undo and Redo would act on', async () => {
+    MOCK_TOPOLOGY = { ...MOCK_TOPOLOGY!, state: 'committed' };
     useCaseStore.setState({ cloneInitialized: true, cloneUndoDepth: 1, cloneRedoDepth: 1 });
     const user = userEvent.setup();
     render(withProviders(<EditMenu />));
     await user.click(screen.getByTestId('topbar-menu-edit-trigger'));
-    const addition = await screen.findByTestId('topbar-menu-edit-undo');
-    const parameter = screen.getByTestId('topbar-menu-edit-clone-undo');
-    expect(addition).toHaveTextContent('Undo last addition');
-    expect(parameter).toHaveTextContent('Undo parameter edit');
-    // Each hover text says what it leaves alone, so neither is read as the other.
-    expect(addition.getAttribute('aria-description')).toMatch(/added last/);
-    expect(parameter.getAttribute('aria-description')).toMatch(/Undo last addition/);
-    expect(screen.getByTestId('topbar-menu-edit-clone-redo')).toHaveTextContent(
-      'Redo parameter edit',
+    expect(await screen.findByTestId('topbar-menu-edit-undo')).toHaveTextContent(
+      'Undo: parameter edit',
     );
-    // The hover text is on the screen while the pointer is over the item, where a
-    // browser's own tooltip is not in the page for anything to read.
-    await user.hover(addition);
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(/added last/);
+    expect(screen.getByTestId('topbar-menu-edit-redo')).toHaveTextContent('Redo: parameter edit');
   });
 
-  it('lists the two parameter commands greyed out, with what to do first, until Edit mode has run', async () => {
+  it('lists Undo and Save parameter edits greyed out, with what to do first, until there is an edit', async () => {
     const user = userEvent.setup();
     render(withProviders(<EditMenu />));
     await user.click(screen.getByTestId('topbar-menu-edit-trigger'));
-    const undo = await screen.findByTestId('topbar-menu-edit-clone-undo');
+    const undo = await screen.findByTestId('topbar-menu-edit-undo');
     const save = screen.getByTestId('topbar-menu-edit-clone-save-as');
     expect(undo).toHaveAttribute('aria-disabled', 'true');
-    expect(undo).toHaveTextContent(/Switch to Edit mode and change a controller parameter first/);
+    expect(undo).toHaveTextContent(/Nothing to undo yet. Add, change or delete an element first/);
     expect(save).toHaveAttribute('aria-disabled', 'true');
     expect(save).toHaveTextContent('Save parameter edits as case…');
     expect(save).toHaveTextContent(/Nothing to save yet/);
     // Nothing that is not about edits shows a reason, and Redo and Discard stay out.
-    expect(screen.getByTestId('topbar-menu-edit-undo')).not.toHaveAttribute('aria-disabled');
-    expect(screen.queryByTestId('topbar-menu-edit-clone-redo')).not.toBeInTheDocument();
+    expect(screen.getByTestId('topbar-menu-edit-reload')).not.toHaveAttribute('aria-disabled');
+    expect(screen.queryByTestId('topbar-menu-edit-redo')).not.toBeInTheDocument();
     expect(screen.queryByTestId('topbar-menu-edit-clone-reset')).not.toBeInTheDocument();
     // A click on the greyed Save does not open its dialog.
     await user.click(save);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('says there is nothing to undo once Edit mode is on but no parameter has changed', async () => {
+  it('says after a run that there is nothing to undo once Edit mode is on but no parameter has changed', async () => {
+    MOCK_TOPOLOGY = { ...MOCK_TOPOLOGY!, state: 'committed' };
     useCaseStore.setState({ cloneInitialized: true, cloneUndoDepth: 0, cloneRedoDepth: 0 });
     const user = userEvent.setup();
     render(withProviders(<EditMenu />));
     await user.click(screen.getByTestId('topbar-menu-edit-trigger'));
-    const undo = await screen.findByTestId('topbar-menu-edit-clone-undo');
+    const undo = await screen.findByTestId('topbar-menu-edit-undo');
     expect(undo).toHaveAttribute('aria-disabled', 'true');
     expect(undo).toHaveTextContent(/No controller parameter has been changed yet/);
     // The copy exists, so Save parameter edits as case is usable.
@@ -157,16 +175,16 @@ describe('<EditMenu />', () => {
     const save = await screen.findByTestId('topbar-menu-edit-clone-save-as');
     expect(save).not.toHaveAttribute('aria-disabled');
     expect(save).not.toHaveTextContent(/Nothing to save yet/);
-    expect(screen.getByTestId('topbar-menu-edit-clone-undo')).not.toHaveAttribute('aria-disabled');
+    expect(screen.getByTestId('topbar-menu-edit-undo')).not.toHaveAttribute('aria-disabled');
   });
 
-  it('lists no parameter command when no case is open, since there is nothing to edit', async () => {
+  it('lists no edit command when no case is open, since there is nothing to edit', async () => {
     MOCK_TOPOLOGY = null;
     const user = userEvent.setup();
     render(withProviders(<EditMenu />));
     await user.click(screen.getByTestId('topbar-menu-edit-trigger'));
     await screen.findByTestId('topbar-menu-edit-content');
-    expect(screen.queryByTestId('topbar-menu-edit-clone-undo')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('topbar-menu-edit-undo')).not.toBeInTheDocument();
     expect(screen.queryByTestId('topbar-menu-edit-clone-save-as')).not.toBeInTheDocument();
   });
 

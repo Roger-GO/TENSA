@@ -67,6 +67,7 @@ export type JobKind =
   | 'element-edit'
   | 'element-delete'
   | 'element-undo'
+  | 'element-redo'
   | 'disturbance-commit'
   | 'pmu-add'
   | 'pmu-delete'

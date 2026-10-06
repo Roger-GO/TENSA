@@ -60,14 +60,20 @@ import {
   useCloneReset,
   useCloneUndo,
   useCurrentTopology,
+  useRedoEdit,
   useReloadCase,
+  useTopologyRefetching,
   useUndoLastEdit,
 } from '@/api/queries';
+import { ProblemDetailsError } from '@/api/client';
+import type { TopologySummary } from '@/api/types';
 import { __requestOpenSldSearch, __requestSldCommand } from '@/store/sld';
 import { useThemeStore } from '@/store/theme';
 import { useLayoutStore } from '@/store/layout';
 import { requestEigLogToggle, requestEigViewReset } from '@/lib/eigViewBus';
 import { reportAbortError } from '@/lib/abortRun';
+import { describeStep } from '@/lib/editSteps';
+import { toast } from '@/lib/toast';
 import { openPflowComparePanel } from '@/lib/openPflowPanel';
 import { openRunHistory } from '@/lib/runHistory';
 import { saveHtmlReport } from '@/lib/saveHtmlReport';
@@ -101,7 +107,7 @@ export interface Command {
   /**
    * One or two sentences on what the command does, for the hover text of its menu
    * item and palette row. For the commands whose label alone leaves two of them
-   * easy to confuse (the two Undos, the two ways to save).
+   * easy to confuse (the two ways to save), or does not say what it will act on (Undo).
    */
   description?: string;
   /**
@@ -191,6 +197,7 @@ function useCommandSets(): CommandSets {
   const sessionId = useSessionStore((s) => s.sessionId);
   const caseSelection = useCaseStore((s) => s.selection);
   const topology = useCurrentTopology();
+  const topologyRefetching = useTopologyRefetching();
   const isPfRunning = usePflowStore((s) => s.isRunning);
   const lastPfRun = usePflowStore((s) => s.lastRun);
   const hasPflowHistory = usePflowHistoryStore((s) => s.snapshots.length > 0);
@@ -226,6 +233,7 @@ function useCommandSets(): CommandSets {
   // ---- mutations (Edit group) -------------------------------------------
   const reloadMutation = useReloadCase();
   const undoMutation = useUndoLastEdit();
+  const redoMutation = useRedoEdit();
 
   // ---- save (Workspace group) --------------------------------------------
   // `target` is what Save does now: write the open file, or ask for a name.
@@ -264,7 +272,28 @@ function useCommandSets(): CommandSets {
   const sessionScopeDisabled = sessionId === null || caseSelection === null;
   const reportDisabled = sessionId === null;
   const reloadDisabled = noTopology || caseSelection?.blank === true;
-  const undoDisabled = noTopology || committed;
+  // One Undo and one Redo for two histories the substrate keeps apart. Before a
+  // run it records every element added, changed or deleted (the topology names
+  // the newest as `undo`, and the one last taken back as `redo`). After a run,
+  // Edit mode keeps the controller parameter edits in its copy of the case. A
+  // parameter edit sets the case up again and so empties the first history,
+  // which means an element edit, when there is one, is always the newer.
+  const elementUndo = committed ? null : (topology?.undo ?? null);
+  const elementRedo = committed ? null : (topology?.redo ?? null);
+  const parameterUndo = cloneInitialized && cloneUndoDepth > 0;
+  // An element edit made since a parameter edit was undone is a new change, and
+  // a new change leaves nothing to redo: putting the parameter edit back would
+  // set the case up from the copy and drop the element edit.
+  const parameterRedo = cloneInitialized && cloneRedoDepth > 0 && elementUndo === null;
+  // While the topology is being read again (an add or an edit asks for that),
+  // `undo` and `redo` are still the ones from before it: wait for the read
+  // rather than act on an edit that is no longer the newest.
+  const undoRedoPending =
+    topologyRefetching ||
+    undoMutation.isPending ||
+    redoMutation.isPending ||
+    cloneUndoMutation.isPending ||
+    cloneRedoMutation.isPending;
   const pfConverged = lastPfRun?.converged === true;
   const diagramVisible = topology !== null && topology.buses.length > 0 && !resultsViewActive;
 
@@ -427,19 +456,70 @@ function useCommandSets(): CommandSets {
       },
 
       // ---- edit ----------------------------------------------------------
-      // Drops the last add (an element, a PMU or a profile). It has nothing to do with
-      // parameter edits: those are the two commands below, which carry Ctrl/Cmd+Z.
+      // Undo and Redo (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z) act on whichever history
+      // holds the newest change: the elements added, changed or deleted before
+      // a run, else the controller parameters changed in Edit mode.
       {
         id: 'edit.undo',
-        label: 'Undo last addition',
+        label:
+          elementUndo !== null
+            ? `Undo: ${describeStep(elementUndo)}`
+            : parameterUndo
+              ? 'Undo: parameter edit'
+              : 'Undo',
         description:
-          'Removes the element, PMU or profile you added last. The system is rebuilt from the case file and the additions that remain, so changes to the parameters of existing elements are dropped too.',
+          'Takes back your last change to the system: an element added, changed or deleted before a run, or a controller parameter changed in Edit mode. A deleted element comes back with everything that was deleted with it.',
         group: 'edit',
-        keywords: ['undo', 'revert', 'last', 'add', 'addition', 'element', 'remove'],
+        keywords: ['undo', 'revert', 'last', 'add', 'addition', 'delete', 'change', 'parameter'],
         action: () => {
-          if (sessionId !== null) undoMutation.mutate(sessionId);
+          if (sessionId === null) return;
+          if (elementUndo !== null) {
+            // ``mutateAsync``: the note has to be left also when the palette
+            // that ran the command has closed by the time the answer is back.
+            void undoMutation
+              .mutateAsync(sessionId)
+              .then(noteUndone, (err: unknown) => noteRefused('Could not undo', err));
+          } else if (parameterUndo) {
+            cloneUndoMutation.mutate(sessionId);
+          }
         },
-        when: () => sessionId !== null && !undoDisabled && !undoMutation.isPending,
+        when: () =>
+          sessionId !== null && !undoRedoPending && (elementUndo !== null || parameterUndo),
+        // Listed greyed out while there is nothing to undo, saying what Undo takes back.
+        unavailableReason: () => {
+          if (sessionId === null || topology === null || undoRedoPending) return null;
+          if (!committed) return 'Nothing to undo yet. Add, change or delete an element first.';
+          if (cloneInitialized) return 'No controller parameter has been changed yet.';
+          return editMode === 'edit'
+            ? 'Nothing to undo since the run. Change a controller parameter in the Inspector first.'
+            : 'Nothing to undo since the run. Switch to Edit mode to change a controller parameter.';
+        },
+        shortcut: 'ctrl+z, meta+z',
+      },
+      {
+        id: 'edit.redo',
+        label:
+          elementRedo !== null
+            ? `Redo: ${describeStep(elementRedo)}`
+            : parameterRedo
+              ? 'Redo: parameter edit'
+              : 'Redo',
+        description: 'Puts back the change you just took back with Undo.',
+        group: 'edit',
+        keywords: ['redo', 'reapply', 'undo', 'again'],
+        action: () => {
+          if (sessionId === null) return;
+          if (elementRedo !== null) {
+            void redoMutation
+              .mutateAsync(sessionId)
+              .then(noteRedone, (err: unknown) => noteRefused('Could not redo', err));
+          } else if (parameterRedo) {
+            cloneRedoMutation.mutate(sessionId);
+          }
+        },
+        when: () =>
+          sessionId !== null && !undoRedoPending && (elementRedo !== null || parameterRedo),
+        shortcut: 'ctrl+shift+z, meta+shift+z',
       },
       {
         id: 'edit.reload',
@@ -469,53 +549,6 @@ function useCommandSets(): CommandSets {
         keywords: ['edit', 'run', 'mode', 'toggle', 'inspector', 'controller', 'parameter'],
         action: () => setEditMode(editMode === 'edit' ? 'run' : 'edit'),
         when: () => sessionId !== null,
-      },
-      // Clone undo / redo (Ctrl+Z / Ctrl+Shift+Z). NOTE: the existing
-      // ``edit.undo`` (Undo last addition) is palette/menu-only with NO shortcut
-      // binding, so Ctrl+Z is free to bind here without collision. Gated on a
-      // live clone + a non-empty stack so the binding is a no-op otherwise.
-      {
-        id: 'clone.undo',
-        label: 'Undo parameter edit',
-        description:
-          'Steps back the last controller parameter you changed in Edit mode. To remove an element you added, use Undo last addition.',
-        group: 'edit',
-        keywords: ['undo', 'clone', 'parameter', 'edit', 'revert', 'controller'],
-        action: () => {
-          if (sessionId !== null) cloneUndoMutation.mutate(sessionId);
-        },
-        when: () =>
-          sessionId !== null &&
-          cloneInitialized &&
-          cloneUndoDepth > 0 &&
-          !cloneUndoMutation.isPending,
-        // Listed greyed out while there is nothing to undo, so the two Undos sit side
-        // by side in the menu and the second says what it is for.
-        unavailableReason: () => {
-          if (sessionId === null || topology === null || cloneUndoMutation.isPending) return null;
-          return cloneInitialized
-            ? 'No controller parameter has been changed yet.'
-            : editMode === 'edit'
-              ? 'Change a controller parameter in the Inspector first.'
-              : 'Switch to Edit mode and change a controller parameter first.';
-        },
-        shortcut: 'ctrl+z, meta+z',
-      },
-      {
-        id: 'clone.redo',
-        label: 'Redo parameter edit',
-        description: 'Re-applies the controller parameter edit you just undid.',
-        group: 'edit',
-        keywords: ['redo', 'clone', 'parameter', 'edit', 'reapply', 'controller'],
-        action: () => {
-          if (sessionId !== null) cloneRedoMutation.mutate(sessionId);
-        },
-        when: () =>
-          sessionId !== null &&
-          cloneInitialized &&
-          cloneRedoDepth > 0 &&
-          !cloneRedoMutation.isPending,
-        shortcut: 'ctrl+shift+z, meta+shift+z',
       },
       {
         id: 'clone.save-as',
@@ -1008,13 +1041,18 @@ function useCommandSets(): CommandSets {
     renameTargetRunId,
     reloadMutation,
     undoMutation,
+    redoMutation,
+    elementUndo,
+    elementRedo,
+    parameterUndo,
+    parameterRedo,
+    undoRedoPending,
+    committed,
     saveTarget,
     saveOpenCase,
     editMode,
     setEditMode,
     cloneInitialized,
-    cloneUndoDepth,
-    cloneRedoDepth,
     cloneUndoMutation,
     cloneRedoMutation,
     cloneResetMutation,
@@ -1022,7 +1060,6 @@ function useCommandSets(): CommandSets {
     sessionScopeDisabled,
     reportDisabled,
     reloadDisabled,
-    undoDisabled,
     pfConverged,
     hasPflowHistory,
     hasReportContent,
@@ -1030,6 +1067,27 @@ function useCommandSets(): CommandSets {
     abortMutation,
     diagramVisible,
   ]);
+}
+
+/** Say what an undo took back: the topology that came back names it as its `redo`. */
+function noteUndone(topology: TopologySummary): void {
+  if (topology.redo != null) toast.info(`Undone: ${describeStep(topology.redo)}`);
+}
+
+/** Say what a redo put back: the topology that came back names it as its `undo`. */
+function noteRedone(topology: TopologySummary): void {
+  if (topology.undo != null) toast.info(`Redone: ${describeStep(topology.undo)}`);
+}
+
+/** Say why the substrate refused an undo or a redo, in its own words. */
+function noteRefused(title: string, err: unknown): void {
+  const description =
+    err instanceof ProblemDetailsError
+      ? (err.detail ?? err.title)
+      : err instanceof Error
+        ? err.message
+        : undefined;
+  toast.error(title, { description });
 }
 
 /**

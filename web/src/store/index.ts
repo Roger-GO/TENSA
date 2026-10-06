@@ -204,7 +204,12 @@ export function __resetCascadeForTests(): void {
   });
   usePmuStore.setState({ pmus: [] });
   useProfilesStore.setState({ profiles: [] });
-  useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
+  useDisturbanceStore.setState({
+    disturbances: [],
+    removedWith: {},
+    dirty: false,
+    committed: false,
+  });
   useUiStore.getState().setTdsConfig({ daeVars: [], controllers: [] });
   useSweepStore.setState({ sweeps: {}, activeSweepId: null });
   useJobsStore.setState({ jobs: {} });

@@ -7,8 +7,9 @@ import { describe, expect, it } from 'vitest';
 import { kindLabel } from '@/components/shell/jobLabels';
 
 describe('kindLabel', () => {
-  it('calls the add undo an addition, not an edit, so it is not read as a parameter undo', () => {
-    expect(kindLabel('element-undo')).toBe('Undo addition');
+  it('calls the undo and redo of an add, an edit or a delete a change, whichever it was', () => {
+    expect(kindLabel('element-undo')).toBe('Undo change');
+    expect(kindLabel('element-redo')).toBe('Redo change');
   });
 
   it('names the controller parameter edit jobs like the Edit menu items they come from', () => {

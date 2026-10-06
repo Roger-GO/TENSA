@@ -41,7 +41,8 @@ import { NO_ELEMENT_NAMES } from '@/lib/elementNames';
 import { useAnalyzeStore } from '@/store/analyze';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
-import type { TopologySummary, PflowResult } from '@/api/types';
+import type { EditStep, TopologySummary, PflowResult } from '@/api/types';
+import { toast } from '@/lib/toast';
 
 // The report itself is built by a module loaded on demand; the registry only
 // has to call the one function that saves it.
@@ -51,13 +52,25 @@ vi.mock('@/lib/saveHtmlReport', () => ({
 }));
 
 // `useCurrentTopology` is a TanStack-Query wrapper; mock it to feed
-// deterministic topology states without a network round-trip.
+// deterministic topology states without a network round-trip. The four
+// mutations Undo and Redo choose between are stand-ins, so a test can see
+// which one a command sent.
 let MOCK_TOPOLOGY: TopologySummary | null = null;
+let MOCK_REFETCHING = false;
+const undoMutate = vi.hoisted(() => vi.fn());
+const redoMutate = vi.hoisted(() => vi.fn());
+const cloneUndoMutate = vi.hoisted(() => vi.fn());
+const cloneRedoMutate = vi.hoisted(() => vi.fn());
 vi.mock('@/api/queries', async () => {
   const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
   return {
     ...actual,
     useCurrentTopology: () => MOCK_TOPOLOGY,
+    useTopologyRefetching: () => MOCK_REFETCHING,
+    useUndoLastEdit: () => ({ mutateAsync: undoMutate, isPending: false }),
+    useRedoEdit: () => ({ mutateAsync: redoMutate, isPending: false }),
+    useCloneUndo: () => ({ mutate: cloneUndoMutate, isPending: false }),
+    useCloneRedo: () => ({ mutate: cloneRedoMutate, isPending: false }),
   };
 });
 
@@ -82,6 +95,13 @@ function wrapper({ children }: { children: ReactNode }) {
 
 beforeEach(() => {
   MOCK_TOPOLOGY = emptyTopology();
+  MOCK_REFETCHING = false;
+  for (const mutate of [undoMutate, redoMutate, cloneUndoMutate, cloneRedoMutate]) {
+    mutate.mockReset();
+  }
+  // The element history's two answer with the topology after the undo or redo.
+  undoMutate.mockResolvedValue(emptyTopology());
+  redoMutate.mockResolvedValue(emptyTopology());
   useSessionStore.setState({
     sessionId: parseSessionId('test-session'),
     recoveryInProgress: false,
@@ -158,51 +178,167 @@ describe('useCommandRegistry — edit mode command', () => {
   });
 });
 
-describe('useCommandRegistry: the two Undos', () => {
-  it('"Undo last addition" drops an add, "Undo parameter edit" steps back a clone edit, and they read differently', () => {
+describe('useCommandRegistry: one Undo and one Redo', () => {
+  const byId = (list: readonly { id: string }[], id: string) => list.find((c) => c.id === id);
+  const DELETE: EditStep = { op: 'delete', model: 'Line', idx: 'Line_3', params: [], also: 2 };
+  const ADD: EditStep = { op: 'add', model: 'Bus', idx: 15, params: [], also: 0 };
+
+  it('names the element edit each would act on, and sends it to the element history', () => {
+    MOCK_TOPOLOGY = { ...emptyTopology(), undo: DELETE, redo: ADD };
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const undo = result.current.find((c) => c.id === 'edit.undo');
+    const redo = result.current.find((c) => c.id === 'edit.redo');
+    expect(undo?.label).toBe('Undo: delete Line Line_3 and 2 more');
+    expect(redo?.label).toBe('Redo: add Bus 15');
+    expect(undo?.shortcut).toBe('ctrl+z, meta+z');
+    expect(redo?.shortcut).toBe('ctrl+shift+z, meta+shift+z');
+    expect(undo?.description).toMatch(/added, changed or deleted/);
+    // There is no second pair of commands for the parameter edits any more.
+    expect(byId(result.current, 'clone.undo')).toBeUndefined();
+    expect(byId(result.current, 'clone.redo')).toBeUndefined();
+
+    undo?.action();
+    redo?.action();
+    expect(undoMutate).toHaveBeenCalledWith('test-session');
+    expect(redoMutate).toHaveBeenCalledWith('test-session');
+    expect(cloneUndoMutate).not.toHaveBeenCalled();
+    expect(cloneRedoMutate).not.toHaveBeenCalled();
+  });
+
+  it('acts on the controller parameter edits after a run, when those are the history there is', () => {
+    // The element edits made before the run are still named by the topology, but
+    // a system that is set up cannot take them back.
+    MOCK_TOPOLOGY = { ...emptyTopology('committed'), undo: DELETE, redo: ADD };
     act(() => {
       useCaseStore.setState({ cloneInitialized: true, cloneUndoDepth: 2, cloneRedoDepth: 1 });
     });
     const { result } = renderHook(() => useCommandRegistry(), { wrapper });
-    const byId = (id: string) => result.current.find((c) => c.id === id);
-    expect(byId('edit.undo')?.label).toBe('Undo last addition');
-    expect(byId('clone.undo')?.label).toBe('Undo parameter edit');
-    expect(byId('clone.redo')?.label).toBe('Redo parameter edit');
-    // Only the parameter undo has Ctrl/Cmd+Z; the addition undo has no key.
-    expect(byId('edit.undo')?.shortcut).toBeUndefined();
-    expect(byId('clone.undo')?.shortcut).toBe('ctrl+z, meta+z');
-    // The hover text of each points at the other, so a user who picked the wrong one is told.
-    expect(byId('edit.undo')?.description).toMatch(/added last/);
-    expect(byId('clone.undo')?.description).toMatch(/Undo last addition/);
+    const undo = result.current.find((c) => c.id === 'edit.undo');
+    const redo = result.current.find((c) => c.id === 'edit.redo');
+    expect(undo?.label).toBe('Undo: parameter edit');
+    expect(redo?.label).toBe('Redo: parameter edit');
+
+    undo?.action();
+    redo?.action();
+    expect(cloneUndoMutate).toHaveBeenCalledWith('test-session');
+    expect(cloneRedoMutate).toHaveBeenCalledWith('test-session');
+    expect(undoMutate).not.toHaveBeenCalled();
+    expect(redoMutate).not.toHaveBeenCalled();
+  });
+
+  it('takes the element edit first when both histories hold one, since it is the newer', () => {
+    MOCK_TOPOLOGY = { ...emptyTopology(), undo: ADD };
+    act(() => {
+      useCaseStore.setState({ cloneInitialized: true, cloneUndoDepth: 1, cloneRedoDepth: 1 });
+    });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const undo = result.current.find((c) => c.id === 'edit.undo');
+    expect(undo?.label).toBe('Undo: add Bus 15');
+    undo?.action();
+    expect(undoMutate).toHaveBeenCalledTimes(1);
+    expect(cloneUndoMutate).not.toHaveBeenCalled();
+    // The element edit came after the parameter edit was undone, so there is
+    // nothing to redo: putting the parameter edit back would drop the element edit.
+    expect(byId(result.current, 'edit.redo')).toBeUndefined();
+  });
+
+  it('redoes a parameter edit before a run when no element has been edited since', () => {
+    act(() => {
+      useCaseStore.setState({ cloneInitialized: true, cloneUndoDepth: 0, cloneRedoDepth: 1 });
+    });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const redo = result.current.find((c) => c.id === 'edit.redo');
+    expect(redo?.label).toBe('Redo: parameter edit');
+    redo?.action();
+    expect(cloneRedoMutate).toHaveBeenCalledTimes(1);
+    expect(redoMutate).not.toHaveBeenCalled();
+  });
+
+  it('says what was taken back or put back, and why when the substrate refuses', async () => {
+    const info = vi.spyOn(toast, 'info').mockImplementation(() => '');
+    const error = vi.spyOn(toast, 'error').mockImplementation(() => '');
+    MOCK_TOPOLOGY = { ...emptyTopology(), undo: DELETE, redo: ADD };
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const undo = result.current.find((c) => c.id === 'edit.undo');
+    const redo = result.current.find((c) => c.id === 'edit.redo');
+
+    // An undo answers with the topology whose `redo` is what it took back.
+    undoMutate.mockResolvedValueOnce({ ...emptyTopology(), redo: DELETE });
+    undo?.action();
+    await vi.waitFor(() =>
+      expect(info).toHaveBeenLastCalledWith('Undone: delete Line Line_3 and 2 more'),
+    );
+    redoMutate.mockResolvedValueOnce({ ...emptyTopology(), undo: ADD });
+    redo?.action();
+    await vi.waitFor(() => expect(info).toHaveBeenLastCalledWith('Redone: add Bus 15'));
+
+    undoMutate.mockRejectedValueOnce(new Error('2 pending disturbance(s) act on it'));
+    undo?.action();
+    await vi.waitFor(() =>
+      expect(error).toHaveBeenLastCalledWith('Could not undo', {
+        description: '2 pending disturbance(s) act on it',
+      }),
+    );
+  });
+
+  it('waits while the topology is read again, since what it names is the edit before', () => {
+    // Right after an add the cached topology still names the edit before it (or
+    // none, leaving the parameter history to act on by mistake).
+    MOCK_TOPOLOGY = { ...emptyTopology(), undo: ADD };
+    MOCK_REFETCHING = true;
+    act(() => {
+      useCaseStore.setState({ cloneInitialized: true, cloneUndoDepth: 1, cloneRedoDepth: 1 });
+    });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(byId(result.current, 'edit.undo')).toBeUndefined();
+    expect(byId(result.current, 'edit.redo')).toBeUndefined();
+  });
+
+  it('is not there to run when neither history holds anything', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(byId(result.current, 'edit.undo')).toBeUndefined();
+    expect(byId(result.current, 'edit.redo')).toBeUndefined();
   });
 });
 
 describe('useMenuCommands: commands kept in view while they cannot run', () => {
   const ids = (list: readonly { id: string }[]) => list.map((c) => c.id);
 
-  it('keeps the two parameter commands, with what to do first, where the palette hides them', () => {
+  it('keeps Undo and Save parameter edits, with what to do first, where the palette hides them', () => {
     const { result: registry } = renderHook(() => useCommandRegistry(), { wrapper });
     const { result: menu } = renderHook(() => useMenuCommands(), { wrapper });
     expect(ids(registry.current)).not.toContain('clone.save-as');
-    expect(ids(registry.current)).not.toContain('clone.undo');
+    expect(ids(registry.current)).not.toContain('edit.undo');
     const save = menu.current.find((c) => c.id === 'clone.save-as');
-    const undo = menu.current.find((c) => c.id === 'clone.undo');
+    const undo = menu.current.find((c) => c.id === 'edit.undo');
     expect(save?.unavailable).toMatch(/Nothing to save yet.*Switch to Edit mode/);
-    expect(undo?.unavailable).toMatch(/Switch to Edit mode and change a controller parameter/);
+    expect(undo?.label).toBe('Undo');
+    expect(undo?.unavailable).toBe('Nothing to undo yet. Add, change or delete an element first.');
     // The command still runs nothing by itself: its gate is the same one.
     expect(save?.when?.()).toBe(false);
+    expect(undo?.when?.()).toBe(false);
+  });
+
+  it('after a run, says that Undo is then for a controller parameter and how to change one', () => {
+    MOCK_TOPOLOGY = emptyTopology('committed');
+    const { result } = renderHook(() => useMenuCommands(), { wrapper });
+    expect(result.current.find((c) => c.id === 'edit.undo')?.unavailable).toBe(
+      'Nothing to undo since the run. Switch to Edit mode to change a controller parameter.',
+    );
   });
 
   it('does not say to switch to Edit mode when it is already on', () => {
+    MOCK_TOPOLOGY = emptyTopology('committed');
     act(() => {
       useCaseStore.setState({ editMode: 'edit' });
     });
     const { result } = renderHook(() => useMenuCommands(), { wrapper });
     const save = result.current.find((c) => c.id === 'clone.save-as');
-    const undo = result.current.find((c) => c.id === 'clone.undo');
+    const undo = result.current.find((c) => c.id === 'edit.undo');
     expect(save?.unavailable).toMatch(/Change a controller parameter in the Inspector first/);
     expect(save?.unavailable).not.toMatch(/Switch to Edit mode/);
     expect(undo?.unavailable).toMatch(/Change a controller parameter in the Inspector first/);
+    expect(undo?.unavailable).not.toMatch(/Switch to Edit mode/);
     act(() => {
       useCaseStore.setState({ editMode: 'run' });
     });
@@ -213,18 +349,23 @@ describe('useMenuCommands: commands kept in view while they cannot run', () => {
     const { result: menu } = renderHook(() => useMenuCommands(), { wrapper });
     const runnable = menu.current.filter((c) => c.unavailable === null);
     expect(ids(runnable)).toEqual(ids(registry.current));
-    // The greyed ones are in the place they are declared in, after Edit mode's switch.
+    // The greyed ones are in the place they are declared in: Undo at the head of
+    // the edits, Save parameter edits after Edit mode's switch.
     const order = ids(menu.current);
-    expect(order.indexOf('inspector.toggle-edit-mode')).toBeLessThan(order.indexOf('clone.undo'));
-    expect(order.indexOf('clone.undo')).toBeLessThan(order.indexOf('clone.save-as'));
+    expect(order.indexOf('edit.undo')).toBeLessThan(order.indexOf('edit.reload'));
+    expect(order.indexOf('edit.reload')).toBeLessThan(order.indexOf('inspector.toggle-edit-mode'));
+    expect(order.indexOf('inspector.toggle-edit-mode')).toBeLessThan(
+      order.indexOf('clone.save-as'),
+    );
   });
 
   it('says there is nothing to undo, not to switch modes, once the copy exists without edits', () => {
+    MOCK_TOPOLOGY = emptyTopology('committed');
     act(() => {
       useCaseStore.setState({ cloneInitialized: true, cloneUndoDepth: 0, cloneRedoDepth: 0 });
     });
     const { result } = renderHook(() => useMenuCommands(), { wrapper });
-    expect(result.current.find((c) => c.id === 'clone.undo')?.unavailable).toMatch(
+    expect(result.current.find((c) => c.id === 'edit.undo')?.unavailable).toMatch(
       /No controller parameter has been changed yet/,
     );
     // Save parameter edits as case is usable once the copy exists.
@@ -236,20 +377,20 @@ describe('useMenuCommands: commands kept in view while they cannot run', () => {
       useCaseStore.setState({ cloneInitialized: true, cloneUndoDepth: 1, cloneRedoDepth: 0 });
     });
     const { result } = renderHook(() => useMenuCommands(), { wrapper });
-    expect(result.current.find((c) => c.id === 'clone.undo')?.unavailable).toBeNull();
+    expect(result.current.find((c) => c.id === 'edit.undo')?.unavailable).toBeNull();
     // Redo and Discard are shown when they apply and are otherwise not listed.
-    expect(ids(result.current)).not.toContain('clone.redo');
+    expect(ids(result.current)).not.toContain('edit.redo');
     act(() => {
       useCaseStore.setState({ cloneRedoDepth: 1 });
     });
     const { result: after } = renderHook(() => useMenuCommands(), { wrapper });
-    expect(after.current.find((c) => c.id === 'clone.redo')?.unavailable).toBeNull();
+    expect(after.current.find((c) => c.id === 'edit.redo')?.unavailable).toBeNull();
   });
 
   it('lists none of them when no case is open, since there is nothing to edit or save', () => {
     MOCK_TOPOLOGY = null;
     const { result } = renderHook(() => useMenuCommands(), { wrapper });
-    expect(ids(result.current)).not.toContain('clone.undo');
+    expect(ids(result.current)).not.toContain('edit.undo');
     expect(ids(result.current)).not.toContain('clone.save-as');
   });
 
@@ -258,7 +399,7 @@ describe('useMenuCommands: commands kept in view while they cannot run', () => {
       useSessionStore.setState({ sessionId: null });
     });
     const { result } = renderHook(() => useMenuCommands(), { wrapper });
-    expect(ids(result.current)).not.toContain('clone.undo');
+    expect(ids(result.current)).not.toContain('edit.undo');
     expect(ids(result.current)).not.toContain('clone.save-as');
   });
 });

@@ -8,6 +8,7 @@ import {
   compactJournal,
   hasEditsNotInFile,
   hasUnsavedEdits,
+  isWorkOp,
   useEditJournalStore,
 } from '@/store/editJournal';
 import type { JournalEntry, JournalOp } from '@/store/editJournal';
@@ -50,48 +51,44 @@ describe('record', () => {
     expect(entries.map((e) => e.rev)).toEqual([1, 2, 3]);
   });
 
-  it('merges back-to-back edits to one element, later values winning', () => {
+  it('keeps one entry per edit, also for edits of one element back to back', () => {
+    // The substrate takes back one request per undo. Were the two edits folded
+    // into one entry, an undo replayed after them would take back both.
     record(
       { op: 'edit', model: 'Bus', idx: '1', params: { Vn: 230, v0: 1.0 } },
       { op: 'edit', model: 'Bus', idx: '1', params: { v0: 1.02 } },
+      { op: 'undo' },
     );
 
     const { entries } = useEditJournalStore.getState();
-    expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ op: 'edit', params: { Vn: 230, v0: 1.02 }, rev: 2 });
+    expect(entries).toMatchObject([
+      { op: 'edit', params: { Vn: 230, v0: 1.0 }, rev: 1 },
+      { op: 'edit', params: { v0: 1.02 }, rev: 2 },
+      { op: 'undo', rev: 3 },
+    ]);
   });
 
-  it('keeps one name for the inertia of a machine when edits to it merge, the newer winning', () => {
-    // The server refuses H and M in one request, so a merged {H, M} would stop a replay.
+  it('records a delete with its cascade, and a redo, as the requests they were', () => {
     record(
-      { op: 'edit', model: 'GENROU', idx: 'G1', params: { H: 7, D: 1 } },
-      { op: 'edit', model: 'GENROU', idx: 'G1', params: { M: 15 } },
+      { op: 'delete', model: 'Bus', idx: '3', cascade: true },
+      { op: 'undo' },
+      { op: 'redo' },
+      { op: 'delete', model: 'Line', idx: 'L1' },
     );
-    expect(useEditJournalStore.getState().entries).toHaveLength(1);
-    expect(useEditJournalStore.getState().entries[0]).toMatchObject({
-      params: { D: 1, M: 15 },
-    });
 
-    useEditJournalStore.getState().reset();
-    record(
-      { op: 'edit', model: 'GENROU', idx: 'G1', params: { M: 15 } },
-      { op: 'edit', model: 'GENROU', idx: 'G1', params: { H: 7 } },
-      { op: 'edit', model: 'GENROU', idx: 'G1', params: { xd: 1.9 } },
-    );
-    expect(useEditJournalStore.getState().entries[0]).toMatchObject({
-      params: { H: 7, xd: 1.9 },
-    });
+    expect(useEditJournalStore.getState().entries).toMatchObject([
+      { op: 'delete', model: 'Bus', idx: '3', cascade: true },
+      { op: 'undo' },
+      { op: 'redo' },
+      { op: 'delete', model: 'Line', idx: 'L1' },
+    ]);
+    expect(hasUnsavedEdits()).toBe(true);
   });
 
-  it('does not merge edits to different elements, or edits with something between them', () => {
-    record(
-      { op: 'edit', model: 'Bus', idx: '1', params: { Vn: 230 } },
-      { op: 'edit', model: 'Bus', idx: '2', params: { Vn: 230 } },
-      addBus(3),
-      { op: 'edit', model: 'Bus', idx: '2', params: { Vn: 110 } },
-    );
-
-    expect(ops()).toEqual(['edit', 'edit', 'add', 'edit']);
+  it('counts a redo as work of the user, like the undo it follows', () => {
+    record({ op: 'redo' });
+    expect(isWorkOp({ op: 'redo' })).toBe(true);
+    expect(hasUnsavedEdits()).toBe(true);
   });
 
   it('gives up past the cap: nothing to replay, but the unsaved work is still known', () => {
@@ -206,7 +203,7 @@ describe('unsaved work', () => {
     expect(hasUnsavedEdits()).toBe(true);
   });
 
-  it('counts an edit merged into one that a save already covered', () => {
+  it('counts an edit of an element whose earlier edit a save already covered', () => {
     record({ op: 'edit', model: 'Bus', idx: '1', params: { Vn: 230 } });
     useEditJournalStore.getState().markSaved();
 
@@ -266,7 +263,7 @@ describe('a save over the open case file', () => {
     });
   });
 
-  it('does not merge the first edit after it into one the file already holds', () => {
+  it('keeps the first edit after it apart from the one the file already holds', () => {
     record({ op: 'edit', model: 'Bus', idx: '1', params: { Vn: 230 } });
     useEditJournalStore.getState().markSavedInPlace();
     record({ op: 'edit', model: 'Bus', idx: '1', params: { v0: 1.02 } });

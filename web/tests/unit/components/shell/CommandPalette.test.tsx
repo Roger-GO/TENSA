@@ -92,13 +92,18 @@ afterEach(() => {
 
 describe('<CommandPalette /> descriptions', () => {
   it('gives a command that has a description as hover text on its row', async () => {
+    MOCK_TOPOLOGY = {
+      ...emptyTopology(),
+      undo: { op: 'edit', model: 'Bus', idx: 3, params: ['Vn'], also: 0 },
+    };
     render(withProviders(<CommandPalette />));
     act(() => {
       useCommandPaletteStore.getState().openPalette();
     });
     const undo = await screen.findByTestId('command-palette-item-edit.undo');
-    expect(undo).toHaveTextContent('Undo last addition');
-    expect(undo.getAttribute('title')).toMatch(/added last/);
+    // The row names the change Undo would take back.
+    expect(undo).toHaveTextContent('Undo: change Vn of Bus 3');
+    expect(undo.getAttribute('title')).toMatch(/added, changed or deleted/);
     // A command with none has no title.
     expect(screen.getByTestId('command-palette-item-edit.reload').hasAttribute('title')).toBe(
       false,

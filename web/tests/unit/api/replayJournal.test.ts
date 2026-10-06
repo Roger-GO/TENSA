@@ -60,6 +60,8 @@ describe('replayJournal', () => {
         { op: 'edit', model: 'Bus', idx: '1', params: { Vn: 230 } },
         { op: 'delete', model: 'Bus', idx: '1' },
         { op: 'undo' },
+        { op: 'redo' },
+        { op: 'delete', model: 'Bus', idx: '3', cascade: true },
         { op: 'reload' },
       ),
     );
@@ -77,9 +79,16 @@ describe('replayJournal', () => {
       },
       { method: 'DELETE', path: '/api/sessions/sess-new/elements/Bus/1', body: undefined },
       { method: 'POST', path: '/api/sessions/sess-new/undo-last-edit', body: {} },
+      { method: 'POST', path: '/api/sessions/sess-new/redo-edit', body: {} },
+      // A delete that took its dependents with it asks for the cascade again.
+      {
+        method: 'DELETE',
+        path: '/api/sessions/sess-new/elements/Bus/3?cascade=true',
+        body: undefined,
+      },
       { method: 'POST', path: '/api/sessions/sess-new/reload', body: {} },
     ]);
-    expect(outcome).toMatchObject({ applied: 5, total: 5, error: null, appliedThroughRev: 5 });
+    expect(outcome).toMatchObject({ applied: 7, total: 7, error: null, appliedThroughRev: 7 });
     expect(outcome.clone).toBeNull();
   });
 
