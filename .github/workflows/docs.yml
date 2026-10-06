@@ -10,7 +10,9 @@
 # setting and not something a workflow can do for itself. To turn it on, set Pages'
 # source to GitHub Actions and add a repository variable DOCS_DEPLOY with the value true
 # (docs/contributing.md has the steps). Until then the `deploy` job is skipped, and the
-# built site is still available as the `github-pages` artifact of each run.
+# built site is still available as the `github-pages` artifact of each run. The package's
+# Documentation link (server/pyproject.toml) is the docs folder on GitHub until the first
+# publish: switch it to the site's address then.
 name: docs
 
 on:

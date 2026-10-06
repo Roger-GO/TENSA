@@ -78,5 +78,6 @@ CI builds the site on every pull request and on pushes to `main`, and keeps the 
 1. In the repository on GitHub, open **Settings**, then **Pages**, and under **Build and deployment** set the **Source** to **GitHub Actions**.
 2. Open **Settings**, then **Secrets and variables**, then **Actions**, then the **Variables** tab, and add a repository variable named `DOCS_DEPLOY` with the value `true`.
 3. Push to `main`, or run the **docs** workflow by hand from the **Actions** tab. The `deploy` job of the workflow publishes the site at `https://roger-go.github.io/TENSA/`.
+4. Once the site is up, point the package at it: set `Documentation` under `[project.urls]` in `server/pyproject.toml` to `https://roger-go.github.io/TENSA/`, and change the test that pins the link (`test_the_documentation_link_of_the_package_is_a_page_that_exists` in `server/tests/unit/test_docs_site.py`) to match.
 
-That address is the `site_url` in `mkdocs.yml` and the `Documentation` link in `server/pyproject.toml`, which stays a dead link until the first publish. To stop publishing, delete the variable or set it to anything else.
+The site's address is the `site_url` in `mkdocs.yml`. The `Documentation` link of the package, which PyPI and `pip show` display, is the `docs` folder on GitHub until step 4, because the site's address answers 404 before the first publish. To stop publishing, delete the variable or set it to anything else.

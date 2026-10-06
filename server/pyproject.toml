@@ -95,9 +95,12 @@ dev = [
 [project.scripts]
 tensa = "tensa.cli:app"
 
+# ``Documentation`` is the docs folder on GitHub until the site is published: the
+# site's address (``site_url`` in mkdocs.yml) answers 404 before that. Switch it
+# after the first publish (docs/contributing.md, "Publish on GitHub Pages").
 [project.urls]
 Homepage = "https://github.com/Roger-GO/TENSA"
-Documentation = "https://roger-go.github.io/TENSA/"
+Documentation = "https://github.com/Roger-GO/TENSA/tree/main/docs"
 Issues = "https://github.com/Roger-GO/TENSA/issues"
 
 # Hatchling build targets. The built web UI (``../web/dist``) is bundled by the

@@ -201,10 +201,21 @@ def test_the_site_does_not_carry_the_demo_video(mkdocs: dict[str, Any]) -> None:
     assert _is_excluded("demo/ieee9-agent-demo.mp4", _excluded(mkdocs))
 
 
-def test_the_documentation_link_of_the_package_is_the_site(mkdocs: dict[str, Any]) -> None:
+def test_the_documentation_link_of_the_package_is_a_page_that_exists(
+    mkdocs: dict[str, Any],
+) -> None:
+    """The site is published only once the repository owner turns Pages on, and until
+    then its address answers 404, on PyPI and in ``pip show``. The link is the docs
+    folder on GitHub, which is there today. ``docs/contributing.md`` says to point it at
+    the site after the first publish, and this test changes with it."""
     urls = pyproject()["project"]["urls"]
-    assert urls["Documentation"].rstrip("/") == mkdocs["site_url"].rstrip("/")
-    assert urls["Documentation"] != urls["Homepage"]
+    assert urls["Documentation"] == f"{urls['Homepage']}/tree/main/docs"
+    assert (DOCS / "index.md").is_file()
+    assert urls["Documentation"].rstrip("/") != mkdocs["site_url"].rstrip("/")
+    steps = _hand_written(mkdocs)["contributing.md"]
+    assert "server/pyproject.toml" in steps
+    assert mkdocs["site_url"] in steps
+    assert "test_the_documentation_link_of_the_package_is_a_page_that_exists" in steps
 
 
 def test_the_theme_fetches_nothing_from_a_third_party(mkdocs: dict[str, Any]) -> None:
