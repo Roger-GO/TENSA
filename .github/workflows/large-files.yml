@@ -1,0 +1,48 @@
+# Fail a change that adds a large file, or makes one bigger.
+#
+# What is committed stays in every clone for good and the history is not rewritten, so this
+# is the moment to stop a recording or an image that is bigger than it needs to be.
+# `scripts/check_large_files.py` says what counts (a file over 1 MiB that the change adds
+# or grows), what does not (a large file the change leaves alone, such as the demo video the
+# README embeds), and how a change says that a file belongs in the repository (a line in
+# `.github/large-files-allowed.txt`). CONTRIBUTING.md has the guidance for contributors.
+#
+# There is no `paths` filter on purpose: a large file can land anywhere in the tree, and
+# the other workflows only run for the folders they cover.
+name: large-files
+
+on:
+  push:
+    branches: [main, "improve/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  size:
+    name: no new large files
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The check compares with the commit the change started from, so it needs the history.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # A pull request is compared with the tip of the branch it targets, a push with what the
+      # branch held before it. A new branch has no such commit, and a manual run has no change
+      # at all, so both are compared with main. The script reads python3 from the runner's
+      # image: it uses the standard library only.
+      - name: Check the files this change adds
+        env:
+          EVENT: ${{ github.event_name }}
+          PULL_REQUEST_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          base="$PULL_REQUEST_BASE"
+          if [ "$EVENT" = push ] && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            base="$PUSH_BEFORE"
+          fi
+          python3 scripts/check_large_files.py --base "${base:-origin/main}"

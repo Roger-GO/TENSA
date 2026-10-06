@@ -56,6 +56,7 @@ All of these must pass before a PR is merged (CI enforces them):
 | Web coverage | `cd web && pnpm test:coverage` (report in `web/coverage`) |
 | Web build | `cd web && pnpm build` |
 | Docs site | `pip install -r docs/requirements.txt -e ./server`, then `mkdocs build --strict` from the repository root (the pages are in `docs/`; the build fails on a broken link) |
+| Large files | `python scripts/check_large_files.py --base origin/main` (a file your change adds or makes bigger must be 1 MiB or less; see [Media and other large files](#media-and-other-large-files)) |
 | Web e2e | `cd web && pnpm build`, start `tensa serve --port 8765 --workspace "$(mktemp -d)" --max-sessions 32`, then `E2E_BASE_URL=http://127.0.0.1:8765 E2E_NO_WEBSERVER=1 pnpm test:e2e` (a real browser against a real server; `pnpm exec playwright install chromium` once; the `e2e` job in `web.yml` does the same; other modes are described in `web/playwright.config.ts`). If something else holds port 8765, `tensa serve` says so and stops: use another port in both commands, or the tests run against whatever is listening there |
 
 The table is written for a POSIX shell. In PowerShell, leave out the `PYTHONPATH=src` prefix (the editable install already puts `tensa` on the path), set environment variables on their own line (`$env:E2E_BASE_URL = "http://127.0.0.1:8765"`), and pass `--workspace` a directory you made yourself instead of `$(mktemp -d)`.
@@ -84,6 +85,15 @@ To build the same packages locally, build the UI first and then run the build: `
 ## Documentation
 
 The documentation site is MkDocs with the Material theme: the pages are Markdown files in `docs/`, listed in `mkdocs.yml`, and `mkdocs serve` previews them. Its Reference pages (the command line, the API routes and the API models) are written from the code while the site builds, so a change to a route's description or an option's help text is a change to the documentation, and no page needs editing. [`docs/contributing.md`](./docs/contributing.md) explains how to build the site, how to write a page, how to take the screenshots again, and how the repository owner turns on publishing to GitHub Pages. Docs are plain prose: no em dashes and no emoji.
+
+## Media and other large files
+
+What is committed stays in every clone for good, and the project does not rewrite its history to take a file back out, so a large file costs every contributor for as long as the repository lives. Two files already weigh more than they should have: the demo video `docs/demo/ieee9-agent-demo.mp4` (about 3.3 MiB) and the GIF `docs/img/demo.gif` (about 1.4 MiB). The README embeds both, so they stay where they are, and no new file should join them.
+
+- **The limit is 1 MiB.** A file your change adds, or makes bigger, has to be 1 MiB (1,048,576 bytes) or less. The `large-files` workflow (`.github/workflows/large-files.yml`) checks every pull request and every push to `main`, and `python scripts/check_large_files.py --base origin/main` runs the same check on your branch. A file your change does not touch is not checked, and a large file that is moved or made smaller passes. The check reads what the change comes to, so a file added in one commit and deleted in the next gets through it, yet a merge that keeps the commits keeps the file in the history. If a large file got into a branch by mistake, take it out of the branch's commits before the merge.
+- **Screenshots** are JPEG, or an optimized PNG for flat diagrams, no wider than about 1600 px, and under 200 KB. [`docs/contributing.md`](./docs/contributing.md) shows how the UI tour's images are taken again.
+- **Recordings** stay out of the repository. Attach the video or GIF to the pull request, an issue or a GitHub release, and link to it. A clip that has to live in the repository is trimmed, scaled down and given a lower frame rate until it is under the limit.
+- **A real exception** is a decision for the reviewer. Add the path to `.github/large-files-allowed.txt` in the same pull request, one path per line with a `#` comment that says why the file has to be in the repository.
 
 ## Making changes that touch the API surface
 

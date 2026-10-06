@@ -1,0 +1,7 @@
+# Paths a change may add, or make bigger, although the file is over the size limit that
+# scripts/check_large_files.py enforces (1 MiB). One repository path per line. Blank lines
+# and lines that start with # are ignored, and so is a trailing " # reason".
+#
+# A line here is a decision for the reviewer to see, so say why the file has to be in the
+# repository. A large file that is already committed needs no line unless a change makes it
+# bigger: the demo video and GIF the README embeds are such files.
