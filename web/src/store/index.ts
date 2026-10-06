@@ -186,7 +186,7 @@ export function __resetCascadeForTests(): void {
     layoutSidecar: null,
     selectedElement: null,
   });
-  usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  usePflowStore.setState({ lastRun: null, lastSolved: null, isRunning: false, error: null });
   usePflowHistoryStore.getState().clear();
   usePflowOptionsStore.getState().resetForNewCase();
   useAnalyzeStore.setState({

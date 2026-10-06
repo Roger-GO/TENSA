@@ -11,8 +11,8 @@ import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useSldStore } from '@/store/sld';
 import { useUnitsStore } from '@/store/units';
-import { parseWorkspacePath } from '@/api/types';
-import type { TopologySummary } from '@/api/types';
+import { parseRunId, parseWorkspacePath } from '@/api/types';
+import type { PflowResult, TopologySummary } from '@/api/types';
 import { LIMITS_TOPOLOGY, limitsPflow } from '../../helpers/limitsCase';
 import { lineFlow } from '../../helpers/lineFlow';
 
@@ -30,13 +30,31 @@ function rowCells(rowId: string): (string | null)[] {
   ].map((c) => c.textContent);
 }
 
+// The totals a converged power flow comes with, which is how it is told from
+// the operating point read back after a time-domain run.
+const SUMMARY = {
+  generation_p: 50,
+  generation_q: 45,
+  load_p: 48,
+  load_q: 40,
+  shunt_p: 0,
+  shunt_q: 0,
+  loss_p: 2,
+  loss_q: 5,
+};
+
+/** A power flow solved on the open case, as the pflow slice holds one. */
+function solve(result: PflowResult): void {
+  usePflowStore.setState({ lastRun: result, lastSolved: result });
+}
+
 beforeEach(() => {
   mockTopology = null;
   useCaseStore.setState({
     selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
     selectedElement: null,
   });
-  usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  usePflowStore.setState({ lastRun: null, lastSolved: null, isRunning: false, error: null });
   useSldStore.setState({ selectedNodeId: null });
   useUnitsStore.setState({ mode: 'pu' });
 });
@@ -60,15 +78,15 @@ describe('<ViolationsGrid />', () => {
     render(<ViolationsGrid />);
     expect(screen.getByTestId('violations-grid-empty')).toHaveTextContent('Run a power flow');
     cleanup();
-    usePflowStore.setState({ lastRun: limitsPflow({ converged: false }) });
+    solve(limitsPflow({ converged: false }));
     render(<ViolationsGrid />);
     expect(screen.getByTestId('violations-grid-empty')).toHaveTextContent('Run a power flow');
   });
 
   it('says what was checked when every limit holds, and how many lines it could not check', () => {
     mockTopology = LIMITS_TOPOLOGY;
-    usePflowStore.setState({
-      lastRun: limitsPflow({
+    solve(
+      limitsPflow({
         bus_voltages: { '1': 1.0, '2': 1.0, '3': 1.0 },
         line_flows: {
           L1: lineFlow(10, 1, undefined, { rate_a: 100, loading_pct: 10 }),
@@ -76,7 +94,7 @@ describe('<ViolationsGrid />', () => {
         },
         generator_outputs: { '1': { p: 40, q: 5, v: 1, bus: 1, q_min: -40, q_max: 15 } },
       }),
-    });
+    );
     render(<ViolationsGrid />);
     const empty = screen.getByTestId('violations-grid-empty');
     expect(empty).toHaveTextContent('No limit is violated.');
@@ -88,9 +106,52 @@ describe('<ViolationsGrid />', () => {
     expect(empty).toHaveTextContent("Set a line's rate_a in the Inspector to check it.");
   });
 
+  // The operating point read back after a time-domain run: converged, with the
+  // bus voltages and nothing else (``GET /operating-point``).
+  const operatingPoint: PflowResult = {
+    run_id: parseRunId('run-op'),
+    converged: true,
+    iterations: 0,
+    mismatch: 0,
+    bus_voltages: { '1': 1.0, '2': 1.0, '3': 1.0 },
+    bus_angles: { '1': 0, '2': 0, '3': 0 },
+  };
+
+  it('keeps the power flow report after a time-domain run, and says it is the power flow', () => {
+    mockTopology = LIMITS_TOPOLOGY;
+    usePflowStore.getState().setLastRun(limitsPflow({ summary: SUMMARY }));
+    // What the run's end does: the tables read the operating point from here on.
+    usePflowStore.getState().setLastRun(operatingPoint);
+    render(<ViolationsGrid />);
+    expect(screen.getByTestId('violations-grid-row-line-L1')).toBeInTheDocument();
+    expect(screen.getByTestId('violations-grid-row-generator-1')).toBeInTheDocument();
+    const hint = screen.getByTestId('violations-grid-hint');
+    expect(hint).toHaveTextContent('Checked 3 buses, 3 rated lines, 2 generators.');
+    expect(hint).toHaveTextContent(
+      'This is the power flow the time-domain run started from. The run itself is not checked against the limits.',
+    );
+  });
+
+  it('does not call a time-domain run with no power flow an all-clear', () => {
+    mockTopology = LIMITS_TOPOLOGY;
+    usePflowStore.getState().setLastRun(operatingPoint);
+    render(<ViolationsGrid />);
+    const empty = screen.getByTestId('violations-grid-empty');
+    expect(empty).not.toHaveTextContent('No limit is violated');
+    expect(empty).toHaveTextContent('A time-domain run is not checked against the limits.');
+    expect(empty).toHaveTextContent('Reset the run and run a power flow');
+  });
+
+  it('says nothing of a run while the power flow is the latest result', () => {
+    mockTopology = LIMITS_TOPOLOGY;
+    usePflowStore.getState().setLastRun(limitsPflow({ summary: SUMMARY }));
+    render(<ViolationsGrid />);
+    expect(screen.getByTestId('violations-grid-hint')).not.toHaveTextContent('time-domain run');
+  });
+
   it('lists the violations before the warnings, one row per element', () => {
     mockTopology = LIMITS_TOPOLOGY;
-    usePflowStore.setState({ lastRun: limitsPflow() });
+    solve(limitsPflow());
     render(<ViolationsGrid />);
     const rows = screen
       .getAllByRole('row')
@@ -109,7 +170,7 @@ describe('<ViolationsGrid />', () => {
 
   it('describes each finding: severity, type, element, what is wrong, the value and the limit', () => {
     mockTopology = LIMITS_TOPOLOGY;
-    usePflowStore.setState({ lastRun: limitsPflow() });
+    solve(limitsPflow());
     render(<ViolationsGrid />);
     // severity, type, name, idx, finding, value, limit, unit
     expect(rowCells('bus-1')).toEqual([
@@ -158,7 +219,7 @@ describe('<ViolationsGrid />', () => {
   it('reads a bus voltage in kV under the actual-units display, and leaves the rest alone', () => {
     mockTopology = LIMITS_TOPOLOGY;
     useUnitsStore.setState({ mode: 'actual' });
-    usePflowStore.setState({ lastRun: limitsPflow() });
+    solve(limitsPflow());
     render(<ViolationsGrid />);
     // 1.07 pu and its 1.05 pu limit on a 110 kV bus.
     expect(rowCells('bus-1').slice(5)).toEqual(['117.700', '115.500', 'kV']);
@@ -169,14 +230,14 @@ describe('<ViolationsGrid />', () => {
   it('keeps a bus whose rated voltage the case does not give in per unit', () => {
     mockTopology = { ...LIMITS_TOPOLOGY, buses_without_vn: [1] };
     useUnitsStore.setState({ mode: 'actual' });
-    usePflowStore.setState({ lastRun: limitsPflow() });
+    solve(limitsPflow());
     render(<ViolationsGrid />);
     expect(rowCells('bus-1').slice(5)).toEqual(['1.070', '1.050', 'pu']);
   });
 
   it('summarises the findings above the table', () => {
     mockTopology = LIMITS_TOPOLOGY;
-    usePflowStore.setState({ lastRun: limitsPflow() });
+    solve(limitsPflow());
     render(<ViolationsGrid />);
     const hint = screen.getByTestId('violations-grid-hint');
     expect(hint).toHaveTextContent('4 violations and 3 warnings.');
@@ -186,7 +247,7 @@ describe('<ViolationsGrid />', () => {
   it('selects a bus the way its own table does: the diagram node and the inspector', async () => {
     const user = userEvent.setup();
     mockTopology = LIMITS_TOPOLOGY;
-    usePflowStore.setState({ lastRun: limitsPflow() });
+    solve(limitsPflow());
     render(<ViolationsGrid />);
     await user.click(screen.getByTestId('violations-grid-row-bus-1'));
     expect(useSldStore.getState().selectedNodeId).toBe('1');
@@ -196,7 +257,7 @@ describe('<ViolationsGrid />', () => {
   it('selects a line, a transformer and a generator by their own kind', async () => {
     const user = userEvent.setup();
     mockTopology = LIMITS_TOPOLOGY;
-    usePflowStore.setState({ lastRun: limitsPflow() });
+    solve(limitsPflow());
     render(<ViolationsGrid />);
 
     await user.click(screen.getByTestId('violations-grid-row-line-L1'));
@@ -214,7 +275,7 @@ describe('<ViolationsGrid />', () => {
 
   it('highlights the row of the element selected on the diagram', () => {
     mockTopology = LIMITS_TOPOLOGY;
-    usePflowStore.setState({ lastRun: limitsPflow() });
+    solve(limitsPflow());
     useSldStore.setState({ selectedNodeId: 'line-L1' });
     render(<ViolationsGrid />);
     expect(screen.getByTestId('violations-grid-row-line-L1')).toHaveAttribute(
@@ -229,7 +290,7 @@ describe('<ViolationsGrid />', () => {
 
   it('offers the table as a CSV export', () => {
     mockTopology = LIMITS_TOPOLOGY;
-    usePflowStore.setState({ lastRun: limitsPflow() });
+    solve(limitsPflow());
     render(<ViolationsGrid />);
     expect(screen.getByRole('button', { name: /export/i })).toBeEnabled();
   });

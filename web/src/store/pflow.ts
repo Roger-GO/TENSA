@@ -14,9 +14,28 @@ import { create } from 'zustand';
 import type { PflowResult } from '@/api/types';
 import type { ProblemDetailsError } from '@/api/client';
 
+/**
+ * Whether a result is what a power flow gave. The operating point read back
+ * after a time-domain run comes in the same shape and reads as converged, but
+ * it is bus voltages and angles only: a power flow that converged has its
+ * totals (`summary`), and one that did not says so.
+ */
+export function isSolvedPflow(result: PflowResult): boolean {
+  return !result.converged || result.summary != null;
+}
+
 export interface PflowState {
-  /** Most recent PF result (converged or not), or null if no run yet. */
+  /**
+   * Most recent PF result (converged or not), or null if no run yet. After a
+   * time-domain run it is the operating point that run ended at.
+   */
   lastRun: PflowResult | null;
+  /**
+   * The last result a power flow gave on the open case, which the operating
+   * point read back after a time-domain run does not replace. What judges a
+   * power flow (the Violations report) reads this, not `lastRun`.
+   */
+  lastSolved: PflowResult | null;
   /** True while a PF run is in flight. */
   isRunning: boolean;
   /**
@@ -33,10 +52,16 @@ export interface PflowState {
 
 export const usePflowStore = create<PflowState>((set) => ({
   lastRun: null,
+  lastSolved: null,
   isRunning: false,
   error: null,
   setRunning: (running: boolean) => set({ isRunning: running }),
-  setLastRun: (result: PflowResult) => set({ lastRun: result, error: null }),
+  setLastRun: (result: PflowResult) =>
+    set((state) => ({
+      lastRun: result,
+      lastSolved: isSolvedPflow(result) ? result : state.lastSolved,
+      error: null,
+    })),
   setError: (error: ProblemDetailsError | null) => set({ error }),
-  clearPflow: () => set({ lastRun: null, isRunning: false, error: null }),
+  clearPflow: () => set({ lastRun: null, lastSolved: null, isRunning: false, error: null }),
 }));

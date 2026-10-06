@@ -19,7 +19,7 @@
 import { useMemo } from 'react';
 import { DataGrid, type ColumnConfig } from './DataGrid';
 import { useCurrentTopology } from '@/api/queries';
-import { useViolationReport } from '@/lib/useViolationReport';
+import { useRunFollowedPflow, useViolationReport } from '@/lib/useViolationReport';
 import {
   summarizeViolations,
   type Violation,
@@ -80,6 +80,7 @@ export interface ViolationsGridProps {
 export function ViolationsGrid({ className }: ViolationsGridProps) {
   const topology = useCurrentTopology();
   const report = useViolationReport();
+  const afterRun = useRunFollowedPflow();
   const setSelectedNodeId = useSldStore((s) => s.setSelectedNodeId);
   const selectedNodeId = useSldStore((s) => s.selectedNodeId);
   const setSelectedElement = useCaseStore((s) => s.setSelectedElement);
@@ -125,12 +126,16 @@ export function ViolationsGrid({ className }: ViolationsGridProps) {
       ? null
       : (report?.items.find((item) => item.nodeId === selectedNodeId)?.id ?? null);
 
+  // After a time-domain run the report is still the power flow's, and says so.
+  const summary = report === null ? null : summaryLine(report, afterRun);
   const emptyState =
     topology === null
       ? 'Load a case to check its limits.'
-      : report === null
-        ? 'Run a power flow to check the bus voltages, line loading and generator reactive limits.'
-        : summaryLine(report);
+      : summary === null
+        ? afterRun
+          ? NO_PFLOW_AFTER_RUN
+          : 'Run a power flow to check the bus voltages, line loading and generator reactive limits.'
+        : summary;
 
   return (
     <DataGrid
@@ -143,7 +148,7 @@ export function ViolationsGrid({ className }: ViolationsGridProps) {
       testId="violations-grid"
       ariaLabel="Violations"
       exportPanel="violations"
-      hint={report === null || rows.length === 0 ? undefined : summaryLine(report)}
+      hint={summary === null || rows.length === 0 ? undefined : summary}
       className={className}
     />
   );
@@ -163,7 +168,16 @@ function checkedText(report: ViolationReport): string {
   return `${checked} ${n} line${n === 1 ? ' has' : 's have'} no rating (rate_a) and ${n === 1 ? 'is' : 'are'} not checked for overload. Set a line's rate_a in the Inspector to check it.`;
 }
 
+/** What the report is of once a time-domain run has gone on from its power flow. */
+const AFTER_RUN_NOTE =
+  'This is the power flow the time-domain run started from. The run itself is not checked against the limits.';
+
+/** What to do when a time-domain run was made with no power flow to report on. */
+const NO_PFLOW_AFTER_RUN =
+  'A time-domain run is not checked against the limits. Reset the run and run a power flow to check the bus voltages, line loading and generator reactive limits.';
+
 /** The headline and what was checked, as one sentence pair. */
-function summaryLine(report: ViolationReport): string {
-  return `${summarizeViolations(report)}. ${checkedText(report)}`;
+function summaryLine(report: ViolationReport, afterRun: boolean): string {
+  const line = `${summarizeViolations(report)}. ${checkedText(report)}`;
+  return afterRun ? `${line} ${AFTER_RUN_NOTE}` : line;
 }

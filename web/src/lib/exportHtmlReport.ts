@@ -38,7 +38,7 @@ import type { UnitMode } from '@/lib/units';
 import { collectViolations } from '@/lib/violations';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useCaseStore } from '@/store/case';
-import { usePflowStore } from '@/store/pflow';
+import { isSolvedPflow, usePflowStore } from '@/store/pflow';
 import { resolveComparePair, snapshotLabel, usePflowHistoryStore } from '@/store/pflowHistory';
 import { chartKeyOf, chartTitle, parseColumnName, usePlotStore, type VarGroup } from '@/store/plot';
 import { useRunsStore, type RunRecord } from '@/store/runs';
@@ -119,8 +119,7 @@ export function reportChartsOf(
 function reportPflow(caseName: string): ReportPflow | null {
   const { selection, topology } = useCaseStore.getState();
   const lastRun = usePflowStore.getState().lastRun;
-  const solved = lastRun !== null && (!lastRun.converged || lastRun.summary != null);
-  if (lastRun !== null && solved) {
+  if (lastRun !== null && isSolvedPflow(lastRun)) {
     return {
       result: lastRun,
       names: elementNamesOf(topology),
@@ -229,7 +228,7 @@ async function fetchAndesReports(): Promise<ReportAndesText[]> {
   const active = activeRunId === null ? undefined : runs[activeRunId];
   const wanted: ReportRoutine[] = [];
   // A solved power flow has totals; the operating point read after a run has none.
-  if (lastRun?.converged === true && lastRun.summary != null) wanted.push('pflow');
+  if (lastRun?.converged === true && isSolvedPflow(lastRun)) wanted.push('pflow');
   if (active !== undefined && active.state !== 'starting' && active.state !== 'streaming') {
     wanted.push('tds');
   }

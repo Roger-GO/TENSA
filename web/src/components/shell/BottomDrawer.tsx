@@ -65,7 +65,7 @@ const TAB_LABELS: Record<BottomDrawerTab, string> = {
  * component so the tab strip reads the topology only once there is a result.
  */
 function ViolationsCount() {
-  const converged = usePflowStore((s) => s.lastRun?.converged === true);
+  const converged = usePflowStore((s) => s.lastSolved?.converged === true);
   return converged ? <ViolationsCountBadge /> : null;
 }
 

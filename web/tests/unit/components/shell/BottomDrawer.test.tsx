@@ -22,8 +22,7 @@ import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { useAnalyzeStore } from '@/store/analyze';
 import { usePflowStore } from '@/store/pflow';
 import { useMessagesStore } from '@/store/messages';
-import type { SessionMessage } from '@/api/types';
-import type { TopologySummary } from '@/api/types';
+import type { PflowResult, SessionMessage, TopologySummary } from '@/api/types';
 import { LIMITS_TOPOLOGY, limitsPflow } from '../../helpers/limitsCase';
 
 // useCurrentTopology is read by the per-bucket grids that BottomDrawer
@@ -74,11 +73,16 @@ function wrapper({ children }: { children: ReactNode }) {
   return React.createElement(QueryClientProvider, { client }, children);
 }
 
+/** A power flow solved on the open case, as the pflow slice holds one. */
+function solve(result: PflowResult): void {
+  usePflowStore.setState({ lastRun: result, lastSolved: result });
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
   useAnalyzeStore.setState({ subMode: 'eig' });
-  usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  usePflowStore.setState({ lastRun: null, lastSolved: null, isRunning: false, error: null });
   useMessagesStore.getState().reset();
   mockTopology = null;
 });
@@ -87,7 +91,7 @@ afterEach(() => {
   cleanup();
   window.localStorage.clear();
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
-  usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  usePflowStore.setState({ lastRun: null, lastSolved: null, isRunning: false, error: null });
   useMessagesStore.getState().reset();
 });
 
@@ -279,14 +283,14 @@ describe('<BottomDrawer /> Violations tab', () => {
     render(<BottomDrawer />, { wrapper });
     expect(screen.queryByTestId('violations-tab-count')).not.toBeInTheDocument();
     cleanup();
-    usePflowStore.setState({ lastRun: limitsPflow({ converged: false }) });
+    solve(limitsPflow({ converged: false }));
     render(<BottomDrawer />, { wrapper });
     expect(screen.queryByTestId('violations-tab-count')).not.toBeInTheDocument();
   });
 
   it('counts the violations beside the tab name, in red, once a power flow has converged', () => {
     mockTopology = LIMITS_TOPOLOGY;
-    usePflowStore.setState({ lastRun: limitsPflow() });
+    solve(limitsPflow());
     render(<BottomDrawer />, { wrapper });
     const count = screen.getByTestId('violations-tab-count');
     expect(count).toHaveTextContent('4');
@@ -295,15 +299,30 @@ describe('<BottomDrawer /> Violations tab', () => {
     expect(screen.getByTestId('bottom-drawer-tab-violations')).toContainElement(count);
   });
 
-  it('counts the warnings instead, in amber, when there are only warnings', () => {
+  it('keeps the count of the power flow after a time-domain run has replaced the latest result', () => {
     mockTopology = LIMITS_TOPOLOGY;
+    solve(limitsPflow());
+    // The operating point a run ends at: converged, bus voltages only.
     usePflowStore.setState({
       lastRun: limitsPflow({
+        bus_voltages: { '1': 1.0, '2': 1.0, '3': 1.0 },
+        line_flows: undefined,
+        generator_outputs: undefined,
+      }),
+    });
+    render(<BottomDrawer />, { wrapper });
+    expect(screen.getByTestId('violations-tab-count')).toHaveTextContent('4');
+  });
+
+  it('counts the warnings instead, in amber, when there are only warnings', () => {
+    mockTopology = LIMITS_TOPOLOGY;
+    solve(
+      limitsPflow({
         bus_voltages: { '1': 1.0, '2': 0.915, '3': 1.0 },
         line_flows: {},
         generator_outputs: { '2': { p: 10, q: 15, v: 1.0, bus: 2, q_min: -50, q_max: 15 } },
       }),
-    });
+    );
     render(<BottomDrawer />, { wrapper });
     const count = screen.getByTestId('violations-tab-count');
     expect(count).toHaveTextContent('2');
@@ -313,13 +332,13 @@ describe('<BottomDrawer /> Violations tab', () => {
 
   it('shows no count when every limit holds, and follows the next run', () => {
     mockTopology = LIMITS_TOPOLOGY;
-    usePflowStore.setState({
-      lastRun: limitsPflow({
+    solve(
+      limitsPflow({
         bus_voltages: { '1': 1.0, '2': 1.0, '3': 1.0 },
         line_flows: {},
         generator_outputs: {},
       }),
-    });
+    );
     render(<BottomDrawer />, { wrapper });
     expect(screen.queryByTestId('violations-tab-count')).not.toBeInTheDocument();
   });
