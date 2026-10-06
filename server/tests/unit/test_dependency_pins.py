@@ -80,6 +80,16 @@ def test_mcp_extra_excludes_the_incompatible_major_and_the_advisories() -> None:
     assert _floor(requirement) >= Version("1.28.1")
 
 
+def test_desktop_extra_is_pywebview_from_the_release_with_settings_below_the_next_major() -> None:
+    """``tensa desktop`` sets ``webview.settings["ALLOW_DOWNLOADS"]``, which pywebview 5 added
+    (4.x has no ``settings``), and the app's own window code is checked against 5 and 6 only."""
+    requirement = _requirements("desktop")["pywebview"]
+    assert _floor(requirement) >= Version("5")
+    assert not requirement.specifier.contains("7.0.0")
+    # Nothing but pywebview: the toolkit on Linux is the user's choice (GTK or Qt).
+    assert set(_requirements("desktop")) == {"pywebview"}
+
+
 def _package_json() -> dict[str, Any]:
     path = WEB_DIR / "package.json"
     if not path.is_file():
