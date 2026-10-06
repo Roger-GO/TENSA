@@ -133,9 +133,11 @@ Reports:         GET /sessions/{id}/report
 Workspace:       GET /workspace/files · GET/PUT /workspace/layout?case_path=<rel>
                  (the layout of a case's diagram, <case>.layout.json, schema_version "2": positions of buses, devices
                  and placed controllers, branch routes, busbars, label offsets, connection faces, figure settings
-                 ("figure.connector_style": "straight" or "elbow", how the UI draws device connectors);
-                 a device position carries "bus" and a route "bus1"/"bus2", and is used only for an element on
-                 those buses; a version 1 document is accepted and upgraded. Cap 2 MiB, on the request body and on
+                 ("figure.connector_style": "straight" or "elbow", how the UI draws device connectors), and
+                 "units": by the idx of a static generator, {"expanded": true} where the UI draws the control
+                 chain of that generator (its machine, exciter, governor) out beside its symbol;
+                 a device position and a unit carry "bus" and a route "bus1"/"bus2", and are used only for an
+                 element on those buses; a version 1 document is accepted and upgraded. Cap 2 MiB, on the request body and on
                  the layout as the server stores it: compact JSON with every field written out, so a field left
                  to its default still counts; 413 over it. POST /sessions/{id}/save and
                  .../case/clone/save-as copy the open case's layout to the new name)
