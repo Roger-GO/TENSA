@@ -29,8 +29,19 @@ that pywebview does not install. Left alone, a machine without a display or
 without a toolkit gets pywebview's tracebacks, and Qt without its X11 library does
 not raise at all, it aborts the process. ``check_window_support`` looks for these
 before anything is started, so the command can say what is missing and how to get
-it, and so that pywebview is told to use Qt straight away when GTK is not there
-(it tries GTK first and logs a traceback for the one it cannot import).
+it, and so that pywebview is told which toolkit to use when its first choice is
+not there or does not start (it tries GTK first and logs a traceback for the one
+it cannot import).
+
+An abort cannot be caught, but it can be seen from outside: ``probe_toolkit``
+starts the toolkit in a child process, the way pywebview will start it here, and
+reports how the child ended. A child that Qt aborted is the answer to "can a
+window open", found out before the workspace is made, with Qt's own words about
+what it could not load.
+
+Every message that says how to install something takes the command from
+``install_command``, and the help of ``tensa desktop`` gives the same two
+commands, so what the user is told to type does not depend on where they read it.
 """
 
 from __future__ import annotations
@@ -42,6 +53,7 @@ import importlib.util
 import logging
 import os
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -55,16 +67,31 @@ import uvicorn
 # same), for an install of tensa that has no such extra.
 PYWEBVIEW_REQUIREMENT = "pywebview>=5,<7"
 
-# The sentences about the GUI toolkit on Linux, said when none is installed and
-# when the window could not be opened. ``libxcb-cursor0`` is what Qt 6.5 and newer
-# loads for X11, and it is the one a plain Linux install most often lacks.
-TOOLKIT_HELP = (
-    "On Linux the window needs a GUI toolkit. Qt: pip install 'pywebview[qt]' "
-    "(on X11 it also needs the system library libxcb-cursor0, for example "
-    "sudo apt install libxcb-cursor0). GTK: install WebKitGTK and PyGObject with "
-    "your package manager (on Debian and Ubuntu, sudo apt install python3-gi "
-    "gir1.2-webkit2-4.1); a virtual environment sees them only when it was "
-    "created with --system-site-packages."
+# What pip installs for a window on Linux besides pywebview: Qt for Python, with
+# its web engine. GTK with WebKitGTK works too, and comes from the distribution.
+QT_REQUIREMENT = "pywebview[qt]"
+
+# The shared library Qt 6.5 and newer loads for X11. It is the one a plain Linux
+# install most often lacks, and Qt aborts the process when it cannot load it.
+XCB_CURSOR_LIBRARY = "libxcb-cursor.so.0"
+
+# The package that holds a system library, by family of distribution: pip cannot
+# install these, so a message that asks for one gives all three commands.
+XCB_CURSOR_INSTALL = (
+    "  Debian, Ubuntu: sudo apt install libxcb-cursor0\n"
+    "  Fedora:         sudo dnf install xcb-util-cursor\n"
+    "  Arch:           sudo pacman -S xcb-util-cursor"
+)
+WEBKITGTK_INSTALL = (
+    "  Debian, Ubuntu: sudo apt install python3-gi gir1.2-webkit2-4.1\n"
+    "  Fedora:         sudo dnf install python3-gobject webkit2gtk4.1\n"
+    "  Arch:           sudo pacman -S python-gobject webkit2gtk-4.1"
+)
+
+# The last line of every refusal: the UI does not need a window.
+BROWSER_INSTEAD = (
+    'To use TENSA without a window, run "tensa serve --open": it shows the same UI '
+    "in your browser and needs none of this."
 )
 
 NO_DISPLAY = (
@@ -75,11 +102,10 @@ NO_DISPLAY = (
     "SSH, forward the port first: ssh -L 8000:127.0.0.1:8000 <host>."
 )
 
-NO_TOOLKIT = (
-    "tensa desktop cannot open a window: neither Qt for Python (qtpy) nor "
-    "PyGObject (GTK) is installed. " + TOOLKIT_HELP
-)
-
+# Said when the toolkit's start could not be tried in a child process (a bundled
+# executable, a child that did not answer in time), so the library was only
+# looked for: Qt 5 does not need it, and Qt's abort would otherwise be all there
+# is to see.
 QT_NEEDS_XCB_CURSOR = (
     "Qt's X11 plugin needs the system library libxcb-cursor0 (since Qt 6.5), and "
     "it was not found. If the window then fails with 'Could not load the Qt "
@@ -87,6 +113,51 @@ QT_NEEDS_XCB_CURSOR = (
     "and Ubuntu), sudo dnf install xcb-util-cursor (Fedora) or sudo pacman -S "
     "xcb-util-cursor (Arch)."
 )
+
+# How long a toolkit is given to start in the child process. It takes well under
+# a second; a child that takes longer than this is left alone and nothing is
+# concluded from it.
+PROBE_TIMEOUT = 30.0
+
+# What the child runs for each toolkit: the imports pywebview's own platform
+# module makes and, for Qt, the application object, since creating it is where Qt
+# loads its platform plugin and aborts when it cannot. The first lines of the Qt
+# script keep the abort from leaving a core dump, or a crash report on the
+# distributions that collect them (PR_SET_DUMPABLE is 4).
+_PROBE_SCRIPTS = {
+    "qt": (
+        "import ctypes, sys\n"
+        "try:\n"
+        "    ctypes.CDLL(None).prctl(4, 0)\n"
+        "except Exception:\n"
+        "    pass\n"
+        "try:\n"
+        "    from qtpy.QtWebEngineWidgets import QWebEngineView\n"
+        "except ImportError as engine:\n"
+        "    try:\n"
+        "        from PyQt5.QtWebKitWidgets import QWebView\n"
+        "    except ImportError:\n"
+        "        sys.exit(f'Qt WebEngine cannot be imported: {engine}')\n"
+        "from qtpy.QtWidgets import QApplication\n"
+        "QApplication(['tensa-desktop-check'])\n"
+        # Nothing of Qt is taken down: only whether it starts is asked.
+        "import os\n"
+        "os._exit(0)\n"
+    ),
+    "gtk": (
+        "import sys\n"
+        "try:\n"
+        "    import gi\n"
+        "    gi.require_version('Gtk', '3.0')\n"
+        "    try:\n"
+        "        gi.require_version('WebKit2', '4.1')\n"
+        "    except ValueError:\n"
+        "        gi.require_version('WebKit2', '4.0')\n"
+        "    from gi.repository import Gtk, WebKit2\n"
+        "except (ImportError, ValueError) as exc:\n"
+        "    sys.exit(f'GTK with WebKitGTK cannot be loaded: {exc}')\n"
+    ),
+}
 
 # The smallest window the UI is laid out for (the top bar, the sidebar and a
 # drawer need about this much); ``--width`` and ``--height`` cannot go below it.
@@ -118,28 +189,58 @@ def _provided_extras() -> list[str]:
         return []
 
 
-def install_hint(*, platform: str = sys.platform, extras: list[str] | None = None) -> str:
-    """How to get pywebview: the ``desktop`` extra, or pywebview itself.
+def install_command(*, platform: str = sys.platform, extras: list[str] | None = None) -> str:
+    """The one pip command that installs what a window needs on ``platform``.
 
-    An install of tensa that predates the extra (an editable install made before
-    it was added, say) has no such extra, and pip only warns about one it does not
-    know and then installs nothing, so the hint must not name it there. On Linux a
-    toolkit is needed as well, and the hint says so in the same breath.
+    The ``desktop`` extra brings pywebview. An install of tensa that predates the
+    extra (an editable install made before it was added, say) has no such extra,
+    and pip only warns about one it does not know and then installs nothing, so
+    the command names pywebview itself there. On Linux pywebview brings no GUI
+    toolkit, so the command adds Qt, the one pip can install. Double quotes,
+    because ``cmd.exe`` passes single ones on to pip.
     """
     declared = _provided_extras() if extras is None else extras
-    command = (
-        "pip install 'tensa[desktop]'"
-        if "desktop" in declared
-        else f"pip install '{PYWEBVIEW_REQUIREMENT}'"
-    )
-    hint = f"Install it with: {command}"
+    linux = platform.startswith("linux")
+    if "desktop" in declared:
+        return 'pip install "tensa[desktop]"' + (f' "{QT_REQUIREMENT}"' if linux else "")
+    if not linux:
+        return f'pip install "{PYWEBVIEW_REQUIREMENT}"'
+    # One requirement there: pywebview with its Qt extra, inside the same bounds.
+    name, _, bounds = PYWEBVIEW_REQUIREMENT.partition(">")
+    return f'pip install "{name}[qt]>{bounds}"'
+
+
+def install_hint(*, platform: str = sys.platform, extras: list[str] | None = None) -> str:
+    """How to get pywebview, and that the UI can be used without it."""
+    hint = f"Install it with: {install_command(platform=platform, extras=extras)}"
     if platform.startswith("linux"):
         hint += (
-            "\nOn Linux the window also needs a GUI toolkit; the easiest is Qt: "
-            "pip install 'pywebview[qt]' (see 'tensa desktop --help' for GTK and for "
-            "what Qt needs from the system)."
+            f'\n"{QT_REQUIREMENT}" is the Qt toolkit: on Linux the window needs a GUI '
+            "toolkit, which pywebview does not bring (see 'tensa desktop --help' for "
+            "GTK and for what Qt needs from the system)."
         )
-    return hint
+    return f"{hint}\n{BROWSER_INSTEAD}"
+
+
+def toolkit_help(*, extras: list[str] | None = None) -> str:
+    """The two ways to get a GUI toolkit on Linux, with the commands for each."""
+    return (
+        f"Qt: {install_command(platform='linux', extras=extras)}\n"
+        "On X11, Qt also needs the system library libxcb-cursor0:\n"
+        f"{XCB_CURSOR_INSTALL}\n"
+        "GTK: WebKitGTK and PyGObject from the distribution (a virtual environment "
+        "sees them only when it was created with --system-site-packages):\n"
+        f"{WEBKITGTK_INSTALL}"
+    )
+
+
+def no_toolkit(*, extras: list[str] | None = None) -> str:
+    """Why no window can open on a Linux machine with neither toolkit."""
+    return (
+        "tensa desktop cannot open a window: no GUI toolkit is installed (neither Qt "
+        "for Python nor PyGObject can be imported), and on Linux pywebview does not "
+        f"bring one. Install one of the two.\n{toolkit_help(extras=extras)}\n{BROWSER_INSTEAD}"
+    )
 
 
 def load_webview() -> ModuleType:
@@ -166,6 +267,22 @@ class WindowSupport:
     gui: str | None = None
 
 
+@dataclass(frozen=True)
+class ToolkitProbe:
+    """How a toolkit's start in a child process ended."""
+
+    # The child's exit status: 0 when the toolkit started, negative when a signal
+    # ended it (-6 is Qt's abort).
+    returncode: int
+    # What the child wrote: Qt's own words about its platform plugin, or the
+    # import that failed.
+    output: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0
+
+
 def _importable(name: str) -> bool:
     """Whether ``name`` (a top-level module) can be found, without importing it."""
     return importlib.util.find_spec(name) is not None
@@ -180,23 +297,117 @@ def _library_loads(name: str) -> bool:
     return True
 
 
+def probe_toolkit(
+    toolkit: str,
+    *,
+    timeout: float = PROBE_TIMEOUT,
+    executable: str | None = None,
+    frozen: bool | None = None,
+) -> ToolkitProbe | None:
+    """Start ``toolkit`` (``"qt"`` or ``"gtk"``) in a child process and say how it went.
+
+    The child is this interpreter with this environment, so it finds the modules,
+    the libraries and the display the window would. None means nothing was found
+    out, and is not a refusal: a bundled executable has no interpreter to run a
+    script with (its ``sys.executable`` is the program itself), and a child that
+    could not be started or did not end in time says nothing about the toolkit.
+    """
+    is_frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
+    if is_frozen:
+        return None
+    try:
+        done = subprocess.run(
+            [executable or sys.executable, "-c", _PROBE_SCRIPTS[toolkit]],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return ToolkitProbe(returncode=done.returncode, output=(done.stderr or done.stdout).strip())
+
+
+_TOOLKIT_NAMES = {"qt": "Qt", "gtk": "GTK"}
+
+
+def _said(output: str, *, lines: int = 6, width: int = 300) -> str:
+    """The end of what a child wrote, indented, for quoting in a message."""
+    kept = [line.rstrip() for line in output.splitlines() if line.strip()][-lines:]
+    return "\n".join(f"  {line[:width]}" for line in kept) or "  (it wrote nothing)"
+
+
+def _lacks_xcb_cursor(probe: ToolkitProbe, library_loads: Callable[[str], bool]) -> bool:
+    """Whether Qt's failed start is the missing X11 cursor library.
+
+    Qt 6.5 and newer names the library before it aborts. An older message only
+    says that the ``xcb`` plugin could not be loaded, which has other causes, so
+    there the library is looked for as well.
+    """
+    if "xcb-cursor" in probe.output:
+        return True
+    return 'platform plugin "xcb"' in probe.output and not library_loads(XCB_CURSOR_LIBRARY)
+
+
+def _toolkit_problem(
+    failed: Mapping[str, ToolkitProbe],
+    *,
+    library_loads: Callable[[str], bool],
+    extras: list[str] | None = None,
+) -> str:
+    """The refusal for a machine whose toolkits are installed and do not start:
+    what each one lacks, and the command that installs it."""
+    parts: list[str] = []
+    for toolkit, probe in failed.items():
+        if toolkit == "qt" and _lacks_xcb_cursor(probe, library_loads):
+            parts.append(
+                "Qt cannot start, because the system library libxcb-cursor0 is missing "
+                f"(Qt 6.5 and newer need it on X11). Install it:\n{XCB_CURSOR_INSTALL}"
+            )
+        elif toolkit == "qt":
+            parts.append(
+                f"Qt cannot start. It said:\n{_said(probe.output)}\n"
+                "Qt and its web engine are installed with: "
+                f"{install_command(platform='linux', extras=extras)}"
+            )
+        else:
+            parts.append(
+                "PyGObject is installed, but GTK with WebKitGTK cannot be loaded. It said:\n"
+                f"{_said(probe.output)}\n"
+                f"Install WebKitGTK:\n{WEBKITGTK_INSTALL}"
+            )
+    if "qt" not in failed:
+        parts.append(f"Or use Qt instead: {install_command(platform='linux', extras=extras)}")
+    body = "\n".join(parts)
+    return f"tensa desktop cannot open a window: {body}\n{BROWSER_INSTEAD}"
+
+
 def check_window_support(
     *,
     platform: str = sys.platform,
     env: Mapping[str, str] | None = None,
     has_module: Callable[[str], bool] = _importable,
     library_loads: Callable[[str], bool] = _library_loads,
+    probe: Callable[[str], ToolkitProbe | None] = probe_toolkit,
 ) -> WindowSupport:
     """Look for what would keep a window from opening, before anything is started.
 
     Windows and macOS always have a display and a web view, so only Linux is
     checked. It needs a display (or a Qt platform chosen by hand, which is how Qt
-    runs without a screen) and a toolkit. When only Qt is installed pywebview is
-    asked for it, so that it does not try GTK first and log a traceback for the
-    import that fails; when the user chose a toolkit with ``PYWEBVIEW_GUI`` that
-    stands. The Qt library check is a warning, not a stop: Qt 5 does not need it
-    and a Wayland session does not use the plugin that does, and Qt's abort, which
-    no Python code can catch, would otherwise be all there is to see.
+    runs without a screen) and a toolkit that starts. The installed toolkits are
+    tried in the order pywebview would take them (the one ``PYWEBVIEW_GUI`` asks
+    for, else Qt in a KDE session, else GTK), each in a child process (``probe``),
+    and the first that starts is the one the window uses: pywebview is asked for
+    it by name when it is not its own first choice, so that it does not try the
+    other first and log a traceback for it, or abort in it. When none starts the
+    command stops with what each one lacks.
+
+    A probe that found nothing out (``None``) does not stop the command. For Qt
+    the X11 library is then looked for, and its absence is a warning, since Qt 5
+    does not need it and a Wayland session does not use the plugin that does.
     """
     if not platform.startswith("linux"):
         return WindowSupport()
@@ -211,18 +422,36 @@ def check_window_support(
         # Another toolkit (CEF, say) was asked for by hand; pywebview reports its
         # own problems with it.
         return WindowSupport()
-    has_gtk, has_qt = has_module("gi"), has_module("qtpy")
-    if not (has_gtk or has_qt):
-        return WindowSupport(problem=NO_TOOLKIT)
+    installed = {"gtk": has_module("gi"), "qt": has_module("qtpy")}
+    if not any(installed.values()):
+        return WindowSupport(problem=no_toolkit())
 
     # pywebview's own order: the one asked for, else Qt in a KDE session, else GTK.
     first = requested or ("qt" if "KDE_FULL_SESSION" in environment else "gtk")
-    uses_qt = has_qt and (first == "qt" or not has_gtk)
-    gui = "qt" if uses_qt and not has_gtk and not requested else None
-    warnings: list[str] = []
-    if uses_qt and not (wayland or chosen_qpa) and not library_loads("libxcb-cursor.so.0"):
-        warnings.append(QT_NEEDS_XCB_CURSOR)
-    return WindowSupport(warnings=tuple(warnings), gui=gui)
+    failed: dict[str, ToolkitProbe] = {}
+    for toolkit in (first, "gtk" if first == "qt" else "qt"):
+        if not installed[toolkit]:
+            continue
+        found = probe(toolkit)
+        if found is not None and not found.ok:
+            failed[toolkit] = found
+            continue
+        warnings: list[str] = []
+        if requested and toolkit != requested:
+            warnings.append(
+                f"PYWEBVIEW_GUI asks for {_TOOLKIT_NAMES[requested]}, which is "
+                + ("not installed" if requested not in failed else "installed but does not start")
+                + f"; the window uses {_TOOLKIT_NAMES[toolkit]}."
+            )
+        if (
+            toolkit == "qt"
+            and found is None
+            and not (wayland or chosen_qpa)
+            and not library_loads(XCB_CURSOR_LIBRARY)
+        ):
+            warnings.append(QT_NEEDS_XCB_CURSOR)
+        return WindowSupport(warnings=tuple(warnings), gui=None if toolkit == first else toolkit)
+    return WindowSupport(problem=_toolkit_problem(failed, library_loads=library_loads))
 
 
 def run_window(

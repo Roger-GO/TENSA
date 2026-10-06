@@ -24,10 +24,10 @@ pip install "tensa[mcp]"
 tensa mcp --workspace ~/tensa-cases
 ```
 
-To get the app in a window of its own instead of a browser tab, install the desktop extra and run `tensa desktop` (the Desktop window section below says more, including what Linux needs besides pip):
+To get the app in a window of its own instead of a browser tab, install the desktop extra and run `tensa desktop` (the Desktop window section below says more, including what Linux needs besides the extra):
 
 ```bash
-pip install "tensa[desktop]"
+pip install "tensa[desktop]"       # on Linux: pip install "tensa[desktop]" "pywebview[qt]"
 tensa desktop
 ```
 
@@ -64,7 +64,7 @@ Every response carries `X-Frame-Options: DENY`, `Content-Security-Policy: frame-
 `tensa desktop` shows the app in a window of its own, for someone who would rather open a program than a web address. It starts the server on a free port of your machine, opens the window on it, and stops the server when you close the window; the sessions and their workers end with it. Everything inside the window is the same app, served by the same code as `tensa serve`.
 
 ```bash
-pip install "tensa[desktop]"
+pip install "tensa[desktop]"       # on Linux: pip install "tensa[desktop]" "pywebview[qt]"
 tensa desktop --workspace ~/tensa-cases
 ```
 
@@ -72,19 +72,18 @@ The window is [pywebview](https://pywebview.flowrl.com)'s, so it uses the web vi
 
 - Windows: the WebView2 runtime, which comes with Windows 11 and is a free download for Windows 10. Nothing else.
 - macOS: nothing else (it uses WebKit).
-- Linux: a desktop session, because the window needs a display, and one GUI toolkit, which pip does not bring:
-  - Qt: `pip install "pywebview[qt]"`. On X11, Qt 6 also needs a system library, `libxcb-cursor0` (`sudo apt install libxcb-cursor0` on Debian and Ubuntu, `sudo dnf install xcb-util-cursor` on Fedora, `sudo pacman -S xcb-util-cursor` on Arch).
-  - GTK: WebKitGTK and PyGObject from your distribution (`sudo apt install python3-gi gir1.2-webkit2-4.1` on Debian and Ubuntu). A virtual environment sees them only when it was created with `python -m venv --system-site-packages`; otherwise use Qt.
-  - With both installed pywebview uses GTK, or Qt in a KDE session; set `PYWEBVIEW_GUI=qt` or `PYWEBVIEW_GUI=gtk` to choose.
+- Linux: a desktop session, because the window needs a display, and one GUI toolkit, which pywebview does not bring:
+  - Qt, which pip installs when you add `"pywebview[qt]"` to the command. On X11, Qt 6 also needs a system library, `libxcb-cursor0` (`sudo apt install libxcb-cursor0` on Debian and Ubuntu, `sudo dnf install xcb-util-cursor` on Fedora, `sudo pacman -S xcb-util-cursor` on Arch).
+  - GTK: WebKitGTK and PyGObject from your distribution (`sudo apt install python3-gi gir1.2-webkit2-4.1` on Debian and Ubuntu, `sudo dnf install python3-gobject webkit2gtk4.1` on Fedora, `sudo pacman -S python-gobject webkit2gtk-4.1` on Arch). A virtual environment sees them only when it was created with `python -m venv --system-site-packages`; otherwise use Qt.
+  - With both installed pywebview uses GTK, or Qt in a KDE session; set `PYWEBVIEW_GUI=qt` or `PYWEBVIEW_GUI=gtk` to choose. If the one it would take does not start and the other does, `tensa desktop` uses the other.
 
-So a first install on Linux, with Qt, is `pip install "tensa[desktop]" "pywebview[qt]"` and the system package above, and then `tensa desktop`.
+So the one command for a first install is `pip install "tensa[desktop]"` on Windows and macOS and `pip install "tensa[desktop]" "pywebview[qt]"` on Linux, with the system package above on X11, and then `tensa desktop`. The command's own help and its messages give the same two commands.
 
 Over SSH or on a server there is no display, so no window can open. Run `tensa serve --port 8000` there instead and open `http://127.0.0.1:8000` in a browser; over SSH, forward the port first with `ssh -L 8000:127.0.0.1:8000 <host>`.
 
-Before it creates the workspace or starts the server, the command checks what it can: pywebview is installed, and on Linux that there is a display and a toolkit. When one is missing it says so with the command that fixes it and exits with status 1, having created nothing. If no window can be opened after that, it logs why and exits with status 1 too. Two messages come from outside the command:
+Before it creates the workspace or starts the server, the command checks that a window can open: that pywebview is installed and, on Linux, that there is a display and that a toolkit starts. It finds the last out by starting the toolkit in a short-lived child process, because Qt does not report a missing system library as an error. It aborts the whole program (`Could not load the Qt platform plugin "xcb"`, exit status 134), which no Python code can catch but a parent process can see. When something is missing the command prints one message and exits with status 1, having created nothing. The message says what is missing, gives the command that installs it (for a system library, the one for Debian and Ubuntu, for Fedora and for Arch), and ends with the way that needs none of it: `tensa serve --open` shows the same UI in your browser. If no window can be opened after the check, the command logs why and exits with status 1 too. One message comes from outside the command:
 
 - `pip` warns that `tensa` "does not provide the extra desktop". The copy of tensa that is installed is older than the extra (the 0.4.0 release has none), so the extra installs nothing. Install pywebview itself with `pip install "pywebview>=5,<7"`, or upgrade tensa once a release has the extra. When pywebview is missing, the message `tensa desktop` prints names whichever of the two works for the copy you have.
-- `Could not load the Qt platform plugin "xcb"` and the exit status 134. Qt aborts the whole program when it cannot load its X11 plugin, which no Python code can catch. The cause is almost always the missing `libxcb-cursor0` above, and the command logs a warning that names it before it opens the window whenever it cannot find that library.
 
 `tensa desktop` flags:
 

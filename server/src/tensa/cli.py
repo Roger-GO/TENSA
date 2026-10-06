@@ -58,13 +58,13 @@ from tensa.core.logging_setup import configure_logging, resolve_log_file
 from tensa.desktop import (
     MIN_HEIGHT,
     MIN_WIDTH,
-    TOOLKIT_HELP,
     DesktopUnavailable,
     ServerNotStarted,
     WindowFailed,
     check_window_support,
     load_webview,
     run_window,
+    toolkit_help,
 )
 from tensa.security.paths import ensure_workspace
 
@@ -115,10 +115,8 @@ _IdleTimeoutOption = Annotated[
     typer.Option(
         "--idle-timeout-seconds",
         help=(
-            "Sessions with no activity for this long are reaped. A browser tab "
-            "with the UI open checks in every 30 seconds, so its session lives "
-            "until the tab closes; keep this above 60 seconds so a background "
-            "tab, whose timers the browser slows down, is not caught out."
+            "Seconds without activity after which a session is closed. An open "
+            "UI checks in every 30 seconds; keep this above 60."
         ),
     ),
 ]
@@ -720,15 +718,21 @@ def desktop(
     the window, everything works as it does under "tensa serve", and the
     options that both commands have are the same.
 
-    Needs pywebview, which the desktop extra installs: pip install
-    "tensa\[desktop]".
+    The window is pywebview's. Install it with pip install "tensa\[desktop]" on
+    Windows and macOS, and with pip install "tensa\[desktop]" "pywebview\[qt]"
+    on Linux, where the window also needs a GUI toolkit that pywebview does not
+    bring: Qt, which that command adds (on X11 it needs the system library
+    libxcb-cursor0), or WebKitGTK and PyGObject from the distribution (a
+    virtual environment sees them only when it was created with
+    --system-site-packages).
 
-    On Linux the window also needs a display and a GUI toolkit, which pip does
-    not bring. Qt: pip install "pywebview\[qt]" (on X11 it also needs the system
-    library libxcb-cursor0, for example sudo apt install libxcb-cursor0). GTK:
-    WebKitGTK and PyGObject from the distribution (a virtual environment sees
-    them only when it was created with --system-site-packages). Without a
-    display, as over SSH, run "tensa serve" and open its address in a browser.
+    Before it creates the workspace or starts the server, the command checks
+    that a window can open here: that pywebview is installed and, on Linux,
+    that there is a display and a toolkit that starts. When something is
+    missing it says what, gives the command that installs it, and exits with
+    status 1. "tensa serve --open" shows the same UI in a browser and needs
+    none of this. Without a display, as over SSH, run "tensa serve" and open
+    its address in a browser.
     """
     # A bundled executable (PyInstaller) starts each worker process by running
     # itself again with arguments only this call understands; it has to come
@@ -744,7 +748,8 @@ def desktop(
 
     # Before the workspace is made or anything listens: a machine that cannot show
     # a window should leave nothing behind (and Qt, when it cannot start, aborts
-    # the whole process without a word of ours).
+    # the whole process without a word of ours, which is why the check starts it
+    # in a child process first).
     support = check_window_support()
     if support.problem is not None:
         typer.echo(support.problem, err=True)
@@ -819,7 +824,7 @@ def desktop(
     except WindowFailed as exc:
         log.error("cannot open the window: %s", exc)
         if sys.platform.startswith("linux"):
-            log.error("%s", TOOLKIT_HELP)
+            log.error("On Linux the window needs a GUI toolkit.\n%s", toolkit_help())
         raise typer.Exit(code=1) from exc
     finally:
         sock.close()

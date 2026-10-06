@@ -120,19 +120,29 @@ def test_server_readme_states_the_real_desktop_defaults() -> None:
 
 
 def test_server_readme_gives_the_linux_fixes_the_desktop_command_gives() -> None:
-    """The package a Linux user is told to install when Qt cannot start, and the way to
-    make a virtual environment see GTK, read the same in the README as in the command's
-    own messages (a message that moves on without the README sends people to a package
-    that is no longer the answer)."""
+    """The package a Linux user is told to install when a toolkit cannot start, and the
+    way to make a virtual environment see GTK, read the same in the README as in the
+    command's own messages (a message that moves on without the README sends people to a
+    package that is no longer the answer)."""
     readme = _read("server/README.md")
-    for message in (desktop.QT_NEEDS_XCB_CURSOR, desktop.TOOLKIT_HELP):
-        for command in re.findall(
-            r"sudo (?:apt install|dnf install|pacman -S) [\w.-]+(?: [\w.-]+)*(?=[ ,)]|\.$|\.\s|$)",
-            message,
-        ):
-            assert command in readme, command
+    commands = [
+        line.split(":", 1)[1].strip()
+        for block in (desktop.XCB_CURSOR_INSTALL, desktop.WEBKITGTK_INSTALL)
+        for line in block.splitlines()
+    ]
+    # One for each of the three families of distribution, for each of the two.
+    assert len(commands) == 6
+    for command in commands:
+        assert re.fullmatch(r"sudo (?:apt install|dnf install|pacman -S) [\w. -]+", command)
+        assert command in readme, command
+    # The warning that stands in when the toolkit could not be tried names the same ones.
+    for command in commands[:3]:
+        assert command in desktop.QT_NEEDS_XCB_CURSOR
     assert "--system-site-packages" in readme
-    assert "pywebview[qt]" in readme
+    # The one install command of each system, as the help and the messages give it.
+    for platform in ("linux", "win32", "darwin"):
+        assert desktop.install_command(platform=platform, extras=["desktop"]) in readme, platform
+    assert "tensa serve --open" in readme
 
 
 @pytest.mark.parametrize(

@@ -5,8 +5,9 @@ uvicorn's ``Server`` by one that runs in the thread ``run_window`` gives it, com
 up when asked to, and stops when ``should_exit`` is set. What is checked is the
 order of events: the server listens before the window opens, and is stopped when
 the window has closed, however it closed. Whether this machine can show a window at
-all (a display, a toolkit) is what ``check_window_support`` answers; the tests here
-stand in for it, and its own tests are at the end.
+all (a display, a toolkit that starts) is what ``check_window_support`` answers; the
+tests here stand in for it, and its own tests and those of the child process it
+starts a toolkit in (``probe_toolkit``) come after them.
 """
 
 from __future__ import annotations
@@ -14,7 +15,9 @@ from __future__ import annotations
 import asyncio
 import importlib.metadata
 import logging
+import re
 import socket
+import subprocess
 import sys
 import threading
 import types
@@ -424,7 +427,10 @@ def test_desktop_says_how_to_install_pywebview_when_it_is_missing(
     monkeypatch.setitem(sys.modules, "webview", None)
     result = _desktop(tmp_path)
     assert result.exit_code == 1
-    assert "pip install 'tensa[desktop]'" in result.output
+    assert desktop.install_command() in result.output
+    assert 'pip install "tensa[desktop]"' in result.output
+    # The UI does not need the window, and the message says so.
+    assert desktop.BROWSER_INSTEAD in result.output
     # It stopped before touching the workspace, a socket or a server.
     assert built_apps == [] and fake_server.instances == []
     assert not (tmp_path / "ws").exists()
@@ -438,26 +444,53 @@ def test_load_webview_names_the_extra_when_pywebview_is_missing(
         desktop.load_webview()
 
 
-def test_the_install_hint_names_the_extra_only_when_this_install_has_it() -> None:
-    assert "pip install 'tensa[desktop]'" in desktop.install_hint(extras=["mcp", "desktop"])
+def test_the_install_command_names_the_extra_only_when_this_install_has_it() -> None:
+    assert desktop.install_command(platform="win32", extras=["mcp", "desktop"]) == (
+        'pip install "tensa[desktop]"'
+    )
     # An install made before the extra existed: pip would only warn that tensa has no
-    # such extra and install nothing, so the hint names pywebview itself.
-    without = desktop.install_hint(extras=["mcp", "dev"])
-    assert f"pip install '{desktop.PYWEBVIEW_REQUIREMENT}'" in without
-    assert "tensa[desktop]" not in without
-    assert "tensa[desktop]" not in desktop.install_hint(extras=[])
+    # such extra and install nothing, so the command names pywebview itself.
+    without = desktop.install_command(platform="darwin", extras=["mcp", "dev"])
+    assert without == f'pip install "{desktop.PYWEBVIEW_REQUIREMENT}"'
+    assert "tensa[desktop]" not in desktop.install_command(platform="win32", extras=[])
 
 
-def test_the_install_hint_reads_the_extras_of_the_installed_package(
+def test_the_install_command_adds_the_toolkit_on_linux_only() -> None:
+    """pywebview brings a web view on Windows and macOS and none on Linux, so the one
+    command a Linux user is given installs Qt as well."""
+    assert desktop.install_command(platform="linux", extras=["desktop"]) == (
+        'pip install "tensa[desktop]" "pywebview[qt]"'
+    )
+    # Without the extra it is one requirement: pywebview, its Qt extra and its bounds.
+    assert desktop.install_command(platform="linux", extras=[]) == (
+        'pip install "pywebview[qt]>=5,<7"'
+    )
+    for platform in ("win32", "darwin"):
+        assert "pywebview[qt]" not in desktop.install_command(
+            platform=platform, extras=["desktop"]
+        )
+
+
+def test_the_install_command_is_quoted_for_every_shell() -> None:
+    """``cmd.exe`` passes single quotes on to pip, which then finds no such package;
+    double quotes work there, in PowerShell and in a POSIX shell."""
+    for platform in ("linux", "win32", "darwin"):
+        for extras in (["desktop"], []):
+            command = desktop.install_command(platform=platform, extras=extras)
+            assert "'" not in command
+            assert re.fullmatch(r'pip install(?: "[^"\s]+")+', command), command
+
+
+def test_the_install_command_reads_the_extras_of_the_installed_package(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.undo()  # the autouse stand-in for what the install declares
     declared = importlib.metadata.metadata("tensa").get_all("Provides-Extra") or []
-    expected = "tensa[desktop]" if "desktop" in declared else desktop.PYWEBVIEW_REQUIREMENT
-    assert expected in desktop.install_hint()
+    expected = "tensa[desktop]" if "desktop" in declared else "pywebview"
+    assert expected in desktop.install_command()
 
 
-def test_the_install_hint_is_pywebview_alone_when_tensa_has_no_metadata(
+def test_the_install_command_is_pywebview_alone_when_tensa_has_no_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.undo()
@@ -466,14 +499,51 @@ def test_the_install_hint_is_pywebview_alone_when_tensa_has_no_metadata(
         raise importlib.metadata.PackageNotFoundError("tensa")
 
     monkeypatch.setattr(desktop.importlib.metadata, "metadata", _missing)
-    assert desktop.PYWEBVIEW_REQUIREMENT in desktop.install_hint()
+    assert desktop.install_command(platform="win32") == (
+        f'pip install "{desktop.PYWEBVIEW_REQUIREMENT}"'
+    )
 
 
-def test_the_install_hint_adds_the_toolkit_on_linux_only() -> None:
-    linux = desktop.install_hint(platform="linux", extras=["desktop"])
-    assert "pywebview[qt]" in linux
-    assert "pywebview[qt]" not in desktop.install_hint(platform="win32", extras=["desktop"])
-    assert "pywebview[qt]" not in desktop.install_hint(platform="darwin", extras=["desktop"])
+def test_the_install_hint_gives_the_command_and_the_way_without_a_window() -> None:
+    for platform in ("linux", "win32", "darwin"):
+        hint = desktop.install_hint(platform=platform, extras=["desktop"])
+        assert desktop.install_command(platform=platform, extras=["desktop"]) in hint
+        assert hint.endswith(desktop.BROWSER_INSTEAD)
+    # Why the Linux command is longer is said there and nowhere else.
+    assert "GUI toolkit" in desktop.install_hint(platform="linux", extras=["desktop"])
+    assert "toolkit" not in desktop.install_hint(platform="win32", extras=["desktop"])
+
+
+def test_the_way_without_a_window_is_a_command_that_exists() -> None:
+    assert '"tensa serve --open"' in desktop.BROWSER_INSTEAD
+    assert "--open" in _options("serve")
+
+
+def _help_text(*command: str) -> str:
+    """A command's ``--help`` as one line of single-spaced words (the terminal
+    wraps it, and a command to copy can fall on two lines)."""
+    result = runner.invoke(cli.app, [*command, "--help"])
+    assert result.exit_code == 0, result.output
+    return " ".join(result.output.split())
+
+
+def test_the_help_gives_the_install_commands_the_messages_give() -> None:
+    """A user who reads ``--help`` and one who reads a refusal are told to type the
+    same thing: both take the command from ``install_command``."""
+    text = _help_text("desktop")
+    for platform in ("linux", "win32", "darwin"):
+        assert desktop.install_command(platform=platform, extras=["desktop"]) in text, platform
+    # What cannot come from pip, and the way without a window.
+    assert "libxcb-cursor0" in text
+    assert "--system-site-packages" in text
+    assert '"tensa serve --open"' in text
+
+
+def test_the_idle_timeout_help_is_two_short_sentences() -> None:
+    text = _options("desktop")["--idle-timeout-seconds"].help
+    assert len(text) < 130, text
+    # What a user needs to pick a value: the UI's own interval and the floor it sets.
+    assert "30 seconds" in text and "60" in text
 
 
 # ------------------------------------------------- a machine without a window
@@ -543,12 +613,26 @@ def test_the_toolkit_hint_follows_a_window_that_could_not_open_on_linux(
     webview.start_error = RuntimeError("no toolkit")
     with caplog.at_level("ERROR", logger="tensa.desktop"):
         assert _desktop(tmp_path).exit_code == 1
-    assert desktop.TOOLKIT_HELP in caplog.text
+    assert desktop.toolkit_help() in caplog.text
 
 
 # ---------------------------------------------- what check_window_support finds
 
 _X11 = {"DISPLAY": ":0"}
+
+# What Qt 6.5 and newer writes before it aborts on X11 without its cursor library.
+_QT_ABORT = (
+    "qt.qpa.plugin: From 6.5.0, xcb-cursor0 or libxcb-cursor0 is needed to load the Qt "
+    "xcb platform plugin.\n"
+    'qt.qpa.plugin: Could not load the Qt platform plugin "xcb" in "" even though it was '
+    "found.\n"
+    "This application failed to start because no Qt platform plugin could be initialized."
+)
+_STARTS = desktop.ToolkitProbe(returncode=0)
+_QT_ABORTS = desktop.ToolkitProbe(returncode=-6, output=_QT_ABORT)
+_NO_WEBKIT = desktop.ToolkitProbe(
+    returncode=1, output="GTK with WebKitGTK cannot be loaded: Namespace WebKit2 not available"
+)
 
 
 def _support(
@@ -557,18 +641,32 @@ def _support(
     modules: tuple[str, ...] = ("qtpy",),
     libraries: tuple[str, ...] = ("libxcb-cursor.so.0",),
     platform: str = "linux",
+    probes: dict[str, desktop.ToolkitProbe | None] | None = None,
+    probed: list[str] | None = None,
 ) -> desktop.WindowSupport:
+    """``check_window_support`` on a made-up machine. ``probes`` says how each toolkit's
+    start in a child process ends (it starts, unless said otherwise), and ``probed``
+    collects the toolkits that were tried."""
+
+    def probe(toolkit: str) -> desktop.ToolkitProbe | None:
+        if probed is not None:
+            probed.append(toolkit)
+        return (probes or {}).get(toolkit, _STARTS)
+
     return desktop.check_window_support(
         platform=platform,
         env=env,
         has_module=lambda name: name in modules,
         library_loads=lambda name: name in libraries,
+        probe=probe,
     )
 
 
 def test_a_session_without_a_display_cannot_open_a_window() -> None:
-    found = _support({})
+    probed: list[str] = []
+    found = _support({}, probed=probed)
     assert found.problem == desktop.NO_DISPLAY
+    assert probed == []  # nothing is started where nothing could be shown
     # It says what to do instead, and the commands it gives exist.
     assert "tensa serve --port 8000" in desktop.NO_DISPLAY
     assert "--port" in _options("serve")
@@ -583,43 +681,180 @@ def test_a_display_or_a_qt_platform_chosen_by_hand_is_enough(env: dict[str, str]
 
 
 def test_a_machine_with_no_toolkit_is_told_both_ways_to_get_one() -> None:
-    found = _support(_X11, modules=())
-    assert found.problem == desktop.NO_TOOLKIT
-    assert "pywebview[qt]" in desktop.NO_TOOLKIT
-    assert "python3-gi" in desktop.NO_TOOLKIT
-    assert "libxcb-cursor0" in desktop.NO_TOOLKIT
-    assert "--system-site-packages" in desktop.NO_TOOLKIT
+    probed: list[str] = []
+    found = _support(_X11, modules=(), probed=probed)
+    assert found.problem == desktop.no_toolkit()
+    assert probed == []
+    message = desktop.no_toolkit()
+    # Qt by the one command the help gives, with the library pip cannot bring.
+    assert desktop.install_command(platform="linux") in message
+    assert desktop.XCB_CURSOR_INSTALL in message
+    # GTK from the distribution.
+    assert desktop.WEBKITGTK_INSTALL in message
+    assert "--system-site-packages" in message
+    assert message.endswith(desktop.BROWSER_INSTEAD)
 
 
 def test_only_linux_is_checked() -> None:
     # Windows and macOS always have a display and a web view of their own.
     for platform in ("win32", "darwin"):
-        assert _support({}, modules=(), libraries=(), platform=platform) == desktop.WindowSupport()
+        probed: list[str] = []
+        found = _support({}, modules=(), libraries=(), platform=platform, probed=probed)
+        assert found == desktop.WindowSupport()
+        assert probed == []
 
 
 def test_qt_alone_is_asked_for_by_name_so_pywebview_does_not_try_gtk_first() -> None:
-    assert _support(_X11, modules=("qtpy",)).gui == "qt"
+    probed: list[str] = []
+    assert _support(_X11, modules=("qtpy",), probed=probed).gui == "qt"
+    assert probed == ["qt"]  # a toolkit that is not installed is not started
 
 
 def test_pywebview_keeps_the_choice_when_both_toolkits_are_there() -> None:
-    both = _support(_X11, modules=("gi", "qtpy"))
-    assert both.problem is None and both.gui is None
-    assert both.warnings == ()  # GTK goes first, and needs no Qt library
+    probed: list[str] = []
+    both = _support(_X11, modules=("gi", "qtpy"), probed=probed)
+    assert both == desktop.WindowSupport()
+    assert probed == ["gtk"]  # GTK goes first, and it starts: Qt is not needed
     assert _support(_X11, modules=("gi",)) == desktop.WindowSupport()
 
 
 def test_a_toolkit_chosen_with_pywebview_gui_stands() -> None:
-    assert _support({**_X11, "PYWEBVIEW_GUI": "qt"}, modules=("gi", "qtpy")).gui is None
+    probed: list[str] = []
+    env = {**_X11, "PYWEBVIEW_GUI": "qt"}
+    assert _support(env, modules=("gi", "qtpy"), probed=probed) == desktop.WindowSupport()
+    assert probed == ["qt"]
     # CEF and the like are pywebview's to check.
     assert _support({**_X11, "PYWEBVIEW_GUI": "cef"}, modules=()) == desktop.WindowSupport()
 
 
-def test_qt_without_its_x11_library_is_warned_about_with_the_package_to_install() -> None:
-    found = _support(_X11, libraries=())
-    assert found.problem is None
+def test_a_kde_session_prefers_qt_even_when_gtk_is_there() -> None:
+    probed: list[str] = []
+    found = _support({**_X11, "KDE_FULL_SESSION": "true"}, modules=("gi", "qtpy"), probed=probed)
+    assert probed == ["qt"]
+    assert found == desktop.WindowSupport()  # pywebview already puts Qt first there
+
+
+def test_qt_that_aborts_for_its_x11_library_stops_the_command_with_the_package() -> None:
+    """Qt does not raise when it cannot load its X11 plugin, it aborts the process, so
+    the only place to find that out is a child, before anything is started."""
+    found = _support(_X11, libraries=(), probes={"qt": _QT_ABORTS})
+    assert found.warnings == () and found.gui is None
+    assert found.problem is not None
+    # What is missing, the command for each family of distribution, and the way
+    # without a window; none of Qt's own text, which says less.
+    assert "libxcb-cursor0 is missing" in found.problem
+    assert desktop.XCB_CURSOR_INSTALL in found.problem
+    for command in (
+        "sudo apt install libxcb-cursor0",
+        "sudo dnf install xcb-util-cursor",
+        "sudo pacman -S xcb-util-cursor",
+    ):
+        assert command in found.problem
+    assert found.problem.endswith(desktop.BROWSER_INSTEAD)
+    assert "qt.qpa.plugin" not in found.problem
+    # One message: it does not send the user to pip for something pip cannot install.
+    assert "pip install" not in found.problem
+
+
+def test_an_older_qt_that_only_names_its_plugin_is_matched_by_the_missing_library() -> None:
+    old_words = desktop.ToolkitProbe(
+        returncode=-6, output='qt.qpa.plugin: Could not load the Qt platform plugin "xcb" in ""'
+    )
+    assert "libxcb-cursor0 is missing" in str(
+        _support(_X11, libraries=(), probes={"qt": old_words}).problem
+    )
+    # With the library there, the plugin failed for another reason: Qt's words are kept.
+    other = _support(_X11, probes={"qt": old_words}).problem
+    assert other is not None and "libxcb-cursor0 is missing" not in other
+    assert 'Could not load the Qt platform plugin "xcb"' in other
+
+
+def test_qt_that_does_not_start_for_another_reason_is_quoted() -> None:
+    no_engine = desktop.ToolkitProbe(
+        returncode=1,
+        output="Qt WebEngine cannot be imported: libnss3.so: cannot open shared object file",
+    )
+    problem = _support(_X11, probes={"qt": no_engine}).problem
+    assert problem is not None
+    assert "Qt cannot start. It said:\n  Qt WebEngine cannot be imported: libnss3.so" in problem
+    assert desktop.install_command(platform="linux") in problem
+    assert problem.endswith(desktop.BROWSER_INSTEAD)
+
+
+def test_only_the_end_of_what_a_toolkit_wrote_is_quoted() -> None:
+    long = desktop.ToolkitProbe(
+        returncode=1, output="\n".join(f"line {n}" for n in range(40)) + "\n\n" + "x" * 900
+    )
+    problem = str(_support(_X11, probes={"qt": long}).problem)
+    assert "line 35" in problem and "line 33" not in problem
+    assert "x" * 300 in problem and "x" * 301 not in problem
+    silent = str(_support(_X11, probes={"qt": desktop.ToolkitProbe(returncode=-11)}).problem)
+    assert "(it wrote nothing)" in silent
+
+
+def test_gtk_without_webkit_is_told_the_packages_and_offered_qt() -> None:
+    problem = _support(_X11, modules=("gi",), probes={"gtk": _NO_WEBKIT}).problem
+    assert problem is not None
+    assert "Namespace WebKit2 not available" in problem
+    assert desktop.WEBKITGTK_INSTALL in problem
+    assert f"Or use Qt instead: {desktop.install_command(platform='linux')}" in problem
+    assert problem.endswith(desktop.BROWSER_INSTEAD)
+
+
+def test_the_window_uses_the_toolkit_that_starts() -> None:
+    # GTK is installed without WebKitGTK (PyGObject is on most desktops): Qt it is,
+    # asked for by name so that pywebview does not log GTK's traceback first.
+    probed: list[str] = []
+    found = _support(_X11, modules=("gi", "qtpy"), probes={"gtk": _NO_WEBKIT}, probed=probed)
+    assert probed == ["gtk", "qt"]
+    assert found == desktop.WindowSupport(gui="qt")
+    # A KDE session, where pywebview would start Qt first and abort in it.
+    kde = _support(
+        {**_X11, "KDE_FULL_SESSION": "true"},
+        modules=("gi", "qtpy"),
+        libraries=(),
+        probes={"qt": _QT_ABORTS},
+    )
+    assert kde == desktop.WindowSupport(gui="gtk")
+
+
+def test_a_toolkit_asked_for_that_cannot_be_used_is_said_and_the_other_used() -> None:
+    env = {**_X11, "PYWEBVIEW_GUI": "qt"}
+    aborts = _support(env, modules=("gi", "qtpy"), libraries=(), probes={"qt": _QT_ABORTS})
+    assert aborts.problem is None and aborts.gui == "gtk"
+    assert aborts.warnings == (
+        "PYWEBVIEW_GUI asks for Qt, which is installed but does not start; "
+        "the window uses GTK.",
+    )
+    absent = _support({**_X11, "PYWEBVIEW_GUI": "gtk"}, modules=("qtpy",))
+    assert absent.problem is None and absent.gui == "qt"
+    assert absent.warnings == (
+        "PYWEBVIEW_GUI asks for GTK, which is not installed; the window uses Qt.",
+    )
+
+
+def test_when_no_toolkit_starts_the_message_says_what_each_one_lacks() -> None:
+    problem = _support(
+        _X11, modules=("gi", "qtpy"), libraries=(), probes={"gtk": _NO_WEBKIT, "qt": _QT_ABORTS}
+    ).problem
+    assert problem is not None
+    assert problem.index("GTK with WebKitGTK cannot be loaded") < problem.index("Qt cannot start")
+    assert desktop.WEBKITGTK_INSTALL in problem and desktop.XCB_CURSOR_INSTALL in problem
+    assert "Or use Qt instead" not in problem  # Qt is installed, and has its own line
+    assert problem.count(desktop.BROWSER_INSTEAD) == 1
+
+
+# A child that told nothing (a bundled executable has no interpreter to start one
+# with, and one that did not end in time is not waited for): the command goes on,
+# and for Qt the library is looked for instead.
+
+
+def test_without_a_probe_a_missing_x11_library_is_a_warning() -> None:
+    found = _support(_X11, libraries=(), probes={"qt": None})
+    assert found.problem is None and found.gui == "qt"
     assert found.warnings == (desktop.QT_NEEDS_XCB_CURSOR,)
     assert "sudo apt install libxcb-cursor0" in desktop.QT_NEEDS_XCB_CURSOR
-    assert _support(_X11, libraries=("libxcb-cursor.so.0",)).warnings == ()
+    assert _support(_X11, probes={"qt": None}).warnings == ()
 
 
 @pytest.mark.parametrize(
@@ -632,23 +867,228 @@ def test_qt_without_its_x11_library_is_warned_about_with_the_package_to_install(
     ],
 )
 def test_the_x11_library_is_not_asked_for_where_qt_will_not_load_it(env: dict[str, str]) -> None:
-    assert _support(env, libraries=()).warnings == ()
-
-
-def test_a_kde_session_prefers_qt_even_when_gtk_is_there() -> None:
-    found = _support({**_X11, "KDE_FULL_SESSION": "true"}, modules=("gi", "qtpy"), libraries=())
-    assert found.warnings == (desktop.QT_NEEDS_XCB_CURSOR,)
-    assert found.gui is None  # pywebview already puts Qt first there
+    assert _support(env, libraries=(), probes={"qt": None}).warnings == ()
 
 
 def test_gtk_only_needs_no_qt_library() -> None:
-    assert _support(_X11, modules=("gi",), libraries=()) == desktop.WindowSupport()
+    for probes in ({}, {"gtk": None}):
+        assert _support(_X11, modules=("gi",), libraries=(), probes=probes) == (
+            desktop.WindowSupport()
+        )
 
 
 def test_the_real_checks_find_a_module_and_a_library_or_say_they_are_not_there() -> None:
     assert desktop._importable("sys")
     assert not desktop._importable("no_such_module_for_tensa")
     assert not desktop._library_loads("libno-such-library-for-tensa.so.9")
+
+
+# ------------------------------------------------- the child a toolkit starts in
+
+
+def test_the_probe_scripts_are_python() -> None:
+    assert set(desktop._PROBE_SCRIPTS) == {"qt", "gtk"}
+    for toolkit, script in desktop._PROBE_SCRIPTS.items():
+        compile(script, f"<{toolkit} probe>", "exec")
+
+
+def test_a_child_that_ends_well_means_the_toolkit_starts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(desktop._PROBE_SCRIPTS, "qt", "print('up')")
+    found = desktop.probe_toolkit("qt")
+    assert found == desktop.ToolkitProbe(returncode=0, output="up")
+    assert found.ok
+
+
+def test_a_child_that_fails_says_why(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(
+        desktop._PROBE_SCRIPTS, "gtk", "import sys\nsys.exit('no WebKit here')"
+    )
+    found = desktop.probe_toolkit("gtk")
+    assert found == desktop.ToolkitProbe(returncode=1, output="no WebKit here")
+    assert not found.ok
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a signal does not end a process there")
+def test_a_child_that_a_signal_ended_is_a_toolkit_that_does_not_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # SIGKILL stands in for Qt's SIGABRT: it ends the child the same way and leaves
+    # no core dump for the machine's crash reporter to pick up.
+    script = (
+        "import os, signal, sys\n"
+        "sys.stderr.write('could not load the platform plugin\\n')\n"
+        "sys.stderr.flush()\n"
+        "os.kill(os.getpid(), signal.SIGKILL)\n"
+    )
+    monkeypatch.setitem(desktop._PROBE_SCRIPTS, "qt", script)
+    found = desktop.probe_toolkit("qt")
+    assert found is not None and not found.ok
+    assert found.returncode == -9
+    assert found.output == "could not load the platform plugin"
+
+
+def test_a_child_that_does_not_end_in_time_tells_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(desktop._PROBE_SCRIPTS, "qt", "import time\ntime.sleep(60)")
+    assert desktop.probe_toolkit("qt", timeout=0.5) is None
+
+
+def test_a_child_that_cannot_be_started_tells_nothing(tmp_path: Path) -> None:
+    assert desktop.probe_toolkit("qt", executable=str(tmp_path / "no-python-here")) is None
+
+
+def test_a_bundled_executable_starts_no_child(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Its ``sys.executable`` is the program itself, which would start a second copy
+    of the application with ``-c`` and a script for arguments."""
+
+    def _refuse(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("a child process was started")
+
+    monkeypatch.setattr(desktop.subprocess, "run", _refuse)
+    assert desktop.probe_toolkit("qt", frozen=True) is None
+    monkeypatch.setattr(desktop.sys, "frozen", True, raising=False)
+    assert desktop.probe_toolkit("gtk") is None
+
+
+def test_the_child_is_this_interpreter_and_gets_no_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def _run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen["command"], seen["kwargs"] = command, kwargs
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop.subprocess, "run", _run)
+    assert desktop.probe_toolkit("gtk") == desktop.ToolkitProbe(returncode=0)
+    assert seen["command"] == [sys.executable, "-c", desktop._PROBE_SCRIPTS["gtk"]]
+    assert seen["kwargs"]["stdin"] is subprocess.DEVNULL
+    assert seen["kwargs"]["timeout"] == desktop.PROBE_TIMEOUT
+    # The environment is inherited: the child must see the display and the libraries.
+    assert "env" not in seen["kwargs"]
+
+
+def _stub_package(root: Path, name: str, modules: dict[str, str]) -> None:
+    """A package ``name`` under ``root`` whose modules hold the given source."""
+    package = root / name
+    package.mkdir()
+    for module, source in modules.items():
+        (package / f"{module}.py").write_text(source, encoding="utf-8")
+
+
+@pytest.fixture
+def stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A directory the child imports from before anything installed, so the real
+    scripts run against stand-ins for the toolkits."""
+    root = tmp_path / "stubs"
+    root.mkdir()
+    monkeypatch.setenv("PYTHONPATH", str(root))
+    return root
+
+
+_NO_QT5 = {"__init__": "", "QtWebKitWidgets": "raise ImportError('no QtWebKit')"}
+
+
+def test_the_qt_script_passes_when_the_web_engine_and_the_application_start(
+    stubs: Path,
+) -> None:
+    _stub_package(
+        stubs,
+        "qtpy",
+        {
+            "__init__": "",
+            "QtWebEngineWidgets": "QWebEngineView = object",
+            "QtWidgets": "class QApplication:\n    def __init__(self, argv):\n        pass\n",
+        },
+    )
+    assert desktop.probe_toolkit("qt") == desktop.ToolkitProbe(returncode=0)
+
+
+def test_the_qt_script_names_a_web_engine_that_cannot_be_imported(stubs: Path) -> None:
+    _stub_package(
+        stubs,
+        "qtpy",
+        {
+            "__init__": "",
+            "QtWebEngineWidgets": "raise ImportError('libnss3.so: cannot open shared object file')",
+            "QtWidgets": "raise AssertionError('not reached')",
+        },
+    )
+    _stub_package(stubs, "PyQt5", _NO_QT5)
+    found = desktop.probe_toolkit("qt")
+    # The first failure is the one that matters, not the fallback's.
+    assert found == desktop.ToolkitProbe(
+        returncode=1,
+        output="Qt WebEngine cannot be imported: libnss3.so: cannot open shared object file",
+    )
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Qt aborts like this on Linux")
+def test_the_qt_script_reports_an_application_that_aborts_and_leaves_no_core_dump(
+    stubs: Path,
+) -> None:
+    """The real thing: the application object writes Qt's words and aborts. The
+    script has switched core dumps off by then (``PR_GET_DUMPABLE`` is 3), so the
+    abort leaves nothing for the machine's crash reporter."""
+    aborting = (
+        "import ctypes, os, sys\n"
+        "class QApplication:\n"
+        "    def __init__(self, argv):\n"
+        f"        sys.stderr.write({_QT_ABORT!r} + '\\n')\n"
+        "        dumpable = ctypes.CDLL(None).prctl(3)\n"
+        "        sys.stderr.write(f'dumpable: {dumpable}\\n')\n"
+        "        sys.stderr.flush()\n"
+        "        os.abort()\n"
+    )
+    _stub_package(
+        stubs,
+        "qtpy",
+        {"__init__": "", "QtWebEngineWidgets": "QWebEngineView = object", "QtWidgets": aborting},
+    )
+    found = desktop.probe_toolkit("qt")
+    assert found is not None
+    assert found.returncode == -6
+    assert "xcb-cursor0 or libxcb-cursor0 is needed" in found.output
+    assert found.output.endswith("dumpable: 0")
+    # And it reads as the missing library, whatever the loader says.
+    assert desktop._lacks_xcb_cursor(found, lambda _name: True)
+
+
+def test_the_gtk_script_names_what_cannot_be_loaded(stubs: Path) -> None:
+    _stub_package(
+        stubs,
+        "gi",
+        {
+            "__init__": (
+                "def require_version(namespace, version):\n"
+                "    if namespace == 'WebKit2':\n"
+                "        raise ValueError('Namespace WebKit2 not available')\n"
+            ),
+        },
+    )
+    assert desktop.probe_toolkit("gtk") == desktop.ToolkitProbe(
+        returncode=1,
+        output="GTK with WebKitGTK cannot be loaded: Namespace WebKit2 not available",
+    )
+
+
+def test_the_gtk_script_takes_either_version_of_webkit(stubs: Path) -> None:
+    _stub_package(
+        stubs,
+        "gi",
+        {
+            "__init__": (
+                "def require_version(namespace, version):\n"
+                "    if (namespace, version) == ('WebKit2', '4.1'):\n"
+                "        raise ValueError('Namespace WebKit2 not available for version 4.1')\n"
+            ),
+            "repository": "Gtk = WebKit2 = object()",
+        },
+    )
+    assert desktop.probe_toolkit("gtk") == desktop.ToolkitProbe(returncode=0)
 
 
 # ------------------------------------------------------- freeze_support
