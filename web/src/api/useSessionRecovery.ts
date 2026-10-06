@@ -64,7 +64,7 @@
  *
  * Per-instance debounce: prevent rapid-fire create attempts from
  * re-render loops. Allows at most one mutate() call per second from this
- * hook. The recovery handler in queries.ts has its own module-level
+ * hook. The recovery handler in queries/queryClient.ts has its own module-level
  * debounce for the 404→reset path.
  *
  * v2.0 polish Unit 2 — stuck-detection + transition telemetry:

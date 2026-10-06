@@ -3,7 +3,7 @@
  *
  * Tracks the local UI state for the snapshot menu + save/load dialogs.
  * The actual save / restore / list / delete I/O lives in
- * ``src/api/queries.ts``; this slice owns dialog open/close, the
+ * ``src/api/queries/snapshots.ts``; this slice owns dialog open/close, the
  * pending-name input, the list of snapshots fetched from the substrate
  * (so the load dialog can render before the network responds when a
  * user re-opens it), and last-error / last-fallback messages for

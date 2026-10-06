@@ -10,7 +10,7 @@
  *
  * Two write paths converge here and reconcile by ``job_id``:
  *
- * 1. **Mutation hooks** (``api/queries.ts``) register a placeholder
+ * 1. **Mutation hooks** (``api/queries/``) register a placeholder
  *    ``JobRecord`` on ``onMutate`` for instant optimistic feedback (the
  *    server ``job_id`` may not be known yet, so a temp id is minted), then
  *    upgrade to the substrate ``job_id`` once the response lands.

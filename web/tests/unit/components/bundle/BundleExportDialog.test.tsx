@@ -4,7 +4,7 @@
  *
  * Stubs the substrate fetch path because the bundle endpoint returns
  * `application/zip`, which the regular `andesClient` doesn't surface.
- * The mutation hook in `queries.ts` calls `fetch` directly; we mock
+ * The mutation hook in `queries/bundle.ts` calls `fetch` directly; we mock
  * `globalThis.fetch` to return a synthetic `Response` carrying a fake
  * zip blob.
  *

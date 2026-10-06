@@ -19,7 +19,7 @@
  * - Trigger: ``<ReportDialogButton />`` (mounted in the TopBar). On
  *   click, opens the dialog via ``useReportDialogStore.openDialog()``.
  * - Per-tab data: ``useReport(routine, hasRunResult)`` from
- *   ``api/queries.ts``. Gated on ``hasRunResult`` so the dialog
+ *   ``api/queries/report.ts``. Gated on ``hasRunResult`` so the dialog
  *   doesn't fire a guaranteed-409 when no run has happened yet.
  * - Empty / error states: a 409 ``ProblemDetailsError`` is treated as
  *   the empty state (with the substrate's actionable message). Other

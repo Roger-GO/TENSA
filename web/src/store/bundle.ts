@@ -7,7 +7,7 @@
  * error message (if any) for inline display in the dialog.
  *
  * The actual ``POST /api/sessions/{id}/bundle/export`` mutation lives
- * in ``src/api/queries.ts`` (``useExportBundle``) — this slice only
+ * in ``src/api/queries/bundle.ts`` (``useExportBundle``) — this slice only
  * owns the dialog-side ephemeral state. We split the two so the
  * mutation can be triggered from any component (TopBar button, future
  * keyboard shortcut, future "Export bundle for this run" affordance in

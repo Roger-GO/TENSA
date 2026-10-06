@@ -5,7 +5,7 @@
  * The bundle-import endpoint accepts a multipart upload and returns
  * either a 200 ``status="committed"`` (clean import) or a 409
  * ``status="plan"`` (conflicts to resolve). The mutation hook in
- * ``queries.ts`` re-shapes the 409 body into the same return type so
+ * ``queries/bundle.ts`` re-shapes the 409 body into the same return type so
  * the dialog always sees a ``BundleImportResponse``.
  *
  * We mock ``globalThis.fetch`` to drive both branches:

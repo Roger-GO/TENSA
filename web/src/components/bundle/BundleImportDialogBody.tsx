@@ -7,7 +7,7 @@
  * with the file picker the button sits in.
  *
  * State ownership: this component owns the picked file, the most recent plan,
- * and the user's resolution choices. The mutation itself lives in queries.ts
+ * and the user's resolution choices. The mutation itself lives in api/queries/bundle.ts
  * (``useImportBundle``) so other call sites can re-use it.
  */
 import { useState } from 'react';

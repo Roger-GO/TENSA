@@ -1,5 +1,5 @@
 /**
- * Smoke tests for the TanStack Query hooks in `src/api/queries.ts`.
+ * Smoke tests for the TanStack Query hooks in `src/api/queries/`.
  *
  * These tests don't exercise every cache permutation — the goal is to
  * prove the wrapper-around-fetch-+-store-write contract holds end-to-end:

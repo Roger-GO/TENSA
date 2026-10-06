@@ -26,7 +26,7 @@
  * This module holds the trigger button and the dialog shell. The dialog's
  * content, which owns the picked file, the most recent plan, and the
  * user's resolution choices, is ``BundleImportDialogBody`` and loads when
- * the dialog first opens. The mutation itself lives in queries.ts
+ * the dialog first opens. The mutation itself lives in api/queries/bundle.ts
  * (``useImportBundle``) so other call sites (e.g., a future "Import from
  * URL" affordance) can re-use it.
  */

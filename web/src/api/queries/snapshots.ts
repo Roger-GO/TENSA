@@ -1,0 +1,213 @@
+/** Snapshots of a case's operating point: save, restore, list and delete. */
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
+import { andesClient, TIMEOUTS } from '@/api/client';
+import type { SessionId } from '@/api/types';
+import { useDisturbanceStore } from '@/store/disturbance';
+import { useEditJournalStore } from '@/store/editJournal';
+import { useSessionStore } from '@/store/session';
+import { queryKeys, snapshotsKey } from './keys';
+import { useCaseReady } from './caseReady';
+import { failJob, reconcileJobSuccess, registerJob } from './jobGlue';
+
+/** Sidecar-JSON shape echoed in save/restore/list responses. */
+export interface SnapshotMetadata {
+  andes_version: string;
+  tensa_version: string;
+  case_filename: string | null;
+  case_sha256: string | null;
+  disturbance_log: readonly Record<string, unknown>[];
+  saved_at: string;
+  has_pflow: boolean;
+  has_tds: boolean;
+}
+
+/** Response of ``POST /sessions/{id}/snapshot``. */
+export interface SaveSnapshotResponse {
+  name: string;
+  metadata: SnapshotMetadata;
+  dill_bytes: number;
+  metadata_bytes: number;
+}
+
+/** Response of ``POST /sessions/{id}/snapshot/restore``. */
+export interface RestoreSnapshotResponse {
+  used_dill: boolean;
+  fallback_reason: string | null;
+  disturbances_replayed: number;
+  metadata: SnapshotMetadata;
+}
+
+/** One entry of the ``GET /sessions/{id}/snapshots`` response. */
+export interface SnapshotListEntry {
+  name: string;
+  saved_at: string;
+  has_pflow: boolean;
+  has_tds: boolean;
+  has_dill: boolean;
+  andes_version: string;
+  disturbance_count: number;
+}
+
+/** Response shape of ``GET /sessions/{id}/snapshots``. */
+export interface ListSnapshotsResponse {
+  snapshots: readonly SnapshotListEntry[];
+}
+
+export interface SaveSnapshotVars {
+  sessionId: SessionId;
+  name: string;
+  /** When True, overwrite an existing snapshot under the same name. */
+  force?: boolean;
+  /** When True, also write the solver-state (dill) blob, which costs a couple
+   *  of seconds and a few MB. Default False saves the metadata only. */
+  includeDill?: boolean;
+}
+
+export interface RestoreSnapshotVars {
+  sessionId: SessionId;
+  name: string;
+  /** When True, try the dill blob first and skip the replay and PF re-solve.
+   *  Default False restores by replaying the snapshot's disturbances. */
+  useDillOptimization?: boolean;
+}
+
+export interface DeleteSnapshotVars {
+  sessionId: SessionId;
+  name: string;
+}
+
+/**
+ * ``POST /sessions/{id}/snapshot`` — save the current operating point.
+ *
+ * On success, invalidates the snapshot listing so a re-open of the
+ * load dialog picks up the new entry without a manual refetch.
+ */
+export function useSaveSnapshot(): UseMutationResult<
+  SaveSnapshotResponse,
+  Error,
+  SaveSnapshotVars
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, name, force, includeDill }: SaveSnapshotVars) => {
+      return await andesClient.post<SaveSnapshotResponse>(
+        `/sessions/${encodeURIComponent(sessionId)}/snapshot`,
+        {
+          body: { name, force: force ?? false, include_dill: includeDill ?? false },
+          timeoutMs: TIMEOUTS.caseLoad,
+        },
+      );
+    },
+    onMutate: ({ name }) => ({ jobId: registerJob('snapshot-save', { name }) }),
+    onSuccess: (data, { sessionId }, ctx) => {
+      void queryClient.invalidateQueries({ queryKey: snapshotsKey(sessionId) });
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
+    },
+  });
+}
+
+/**
+ * ``POST /sessions/{id}/snapshot/restore`` — restore a saved snapshot.
+ *
+ * On success, invalidates session-scoped caches that the restore
+ * mutated under the hood (topology, pflow, EIG) so the UI re-fetches
+ * the post-restore state without a stale render.
+ */
+export function useRestoreSnapshot(): UseMutationResult<
+  RestoreSnapshotResponse,
+  Error,
+  RestoreSnapshotVars
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, name, useDillOptimization }: RestoreSnapshotVars) => {
+      return await andesClient.post<RestoreSnapshotResponse>(
+        `/sessions/${encodeURIComponent(sessionId)}/snapshot/restore`,
+        {
+          body: {
+            name,
+            use_dill_optimization: useDillOptimization ?? false,
+          },
+          timeoutMs: TIMEOUTS.caseLoad,
+        },
+      );
+    },
+    onMutate: ({ name }) => ({ jobId: registerJob('snapshot-restore', { name }) }),
+    onSuccess: (data, { sessionId }, ctx) => {
+      // The restored system is not something the journal's edits can rebuild.
+      useEditJournalStore.getState().markReplaced();
+      // Restore swaps the System; every session-scoped query is now
+      // potentially stale. Invalidate the broad set rather than
+      // hand-list each one — a snapshot restore is a rare operation
+      // so the over-invalidation cost is fine.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.eig(sessionId) });
+      // Disturbance log is reset by the restore; tell the disturbance
+      // store to mark itself dirty so the next TDS run re-syncs.
+      useDisturbanceStore.setState({ committed: false, dirty: true });
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
+    },
+  });
+}
+
+/**
+ * ``GET /sessions/{id}/snapshots`` — list snapshots for the current case.
+ *
+ * Gating: enabled only when a session is active. Returns an empty list
+ * when no snapshots have been saved against the case yet.
+ */
+export function useListSnapshots(): UseQueryResult<ListSnapshotsResponse, Error> {
+  const sessionId = useSessionStore((s) => s.sessionId);
+  // Gate on a loaded case: snapshots are listed per-case, so on a fresh
+  // session with no case loaded this 409s (landing-page console noise). The
+  // load mutation invalidates this key, so it refetches once a case lands.
+  const hasCase = useCaseReady();
+  const enabled = sessionId !== null && hasCase;
+  return useQuery({
+    queryKey: enabled ? snapshotsKey(sessionId) : ['snapshots', 'noop'],
+    enabled,
+    staleTime: 10_000,
+    queryFn: async () => {
+      if (!sessionId) {
+        throw new Error('useListSnapshots enabled without a session id');
+      }
+      return await andesClient.get<ListSnapshotsResponse>(
+        `/sessions/${encodeURIComponent(sessionId)}/snapshots`,
+        { timeoutMs: TIMEOUTS.workspace },
+      );
+    },
+  });
+}
+
+/**
+ * ``DELETE /sessions/{id}/snapshot/{name}`` — remove a snapshot.
+ *
+ * On success, invalidates the listing so the load dialog rerenders
+ * without the deleted entry.
+ */
+export function useDeleteSnapshot(): UseMutationResult<void, Error, DeleteSnapshotVars> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, name }: DeleteSnapshotVars) => {
+      await andesClient.delete<unknown>(
+        `/sessions/${encodeURIComponent(sessionId)}/snapshot/${encodeURIComponent(name)}`,
+        { timeoutMs: TIMEOUTS.workspace },
+      );
+    },
+    onMutate: ({ name }) => ({ jobId: registerJob('snapshot-delete', { name }) }),
+    onSuccess: (data, { sessionId }, ctx) => {
+      void queryClient.invalidateQueries({ queryKey: snapshotsKey(sessionId) });
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
+    },
+  });
+}
