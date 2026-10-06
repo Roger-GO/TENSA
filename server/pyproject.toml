@@ -210,7 +210,7 @@ addopts = [
 
 [tool.coverage.run]
 source_pkgs = ["tensa"]
-# Most of the ANDES-facing code (core/worker.py, core/wrapper.py) runs in
+# Most of the ANDES-facing code (core/worker.py, core/wrapper/) runs in
 # worker processes the session manager spawns, so measure subprocesses too.
 patch = ["subprocess"]
 # Line coverage through sys.monitoring costs about 10% on a worker-heavy test

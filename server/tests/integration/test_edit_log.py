@@ -18,7 +18,6 @@ from typing import Any
 import numpy as np
 import pytest
 
-from tensa.core import wrapper as wrapper_mod
 from tensa.core.case_events import event_from_spec
 from tensa.core.disturbance import FaultSpec, ToggleSpec
 from tensa.core.edit_log import (
@@ -43,6 +42,7 @@ from tensa.core.errors import (
     SetupFailedError,
 )
 from tensa.core.wrapper import Wrapper
+from tensa.core.wrapper import elements as elements_mod
 
 pytestmark = pytest.mark.integration
 
@@ -781,7 +781,7 @@ def test_an_element_added_without_an_idx_is_replayed_with_the_one_it_got() -> No
 def test_an_edit_the_log_has_no_room_for_is_refused_before_it_is_made(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(wrapper_mod, "EDIT_LOG_MAX", 2)
+    monkeypatch.setattr(elements_mod, "EDIT_LOG_MAX", 2)
     w = _wrapper()
     w.add_element("Bus", {"idx": "100", "name": "B100", "Vn": 69.0})
     w.edit_element("Bus", "100", {"Vn": 138.0})

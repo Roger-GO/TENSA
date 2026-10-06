@@ -25,7 +25,6 @@ from typer.testing import CliRunner
 
 from tensa import cli
 from tensa.core import codegen_cache
-from tensa.core import wrapper as wrapper_module
 from tensa.core.codegen_cache import (
     STAMP_NAME,
     BackgroundWarm,
@@ -40,6 +39,7 @@ from tensa.core.codegen_cache import (
 from tensa.core.errors import CaseLoadError
 from tensa.core.worker_spawn import DEFAULT_WORKER_THREADS
 from tensa.core.wrapper import Wrapper
+from tensa.core.wrapper import case as case_module
 
 pytestmark = pytest.mark.unit
 
@@ -484,7 +484,7 @@ def waits(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         events.append("build")
         raise _StopBuilding
 
-    monkeypatch.setattr(wrapper_module, "wait_for_background_warm", wait)
+    monkeypatch.setattr(case_module, "wait_for_background_warm", wait)
     monkeypatch.setattr(andes, "load", build)
     monkeypatch.setattr(andes, "System", build)
     return events
