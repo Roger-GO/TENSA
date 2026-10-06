@@ -10,7 +10,7 @@ Substrate-level coverage of the v3.1 UX-overhaul Unit 3 contract:
   module that defines a subclass — errors, session, bundle, report, snapshot,
   sweep, security/paths) catches any concrete subclass added later without a
   classification, and any drift between the plain-``str`` attrs in ``core/``
-  and the ``RecoveryKind`` Literal in ``api/schemas.py``.
+  and the ``RecoveryKind`` Literal in ``api/schemas/errors.py``.
 - ``RECOVERY_DEFAULT_LABELS`` has a label for every ``RecoveryKind`` value.
 - ``RecoveryDescriptor`` validates a good payload, rejects an unknown kind,
   and rejects extra fields (``extra='forbid'``).

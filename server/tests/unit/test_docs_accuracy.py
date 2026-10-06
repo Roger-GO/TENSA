@@ -346,3 +346,51 @@ def test_package_metadata_and_workflows_carry_no_stale_planning_text() -> None:
         # name, which is what the checks are listed under on a pull request.
         tag = re.search(r"\bKTD-\d+|\bUnit\s+\d+|^name:.*\bv\d+\.\d+", text, re.MULTILINE)
         assert tag is None, f"{workflow.name} mentions {tag and tag.group(0)!r}"
+
+
+# The single files that became packages: ``api/schemas/``, ``core/wrapper/`` and
+# ``core/session/`` on the server, ``api/queries/`` in the web UI. No file of those names
+# is left, so a comment or a page that still names one points at nothing.
+_SPLIT_MODULE = re.compile(r"(?<![\w-])(?:schemas|wrapper|session)\.py\b|(?<![\w-])queries\.ts\b")
+_TEXT_SUFFIXES = {".py", ".ts", ".tsx", ".md", ".yml", ".toml", ".txt", ".sh", ".mjs", ".json"}
+_NOT_SOURCE = {"node_modules", "dist", "site", "__pycache__", ".venv", "coverage", "htmlcov"}
+
+
+def test_nothing_names_a_module_that_became_a_package() -> None:
+    roots = [
+        REPO_ROOT / "server" / "src",
+        REPO_ROOT / "server" / "tests",
+        REPO_ROOT / "web" / "src",
+        REPO_ROOT / "web" / "tests",
+        REPO_ROOT / "docs",
+        REPO_ROOT / "examples",
+        REPO_ROOT / "scripts",
+        REPO_ROOT / ".github",
+    ]
+    if not all(root.is_dir() for root in roots):
+        pytest.skip("the repository is not next to the tests")
+    # The files themselves are gone, which is what makes a mention of one stale.
+    for gone in (
+        "server/src/tensa/api/schemas.py",
+        "server/src/tensa/core/wrapper.py",
+        "server/src/tensa/core/session.py",
+        "web/src/api/queries.ts",
+    ):
+        assert not (REPO_ROOT / gone).exists(), gone
+    files = [path for root in roots for path in root.rglob("*")]
+    # Top-level pages and the server's; the changelog tells the history, with the old names.
+    files += [*REPO_ROOT.glob("*.md"), *REPO_ROOT.glob("*.txt"), *(REPO_ROOT / "server").glob("*.md")]
+    stale: list[str] = []
+    for path in files:
+        if path.suffix not in _TEXT_SUFFIXES or not path.is_file():
+            continue
+        relative = path.relative_to(REPO_ROOT)
+        if _NOT_SOURCE & set(relative.parts) or relative.as_posix() == "CHANGELOG.md":
+            continue
+        if path == Path(__file__).resolve():
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            found = _SPLIT_MODULE.search(line)
+            if found:
+                stale.append(f"{relative.as_posix()}:{number}: {found.group(0)}")
+    assert not stale, "these name a file that is now a package:\n" + "\n".join(stale)

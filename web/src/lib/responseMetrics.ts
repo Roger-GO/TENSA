@@ -23,7 +23,7 @@ import type { UnitMode } from '@/lib/units';
 export const SETTLING_BAND = 0.02;
 export const ROCOF_WINDOW_S = 0.5;
 
-/** The substrate's bounds on one request (``api/schemas.py``). */
+/** The substrate's bounds on one request (``api/schemas/metrics.py``). */
 export const MAX_METRIC_SERIES = 64;
 export const MAX_METRIC_SAMPLES = 200_000;
 export const MAX_METRIC_SAMPLES_TOTAL = 1_000_000;

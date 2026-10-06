@@ -9,7 +9,7 @@
  * 2. **Post-error recoveries** (`ProblemDetailsError.recovery`) — the
  *    substrate attaches a typed `{kind, label}` descriptor to every 4xx/5xx
  *    ProblemDetails body so the client can offer the exact recovery CTA
- *    (`server/src/tensa/api/schemas.py::RecoveryDescriptor`).
+ *    (`server/src/tensa/api/schemas/errors.py::RecoveryDescriptor`).
  *
  * Before Unit 7 these were two divergent local unions
  * (`useRunReadiness.RecoveryAction` vs the wire's `RecoveryKind`). Sharing

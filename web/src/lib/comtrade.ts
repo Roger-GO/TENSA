@@ -15,7 +15,7 @@ import { runLabel, shortRunId } from '@/lib/runLabel';
 import { parseColumnName } from '@/store/plot';
 import type { RunRecord } from '@/store/runs';
 
-/** The substrate's bound on one export, channels times samples (``api/schemas.py``). */
+/** The substrate's bound on one export, channels times samples (``api/schemas/comtrade.py``). */
 export const MAX_COMTRADE_VALUES = 5_000_000;
 
 /**

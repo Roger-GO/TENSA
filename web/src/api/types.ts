@@ -113,7 +113,7 @@ export type DisturbanceAck = components['schemas']['DisturbanceAck'];
  * Response body for ``POST /sessions/{id}/abort`` (Unit 1b endpoint).
  *
  * The substrate-side ``AbortResponse`` schema is defined in
- * ``server/src/tensa/api/schemas.py`` but the web ``generated.ts`` was
+ * ``server/src/tensa/api/schemas/tds.py`` but the web ``generated.ts`` was
  * regenerated before Unit 7 landed. Hand-authored here so Unit 7 doesn't
  * block on a codegen sweep; the field shape is identical and a one-to-one
  * alias substitution will work when codegen is re-run.
@@ -147,7 +147,7 @@ export type DisturbanceSpec = FaultSpec | ToggleSpec | AlterSpec;
  * (Unit 1b endpoint).
  *
  * The OpenAPI spec on the substrate side already defines this (see
- * ``server/src/tensa/api/schemas.py:AlterableParamsResponse``), but the
+ * ``server/src/tensa/api/schemas/cases.py:AlterableParamsResponse``), but the
  * web ``generated.ts`` is regenerated out-of-band. Defined here as a
  * hand-authored type so Unit 6 can land before the next codegen sweep
  * without blocking on the regen step. When ``generated.ts`` is regenerated

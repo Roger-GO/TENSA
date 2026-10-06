@@ -490,7 +490,7 @@ def test_concurrent_failed_marks_coalesce_to_count(registry: _JobRegistry) -> No
 
 def test_jobrecord_is_a_dataclass_with_expected_fields() -> None:
     """Defends against accidental schema drift on the JobRecord shape —
-    every consumer (substrate, schemas.py, web codegen) treats these
+    every consumer (substrate, ``api/schemas/jobs.py``, web codegen) treats these
     names as load-bearing."""
     record = JobRecord(
         id="x",

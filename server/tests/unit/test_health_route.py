@@ -134,6 +134,6 @@ def test_health_is_in_the_api_description(tmp_path: Path) -> None:
     schema: dict[str, Any] = make_app(workspace=tmp_path, static_override=tmp_path).openapi()
     operation = schema["paths"]["/api/health"]["get"]
     assert operation["operationId"] == "getHealth"
-    # The response model is the route module's own, not one of ``api/schemas.py``.
+    # The response model is the route module's own, not one of ``api/schemas/``.
     assert "HealthResponse" in schema["components"]["schemas"]
     assert health.HealthResponse.__module__ == "tensa.api.routes.health"
