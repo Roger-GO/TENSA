@@ -63,6 +63,7 @@ The trust model lives in the top-level docstring of `server/src/tensa/__init__.p
 - **Styling**: Tailwind v4 utility classes only. Color/type/spacing/motion tokens live in `web/src/styles/tokens.css` (Unit 2 fills it in) and resolve via Tailwind's `@theme`. Never hardcode colors / spacing values in components — always go through tokens.
 - **Radix wrappers** (`web/src/components/ui/*`) forward Radix's behavior unchanged and apply project tokens via Tailwind. Never re-implement Radix logic. Falsification gate (Unit 2): if the project-built component library doesn't out-look stock shadcn-with-tokens, downgrade.
 - **API client**: types are codegen'd from the substrate's `/openapi.json` via `pnpm regen-api-types` into `src/api/generated.ts` (committed). Hand-authored brands (`SessionId`, `RunId`) live in `src/api/types.ts`.
+- **Query hooks**: `src/api/queries/` holds one module per domain (`case.ts`, `elements.ts`, `snapshots.ts`, ...), and its `index.ts` re-exports them all. Import hooks from `@/api/queries`, never from a module of the folder: tests mock that path, and an import that reaches past it runs the real hook. A helper only the modules share (`jobGlue.ts`, `caseReady.ts`) stays out of the barrel, and `web/tests/unit/api/queriesSurface.test.ts` pins what the barrel exports.
 - **`/api/*` prefix**: the Vite dev proxy strips `/api` and forwards to the substrate's root paths. Production (Unit 10) prefixes the substrate's routers with `/api` so the same client URL works in both modes.
 
 ## What goes where
