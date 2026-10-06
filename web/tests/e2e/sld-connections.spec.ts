@@ -6,9 +6,11 @@
  *   lands on a tap of its bus's bar without running through another symbol,
  *   each line and transformer runs at right angles from a tap to a tap,
  *   clear of every bar but its own two and of every generator, load and
- *   shunt, and every tap has a dot that stands clear of the next -> ask for
- *   right angles on IEEE 14, where more devices stand in a row than its
- *   bars are long -> still nothing runs through a symbol -> drag a load round
+ *   shunt, and every tap has a dot that stands clear of the next -> on IEEE
+ *   14, place a load beyond the generator beside it, so that the generator
+ *   stands between the load and its tap -> its connector goes round the
+ *   generator -> ask for right angles -> still nothing runs through a symbol
+ *   -> drag a load round
  *   its bus -> the connector follows while the pointer is still down -> ask
  *   for right angles from the right-click menu -> the connector turns once
  *   -> reload the page -> the placement and the style are still there
@@ -135,7 +137,11 @@ const NEAR = 0.6;
 /** The least distance between two taps of a bar (`TAP_SPACING` in `connections.ts`). */
 const TAP_SPACING = 14;
 
-/** The kinds of node a connector must not run through: the symbols, and the controller badges. */
+/**
+ * The kinds of node a connector must not run through: the symbols, and the
+ * badge of a controller that has one (a controller of a generator is named on
+ * the generator's symbol).
+ */
 const SYMBOLS = new Set(['generator', 'load', 'shunt', 'controller']);
 
 /** The kinds of node the automatic placement keeps clear of the branches: the devices. */
@@ -336,15 +342,16 @@ test('no connector of IEEE 14 runs through another symbol, drawn straight or at 
   page,
 }) => {
   const stem = `connections-row-e2e-${Date.now()}`;
+  const copy = `${stem}.xlsx`;
 
-  // IEEE 14 has buses with three and four devices in a row, more than stand
-  // over a bar of the default length: the outer ones are beyond its tips,
-  // with a neighbour between them and their tap.
+  // IEEE 14 has buses with a generator and a load side by side, wider
+  // together than a bar of the default length. (A generator is one symbol
+  // with its machine and their controllers, so there are 18 symbols.)
   await page.goto('/');
   await openCase(page, 'ieee14_full.xlsx');
   const first = await settled(page);
   const devices = Object.values(first.nodes).filter((node) => SYMBOLS.has(node.type));
-  expect(devices.length).toBeGreaterThan(20);
+  expect(devices.length).toBeGreaterThan(15);
   expect(problems(first)).toEqual([]);
   // Four branches land on one port of bus 5, and two of them come down a
   // corridor beside the bars of buses 3 and 4, where three devices stand in
@@ -355,18 +362,47 @@ test('no connector of IEEE 14 runs through another symbol, drawn straight or at 
   await page.getByTestId('topbar-menu-workspace-trigger').click();
   await page.getByTestId('topbar-menu-workspace-save-system').click();
   await page.getByTestId('save-filename').fill(stem);
-  await Promise.all([layoutWritten(page), page.getByTestId('save-confirm').click()]);
-  await openCase(page, `${stem}.xlsx`);
+  const [saved] = await Promise.all([
+    layoutWritten(page),
+    page.getByTestId('save-confirm').click(),
+  ]);
+  await openCase(page, copy);
+  const asSaved = await settled(page);
+  expect(asSaved.nodes).toEqual(first.nodes);
+  expect(problems(asSaved)).toEqual([]);
+  const stubs = Object.keys(asSaved.edges).filter((id) => id.startsWith('stub-'));
+  const diagonals = (drawn: Drawing): string[] =>
+    stubs.filter(
+      (id) => Math.abs(drawn.edges[id]!.points[0]![0] - drawn.edges[id]!.points[1]![0]) > NEAR,
+    );
+  // As the diagram places them, every device stands over its bar, or over a
+  // bar that reaches out under it: each connector drops square.
+  expect(diagonals(asSaved)).toEqual([]);
+
+  // A layout placed by hand: the load of bus 2 beyond the generator beside
+  // it, so that the generator stands between the load and its tap.
+  const layout = saved.request().postDataJSON() as {
+    non_bus_coordinates: Record<string, Record<string, { x: number; y: number }>>;
+  };
+  const generator = first.nodes['generator-2']!;
+  const beyond = { x: generator.x + generator.width + 24, y: first.nodes['load-PQ_1']!.y };
+  for (const key of ['PQ', 'load']) {
+    Object.assign(layout.non_bus_coordinates[key]!.PQ_1!, beyond);
+  }
+  const placedByHand = await page.request.put('/api/workspace/layout', {
+    params: { case_path: copy },
+    data: layout,
+  });
+  expect(placedByHand.status()).toBe(204);
+  await page.reload();
+  await openCase(page, copy);
   const straight = await settled(page);
-  expect(straight.nodes).toEqual(first.nodes);
+  expect(straight.nodes['load-PQ_1']).toMatchObject(beyond);
   expect(problems(straight)).toEqual([]);
-  const stubs = Object.keys(straight.edges).filter((id) => id.startsWith('stub-'));
   // Drawn straight, a connector has no bend: square onto the bar, or a diagonal.
   expect(stubs.filter((id) => straight.edges[id]!.points.length !== 2)).toEqual([]);
-  const diagonal = stubs.filter(
-    (id) => Math.abs(straight.edges[id]!.points[0]![0] - straight.edges[id]!.points[1]![0]) > NEAR,
-  );
-  expect(diagonal.length).toBeGreaterThan(0);
+  const diagonal = diagonals(straight);
+  expect(diagonal).toContain('stub-load-PQ_1');
 
   await page.locator('.react-flow__pane').click({ button: 'right', position: { x: 24, y: 320 } });
   await Promise.all([

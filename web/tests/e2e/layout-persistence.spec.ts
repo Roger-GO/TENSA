@@ -3,11 +3,11 @@
  *
  *   load Kundur, which is drawn in its automatic layout -> save the system under
  *   a new name without moving anything -> open the copy -> the same picture ->
- *   drag a bus and a machine -> the machine's governor badge goes with it -> the
- *   layout is written beside the case -> save a snapshot -> drag another bus ->
- *   open another case and come back -> still as it was left -> restore the
- *   snapshot -> the diagram is back as the snapshot has it -> "Keep my layout"
- *   -> the later arrangement is back, on screen and on disk
+ *   drag a bus and a machine -> the governor named on the machine's symbol goes
+ *   with it -> the layout is written beside the case -> save a snapshot -> drag
+ *   another bus -> open another case and come back -> still as it was left ->
+ *   restore the snapshot -> the diagram is back as the snapshot has it -> "Keep
+ *   my layout" -> the later arrangement is back, on screen and on disk
  *
  * It drives the real UI against a real `tensa serve` (see `playwright.config.ts`)
  * in a real browser, and reads what React Flow drew: where each node is and the
@@ -225,7 +225,23 @@ test('a diagram is saved with the system and comes back as it was placed', async
 
   // ---- Place things ------------------------------------------------------
   const machine = 'generator-1';
-  const badge = 'controller-TGOV1-1';
+  // The governor is named on the symbol of its machine and has no node of
+  // its own that a drag could leave behind.
+  const governor = page
+    .locator(`.react-flow__node[data-id="${machine}"]`)
+    .getByTestId('unit-chip-TGOV1-1');
+  await expect(governor).toBeVisible();
+  expect(Object.keys(automatic.nodes).filter((id) => id.startsWith('controller-'))).toEqual([]);
+  // Where the chip is on the symbol, as fractions of the symbol's box: the
+  // view is fitted again before a drag, so pixels on screen do not compare.
+  const onSymbol = async (): Promise<[number, number]> => {
+    const [symbol, chip] = await Promise.all([
+      page.locator(`.react-flow__node[data-id="${machine}"]`).boundingBox(),
+      governor.boundingBox(),
+    ]);
+    return [(chip!.x - symbol!.x) / symbol!.width, (chip!.y - symbol!.y) / symbol!.height];
+  };
+  const chipBefore = await onSymbol();
   await dragNode(page, machine, 60, -12);
   const afterMachine = await settledPicture(page);
   const delta = (id: string): [number, number] => [
@@ -233,9 +249,10 @@ test('a diagram is saved with the system and comes back as it was placed', async
     (afterMachine.nodes[id]?.[1] ?? 0) - (automatic.nodes[id]?.[1] ?? 0),
   ];
   expect(Math.abs(delta(machine)[0])).toBeGreaterThan(10);
-  // The governor's badge went with its machine, by the same amount.
-  expect(delta(badge)[0]).toBeCloseTo(delta(machine)[0], 2);
-  expect(delta(badge)[1]).toBeCloseTo(delta(machine)[1], 2);
+  // The governor went with its machine: it is where it was on the symbol.
+  const chipAfter = await onSymbol();
+  expect(chipAfter[0]).toBeCloseTo(chipBefore[0], 2);
+  expect(chipAfter[1]).toBeCloseTo(chipBefore[1], 2);
   // Moving a machine moved no bus, so every line kept its route.
   expect(differences(automatic, afterMachine).filter((id) => id.startsWith('line-'))).toEqual([]);
 
