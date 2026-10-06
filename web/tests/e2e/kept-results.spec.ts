@@ -23,7 +23,7 @@
  * Kundur's own case file trips a line at 2 s, so a short run has something to
  * show without a fault being added.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 const CASE_FILE = 'kundur_full.xlsx';
 

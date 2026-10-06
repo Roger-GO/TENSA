@@ -14,7 +14,7 @@
  * renders the file from disk under its own content policy.
  */
 import { readFile } from 'node:fs/promises';
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 const CASE_FILE = 'ieee14_full.xlsx';
 

@@ -24,7 +24,7 @@
  * selectors below no longer match. ``load-pf-flow.spec.ts`` shows the current
  * way to open a case, and ``playwright.config.ts`` how to start the substrate.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.fixme('change-case: load IEEE 14 → change to kundur → substrate sees kundur', async ({
   page,

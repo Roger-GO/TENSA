@@ -17,7 +17,7 @@
  * Kundur's own case file schedules a line trip at 2 s, so the run has something
  * to respond to without a fault being added.
  */
-import { test, expect, type Locator } from '@playwright/test';
+import { test, expect, type Locator } from './fixtures';
 
 const CASE_FILE = 'kundur_full.xlsx';
 

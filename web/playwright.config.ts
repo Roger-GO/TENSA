@@ -28,7 +28,13 @@ import { defineConfig, devices } from '@playwright/test';
  *
  * Every page load opens a session that stays for as long as its tab is open and
  * then idles out (three minutes by default), and the default cap is 4. Past that
- * the UI cannot open a case, so the commands above raise it for repeated runs.
+ * the UI cannot open a case. The specs take `test` from `tests/e2e/fixtures.ts`,
+ * which ends the sessions a test's pages opened once the test is over, so the
+ * suite holds a few at a time; the commands above raise the cap for the tests
+ * that hold several at once and for a run that is interrupted.
+ *
+ * If the port is taken, `tensa serve` says so and stops. Use another one: the
+ * tests would otherwise run against whatever is listening there.
  *
  * The first load of a case generates ANDES code for its models, so the timeouts
  * below are generous for a cold cache.

@@ -244,6 +244,24 @@ def test_the_flagship_e2e_spec_is_not_skipped() -> None:
     assert "test.skip" not in spec
 
 
+def test_every_e2e_spec_ends_the_sessions_its_pages_open() -> None:
+    """A page that loads the UI opens a session, and a closed tab does not end it.
+    ``fixtures.ts`` ends them after each test, for the specs that take ``test``
+    from it: one that took Playwright's own would leave its sessions to idle out,
+    and enough of those inside three minutes fill the server (``--max-sessions``),
+    after which the next page has no session and its test cannot open a case."""
+    fixtures = _read_required(_E2E_DIR / "fixtures.ts")
+    assert "/api/sessions/" in fixtures and ".delete(" in fixtures
+    specs = sorted(_E2E_DIR.glob("*.spec.ts"))
+    assert specs, "no Playwright specs found"
+    for path in specs:
+        text = path.read_text(encoding="utf-8")
+        assert "from '@playwright/test'" not in text, path.name
+        assert re.search(r"^import \{ test\b[^}]*\} from '\./fixtures';$", text, re.MULTILINE), (
+            path.name
+        )
+
+
 def test_the_test_workflows_can_be_called_from_the_release_workflow() -> None:
     for name in ("server.yml", "web.yml"):
         assert "workflow_call" in _triggers(_load(_WORKFLOWS / name)), name

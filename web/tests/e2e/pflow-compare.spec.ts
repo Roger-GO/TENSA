@@ -11,7 +11,7 @@
  * this one checks that a run reaches the history and the tab the way a user gets
  * there.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 const CASE_FILE = 'ieee14_full.xlsx';
 

@@ -10,7 +10,7 @@
  * `ieee14_full.xlsx` when the server starts, so the test needs no fixtures. The
  * unit tests under `tests/unit/` cover the same components in isolation.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 const CASE_FILE = 'ieee14_full.xlsx';
 const BUS_COUNT = 14;

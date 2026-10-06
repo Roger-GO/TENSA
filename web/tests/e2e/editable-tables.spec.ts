@@ -10,7 +10,7 @@
  * the test that checks that what the table sends is what the server accepts and
  * what ANDES solves. `playwright.config.ts` says how to start the substrate.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 const CASE_FILE = 'ieee14_full.xlsx';
 const BUS_COUNT = 14;

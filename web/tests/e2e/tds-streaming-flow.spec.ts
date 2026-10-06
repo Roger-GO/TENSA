@@ -22,7 +22,7 @@
  * run status badge shows "Aborted at t=…" and the plot panel retains the
  * partial trace.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.fixme('flagship: load IEEE 14 → fault at t=1 → run TDS → abort mid-run → verify aborted state', async ({
   page,

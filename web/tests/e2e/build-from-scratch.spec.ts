@@ -14,7 +14,7 @@
  * selectors below need updating. `playwright.config.ts` says how to start the
  * substrate.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 async function fillField(page: Page, fieldName: string, value: string | number): Promise<void> {
   const field = page.getByTestId(`field-${fieldName}`);

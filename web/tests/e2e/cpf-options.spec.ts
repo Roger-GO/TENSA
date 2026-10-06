@@ -14,7 +14,7 @@
  * reach the routine the way a user sets them, and that what comes back says what
  * was run.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 const CASE_FILE = 'ieee14_full.xlsx';
 

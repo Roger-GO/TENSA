@@ -133,8 +133,8 @@ jobs:
 
       # A fresh workspace, which the server seeds with the example cases the
       # tests open. Every page load opens a session and a closed tab does not
-      # end it, so raise the cap above the default of 4 to leave room for more
-      # specs than one.
+      # end it. Each test ends the ones its pages opened (tests/e2e/fixtures.ts);
+      # the cap is raised above the default of 4 for a test that holds several.
       - name: Start the substrate
         run: |
           workspace="$RUNNER_TEMP/tensa-e2e-workspace"

@@ -26,7 +26,7 @@
  *   the battery on it -> the form that comes back does not offer that generator
  *   to a second battery -> the TDS tab offers the battery to a controller
  */
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page } from './fixtures';
 
 /** Key under which the UI remembers that the first-run coach was dismissed. */
 const FIRST_RUN_COACH_KEY = 'tensa:first-run-coach-v1';

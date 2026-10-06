@@ -20,7 +20,7 @@
  * worker's replies, kept by the server and read by the page. The unit tests check
  * each of those steps against stand-ins; this one checks that they meet.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 /** Key under which the UI remembers that the first-run coach was dismissed. */
 const FIRST_RUN_COACH_KEY = 'tensa:first-run-coach-v1';

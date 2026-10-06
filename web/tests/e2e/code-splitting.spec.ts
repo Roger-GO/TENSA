@@ -20,7 +20,7 @@
  * it (`E2E_NO_WEBSERVER`, see `playwright.config.ts`). Against the Vite dev
  * server there are no chunks to look at.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 const CASE_FILE = 'ieee14_full.xlsx';
 const BUS_COUNT = 14;

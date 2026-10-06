@@ -11,7 +11,7 @@
  * against a real `tensa serve`, like the flagship spec; `playwright.config.ts` says
  * how to start the substrate.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 const CASE_FILE = 'ieee14_full.xlsx';
 

@@ -11,7 +11,7 @@
  * loads. `playwright.config.ts` says how to start the substrate. Every test uses a
  * file name of its own, so repeated runs against one workspace do not collide.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 /** Key under which the UI remembers that the first-run coach was dismissed. */
 const FIRST_RUN_COACH_KEY = 'tensa:first-run-coach-v1';

@@ -30,7 +30,7 @@
  * current way to open a case, and ``playwright.config.ts`` how to start the
  * substrate.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.fixme('state-leakage: typing in snapshot-name input does not contaminate the bus filter', async ({
   page,

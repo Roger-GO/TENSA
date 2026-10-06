@@ -19,7 +19,7 @@
  */
 import { readFile } from 'node:fs/promises';
 import { inflateRawSync } from 'node:zlib';
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 const CASE_FILE = 'kundur_full.xlsx';
 const TF_SECONDS = 4;
