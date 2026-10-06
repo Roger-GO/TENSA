@@ -159,8 +159,8 @@ function LoadSnapshotDialogInner() {
       <DialogTitle>Load snapshot</DialogTitle>
       <DialogDescription className="mt-2">
         Restore a previously-saved operating point by replaying its disturbances and re-solving the
-        power flow. A snapshot saved with its solver state can skip the re-solve when the ANDES
-        version matches.
+        power flow. The diagram goes back to how it was placed when the snapshot was saved. A
+        snapshot saved with its solver state can skip the re-solve when the ANDES version matches.
       </DialogDescription>
 
       <div className="mt-4 flex flex-col gap-3">

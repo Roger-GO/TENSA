@@ -22,6 +22,8 @@ export const queryKeys = {
   topology: (id: SessionId) => ['topology', id] as const,
   workspaceFiles: ['workspace-files'] as const,
   sidecar: (casePath: WorkspacePath) => ['sidecar', casePath] as const,
+  /** Every layout sidecar read, whatever its case: the prefix of ``sidecar``. */
+  sidecars: ['sidecar'] as const,
   topologySchema: ['topology-schema'] as const,
   version: ['version'] as const,
   /** Alterable-params lookup, scoped per (session, model). */

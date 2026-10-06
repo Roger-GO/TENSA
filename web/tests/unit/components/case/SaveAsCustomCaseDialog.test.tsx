@@ -6,6 +6,7 @@
  * - Name collision (case-insensitive vs existing workspace files) → inline
  *   error + disabled confirm.
  * - Confirm fires the clone save-as POST and flips to the success state.
+ * - The diagram's layout is written beside the saved case.
  * - Cancel closes without firing the mutation.
  * - The dialog closes itself a beat after a save, and that beat never closes
  *   a dialog opened since.
@@ -17,6 +18,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
 import { SaveAsCustomCaseDialog } from '@/components/case/SaveAsCustomCaseDialog';
+import { buildSidecarLayout } from '@/components/sld/sidecar';
+import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { parseSessionId } from '@/api/types';
 import { __requestPaletteDialog } from '@/lib/commands';
@@ -69,10 +72,12 @@ beforeEach(() => {
   fetchSpy.mockReset();
   globalThis.fetch = fetchSpy as unknown as typeof globalThis.fetch;
   useSessionStore.setState({ sessionId: parseSessionId('test-session-id') });
+  useCaseStore.setState({ diagramLayout: null });
 });
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  useCaseStore.setState({ diagramLayout: null });
   cleanup();
 });
 
@@ -161,6 +166,43 @@ describe('<SaveAsCustomCaseDialog /> — confirm flow', () => {
       expect(saveCall).toBeDefined();
     });
     expect(await screen.findByTestId('save-as-custom-success')).toBeInTheDocument();
+  });
+
+  it('writes the diagram as it is drawn beside the saved case', async () => {
+    // The saved case is the open one with edited parameters. Without its own
+    // layout file it would reopen in the automatic layout.
+    const user = userEvent.setup();
+    const drawn = buildSidecarLayout({ '1': { x: 10, y: 20 }, '2': { x: 210, y: 20 } });
+    useCaseStore.setState({ diagramLayout: drawn });
+    fetchSpy.mockImplementation(routeFetch());
+    render(withQueryClient(<SaveAsCustomCaseDialog open onOpenChange={() => {}} />));
+    await user.type(screen.getByTestId('save-as-custom-name-input'), 'kundur_tuned');
+    await user.click(screen.getByTestId('save-as-custom-confirm'));
+
+    await waitFor(() => {
+      const put = fetchSpy.mock.calls.find(
+        ([u, i]) =>
+          String(u).includes('/workspace/layout') &&
+          ((i as RequestInit | undefined)?.method ?? 'GET').toUpperCase() === 'PUT',
+      );
+      expect(put).toBeDefined();
+      // Beside the file the server wrote, named by what it answered.
+      expect(String(put![0])).toContain('case_path=kundur_tuned.xlsx');
+      expect(JSON.parse(String((put![1] as RequestInit).body))).toMatchObject({
+        schema_version: '2',
+        coordinates: drawn.coordinates,
+      });
+    });
+  });
+
+  it('writes no layout when no diagram has been drawn', async () => {
+    const user = userEvent.setup();
+    fetchSpy.mockImplementation(routeFetch());
+    render(withQueryClient(<SaveAsCustomCaseDialog open onOpenChange={() => {}} />));
+    await user.type(screen.getByTestId('save-as-custom-name-input'), 'kundur_tuned');
+    await user.click(screen.getByTestId('save-as-custom-confirm'));
+    expect(await screen.findByTestId('save-as-custom-success')).toBeInTheDocument();
+    expect(fetchSpy.mock.calls.some(([u]) => String(u).includes('/workspace/layout'))).toBe(false);
   });
 
   it('cancel closes without firing the save-as mutation', async () => {

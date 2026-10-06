@@ -1,8 +1,16 @@
 /** Snapshots of a case's operating point: save, restore, list and delete. */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
+import type { QueryClient, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import { andesClient, TIMEOUTS } from '@/api/client';
-import type { SessionId } from '@/api/types';
+import type { SessionId, SidecarLayout } from '@/api/types';
+import {
+  cancelPendingSidecarPut,
+  dragOverridesFromLayout,
+  samePlacement,
+} from '@/components/sld/sidecar';
+import { diagramLayoutForSave } from '@/lib/diagramLayout';
+import { toast } from '@/lib/toast';
+import { useCaseStore } from '@/store/case';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { useEditJournalStore } from '@/store/editJournal';
 import { useSessionStore } from '@/store/session';
@@ -20,6 +28,8 @@ export interface SnapshotMetadata {
   saved_at: string;
   has_pflow: boolean;
   has_tds: boolean;
+  /** Whether the snapshot holds the diagram's layout (a restore returns it). */
+  has_layout?: boolean;
 }
 
 /** Response of ``POST /sessions/{id}/snapshot``. */
@@ -36,6 +46,11 @@ export interface RestoreSnapshotResponse {
   fallback_reason: string | null;
   disturbances_replayed: number;
   metadata: SnapshotMetadata;
+  /**
+   * The diagram's layout the snapshot held, or ``null`` when it held none. For a
+   * case opened from a file the server has already written it beside that file.
+   */
+  layout?: SidecarLayout | null;
 }
 
 /** One entry of the ``GET /sessions/{id}/snapshots`` response. */
@@ -78,7 +93,8 @@ export interface DeleteSnapshotVars {
 }
 
 /**
- * ``POST /sessions/{id}/snapshot`` — save the current operating point.
+ * ``POST /sessions/{id}/snapshot`` — save the current operating point, with the
+ * diagram's layout as it is drawn now, which a restore brings back.
  *
  * On success, invalidates the snapshot listing so a re-open of the
  * load dialog picks up the new entry without a manual refetch.
@@ -91,10 +107,18 @@ export function useSaveSnapshot(): UseMutationResult<
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ sessionId, name, force, includeDill }: SaveSnapshotVars) => {
+      // With no diagram drawn the field is left out, and the server keeps the
+      // layout saved beside the case file.
+      const layout = diagramLayoutForSave();
       return await andesClient.post<SaveSnapshotResponse>(
         `/sessions/${encodeURIComponent(sessionId)}/snapshot`,
         {
-          body: { name, force: force ?? false, include_dill: includeDill ?? false },
+          body: {
+            name,
+            force: force ?? false,
+            include_dill: includeDill ?? false,
+            ...(layout === null ? {} : { layout }),
+          },
           timeoutMs: TIMEOUTS.caseLoad,
         },
       );
@@ -111,11 +135,69 @@ export function useSaveSnapshot(): UseMutationResult<
 }
 
 /**
+ * Draw the diagram from the layout a restored snapshot held.
+ *
+ * For a case opened from a file the server has written the layout beside that
+ * file, so the cached copy is replaced with it and the canvas redraws from
+ * there. The drags of this visit sit on top of any saved layout and would hide
+ * it, so they go, and a write of them still waiting to be sent is dropped: it
+ * would put the layout of before the restore back. A system built from scratch
+ * has no file to keep a layout beside; its positions are applied as drags.
+ *
+ * A diagram arranged since the snapshot was saved is work, and the restore was
+ * asked for the operating point. So when the diagram on screen changes, a toast
+ * says so and offers to keep the arrangement it had; the operating point stays
+ * restored either way.
+ */
+function applyRestoredLayout(queryClient: QueryClient, layout: SidecarLayout): void {
+  const store = useCaseStore.getState();
+  const selection = store.selection;
+  const primaryPath = selection?.primaryPath ?? null;
+  const before = { drawn: store.diagramLayout, overrides: store.dragOverrides };
+  if (primaryPath === null) {
+    store.setDragOverrides(dragOverridesFromLayout(layout));
+  } else {
+    cancelPendingSidecarPut(primaryPath);
+    queryClient.setQueryData(queryKeys.sidecar(primaryPath), layout);
+    store.setDragOverrides({});
+  }
+  // No diagram was drawn, or it is drawn just as the snapshot has it: nothing
+  // on screen changed, so there is nothing to tell or to take back.
+  const drawnBefore = before.drawn;
+  if (drawnBefore === null || samePlacement(drawnBefore, layout)) return;
+
+  const keepPreviousLayout = (): void => {
+    // The file gets the earlier arrangement back whatever is open by now; the
+    // diagram on screen is only touched while it is still this case's.
+    const stillOpen = useCaseStore.getState().selection === selection;
+    if (stillOpen) useCaseStore.getState().setDragOverrides(before.overrides);
+    if (primaryPath === null) return;
+    queryClient.setQueryData(queryKeys.sidecar(primaryPath), drawnBefore);
+    andesClient
+      .put<void>('/workspace/layout', {
+        query: { case_path: primaryPath },
+        body: drawnBefore,
+        timeoutMs: TIMEOUTS.workspace,
+      })
+      .catch((err: unknown) => {
+        toast.error('Could not save the earlier layout back', {
+          description: err instanceof Error ? err.message : undefined,
+        });
+      });
+  };
+  toast.info('The diagram is placed as it was when the snapshot was saved.', {
+    duration: 12_000,
+    action: { label: 'Keep my layout', onClick: keepPreviousLayout },
+  });
+}
+
+/**
  * ``POST /sessions/{id}/snapshot/restore`` — restore a saved snapshot.
  *
  * On success, invalidates session-scoped caches that the restore
  * mutated under the hood (topology, pflow, EIG) so the UI re-fetches
- * the post-restore state without a stale render.
+ * the post-restore state without a stale render, and redraws the diagram
+ * from the snapshot's layout when it has one.
  */
 export function useRestoreSnapshot(): UseMutationResult<
   RestoreSnapshotResponse,
@@ -149,6 +231,7 @@ export function useRestoreSnapshot(): UseMutationResult<
       // Disturbance log is reset by the restore; tell the disturbance
       // store to mark itself dirty so the next TDS run re-syncs.
       useDisturbanceStore.setState({ committed: false, dirty: true });
+      if (data.layout) applyRestoredLayout(queryClient, data.layout);
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
     },
     onError: (err, _vars, ctx) => {

@@ -2,7 +2,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { UseMutationResult } from '@tanstack/react-query';
 import { NetworkError, ProblemDetailsError, TIMEOUTS } from '@/api/client';
-import type { SessionId } from '@/api/types';
+import type { SessionId, SidecarLayout } from '@/api/types';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { useEditJournalStore } from '@/store/editJournal';
 import { usePflowStore } from '@/store/pflow';
@@ -24,6 +24,12 @@ export interface ExportBundleVars {
     sim_params?: Record<string, unknown> | null;
     results_csv?: string | null;
     run_id?: string | null;
+    /**
+     * The diagram's layout as it is drawn, written to the bundle as
+     * ``layout.json``. Without it the substrate bundles the layout saved
+     * beside the case file, if there is one.
+     */
+    layout?: SidecarLayout | null;
   };
 }
 
@@ -164,6 +170,8 @@ export interface BundleImportResponse {
   case_filename: string | null;
   addfile_filenames: readonly string[];
   disturbances_replayed: number;
+  /** True when the bundle held a diagram layout that is now saved beside the case. */
+  layout_restored?: boolean;
 }
 
 export interface ImportBundleVars {
@@ -304,6 +312,10 @@ export function useImportBundle(): UseMutationResult<
       useEditJournalStore.getState().markReplaced();
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.workspaceFiles });
+      // The bundle's layout replaced the one beside the case file. A copy of the
+      // old one may be cached (the case was open here before), and the diagram
+      // would be drawn from it.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sidecars });
       // Reset session-scoped slices that the import made stale: pflow
       // (no run yet on the new System), the active run (the dynamic state it
       // left belongs to the old System; its results stay in the history, as

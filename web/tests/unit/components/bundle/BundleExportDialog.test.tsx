@@ -21,6 +21,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
 import { BundleExportButton, BundleExportDialog } from '@/components/bundle/BundleExportDialog';
+import { buildSidecarLayout } from '@/components/sld/sidecar';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useDisturbanceStore } from '@/store/disturbance';
@@ -76,6 +77,7 @@ beforeEach(() => {
     addPanelKind: null,
     addPanelDirty: false,
     dragOverrides: {},
+    diagramLayout: null,
     pendingDependents: [],
   });
   useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
@@ -211,6 +213,42 @@ describe('<BundleExportDialog /> — confirm flow', () => {
     const init = fetchSpy.mock.calls[0]![1] as RequestInit;
     expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
     expect(JSON.parse(String(init.body))).toHaveProperty('disturbances');
+  });
+
+  it('bundles the diagram as it is drawn, and lists it in the preview', async () => {
+    const user = userEvent.setup();
+    const drawn = buildSidecarLayout({ '1': { x: 10, y: 20 }, '2': { x: 210, y: 20 } });
+    useCaseStore.setState({ diagramLayout: drawn });
+    fetchSpy.mockResolvedValue(makeZipResponse());
+    useBundleStore.getState().openDialog();
+    render(withQueryClient(<BundleExportDialog />));
+
+    const list = await screen.findByTestId('bundle-export-preview-list');
+    expect(Array.from(list.querySelectorAll('li')).map((li) => li.textContent)).toEqual([
+      'case/ieee14.raw',
+      'layout.json',
+      'manifest.json',
+    ]);
+
+    await user.click(screen.getByTestId('bundle-export-confirm'));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(String((fetchSpy.mock.calls[0]![1] as RequestInit).body));
+    expect(body.layout).toMatchObject({ schema_version: '2', coordinates: drawn.coordinates });
+  });
+
+  it('sends no layout, and previews none, when no diagram has been drawn', async () => {
+    const user = userEvent.setup();
+    fetchSpy.mockResolvedValue(makeZipResponse());
+    useBundleStore.getState().openDialog();
+    render(withQueryClient(<BundleExportDialog />));
+
+    const list = await screen.findByTestId('bundle-export-preview-list');
+    expect(list).not.toHaveTextContent('layout.json');
+    await user.click(screen.getByTestId('bundle-export-confirm'));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    // The server then bundles the layout saved beside the case file, if any.
+    const body = JSON.parse(String((fetchSpy.mock.calls[0]![1] as RequestInit).body));
+    expect(body.layout).toBeNull();
   });
 
   it('error response surfaces inline and re-enables the confirm button', async () => {

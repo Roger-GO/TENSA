@@ -19,7 +19,9 @@
  *    use…") — unlike snapshots, save-as has no force-overwrite affordance here.
  *
  * On a successful save the workspace-files query is invalidated by
- * ``useCloneSaveAs`` so the new case appears in ``SavedCasesList`` immediately.
+ * ``useCloneSaveAs`` so the new case appears in ``SavedCasesList`` immediately,
+ * and the diagram's layout is written beside the new case, so it opens as the
+ * edited one is placed now.
  */
 import { useEffect, useId, useState } from 'react';
 import {
@@ -37,8 +39,9 @@ import { subscribePaletteDialog } from '@/lib/commands';
 import { ProblemDetailsError } from '@/api/client';
 import { cn } from '@/lib/cn';
 import { userNameProblem } from '@/lib/fileName';
-import { stemOf } from '@/lib/paths';
+import { baseName, stemOf } from '@/lib/paths';
 import { useSafeTimeout } from '@/lib/useSafeTimeout';
+import { useWriteLayoutSidecar } from '@/lib/useSaveOpenCase';
 
 export interface SaveAsCustomCaseDialogProps {
   /** Controlled open state. When omitted the dialog self-manages via the
@@ -86,6 +89,7 @@ function SaveAsCustomCaseDialogInner({ onClose }: { onClose: () => void }) {
   const [saved, setSaved] = useState(false);
 
   const saveAs = useCloneSaveAs();
+  const writeLayoutBeside = useWriteLayoutSidecar();
   const filesQuery = useListWorkspaceFiles();
   // The auto-close beat after a save must not outlive this body: dismissing
   // the dialog inside the beat (or before the save answered) and opening it
@@ -108,7 +112,13 @@ function SaveAsCustomCaseDialogInner({ onClose }: { onClose: () => void }) {
     saveAs.mutate(
       { sessionId, name },
       {
-        onSuccess: () => {
+        onSuccess: (data) => {
+          // The first file written is the case file itself (the others are its
+          // addfiles), and that is the one a layout is kept beside. The server
+          // has copied the layout saved with the open case; this replaces it
+          // with the diagram as it is drawn now.
+          const primary = data.files?.[0];
+          if (primary !== undefined) writeLayoutBeside(baseName(primary));
           setSaved(true);
           schedule(onClose, 600);
         },

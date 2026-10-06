@@ -108,9 +108,9 @@ function SaveSnapshotDialogInner() {
     <DialogContent data-testid="save-snapshot-dialog">
       <DialogTitle>Save snapshot</DialogTitle>
       <DialogDescription className="mt-2">
-        Capture the current operating point + disturbance log as a named snapshot. Snapshots live
-        under the workspace and survive across sessions; a restore replays the log and re-solves the
-        power flow.
+        Capture the current operating point + disturbance log as a named snapshot, with the diagram
+        as it is placed now. Snapshots live under the workspace and survive across sessions; a
+        restore replays the log, re-solves the power flow and puts the diagram back as it was.
       </DialogDescription>
 
       <div className="mt-4 flex flex-col gap-3">

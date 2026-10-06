@@ -3,8 +3,8 @@
  *
  * Modal that lets the user export a reproducibility ``.zip`` bundle
  * for the current session. Shows a preview of what will be in the
- * bundle (case file, disturbances, sim params, results CSV) before
- * the user confirms.
+ * bundle (case file, disturbances, sim params, results CSV, the
+ * diagram's layout) before the user confirms.
  *
  * Wiring:
  *
@@ -44,7 +44,10 @@ import { useDisturbanceStore } from '@/store/disturbance';
 import { useRunsStore } from '@/store/runs';
 import { useUiStore } from '@/store/ui';
 import { ProblemDetailsError } from '@/api/client';
+import type { SidecarLayout } from '@/api/types';
+import { hasSavedPositions } from '@/components/sld/sidecar';
 import { cn } from '@/lib/cn';
+import { diagramLayoutForSave } from '@/lib/diagramLayout';
 import { baseName } from '@/lib/paths';
 import { useSafeTimeout } from '@/lib/useSafeTimeout';
 
@@ -60,6 +63,7 @@ function computePreviewFiles(args: {
   disturbanceCount: number;
   hasSimParams: boolean;
   hasResultsCsv: boolean;
+  hasLayout: boolean;
 }): readonly BundlePreviewFile[] {
   const out: BundlePreviewFile[] = [];
   if (args.caseFilename !== null) {
@@ -77,6 +81,7 @@ function computePreviewFiles(args: {
   if (args.disturbanceCount > 0) out.push({ name: 'disturbances.json' });
   if (args.hasSimParams) out.push({ name: 'sim_params.json' });
   if (args.hasResultsCsv) out.push({ name: 'results.csv' });
+  if (args.hasLayout) out.push({ name: 'layout.json' });
   out.push({ name: 'manifest.json' });
   return out;
 }
@@ -168,6 +173,9 @@ function BundleExportDialogInner() {
   const activeRun = activeRunId ? (runs[activeRunId] ?? null) : null;
   const hasResultsCsv = activeRun !== null && activeRun.seqCount > 0;
   const hasSimParams = activeRun !== null;
+  // The diagram as it is drawn goes in the bundle. A boolean, so the dialog does
+  // not re-render each time the canvas rewrites the layout itself.
+  const hasLayout = useCaseStore((s) => hasSavedPositions(s.diagramLayout));
 
   const previewFiles = useMemo(
     () =>
@@ -178,8 +186,17 @@ function BundleExportDialogInner() {
         disturbanceCount: disturbances.length,
         hasSimParams,
         hasResultsCsv,
+        hasLayout,
       }),
-    [caseFilename, caseDirty, addfiles, disturbances.length, hasSimParams, hasResultsCsv],
+    [
+      caseFilename,
+      caseDirty,
+      addfiles,
+      disturbances.length,
+      hasSimParams,
+      hasResultsCsv,
+      hasLayout,
+    ],
   );
 
   const submit = async () => {
@@ -193,6 +210,7 @@ function BundleExportDialogInner() {
       sim_params: Record<string, unknown> | null;
       results_csv: string | null;
       run_id: string | null;
+      layout: SidecarLayout | null;
     } = {
       disturbances: disturbances.map((d) => d.spec),
       sim_params: hasSimParams
@@ -206,6 +224,7 @@ function BundleExportDialogInner() {
         : null,
       results_csv: null,
       run_id: activeRun?.runId ?? null,
+      layout: diagramLayoutForSave(),
     };
 
     if (hasResultsCsv && activeRun !== null) {
@@ -247,8 +266,9 @@ function BundleExportDialogInner() {
     <DialogContent data-testid="bundle-export-dialog">
       <DialogTitle>Export reproducibility bundle</DialogTitle>
       <DialogDescription className="mt-2">
-        Bundle the current case + disturbances + last TDS run into a single <code>.zip</code> a
-        colleague can re-load to reproduce your results on the same ANDES version.
+        Bundle the current case + disturbances + last TDS run + the diagram&apos;s layout into a
+        single <code>.zip</code> a colleague can re-load to reproduce your results on the same ANDES
+        version.
       </DialogDescription>
 
       <div className="mt-4 flex flex-col gap-3">
