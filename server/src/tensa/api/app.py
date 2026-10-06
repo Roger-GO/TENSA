@@ -45,6 +45,7 @@ from tensa.api.routes.cpf import router as cpf_router
 from tensa.api.routes.disturbances import router as disturbances_router
 from tensa.api.routes.eig import router as eig_router
 from tensa.api.routes.elements import router as elements_router
+from tensa.api.routes.health import router as health_router
 from tensa.api.routes.jobs import router as jobs_router
 from tensa.api.routes.messages import router as messages_router
 from tensa.api.routes.metrics import router as metrics_router
@@ -255,6 +256,9 @@ def make_app(
         ),
         lifespan=_lifespan,
     )
+    # ``GET /health`` reports the cap beside the live count, and the manager that
+    # holds the count is built later, in the lifespan.
+    app.state.max_sessions = max_sessions
 
     # ProblemDetails error envelope (RFC 7807). Wrap any HTTPException raised
     # by routes/dependencies into the schema declared in ``schemas/errors.py`` so the
@@ -349,6 +353,7 @@ def make_app(
     app.include_router(comtrade_router, prefix="/api", tags=["tds"])
     app.include_router(workspace_router, prefix="/api", tags=["workspace"])
     app.include_router(version_router, prefix="/api", tags=["version"])
+    app.include_router(health_router, prefix="/api", tags=["health"])
     # Houses both the Unit-3 bundle-export endpoint AND the Unit-7
     # snapshot save / restore / list / delete endpoints. The OpenAPI tag
     # is "snapshot" since that's the broader concept; the bundle export

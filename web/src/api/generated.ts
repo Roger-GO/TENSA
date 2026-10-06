@@ -717,6 +717,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Report that the server is up, with its versions, session load and code-cache state.
+         * @description Reads the session registry and a few files; nothing here waits for a worker.
+         */
+        get: operations["getHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/bundle/export": {
         parameters: {
             query?: never;
@@ -3115,6 +3135,68 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HealthCache
+         * @description State of ANDES's generated code (``~/.andes/pycode``), which a case load needs.
+         */
+        HealthCache: {
+            /**
+             * State
+             * @description ``ready``: generated and checked against the installed ANDES. ``unchecked``: there is code, but nothing has checked it against this ANDES (it was upgraded, or another ANDES regenerated the code). ``missing``: ANDES has generated nothing yet.
+             * @enum {string}
+             */
+            state: "ready" | "unchecked" | "missing";
+            /**
+             * Warm
+             * @description True when ``state`` is ``ready``: the next case load does not generate code.
+             */
+            warm: boolean;
+            /**
+             * Generating
+             * @description True while the server's background process is generating the code. A case loaded meanwhile waits for it.
+             */
+            generating: boolean;
+        };
+        /**
+         * HealthResponse
+         * @description Response shape for ``GET /health``.
+         */
+        HealthResponse: {
+            /**
+             * Status
+             * @description Always ``ok``: a server that cannot answer sends no response.
+             * @constant
+             */
+            status: "ok";
+            /**
+             * Version
+             * @description Installed tensa version.
+             */
+            version: string;
+            /**
+             * Andes Version
+             * @description Installed ANDES version, or ``unknown`` when its package metadata is missing.
+             */
+            andes_version: string;
+            sessions: components["schemas"]["HealthSessions"];
+            cache: components["schemas"]["HealthCache"];
+        };
+        /**
+         * HealthSessions
+         * @description How full the server is.
+         */
+        HealthSessions: {
+            /**
+             * Active
+             * @description Sessions open now, each with its own worker process.
+             */
+            active: number;
+            /**
+             * Max
+             * @description Cap on open sessions (``--max-sessions``). Creating one past it answers 429.
+             */
+            max: number;
         };
         /**
          * JobRecordSchema
@@ -6842,6 +6924,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionInfo"];
+                };
+            };
+        };
+    };
+    getHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthResponse"];
                 };
             };
         };

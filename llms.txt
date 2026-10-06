@@ -130,6 +130,9 @@ Workspace:       GET /workspace/files · GET/PUT /workspace/layout?case_path=<re
                  as in curl --data-binary @ieee14.raw ..., not multipart, which answers 415; 32 MiB; xlsx raw dyr json m;
                  409 if the name exists and overwrite is not true; a <case>.layout.json name is refused, PUT /workspace/layout writes those)
 Version:         GET /version  → {"tensa": "...", "andes": "..."}  (installed package versions, no session needed)
+Health:          GET /health  → {"status": "ok", "version", "andes_version", "sessions": {"active", "max"},
+                 "cache": {"state": ready|unchecked|missing, "warm", "generating"}}  (poll it; no session, never waits for a worker;
+                 "cache" is ANDES's generated code: until it is ready, the first case load may take 30 s or more)
 
 ## WebSockets (live streaming)
 
