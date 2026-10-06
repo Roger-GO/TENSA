@@ -32,6 +32,7 @@ import { elementToPng } from '@/components/export/exportToPng';
 import { exportRunToComtrade } from '@/components/export/exportToComtrade';
 import { Button } from '@/components/ui/button';
 import { openRunHistory } from '@/lib/runHistory';
+import { openTdsPanel } from '@/lib/openTdsPanel';
 import { runIdToStrokeStyle } from '@/lib/runIdToColor';
 import { runLabel } from '@/lib/runLabel';
 import { useTheme } from '@/lib/useTheme';
@@ -418,10 +419,11 @@ function RowEnd({ actions, children }: { actions: ReactNode; children: ReactNode
 
 /**
  * Empty-state placeholder shown when no series are selected (or no run).
- * ``children`` is a control under the message, for the state that has one way
- * out worth a button (the runs kept in the run history). It takes the height
- * left under the toolbar's row and no less than its own, so in a short panel
- * it pushes what follows down and does not lie over it.
+ * ``children`` is a control under the message, for a state that has one way
+ * out worth a button (the runs kept in the run history, the settings of a
+ * first run). It takes the height left under the toolbar's row and no less
+ * than its own, so in a short panel it pushes what follows down and does not
+ * lie over it.
  */
 function EmptyPlotMessage({ message, children }: { message: string; children?: ReactNode }) {
   return (
@@ -887,7 +889,20 @@ export function TimeSeriesPlot({
             </Button>
           </EmptyPlotMessage>
         ) : (
-          <EmptyPlotMessage message="Run a TDS to see results" />
+          <EmptyPlotMessage message="Run a TDS to see results">
+            <span className="text-xs">
+              How long the run goes, its step and what it records are set in the TDS tab.
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={openTdsPanel}
+              data-testid="time-series-plot-open-tds-settings"
+            >
+              Open TDS settings
+            </Button>
+          </EmptyPlotMessage>
         )}
       </div>
     );

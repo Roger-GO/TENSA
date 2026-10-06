@@ -148,6 +148,43 @@ describe('TimeSeriesPlot', () => {
     expect(constructSpy).not.toHaveBeenCalled();
   });
 
+  it('says where a first run is set up, and its button opens the TDS tab', async () => {
+    const user = userEvent.setup();
+    useLayoutStore.setState({
+      activeBottomDrawerTab: 'buses',
+      activeAnalysisSubTab: 'plot',
+      bottomDrawerCollapsed: true,
+    });
+    try {
+      const { getByTestId } = render(<TimeSeriesPlot />);
+      expect(getByTestId('time-series-plot-empty')).toHaveTextContent(
+        'How long the run goes, its step and what it records are set in the TDS tab.',
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Open TDS settings' }));
+
+      const layout = useLayoutStore.getState();
+      expect(layout.activeBottomDrawerTab).toBe('analysis');
+      expect(layout.activeAnalysisSubTab).toBe('tds');
+      expect(layout.bottomDrawerCollapsed).toBe(false);
+    } finally {
+      useLayoutStore.setState({
+        activeBottomDrawerTab: 'buses',
+        activeAnalysisSubTab: 'plot',
+        bottomDrawerCollapsed: false,
+      });
+    }
+  });
+
+  it('keeps the settings button for the plot with no run at all: kept runs get the history', () => {
+    seedRun('r1', ['Bus_1_v']);
+    useRunsStore.getState().markRunDone('r1', 1);
+    useRunsStore.getState().clearActiveRun();
+    render(<TimeSeriesPlot />);
+    expect(screen.queryByTestId('time-series-plot-open-tds-settings')).toBeNull();
+    expect(screen.getByTestId('time-series-plot-open-history')).toBeInTheDocument();
+  });
+
   it('does not point at the history while there is nothing in it', () => {
     const { getByTestId, queryByTestId } = render(<TimeSeriesPlot />);
     expect(getByTestId('time-series-plot-empty')).not.toHaveTextContent(/history/i);

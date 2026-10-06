@@ -84,6 +84,21 @@ const SUB_TAB_LABELS: Record<AnalysisSubTab, string> = {
   tds: 'TDS',
 };
 
+/**
+ * What each sub-tab holds, on hover. The labels are the routines' short names,
+ * and "TDS" does not say that it is where a run's end time and step are set
+ * while its results are under Plot.
+ */
+const SUB_TAB_TITLES: Record<AnalysisSubTab, string> = {
+  plot: 'Time-domain results: the plot of the runs, the variables on it and their response metrics',
+  pf: 'Power flow: its options and the summary of the last one',
+  compare: 'Two kept power flows side by side, and what changed between them',
+  eig: 'Eigenvalue analysis: run it and read the modes',
+  cpf: 'Continuation power flow: its options and the curves',
+  se: 'State estimation: run it and read the residuals',
+  tds: 'Time-domain simulation settings: the end time of the run, its step and integrator, what it records, frequency control',
+};
+
 export interface AnalysisTabProps {
   activeSubTab: AnalysisSubTab;
   onSubTabChange: (next: AnalysisSubTab) => void;
@@ -113,6 +128,7 @@ export function AnalysisTab({ activeSubTab, onSubTabChange, className }: Analysi
             key={sub}
             value={sub}
             data-testid={`analysis-sub-tab-${sub}`}
+            title={SUB_TAB_TITLES[sub]}
             className={cn(
               // Sub-tabs are pill-shaped (rounded-t) without right
               // borders — visually softer than the outer tab strip so

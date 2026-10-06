@@ -8,8 +8,10 @@ import {
   useDisturbanceStore,
 } from '@/store/disturbance';
 import type { DisturbanceLocal } from '@/store/disturbance';
+import { useUiStore } from '@/store/ui';
 import type { CaseEvent, DisturbanceSpec } from '@/api/types';
 import { cn } from '@/lib/cn';
+import { openTdsPanel } from '@/lib/openTdsPanel';
 import { LazyMount } from '@/components/ui/Lazy';
 import { lazyNamed } from '@/lib/lazyNamed';
 
@@ -34,6 +36,10 @@ const AddEventDialog = lazyNamed(() => import('./AddEventDialog'), 'AddEventDial
  *
  * With neither, it says what that means: the run starts from the power flow
  * and nothing in the list or the case disturbs it.
+ *
+ * Under the list it says when the run ends, with a button that opens the TDS
+ * tab where that is set. The times of a fault are typed here, and the end time
+ * of the run they belong to was three tabs away with nothing pointing at it.
  */
 
 /** A time in seconds without trailing zeros: 1, 1.1, 2.55. */
@@ -116,6 +122,7 @@ export function ScheduledDisturbances({ className }: ScheduledDisturbancesProps)
   const updateDisturbance = useDisturbanceStore((s) => s.updateDisturbance);
   const removeDisturbance = useDisturbanceStore((s) => s.removeDisturbance);
   const topology = useCaseStore((s) => s.topology);
+  const tf = useUiStore((s) => s.tdsConfig.tf);
   const [dialog, setDialog] = useState<DialogState>({ mode: 'closed' });
 
   const busNames = useMemo(
@@ -232,6 +239,25 @@ export function ScheduledDisturbances({ className }: ScheduledDisturbancesProps)
           <p className="text-muted-foreground text-xs">Applied the next time you run TDS.</p>
         </>
       )}
+      <p data-testid="scheduled-disturbances-run-end" className="text-muted-foreground text-xs">
+        {Number.isFinite(tf) && tf > 0
+          ? `A TDS run ends at ${seconds(tf)}.`
+          : 'A TDS run has no valid end time.'}{' '}
+        <button
+          type="button"
+          onClick={openTdsPanel}
+          title="Open the TDS tab of Analysis, which has the end time of the run, its step and what it records"
+          data-testid="scheduled-disturbances-run-settings"
+          className={cn(
+            'text-foreground underline underline-offset-2',
+            'hover:text-primary focus-visible:outline-none',
+            'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+            'rounded-[var(--radius-sm)]',
+          )}
+        >
+          Change the end time
+        </button>
+      </p>
       <Button
         type="button"
         variant="outline"

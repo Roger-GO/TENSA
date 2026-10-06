@@ -4,7 +4,7 @@
  * disturbances it lists, read-only, the events the case defines.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -17,6 +17,8 @@ import {
   useDisturbanceStore,
 } from '@/store/disturbance';
 import { useCaseStore } from '@/store/case';
+import { useLayoutStore } from '@/store/layout';
+import { useUiStore } from '@/store/ui';
 import type { CaseEvent, TopologySummary } from '@/api/types';
 
 let MOCK_TOPOLOGY: TopologySummary | null = null;
@@ -46,6 +48,7 @@ beforeEach(() => {
   counter = 0;
   __setUuidFactoryForTests(() => `id-${++counter}`);
   useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
+  useUiStore.getState().resetTdsConfig();
   // Kundur numbers its buses 1 to 10 and names them differently: idx 7 is bus "3".
   MOCK_TOPOLOGY = {
     state: 'pre-setup',
@@ -111,6 +114,62 @@ describe('<ScheduledDisturbances />', () => {
     expect(within(list).getByText('Applied at 1 s, cleared at 1.1 s')).toBeInTheDocument();
     expect(screen.queryByTestId('scheduled-disturbances-empty')).toBeNull();
     expect(screen.getByText('Applied the next time you run TDS.')).toBeInTheDocument();
+  });
+
+  it('says when the run ends, with or without a disturbance, and follows the TDS tab', () => {
+    render(withQueryClient(<ScheduledDisturbances />));
+    const line = screen.getByTestId('scheduled-disturbances-run-end');
+    expect(line).toHaveTextContent('A TDS run ends at 10 s.');
+
+    act(() => useUiStore.getState().setTdsConfig({ tf: 2 }));
+    expect(line).toHaveTextContent('A TDS run ends at 2 s.');
+
+    act(() => {
+      useDisturbanceStore.getState().addDisturbance({ ...blankFaultSpec(), bus_idx: '7' });
+    });
+    expect(screen.getByText('Applied the next time you run TDS.')).toBeInTheDocument();
+    expect(screen.getByTestId('scheduled-disturbances-run-end')).toHaveTextContent(
+      'A TDS run ends at 2 s.',
+    );
+  });
+
+  it('says so when the end time field is empty or not a time, and prints neither', () => {
+    useUiStore.getState().setTdsConfig({ tf: Number.NaN });
+    render(withQueryClient(<ScheduledDisturbances />));
+    const line = screen.getByTestId('scheduled-disturbances-run-end');
+    expect(line).toHaveTextContent('A TDS run has no valid end time.');
+    expect(line).not.toHaveTextContent('NaN');
+
+    act(() => useUiStore.getState().setTdsConfig({ tf: -1 }));
+    expect(line).toHaveTextContent('A TDS run has no valid end time.');
+    expect(line).not.toHaveTextContent('-1');
+    // The way to the field that needs fixing is still there.
+    expect(screen.getByRole('button', { name: 'Change the end time' })).toBeInTheDocument();
+  });
+
+  it('opens the TDS tab, where the end time is set, from the line that states it', async () => {
+    const user = userEvent.setup();
+    useLayoutStore.setState({
+      activeBottomDrawerTab: 'buses',
+      activeAnalysisSubTab: 'plot',
+      bottomDrawerCollapsed: true,
+    });
+    try {
+      render(withQueryClient(<ScheduledDisturbances />));
+
+      await user.click(screen.getByRole('button', { name: 'Change the end time' }));
+
+      const layout = useLayoutStore.getState();
+      expect(layout.activeBottomDrawerTab).toBe('analysis');
+      expect(layout.activeAnalysisSubTab).toBe('tds');
+      expect(layout.bottomDrawerCollapsed).toBe(false);
+    } finally {
+      useLayoutStore.setState({
+        activeBottomDrawerTab: 'buses',
+        activeAnalysisSubTab: 'plot',
+        bottomDrawerCollapsed: false,
+      });
+    }
   });
 
   it('names a bus once, when its name is its idx', () => {

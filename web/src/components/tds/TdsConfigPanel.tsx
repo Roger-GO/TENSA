@@ -27,7 +27,8 @@ import { useRunsStore, MAX_RETENTION_LIMIT } from '@/store/runs';
  * TdsConfigPanel — compact form for the TDS run parameters.
  *
  * Owned fields (per the v0.2 plan, Unit 8):
- * - ``tf`` (final time, sec): required, > 0. Default 10.
+ * - ``tf`` (end time of the run, sec): required, > 0. Default 10. The
+ *   Disturbances list of the sidebar shows it and opens this tab.
  * - ``h`` (integration step, sec): optional override of the trapezoidal
  *   fixed step. Blank → ANDES default (1/30 s). QNDF ignores it. Default blank.
  * - ``vars`` (variable groups to stream): multi-select of ``bus_v`` /
@@ -280,11 +281,11 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
 
       <NumberField
         id="tds-config-tf"
-        label="tf — final time (s)"
+        label="tf — end time (s)"
         value={tfText}
         onChange={(t) => setNumber('tf', t)}
         error={errors.tf}
-        hint="Simulation horizon in seconds."
+        hint="The simulated time the run stops at, in seconds. A disturbance set for a later time is never reached."
       />
 
       <NumberField
