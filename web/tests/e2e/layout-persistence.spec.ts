@@ -21,6 +21,11 @@
  * A second test leaves the diagram for the results view right after a drag,
  * inside the delay the layout write waits out, and checks that the file still
  * got the drag.
+ *
+ * A third places nodes the ways that are not a drag of many pointer moves: one
+ * move from the press to the drop, and the arrow keys from the right-click
+ * menu. It then saves a snapshot with the button of the left rail and restores
+ * it with a click on its row.
  */
 import { test, expect, type Page } from './fixtures';
 
@@ -332,4 +337,104 @@ test('a drag made a moment before the diagram is left is still written to the fi
   await page.reload();
   await openCase(page, copy);
   await expectPicture(page, dragged);
+});
+
+test('a node is placed by a drag of one pointer move and by the arrow keys, and a snapshot from the left rail brings it back', async ({
+  page,
+}) => {
+  const stem = `layout-keys-e2e-${Date.now()}`;
+  const copy = `${stem}.xlsx`;
+  const layoutWritten = () =>
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === 'PUT' &&
+        new URL(response.url()).pathname === '/api/workspace/layout',
+    );
+  const node = (id: string) => page.locator(`.react-flow__node[data-id="${id}"]`);
+
+  await page.goto('/');
+  await openCase(page, OTHER_CASE);
+  await settledPicture(page);
+  await page.getByTestId('topbar-menu-workspace-trigger').click();
+  await page.getByTestId('topbar-menu-workspace-save-system').click();
+  await page.getByTestId('save-filename').fill(stem);
+  await Promise.all([layoutWritten(), page.getByTestId('save-confirm').click()]);
+  await openCase(page, copy);
+  const start = await settledPicture(page);
+
+  // ---- One pointer move from the press to the drop ------------------------
+  // `dragTo` presses, moves once and lets go, as a script or a pointer driven
+  // by assistive technology does. React Flow's own threshold made that a drag
+  // of no length.
+  const [afterDrag] = await Promise.all([
+    layoutWritten(),
+    node('5').dragTo(page.getByTestId('sld-canvas-surface'), {
+      targetPosition: { x: 140, y: 140 },
+    }),
+  ]);
+  expect(afterDrag.status()).toBe(204);
+  const dragged = await settledPicture(page);
+  expect(differences(start, dragged)).toContain('5');
+  expect(
+    Math.hypot(
+      (dragged.nodes['5']?.[0] ?? 0) - (start.nodes['5']?.[0] ?? 0),
+      (dragged.nodes['5']?.[1] ?? 0) - (start.nodes['5']?.[1] ?? 0),
+    ),
+  ).toBeGreaterThan(20);
+
+  // ---- A press that slips a pixel is a click ------------------------------
+  let writes = 0;
+  const countWrites = (request: { method(): string; url(): string }) => {
+    if (request.method() === 'PUT' && new URL(request.url()).pathname === '/api/workspace/layout')
+      writes += 1;
+  };
+  page.on('request', countWrites);
+  const box = await node('4').boundingBox();
+  if (box === null) throw new Error('bus 4 is not on screen');
+  const pressX = Math.round(box.x + box.width / 2);
+  const pressY = Math.round(box.y + 3);
+  await page.mouse.move(pressX, pressY);
+  await page.mouse.down();
+  await page.mouse.move(pressX + 1, pressY);
+  await page.mouse.up();
+  // Longer than the layout write waits.
+  await page.waitForTimeout(900);
+  page.off('request', countWrites);
+  expect(writes).toBe(0);
+  expect(differences(dragged, await picture(page))).toEqual([]);
+
+  // ---- The arrow keys, from the right-click menu ---------------------------
+  await node('4').click({ button: 'right' });
+  await page.getByTestId('sld-context-move').click();
+  await expect(node('4')).toBeFocused();
+  await Promise.all([layoutWritten(), page.keyboard.press('Shift+ArrowRight')]);
+  const nudged = await settledPicture(page);
+  expect((nudged.nodes['4']?.[0] ?? 0) - (dragged.nodes['4']?.[0] ?? 0)).toBeCloseTo(20, 1);
+  expect(nudged.nodes['4']?.[1]).toBeCloseTo(dragged.nodes['4']?.[1] ?? Number.NaN, 1);
+
+  // ---- A locked diagram says so --------------------------------------------
+  await page.getByRole('button', { name: /^Lock the diagram/ }).click();
+  await expect(page.getByTestId('sld-canvas-locked')).toContainText('The diagram is locked.');
+  await page.getByRole('button', { name: /^Unlock the diagram/ }).click();
+  await expect(page.getByTestId('sld-canvas-hint')).toContainText('press the arrow keys');
+
+  // ---- Save a snapshot from the left rail, move on, and click it -----------
+  await page.getByTestId('saved-cases-save-snapshot').click();
+  await page.getByTestId('save-snapshot-name-input').fill('arranged');
+  await page.getByTestId('save-snapshot-confirm').click();
+  const row = page.getByRole('button', { name: /^Restore snapshot\s*arranged/ });
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('save-snapshot-dialog')).toBeHidden({ timeout: 10_000 });
+
+  await Promise.all([
+    layoutWritten(),
+    node('6').dragTo(page.getByTestId('sld-canvas-surface'), {
+      targetPosition: { x: 220, y: 300 },
+    }),
+  ]);
+  const moved = await settledPicture(page);
+  expect(differences(nudged, moved)).toContain('6');
+
+  await row.click();
+  await expectPicture(page, nudged);
 });
