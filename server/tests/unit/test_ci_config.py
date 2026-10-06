@@ -245,7 +245,7 @@ def test_the_flagship_e2e_spec_is_not_skipped() -> None:
 
 
 def test_every_e2e_spec_ends_the_sessions_its_pages_open() -> None:
-    """A page that loads the UI opens a session, and a closed tab does not end it.
+    """A page that loads the UI opens a session, and one the test runner closes does not end it.
     ``fixtures.ts`` ends them after each test, for the specs that take ``test``
     from it: one that took Playwright's own would leave its sessions to idle out,
     and enough of those inside three minutes fill the server (``--max-sessions``),

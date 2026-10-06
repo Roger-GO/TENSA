@@ -27,6 +27,7 @@ import { KeptResultsNote } from '@/components/history/KeptResultsNote';
 import { makeQueryClient, wireGlobalErrorRecovery } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
 import { useSessionHeartbeat } from '@/api/useSessionHeartbeat';
+import { useSessionRelease } from '@/api/useSessionRelease';
 import { useSessionMessagesSync } from '@/api/useSessionMessages';
 import { useUnsavedWorkGuard } from '@/lib/useUnsavedWorkGuard';
 import { useSyncTopologyMirror } from '@/lib/useSyncTopologyMirror';
@@ -93,6 +94,9 @@ function AppInner({ children }: { children: React.ReactNode }) {
   // Check in with the substrate every 30 s so an idle tab keeps its session
   // (and a lost one is noticed before the user's next click).
   useSessionHeartbeat();
+  // Give the session back when the tab is closed or reloaded, so reloads do not
+  // fill the substrate's session cap with sessions no tab has.
+  useSessionRelease();
   // Ask before the tab is closed or reloaded with edits, a build or run results
   // that nothing has saved.
   useUnsavedWorkGuard();

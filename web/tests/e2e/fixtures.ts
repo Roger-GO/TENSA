@@ -2,13 +2,15 @@
  * The `test` every spec here imports: Playwright's own, with one thing added
  * that runs after each test.
  *
- * A page that loads the UI opens a session on the server, and closing the tab
- * does not end it: the session idles out, three minutes later by default. A run
- * of the whole suite on a fast machine loads more pages inside those three
- * minutes than the server takes sessions (`--max-sessions`), and the page that
- * comes after the cap has no session, so its test cannot open a case. Each test
- * therefore ends the sessions its own pages opened, and the suite holds only a
- * few at a time however many specs it has.
+ * A page that loads the UI opens a session on the server. A tab that a person
+ * closes gives it back as it goes (`useSessionRelease`), but a page the test
+ * runner closes goes without running that, and its session idles out, three
+ * minutes later by default. A run of the whole suite on a fast machine loads
+ * more pages inside those three minutes than the server takes sessions
+ * (`--max-sessions`), and the page that comes after the cap has no session, so
+ * its test cannot open a case. Each test therefore ends the sessions its own
+ * pages opened, and the suite holds only a few at a time however many specs it
+ * has.
  *
  * Only what a page of the test opened is ended. A session a test opens itself
  * through `request` is the test's to end, and anything else on the server is

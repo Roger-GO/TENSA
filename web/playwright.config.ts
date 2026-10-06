@@ -26,9 +26,10 @@ import { defineConfig, devices } from '@playwright/test';
  *        --allow-origin http://127.0.0.1:5173
  *      pnpm test:e2e
  *
- * Every page load opens a session that stays for as long as its tab is open and
- * then idles out (three minutes by default), and the default cap is 4. Past that
- * the UI cannot open a case. The specs take `test` from `tests/e2e/fixtures.ts`,
+ * Every page load opens a session that stays for as long as its tab is open.
+ * A page the test runner closes does not give it back the way a closed tab
+ * does, so it idles out (three minutes by default), and the default cap is 4.
+ * Past that the UI cannot open a case. The specs take `test` from `tests/e2e/fixtures.ts`,
  * which ends the sessions a test's pages opened once the test is over, so the
  * suite holds a few at a time; the commands above raise the cap for the tests
  * that hold several at once and for a run that is interrupted.
