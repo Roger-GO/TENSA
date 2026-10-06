@@ -1,7 +1,7 @@
 import { useCaseStore } from '@/store/case';
 import { cn } from '@/lib/cn';
 import { ElementFormFields } from './ElementFormFields';
-import { AttachedControllersSection } from './AttachedControllersSection';
+import { GeneratingUnitSection } from './GeneratingUnitSection';
 
 /**
  * PropertiesAccordion (v3 Unit 8).
@@ -27,9 +27,11 @@ export function PropertiesAccordion({ className }: PropertiesAccordionProps) {
       {selectedElement ? (
         <>
           <ElementFormFields />
-          {/* Generator drill-down: list the machine's attached exciters /
-              governors so the user can jump straight to them (Unit 20). */}
-          {selectedElement.kind === 'generator' ? <AttachedControllersSection /> : null}
+          {/* The generating unit the selection is a model of: the generator,
+              its machine and their controllers, each one press away. */}
+          {selectedElement.kind === 'generator' || selectedElement.kind === 'controller' ? (
+            <GeneratingUnitSection />
+          ) : null}
         </>
       ) : (
         <p className="text-muted-foreground text-xs">

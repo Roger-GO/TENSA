@@ -4,9 +4,8 @@ import { cn } from '@/lib/cn';
 /**
  * Inline line glyph for a controller sub-kind. Stroke uses `currentColor`,
  * so the icon inherits the surrounding text colour. Shared by the SLD
- * `ControllerNode` badge (Unit 19) and the inspector's
- * `AttachedControllersSection` drill-down rows (Unit 20) so both surfaces
- * stay visually consistent.
+ * `ControllerNode` badge (Unit 19) and the rows of the inspector's
+ * `GeneratingUnitSection` so both surfaces stay visually consistent.
  *
  * Per-class IEC 60617 art is deferred; these are neutral schematic symbols
  * discriminated by sub-kind only.

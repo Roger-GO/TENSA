@@ -11,6 +11,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
+import type { TopologySummary } from '@/api/types';
 import { useCaseStore } from '@/store/case';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { DisturbancesAccordion } from '@/components/inspector/DisturbancesAccordion';
@@ -104,5 +105,57 @@ describe('<DisturbancesAccordion />', () => {
     render(withQueryClient(<DisturbancesAccordion />));
     const list = screen.getByTestId('disturbances-accordion-list');
     expect(list.querySelectorAll('li').length).toBe(1);
+  });
+
+  describe('a generator and the machine that takes its place in a run', () => {
+    // ieee14_full's shape: PV 2 on bus 1 and GENROU_2 that names it, and
+    // another generator with its machine on bus 2.
+    const topology: TopologySummary = {
+      state: 'pre-setup',
+      buses: [
+        { idx: 1, name: 'b1', kind: 'Bus', params: {} },
+        { idx: 2, name: 'b2', kind: 'Bus', params: {} },
+      ],
+      lines: [],
+      transformers: [],
+      generators: [
+        { idx: 2, name: '2', kind: 'PV', params: { bus: 1 } },
+        { idx: 3, name: '3', kind: 'PV', params: { bus: 2 } },
+        { idx: 'GENROU_2', name: 'GENROU_2', kind: 'GENROU', params: { bus: 1, gen: 2 } },
+        { idx: 'GENROU_3', name: 'GENROU_3', kind: 'GENROU', params: { bus: 2, gen: 3 } },
+      ],
+      loads: [],
+    };
+
+    function seed(selectedElement: { kind: 'generator'; idx: string; modelClass: string }) {
+      useCaseStore.setState({ topology, selectedElement });
+      const add = useDisturbanceStore.getState().addDisturbance;
+      add({ kind: 'toggle', model: 'GENROU', dev_idx: 'GENROU_2', t: 1.0 });
+      add({ kind: 'alter', model: 'PV', dev_idx: 2, src: 'p0', t: 2.0, method: '=', amount: 0.5 });
+      // The trip of the other unit's machine.
+      add({ kind: 'toggle', model: 'GENROU', dev_idx: 'GENROU_3', t: 3.0 });
+    }
+
+    const listed = () =>
+      screen.getByTestId('disturbances-accordion-list').querySelectorAll('li').length;
+
+    it('lists the trip of the machine under the static generator, which is drawn as one with it', () => {
+      seed({ kind: 'generator', idx: '2', modelClass: 'PV' });
+      render(withQueryClient(<DisturbancesAccordion />));
+      expect(listed()).toBe(2);
+    });
+
+    it('lists what acts on the static generator under its machine', () => {
+      seed({ kind: 'generator', idx: 'GENROU_2', modelClass: 'GENROU' });
+      render(withQueryClient(<DisturbancesAccordion />));
+      expect(listed()).toBe(2);
+    });
+
+    it('lists only its own without the case to say which machine is whose', () => {
+      seed({ kind: 'generator', idx: '2', modelClass: 'PV' });
+      useCaseStore.setState({ topology: null });
+      render(withQueryClient(<DisturbancesAccordion />));
+      expect(listed()).toBe(1);
+    });
   });
 });

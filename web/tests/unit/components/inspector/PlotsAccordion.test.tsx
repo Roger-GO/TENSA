@@ -252,6 +252,57 @@ describe('<PlotsAccordion />', () => {
     });
   });
 
+  describe('a static generator and the machine that takes its place in a run', () => {
+    // ieee14_full's shape: PV 2 on bus 1, and GENROU_2 that names it.
+    function seedUnit(selectedElement: { kind: 'generator'; idx: string; modelClass?: string }) {
+      seedLoadedCase();
+      useCaseStore.setState({
+        topology: {
+          state: 'committed',
+          buses: [{ idx: 1, name: 'b1', kind: 'Bus', params: {} }],
+          lines: [],
+          transformers: [],
+          generators: [
+            { idx: 2, name: 'pv', kind: 'PV', params: { bus: 1 } },
+            { idx: 'GENROU_2', name: 'm2', kind: 'GENROU', params: { bus: 1, gen: 2 } },
+          ],
+          loads: [],
+        },
+        selectedElement,
+      });
+      // A run records the speed and the angle under the idx of the machine.
+      seedRunWithColumns({
+        Gen_GENROU_2_omega: [1.0, 1.001, 0.999, 1.0005],
+        Gen_GENROU_2_delta: [0, 0.05, 0.1, 0.07],
+      });
+    }
+
+    it('shows the speed and the angle of its machine under the static generator', () => {
+      // What a click on the symbol of the unit selects.
+      seedUnit({ kind: 'generator', idx: '2', modelClass: 'PV' });
+      render(<PlotsAccordion />);
+      expect(sparklines().map((s) => s.label)).toEqual(['ω (pu)', 'δ (°)']);
+    });
+
+    it('shows them under the machine itself as before', () => {
+      seedUnit({ kind: 'generator', idx: 'GENROU_2', modelClass: 'GENROU' });
+      render(<PlotsAccordion />);
+      expect(sparklines()).toHaveLength(2);
+    });
+
+    it('shows nothing of a machine under a static generator that has none', () => {
+      seedUnit({ kind: 'generator', idx: '2', modelClass: 'PV' });
+      useCaseStore.setState((state) => ({
+        topology: {
+          ...state.topology!,
+          generators: [{ idx: 2, name: 'pv', kind: 'PV', params: { bus: 1 } }],
+        },
+      }));
+      render(<PlotsAccordion />);
+      expect(screen.queryByTestId('inline-sparkline')).not.toBeInTheDocument();
+    });
+  });
+
   describe('units', () => {
     const GEN = { Gen_G1_omega: [1.0, 1.001, 0.999, 1.0005], Gen_G1_delta: [0, 0.05, 0.1, 0.07] };
 

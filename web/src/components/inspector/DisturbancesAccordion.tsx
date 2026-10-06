@@ -6,6 +6,7 @@ import { disturbanceSummary, sortedDisturbances, useDisturbanceStore } from '@/s
 import type { DisturbanceLocal } from '@/store/disturbance';
 import type { AlterSpec, DisturbanceSpec, FaultSpec, ToggleSpec } from '@/api/types';
 import type { SelectedElement } from '@/store/case';
+import { unitGenerators } from '@/lib/generatingUnits';
 import { AddEventDialog } from '@/components/disturbance/AddEventDialog';
 import { cn } from '@/lib/cn';
 
@@ -28,6 +29,11 @@ import { cn } from '@/lib/cn';
  * are stringly-typed (e.g., ``"Line"``, ``"PQ"``, ``"PV"``). The match
  * here uses ``includes()`` semantics on a per-kind shortlist so a
  * generator selection matches both ``PV`` and ``Slack`` toggles.
+ *
+ * A generator is one with the machine that takes its place in a run (the
+ * diagram draws them as one symbol), so a generator or a machine also
+ * lists what acts on the other: the trip of ``GENROU_2`` shows under
+ * ``PV 2``.
  */
 
 const KIND_TO_MODELS: Record<SelectedElement['kind'], readonly string[]> = {
@@ -43,14 +49,20 @@ const KIND_TO_MODELS: Record<SelectedElement['kind'], readonly string[]> = {
   controller: [],
 };
 
-function matchesElement(spec: DisturbanceSpec, selected: SelectedElement): boolean {
+function matchesElement(
+  spec: DisturbanceSpec,
+  selected: SelectedElement,
+  /** The generator and the machines of the unit a selected generator is one of. */
+  unit: ReadonlyArray<{ kind: string; idx: string }>,
+): boolean {
   if (spec.kind === 'fault') {
     if (selected.kind !== 'bus') return false;
     return String((spec as FaultSpec).bus_idx) === selected.idx;
   }
-  const dev = (spec as ToggleSpec | AlterSpec).dev_idx;
-  if (String(dev) !== selected.idx) return false;
+  const dev = String((spec as ToggleSpec | AlterSpec).dev_idx);
   const model = (spec as ToggleSpec | AlterSpec).model;
+  if (unit.some((member) => member.kind === model && member.idx === dev)) return true;
+  if (dev !== selected.idx) return false;
   const allowed = KIND_TO_MODELS[selected.kind];
   return allowed.includes(model);
 }
@@ -61,6 +73,7 @@ export interface DisturbancesAccordionProps {
 
 export function DisturbancesAccordion({ className }: DisturbancesAccordionProps) {
   const selectedElement = useCaseStore((s) => s.selectedElement);
+  const topology = useCaseStore((s) => s.topology);
   const disturbances = useDisturbanceStore((s) => s.disturbances);
   const addDisturbance = useDisturbanceStore((s) => s.addDisturbance);
   const updateDisturbance = useDisturbanceStore((s) => s.updateDisturbance);
@@ -74,9 +87,10 @@ export function DisturbancesAccordion({ className }: DisturbancesAccordionProps)
 
   const filtered = useMemo<DisturbanceLocal[]>(() => {
     if (!selectedElement) return [];
-    const matching = disturbances.filter((d) => matchesElement(d.spec, selectedElement));
+    const unit = unitGenerators(topology, selectedElement);
+    const matching = disturbances.filter((d) => matchesElement(d.spec, selectedElement, unit));
     return sortedDisturbances(matching);
-  }, [disturbances, selectedElement]);
+  }, [disturbances, selectedElement, topology]);
 
   // Add-mode prefill: when the dialog opens from a specific element's
   // accordion, land the user on a spec already pointing at that element

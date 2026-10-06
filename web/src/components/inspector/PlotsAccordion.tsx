@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChartLineIcon, EmptyState } from '@/components/ui/EmptyState';
 import { useCaseStore } from '@/store/case';
 import type { SelectedElement } from '@/store/case';
@@ -7,6 +7,7 @@ import { usePflowStore } from '@/store/pflow';
 import { useUnitsStore } from '@/store/units';
 import type { RunRecord } from '@/store/runs';
 import { cn } from '@/lib/cn';
+import { selectedUnitMember, unitGenerators } from '@/lib/generatingUnits';
 import { findTopologyEntry, generatorRowKey } from '@/lib/topology';
 import {
   busBaseKv,
@@ -28,8 +29,9 @@ import { InlineSparkline } from './InlineSparkline';
  *   1. Active TDS run + matching column → ``InlineSparkline`` from the
  *      run's history. Column-name derivation mirrors
  *      ``parseColumnName`` in ``store/plot.ts`` — bus voltage is
- *      ``Bus_<idx>_v``; generator state is ``Gen_<idx>_omega|delta``;
- *      line flow is ``Line_<idx>_p|q``.
+ *      ``Bus_<idx>_v``; generator state is ``Gen_<idx>_omega|delta``,
+ *      under the idx of the machine (a static generator reads the
+ *      machine of its unit); line flow is ``Line_<idx>_p|q``.
  *   2. PF result (no active TDS) → static scalar badge from the
  *      ``pflow.lastRun`` summary.
  *   3. Neither → ``<EmptyState />`` ("Run PF or TDS to populate plots.")
@@ -340,6 +342,14 @@ export interface PlotsAccordionProps {
 export function PlotsAccordion({ className }: PlotsAccordionProps) {
   const selectedElement = useCaseStore((s) => s.selectedElement);
   const topology = useCaseStore((s) => s.topology);
+  // A run records a generator's speed and angle under the idx of its
+  // machine. A static generator has none of its own: it shows those of the
+  // machine that takes its place, which the diagram draws as one with it.
+  const runIdx = useMemo(() => {
+    const generators = unitGenerators(topology, selectedElement);
+    if (selectedUnitMember(generators, selectedElement)?.role !== 'generator') return null;
+    return generators.find((member) => member.role === 'machine')?.idx ?? null;
+  }, [topology, selectedElement]);
   if (!selectedElement) {
     return (
       <div data-testid="plots-accordion" className={cn('flex flex-col gap-2', className)}>
@@ -353,7 +363,7 @@ export function PlotsAccordion({ className }: PlotsAccordionProps) {
     <div data-testid="plots-accordion" className={cn('flex flex-col gap-2', className)}>
       <KindContent
         kind={selectedElement.kind}
-        idx={selectedElement.idx}
+        idx={runIdx ?? selectedElement.idx}
         pflowKey={entry ? generatorRowKey(entry) : selectedElement.idx}
         bases={unitBasesOf(topology)}
       />

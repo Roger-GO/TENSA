@@ -16,7 +16,7 @@
  *     classification.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
@@ -140,9 +140,10 @@ describe('controller inspection — Properties body', () => {
       },
     });
     render(withQueryClient(<PropertiesAccordion />));
-    expect(screen.getByTestId('inspector-properties')).toBeInTheDocument();
-    // The matched entry's real class is shown + its model params render.
-    expect(screen.getByText('EXST1')).toBeInTheDocument();
+    // The matched entry's real class is shown + its model params render. (The
+    // class is also on the row the unit's list has for the exciter.)
+    const properties = within(screen.getByTestId('inspector-properties'));
+    expect(properties.getByText('EXST1')).toBeInTheDocument();
     expect(screen.getByText('Ka')).toBeInTheDocument();
     expect(screen.getByText('Ta')).toBeInTheDocument();
     expect(screen.getByText('Vrmax')).toBeInTheDocument();
@@ -159,7 +160,8 @@ describe('controller inspection — Properties body', () => {
       },
     });
     render(withQueryClient(<PropertiesAccordion />));
-    expect(screen.getByText('IEEEG1')).toBeInTheDocument();
+    const properties = within(screen.getByTestId('inspector-properties'));
+    expect(properties.getByText('IEEEG1')).toBeInTheDocument();
     expect(screen.getByText('T1')).toBeInTheDocument();
     expect(screen.getByText('PMAX')).toBeInTheDocument();
   });
