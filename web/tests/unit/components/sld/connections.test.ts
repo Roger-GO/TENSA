@@ -4,7 +4,8 @@
  * they need, the face of a device its connector leaves by, the straight and
  * the right-angled connector and how each keeps out of the other devices,
  * and the two ways a branch is routed (from tap to tap, and through a stored
- * route whose ends are brought onto the bars).
+ * route whose ends are brought onto the bars, with the runs that move along
+ * kept off the bars the branch is not connected to).
  *
  * A bus node at `(x, y)` is drawn as a bar from `x` to `x + 92` whose centre
  * line is at `y + 3`; its taps run from the middle of one rounded tip to the
@@ -15,6 +16,7 @@ import {
   BAR_LENGTH,
   BAR_THICKNESS,
   MIN_BAR_LENGTH,
+  SLIDE_CLEARANCE,
   TAP_HOLD,
   TAP_INSET,
   TAP_SPACING,
@@ -299,6 +301,61 @@ describe('spreadTaps', () => {
     ]);
     expect(spreadTaps([{ desired: 80, hold: TAP_HOLD.square }, { desired: 89 }], 3, 89)).toEqual([
       80, 94,
+    ]);
+  });
+
+  it('gives the place to another of several that ask for it alike, where that leaves none up against something', () => {
+    // Four at 46, and the third cannot stand to the right of it. With the
+    // second on the place the third would stand at 60; with the third on
+    // it, they stand one spacing further left and nothing is in the way.
+    const third = { desired: 46, blocked: (x: number) => x > 50 };
+    const four = [{ desired: 46 }, { desired: 46 }, third, { desired: 46 }];
+    expect(spreadTaps(four, 3, 89)).toEqual([18, 32, 46, 60]);
+    // The one in the middle keeps the place when that is as good as any other.
+    const nowhere = { desired: 46, blocked: () => true };
+    expect(spreadTaps([{ desired: 46 }, { desired: 46 }, nowhere, { desired: 46 }], 3, 89)).toEqual(
+      [32, 46, 60, 74],
+    );
+    expect(spreadTaps([{ desired: 46 }, { desired: 46, blocked: () => false }], 3, 89)).toEqual([
+      46, 60,
+    ]);
+  });
+
+  it('takes the way to part them that leaves the fewest up against something', () => {
+    // The first cannot stand left of 40 and the last cannot stand right of
+    // 50. Two of the four ways leave both in the way and two leave one; of
+    // those, the first tried is the one where the first of them has the place.
+    const four = [
+      { desired: 46, blocked: (x: number) => x < 40 },
+      { desired: 46 },
+      { desired: 46 },
+      { desired: 46, blocked: (x: number) => x > 50 },
+    ];
+    expect(spreadTaps(four, 3, 89)).toEqual([46, 60, 74, 88]);
+  });
+
+  it('parts them another way only within the span, and only where they hold the place alike', () => {
+    // The second cannot stand right of 10, but the first cannot be moved
+    // left of the tip to make room for it there.
+    const second = { desired: 5, blocked: (x: number) => x > 10 };
+    expect(spreadTaps([{ desired: 5 }, second], 3, 89)).toEqual([5, 19]);
+    // A route that runs straight on has the place before the two that
+    // turn, whatever is in the way of those.
+    const { route, straight } = TAP_HOLD;
+    expect(
+      spreadTaps(
+        [
+          { desired: 46, hold: route },
+          { desired: 46, hold: straight },
+          { desired: 46, hold: route, blocked: (x: number) => x > 50 },
+        ],
+        3,
+        89,
+      ),
+    ).toEqual([32, 46, 60]);
+    // One that asks for a place of its own is not moved for being in the way there.
+    expect(spreadTaps([{ desired: 30, blocked: () => true }, { desired: 60 }], 3, 89)).toEqual([
+      30, 60,
     ]);
   });
 
@@ -1411,6 +1468,227 @@ describe('layoutConnections: branches with a stored route', () => {
       [18, 80],
       [-104, 80],
       [-104, 203],
+    ]);
+  });
+
+  it('parts the ends that share a port to the side that keeps their runs off a bar beside them', () => {
+    // Two lines come down a corridor 11 left of the bars of buses 2 and 3
+    // and land on the north port of bus 4, at -11. Parted to the right, the
+    // run of line B (up to its turn under bus 2) would stand at 3, in the
+    // tip of the bar of bus 3. They are parted to the left.
+    const nodes = [bus('1', 0, 0), bus('2', 0, 120), bus('3', 0, 240), bus('4', -57, 360)];
+    const fourth = { x: -57, y: 360 };
+    const lineA = routedLine(
+      'line-A',
+      '1',
+      '4',
+      [
+        [46, 40],
+        [46, 50],
+        [-11, 50],
+        [-11, 360],
+      ],
+      first,
+      fourth,
+    );
+    const lineB = routedLine(
+      'line-B',
+      '2',
+      '4',
+      [
+        [46, 160],
+        [46, 170],
+        [-11, 170],
+        [-11, 360],
+      ],
+      second,
+      fourth,
+    );
+    const { routes, bars } = layoutConnections(nodes, [lineA, lineB]);
+    expect(routes.get('line-A')!.points).toEqual([
+      [46, 3],
+      [46, 50],
+      [-11 - TAP_SPACING, 50],
+      [-11 - TAP_SPACING, 363],
+    ]);
+    expect(routes.get('line-B')!.points).toEqual([
+      [46, 123],
+      [46, 170],
+      [-11, 170],
+      [-11, 363],
+    ]);
+    // As offsets from the origin of bus 4, at -57.
+    expect(bars.get('4')!.taps.map((tap) => tap.x)).toEqual([46 - TAP_SPACING, 46]);
+    // Neither run is nearer than the clearance to the bar of bus 2 or 3, which start at 0.
+    for (const id of ['line-A', 'line-B']) {
+      expect(0 - routes.get(id)!.points[3]![0]).toBeGreaterThanOrEqual(SLIDE_CLEARANCE);
+    }
+
+    // With bus 3 out of the way they are parted as ever: the one that turns
+    // further up keeps the place, and the other stands on its right.
+    const open = layoutConnections(
+      nodes.filter((n) => n.id !== '3'),
+      [lineA, lineB],
+    );
+    expect(open.routes.get('line-A')!.points[3]).toEqual([-11, 363]);
+    expect(open.routes.get('line-B')!.points[3]).toEqual([-11 + TAP_SPACING, 363]);
+  });
+
+  it('keeps a run where the route has it and steps across to the tap, where the run cannot move clear of a bar', () => {
+    // Two lines leave bus 1 downwards through one port, at 46, 11 left of
+    // the bar of bus 2. Line S runs straight on to bus 4 and keeps the
+    // place. Line B turns right under bus 2 and leaves a spacing to the
+    // right, at 60, where its run down would pass through the tip of that
+    // bar: the run stays at 46, and the line steps across to it under the
+    // label of its own bus.
+    const { routes, bars } = layoutConnections(
+      [bus('1', 0, 0), bus('2', 57, 120), bus('3', 57, 240), bus('4', 0, 360)],
+      [
+        routedLine(
+          'line-S',
+          '1',
+          '4',
+          [
+            [46, 40],
+            [46, 360],
+          ],
+          first,
+          { x: 0, y: 360 },
+        ),
+        routedLine(
+          'line-B',
+          '1',
+          '3',
+          [
+            [46, 40],
+            [46, 170],
+            [103, 170],
+            [103, 240],
+          ],
+          first,
+          { x: 57, y: 240 },
+        ),
+      ],
+    );
+    expect(bars.get('1')!.taps.map((tap) => tap.x)).toEqual([46, 46 + TAP_SPACING]);
+    expect(routes.get('line-S')!.points).toEqual([
+      [46, 3],
+      [46, 363],
+    ]);
+    expect(routes.get('line-B')!.points).toEqual([
+      [60, 3],
+      [60, 47],
+      [46, 47],
+      [46, 170],
+      [103, 170],
+      [103, 243],
+    ]);
+  });
+
+  it('moves a run along with its tap where no bar is near, and leaves one that did not move where it is', () => {
+    // The same two lines with bus 2 further right: the run of line B is
+    // clear at 60, and goes there with its tap.
+    const { routes } = layoutConnections(
+      [bus('1', 0, 0), bus('2', 60 + SLIDE_CLEARANCE, 120), bus('3', 57, 240), bus('4', 0, 360)],
+      [
+        routedLine(
+          'line-S',
+          '1',
+          '4',
+          [
+            [46, 40],
+            [46, 360],
+          ],
+          first,
+          { x: 0, y: 360 },
+        ),
+        routedLine(
+          'line-B',
+          '1',
+          '3',
+          [
+            [46, 40],
+            [46, 170],
+            [103, 170],
+            [103, 240],
+          ],
+          first,
+          { x: 57, y: 240 },
+        ),
+      ],
+    );
+    expect(routes.get('line-B')!.points).toEqual([
+      [60, 3],
+      [60, 170],
+      [103, 170],
+      [103, 243],
+    ]);
+    // A route alone on its port keeps its run where the layout drew it,
+    // also 5 from a bar: that is the layout's to decide.
+    const alone = layoutConnections(
+      [bus('1', 0, 0), bus('2', 51, 120), bus('3', 57, 240)],
+      [
+        routedLine(
+          'line-B',
+          '1',
+          '3',
+          [
+            [46, 40],
+            [46, 170],
+            [103, 170],
+            [103, 240],
+          ],
+          first,
+          { x: 57, y: 240 },
+        ),
+      ],
+    );
+    expect(alone.routes.get('line-B')!.points).toEqual([
+      [46, 3],
+      [46, 170],
+      [103, 170],
+      [103, 243],
+    ]);
+  });
+
+  it('slides a run that has no room for the step, as before', () => {
+    // Line B, as a saved layout holds it, turns 30 under its bar, nearer
+    // than a step across needs, and a bus stands close under the right half
+    // of bus 1: the run moves with its tap.
+    const { routes } = layoutConnections(
+      [bus('1', 0, 0), bus('2', 50, 20), bus('3', 200, 120), bus('4', 0, 360)],
+      [
+        routedLine(
+          'line-S',
+          '1',
+          '4',
+          [
+            [46, 40],
+            [46, 360],
+          ],
+          first,
+          { x: 0, y: 360 },
+        ),
+        routedLine(
+          'line-B',
+          '1',
+          '3',
+          [
+            [46, 3],
+            [46, 33],
+            [246, 33],
+            [246, 123],
+          ],
+          first,
+          { x: 200, y: 120 },
+        ),
+      ],
+    );
+    expect(routes.get('line-B')!.points).toEqual([
+      [60, 3],
+      [60, 33],
+      [246, 33],
+      [246, 123],
     ]);
   });
 

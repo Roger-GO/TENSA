@@ -33,6 +33,14 @@
  *   place stand whole spacings from it for that reason, and where two faces
  *   still crowd each other the taps of the one that gives way more easily
  *   are moved in line or clear.
+ * - The run of a stored route that leaves a bar moves along with its tap,
+ *   and a run that moves is kept `SLIDE_CLEARANCE` from every bar the
+ *   branch is not connected to: the layout that made the route kept it
+ *   clear where it was, not a spacing or two to the side. Of the ways to
+ *   part several ends that ask for one place, the one that leaves the
+ *   fewest runs up against a bar is taken (`TapWish.blocked`). A run that is
+ *   still up against one stays where the route has it, and the branch
+ *   steps across to its tap just outside its own bar.
  * - Where a branch could run straight down from one bar to the other but
  *   for its two taps being out of line, the one that is free to move is
  *   brought in line with the other.
@@ -103,6 +111,13 @@ const BRIDGE_CLEARANCE: Record<Side, number> = { north: 24, south: 44, east: 24,
  * so that it is not taken for part of that bar.
  */
 const RUN_CLEARANCE = 16;
+
+/**
+ * How near a run that moved along with its tap may come to a bar it is not
+ * connected to. Nearer, it would be taken for a connection on the tip of
+ * that bar, or run through it.
+ */
+export const SLIDE_CLEARANCE = 8;
 
 /** Two coordinates closer than this are the same place. */
 const EPS = 0.5;
@@ -201,28 +216,65 @@ export interface TapWish {
   desired: number;
   /** How firmly it holds that place (`TAP_HOLD`). Default: `free`. */
   hold?: number;
+  /**
+   * Whether the connection would be up against something with its tap at
+   * `x`: the run that moves along with the tap would come too near a bar
+   * it is not connected to. Absent: it can stand anywhere.
+   */
+  blocked?: (x: number) => boolean;
+}
+
+/** Several wishes, next to each other in the order of a face, that ask for the very same place. */
+interface SameSpot {
+  /** The first of them, and the one after the last. */
+  start: number;
+  end: number;
+  /** Where, among them, the ones that hold the place most stand on average. */
+  middle: number;
+  /**
+   * Which of them may be the one that has the place, counted from `start`:
+   * the one that has it unless something is in the way first.
+   */
+  keepers: number[];
 }
 
 /**
- * What each of `wishes` asks for, moved for those that ask for the very same
- * place so that, spread about their middle, the ones that hold it most stand
- * whole spacings from it: an even number of them would stand half a spacing
- * either side. They are moved by the part of a spacing that is over.
+ * The neighbours among `wishes` that ask for the very same place, group by
+ * group. Spread about their middle, an even number of them would stand
+ * half a spacing either side of it; they stand whole spacings from it, so
+ * one of them has the place. By default that is the one in the middle of
+ * those that hold it most (the first of the two in the middle). Where all
+ * hold it alike, any other of them may have it as well, as long as they
+ * all stay between `lo` and `hi`: the nearer to the middle the sooner.
  */
-function sameSpotOnWholeSpacings(wishes: readonly TapWish[], spacing: number): number[] {
-  const asked = wishes.map((wish) => wish.desired);
+function sameSpots(
+  wishes: readonly TapWish[],
+  lo: number,
+  hi: number,
+  spacing: number,
+): SameSpot[] {
+  const found: SameSpot[] = [];
   for (let start = 0, end = 1; start < wishes.length; start = end, end += 1) {
-    while (end < wishes.length && Math.abs(asked[end]! - asked[start]!) < 1e-9) end += 1;
-    if (end - start < 2) continue;
+    const place = wishes[start]!.desired;
+    while (end < wishes.length && Math.abs(wishes[end]!.desired - place) < 1e-9) end += 1;
+    const count = end - start;
+    if (count < 2) continue;
     const together = wishes.slice(start, end).map((wish) => wish.hold ?? TAP_HOLD.free);
     const most = Math.max(...together);
-    // Where, among those of this place, the ones that hold it most stand on average.
     const places = together.flatMap((hold, i) => (hold === most ? [i] : []));
     const middle = places.reduce((sum, i) => sum + i, 0) / places.length;
-    const over = (middle - Math.floor(middle)) * spacing;
-    for (let i = start; i < end; i += 1) asked[i] = asked[i]! + over;
+    const keepers = [Math.floor(middle)];
+    if (places.length === count) {
+      const fits = (keeper: number): boolean =>
+        place - keeper * spacing >= lo - 1e-6 &&
+        place + (count - 1 - keeper) * spacing <= hi + 1e-6;
+      const others = together.map((_, i) => i).filter((i) => i !== keepers[0] && fits(i));
+      others.sort((a, b) => Math.abs(a - middle) - Math.abs(b - middle) || a - b);
+      if (fits(keepers[0]!)) keepers.push(...others);
+    }
+    found.push({ start, end, middle, keepers });
   }
-  return asked;
+  return found;
 }
 
 /**
@@ -245,7 +297,10 @@ function sameSpotOnWholeSpacings(wishes: readonly TapWish[], spacing: number): n
  * that place on the other face of the bar, however many, then stands in
  * line with them or a whole spacing away: the automatic layout runs every
  * branch of one side of a bus through the middle of that side, so the taps
- * of the two faces of a bar ask for one place more often than not.
+ * of the two faces of a bar ask for one place more often than not. Which of
+ * them has the place is the one in the middle, unless that leaves a tap
+ * where its connection is up against something (`TapWish.blocked`): then
+ * it is the one that leaves the fewest so.
  */
 export function spreadTaps(
   wishes: readonly TapWish[],
@@ -253,8 +308,46 @@ export function spreadTaps(
   hi: number,
   spacing: number = TAP_SPACING,
 ): number[] {
+  if (wishes.length === 0) return [];
+  const spots = sameSpots(wishes, lo, hi, spacing);
+  const asked = wishes.map((wish) => wish.desired);
+  // The one of a same spot that has the place stands on it, and the others
+  // whole spacings from it: they all ask for the place moved by the part of
+  // a spacing that their middle is off it.
+  const give = (spot: SameSpot, keeper: number): void => {
+    const place = wishes[spot.start]!.desired + (spot.middle - keeper) * spacing;
+    for (let i = spot.start; i < spot.end; i += 1) asked[i] = place;
+  };
+  for (const spot of spots) give(spot, spot.keepers[0]!);
+  let positions = spreadAsked(wishes, asked, lo, hi, spacing);
+  const upAgainst = (at: readonly number[]): number =>
+    wishes.reduce((count, wish, i) => count + (wish.blocked?.(at[i]!) === true ? 1 : 0), 0);
+  let inTheWay = upAgainst(positions);
+  for (const spot of spots) {
+    if (inTheWay === 0) break;
+    let kept = spot.keepers[0]!;
+    for (const keeper of spot.keepers.slice(1)) {
+      give(spot, keeper);
+      const tried = spreadAsked(wishes, asked, lo, hi, spacing);
+      const count = upAgainst(tried);
+      if (count >= inTheWay) continue;
+      [kept, positions, inTheWay] = [keeper, tried, count];
+      if (count === 0) break;
+    }
+    give(spot, kept);
+  }
+  return positions;
+}
+
+/** `spreadTaps` for wishes whose places are `asked`, with their holds. */
+function spreadAsked(
+  wishes: readonly TapWish[],
+  asked: readonly number[],
+  lo: number,
+  hi: number,
+  spacing: number,
+): number[] {
   const n = wishes.length;
-  if (n === 0) return [];
   // With `q[i] = position[i] - i * spacing` the spacing rule reads "q never
   // falls", which is an isotonic regression: pool neighbours that break it.
   // A pool sits at the mean of what its members that hold most ask for
@@ -263,7 +356,6 @@ export function spreadTaps(
   const blocks: { hold: number; weight: number; sum: number; count: number }[] = [];
   let heldLo = Infinity;
   let heldHi = -Infinity;
-  const asked = sameSpotOnWholeSpacings(wishes, spacing);
   wishes.forEach((wish, i) => {
     const z = asked[i]! - i * spacing;
     const hold = wish.hold ?? TAP_HOLD.free;
@@ -459,6 +551,8 @@ interface Terminal {
   x: number;
   /** Whether the first bend can slide along the run after it, to follow a tap that moved. */
   slides: boolean;
+  /** How far the first run goes before the route turns: the y of the first bend of a `face`. */
+  reach: number;
   /**
    * Orders the routes that leave a face at one place (the automatic layout
    * runs every branch of one side of a bus through one port), so that they
@@ -635,6 +729,7 @@ function readTerminal(points: Point[], bar: Bar): Terminal {
       side: next[1] < bar.cy ? 'north' : 'south',
       x: first[0],
       slides,
+      reach: next[1],
       turn: way * (TURN_BASE - Math.abs(next[1] - first[1])),
       towards: slides ? after[0] : first[0],
     };
@@ -645,6 +740,7 @@ function readTerminal(points: Point[], bar: Bar): Terminal {
       side: next[0] >= bar.cx ? 'east' : 'west',
       x: first[0],
       slides: after !== undefined && sameX(next, after),
+      reach: next[0],
       turn: 0,
       towards: first[0],
     };
@@ -654,6 +750,7 @@ function readTerminal(points: Point[], bar: Bar): Terminal {
     side: next[1] < bar.cy ? 'north' : 'south',
     x: next[0],
     slides: false,
+    reach: next[1],
     turn: 0,
     towards: next[0],
   };
@@ -848,9 +945,33 @@ export function layoutConnections(
   const claimedEnds = new Set<string>();
   const stubs: { edge: ConnectionEdge; box: Box; bar: Bar }[] = [];
 
+  // The bars by the height of their line, to find the ones an upright run passes.
+  const barsByHeight = [...bars.values()].sort((a, b) => a.cy - b.cy);
+  /**
+   * Whether an upright run at `x`, from the height `from` to the height
+   * `to`, comes nearer than `SLIDE_CLEARANCE` to a bar that is not one of
+   * `own`.
+   */
+  const barInTheWay = (x: number, from: number, to: number, own: readonly Bar[]): boolean => {
+    const top = Math.min(from, to) - SLIDE_CLEARANCE;
+    const bottom = Math.max(from, to) + SLIDE_CLEARANCE;
+    let first = 0;
+    for (let last = barsByHeight.length; first < last; ) {
+      const middle = (first + last) >> 1;
+      if (barsByHeight[middle]!.cy <= top) first = middle + 1;
+      else last = middle;
+    }
+    for (let i = first; i < barsByHeight.length && barsByHeight[i]!.cy < bottom; i += 1) {
+      const bar = barsByHeight[i]!;
+      if (own.includes(bar)) continue;
+      if (x > bar.start - SLIDE_CLEARANCE && x < bar.end + SLIDE_CLEARANCE) return true;
+    }
+    return false;
+  };
+
   // The end of a stored route stays where the route has it, and the others
   // make room; one drawn at an angle lands under where it heads.
-  const routeEnd = (bar: Bar, terminal: Terminal, straight: boolean): Request => {
+  const routeEnd = (bar: Bar, other: Bar, terminal: Terminal, straight: boolean): Request => {
     if (terminal.kind === 'end') {
       claimedEnds.add(`${bar.id}|${terminal.side}`);
       return ask(bar, terminal.side, terminal.x, theEnd);
@@ -861,7 +982,13 @@ export function layoutConnections(
       }));
     }
     const hold = straight ? TAP_HOLD.straight : TAP_HOLD.route;
-    return ask(bar, terminal.side, terminal.x, () => ({ desired: terminal.x, hold }), {
+    // The run that moves along with the tap: as far as the first bend, or
+    // all the way to the other bar. Where the route has it, it is clear.
+    const moves = straight || terminal.slides;
+    const reach = straight ? other.cy : terminal.reach;
+    const blocked = (x: number): boolean =>
+      moves && Math.abs(x - terminal.x) > EPS && barInTheWay(x, bar.cy, reach, [bar, other]);
+    return ask(bar, terminal.side, terminal.x, () => ({ desired: terminal.x, hold, blocked }), {
       rank: terminal.turn,
       tie: terminal.towards,
     });
@@ -899,8 +1026,14 @@ export function layoutConnections(
       edge,
       points: stored,
       straight,
-      source: { terminal: sourceTerminal, request: routeEnd(source, sourceTerminal, straight) },
-      target: { terminal: targetTerminal, request: routeEnd(target, targetTerminal, straight) },
+      source: {
+        terminal: sourceTerminal,
+        request: routeEnd(source, target, sourceTerminal, straight),
+      },
+      target: {
+        terminal: targetTerminal,
+        request: routeEnd(target, source, targetTerminal, straight),
+      },
     });
   }
 
@@ -1101,10 +1234,34 @@ export function layoutConnections(
 
   // ---- routes ----
   const routes = new Map<string, ConnectorRoute>();
+  // Bring the first point of `points` onto the tap of that end. The run to
+  // the first bend goes along with the tap, unless that takes it up against
+  // a bar the branch is not connected to: then the run stays where the
+  // route has it, and the branch steps across to its tap just outside its
+  // own bar, where there is room for the step.
+  const land = (
+    points: Point[],
+    { terminal, request }: { terminal: Terminal; request: Request },
+    own: readonly Bar[],
+  ): void => {
+    const [from, bend] = [points[0]!, points[1]!];
+    const tap = request.tap;
+    const moved = terminal.kind === 'face' && terminal.slides && Math.abs(tap[0] - from[0]) > EPS;
+    if (moved && barInTheWay(tap[0], tap[1], bend[1], own)) {
+      const out = outOf(tap, terminal.side, BRIDGE_CLEARANCE[terminal.side]);
+      const room = Math.abs(bend[1] - tap[1]) > BRIDGE_CLEARANCE[terminal.side] + EPS;
+      if (room && !barInTheWay(tap[0], tap[1], out[1], own)) {
+        points.splice(0, 1, tap, out, [from[0], out[1]]);
+        return;
+      }
+    }
+    anchor(points, terminal, tap);
+  };
   for (const { edge, points, source, target } of routed) {
-    anchor(points, source.terminal, source.request.tap);
+    const own = [source.request.bar, target.request.bar];
+    land(points, source, own);
     points.reverse();
-    anchor(points, target.terminal, target.request.tap);
+    land(points, target, own);
     points.reverse();
     let drawn = points;
     if (
