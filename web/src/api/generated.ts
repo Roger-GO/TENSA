@@ -3179,7 +3179,9 @@ export interface components {
              * @description Installed ANDES version, or ``unknown`` when its package metadata is missing.
              */
             andes_version: string;
+            /** @description How many sessions are open, against the cap on them. */
             sessions: components["schemas"]["HealthSessions"];
+            /** @description Whether ANDES's generated code is ready, so that a case load does not wait for it. */
             cache: components["schemas"]["HealthCache"];
         };
         /**

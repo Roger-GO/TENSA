@@ -137,3 +137,9 @@ def test_health_is_in_the_api_description(tmp_path: Path) -> None:
     # The response model is the route module's own, not one of ``api/schemas/``.
     assert "HealthResponse" in schema["components"]["schemas"]
     assert health.HealthResponse.__module__ == "tensa.api.routes.health"
+    # Every field says what it is, the two that hold a model of their own included:
+    # the acceptance suite asks that of every model, and these live outside the
+    # package the other models are in.
+    for model in ("HealthResponse", "HealthSessions", "HealthCache"):
+        for name, field in schema["components"]["schemas"][model]["properties"].items():
+            assert str(field.get("description", "")).strip(), f"{model}.{name}"

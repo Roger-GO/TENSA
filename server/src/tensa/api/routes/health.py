@@ -68,8 +68,16 @@ class HealthResponse(BaseModel):
         ...,
         description="Installed ANDES version, or ``unknown`` when its package metadata is missing.",
     )
-    sessions: HealthSessions
-    cache: HealthCache
+    sessions: HealthSessions = Field(
+        ..., description="How many sessions are open, against the cap on them."
+    )
+    cache: HealthCache = Field(
+        ...,
+        description=(
+            "Whether ANDES's generated code is ready, so that a case load does not "
+            "wait for it."
+        ),
+    )
 
 
 def _manager(request: Request) -> SessionManager:
