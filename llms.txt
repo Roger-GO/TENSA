@@ -75,9 +75,13 @@ Disturbances:    POST/GET /sessions/{id}/disturbances
   AlterSpec:  {"kind":"alter","model":"PQ","dev_idx":"PQ_1","src":"p0","t":1.0,"method":"*","amount":1.2}
               (change parameter at t; method one of + - * / =; use alterable_params to discover valid src names)
 Elements:        GET /topology/schema (every buildable model + typed params) · POST /sessions/{id}/elements (add)
-                 PUT/DELETE /sessions/{id}/elements/{model}/{idx} (edit/delete)
+                 PUT /sessions/{id}/elements/{model}/{idx} (edit) · DELETE /sessions/{id}/elements/{model}/{idx}[?cascade=true]
+                 (delete any element, one the case file brought included; the file is not written. 422 with "dependents" and
+                 "disturbances" when other elements name it or disturbances act on it: delete those first, or send cascade=true to
+                 delete them with it. The 200 body is the topology plus "deleted" and "disturbances", what went)
+                 POST /sessions/{id}/undo-last-edit · POST /sessions/{id}/redo-edit (take back / put back the last add, edit or delete;
+                 the topology's "undo" and "redo" name the edit each would act on, null when there is none)
                  POST /sessions/{id}/blank (start empty system) · POST /sessions/{id}/save (write case file; format xlsx, json or raw)
-                 POST /sessions/{id}/undo-last-edit
 Jobs:            GET /sessions/{id}/jobs[?kind=&status=] · GET/DELETE /sessions/{id}/jobs/{job_id}
                  (statuses: pending running done failed cancelled)
 Messages:        GET /sessions/{id}/messages[?after=&level=&limit=] · DELETE /sessions/{id}/messages  (what ANDES logged while a command ran:

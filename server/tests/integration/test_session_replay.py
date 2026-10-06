@@ -135,10 +135,41 @@ async def test_a_blank_build_replays_to_the_same_topology(client: httpx.AsyncCli
 
     topology = await _replays_to_the_same_topology(client, steps)
 
-    # Delete dropped bus 3 and the undo then dropped the line, so the build ended
-    # with buses 1, 2, 4 (the reload keeps a blank system's adds) and 5.
-    assert sorted(str(b["idx"]) for b in topology["buses"]) == ["1", "2", "4", "5"]
-    assert topology["lines"] == []
+    # The undo took the delete of bus 3 back, so the build ended with buses 1, 2,
+    # 3, 4 (the reload keeps a blank system's edits) and 5, the line, and bus 1 at
+    # the voltage the edit gave it.
+    assert sorted(str(b["idx"]) for b in topology["buses"]) == ["1", "2", "3", "4", "5"]
+    assert [str(line["idx"]) for line in topology["lines"]] == ["L12"]
+    (bus_1,) = [b for b in topology["buses"] if str(b["idx"]) == "1"]
+    assert bus_1["params"]["Vn"] == 230.0
+
+
+async def test_an_undo_a_redo_and_a_cascade_replay_to_the_same_topology(
+    client: httpx.AsyncClient,
+) -> None:
+    """The journal sends an undo, a redo and a delete with its cascade the way the
+    user did; each has to do to the fresh session what it did to the first."""
+    steps: list[Step] = [
+        _load("ieee14.raw"),
+        _bus("100", 69.0),
+        ("PUT", "/elements/Bus/100", {"params": {"Vn": 138.0}}),
+        ("PUT", "/elements/Bus/100", {"params": {"vmax": 1.2}}),
+        ("POST", "/undo-last-edit", None),
+        ("DELETE", "/elements/Bus/3?cascade=true", None),
+        ("POST", "/undo-last-edit", None),
+        ("POST", "/redo-edit", None),
+        ("DELETE", "/elements/Line/Line_1", None),
+        ("POST", "/undo-last-edit", None),
+    ]
+
+    topology = await _replays_to_the_same_topology(client, steps)
+
+    idxes = {str(b["idx"]) for b in topology["buses"]}
+    assert "100" in idxes and "3" not in idxes
+    (bus_100,) = [b for b in topology["buses"] if str(b["idx"]) == "100"]
+    assert bus_100["params"]["Vn"] == 138.0 and bus_100["params"]["vmax"] != 1.2
+    assert "Line_1" in {str(line["idx"]) for line in topology["lines"]}
+    assert topology["undo"]["op"] == "delete" and topology["redo"]["idx"] == "Line_1"
 
 
 async def test_edits_to_a_loaded_case_replay_to_the_same_topology(
@@ -296,13 +327,21 @@ async def test_undo_after_a_save_over_the_open_case_drops_only_what_came_after(
 async def test_a_saved_element_is_the_cases_to_delete_like_any_other(
     client: httpx.AsyncClient,
 ) -> None:
+    """The save made the bus part of the file, so the save is not what an undo of
+    its delete goes back past: the bus comes back, and nothing else is undone."""
     sid = await _new_session(client)
     await _send(
         client, sid, [_load("kundur_full.xlsx"), _bus("100", 230.0), _save_over("kundur_full.xlsx")]
     )
+    saved = await _bus_idxes(client, sid)
     resp = await client.delete(f"/api/sessions/{sid}/elements/Bus/100")
-    assert resp.status_code == 422, resp.text
-    assert "loaded case file" in resp.json()["detail"]
+    assert resp.status_code == 200, resp.text
+    assert "100" not in await _bus_idxes(client, sid)
+
+    await _send(client, sid, [("POST", "/undo-last-edit", None)])
+    assert await _bus_idxes(client, sid) == saved
+    nothing = await client.post(f"/api/sessions/{sid}/undo-last-edit")
+    assert nothing.status_code == 422, nothing.text
 
 
 async def test_a_save_under_another_name_keeps_the_edits_to_undo(

@@ -16,6 +16,7 @@ import pytest
 from andes.core.param import ExtParam, NumParam
 
 from tensa.core.clone_writers import load_clone_write_index
+from tensa.core.edit_log import reference_params
 from tensa.core.errors import ElementValidationError
 from tensa.core.esd1 import (
     CHECKED_PARAMS,
@@ -31,7 +32,6 @@ from tensa.core.wrapper import (
     _ALTERABLE_SERVICES,
     _CONTROLLER_MODEL_NAMES,
     _PARAMS_BY_MODEL,
-    _REFERENCE_ATTRS,
 )
 
 pytestmark = pytest.mark.unit
@@ -51,11 +51,14 @@ def defaults(system: andes.System) -> dict[str, Any]:
 # ---- the whitelist is ANDES's own parameter list -----------------------------------
 
 
-def test_esd1_is_registered_wherever_a_buildable_controller_is() -> None:
+def test_esd1_is_registered_wherever_a_buildable_controller_is(system: andes.System) -> None:
     assert "ESD1" in _PARAMS_BY_MODEL
     assert "ESD1" in _CONTROLLER_MODEL_NAMES
-    # It sits on a bus, so deleting that bus must name it as a dependent.
-    assert _REFERENCE_ATTRS["ESD1"] == ("bus",)
+    # It sits on a bus and on a static generator, so deleting either must name
+    # it as a dependent.
+    followed = reference_params(system)
+    assert followed[("ESD1", "bus")] == "ACNode"
+    assert followed[("ESD1", "gen")] == "StaticGen"
 
 
 def test_esd1_params_are_andes_own_in_its_order(system: andes.System) -> None:

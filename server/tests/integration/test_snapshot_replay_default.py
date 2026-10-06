@@ -138,7 +138,7 @@ def test_opt_in_dill_restore_skips_the_reload_and_the_replay(
     assert [d.bus_idx for d in w.list_disturbances() if isinstance(d, FaultSpec)] == [5]
     assert w._se_measurements is None
     assert w._setup_failed is False
-    assert w._replay_buffer == []
+    assert w._edit_log == []
 
 
 def test_failed_dill_load_leaves_the_live_system_for_the_replay_to_replace(

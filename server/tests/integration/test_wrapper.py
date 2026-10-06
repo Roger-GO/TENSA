@@ -684,7 +684,7 @@ def test_add_line_on_an_integer_idx_case_takes_its_voltage_base_from_text_bus_re
     assert float(line.Vn1.v[uid]) == bus_kv
     assert float(line.Vn2.v[uid]) == bus_kv
     # Undo and delete replay what was recorded, so that holds the bus's own idx too.
-    assert w._replay_buffer[-1][1]["bus1"] == 5
+    assert w._edit_log[-1].params["bus1"] == 5
     assert w.run_pflow().converged
 
 
@@ -745,7 +745,7 @@ def test_add_without_a_mandatory_param_is_refused_and_leaves_no_half_built_devic
         w.add_element("GENROU", {"idx": "G_x", "name": "G_x", "bus": 2, "Sn": 100, "Vn": 69})
     assert "GENROU cannot be added without gen" in str(refused.value)
     assert ss.GENROU.n == 0 and list(ss.GENROU.idx.v) == []
-    assert w._replay_buffer == []
+    assert w._edit_log == []
 
     with pytest.raises(ElementValidationError) as refused:
         w.add_element("GENROU", {"idx": "G_x", "name": "G_x", "Sn": 100, "Vn": 69})

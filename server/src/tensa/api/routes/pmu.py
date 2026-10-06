@@ -1,7 +1,7 @@
 """PMU placement endpoints (Unit 14 of the v2.0 plan).
 
 Researchers place PMU instances at user-selected buses pre-setup. The
-substrate stores them via the same ``_replay_buffer`` machinery used by
+substrate stores them via the same ``_edit_log`` machinery used by
 ``add_element`` so PMUs survive a ``reload_case`` cycle (Unit 6.5
 disturbance-replay parity).
 
@@ -324,8 +324,8 @@ async def list_pmus(
         422: {
             "model": ProblemDetails,
             "description": (
-                "PMU originated from the loaded case file (not "
-                "removable via this endpoint — reload to reset)."
+                "A disturbance acts on the PMU (a toggle of it), and would "
+                "be left naming a device that is gone."
             ),
         },
     },
@@ -335,7 +335,7 @@ async def delete_pmu(
     pmu_idx: str,
     request: Request,
 ) -> Response:
-    """Delete a PMU previously added via ``POST /pmu``.
+    """Delete a PMU, whether ``POST /pmu`` placed it or the case file brought it.
 
     Returns 204 on success. 404 when the idx isn't a known PMU. 409
     when the session is post-setup (call /reload first).

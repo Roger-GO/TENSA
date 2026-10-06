@@ -537,6 +537,31 @@ class CaseEvent(BaseModel):
     )
 
 
+class EditStep(BaseModel):
+    """One edit to the system made before a run: an element added, changed or
+    deleted. What ``undo`` and ``redo`` of a topology summary name."""
+
+    op: Literal["add", "edit", "delete"] = Field(
+        ..., description="What the edit did to the element."
+    )
+    model: str = Field(..., description="ANDES model of the element.")
+    idx: int | str | None = Field(
+        default=None, description="The element's idx."
+    )
+    params: list[str] = Field(
+        default_factory=list,
+        description="``edit`` only: the params whose values it changed.",
+    )
+    also: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "``delete`` only: how many more devices went with the element "
+            "because they depended on it."
+        ),
+    )
+
+
 class TopologySummary(BaseModel):
     """Substrate's structural view of the loaded case.
 
@@ -643,13 +668,30 @@ class TopologySummary(BaseModel):
             "zero) is not listed. Empty when there are none."
         ),
     )
+    undo: EditStep | None = Field(
+        default=None,
+        description=(
+            "The edit ``POST /sessions/{id}/undo-last-edit`` would take back: "
+            "the last element added, changed or deleted since the case was "
+            "loaded. ``null`` when there is none. Edits are taken back while "
+            "``state`` is ``pre-setup``."
+        ),
+    )
+    redo: EditStep | None = Field(
+        default=None,
+        description=(
+            "The edit ``POST /sessions/{id}/redo-edit`` would put back: the "
+            "one taken back last. ``null`` when there is none, which is the "
+            "case after any new edit."
+        ),
+    )
     job_id: str | None = Field(
         default=None,
         description=(
             "Job-registry id mirroring the routine that produced this topology "
             "snapshot: case load / reload, element delete / "
-            "undo, or blank-system create. ``null`` when the summary is a plain "
-            "read (``GET /topology``)."
+            "undo / redo, or blank-system create. ``null`` when the summary is "
+            "a plain read (``GET /topology``)."
         ),
     )
 
@@ -1468,12 +1510,51 @@ class SaveCaseResponse(BaseModel):
     )
 
 
+class DeletedDisturbance(BaseModel):
+    """A disturbance that acts on an element a delete removes, or would remove."""
+
+    source: Literal["case", "restored", "committed"] = Field(
+        ...,
+        description=(
+            "``case``: a ``Fault``, ``Toggle`` or ``Alter`` device the case's "
+            "files define. ``restored``: one a bundle import or a snapshot "
+            "restore replayed. ``committed``: one a client committed through "
+            "``POST /sessions/{id}/disturbances``."
+        ),
+    )
+    kind: Literal["fault", "toggle", "alter"] = Field(
+        ..., description="Which ANDES event model it is."
+    )
+    model: str | None = Field(
+        default=None,
+        description="ANDES model of the device it acts on: ``Bus`` for a fault.",
+    )
+    dev_idx: int | str | None = Field(
+        default=None, description="Idx of the device it acts on."
+    )
+    t: float | None = Field(
+        default=None,
+        description=(
+            "Time it starts, in seconds: a fault's ``tf``. ``null`` for a "
+            "device of the case that never fires (switched off, or a time "
+            "below zero); it names the element all the same, so it goes too."
+        ),
+    )
+    name: str | None = Field(
+        default=None,
+        description="The device's name in the case file, for a ``case`` one.",
+    )
+
+
 class DeleteBlockedResponse(BaseModel):
     """Response body for ``DELETE /sessions/{id}/elements/{model}/{idx}``
-    when the deletion is blocked by cascade dependents (HTTP 422).
+    when the element cannot be deleted alone (HTTP 422): other elements
+    depend on it, or disturbances act on it or on one of those.
 
-    The list is capped at 25 entries; ``total`` reports the full count so
-    the UI can render a "Showing 25 of N dependents" footer when truncated.
+    Sending the delete again with ``cascade=true`` deletes them all with it.
+    Each list is capped at 25 entries; ``total`` and ``disturbances_total``
+    report the full counts so the UI can render a "Showing 25 of N" footer
+    when truncated.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1481,11 +1562,11 @@ class DeleteBlockedResponse(BaseModel):
     dependents: list[TopologyEntry] = Field(
         ...,
         description=(
-            "Up to 25 dependent topology entries that reference the "
-            "target element (e.g., Lines and generators attached to a "
-            "Bus the caller tried to delete). The UI surfaces these as "
-            "clickable rows the user must clear before re-issuing the "
-            "delete."
+            "Up to 25 of the elements that cannot stay without the target: "
+            "the ones that name it (the lines and generators on a bus, the "
+            "machine on a static generator), the ones that name those, and "
+            "so on. The nearest come first. Empty when only disturbances "
+            "stand in the way."
         ),
         max_length=25,
     )
@@ -1498,13 +1579,44 @@ class DeleteBlockedResponse(BaseModel):
         ),
         ge=0,
     )
+    disturbances: list[DeletedDisturbance] = Field(
+        default_factory=list,
+        description=(
+            "Up to 25 of the disturbances that act on the target or on one "
+            "of its dependents, and would be removed with them."
+        ),
+        max_length=25,
+    )
+    disturbances_total: int = Field(
+        default=0,
+        description="Full count of those disturbances.",
+        ge=0,
+    )
+    detail: str | None = Field(
+        default=None,
+        description="The refusal in one sentence, with the way out.",
+    )
 
 
-# ``DeleteElementResponse`` is a transparent alias for ``TopologySummary``:
-# a successful delete returns the post-delete topology snapshot. The alias
-# documents the relationship at the OpenAPI surface and gives the generated
-# TypeScript client a dedicated symbol for the success path.
-DeleteElementResponse = TopologySummary
+class DeleteElementResponse(TopologySummary):
+    """Response body for ``DELETE /sessions/{id}/elements/{model}/{idx}``: the
+    topology after the delete, with what the delete removed."""
+
+    deleted: list[TopologyEntry] = Field(
+        default_factory=list,
+        description=(
+            "Every element the delete removed, as it was: the dependents a "
+            "``cascade`` took, then the element asked for, last."
+        ),
+    )
+    disturbances: list[DeletedDisturbance] = Field(
+        default_factory=list,
+        description=(
+            "Every disturbance the delete removed because it acted on one of "
+            "``deleted``. A client that keeps its own list of disturbances "
+            "to commit should drop the matching ones too."
+        ),
+    )
 
 
 class TopologySchema(BaseModel):

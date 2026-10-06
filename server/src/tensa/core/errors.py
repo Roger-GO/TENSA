@@ -313,17 +313,18 @@ class EigDirtyDaeError(AndesAppError):
 
 
 class ElementHasDependentsError(AndesAppError):
-    """Raised when ``delete_element(model, idx)`` would orphan references on
-    other devices (e.g., deleting a Bus that has a Line attached).
+    """Raised when ``delete_element(model, idx)`` would leave other devices,
+    or disturbances, naming an element that is gone (e.g., deleting a Bus
+    that has a Line attached, or a Line a ``Toggle`` trips).
 
-    Surfaced as HTTP 422 ``DeleteBlockedResponse``. Carries the list of
-    dependent topology entries (capped at 25 by the wrapper at construction
-    time) plus the full count so the UI can render a "Showing N of M"
-    truncation footer.
+    Surfaced as HTTP 422 ``DeleteBlockedResponse``. Carries the dependent
+    topology entries and the disturbances that act on any of them (each list
+    capped at 25 by the wrapper at construction time) plus the full counts,
+    so the UI can render a "Showing N of M" truncation footer.
 
-    The ``dependents`` list is a list of plain dicts (already serialized
-    from ``TopologyEntry`` dataclasses) so the value can cross the worker
-    Pipe without re-importing the wrapper module on the parent side.
+    Both lists hold plain dicts (already serialized from the wrapper's
+    dataclasses) so the value can cross the worker Pipe without re-importing
+    the wrapper module on the parent side.
     """
 
     recovery_kind: str | None = "none"
@@ -334,16 +335,29 @@ class ElementHasDependentsError(AndesAppError):
         idx: int | str,
         dependents: list[dict[str, Any]],
         total: int,
+        disturbances: list[dict[str, Any]] | None = None,
+        disturbances_total: int = 0,
     ) -> None:
+        held = [
+            f"{count} {noun}"
+            for count, noun in (
+                (total, "dependent element(s)"),
+                (disturbances_total, "disturbance(s)"),
+            )
+            if count
+        ]
         super().__init__(
-            f"cannot delete {model} idx={idx!r}: {total} dependent "
-            f"element(s) reference it. Delete those first."
+            f"cannot delete {model} idx={idx!r} alone: {' and '.join(held)} "
+            "cannot stay without it. Delete those first, or pass cascade=true "
+            "to delete them with it."
         )
         self.model = model
         self.idx = idx
-        # Dependents capped at 25; ``total`` is the full count.
+        # Each list capped at 25; the totals are the full counts.
         self.dependents = dependents
         self.total = total
+        self.disturbances = disturbances or []
+        self.disturbances_total = disturbances_total
 
 
 class CloneEditError(AndesAppError):

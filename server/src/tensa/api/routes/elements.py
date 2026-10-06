@@ -1,10 +1,14 @@
 """Topology-mutation endpoints (Unit 2).
 
-Three endpoints, all gated to pre-setup state:
+All gated to pre-setup state:
 
 - ``POST /sessions/{id}/elements`` — add a Bus/Line/generator/load/shunt.
 - ``PUT /sessions/{id}/elements/{model}/{idx}`` — edit one or more
   parameters on an existing element.
+- ``DELETE /sessions/{id}/elements/{model}/{idx}`` — delete an element,
+  with what depends on it when ``cascade=true``.
+- ``POST /sessions/{id}/undo-last-edit`` and ``POST /sessions/{id}/redo-edit``
+  — take back the last of those edits, whichever it was, and put it back.
 - ``POST /sessions/{id}/blank`` — create a blank ``andes.System()``.
 
 Pre-setup gate copies ``add_disturbance``'s pattern: ``self._ss.is_setup``
@@ -20,7 +24,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from tensa.api._run_as_job import _run_as_job
@@ -29,6 +33,8 @@ from tensa.api.schemas import (
     AddElementRequest,
     BlankSystemResponse,
     DeleteBlockedResponse,
+    DeletedDisturbance,
+    DeleteElementResponse,
     EditElementRequest,
     ElementCreated,
     ProblemDetails,
@@ -110,10 +116,10 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
     - everything else uses the canonical mapping (``SystemAlreadyLoadedError`` /
       ``no-case-loaded`` → 409, ``ElementNotFoundError`` → 404,
       ``ElementValidationError`` / ``DisturbanceValidationError`` / ``CaseLoadError``
-      / ``ElementHasDependentsError`` → 422). The DELETE route handles
-      ``ElementHasDependentsError`` with its bespoke ``DeleteBlockedResponse`` branch
+      / ``ElementHasDependentsError`` → 422). The DELETE and redo routes handle
+      ``ElementHasDependentsError`` with their bespoke ``DeleteBlockedResponse`` branch
       *before* calling this adapter, so the generic 422 path here only fires for the
-      non-DELETE call sites.
+      other call sites.
     """
     if exc.category in ("disturbance-commit", "SetupFailedError"):
         exc.detail = (
@@ -423,14 +429,14 @@ async def save_case(
     )
 
 
-# ---- undo (Unit 12) -------------------------------------------------------
+# ---- undo / redo (Unit 12) ------------------------------------------------
 
 
 @router.post(
     "/sessions/{session_id}/undo-last-edit",
     openapi_extra={"x-tensa-gui-location": "command-palette"},
     operation_id="undoLastEdit",
-    summary="Drop the last add() and rebuild the System.",
+    summary="Take back the last element added, changed or deleted.",
     response_model=TopologySummary,
     responses={
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
@@ -443,7 +449,10 @@ async def save_case(
         },
         422: {
             "model": ProblemDetails,
-            "description": "No edits to undo on this session.",
+            "description": (
+                "No edits to undo on this session, or the edit added an "
+                "element a committed disturbance acts on."
+            ),
         },
     },
 )
@@ -451,6 +460,12 @@ async def undo_last_edit(
     session_id: str,
     request: Request,
 ) -> TopologySummary:
+    """Takes back the newest edit made since the case was loaded, whether it
+    added an element, changed its params or deleted it (with everything a
+    cascade took). The edits before it stay, and so do the committed
+    disturbances; the ones a delete had removed come back with it. The
+    summary's ``undo`` names the edit that is now the newest, and ``redo``
+    the one just taken back."""
     _enforce_body_size(request)
     mgr = _manager(request)
     try:
@@ -468,15 +483,88 @@ async def undo_last_edit(
     return TopologySummary(**payload, job_id=job_id)
 
 
+@router.post(
+    "/sessions/{session_id}/redo-edit",
+    openapi_extra={"x-tensa-gui-location": "command-palette"},
+    operation_id="redoEdit",
+    summary="Put back the edit that was taken back last.",
+    response_model=TopologySummary,
+    responses={
+        404: {"model": ProblemDetails, "description": "Session not found or already closed."},
+        409: {
+            "model": ProblemDetails,
+            "description": (
+                "Session has been committed (PF / TDS already ran); reset "
+                "the run before redoing."
+            ),
+        },
+        422: {
+            "model": DeleteBlockedResponse,
+            "description": (
+                "No edits to redo on this session (body matches "
+                "``ProblemDetails``), or the edit is a delete that something "
+                "has come to depend on since (body matches "
+                "``DeleteBlockedResponse``)."
+            ),
+        },
+    },
+)
+async def redo_edit(
+    session_id: str,
+    request: Request,
+) -> TopologySummary | JSONResponse:
+    """Applies again the edit ``POST /sessions/{id}/undo-last-edit`` took back
+    last. Any new edit empties what there is to redo."""
+    _enforce_body_size(request)
+    mgr = _manager(request)
+    try:
+        async with _run_as_job(
+            mgr, session_id, "element-redo", request_summary={}
+        ) as job_id:
+            payload: Any = await mgr.invoke(session_id, "redo_edit", {})
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except WorkerError as exc:
+        if exc.category == "ElementHasDependentsError":
+            return _delete_blocked(exc)
+        raise _to_http_error(exc) from exc
+    return TopologySummary(**payload, job_id=job_id)
+
+
 # ---- delete (Unit 1, v0.1.y) -----------------------------------------------
+
+
+def _delete_blocked(exc: WorkerError) -> JSONResponse:
+    """The typed 422 body of a delete that dependents stand in the way of.
+
+    The lists and their counts cross the worker Pipe in ``WorkerError.extra``
+    (set by the worker's ``ElementHasDependentsError`` handler).
+    """
+    extra = exc.extra
+    dependents_raw = extra.get("dependents", [])
+    disturbances_raw = extra.get("disturbances", [])
+    body = DeleteBlockedResponse(
+        dependents=[TopologyEntry(**d) for d in dependents_raw],
+        total=int(extra.get("total", len(dependents_raw))),
+        disturbances=[DeletedDisturbance(**d) for d in disturbances_raw],
+        disturbances_total=int(extra.get("disturbances_total", len(disturbances_raw))),
+        detail=exc.detail,
+    )
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content=body.model_dump(),
+    )
 
 
 @router.delete(
     "/sessions/{session_id}/elements/{model}/{idx}",
     openapi_extra={"x-tensa-gui-location": "inspector"},
     operation_id="deleteElement",
-    summary="Delete a previously-added pre-setup element.",
-    response_model=TopologySummary,
+    summary="Delete an element of a pre-setup session.",
+    response_model=DeleteElementResponse,
     responses={
         404: {
             "model": ProblemDetails,
@@ -495,13 +583,12 @@ async def undo_last_edit(
         422: {
             "model": DeleteBlockedResponse,
             "description": (
-                "Deletion is blocked. Three sub-cases share this status: "
-                "(a) cascade dependents exist (body matches "
-                "``DeleteBlockedResponse``); (b) the element came from "
-                "the loaded case file, not from ``add_element`` (body "
-                "matches ``ProblemDetails`` with the 'reload to revert' "
-                "message); (c) unknown model name (body matches "
-                "``ProblemDetails``)."
+                "Deletion is refused. Two sub-cases share this status: "
+                "(a) other elements depend on the element, or disturbances "
+                "act on it or on one of those, and ``cascade`` is not set "
+                "(body matches ``DeleteBlockedResponse``); (b) unknown "
+                "model name, or the device is a committed disturbance "
+                "(body matches ``ProblemDetails``)."
             ),
         },
     },
@@ -511,10 +598,24 @@ async def delete_element(
     model: str,
     idx: str,
     request: Request,
-) -> TopologySummary | JSONResponse:
+    cascade: bool = Query(
+        False,
+        description=(
+            "Delete with the element everything that cannot stay without "
+            "it: the elements that depend on it and the disturbances that "
+            "act on any of them. Without it, a delete that would leave any "
+            "of those behind is refused with the list."
+        ),
+    ),
+) -> DeleteElementResponse | JSONResponse:
+    """Deletes any element of the loaded system: one the case file brought as
+    well as one added since. The case file is not written. The delete is one
+    edit, which ``POST /sessions/{id}/undo-last-edit`` takes back whole, with
+    the dependents and the disturbances that went with it. The disturbances
+    committed for the next run that act on nothing deleted are kept."""
     _enforce_body_size(request)
     mgr = _manager(request)
-    summary = {"model": model, "idx": idx}
+    summary = {"model": model, "idx": idx, "cascade": cascade}
     try:
         async with _run_as_job(
             mgr, session_id, "element-delete", request_summary=summary
@@ -522,7 +623,7 @@ async def delete_element(
             payload: Any = await mgr.invoke(
                 session_id,
                 "delete_element",
-                {"model": model, "idx": idx},
+                {"model": model, "idx": idx, "cascade": cascade},
             )
     except SessionExpiredError as exc:
         raise HTTPException(
@@ -530,22 +631,11 @@ async def delete_element(
             detail=str(exc),
         ) from exc
     except WorkerError as exc:
-        # Cascade-dependents case: surface the typed ``DeleteBlockedResponse``
+        # Dependents case: surface the typed ``DeleteBlockedResponse``
         # body instead of the generic ``ProblemDetails`` envelope. The
-        # extra payload (dependents + total) crosses the worker Pipe via
-        # ``WorkerError.extra`` (set by the worker's
-        # ``ElementHasDependentsError`` handler). The wrapping
-        # ``_run_as_job`` already transitioned the job to ``failed`` (the
-        # delete did not happen — blocked by dependents).
+        # wrapping ``_run_as_job`` already transitioned the job to
+        # ``failed`` (the delete did not happen).
         if exc.category == "ElementHasDependentsError":
-            extra = exc.extra
-            dependents_raw = extra.get("dependents", [])
-            total = int(extra.get("total", len(dependents_raw)))
-            dependents = [TopologyEntry(**d) for d in dependents_raw]
-            body = DeleteBlockedResponse(dependents=dependents, total=total)
-            return JSONResponse(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                content=body.model_dump(),
-            )
+            return _delete_blocked(exc)
         raise _to_http_error(exc) from exc
-    return TopologySummary(**payload, job_id=job_id)
+    return DeleteElementResponse(**payload, job_id=job_id)

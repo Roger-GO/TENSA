@@ -443,10 +443,20 @@ def _handle_undo_last_edit(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.undo_last_edit())
 
 
+def _handle_redo_edit(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    return _serialize_dataclass(wrapper.redo_edit())
+
+
 def _handle_delete_element(wrapper: Wrapper, args: dict[str, Any]) -> Any:
-    return _serialize_dataclass(
-        wrapper.delete_element(args["model"], args["idx"])
+    """Delete one element. The reply is the new topology with, beside it,
+    what went: ``deleted`` (the elements) and ``disturbances``."""
+    result = wrapper.delete_element(
+        args["model"], args["idx"], cascade=bool(args.get("cascade", False))
     )
+    payload: dict[str, Any] = _serialize_dataclass(result.topology)
+    payload["deleted"] = [_serialize_dataclass(entry) for entry in result.deleted]
+    payload["disturbances"] = [_serialize_dataclass(d) for d in result.disturbances]
+    return payload
 
 
 def _handle_alterable_params(wrapper: Wrapper, args: dict[str, Any]) -> Any:
@@ -811,7 +821,7 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     The substrate contributes:
 
     - The case file(s), read verbatim from the workspace when the
-      wrapper's ``_replay_buffer`` is empty (no edits since load), or
+      wrapper's ``_edit_log`` is empty (no edits since load), or
       written via ``Wrapper.save_case('xlsx', ...)`` when the case is
       dirty. ``case_canonical_export`` in the manifest reflects which
       path was taken.
@@ -835,15 +845,15 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
         check_exportable_case_files,
     )
 
-    # _replay_buffer is the only substrate-side signal of "case has been
-    # edited since load". Length > 0 with a non-None case path means the
-    # user added elements on top of the loaded case — the bundle must
-    # ship the canonical export, not the original file.
-    replay_buffer = wrapper._replay_buffer  # noqa: SLF001 — internal access by design
+    # _edit_log is the substrate-side signal of "case has been edited
+    # since load". Length > 0 with a non-None case path means the user
+    # added, changed or deleted elements on top of the loaded case — the
+    # bundle must ship the canonical export, not the original file.
+    edit_log = wrapper._edit_log  # noqa: SLF001 — internal access by design
     case_path = wrapper._case_path  # noqa: SLF001
     addfiles = wrapper._addfiles  # noqa: SLF001
 
-    if case_path is None and not replay_buffer:
+    if case_path is None and not edit_log:
         raise NoCaseLoadedError(
             "no case loaded — load a case (or create a blank one) before exporting a bundle"
         )
@@ -859,7 +869,7 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
             target = Path(td) / "blank-system.xlsx"
             wrapper.save_case("xlsx", str(target))
             case_files = ((target.name, target.read_bytes()),)
-    elif replay_buffer:
+    elif edit_log:
         # Edited session: canonicalize via xlsx export. The original case
         # file is intentionally NOT included — the manifest's
         # ``case_canonical_export=True`` flag tells the consumer to expect
@@ -1534,6 +1544,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "create_blank": _handle_create_blank,
     "save_case": _handle_save_case,
     "undo_last_edit": _handle_undo_last_edit,
+    "redo_edit": _handle_redo_edit,
     "delete_element": _handle_delete_element,
     "run_pflow": _handle_run_pflow,
     "alterable_params": _handle_alterable_params,
@@ -1715,8 +1726,8 @@ def _serve_commands(
                 }
             )
         except ElementHasDependentsError as exc:
-            # Carry the (capped) dependents list + total count over the
-            # Pipe so the routes layer can build a typed
+            # Carry the (capped) dependents and disturbances lists + their
+            # total counts over the Pipe so the routes layer can build a typed
             # ``DeleteBlockedResponse`` body. ``extra`` is the worker
             # side's structured-extra escape hatch; the parent's
             # ``WorkerError`` exposes it via ``exc.extra``.
@@ -1729,6 +1740,8 @@ def _serve_commands(
                     "extra": {
                         "dependents": exc.dependents,
                         "total": exc.total,
+                        "disturbances": exc.disturbances,
+                        "disturbances_total": exc.disturbances_total,
                     },
                 }
             )

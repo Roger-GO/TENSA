@@ -383,20 +383,38 @@ def test_a_case_file_session_is_its_path_and_add_on_files(tmp_path: Path) -> Non
     }
 
 
-def test_a_blank_session_is_the_additions_that_rebuild_it(tmp_path: Path) -> None:
+def test_a_blank_session_is_the_edits_that_rebuild_it(tmp_path: Path) -> None:
+    from tensa.core.edit_log import AddOp, DeleteOp, EditOp
+
     w = Wrapper(workspace=tmp_path)
-    w._replay_buffer = [("Bus", {"idx": "1", "Vn": 110}), ("PQ", {"bus": "1", "p0": 0.5})]  # noqa: SLF001
+    w._edit_log = [  # noqa: SLF001
+        AddOp("Bus", {"idx": "1", "Vn": 110}),
+        AddOp("PQ", {"idx": "PQ_1", "bus": "1", "p0": 0.5}),
+        EditOp("Bus", "1", {"Vn": 138}),
+        DeleteOp("PQ", "PQ_1", devices=(("PQ", "PQ_1"),)),
+    ]
 
     source = w.sweep_source()
 
     assert source == {
         "case_path": None,
         "addfiles": None,
-        "replay": [("Bus", {"idx": "1", "Vn": 110}), ("PQ", {"bus": "1", "p0": 0.5})],
+        "replay": [
+            {"op": "add", "model": "Bus", "params": {"idx": "1", "Vn": 110}},
+            {"op": "add", "model": "PQ", "params": {"idx": "PQ_1", "bus": "1", "p0": 0.5}},
+            {"op": "edit", "model": "Bus", "idx": "1", "params": {"Vn": 138}},
+            {"op": "delete", "model": "PQ", "idx": "PQ_1", "devices": [["PQ", "PQ_1"]]},
+        ],
     }
     # A copy: editing the session afterwards cannot reach a source already handed out.
-    w._replay_buffer[0][1]["Vn"] = 220  # noqa: SLF001
-    assert source["replay"][0][1]["Vn"] == 110
+    w._edit_log[0].params["Vn"] = 220  # noqa: SLF001
+    assert source["replay"][0]["params"]["Vn"] == 110
+
+    # What another wrapper adopts is the same log.
+    other = Wrapper(workspace=tmp_path)
+    other.adopt_sweep_source(source)
+    assert other._edit_log[1:] == w._edit_log[1:]  # noqa: SLF001
+    assert other._edit_log[0].params == {"idx": "1", "Vn": 110}  # noqa: SLF001
 
 
 def test_a_session_with_no_case_has_no_source(tmp_path: Path) -> None:

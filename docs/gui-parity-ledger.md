@@ -15,7 +15,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `analysis-panel` | 9 |
 | `auto` | 4 |
 | `bundle-dialog` | 2 |
-| `command-palette` | 5 |
+| `command-palette` | 6 |
 | `data-grid` | 1 |
 | `disturbance-panel` | 2 |
 | `inspector` | 9 |
@@ -29,7 +29,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `snapshot-dialog` | 4 |
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
-| **total** | **66** |
+| **total** | **67** |
 
 ## OpenAPI routes
 
@@ -80,6 +80,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `GET` | `/api/sessions/{session_id}/profiles` | `profile-dialog` |  |
 | `POST` | `/api/sessions/{session_id}/profiles/upload` | `profile-dialog` |  |
 | `DELETE` | `/api/sessions/{session_id}/profiles/{profile_idx}` | `profile-dialog` |  |
+| `POST` | `/api/sessions/{session_id}/redo-edit` | `command-palette` |  |
 | `POST` | `/api/sessions/{session_id}/reload` | `run-controls` |  |
 | `GET` | `/api/sessions/{session_id}/report` | `report-dialog` |  |
 | `POST` | `/api/sessions/{session_id}/save` | `command-palette` |  |

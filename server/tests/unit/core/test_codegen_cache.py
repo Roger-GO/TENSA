@@ -519,8 +519,10 @@ def test_creating_a_blank_system_waits_for_the_background_generation_first(
 def test_reloading_a_blank_system_waits_for_the_background_generation_first(
     waits: list[str],
 ) -> None:
+    from tensa.core.edit_log import AddOp
+
     wrapper = Wrapper()
-    wrapper._replay_buffer = [("Bus", {"idx": 1})]
+    wrapper._edit_log = [AddOp("Bus", {"idx": 1})]
     with pytest.raises(_StopBuilding):
         wrapper.reload_case()
     assert waits == ["wait", "build"]

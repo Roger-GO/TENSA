@@ -100,6 +100,8 @@ def _topology_from_payload(payload: dict[str, Any]) -> TopologySummary:
         base_mva=payload.get("base_mva"),
         buses_without_vn=payload.get("buses_without_vn", []),
         events=payload.get("events", []),
+        undo=payload.get("undo"),
+        redo=payload.get("redo"),
     )
 
 

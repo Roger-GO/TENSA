@@ -11,7 +11,7 @@ case. Exercises:
 - Edge: delete PMU pre-setup → 204; delete non-existent PMU → 404.
 - Edge: delete PMU post-setup → 409.
 - Reload-and-replay parity: PMU survives a /reload (because add_pmu
-  records into ``_replay_buffer`` exactly like ``add_element``).
+  records into ``_edit_log`` exactly like ``add_element``).
 - Validation: missing ``bus_idx`` → 422 (Pydantic).
 
 Markers: ``integration`` — these tests load real case files and spawn
@@ -308,8 +308,8 @@ async def test_pmu_survives_blank_session_reload_and_replay(
     client: httpx.AsyncClient,
 ) -> None:
     """PMUs added pre-setup on a *blank* session are recorded into
-    ``_replay_buffer``; a /reload re-creates the empty System and
-    replays every recorded add, so the PMU reappears with the same idx.
+    ``_edit_log``; a /reload re-creates the empty System and
+    replays every recorded edit, so the PMU reappears with the same idx.
 
     For *loaded* sessions, reload re-parses the case file and wipes the
     buffer — same contract as ``add_element`` and the disturbance log

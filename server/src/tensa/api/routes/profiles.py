@@ -517,8 +517,8 @@ async def list_profiles(
         422: {
             "model": ProblemDetails,
             "description": (
-                "TimeSeries originated from the loaded case file (not "
-                "removable via this endpoint — reload to reset)."
+                "A disturbance acts on the TimeSeries (a toggle of it), and "
+                "would be left naming a device that is gone."
             ),
         },
     },
@@ -528,7 +528,8 @@ async def delete_profile(
     profile_idx: str,
     request: Request,
 ) -> Response:
-    """Delete a TimeSeries previously staged via ``POST /profiles``.
+    """Delete a TimeSeries, whether ``POST /profiles`` staged it or the case
+    file brought it.
 
     Returns 204 on success. 404 when the idx isn't a known TimeSeries.
     409 when the session is post-setup (call /reload first).

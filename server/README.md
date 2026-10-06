@@ -86,7 +86,7 @@ pytest                   # all of the above
 
 `tests/acceptance/walkthrough.sh` exercises the full end-to-end flow with curl alone, no UI. `tests/acceptance/test_walkthrough.py` starts a server and runs it, and CI runs it in the `acceptance` job.
 
-`ANDES_VERSIONS.md` lists the thirteen API contracts the server depends on and the verification matrix per ANDES version.
+`ANDES_VERSIONS.md` lists the fourteen API contracts the server depends on and the verification matrix per ANDES version.
 
 ## License
 

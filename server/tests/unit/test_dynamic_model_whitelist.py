@@ -1,7 +1,7 @@
 """Unit 15 — the R15 dynamic-model whitelist expansion.
 
 Nine controller classes were added to ``_PARAMS_BY_MODEL`` /
-``_CONTROLLER_MODEL_NAMES`` / ``_REFERENCE_ATTRS``. Their param metadata is
+``_CONTROLLER_MODEL_NAMES``. Their param metadata is
 introspected from the real ANDES 2.0 model classes, so these tests assert the
 static whitelist matches live andes (catching drift or transcription errors).
 
@@ -15,10 +15,10 @@ import andes
 import pytest
 from andes.core.param import ExtParam
 
+from tensa.core.edit_log import reference_params
 from tensa.core.wrapper import (
     _CONTROLLER_MODEL_NAMES,
     _PARAMS_BY_MODEL,
-    _REFERENCE_ATTRS,
 )
 
 # The R15 set, using the ANDES-native names (ST6BU->ESST1A, PSS2A->ST2CUT).
@@ -53,10 +53,13 @@ def _expected_param_names(model: str, system: andes.System) -> list[str]:
 
 
 @pytest.mark.parametrize("model", NEW_MODELS)
-def test_model_registered_everywhere(model: str) -> None:
+def test_model_registered_everywhere(model: str, system: andes.System) -> None:
     assert model in _PARAMS_BY_MODEL, f"{model} missing from _PARAMS_BY_MODEL"
     assert model in _CONTROLLER_MODEL_NAMES
-    assert model in _REFERENCE_ATTRS  # dependents-coverage invariant
+    # Dependents-coverage invariant: a delete follows every reference the
+    # model declares, so none of its devices is left naming one that is gone.
+    followed = {p: t for (m, p), t in reference_params(system).items() if m == model}
+    assert followed and all(target is not None for target in followed.values()), followed
 
 
 @pytest.mark.parametrize("model", NEW_MODELS)
@@ -85,6 +88,6 @@ def test_kinds_well_formed(model: str, system: andes.System) -> None:
             assert p.kind == "syn_idx"
 
 
-def test_regcp1_bus_is_a_dependent_reference() -> None:
+def test_regcp1_bus_is_a_dependent_reference(system: andes.System) -> None:
     # REGCP1 attaches to a Bus directly, so deleting a Bus must surface it.
-    assert _REFERENCE_ATTRS["REGCP1"] == ("bus",)
+    assert reference_params(system)[("REGCP1", "bus")] == "ACNode"

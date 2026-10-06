@@ -190,11 +190,11 @@ async def test_export_bundle_includes_psse_addfile_verbatim(
 async def test_export_bundle_dirty_case_writes_canonical_xlsx(
     client: httpx.AsyncClient,
 ) -> None:
-    """Edge case from the plan: case edited (replay buffer non-empty) →
+    """Edge case from the plan: case edited (edit log non-empty) →
     bundle includes ``.xlsx`` instead of the original ``.raw``;
     manifest's ``case_canonical_export`` flips to True."""
     sid = await _create_session_and_load(client, "ieee14.raw")
-    # Add a Bus on top of the loaded case so the wrapper's _replay_buffer
+    # Add a Bus on top of the loaded case so the wrapper's _edit_log
     # becomes non-empty. This is the substrate's signal for "dirty case".
     add = await client.post(
         f"/api/sessions/{sid}/elements",
@@ -214,6 +214,33 @@ async def test_export_bundle_dirty_case_writes_canonical_xlsx(
         manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
     # Canonical export uses the original stem with .xlsx.
     assert any(n.endswith(".xlsx") for n in names if n.startswith("case/"))
+    assert manifest["case_canonical_export"] is True
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("PUT", "/elements/Bus/3", {"params": {"vmax": 1.2}}),
+        ("DELETE", "/elements/Line/Line_3", None),
+    ],
+)
+async def test_export_bundle_of_a_changed_or_trimmed_case_is_the_case_as_it_stands(
+    client: httpx.AsyncClient, method: str, path: str, body: dict[str, object] | None
+) -> None:
+    """A changed value and a deleted element make the case no longer the file.
+    A session that had only those used to export the file as it was loaded."""
+    sid = await _create_session_and_load(client, "ieee14.raw")
+    edit = await client.request(method, f"/api/sessions/{sid}{path}", json=body)
+    assert edit.status_code == 200, edit.text
+
+    resp = await client.post(f"/api/sessions/{sid}/bundle/export", json={})
+
+    assert resp.status_code == 200, resp.text
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        names = [n for n in zf.namelist() if n.startswith("case/")]
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+    assert names == ["case/ieee14.xlsx"]
     assert manifest["case_canonical_export"] is True
 
 

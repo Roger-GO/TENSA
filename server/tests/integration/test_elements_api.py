@@ -16,6 +16,7 @@ import sys
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -918,24 +919,208 @@ async def test_delete_generator_has_no_dependents(
 
 
 @pytest.mark.integration
-async def test_delete_case_file_originated_returns_422_with_reload_message(
-    client: httpx.AsyncClient,
+async def test_delete_an_element_the_case_file_brought(
+    client: httpx.AsyncClient, tmp_path: Path
 ) -> None:
-    """Delete an idx not in the replay buffer (case-file-originated) ->
-    422 with the verbatim 'reload to revert' message."""
+    """A line of the loaded case is deleted like one added since: it is gone
+    from the topology and from the power flow, and the file is not written."""
+    case = tmp_path / "ws" / "ieee14.raw"
+    before = case.read_bytes()
     sid = await _create_session(client)
     await _load_ieee14(client, sid)
-    # Bus 1 is in the loaded case but never added via the replay buffer.
-    resp = await client.delete(
-        f"/api/sessions/{sid}/elements/Bus/1",
+
+    resp = await client.delete(f"/api/sessions/{sid}/elements/Line/Line_3")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "Line_3" not in {line["idx"] for line in body["lines"] + body["transformers"]}
+    assert len(body["lines"]) + len(body["transformers"]) == 19
+    assert [(d["kind"], d["idx"]) for d in body["deleted"]] == [("Line", "Line_3")]
+    assert body["disturbances"] == []
+    assert body["undo"] == {
+        "op": "delete", "model": "Line", "idx": "Line_3", "params": [], "also": 0,
+    }
+    assert case.read_bytes() == before
+
+    pflow = await client.post(f"/api/sessions/{sid}/pflow", json={})
+    assert pflow.status_code == 200, pflow.text
+    assert pflow.json()["converged"] is True
+    assert "Line_3" not in pflow.json()["line_flows"]
+
+
+@pytest.mark.integration
+async def test_delete_a_case_bus_is_refused_until_cascade_takes_what_is_on_it(
+    client: httpx.AsyncClient,
+) -> None:
+    """Bus 3 of IEEE 14 carries a generator, a load and two lines. Alone it
+    cannot go; with ``cascade`` they all go, as one edit an undo brings back."""
+    sid = await _create_session(client)
+    await _load_ieee14(client, sid)
+    full = (await client.get(f"/api/sessions/{sid}/topology")).json()
+
+    blocked = await client.delete(f"/api/sessions/{sid}/elements/Bus/3")
+
+    assert blocked.status_code == 422, blocked.text
+    body = blocked.json()
+    on_the_bus = {(d["kind"], str(d["idx"])) for d in body["dependents"]}
+    assert on_the_bus == {("PV", "3"), ("PQ", "PQ_2"), ("Line", "Line_3"), ("Line", "Line_6")}
+    assert body["total"] == 4
+    assert body["disturbances"] == [] and body["disturbances_total"] == 0
+    assert "cascade=true" in body["detail"]
+    # Refused means untouched.
+    assert (await client.get(f"/api/sessions/{sid}/topology")).json() == full
+
+    done = await client.delete(f"/api/sessions/{sid}/elements/Bus/3", params={"cascade": "true"})
+
+    assert done.status_code == 200, done.text
+    after = done.json()
+    assert {(d["kind"], str(d["idx"])) for d in after["deleted"]} == on_the_bus | {("Bus", "3")}
+    assert after["deleted"][-1]["kind"] == "Bus"
+    assert len(after["buses"]) == 13
+    assert after["undo"]["op"] == "delete" and after["undo"]["also"] == 4
+    assert (await client.post(f"/api/sessions/{sid}/pflow", json={})).json()["converged"] is True
+
+    await client.post(f"/api/sessions/{sid}/reload")
+    await client.delete(f"/api/sessions/{sid}/elements/Bus/3", params={"cascade": "true"})
+    undone = await client.post(f"/api/sessions/{sid}/undo-last-edit")
+    assert undone.status_code == 200, undone.text
+    restored = undone.json()
+    assert restored["redo"]["op"] == "delete" and restored["undo"] is None
+    for key in ("buses", "lines", "transformers", "generators", "loads", "shunts"):
+        assert restored[key] == full[key], key
+
+
+@pytest.mark.integration
+async def test_undo_and_redo_take_back_and_put_back_any_kind_of_edit(
+    client: httpx.AsyncClient,
+) -> None:
+    """One history for an add, a change and a delete: each undo takes back the
+    newest, whatever it was, and leaves the ones before it."""
+    sid = await _create_session(client)
+    await _load_ieee14(client, sid)
+
+    async def bus_100() -> dict[str, Any] | None:
+        topo = (await client.get(f"/api/sessions/{sid}/topology")).json()
+        found = [b for b in topo["buses"] if str(b["idx"]) == "100"]
+        return found[0] if found else None
+
+    assert (await _add_bus(client, sid, "100", name="EXTRA")).status_code == 201
+    edited = await client.put(
+        f"/api/sessions/{sid}/elements/Bus/100", json={"params": {"Vn": 230.0}}
     )
-    assert resp.status_code == 422, resp.text
-    expected = (
-        "This element came from the loaded case file. "
-        "Use the Reload button in the workflow toolbar to "
-        "reset to the original case."
+    assert edited.status_code == 200, edited.text
+    deleted = await client.delete(f"/api/sessions/{sid}/elements/Bus/100")
+    assert deleted.status_code == 200, deleted.text
+    assert await bus_100() is None
+
+    async def undo() -> dict[str, Any]:
+        resp = await client.post(f"/api/sessions/{sid}/undo-last-edit")
+        assert resp.status_code == 200, resp.text
+        return dict(resp.json())
+
+    async def redo() -> dict[str, Any]:
+        resp = await client.post(f"/api/sessions/{sid}/redo-edit")
+        assert resp.status_code == 200, resp.text
+        return dict(resp.json())
+
+    # The delete comes back with the value the edit gave it.
+    topo = await undo()
+    assert topo["undo"] == {"op": "edit", "model": "Bus", "idx": "100", "params": ["Vn"], "also": 0}
+    assert topo["redo"] == {"op": "delete", "model": "Bus", "idx": "100", "params": [], "also": 0}
+    bus = await bus_100()
+    assert bus is not None and bus["params"]["Vn"] == 230.0
+    # The edit goes, the bus stays.
+    topo = await undo()
+    assert topo["undo"] == {"op": "add", "model": "Bus", "idx": "100", "params": [], "also": 0}
+    bus = await bus_100()
+    assert bus is not None and bus["params"]["Vn"] == 100.0
+    # The add goes.
+    topo = await undo()
+    assert topo["undo"] is None and await bus_100() is None
+    nothing = await client.post(f"/api/sessions/{sid}/undo-last-edit")
+    assert nothing.status_code == 422 and "no edits to undo" in nothing.text
+
+    await redo()
+    await redo()
+    bus = await bus_100()
+    assert bus is not None and bus["params"]["Vn"] == 230.0
+    topo = await redo()
+    assert topo["redo"] is None and await bus_100() is None
+    nothing = await client.post(f"/api/sessions/{sid}/redo-edit")
+    assert nothing.status_code == 422 and "no edits to redo" in nothing.text
+
+    # A new edit after an undo leaves nothing to redo.
+    await undo()
+    assert (await _add_bus(client, sid, "101")).status_code == 201
+    topo = (await client.get(f"/api/sessions/{sid}/topology")).json()
+    assert topo["redo"] is None and topo["undo"]["idx"] == "101"
+
+
+@pytest.mark.integration
+async def test_undo_and_redo_after_pf_return_409(client: httpx.AsyncClient) -> None:
+    sid = await _create_session(client)
+    await _load_ieee14(client, sid)
+    await _add_bus(client, sid, "100", name="EXTRA")
+    await _add_bus(client, sid, "101", name="EXTRA2")
+    assert (await client.post(f"/api/sessions/{sid}/undo-last-edit")).status_code == 200
+    await client.post(f"/api/sessions/{sid}/pflow", json={})
+
+    for route in ("undo-last-edit", "redo-edit"):
+        resp = await client.post(f"/api/sessions/{sid}/{route}")
+        assert resp.status_code == 409, resp.text
+        assert "/reload" in resp.text
+
+
+@pytest.mark.integration
+async def test_delete_warns_about_the_disturbances_that_act_on_the_element(
+    client: httpx.AsyncClient,
+) -> None:
+    """A committed fault on bus 14 and a trip of its line stand in the way of
+    deleting that line or that bus; a fault elsewhere does not, and stays
+    committed when the others go."""
+    sid = await _create_session(client)
+    await _load_ieee14(client, sid)
+    specs = [
+        {"kind": "fault", "bus_idx": 14, "tf": 1.0, "tc": 1.1},
+        {"kind": "toggle", "model": "Line", "dev_idx": "Line_13", "t": 2.0},
+        {"kind": "fault", "bus_idx": 5, "tf": 3.0, "tc": 3.1},
+    ]
+    committed = await client.post(
+        f"/api/sessions/{sid}/disturbances", json={"disturbances": specs}
     )
-    assert expected in resp.text
+    assert committed.status_code == 200, committed.text
+
+    # An element nothing acts on goes, and every disturbance stays.
+    free = await client.delete(f"/api/sessions/{sid}/elements/Line/Line_3")
+    assert free.status_code == 200, free.text
+    listed = (await client.get(f"/api/sessions/{sid}/disturbances")).json()["disturbances"]
+    assert [d["kind"] for d in listed] == ["fault", "toggle", "fault"]
+
+    blocked = await client.delete(f"/api/sessions/{sid}/elements/Line/Line_13")
+    assert blocked.status_code == 422, blocked.text
+    body = blocked.json()
+    assert body["dependents"] == [] and body["total"] == 0
+    assert body["disturbances"] == [
+        {"source": "committed", "kind": "toggle", "model": "Line", "dev_idx": "Line_13",
+         "t": 2.0, "name": None}
+    ]
+    assert "1 disturbance(s)" in body["detail"]
+
+    done = await client.delete(
+        f"/api/sessions/{sid}/elements/Bus/14", params={"cascade": "true"}
+    )
+    assert done.status_code == 200, done.text
+    assert {(d["kind"], d["dev_idx"]) for d in done.json()["disturbances"]} == {
+        ("fault", 14), ("toggle", "Line_13"),
+    }
+    listed = (await client.get(f"/api/sessions/{sid}/disturbances")).json()["disturbances"]
+    assert [(d["kind"], d["bus_idx"]) for d in listed] == [("fault", 5)]
+
+    # Taking the delete back brings the two disturbances back where they were.
+    assert (await client.post(f"/api/sessions/{sid}/undo-last-edit")).status_code == 200
+    listed = (await client.get(f"/api/sessions/{sid}/disturbances")).json()["disturbances"]
+    assert [d["kind"] for d in listed] == ["fault", "toggle", "fault"]
+    assert listed[0]["bus_idx"] == 14 and listed[2]["bus_idx"] == 5
 
 
 @pytest.mark.integration
@@ -977,53 +1162,46 @@ async def test_delete_unknown_model_returns_422(client: httpx.AsyncClient) -> No
         f"/api/sessions/{sid}/elements/NoSuchModel/1",
     )
     assert resp.status_code == 422, resp.text
-    assert "unknown model" in resp.text.lower() or "supported models" in resp.text
+    assert "unknown model" in resp.text.lower()
 
 
 @pytest.mark.integration
 async def test_delete_atomicity_replay_failure_preserves_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Atomicity: a synthetic replay-failure injection leaves ss + replay
-    buffer unchanged.
+    """Atomicity: a synthetic replay-failure injection leaves ss + the edit
+    log unchanged.
 
     Drives the wrapper directly (no Pipe) because the failure injection
-    needs to control the rebuild path. The wrapper's snapshot/rollback
-    logic is the unit under test.
-
-    Injection strategy: monkey-patch the wrapper's blank-replay method to
-    raise mid-rebuild. The pre-delete ss + replay_buffer are captured
-    before the call; after the failure the wrapper must have restored
-    both to the pre-call snapshots.
+    needs to control the rebuild path. A delete builds the new System before
+    it touches the session, so a rebuild that raises must leave the session
+    holding the System and the log it had.
     """
     pytest.importorskip("andes")
-    from tensa.core import wrapper as wrapper_mod
     from tensa.core.errors import ElementValidationError
     from tensa.core.wrapper import Wrapper
 
     w = Wrapper()
     w.create_blank()
-    # Build up 3 valid buses in the replay buffer.
+    # Build up 3 valid buses in the edit log.
     w.add_element("Bus", {"idx": "1", "name": "B1", "Vn": 100.0})
     w.add_element("Bus", {"idx": "2", "name": "B2", "Vn": 100.0})
     w.add_element("Bus", {"idx": "3", "name": "B3", "Vn": 100.0})
 
     pre_ss = w._ss
-    pre_buffer = list(w._replay_buffer)
+    pre_log = list(w._edit_log)
 
-    # Patch the rebuild path so it raises mid-replay. ``delete_element`` is
-    # blank-session here, so the failure surfaces inside ``_reload_blank_locked``.
-    def _boom(self: Wrapper) -> None:
-        raise wrapper_mod.ElementValidationError("synthetic replay failure")
+    def _boom(self: Wrapper, ops: object) -> None:
+        raise ElementValidationError("synthetic replay failure")
 
-    monkeypatch.setattr(Wrapper, "_reload_blank_locked", _boom)
+    monkeypatch.setattr(Wrapper, "_build_system", _boom)
 
     with pytest.raises(ElementValidationError):
         w.delete_element("Bus", "2")
 
-    # Snapshot must be restored: ss and buffer are unchanged.
+    # The session is as it was: ss and log are unchanged.
     assert w._ss is pre_ss
-    assert w._replay_buffer == pre_buffer
+    assert w._edit_log == pre_log
 
 
 @pytest.mark.integration
@@ -1057,34 +1235,31 @@ async def test_delete_perf_under_one_second_ieee14_and_ieee39(
 
 
 @pytest.mark.integration
-async def test_find_dependents_covers_every_whitelisted_model() -> None:
-    """Coverage assertion: every model in ``_PARAMS_BY_MODEL`` is exercised
-    by ``_find_dependents`` (either as the target — Bus — or via its
-    reference attributes pointing at a Bus).
-
-    The test loops over the whitelist dict and verifies the cascade
-    walker's reference-attrs table covers every non-Bus model. The Bus
-    entry has no outgoing references and is the ``model`` parameter
-    rather than an entry in ``_REFERENCE_ATTRS``.
-    """
+async def test_every_reference_the_builder_takes_is_one_a_delete_follows() -> None:
+    """A param the add form offers as a reference to a bus, a static generator
+    or a machine is one ``edit_log.referrers`` follows, so no element the
+    builder can add is left naming one that a delete removed."""
     pytest.importorskip("andes")
-    from tensa.core.wrapper import _PARAMS_BY_MODEL, _REFERENCE_ATTRS
+    import andes
 
-    expected_models = set(_PARAMS_BY_MODEL.keys()) - {"Bus"}
-    covered_models = set(_REFERENCE_ATTRS.keys())
-    assert expected_models == covered_models, (
-        f"models in _PARAMS_BY_MODEL but not in _REFERENCE_ATTRS: "
-        f"{expected_models - covered_models}; "
-        f"models in _REFERENCE_ATTRS but not in _PARAMS_BY_MODEL: "
-        f"{covered_models - expected_models}"
-    )
-    # Each entry's reference attribute(s) must be in the model's
-    # parameter whitelist (otherwise the walker would read non-existent
-    # attributes off the ANDES System).
-    for model_name, attrs in _REFERENCE_ATTRS.items():
-        allowed = {p.name for p in _PARAMS_BY_MODEL[model_name]}
-        for attr in attrs:
-            assert attr in allowed, (
-                f"{model_name}.{attr} is in _REFERENCE_ATTRS but not in "
-                f"_PARAMS_BY_MODEL[{model_name!r}]"
+    from tensa.core.edit_log import reference_params
+    from tensa.core.wrapper import _PARAMS_BY_MODEL
+
+    followed = reference_params(andes.System(no_output=True, default_config=True))
+    expected = {"bus_idx": {"ACNode", "Bus"}, "gen_idx": {"StaticGen"}, "syn_idx": {"SynGen"}}
+    undeclared: set[tuple[str, str]] = set()
+    for model_name, metas in _PARAMS_BY_MODEL.items():
+        for meta in metas:
+            if meta.kind not in expected:
+                continue
+            if (model_name, meta.name) not in followed:
+                undeclared.add((model_name, meta.name))
+                continue
+            assert followed[(model_name, meta.name)] in expected[meta.kind], (
+                f"{model_name}.{meta.name} is a {meta.kind} in the schema but "
+                f"a delete takes it to point into {followed[(model_name, meta.name)]!r}"
             )
+    # ANDES's ZIP has no ``bus`` of its own: it names a static load (``pq``, which
+    # a delete does follow) and copies that load's bus. Nothing else may be here.
+    assert undeclared == {("ZIP", "bus")}
+    assert followed[("ZIP", "pq")] == "StaticLoad"

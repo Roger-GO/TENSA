@@ -35,7 +35,7 @@ import re
 import tempfile
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
@@ -52,6 +52,24 @@ from tensa.core.cpf_options import (
 )
 from tensa.core.cpf_result import CpfGeneratorTrace, CpfLimitEvent, CpfResult
 from tensa.core.disturbance import AlterSpec, DisturbanceSpec, FaultSpec, ToggleSpec
+from tensa.core.edit_log import (
+    AddOp,
+    DeleteOp,
+    DeviceRef,
+    DroppedDisturbance,
+    EditOp,
+    EditStep,
+    Op,
+    apply_op,
+    dependents,
+    held_idx,
+    is_event,
+    ops_from_dicts,
+    ops_to_dicts,
+    plain_idx,
+    spec_targets,
+    step_of,
+)
 from tensa.core.eig_result import ComplexNumber, EigResult
 from tensa.core.errors import (
     AndesAppError,
@@ -233,6 +251,41 @@ class TopologySnapshot:
     # line, say) and those a bundle import or snapshot restore replayed. See
     # ``tensa.core.case_events``.
     events: list[CaseEvent] = field(default_factory=list)
+    # The edit ``undo_last_edit`` would take back and the one ``redo_edit`` would
+    # put back, or ``None`` when there is none. See ``tensa.core.edit_log``.
+    undo: EditStep | None = None
+    redo: EditStep | None = None
+
+
+@dataclass
+class DeletedDisturbance:
+    """A disturbance that acts on something a delete removes, or would remove.
+
+    ``source`` says where it came from: the case file (``case``), a bundle
+    import or snapshot restore (``restored``), or a client's own commit
+    (``committed``). ``t`` is when it starts, or ``None`` for one that never
+    fires.
+    """
+
+    source: Literal["case", "restored", "committed"]
+    kind: Literal["fault", "toggle", "alter"]
+    model: str | None
+    dev_idx: int | str | None
+    t: float | None = None
+    name: str | None = None
+
+
+@dataclass
+class DeleteResult:
+    """What ``Wrapper.delete_element`` did.
+
+    ``deleted`` is every element that went, the one asked for last, and
+    ``disturbances`` every disturbance that went with them.
+    """
+
+    topology: TopologySnapshot
+    deleted: list[TopologyEntry] = field(default_factory=list)
+    disturbances: list[DeletedDisturbance] = field(default_factory=list)
 
 
 @dataclass
@@ -397,13 +450,22 @@ class Wrapper:
         self._workspace: Path | None = (
             Path(workspace) if workspace is not None else None
         )
-        # ``replay_buffer`` records every successful pre-setup add so a
-        # blank session (no underlying case file) can recover its topology
-        # via ``reload_case`` — the v0.1.x workaround for ANDES's missing
-        # pre-setup ``delete()`` API. Capped at REPLAY_BUFFER_MAX entries
-        # with oldest-eviction; older entries are dropped silently with a
-        # logged warning.
-        self._replay_buffer: list[tuple[str, dict[str, Any]]] = []
+        # ``_edit_log`` records, in order, every element added, changed or
+        # deleted since the case was loaded (``tensa.core.edit_log``). The
+        # pre-setup System is always the case file, or an empty System, with
+        # this log applied: that is how an edit is taken back, how an element
+        # of the case file is deleted, and how a blank session (which has no
+        # file) comes back from ``reload_case``. It holds at most
+        # ``EDIT_LOG_MAX`` entries; an edit past that is refused, since a
+        # dropped entry would change what the next rebuild gives.
+        self._edit_log: list[Op] = []
+        # The edits ``undo_last_edit`` took back, newest last, for ``redo_edit``.
+        # A new edit empties it.
+        self._redo_log: list[Op] = []
+        # The ``Fault`` / ``Toggle`` / ``Alter`` devices ``add_disturbance`` put
+        # on the current System. Every other device of those models came with
+        # the case file, which is what tells the two apart when one is deleted.
+        self._client_events: list[DeviceRef] = []
         # ``_disturbance_log`` records every successfully-added disturbance
         # spec so callers can replay them after ``reload_case()`` —
         # the only escape hatch from the post-setup ``add()`` rejection
@@ -469,12 +531,43 @@ class Wrapper:
         format detection failure). The wrapper survives the failure — a
         subsequent ``load_case`` call with a valid path works.
         """
-        import andes  # heavy import — kept lazy
-
         case_path = Path(path)
         resolved_addfiles: list[Path] | None = (
             [Path(a) for a in addfiles] if addfiles else None
         )
+        ss = self._load_system(case_path, resolved_addfiles)
+
+        self._ss = ss
+        self._case_path = case_path
+        self._addfiles = resolved_addfiles
+        self._buses_without_vn = buses_without_rated_voltage(ss, case_path)
+        self._case_events = events_in_case(ss)
+        self._setup_failed = False
+        # Loading from a real case file makes that file the base again: the
+        # edits recorded against the prior System are gone with it.
+        self._edit_log = []
+        self._redo_log = []
+        # Disturbances added against the prior System reference are gone —
+        # the new System has none. Callers that need to keep them across a
+        # reload must capture them via ``list_disturbances()`` BEFORE
+        # ``reload_case`` and then ``replay_disturbances()`` AFTER.
+        self._disturbance_log = []
+        self._client_events = []
+        self._restored_events = []
+        # SE measurements (Unit 13) are scoped to the previous System's
+        # device idxes; load/reload invalidates them. The user must
+        # call /se/measurements/generate again on the new System.
+        self._se_measurements = None
+        return self._topology_snapshot_locked()
+
+    @staticmethod
+    def _load_system(case_path: Path, addfiles: list[Path] | None) -> System:
+        """Read a case into a new System, before ``setup()``.
+
+        Touches nothing on the wrapper, so a caller can build a System and
+        decide afterwards whether to keep it. Raises ``CaseLoadError``.
+        """
+        import andes  # heavy import — kept lazy
 
         if not case_path.exists():
             raise CaseLoadError(str(case_path), "file does not exist")
@@ -496,9 +589,7 @@ class Wrapper:
         try:
             ss = andes.load(
                 str(case_path),
-                addfile=[str(a) for a in resolved_addfiles]
-                if resolved_addfiles
-                else None,
+                addfile=[str(a) for a in addfiles] if addfiles else None,
                 setup=False,
                 no_output=True,
                 default_config=True,
@@ -516,28 +607,7 @@ class Wrapper:
 
         if ss is None:
             raise CaseLoadError(str(case_path), "andes.load returned None")
-
-        self._ss = ss
-        self._case_path = case_path
-        self._addfiles = resolved_addfiles
-        self._buses_without_vn = buses_without_rated_voltage(ss, case_path)
-        self._case_events = events_in_case(ss)
-        self._setup_failed = False
-        # Loading from a real case file invalidates any blank-session replay
-        # history — that buffer is only meaningful for sessions whose entire
-        # state was built up via ``add_element``.
-        self._replay_buffer = []
-        # Disturbances added against the prior System reference are gone —
-        # the new System has none. Callers that need to keep them across a
-        # reload must capture them via ``list_disturbances()`` BEFORE
-        # ``reload_case`` and then ``replay_disturbances()`` AFTER.
-        self._disturbance_log = []
-        self._restored_events = []
-        # SE measurements (Unit 13) are scoped to the previous System's
-        # device idxes; load/reload invalidates them. The user must
-        # call /se/measurements/generate again on the new System.
-        self._se_measurements = None
-        return self._topology_snapshot_locked()
+        return ss
 
     def reload_case(self) -> TopologySnapshot:
         """Re-load the current case to return to pre-setup state.
@@ -547,14 +617,18 @@ class Wrapper:
         revert ``is_setup``; ``System.reset()`` always re-calls setup, and
         ``System.reload()`` always re-parses.
 
+        A case file's reload is the file again: the edits made since it was
+        loaded (``self._edit_log``) are gone with the System they were made on.
+
         Blank-session reload (no underlying case file): re-create
         ``andes.System()`` and replay every entry recorded in
-        ``self._replay_buffer``. Failed replays leave the wrapper in a
-        partial state and raise ``ElementValidationError`` — caller can
-        retry ``create_blank()`` to start over.
+        ``self._edit_log``, since the log is all a blank session has. Failed
+        replays leave the wrapper in a partial state and raise
+        ``ElementValidationError`` — caller can retry ``create_blank()`` to
+        start over.
         """
         if self._case_path is None:
-            if not self._replay_buffer:
+            if not self._edit_log:
                 raise NoCaseLoadedError(
                     "no case has been loaded; call load_case() or create_blank() first"
                 )
@@ -565,32 +639,113 @@ class Wrapper:
         )
 
     def _reload_blank_locked(self) -> TopologySnapshot:
-        """Re-create the blank System and replay every recorded add."""
+        """Re-create the blank System and replay every recorded edit."""
         import andes  # heavy import — kept lazy
 
         log = logging.getLogger("tensa.wrapper.replay")
         wait_for_background_warm()
         ss = andes.System()
-        replay = list(self._replay_buffer)  # snapshot — replays may mutate
+        replay = list(self._edit_log)  # snapshot — replays may mutate
         self._ss = ss
         self._setup_failed = False
-        self._replay_buffer = []
-        for model_name, params in replay:
-            # Pass a fresh copy each iteration — ANDES mutates the dict.
+        self._edit_log = []
+        self._client_events = []
+        for op in replay:
             try:
-                ss.add(model_name, dict(params))
+                apply_op(ss, op)
             except Exception as exc:  # noqa: BLE001
                 log.warning(
                     "replay rejected by ANDES on model=%r: %s",
-                    model_name,
+                    op.model,
                     _sanitize_message(str(exc)),
                 )
                 raise ElementValidationError(
-                    f"replay failed at model {model_name!r}: "
+                    f"replay failed at model {op.model!r}: "
                     f"{_sanitize_message(str(exc))}"
                 ) from exc
-            self._replay_buffer.append((model_name, dict(params)))
+            self._edit_log.append(op)
         return self._topology_snapshot_locked()
+
+    def _build_system(self, ops: Sequence[Op]) -> System:
+        """A new pre-setup System: the case file, or an empty one, with ``ops`` applied.
+
+        Touches nothing on the wrapper. A caller builds the System it wants
+        and swaps it in with ``_adopt_system`` once that worked, so a failure
+        here leaves the session as it was. Raises ``ElementValidationError``
+        naming the entry that could not be replayed.
+        """
+        if self._case_path is not None:
+            ss = self._load_system(self._case_path, self._addfiles)
+        else:
+            import andes  # heavy import — kept lazy
+
+            wait_for_background_warm()
+            ss = andes.System()
+        for op in ops:
+            try:
+                apply_op(ss, op)
+            except Exception as exc:  # noqa: BLE001
+                step = step_of(op)
+                raise ElementValidationError(
+                    f"could not replay the {step.op} of {step.model} "
+                    f"{step.idx!r}: {_sanitize_message(str(exc))}"
+                ) from exc
+        return ss
+
+    def _adopt_system(
+        self,
+        ss: System,
+        *,
+        edit_log: Sequence[Op],
+        redo_log: Sequence[Op],
+        disturbances: Sequence[DisturbanceSpec],
+        restored_events: Sequence[CaseEvent],
+    ) -> None:
+        """Make ``ss`` (from ``_build_system``) the session's System.
+
+        ``disturbances`` are the pending ones the session keeps: each is added
+        to ``ss`` again, since a System that was built afresh has none. If
+        ANDES refuses one, the session is put back as it was and the error
+        raised.
+        """
+        before = (
+            self._ss,
+            self._setup_failed,
+            self._edit_log,
+            self._redo_log,
+            self._case_events,
+            self._disturbance_log,
+            self._client_events,
+            self._restored_events,
+            self._se_measurements,
+        )
+        self._ss = ss
+        self._setup_failed = False
+        self._edit_log = list(edit_log)
+        self._redo_log = list(redo_log)
+        # Read before a pending disturbance is added back: what ``ss`` holds
+        # now is what the case file defines, less what a delete removed.
+        self._case_events = events_in_case(ss)
+        self._disturbance_log = []
+        self._client_events = []
+        self._restored_events = list(restored_events)
+        self._se_measurements = None
+        try:
+            for spec in disturbances:
+                self.add_disturbance(spec)
+        except Exception:
+            (
+                self._ss,
+                self._setup_failed,
+                self._edit_log,
+                self._redo_log,
+                self._case_events,
+                self._disturbance_log,
+                self._client_events,
+                self._restored_events,
+                self._se_measurements,
+            ) = before
+            raise
 
     # ----- clone-on-write (Unit 21) -----
 
@@ -668,8 +823,10 @@ class Wrapper:
         """
         self._ss = ss
         self._setup_failed = False
-        self._replay_buffer = []
+        self._edit_log = []
+        self._redo_log = []
         self._disturbance_log = []
+        self._client_events = []
         self._case_events = events_in_case(ss)
         self._restored_events = []
         self._se_measurements = None
@@ -716,6 +873,8 @@ class Wrapper:
             base_mva=_system_base_mva(ss),
             buses_without_vn=still_without_rated_voltage(ss, self._buses_without_vn),
             events=[*self._case_events, *self._restored_events],
+            undo=step_of(self._edit_log[-1]) if self._edit_log else None,
+            redo=step_of(self._redo_log[-1]) if self._redo_log else None,
         )
 
     # ----- disturbance management -----
@@ -810,6 +969,7 @@ class Wrapper:
                 f"ANDES rejected {model_name} spec: {_sanitize_message(str(exc))}"
             ) from exc
         self._disturbance_log.append(spec)
+        self._client_events.append((model_name, idx))
         return idx
 
     def list_disturbances(self) -> list[DisturbanceSpec]:
@@ -964,18 +1124,14 @@ class Wrapper:
         Mirrors ``add_disturbance``'s pre-setup gate. Whitelists every key in
         ``params`` against ``_PARAMS_BY_MODEL[model]`` BEFORE invoking
         ``ss.add(...)`` so unknown keys never reach ANDES. On success,
-        records the call in ``self._replay_buffer`` so a blank session can
-        recover via ``reload_case()``.
+        records the call in ``self._edit_log`` so it can be taken back
+        (``undo_last_edit``) and a blank session can recover via
+        ``reload_case()``.
 
         Returns a freshly-built ``TopologyEntry`` for the new element.
         """
-        ss = self._require_loaded()
-        if self._setup_failed:
-            raise SetupFailedError(
-                "previous setup() failed; the System is in an inconsistent state"
-            )
-        if ss.is_setup:
-            raise DisturbanceCommitError()
+        ss = self._require_editable()
+        self._require_room_in_edit_log()
 
         allowed = allowed_param_names(model)
         if not allowed:
@@ -1063,15 +1219,7 @@ class Wrapper:
             raise ElementValidationError(
                 f"ANDES rejected add({model!r}, ...): {_sanitize_message(str(exc))}"
             ) from exc
-
-        # Cap the replay buffer at REPLAY_BUFFER_MAX with oldest-eviction.
-        if len(self._replay_buffer) >= REPLAY_BUFFER_MAX:
-            dropped, _ = self._replay_buffer.pop(0)
-            logging.getLogger("tensa.wrapper.replay").warning(
-                "replay buffer at cap (%d); dropping oldest entry (model=%r)",
-                REPLAY_BUFFER_MAX, dropped,
-            )
-        self._replay_buffer.append((model, replay_snapshot))
+        self._record_add(model, replay_snapshot, idx)
 
         if model == ESD1_MODEL:
             log_esd1_base_notice(idx, replay_snapshot.get("Sn"), _system_base_mva(ss))
@@ -1098,17 +1246,13 @@ class Wrapper:
         Same pre-setup gate as ``add_element``. Whitelists keys against
         ``_PARAMS_BY_MODEL[model]``. For each ``(param, value)`` pair, sets
         ``getattr(getattr(ss, model), param).v[i] = value`` where ``i`` is
-        the index of ``idx`` in ``ss.<model>.idx.v``.
+        the index of ``idx`` in ``ss.<model>.idx.v``. What was written goes
+        into ``self._edit_log``, so the change survives a rebuild of the
+        System and can be taken back.
 
         Returns the updated ``TopologyEntry``.
         """
-        ss = self._require_loaded()
-        if self._setup_failed:
-            raise SetupFailedError(
-                "previous setup() failed; the System is in an inconsistent state"
-            )
-        if ss.is_setup:
-            raise DisturbanceCommitError()
+        ss = self._require_editable()
 
         allowed = allowed_param_names(model)
         if not allowed:
@@ -1176,17 +1320,27 @@ class Wrapper:
         if model == ESD1_MODEL:
             check_esd1_edit(ss, i, {pname: value for pname, _, value in writes})
 
-        for pname, param_v, value in writes:
-            try:
-                # ANDES service params expose .v as a numpy array — direct
-                # element write is the documented way to alter a single
-                # device's parameter.
-                param_v[i] = value
-            except Exception as exc:  # noqa: BLE001
-                raise ElementValidationError(
-                    f"ANDES rejected {model}.{pname}={value!r}: "
-                    f"{_sanitize_message(str(exc))}"
-                ) from exc
+        self._require_room_in_edit_log()
+        written: dict[str, Any] = {}
+        try:
+            for pname, param_v, value in writes:
+                try:
+                    # ANDES service params expose .v as a numpy array — direct
+                    # element write is the documented way to alter a single
+                    # device's parameter.
+                    param_v[i] = value
+                except Exception as exc:  # noqa: BLE001
+                    raise ElementValidationError(
+                        f"ANDES rejected {model}.{pname}={value!r}: "
+                        f"{_sanitize_message(str(exc))}"
+                    ) from exc
+                written[pname] = value
+        finally:
+            # Recorded even when a later value was refused: the System holds
+            # the ones before it, and the log has to say what the System holds.
+            if written:
+                self._edit_log.append(EditOp(model=model, idx=idx_values[i], params=written))
+                self._redo_log = []
 
         if model == ESD1_MODEL and "Sn" in params:
             log_esd1_base_notice(idx_values[i], params["Sn"], _system_base_mva(ss))
@@ -1254,80 +1408,8 @@ class Wrapper:
             _validate_genrou_reactance_edit(current, edited)
         return edited
 
-    def undo_last_edit(self) -> TopologySnapshot:
-        """Drop the most recent add() from the replay buffer and rebuild
-        the System from the remaining history.
-
-        For blank sessions: re-creates ``andes.System()`` and replays the
-        buffer minus the popped entry.
-
-        For loaded sessions: reloads from the case file (which clears
-        the buffer) and re-applies all remaining buffer entries.
-
-        Raises ``ElementValidationError`` when there's nothing to undo.
-        """
-        if not self._replay_buffer:
-            raise ElementValidationError("no edits to undo")
-        kept = list(self._replay_buffer[:-1])
-        if self._case_path is not None:
-            # Loaded session: reload from file, then re-add the kept
-            # entries on top.
-            self.reload_case()
-            ss = self._require_loaded()
-            for model_name, params in kept:
-                try:
-                    ss.add(model_name, dict(params))
-                except Exception as exc:  # noqa: BLE001
-                    raise ElementValidationError(
-                        f"undo failed at replay of model {model_name!r}: "
-                        f"{_sanitize_message(str(exc))}"
-                    ) from exc
-                self._replay_buffer.append((model_name, dict(params)))
-            return self._topology_snapshot_locked()
-        # Blank session: replay-from-scratch with the truncated buffer.
-        self._replay_buffer = kept
-        return self._reload_blank_locked()
-
-    def delete_element(self, model: str, idx: int | str) -> TopologySnapshot:
-        """Delete a previously-added topology element by ``(model, idx)``.
-
-        Order of operations:
-
-        1. Whitelist check: ``model`` must be a known ANDES model class
-           (i.e., a key of ``_PARAMS_BY_MODEL``). Unknown models are
-           rejected with ``ElementValidationError`` BEFORE any further
-           work — this guarantees the dependents walker only sees
-           supported model classes.
-        2. Replay-buffer check: ``(model, idx)`` must correspond to a
-           successful ``add_element`` call recorded in
-           ``self._replay_buffer``. Case-file-originated elements are
-           NOT deletable in v0.1.y; the caller is directed to the
-           Reload button. The check is the ground truth for "did the
-           user add this element in this session?".
-        3. Cascade detection: walk the loaded System for elements that
-           reference the target via ``bus``/``bus1``/``bus2``. If any
-           dependents exist, raise ``ElementHasDependentsError`` with
-           the (capped) list and total count.
-        4. Atomic reload-and-replay: snapshot the current ``self._ss``
-           reference and ``_replay_buffer`` list. Pop the matching
-           ``(model, idx)`` from the buffer, then rebuild the System
-           from the kept entries via the same code path
-           ``undo_last_edit`` uses. On any rebuild failure, restore
-           the snapshots — leaving the wrapper in its pre-delete
-           state — and re-raise.
-
-        Notes:
-
-        - Disturbances (``add_disturbance``) are NOT recorded in
-          ``self._replay_buffer``; if the session has any pending
-          disturbances they are silently dropped by the rebuild. This
-          is documented as a known limitation in the v0.1.y plan; the
-          v0.2 disturbance-timeline UI will need to either record
-          disturbances in the replay buffer or refuse delete while
-          disturbances are pending.
-
-        Returns the post-delete topology snapshot.
-        """
+    def _require_editable(self) -> System:
+        """The loaded System, which every edit needs to find before ``setup()``."""
         ss = self._require_loaded()
         if self._setup_failed:
             raise SetupFailedError(
@@ -1335,165 +1417,308 @@ class Wrapper:
             )
         if ss.is_setup:
             raise DisturbanceCommitError()
+        return ss
 
-        # 1. Whitelist check — keep this before everything so the dependents
-        # walker only ever sees a known model class string.
-        if model not in _PARAMS_BY_MODEL:
+    def _require_undoable(self) -> System:
+        """The loaded System, for an undo: not one that is set up.
+
+        Unlike an edit, an undo builds the System again, so it is also the way
+        out of one whose ``setup()`` failed.
+        """
+        ss = self._require_loaded()
+        if ss.is_setup and not self._setup_failed:
+            raise DisturbanceCommitError()
+        return ss
+
+    def _require_room_in_edit_log(self) -> None:
+        """Refuse an edit the log has no room to record.
+
+        An entry dropped to make room would change what the next rebuild
+        gives (an element back that was deleted, a value back that was
+        changed), so the edit is refused instead, before it touches anything.
+        """
+        if len(self._edit_log) >= EDIT_LOG_MAX:
             raise ElementValidationError(
-                f"unknown model {model!r}; supported models: "
-                f"{sorted(_PARAMS_BY_MODEL.keys())}"
+                f"this session holds {EDIT_LOG_MAX} edits, the most it keeps to "
+                "rebuild the system from. Save the case and open the saved file "
+                "to go on editing"
             )
 
-        # 2. Replay-buffer check. The buffer stores the params dict ANDES
-        # was passed; ``idx`` lives at ``params['idx']`` (we pre-snapshot
-        # before ANDES mutates the dict in ``add_element``).
-        idx_str = str(idx)
-        match_index: int | None = None
-        for i, (m_name, params) in enumerate(self._replay_buffer):
-            if m_name != model:
-                continue
-            entry_idx = params.get("idx")
-            if entry_idx is None:
-                continue
-            if str(entry_idx) == idx_str:
-                match_index = i
-                break
-        if match_index is None:
-            # Verify the element exists at all so we can return a clear 404
-            # vs the "case-file-originated" 422 distinction.
-            existing = self._lookup_topology_entry(model, idx)
-            if existing is None:
-                raise ElementNotFoundError(
-                    f"no {model} with idx={idx!r}"
-                )
-            raise ElementValidationError(
-                "This element came from the loaded case file. "
-                "Use the Reload button in the workflow toolbar to "
-                "reset to the original case."
-            )
+    def _record_add(self, model: str, params: dict[str, Any], idx: int | str) -> None:
+        """Note a device ``ss.add`` just took, with the idx ANDES gave it.
 
-        # 3. Cascade detection. The walker returns ``TopologyEntry`` items
-        # for every device that references ``(model, idx)``.
-        dependents_full = self._find_dependents(model, idx)
-        if dependents_full:
-            total = len(dependents_full)
-            capped = dependents_full[:DELETE_DEPENDENTS_CAP]
-            # Serialize to plain dicts so the error can cross the worker
-            # Pipe without dataclass import on the parent side.
-            payload = [
-                {
-                    "idx": e.idx,
-                    "name": e.name,
-                    "kind": e.kind,
-                    "params": dict(e.params),
-                }
-                for e in capped
+        The idx is recorded also when the caller left it to ANDES, so a replay
+        gives the device the same one whatever the System holds by then.
+        """
+        self._edit_log.append(AddOp(model=model, params={**params, "idx": idx}))
+        self._redo_log = []
+
+    def undo_last_edit(self) -> TopologySnapshot:
+        """Take back the last edit: an element added, changed or deleted.
+
+        The System is built again from the case file (or from nothing, for a
+        blank session) and every recorded edit but the last, so the edits
+        before it stay, and so do the pending disturbances, which are added
+        to the new System. The edit goes to ``redo_edit``. Undoing a delete
+        also puts back the pending disturbances the delete dropped.
+
+        A System whose ``setup()`` failed can be undone out of that state,
+        since the rebuild replaces it; one that is set up cannot, as with any
+        other edit (``DisturbanceCommitError``).
+
+        Raises ``ElementValidationError`` when there is nothing to undo, or
+        when the edit added an element a pending disturbance now acts on.
+        """
+        ss = self._require_undoable()
+        if not self._edit_log:
+            raise ElementValidationError("no edits to undo")
+        op = self._edit_log[-1]
+        kept = self._edit_log[:-1]
+        disturbances = list(self._disturbance_log)
+        restored_events = list(self._restored_events)
+        if isinstance(op, AddOp):
+            acting = [
+                spec
+                for spec in disturbances
+                if spec_targets(ss, spec, [(op.model, op.params["idx"])])
             ]
-            raise ElementHasDependentsError(
-                model=model, idx=idx, dependents=payload, total=total
-            )
-
-        # 4. Atomic reload-and-replay. Snapshot first so a rebuild failure
-        # leaves the wrapper exactly as the caller saw it pre-delete.
-        ss_snapshot = self._ss
-        buffer_snapshot = list(self._replay_buffer)
-        kept = [
-            entry
-            for i, entry in enumerate(self._replay_buffer)
-            if i != match_index
-        ]
-        try:
-            if self._case_path is not None:
-                # Loaded session: re-load from file (clears the buffer),
-                # then re-apply the kept entries on top.
-                self.reload_case()
-                ss_after = self._require_loaded()
-                for model_name, params in kept:
-                    try:
-                        ss_after.add(model_name, dict(params))
-                    except Exception as exc:  # noqa: BLE001
-                        raise ElementValidationError(
-                            f"delete failed at replay of model "
-                            f"{model_name!r}: "
-                            f"{_sanitize_message(str(exc))}"
-                        ) from exc
-                    self._replay_buffer.append((model_name, dict(params)))
-            else:
-                # Blank session: replay-from-scratch with the kept buffer.
-                # ``_reload_blank_locked`` reads ``self._replay_buffer``
-                # and re-creates the System from it.
-                self._replay_buffer = kept
-                self._reload_blank_locked()
-        except Exception:
-            # Rollback to the pre-delete state. We restore ss reference and
-            # buffer; ``_setup_failed`` is implicitly cleared by the snapshot
-            # ss reference being pre-failure.
-            self._ss = ss_snapshot
-            self._replay_buffer = buffer_snapshot
-            self._setup_failed = False
-            raise
+            if acting:
+                raise ElementValidationError(
+                    f"cannot undo the addition of {op.model} {op.params['idx']!r}: "
+                    f"{len(acting)} pending disturbance(s) act on it. Reload the "
+                    "case to clear them first"
+                )
+        elif isinstance(op, DeleteOp):
+            for dropped in sorted(op.dropped, key=lambda d: d.position):
+                disturbances.insert(min(dropped.position, len(disturbances)), dropped.spec)
+            for dropped in sorted(
+                (d for d in op.dropped if d.restored_position is not None),
+                key=lambda d: d.restored_position or 0,
+            ):
+                assert dropped.restored_position is not None
+                restored_events.insert(
+                    min(dropped.restored_position, len(restored_events)),
+                    event_from_spec(dropped.spec),
+                )
+        self._adopt_system(
+            self._build_system(kept),
+            edit_log=kept,
+            redo_log=[*self._redo_log, op],
+            disturbances=disturbances,
+            restored_events=restored_events,
+        )
         return self._topology_snapshot_locked()
 
-    def _find_dependents(
-        self, model: str, idx: int | str
-    ) -> list[TopologyEntry]:
-        """Walk the loaded System for elements that reference the target.
+    def redo_edit(self) -> TopologySnapshot:
+        """Put back the edit ``undo_last_edit`` took back last.
 
-        Reference attributes per the ANDES 2.0 model surface enumerated
-        in ``_PARAMS_BY_MODEL``:
-
-        - ``Line``: ``bus1`` and ``bus2`` (terminal buses)
-        - ``PV``, ``Slack``, ``GENROU``, ``GENCLS``: ``bus`` (terminal)
-        - ``PQ``, ``ZIP``: ``bus`` (terminal)
-        - ``Shunt``: ``bus`` (terminal)
-        - ``Bus``: no outgoing references
-
-        Therefore only ``Bus`` deletions trigger a non-empty dependents
-        walk; deleting a Line / generator / load / shunt always returns
-        an empty list (nothing else in ``_PARAMS_BY_MODEL`` references
-        them).
-
-        Returns a list of ``TopologyEntry`` items. The list is uncapped;
-        callers (``delete_element``) are responsible for applying the
-        ``DELETE_DEPENDENTS_CAP`` truncation.
+        The System is built again with the edit as the last one. A delete is
+        done again as a delete: if something has come to depend on the element
+        since (a disturbance committed in between), it is refused as a first
+        delete would be. Raises ``ElementValidationError`` when there is
+        nothing to redo.
         """
-        # Bus is the only model with downstream references; everything
-        # else trivially has no dependents.
-        if model != "Bus":
-            return []
-
-        ss = self._require_loaded()
-        idx_str = str(idx)
-        dependents: list[TopologyEntry] = []
-        # ``_REFERENCE_ATTRS`` enumerates the reference attribute(s) on
-        # each model that, when matched, indicate a dependency on the
-        # target Bus. Add new ANDES model classes here as the
-        # ``_PARAMS_BY_MODEL`` whitelist grows.
-        for ref_model, ref_attrs in _REFERENCE_ATTRS.items():
-            model_obj = getattr(ss, ref_model, None)
-            if model_obj is None:
-                continue
-            idx_var = getattr(model_obj, "idx", None)
-            idx_values = list(
-                getattr(idx_var, "v", []) if idx_var is not None else []
+        self._require_editable()
+        if not self._redo_log:
+            raise ElementValidationError("no edits to redo")
+        op = self._redo_log[-1]
+        remaining = self._redo_log[:-1]
+        if isinstance(op, DeleteOp):
+            self._delete(
+                op.model, op.idx, cascade=len(op.devices) > 1 or bool(op.dropped)
             )
-            if not idx_values:
+            self._redo_log = remaining
+        else:
+            ops = [*self._edit_log, op]
+            self._adopt_system(
+                self._build_system(ops),
+                edit_log=ops,
+                redo_log=remaining,
+                disturbances=self._disturbance_log,
+                restored_events=self._restored_events,
+            )
+        return self._topology_snapshot_locked()
+
+    def delete_element(
+        self, model: str, idx: int | str, *, cascade: bool = False
+    ) -> DeleteResult:
+        """Delete one element of the System, whether the case file brought it
+        or this session added it.
+
+        ``model`` is any ANDES model the System has a device of. A device that
+        ``add_disturbance`` put there is not one: it is a pending disturbance,
+        which a reload clears.
+
+        What depends on the element cannot stay without it: the devices that
+        name it (a line on a bus, a machine on a static generator, an exciter
+        on that machine, and so on down), and the disturbances that act on
+        any of those, whether the case file defines them, a bundle or a
+        snapshot replayed them, or a client committed them. With any of
+        those, the delete is refused with ``ElementHasDependentsError``,
+        which lists them, unless ``cascade`` is true, in which case they all
+        go with it.
+
+        The System is built again from the case file and the recorded edits
+        with the delete as the last of them, so the case file is not written,
+        the pending disturbances that remain are added to the new System, and
+        ``undo_last_edit`` brings everything back. A failure leaves the
+        session as it was.
+
+        Raises ``ElementValidationError`` for a model ANDES does not have,
+        ``ElementNotFoundError`` when the System holds no such device.
+        """
+        self._require_editable()
+        self._require_room_in_edit_log()
+        result = self._delete(model, idx, cascade=cascade)
+        self._redo_log = []
+        return result
+
+    def _delete(self, model: str, idx: int | str, *, cascade: bool) -> DeleteResult:
+        """``delete_element`` without its gates, shared with ``redo_edit``."""
+        live = self._require_loaded()
+        # Membership in ``ss.models`` is the whitelist: the name never reaches
+        # an attribute lookup unless ANDES has a model called that.
+        if model not in live.models:
+            raise ElementValidationError(
+                f"unknown model {model!r}; the loaded System has devices of: "
+                f"{sorted(name for name, m in live.models.items() if m.n)}"
+            )
+        target_idx = held_idx(live.models[model], idx)
+        if target_idx is None:
+            raise ElementNotFoundError(f"no {model} with idx={idx!r}")
+        target: DeviceRef = (model, target_idx)
+        if target in self._client_events:
+            raise ElementValidationError(
+                f"{model} {target_idx!r} is a disturbance committed for the next "
+                "run, not part of the case. Reload the case to clear the "
+                "committed disturbances"
+            )
+
+        # Looked up on the live System so a refusal costs no reload. The
+        # client's own disturbance devices are left out here and found among
+        # the pending specs instead.
+        bound = [
+            ref
+            for ref in dependents(live, model, target_idx)
+            if ref not in self._client_events
+        ]
+        elements = [ref for ref in bound if not is_event(live, ref[0])]
+        case_events = [ref for ref in bound if is_event(live, ref[0])]
+        going = [target, *elements]
+        dropped: list[DroppedDisturbance] = []
+        # A pending disturbance that a bundle or a snapshot replayed is also
+        # in ``_restored_events``; it leaves that list with the spec.
+        kept_restored = list(range(len(self._restored_events)))
+        for position, spec in enumerate(self._disturbance_log):
+            if not spec_targets(live, spec, going):
                 continue
-            for attr in ref_attrs:
-                ref_var = getattr(model_obj, attr, None)
-                ref_values = list(
-                    getattr(ref_var, "v", []) if ref_var is not None else []
+            event = event_from_spec(spec)
+            restored_position = next(
+                (i for i in kept_restored if self._restored_events[i] == event), None
+            )
+            if restored_position is not None:
+                kept_restored.remove(restored_position)
+            dropped.append(
+                DroppedDisturbance(
+                    position=position, spec=spec, restored_position=restored_position
                 )
-                for i, ref_v in enumerate(ref_values):
-                    if i >= len(idx_values):
-                        break
-                    if str(ref_v) == idx_str:
-                        entry = self._lookup_topology_entry(
-                            ref_model, idx_values[i]
-                        )
-                        if entry is not None:
-                            dependents.append(entry)
-        return dependents
+            )
+        disturbances = [
+            *(self._deleted_event(live, ref) for ref in case_events),
+            *(self._deleted_spec(d) for d in dropped),
+        ]
+        entries = [
+            entry
+            for entry in (self._lookup_topology_entry(m, i) for m, i in elements)
+            if entry is not None
+        ]
+
+        if (entries or disturbances) and not cascade:
+            raise ElementHasDependentsError(
+                model=model,
+                idx=target_idx,
+                # Plain dicts, so the error can cross the worker Pipe without
+                # a dataclass import on the parent side.
+                dependents=[
+                    {"idx": e.idx, "name": e.name, "kind": e.kind, "params": dict(e.params)}
+                    for e in entries[:DELETE_DEPENDENTS_CAP]
+                ],
+                total=len(entries),
+                disturbances=[asdict(d) for d in disturbances[:DELETE_DEPENDENTS_CAP]],
+                disturbances_total=len(disturbances),
+            )
+
+        target_entry = self._lookup_topology_entry(model, target_idx)
+        # The dependents go before what they depend on, the case's events
+        # first of all, so no entry of the log leaves a reference dangling.
+        op = DeleteOp(
+            model=model,
+            idx=target_idx,
+            devices=(*case_events, *reversed(elements), target),
+            dropped=tuple(dropped),
+        )
+        ops = [*self._edit_log, op]
+        gone = {d.position for d in dropped}
+        self._adopt_system(
+            self._build_system(ops),
+            edit_log=ops,
+            redo_log=self._redo_log,
+            disturbances=[
+                spec for i, spec in enumerate(self._disturbance_log) if i not in gone
+            ],
+            restored_events=[self._restored_events[i] for i in kept_restored],
+        )
+        deleted = [*entries]
+        if target_entry is not None:
+            deleted.append(target_entry)
+        return DeleteResult(
+            topology=self._topology_snapshot_locked(),
+            deleted=deleted,
+            disturbances=disturbances,
+        )
+
+    @staticmethod
+    def _deleted_event(ss: Any, ref: DeviceRef) -> DeletedDisturbance:
+        """One of the case's own ``Fault`` / ``Toggle`` / ``Alter`` devices, as a delete reports it."""
+        model, idx = ref
+        model_obj = ss.models[model]
+        position = list(model_obj.idx.v).index(idx)
+
+        def held(name: str) -> Any:
+            values = getattr(getattr(model_obj, name, None), "v", None)
+            return None if values is None or position >= len(values) else values[position]
+
+        # As ``tensa.core.case_events`` reads them: a device that is switched
+        # off, or whose time is below zero, never fires.
+        t: float | None
+        try:
+            t = float(held("tf" if model == "Fault" else "t"))
+            if not t >= 0 or (held("u") is not None and float(held("u")) == 0):
+                t = None
+        except (TypeError, ValueError):
+            t = None
+        kind: Literal["fault", "toggle", "alter"] = (
+            "fault" if model == "Fault" else "toggle" if model == "Toggle" else "alter"
+        )
+        return DeletedDisturbance(
+            source="case",
+            kind=kind,
+            model="Bus" if model == "Fault" else _text_or_none(held("model")),
+            dev_idx=plain_idx(held("bus" if model == "Fault" else "dev")),
+            t=t,
+            name=_text_or_none(held("name")),
+        )
+
+    def _deleted_spec(self, dropped: DroppedDisturbance) -> DeletedDisturbance:
+        """A pending disturbance, as a delete reports it."""
+        event = event_from_spec(dropped.spec)
+        return DeletedDisturbance(
+            source="committed" if dropped.restored_position is None else "restored",
+            kind=event.kind,
+            model=event.model,
+            dev_idx=event.dev_idx,
+            t=event.t,
+        )
 
     def save_case(
         self, format: Literal["xlsx", "json", "raw"], filename: str
@@ -1511,9 +1736,10 @@ class Wrapper:
           GENCLS, Line, 2W transformer).
 
         Writing over the file the case was loaded from makes that file the new
-        base of the session: it now holds the elements added since the load, so
-        ``_replay_buffer`` is emptied (an undo or a delete would otherwise reload
-        the file and add those elements a second time). That write is refused
+        base of the session: it now holds the edits made since the load, so
+        ``_edit_log`` and ``_redo_log`` are emptied (an undo or a delete would
+        otherwise reload the file and apply those edits a second time). That
+        write is refused
         while the System holds disturbances a client committed or a restore
         replayed, because they would become part of the case file.
 
@@ -1595,7 +1821,8 @@ class Wrapper:
                 tmp_path.unlink()
             raise CaseSaveError(_sanitize_message(str(exc))) from exc
         if overwrites_open_case:
-            self._replay_buffer = []
+            self._edit_log = []
+            self._redo_log = []
         return target
 
     def _is_open_case_file(self, target: Path) -> bool:
@@ -1611,7 +1838,7 @@ class Wrapper:
         """Create a brand-new empty ``andes.System()`` for this session.
 
         409s if a System is already loaded — the caller should reload or
-        open a fresh session. The replay buffer is reset so the new blank
+        open a fresh session. The edit log is reset so the new blank
         session starts from zero.
         """
         if self._ss is not None:
@@ -1626,7 +1853,9 @@ class Wrapper:
         self._case_path = None
         self._addfiles = None
         self._setup_failed = False
-        self._replay_buffer = []
+        self._edit_log = []
+        self._redo_log = []
+        self._client_events = []
         return self._topology_snapshot_locked()
 
     def _lookup_topology_entry(
@@ -2757,7 +2986,7 @@ class Wrapper:
     # endpoint, and the post-run CSV export are all PMU-scoped. The
     # wrapper-side mechanics still re-use the generic ``add_element`` /
     # ``delete_element`` paths so PMUs participate in the existing
-    # ``_replay_buffer`` reload-and-replay machinery without growing a
+    # ``_edit_log`` reload-and-replay machinery without growing a
     # parallel buffer.
     #
     # PMU outputs during TDS:
@@ -2791,13 +3020,8 @@ class Wrapper:
         exist on the loaded System (the underlying ANDES error is
         opaque; we pre-validate so the user sees an actionable message).
         """
-        ss = self._require_loaded()
-        if self._setup_failed:
-            raise SetupFailedError(
-                "previous setup() failed; the System is in an inconsistent state"
-            )
-        if ss.is_setup:
-            raise DisturbanceCommitError()
+        ss = self._require_editable()
+        self._require_room_in_edit_log()
 
         # Pre-validate bus existence so the user gets a clean 422 instead
         # of ANDES's internal "no such ACNode" exception inside ss.add.
@@ -2841,21 +3065,9 @@ class Wrapper:
                 f"{_sanitize_message(str(exc))}"
             ) from exc
 
-        # Record via the same buffer ``add_element`` uses so reload-and-
-        # replay carries the PMU. Cap-at-REPLAY_BUFFER_MAX semantics
-        # mirror ``add_element`` exactly.
-        if len(self._replay_buffer) >= REPLAY_BUFFER_MAX:
-            dropped, _ = self._replay_buffer.pop(0)
-            logging.getLogger("tensa.wrapper.replay").warning(
-                "replay buffer at cap (%d); dropping oldest entry (model=%r)",
-                REPLAY_BUFFER_MAX,
-                dropped,
-            )
-        # Ensure the snapshot carries the auto-assigned idx so a replay
-        # rebuilds the same identifier (mirrors add_element's idx
-        # snapshotting discipline).
-        replay_snapshot["idx"] = new_idx
-        self._replay_buffer.append(("PMU", replay_snapshot))
+        # Record via the same log ``add_element`` uses so reload-and-
+        # replay carries the PMU, with the idx ANDES assigned.
+        self._record_add("PMU", replay_snapshot, new_idx)
 
         entry = self._lookup_topology_entry("PMU", new_idx)
         if entry is None:
@@ -2877,20 +3089,19 @@ class Wrapper:
         return _collect_models(ss, ["PMU"])
 
     def delete_pmu(self, idx: int | str) -> None:
-        """Remove a PMU previously added via :meth:`add_pmu` — Unit 14.
+        """Remove a PMU, whether :meth:`add_pmu` placed it or the case file
+        brought it — Unit 14.
 
         Same pre-setup gate as ``delete_element``. Implementation
-        delegates to ``delete_element`` so the buffer rewind +
-        reload-and-replay machinery is shared.
+        delegates to ``delete_element`` so the edit log and its
+        reload-and-replay machinery are shared.
 
         Raises ``ElementNotFoundError`` (→ 404) when no PMU with that
         idx exists; ``DisturbanceCommitError`` (→ 409) when setup is
         committed.
         """
-        # delete_element handles the pre-setup gate, the replay-buffer
-        # check (which rejects case-file-originated PMUs with an
-        # actionable 422), and the cascade walk (PMU has no downstream
-        # references so the walk returns empty).
+        # delete_element handles the pre-setup gate and the walk for
+        # dependents (nothing names a PMU, so it finds none).
         self.delete_element("PMU", idx)
 
     def export_pmu_csv(self) -> str:
@@ -3163,18 +3374,13 @@ class Wrapper:
         - The session must be pre-setup. Same gate as ``add_pmu`` /
           ``add_disturbance``.
 
-        On success the call is recorded in ``self._replay_buffer`` so
+        On success the call is recorded in ``self._edit_log`` so
         the TimeSeries survives a blank-session ``reload_case`` cycle
         (Unit 6.5 disturbance-replay parity for non-disturbance
         ``ss.add`` calls).
         """
-        ss = self._require_loaded()
-        if self._setup_failed:
-            raise SetupFailedError(
-                "previous setup() failed; the System is in an inconsistent state"
-            )
-        if ss.is_setup:
-            raise DisturbanceCommitError()
+        ss = self._require_editable()
+        self._require_room_in_edit_log()
         if int(mode) != 1:
             raise ElementValidationError(
                 "TimeSeries mode=2 (interpolated) raises NotImplementedError "
@@ -3245,18 +3451,9 @@ class Wrapper:
                 f"{_sanitize_message(str(exc))}"
             ) from exc
 
-        # Record into the generic replay buffer so blank-session
-        # reload-and-replay carries the TimeSeries (parity with PMU /
-        # add_element).
-        if len(self._replay_buffer) >= REPLAY_BUFFER_MAX:
-            dropped, _ = self._replay_buffer.pop(0)
-            logging.getLogger("tensa.wrapper.replay").warning(
-                "replay buffer at cap (%d); dropping oldest entry (model=%r)",
-                REPLAY_BUFFER_MAX,
-                dropped,
-            )
-        replay_snapshot["idx"] = new_idx
-        self._replay_buffer.append(("TimeSeries", replay_snapshot))
+        # Record into the edit log so blank-session reload-and-replay
+        # carries the TimeSeries (parity with PMU / add_element).
+        self._record_add("TimeSeries", replay_snapshot, new_idx)
 
         entry = self._lookup_topology_entry("TimeSeries", new_idx)
         if entry is None:
@@ -3277,13 +3474,13 @@ class Wrapper:
         return _collect_models(ss, ["TimeSeries"])
 
     def delete_timeseries(self, idx: int | str) -> None:
-        """Remove a TimeSeries previously added via :meth:`add_timeseries`
-        — Unit 15.
+        """Remove a TimeSeries, whether :meth:`add_timeseries` added it or
+        the case file brought it — Unit 15.
 
         Same pre-setup gate as ``delete_element``. Implementation
-        delegates to ``delete_element`` so the buffer rewind +
-        reload-and-replay machinery is shared. Cascade walk is empty
-        for TimeSeries (no other model class references it).
+        delegates to ``delete_element`` so the edit log and its
+        reload-and-replay machinery are shared. Nothing names a
+        TimeSeries, so the walk for dependents finds none.
 
         Raises ``ElementNotFoundError`` (→ 404) when no TimeSeries
         with that idx exists; ``DisturbanceCommitError`` (→ 409) when
@@ -3601,8 +3798,10 @@ class Wrapper:
                 self._setup_failed = False
                 self._se_measurements = None
                 if self._case_path is not None:
-                    self._replay_buffer = []
+                    self._edit_log = []
+                    self._redo_log = []
                 self._disturbance_log = list(specs)
+                self._client_events = []
                 self._restored_events = [event_from_spec(spec) for spec in specs]
 
         replayed = len(specs)
@@ -3977,14 +4176,14 @@ class Wrapper:
                 "addfiles": [str(a) for a in self._addfiles] if self._addfiles else None,
                 "replay": [],
             }
-        if not self._replay_buffer:
+        if not self._edit_log:
             raise NoCaseLoadedError(
                 "no case has been loaded; call load_case() or create_blank() first"
             )
         return {
             "case_path": None,
             "addfiles": None,
-            "replay": [(model, dict(params)) for model, params in self._replay_buffer],
+            "replay": ops_to_dicts(self._edit_log),
         }
 
     def adopt_sweep_source(self, source: dict[str, Any]) -> None:
@@ -3998,19 +4197,19 @@ class Wrapper:
         self._ss = None
         self._setup_failed = False
         self._disturbance_log = []
+        self._client_events = []
         self._se_measurements = None
+        self._redo_log = []
         case_path = source.get("case_path")
         if case_path is not None:
             addfiles = source.get("addfiles")
             self._case_path = Path(case_path)
             self._addfiles = [Path(a) for a in addfiles] if addfiles else None
-            self._replay_buffer = []
+            self._edit_log = []
         else:
             self._case_path = None
             self._addfiles = None
-            self._replay_buffer = [
-                (str(model), dict(params)) for model, params in source.get("replay") or []
-            ]
+            self._edit_log = ops_from_dicts(source.get("replay") or [])
 
     def run_sweep_iteration(
         self,
@@ -4224,84 +4423,19 @@ class Wrapper:
             raise SetupFailedError("setup() returned False")
 
 
-# Cap on the per-session replay buffer (Unit 2). Beyond this many adds the
-# buffer drops the oldest entries with a logged warning. 1000 is well above
-# any realistic interactive build session and well below memory concerns.
-REPLAY_BUFFER_MAX = 1000
+# Cap on the per-session edit log. An edit past it is refused (see
+# ``Wrapper._require_room_in_edit_log``). A system built element by element
+# takes a few entries per bus, so this leaves room for one of a few thousand
+# buses, and replaying the whole log stays a fraction of a second.
+EDIT_LOG_MAX = 10_000
 
 
-# Maximum number of dependents returned in the 422 ``DeleteBlockedResponse``
-# body. The full count is reported separately as ``total`` so the UI can
-# render a "Showing 25 of N dependents" footer when truncated. 25 is enough
-# to identify the structural problem on any realistic case; deleting the
-# first 25 dependents and re-trying is the recovery path.
+# Maximum number of dependents, and of disturbances, returned in the 422
+# ``DeleteBlockedResponse`` body. The full counts are reported separately as
+# ``total`` and ``disturbances_total`` so the UI can render a "Showing 25 of N"
+# footer when truncated. 25 is enough to see what a delete would take with it
+# on any realistic case.
 DELETE_DEPENDENTS_CAP = 25
-
-
-# Per-model reference attributes for the cascade walker. Each (model_class,
-# attribute_name) pair indicates a downstream reference to a Bus idx. The
-# walker uses this table when ``delete_element`` targets a Bus.
-#
-# Coverage invariant: every model in ``_PARAMS_BY_MODEL`` whose schema
-# carries ``bus``/``bus1``/``bus2`` reference fields must appear here. A
-# coverage assertion in the test suite enforces this.
-_REFERENCE_ATTRS: dict[str, tuple[str, ...]] = {
-    "Line": ("bus1", "bus2"),
-    "PV": ("bus",),
-    "Slack": ("bus",),
-    "GENROU": ("bus",),
-    "GENCLS": ("bus",),
-    "PQ": ("bus",),
-    "ZIP": ("bus",),
-    "Shunt": ("bus",),
-    # REGCA1 attaches directly to a Bus via its mandatory ``bus`` IdxParam
-    # (regca1.py:22).
-    "REGCA1": ("bus",),
-    # Unit 14: PMU also references a Bus directly via its mandatory
-    # ``bus`` IdxParam (pmu.py:15). Deleting a Bus that has a PMU
-    # attached must surface the PMU as a dependent.
-    "PMU": ("bus",),
-    # The remaining Unit 8 dynamic models reference SynGen (``syn``),
-    # Exciter (``avr``), or other non-Bus models — not a Bus directly. The
-    # cascade walker only triggers on Bus deletion, so these entries carry
-    # an empty tuple: present to satisfy the
-    # _find_dependents-coverage invariant (see
-    # ``test_find_dependents_covers_every_whitelisted_model``), but
-    # contributing no Bus-deletion fan-out.
-    "IEEEX1": (),
-    "ESDC2A": (),
-    "SEXS": (),
-    "IEEEG1": (),
-    "TGOV1": (),
-    "IEEEST": (),
-    # Unit 15 (v3.1): REGCP1 attaches directly to a Bus via its
-    # ``bus`` IdxParam (regcp1.py / regca1.py:22, the shared
-    # REGCAData base), so a Bus deletion must surface it as a
-    # dependent. The remaining R15 models reference SynGen (``syn``),
-    # Exciter (``avr``), RenGen (``reg``), or RenExciter (``ree``) —
-    # never a Bus directly — so they carry an empty tuple purely to
-    # satisfy the _find_dependents-coverage invariant.
-    "REGCP1": ("bus",),
-    "EXST1": (),
-    "ESST1A": (),
-    "GAST": (),
-    "HYGOV": (),
-    "IEESGO": (),
-    "ST2CUT": (),
-    "REECA1": (),
-    "REPCA1": (),
-    # ESD1 sits on a Bus through its mandatory ``bus`` IdxParam (pvd1.py, the
-    # PVD1Data it extends), so a Bus deletion must surface it as a dependent.
-    "ESD1": ("bus",),
-    # Unit 15: TimeSeries references a target device via the (model,
-    # dev) pair, not a Bus directly. The cascade walker only triggers
-    # on Bus deletion today; this entry is present to satisfy the
-    # coverage invariant. (Cross-model dev references are deferred —
-    # the user gets an ANDES-side error at setup if they delete the
-    # target model after staging the TimeSeries; the substrate
-    # surfaces the failure via ``SetupFailedError``.)
-    "TimeSeries": (),
-}
 
 
 # Per-model parameter metadata. Drives three things:
@@ -5331,6 +5465,11 @@ def _split_lines_transformers(
 # structure; the andes install path leaks the wheel layout. Both add noise
 # without giving the client actionable detail.
 _PATH_PATTERN = re.compile(r"/[\w./\-_]+(?:\.py|\.raw|\.dyr|\.xlsx|\.json|\.m)\b")
+
+
+def _text_or_none(value: Any) -> str | None:
+    """``value`` as text, with ``None`` left as it is."""
+    return None if value is None else str(value)
 
 
 def _sanitize_message(message: str) -> str:
