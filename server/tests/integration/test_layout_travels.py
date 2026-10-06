@@ -4,7 +4,9 @@ End to end against the real worker and ANDES's bundled IEEE 14 case: a layout
 saved beside a case is still there after the case is saved under a new name,
 after a snapshot is restored, and after a reproducibility bundle is exported
 and imported somewhere else. Each test places things, saves by one path, and
-reads the placement back.
+reads the placement back. The last section holds the size cap to the same
+rule: a layout the server takes, right up to the cap, goes by every one of
+those paths, and one over it is taken by none.
 
 Markers: ``integration`` (each test spawns a worker and loads a case).
 """
@@ -23,6 +25,7 @@ import httpx
 import pytest
 
 from tensa.api.app import make_app
+from tensa.core.layout import MAX_LAYOUT_BYTES
 from tensa.core.session import SessionManager
 
 pytestmark = pytest.mark.integration
@@ -482,3 +485,163 @@ async def test_bundle_export_refuses_a_layout_that_is_not_one(client: httpx.Asyn
     bad["figure"] = {"palette": ["black", "white"]}
     resp = await client.post(f"/api/sessions/{sid}/bundle/export", json={"layout": bad})
     assert resp.status_code == 422, resp.text
+
+
+# ---- the cap ----------------------------------------------------------------
+
+
+def _compact(doc: dict[str, Any]) -> bytes:
+    """``doc`` as a client sends it and as the server stores it: compact JSON."""
+    return json.dumps(doc, separators=(",", ":")).encode("utf-8")
+
+
+def _route(points: int = 4) -> dict[str, Any]:
+    return {
+        "routing": "polyline",
+        "bend_points": [{"x": 1000.5 + k, "y": 2000.5 + k} for k in range(points)],
+        "bus1": "1",
+        "bus2": "2",
+        "source_face": None,
+        "target_face": None,
+    }
+
+
+def _placement_of_about(size: int) -> dict[str, Any]:
+    """``_placement()`` with routed lines added until one more would take it
+    past ``size`` bytes of compact JSON: the layout of a case of a few
+    thousand buses."""
+    doc = _placement()
+    lines = doc["branches"]["line"]
+    one = len(_compact({"L00000": _route()})) - 1  # the entry and its comma, less the braces
+    for i in range((size - len(_compact(doc))) // one):
+        lines[f"L{i:05d}"] = _route()
+    assert size - one < len(_compact(doc)) <= size
+    return doc
+
+
+async def _import_elsewhere(bundle: bytes, elsewhere: Path) -> tuple[dict[str, Any], Any]:
+    """Import ``bundle`` into the empty workspace ``elsewhere`` on another
+    server; the import's answer and the layout then beside the case."""
+    elsewhere.mkdir(mode=0o700)
+    other, mgr = await _client_for(elsewhere)
+    try:
+        resp = await other.post("/api/sessions")
+        sid = str(resp.json()["session_id"])
+        resp = await other.post(
+            f"/api/sessions/{sid}/bundle/import",
+            files={"file": ("bundle.zip", bundle, "application/zip")},
+        )
+        assert resp.status_code == 200, resp.text
+        return resp.json(), await _get_layout(other, "ieee14.raw")
+    finally:
+        await other.aclose()
+        await mgr.shutdown()
+
+
+async def test_a_layout_just_under_the_cap_goes_everywhere_the_case_goes(
+    client: httpx.AsyncClient, workspace: Path, tmp_path: Path
+) -> None:
+    """The cap is on the layout as the server stores it, so one the server
+    takes fits in the file beside the case, in a snapshot and in a bundle, and
+    is read back from each of them."""
+    sid = await _open(client)
+    placed = _placement_of_about(MAX_LAYOUT_BYTES)
+    await _put_layout(client, "ieee14.raw", placed)
+    assert await _get_layout(client, "ieee14.raw") == placed
+    # The file is the layout as it was measured: no larger than what was sent.
+    assert (workspace / "ieee14.raw.layout.json").stat().st_size == len(_compact(placed))
+
+    # Saved under a new name.
+    resp = await client.post(
+        f"/api/sessions/{sid}/save", json={"filename": "mine.xlsx", "format": "xlsx"}
+    )
+    assert resp.status_code == 201, resp.text
+    assert await _get_layout(client, "mine.xlsx") == placed
+
+    # A snapshot that is sent no layout takes the one beside the case.
+    resp = await client.post(f"/api/sessions/{sid}/snapshot", json={"name": "big"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["metadata"]["has_layout"] is True
+    await _put_layout(client, "ieee14.raw", _placement(shift=900.0))
+    resp = await client.post(f"/api/sessions/{sid}/snapshot/restore", json={"name": "big"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["layout"] == placed
+    assert await _get_layout(client, "ieee14.raw") == placed
+
+    # A bundle, with the layout taken from beside the case and with it sent.
+    for n, body in enumerate(({}, {"layout": placed})):
+        bundle = await _export(client, sid, body)
+        answer, imported = await _import_elsewhere(bundle, tmp_path / f"elsewhere-{n}")
+        assert answer["layout_restored"] is True
+        assert answer["warnings"] == []
+        assert imported == placed
+
+
+def _placement_over_the_cap() -> dict[str, Any]:
+    return _placement_of_about(MAX_LAYOUT_BYTES + len(_compact({"L00000": _route()})))
+
+
+async def test_a_layout_over_the_cap_is_refused_in_a_request_body_that_is_under_it(
+    client: httpx.AsyncClient, workspace: Path
+) -> None:
+    """A request body under the cap can still hold a layout over it: the
+    server writes out every field a client left to its default. Taken, it
+    would be a layout the server could write nowhere."""
+    doc = _placement()
+    doc["branches"]["line"] = {f"L{i:06d}": {} for i in range(120_000)}
+    body = _compact(doc)
+    assert len(body) < MAX_LAYOUT_BYTES
+    resp = await client.put(
+        "/api/workspace/layout",
+        params={"case_path": "ieee14.raw"},
+        headers={"Content-Type": "application/json"},
+        content=body,
+    )
+    assert resp.status_code == 413, resp.text
+    assert str(MAX_LAYOUT_BYTES) in resp.json()["detail"]
+    assert [p.name for p in workspace.iterdir()] == ["ieee14.raw"]  # nothing written
+
+
+async def test_a_snapshot_refuses_a_layout_over_the_cap(client: httpx.AsyncClient) -> None:
+    """A snapshot that held one could not put it back: a restore writes the
+    layout beside the case, where the cap applies."""
+    sid = await _open(client)
+    resp = await client.post(
+        f"/api/sessions/{sid}/snapshot",
+        json={"name": "too-big", "layout": _placement_over_the_cap()},
+    )
+    assert resp.status_code == 413, resp.text
+    assert str(MAX_LAYOUT_BYTES) in resp.json()["detail"]
+    listing = await client.get(f"/api/sessions/{sid}/snapshots")
+    assert listing.json()["snapshots"] == []
+
+
+async def test_a_snapshot_holding_a_layout_over_the_cap_restores_without_it(
+    client: httpx.AsyncClient, workspace: Path
+) -> None:
+    """A snapshot file edited by hand, or saved before a snapshot's layout was
+    held to the cap: the operating point comes back, and the layout beside
+    the case is left as it is."""
+    sid = await _open(client)
+    beside = _placement()
+    await _put_layout(client, "ieee14.raw", beside)
+    resp = await client.post(f"/api/sessions/{sid}/snapshot", json={"name": "bloated"})
+    assert resp.status_code == 200, resp.text
+    path = workspace / "snapshots" / "ieee14" / "bloated.json"
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    stored["layout"] = _placement_over_the_cap()
+    path.write_text(json.dumps(stored), encoding="utf-8")
+
+    resp = await client.post(f"/api/sessions/{sid}/snapshot/restore", json={"name": "bloated"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["layout"] is None
+    assert await _get_layout(client, "ieee14.raw") == beside
+
+
+async def test_bundle_export_refuses_a_layout_over_the_cap(client: httpx.AsyncClient) -> None:
+    sid = await _open(client)
+    resp = await client.post(
+        f"/api/sessions/{sid}/bundle/export", json={"layout": _placement_over_the_cap()}
+    )
+    assert resp.status_code == 413, resp.text
+    assert str(MAX_LAYOUT_BYTES) in resp.json()["detail"]

@@ -658,16 +658,73 @@ def test_a_layout_that_does_not_validate_is_left_out_with_a_warning(
 
 
 @pytest.mark.unit
-def test_a_layout_over_the_cap_is_left_out_without_being_read(tmp_path: Path) -> None:
-    from tensa.core.layout import MAX_LAYOUT_BYTES
+def test_a_layout_entry_too_large_to_read_is_left_out_without_being_read(tmp_path: Path) -> None:
+    from tensa.core.layout import MAX_LAYOUT_FILE_BYTES
 
     zip_bytes = _with_entry(
-        assemble_bundle(_minimal_inputs()), "layout.json", b" " * (MAX_LAYOUT_BYTES + 1)
+        assemble_bundle(_minimal_inputs()), "layout.json", b" " * (MAX_LAYOUT_FILE_BYTES + 1)
     )
     result = _extract(zip_bytes, tmp_path)
     assert result["layout_restored"] is False
-    assert len(result["warnings"]) == 1
-    assert "the diagram layout was not imported" in result["warnings"][0]
+    assert result["warnings"] == [
+        f"the bundle's layout.json is {MAX_LAYOUT_FILE_BYTES + 1} bytes, too large to read; "
+        "the diagram layout was not imported"
+    ]
+    assert not (tmp_path / "ieee14.raw.layout.json").exists()
+
+
+@pytest.mark.unit
+def test_the_layout_entry_is_the_layout_as_it_is_stored_beside_a_case(tmp_path: Path) -> None:
+    """One stored form, the one the layout's cap is measured on: a layout that
+    fits beside a case fits in a bundle, and the other way round."""
+    from tensa.core.layout import layout_json, parse_layout
+
+    layout = _layout()
+    out = assemble_bundle(_minimal_inputs(layout=layout))
+    with zipfile.ZipFile(io.BytesIO(out)) as zf:
+        entry = zf.read("layout.json")
+    assert entry == layout_json(parse_layout(layout))
+    _extract(out, tmp_path)
+    assert (tmp_path / "ieee14.raw.layout.json").read_bytes() == entry
+
+
+@pytest.mark.unit
+def test_an_indented_layout_entry_is_imported_when_the_layout_in_it_fits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cap is on the layout, not on the entry: a bundle written with
+    indentation holds the same layout in more bytes."""
+    from tensa.core.layout import layout_json, parse_layout
+
+    layout = _layout()
+    stored = len(layout_json(parse_layout(layout)))
+    indented = json.dumps(layout, indent=2).encode("utf-8")
+    assert len(indented) > stored
+    monkeypatch.setattr("tensa.core.layout.MAX_LAYOUT_BYTES", stored)
+    zip_bytes = _with_entry(assemble_bundle(_minimal_inputs()), "layout.json", indented)
+    result = _extract(zip_bytes, tmp_path)
+    assert result["layout_restored"] is True
+    assert result["warnings"] == []
+    assert json.loads((tmp_path / "ieee14.raw.layout.json").read_text(encoding="utf-8")) == layout
+
+
+@pytest.mark.unit
+def test_a_layout_entry_holding_a_layout_over_the_cap_is_left_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tensa.core.layout import layout_json, parse_layout
+
+    layout = _layout()
+    stored = len(layout_json(parse_layout(layout)))
+    zip_bytes = assemble_bundle(_minimal_inputs(layout=layout))
+    monkeypatch.setattr("tensa.core.layout.MAX_LAYOUT_BYTES", stored - 1)
+    result = _extract(zip_bytes, tmp_path)
+    assert (tmp_path / "ieee14.raw").exists()
+    assert result["layout_restored"] is False
+    assert result["warnings"] == [
+        f"the bundle's layout.json is too large (the layout takes {stored} bytes as it is "
+        f"stored; the cap is {stored - 1}); the diagram layout was not imported"
+    ]
     assert not (tmp_path / "ieee14.raw.layout.json").exists()
 
 

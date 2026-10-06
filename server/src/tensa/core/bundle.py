@@ -19,8 +19,9 @@ The bundle contract (KTD-5) is:
 - ``layout.json`` — the layout of the case's diagram (the document
   ``tensa.core.layout`` describes), so the case opens elsewhere with the same
   picture. Omitted when the session has none. On import it is written beside
-  the case as ``<case>.layout.json``; one that does not validate is left out
-  with a warning, never a reason to refuse the bundle.
+  the case as ``<case>.layout.json``; one that does not validate or is over
+  the layout's cap is left out with a warning, never a reason to refuse the
+  bundle.
 - ``manifest.json`` — ``{ andes_version, tensa_version, case_filename,
   case_sha256, disturbance_count, run_id, exported_at, files: [...] }``.
 
@@ -54,9 +55,12 @@ from typing import Any, Literal
 from tensa.core.errors import AndesAppError as _AndesAppError
 from tensa.core.layout import (
     LAYOUT_SIDECAR_SUFFIX,
-    MAX_LAYOUT_BYTES,
+    MAX_LAYOUT_FILE_BYTES,
     LayoutError,
+    LayoutTooLargeError,
     SidecarLayout,
+    check_layout_size,
+    layout_json,
     parse_layout,
     write_layout_file,
 )
@@ -192,7 +196,9 @@ def assemble_bundle(inputs: BundleInputs, *, exported_at: str | None = None) -> 
         if inputs.layout is not None:
             info = zipfile.ZipInfo(filename=LAYOUT_ENTRY, date_time=fixed_mtime)
             info.compress_type = zipfile.ZIP_DEFLATED
-            zf.writestr(info, json.dumps(inputs.layout, indent=2, sort_keys=True))
+            # The bytes the layout has beside a case, which are the ones its
+            # cap is measured on.
+            zf.writestr(info, layout_json(parse_layout(inputs.layout)))
         info = zipfile.ZipInfo(filename="manifest.json", date_time=fixed_mtime)
         info.compress_type = zipfile.ZIP_DEFLATED
         zf.writestr(info, json.dumps(manifest, indent=2, sort_keys=True))
@@ -636,25 +642,34 @@ def _read_layout(zf: zipfile.ZipFile) -> tuple[SidecarLayout | None, str | None]
     ``(None, None)`` for a bundle with no ``layout.json`` (every bundle made
     before layouts were bundled). A layout that is too large or does not
     validate gives ``(None, <warning>)``: the case and its disturbances are
-    what reproduce a result, so the import goes ahead without it.
+    what reproduce a result, so the import goes ahead without it. As for the
+    file beside a case, the cap is held on the layout that was read and not on
+    the entry, which may have been written with indentation.
     """
     try:
         info = zf.getinfo(LAYOUT_ENTRY)
     except KeyError:
         return None, None
-    if info.file_size > MAX_LAYOUT_BYTES:
+    if info.file_size > MAX_LAYOUT_FILE_BYTES:
         return None, (
-            f"the bundle's {LAYOUT_ENTRY} is {info.file_size} bytes (cap "
-            f"{MAX_LAYOUT_BYTES}); the diagram layout was not imported"
+            f"the bundle's {LAYOUT_ENTRY} is {info.file_size} bytes, too large "
+            "to read; the diagram layout was not imported"
         )
     try:
         with zf.open(info, "r") as fh:
-            return parse_layout(fh.read()), None
+            layout = parse_layout(fh.read())
+        check_layout_size(layout)
+    except LayoutTooLargeError as exc:
+        return None, (
+            f"the bundle's {LAYOUT_ENTRY} is too large ({exc}); "
+            "the diagram layout was not imported"
+        )
     except LayoutError:
         return None, (
             f"the bundle's {LAYOUT_ENTRY} is not a valid layout; "
             "the diagram layout was not imported"
         )
+    return layout, None
 
 
 def _major_minor(version: str) -> tuple[int, int] | None:
@@ -965,7 +980,7 @@ def extract_bundle(
                 _checked_write_target(workspace, primary + LAYOUT_SIDECAR_SUFFIX), layout
             )
             layout_restored = True
-        except (OSError, BundleValidationError) as exc:
+        except (OSError, LayoutError, BundleValidationError) as exc:
             warnings.append(f"the bundle's diagram layout could not be written: {exc}")
 
     return {

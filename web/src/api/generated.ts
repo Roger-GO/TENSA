@@ -1752,7 +1752,7 @@ export interface components {
              * @description Run id of the most recent TDS run. Surfaced in the manifest for cross-referencing with run-history exports.
              */
             run_id?: string | null;
-            /** @description The diagram's layout as the client shows it, written to the bundle as ``layout.json`` so an import opens with the same picture. ``null`` uses the layout saved beside the case file; with neither, the bundle holds no ``layout.json``. */
+            /** @description The diagram's layout as the client shows it, written to the bundle as ``layout.json`` so an import opens with the same picture. ``null`` uses the layout saved beside the case file; with neither, the bundle holds no ``layout.json``. One over the cap ``PUT /workspace/layout`` holds a layout to is refused (413). */
             layout?: components["schemas"]["SidecarLayout"] | null;
         };
         /**
@@ -4078,7 +4078,7 @@ export interface components {
              * @default false
              */
             include_dill: boolean;
-            /** @description The diagram's layout as the client shows it. It is kept in the snapshot and put back beside the case when the snapshot is restored. ``null`` keeps the layout saved beside the case file, if there is one. */
+            /** @description The diagram's layout as the client shows it. It is kept in the snapshot and put back beside the case when the snapshot is restored. ``null`` keeps the layout saved beside the case file, if there is one. One over the cap ``PUT /workspace/layout`` holds a layout to is refused (413). */
             layout?: components["schemas"]["SidecarLayout"] | null;
         };
         /**
@@ -7100,7 +7100,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Body exceeds the 2 MiB sidecar cap. */
+            /** @description The body is over the 2 MiB cap on a layout, or the layout in it is. The cap is measured on the layout as the server stores it, compact JSON with every field written out, so a body that leaves fields to their defaults can be under the cap and its layout over. Nothing is written. A layout this route takes is one a save under a new name, a snapshot and a bundle can all carry. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -7202,6 +7202,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description ``layout`` is over the 2 MiB cap ``PUT /workspace/layout`` holds a layout to, measured as the server stores it (compact JSON with every field written out). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description The substrate could not produce a canonical xlsx export for the dirty case (elements ANDES can't roundtrip), or a case file has a name the importer would refuse (a Windows device name such as CON, a ':', a leading dot, a trailing dot or space), or the case has more case files than an import accepts (16); the message names the file or the count. */
             422: {
                 headers: {
@@ -7248,6 +7257,15 @@ export interface operations {
             };
             /** @description Snapshot name collision (re-issue with ``force=true``) OR no case loaded yet. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description ``layout`` is over the 2 MiB cap ``PUT /workspace/layout`` holds a layout to, measured as the server stores it (compact JSON with every field written out). */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

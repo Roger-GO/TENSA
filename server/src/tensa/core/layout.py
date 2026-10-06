@@ -38,6 +38,13 @@ name takes its layout along (:func:`carry_layout_sidecar`), and a snapshot and a
 reproducibility bundle hold a copy that restoring or importing puts back
 (:func:`read_layout_sidecar`, :func:`write_layout_sidecar`).
 
+A layout has one size, the bytes it takes as the server stores it
+(:func:`layout_json`), and one cap on it (``MAX_LAYOUT_BYTES``). Every way in
+holds a layout to that cap (the ``PUT``, the ``layout`` of a snapshot or a
+bundle export, a file or a bundle entry that is read), so whatever the server
+has taken it can also write beside a case, keep in a snapshot, pack in a
+bundle, and read back.
+
 This module imports nothing heavy (no ANDES), so the routes, the worker and the
 bundle and snapshot code can all use it.
 """
@@ -66,10 +73,21 @@ LAYOUT_SCHEMA_VERSION = "2"
 # What a layout's file name adds to its case's: ``ieee14.raw.layout.json``.
 LAYOUT_SIDECAR_SUFFIX = ".layout.json"
 
-# Cap on a layout document, in bytes. A few thousand buses with their devices and
-# the bend points of every branch come to a few hundred kB; the cap only stops a
-# runaway body.
+# Cap on a layout, in bytes of the form the server stores it in
+# (:func:`layout_json`: compact JSON with every field written out). It is
+# measured on that one form wherever a layout comes in, so a layout the server
+# takes fits in the file beside the case, in a snapshot and in a bundle, and is
+# read back from each. A few thousand buses with their devices and the bend
+# points of every branch come to about a megabyte; the cap only stops a runaway
+# document.
 MAX_LAYOUT_BYTES = 2 * 1024 * 1024
+
+# The most the server reads of a file, or of a bundle entry, that should hold a
+# layout. It is not a second cap on the layout: the same document takes two to
+# four times the room once it is indented, which is how earlier versions wrote
+# the file and how one edited by hand may come back, so a reader takes in this
+# much and then holds what it read to ``MAX_LAYOUT_BYTES``.
+MAX_LAYOUT_FILE_BYTES = 4 * MAX_LAYOUT_BYTES
 
 # The most points one branch can bend at. A routed branch has a handful.
 MAX_BEND_POINTS = 256
@@ -83,6 +101,10 @@ Side = Literal["north", "east", "south", "west"]
 
 class LayoutError(AndesAppError):
     """A document that is not a layout: not JSON, or a shape the schema refuses."""
+
+
+class LayoutTooLargeError(LayoutError):
+    """A layout over :data:`MAX_LAYOUT_BYTES` in the form the server stores it in."""
 
 
 class BusCoord(BaseModel):
@@ -459,6 +481,36 @@ def parse_layout(raw: str | bytes | Mapping[str, Any]) -> SidecarLayout:
     return upgrade_layout(layout)
 
 
+# ---- size -------------------------------------------------------------------
+
+
+def layout_json(layout: SidecarLayout) -> bytes:
+    """``layout`` as the server stores it: compact JSON in the current schema version.
+
+    The file beside a case and a bundle's ``layout.json`` are these bytes, and
+    :data:`MAX_LAYOUT_BYTES` is measured on them. Raises
+    :class:`LayoutTooLargeError` for a layout over the cap, so nothing is
+    written that a later read would turn down.
+    """
+    data = upgrade_layout(layout).model_dump_json().encode("utf-8")
+    if len(data) > MAX_LAYOUT_BYTES:
+        raise LayoutTooLargeError(
+            f"the layout takes {len(data)} bytes as it is stored; "
+            f"the cap is {MAX_LAYOUT_BYTES}"
+        )
+    return data
+
+
+def check_layout_size(layout: SidecarLayout) -> None:
+    """Raise :class:`LayoutTooLargeError` when ``layout`` is over the cap.
+
+    For a layout that was read or sent and is not being written here: however
+    the bytes it came in were laid out, the size that counts is the one it
+    takes once stored.
+    """
+    layout_json(layout)
+
+
 # ---- the file beside a case -------------------------------------------------
 
 
@@ -472,9 +524,11 @@ def write_layout_file(sidecar: Path, layout: SidecarLayout) -> None:
 
     The document goes to a temp file in the same directory first and is renamed
     over ``sidecar``, so a reader never sees half of one. It is written in the
-    current schema version. The caller has checked where ``sidecar`` points.
+    current schema version, as :func:`layout_json` gives it, and one over the
+    cap is refused (:class:`LayoutTooLargeError`) before anything is written.
+    The caller has checked where ``sidecar`` points.
     """
-    data = upgrade_layout(layout).model_dump_json(indent=2).encode("utf-8")
+    data = layout_json(layout)
     tmp_path = write_private_temp(sidecar.parent, data, prefix=".layout.")
     try:
         os.replace(tmp_path, sidecar)
@@ -489,19 +543,28 @@ def read_layout_sidecar(case_path: Path) -> SidecarLayout | None:
 
     A layout is never worth failing a save, an export or a restore for, so one
     that cannot be read, is too large or does not validate is logged and
-    treated as absent. A symlink in its place is not followed.
+    treated as absent. A symlink in its place is not followed. The cap is held
+    on the layout that was read, not on the file: a file written with
+    indentation is larger than the layout in it.
     """
     sidecar = layout_sidecar_path(case_path)
     try:
         if sidecar.is_symlink() or not sidecar.is_file():
             return None
-        if sidecar.stat().st_size > MAX_LAYOUT_BYTES:
-            log.warning("ignoring the layout beside %s: it is too large", case_path.name)
+        size = sidecar.stat().st_size
+        if size > MAX_LAYOUT_FILE_BYTES:
+            log.warning(
+                "ignoring the layout beside %s: the file is %d bytes, too large to read",
+                case_path.name,
+                size,
+            )
             return None
-        return parse_layout(sidecar.read_bytes())
+        layout = parse_layout(sidecar.read_bytes())
+        check_layout_size(layout)
     except (OSError, LayoutError) as exc:
         log.warning("ignoring the layout beside %s: %s", case_path.name, exc)
         return None
+    return layout
 
 
 def write_layout_sidecar(case_path: Path, layout: SidecarLayout) -> Path:
@@ -509,7 +572,7 @@ def write_layout_sidecar(case_path: Path, layout: SidecarLayout) -> Path:
 
     Refuses to write where a symlink sits (:class:`LayoutError`): the rename
     would replace the link and not follow it, but a link there was not put by
-    this server.
+    this server. Refuses a layout over the cap (:class:`LayoutTooLargeError`).
     """
     sidecar = layout_sidecar_path(case_path)
     if sidecar.is_symlink():
@@ -565,6 +628,7 @@ __all__ = [
     "MAX_FIGURE_SETTINGS",
     "MAX_FIGURE_TEXT",
     "MAX_LAYOUT_BYTES",
+    "MAX_LAYOUT_FILE_BYTES",
     "BusCoord",
     "LayoutBranchRoute",
     "LayoutBusbar",
@@ -572,11 +636,14 @@ __all__ = [
     "LayoutDeviceCoord",
     "LayoutError",
     "LayoutLabelOffset",
+    "LayoutTooLargeError",
     "LayoutUnit",
     "SidecarLayout",
     "Side",
     "carry_layout_sidecar",
+    "check_layout_size",
     "for_renumbered_copy",
+    "layout_json",
     "layout_sidecar_path",
     "parse_layout",
     "read_layout_sidecar",

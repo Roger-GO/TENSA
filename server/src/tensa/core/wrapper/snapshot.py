@@ -168,18 +168,26 @@ class SnapshotMixin(CaseMixin):
         """The layout a snapshot being saved should hold, as a plain dict.
 
         ``layout`` is what the caller says the diagram shows; it is validated
-        here as well as by the route, since the worker takes requests from
-        more than one caller. Without it, the layout saved beside the case
-        file is used, and a session with neither saves none.
+        and held to the layout's cap here as well as by the route, since the
+        worker takes requests from more than one caller. Without it, the
+        layout saved beside the case file is used, and a session with neither
+        saves none.
         """
-        from tensa.core.layout import LayoutError, parse_layout, read_layout_sidecar
+        from tensa.core.layout import (
+            LayoutError,
+            check_layout_size,
+            parse_layout,
+            read_layout_sidecar,
+        )
         from tensa.core.snapshot import SnapshotMetadataError
 
         if layout is not None:
             try:
-                return parse_layout(layout).model_dump()
+                sent = parse_layout(layout)
+                check_layout_size(sent)
             except LayoutError as exc:
                 raise SnapshotMetadataError(f"the snapshot's layout is not valid: {exc}") from exc
+            return sent.model_dump()
         if self._case_path is None:
             return None
         stored = read_layout_sidecar(self._case_path)
@@ -190,19 +198,26 @@ class SnapshotMixin(CaseMixin):
 
         Returns the layout (validated, in the current schema version) for the
         reply, so a client can redraw from it, or ``None`` when the snapshot
-        holds none or holds one that no longer validates. A session with no
-        case file has nowhere to keep it, so it only goes in the reply. A
-        layout that cannot be written is logged: the restore itself worked.
+        holds none or holds one that no longer validates or is over the
+        layout's cap. A session with no case file has nowhere to keep it, so
+        it only goes in the reply. A layout that cannot be written is logged:
+        the restore itself worked.
         """
-        from tensa.core.layout import LayoutError, parse_layout, write_layout_sidecar
+        from tensa.core.layout import (
+            LayoutError,
+            check_layout_size,
+            parse_layout,
+            write_layout_sidecar,
+        )
 
         if metadata.layout is None:
             return None
         log = logging.getLogger("tensa.wrapper.snapshot")
         try:
             layout = parse_layout(metadata.layout)
+            check_layout_size(layout)
         except LayoutError as exc:
-            log.warning("snapshot layout ignored, it does not validate: %s", exc)
+            log.warning("snapshot layout ignored: %s", exc)
             return None
         if self._case_path is not None:
             try:

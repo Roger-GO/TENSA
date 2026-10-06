@@ -27,6 +27,7 @@ from tensa.api._run_as_job import _run_as_job
 from tensa.api.error_mapping import map_worker_error
 from tensa.api.schemas import ProblemDetails, SidecarLayout
 from tensa.core.disturbance import AlterSpec, FaultSpec, ToggleSpec
+from tensa.core.layout import MAX_LAYOUT_BYTES, LayoutTooLargeError, check_layout_size
 from tensa.core.session import (
     SessionExpiredError,
     SessionManager,
@@ -126,7 +127,8 @@ class BundleExportRequest(BaseModel):
             "The diagram's layout as the client shows it, written to the "
             "bundle as ``layout.json`` so an import opens with the same "
             "picture. ``null`` uses the layout saved beside the case file; "
-            "with neither, the bundle holds no ``layout.json``."
+            "with neither, the bundle holds no ``layout.json``. One over the "
+            "cap ``PUT /workspace/layout`` holds a layout to is refused (413)."
         ),
     )
 
@@ -143,6 +145,33 @@ def _manager(request: Request) -> SessionManager:
         )
     assert isinstance(mgr, SessionManager)
     return mgr
+
+
+def _refuse_layout_over_the_cap(layout: SidecarLayout | None) -> None:
+    """Answer 413 to a ``layout`` over the cap ``PUT /workspace/layout`` holds one to.
+
+    A snapshot or a bundle that took a larger one would hold a layout no
+    restore and no import could put back beside a case.
+    """
+    if layout is None:
+        return
+    try:
+        check_layout_size(layout)
+    except LayoutTooLargeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=str(exc),
+        ) from exc
+
+
+_LAYOUT_OVER_THE_CAP: dict[str, Any] = {
+    "model": ProblemDetails,
+    "description": (
+        f"``layout`` is over the {MAX_LAYOUT_BYTES // (1024 * 1024)} MiB cap "
+        "``PUT /workspace/layout`` holds a layout to, measured as the server "
+        "stores it (compact JSON with every field written out)."
+    ),
+}
 
 
 def _to_http_error(exc: WorkerError) -> HTTPException:
@@ -201,6 +230,7 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
             "model": ProblemDetails,
             "description": "No case has been loaded into this session yet.",
         },
+        413: _LAYOUT_OVER_THE_CAP,
         422: {
             "model": ProblemDetails,
             "description": (
@@ -233,6 +263,7 @@ async def export_bundle(
     version-locked and undermine portability.
     """
     mgr = _manager(request)
+    _refuse_layout_over_the_cap(body.layout)
 
     args: dict[str, Any] = {
         "disturbances": [d.model_dump() for d in body.disturbances],
@@ -329,7 +360,8 @@ class SaveSnapshotRequest(BaseModel):
             "The diagram's layout as the client shows it. It is kept in the "
             "snapshot and put back beside the case when the snapshot is "
             "restored. ``null`` keeps the layout saved beside the case file, "
-            "if there is one."
+            "if there is one. One over the cap ``PUT /workspace/layout`` holds "
+            "a layout to is refused (413)."
         ),
     )
 
@@ -575,6 +607,7 @@ def _map_snapshot_error(exc: WorkerError) -> HTTPException:
                 "OR no case loaded yet."
             ),
         },
+        413: _LAYOUT_OVER_THE_CAP,
         422: {
             "model": ProblemDetails,
             "description": "Invalid snapshot name or save-time failure inside ANDES.",
@@ -595,6 +628,7 @@ async def save_snapshot(
     so a restore brings the placement back with the operating point.
     """
     mgr = _manager(request)
+    _refuse_layout_over_the_cap(body.layout)
     try:
         # The job's summary is what a Retry repeats; the layout is not a knob.
         async with _run_as_job(

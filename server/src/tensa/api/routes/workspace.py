@@ -49,6 +49,7 @@ from tensa.core.layout import (
     LAYOUT_SIDECAR_SUFFIX,
     MAX_LAYOUT_BYTES,
     LayoutError,
+    LayoutTooLargeError,
     parse_layout,
     write_layout_file,
 )
@@ -510,6 +511,10 @@ def _enforce_layout_content_length(request: Request) -> None:
     """Reject oversized PUT bodies via the ``Content-Length`` header before
     FastAPI parses the body. Runs as a route dependency so a 413 short-circuits
     Pydantic body parsing.
+
+    This only keeps a runaway body from being parsed. The cap proper is on the
+    layout as it is stored, which ``put_layout`` holds it to once it is
+    validated: a body can be under the cap and the layout in it over.
     """
     cl_header = request.headers.get("content-length")
     if cl_header is None:
@@ -542,7 +547,13 @@ def _enforce_layout_content_length(request: Request) -> None:
         413: {
             "model": ProblemDetails,
             "description": (
-                f"Body exceeds the {_MAX_LAYOUT_BYTES // (1024 * 1024)} MiB sidecar cap."
+                f"The body is over the {_MAX_LAYOUT_BYTES // (1024 * 1024)} MiB cap on "
+                "a layout, or the layout in it is. The cap is measured on the "
+                "layout as the server stores it, compact JSON with every field "
+                "written out, so a body that leaves fields to their defaults "
+                "can be under the cap and its layout over. Nothing is written. "
+                "A layout this route takes is one a save under a new name, a "
+                "snapshot and a bundle can all carry."
             ),
         },
         422: {
@@ -583,6 +594,11 @@ async def put_layout(
     except WorkspacePathError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except LayoutTooLargeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=str(exc),
         ) from exc
 

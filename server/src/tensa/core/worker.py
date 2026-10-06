@@ -883,7 +883,12 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
         case_files_from_workspace,
         check_exportable_case_files,
     )
-    from tensa.core.layout import LayoutError, parse_layout, read_layout_sidecar
+    from tensa.core.layout import (
+        LayoutError,
+        check_layout_size,
+        parse_layout,
+        read_layout_sidecar,
+    )
 
     # _edit_log is the substrate-side signal of "case has been edited
     # since load". Length > 0 with a non-None case path means the user
@@ -970,9 +975,11 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     layout: dict[str, Any] | None = None
     if isinstance(layout_raw, dict):
         try:
-            layout = parse_layout(layout_raw).model_dump()
+            sent = parse_layout(layout_raw)
+            check_layout_size(sent)
         except LayoutError as exc:
             raise AndesAppError(f"'layout' is not a valid layout: {exc}") from exc
+        layout = sent.model_dump()
     elif layout_raw is not None:
         raise AndesAppError("'layout' must be a layout object or null")
     elif case_path is not None:

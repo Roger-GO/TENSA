@@ -22,10 +22,14 @@ from tensa.core.layout import (
     MAX_FIGURE_SETTINGS,
     MAX_FIGURE_TEXT,
     MAX_LAYOUT_BYTES,
+    MAX_LAYOUT_FILE_BYTES,
     LayoutError,
+    LayoutTooLargeError,
     SidecarLayout,
     carry_layout_sidecar,
+    check_layout_size,
     for_renumbered_copy,
+    layout_json,
     layout_sidecar_path,
     parse_layout,
     read_layout_sidecar,
@@ -323,8 +327,8 @@ def test_no_file_reads_as_no_layout(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "content",
-    ["{not json", json.dumps({"schema_version": "2"}), "x" * (MAX_LAYOUT_BYTES + 1)],
-    ids=["not-json", "not-a-layout", "over-the-cap"],
+    ["{not json", json.dumps({"schema_version": "2"}), " " * (MAX_LAYOUT_FILE_BYTES + 1)],
+    ids=["not-json", "not-a-layout", "too-large-to-read"],
 )
 def test_a_file_that_cannot_be_used_reads_as_no_layout_and_is_logged(
     tmp_path: Path, caplog: pytest.LogCaptureFixture, content: str
@@ -334,6 +338,115 @@ def test_a_file_that_cannot_be_used_reads_as_no_layout_and_is_logged(
     with caplog.at_level(logging.WARNING, logger="tensa.layout"):
         assert read_layout_sidecar(case) is None
     assert "ignoring the layout beside ieee14.raw" in caplog.text
+
+
+# ---- the cap ----------------------------------------------------------------
+
+
+def _with_routes(count: int) -> dict[str, Any]:
+    """``_v2()`` with ``count`` more routed lines, each a couple of hundred bytes."""
+    doc = _v2()
+    route = doc["branches"]["line"]["Line_1"]
+    doc["branches"]["line"].update({f"L{i:04d}": route for i in range(count)})
+    return doc
+
+
+def test_the_file_holds_the_layout_as_compact_json(tmp_path: Path) -> None:
+    """One stored form: it is what the cap is measured on, so it is also what
+    is written."""
+    layout = parse_layout(_v2())
+    written = write_layout_sidecar(tmp_path / "ieee14.raw", layout)
+    data = written.read_bytes()
+    assert data == layout_json(layout)
+    assert json.loads(data) == _v2()
+    assert b"\n" not in data and b": " not in data and b", " not in data
+
+
+def test_the_cap_is_on_the_layout_as_it_is_stored(monkeypatch: pytest.MonkeyPatch) -> None:
+    layout = parse_layout(_with_routes(20))
+    size = len(layout_json(layout))
+    monkeypatch.setattr("tensa.core.layout.MAX_LAYOUT_BYTES", size)
+    check_layout_size(layout)  # at the cap: taken
+    monkeypatch.setattr("tensa.core.layout.MAX_LAYOUT_BYTES", size - 1)
+    with pytest.raises(LayoutTooLargeError) as raised:
+        check_layout_size(layout)
+    assert f"{size} bytes" in str(raised.value)
+    assert str(size - 1) in str(raised.value)
+    with pytest.raises(LayoutTooLargeError):
+        layout_json(layout)
+
+
+def test_a_field_left_to_its_default_counts_as_it_is_written_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A document can be shorter than the layout it holds: the server writes
+    every field, and ``{}`` for a branch becomes its six fields."""
+    doc = {**_v2(), "branches": {"line": {f"L{i:04d}": {} for i in range(100)}}}
+    sent = len(json.dumps(doc, separators=(",", ":")))
+    stored = len(layout_json(parse_layout(doc)))
+    assert stored > 2 * sent
+    monkeypatch.setattr("tensa.core.layout.MAX_LAYOUT_BYTES", sent)
+    with pytest.raises(LayoutTooLargeError):
+        check_layout_size(parse_layout(doc))
+
+
+def test_a_layout_over_the_cap_is_not_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = tmp_path / "ieee14.raw"
+    layout = parse_layout(_with_routes(20))
+    monkeypatch.setattr("tensa.core.layout.MAX_LAYOUT_BYTES", len(layout_json(layout)) - 1)
+    with pytest.raises(LayoutTooLargeError):
+        write_layout_sidecar(case, layout)
+    assert list(tmp_path.iterdir()) == []  # no file, and no temp file either
+
+
+def test_a_file_written_with_indentation_reads_when_the_layout_in_it_fits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The file is larger than the cap and the layout in it is not: earlier
+    versions wrote the file indented, and one edited by hand may be."""
+    case = tmp_path / "ieee14.raw"
+    doc = _with_routes(20)
+    indented = json.dumps(doc, indent=2)
+    stored = len(layout_json(parse_layout(doc)))
+    assert len(indented) > 2 * stored
+    monkeypatch.setattr("tensa.core.layout.MAX_LAYOUT_BYTES", stored)
+    monkeypatch.setattr("tensa.core.layout.MAX_LAYOUT_FILE_BYTES", 4 * stored)
+    layout_sidecar_path(case).write_text(indented, encoding="utf-8")
+    read = read_layout_sidecar(case)
+    assert read is not None
+    assert read.model_dump() == doc
+    # And it is carried to a new name, where it is written the compact way.
+    target = tmp_path / "mine.xlsx"
+    assert carry_layout_sidecar(case, target) is True
+    assert layout_sidecar_path(target).stat().st_size == stored
+
+
+def test_a_file_whose_layout_is_over_the_cap_reads_as_no_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Whatever the size of the file: this one is shorter than the cap, and
+    the layout it holds would not fit in the file the server writes."""
+    case = tmp_path / "ieee14.raw"
+    doc = {**_v2(), "branches": {"line": {f"L{i:04d}": {} for i in range(100)}}}
+    text = json.dumps(doc, separators=(",", ":"))
+    monkeypatch.setattr("tensa.core.layout.MAX_LAYOUT_BYTES", len(text))
+    layout_sidecar_path(case).write_text(text, encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="tensa.layout"):
+        assert read_layout_sidecar(case) is None
+    assert "ignoring the layout beside ieee14.raw" in caplog.text
+    assert "as it is stored" in caplog.text
+
+
+def test_the_real_cap_takes_a_few_thousand_buses_with_every_branch_routed() -> None:
+    """What the cap is sized for, with room to spare, and the file guard above it."""
+    doc = _v2()
+    doc["coordinates"] = {str(i): {"x": 100.5 * i, "y": 40.25 * i} for i in range(3000)}
+    route = doc["branches"]["line"]["Line_1"]
+    doc["branches"]["line"] = {f"Line_{i}": route for i in range(4500)}
+    assert len(layout_json(parse_layout(doc))) < MAX_LAYOUT_BYTES // 2
+    assert len(json.dumps(doc, indent=2)) < MAX_LAYOUT_FILE_BYTES
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
