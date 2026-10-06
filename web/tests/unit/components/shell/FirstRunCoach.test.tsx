@@ -126,6 +126,28 @@ describe('<FirstRunCoach />', () => {
     expect(card).toHaveTextContent(/fault.*under Disturbances in the left rail.*Run mode to TDS/i);
   });
 
+  it('keeps off the diagram once a case is open: steps 2 and 3 sit at the right', async () => {
+    // Step 2 used to sit under the Run button, on the top of the diagram, where
+    // it took the click or the drag meant for the first bus of the case.
+    const { FirstRunCoach } = await import('@/components/shell/FirstRunCoach');
+    const { useFirstRunStore } = await import('@/store/firstRun');
+    render(<FirstRunCoach />);
+    const card = screen.getByTestId('first-run-coach');
+    expect(card.getAttribute('data-anchor')).toBe('top-left');
+    act(() => {
+      useFirstRunStore.getState().nextStep();
+    });
+    expect(card.getAttribute('data-step')).toBe('2');
+    expect(card.getAttribute('data-anchor')).toBe('top-right');
+    expect(card.className).toContain('right-4');
+    expect(card.className).not.toContain('left-1/2');
+    act(() => {
+      useFirstRunStore.getState().nextStep();
+    });
+    expect(card.getAttribute('data-step')).toBe('3');
+    expect(card.getAttribute('data-anchor')).toBe('top-right');
+  });
+
   it('step 3 points at the Analysis tab in the bottom drawer, where EIG / CPF / SE live', async () => {
     const { FirstRunCoach } = await import('@/components/shell/FirstRunCoach');
     const { useFirstRunStore } = await import('@/store/firstRun');

@@ -21,10 +21,13 @@ import { cn } from '@/lib/cn';
  *   visible. That's the whole point: the coach exists to nudge, not
  *   to block.
  * - **Anchored copy, simple positioning.** The card lives in a fixed
- *   corner per step (top-left for step 1, top-center for step 2,
- *   top-right for step 3) with copy that names the target ("Look at
- *   the left rail to pick a case…"). No intersection observer, no
- *   connector arrow.
+ *   corner per step (top-left for step 1, top-right for steps 2 and
+ *   3) with copy that names the target ("Look at the left rail to
+ *   pick a case…"). No intersection observer, no connector arrow.
+ *   From step 2 on a case is open, and the card keeps off its
+ *   diagram: under the Run button it covered the top of the diagram,
+ *   where the first bus of the example cases is drawn, and took the
+ *   click or the drag meant for that bus.
  * - **Auto-advance.** Step 1 watches the case slice; once a case is
  *   loaded, advances to step 2. Step 2 watches the PFlow slice; once
  *   a converged result lands, advances to step 3. Step 3 has a
@@ -41,7 +44,7 @@ interface StepCopy {
   title: string;
   body: string;
   /** Anchor side — drives the fixed-position class. */
-  anchor: 'top-left' | 'top-center' | 'top-right';
+  anchor: 'top-left' | 'top-right';
   /** Primary CTA label for this step. */
   cta: string;
 }
@@ -56,7 +59,7 @@ const STEP_COPY: Record<Exclude<CoachStep, null>, StepCopy> = {
   2: {
     title: 'Run power flow',
     body: 'Use the Run button at the top of the screen to compute the operating point. The Inspector and Results table populate when PF converges. To simulate a fault instead, add it under Disturbances in the left rail and switch the Run mode to TDS.',
-    anchor: 'top-center',
+    anchor: 'top-right',
     cta: 'Got it',
   },
   3: {
@@ -73,8 +76,9 @@ const ANCHOR_CLASS: Record<StepCopy['anchor'], string> = {
   // overflows narrow viewports. Step 1 ('top-left') sits just RIGHT of
   // the left rail (~240 px) instead of on top of it — the card must
   // never cover the Saved-cases list it is pointing the user at.
+  // 'top-right' sits over the Inspector, which has nothing in it until
+  // an element is selected.
   'top-left': 'top-16 left-[260px]',
-  'top-center': 'top-16 left-1/2 -translate-x-1/2',
   'top-right': 'top-16 right-4',
 };
 
@@ -126,6 +130,7 @@ export function FirstRunCoach() {
       aria-label="First-run coach"
       data-testid="first-run-coach"
       data-step={coachStep}
+      data-anchor={copy.anchor}
       className={cn(
         'fixed z-40 w-72 max-w-[calc(100vw-2rem)]',
         'border-border bg-background text-foreground',
