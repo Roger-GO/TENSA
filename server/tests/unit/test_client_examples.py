@@ -344,6 +344,138 @@ def test_the_mcp_metrics_tool_runs_the_simulation_and_returns_only_the_metrics(
     }
 
 
+@pytest.mark.parametrize(
+    ("dae_vars", "refusal"),
+    [
+        ([], "dae_vars names no variable"),
+        ([f"v Bus {i}" for i in range(65)], "dae_vars names 65 variables; the metrics describe at most 64"),
+    ],
+)
+def test_the_mcp_metrics_tool_refuses_what_the_metrics_would_before_it_runs_anything(
+    monkeypatch: pytest.MonkeyPatch, dae_vars: list[str], refusal: str
+) -> None:
+    """With no variable the run records nothing and ``traces`` is null; with more
+    than the metrics take, the whole run was made to be answered 422."""
+    pytest.importorskip("mcp.server.fastmcp")
+    from tensa import mcp_server
+
+    calls: list[str] = []
+    monkeypatch.setattr(mcp_server, "_api", lambda _m, path, _b=None: calls.append(path))
+
+    with pytest.raises(ValueError, match=refusal):
+        mcp_server.get_response_metrics("abc", 3.0, dae_vars)
+    assert calls == []
+
+
+def test_the_mcp_metrics_tool_counts_a_name_given_twice_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    from tensa import mcp_server
+    from tensa.api.schemas import MAX_METRIC_SERIES
+
+    def fake_api(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
+        if path.endswith("/tds"):
+            return {
+                "converged": True,
+                "final_t": 1.0,
+                "traces": {"t": [0.0, 1.0], "variables": [], "truncated": False},
+            }
+        raise AssertionError(f"unexpected call to {path}")
+
+    monkeypatch.setattr(mcp_server, "_api", fake_api)
+    names = [f"v Bus {i}" for i in range(MAX_METRIC_SERIES)]
+
+    # 64 names and one of them again is 64 variables, which a run takes.
+    answer = mcp_server.get_response_metrics("abc", 1.0, [*names, names[0]])
+    assert "error" in answer
+
+
+@pytest.mark.parametrize(
+    "traces", [None, {"t": [], "variables": [], "truncated": False}], ids=["null", "empty"]
+)
+def test_the_mcp_metrics_tool_says_so_when_the_run_recorded_nothing(
+    monkeypatch: pytest.MonkeyPatch, traces: Any
+) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    from tensa import mcp_server
+
+    calls: list[str] = []
+
+    def fake_api(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
+        calls.append(path)
+        return {"converged": False, "final_t": 0.0, "traces": traces}
+
+    monkeypatch.setattr(mcp_server, "_api", fake_api)
+
+    answer = mcp_server.get_response_metrics("abc", 3.0, ["omega GENROU 1"])
+
+    assert answer == {
+        "converged": False,
+        "final_t": 0.0,
+        "error": "The run recorded none of the variables, so there is no response to describe.",
+    }
+    # The metrics were not asked for a body with no series, which they refuse.
+    assert calls == ["/sessions/abc/tds"]
+
+
+def test_the_mcp_metrics_tool_thins_a_run_with_more_samples_than_the_metrics_take(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    from tensa import mcp_server
+    from tensa.api.schemas import MAX_METRIC_SAMPLES
+
+    samples = 2 * MAX_METRIC_SAMPLES + 3
+    sent: list[dict[str, Any]] = []
+
+    def fake_api(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
+        if path.endswith("/tds"):
+            return {
+                "converged": True,
+                "final_t": float(samples - 1),
+                "traces": {
+                    "t": [float(i) for i in range(samples)],
+                    "variables": [{"name": "omega GENROU 1", "values": list(range(samples))}],
+                    "truncated": False,
+                },
+            }
+        assert body is not None
+        sent.append(body)
+        return {"results": [{"name": "omega GENROU 1", "error": None}]}
+
+    monkeypatch.setattr(mcp_server, "_api", fake_api)
+
+    answer = mcp_server.get_response_metrics("abc", 1.0, ["omega GENROU 1"])
+
+    (series,) = sent[0]["series"]
+    assert len(series["t"]) == len(series["y"]) <= MAX_METRIC_SAMPLES
+    # Every third sample, each value still with its own time, and the last one kept.
+    assert answer["every_nth_sample"] == 3
+    assert len(series["t"]) > MAX_METRIC_SAMPLES // 2
+    assert series["t"][:3] == [0.0, 3.0, 6.0]
+    assert series["y"] == [int(t) for t in series["t"]]
+    assert series["t"][-1] == float(samples - 1)
+
+
+@pytest.mark.parametrize(
+    ("samples", "every", "kept"),
+    [
+        (5, 1, [0, 1, 2, 3, 4]),
+        (7, 3, [0, 3, 6]),
+        (8, 3, [0, 3, 6, 7]),
+        (2, 5, [0, 1]),
+    ],
+)
+def test_thinning_keeps_the_first_sample_and_the_last(
+    samples: int, every: int, kept: list[int]
+) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    from tensa import mcp_server
+
+    assert list(mcp_server._thinned(samples, every)) == kept
+
+
 def _curl_commands(script: Path) -> list[str]:
     """The lines of a shell script that run ``curl``, continuation lines joined."""
     text = script.read_text(encoding="utf-8").replace("\\\n", " ")

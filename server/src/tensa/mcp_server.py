@@ -24,6 +24,9 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+# What POST /response-metrics takes in one request.
+from tensa.api.schemas import MAX_METRIC_SAMPLES, MAX_METRIC_SERIES
+
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError as exc:  # pragma: no cover - exercised only without the extra
@@ -276,25 +279,66 @@ def get_response_metrics(
     the damping ratio and frequency of its oscillation. t_start / t_end narrow
     the window the metrics are read over (a fault applied at t=1 s: t_start=1).
     The values are in ANDES's units (per unit for speed and voltage). The
-    traces themselves are not returned; use run_tds for them.
+    traces themselves are not returned; use run_tds for them. Takes 1 to 64
+    variables. A run with more samples than the metrics take is read at every
+    second or third sample, and the answer says so ("every_nth_sample").
     """
+    # What the metrics would refuse is refused here, before the run is made for it.
+    named = len(dict.fromkeys(dae_vars))
+    if named == 0:
+        raise ValueError(
+            "dae_vars names no variable: give at least one ANDES variable to describe "
+            "(list_dae_variables lists them)."
+        )
+    if named > MAX_METRIC_SERIES:
+        raise ValueError(
+            f"dae_vars names {named} variables; the metrics describe at most "
+            f"{MAX_METRIC_SERIES} in one call."
+        )
     run = _api("POST", f"/sessions/{session_id}/tds", {"tf": tf, "dae_vars": dae_vars})
-    traces = run["traces"]
+    traces = run.get("traces")
+    if not traces or not traces.get("variables"):
+        return {
+            "converged": run.get("converged"),
+            "final_t": run.get("final_t"),
+            "error": "The run recorded none of the variables, so there is no response to describe.",
+        }
+    # One series may hold ``MAX_METRIC_SAMPLES`` samples, and a long run of one
+    # or two variables records more: thin it rather than lose the run to a 422.
+    samples = len(traces["t"])
+    every = 1 if samples <= MAX_METRIC_SAMPLES else -(-samples // (MAX_METRIC_SAMPLES - 1))
+    kept = _thinned(samples, every)
+    t = [traces["t"][i] for i in kept]
     body: dict[str, Any] = {
         "series": [
-            {"name": v["name"], "t": traces["t"], "y": v["values"]} for v in traces["variables"]
+            {"name": v["name"], "t": t, "y": [v["values"][i] for i in kept]}
+            for v in traces["variables"]
         ]
     }
     for key, value in (("t_start", t_start), ("t_end", t_end)):
         if value is not None:
             body[key] = value
     metrics = _api("POST", "/response-metrics", body)
-    return {
+    answer = {
         "converged": run["converged"],
         "final_t": run["final_t"],
         "truncated": traces["truncated"],
         "metrics": metrics["results"],
     }
+    if every > 1:
+        answer["every_nth_sample"] = every
+    return answer
+
+
+def _thinned(samples: int, every: int) -> range | list[int]:
+    """The samples to keep of ``samples`` when only every ``every``-th is: the
+    first, each ``every``-th after it, and the last, which is where the run ended."""
+    if every <= 1:
+        return range(samples)
+    kept = list(range(0, samples, every))
+    if kept[-1] != samples - 1:
+        kept.append(samples - 1)
+    return kept
 
 
 @mcp.tool()
