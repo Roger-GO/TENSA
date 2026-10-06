@@ -77,7 +77,7 @@ The **Analysis** tab has a sub-tab for each routine. `Ctrl+Shift+M` (or **Expand
 
 **Compare** sets two power flows side by side: the change of every bus voltage and angle, of every line's flow, loss and loading, and of the system totals, with the largest change first. The last ten converged power flows are kept.
 
-**TDS** sets the run: the final time (10 s by default), the step, the groups of variables to stream, the integrator (a fixed-step trapezoidal one, or the adaptive QNDF) and, optionally, any ANDES variable by name. **Frequency control** adds a droop or a fast frequency response on a battery or another distributed generator. The results stream into the **Plot** tab while the run goes: bus voltage, bus angle, generator speed and generator angle, with two cursors that read values and differences between two instants, a scrub bar to replay the run, and a table of response metrics (nadir, rate of change, settling time, overshoot, damping).
+**TDS** sets the run: the end time (10 s by default), the step, the groups of variables to stream, the integrator (a fixed-step trapezoidal one, or the adaptive QNDF) and, optionally, any ANDES variable by name. **Frequency control** adds a droop or a fast frequency response on a battery or another distributed generator. The results stream into the **Plot** tab while the run goes: bus voltage, bus angle, generator speed and generator angle, with two cursors that read values and differences between two instants, a scrub bar to replay the run, and a table of response metrics (nadir, rate of change, settling time, overshoot, damping).
 
 ![Time-domain run with a fault on bus 4 in the results view](img/ui-tds.jpg)
 

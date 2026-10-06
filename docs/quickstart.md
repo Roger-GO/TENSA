@@ -18,6 +18,8 @@ The workspace is the directory the server reads case files from. If it is empty,
 
 If you leave out `--open`, open the address in a browser yourself. Use `http://127.0.0.1:8000` or `http://localhost:8000`, the two spellings the server accepts by default.
 
+To have the app in a window of its own instead of a browser tab, run `tensa desktop`, which [Install](install.md#a-window-of-its-own) describes. The rest of this page is the same there.
+
 ## 2. Load a case
 
 In the left rail, under **Saved cases**, click `ieee14_full.xlsx`. The one-line diagram appears, the **Buses** table at the bottom lists the 14 buses, and the left rail shows the case with its state, `pre-setup`, which means nothing has run yet.

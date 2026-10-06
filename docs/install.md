@@ -68,6 +68,30 @@ pip install "tensa[mcp]"
 
 See [Agents and MCP](agents.md) for how to connect a client.
 
+### A window of its own
+
+`tensa desktop` shows the same app in a native window instead of a browser tab. It starts the server on a free port of your machine, opens the window on it, and stops the server when you close the window. It needs the `desktop` extra, which installs [pywebview](https://pywebview.flowrl.com):
+
+=== "Windows and macOS"
+
+    ```bash
+    pip install "tensa[desktop]"
+    tensa desktop
+    ```
+
+    Windows uses the WebView2 runtime, which comes with Windows 11 and is a free download for Windows 10. macOS uses WebKit and needs nothing else.
+
+=== "Linux"
+
+    ```bash
+    pip install "tensa[desktop]" "pywebview[qt]"
+    tensa desktop
+    ```
+
+    On Linux the window needs a GUI toolkit, which pywebview does not bring. `"pywebview[qt]"` adds Qt. On X11, Qt also needs the system library `libxcb-cursor0`: `sudo apt install libxcb-cursor0` on Debian and Ubuntu, `sudo dnf install xcb-util-cursor` on Fedora, `sudo pacman -S xcb-util-cursor` on Arch. GTK with WebKitGTK from your distribution works instead of Qt.
+
+Before it starts anything, the command checks that a window can open and says what is missing, with the command that installs it. [Troubleshooting](troubleshooting.md#tensa-desktop-does-not-open-a-window) has the messages. `tensa serve --open` shows the same app in your browser and needs none of this.
+
 ## Upgrade
 
 ```bash

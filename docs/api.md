@@ -11,6 +11,7 @@ The server also publishes the API itself: `GET /openapi.json` is the OpenAPI sch
 - **No authentication.** The server trusts the local user and accepts only requests that name its own address in the `Host` and `Origin` headers. See [Concepts](concepts.md#trust-model).
 - **Case paths are relative to the workspace.** `"ieee14_full.xlsx"` names a file in the directory given to `--workspace`. An absolute path, or one with `..`, is refused with a 400. Put a file there with `POST /api/workspace/files?name=<file>`, whose body is the file's bytes (not a multipart form, which answers 415).
 - **Identifiers are strings.** A bus, line or generator is named by the `idx` ANDES gives it, as in `"7"` or `"Line_6"`. A reference from one device to another (`bus`, `gen`, `syn`) can be sent as `"5"` or `5`.
+- **Health check.** `GET /api/health` needs no session and answers `{"status": "ok", ...}` with the TENSA and ANDES versions, the open sessions against the `--max-sessions` limit, and whether the code ANDES generates is ready. It never waits for a worker, so it answers while a run holds every session: it is the call for a script that waits for the server to come up, a process supervisor or a container health check.
 
 ## The workflow
 

@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Start with what the program tells you. The terminal where `tensa serve` runs prints the address it serves, the workspace it uses, and every warning and error the server raises. In the UI, the **Messages** tab lists what ANDES logged while it loaded the case and ran, and a run that fails says why in a banner or a toast. `tensa --version` prints the TENSA and ANDES versions, which a bug report needs.
+Start with what the program tells you. The terminal where `tensa serve` runs prints the address it serves, the workspace it uses, and every warning and error the server raises. In the UI, the **Messages** tab lists what ANDES logged while it loaded the case and ran, and a run that fails says why in a banner or a toast. `tensa --version` prints the TENSA and ANDES versions, which a bug report needs. [Seeing what the server did](#seeing-what-the-server-did) says how to get more out of the server.
 
 The first sections are for every operating system. Sections for [Linux](#linux), [macOS](#macos) and [Windows](#windows) follow.
 
@@ -31,6 +31,35 @@ The page or a request answers 400 with `bad-host` or `bad-origin` when you reach
 ### The workspace has no cases
 
 An empty workspace is filled with three example cases the first time the server starts. A workspace that already holds a case file, even an unrelated one, is not filled. The list shows files with the extensions `.xlsx`, `.raw`, `.dyr`, `.m` and `.json`. Add the examples by copying cases in, dropping files on the window, or pointing `--workspace` at an empty directory.
+
+### `tensa desktop` does not open a window
+
+The command checks that a window can open before it creates the workspace or starts the server. When one cannot, it prints one message that says what is missing and how to install it, and exits with status 1:
+
+- **pywebview is not installed.** Install it with `pip install "tensa[desktop]"`, or on Linux `pip install "tensa[desktop]" "pywebview[qt]"`. If `pip` warns that tensa "does not provide the extra desktop", the installed tensa is older than the extra, and the message names pywebview itself instead.
+- **The session has no display** (Linux, over SSH or in a container). A window needs a desktop session. Use `tensa serve` and a browser instead, as under [Reaching the server from another machine](#reaching-the-server-from-another-machine).
+- **No GUI toolkit is installed** (Linux). pywebview does not bring one. `pip install "tensa[desktop]" "pywebview[qt]"` adds Qt, or install WebKitGTK and PyGObject from your distribution.
+- **Qt cannot start, because the system library `libxcb-cursor0` is missing** (Linux, X11). Install it with `sudo apt install libxcb-cursor0` on Debian and Ubuntu, `sudo dnf install xcb-util-cursor` on Fedora, or `sudo pacman -S xcb-util-cursor` on Arch. Without the check, Qt would abort the whole program with `Could not load the Qt platform plugin "xcb"` and exit status 134.
+
+Every one of these messages ends with the way that needs no window: `tensa serve --open` shows the same app in your browser.
+
+### Seeing what the server did
+
+At its default level the server logs its startup, the address it serves and whatever goes wrong. For more, start it with `--log-level debug`, which adds a line for every request (the method, the path, the status and the time it took), and with `--log-file` to keep the log in a file as well:
+
+```bash
+tensa serve --workspace ~/tensa-cases --port 8000 --log-level debug --log-file tensa.log
+```
+
+A file name with no directory goes in `~/.tensa/logs`, and the server logs the full path when it starts. The file rotates at 5 MB. `--log-json` writes each line as a JSON object, for a tool that reads logs. `tensa desktop` takes the same three options.
+
+To ask a running server whether it is up, without opening a session:
+
+```bash
+curl -s http://127.0.0.1:8000/api/health
+```
+
+It answers `{"status": "ok", ...}` with the TENSA and ANDES versions, the number of open sessions against the limit, and whether the code ANDES generates is ready. It answers even while a long run holds every session, so a process supervisor or a container health check can poll it.
 
 ## Using the UI
 
@@ -100,7 +129,8 @@ Then open `http://127.0.0.1:8000` on your own machine. With a different local po
 
 ## Linux
 
-- **A headless machine.** Use the SSH tunnel above and leave `--open` out.
+- **A headless machine.** Use the SSH tunnel above and leave `--open` out. `tensa desktop` needs a display and refuses to start without one.
+- **`tensa desktop` needs a GUI toolkit.** See [`tensa desktop` does not open a window](#tensa-desktop-does-not-open-a-window).
 - **`python3 -m venv` fails.** Some distributions split the module into a package, such as `python3-venv` on Debian and Ubuntu.
 - **`pip` builds a package from source.** A very old `pip` cannot read the wheel tags of current packages. Upgrade it first with `python -m pip install --upgrade pip`. Linux on ARM is not a tested platform.
 

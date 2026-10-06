@@ -25,7 +25,7 @@ from typing import Any
 import pytest
 import typer
 
-from tensa import cli
+from tensa import cli, desktop
 from tests._repo import REPO_ROOT, SCRIPTS_DIR, SERVER_DIR, WEB_DIR, load_module, pyproject
 
 pytestmark = pytest.mark.unit
@@ -393,6 +393,42 @@ def test_the_quick_start_runs_the_server_the_way_the_readme_does(mkdocs: dict[st
     # The three example cases a new workspace is seeded with.
     for case in ("ieee14_full.xlsx", "kundur_full.xlsx", "wscc9.xlsx"):
         assert case in text
+
+
+def test_the_pages_cover_the_desktop_window_the_logging_options_and_the_health_check(
+    mkdocs: dict[str, Any],
+) -> None:
+    """What the README describes and the Reference pages only list: the pages a reader
+    goes to first say how to get the window, how to make the server say more, and how
+    to ask it whether it is up."""
+    pages = _hand_written(mkdocs)
+    install, trouble = pages["install.md"], pages["troubleshooting.md"]
+    # The one install command of each system, as the command's help and messages give it.
+    for platform in ("linux", "win32", "darwin"):
+        command = desktop.install_command(platform=platform, extras=["desktop"])
+        assert command in install, command
+        assert command in trouble, command
+    assert "tensa desktop" in pages["quickstart.md"]
+    # The system library Qt aborts without, with the package for each distribution.
+    for line in desktop.XCB_CURSOR_INSTALL.splitlines():
+        package = line.split(":", 1)[1].strip()
+        assert package in install, package
+        assert package in trouble, package
+    assert "tensa serve --open" in install and "tensa serve --open" in trouble
+    for flag in ("--log-level", "--log-file", "--log-json"):
+        assert flag in trouble, flag
+    for name in ("troubleshooting.md", "api.md"):
+        assert "/api/health" in pages[name], name
+
+
+def test_the_tour_names_the_end_time_field_as_the_ui_labels_it(mkdocs: dict[str, Any]) -> None:
+    panel = WEB_DIR / "src" / "components" / "tds" / "TdsConfigPanel.tsx"
+    if not panel.is_file():
+        pytest.skip("web/src/components/tds/TdsConfigPanel.tsx is not next to the tests")
+    assert "end time (s)" in panel.read_text(encoding="utf-8")
+    tour = _hand_written(mkdocs)["ui-tour.md"]
+    assert "the end time (10 s by default)" in tour
+    assert "final time" not in tour
 
 
 def _mcp_tools() -> list[str]:
