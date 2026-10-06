@@ -24,11 +24,12 @@ import { BottomDrawer } from '@/components/shell/BottomDrawer';
 import { ResultsView } from '@/components/shell/ResultsView';
 import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
 import { KeptResultsNote } from '@/components/history/KeptResultsNote';
-import { makeQueryClient, wireGlobalErrorRecovery, useCurrentTopology } from '@/api/queries';
+import { makeQueryClient, wireGlobalErrorRecovery } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
 import { useSessionHeartbeat } from '@/api/useSessionHeartbeat';
 import { useSessionMessagesSync } from '@/api/useSessionMessages';
 import { useUnsavedWorkGuard } from '@/lib/useUnsavedWorkGuard';
+import { useSyncTopologyMirror } from '@/lib/useSyncTopologyMirror';
 import { useAddComponent } from '@/lib/useAddComponent';
 import { useJobEventsStream } from '@/streaming/useJobEventsStream';
 import { useSldFrameOverlay } from '@/components/sld/overlay';
@@ -82,23 +83,6 @@ const LoadSnapshotDialog = lazyNamed(
  * - Runtime crash (5xx) → RuntimeCrashModal as the one allowed
  *   non-destructive modal.
  */
-/**
- * Mirror the topology query into the case store on every change. The store
- * holds a synchronous `topology` mirror that non-query consumers read (the
- * dynamic-content badge + the run-readiness dynamic gate, Unit 24). The plain
- * topology query is often served from the TanStack cache (seeded by the load
- * mutation), so its `queryFn` doesn't re-run to set the mirror — this effect
- * keeps the mirror faithful to `useCurrentTopology()` whether the data came
- * from a fetch or the cache. Mounted once at the app root.
- */
-function useSyncTopologyMirror(): void {
-  const topology = useCurrentTopology();
-  const setTopology = useCaseStore((s) => s.setTopology);
-  useEffect(() => {
-    if (topology !== null) setTopology(topology);
-  }, [topology, setTopology]);
-}
-
 function AppInner({ children }: { children: React.ReactNode }) {
   // Top-level recovery driver — must live INSIDE QueryClientProvider so
   // ``useCreateSession`` / ``useLoadCase`` can subscribe to the cache.
