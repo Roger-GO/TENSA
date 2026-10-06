@@ -98,10 +98,31 @@ function staticGeneratorHelp(model: 'PV' | 'Slack', context: ElementHelpContext)
   return { note: [], fields };
 }
 
+/**
+ * ANDES's ZIP (`andes/models/dynload/zip.py`): a dynamic load that takes over a
+ * static one, with nothing of its own but the shares.
+ */
+const ZIP_HELP: ElementHelp = {
+  note: [
+    "A ZIP load is not a load of its own: when a time-domain run starts it takes over the PQ load named in pq, on that load's bus and with its power, and makes each share of it follow the voltage differently. Add the PQ load first. A power flow still solves the PQ load as it is.",
+    'The three shares of the active power, and the three of the reactive power, are in percent and each three must add up to 100.',
+  ],
+  fields: {
+    pq: 'The idx of the PQ load it takes over, as the Loads table lists it.',
+    kpp: 'Percent of the active power that stays constant.',
+    kpi: 'Percent of the active power drawn as constant current: it follows the voltage.',
+    kpz: 'Percent of the active power drawn as constant impedance: it follows the voltage squared.',
+    kqp: 'Percent of the reactive power that stays constant.',
+    kqi: 'Percent of the reactive power drawn as constant current: it follows the voltage.',
+    kqz: 'Percent of the reactive power drawn as constant impedance: it follows the voltage squared.',
+  },
+};
+
 /** The help for `model`, or `null` when the schema says all there is to say. */
 export function elementHelp(model: string, context: ElementHelpContext): ElementHelp | null {
   if (model === 'ESD1') return esd1Help(context);
   if (model === 'PV' || model === 'Slack') return staticGeneratorHelp(model, context);
+  if (model === 'ZIP') return ZIP_HELP;
   return null;
 }
 
@@ -129,6 +150,22 @@ export function elementWarnings(
   context: ElementHelpContext,
 ): Record<string, string> {
   const warnings: Record<string, string> = {};
+  if (model === 'ZIP') {
+    // ANDES takes shares that do not add up and says so only when the run starts.
+    for (const [first, shares, power] of [
+      ['kpp', ['kpp', 'kpi', 'kpz'], 'active'],
+      ['kqp', ['kqp', 'kqi', 'kqz'], 'reactive'],
+    ] as const) {
+      const given = shares.map((name) => asNumber(values[name]));
+      if (given.some((share) => share === null)) continue;
+      const total = given.reduce<number>((sum, share) => sum + (share ?? 0), 0);
+      if (Math.abs(total - 100) > 1e-9) {
+        warnings[first] =
+          `The shares of the ${power} power (${shares.join(', ')}) add up to ${formatMva(total)}, not 100.`;
+      }
+    }
+    return warnings;
+  }
   if (model !== 'ESD1') return warnings;
   const sn = asNumber(values.Sn);
   const base = context.baseMva;

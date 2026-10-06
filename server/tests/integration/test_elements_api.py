@@ -1279,7 +1279,74 @@ async def test_every_reference_the_builder_takes_is_one_a_delete_follows() -> No
                 f"{model_name}.{meta.name} is a {meta.kind} in the schema but "
                 f"a delete takes it to point into {followed[(model_name, meta.name)]!r}"
             )
-    # ANDES's ZIP has no ``bus`` of its own: it names a static load (``pq``, which
-    # a delete does follow) and copies that load's bus. Nothing else may be here.
-    assert undeclared == {("ZIP", "bus")}
+    assert undeclared == set()
+    # A ZIP names the static load it takes over, which a delete follows too.
     assert followed[("ZIP", "pq")] == "StaticLoad"
+
+
+@pytest.mark.integration
+async def test_the_parameters_the_builder_lists_are_the_models_own() -> None:
+    """Every name the add form offers for a model is a parameter ANDES's model
+    takes at ``add``. The ZIP load was listed with a ``bus``, a rating and a
+    power, none of which it has (it takes over a static load, ``pq``), so no
+    ZIP could be added: what the form sent was refused for what it lacked, and
+    what ANDES needs was refused as unknown."""
+    pytest.importorskip("andes")
+    import andes
+
+    from tensa.core.wrapper import _PARAMS_BY_MODEL
+
+    ss = andes.System(no_output=True, default_config=True)
+    # ``H`` is the inertia constant the GENROU form asks for; ``add_element``
+    # hands ANDES ``M``.
+    renamed = {("GENROU", "H")}
+    foreign = {
+        (model_name, meta.name)
+        for model_name, metas in _PARAMS_BY_MODEL.items()
+        for meta in metas
+        if meta.name not in getattr(ss, model_name).params
+    }
+    assert foreign == renamed
+    # And nothing ANDES holds mandatory is missing from a form.
+    for model_name, metas in _PARAMS_BY_MODEL.items():
+        listed = {meta.name for meta in metas}
+        mandatory = {
+            name
+            for name, param in getattr(ss, model_name).params.items()
+            if getattr(param, "mandatory", False) and getattr(param, "export", True)
+        }
+        assert mandatory <= listed, f"{model_name} lacks {sorted(mandatory - listed)}"
+
+
+@pytest.mark.integration
+async def test_a_zip_load_is_added_on_a_static_load_and_runs(client: httpx.AsyncClient) -> None:
+    sid = await _create_session(client)
+    loaded = await client.post(
+        f"/api/sessions/{sid}/case",
+        json={"primary_path": "ieee14.raw", "addfiles": ["ieee14.dyr"]},
+    )
+    assert loaded.status_code == 200, loaded.text
+    shares = {"kpp": 50, "kpi": 30, "kpz": 20, "kqp": 60, "kqi": 0, "kqz": 40}
+
+    # The form's old fields are not the model's.
+    old = await client.post(
+        f"/api/sessions/{sid}/elements",
+        json={"model": "ZIP", "params": {"idx": "Z0", "name": "Z0", "bus": 2, "p0": 0.2, "q0": 0.1}},
+    )
+    assert old.status_code == 422
+    assert "unknown param keys for ZIP" in old.json()["detail"]
+
+    added = await client.post(
+        f"/api/sessions/{sid}/elements",
+        json={"model": "ZIP", "params": {"idx": "Z1", "name": "Z1", "pq": "PQ_1", **shares}},
+    )
+    assert added.status_code == 201, added.text
+    assert added.json()["element"]["params"] == {"pq": "PQ_1", **shares, "u": 1}
+
+    topology = (await client.get(f"/api/sessions/{sid}/topology")).json()
+    (zip_load,) = [entry for entry in topology["loads"] if entry["kind"] == "ZIP"]
+    assert (zip_load["idx"], zip_load["params"]["pq"]) == ("Z1", "PQ_1")
+
+    run = await client.post(f"/api/sessions/{sid}/tds", json={"tf": 0.3})
+    assert run.status_code == 200, run.text
+    assert run.json()["converged"] is True

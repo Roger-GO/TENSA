@@ -27,6 +27,7 @@ import { DataGrid, type ColumnConfig } from './DataGrid';
 import { formatParamValue } from './gridCells';
 import { useGridEditing, type GridEditTarget } from './useGridEditing';
 import { useCurrentTopology } from '@/api/queries';
+import { loadBusIdx } from '@/lib/topology';
 import { usePflowStore } from '@/store/pflow';
 import { useSldStore } from '@/store/sld';
 import { useCaseStore } from '@/store/case';
@@ -121,7 +122,7 @@ export function LoadsGrid({ className }: LoadsGridProps) {
         idx,
         name: load.name,
         kind: load.kind,
-        bus: paramString(load, 'bus'),
+        bus: loadBusIdx(load, topology.loads),
         p0: paramNumber(load, 'p0'),
         q0: paramNumber(load, 'q0'),
         p: finiteOrNull(row?.p),

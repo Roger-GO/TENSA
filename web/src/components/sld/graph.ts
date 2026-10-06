@@ -1035,6 +1035,9 @@ export function buildGraph(
     for (const entry of bucket.entries) {
       const parentIdx = bucket.parentBus(entry);
       if (parentIdx === null) {
+        // A dynamic load (ANDES's ZIP) has no bus: it is the model of the
+        // static load it names (`pq`), and that load is the one drawn.
+        if (bucket.kind === 'load' && entry.params?.pq !== undefined) continue;
         // Defensive: an orphan element with no parent bus shouldn't
         // happen with a valid topology. Skip + warn.
         console.warn(`SLD: ${bucket.kind} ${String(entry.idx)} has no parent bus; skipping`);

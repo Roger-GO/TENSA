@@ -27,6 +27,25 @@ describe('elementHelp', () => {
     expect(help!.fields.Sn).toContain('system base (100 MVA)');
   });
 
+  it('says that a ZIP load takes over a PQ load, and what its shares are', () => {
+    const help = elementHelp('ZIP', { baseMva: 100 });
+    expect(help).not.toBeNull();
+    const note = help!.note.join(' ');
+    expect(note).toContain('takes over the PQ load named in pq');
+    expect(note).toContain('Add the PQ load first.');
+    expect(note).toContain('each three must add up to 100');
+    expect(help!.fields.pq).toContain('idx of the PQ load');
+    expect(Object.keys(help!.fields).sort()).toEqual([
+      'kpi',
+      'kpp',
+      'kpz',
+      'kqi',
+      'kqp',
+      'kqz',
+      'pq',
+    ]);
+  });
+
   it('names the base the case sets, not 100', () => {
     const help = elementHelp('ESD1', { baseMva: 250 });
     expect(help!.note.join(' ')).toContain('the system base (250 MVA)');
@@ -106,6 +125,21 @@ describe('elementHelp', () => {
 });
 
 describe('elementWarnings', () => {
+  it('says when the shares of a ZIP load do not add up to 100', () => {
+    const shares = { kpp: 50, kpi: 30, kpz: 20, kqp: '60', kqi: '0', kqz: '40' };
+    expect(elementWarnings('ZIP', shares, { baseMva: 100 })).toEqual({});
+    expect(elementWarnings('ZIP', { ...shares, kpz: 10 }, { baseMva: 100 })).toEqual({
+      kpp: 'The shares of the active power (kpp, kpi, kpz) add up to 90, not 100.',
+    });
+    expect(elementWarnings('ZIP', { ...shares, kqz: 50.5 }, { baseMva: 100 })).toEqual({
+      kqp: 'The shares of the reactive power (kqp, kqi, kqz) add up to 110.5, not 100.',
+    });
+  });
+
+  it('waits for all three shares of a ZIP load before it adds them up', () => {
+    expect(elementWarnings('ZIP', { kpp: 50, kpi: '', kqp: 100 }, { baseMva: null })).toEqual({});
+  });
+
   it('says nothing while the rating is the system base', () => {
     expect(elementWarnings('ESD1', { Sn: 100 }, { baseMva: 100 })).toEqual({});
     expect(elementWarnings('ESD1', { Sn: '100' }, { baseMva: 100 })).toEqual({});

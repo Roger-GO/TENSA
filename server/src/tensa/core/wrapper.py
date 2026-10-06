@@ -4620,20 +4620,22 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         ParamMeta("p0", "number", required=True, unit="pu"),
         ParamMeta("q0", "number", required=True, unit="pu"),
     ),
+    # ANDES's ZIP is a dynamic load, not a load on a bus of its own: when a
+    # time-domain run starts it takes over the static load ``pq`` names and
+    # splits that load's active and its reactive power into shares of constant
+    # power, current and impedance, in percent (each three add up to 100). The
+    # bus and the powers are the static load's.
     "ZIP": (
         ParamMeta("idx", "string", required=True),
         ParamMeta("name", "string", required=True),
-        ParamMeta("bus", "bus_idx", required=True),
-        ParamMeta("Vn", "number", required=True, unit="kV"),
-        ParamMeta("p0", "number", required=True, unit="pu"),
-        ParamMeta("q0", "number", required=True, unit="pu"),
+        ParamMeta("pq", "string", required=True),
+        ParamMeta("kpp", "number", required=True, unit="%"),
+        ParamMeta("kpi", "number", required=True, unit="%"),
+        ParamMeta("kpz", "number", required=True, unit="%"),
+        ParamMeta("kqp", "number", required=True, unit="%"),
+        ParamMeta("kqi", "number", required=True, unit="%"),
+        ParamMeta("kqz", "number", required=True, unit="%"),
         ParamMeta("u", "number"),
-        ParamMeta("gammapz", "number"),
-        ParamMeta("gammaiz", "number"),
-        ParamMeta("gammapi", "number"),
-        ParamMeta("gammaii", "number"),
-        ParamMeta("gammapv", "number"),
-        ParamMeta("gammaqv", "number"),
     ),
     "Shunt": (
         ParamMeta("idx", "string", required=True),

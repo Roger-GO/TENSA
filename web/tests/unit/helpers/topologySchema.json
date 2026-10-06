@@ -96,17 +96,14 @@
     "ZIP": [
       { "name": "idx", "kind": "string", "required": true, "unit": null },
       { "name": "name", "kind": "string", "required": true, "unit": null },
-      { "name": "bus", "kind": "bus_idx", "required": true, "unit": null },
-      { "name": "Vn", "kind": "number", "required": true, "unit": "kV" },
-      { "name": "p0", "kind": "number", "required": true, "unit": "pu" },
-      { "name": "q0", "kind": "number", "required": true, "unit": "pu" },
-      { "name": "u", "kind": "number", "required": false, "unit": null },
-      { "name": "gammapz", "kind": "number", "required": false, "unit": null },
-      { "name": "gammaiz", "kind": "number", "required": false, "unit": null },
-      { "name": "gammapi", "kind": "number", "required": false, "unit": null },
-      { "name": "gammaii", "kind": "number", "required": false, "unit": null },
-      { "name": "gammapv", "kind": "number", "required": false, "unit": null },
-      { "name": "gammaqv", "kind": "number", "required": false, "unit": null }
+      { "name": "pq", "kind": "string", "required": true, "unit": null },
+      { "name": "kpp", "kind": "number", "required": true, "unit": "%" },
+      { "name": "kpi", "kind": "number", "required": true, "unit": "%" },
+      { "name": "kpz", "kind": "number", "required": true, "unit": "%" },
+      { "name": "kqp", "kind": "number", "required": true, "unit": "%" },
+      { "name": "kqi", "kind": "number", "required": true, "unit": "%" },
+      { "name": "kqz", "kind": "number", "required": true, "unit": "%" },
+      { "name": "u", "kind": "number", "required": false, "unit": null }
     ],
     "Shunt": [
       { "name": "idx", "kind": "string", "required": true, "unit": null },

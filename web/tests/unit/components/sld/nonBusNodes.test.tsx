@@ -172,6 +172,30 @@ describe('buildGraph — non-bus nodes', () => {
       expect(console.warn).toHaveBeenCalled();
     });
 
+    it('draws the static load a dynamic load takes over, and says nothing of the dynamic one', () => {
+      // ANDES's ZIP names a PQ (`pq`) and has no bus: it is that load's model.
+      const topology = makeTopology({
+        buses: [bus(1)],
+        loads: [
+          load('PQ_1', 1),
+          { idx: 'ZIP_1', name: 'ZIP_1', kind: 'ZIP', params: { pq: 'PQ_1', kpp: 100 } },
+        ],
+      });
+      const { nodes } = buildGraph(topology, { '1': { x: 0, y: 0 } });
+      expect(nodes.filter((n) => n.type === 'load').map((n) => n.id)).toEqual(['load-PQ_1']);
+      expect(console.warn).not.toHaveBeenCalled();
+    });
+
+    it('still warns about a load that has no bus and names no load', () => {
+      const topology = makeTopology({
+        buses: [bus(1)],
+        loads: [{ idx: 'L_noisy', name: 'l', kind: 'PQ', params: {} }],
+      });
+      const { nodes } = buildGraph(topology, { '1': { x: 0, y: 0 } });
+      expect(nodes.find((n) => n.type === 'load')).toBeUndefined();
+      expect(console.warn).toHaveBeenCalled();
+    });
+
     it('skips a generator with no bus param', () => {
       const topology = makeTopology({
         buses: [bus(1)],

@@ -90,7 +90,13 @@ const TOPOLOGY: TopologySummary = {
   ],
   loads: [
     { idx: 'PQ_1', name: 'PQ_1', kind: 'PQ', params: { bus: 1, p0: 0.5, q0: 0.1 } },
-    { idx: 'Z_1', name: 'Z_1', kind: 'ZIP', params: { bus: 2, p0: 0.3, q0: 0.05 } },
+    // A dynamic load: it takes over PQ_1 and has shares, no bus or power of its own.
+    {
+      idx: 'Z_1',
+      name: 'Z_1',
+      kind: 'ZIP',
+      params: { pq: 'PQ_1', kpp: 50, kpi: 30, kpz: 20, kqp: 100, kqi: 0, kqz: 0, u: 1 },
+    },
   ],
   shunts: [{ idx: 'S1', name: 'S1', kind: 'Shunt', params: { bus: 2, b: 0.19, g: 0 } }],
 };
@@ -380,16 +386,22 @@ describe('<GeneratorsGrid /> editing', () => {
 });
 
 describe('<LoadsGrid /> editing', () => {
-  it('writes the set-points to the model of the load, PQ or ZIP', async () => {
+  it('writes the set-points of a PQ load, and leaves a ZIP load, which has none, alone', async () => {
     const user = userEvent.setup();
     render(<LoadsGrid />);
     expect(cell('loads', 'load-PQ_1', 'p')).not.toHaveAttribute('data-editable');
     await typeInto(user, cell('loads', 'load-PQ_1', 'p0'), '0.55');
-    await typeInto(user, cell('loads', 'load-Z_1', 'q0'), '0.06');
-    expect(puts()).toEqual([
-      ['/sessions/s1/elements/PQ/PQ_1', { params: { p0: 0.55 } }],
-      ['/sessions/s1/elements/ZIP/Z_1', { params: { q0: 0.06 } }],
-    ]);
+    expect(puts()).toEqual([['/sessions/s1/elements/PQ/PQ_1', { params: { p0: 0.55 } }]]);
+    // A ZIP is the dynamic model of the static load it names: the power is that load's.
+    expect(cell('loads', 'load-Z_1', 'p0')).not.toHaveAttribute('data-editable');
+    expect(cell('loads', 'load-Z_1', 'q0')).not.toHaveAttribute('data-editable');
+    expect(cell('loads', 'load-Z_1', 'p0')).toHaveTextContent('—');
+  });
+
+  it('lists a ZIP load on the bus of the static load it takes over', () => {
+    render(<LoadsGrid />);
+    expect(cell('loads', 'load-PQ_1', 'bus')).toHaveTextContent('1');
+    expect(cell('loads', 'load-Z_1', 'bus')).toHaveTextContent('1');
   });
 
   it('labels the set-points per unit, not MW', () => {

@@ -62,6 +62,20 @@ export function findTopologyEntry(
   return bucket.find((e) => String(e.idx) === selected.idx) ?? null;
 }
 
+/**
+ * The bus a load is on. A dynamic load (ANDES's ZIP) has none of its own: it
+ * takes over the static load it names (`pq`) and is on that load's bus.
+ */
+export function loadBusIdx(load: TopologyEntry, loads: readonly TopologyEntry[]): string | null {
+  const own = load.params?.bus;
+  if (own !== undefined && own !== null && typeof own !== 'boolean') return String(own);
+  const named = load.params?.pq;
+  if (named === undefined || named === null) return null;
+  const taken = loads.find((other) => other !== load && String(other.idx) === String(named));
+  const bus = taken?.params?.bus;
+  return bus === undefined || bus === null || typeof bus === 'boolean' ? null : String(bus);
+}
+
 /** Every element a topology lists, whatever its bucket. */
 function entriesOf(topology: TopologySummary): TopologyEntry[] {
   return [
