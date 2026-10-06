@@ -5,9 +5,11 @@ Subcommands:
 - ``serve`` — start the FastAPI substrate via uvicorn. Binds to loopback by
   default; there is no authentication, so non-loopback binds expose the API
   to the whole network (a stderr warning is emitted). uvicorn's default
-  access log is disabled; the substrate emits its own structured stderr
-  lines via ``logging``. When ANDES's generated code is missing or unchecked,
-  it is generated in a background process while the server runs (see
+  access log is disabled; the substrate emits its own lines to stderr via
+  ``logging``, at the level ``--log-level`` sets, as plain text or, with
+  ``--log-json``, as JSON lines, and ``--log-file`` adds a rotating file (see
+  ``core/logging_setup.py``). When ANDES's generated code is missing or
+  unchecked, it is generated in a background process while the server runs (see
   ``core/codegen_cache.py``).
 - ``--version`` — print the tensa and ANDES versions and exit.
 - ``warm-cache`` — run ANDES's symbolic-equation code generation
@@ -20,6 +22,7 @@ Subcommands:
 from __future__ import annotations
 
 import contextlib
+import enum
 import logging
 import os
 import socket
@@ -45,6 +48,7 @@ from tensa.core.codegen_cache import (
     start_background_warm,
 )
 from tensa.core.examples import seed_example_cases
+from tensa.core.logging_setup import configure_logging, resolve_log_file
 from tensa.security.paths import ensure_workspace
 
 app = typer.Typer(
@@ -61,6 +65,16 @@ _STARTUP_FAILURE = 3
 
 # Bind addresses that listen everywhere but are not valid URL hosts.
 _WILDCARD_BINDS = frozenset({"0.0.0.0", "::", ""})
+
+
+class LogLevel(enum.StrEnum):
+    """The values ``--log-level`` takes (uvicorn's names for them too)."""
+
+    debug = "debug"
+    info = "info"
+    warning = "warning"
+    error = "error"
+    critical = "critical"
 
 
 def _version_callback(value: bool) -> None:
@@ -163,6 +177,32 @@ def serve(
             "for any generation."
         ),
     ),
+    log_level: LogLevel = typer.Option(
+        LogLevel.info,
+        "--log-level",
+        case_sensitive=False,
+        help="Least severe message the server logs: debug, info, warning, error or critical.",
+    ),
+    log_file: str | None = typer.Option(
+        None,
+        "--log-file",
+        metavar="PATH",
+        help=(
+            "Also write the log to this file, which rotates at 5 MB and keeps three "
+            "older ones. A name with no directory part, such as tensa.log, is "
+            "written in ~/.tensa/logs; any other path is used as given. Created if "
+            "missing; the server does not start if it cannot be written."
+        ),
+    ),
+    log_json: bool = typer.Option(
+        False,
+        "--log-json",
+        help=(
+            "Log one JSON object per line (time, level, logger, message, and "
+            "exception when there is a traceback) instead of plain text, on stderr "
+            "and in the --log-file."
+        ),
+    ),
     reload: bool = typer.Option(
         False,
         "--reload",
@@ -174,12 +214,23 @@ def serve(
     ),
 ) -> None:
     """Run the tensa substrate."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        stream=sys.stderr,
-    )
+    # Under ``--reload`` the server runs in a child process that opens the file
+    # itself (see ``_reload_app_factory``), so two processes never rotate one file.
+    log_path = resolve_log_file(log_file) if log_file is not None else None
+    try:
+        configure_logging(
+            level=log_level.name.upper(),
+            json_lines=log_json,
+            log_file=None if reload else log_path,
+        )
+    except OSError as exc:
+        raise typer.BadParameter(
+            f"cannot write the log file {log_path}: {exc.strerror or exc}",
+            param_hint="--log-file",
+        ) from exc
     log = logging.getLogger("tensa.serve")
+    if log_path is not None:
+        log.info("writing the log to %s", log_path)
 
     # Windows: emit the trust-model caveat (workspace boundary is best-effort
     # on Windows).
@@ -276,6 +327,12 @@ def serve(
             os.environ["ANDES_APP_RELOAD_SWEEP_WORKERS"] = str(sweep_workers)
         else:
             os.environ.pop("ANDES_APP_RELOAD_SWEEP_WORKERS", None)
+        os.environ["ANDES_APP_RELOAD_LOG_LEVEL"] = log_level.value
+        os.environ["ANDES_APP_RELOAD_LOG_JSON"] = "1" if log_json else ""
+        if log_path is not None:
+            os.environ["ANDES_APP_RELOAD_LOG_FILE"] = str(log_path)
+        else:
+            os.environ.pop("ANDES_APP_RELOAD_LOG_FILE", None)
         watch_dir = Path(__file__).resolve().parent  # the tensa package
         log.info("dev --reload: watching %s for changes", watch_dir)
         log.info(
@@ -300,7 +357,7 @@ def serve(
                 reload_dirs=[str(watch_dir)],
                 host=bind,
                 port=reload_port,
-                log_level="info",
+                log_level=log_level.value,
                 access_log=False,
             )
         return
@@ -330,12 +387,16 @@ def serve(
 
     # ``access_log=False`` disables uvicorn's default access logger (per the
     # trust-model docstring; the structured logger is SaaS-phase work).
+    # ``log_config=None`` keeps uvicorn from configuring logging itself, so what it
+    # logs (an unhandled exception in a route, with its traceback) goes through the
+    # handlers ``configure_logging`` installed, in their format and into the log file.
     server = uvicorn.Server(
         uvicorn.Config(
             fastapi_app,
             host=bind,
             port=bound_port,
-            log_level="info",
+            log_level=log_level.value,
+            log_config=None,
             access_log=False,
         )
     )
@@ -452,7 +513,17 @@ def _reload_app_factory() -> FastAPI:
     this with no args, so every config value is read from the
     ``ANDES_APP_RELOAD_*`` env vars that ``serve`` sets before ``uvicorn.run``.
     Not used on the normal (non-reload) path.
+
+    The logging options ride along the same way. This process owns the log file
+    (``serve`` opens none under ``--reload``), and uvicorn's own lines keep its
+    default format, since its reloader configures them before this runs.
     """
+    log_file_env = os.environ.get("ANDES_APP_RELOAD_LOG_FILE")
+    configure_logging(
+        level=os.environ.get("ANDES_APP_RELOAD_LOG_LEVEL", "info").upper(),
+        json_lines=bool(os.environ.get("ANDES_APP_RELOAD_LOG_JSON")),
+        log_file=Path(log_file_env) if log_file_env else None,
+    )
     workspace = Path(os.environ["ANDES_APP_RELOAD_WORKSPACE"])
     bind = os.environ.get("ANDES_APP_RELOAD_BIND", "127.0.0.1")
     port = int(os.environ.get("ANDES_APP_RELOAD_PORT", "0"))

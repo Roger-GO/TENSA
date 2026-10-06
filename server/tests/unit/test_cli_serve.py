@@ -13,10 +13,12 @@ the tests exercise ``serve``'s wiring without a listening server.
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 import socket
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -28,10 +30,21 @@ from typer.testing import CliRunner
 
 from tensa import cli
 from tensa.api.app import make_app
+from tensa.core.logging_setup import reset_logging
 
 pytestmark = pytest.mark.unit
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _restore_logging() -> Iterator[None]:
+    """``serve`` configures the root logger, which outlives the test that ran it."""
+    root = logging.getLogger()
+    level = root.level
+    yield
+    reset_logging()
+    root.setLevel(level)
 
 
 class _FakeServer:
@@ -530,3 +543,187 @@ def test_accepts_connections_probe() -> None:
         assert cli._accepts_connections("127.0.0.1", port) is True
     finally:
         sock.close()
+
+
+# ------------------------------------------------------------ logging options
+
+
+def test_serve_logs_at_info_to_stderr_in_plain_text_by_default(
+    tmp_path: Path, fake_server: type[_FakeServer]
+) -> None:
+    result = runner.invoke(cli.app, ["serve", "--workspace", str(tmp_path / "ws")])
+    assert result.exit_code == 0, result.output
+    port = fake_server.instances[0].bound_port_during_run
+    assert f"[INFO] tensa.serve: serving http://127.0.0.1:{port}/" in result.stderr
+    assert logging.getLogger().level == logging.INFO
+    config = fake_server.instances[0].config
+    assert config.log_level == "info"
+    # uvicorn leaves logging to the handlers ``serve`` installed, so its lines (an
+    # unhandled exception's traceback) get the level, the format and the file.
+    assert config.log_config is None
+
+
+@pytest.mark.parametrize("level", ["debug", "warning", "error", "critical", "WARNING"])
+def test_serve_log_level_sets_the_threshold_and_uvicorns(
+    tmp_path: Path, fake_server: type[_FakeServer], level: str
+) -> None:
+    result = runner.invoke(
+        cli.app, ["serve", "--workspace", str(tmp_path / "ws"), "--log-level", level]
+    )
+    assert result.exit_code == 0, result.output
+    assert logging.getLogger().level == getattr(logging, level.upper())
+    assert fake_server.instances[0].config.log_level == level.lower()
+
+
+def test_serve_log_level_above_info_hides_the_startup_line(
+    tmp_path: Path, fake_server: type[_FakeServer]
+) -> None:
+    result = runner.invoke(
+        cli.app, ["serve", "--workspace", str(tmp_path / "ws"), "--log-level", "warning"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "serving http" not in result.stderr
+
+
+def test_serve_refuses_a_log_level_it_does_not_have(
+    tmp_path: Path, fake_server: type[_FakeServer], built_apps: list[dict[str, Any]]
+) -> None:
+    result = runner.invoke(
+        cli.app, ["serve", "--workspace", str(tmp_path / "ws"), "--log-level", "loud"]
+    )
+    assert result.exit_code == 2
+    assert built_apps == []
+
+
+def test_serve_log_json_writes_one_json_object_per_line(
+    tmp_path: Path, fake_server: type[_FakeServer]
+) -> None:
+    result = runner.invoke(
+        cli.app, ["serve", "--workspace", str(tmp_path / "ws"), "--log-json"]
+    )
+    assert result.exit_code == 0, result.output
+    entries = [json.loads(line) for line in result.stderr.splitlines()]
+    port = fake_server.instances[0].bound_port_during_run
+    serving = [e for e in entries if e["logger"] == "tensa.serve" and "serving" in e["message"]]
+    assert [e["message"].split(" (")[0] for e in serving] == [f"serving http://127.0.0.1:{port}/"]
+    assert serving[0]["level"] == "INFO"
+
+
+def test_serve_log_file_also_writes_the_log_there(
+    tmp_path: Path, fake_server: type[_FakeServer]
+) -> None:
+    target = tmp_path / "logs" / "serve.log"
+    result = runner.invoke(
+        cli.app, ["serve", "--workspace", str(tmp_path / "ws"), "--log-file", str(target)]
+    )
+    assert result.exit_code == 0, result.output
+    text = target.read_text(encoding="utf-8")
+    assert "[INFO] tensa.serve: serving http://127.0.0.1:" in text
+    # The server says where its log is, on stderr as well.
+    assert f"writing the log to {target}" in result.stderr
+
+
+def test_serve_log_file_with_a_bare_name_writes_in_the_log_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_server: type[_FakeServer]
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    result = runner.invoke(
+        cli.app, ["serve", "--workspace", str(tmp_path / "ws"), "--log-file", "tensa.log"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "serving http" in (home / ".tensa" / "logs" / "tensa.log").read_text(encoding="utf-8")
+
+
+def test_serve_log_file_and_json_combine(tmp_path: Path, fake_server: type[_FakeServer]) -> None:
+    target = tmp_path / "serve.log"
+    result = runner.invoke(
+        cli.app,
+        ["serve", "--workspace", str(tmp_path / "ws"), "--log-json", "--log-file", str(target)],
+    )
+    assert result.exit_code == 0, result.output
+    assert all(json.loads(line)["logger"] for line in target.read_text("utf-8").splitlines())
+
+
+def test_serve_writes_no_log_file_unless_asked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_server: type[_FakeServer]
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    result = runner.invoke(cli.app, ["serve", "--workspace", str(tmp_path / "ws")])
+    assert result.exit_code == 0, result.output
+    assert not (home / ".tensa" / "logs").exists()
+
+
+def test_serve_stops_before_binding_when_the_log_file_cannot_be_written(
+    tmp_path: Path, fake_server: type[_FakeServer], built_apps: list[dict[str, Any]]
+) -> None:
+    blocker = tmp_path / "plain-file"
+    blocker.write_text("not a directory", encoding="utf-8")
+    result = runner.invoke(
+        cli.app,
+        ["serve", "--workspace", str(tmp_path / "ws"), "--log-file", str(blocker / "serve.log")],
+    )
+    assert result.exit_code == 2
+    assert "--log-file" in result.output
+    assert "cannot write the log file" in result.output
+    assert built_apps == []
+    assert fake_server.instances == []
+
+
+def test_serve_reload_hands_the_logging_options_to_the_app_factory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+) -> None:
+    """The server runs in the reloader's child, which opens the log file itself, so
+    two processes never rotate one file."""
+    run_kwargs: dict[str, Any] = {}
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **kw: run_kwargs.update(kw))
+    target = tmp_path / "reload.log"
+    with mock.patch.dict(os.environ):
+        result = runner.invoke(
+            cli.app,
+            [
+                "serve",
+                "--workspace",
+                str(tmp_path / "ws"),
+                "--reload",
+                "--log-level",
+                "debug",
+                "--log-json",
+                "--log-file",
+                str(target),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert run_kwargs["log_level"] == "debug"
+        assert not target.exists(), "the reloader's parent must not hold the file"
+
+        cli._reload_app_factory()  # what the child does
+    logging.getLogger("tensa.test").debug("from the child")
+    entries = [json.loads(line) for line in target.read_text("utf-8").splitlines()]
+    (entry,) = [e for e in entries if e["logger"] == "tensa.test"]
+    assert entry["message"] == "from the child"
+    assert entry["level"] == "DEBUG"
+
+
+def test_serve_reload_does_not_inherit_the_logging_options_of_an_earlier_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+) -> None:
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **kw: None)
+    with mock.patch.dict(os.environ):
+        os.environ["ANDES_APP_RELOAD_LOG_FILE"] = str(tmp_path / "stale.log")
+        os.environ["ANDES_APP_RELOAD_LOG_JSON"] = "1"
+        result = runner.invoke(
+            cli.app, ["serve", "--workspace", str(tmp_path / "ws"), "--reload"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "ANDES_APP_RELOAD_LOG_FILE" not in os.environ
+        assert os.environ["ANDES_APP_RELOAD_LOG_JSON"] == ""
+        cli._reload_app_factory()
+    assert not (tmp_path / "stale.log").exists()

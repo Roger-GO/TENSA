@@ -39,9 +39,16 @@ The server has no authentication: it binds to loopback by default, so only proce
 - `--sweep-workers <int>`: the most worker processes one sensitivity sweep may spread its iterations over. Default: the smaller of `4` and the number of CPUs. A sweep with four or more values runs on several extra workers, each given at least two values, and leaves the session's own System as it was. `1` runs every sweep on the session's own worker, one value after another. The bound applies to each sweep, not to the server: sessions sweep independently, so sweeps running in several sessions at once use that many times as many workers. On a small machine, lower it together with `--max-sessions`.
 - `--allow-origin <url>`: extra browser origin to accept, for example `http://127.0.0.1:5173` for the Vite dev server. Repeatable.
 - `--no-warm-cache`: skip the startup check of ANDES's generated code. ANDES turns its model equations into Python code the first time it needs them, which takes about 30 s on a laptop and would otherwise happen inside the first case you load. By default, when that code is missing or has not been checked against the installed ANDES (after an upgrade, say), `serve` generates it in a background process, the same work as `tensa warm-cache`, and logs when it finishes. A case you load while that runs waits for it, instead of generating the code a second time alongside it.
+- `--log-level <level>`: the least severe message to log: `debug`, `info`, `warning`, `error` or `critical`. Default `info`. The serving URL is logged at `info`, so a higher level hides it.
+- `--log-file <path>`: also write the log to a file, in the same format as stderr. The file rotates at 5 MB and keeps three older ones. A name with no directory part, such as `tensa.log`, is written in `~/.tensa/logs`; any other path is used as given. Missing directories are created, and the server does not start if the file cannot be written. Nothing is written to disk unless you ask.
+- `--log-json`: log each line as a JSON object (`time`, `level`, `logger`, `message`, and `exception` when there is a traceback) instead of plain text, on stderr and in the log file.
 - `--reload`: development only. Restart the server when the package changes.
 
 Windows: the server runs, but the workspace boundary is best-effort there (ANDES can read files outside the workspace), and `serve` logs a warning about it at startup. Do not load untrusted case files on Windows.
+
+`GET /api/health` is the call for a script, a process supervisor or a container health check. It answers `{"status": "ok", ...}` with the tensa and ANDES versions, the number of open sessions against the `--max-sessions` cap, and whether ANDES's generated code is ready. It never waits for a worker, so it answers while a run holds every session. A worker that crashes in native code (a segfault in a numerical library, say) prints the Python stack of its threads to the server's stderr; that goes to the terminal, not into the `--log-file`.
+
+Every response carries `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`, so another page cannot put the UI in a frame.
 
 ## Using the API
 
