@@ -55,7 +55,8 @@ Two streaming modes:
   oscillations above the output Nyquist *when the integrator is fixed-step*;
   on adaptive-step integrators (ANDES default) the math is best-effort,
   declared honestly via ``algorithm: "boxcar-mean-best-effort"`` in the
-  stream-start metadata.
+  stream-start metadata. The run's last step is not averaged: it is the last
+  row as it is, after the mean of the steps its window held before it.
 
 The ``StreamCollector`` reads the selected groups' values off the System at
 each callpert step: it resolves where every value lives once, when the run
@@ -70,7 +71,8 @@ the call names, so the values at a call are the step before; the worker pairs
 them with that step's time and takes the run's last step, which no call sees,
 once the run has returned (``tensa.core.tds_steps``). A run therefore sends one
 row per step it solved, the last one at ``tf`` when it got there, and none for
-the state it started from.
+the state it started from. A decimated run sends a row per window, and its
+last row is still that last step (``StreamAggregator.flush``).
 """
 
 from __future__ import annotations
@@ -740,7 +742,8 @@ class StreamAggregator:
       (N-rows-per-batch; cuts Arrow framing overhead).
     - ``decimation="mean"`` + ``max_rate_hz=N`` — buffer until
       ``next_emit_t``, then emit one row whose values are the mean of all
-      buffered values (anti-aliased decimation; output rate = N Hz).
+      buffered values (anti-aliased decimation; output rate = N Hz). The
+      last step of the run is kept out of the mean (see ``flush``).
 
     ``decimation="mean"`` requires ``max_rate_hz`` (the aggregation window
     is ``1/max_rate_hz`` simulated seconds). The constructor raises
@@ -837,10 +840,21 @@ class StreamAggregator:
 
     def flush(self) -> list[StreamRow] | None:
         """Emit any buffered rows at end of run. Returns ``None`` if buffer
-        is empty (e.g., no callpert fired since the last emit)."""
+        is empty (e.g., no callpert fired since the last emit).
+
+        With ``decimation="mean"`` the last buffered row, which is the last
+        step the run solved, is returned as it is, after the mean of the rows
+        buffered before it. Averaged with them it would end the record on a
+        time the run went past and on values the System never held: a run to
+        2 s whose last window holds the steps at 1.9667 s, 1.9999 s and 2 s
+        ended at 1.9889 s.
+        """
         assert self._buffer is not None
         if not self._buffer:
             return None
+        if self.decimation == "mean" and len(self._buffer) > 1:
+            last = self._buffer.pop()
+            return [*self._drain_buffer(), last]
         return self._drain_buffer()
 
     def _drain_buffer(self) -> list[StreamRow]:

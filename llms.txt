@@ -146,6 +146,8 @@ WS /api/ws/{session_id}            — TDS live stream. Send {"type":"start_tds"
                                      the row's values in var_columns order, then {"type":"done",...}.
                                      A row is a step ANDES solved, at the time it solved it (the rows are
                                      ANDES's own dae.ts); the last is at tf when the run reached it.
+                                     With "decimation":"mean" and "max_rate_hz":N a row is the mean of the
+                                     steps of each 1/N s, and the last row is still the run's last step.
                                      Reconnect+resume: {"type":"resume","run_id":"...","last_seq":N}.
                                      A client that falls too far behind the run, or resumes past the
                                      ~30 s buffer, gets {"type":"resync",...} and the socket closes;

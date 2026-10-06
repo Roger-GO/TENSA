@@ -1512,9 +1512,15 @@ def _handle_run_tds(
             record_step(last)
 
     # Drain any buffered rows that didn't reach an emit boundary before run end.
+    # A mean-decimated run keeps its last step out of the last window's mean, so
+    # there can be two rows: each goes in a frame of its own, as every window's
+    # row of such a run does.
     if stream and aggregator is not None:
         tail_rows = aggregator.flush()
-        if tail_rows:
+        if tail_rows and aggregator.decimation == "mean":
+            for row in tail_rows:
+                _emit_rows([row], tail=True)
+        elif tail_rows:
             _emit_rows(tail_rows, tail=True)
 
     abort_event.clear()

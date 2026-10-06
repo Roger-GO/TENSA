@@ -195,6 +195,34 @@ def test_a_batched_stream_ends_on_the_last_step_too() -> None:
     assert frames[-1].get("tail") is True
 
 
+def test_a_mean_decimated_stream_ends_on_the_last_step_too() -> None:
+    """The web UI's stream: one row per window, the mean of its steps. The run
+    ends inside a window (four steps of 1/60 s into the one from 0.9 s), and
+    its last row is the step at ``tf`` as ANDES stored it, not the mean of the
+    four, which is a time the run went past."""
+    w = _ieee14()
+    pipe = _RecordingPipe()
+    request = {
+        "tf": 0.95, "h": 1 / 60, "stream": True, "decimation": "mean", "max_rate_hz": 10,
+        "vars": [], "dae_vars": RECORDED,
+    }
+    result = worker._handle_run_tds(w, request, threading.Event(), pipe, seq=1)  # type: ignore[arg-type]  # noqa: SLF001
+    t, values = pipe.rows()
+    stored_t, stored = _stored(w, RECORDED)
+
+    assert t[-1] == 0.95 == result["final_t"] == stored_t[-1]
+    assert np.array_equal(values[-1], stored[-1])
+    # The row before it is the mean of the window's other steps.
+    others = (stored_t >= 0.9 - 1e-9) & (stored_t < 0.95 - 1e-9)
+    assert others.sum() == 3
+    assert t[-2] == pytest.approx(stored_t[others].mean())
+    assert values[-2] == pytest.approx(stored[others].mean(axis=0))
+    # Still one row to a frame, as for every window of a mean-decimated run.
+    frames = [m for m in pipe.sent if m["type"] == "stream_frame"]
+    assert all(f["row_count"] == 1 for f in frames)
+    assert [f.get("tail") for f in frames[-3:]] == [None, True, True]
+
+
 def test_a_run_that_carries_on_starts_after_the_step_the_last_one_ended_on() -> None:
     w = _ieee14()
     _, first_t, first = _batch(w, tf=0.3)

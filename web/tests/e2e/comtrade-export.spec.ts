@@ -250,10 +250,11 @@ test('a time-domain run is saved as a COMTRADE record that holds the run', async
   expect([...units.keys()].filter((name) => /^Gen_.+_omega$/.test(name))).toHaveLength(4);
 
   // The time stamps run from the first sample to the end of the run, in order.
+  // The last one is the time the run was asked to reach: its last step is sent
+  // as it is, not averaged with the steps before it.
   expect(run.t[0]).toBe(0);
   expect(run.t.every((t, i) => i === 0 || t >= run.t[i - 1]!)).toBe(true);
-  expect(run.t.at(-1)!).toBeGreaterThan(TF_SECONDS - 0.2);
-  expect(run.t.at(-1)!).toBeLessThanOrEqual(TF_SECONDS);
+  expect(run.t.at(-1)!).toBeCloseTo(TF_SECONDS, 6);
 
   // The values are the run's: voltages near 1 pu that move when the line trips
   // at 2 s, and speeds that leave 1 pu after it.

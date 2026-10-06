@@ -128,17 +128,64 @@ def test_flush_drains_buffer_at_end_of_run() -> None:
 @pytest.mark.unit
 def test_flush_after_partial_window_returns_only_buffered_rows() -> None:
     """A run that ends mid-window emits only the partial window's buffer,
-    not a faux window-aligned summary."""
+    not a faux window-aligned summary: the mean of the steps before the
+    last one, and the last one."""
     agg = StreamAggregator(decimation="mean", max_rate_hz=10.0)
-    agg.push(0.05, [1.0])
-    agg.push(0.06, [2.0])
+    agg.push(0.04, [1.0])
+    agg.push(0.05, [2.0])
+    agg.push(0.06, [6.0])
     # Run ends mid-window
     tail = agg.flush()
     assert tail is not None
-    assert len(tail) == 1
-    # Mean of values 1.0, 2.0 = 1.5; mean of t = 0.055
-    assert pytest.approx(tail[0][0], abs=1e-9) == 0.055
+    assert len(tail) == 2
+    # Mean of values 1.0, 2.0 = 1.5; mean of t = 0.045
+    assert pytest.approx(tail[0][0], abs=1e-9) == 0.045
     assert pytest.approx(tail[0][1][0], abs=1e-9) == 1.5
+    assert agg.flush() is None
+
+
+@pytest.mark.unit
+def test_a_mean_decimated_run_ends_on_its_last_step() -> None:
+    """The last step of a run is the state it ended in, at the time it ended
+    at. Averaged with the steps before it in its window, the record of a run to
+    1.95 s here would end at 1.9333 s, on values the System never held."""
+    agg = StreamAggregator(decimation="mean", max_rate_hz=10.0)
+    assert agg.push(1.9167, [0.98]) is None
+    assert agg.push(1.9333, [0.97]) is None
+    assert agg.push(1.95, [0.5]) is None
+
+    tail = agg.flush()
+
+    assert tail is not None
+    assert [t for t, _ in tail] == pytest.approx([1.925, 1.95])
+    assert tail[0][1][0] == pytest.approx(0.975)
+    # The last row is the step itself, not a mean that happens to equal it.
+    assert tail[1] == (1.95, [0.5])
+
+
+@pytest.mark.unit
+def test_a_last_step_alone_in_its_window_is_one_row() -> None:
+    """A step on a window boundary closes the window before it and waits in
+    the next one: the flush has that step to send and nothing to average."""
+    agg = StreamAggregator(decimation="mean", max_rate_hz=10.0)
+    agg.push(0.05, [1.0])
+    assert agg.push(0.10, [3.0]) is not None
+
+    tail = agg.flush()
+
+    assert tail is not None and len(tail) == 1
+    assert tail[0][0] == 0.10
+    assert np.asarray(tail[0][1]).tolist() == [3.0]
+
+
+@pytest.mark.unit
+def test_an_undecimated_flush_keeps_every_row_as_it_is() -> None:
+    agg = StreamAggregator(decimation="none", max_rate_hz=10.0)
+    agg.push(0.01, [1.0])
+    agg.push(0.02, [2.0])
+    agg.push(0.03, [3.0])
+
+    assert agg.flush() == [(0.01, [1.0]), (0.02, [2.0]), (0.03, [3.0])]
 
 
 @pytest.mark.unit
@@ -219,11 +266,11 @@ def test_mean_over_wide_rows_matches_the_mean_taken_one_column_at_a_time() -> No
     for i, row in enumerate(pushed):
         assert agg.push(0.01 * (i + 1), row) is None
 
-    tail = agg.flush()
+    rows = agg.push(0.10, rng.normal(size=1208))
 
-    assert tail is not None
+    assert rows is not None and len(rows) == 1
     expected = [sum(row[j] for row in pushed) / len(pushed) for j in range(1208)]
-    assert np.asarray(tail[0][1]).tolist() == pytest.approx(expected, rel=1e-12, abs=1e-12)
+    assert np.asarray(rows[0][1]).tolist() == pytest.approx(expected, rel=1e-12, abs=1e-12)
 
 
 @pytest.mark.unit
@@ -234,8 +281,13 @@ def test_mean_of_rows_with_no_columns_still_averages_the_times() -> None:
     agg.push(0.02, np.empty(0))
     agg.push(0.04, np.empty(0))
 
-    tail = agg.flush()
+    rows = agg.push(0.10, np.empty(0))
 
-    assert tail is not None
-    assert tail[0][0] == pytest.approx(0.03)
+    assert rows is not None and len(rows) == 1
+    assert rows[0][0] == pytest.approx(0.03)
+    assert np.asarray(rows[0][1]).shape == (0,)
+    # And the run's last step, alone in its window, is a row with no columns too.
+    tail = agg.flush()
+    assert tail is not None and len(tail) == 1
+    assert tail[0][0] == pytest.approx(0.10)
     assert np.asarray(tail[0][1]).shape == (0,)
