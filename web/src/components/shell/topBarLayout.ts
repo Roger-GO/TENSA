@@ -21,9 +21,15 @@
  *
  * The class names are written out in full, and not built from the numbers, because
  * Tailwind finds the classes it must generate by reading the source for them. Each
- * carries its threshold: `max-[N]:hidden` hides below N px and `min-[N]:hidden` from N px
- * up (Tailwind 4 makes `max-[N]` mean "narrower than N"), so an inline control and its
- * More item swap over at the same width. A test reads them against these numbers.
+ * carries its threshold in square brackets: the `max-` form hides below that width and
+ * the `min-` form from it up (in Tailwind 4, `max-` with a width means "narrower than
+ * it"), so an inline control and its More item swap over at the same width. A test
+ * reads them against these numbers.
+ *
+ * Tailwind reads comments too, and the tests. A class written here with a letter for
+ * the width, as an example, becomes a rule with a media query that is not valid CSS,
+ * and the build warns about it. So the only width classes in this file are the six
+ * below, and the same test fails on one written anywhere without a length in it.
  */
 export const WIDE_PX = 1820;
 export const MEDIUM_PX = 1620;

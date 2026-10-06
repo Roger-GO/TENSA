@@ -3,6 +3,8 @@
  * Tailwind has to see them written out. These tests keep the names and the numbers
  * beside them from drifting apart.
  */
+import { readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -17,7 +19,7 @@ import {
   WIDE_PX,
 } from '@/components/shell/topBarLayout';
 
-/** The width in a `max-[Npx]:hidden` or `min-[Npx]:hidden` class. */
+/** The width, in px, that a `max-` or a `min-` class of the bar has in its brackets. */
 function widthOf(cls: string): number {
   const match = /^(?:max|min)-\[(\d+)px\]:hidden$/.exec(cls);
   if (match === null) throw new Error(`not a width class: ${cls}`);
@@ -47,5 +49,31 @@ describe('topBarLayout', () => {
   it('hands over in order: Search, Theme and History first, then the pane toggles, then Labels and Units', () => {
     expect(WIDE_PX).toBeGreaterThan(MEDIUM_PX);
     expect(MEDIUM_PX).toBeGreaterThan(NARROW_PX);
+  });
+});
+
+/** Every `.ts` and `.tsx` file under a directory of `web/`, where Vitest runs. */
+function sourcesUnder(dir: string): string[] {
+  return readdirSync(path.resolve(process.cwd(), dir), { recursive: true, encoding: 'utf8' })
+    .filter((name) => /\.tsx?$/.test(name))
+    .map((name) => path.join(dir, name));
+}
+
+describe('width classes anywhere in the sources', () => {
+  // Tailwind makes a rule of every class-like word it finds, in a comment or a test as
+  // much as in a `className`. A width variant whose brackets hold a placeholder gives a
+  // media query that is not CSS: the rule ships in the stylesheet and the build warns.
+  it('have a length in their brackets, in comments too', () => {
+    const variant = /\b(?:min|max)-\[([^\]\s]*)\]:/g;
+    const strays: string[] = [];
+    for (const file of [...sourcesUnder('src'), ...sourcesUnder('tests')]) {
+      const text = readFileSync(path.resolve(process.cwd(), file), 'utf8');
+      for (const match of text.matchAll(variant)) {
+        if (!/^\d+(?:\.\d+)?(?:px|rem|em)$/.test(match[1] ?? '')) {
+          strays.push(`${file}: ${match[0]}`);
+        }
+      }
+    }
+    expect(strays).toEqual([]);
   });
 });
