@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from tensa.api._run_as_job import _run_as_job
 from tensa.api.error_mapping import map_worker_error
-from tensa.api.schemas import ProblemDetails
+from tensa.api.schemas import ProblemDetails, SidecarLayout
 from tensa.core.disturbance import AlterSpec, FaultSpec, ToggleSpec
 from tensa.core.session import (
     SessionExpiredError,
@@ -120,6 +120,15 @@ class BundleExportRequest(BaseModel):
             "for cross-referencing with run-history exports."
         ),
     )
+    layout: SidecarLayout | None = Field(
+        None,
+        description=(
+            "The diagram's layout as the client shows it, written to the "
+            "bundle as ``layout.json`` so an import opens with the same "
+            "picture. ``null`` uses the layout saved beside the case file; "
+            "with neither, the bundle holds no ``layout.json``."
+        ),
+    )
 
 
 # ---- helpers ---------------------------------------------------------------
@@ -183,8 +192,8 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
             "description": (
                 "Bundle stream. Body is a ``.zip`` containing case + "
                 "disturbances.json + sim_params.json + results.csv + "
-                "manifest.json (each optional except case + manifest). "
-                "Snapshots are NOT included."
+                "layout.json + manifest.json (each optional except case + "
+                "manifest). Snapshots are NOT included."
             ),
         },
         404: {"model": ProblemDetails, "description": "Session not found or already closed."},
@@ -214,8 +223,9 @@ async def export_bundle(
 
     The substrate gathers the case file (verbatim or canonical xlsx),
     builds the manifest, and zips the lot together with the
-    request-body-supplied disturbances / sim_params / results.csv. The
-    response is the raw zip bytes with ``Content-Type: application/zip``
+    request-body-supplied disturbances / sim_params / results.csv and the
+    diagram's layout (the request's, else the one saved beside the case).
+    The response is the raw zip bytes with ``Content-Type: application/zip``
     and a ``Content-Disposition`` header that suggests a sensible
     filename.
 
@@ -229,11 +239,13 @@ async def export_bundle(
         "sim_params": body.sim_params.model_dump() if body.sim_params is not None else None,
         "results_csv": body.results_csv,
         "run_id": body.run_id,
+        "layout": body.layout.model_dump() if body.layout is not None else None,
     }
 
-    # request_summary drops the (potentially large) ``results_csv`` body — the
-    # activity-panel Retry only needs the user-facing knobs, not the CSV blob.
-    summary = body.model_dump(exclude={"results_csv"})
+    # request_summary drops the (potentially large) ``results_csv`` body and the
+    # layout: the activity-panel Retry only needs the user-facing knobs, not
+    # the CSV blob or a few thousand coordinates.
+    summary = body.model_dump(exclude={"results_csv", "layout"})
 
     try:
         async with _run_as_job(
@@ -311,6 +323,15 @@ class SaveSnapshotRequest(BaseModel):
             "replay. Default False writes the metadata only."
         ),
     )
+    layout: SidecarLayout | None = Field(
+        None,
+        description=(
+            "The diagram's layout as the client shows it. It is kept in the "
+            "snapshot and put back beside the case when the snapshot is "
+            "restored. ``null`` keeps the layout saved beside the case file, "
+            "if there is one."
+        ),
+    )
 
 
 class SnapshotMetadataModel(BaseModel):
@@ -340,6 +361,13 @@ class SnapshotMetadataModel(BaseModel):
     )
     has_tds: bool = Field(
         ..., description="Whether a TDS run had completed at save time."
+    )
+    has_layout: bool = Field(
+        False,
+        description=(
+            "Whether the snapshot holds the diagram's layout. The layout "
+            "itself is left out of this echo; a restore returns it."
+        ),
     )
 
 
@@ -423,6 +451,16 @@ class RestoreSnapshotResponse(BaseModel):
     )
     metadata: SnapshotMetadataModel = Field(
         ..., description="Sidecar metadata of the restored snapshot."
+    )
+    layout: SidecarLayout | None = Field(
+        None,
+        description=(
+            "The diagram's layout the snapshot held, in the current schema "
+            "version, or ``null`` when it held none. For a case loaded from "
+            "a file the server has already written it beside that file, "
+            "replacing the layout that was there; a system built from "
+            "scratch has no file, so the layout is only returned here."
+        ),
     )
     job_id: str | None = Field(
         default=None,
@@ -553,12 +591,17 @@ async def save_snapshot(
     Writes sidecar JSON metadata under
     ``<workspace>/snapshots/<case_basename>/<name>.json`` and, when
     ``include_dill`` is true, ANDES's ``andes.utils.snapshot.save_ss`` blob
-    beside it as ``<name>.dill``.
+    beside it as ``<name>.dill``. The metadata holds the diagram's layout,
+    so a restore brings the placement back with the operating point.
     """
     mgr = _manager(request)
     try:
+        # The job's summary is what a Retry repeats; the layout is not a knob.
         async with _run_as_job(
-            mgr, session_id, "snapshot-save", request_summary=body.model_dump()
+            mgr,
+            session_id,
+            "snapshot-save",
+            request_summary=body.model_dump(exclude={"layout"}),
         ) as job_id:
             payload = await mgr.invoke(
                 session_id,
@@ -567,6 +610,7 @@ async def save_snapshot(
                     "name": body.name,
                     "force": body.force,
                     "include_dill": body.include_dill,
+                    "layout": body.layout.model_dump() if body.layout is not None else None,
                 },
                 timeout=60.0,
             )
@@ -622,6 +666,8 @@ async def restore_snapshot(
     ``PFlow.run``. With ``use_dill_optimization`` it first tries to
     substitute the dill-loaded System (when the snapshot has a blob and
     the ANDES version matches) and falls back to the replay otherwise.
+    The diagram's layout the snapshot holds is put back beside the case
+    file and returned.
     """
     mgr = _manager(request)
     try:

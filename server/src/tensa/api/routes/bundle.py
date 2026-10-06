@@ -158,6 +158,16 @@ class BundleImportResponse(BaseModel):
             "newly-loaded System. Zero on ``status=plan``."
         ),
     )
+    layout_restored: bool = Field(
+        False,
+        description=(
+            "``true`` when the bundle held the diagram's layout "
+            "(``layout.json``) and it is now saved beside the imported case, "
+            "replacing any layout that was there. ``false`` on "
+            "``status=plan``, for a bundle with no layout, and when the "
+            "workspace's own case file was kept."
+        ),
+    )
     job_id: str | None = Field(
         default=None,
         description=(
@@ -413,6 +423,7 @@ async def import_bundle(
             str(f) for f in (payload.get("addfile_filenames") or [])
         ],
         disturbances_replayed=int(payload.get("disturbances_replayed") or 0),
+        layout_restored=bool(payload.get("layout_restored", False)),
         job_id=job_id,
     )
 

@@ -460,7 +460,18 @@ def _handle_create_blank(wrapper: Wrapper, args: dict[str, Any]) -> Any:
 
 
 def _handle_save_case(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    from tensa.core.layout import carry_layout_sidecar
+
     path = wrapper.save_case(args["format"], args["filename"])
+    # A case saved under a new name opens with the diagram the open one has.
+    # (A client that shows the diagram writes its current layout afterwards;
+    # this is what a save through the API alone gets.) A ``.raw`` file keeps no
+    # idx, so the system read back from it is numbered afresh.
+    carry_layout_sidecar(
+        wrapper._case_path,  # noqa: SLF001
+        path,
+        renumbered=args["format"] == "raw",
+    )
     return str(path)
 
 
@@ -842,6 +853,9 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     - ``results_csv``: optional long-form CSV body (UTF-8 string).
       ``None`` skips the file.
     - ``run_id``: optional last run id, surfaced in the manifest.
+    - ``layout``: optional layout of the diagram as the client shows it.
+      Without it the layout saved beside the case file goes in the bundle,
+      and a session with neither gets a bundle with no ``layout.json``.
 
     The substrate contributes:
 
@@ -869,6 +883,7 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
         case_files_from_workspace,
         check_exportable_case_files,
     )
+    from tensa.core.layout import LayoutError, parse_layout, read_layout_sidecar
 
     # _edit_log is the substrate-side signal of "case has been edited
     # since load". Length > 0 with a non-None case path means the user
@@ -951,6 +966,19 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     else:
         raise AndesAppError("'run_id' must be a string or null")
 
+    layout_raw = args.get("layout")
+    layout: dict[str, Any] | None = None
+    if isinstance(layout_raw, dict):
+        try:
+            layout = parse_layout(layout_raw).model_dump()
+        except LayoutError as exc:
+            raise AndesAppError(f"'layout' is not a valid layout: {exc}") from exc
+    elif layout_raw is not None:
+        raise AndesAppError("'layout' must be a layout object or null")
+    elif case_path is not None:
+        stored = read_layout_sidecar(case_path)
+        layout = stored.model_dump() if stored is not None else None
+
     inputs = BundleInputs(
         case_files=case_files,
         case_canonical_export=case_canonical_export,
@@ -960,6 +988,7 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
         run_id=run_id,
         andes_version=str(getattr(andes, "__version__", "unknown")),
         tensa_version=str(tensa_version),
+        layout=layout,
     )
     return assemble_bundle(inputs)
 
@@ -967,16 +996,21 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
 def _handle_save_snapshot(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     """Wire ``Wrapper.save_snapshot`` for Unit 7.
 
-    Args: ``{"name": str, "force": bool, "include_dill": bool}``. Returns
-    the metadata dict + file sizes so the route layer can echo them in the
-    success response.
+    Args: ``{"name": str, "force": bool, "include_dill": bool, "layout":
+    dict | None}``. Returns the metadata dict + file sizes so the route layer
+    can echo them in the success response.
     """
     name = args.get("name")
     if not isinstance(name, str):
         raise AndesAppError("'name' must be a string")
     force = bool(args.get("force", False))
     include_dill = bool(args.get("include_dill", False))
-    return wrapper.save_snapshot(name, force=force, include_dill=include_dill)
+    layout = args.get("layout")
+    if layout is not None and not isinstance(layout, dict):
+        raise AndesAppError("'layout' must be a layout object or null")
+    return wrapper.save_snapshot(
+        name, force=force, include_dill=include_dill, layout=layout
+    )
 
 
 def _handle_restore_snapshot(wrapper: Wrapper, args: dict[str, Any]) -> Any:
@@ -984,7 +1018,7 @@ def _handle_restore_snapshot(wrapper: Wrapper, args: dict[str, Any]) -> Any:
 
     Args: ``{"name": str, "use_dill_optimization": bool}``. Returns the
     restore-result dict (``used_dill``, ``fallback_reason``,
-    ``disturbances_replayed``, ``metadata``).
+    ``disturbances_replayed``, ``metadata``, ``layout``).
     """
     name = args.get("name")
     if not isinstance(name, str):

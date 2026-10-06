@@ -6,7 +6,10 @@ Snapshots compose up to two pieces, per the plan's KTD-4 contract:
   ``_disturbance_log`` (Unit 6.5) plus the manifest fields needed for the
   version check + integrity audit (``andes_version``, ``tensa_version``,
   ``case_filename``, ``case_sha256``, ``saved_at``, ``has_pflow``,
-  ``has_tds``). It is the source of truth for the default restore.
+  ``has_tds``). It is the source of truth for the default restore. It also
+  holds the diagram's ``layout`` as it was at the save (see
+  ``tensa.core.layout``), which a restore puts back beside the case; a
+  snapshot saved before layouts were kept has none and restores without one.
 - ``<name>.dill`` - ANDES's own ``andes.utils.snapshot.save_ss`` output, written
   only when the caller asks for it (``include_dill=True``). The dill payload
   carries the complete ``System`` state (DAE arrays, PF state, TDS state when
@@ -126,6 +129,9 @@ class SnapshotMetadata:
     saved_at: str
     has_pflow: bool
     has_tds: bool
+    #: The diagram's layout at the save, as the plain dict of a validated
+    #: ``SidecarLayout``; ``None`` when the snapshot was saved without one.
+    layout: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SnapshotMetadata:
@@ -168,10 +174,20 @@ class SnapshotMetadata:
             ),
             has_pflow=bool(data.get("has_pflow", False)),
             has_tds=bool(data.get("has_tds", False)),
+            layout=_layout if isinstance(_layout := data.get("layout"), dict) else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
         """Return the JSON-friendly dict used to write the sidecar."""
+        payload = self.summary()
+        del payload["has_layout"]
+        if self.layout is not None:
+            payload["layout"] = self.layout
+        return payload
+
+    def summary(self) -> dict[str, Any]:
+        """The metadata as a response echoes it: everything on disk but the
+        layout itself, which can be large, with ``has_layout`` in its place."""
         return {
             "andes_version": self.andes_version,
             "tensa_version": self.tensa_version,
@@ -181,6 +197,7 @@ class SnapshotMetadata:
             "saved_at": self.saved_at,
             "has_pflow": self.has_pflow,
             "has_tds": self.has_tds,
+            "has_layout": self.layout is not None,
         }
 
 

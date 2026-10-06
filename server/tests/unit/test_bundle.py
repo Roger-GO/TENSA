@@ -529,3 +529,174 @@ def test_extract_bundle_keep_workspace_copy_writes_sibling(tmp_path: Path) -> No
     assert result["warnings"] == [
         "workspace 'ieee14.raw' preserved; bundle copy saved to ieee14.raw.from-bundle for comparison"
     ]
+
+
+# ---- the diagram's layout ---------------------------------------------------
+
+
+def _layout(**overrides: Any) -> dict[str, Any]:
+    """A layout as the worker hands it to the assembler: a validated document's dict."""
+    from tensa.core.layout import parse_layout
+
+    doc: dict[str, Any] = {
+        "schema_version": "2",
+        "andes_version": "2.0.0",
+        "coordinates": {"1": {"x": 10.0, "y": 20.0}, "2": {"x": 210.0, "y": 20.0}},
+        "non_bus_coordinates": {"load": {"PQ_1": {"x": 10.0, "y": 90.0}}},
+        "branches": {
+            "line": {
+                "Line_1": {
+                    "routing": "polyline",
+                    "bend_points": [{"x": 40.0, "y": 26.0}, {"x": 240.0, "y": 26.0}],
+                }
+            }
+        },
+        "figure": {"monochrome": True},
+        "last_modified": "2026-10-06T08:00:00+00:00",
+    }
+    doc.update(overrides)
+    return parse_layout(doc).model_dump()
+
+
+def _with_entry(zip_bytes: bytes, name: str, data: bytes) -> bytes:
+    """``zip_bytes`` with one entry replaced (or added)."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as src, zipfile.ZipFile(out, "w") as dst:
+        for info in src.infolist():
+            if info.filename != name:
+                dst.writestr(info, src.read(info.filename))
+        dst.writestr(name, data)
+    return out.getvalue()
+
+
+@pytest.mark.unit
+def test_assemble_bundle_holds_the_layout_and_the_manifest_lists_it() -> None:
+    layout = _layout()
+    out = assemble_bundle(_minimal_inputs(layout=layout))
+    assert "layout.json" in list_bundle_entries(out)
+    with zipfile.ZipFile(io.BytesIO(out)) as zf:
+        assert json.loads(zf.read("layout.json")) == layout
+    files = read_bundle_manifest(out)["files"]
+    assert files.index("layout.json") < files.index("manifest.json")
+
+
+@pytest.mark.unit
+def test_a_bundle_with_no_layout_has_no_layout_entry() -> None:
+    out = assemble_bundle(_minimal_inputs())
+    assert "layout.json" not in list_bundle_entries(out)
+    assert "layout.json" not in read_bundle_manifest(out)["files"]
+
+
+@pytest.mark.unit
+def test_extract_bundle_puts_the_layout_beside_the_case(tmp_path: Path) -> None:
+    layout = _layout()
+    result = _extract(assemble_bundle(_minimal_inputs(layout=layout)), tmp_path)
+    assert result["layout_restored"] is True
+    assert result["warnings"] == []
+    assert json.loads((tmp_path / "ieee14.raw.layout.json").read_text(encoding="utf-8")) == layout
+    # The layout is no case file: it is not listed as one, nor loaded as an addfile.
+    assert result["addfile_paths"] == []
+
+
+@pytest.mark.unit
+def test_extract_bundle_replaces_the_layout_the_workspace_had(tmp_path: Path) -> None:
+    (tmp_path / "ieee14.raw.layout.json").write_text(
+        json.dumps(_layout(coordinates={"99": {"x": 1.0, "y": 1.0}})), encoding="utf-8"
+    )
+    result = _extract(assemble_bundle(_minimal_inputs(layout=_layout())), tmp_path)
+    assert result["layout_restored"] is True
+    stored = json.loads((tmp_path / "ieee14.raw.layout.json").read_text(encoding="utf-8"))
+    assert sorted(stored["coordinates"]) == ["1", "2"]
+
+
+@pytest.mark.unit
+def test_extract_bundle_without_a_layout_leaves_the_workspace_layout_alone(tmp_path: Path) -> None:
+    """A bundle exported before layouts were bundled."""
+    existing = json.dumps(_layout())
+    (tmp_path / "ieee14.raw.layout.json").write_text(existing, encoding="utf-8")
+    result = _extract(assemble_bundle(_minimal_inputs()), tmp_path)
+    assert result["layout_restored"] is False
+    assert result["warnings"] == []
+    assert (tmp_path / "ieee14.raw.layout.json").read_text(encoding="utf-8") == existing
+
+
+@pytest.mark.unit
+def test_extract_bundle_upgrades_a_version_1_layout(tmp_path: Path) -> None:
+    v1 = {
+        "schema_version": "1",
+        "andes_version": "2.0.0",
+        "coordinates": {"1": {"x": 10.0, "y": 20.0}},
+        "last_modified": "2026-05-07T12:00:00+00:00",
+    }
+    zip_bytes = _with_entry(
+        assemble_bundle(_minimal_inputs()), "layout.json", json.dumps(v1).encode("utf-8")
+    )
+    assert _extract(zip_bytes, tmp_path)["layout_restored"] is True
+    stored = json.loads((tmp_path / "ieee14.raw.layout.json").read_text(encoding="utf-8"))
+    assert stored["schema_version"] == "2"
+    assert stored["coordinates"] == v1["coordinates"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "data",
+    [b"{not json", b'{"schema_version": "2"}', b'{"coordinates": {"1": {"x": "left"}}}'],
+)
+def test_a_layout_that_does_not_validate_is_left_out_with_a_warning(
+    tmp_path: Path, data: bytes
+) -> None:
+    """The case and its disturbances reproduce the result; a bad layout does
+    not stop the import."""
+    zip_bytes = _with_entry(assemble_bundle(_minimal_inputs()), "layout.json", data)
+    result = _extract(zip_bytes, tmp_path)
+    assert (tmp_path / "ieee14.raw").read_bytes() == b"BUS 1\nLINE 1 2\n"
+    assert result["layout_restored"] is False
+    assert result["warnings"] == [
+        "the bundle's layout.json is not a valid layout; the diagram layout was not imported"
+    ]
+    assert not (tmp_path / "ieee14.raw.layout.json").exists()
+
+
+@pytest.mark.unit
+def test_a_layout_over_the_cap_is_left_out_without_being_read(tmp_path: Path) -> None:
+    from tensa.core.layout import MAX_LAYOUT_BYTES
+
+    zip_bytes = _with_entry(
+        assemble_bundle(_minimal_inputs()), "layout.json", b" " * (MAX_LAYOUT_BYTES + 1)
+    )
+    result = _extract(zip_bytes, tmp_path)
+    assert result["layout_restored"] is False
+    assert len(result["warnings"]) == 1
+    assert "the diagram layout was not imported" in result["warnings"][0]
+    assert not (tmp_path / "ieee14.raw.layout.json").exists()
+
+
+@pytest.mark.unit
+def test_keeping_the_workspace_case_keeps_its_layout_too(tmp_path: Path) -> None:
+    (tmp_path / "ieee14.raw").write_bytes(b"workspace copy")
+    mine = json.dumps(_layout(coordinates={"7": {"x": 7.0, "y": 7.0}}))
+    (tmp_path / "ieee14.raw.layout.json").write_text(mine, encoding="utf-8")
+    zip_bytes = assemble_bundle(_minimal_inputs(layout=_layout()))
+    result = _extract(zip_bytes, tmp_path, use_bundle_case=False)
+    assert result["layout_restored"] is False
+    assert (tmp_path / "ieee14.raw.layout.json").read_text(encoding="utf-8") == mine
+    assert result["warnings"][-1] == (
+        "the bundle's diagram layout was not imported: workspace 'ieee14.raw' "
+        "was kept, and its own layout with it"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_symlink_where_the_layout_goes_is_not_written_through(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    planted = tmp_path / "planted.json"
+    (workspace / "ieee14.raw.layout.json").symlink_to(planted)  # dangling
+    result = _extract(assemble_bundle(_minimal_inputs(layout=_layout())), workspace)
+    assert not planted.exists()
+    # The case is imported all the same; only the layout is given up, with a warning.
+    assert (workspace / "ieee14.raw").exists()
+    assert result["layout_restored"] is False
+    assert len(result["warnings"]) == 1
+    assert "diagram layout could not be written" in result["warnings"][0]

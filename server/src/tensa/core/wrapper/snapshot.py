@@ -25,7 +25,12 @@ class SnapshotMixin(CaseMixin):
     """Save, restore, list and delete snapshots of a session."""
 
     def save_snapshot(
-        self, name: str, *, force: bool = False, include_dill: bool = False
+        self,
+        name: str,
+        *,
+        force: bool = False,
+        include_dill: bool = False,
+        layout: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Save the current System state as a snapshot — Unit 7.
 
@@ -34,7 +39,9 @@ class SnapshotMixin(CaseMixin):
         - ``<name>.json`` — sidecar metadata: ANDES + tensa versions,
           case filename + sha256, recorded ``_disturbance_log``,
           ``has_pflow`` / ``has_tds`` flags. The disturbance log is the
-          default restore path's source of truth (Unit 6.5).
+          default restore path's source of truth (Unit 6.5). The diagram's
+          layout goes in it too: ``layout`` when the caller sends the one it
+          is showing, else the one saved beside the case file, if any.
         - ``<name>.dill`` — ANDES's ``andes.utils.snapshot.save_ss`` blob,
           only when ``include_dill=True``. Carries the complete System
           state (DAE arrays, PF / TDS state) for the opt-in dill restore.
@@ -65,6 +72,7 @@ class SnapshotMixin(CaseMixin):
                 "was launched without one"
             )
         validated = validate_snapshot_name(name)
+        snapshot_layout = self._layout_for_snapshot(layout)
 
         case_filename = (
             self._case_path.name if self._case_path is not None else None
@@ -127,6 +135,7 @@ class SnapshotMixin(CaseMixin):
                 saved_at=saved_at,
                 has_pflow=has_pflow,
                 has_tds=has_tds,
+                layout=snapshot_layout,
             )
 
             dill_bytes, json_bytes = write_snapshot_files(
@@ -150,10 +159,61 @@ class SnapshotMixin(CaseMixin):
 
         return {
             "name": validated,
-            "metadata": metadata.to_dict(),
+            "metadata": metadata.summary(),
             "dill_bytes": dill_bytes,
             "metadata_bytes": json_bytes,
         }
+
+    def _layout_for_snapshot(self, layout: dict[str, Any] | None) -> dict[str, Any] | None:
+        """The layout a snapshot being saved should hold, as a plain dict.
+
+        ``layout`` is what the caller says the diagram shows; it is validated
+        here as well as by the route, since the worker takes requests from
+        more than one caller. Without it, the layout saved beside the case
+        file is used, and a session with neither saves none.
+        """
+        from tensa.core.layout import LayoutError, parse_layout, read_layout_sidecar
+        from tensa.core.snapshot import SnapshotMetadataError
+
+        if layout is not None:
+            try:
+                return parse_layout(layout).model_dump()
+            except LayoutError as exc:
+                raise SnapshotMetadataError(f"the snapshot's layout is not valid: {exc}") from exc
+        if self._case_path is None:
+            return None
+        stored = read_layout_sidecar(self._case_path)
+        return stored.model_dump() if stored is not None else None
+
+    def _restore_snapshot_layout(self, metadata: SnapshotMetadata) -> dict[str, Any] | None:
+        """Put a restored snapshot's layout back beside the case file.
+
+        Returns the layout (validated, in the current schema version) for the
+        reply, so a client can redraw from it, or ``None`` when the snapshot
+        holds none or holds one that no longer validates. A session with no
+        case file has nowhere to keep it, so it only goes in the reply. A
+        layout that cannot be written is logged: the restore itself worked.
+        """
+        from tensa.core.layout import LayoutError, parse_layout, write_layout_sidecar
+
+        if metadata.layout is None:
+            return None
+        log = logging.getLogger("tensa.wrapper.snapshot")
+        try:
+            layout = parse_layout(metadata.layout)
+        except LayoutError as exc:
+            log.warning("snapshot layout ignored, it does not validate: %s", exc)
+            return None
+        if self._case_path is not None:
+            try:
+                write_layout_sidecar(self._case_path, layout)
+            except (OSError, LayoutError) as exc:
+                log.warning(
+                    "could not put the snapshot's layout back beside %s: %s",
+                    self._case_path.name,
+                    _sanitize_message(str(exc)),
+                )
+        return layout.model_dump()
 
     def _read_snapshot_record(self, name: str) -> _SnapshotRecord:
         """Read a snapshot's sidecar JSON without touching the System.
@@ -240,6 +300,9 @@ class SnapshotMixin(CaseMixin):
            JSON's disturbance log becomes the wrapper's ``_disturbance_log``
            (the blob already carries those disturbances). Any failure along
            the way falls back to the default path.
+
+        Either way the snapshot's diagram layout, when it holds one, is
+        written back beside the case file and returned as ``layout``.
 
         Raises :class:`SnapshotNotFoundError` (404) when the named
         snapshot does not exist; :class:`SnapshotMetadataError` (422)
@@ -360,7 +423,10 @@ class SnapshotMixin(CaseMixin):
             metadata=metadata,
             fallback_reason=fallback_reason,
             disturbances_replayed=replayed,
-        ).__dict__ | {"metadata": metadata.to_dict()}
+        ).__dict__ | {
+            "metadata": metadata.summary(),
+            "layout": self._restore_snapshot_layout(metadata),
+        }
 
     def list_snapshots(self) -> list[dict[str, Any]]:
         """Return the listing of snapshots for the current case.

@@ -52,6 +52,8 @@ class BundleMixin(CaseMixin):
         - ``case_filename``, ``addfile_filenames``: post-commit only.
         - ``disturbances_replayed``: post-commit only; count of specs
           successfully re-applied to the new System.
+        - ``layout_restored``: post-commit only; whether the bundle held a
+          diagram layout that is now saved beside the case.
         """
         from tensa.core.bundle import (
             BundleResolveChoices,
@@ -152,4 +154,5 @@ class BundleMixin(CaseMixin):
             "case_filename": primary_path.name,
             "addfile_filenames": [p.name for p in addfile_paths],
             "disturbances_replayed": replayed,
+            "layout_restored": bool(extraction.get("layout_restored", False)),
         }

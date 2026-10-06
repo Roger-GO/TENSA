@@ -40,6 +40,7 @@ from tensa.core.errors import (
 from tensa.core.esd1 import MODEL as ESD1_MODEL
 from tensa.core.esd1 import check_edit as check_esd1_edit
 from tensa.core.esd1 import log_base_notice as log_esd1_base_notice
+from tensa.core.layout import carry_layout_sidecar
 from tensa.core.session_dirs import (
     SESSIONS_DIRNAME,
     remove_tree,
@@ -476,7 +477,8 @@ class CloneManager:
         ``name`` is the stem only (no extension, no separators / traversal);
         the manager appends each clone file's extension. The new files appear in
         the workspace listing immediately (so the UI's SavedCasesList shows
-        them).
+        them). The layout of the original's diagram is copied beside the new
+        primary file, so the saved case opens with the same picture.
 
         **Refuses to clobber an existing workspace file** unless ``overwrite``
         is explicitly ``True``. The originals live in the same workspace, so a
@@ -516,6 +518,11 @@ class CloneManager:
         for clone_path, dest in zip(self.clone_paths, dests, strict=True):
             shutil.copy2(clone_path, dest)
             written.append(str(dest))
+        # The new case is the open one with edited parameters: same elements,
+        # same diagram. The first file of each list is the primary case file,
+        # the one a layout is kept beside.
+        if self.original_paths and dests:
+            carry_layout_sidecar(self.original_paths[0], dests[0])
         return CloneSaveAsResult(name=safe, files=written)
 
     def _validate_save_as_name(self, name: str) -> str:

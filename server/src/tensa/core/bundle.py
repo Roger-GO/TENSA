@@ -16,6 +16,11 @@ The bundle contract (KTD-5) is:
   (per the v2.0 plan's option (a) handling — frames live in the runs slice
   on the frontend, not the substrate, so the frontend ships the CSV body
   to this endpoint inline).
+- ``layout.json`` — the layout of the case's diagram (the document
+  ``tensa.core.layout`` describes), so the case opens elsewhere with the same
+  picture. Omitted when the session has none. On import it is written beside
+  the case as ``<case>.layout.json``; one that does not validate is left out
+  with a warning, never a reason to refuse the bundle.
 - ``manifest.json`` — ``{ andes_version, tensa_version, case_filename,
   case_sha256, disturbance_count, run_id, exported_at, files: [...] }``.
 
@@ -47,6 +52,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 from tensa.core.errors import AndesAppError as _AndesAppError
+from tensa.core.layout import (
+    LAYOUT_SIDECAR_SUFFIX,
+    MAX_LAYOUT_BYTES,
+    LayoutError,
+    SidecarLayout,
+    parse_layout,
+    write_layout_file,
+)
 from tensa.security.names import portable_name_problem
 from tensa.security.paths import WorkspacePathError, open_workspace_file_for_write
 
@@ -86,6 +99,9 @@ class BundleInputs:
     andes_version: str
     #: ``tensa`` package version (the substrate).
     tensa_version: str
+    #: The diagram's layout as a plain dict (a validated ``SidecarLayout``),
+    #: written as ``layout.json``. ``None`` when the session has none.
+    layout: dict[str, Any] | None = None
 
 
 # ---- public API ------------------------------------------------------------
@@ -114,6 +130,8 @@ def build_manifest(inputs: BundleInputs, *, exported_at: str | None = None) -> d
         files.append("sim_params.json")
     if inputs.results_csv is not None:
         files.append("results.csv")
+    if inputs.layout is not None:
+        files.append(LAYOUT_ENTRY)
     files.append("manifest.json")
     return {
         "andes_version": inputs.andes_version,
@@ -171,6 +189,10 @@ def assemble_bundle(inputs: BundleInputs, *, exported_at: str | None = None) -> 
             info = zipfile.ZipInfo(filename="results.csv", date_time=fixed_mtime)
             info.compress_type = zipfile.ZIP_DEFLATED
             zf.writestr(info, inputs.results_csv)
+        if inputs.layout is not None:
+            info = zipfile.ZipInfo(filename=LAYOUT_ENTRY, date_time=fixed_mtime)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, json.dumps(inputs.layout, indent=2, sort_keys=True))
         info = zipfile.ZipInfo(filename="manifest.json", date_time=fixed_mtime)
         info.compress_type = zipfile.ZIP_DEFLATED
         zf.writestr(info, json.dumps(manifest, indent=2, sort_keys=True))
@@ -300,6 +322,10 @@ _MAX_CASE_ENTRIES: int = 16
 # spec is ~150 bytes (JSON-serialised); 1 MiB allows ~7000 specs which
 # vastly exceeds the disturbance-log cap of 64 (Unit 7).
 _MAX_DISTURBANCES_JSON_BYTES: int = 1 * 1024 * 1024
+
+# The bundle entry that holds the diagram's layout. It sits at the top level,
+# beside the manifest, so it is never taken for a case file.
+LAYOUT_ENTRY: str = "layout.json"
 
 
 # Conflict severity. ``warning`` lets the caller proceed (with the
@@ -604,6 +630,33 @@ def _read_disturbances_or_raise(
     return tuple(out)
 
 
+def _read_layout(zf: zipfile.ZipFile) -> tuple[SidecarLayout | None, str | None]:
+    """The bundle's layout and, when it has one that cannot be used, why not.
+
+    ``(None, None)`` for a bundle with no ``layout.json`` (every bundle made
+    before layouts were bundled). A layout that is too large or does not
+    validate gives ``(None, <warning>)``: the case and its disturbances are
+    what reproduce a result, so the import goes ahead without it.
+    """
+    try:
+        info = zf.getinfo(LAYOUT_ENTRY)
+    except KeyError:
+        return None, None
+    if info.file_size > MAX_LAYOUT_BYTES:
+        return None, (
+            f"the bundle's {LAYOUT_ENTRY} is {info.file_size} bytes (cap "
+            f"{MAX_LAYOUT_BYTES}); the diagram layout was not imported"
+        )
+    try:
+        with zf.open(info, "r") as fh:
+            return parse_layout(fh.read()), None
+    except LayoutError:
+        return None, (
+            f"the bundle's {LAYOUT_ENTRY} is not a valid layout; "
+            "the diagram layout was not imported"
+        )
+
+
 def _major_minor(version: str) -> tuple[int, int] | None:
     """Parse a SemVer-like string and return ``(major, minor)`` or ``None``.
 
@@ -820,10 +873,16 @@ def extract_bundle(
       written to a sibling path with a ``.from-bundle`` suffix so the
       user can compare offline.
 
+    The bundle's ``layout.json``, when it has one, is written beside the
+    case as its layout, replacing any that was there. With the sha-mismatch
+    resolved as "keep the workspace file", the workspace's layout is kept
+    along with its case.
+
     Returns a dict with ``primary_path`` (the path the caller should
     pass to :meth:`Wrapper.load_case`), ``addfile_paths`` (the same
-    for the addfiles, in declared order), and ``warnings`` (a list of
-    free-form strings the route layer surfaces in the response body).
+    for the addfiles, in declared order), ``warnings`` (a list of
+    free-form strings the route layer surfaces in the response body), and
+    ``layout_restored`` (whether the bundle's layout was written).
     """
     if plan.blocked:
         raise BundleValidationError(
@@ -873,6 +932,7 @@ def extract_bundle(
             for name in plan.case_files
             if name != primary
         ]
+        layout, layout_warning = _read_layout(zf)
 
         primary_write.write_bytes(primary_bytes)
         if keep_workspace_copy:
@@ -889,10 +949,30 @@ def extract_bundle(
             target.write_bytes(data)
             addfile_paths.append(target)
 
+    if layout_warning is not None:
+        warnings.append(layout_warning)
+    layout_restored = False
+    if layout is not None and keep_workspace_copy:
+        warnings.append(
+            f"the bundle's diagram layout was not imported: workspace {primary!r} "
+            "was kept, and its own layout with it"
+        )
+    elif layout is not None:
+        # The layout is the last thing written and the only one that may fail
+        # without failing the import: the case is in place either way.
+        try:
+            write_layout_file(
+                _checked_write_target(workspace, primary + LAYOUT_SIDECAR_SUFFIX), layout
+            )
+            layout_restored = True
+        except (OSError, BundleValidationError) as exc:
+            warnings.append(f"the bundle's diagram layout could not be written: {exc}")
+
     return {
         "primary_path": str(primary_path),
         "addfile_paths": [str(p) for p in addfile_paths],
         "warnings": warnings,
+        "layout_restored": layout_restored,
     }
 
 
@@ -954,6 +1034,7 @@ __all__ = [
     "BundleResolveChoices",
     "BundleValidationError",
     "CaseMetadataDiff",
+    "LAYOUT_ENTRY",
     "MAX_BUNDLE_BYTES",
     "assemble_bundle",
     "build_manifest",

@@ -190,6 +190,54 @@ def test_snapshot_metadata_round_trips_through_json() -> None:
 
 
 @pytest.mark.unit
+def test_snapshot_metadata_keeps_the_layout_on_disk_and_out_of_the_summary() -> None:
+    """The layout is part of what a snapshot stores, so it round-trips through
+    the JSON on disk; the echo a response carries says only that there is one."""
+    layout = {
+        "schema_version": "2",
+        "andes_version": "2.0.0",
+        "coordinates": {"1": {"x": 10.0, "y": 20.0}},
+        "last_modified": "2026-10-06T08:00:00+00:00",
+    }
+    meta = SnapshotMetadata(
+        andes_version="2.0.0",
+        tensa_version=tensa.__version__,
+        case_filename="ieee14.raw",
+        case_sha256=None,
+        disturbance_log=[],
+        saved_at="2026-10-06T08:00:01+00:00",
+        has_pflow=True,
+        has_tds=False,
+        layout=layout,
+    )
+    payload = meta.to_dict()
+    assert payload["layout"] == layout
+    assert "has_layout" not in payload
+    assert SnapshotMetadata.from_dict(json.loads(json.dumps(payload))) == meta
+    summary = meta.summary()
+    assert "layout" not in summary
+    assert summary["has_layout"] is True
+    assert {k: v for k, v in summary.items() if k != "has_layout"} == {
+        k: v for k, v in payload.items() if k != "layout"
+    }
+
+
+@pytest.mark.unit
+def test_a_snapshot_saved_without_a_layout_writes_the_json_it_always_wrote() -> None:
+    meta = SnapshotMetadata.from_dict({"andes_version": "2.0.0", "tensa_version": "0.1.0"})
+    assert meta.layout is None
+    assert "layout" not in meta.to_dict()
+    assert meta.summary()["has_layout"] is False
+    # Something that is not an object where the layout goes reads as none.
+    assert (
+        SnapshotMetadata.from_dict(
+            {"andes_version": "2.0.0", "tensa_version": "0.1.0", "layout": "ieee14"}
+        ).layout
+        is None
+    )
+
+
+@pytest.mark.unit
 def test_snapshot_metadata_from_dict_rejects_missing_versions() -> None:
     """Missing required strings → SnapshotMetadataError."""
     with pytest.raises(SnapshotMetadataError):

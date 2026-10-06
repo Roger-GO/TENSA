@@ -7,12 +7,14 @@ edits preserved. Exercises the ``Wrapper`` delegation + a fresh
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
 import pytest
 
 from tensa.core.errors import CloneEditError
+from tensa.core.layout import parse_layout, read_layout_sidecar, write_layout_sidecar
 from tensa.core.wrapper import Wrapper
 
 pytestmark = pytest.mark.integration
@@ -94,3 +96,50 @@ def test_save_as_refuses_to_clobber_the_loaded_original(
         w.save_clone_as("kundur_full")
     # The original is byte-for-byte untouched.
     assert original.read_bytes() == original_bytes
+
+
+def _kundur_layout() -> dict[str, object]:
+    return {
+        "schema_version": "2",
+        "andes_version": "2.0.0",
+        "coordinates": {str(i): {"x": 80.0 * i, "y": 40.0 * (i % 2)} for i in range(1, 11)},
+        "non_bus_coordinates": {"generator": {"1": {"x": 60.0, "y": -70.0}}},
+        "units": {"1": {"expanded": True}},
+        "last_modified": "2026-10-06T08:00:00+00:00",
+    }
+
+
+def test_save_as_takes_the_diagram_layout_to_the_new_case(
+    kundur_wrapper: tuple[Wrapper, Path],
+) -> None:
+    """The saved case is the open one with edited parameters, so it opens with
+    the diagram as it was placed. Before, the copy came up in the automatic
+    layout because nothing wrote a layout beside it."""
+    w, workspace = kundur_wrapper
+    placed = parse_layout(_kundur_layout())
+    write_layout_sidecar(workspace / "kundur_full.xlsx", placed)
+
+    w.init_clone()
+    w.apply_clone_edit("TGOV1", "1", "T1", 0.6)
+    w.save_clone_as("kundur_tuned")
+
+    carried = read_layout_sidecar(workspace / "kundur_tuned.xlsx")
+    assert carried is not None
+    assert carried.model_dump() == placed.model_dump()
+    # The original keeps its own.
+    assert read_layout_sidecar(workspace / "kundur_full.xlsx") == placed
+
+
+def test_save_as_of_a_case_with_no_layout_writes_none(
+    kundur_wrapper: tuple[Wrapper, Path],
+) -> None:
+    w, workspace = kundur_wrapper
+    # A layout left behind by an earlier file of the name the save is about to take.
+    (workspace / "kundur_tuned.xlsx.layout.json").write_text(
+        json.dumps(_kundur_layout()), encoding="utf-8"
+    )
+    w.init_clone()
+    w.apply_clone_edit("TGOV1", "1", "T1", 0.6)
+    w.save_clone_as("kundur_tuned")
+    assert (workspace / "kundur_tuned.xlsx").exists()
+    assert not (workspace / "kundur_tuned.xlsx.layout.json").exists()
