@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'node:path';
+import { entryChunkLimit } from './vite-plugins/entryChunkLimit';
 
 // Default substrate port. Override with VITE_ANDES_PORT env var when running
 // `tensa serve --port <N>` so dev proxy targets the right backend.
@@ -10,7 +11,8 @@ const ANDES_HOST = process.env.VITE_ANDES_HOST ?? '127.0.0.1';
 const ANDES_TARGET = `http://${ANDES_HOST}:${ANDES_PORT}`;
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  // The last one fails the build when the entry chunk outgrows its limit.
+  plugins: [react(), tailwindcss(), entryChunkLimit()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

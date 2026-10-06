@@ -101,6 +101,23 @@ const LAZY_MODULES = [
   'components/profiles/ProfileImportDialog.tsx',
   'components/shell/CommandPalette.tsx',
   'components/shell/ShortcutCheatsheet.tsx',
+  // The Inspector and what only it shows.
+  'components/inspector/RightInspector.tsx',
+  'components/inspector/ElementFormFields.tsx',
+  'components/inspector/PlotsAccordion.tsx',
+  'components/inspector/DisturbancesAccordion.tsx',
+  'components/elements/DeleteElementButton.tsx',
+  // The Add element panel and its forms.
+  'components/elements/AddElementPanel.tsx',
+  'components/elements/ElementForm.tsx',
+  'components/elements/elementHelp.ts',
+  // The drawer's Activity and Messages tabs.
+  'components/shell/ActivityPanel.tsx',
+  'components/messages/MessagesPanel.tsx',
+  // Dialogs of the first screen's menus and lists.
+  'components/case/SaveSystemDialog.tsx',
+  'components/disturbance/AddEventDialog.tsx',
+  'components/disturbance/DisturbanceForm.tsx',
   'streaming/arrow.ts',
 ];
 

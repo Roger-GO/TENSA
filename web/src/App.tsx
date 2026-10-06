@@ -10,7 +10,6 @@ import { RunStatusBadge } from '@/components/tds/RunStatusBadge';
 import { NumericalErrorBanner } from '@/components/tds/NumericalErrorBanner';
 import { ConvergenceErrorPanel } from '@/components/pflow/ConvergenceErrorPanel';
 import { RuntimeCrashModal } from '@/components/pflow/RuntimeCrashModal';
-import { AddElementPanel } from '@/components/elements/AddElementPanel';
 import { HideLabelsToggle } from '@/components/pflow/HideLabelsToggle';
 import { UnitsToggle } from '@/components/shell/UnitsToggle';
 import { INLINE_FROM_NARROW } from '@/components/shell/topBarLayout';
@@ -19,7 +18,6 @@ import { EditMenu } from '@/components/shell/EditMenu';
 import { RunMenu } from '@/components/shell/RunMenu';
 import { ExportMenu } from '@/components/shell/ExportMenu';
 import { SldLayoutSkeleton } from '@/components/sld/SldLayoutSkeleton';
-import { RightInspector } from '@/components/inspector/RightInspector';
 import { BottomDrawer } from '@/components/shell/BottomDrawer';
 import { ResultsView } from '@/components/shell/ResultsView';
 import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
@@ -44,13 +42,24 @@ import { useCaseStore } from '@/store/case';
 import { startResultsPersistence } from '@/store/resultsPersistence';
 import { useSnapshotStore } from '@/store/snapshot';
 import { ComponentDropZone } from '@/components/sld/ComponentDropZone';
-import { LazyMount } from '@/components/ui/Lazy';
+import { LazyMount, LoadingPanel } from '@/components/ui/Lazy';
 import { lazyNamed } from '@/lib/lazyNamed';
 
 // Code split out of the first load: the diagram (React Flow and the layout
-// code) is fetched when a case is first shown, and the snapshot dialogs when
-// one is first opened.
+// code) is fetched when a case is first shown, the Inspector when it is first
+// opened (the shell mounts it for a selection, or when it is toggled on), the
+// Add element panel when an element is first added, and the snapshot dialogs
+// when one is first opened.
 const SldCanvas = lazyNamed(() => import('@/components/sld/SldCanvas'), 'SldCanvas');
+const RightInspector = lazyNamed(
+  () => import('@/components/inspector/RightInspector'),
+  'RightInspector',
+);
+const AddElementPanel = lazyNamed(
+  () => import('@/components/elements/AddElementPanel'),
+  'AddElementPanel',
+  'overlay',
+);
 const SaveSnapshotDialog = lazyNamed(
   () => import('@/components/snapshot/SaveSnapshotDialog'),
   'SaveSnapshotDialog',
@@ -227,6 +236,20 @@ function SnapshotDialogs() {
   );
 }
 
+/**
+ * The Add element panel, which draws nothing while it is closed, so it is
+ * fetched and mounted once something has opened it.
+ */
+function AddElementDock() {
+  const open = useCaseStore((s) => s.addPanelOpen);
+  const closeAddPanel = useCaseStore((s) => s.closeAddPanel);
+  return (
+    <LazyMount when={open} onLoadFailed={closeAddPanel}>
+      <AddElementPanel />
+    </LazyMount>
+  );
+}
+
 export function App() {
   // The QueryClient is created once per mount via `useState`'s lazy
   // initializer — re-renders preserve the instance, but unmount/remount
@@ -264,12 +287,16 @@ export function App() {
           }
           leftSidebar={<LeftSidebar />}
           canvas={<CanvasSlot />}
-          rightInspector={<RightInspector />}
+          rightInspector={
+            <Suspense fallback={<LoadingPanel />}>
+              <RightInspector />
+            </Suspense>
+          }
           bottomDrawer={<BottomDrawer />}
           resultsView={<ResultsView />}
           dockOverlay={
             <>
-              <AddElementPanel />
+              <AddElementDock />
               <ConvergenceErrorPanel />
               <NumericalErrorBanner />
             </>

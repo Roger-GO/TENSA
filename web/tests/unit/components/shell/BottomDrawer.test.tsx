@@ -25,6 +25,10 @@ import { useMessagesStore } from '@/store/messages';
 import type { PflowResult, SessionMessage, TopologySummary } from '@/api/types';
 import { LIMITS_TOPOLOGY, limitsPflow } from '../../helpers/limitsCase';
 
+// A lazily loaded panel's chunk is imported and transformed the first time a
+// test shows it, which on a loaded machine takes longer than the default wait.
+const COLD_LOAD_MS = 15_000;
+
 // useCurrentTopology is read by the per-bucket grids that BottomDrawer
 // mounts. Stub it to a deterministic empty topology so the grids
 // render their empty-state branch without exercising query plumbing.
@@ -144,9 +148,14 @@ describe('<BottomDrawer />', () => {
 
     await user.click(activityTab);
     expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('activity');
-    // The Activity panel content mounts (it renders the sub-tab strip).
+    // The Activity panel content mounts (it renders the sub-tab strip). The
+    // panel is a lazily loaded chunk.
     expect(screen.getByTestId('bottom-drawer-tab-content-activity')).toBeInTheDocument();
-    expect(screen.getByTestId('activity-panel-subtab-active')).toBeInTheDocument();
+    expect(
+      await screen.findByTestId('activity-panel-subtab-active', undefined, {
+        timeout: COLD_LOAD_MS,
+      }),
+    ).toBeInTheDocument();
   });
 
   it('clicking a tab switches activeBottomDrawerTab', async () => {
@@ -372,11 +381,15 @@ describe('<BottomDrawer /> Messages tab', () => {
     });
   }
 
-  it('mounts the messages panel when it is the active tab', () => {
+  it('mounts the messages panel (a lazily loaded chunk) when it is the active tab', async () => {
     useLayoutStore.setState({ activeBottomDrawerTab: 'messages', bottomDrawerCollapsed: false });
     render(<BottomDrawer />, { wrapper });
     expect(screen.getByTestId('bottom-drawer-tab-content-messages')).toBeInTheDocument();
-    expect(screen.getByTestId('messages-panel')).toBeInTheDocument();
+    // A placeholder stands in while the chunk loads.
+    expect(screen.getByTestId('lazy-loading')).toBeInTheDocument();
+    expect(
+      await screen.findByTestId('messages-panel', undefined, { timeout: COLD_LOAD_MS }),
+    ).toBeInTheDocument();
   });
 
   it('opens on a click of its tab', async () => {
@@ -384,7 +397,9 @@ describe('<BottomDrawer /> Messages tab', () => {
     render(<BottomDrawer />, { wrapper });
     await user.click(screen.getByTestId('bottom-drawer-tab-messages'));
     expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('messages');
-    expect(screen.getByTestId('messages-panel')).toBeInTheDocument();
+    expect(
+      await screen.findByTestId('messages-panel', undefined, { timeout: COLD_LOAD_MS }),
+    ).toBeInTheDocument();
   });
 
   it('shows no count while ANDES has logged nothing worse than information', () => {

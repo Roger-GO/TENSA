@@ -23,7 +23,7 @@
  * tabs clears ``drawerHasUnreadResults`` (mirrors the click path on the
  * BottomDrawerToggle button + the ⌘J command).
  */
-import { Fragment, useEffect, useMemo } from 'react';
+import { Fragment, Suspense, useEffect, useMemo } from 'react';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { cn } from '@/lib/cn';
 import {
@@ -37,10 +37,19 @@ import { LazyGrid } from '@/components/data-grid/LazyGrid';
 import { usePflowStore } from '@/store/pflow';
 import { useViolationReport } from '@/lib/useViolationReport';
 import { LazyAnalysisTab } from '@/components/data-grid/LazyAnalysisTab';
-import { ActivityPanel } from '@/components/shell/ActivityPanel';
-import { MessagesPanel } from '@/components/messages/MessagesPanel';
+import { LoadingPanel } from '@/components/ui/Lazy';
+import { lazyNamed } from '@/lib/lazyNamed';
 import { countByLevel } from '@/lib/messages';
 import { useMessagesStore } from '@/store/messages';
+
+// The Activity and Messages panels draw nothing until their tab is on screen,
+// so each loads when its tab is first shown, as the tables do (``LazyGrid``).
+// The counts beside the tab names come from the stores and need neither.
+const ActivityPanel = lazyNamed(() => import('@/components/shell/ActivityPanel'), 'ActivityPanel');
+const MessagesPanel = lazyNamed(
+  () => import('@/components/messages/MessagesPanel'),
+  'MessagesPanel',
+);
 
 const TAB_LABELS: Record<BottomDrawerTab, string> = {
   buses: 'Buses',
@@ -315,14 +324,18 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
             data-testid="bottom-drawer-tab-content-activity"
             className="flex min-h-0 flex-1 flex-col"
           >
-            <ActivityPanel />
+            <Suspense fallback={<LoadingPanel />}>
+              <ActivityPanel />
+            </Suspense>
           </TabsPrimitive.Content>
           <TabsPrimitive.Content
             value="messages"
             data-testid="bottom-drawer-tab-content-messages"
             className="flex min-h-0 flex-1 flex-col"
           >
-            <MessagesPanel />
+            <Suspense fallback={<LoadingPanel />}>
+              <MessagesPanel />
+            </Suspense>
           </TabsPrimitive.Content>
         </div>
       )}

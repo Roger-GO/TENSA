@@ -32,12 +32,16 @@ import { useEffect, useState } from 'react';
 import { TopBarMenu, TopBarMenuItem, TopBarMenuSeparator } from './TopBarMenu';
 import { LazyMount } from '@/components/ui/Lazy';
 import { lazyNamed } from '@/lib/lazyNamed';
-import { SaveSystemDialog } from '@/components/case/SaveSystemDialog';
 import { BundleImportDialog } from '@/components/bundle/BundleImportDialog';
 import { useMenuCommands, subscribePaletteDialog } from '@/lib/commands';
 
-// The PMU and profile-import dialogs are separate chunks, fetched the first
-// time each opens.
+// The save, PMU and profile-import dialogs are separate chunks, fetched the
+// first time each opens.
+const SaveSystemDialog = lazyNamed(
+  () => import('@/components/case/SaveSystemDialog'),
+  'SaveSystemDialog',
+  'overlay',
+);
 const PmuPlacementDialog = lazyNamed(
   () => import('@/components/pmu/PmuPlacementDialog'),
   'PmuPlacementDialog',
@@ -133,7 +137,9 @@ export function WorkspaceMenu() {
           ];
         })}
       </TopBarMenu>
-      <SaveSystemDialog open={saveOpen} onOpenChange={setSaveOpen} />
+      <LazyMount when={saveOpen} onLoadFailed={() => setSaveOpen(false)}>
+        <SaveSystemDialog open={saveOpen} onOpenChange={setSaveOpen} />
+      </LazyMount>
       <BundleImportDialog open={importBundleOpen} onOpenChange={setImportBundleOpen} />
       <LazyMount when={pmuOpen} onLoadFailed={() => setPmuOpen(false)}>
         <PmuPlacementDialog open={pmuOpen} onOpenChange={setPmuOpen} />

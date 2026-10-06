@@ -30,6 +30,10 @@ vi.mock('@/api/queries', async () => {
   };
 });
 
+// The dialog's chunk is imported and transformed the first time a test opens
+// it, which on a loaded machine takes longer than the default wait.
+const COLD_LOAD_MS = 15_000;
+
 function withQueryClient(ui: ReactNode) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -84,7 +88,10 @@ describe('<ScheduledDisturbances />', () => {
     render(withQueryClient(<ScheduledDisturbances />));
 
     await user.click(screen.getByRole('button', { name: 'Add fault' }));
-    const dialog = screen.getByTestId('add-event-dialog');
+    // The dialog is a chunk of its own, fetched when it is first opened.
+    const dialog = await screen.findByTestId('add-event-dialog', undefined, {
+      timeout: COLD_LOAD_MS,
+    });
     // A fault, by default, with the times a first fault wants already in.
     expect(within(dialog).getByTestId('fault-spec-form')).toBeInTheDocument();
     expect(within(dialog).getByLabelText('Fault applied at (s)')).toHaveValue('1');
@@ -142,7 +149,9 @@ describe('<ScheduledDisturbances />', () => {
     render(withQueryClient(<ScheduledDisturbances />));
 
     await user.click(screen.getByTestId(`scheduled-disturbance-edit-${created.id}`));
-    const dialog = screen.getByTestId('add-event-dialog');
+    const dialog = await screen.findByTestId('add-event-dialog', undefined, {
+      timeout: COLD_LOAD_MS,
+    });
     expect(within(dialog).getByText('Edit disturbance')).toBeInTheDocument();
     const clear = within(dialog).getByLabelText('Fault cleared at (s)');
     await user.clear(clear);
@@ -175,7 +184,9 @@ describe('<ScheduledDisturbances />', () => {
     render(withQueryClient(<ScheduledDisturbances />));
 
     await user.click(screen.getByRole('button', { name: 'Add disturbance' }));
-    const dialog = screen.getByTestId('add-event-dialog');
+    const dialog = await screen.findByTestId('add-event-dialog', undefined, {
+      timeout: COLD_LOAD_MS,
+    });
     // A new one, not the existing one.
     expect(within(dialog).getByText('Add disturbance', { selector: 'h2' })).toBeInTheDocument();
     expect(within(dialog).getByLabelText('Bus')).toHaveValue('');

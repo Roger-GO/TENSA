@@ -10,7 +10,12 @@ import {
 import type { DisturbanceLocal } from '@/store/disturbance';
 import type { CaseEvent, DisturbanceSpec } from '@/api/types';
 import { cn } from '@/lib/cn';
-import { AddEventDialog } from './AddEventDialog';
+import { LazyMount } from '@/components/ui/Lazy';
+import { lazyNamed } from '@/lib/lazyNamed';
+
+// The dialog and the three forms inside it are fetched when it is first opened:
+// this list is on the first screen of a loaded case, the forms are not.
+const AddEventDialog = lazyNamed(() => import('./AddEventDialog'), 'AddEventDialog', 'overlay');
 
 /**
  * ScheduledDisturbances. The list of what the next TDS run will do to the
@@ -238,14 +243,16 @@ export function ScheduledDisturbances({ className }: ScheduledDisturbancesProps)
         {disturbances.length === 0 ? 'Add fault' : 'Add disturbance'}
       </Button>
 
-      <AddEventDialog
-        open={dialog.mode !== 'closed'}
-        onOpenChange={(next) => {
-          if (!next) setDialog({ mode: 'closed' });
-        }}
-        initialSpec={dialog.mode === 'edit' ? dialog.spec : null}
-        onSave={handleSave}
-      />
+      <LazyMount when={dialog.mode !== 'closed'} onLoadFailed={() => setDialog({ mode: 'closed' })}>
+        <AddEventDialog
+          open={dialog.mode !== 'closed'}
+          onOpenChange={(next) => {
+            if (!next) setDialog({ mode: 'closed' });
+          }}
+          initialSpec={dialog.mode === 'edit' ? dialog.spec : null}
+          onSave={handleSave}
+        />
+      </LazyMount>
     </div>
   );
 }
