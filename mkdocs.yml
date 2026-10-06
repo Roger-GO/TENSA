@@ -1,0 +1,113 @@
+# The documentation site: MkDocs with the Material theme. The pages are in docs/, and the
+# API reference is written from the server's OpenAPI schema while the site builds
+# (scripts/docs_reference.py), so it needs `tensa` installed beside MkDocs:
+#
+#   pip install -r docs/requirements.txt -e ./server
+#   mkdocs serve            # live preview at http://127.0.0.1:8000
+#   mkdocs build --strict   # what CI runs: any warning (a broken link) fails the build
+#
+# docs/contributing.md has the rest, including how to publish the site on GitHub Pages.
+site_name: TENSA
+site_description: Documentation for TENSA, an interactive web workbench for power system simulation built on ANDES.
+site_url: https://roger-go.github.io/TENSA/
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  # No web fonts, and no repo_url (which makes the theme ask GitHub for the star count on
+  # every page): the site uses the reader's system fonts and fetches nothing from a third
+  # party, which keeps a copy opened offline looking the same.
+  font: false
+  logo: img/logo.svg
+  favicon: img/favicon.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: blue
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: blue
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - content.code.copy
+    - content.tabs.link
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - toc.follow
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Install: install.md
+      - Quick start: quickstart.md
+      - UI tour: ui-tour.md
+  - Concepts: concepts.md
+  - Using TENSA:
+      - API guide: api.md
+      - Agents and MCP: agents.md
+  - Reference:
+      - Command line: reference/cli.md
+      - API routes: reference/api.md
+      - API models: reference/models.md
+  - Troubleshooting: troubleshooting.md
+  - Contributing to the docs: contributing.md
+
+# Files in docs/ that are not part of the site: the tooling's requirements, the GUI parity
+# ledger the CI check writes (a review table for contributors), and the media only the
+# README uses: the demo video, which it links to on GitHub, the GIF made from it, and a
+# screenshot from before the project was renamed.
+exclude_docs: |
+  requirements.txt
+  gui-parity-ledger.md
+  demo/
+  img/demo.gif
+  img/empty-state.jpeg
+
+# `mkdocs build --strict` turns each of these into an error.
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    absolute_links: warn
+    unrecognized_links: warn
+    anchors: warn
+
+extra_css:
+  - stylesheets/extra.css
+
+hooks:
+  - scripts/docs_reference.py
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+
+extra:
+  generator: false
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Roger-GO/TENSA
+      name: TENSA on GitHub

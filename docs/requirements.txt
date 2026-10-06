@@ -1,0 +1,4 @@
+# What `mkdocs build` needs besides TENSA itself (see mkdocs.yml and docs/contributing.md).
+# MkDocs 2.0 drops the plugin and theme systems that Material builds on, so it is held back.
+mkdocs>=1.6,<2
+mkdocs-material>=9.6,<10

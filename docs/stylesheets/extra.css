@@ -1,0 +1,9 @@
+/* The reference tables are wide: give the page more room than the theme's default. */
+.md-grid {
+  max-width: 76rem;
+}
+
+/* Keep an option, field or route name on one line in the first column of a table. */
+.md-typeset table:not([class]) td:first-child code {
+  white-space: nowrap;
+}

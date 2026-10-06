@@ -55,6 +55,7 @@ All of these must pass before a PR is merged (CI enforces them):
 | Web tests | `cd web && pnpm test` |
 | Web coverage | `cd web && pnpm test:coverage` (report in `web/coverage`) |
 | Web build | `cd web && pnpm build` |
+| Docs site | `pip install -r docs/requirements.txt -e ./server`, then `mkdocs build --strict` from the repository root (the pages are in `docs/`; the build fails on a broken link) |
 | Web e2e | `cd web && pnpm build`, start `tensa serve --port 8765 --workspace "$(mktemp -d)" --max-sessions 32`, then `E2E_BASE_URL=http://127.0.0.1:8765 E2E_NO_WEBSERVER=1 pnpm test:e2e` (a real browser against a real server; `pnpm exec playwright install chromium` once; the `e2e` job in `web.yml` does the same; other modes are described in `web/playwright.config.ts`). If something else holds port 8765, `tensa serve` says so and stops: use another port in both commands, or the tests run against whatever is listening there |
 
 The table is written for a POSIX shell. In PowerShell, leave out the `PYTHONPATH=src` prefix (the editable install already puts `tensa` on the path), set environment variables on their own line (`$env:E2E_BASE_URL = "http://127.0.0.1:8765"`), and pass `--workspace` a directory you made yourself instead of `$(mktemp -d)`.
@@ -79,6 +80,10 @@ Dependencies are kept current by weekly Dependabot pull requests (`.github/depen
 3. `.github/workflows/publish.yml` runs the server and web test workflows, builds the UI, the sdist, and the wheel from that sdist, checks them (`scripts/check_dist.py`: tag equals version, UI bundled, no source maps, license included), installs the wheel into a clean environment, and uploads it to PyPI with Trusted Publishing. It publishes nothing if any step fails.
 
 To build the same packages locally, build the UI first and then run the build: `cd web && pnpm install && pnpm build`, then `pip install build && python -m build server`. `python scripts/check_dist.py server/dist` runs the same checks. The build fails when `web/dist` is missing, so a package never ships without the UI. An editable install (`pip install -e ./server`) does not need the UI built first.
+
+## Documentation
+
+The documentation site is MkDocs with the Material theme: the pages are Markdown files in `docs/`, listed in `mkdocs.yml`, and `mkdocs serve` previews them. Its Reference pages (the command line, the API routes and the API models) are written from the code while the site builds, so a change to a route's description or an option's help text is a change to the documentation, and no page needs editing. [`docs/contributing.md`](./docs/contributing.md) explains how to build the site, how to write a page, how to take the screenshots again, and how the repository owner turns on publishing to GitHub Pages. Docs are plain prose: no em dashes and no emoji.
 
 ## Making changes that touch the API surface
 

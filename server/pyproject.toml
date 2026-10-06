@@ -89,7 +89,7 @@ tensa = "tensa.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/Roger-GO/TENSA"
-Documentation = "https://github.com/Roger-GO/TENSA"
+Documentation = "https://roger-go.github.io/TENSA/"
 Issues = "https://github.com/Roger-GO/TENSA/issues"
 
 # Hatchling build targets. The built web UI (``../web/dist``) is bundled by the

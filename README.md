@@ -205,7 +205,7 @@ Each session gets its own `andes.System` in a separate subprocess. The API proce
 | [`web/`](./web) | React 19 and TypeScript UI. Interactive SLD (React Flow), uPlot result plots, Radix UI, Tailwind v4, Zustand. |
 | [`examples/`](./examples) | curl and Python client walkthroughs for the API. |
 | [`llms.txt`](./llms.txt) | API map written for LLMs. |
-| [`docs/`](./docs) | Images and the demo video. |
+| [`docs/`](./docs) | The documentation site (MkDocs, configured in [`mkdocs.yml`](./mkdocs.yml)), and the images and the demo video this README uses. |
 
 ## Citation
 
