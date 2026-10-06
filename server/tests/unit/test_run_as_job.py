@@ -137,6 +137,61 @@ def test_a_busy_refusal_names_no_job_when_what_holds_the_session_is_not_one() ->
     assert str(corrected) == "session is busy with an in-flight operation"
 
 
+def test_a_busy_refusal_names_a_job_still_waiting_when_no_other_one_runs() -> None:
+    """Another request's job, registered and not yet marked running, is the
+    nearest thing to a holder the registry knows of. One that runs comes first."""
+    from tensa.api._run_as_job import busy_with_another
+    from tensa.core.errors import SessionBusyError
+
+    mgr: Any = _FakeManager()
+    own = mgr.registry.register_job(kind="clone-edit", can_cancel=False)
+    mgr.registry.mark_running(own)
+    waiting = mgr.registry.register_job(kind="pflow", can_cancel=False)
+    gate_said = SessionBusyError(current_job=mgr.registry.get_job(own))
+
+    corrected = busy_with_another(gate_said, mgr, "s1", own)
+
+    assert isinstance(corrected, SessionBusyError)
+    assert corrected.current_job is not None
+    assert (corrected.current_job.id, corrected.current_job.status) == (waiting, "pending")
+    assert str(corrected) == f"session is busy with an in-flight pflow operation (job {waiting})"
+
+    # A job that runs is the holder, with a newer one waiting behind it or not.
+    holder = mgr.registry.register_job(kind="tds-batch", can_cancel=True)
+    mgr.registry.mark_running(holder)
+    mgr.registry.register_job(kind="eig", can_cancel=False)
+
+    corrected = busy_with_another(gate_said, mgr, "s1", own)
+
+    assert isinstance(corrected, SessionBusyError)
+    assert corrected.current_job is not None
+    assert corrected.current_job.id == holder
+
+
+def test_a_busy_refusal_names_no_job_when_the_session_is_gone() -> None:
+    """The session closed between the refusal and the look at its jobs: the
+    refusal stays one for a busy session, and stops naming the caller's job."""
+    from tensa.api._run_as_job import busy_with_another
+    from tensa.core.errors import SessionBusyError
+    from tensa.core.session import SessionExpiredError
+
+    class _ClosedSessionManager(_FakeManager):
+        def session_job_registry(self, session_id: str) -> _JobRegistry:
+            raise SessionExpiredError(f"session {session_id} has expired")
+
+    mgr: Any = _ClosedSessionManager()
+    own = mgr.registry.register_job(kind="clone-edit", can_cancel=False)
+    mgr.registry.mark_running(own)
+
+    corrected = busy_with_another(
+        SessionBusyError(current_job=mgr.registry.get_job(own)), mgr, "s1", own
+    )
+
+    assert isinstance(corrected, SessionBusyError)
+    assert corrected.current_job is None
+    assert str(corrected) == "session is busy with an in-flight operation"
+
+
 def test_a_refusal_that_names_another_job_and_any_other_error_are_left_alone() -> None:
     from tensa.api._run_as_job import busy_with_another
     from tensa.core.errors import SessionBusyError
