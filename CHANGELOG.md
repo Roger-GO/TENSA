@@ -233,6 +233,7 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 - The web UI's file-name helpers (`baseName`, `stemOf`, `extensionOf`) are one module, `web/src/lib/paths.ts`, with tests. The export case name, the diagram's curated-layout lookup, Save in place, the case list, the bundle export dialog and the Save as custom case dialog each had a copy; they split on `/` alone or on both slashes, and now all split on both.
 - Server tests that failed on one system only now pass on all of them; none was a fault in the code under test. On macOS, a workspace path test made every fd lookup fail, the workspace directory's among them, where it meant the file's; that failure is now also tested on the macOS branch, under the stand-in `fcntl` that runs on Linux. The sweep pool's abort test raced a 0.5 s timer against a 0.4 s sleep and lost on a slow runner; it now waits for what it is told has happened. On Windows, a parametrized name of 100,000 characters became its test's id, which pytest keeps in an environment variable that Windows caps at 32,767 characters; a test now refuses such an id on every system.
 - Two web tests failed on Node 22 and passed on newer versions: they compared the `Blob` of a response with jsdom's by class, and only newer Node versions make the two the same. And the test of the Analysis tab's first load gave its chunk one second to arrive, which a busy machine overran now and then.
+- `clamp` is one function, `web/src/lib/clamp.ts`. The data grid and the eigenvalue plot each had a copy.
 
 ## [0.4.0] — 2026-07-05
 

@@ -62,6 +62,7 @@ import {
   type ReactNode,
 } from 'react';
 import { FixedSizeList, type ListChildComponentProps } from 'react-window';
+import { clamp } from '@/lib/clamp';
 import { cn } from '@/lib/cn';
 import { toast } from '@/lib/toast';
 import { isEditableTarget, useHotkeys } from '@/lib/useHotkeys';
@@ -73,7 +74,6 @@ import { useExportCaseName } from '@/components/export/useExportCaseName';
 import {
   cellKey,
   cellText,
-  clamp,
   filterTerms,
   formatCellValue,
   parseCellNumber,

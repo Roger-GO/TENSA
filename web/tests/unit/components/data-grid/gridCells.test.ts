@@ -9,7 +9,6 @@ import type { CellEdit, ColumnConfig } from '@/components/data-grid/DataGrid';
 import {
   cellKey,
   cellText,
-  clamp,
   filterTerms,
   formatCellValue,
   formatParamValue,
@@ -38,12 +37,6 @@ describe('cell ranges', () => {
     expect(rangeContains(range, 2, 3)).toBe(true);
     expect(rangeContains(range, 0, 1)).toBe(false);
     expect(rangeContains(range, 1, 4)).toBe(false);
-  });
-
-  it('clamps into bounds', () => {
-    expect(clamp(-3, 0, 4)).toBe(0);
-    expect(clamp(9, 0, 4)).toBe(4);
-    expect(clamp(2, 0, 4)).toBe(2);
   });
 
   it('keys a cell by its row and column', () => {

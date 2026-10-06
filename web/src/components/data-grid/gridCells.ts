@@ -38,10 +38,6 @@ export function rangeSize(range: CellRange): number {
   return (range.row1 - range.row0 + 1) * (range.col1 - range.col0 + 1);
 }
 
-export function clamp(n: number, lo: number, hi: number): number {
-  return Math.min(Math.max(n, lo), hi);
-}
-
 /** The key of one cell among the rows: what a grid's pending set holds. */
 export function cellKey(rowId: string, columnKey: string): string {
   return `${rowId}\u0000${columnKey}`;

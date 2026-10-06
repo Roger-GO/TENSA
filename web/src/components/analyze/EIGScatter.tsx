@@ -5,6 +5,7 @@ import { ExportMenu } from '@/components/export/ExportMenu';
 import { fetchEigStateMatrixMat } from '@/components/export/exportToMat';
 import { elementToPng } from '@/components/export/exportToPng';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
+import { clamp } from '@/lib/clamp';
 import { cn } from '@/lib/cn';
 import { applyEigFilter, useAnalyzeStore } from '@/store/analyze';
 import { useSessionStore } from '@/store/session';
@@ -951,10 +952,4 @@ function formatNearZero(x: number): string {
   // modes in research workflows; longer numbers wrap unhelpfully on
   // the cursor-following card.
   return x.toFixed(3);
-}
-
-function clamp(v: number, lo: number, hi: number): number {
-  if (v < lo) return lo;
-  if (v > hi) return hi;
-  return v;
 }
