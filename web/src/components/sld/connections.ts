@@ -20,7 +20,9 @@
  * - The taps of one face keep `TAP_SPACING` between them (`spreadTaps`).
  *   Two faces do not compete: a generator above a bar and a load below it
  *   may share a tap. A bar that has no room for the taps of a face grows,
- *   about its middle, until it has.
+ *   about its middle, until it has. Where a branch could run straight down
+ *   from one bar to the other but for its two taps being out of line, the
+ *   one that is free to move is brought in line with the other.
  * - A device has a port at the middle of each of its four faces. Its
  *   connector leaves from the port on the face that points at its tap, so
  *   never from a corner and never from the far side.
@@ -42,7 +44,10 @@ import { assignBranchSides, type BranchEnds, type HandleAssignment, type Side } 
 /** A point on the canvas, `[x, y]`. */
 export type Point = [number, number];
 
-/** The length a bar is drawn at unless its taps need more, which is also the width of a bus node. */
+/**
+ * The length a bar is drawn at unless its taps need more, which is also the
+ * width of a bus node.
+ */
 export const BAR_LENGTH = 92;
 
 /** The thickness a bar is drawn at. */
@@ -809,6 +814,36 @@ export function layoutConnections(
     r.tap = [r.side === 'east' ? r.bar.end - TAP_INSET : r.bar.start + TAP_INSET, r.bar.cy];
   }
 
+  // ---- straighten ----
+  // A branch that would run straight down from one bar to the other, were
+  // its two taps in line, has them brought in line where one of them is
+  // free to move: within its bar, a spacing clear of the other taps of its
+  // face, and without changing places with any of them. The tap on the
+  // face with fewer taps is the one that moves.
+  const faceOf = (r: Request): Request[] => byFace.get(`${r.bar.id}|${r.side}`) ?? [];
+  const canMoveTo = (r: Request, x: number): boolean => {
+    if (x < lo(r.bar) - EPS || x > hi(r.bar) + EPS) return false;
+    const [from, to] = [Math.min(r.tap[0], x), Math.max(r.tap[0], x)];
+    return faceOf(r).every(
+      (q) =>
+        q === r ||
+        (Math.abs(q.tap[0] - x) >= TAP_SPACING - EPS && (q.tap[0] < from || q.tap[0] > to)),
+    );
+  };
+  const straighten = (a: Request, b: Request): void => {
+    if (!isVertical(a.side) || !isVertical(b.side) || a.side === b.side) return;
+    if (Math.abs(a.tap[0] - b.tap[0]) <= EPS) return;
+    const [freer, other] = faceOf(a).length <= faceOf(b).length ? [a, b] : [b, a];
+    if (canMoveTo(freer, other.tap[0])) freer.tap = [other.tap[0], freer.tap[1]];
+    else if (canMoveTo(other, freer.tap[0])) other.tap = [freer.tap[0], other.tap[1]];
+  };
+  for (const { source, target } of stepped) straighten(source, target);
+  for (const { points, source, target } of routed) {
+    const straightDown =
+      points.length === 2 && source.terminal.kind === 'face' && target.terminal.kind === 'face';
+    if (straightDown) straighten(source.request, target.request);
+  }
+
   // ---- routes ----
   const routes = new Map<string, ConnectorRoute>();
   for (const { edge, points, source, target } of routed) {
@@ -958,7 +993,10 @@ export function busLabelOffset(bar: BarGeometry | undefined, width: number): num
   });
 }
 
-/** The point half way along `points`, and the direction of the run it is on (degrees, clockwise from +x). */
+/**
+ * The point half way along `points`, and the direction of the run it is on
+ * (degrees, clockwise from +x).
+ */
 export function routeMidpoint(points: readonly Point[]): {
   x: number;
   y: number;

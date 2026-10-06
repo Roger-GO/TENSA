@@ -536,7 +536,10 @@ export const DEVICE_ROW_OFFSET = 70;
  */
 export const DEVICE_COLUMN_OFFSET = 33;
 
-/** The gap a device keeps to a branch that lands on its side of the bar, and to the next device. */
+/**
+ * The gap a device keeps to a branch that lands on its side of the bar, and
+ * to the next device.
+ */
 export const DEVICE_COLUMN_GAP = 8;
 
 /**
@@ -549,7 +552,10 @@ export function deviceBoxSize(label: string): { width: number; height: number } 
   return { width: Math.round(Math.max(24, 5.4 * label.length) + 14), height: 41 };
 }
 
-/** How many pixels of distance from its column a device gives up to stand one pixel less past a tip. */
+/**
+ * How many pixels of distance from its column a device gives up to stand one
+ * pixel less past a tip.
+ */
 const PAST_TIP_COST = 4;
 
 /** Something that stands on a face of a bar: `half` either side of `x`. */

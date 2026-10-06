@@ -10,10 +10,11 @@
  * Unit 1 (Phase 0 spike-confirmed): two passes. Pass 1 uses no port
  * constraints to derive bus coords. Pass 2 declares 4 cardinal ports
  * per bus with `'elk.portConstraints': 'FIXED_SIDE'` and points each
- * edge at a specific port chosen via `assignHandles(fromCoord,
- * toCoord)`; ELK's ORTHOGONAL routing then produces per-edge bend
- * points exiting the declared cardinal sides. The bend points become the
- * route each line is drawn through, so each traces a corridor of its own.
+ * edge at the port on the side the diagram draws it leaving by
+ * (`computeHandleAssignments`); ELK's ORTHOGONAL routing then produces
+ * per-edge bend points exiting the declared cardinal sides. The bend
+ * points become the route each line is drawn through, so each traces a
+ * corridor of its own.
  *
  * Design choices:
  *
@@ -171,9 +172,9 @@ interface ElkResultEdge {
  * 1. Layered + ORTHOGONAL with no port constraints — gives final
  *    bus coords. Same shape as the v0.1 single-pass call.
  * 2. Same algorithm + 4 cardinal `FIXED_SIDE` ports per bus + edges
- *    targeted at port-suffixed shape ids derived from `assignHandles`
- *    on pass-1 coords. Bend points come back on `result.edges[].
- *    sections[0].{startPoint, bendPoints, endPoint}`.
+ *    targeted at port-suffixed shape ids derived from
+ *    `computeHandleAssignments` on pass-1 coords. Bend points come back
+ *    on `result.edges[].sections[0].{startPoint, bendPoints, endPoint}`.
  *
  * Pass 2 is skipped if `topology.buses.length < 2` (a single bus has
  * no edges; routing is moot).
@@ -230,11 +231,9 @@ export async function autoLayout(
   }
 
   // ---- pass 2: bend points via FIXED_SIDE ports ----
-  // Reuse the canvas-side handle assignments so ELK's chosen ports
-  // match the React Flow handle ids the buildGraph step will set.
-  // computeHandleAssignments runs greedy conflict-avoidance (primary
-  // → alternate axis on hub buses), so this stays in sync without
-  // duplicating the logic.
+  // Reuse the rule the diagram draws its branches by (the faces of the
+  // bars, or the ends of two that stand in a row, one branch to an end),
+  // so a route leaves each bus by the side it will be drawn leaving by.
   const { branches: handleAssignments } = computeHandleAssignments(topology, coords);
   const portTargets = new Map<string, { source: string; target: string }>();
   for (const branch of validBranches) {

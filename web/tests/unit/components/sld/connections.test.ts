@@ -640,6 +640,37 @@ describe('layoutConnections: branches routed from where their buses sit', () => 
     expect(connector.points[connector.points.length - 1]).toEqual([75, 3]);
   });
 
+  it('brings the two taps of a branch in line when one of them is free to move', () => {
+    // The load under bar 1 stands where the line leaves it, so the line's tap
+    // on bar 1 moves aside. Its tap on bar 2 has that face to itself, and
+    // follows: the line still runs straight down.
+    const { routes, bars } = layoutConnections(
+      [bus('1', 0, 0), bus('2', 0, 200), device('load-A', 46, 80)],
+      [line('line-L', '1', '2'), stub('load-A', '1')],
+    );
+    const points = routes.get('line-L')!.points;
+    expect(points).toHaveLength(2);
+    expect(points[0]![0]).toBe(points[1]![0]);
+    expect(Math.abs(points[0]![0] - 46)).toBe(7);
+    expect(bars.get('2')!.taps).toEqual([{ x: points[0]![0], side: 'north' }]);
+  });
+
+  it('leaves a tap where it is when moving it would crowd another, and steps across instead', () => {
+    // Two lines from bar 1 down to bars 2 and 3, which stand side by side
+    // under it: each end has one place it can be, and they are not in line.
+    const { routes } = layoutConnections(
+      [bus('1', 100, 0), bus('2', 0, 200), bus('3', 200, 200)],
+      [line('line-A', '1', '2'), line('line-B', '1', '3')],
+    );
+    // Bar 1 has taps from 103 to 189, bar 2 from 3 to 89: no overlap.
+    expect(routes.get('line-A')!.points).toEqual([
+      [103, 3],
+      [103, 103],
+      [89, 103],
+      [89, 203],
+    ]);
+  });
+
   it('keeps the run across clear of the line of a bar that stands between the two buses', () => {
     // Half way between bars 1 and 2 is y = 203, the very line of bar 3,
     // which reaches from 120 to 212 under the run from 89 to 303.
@@ -767,6 +798,51 @@ describe('layoutConnections: branches with a stored route', () => {
       sourceSide: 'south',
       targetSide: 'north',
     });
+  });
+
+  it('straightens a route the layout drew straight when the taps at its two ends were spread apart', () => {
+    // The automatic layout runs every branch of one side of a bus through
+    // one port, so the two that leave bar 1 downwards share x = 46. On bar 1
+    // they are spread a spacing apart; bar 2 has only the one, which follows
+    // it, so the route stays the straight line it was.
+    const third = { x: 200, y: 120 };
+    const { routes } = layoutConnections(
+      [bus('1', 0, 0), bus('2', 0, 120), bus('3', 200, 120)],
+      [
+        routedLine(
+          'line-A',
+          '1',
+          '2',
+          [
+            [46, 40],
+            [46, 120],
+          ],
+          first,
+          second,
+        ),
+        routedLine(
+          'line-B',
+          '1',
+          '3',
+          [
+            [46, 40],
+            [46, 80],
+            [246, 80],
+            [246, 120],
+          ],
+          first,
+          third,
+        ),
+      ],
+    );
+    const straight = routes.get('line-A')!.points;
+    expect(straight).toHaveLength(2);
+    expect(straight[0]![0]).toBe(straight[1]![0]);
+    const bent = routes.get('line-B')!.points;
+    // The two leave bar 1 a spacing apart, and the bend of the second slid with its tap.
+    expect(Math.abs(bent[0]![0] - straight[0]![0])).toBeCloseTo(TAP_SPACING, 3);
+    expect(bent[1]![0]).toBe(bent[0]![0]);
+    expect(bent[bent.length - 1]).toEqual([246, 123]);
   });
 
   it('holds its tap against a device that wants the same spot', () => {
