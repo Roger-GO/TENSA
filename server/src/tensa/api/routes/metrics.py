@@ -87,6 +87,14 @@ def _describe(series: MetricsSeries, body: ResponseMetricsRequest) -> SeriesMetr
     summary="Describe the response of sampled signals: nadir, rate of change, settling time, overshoot, damping.",
     response_model=ResponseMetricsResponse,
     responses={
+        413: {
+            "model": ProblemDetails,
+            "description": (
+                f"The body is larger than {MAX_METRICS_BYTES // (1024 * 1024)} MiB, more "
+                f"than a request within the limits takes ({MAX_METRIC_SAMPLES_TOTAL} "
+                "samples in all). It is refused before it is read."
+            ),
+        },
         422: {
             "model": ProblemDetails,
             "description": (

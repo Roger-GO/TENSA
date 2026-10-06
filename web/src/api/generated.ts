@@ -6658,6 +6658,15 @@ export interface operations {
                     "application/json": components["schemas"]["ResponseMetricsResponse"];
                 };
             };
+            /** @description The body is larger than 62 MiB, more than a request within the limits takes (1000000 samples in all). It is refused before it is read. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description The body is malformed, or a limit is exceeded: more than 64 series, more than 200000 samples in one, or a setting out of range. A series that is only too short to describe is not an error: it is answered with its own ``error``. */
             422: {
                 headers: {

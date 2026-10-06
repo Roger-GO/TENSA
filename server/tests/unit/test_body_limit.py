@@ -168,3 +168,29 @@ async def test_the_two_routes_that_take_long_series_refuse_an_oversized_body_unr
     # One byte less is read, and then judged for what it holds.
     status, _answer, asked = await _call(app, path, [b"{}"], content_length=cap)
     assert (status, asked) == (422, 1)
+
+
+def test_a_route_that_refuses_a_large_body_lists_the_413_in_the_api_description(
+    tmp_path: Path,
+) -> None:
+    """The route class answers 413 for every route of its router, whatever the route
+    itself declares, so the description has to say so for each: a client written from
+    the schema (the web UI's types are) otherwise does not know the status exists."""
+    paths = make_app(workspace=tmp_path, static_override=tmp_path).openapi()["paths"]
+    limited = [
+        route for router in (comtrade_route.router, metrics_route.router) for route in router.routes
+    ]
+    assert len(limited) == 2
+    for route in limited:
+        assert type(route).__name__ == "BodyLimitedRoute"
+        path = "/api" + getattr(route, "path", "")
+        for method in getattr(route, "methods", set()):
+            responses = paths[path][method.lower()]["responses"]
+            assert "413" in responses, f"{method} {path}"
+            assert responses["413"]["content"]["application/json"]["schema"] == {
+                "$ref": "#/components/schemas/ProblemDetails"
+            }
+    # The cap the description gives is the one the route refuses at.
+    megabytes = metrics_route.MAX_METRICS_BYTES // (1024 * 1024)
+    described = paths["/api/response-metrics"]["post"]["responses"]["413"]["description"]
+    assert f"larger than {megabytes} MiB" in described
