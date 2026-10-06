@@ -12,11 +12,15 @@ import {
   useCommitDisturbances,
   useRefreshTopology,
   useReloadCase,
-  useResetRun,
   loadOperatingPointIntoStore,
 } from '@/api/queries';
 import { ProblemDetailsError } from '@/api/client';
 import { usePflowRunAction } from '@/lib/usePflowRunAction';
+import {
+  EDITS_DISCARDED,
+  useReloadDiscardsEdits,
+  useResetRunAction,
+} from '@/lib/useResetRunAction';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
@@ -31,7 +35,7 @@ import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { reportAbortError } from '@/lib/abortRun';
 import { toast } from '@/lib/toast';
 import { unitBasesOf } from '@/lib/units';
-import { describeScenario, runLabel } from '@/lib/runLabel';
+import { describeScenario } from '@/lib/runLabel';
 import { runDaeVars, summariseResults } from '@/lib/tdsControllers';
 import { stemOf } from '@/lib/paths';
 import { cn } from '@/lib/cn';
@@ -120,10 +124,6 @@ export interface RunButtonProps {
   defaultH?: number;
 }
 
-/** What a reload of a case file costs a session that has edited it, and the way round it. */
-const EDITS_DISCARDED =
-  'The reload reads the case from its file again, so the elements you added, changed or deleted since it was opened are gone. To keep such edits, save the system first.';
-
 function Spinner() {
   return (
     <svg
@@ -165,19 +165,13 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     activeRunId === null ? null : (s.runs[activeRunId] ?? null),
   );
 
-  // Whether a reload now loses edits. A case file's reload is the file again,
-  // so what was added, changed or deleted since it was opened goes with it
-  // (the topology names the newest such edit as `undo`). A system built from
-  // scratch has no file and keeps its edits through a reload.
-  const reloadDiscardsEdits = useCaseStore(
-    (s) => s.topology?.undo != null && s.selection?.blank !== true,
-  );
+  const reloadDiscardsEdits = useReloadDiscardsEdits();
 
   const commitDisturbances = useCommitDisturbances();
   const reloadCase = useReloadCase();
   const refreshTopology = useRefreshTopology();
   const abortRun = useAbortRun();
-  const resetRun = useResetRun();
+  const resetRun = useResetRunAction({ errorTitle: 'TDS error' });
 
   // Mode = "auto" derived from disturbances + a manual override that
   // sticks until the user changes it again. Using ``null`` to mean
@@ -504,31 +498,9 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
 
   // ---- reset flow ---------------------------------------------------------
 
-  const onReset = () => {
-    if (!sessionId) return;
-    // "Reset" reads as a delete, so say where the run it releases went.
-    const kept = activeRun === null ? null : runLabel(activeRun);
-    // As the topology says before the reload answers with a new one.
-    const discarded = reloadDiscardsEdits;
-    resetRun.mutate(sessionId, {
-      onSuccess: () => {
-        if (discarded) {
-          toast.warning('Edits discarded', { description: EDITS_DISCARDED, duration: 10000 });
-        }
-        if (kept === null) return;
-        toast.info(`${kept} stays in History`, {
-          description: 'Run again, then pin both runs in History to overlay them.',
-        });
-      },
-      onError: (err) => {
-        const detail =
-          err instanceof ProblemDetailsError
-            ? (err.detail ?? err.title ?? `HTTP ${err.status}`)
-            : (err.message ?? 'Reset failed');
-        toast.error('TDS error', { description: `Could not reset: ${detail}` });
-      },
-    });
-  };
+  // The reload, and the toasts that say what became of the run and of the edits
+  // (`useResetRunAction`, which the tables' Reset run shares).
+  const onReset = resetRun.reset;
 
   // ---- PF flow ------------------------------------------------------------
 

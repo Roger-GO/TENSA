@@ -34,7 +34,6 @@ import {
   useCloneEdit,
   useCurrentTopology,
   useEditElement,
-  useResetRun,
   useTopologySchema,
 } from '@/api/queries';
 import type { ParamValue } from '@/api/types';
@@ -42,6 +41,7 @@ import { Button } from '@/components/ui/button';
 import { EditModeToggle } from '@/components/inspector/EditModeToggle';
 import { announceEdit } from '@/lib/announceEdit';
 import { toast } from '@/lib/toast';
+import { useResetRunAction } from '@/lib/useResetRunAction';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';
@@ -133,7 +133,9 @@ export function useGridEditing<Row>(target: GridEditTarget<Row>): GridEditing<Ro
   );
   const editElement = useEditElement();
   const cloneEdit = useCloneEdit();
-  const resetRun = useResetRun();
+  // The reset says what the top bar's does, and that it happened: this button
+  // is gone once the case is unlocked.
+  const resetRun = useResetRunAction({ errorTitle: 'Reset run', confirm: true });
 
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
@@ -294,9 +296,7 @@ export function useGridEditing<Row>(target: GridEditTarget<Row>): GridEditing<Ro
             variant="outline"
             size="sm"
             disabled={resetRun.isPending || sessionId === null}
-            onClick={() => {
-              if (sessionId !== null) resetRun.mutate(sessionId);
-            }}
+            onClick={resetRun.reset}
             title="Reload the case from its file so the values can be changed. The run's results stay in History; the changes made so far are discarded."
             data-testid="grid-reset-run"
             className="h-6 px-2"

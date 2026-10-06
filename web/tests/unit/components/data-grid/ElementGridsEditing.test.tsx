@@ -292,8 +292,30 @@ describe('a table once a run has locked the case', () => {
     await user.dblClick(cell('buses', '1', 'vmax'));
     expect(screen.queryByTestId('buses-grid-editor')).not.toBeInTheDocument();
     expect(screen.getByTestId('buses-grid-hint')).toHaveTextContent('The case is set up for a run');
+    client.post.mockResolvedValue({ ...TOPOLOGY, state: 'pre-setup' });
     await user.click(screen.getByTestId('grid-reset-run'));
     expect(client.post).toHaveBeenCalledWith('/sessions/s1/reload', expect.anything());
+    // The button goes with the lock, so the click is answered with a toast.
+    await waitFor(() =>
+      expect(toastMock.info).toHaveBeenCalledWith(
+        'Run reset',
+        expect.objectContaining({
+          description: 'The results are cleared and the values can be changed again.',
+        }),
+      ),
+    );
+  });
+
+  it('says so when the reset from the bar fails', async () => {
+    const user = userEvent.setup();
+    client.post.mockRejectedValue(new Error('worker is gone'));
+    render(<BusesGrid />);
+    await user.click(screen.getByTestId('grid-reset-run'));
+    await waitFor(() =>
+      expect(toastMock.error).toHaveBeenCalledWith('Reset run', {
+        description: 'Could not reset: worker is gone',
+      }),
+    );
   });
 
   it('does not paste, and says why', async () => {
