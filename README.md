@@ -48,6 +48,13 @@ tensa warm-cache                                   # optional, about 30 s (serve
 tensa serve --workspace ~/tensa-cases --port 8000 --open
 ```
 
+To get the app in a window of its own instead of a browser tab, add the desktop extra and run `tensa desktop` (details in the [server README](./server/README.md#desktop-window)):
+
+```bash
+pip install "tensa[desktop]"
+tensa desktop
+```
+
 ### From source
 
 For development, or to build the UI yourself, you need Python 3.12 or newer and Node 22 with [pnpm](https://pnpm.io/). Node is only used to build the UI once.

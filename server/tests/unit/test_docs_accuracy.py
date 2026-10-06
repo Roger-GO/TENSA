@@ -32,28 +32,43 @@ def _read(relative: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _serve_options() -> dict[str, Any]:
-    """The long options of ``tensa serve``, keyed by flag (``--help`` excluded).
+def _command_options(command: str) -> dict[str, Any]:
+    """The long options of a ``tensa`` command, keyed by flag (``--help`` excluded).
 
     Typer ships its own copy of click's classes, so the options are read by attribute rather
     than by ``isinstance``.
     """
-    serve = typer.main.get_command(cli.app).commands["serve"]  # type: ignore[attr-defined]
-    return {opt: param for param in serve.params for opt in param.opts if opt.startswith("--")}
+    found = typer.main.get_command(cli.app).commands[command]  # type: ignore[attr-defined]
+    return {opt: param for param in found.params for opt in param.opts if opt.startswith("--")}
+
+
+def _serve_options() -> dict[str, Any]:
+    return _command_options("serve")
 
 
 # ---- the CLI documentation ---------------------------------------------------
 
 
-def _documented_serve_flags() -> dict[str, str]:
-    """Flag -> its bullet in server/README.md's ``tensa serve`` flag list."""
-    text = _read("server/README.md")
-    bullets = {
-        m.group(1): m.group(0)
-        for m in re.finditer(r"^- `(--[a-z][a-z-]*)[^`]*`.*$", text, flags=re.MULTILINE)
-    }
-    assert bullets, "no flag bullets found in server/README.md"
+def _documented_flags(command: str) -> dict[str, str]:
+    """Flag -> its bullet in server/README.md's flag list of a command: the run of bullets
+    that follows the line "`tensa <command>` flags:"."""
+    lines = _read("server/README.md").splitlines()
+    heading = f"`tensa {command}` flags:"
+    assert heading in lines, f"server/README.md has no {heading!r} line"
+    bullets: dict[str, str] = {}
+    for line in lines[lines.index(heading) + 1 :]:
+        if not line.strip() and not bullets:
+            continue
+        found = re.match(r"^- `(--[a-z][a-z-]*)[^`]*`.*$", line)
+        if found is None:
+            break
+        bullets[found.group(1)] = line
+    assert bullets, f"no flag bullets found under {heading!r}"
     return bullets
+
+
+def _documented_serve_flags() -> dict[str, str]:
+    return _documented_flags("serve")
 
 
 def test_server_readme_lists_exactly_the_serve_flags_that_exist() -> None:
@@ -79,6 +94,31 @@ def test_server_readme_states_the_real_defaults() -> None:
     assert stated("--workspace", home_relative), bullets["--workspace"]
 
 
+def test_server_readme_lists_exactly_the_desktop_flags_that_exist() -> None:
+    documented = set(_documented_flags("desktop"))
+    real = set(_command_options("desktop"))
+    assert not documented - real, f"documented, not accepted: {sorted(documented - real)}"
+    assert not real - documented, f"accepted, not documented: {sorted(real - documented)}"
+
+
+def test_server_readme_states_the_real_desktop_defaults() -> None:
+    bullets = _documented_flags("desktop")
+    options = _command_options("desktop")
+
+    def stated(flag: str, value: str) -> bool:
+        return f"Default `{value}`" in bullets[flag]
+
+    for flag in ("--max-sessions", "--idle-timeout-seconds", "--width", "--height"):
+        default = options[flag].default
+        assert stated(flag, f"{default:g}"), bullets[flag]
+    workspace = options["--workspace"].default
+    home_relative = "~/" + Path(workspace).relative_to(Path.home()).as_posix()
+    assert stated("--workspace", home_relative), bullets["--workspace"]
+    # The window sizes the readme gives as least are the ones the command refuses to go below.
+    assert f"at least `{options['--width'].type.min}`" in bullets["--width"]
+    assert f"at least `{options['--height'].type.min}`" in bullets["--height"]
+
+
 @pytest.mark.parametrize(
     "document",
     [
@@ -97,6 +137,16 @@ def test_every_serve_flag_a_document_uses_exists(document: str) -> None:
         if "tensa serve" in line:
             used.update(re.findall(r"(?<![\w-])(--[a-z][a-z-]*)", line))
     assert used - real == set(), f"{document} passes flags `tensa serve` does not have"
+
+
+@pytest.mark.parametrize("document", ["README.md", "server/README.md"])
+def test_every_desktop_flag_a_document_uses_exists(document: str) -> None:
+    real = set(_command_options("desktop"))
+    used: set[str] = set()
+    for line in _read(document).splitlines():
+        if "tensa desktop" in line:
+            used.update(re.findall(r"(?<![\w-])(--[a-z][a-z-]*)", line))
+    assert used - real == set(), f"{document} passes flags `tensa desktop` does not have"
 
 
 def test_readmes_say_windows_on_arm_is_unsupported() -> None:

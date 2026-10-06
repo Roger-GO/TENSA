@@ -24,6 +24,13 @@ pip install "tensa[mcp]"
 tensa mcp --workspace ~/tensa-cases
 ```
 
+To get the app in a window of its own instead of a browser tab, install the desktop extra and run `tensa desktop` (the Desktop window section below says more):
+
+```bash
+pip install "tensa[desktop]"
+tensa desktop
+```
+
 ## Running the server
 
 The server has no authentication: it binds to loopback by default, so only processes on your machine can reach it. Stderr prints the serving URL and workspace path at startup. Interactive API docs are served at `/docs` (Swagger UI) and `/redoc`, and the OpenAPI schema at `/openapi.json`.
@@ -51,6 +58,54 @@ Windows: the server runs, but the workspace boundary is best-effort there (ANDES
 `GET /api/health` is the call for a script, a process supervisor or a container health check. It answers `{"status": "ok", ...}` with the tensa and ANDES versions, the number of open sessions against the `--max-sessions` cap, and whether ANDES's generated code is ready. It never waits for a worker, so it answers while a run holds every session. A worker that crashes in native code (a segfault in a numerical library, say) prints the Python stack of its threads to the server's stderr; that goes to the terminal, not into the `--log-file`.
 
 Every response carries `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`, so another page cannot put the UI in a frame.
+
+## Desktop window
+
+`tensa desktop` shows the app in a window of its own, for someone who would rather open a program than a web address. It starts the server on a free port of your machine, opens the window on it, and stops the server when you close the window; the sessions and their workers end with it. Everything inside the window is the same app, served by the same code as `tensa serve`.
+
+```bash
+pip install "tensa[desktop]"
+tensa desktop --workspace ~/tensa-cases
+```
+
+The window is [pywebview](https://pywebview.flowrl.com)'s, so it uses the web view the system already has: WebView2 on Windows (the runtime that comes with Windows 11 and is a free download for Windows 10), WebKit on macOS, and WebKitGTK or Qt WebEngine on Linux. On Linux pywebview needs one of the two toolkits: Qt comes with `pip install "pywebview[qt]"`, and GTK needs WebKitGTK and PyGObject from your distribution. If no window can be opened, the command logs why and exits with status 1. Without pywebview it says how to install it.
+
+`tensa desktop` flags:
+
+- `--workspace <dir>`: case-file workspace root. Default `~/.tensa/cases`. Created with mode `0700` if missing.
+- `--max-sessions <int>`: session-creation cap. Default `4`.
+- `--idle-timeout-seconds <float>`: reap sessions after this many seconds without activity. Default `180`.
+- `--sweep-workers <int>`: the most worker processes one sensitivity sweep may spread its iterations over. Default: the smaller of `4` and the number of CPUs.
+- `--no-warm-cache`: skip the startup check of ANDES's generated code, as for `tensa serve`.
+- `--log-level <level>`: how much to log. Default `info`.
+- `--log-file <path>`: also write the log to a rotating file; a bare name goes in `~/.tensa/logs`.
+- `--log-json`: log each line as a JSON object.
+- `--width <int>`: width of the window in pixels, at least `640`. Default `1280`.
+- `--height <int>`: height of the window in pixels, at least `400`. Default `800`.
+- `--devtools`: open the web inspector with the window, to see why the page misbehaves.
+
+The options that `tensa serve` has too mean the same here. There is no `--bind` or `--port`: the window is on your machine, so the server listens on `127.0.0.1` and takes whatever port the system gives it. It has no authentication, as ever, so while the window is open any program on your machine can reach that port; the address is in the log at the default level. The window keeps nothing between launches (its port is different each time, and its browser data is private), so the results the page stores in the browser and its list of recent cases start empty; the workspace, the layout files and anything you saved are on disk as before. Exports (CSV, COMTRADE, HTML report, Save system as) are downloads, and the window asks where to put them.
+
+There is no installer, signed application or bundled executable yet. Building one is future work, and what follows is an outline of it that has not been built, not a recipe known to work. A bundler has to start from a script of its own rather than the `tensa` command, because each worker is a copy of the program started again with arguments that only `multiprocessing.freeze_support()` understands, and the command-line parser would refuse them:
+
+```python
+# tensa_desktop.py
+import multiprocessing
+import sys
+
+from tensa.cli import app
+
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    app(["desktop", *sys.argv[1:]])
+```
+
+```bash
+pip install pyinstaller "tensa[desktop]"
+pyinstaller --windowed --name TENSA --collect-all tensa --collect-all andes tensa_desktop.py
+```
+
+`--collect-all tensa` carries the built UI (`tensa/static`), and `--collect-all andes` carries ANDES, which writes its generated model code to `~/.andes/pycode` the first time it needs it. Signing the application (and, on macOS, notarizing it) and making an installer are separate work on top.
 
 ## Using the API
 
