@@ -17,6 +17,7 @@ import type {
   NodeMouseHandler,
   EdgeMouseHandler,
   OnNodesChange,
+  OnNodeDrag,
   NodeChange,
   NodePositionChange,
 } from '@xyflow/react';
@@ -108,16 +109,30 @@ const LARGE_TOPOLOGY_THRESHOLD = 30;
 const MIN_ZOOM = 0.1;
 
 /**
- * React Flow's name for the lock button is "Toggle Interactivity", which does not
- * say that a locked diagram refuses drags and clicks with nothing to show why.
+ * How far a press on a node may travel, in pixels on screen, and still be a
+ * click and not a drag (see `onNodesChange`).
  */
-const ARIA_LABELS = {
-  'controls.interactive.ariaLabel': 'Lock or unlock dragging and selecting',
+const DRAG_SLOP_PX = 2;
+
+/**
+ * React Flow's name for the lock button is "Toggle Interactivity", which does not
+ * say that a locked diagram refuses drags and clicks. The name says what the next
+ * click does, so it also tells the state: the padlock icon is the only other sign
+ * of it on the button.
+ */
+const ARIA_LABELS_UNLOCKED = {
+  'controls.interactive.ariaLabel': 'Lock the diagram (stops dragging and selecting)',
+};
+const ARIA_LABELS_LOCKED = {
+  'controls.interactive.ariaLabel': 'Unlock the diagram (dragging and selecting are off)',
 };
 
-/** What the diagram offers that nothing on it shows: the drag and the right-click menu. */
+/**
+ * What the diagram offers that nothing on it shows: the drag, the arrow keys and
+ * the right-click menu, and that an arrangement is kept.
+ */
 const INTERACTION_HINT =
-  'Drag a bus to move it. Right-click a bus, line or the background for more actions.';
+  'Drag a bus or device to move it, or click it and press the arrow keys. Your layout is saved with the case. Right-click a bus, line or the background for more actions.';
 
 /**
  * Per-kind color hint for the React Flow MiniMap. Uses semantic CSS
@@ -290,6 +305,11 @@ function SldCanvasInner({
   const [coordsTopology, setCoordsTopology] = useState<TopologySummary | null>(null);
   const [showLargeBanner, setShowLargeBanner] = useState<boolean>(false);
   const [showDriftBanner, setShowDriftBanner] = useState<boolean>(false);
+  // The lock button of the controls was pressed: React Flow refuses drags and
+  // selection until it is pressed again. The toolbar says so in place of the
+  // hint, which would promise a drag that does nothing.
+  const [locked, setLocked] = useState<boolean>(false);
+  const onInteractiveChange = useCallback((interactive: boolean) => setLocked(!interactive), []);
 
   // Curated layout takes precedence over auto-layout. Computed once
   // per primaryPath; the result is folded into mergeWithDrift below.
@@ -515,19 +535,45 @@ function SldCanvasInner({
   //   from the graph the overrides produce, not from here: the edges in
   //   hand at this point still carry the routes of the buses that just
   //   moved.
+  //
+  // A drag begins with the press (`nodeDragThreshold={0}` below), so that React
+  // Flow moves a node the whole way the pointer went. With its default
+  // threshold the first pointer move only starts the drag, measured from where
+  // that move ended, and a drag that arrives as one move (a pointer driven by
+  // a script, or by assistive technology that goes from the press to the drop
+  // in one step) left the node where it was. What the threshold kept out is
+  // kept out here: a press that slips a pixel or two is a click, so the node
+  // goes back and nothing is recorded. `dragOriginRef` holds where the nodes of
+  // the drag in hand started, between React Flow's drag-start and drag-stop; a
+  // move by the arrow keys has neither and is always kept.
   const persistRequestedRef = useRef(false);
+  const dragOriginRef = useRef<Map<string, { x: number; y: number }> | null>(null);
+  const onNodeDragStart: OnNodeDrag = useCallback((_event, _node, dragged) => {
+    dragOriginRef.current = new Map(dragged.map((n) => [n.id, { ...n.position }]));
+  }, []);
+  const onNodeDragStop: OnNodeDrag = useCallback(() => {
+    dragOriginRef.current = null;
+  }, []);
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
-      const next = applyPositionChanges(nodesRef.current, changes);
-      if (next !== nodesRef.current) {
-        nodesRef.current = next;
-        setNodes(next);
-      }
+      let next = applyPositionChanges(nodesRef.current, changes);
       const dragEnded = changes.some(
         (c): c is NodePositionChange =>
           c.type === 'position' && c.dragging === false && c.position !== undefined,
       );
-      if (!dragEnded) return;
+      const origin = dragOriginRef.current;
+      // To the nearest pixel: the positions are in flow units, and a pointer
+      // that went two pixels comes back from them as a hair over or under two.
+      const slipped =
+        dragEnded &&
+        origin !== null &&
+        Math.round(farthestMove(origin, next) * rf.getZoom()) <= DRAG_SLOP_PX;
+      if (slipped) next = withPositions(next, origin);
+      if (next !== nodesRef.current) {
+        nodesRef.current = next;
+        setNodes(next);
+      }
+      if (!dragEnded || slipped) return;
       // Capture the current position of every node that can be dragged
       // into the override map. The map keys by React Flow node id (bus
       // idx for buses, `${kind}-${idx}` for non-bus nodes). A controller
@@ -541,7 +587,7 @@ function SldCanvasInner({
       setDragOverrides(overrides);
       persistRequestedRef.current = true;
     },
-    [setDragOverrides],
+    [setDragOverrides, rf],
   );
 
   // Keep the layout of the diagram as drawn where a save can reach it
@@ -894,13 +940,26 @@ function SldCanvasInner({
   return (
     <div className="flex h-full w-full flex-col" data-testid="sld-canvas">
       <div className="flex items-center gap-2 px-2 py-1">
-        <p
-          data-testid="sld-canvas-hint"
-          title={INTERACTION_HINT}
-          className="text-muted-foreground min-w-0 flex-1 truncate text-xs"
-        >
-          {INTERACTION_HINT}
-        </p>
+        {/* Two lines at most, which is the height the buttons beside it give
+            the row anyway; the title has the whole text where it is cut. */}
+        {locked ? (
+          <p
+            role="status"
+            data-testid="sld-canvas-locked"
+            className="text-foreground line-clamp-2 min-w-0 flex-1 text-xs"
+          >
+            <span className="font-semibold">The diagram is locked.</span> Nothing can be dragged or
+            selected until you press the padlock button at the bottom left of the diagram again.
+          </p>
+        ) : (
+          <p
+            data-testid="sld-canvas-hint"
+            title={INTERACTION_HINT}
+            className="text-muted-foreground line-clamp-2 min-w-0 flex-1 text-xs"
+          >
+            {INTERACTION_HINT}
+          </p>
+        )}
         <ConnectivityRecomputeButton />
         <ExportMenu formats={['png']} panel="sld" caseName={caseName} onExportPng={onExportPng} />
       </div>
@@ -936,6 +995,8 @@ function SldCanvasInner({
               nodes={nodesWithSelection}
               edges={edges}
               onNodesChange={onNodesChange}
+              onNodeDragStart={onNodeDragStart}
+              onNodeDragStop={onNodeDragStop}
               nodeTypes={NODE_TYPES}
               edgeTypes={EDGE_TYPES}
               onNodeClick={onNodeClick}
@@ -944,8 +1005,9 @@ function SldCanvasInner({
               onEdgeContextMenu={onEdgeContextMenu}
               fitView
               minZoom={MIN_ZOOM}
-              ariaLabelConfig={ARIA_LABELS}
+              ariaLabelConfig={locked ? ARIA_LABELS_LOCKED : ARIA_LABELS_UNLOCKED}
               nodesDraggable
+              nodeDragThreshold={0}
               selectionMode={SelectionMode.Partial}
               proOptions={{ hideAttribution: true }}
             >
@@ -956,7 +1018,10 @@ function SldCanvasInner({
                 color={DOT_GRID_COLOR}
                 data-testid="sld-canvas-dot-grid"
               />
-              <Controls className={FLOATING_OVERLAY_CHROME} />
+              <Controls
+                className={FLOATING_OVERLAY_CHROME}
+                onInteractiveChange={onInteractiveChange}
+              />
               <MiniMap
                 pannable
                 zoomable
@@ -993,6 +1058,7 @@ function SldCanvasInner({
         </ContextMenuTrigger>
         <SldContextMenuBody
           target={contextTarget}
+          locked={locked}
           onFitView={fitView}
           onResetLayout={resetLayout}
         />
@@ -1065,11 +1131,27 @@ function applyPositionChanges(nodes: Node[], changes: NodeChange[]): Node[] {
       positionById.set(c.id, c.position);
     }
   }
+  return withPositions(nodes, positionById);
+}
+
+/** `nodes` with each node that `positionById` names put at its position there. */
+function withPositions(nodes: Node[], positionById: Map<string, { x: number; y: number }>): Node[] {
   if (positionById.size === 0) return nodes;
   return nodes.map((n) => {
     const p = positionById.get(n.id);
     return p ? { ...n, position: p } : n;
   });
+}
+
+/** How far the node that moved the most is from where `origin` has it, in flow units. */
+function farthestMove(origin: Map<string, { x: number; y: number }>, nodes: Node[]): number {
+  let farthest = 0;
+  for (const n of nodes) {
+    const from = origin.get(n.id);
+    if (from === undefined) continue;
+    farthest = Math.max(farthest, Math.hypot(n.position.x - from.x, n.position.y - from.y));
+  }
+  return farthest;
 }
 
 /**

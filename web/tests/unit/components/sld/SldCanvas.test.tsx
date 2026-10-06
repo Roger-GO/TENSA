@@ -76,6 +76,7 @@ vi.mock('@xyflow/react', async () => {
     nodeTypes: Record<string, React.ComponentType<unknown>>;
     edgeTypes?: Record<string, React.ComponentType<unknown>>;
     minZoom?: number;
+    nodeDragThreshold?: number;
     ariaLabelConfig?: Record<string, string>;
     onNodeClick?: (
       e: React.MouseEvent,
@@ -97,6 +98,7 @@ vi.mock('@xyflow/react', async () => {
       edges,
       nodeTypes,
       minZoom,
+      nodeDragThreshold,
       ariaLabelConfig,
       onNodeClick,
       onNodeContextMenu,
@@ -108,6 +110,7 @@ vi.mock('@xyflow/react', async () => {
         {
           'data-testid': 'rf-root',
           'data-min-zoom': minZoom,
+          'data-drag-threshold': nodeDragThreshold,
           'data-lock-label': ariaLabelConfig?.['controls.interactive.ariaLabel'],
         },
         nodes.map((n) => {
@@ -175,11 +178,29 @@ vi.mock('@xyflow/react', async () => {
         'data-color': color,
         'data-gap': gap,
       }),
-    Controls: ({ className }: { className?: string }) =>
-      React.createElement('div', {
-        'data-testid': 'sld-canvas-controls',
-        className,
-      }),
+    // The lock button of the real controls reports each press through
+    // `onInteractiveChange`; the stand-in has one that turns the lock on and off.
+    Controls: ({
+      className,
+      onInteractiveChange,
+    }: {
+      className?: string;
+      onInteractiveChange?: (interactive: boolean) => void;
+    }) => {
+      const [interactive, setInteractive] = React.useState(true);
+      return React.createElement(
+        'div',
+        { 'data-testid': 'sld-canvas-controls', className },
+        React.createElement('button', {
+          type: 'button',
+          'data-testid': 'sld-canvas-lock',
+          onClick: () => {
+            setInteractive(!interactive);
+            onInteractiveChange?.(!interactive);
+          },
+        }),
+      );
+    },
     MiniMap: ({ className }: { className?: string }) =>
       React.createElement('div', {
         'data-testid': 'sld-canvas-minimap',
@@ -1130,10 +1151,68 @@ describe('SldCanvas', () => {
     render(withQueryClient(<SldCanvas />));
     await waitFor(() => expect(screen.getByTestId('rf-root')).toBeInTheDocument());
     expect(screen.getByTestId('rf-root').getAttribute('data-lock-label')).toMatch(
-      /lock.*dragging/i,
+      /^Lock the diagram.*dragging/,
     );
     expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
       /Drag a bus.*Right-click a bus, line or the background/,
+    );
+    // The way to move something without a drag, and that an arrangement is kept.
+    expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
+      /click it and press the arrow keys\. Your layout is saved with the case\./,
+    );
+  });
+
+  it('starts a drag on the press, so that a drag made of one pointer move moves the node', async () => {
+    mockTopology = makeTopology([bus(1), bus(2)], [line(10, 1, 2)]);
+    act(() => {
+      useCaseStore.setState({
+        selection: {
+          primaryPath: parseWorkspacePath('synthetic.raw'),
+          addfiles: [],
+        },
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => expect(screen.getByTestId('rf-root')).toBeInTheDocument());
+    expect(screen.getByTestId('rf-root').getAttribute('data-drag-threshold')).toBe('0');
+  });
+
+  it('says that the diagram is locked, and how to unlock it, while the lock is on', async () => {
+    mockTopology = makeTopology([bus(1), bus(2)], [line(10, 1, 2)]);
+    act(() => {
+      useCaseStore.setState({
+        selection: {
+          primaryPath: parseWorkspacePath('synthetic.raw'),
+          addfiles: [],
+        },
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => expect(screen.getByTestId('rf-root')).toBeInTheDocument());
+    expect(screen.queryByTestId('sld-canvas-locked')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('sld-canvas-lock'));
+    // In place of the hint, which would promise a drag that does nothing.
+    expect(screen.queryByTestId('sld-canvas-hint')).toBeNull();
+    const notice = screen.getByRole('status');
+    expect(notice).toBe(screen.getByTestId('sld-canvas-locked'));
+    expect(notice).toHaveTextContent(
+      'The diagram is locked. Nothing can be dragged or selected until you press the padlock button',
+    );
+    // The button's name says what the next press does.
+    expect(screen.getByTestId('rf-root').getAttribute('data-lock-label')).toMatch(
+      /^Unlock the diagram/,
+    );
+    // And the right-click menu does not offer a move that cannot happen.
+    fireEvent.contextMenu(screen.getByTestId('bus-node-1'));
+    expect(await screen.findByTestId('sld-context-move')).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.keyDown(screen.getByTestId('sld-context-menu'), { key: 'Escape' });
+
+    fireEvent.click(screen.getByTestId('sld-canvas-lock'));
+    expect(screen.queryByTestId('sld-canvas-locked')).toBeNull();
+    expect(screen.getByTestId('sld-canvas-hint')).toBeInTheDocument();
+    expect(screen.getByTestId('rf-root').getAttribute('data-lock-label')).toMatch(
+      /^Lock the diagram/,
     );
   });
 

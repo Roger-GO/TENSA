@@ -3,15 +3,23 @@
  *
  * What it offers depends on what was clicked:
  *
- *  - **A bus**: Inspect, Add element here (opens the Add element panel with this
- *    bus chosen in the form), Fault here (opens the Add disturbance dialog with a
- *    fault on this bus), Plot voltage (puts the bus's voltage on the time-series
- *    plot of the active run).
+ *  - **A bus**: Inspect, Move with arrow keys, Add element here (opens the Add
+ *    element panel with this bus chosen in the form), Fault here (opens the Add
+ *    disturbance dialog with a fault on this bus), Plot voltage (puts the bus's
+ *    voltage on the time-series plot of the active run).
  *  - **A line or transformer**: Inspect, Trip line (the dialog with a toggle on
  *    this branch).
- *  - **A generator, load, shunt or controller**: Inspect.
- *  - **The canvas**: Add element, and Fit view and Reset to auto-layout, the same
- *    two commands the palette has.
+ *  - **A generator, load or shunt**: Inspect, Move with arrow keys.
+ *  - **A controller**: Inspect. Its badge is placed from its machine and cannot be
+ *    moved on its own.
+ *  - **The canvas**: Add element, Fit view and Reset to auto-layout (the same two
+ *    commands the palette has), and Save snapshot, which keeps the diagram as it
+ *    is placed with the operating point.
+ *
+ * Move with arrow keys is the way to place something without a drag: it selects
+ * the element and gives it the keyboard focus, where React Flow moves a selected
+ * node by the arrow keys (Shift for bigger steps). A move by the keys is saved as
+ * a drag is.
  *
  * A right-click on the diagram is where a first-time user looks for a way to add
  * to it, and the Component library is at the foot of the sidebar, below the fold
@@ -29,7 +37,7 @@
  * TDS run applies, through the same dialog the sidebar's button opens, so the
  * time and the fault impedance are the user's to set before anything is added.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import type { DisturbanceSpec } from '@/api/types';
 import { AddEventDialog } from '@/components/disturbance/AddEventDialog';
@@ -49,6 +57,7 @@ import { useLayoutStore } from '@/store/layout';
 import { usePlotStore } from '@/store/plot';
 import { useRunsStore } from '@/store/runs';
 import { useSldStore } from '@/store/sld';
+import { useSnapshotStore } from '@/store/snapshot';
 import type { SldContextTarget } from './contextTarget';
 
 /**
@@ -86,6 +95,44 @@ function inspect(element: SelectedElement, nodeId: string | null): void {
   useCaseStore.getState().setSelectedElement(element);
   if (nodeId !== null) useSldStore.getState().setSelectedNodeId(nodeId);
   useLayoutStore.getState().setRightInspectorCollapsed(false);
+}
+
+/** The React Flow wrapper of a node, which is what takes the keyboard focus. */
+function nodeElement(nodeId: string): HTMLElement | null {
+  for (const el of document.querySelectorAll<HTMLElement>('.react-flow__node')) {
+    if (el.getAttribute('data-id') === nodeId) return el;
+  }
+  return null;
+}
+
+/**
+ * "Move with arrow keys": selects the node, so that the keys move it once it has
+ * the focus (`onMove` notes which node the menu hands the focus to as it closes),
+ * and says which keys. Greyed out, with the reason, while the diagram is locked.
+ */
+function MoveItem({
+  label,
+  locked,
+  onMove,
+}: {
+  label: string;
+  locked: boolean;
+  onMove: () => void;
+}) {
+  const move = () => {
+    onMove();
+    toast.info(`Press the arrow keys to move ${label}`, {
+      description: 'Hold Shift for bigger steps. Your layout is saved with the case.',
+    });
+  };
+  return (
+    <ContextMenuItem data-testid="sld-context-move" disabled={locked} onSelect={move}>
+      <span>Move with arrow keys</span>
+      {locked ? (
+        <span className="text-muted-foreground ml-auto pl-3 text-xs">diagram is locked</span>
+      ) : null}
+    </ContextMenuItem>
+  );
 }
 
 /** The column the run records a bus voltage in; see `parseColumnName` in `store/plot`. */
@@ -171,6 +218,8 @@ function AddElementItem({ busIdx }: { busIdx: string | null }) {
 
 export interface SldContextMenuBodyProps {
   target: SldContextTarget;
+  /** The diagram's lock is on: nothing can be moved until it is off again. */
+  locked?: boolean;
   onFitView: () => void;
   onResetLayout: () => void;
 }
@@ -179,11 +228,26 @@ export interface SldContextMenuBodyProps {
  * The menu's content and the dialog its Fault and Trip items open. Render it inside
  * the `ContextMenu` root, beside the trigger.
  */
-export function SldContextMenuBody({ target, onFitView, onResetLayout }: SldContextMenuBodyProps) {
+export function SldContextMenuBody({
+  target,
+  locked = false,
+  onFitView,
+  onResetLayout,
+}: SldContextMenuBodyProps) {
   const addDisturbance = useDisturbanceStore((s) => s.addDisturbance);
   // The spec the Add disturbance dialog opens with, or null while it is closed.
   // Kept in state, so its reference is stable for as long as the dialog is open.
   const [seed, setSeed] = useState<DisturbanceSpec | null>(null);
+
+  // The node Move with arrow keys was chosen for, until the menu has closed and
+  // handed it the focus. Radix otherwise gives the focus back to whatever had it
+  // before the menu opened, which is the node only when the right-click put it there.
+  const moveNodeRef = useRef<string | null>(null);
+  const move = (element: SelectedElement, nodeId: string) => {
+    useCaseStore.getState().setSelectedElement(element);
+    useSldStore.getState().setSelectedNodeId(nodeId);
+    moveNodeRef.current = nodeId;
+  };
 
   const save = (spec: DisturbanceSpec) => {
     addDisturbance(spec);
@@ -195,7 +259,17 @@ export function SldContextMenuBody({ target, onFitView, onResetLayout }: SldCont
 
   return (
     <>
-      <ContextMenuContent data-testid="sld-context-menu" className="min-w-[13rem]">
+      <ContextMenuContent
+        data-testid="sld-context-menu"
+        className="min-w-[13rem]"
+        onCloseAutoFocus={(event) => {
+          const node = moveNodeRef.current === null ? null : nodeElement(moveNodeRef.current);
+          moveNodeRef.current = null;
+          if (node === null) return;
+          event.preventDefault();
+          node.focus();
+        }}
+      >
         <ContextMenuLabel data-testid="sld-context-menu-title">{titleOf(target)}</ContextMenuLabel>
         <ContextMenuSeparator />
         {target.kind === 'bus' ? (
@@ -206,6 +280,11 @@ export function SldContextMenuBody({ target, onFitView, onResetLayout }: SldCont
             >
               Inspect
             </ContextMenuItem>
+            <MoveItem
+              label={titleOf(target)}
+              locked={locked}
+              onMove={() => move({ kind: 'bus', idx: target.idx }, target.nodeId)}
+            />
             <AddElementItem busIdx={target.idx} />
             <ContextMenuItem
               data-testid="sld-context-fault"
@@ -240,12 +319,21 @@ export function SldContextMenuBody({ target, onFitView, onResetLayout }: SldCont
           </>
         ) : null}
         {target.kind === 'device' ? (
-          <ContextMenuItem
-            data-testid="sld-context-inspect"
-            onSelect={() => inspect(target.element, target.nodeId)}
-          >
-            Inspect
-          </ContextMenuItem>
+          <>
+            <ContextMenuItem
+              data-testid="sld-context-inspect"
+              onSelect={() => inspect(target.element, target.nodeId)}
+            >
+              Inspect
+            </ContextMenuItem>
+            {target.element.kind === 'controller' ? null : (
+              <MoveItem
+                label={titleOf(target)}
+                locked={locked}
+                onMove={() => move(target.element, target.nodeId)}
+              />
+            )}
+          </>
         ) : null}
         {target.kind === 'canvas' ? (
           <>
@@ -255,6 +343,13 @@ export function SldContextMenuBody({ target, onFitView, onResetLayout }: SldCont
             </ContextMenuItem>
             <ContextMenuItem data-testid="sld-context-reset-layout" onSelect={onResetLayout}>
               Reset to auto-layout
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              data-testid="sld-context-save-snapshot"
+              onSelect={() => useSnapshotStore.getState().openSaveDialog()}
+            >
+              Save snapshot…
             </ContextMenuItem>
           </>
         ) : null}

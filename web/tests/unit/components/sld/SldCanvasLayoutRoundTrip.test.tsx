@@ -3,7 +3,8 @@
  *
  * The canvas is rendered against a stand-in for React Flow that records what
  * it is asked to draw (every node's position, every edge's route) and hands
- * back `onNodesChange`, so a test can end a drag the way React Flow does.
+ * back `onNodesChange` and the drag-start and drag-stop handlers, so a test
+ * can end a drag, or make a whole one, the way React Flow does.
  * "Save" is whatever the canvas keeps for the save paths (`diagramLayout` in
  * the case store) or writes itself after a drag (`PUT /workspace/layout`).
  * "Reload" is a fresh canvas given that document as the saved layout, after
@@ -32,22 +33,42 @@ interface PositionChange {
   dragging: boolean;
 }
 
-/** What the canvas last asked React Flow to draw. */
+type DragHandler = (
+  event: unknown,
+  node: Pick<DrawnNode, 'id' | 'position'>,
+  nodes: Pick<DrawnNode, 'id' | 'position'>[],
+) => void;
+
+/** What the canvas last asked React Flow to draw, and the zoom React Flow reports. */
 const drawn: {
   nodes: DrawnNode[];
   edges: DrawnEdge[];
   onNodesChange: ((changes: PositionChange[]) => void) | null;
-} = { nodes: [], edges: [], onNodesChange: null };
+  onNodeDragStart: DragHandler | null;
+  onNodeDragStop: DragHandler | null;
+  zoom: number;
+} = {
+  nodes: [],
+  edges: [],
+  onNodesChange: null,
+  onNodeDragStart: null,
+  onNodeDragStop: null,
+  zoom: 1,
+};
 
 vi.mock('@xyflow/react', () => ({
   ReactFlow: (props: {
     nodes: DrawnNode[];
     edges: DrawnEdge[];
     onNodesChange: (changes: PositionChange[]) => void;
+    onNodeDragStart: DragHandler;
+    onNodeDragStop: DragHandler;
   }) => {
     drawn.nodes = props.nodes;
     drawn.edges = props.edges;
     drawn.onNodesChange = props.onNodesChange;
+    drawn.onNodeDragStart = props.onNodeDragStart;
+    drawn.onNodeDragStop = props.onNodeDragStop;
     return null;
   },
   ReactFlowProvider: ({ children }: { children: ReactNode }) => children,
@@ -64,7 +85,7 @@ vi.mock('@xyflow/react', () => ({
     selector({ transform: [0, 0, 1] }),
   useReactFlow: () => ({
     setCenter: vi.fn(),
-    getZoom: () => 1,
+    getZoom: () => drawn.zoom,
     getNodes: () => [],
     fitView: vi.fn(),
     screenToFlowPosition: (p: { x: number; y: number }) => p,
@@ -203,6 +224,22 @@ function dropAt(id: string, to: { x: number; y: number }): void {
   });
 }
 
+/**
+ * A whole pointer drag of `id` to `to`, as React Flow reports one that starts
+ * on the press: the start, the node following the pointer, the end, the stop.
+ */
+function dragTo(id: string, to: { x: number; y: number }): void {
+  const node = drawn.nodes.find((n) => n.id === id);
+  if (node === undefined) throw new Error(`no node ${id}`);
+  const from = { id, position: { ...node.position } };
+  act(() => {
+    drawn.onNodeDragStart?.({}, from, [from]);
+    drawn.onNodesChange?.([{ id, type: 'position', position: to, dragging: true }]);
+    drawn.onNodesChange?.([{ id, type: 'position', position: to, dragging: false }]);
+    drawn.onNodeDragStop?.({}, { id, position: to }, [{ id, position: to }]);
+  });
+}
+
 function savedLayout(): SidecarLayout {
   const layout = useCaseStore.getState().diagramLayout;
   if (layout === null) throw new Error('the canvas kept no layout');
@@ -217,6 +254,7 @@ beforeEach(() => {
   drawn.nodes = [];
   drawn.edges = [];
   drawn.onNodesChange = null;
+  drawn.zoom = 1;
   useSessionStore.setState({ sessionId: parseSessionId('sess-layout') });
   useCaseStore.getState().clearCase();
 });
@@ -348,6 +386,49 @@ describe('place, save, reload', () => {
     const [vars] = putSidecarSpy.mock.calls[0] as [{ casePath: string; layout: SidecarLayout }];
     expect(vars.casePath).toBe('kundur.xlsx');
     expect(vars.layout.coordinates['1']).toEqual(movedTo);
+  });
+
+  it('a press that slips a pixel or two is a click: the node goes back and nothing is kept', async () => {
+    // The drag starts on the press, so React Flow moves the node by whatever
+    // the pointer did before it was let go. Two pixels on screen are eight
+    // units of the diagram at a quarter of its size.
+    drawn.zoom = 0.25;
+    open('kundur.xlsx');
+    await draw();
+    const start = picture();
+    const from = start.positions['1']!;
+
+    dragTo('1', { x: from.x + 8, y: from.y });
+
+    expect(drawn.nodes.find((n) => n.id === '1')?.position).toEqual(from);
+    expect(picture()).toEqual(start);
+    expect(useCaseStore.getState().dragOverrides).toEqual({});
+    // Nothing waits to be written either: leaving the canvas sends what does.
+    cleanup();
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+  });
+
+  it('a drag of three pixels is a drag, and a move by an arrow key is kept however small', async () => {
+    drawn.zoom = 0.25;
+    open('kundur.xlsx');
+    await draw();
+    const from = picture().positions['1']!;
+
+    const dragged = { x: from.x + 12, y: from.y };
+    dragTo('1', dragged);
+    await waitFor(() => expect(drawn.nodes.find((n) => n.id === '1')?.position).toEqual(dragged));
+    expect(useCaseStore.getState().dragOverrides['1']).toEqual(dragged);
+
+    // An arrow key moves a node five units, which is little more than a pixel
+    // here, and React Flow reports it with no drag around it.
+    const nudged = { x: dragged.x + 5, y: dragged.y };
+    dropAt('1', nudged);
+    await waitFor(() => expect(drawn.nodes.find((n) => n.id === '1')?.position).toEqual(nudged));
+    expect(useCaseStore.getState().dragOverrides['1']).toEqual(nudged);
+
+    await waitFor(() => expect(putSidecarSpy).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    const [vars] = putSidecarSpy.mock.calls[0] as [{ layout: SidecarLayout }];
+    expect(vars.layout.coordinates['1']).toEqual(nudged);
   });
 
   it('a second drag after a reload moves only what was dragged', async () => {

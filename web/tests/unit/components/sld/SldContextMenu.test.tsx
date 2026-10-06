@@ -22,6 +22,8 @@ import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { usePlotStore } from '@/store/plot';
 import { useRunsStore } from '@/store/runs';
 import { useSldStore } from '@/store/sld';
+import { useSnapshotStore } from '@/store/snapshot';
+import { toast } from '@/lib/toast';
 import { parseSessionId } from '@/api/types';
 import type { TopologySummary } from '@/api/types';
 import { useSessionStore } from '@/store/session';
@@ -50,15 +52,34 @@ vi.mock('@/api/queries', async () => {
 const onFitView = vi.fn();
 const onResetLayout = vi.fn();
 
-function openMenu(target: SldContextTarget) {
+/**
+ * Opens the menu for `target`. The surface holds a stand-in for the node React
+ * Flow draws for bus 1 and for generator 3: a focusable wrapper with the node's
+ * id, which is what Move with arrow keys looks for.
+ */
+function openMenu(target: SldContextTarget, { locked = false }: { locked?: boolean } = {}) {
   const client = new QueryClient();
   render(
     <QueryClientProvider client={client}>
       <ContextMenu modal={false}>
         <ContextMenuTrigger asChild>
-          <div data-testid="surface">canvas</div>
+          <div data-testid="surface">
+            canvas
+            <div className="react-flow__node" data-id="1" tabIndex={0} data-testid="node-1" />
+            <div
+              className="react-flow__node"
+              data-id="generator-3"
+              tabIndex={0}
+              data-testid="node-generator-3"
+            />
+          </div>
         </ContextMenuTrigger>
-        <SldContextMenuBody target={target} onFitView={onFitView} onResetLayout={onResetLayout} />
+        <SldContextMenuBody
+          target={target}
+          locked={locked}
+          onFitView={onFitView}
+          onResetLayout={onResetLayout}
+        />
       </ContextMenu>
     </QueryClientProvider>,
   );
@@ -81,11 +102,13 @@ beforeEach(() => {
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
   usePlotStore.getState().clearAll();
   useRunsStore.getState().clearRuns();
+  useSnapshotStore.getState().reset();
 });
 
 afterEach(() => {
   cleanup();
   useRunsStore.getState().clearRuns();
+  vi.restoreAllMocks();
 });
 
 describe('menu for a bus', () => {
@@ -95,6 +118,7 @@ describe('menu for a bus', () => {
       'Bus BUS1 (idx 1)',
     );
     expect(within(menu).getByTestId('sld-context-inspect')).toBeInTheDocument();
+    expect(within(menu).getByTestId('sld-context-move')).toHaveTextContent('Move with arrow keys');
     expect(within(menu).getByTestId('sld-context-add-element')).toHaveTextContent(
       'Add element here…',
     );
@@ -169,6 +193,60 @@ describe('menu for a bus', () => {
       kind: 'fault',
       bus_idx: 'BUS_X',
     });
+  });
+});
+
+describe('Move with arrow keys', () => {
+  it('selects the bus, hands its node the keyboard focus and says which keys move it', async () => {
+    const info = vi.spyOn(toast, 'info');
+    useLayoutStore.setState({ rightInspectorCollapsed: true });
+    await openMenu(BUS);
+    await userEvent.click(screen.getByTestId('sld-context-move'));
+
+    // Selected, which is what lets React Flow's arrow keys move the node.
+    expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'bus', idx: '1' });
+    expect(useSldStore.getState().selectedNodeId).toBe('1');
+    // The keys go to the node that has the focus.
+    await waitFor(() => expect(screen.getByTestId('node-1')).toHaveFocus());
+    expect(info).toHaveBeenCalledWith(
+      'Press the arrow keys to move Bus BUS1 (idx 1)',
+      expect.objectContaining({ description: expect.stringContaining('Hold Shift') }),
+    );
+    // Moving is not inspecting: a folded Inspector stays folded.
+    expect(useLayoutStore.getState().rightInspectorCollapsed).toBe(true);
+  });
+
+  it('is offered for a generator, by the id of its node', async () => {
+    await openMenu({
+      kind: 'device',
+      element: { kind: 'generator', idx: '3' },
+      name: 'G3',
+      nodeId: 'generator-3',
+    });
+    await userEvent.click(screen.getByTestId('sld-context-move'));
+    expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'generator', idx: '3' });
+    expect(useSldStore.getState().selectedNodeId).toBe('generator-3');
+    await waitFor(() => expect(screen.getByTestId('node-generator-3')).toHaveFocus());
+  });
+
+  it('is greyed out, with the reason, while the diagram is locked', async () => {
+    const info = vi.spyOn(toast, 'info');
+    const menu = await openMenu(BUS, { locked: true });
+    const item = within(menu).getByTestId('sld-context-move');
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    expect(item).toHaveTextContent('diagram is locked');
+    fireEvent.click(item);
+    expect(useCaseStore.getState().selectedElement).toBeNull();
+    expect(info).not.toHaveBeenCalled();
+    // What does not move anything is still there.
+    expect(within(menu).getByTestId('sld-context-inspect')).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('leaves the focus where the menu puts it after any other item', async () => {
+    await openMenu(BUS);
+    await userEvent.click(screen.getByTestId('sld-context-inspect'));
+    await waitFor(() => expect(screen.queryByTestId('sld-context-menu')).toBeNull());
+    expect(screen.getByTestId('node-1')).not.toHaveFocus();
   });
 });
 
@@ -267,7 +345,7 @@ describe('menu for a line or transformer', () => {
 });
 
 describe('menu for a generator, load, shunt or controller', () => {
-  it('offers Inspect only, and selects that element', async () => {
+  it('offers Inspect and Move with arrow keys, and Inspect selects that element', async () => {
     const target: SldContextTarget = {
       kind: 'device',
       element: { kind: 'generator', idx: '3' },
@@ -278,13 +356,14 @@ describe('menu for a generator, load, shunt or controller', () => {
     expect(within(menu).getByTestId('sld-context-menu-title')).toHaveTextContent(
       'Generator G3 (idx 3)',
     );
-    expect(within(menu).getAllByRole('menuitem')).toHaveLength(1);
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(2);
+    expect(within(menu).getByTestId('sld-context-move')).toBeInTheDocument();
     await userEvent.click(within(menu).getByTestId('sld-context-inspect'));
     expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'generator', idx: '3' });
     expect(useSldStore.getState().selectedNodeId).toBe('generator-3');
   });
 
-  it('names a controller as one', async () => {
+  it('names a controller as one, and offers no move: its badge follows its machine', async () => {
     const menu = await openMenu({
       kind: 'device',
       element: { kind: 'controller', subKind: 'exciter', modelClass: 'IEEEX1', idx: '1' },
@@ -294,6 +373,8 @@ describe('menu for a generator, load, shunt or controller', () => {
     expect(within(menu).getByTestId('sld-context-menu-title')).toHaveTextContent(
       'Controller EXC1 (idx 1)',
     );
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(1);
+    expect(within(menu).queryByTestId('sld-context-move')).toBeNull();
   });
 });
 
@@ -329,7 +410,16 @@ describe('menu for the canvas', () => {
     const menu = await openMenu({ kind: 'canvas' });
     expect(within(menu).queryByTestId('sld-context-inspect')).toBeNull();
     expect(within(menu).queryByTestId('sld-context-fault')).toBeNull();
-    expect(within(menu).getAllByRole('menuitem')).toHaveLength(3);
+    expect(within(menu).queryByTestId('sld-context-move')).toBeNull();
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(4);
+  });
+
+  it('offers Save snapshot, which opens the Save snapshot dialog', async () => {
+    const menu = await openMenu({ kind: 'canvas' });
+    expect(useSnapshotStore.getState().saveDialogOpen).toBe(false);
+    await userEvent.click(within(menu).getByTestId('sld-context-save-snapshot'));
+    // The dialog is mounted at the app's root and opens from this flag.
+    expect(useSnapshotStore.getState().saveDialogOpen).toBe(true);
   });
 });
 
