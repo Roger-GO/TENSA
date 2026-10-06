@@ -8,6 +8,7 @@ import {
   connectorStyleOf,
   dragOverridesFromLayout,
   samePlacement,
+  unitStatesOf,
 } from '@/components/sld/sidecar';
 import { diagramLayoutForSave } from '@/lib/diagramLayout';
 import { toast } from '@/lib/toast';
@@ -144,7 +145,7 @@ export function useSaveSnapshot(): UseMutationResult<
  * it, so they go, and a write of them still waiting to be sent is dropped: it
  * would put the layout of before the restore back. A system built from scratch
  * has no file to keep a layout beside; its positions are applied as drags, and
- * its connector style as the one chosen.
+ * its connector style and the control chains it draws out as the ones chosen.
  *
  * A diagram arranged since the snapshot was saved is work, and the restore was
  * asked for the operating point. So when the diagram on screen changes, a toast
@@ -159,17 +160,23 @@ function applyRestoredLayout(queryClient: QueryClient, layout: SidecarLayout): v
     drawn: store.diagramLayout,
     overrides: store.dragOverrides,
     connectorStyle: store.connectorStyle,
+    unitExpansion: store.unitExpansion,
   };
   if (primaryPath === null) {
     store.setDragOverrides(dragOverridesFromLayout(layout));
     store.setConnectorStyle(connectorStyleOf(layout));
+    store.setUnitExpansion(
+      Object.fromEntries([...unitStatesOf(layout)].map(([idx, unit]) => [idx, unit.expanded])),
+    );
   } else {
     cancelPendingSidecarPut(primaryPath);
     queryClient.setQueryData(queryKeys.sidecar(primaryPath), layout);
     store.setDragOverrides({});
     // The connector style chosen in this visit sits on top of the saved
-    // layout's, as the drags do, and goes with them.
+    // layout's, as the drags do, and goes with them. So do the control
+    // chains drawn out or folded away in it.
     store.setConnectorStyle(null);
+    store.setUnitExpansion({});
   }
   // No diagram was drawn, or it is drawn just as the snapshot has it: nothing
   // on screen changed, so there is nothing to tell or to take back.
@@ -183,6 +190,7 @@ function applyRestoredLayout(queryClient: QueryClient, layout: SidecarLayout): v
     if (stillOpen) {
       useCaseStore.getState().setDragOverrides(before.overrides);
       useCaseStore.getState().setConnectorStyle(before.connectorStyle);
+      useCaseStore.getState().setUnitExpansion(before.unitExpansion);
     }
     if (primaryPath === null) return;
     queryClient.setQueryData(queryKeys.sidecar(primaryPath), drawnBefore);

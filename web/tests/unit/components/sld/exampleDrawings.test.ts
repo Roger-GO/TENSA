@@ -212,7 +212,9 @@ describe('the example cases, drawn by the automatic layout', () => {
       const { nodes, edges, problems } = await drawn(IEEE14, connectorStyle);
       expect(nodes.filter((n) => n.type === 'bus')).toHaveLength(14);
       expect(edges.filter((e) => e.type !== 'stub')).toHaveLength(20);
-      expect(edges.filter((e) => e.type === 'stub')).toHaveLength(23);
+      // One connector per load and shunt, and one per generating unit: a
+      // generator and the machine that names it are one symbol.
+      expect(edges.filter((e) => e.type === 'stub')).toHaveLength(18);
       expect(problems).toEqual([]);
     });
 

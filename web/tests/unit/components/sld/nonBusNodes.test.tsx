@@ -21,7 +21,17 @@ import {
   DEVICE_ROW_OFFSET,
   DEVICE_VALUE_LABEL,
   NODE_FOOTPRINT,
+  UNIT_CHAIN_GAP,
+  UNIT_CHIP_SLOTS,
+  chooseChainSide,
+  unitBoxSize,
+  unitChainPlaces,
+  unitChainSize,
+  unitChips,
+  type ChainSide,
+  type UnitNodeData,
 } from '@/components/sld/graph';
+import type { UnitMemberInfo } from '@/lib/generatingUnits';
 import { TAP_SPACING, layoutConnections } from '@/components/sld/connections';
 import type { TopologySummary, TopologyEntry } from '@/api/types';
 
@@ -269,6 +279,7 @@ describe('buildGraph — non-bus nodes', () => {
 
   describe('PF result key and readout side (what the P / Q labels read)', () => {
     type DeviceData = { pflowIdx?: string | null; valueSide?: string };
+    type SldData = { parentBus?: string };
     const dataOf = (nodes: { id: string; data: unknown }[], id: string): DeviceData =>
       nodes.find((n) => n.id === id)?.data as DeviceData;
     const machine = (
@@ -314,9 +325,9 @@ describe('buildGraph — non-bus nodes', () => {
       expect(dataOf(nodes, 'generator-GENROU_1').pflowIdx).toBe('GENROU_1');
     });
 
-    it('keeps the machine node and its gen link when it shares an idx with its static generator', () => {
-      // kundur_full numbers PV/Slack and GENROU alike (1..4). The two collapse
-      // to the machine node, which must still read the static row under `1`.
+    it('draws a machine and the static generator it shares an idx with as one node, on the static row', () => {
+      // kundur_full numbers PV/Slack and GENROU alike (1..4). The two are one
+      // unit, drawn once, which reads the static row under `1`.
       const topology = makeTopology({
         buses: [bus(1)],
         generators: [
@@ -327,32 +338,57 @@ describe('buildGraph — non-bus nodes', () => {
       const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
       const gens = nodes.filter((n) => n.type === 'generator');
       expect(gens).toHaveLength(1);
-      expect((gens[0]?.data as { kind?: string }).kind).toBe('GENROU');
+      // The node is the static generator's, with the name the case gives it.
+      expect(gens[0]?.data).toMatchObject({ kind: 'Slack', name: 'slack', symbolKind: 'GENROU' });
       expect(dataOf(nodes, 'generator-1').pflowIdx).toBe('1');
     });
 
-    it('prints the row of a static generator on its machine, not on both', () => {
+    it('draws a static generator and the machine that names it as one node', () => {
       // ieee14_full numbers its machines GENROU_1..5, so the static PV 2 and
-      // GENROU_2 are two nodes on bus 2 that read the same row. Only the
-      // machine prints it; the static generator it names stays quiet.
+      // GENROU_2 have different idx values. They are still one generator:
+      // one node, under the idx of the static one, which prints the row.
       const topology = makeTopology({
         buses: [bus(2)],
         generators: [gen('2', 2), machine('GENROU_2', 2, 2)],
       });
-      const { nodes } = buildGraph(topology, { '2': { x: 0, y: 100 } });
-      expect(dataOf(nodes, 'generator-2').pflowIdx).toBeNull();
-      expect(dataOf(nodes, 'generator-GENROU_2').pflowIdx).toBe('2');
+      const { nodes, edges } = buildGraph(topology, { '2': { x: 0, y: 100 } });
+      expect(nodes.filter((n) => n.type === 'generator').map((n) => n.id)).toEqual(['generator-2']);
+      expect(edges.filter((e) => e.type === 'stub').map((e) => e.id)).toEqual(['stub-generator-2']);
+      expect(dataOf(nodes, 'generator-2').pflowIdx).toBe('2');
     });
 
-    it('prints a row once when two machines name the same static generator', () => {
+    it('takes two machines that name the same static generator into one node', () => {
       const topology = makeTopology({
         buses: [bus(1)],
         generators: [gen('2', 1), machine('GENROU_1', 1, 2), machine('GENCLS_1', 1, '2', 'GENCLS')],
       });
       const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
-      expect(dataOf(nodes, 'generator-2').pflowIdx).toBeNull();
-      expect(dataOf(nodes, 'generator-GENROU_1').pflowIdx).toBe('2');
-      expect(dataOf(nodes, 'generator-GENCLS_1').pflowIdx).toBeNull();
+      expect(nodes.filter((n) => n.type === 'generator').map((n) => n.id)).toEqual(['generator-2']);
+      expect(dataOf(nodes, 'generator-2').pflowIdx).toBe('2');
+      const unit = (nodes.find((n) => n.id === 'generator-2')!.data as { unit: UnitNodeData }).unit;
+      expect(unit.members.map((m) => `${m.kind} ${m.idx}`)).toEqual([
+        'PV 2',
+        'GENROU GENROU_1',
+        'GENCLS GENCLS_1',
+      ]);
+    });
+
+    it('draws a machine apart when the generator it names is on another bus, and prints the row once', () => {
+      // The machine says it is on bus 2, so that is where it is drawn. Its
+      // generator has a symbol of its own on bus 1, which prints the row.
+      const topology = makeTopology({
+        buses: [bus(1), bus(2)],
+        generators: [gen('1', 1), machine('GENROU_1', 2, 1)],
+      });
+      const { nodes } = buildGraph(topology, {
+        '1': { x: 0, y: 100 },
+        '2': { x: 300, y: 100 },
+      });
+      expect(dataOf(nodes, 'generator-1').pflowIdx).toBe('1');
+      expect(dataOf(nodes, 'generator-GENROU_1').pflowIdx).toBeNull();
+      expect((nodes.find((n) => n.id === 'generator-GENROU_1')!.data as SldData).parentBus).toBe(
+        '2',
+      );
     });
 
     it('still prints a static generator that no machine names', () => {
@@ -365,12 +401,12 @@ describe('buildGraph — non-bus nodes', () => {
         '2': { x: 300, y: 100 },
       });
       expect(dataOf(nodes, 'generator-1').pflowIdx).toBe('1');
-      expect(dataOf(nodes, 'generator-2').pflowIdx).toBeNull();
+      expect(dataOf(nodes, 'generator-2').pflowIdx).toBe('2');
     });
 
     it('prints every generator_outputs row exactly once on an ieee14_full-shaped case', () => {
       // Five static generators on buses 1, 2, 3, 6 and 8, each with a machine
-      // of its own idx on the same bus: ten nodes, five rows.
+      // of its own idx on the same bus: five units, five nodes, five rows.
       const onBus = [1, 2, 3, 6, 8];
       const topology = makeTopology({
         buses: onBus.map((b) => bus(b)),
@@ -386,7 +422,7 @@ describe('buildGraph — non-bus nodes', () => {
         .filter((n) => n.type === 'generator')
         .map((n) => dataOf([n], n.id).pflowIdx)
         .filter((key): key is string => typeof key === 'string');
-      expect(nodes.filter((n) => n.type === 'generator')).toHaveLength(10);
+      expect(nodes.filter((n) => n.type === 'generator')).toHaveLength(5);
       expect([...printed].sort()).toEqual(['1', '2', '3', '4', '5']);
       // Loads each print their own row.
       expect(dataOf(nodes, 'load-PQ_1').pflowIdx).toBe('PQ_1');
@@ -505,6 +541,46 @@ describe('buildGraph — non-bus nodes', () => {
     const genNode = nodes.find((n) => n.type === 'generator');
     expect(genNode?.position).toEqual({ x: 500, y: 600 });
   });
+
+  describe('where a saved layout puts a generating unit', () => {
+    const topology = makeTopology({
+      buses: [bus(1)],
+      generators: [
+        gen('2', 1),
+        { idx: 'GENROU_2', name: 'GENROU_2', kind: 'GENROU', params: { bus: 1, gen: 2 } },
+      ],
+    });
+    const unitAt = (nonBusCoords: Map<string, { x: number; y: number }>) =>
+      buildGraph(topology, { '1': { x: 0, y: 100 } }, { nonBusCoords }).nodes.find(
+        (n) => n.id === 'generator-2',
+      )?.position;
+
+    it('is where the layout has its static generator, under its model or as a generator', () => {
+      expect(unitAt(new Map([['PV|2', { x: 500, y: 600 }]]))).toEqual({ x: 500, y: 600 });
+      expect(unitAt(new Map([['generator|2', { x: 510, y: 610 }]]))).toEqual({ x: 510, y: 610 });
+    });
+
+    it('is where the layout has its machine when it has no place for the generator', () => {
+      // A layout saved while the two were two symbols may place only the
+      // machine: the unit takes that place, and is not laid out afresh.
+      expect(unitAt(new Map([['generator|GENROU_2', { x: 300, y: -40 }]]))).toEqual({
+        x: 300,
+        y: -40,
+      });
+      expect(unitAt(new Map([['GENROU|GENROU_2', { x: 310, y: -50 }]]))).toEqual({
+        x: 310,
+        y: -50,
+      });
+    });
+
+    it('prefers the place of the generator to that of its machine', () => {
+      const both = new Map([
+        ['generator|GENROU_2', { x: 300, y: -40 }],
+        ['generator|2', { x: 510, y: 610 }],
+      ]);
+      expect(unitAt(both)).toEqual({ x: 510, y: 610 });
+    });
+  });
 });
 
 /**
@@ -526,9 +602,12 @@ describe('buildGraph — minimap size hints', () => {
       generators: [gen('GEN_1', 1)],
       loads: [load('PQ_1', 1)],
       shunts: [shunt('SH1', 1)],
-      // Exciter controller docked to the generator via its `syn` ref so a
-      // controller badge node is actually emitted.
-      controllers: [{ idx: 'AVR1', name: 'avr-1', kind: 'EXDC2', params: { syn: 'GEN_1' } }],
+      // An exciter on the generator, so the generator is sized as a unit,
+      // and a PMU on the bus, so a controller badge node is emitted.
+      controllers: [
+        { idx: 'AVR1', name: 'avr-1', kind: 'EXST1', params: { syn: 'GEN_1' } },
+        { idx: 'PMU_1', name: 'pmu-1', kind: 'PMU', params: { bus: 1 } },
+      ],
     });
     const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
 
@@ -570,7 +649,7 @@ describe('buildGraph — minimap size hints', () => {
     const topology = makeTopology({
       buses: [bus(1)],
       generators: [gen('GEN_1', 1)],
-      controllers: [{ idx: 'AVR1', name: 'avr-1', kind: 'EXDC2', params: { syn: 'GEN_1' } }],
+      controllers: [{ idx: 'PMU_1', name: 'pmu-1', kind: 'PMU', params: { bus: 1 } }],
     });
     const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
     const ctrl = nodes.find((n) => n.type === 'controller') as SizedNode | undefined;
@@ -586,6 +665,157 @@ describe('deviceBoxSize', () => {
     expect(deviceBoxSize('2')).toEqual({ width: 38, height: 41 });
     expect(deviceBoxSize('PQ_10')).toEqual({ width: 41, height: 41 });
     expect(deviceBoxSize('GENROU_3')).toEqual({ width: 57, height: 41 });
+  });
+});
+
+describe('unitBoxSize', () => {
+  const member = (kind: string, role: UnitMemberInfo['role']): UnitMemberInfo => ({
+    kind,
+    idx: `${kind}_1`,
+    name: `${kind}_1`,
+    role,
+    nodeId: `controller-${kind}-${kind}_1`,
+    depth: 1,
+  });
+  const root = member('PV', 'generator');
+
+  it('is the box of any device for a unit of one model', () => {
+    expect(unitBoxSize('2', [root])).toEqual(deviceBoxSize('2'));
+    expect(unitBoxSize('GENROU_3', [root])).toEqual(deviceBoxSize('GENROU_3'));
+  });
+
+  it('is as high as any device, and as wide as the symbol with a chip on either side', () => {
+    // `SG` and `GOV`: the wider chip is 3 letters of 4.8 in 6 of border and
+    // padding, 3 from the 24 of the symbol, and each side is as wide as it.
+    const size = unitBoxSize('2', [root, member('GENROU', 'machine'), member('TGOV1', 'governor')]);
+    expect(size).toEqual({ width: Math.round(24 + 2 * (3 * 4.8 + 6 + 3) + 14), height: 41 });
+  });
+
+  it('is no wider for a second chip on a side, which stands under the first', () => {
+    const two = [root, member('GENROU', 'machine'), member('TGOV1', 'governor')];
+    const four = [...two, member('EXST1', 'exciter'), member('IEEEST', 'pss')];
+    expect(unitBoxSize('2', four)).toEqual(unitBoxSize('2', two));
+  });
+
+  it('is as wide as its widest chip needs: the four letters of a converter stage', () => {
+    const narrow = unitBoxSize('2', [root, member('GENROU', 'machine')]);
+    const wide = unitBoxSize('2', [root, member('REGCA1', 'renewable')]);
+    expect(wide.width).toBeGreaterThan(narrow.width);
+    expect(wide.height).toBe(41);
+  });
+
+  it('is as wide as a long name needs, with room at its end for the control that draws the chain out', () => {
+    const name = 'A_GENERATOR_WITH_A_LONG_NAME';
+    const size = unitBoxSize(name, [root, member('GENROU', 'machine')]);
+    expect(size.width).toBe(Math.round(5.4 * name.length + 20 + 14));
+  });
+});
+
+describe('unitChips', () => {
+  const members = (n: number): UnitMemberInfo[] =>
+    Array.from({ length: n + 1 }, (_, i) => ({
+      kind: i === 0 ? 'PV' : `M${i}`,
+      idx: String(i),
+      name: String(i),
+      role: i === 0 ? ('generator' as const) : ('other' as const),
+      nodeId: `controller-M${i}-${i}`,
+      depth: i === 0 ? 0 : 1,
+    }));
+
+  it('gives every model after the first a chip while they fit', () => {
+    expect(unitChips(members(0))).toEqual({ chips: [], more: 0 });
+    expect(unitChips(members(4)).chips.map((m) => m.idx)).toEqual(['1', '2', '3', '4']);
+    expect(unitChips(members(4)).more).toBe(0);
+  });
+
+  it('keeps the last place to say how many it leaves out', () => {
+    const { chips, more } = unitChips(members(6));
+    expect(chips.map((m) => m.idx)).toEqual(['1', '2', '3']);
+    expect(more).toBe(3);
+    expect(chips.length + 1).toBe(UNIT_CHIP_SLOTS);
+  });
+});
+
+describe('the place of a control chain that is drawn out', () => {
+  const member = (
+    kind: string,
+    idx: string,
+    role: UnitMemberInfo['role'],
+    depth: number,
+  ): UnitMemberInfo => ({ kind, idx, name: idx, role, nodeId: `${kind}-${idx}`, depth });
+  const members = [
+    member('PV', '2', 'generator', 0),
+    member('GENROU', 'GENROU_2', 'machine', 1),
+    member('EXST1', 'EXST1_1', 'exciter', 2),
+    member('TGOV1', 'TGOV1_2', 'governor', 2),
+  ];
+
+  it('takes a row per model, and is as wide as its longest row', () => {
+    const size = unitChainSize(members);
+    expect(size.height).toBe(4 * 13 + 6);
+    // `└ EXST1 EXST1_1 … AVR`, set in by 8: 12 letters of 5.4, the mark, the
+    // chip and the gaps. (The machine's row has more letters and is narrower.)
+    expect(size.width).toBe(Math.round(12 + 9.4 + 5.4 * 12 + 4 + (8 + 14.4 + 4) + 4 + 6));
+    // A model one deeper is set in by 8 more.
+    const deeper = unitChainSize([...members, member('IEEEST', 'IEEEST_LONG_1', 'pss', 3)]);
+    expect(deeper.height).toBe(5 * 13 + 6);
+    expect(deeper.width).toBe(Math.round(20 + 9.4 + 5.4 * 19 + 4 + (8 + 14.4 + 4) + 4 + 6));
+  });
+
+  it('stands against the middle of each side of the symbol, a gap from it', () => {
+    const places = unitChainPlaces(
+      { x: 100, y: 200, width: 80, height: 40 },
+      { width: 120, height: 60 },
+    );
+    expect(places.above).toEqual({ left: 80, right: 200, top: 136, bottom: 196 });
+    expect(places.below).toEqual({ left: 80, right: 200, top: 244, bottom: 304 });
+    expect(places.left).toEqual({ left: -24, right: 96, top: 190, bottom: 250 });
+    expect(places.right).toEqual({ left: 184, right: 304, top: 190, bottom: 250 });
+    expect(UNIT_CHAIN_GAP).toBe(4);
+  });
+
+  describe('chooseChainSide', () => {
+    const places = unitChainPlaces(
+      { x: 100, y: 200, width: 80, height: 40 },
+      { width: 120, height: 60 },
+    );
+    const covering =
+      (counts: Partial<Record<ChainSide, number>>) =>
+      (place: { left: number; top: number }): number => {
+        const side = (Object.keys(places) as ChainSide[]).find(
+          (key) => places[key].left === place.left && places[key].top === place.top,
+        )!;
+        return counts[side] ?? 0;
+      };
+
+    it('goes away from the bus when nothing is in the way there', () => {
+      expect(chooseChainSide('above', places, covering({}))).toBe('above');
+      expect(chooseChainSide('below', places, covering({ left: 3, right: 3 }))).toBe('below');
+    });
+
+    it('goes beside the symbol when something stands on the far side: the right first, then the left', () => {
+      expect(chooseChainSide('above', places, covering({ above: 2 }))).toBe('right');
+      expect(chooseChainSide('above', places, covering({ above: 2, right: 1 }))).toBe('left');
+    });
+
+    it('takes the side that covers the least when none is free, the far side on a tie', () => {
+      expect(chooseChainSide('above', places, covering({ above: 3, right: 1, left: 2 }))).toBe(
+        'right',
+      );
+      expect(chooseChainSide('above', places, covering({ above: 1, right: 1, left: 1 }))).toBe(
+        'above',
+      );
+    });
+
+    it('never goes on the side of the bus, however free that is', () => {
+      const asked: unknown[] = [];
+      const side = chooseChainSide('above', places, (place) => {
+        asked.push(place);
+        return 5;
+      });
+      expect(side).not.toBe('below');
+      expect(asked).not.toContain(places.below);
+    });
   });
 });
 
@@ -960,11 +1190,12 @@ describe('buildGraph: where a device the layout does not place is put', () => {
     expect(drawn(-254, 90)).toBe(90 + 19 + DEVICE_COLUMN_GAP);
   });
 
-  it('places the narrow devices first, and a machine beside the static generator it names', () => {
+  it('places the narrow devices first, and a generator with its machine as one symbol', () => {
     // A generator, its machine and a load, all above bus 1 because its line
-    // goes down: three do not fit over the bar. The load and the generator
-    // stand over it, and the machine, the widest, is the one past a tip,
-    // next to its generator.
+    // goes down. The generator and its machine are one symbol, so two
+    // devices stand over the bar where three did not fit: the load, the
+    // narrower, takes the place over its third of the bar, and the unit
+    // stands beside it, a gap clear.
     const topology = makeTopology({
       buses: [bus(1), bus(2)],
       lines: [trafo('L', 1, 2)],
@@ -975,24 +1206,26 @@ describe('buildGraph: where a device the layout does not place is put', () => {
       loads: [{ ...load('PQ_1', 1), name: 'PQ_1' }],
     });
     const { nodes, edges } = buildGraph(topology, { '1': { x: 0, y: 0 }, '2': { x: 0, y: 200 } });
-    const at = (id: string): number => middleOf(nodes.find((n) => n.id === id)!);
-    const [machine, generator, pq] = [at('generator-GENROU_7'), at('generator-7'), at('load-PQ_1')];
-    for (const x of [generator, pq]) {
+    const unit = nodes.find((n) => n.id === 'generator-7')!;
+    const pq = nodes.find((n) => n.id === 'load-PQ_1')!;
+    for (const x of [middleOf(unit), middleOf(pq)]) {
       expect(x).toBeGreaterThanOrEqual(3);
       expect(x).toBeLessThanOrEqual(89);
     }
-    expect(machine).toBeLessThan(3);
-    expect(machine).toBeLessThan(generator);
-    expect(generator).toBeLessThan(pq);
-    // The nodes are still built in the order of the topology.
+    expect(middleOf(pq)).toBe(46 + DEVICE_COLUMN_OFFSET);
+    expect(pq.position.x - (unit.position.x + unit.initialWidth!)).toBeCloseTo(
+      DEVICE_COLUMN_GAP,
+      6,
+    );
+    // The nodes are still built in the order of the topology, and the
+    // machine has none of its own.
     expect(nodes.filter((n) => n.type !== 'bus').map((n) => n.id)).toEqual([
       'generator-7',
-      'generator-GENROU_7',
       'load-PQ_1',
     ]);
-    // Every one of them drops square: the bar reaches out under the machine.
+    // Both drop square onto the bar.
     const { routes } = layoutConnections(nodes, edges);
-    for (const id of ['stub-generator-7', 'stub-generator-GENROU_7', 'stub-load-PQ_1']) {
+    for (const id of ['stub-generator-7', 'stub-load-PQ_1']) {
       const points = routes.get(id)!.points;
       expect(points[0]![0], id).toBe(points[1]![0]);
     }

@@ -222,10 +222,11 @@ function formatPower(value: number, unit: 'MW' | 'MVAr'): string {
  * `load_consumption`.
  *
  * `key` is the device's row in that map, not always its own idx: a
- * dynamic machine (GENROU / GENCLS) has no row of its own and reads the
- * one of the static generator it names in `gen` (`graph.ts` puts the
- * right key on the node as `pflowIdx`). `null` is a node that prints no
- * row, because another node prints it, and gets the neutral state.
+ * dynamic machine (GENROU / GENCLS) has no row of its own, and one that
+ * is drawn apart from its static generator reads the row of the generator
+ * it names in `gen` (`graph.ts` puts the right key on the node as
+ * `pflowIdx`). `null` is a node that prints no row, because another node
+ * prints it, and gets the neutral state.
  *
  * Sign convention matches the substrate: generator P / Q are what the
  * machine injects (a slack bus can absorb Q, so it can be negative), load

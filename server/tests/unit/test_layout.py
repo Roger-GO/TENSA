@@ -62,7 +62,7 @@ def _v2() -> dict[str, Any]:
             "generator": {"1": {"x": 0.0, "y": -70.0, "bus": "1"}},
         },
         "controller_coordinates": {"EXST1": {"1": {"x": 64.0, "y": -88.0}}},
-        "units": {"1": {"expanded": True}},
+        "units": {"1": {"expanded": True, "bus": "1"}},
         "busbars": {"2": {"length": 180.0, "orientation": "vertical"}},
         "branches": {
             "line": {
@@ -119,6 +119,8 @@ def test_a_record_reads_with_its_defaults() -> None:
     doc["connections"] = {"load": {"PQ_1": {}}}
     layout = parse_layout(doc)
     assert layout.units["1"].expanded is False
+    # The state of a unit written without its bus is trusted on its idx.
+    assert layout.units["1"].bus is None
     assert layout.busbars["2"].length is None
     assert layout.busbars["2"].orientation == "horizontal"
     route = layout.branches["line"]["Line_1"]
@@ -142,6 +144,7 @@ def test_a_record_reads_with_its_defaults() -> None:
         ("non_bus_coordinates", {"load": {"PQ_1": {"x": 0.0, "y": 0.0, "bus": 7}}}),
         ("branches", {"line": {"1": {"bus1": 1, "bus2": 2}}}),
         ("units", {"1": {"expanded": "sometimes"}}),
+        ("units", {"1": {"expanded": True, "bus": 1}}),
         ("units", {"1": {"expanded": True, "colour": "red"}}),
         ("busbars", {"1": {"length": 0.0}}),
         ("busbars", {"1": {"length": -10.0}}),

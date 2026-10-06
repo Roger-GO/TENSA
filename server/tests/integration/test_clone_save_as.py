@@ -104,7 +104,7 @@ def _kundur_layout() -> dict[str, object]:
         "andes_version": "2.0.0",
         "coordinates": {str(i): {"x": 80.0 * i, "y": 40.0 * (i % 2)} for i in range(1, 11)},
         "non_bus_coordinates": {"generator": {"1": {"x": 60.0, "y": -70.0}}},
-        "units": {"1": {"expanded": True}},
+        "units": {"1": {"expanded": True, "bus": "1"}},
         "last_modified": "2026-10-06T08:00:00+00:00",
     }
 

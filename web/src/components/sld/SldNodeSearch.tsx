@@ -9,6 +9,11 @@
  *  - Command-palette / TopBar entries (`navigation.focusSearch`,
  *    `navigation.panToBus`) which post to `__requestOpenSldSearch`.
  *
+ * The list holds every node of the diagram and, for a generator that stands
+ * for a unit of several models, each of those models as well (the machine,
+ * the exciter, the governor): they have no node of their own, and a pick
+ * shows the symbol of their unit.
+ *
  * Once open, the user types a substring; the list narrows to matching
  * `idx` or `name` (case-insensitive). Selecting a row pans the React
  * Flow viewport to centre that node and writes the node's id to the SLD
@@ -37,17 +42,24 @@ import { useSldStore, subscribeOpenSldSearch } from '@/store/sld';
 import { SHORTCUTS } from '@/lib/shortcuts';
 import { withShortcut } from '@/lib/shortcutFormatter';
 import { cn } from '@/lib/cn';
+import type { UnitNodeData } from './graph';
 import { locateZoom } from './zoom';
 
 /** Per-row payload surfaced in the list. Mirrors React Flow node shape. */
 export interface SldSearchEntry {
-  /** React Flow node id — bus idx for buses, `${kind}-${idx}` for non-bus. */
+  /**
+   * React Flow node id — bus idx for buses, `${kind}-${idx}` for non-bus. For
+   * a model of a generating unit, the id that model is picked by, which the
+   * canvas takes to the node of the unit.
+   */
   id: string;
+  /** What tells two rows apart: the id, and for a model of a unit its class too. */
+  key: string;
   /** Display label (the ANDES `name` field, falls back to idx). */
   name: string;
   /** ANDES idx — surfaced as a secondary label and substring-searchable. */
   idx: string;
-  /** Node type (`bus`, `generator`, `load`, `shunt`, `line`). */
+  /** Node type (`bus`, `generator`, `load`, `shunt`, `line`), or `machine` / `controller` for a model of a unit. */
   type: string;
   /** The middle of the node's box, which is what the view is centred on. */
   x: number;
@@ -93,17 +105,24 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
     const nodes = rf.getNodes();
     const out: SldSearchEntry[] = [];
     for (const n of nodes) {
-      const data = n.data as { idx?: string; name?: string } | undefined;
+      const data = n.data as { idx?: string; name?: string; unit?: UnitNodeData } | undefined;
       const idx = data?.idx ?? n.id;
       const name = data?.name ?? '';
-      out.push({
-        id: n.id,
-        idx: String(idx),
-        name,
-        type: n.type ?? 'bus',
-        x: n.position.x + (n.measured?.width ?? 0) / 2,
-        y: n.position.y + (n.measured?.height ?? 0) / 2,
-      });
+      const x = n.position.x + (n.measured?.width ?? 0) / 2;
+      const y = n.position.y + (n.measured?.height ?? 0) / 2;
+      out.push({ id: n.id, key: n.id, idx: String(idx), name, type: n.type ?? 'bus', x, y });
+      // The models a unit's symbol names, after its own: found where the unit is.
+      for (const member of data?.unit?.members.slice(1) ?? []) {
+        out.push({
+          id: member.nodeId,
+          key: `${member.nodeId}|${member.kind}`,
+          idx: member.idx,
+          name: member.name,
+          type: member.role === 'machine' ? 'machine' : 'controller',
+          x,
+          y,
+        });
+      }
     }
     // Stable display order: buses first, then by idx ascending. The
     // user's mental model is "list of buses with devices below" — match
@@ -237,7 +256,7 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
             ) : (
               <ul className="flex flex-col">
                 {visible.map((entry) => (
-                  <li key={entry.id}>
+                  <li key={entry.key}>
                     <button
                       type="button"
                       role="option"

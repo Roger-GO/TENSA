@@ -18,7 +18,7 @@ import {
 } from '../voltage';
 import { VoltageMarker } from '../VoltageMarker';
 import { BAR_LENGTH, BAR_THICKNESS, busLabelOffset, type BarGeometry } from '../connections';
-import { SOURCE_HANDLE, TARGET_HANDLE, type Side } from '../graph';
+import { SOURCE_HANDLE, TARGET_HANDLE, type Side, type UnitNodeData } from '../graph';
 
 /**
  * Shape of `data` for an IEC 60617 SLD node. Shared across BusNode +
@@ -45,11 +45,12 @@ export interface SldNodeData extends Record<string, unknown> {
   sldSelected?: boolean;
   /**
    * Generator / load nodes: the key of this device's row in the PF
-   * result maps, or `null` when another node prints that row (a static
-   * generator whose dynamic machine is drawn too). A dynamic machine
-   * (GENROU / GENCLS) reads the row of the static generator it names in
-   * `gen`, since it has none of its own. Absent: read the row under the
-   * node's own idx. Stamped by `buildGraph`.
+   * result maps, or `null` when another node prints that row. A generating
+   * unit reads the row of its static generator. A dynamic machine (GENROU /
+   * GENCLS) that is drawn on its own reads the row of the static generator
+   * it names in `gen`, since it has none of its own, unless the node of
+   * that generator prints it. Absent: read the row under the node's own
+   * idx. Stamped by `buildGraph`.
    */
   pflowIdx?: string | null;
   /**
@@ -97,6 +98,19 @@ export interface SldNodeData extends Record<string, unknown> {
    * the left is free. Stamped by `SldCanvas`.
    */
   readoutLeft?: boolean;
+  /**
+   * Generator nodes that stand for a generating unit of more than one model
+   * (a static generator with its machine and their controllers): the models
+   * the symbol names, whether their chain is drawn out, and on which side of
+   * the symbol. Absent on a generator of one model. Stamped by `buildGraph`.
+   */
+  unit?: UnitNodeData;
+  /**
+   * Generator nodes of such a unit: the model whose symbol is drawn, which
+   * is the machine where the unit has one. Absent: the node's own `kind`.
+   * Stamped by `buildGraph`.
+   */
+  symbolKind?: string;
 }
 
 /**

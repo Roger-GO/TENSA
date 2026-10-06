@@ -138,3 +138,23 @@ describe('useCaseStore — AddElementPanel actions', () => {
     expect(useCaseStore.getState().addPanelBus).toBeNull();
   });
 });
+
+describe('useCaseStore: the control chains drawn out in a visit', () => {
+  afterEach(() => useCaseStore.getState().clearCase());
+
+  it('starts with none, and keeps what is set', () => {
+    expect(useCaseStore.getState().unitExpansion).toEqual({});
+    useCaseStore.getState().setUnitExpansion({ '1': true, GENROU_2: false });
+    expect(useCaseStore.getState().unitExpansion).toEqual({ '1': true, GENROU_2: false });
+  });
+
+  it('forgets them when another case is opened, and when the case is closed', () => {
+    useCaseStore.getState().setUnitExpansion({ '1': true });
+    useCaseStore.getState().setCase({ primaryPath: null, addfiles: [], blank: true });
+    expect(useCaseStore.getState().unitExpansion).toEqual({});
+
+    useCaseStore.getState().setUnitExpansion({ '1': true });
+    useCaseStore.getState().clearCase();
+    expect(useCaseStore.getState().unitExpansion).toEqual({});
+  });
+});

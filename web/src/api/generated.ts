@@ -3404,6 +3404,11 @@ export interface components {
              * @default false
              */
             expanded: boolean;
+            /**
+             * Bus
+             * @description idx of the bus the unit was on when this was chosen. A reader uses the entry only for a unit on that bus, so an idx that has come to name another generator does not draw the chain of that one out. ``null``: not recorded; the idx alone is trusted.
+             */
+            bus?: string | null;
         };
         /**
          * LineFlow

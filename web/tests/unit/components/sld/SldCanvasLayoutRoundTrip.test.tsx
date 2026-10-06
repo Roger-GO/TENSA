@@ -137,9 +137,10 @@ import {
   layoutForRenumberedCopy,
   parseSidecar,
 } from '@/components/sld/sidecar';
-import { CONTROLLER_DOCK } from '@/components/sld/graph';
+import type { UnitNodeData } from '@/components/sld/graph';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
+import { __requestUnitExpanded } from '@/store/sld';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { SidecarLayout, TopologyEntry, TopologySummary } from '@/api/types';
 
@@ -450,27 +451,25 @@ describe('place, save, reload', () => {
     expect(after.routes).toEqual(reopened.routes);
   });
 
-  it('the badges of a machine follow it when it is dragged, and come back beside it', async () => {
+  it('a machine is dragged with its controllers as one node, and comes back where it was put', async () => {
     open('kundur.xlsx');
     await draw();
+    // The exciter and the governor are named on the machine's symbol; they
+    // have no node that could be left behind. (They used to be badges beside
+    // the machine, which stayed where it had been.)
+    expect(drawn.nodes.filter((n) => n.type === 'controller')).toEqual([]);
+    const unit = drawn.nodes.find((n) => n.id === 'generator-G1')!.data.unit as UnitNodeData;
+    expect(unit.members.map((m) => `${m.kind} ${m.idx}`)).toEqual([
+      'GENROU G1',
+      'EXST1 E1',
+      'TGOV1 T1',
+    ]);
     const machineAt = { x: 640, y: -210 };
 
     dropAt('generator-G1', machineAt);
     await waitFor(() =>
       expect(drawn.nodes.find((n) => n.id === 'generator-G1')?.position).toEqual(machineAt),
     );
-
-    // Each badge sits in its dock slot beside the machine where it is now,
-    // with its tether ending on the machine. (They used to stay where the
-    // machine had been, pointing at nothing.)
-    const badges = drawn.nodes.filter((n) => n.type === 'controller');
-    expect(badges).toHaveLength(2);
-    for (const badge of badges) {
-      expect(badge.position.x).toBe(machineAt.x + CONTROLLER_DOCK.x);
-      expect(badge.position.x + (badge.data.connectorDx as number)).toBe(machineAt.x);
-      expect(badge.position.y + (badge.data.connectorDy as number)).toBe(machineAt.y);
-    }
-    // A badge cannot be dragged, so it is not recorded as dragged either.
     const overrides = useCaseStore.getState().dragOverrides;
     expect(Object.keys(overrides).some((id) => id.startsWith('controller-'))).toBe(false);
     expect(overrides['generator-G1']).toEqual(machineAt);
@@ -482,6 +481,43 @@ describe('place, save, reload', () => {
     await reload('kundur.xlsx', vars.layout);
 
     expect(picture()).toEqual(placed);
+  });
+
+  it('a unit whose control chain is drawn out is saved so, and reopens so, until it is folded again', async () => {
+    const isDrawnOut = (): boolean =>
+      (drawn.nodes.find((n) => n.id === 'generator-G1')!.data.unit as UnitNodeData).expanded;
+    open('kundur.xlsx');
+    await draw();
+    expect(isDrawnOut()).toBe(false);
+    const before = picture();
+
+    // What the control on the unit's symbol asks for.
+    act(() => __requestUnitExpanded('G1', true));
+    expect(isDrawnOut()).toBe(true);
+    // The chain takes no room of the node's: nothing moved.
+    expect(picture()).toEqual(before);
+    expect(savedLayout().units).toEqual({ G1: { expanded: true, bus: '1' } });
+    await waitFor(() => expect(putSidecarSpy).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    const [drawnOut] = putSidecarSpy.mock.calls[0] as [{ layout: SidecarLayout }];
+    expect(drawnOut.layout.units).toEqual({ G1: { expanded: true, bus: '1' } });
+
+    await reload('kundur.xlsx', drawnOut.layout);
+    expect(isDrawnOut()).toBe(true);
+    expect(picture()).toEqual(before);
+    // A drag keeps it: the layout that is written still says so.
+    dropAt('2', { x: 77, y: 88 });
+    await waitFor(() => expect(putSidecarSpy).toHaveBeenCalledTimes(2), { timeout: 3000 });
+    const [dragged] = putSidecarSpy.mock.calls[1] as [{ layout: SidecarLayout }];
+    expect(dragged.layout.units).toEqual({ G1: { expanded: true, bus: '1' } });
+
+    act(() => __requestUnitExpanded('G1', false));
+    expect(isDrawnOut()).toBe(false);
+    await waitFor(() => expect(putSidecarSpy).toHaveBeenCalledTimes(3), { timeout: 3000 });
+    const [folded] = putSidecarSpy.mock.calls[2] as [{ layout: SidecarLayout }];
+    // Folded is how a unit is drawn without an entry.
+    expect(folded.layout.units).toEqual({});
+    await reload('kundur.xlsx', folded.layout);
+    expect(isDrawnOut()).toBe(false);
   });
 
   it('a device dropped against another comes back where it was dropped, not pushed aside', async () => {
@@ -593,7 +629,6 @@ describe('place, save, reload', () => {
     open('kundur.xlsx');
     await draw();
     const extras = {
-      units: { G1: { expanded: true } },
       busbars: { '2': { length: 180, orientation: 'vertical' as const } },
       label_offsets: { bus: { '3': { dx: 4, dy: -12 } } },
       connections: { load: { PQ_1: { device_face: 'north' as const, bus_face: null } } },

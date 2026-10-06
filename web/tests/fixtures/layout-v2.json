@@ -80,7 +80,8 @@
     },
     "units": {
       "1": {
-        "expanded": true
+        "expanded": true,
+        "bus": "1"
       }
     },
     "busbars": {

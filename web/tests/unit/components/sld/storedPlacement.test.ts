@@ -11,6 +11,7 @@ import {
   CONTROLLER_DOCK,
   NODE_FOOTPRINT,
   routeFitsBuses,
+  type UnitNodeData,
 } from '@/components/sld/graph';
 import type { TopologySummary, TopologyEntry } from '@/api/types';
 
@@ -56,6 +57,13 @@ function node(nodes: ReturnType<typeof buildGraph>['nodes'], id: string) {
   if (!found) throw new Error(`no node ${id}`);
   return found;
 }
+/** The models the symbol of the machine names, after its own. */
+function named(nodes: ReturnType<typeof buildGraph>['nodes']): string[] {
+  const unit = (node(nodes, 'generator-G1').data as { unit?: UnitNodeData }).unit;
+  return (unit?.members ?? []).slice(1).map((m) => `${m.kind} ${m.idx}`);
+}
+const badges = (nodes: ReturnType<typeof buildGraph>['nodes']): string[] =>
+  nodes.filter((n) => n.type === 'controller').map((n) => n.id);
 
 describe('routeFitsBuses', () => {
   const at = (x: number, y: number, moved = false) => ({ coord: { x, y }, moved });
@@ -160,41 +168,26 @@ describe('buildGraph with stored branch routes', () => {
 });
 
 describe('buildGraph with stored controller positions', () => {
-  it('docks every controller when the layout places none', () => {
+  it('names every controller on the symbol of its unit when the layout places none', () => {
     const { nodes } = buildGraph(topology, COORDS);
-    const machine = node(nodes, 'generator-G1');
-    const exciter = node(nodes, 'controller-EXST1-E1');
-    expect(exciter.position.x - machine.position.x).toBe(CONTROLLER_DOCK.x);
-    expect(exciter.data.placed).toBeUndefined();
+    expect(named(nodes)).toEqual(['EXST1 E1', 'IEEEST P1', 'TGOV1 T1']);
+    expect(badges(nodes)).toEqual([]);
   });
 
-  it('puts a placed controller where the layout has it, tethered to its device', () => {
-    const controllerCoords = new Map([['EXST1|E1', { x: 500, y: -300 }]]);
-    const { nodes } = buildGraph(topology, COORDS, { controllerCoords });
-    const machine = node(nodes, 'generator-G1');
-    const exciter = node(nodes, 'controller-EXST1-E1');
-    expect(exciter.position).toEqual({ x: 500, y: -300 });
-    expect(exciter.data.placed).toBe(true);
-    // The tether still ends on the machine, however far the badge is from it.
-    expect(exciter.position.x + (exciter.data.connectorDx as number)).toBe(machine.position.x);
-    expect(exciter.position.y + (exciter.data.connectorDy as number)).toBe(machine.position.y);
-  });
-
-  it('closes up the docked badges beside a placed one', () => {
-    // Docked, the governor has the first slot beside the machine and the
-    // exciter the one below it.
-    const docked = buildGraph(topology, COORDS);
-    const slotOf = (nodes: ReturnType<typeof buildGraph>['nodes'], id: string) =>
-      node(nodes, id).position.y - node(nodes, 'generator-G1').position.y;
-    expect(slotOf(docked.nodes, 'controller-TGOV1-T1')).toBe(CONTROLLER_DOCK.y);
-    expect(slotOf(docked.nodes, 'controller-EXST1-E1')).toBe(
-      CONTROLLER_DOCK.y + CONTROLLER_DOCK.stackDy,
-    );
-
-    // With the governor placed elsewhere, the exciter moves up into its slot.
+  it('puts a placed controller where the layout has it, tethered to its unit', () => {
     const controllerCoords = new Map([['TGOV1|T1', { x: 500, y: -300 }]]);
     const { nodes } = buildGraph(topology, COORDS, { controllerCoords });
-    expect(slotOf(nodes, 'controller-EXST1-E1')).toBe(CONTROLLER_DOCK.y);
+    const machine = node(nodes, 'generator-G1');
+    const governor = node(nodes, 'controller-TGOV1-T1');
+    expect(governor.position).toEqual({ x: 500, y: -300 });
+    expect(governor.data.placed).toBe(true);
+    expect(governor.data.parentNodeId).toBe('generator-G1');
+    // The tether still ends on the machine, however far the badge is from it.
+    expect(governor.position.x + (governor.data.connectorDx as number)).toBe(machine.position.x);
+    expect(governor.position.y + (governor.data.connectorDy as number)).toBe(machine.position.y);
+    // It is drawn once: the symbol names the others and not it.
+    expect(named(nodes)).toEqual(['EXST1 E1', 'IEEEST P1']);
+    expect(badges(nodes)).toEqual(['controller-TGOV1-T1']);
   });
 
   it('docks a controller of a placed controller beside where that one sits', () => {
@@ -206,12 +199,37 @@ describe('buildGraph with stored controller positions', () => {
       x: 500 + CONTROLLER_DOCK.x,
       y: -300 + CONTROLLER_DOCK.y,
     });
+    expect(stabiliser.data.parentNodeId).toBe('controller-EXST1-E1');
+    expect(stabiliser.data.placed).toBeUndefined();
+    // The governor, which has nothing to do with the exciter, stays on the symbol.
+    expect(named(nodes)).toEqual(['TGOV1 T1']);
   });
 
   it('ignores a position stored for a controller the case no longer has', () => {
     const controllerCoords = new Map([['EXST1|E9', { x: 500, y: -300 }]]);
     const { nodes } = buildGraph(topology, COORDS, { controllerCoords });
-    expect(nodes.some((n) => n.id === 'controller-EXST1-E9')).toBe(false);
-    expect(node(nodes, 'controller-EXST1-E1').data.placed).toBeUndefined();
+    expect(badges(nodes)).toEqual([]);
+    expect(named(nodes)).toEqual(['EXST1 E1', 'IEEEST P1', 'TGOV1 T1']);
+  });
+
+  it('ignores a controller position filed under the class of a machine', () => {
+    // A machine is drawn by the symbol of its unit; no badge can stand for it.
+    const withStatic: TopologySummary = {
+      ...topology,
+      generators: [
+        { idx: 1, name: '1', kind: 'PV', params: { bus: 1 } },
+        { idx: 'G1', name: 'G1', kind: 'GENROU', params: { bus: 1, gen: 1 } },
+      ],
+    };
+    const controllerCoords = new Map([['GENROU|G1', { x: 500, y: -300 }]]);
+    const { nodes } = buildGraph(withStatic, COORDS, { controllerCoords });
+    const unit = (node(nodes, 'generator-1').data as { unit: UnitNodeData }).unit;
+    expect(unit.members.map((m) => `${m.kind} ${m.idx}`)).toEqual([
+      'PV 1',
+      'GENROU G1',
+      'EXST1 E1',
+      'IEEEST P1',
+      'TGOV1 T1',
+    ]);
   });
 });

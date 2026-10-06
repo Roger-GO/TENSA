@@ -157,6 +157,14 @@ export interface CaseState {
    */
   connectorStyle: ConnectorStyle | null;
   /**
+   * The generating units whose control chain was drawn out or folded away in
+   * this visit, by the idx of the unit: `true` drawn out, `false` folded. A
+   * unit absent from it is drawn as the saved layout says (its `units`
+   * section), and folded without one. Kept here like the drags and the
+   * connector style, and for the same reasons.
+   */
+  unitExpansion: Record<string, boolean>;
+  /**
    * Topology entries flagged as dependents of an in-flight delete attempt
    * (v0.1.y Unit 2). Populated when a ``DELETE`` returns 422 with the
    * ``DeleteBlockedResponse`` body and the user clicks one of the
@@ -189,6 +197,7 @@ export interface CaseState {
   setDragOverrides: (next: DragOverrides) => void;
   clearDragOverrides: () => void;
   setConnectorStyle: (style: ConnectorStyle | null) => void;
+  setUnitExpansion: (next: Record<string, boolean>) => void;
   setTopology: (topology: TopologySummary | null) => void;
   setLayoutSidecar: (sidecar: SidecarLayout | null) => void;
   setDiagramLayout: (layout: SidecarLayout | null) => void;
@@ -246,6 +255,7 @@ export const useCaseStore = create<CaseState>((set) => ({
   addPanelBus: null,
   dragOverrides: {},
   connectorStyle: null,
+  unitExpansion: {},
   pendingDependents: [],
   editMode: 'run',
   cloneInitialized: false,
@@ -268,6 +278,7 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelBus: null,
       dragOverrides: {},
       connectorStyle: null,
+      unitExpansion: {},
       pendingDependents: [],
       editMode: 'run',
       cloneInitialized: false,
@@ -278,6 +289,7 @@ export const useCaseStore = create<CaseState>((set) => ({
   setDragOverrides: (next: DragOverrides) => set({ dragOverrides: next }),
   clearDragOverrides: () => set({ dragOverrides: {} }),
   setConnectorStyle: (style: ConnectorStyle | null) => set({ connectorStyle: style }),
+  setUnitExpansion: (next: Record<string, boolean>) => set({ unitExpansion: next }),
   setTopology: (topology: TopologySummary | null) => set({ topology }),
   setLayoutSidecar: (sidecar: SidecarLayout | null) => set({ layoutSidecar: sidecar }),
   setDiagramLayout: (layout: SidecarLayout | null) => set({ diagramLayout: layout }),
@@ -334,6 +346,7 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelBus: null,
       dragOverrides: {},
       connectorStyle: null,
+      unitExpansion: {},
       pendingDependents: [],
       editMode: 'run',
       cloneInitialized: false,

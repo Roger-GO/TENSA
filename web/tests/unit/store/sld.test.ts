@@ -14,8 +14,10 @@ import {
   useSldStore,
   __requestOpenSldSearch,
   __requestSldCommand,
+  __requestUnitExpanded,
   subscribeOpenSldSearch,
   subscribeSldCommand,
+  subscribeUnitExpanded,
 } from '@/store/sld';
 
 beforeEach(() => {
@@ -126,5 +128,31 @@ describe('canvas command bridge', () => {
     __requestSldCommand('connectors-straight');
     unsubscribe();
     expect(seen.mock.calls).toEqual([['connectors-elbow'], ['connectors-straight']]);
+  });
+});
+
+describe('generating-unit bridge', () => {
+  it('hands a request to draw a chain out or fold it away to every subscriber, until they unsubscribe', () => {
+    const a = vi.fn();
+    const b = vi.fn();
+    const unsubscribeA = subscribeUnitExpanded(a);
+    const unsubscribeB = subscribeUnitExpanded(b);
+    __requestUnitExpanded('GENROU_1', true);
+    __requestUnitExpanded('2', false);
+    expect(a.mock.calls).toEqual([
+      ['GENROU_1', true],
+      ['2', false],
+    ]);
+    expect(b.mock.calls).toEqual(a.mock.calls);
+
+    unsubscribeA();
+    __requestUnitExpanded('2', true);
+    expect(a).toHaveBeenCalledTimes(2);
+    expect(b).toHaveBeenCalledTimes(3);
+    unsubscribeB();
+  });
+
+  it('reaches nobody, without an error, when no canvas is mounted', () => {
+    expect(() => __requestUnitExpanded('1', true)).not.toThrow();
   });
 });

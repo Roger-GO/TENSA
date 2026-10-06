@@ -8,7 +8,14 @@
 import type { Edge, Node } from '@xyflow/react';
 import type { BusCoord, TopologyEntry, TopologySummary } from '@/api/types';
 import { subKindForControllerClass } from '@/lib/controllers';
-import { DYNAMIC_GENERATOR_KINDS, generatorRowKey } from '@/lib/topology';
+import {
+  generatingUnits,
+  unitChipLabel,
+  unitMemberInfo,
+  type GeneratingUnit,
+  type UnitMemberInfo,
+} from '@/lib/generatingUnits';
+import { generatorRowKey } from '@/lib/topology';
 import { entryBaseKv, unratedBusIdx } from '@/lib/units';
 import { busVoltageLimits } from './voltage';
 import type { CoordsByIdx } from './sidecar';
@@ -164,10 +171,17 @@ export interface BuildGraphOptions {
   barLengths?: ReadonlyMap<string, number>;
   /**
    * Positions of controllers a saved layout places on their own, keyed
-   * `${modelClass}|${idx}`. A controller absent from this map is docked
-   * beside the device it references and follows it.
+   * `${modelClass}|${idx}`. A controller absent from this map is named on
+   * the symbol of its generating unit, or docked beside the bus it acts on.
    */
   controllerCoords?: Map<string, BusCoord>;
+  /**
+   * How the generating units are drawn, by the idx of the unit: whether its
+   * control chain is drawn out, and the bus the unit was on when that was
+   * chosen (`unitStatesOf`). An entry that names a bus counts only for a unit
+   * on that bus. A unit absent from this map is drawn collapsed.
+   */
+  unitStates?: ReadonlyMap<string, { expanded: boolean; bus?: string | null }>;
   /**
    * Optional per-(model, idx) coordinate overrides for non-bus elements
    * (generators, loads, shunts). Keys are `${model}|${idx}` matching the
@@ -561,6 +575,165 @@ export function deviceBoxSize(label: string): { width: number; height: number } 
 }
 
 /**
+ * How many models the symbol of a generating unit names beside its machine
+ * symbol: two on each side. A unit with more shows three and the number of
+ * the rest.
+ */
+export const UNIT_CHIP_SLOTS = 4;
+
+/**
+ * The chips on the symbol of a unit: one per model after the first, which is
+ * what the symbol itself stands for. `more` is how many models the symbol has
+ * no room to name; its last place then says so, and the whole chain is one
+ * press away.
+ */
+export function unitChips(members: readonly UnitMemberInfo[]): {
+  chips: UnitMemberInfo[];
+  more: number;
+} {
+  const rest = members.slice(1);
+  if (rest.length <= UNIT_CHIP_SLOTS) return { chips: rest, more: 0 };
+  return {
+    chips: rest.slice(0, UNIT_CHIP_SLOTS - 1),
+    more: rest.length - (UNIT_CHIP_SLOTS - 1),
+  };
+}
+
+/** The text of the place that stands for the models a symbol does not name. */
+export function unitMoreLabel(more: number): string {
+  return `+${more}`;
+}
+
+/**
+ * The box the symbol of a generating unit is drawn in (`GeneratorNode`): as
+ * high as any device, so the row of devices over a bar and the strip between
+ * a device and its bus stay what they are, and as wide as the machine symbol
+ * with a column of chips on either side (8 px monospace in a 1 px border,
+ * 3 px from the symbol). The two columns are equally wide, which keeps the
+ * machine symbol, and so the port its connector leaves by, in the middle of
+ * the box. The name under the symbol leaves room at its end for the control
+ * that draws the chain out. A unit of one model is a device like any other.
+ */
+export function unitBoxSize(
+  label: string,
+  members: readonly UnitMemberInfo[],
+): { width: number; height: number } {
+  const { chips, more } = unitChips(members);
+  if (chips.length === 0) return deviceBoxSize(label);
+  const labels = [...chips.map(unitChipLabel), ...(more > 0 ? [unitMoreLabel(more)] : [])];
+  const chip = Math.max(...labels.map((text) => 4.8 * text.length + 6));
+  const symbols = 24 + 2 * (chip + 3);
+  const name = 5.4 * label.length + 2 * 10;
+  return { width: Math.round(Math.max(symbols, name) + 14), height: 41 };
+}
+
+/** A side of the symbol of a unit that its control chain can be drawn out on. */
+export type ChainSide = 'above' | 'below' | 'left' | 'right';
+
+/** What the node of a generating unit carries of the unit (`data.unit`). */
+export interface UnitNodeData {
+  /** The models the symbol stands for and names; the first is the symbol's own. */
+  members: UnitMemberInfo[];
+  /** Whether the chain of the unit is drawn out beside the symbol. */
+  expanded: boolean;
+  /**
+   * The side of the symbol the chain is drawn out on. `buildGraph` gives the
+   * one away from the bus; the canvas, which knows what stands around the
+   * symbol, may give the left or the right instead (`chooseChainSide`).
+   */
+  side?: ChainSide;
+}
+
+/** How far a chain that is drawn out stands from the symbol of its unit. */
+export const UNIT_CHAIN_GAP = 4;
+
+/**
+ * The box the control chain of a unit takes when it is drawn out
+ * (`UnitChain`): a row of 13 px per model in 6 px of padding and border, as
+ * wide as its longest row (9 px monospace: the row set in by its depth, the
+ * mark of a model that refers to another, the class, the idx, and at the end
+ * the letters its chip has). It is what the canvas looks for room for; the
+ * chain itself is as large as the browser lays it out.
+ */
+export function unitChainSize(members: readonly UnitMemberInfo[]): {
+  width: number;
+  height: number;
+} {
+  const row = (member: UnitMemberInfo, i: number): number => {
+    const indent = 4 + 8 * Math.max(0, Math.min(member.depth, 4) - 1);
+    const mark = member.depth > 0 ? 5.4 + 4 : 0;
+    const chip = i > 0 ? 8 + 4.8 * unitChipLabel(member).length + 4 : 0;
+    return indent + mark + 5.4 * (member.kind.length + member.idx.length) + 4 + chip + 4;
+  };
+  return {
+    width: Math.round(Math.max(0, ...members.map(row)) + 6),
+    height: 13 * members.length + 6,
+  };
+}
+
+/**
+ * Where the chain of a unit stands on each side of its symbol: against the
+ * middle of that side, `UNIT_CHAIN_GAP` from it. `box` is the node of the
+ * unit and `size` what `unitChainSize` gives.
+ */
+export function unitChainPlaces(
+  box: { x: number; y: number; width: number; height: number },
+  size: { width: number; height: number },
+): Record<ChainSide, Rect> {
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const across = { left: cx - size.width / 2, right: cx + size.width / 2 };
+  const along = { top: cy - size.height / 2, bottom: cy + size.height / 2 };
+  return {
+    above: { ...across, top: box.y - UNIT_CHAIN_GAP - size.height, bottom: box.y - UNIT_CHAIN_GAP },
+    below: {
+      ...across,
+      top: box.y + box.height + UNIT_CHAIN_GAP,
+      bottom: box.y + box.height + UNIT_CHAIN_GAP + size.height,
+    },
+    left: { ...along, left: box.x - UNIT_CHAIN_GAP - size.width, right: box.x - UNIT_CHAIN_GAP },
+    right: {
+      ...along,
+      left: box.x + box.width + UNIT_CHAIN_GAP,
+      right: box.x + box.width + UNIT_CHAIN_GAP + size.width,
+    },
+  };
+}
+
+/**
+ * The side the chain of a unit is drawn out on. `away` is the side that
+ * looks away from the bus, and `inTheWay` says how many things a place
+ * would be drawn over (a bar with its label, another symbol, a line). The
+ * chain goes away from the bus when nothing is in the way there, else to the
+ * right or the left of the symbol when one of those is free, and failing
+ * that to whichever of the three covers the least. It never goes on the
+ * side of the bus, where the connector and the readout are.
+ */
+export function chooseChainSide(
+  away: 'above' | 'below',
+  places: Record<ChainSide, Rect>,
+  inTheWay: (place: Rect) => number,
+): ChainSide {
+  let best: ChainSide = away;
+  let least = Infinity;
+  for (const side of [away, 'right', 'left'] as const) {
+    const covered = inTheWay(places[side]);
+    if (covered === 0) return side;
+    if (covered < least) {
+      best = side;
+      least = covered;
+    }
+  }
+  return best;
+}
+
+/**
+ * The stacking order of a unit whose chain is drawn out: over the symbols
+ * around it, which the chain may reach across.
+ */
+const UNIT_EXPANDED_Z = 5;
+
+/**
  * How many pixels of distance from its column a device gives up to stand one
  * pixel less past a tip.
  */
@@ -726,63 +899,27 @@ interface NonBusBucket {
 }
 
 /**
- * Collapse the generators bucket to one entry per idx. ANDES shares an idx
- * between a machine's static power-flow record (`PV`/`Slack`) and its dynamic
- * rotor model (`GENROU`/`GENCLS`), so the raw bucket carries two entries per
- * machine. Emitting both produces a duplicate `generator-<idx>` React node id
- * (and `stub-generator-<idx>` edge id) — a console error + an ambiguous anchor
- * for controllers that dock via `syn`. Keep one entry per idx, preferring the
- * dynamic record (it owns the rotor stack controllers attach to), and preserve
- * first-seen idx order.
+ * The row of the PF result's `generator_outputs` the symbol of each unit
+ * prints; `null` for a unit that prints none. A unit reads the row of its
+ * static generator. A machine that stands alone (it names no generator of
+ * the case, or one of another bus) reads the row its `gen` gives
+ * (`generatorRowKey`), unless a unit that has that generator prints it
+ * already: one injection is shown once.
  */
-function dedupeGeneratorsByIdx(entries: readonly TopologyEntry[]): TopologyEntry[] {
-  const chosen = new Map<string, TopologyEntry>();
-  for (const e of entries) {
-    const key = String(e.idx);
-    const existing = chosen.get(key);
-    if (existing === undefined) {
-      chosen.set(key, e);
-    } else if (DYNAMIC_GENERATOR_KINDS.has(e.kind) && !DYNAMIC_GENERATOR_KINDS.has(existing.kind)) {
-      chosen.set(key, e);
-    }
-  }
-  const seen = new Set<string>();
-  const out: TopologyEntry[] = [];
-  for (const e of entries) {
-    const key = String(e.idx);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(chosen.get(key)!);
-  }
-  return out;
-}
-
-/**
- * Which generator node prints each row of the PF result's
- * `generator_outputs`, as `entry -> row key`; a node absent from the map
- * prints nothing. A machine reads the row of the static generator it names
- * in `gen` (`generatorRowKey`). When both are drawn (ieee14_full numbers its
- * machines GENROU_1..5, so PV 2 and GENROU_2 both stand on bus 2) printing
- * the row on each would show one injection twice. The machine prints it: it
- * is the node a time-domain run drives and the controllers dock to. The
- * static generator it names stays quiet, and one that no drawn machine names
- * prints its own row.
- */
-function assignGeneratorRows(entries: readonly TopologyEntry[]): Map<TopologyEntry, string> {
-  const rows = new Map<TopologyEntry, string>();
+function assignUnitRows(units: readonly GeneratingUnit[]): Map<GeneratingUnit, string | null> {
+  const rows = new Map<GeneratingUnit, string | null>();
   const claimed = new Set<string>();
-  for (const e of entries) {
-    if (!DYNAMIC_GENERATOR_KINDS.has(e.kind)) continue;
-    const key = generatorRowKey(e);
-    // Two machines naming one generator: the first prints its row.
-    if (claimed.has(key)) continue;
-    claimed.add(key);
-    rows.set(e, key);
+  for (const unit of units) {
+    if (unit.members[0]?.role !== 'generator') continue;
+    rows.set(unit, unit.idx);
+    claimed.add(unit.idx);
   }
-  for (const e of entries) {
-    if (DYNAMIC_GENERATOR_KINDS.has(e.kind)) continue;
-    const key = generatorRowKey(e);
-    if (!claimed.has(key)) rows.set(e, key);
+  for (const unit of units) {
+    const root = unit.members[0];
+    if (root === undefined || root.role === 'generator') continue;
+    const key = generatorRowKey(root.entry);
+    rows.set(unit, claimed.has(key) ? null : key);
+    claimed.add(key);
   }
   return rows;
 }
@@ -920,12 +1057,44 @@ export function buildGraph(
 
   // Non-bus nodes (generators, loads, shunts). Each hangs off a face of
   // its parent bus: where the saved layout or a drag put it, or else over a
-  // free part of the bar.
-  const generatorEntries = dedupeGeneratorsByIdx(topology.generators ?? []);
-  const generatorRows = assignGeneratorRows(generatorEntries);
+  // free part of the bar. A generator is drawn once per generating unit: the
+  // static generator, the machine that takes its place in a time-domain run
+  // and their controllers are one symbol (`generatingUnits`), drawn for the
+  // first of them and naming the rest.
+  const { units } = generatingUnits(topology);
+  const unitRows = assignUnitRows(units);
+  const unitOfRoot = new Map<TopologyEntry, GeneratingUnit>();
+  for (const unit of units) {
+    const root = unit.members[0];
+    if (root !== undefined) unitOfRoot.set(root.entry, unit);
+  }
+  // A controller the layout places on its own is drawn there, as a badge
+  // tethered to the symbol of its unit, and not on the symbol. What refers
+  // to it (the stabiliser of a placed exciter) goes with it, docked beside
+  // its badge.
+  const placedControllers = opts.controllerCoords ?? new Map<string, BusCoord>();
+  const onSymbol = new Map<GeneratingUnit, UnitMemberInfo[]>();
+  const tetheredToUnit = new Map<TopologyEntry, GeneratingUnit>();
+  for (const unit of units) {
+    const named: UnitMemberInfo[] = [];
+    // The depth of the placed controller whose models are being passed over.
+    let under = Infinity;
+    unit.members.forEach((member, i) => {
+      if (member.depth <= under) under = Infinity;
+      if (under !== Infinity) return;
+      const isController = member.role !== 'generator' && member.role !== 'machine';
+      if (i > 0 && isController && placedControllers.has(`${member.kind}|${member.idx}`)) {
+        under = member.depth;
+        tetheredToUnit.set(member.entry, unit);
+        return;
+      }
+      named.push(unitMemberInfo(member));
+    });
+    onSymbol.set(unit, named);
+  }
   const nonBusBuckets: NonBusBucket[] = [
     {
-      entries: generatorEntries,
+      entries: [...unitOfRoot.keys()],
       parentBus: (e) => _busFromParam(e, 'bus'),
       kind: 'generator',
     },
@@ -988,6 +1157,8 @@ export function buildGraph(
   interface PendingDevice {
     entry: TopologyEntry;
     kind: 'generator' | 'load' | 'shunt';
+    /** Generators: the models the symbol stands for and names, the first its own. */
+    members?: UnitMemberInfo[];
     nodeId: string;
     parentIdx: string;
     /** Where the bus sits now: its drag override, or its layout coord. */
@@ -1026,10 +1197,14 @@ export function buildGraph(
         continue;
       }
       const nodeId = `${bucket.kind}-${String(entry.idx)}`;
-      const size = deviceBoxSize(entry.name || String(entry.idx));
+      const unit = unitOfRoot.get(entry);
+      const members = unit === undefined ? undefined : onSymbol.get(unit);
+      const label = entry.name || String(entry.idx);
+      const size = members ? unitBoxSize(label, members) : deviceBoxSize(label);
       const device: PendingDevice = {
         entry,
         kind: bucket.kind,
+        members,
         nodeId,
         parentIdx,
         parentCoord,
@@ -1039,9 +1214,20 @@ export function buildGraph(
       // UI-category key (`generator|1`) so a sidecar that was saved
       // before a kind-edit still resolves the dragged coord. The dual-
       // key shape is documented in `sidecar.ts.buildNonBusCoordinates`.
-      const modelKey = `${entry.kind}|${String(entry.idx)}`;
-      const categoryKey = `${bucket.kind}|${String(entry.idx)}`;
-      const sidecar = nonBusCoords.get(modelKey) ?? nonBusCoords.get(categoryKey);
+      // A unit that has no place of its own takes the one its machine has:
+      // a layout saved while the two were drawn apart places each.
+      const machines = (unit?.members ?? [])
+        .filter((member) => member.role === 'machine' && member.entry !== entry)
+        .map((member) => member.entry);
+      const placedAs = [entry, ...machines].flatMap((e) => [
+        `${e.kind}|${String(e.idx)}`,
+        `${bucket.kind}|${String(e.idx)}`,
+      ]);
+      let sidecar: BusCoord | undefined;
+      for (const key of placedAs) {
+        sidecar = nonBusCoords.get(key);
+        if (sidecar !== undefined) break;
+      }
       if (sidecar !== undefined) placedByLayout.add(nodeId);
       // A device that already has a place, from the layout or from a drag
       // (the canvas puts the override on top of whatever is built here),
@@ -1065,22 +1251,8 @@ export function buildGraph(
   // there is room, so the connector drops square onto it, and beside what
   // is already there otherwise. The narrow ones go first, so that as many
   // as the bar has room for stand over it, and it is the widest that goes
-  // past a tip. A machine and the static generator it names go one after
-  // the other, as wide as the wider of the two, so they stand side by side.
-  const unitOf = (device: PendingDevice): string =>
-    device.kind === 'generator'
-      ? `${device.parentIdx}|${generatorRowKey(device.entry)}`
-      : device.nodeId;
-  const units = new Map<string, { width: number; first: number }>();
-  pending.forEach((device, i) => {
-    const unit = units.get(unitOf(device));
-    if (unit === undefined) units.set(unitOf(device), { width: device.size.width, first: i });
-    else unit.width = Math.max(unit.width, device.size.width);
-  });
-  const byWidth = [...pending].sort((a, b) => {
-    const [ua, ub] = [units.get(unitOf(a))!, units.get(unitOf(b))!];
-    return ua.width - ub.width || ua.first - ub.first;
-  });
+  // past a tip. (The sort keeps devices of one width in the order they came.)
+  const byWidth = [...pending].sort((a, b) => a.size.width - b.size.width);
   for (const device of byWidth) {
     if (device.position !== undefined) continue;
     const { parentIdx, parentCoord, size } = device;
@@ -1126,8 +1298,19 @@ export function buildGraph(
       entry.name,
     );
     // The row of the PF result this node prints, or null when another
-    // node prints it (see `assignGeneratorRows`).
-    const pflowIdx = kind === 'generator' ? (generatorRows.get(entry) ?? null) : String(entry.idx);
+    // node prints it (see `assignUnitRows`).
+    const unit = unitOfRoot.get(entry);
+    const pflowIdx = unit ? (unitRows.get(unit) ?? null) : String(entry.idx);
+    // A unit of more than one model says so on its symbol. Its chain is
+    // drawn out when the layout says so for a unit on this bus.
+    const members = device.members !== undefined && device.members.length > 1 ? device.members : [];
+    const state = opts.unitStates?.get(String(entry.idx));
+    const expanded =
+      members.length > 0 &&
+      state?.expanded === true &&
+      (state.bus === undefined || state.bus === null || state.bus === parentIdx);
+    // The symbol is the machine's where the unit has one.
+    const machine = members.find((member) => member.role === 'machine');
     nodes.push({
       id: nodeId,
       type: NON_BUS_NODE_TYPE[kind],
@@ -1137,12 +1320,16 @@ export function buildGraph(
       // bus-node note above. Dropped once the device glyph is measured.
       initialWidth: size.width,
       initialHeight: size.height,
+      ...(expanded ? { zIndex: UNIT_EXPANDED_Z } : {}),
       data: {
         idx: String(entry.idx),
         name: entry.name,
         kind: entry.kind,
         parentBus: parentIdx,
         pflowIdx,
+        ...(members.length > 0
+          ? { unit: { members, expanded }, symbolKind: machine?.kind ?? entry.kind }
+          : {}),
       },
     } satisfies Node);
     // Stub edge from the non-bus node to its bus. The handles are the ones
@@ -1264,19 +1451,40 @@ export function buildGraph(
     const at = branchDragOverrides[n.id] ?? n.position;
     const under = at.y >= parent.y;
     const valueSide = under && at.y - parent.y >= DEVICE_ROW_OFFSET ? 'above' : 'below';
-    nodes[i] = { ...n, data: { ...n.data, valueSide } };
+    // The chain of a unit is drawn out on the side away from its bus, where
+    // a generator has the most room: it hangs off the face of its bus that
+    // looks away from the network.
+    const unit = (n.data as { unit?: UnitNodeData }).unit;
+    const drawnOut =
+      unit === undefined ? {} : { unit: { ...unit, side: under ? 'below' : 'above' } };
+    nodes[i] = { ...n, data: { ...n.data, valueSide, ...drawnOut } };
   }
 
   // ---- Dynamic controllers (Unit 19) ----------------------------------
-  // Dock each controller beside the device it references. ANDES wires a
-  // controller to a SynGen (`syn`), a Bus/StaticGen (`bus`/`gen`), or
-  // another controller (`avr`→Exciter, `reg`→RenGen, `ree`→RenExciter), so
-  // resolution runs in iterative passes: a PSS docks beside its exciter,
-  // which has already docked beside its GENROU; REPCA1→REECA1→REGCP1
-  // resolves the same way. Runs after collision push-out so anchors use
-  // each parent's final position. A controller whose reference can't be
-  // resolved renders as an orphan badge in the gutter.
-  appendControllerNodes(nodes, topology.controllers ?? [], opts.controllerCoords);
+  // A controller of a generating unit is named on the symbol of that unit
+  // and has no node of its own. The rest are drawn as badges: one that acts
+  // on a bus (a PMU) is docked beside the bus, one the layout places on its
+  // own stands where the layout has it, tethered to its unit, and one whose
+  // reference cannot be resolved (or whose unit is not drawn) is an orphan
+  // badge in the gutter. A controller can name another one (`avr`, `reg`,
+  // `ree`) and is then docked beside that one's badge, so the badges are
+  // resolved in passes. Runs after collision push-out so anchors use each
+  // parent's final position.
+  const drawnNodes = new Set(nodes.map((n) => n.id));
+  const isDrawn = (unit: GeneratingUnit): boolean => drawnNodes.has(`generator-${unit.idx}`);
+  const named = new Set<string>();
+  for (const [unit, members] of onSymbol) {
+    if (!isDrawn(unit)) continue;
+    for (const member of members) named.add(`${member.kind}|${member.idx}`);
+  }
+  const unitNodeOf = new Map<TopologyEntry, string>();
+  for (const [entry, unit] of tetheredToUnit) {
+    if (isDrawn(unit)) unitNodeOf.set(entry, `generator-${unit.idx}`);
+  }
+  const badges = (topology.controllers ?? []).filter(
+    (entry) => !named.has(`${entry.kind}|${String(entry.idx)}`),
+  );
+  appendControllerNodes(nodes, badges, placedControllers, unitNodeOf);
 
   return { nodes, edges };
 }
@@ -1288,8 +1496,8 @@ export function buildGraph(
  * of 9 px mono plus padding). It hangs on the side of its node facing the
  * bus, in the strip between the two (`DEVICE_ROW_OFFSET` leaves 24 px of it
  * beyond the footprint), where only the stub runs. The node's far side
- * is where the controller badges and the neighbouring buses and devices crowd
- * in.
+ * is where the neighbouring buses and devices crowd in, and where the
+ * control chain of a generating unit is drawn out.
  */
 export const DEVICE_VALUE_LABEL = { width: 72, height: 22 } as const;
 
@@ -1320,10 +1528,10 @@ export function readoutPlaces(
 }
 
 /**
- * Docked offset of a controller badge from its parent device's origin. The
- * badge sits past the right edge of the node's readout (`DEVICE_VALUE_LABEL`,
- * centred on the node), so the two never share a strip, whichever face of its
- * bus the machine hangs off.
+ * Docked offset of a controller badge from the origin of what it is docked
+ * to: the bus it acts on, or the badge of the controller it names. (The
+ * controllers of a generating unit have no badge: the symbol of the unit
+ * names them.)
  */
 export const CONTROLLER_DOCK = { x: 64, y: -18, stackDy: 22 } as const;
 
@@ -1333,17 +1541,23 @@ export const CONTROLLER_DOCK = { x: 64, y: -18, stackDy: 22 } as const;
  * ref param), or `'wait'` (a ref exists but its target node hasn't been placed
  * yet — retry on a later pass).
  *
- * Generator/bus references resolve directly (those nodes are placed before any
- * controller). Upstream-controller references (`avr`→Exciter, `reg`→RenGen,
- * `ree`→RenExciter) name another controller by its model-local idx, so they
- * resolve through `controllerNodeIdByIdx` (idx → kind-namespaced node id),
- * which is why the renewable / PSS chains need iterative passes.
+ * A controller of a drawn generating unit goes to the node of that unit
+ * (`unitNodeOf`). Generator/bus references resolve directly (those nodes are
+ * placed before any controller). Upstream-controller references
+ * (`avr`→Exciter, `reg`→RenGen, `ree`→RenExciter) name another controller by
+ * its model-local idx, so they resolve through `controllerNodeIdByIdx`
+ * (idx → kind-namespaced node id), which is why a chain of badges needs
+ * iterative passes.
  */
 function resolveControllerParent(
   entry: TopologyEntry,
   nodeById: ReadonlyMap<string, Node>,
   controllerNodeIdByIdx: ReadonlyMap<string, string>,
+  unitNodeOf: ReadonlyMap<TopologyEntry, string>,
 ): { id: string } | 'orphan' | 'wait' {
+  // A controller of a generating unit belongs beside the symbol of that unit.
+  const ofUnit = unitNodeOf.get(entry);
+  if (ofUnit !== undefined && nodeById.has(ofUnit)) return { id: ofUnit };
   const params = entry.params;
   if (!params) return 'orphan';
   const refVal = (key: string): string | null => {
@@ -1379,15 +1593,17 @@ function resolveControllerParent(
 
 /**
  * Append a badge node for each controller in `controllers`, mutating `nodes`
- * in place. A controller is docked beside the device it references, unless
- * `placedCoords` (a saved layout) puts it somewhere of its own. Iterative
- * passes resolve controller→controller reference chains; anything still
- * unresolved after the passes (a dangling idx) is placed as an orphan.
+ * in place. A controller is docked beside what it references, unless
+ * `placedCoords` (a saved layout) puts it somewhere of its own; one of a
+ * generating unit (`unitNodeOf`) is tethered to the symbol of the unit.
+ * Iterative passes resolve controller→controller reference chains; anything
+ * still unresolved after the passes (a dangling idx) is placed as an orphan.
  */
 function appendControllerNodes(
   nodes: Node[],
   controllers: readonly TopologyEntry[],
   placedCoords: ReadonlyMap<string, BusCoord> = new Map(),
+  unitNodeOf: ReadonlyMap<TopologyEntry, string> = new Map(),
 ): void {
   if (controllers.length === 0) return;
   const nodeById = new Map<string, Node>(nodes.map((n) => [n.id, n] as const));
@@ -1467,7 +1683,7 @@ function appendControllerNodes(
     changed = false;
     for (let i = pending.length - 1; i >= 0; i -= 1) {
       const entry = pending[i]!;
-      const resolved = resolveControllerParent(entry, nodeById, controllerNodeIdByIdx);
+      const resolved = resolveControllerParent(entry, nodeById, controllerNodeIdByIdx, unitNodeOf);
       if (resolved === 'wait') continue;
       pending.splice(i, 1);
       changed = true;

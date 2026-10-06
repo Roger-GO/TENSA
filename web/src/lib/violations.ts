@@ -15,7 +15,7 @@ import { assessLoading, loadingStatusText, LOADING_LIMIT_PCT } from '@/component
 import { assessQLimit, qLimitText } from '@/components/sld/qLimit';
 import { assessVoltage, busVoltageLimits, voltageStatusText } from '@/components/sld/voltage';
 import type { StaticElementKind } from '@/store/case';
-import { DYNAMIC_GENERATOR_KINDS, generatorRowKey } from '@/lib/topology';
+import { DYNAMIC_GENERATOR_KINDS } from '@/lib/topology';
 import { isFiniteNumber } from '@/lib/finite';
 
 export type ViolationKind = 'bus-voltage' | 'line-loading' | 'generator-q';
@@ -63,22 +63,6 @@ const KIND_ORDER: Record<ViolationKind, number> = {
   'line-loading': 1,
   'generator-q': 2,
 };
-
-/**
- * The id of the diagram node that prints a generator's row of the PF result.
- * A dynamic machine prints the row of the static generator it names, so it,
- * not that generator, is the node to light; a generator no machine names
- * prints its own (the rule `buildGraph` draws the readouts by).
- */
-export function generatorNodeId(
-  generators: readonly TopologyEntry[],
-  rowKey: string,
-): `generator-${string}` {
-  const machine = generators.find(
-    (entry) => DYNAMIC_GENERATOR_KINDS.has(entry.kind) && generatorRowKey(entry) === rowKey,
-  );
-  return `generator-${machine === undefined ? rowKey : String(machine.idx)}`;
-}
 
 function compare(a: Violation, b: Violation): number {
   if (a.severity !== b.severity) return a.severity === 'violation' ? -1 : 1;
@@ -177,7 +161,10 @@ export function collectViolations(
       kind: 'generator-q',
       severity: state === 'above-max' || state === 'below-min' ? 'violation' : 'warning',
       target: { kind: 'generator', idx: key },
-      nodeId: generatorNodeId(topology.generators, key),
+      // The symbol of the generating unit: the diagram draws a static
+      // generator and the machine that names it as one node, under the idx
+      // of the static generator, which is the key of its row.
+      nodeId: `generator-${key}`,
       idx: key,
       name: statics.get(key)?.name ?? key,
       finding,

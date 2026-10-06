@@ -98,7 +98,7 @@ def _placement(shift: float = 0.0) -> dict[str, Any]:
             "generator": {"1": {"x": 90.0, "y": -40.0, "bus": None}},
         },
         "controller_coordinates": {"TGOV1": {"1": {"x": 160.0, "y": -60.0}}},
-        "units": {"1": {"expanded": True}},
+        "units": {"1": {"expanded": True, "bus": "1"}},
         "busbars": {"4": {"length": 220.0, "orientation": "vertical"}},
         "branches": {
             "line": {

@@ -9,9 +9,13 @@
  *    voltage on the time-series plot of the active run).
  *  - **A line or transformer**: Inspect, Trip line (the dialog with a toggle on
  *    this branch).
- *  - **A generator, load or shunt**: Inspect, Move with arrow keys.
- *  - **A controller**: Inspect. Its badge is placed from its machine and cannot be
- *    moved on its own.
+ *  - **A generator, load or shunt**: Inspect, Move with arrow keys. A generator
+ *    that stands for a unit of several models (a machine, its exciter, its
+ *    governor) also has Show control chain, or Hide control chain once it is
+ *    drawn out: the same as the control at the end of the unit's name.
+ *  - **A controller**: Inspect. Its badge is placed from what it acts on and
+ *    cannot be moved on its own. (A controller of a generating unit has no
+ *    badge: the symbol of the unit names it.)
  *  - **The canvas**: Add element, Fit view and Reset to auto-layout (the same two
  *    commands the palette has), how the connectors of generators, loads and
  *    shunts are drawn (straight, or with a right angle), and Save snapshot, which
@@ -59,7 +63,7 @@ import { useDisturbanceStore } from '@/store/disturbance';
 import { useLayoutStore } from '@/store/layout';
 import { usePlotStore } from '@/store/plot';
 import { useRunsStore } from '@/store/runs';
-import { useSldStore } from '@/store/sld';
+import { __requestUnitExpanded, useSldStore } from '@/store/sld';
 import { useSnapshotStore } from '@/store/snapshot';
 import type { ConnectorStyle } from './connections';
 import type { SldContextTarget } from './contextTarget';
@@ -342,6 +346,17 @@ export function SldContextMenuBody({
                 onMove={() => move(target.element, target.nodeId)}
               />
             )}
+            {target.unit !== undefined ? (
+              <ContextMenuItem
+                data-testid="sld-context-unit-chain"
+                onSelect={() => {
+                  const { idx, expanded } = target.unit!;
+                  __requestUnitExpanded(idx, !expanded);
+                }}
+              >
+                {target.unit.expanded ? 'Hide control chain' : 'Show control chain'}
+              </ContextMenuItem>
+            ) : null}
           </>
         ) : null}
         {target.kind === 'canvas' ? (

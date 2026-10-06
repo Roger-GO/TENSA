@@ -93,6 +93,7 @@ describe('the layout travels with what is saved', () => {
       selection: { primaryPath: CASE, addfiles: [] },
       dragOverrides: {},
       connectorStyle: null,
+      unitExpansion: {},
       diagramLayout: null,
     });
     useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
@@ -106,6 +107,7 @@ describe('the layout travels with what is saved', () => {
       selection: null,
       dragOverrides: {},
       connectorStyle: null,
+      unitExpansion: {},
       diagramLayout: null,
     });
   });
@@ -255,6 +257,41 @@ describe('the layout travels with what is saved', () => {
       expect(useCaseStore.getState().connectorStyle).toBe('elbow');
     });
 
+    it('restored into an opened case lets the control chains its layout draws out show', async () => {
+      // A chain folded away in this visit sits on top of the saved layout's,
+      // as the drags do, and would hide what the snapshot was saved with.
+      const layout = { ...carried(), units: { '1': { expanded: true, bus: '1' } } };
+      useCaseStore.setState({ unitExpansion: { '1': false, '2': true } });
+      fetchSpy.mockResolvedValue(restoreResponse(layout));
+      const { client, Wrapper } = makeWrapper();
+      const restore = renderHook(() => useRestoreSnapshot(), { wrapper: Wrapper });
+
+      await restore.result.current.mutateAsync({ sessionId: SESSION, name: 'a' });
+
+      expect(useCaseStore.getState().unitExpansion).toEqual({});
+      expect(client.getQueryData(queryKeys.sidecar(CASE))).toEqual(layout);
+    });
+
+    it('restored into a system built from scratch draws out the control chains its layout draws out', async () => {
+      useCaseStore.setState({
+        selection: { primaryPath: null, addfiles: [], blank: true },
+        unitExpansion: { '2': true },
+      });
+      fetchSpy.mockResolvedValue(
+        restoreResponse({
+          ...carried(),
+          units: { '1': { expanded: true, bus: '1' }, '3': { expanded: false } },
+        }),
+      );
+      const { Wrapper } = makeWrapper();
+      const restore = renderHook(() => useRestoreSnapshot(), { wrapper: Wrapper });
+
+      await restore.result.current.mutateAsync({ sessionId: SESSION, name: 'a' });
+
+      // What the snapshot has, and nothing of what was chosen before it.
+      expect(useCaseStore.getState().unitExpansion).toEqual({ '1': true, '3': false });
+    });
+
     describe('that rearranges the diagram on screen', () => {
       /** The diagram as the user had arranged it since the snapshot was saved. */
       const arranged = () => buildSidecarLayout({ '1': { x: 9, y: 9 }, '2': { x: 300, y: 9 } });
@@ -344,6 +381,27 @@ describe('the layout travels with what is saved', () => {
             connector_style: 'elbow',
           },
         );
+      });
+
+      it('gives back the control chains that were drawn out with the arrangement', async () => {
+        const drawnBefore = { ...arranged(), units: { '1': { expanded: true, bus: '1' } } };
+        useCaseStore.setState({
+          diagramLayout: drawnBefore,
+          dragOverrides: dragged,
+          unitExpansion: { '1': true },
+        });
+        const { Wrapper } = makeWrapper();
+        fetchSpy.mockResolvedValueOnce(restoreResponse(carried()));
+        const info = await restoreAndGetOffer(Wrapper);
+        expect(useCaseStore.getState().unitExpansion).toEqual({});
+
+        fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+        info.mock.calls[0]![1]!.action!.onClick();
+
+        expect(useCaseStore.getState().unitExpansion).toEqual({ '1': true });
+        expect(JSON.parse(String((fetchSpy.mock.calls[1]![1] as RequestInit).body)).units).toEqual({
+          '1': { expanded: true, bus: '1' },
+        });
       });
 
       it('taken up after another case was opened, leaves that case alone', async () => {

@@ -130,3 +130,32 @@ export function subscribeSldCommand(listener: CommandListener): () => void {
     commandListeners.delete(listener);
   };
 }
+
+// ---------------------------------------------------------------------------
+// Generating-unit bridge.
+//
+// The symbol of a generating unit has a control that draws its control chain
+// out and folds it away again, and the right-click menu has the same item.
+// Whether a chain is drawn out is part of the layout, which the mounted canvas
+// keeps and writes beside the case, so both post the intent here and the
+// canvas acts on it, as it does on the commands above.
+// ---------------------------------------------------------------------------
+
+type UnitListener = (unitIdx: string, expanded: boolean) => void;
+const unitListeners: Set<UnitListener> = new Set();
+
+/** Ask the mounted canvas to draw the chain of a generating unit out, or to fold it away. */
+export function __requestUnitExpanded(unitIdx: string, expanded: boolean): void {
+  for (const l of unitListeners) l(unitIdx, expanded);
+}
+
+/**
+ * Subscribe to requests to draw a unit's chain out or fold it away. Returns an
+ * unsubscribe function. `SldCanvas` subscribes once on mount.
+ */
+export function subscribeUnitExpanded(listener: UnitListener): () => void {
+  unitListeners.add(listener);
+  return () => {
+    unitListeners.delete(listener);
+  };
+}

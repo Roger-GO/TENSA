@@ -21,7 +21,7 @@ import { useDisturbanceStore } from '@/store/disturbance';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { usePlotStore } from '@/store/plot';
 import { useRunsStore } from '@/store/runs';
-import { useSldStore } from '@/store/sld';
+import { subscribeUnitExpanded, useSldStore } from '@/store/sld';
 import { useSnapshotStore } from '@/store/snapshot';
 import { toast } from '@/lib/toast';
 import { parseSessionId } from '@/api/types';
@@ -376,7 +376,36 @@ describe('menu for a generator, load, shunt or controller', () => {
     expect(useSldStore.getState().selectedNodeId).toBe('generator-3');
   });
 
-  it('names a controller as one, and offers no move: its badge follows its machine', async () => {
+  it('offers the control chain of a generator that stands for a unit, to draw out or to fold away', async () => {
+    const asked = vi.fn();
+    const stop = subscribeUnitExpanded(asked);
+    const unit = (expanded: boolean): SldContextTarget => ({
+      kind: 'device',
+      element: { kind: 'generator', idx: '3', modelClass: 'PV' },
+      name: 'G3',
+      nodeId: 'generator-3',
+      unit: { idx: '3', expanded },
+    });
+
+    let menu = await openMenu(unit(false));
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(3);
+    const show = within(menu).getByTestId('sld-context-unit-chain');
+    expect(show).toHaveTextContent('Show control chain');
+    await userEvent.click(show);
+    expect(asked).toHaveBeenLastCalledWith('3', true);
+    // Drawing a chain out selects nothing.
+    expect(useCaseStore.getState().selectedElement).toBeNull();
+    cleanup();
+
+    menu = await openMenu(unit(true));
+    const hide = within(menu).getByTestId('sld-context-unit-chain');
+    expect(hide).toHaveTextContent('Hide control chain');
+    await userEvent.click(hide);
+    expect(asked).toHaveBeenLastCalledWith('3', false);
+    stop();
+  });
+
+  it('names a controller as one, and offers no move: its badge follows what it acts on', async () => {
     const menu = await openMenu({
       kind: 'device',
       element: { kind: 'controller', subKind: 'exciter', modelClass: 'IEEEX1', idx: '1' },

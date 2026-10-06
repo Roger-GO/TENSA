@@ -65,6 +65,7 @@ vi.mock('@xyflow/react', async () => {
       type: string;
       data: Record<string, unknown>;
       className?: string;
+      selected?: boolean;
     }[];
     edges: {
       id: string;
@@ -139,7 +140,8 @@ vi.mock('@xyflow/react', async () => {
             wrapperProps,
             React.createElement(NodeComp, {
               data: n.data,
-              selected: false,
+              // The canvas says which node is picked out; React Flow hands it on.
+              selected: n.selected === true,
               type: n.type,
               xPos: 0,
               yPos: 0,
@@ -249,7 +251,7 @@ import { SldCanvas } from '@/components/sld/SldCanvas';
 import { buildGraph } from '@/components/sld/graph';
 import { elkLayout } from '@/components/sld/elkClient';
 import { useCaseStore } from '@/store/case';
-import { __requestSldCommand } from '@/store/sld';
+import { __requestSldCommand, useSldStore } from '@/store/sld';
 import { toast } from '@/lib/toast';
 import { useSessionStore } from '@/store/session';
 import { useConnectivityStore } from '@/store/connectivity';
@@ -424,7 +426,8 @@ describe('SldCanvas', () => {
     mockSidecar = null;
     fitViewSpy.mockReset();
     putSidecarSpy.mockReset();
-    act(() => useCaseStore.setState({ dragOverrides: {} }));
+    act(() => useCaseStore.setState({ dragOverrides: {}, unitExpansion: {} }));
+    act(() => useSldStore.getState().clearSelectedNodeId());
     vi.mocked(elkLayout).mockClear();
     mockConnectivityIsFetching = false;
     mockConnectivityIsError = false;
@@ -508,14 +511,11 @@ describe('SldCanvas', () => {
     expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'bus', idx: '4' });
   });
 
-  it('renders a controller node and selects it (with sub-kind) on click', async () => {
+  it('renders the badge of a controller that acts on a bus and selects it (with sub-kind) on click', async () => {
     const user = userEvent.setup();
     const topology: TopologySummary = {
       ...makeTopology([bus(1)]),
-      generators: [{ idx: 'GENROU_1', name: 'g1', kind: 'GENROU', params: { bus: 1 } }],
-      controllers: [
-        { idx: 'EXST1_1', name: 'EXST1 1', kind: 'EXST1', params: { syn: 'GENROU_1' } },
-      ],
+      controllers: [{ idx: 'PMU_1', name: 'PMU 1', kind: 'PMU', params: { bus: 1 } }],
     };
     mockTopology = topology;
     act(() => {
@@ -526,17 +526,283 @@ describe('SldCanvas', () => {
     });
     render(withQueryClient(<SldCanvas />));
     await waitFor(() => {
-      expect(screen.getByTestId('controller-node-EXST1_1')).toBeInTheDocument();
+      expect(screen.getByTestId('controller-node-PMU_1')).toBeInTheDocument();
     });
-    const wrapper = screen.getByTestId('controller-node-EXST1_1').closest('[data-rf-node-id]');
+    const wrapper = screen.getByTestId('controller-node-PMU_1').closest('[data-rf-node-id]');
     expect(wrapper).not.toBeNull();
     await user.click(wrapper as HTMLElement);
+    expect(useCaseStore.getState().selectedElement).toEqual({
+      kind: 'controller',
+      subKind: 'measurement',
+      modelClass: 'PMU',
+      idx: 'PMU_1',
+    });
+  });
+
+  // ---- a generating unit: one symbol for the generator, its machine and their controllers ----
+
+  /** ieee14_full's shape: PV 2 on bus 1, GENROU_2 that names it, an exciter and a governor. */
+  function loadUnitCase(saved: Partial<SidecarLayout> | null = null) {
+    mockTopology = {
+      ...makeTopology([bus(1), bus(2)], [line(10, 1, 2)]),
+      generators: [
+        { idx: 2, name: '2', kind: 'PV', params: { bus: 1 } },
+        { idx: 'GENROU_2', name: 'GENROU_2', kind: 'GENROU', params: { bus: 1, gen: 2 } },
+      ],
+      controllers: [
+        { idx: 'EXST1_1', name: 'EXST1_1', kind: 'EXST1', params: { syn: 'GENROU_2' } },
+        { idx: 'TGOV1_2', name: 'TGOV1_2', kind: 'TGOV1', params: { syn: 'GENROU_2' } },
+      ],
+    };
+    mockSidecar =
+      saved === null
+        ? null
+        : {
+            schema_version: '2',
+            andes_version: '2.0.0',
+            last_modified: '2026-10-01T00:00:00Z',
+            coordinates: { '1': { x: 500, y: 40 }, '2': { x: 900, y: 80 } },
+            ...saved,
+          };
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('synthetic.raw'), addfiles: [] },
+        selectedElement: null,
+      });
+    });
+  }
+
+  async function renderUnit() {
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => expect(screen.getByTestId('generator-node-2')).toBeInTheDocument());
+    return screen.getByTestId('generator-node-2');
+  }
+
+  it('draws a generator, its machine and their controllers as one symbol that names each model', async () => {
+    loadUnitCase();
+    const unit = await renderUnit();
+    // One symbol, and no badge beside it.
+    expect(screen.getAllByTestId(/^generator-node-/)).toHaveLength(1);
+    expect(screen.queryByTestId(/^controller-node-/)).not.toBeInTheDocument();
+    // A chip per model after the generator itself, by what it is to the unit.
+    const chips = within(unit).getAllByTestId(/^unit-chip-/);
+    expect(chips.map((chip) => chip.textContent)).toEqual(['SG', 'AVR', 'GOV']);
+    expect(within(unit).getByTestId('unit-chip-EXST1-EXST1_1')).toHaveAccessibleName(
+      'Exciter: EXST1 EXST1_1',
+    );
+    // Folded until asked.
+    expect(unit).toHaveAttribute('data-unit-expanded', 'false');
+    expect(screen.queryByTestId('unit-chain-2')).not.toBeInTheDocument();
+  });
+
+  it('shows the generator in the Inspector on a click on the symbol, and a model on a press of its chip', async () => {
+    const user = userEvent.setup();
+    loadUnitCase();
+    const unit = await renderUnit();
+
+    await user.click(unit.closest('[data-rf-node-id]') as HTMLElement);
+    expect(useCaseStore.getState().selectedElement).toEqual({
+      kind: 'generator',
+      idx: '2',
+      modelClass: 'PV',
+    });
+    expect(useSldStore.getState().selectedNodeId).toBe('generator-2');
+
+    await user.click(within(unit).getByTestId('unit-chip-EXST1-EXST1_1'));
+    // The press stays on the chip: the node under it does not take the selection back.
     expect(useCaseStore.getState().selectedElement).toEqual({
       kind: 'controller',
       subKind: 'exciter',
       modelClass: 'EXST1',
       idx: 'EXST1_1',
     });
+    expect(useSldStore.getState().selectedNodeId).toBe('controller-EXST1-EXST1_1');
+    // The chip is marked, and the symbol of its unit stays picked out.
+    expect(within(unit).getByTestId('unit-chip-EXST1-EXST1_1')).toHaveAttribute(
+      'data-selected',
+      'true',
+    );
+    expect(within(unit).getByTestId('unit-chip-TGOV1-TGOV1_2')).not.toHaveAttribute(
+      'data-selected',
+    );
+    expect(screen.getByTestId('generator-node-2')).toHaveAttribute('data-selected', 'true');
+
+    await user.click(within(unit).getByTestId('unit-chip-GENROU-GENROU_2'));
+    expect(useCaseStore.getState().selectedElement).toEqual({
+      kind: 'generator',
+      idx: 'GENROU_2',
+      modelClass: 'GENROU',
+    });
+  });
+
+  it('picks out the symbol of the unit when one of its models is picked in a table or the search', async () => {
+    loadUnitCase();
+    await renderUnit();
+    expect(screen.getByTestId('generator-node-2')).not.toHaveAttribute('data-selected');
+    // What a row of the Machines table writes, and what a row of a controller table writes.
+    for (const id of ['generator-GENROU_2', 'controller-TGOV1-TGOV1_2']) {
+      act(() => useSldStore.getState().setSelectedNodeId(id));
+      expect(screen.getByTestId('generator-node-2')).toHaveAttribute('data-selected', 'true');
+      act(() => useSldStore.getState().setSelectedNodeId('1'));
+      expect(screen.getByTestId('generator-node-2')).not.toHaveAttribute('data-selected');
+    }
+    // The governor picked by its id alone has its chip marked.
+    act(() => useSldStore.getState().setSelectedNodeId('controller-TGOV1-TGOV1_2'));
+    expect(screen.getByTestId('unit-chip-TGOV1-TGOV1_2')).toHaveAttribute('data-selected', 'true');
+  });
+
+  it('draws the control chain of a unit out on a press of its control, and folds it away again', async () => {
+    const user = userEvent.setup();
+    loadUnitCase();
+    const unit = await renderUnit();
+    const toggle = within(unit).getByRole('button', {
+      name: 'Show the control chain of generator 2',
+    });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(toggle);
+    // The press does not select the unit.
+    expect(useCaseStore.getState().selectedElement).toBeNull();
+    const chain = await screen.findByTestId('unit-chain-2');
+    expect(screen.getByTestId('generator-node-2')).toHaveAttribute('data-unit-expanded', 'true');
+    // Every model, each under the one it refers to.
+    const rows = within(chain).getAllByTestId(/^unit-chain-row-/);
+    expect(rows.map((row) => `${row.getAttribute('data-depth')} ${row.textContent}`)).toEqual([
+      '0 PV2',
+      '1 └GENROUGENROU_2SG',
+      '2 └EXST1EXST1_1AVR',
+      '2 └TGOV1TGOV1_2GOV',
+    ]);
+    expect(useCaseStore.getState().unitExpansion).toEqual({ '2': true });
+
+    // A row shows its model in the Inspector, like a chip.
+    await user.click(within(chain).getByTestId('unit-chain-row-TGOV1-TGOV1_2'));
+    expect(useCaseStore.getState().selectedElement).toMatchObject({
+      kind: 'controller',
+      modelClass: 'TGOV1',
+      idx: 'TGOV1_2',
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Hide the control chain of generator 2' }));
+    await waitFor(() => expect(screen.queryByTestId('unit-chain-2')).not.toBeInTheDocument());
+    expect(useCaseStore.getState().unitExpansion).toEqual({ '2': false });
+  });
+
+  it('writes a chain that is drawn out beside the case, and draws it out again from there', async () => {
+    const user = userEvent.setup();
+    loadUnitCase({});
+    const unit = await renderUnit();
+    await user.click(within(unit).getByTestId('unit-toggle-2'));
+    await waitFor(() => expect(putSidecarSpy).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    const [vars] = putSidecarSpy.mock.calls[0] ?? [];
+    expect(vars.casePath).toBe('synthetic.raw');
+    // With the bus the unit is on, which is what the entry is good for.
+    expect(vars.layout.units).toEqual({ '2': { expanded: true, bus: '1' } });
+    // And with the diagram as it stands, like any write of the layout.
+    expect(Object.keys(vars.layout.coordinates)).toEqual(['1', '2']);
+    // The save paths send the same.
+    expect(useCaseStore.getState().diagramLayout?.units).toEqual({
+      '2': { expanded: true, bus: '1' },
+    });
+
+    // The case opened again, with that layout on disk and nothing chosen yet.
+    cleanup();
+    act(() => useCaseStore.setState({ unitExpansion: {} }));
+    mockSidecar = vars.layout as SidecarLayout;
+    await renderUnit();
+    expect(screen.getByTestId('unit-chain-2')).toBeInTheDocument();
+  });
+
+  it('folds a chain a saved layout draws out for a unit of another bus', async () => {
+    // The idx has come to name another generator: the entry is not for it.
+    loadUnitCase({ units: { '2': { expanded: true, bus: '9' } } });
+    await renderUnit();
+    expect(screen.queryByTestId('unit-chain-2')).not.toBeInTheDocument();
+    // And the next layout written does not hold it any more.
+    expect(useCaseStore.getState().diagramLayout?.units).toEqual({});
+  });
+
+  it('draws a chain out away from the bus, and beside the symbol where a bar stands in the way there', async () => {
+    // The unit stands over bus 1, so its chain goes above it: but bus 2 is
+    // right there, and the line from it comes down through the same place.
+    const placed: Partial<SidecarLayout> = {
+      coordinates: { '1': { x: 500, y: 300 }, '2': { x: 500, y: 150 } },
+      non_bus_coordinates: { generator: { '2': { x: 510, y: 230, bus: '1' } } },
+      units: { '2': { expanded: true, bus: '1' } },
+    };
+    loadUnitCase(placed);
+    await renderUnit();
+    expect(screen.getByTestId('unit-chain-2')).toHaveAttribute('data-side', 'right');
+    expect(screen.getByTestId('unit-toggle-2')).toHaveAttribute('aria-expanded', 'true');
+    cleanup();
+
+    // With bus 2 and its line elsewhere, nothing is in the way above.
+    loadUnitCase({ ...placed, coordinates: { '1': { x: 500, y: 300 }, '2': { x: 900, y: 600 } } });
+    mockTopology = { ...mockTopology!, lines: [] };
+    await renderUnit();
+    expect(screen.getByTestId('unit-chain-2')).toHaveAttribute('data-side', 'above');
+  });
+
+  it('offers the chain of a unit from its right-click menu', async () => {
+    loadUnitCase();
+    const unit = await renderUnit();
+    const wrapper = unit.closest('[data-rf-node-id]') as HTMLElement;
+    fireEvent.contextMenu(wrapper);
+    let menu = await screen.findByTestId('sld-context-menu');
+    expect(within(menu).getByTestId('sld-context-menu-title')).toHaveTextContent('Generator 2');
+    const show = within(menu).getByTestId('sld-context-unit-chain');
+    expect(show).toHaveTextContent('Show control chain');
+    fireEvent.click(show);
+    await screen.findByTestId('unit-chain-2');
+    await waitFor(() => expect(screen.queryByTestId('sld-context-menu')).toBeNull());
+
+    fireEvent.contextMenu(wrapper);
+    menu = await screen.findByTestId('sld-context-menu');
+    expect(within(menu).getByTestId('sld-context-unit-chain')).toHaveTextContent(
+      'Hide control chain',
+    );
+    fireEvent.keyDown(menu, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('sld-context-menu')).toBeNull());
+
+    // A bus, or a generator of one model, has no chain to offer.
+    fireEvent.contextMenu(screen.getByTestId('bus-node-1').closest('[data-rf-node-id]')!);
+    menu = await screen.findByTestId('sld-context-menu');
+    expect(within(menu).queryByTestId('sld-context-unit-chain')).toBeNull();
+  });
+
+  it('Reset to auto-layout folds the chains drawn out, in this visit and in the file, and Undo draws them out again', async () => {
+    const saved: Partial<SidecarLayout> = { units: { '2': { expanded: true, bus: '1' } } };
+    loadUnitCase(saved);
+    const success = vi.spyOn(toast, 'success').mockReturnValue('id');
+    await renderUnit();
+    expect(screen.getByTestId('unit-chain-2')).toBeInTheDocument();
+    act(() => useCaseStore.setState({ unitExpansion: { '2': true } }));
+
+    act(() => __requestSldCommand('reset-layout'));
+    expect(useCaseStore.getState().unitExpansion).toEqual({});
+    const [vars, callbacks] = putSidecarSpy.mock.calls[0] ?? [];
+    expect(vars.layout.units).toEqual({});
+    act(() => callbacks.onSuccess());
+    act(() => success.mock.calls[0]?.[1]?.action?.onClick());
+    expect(useCaseStore.getState().unitExpansion).toEqual({ '2': true });
+    expect(putSidecarSpy.mock.calls[1]?.[0].layout.units).toEqual(saved.units);
+  });
+
+  it('Reset to auto-layout folds a chain drawn out in a system that has no file', async () => {
+    loadUnitCase();
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: null, addfiles: [], blank: true },
+        unitExpansion: { '2': true },
+      });
+    });
+    const success = vi.spyOn(toast, 'success').mockReturnValue('id');
+    await renderUnit();
+    expect(screen.getByTestId('unit-chain-2')).toBeInTheDocument();
+    act(() => __requestSldCommand('reset-layout'));
+    await waitFor(() => expect(screen.queryByTestId('unit-chain-2')).not.toBeInTheDocument());
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+    expect(success).toHaveBeenCalledTimes(1);
   });
 
   const PF_ROWS = {
@@ -560,10 +826,9 @@ describe('SldCanvas', () => {
     });
   }
 
-  it('writes the PF P / Q onto generator and load nodes, once per row, on the machine', async () => {
-    // ieee14_full's shape: the machine has an idx of its own, so the static
-    // generator and the machine are two nodes on one bus, and both would read
-    // the same row. The machine prints it; the static node stays quiet.
+  it('writes the PF P / Q onto generator and load nodes, once per row', async () => {
+    // ieee14_full's shape: the machine has an idx of its own. It and the
+    // static generator it names are one node, which prints the row once.
     mockTopology = {
       ...makeTopology([bus(1)]),
       generators: [
@@ -577,21 +842,19 @@ describe('SldCanvas', () => {
     await waitFor(() => {
       expect(screen.getByTestId('load-node-PQ_1')).toBeInTheDocument();
     });
+    expect(screen.getAllByTestId(/^generator-node-/)).toHaveLength(1);
     expect(screen.getByTestId('generator-node-1')).toBeInTheDocument();
-    expect(screen.getByTestId('generator-node-GENROU_1')).toBeInTheDocument();
     // No PF yet: names only.
     expect(screen.queryByTestId(/-values-/)).not.toBeInTheDocument();
 
     act(() => {
       usePflowStore.getState().setLastRun(PF_ROWS);
     });
-    expect(screen.getByTestId('generator-p-GENROU_1')).toHaveTextContent('81.4 MW');
-    expect(screen.getByTestId('generator-q-GENROU_1')).toHaveTextContent('-21.6 MVAr');
+    expect(screen.getByTestId('generator-p-1')).toHaveTextContent('81.4 MW');
+    expect(screen.getByTestId('generator-q-1')).toHaveTextContent('-21.6 MVAr');
     expect(screen.getByTestId('load-p-PQ_1')).toHaveTextContent('21.7 MW');
     expect(screen.getByTestId('load-q-PQ_1')).toHaveTextContent('12.7 MVAr');
-    // As many readouts as rows: the static generator the machine names does
-    // not print its row a second time.
-    expect(screen.queryByTestId('generator-values-1')).not.toBeInTheDocument();
+    // As many readouts as rows.
     expect(screen.getAllByTestId(/^generator-values-/)).toHaveLength(
       Object.keys(PF_ROWS.generator_outputs).length,
     );

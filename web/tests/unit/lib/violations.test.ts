@@ -4,13 +4,7 @@
  * and what it leaves out.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  collectViolations,
-  generatorNodeId,
-  summarizeViolations,
-  type ViolationReport,
-} from '@/lib/violations';
-import type { TopologyEntry } from '@/api/types';
+import { collectViolations, summarizeViolations, type ViolationReport } from '@/lib/violations';
 import { LIMITS_TOPOLOGY, limitsPflow } from '../helpers/limitsCase';
 import { lineFlow } from '../helpers/lineFlow';
 
@@ -112,6 +106,14 @@ describe('collectViolations', () => {
     });
   });
 
+  it('points a generator finding at the symbol of its unit, whether or not a machine names the generator', () => {
+    const items = report().items;
+    // GENROU_1 names PV 1 in `gen`: the diagram draws the two as one node,
+    // under the idx of the generator. No machine names Slack 2.
+    expect(items.find((i) => i.id === 'generator-1')?.nodeId).toBe('generator-1');
+    expect(items.find((i) => i.id === 'generator-2')?.nodeId).toBe('generator-2');
+  });
+
   it('finds a generator past its lower limit', () => {
     const r = report({
       generator_outputs: { '1': { p: 40, q: -60, v: 1.0, bus: 1, q_min: -40, q_max: 15 } },
@@ -148,19 +150,6 @@ describe('collectViolations', () => {
     const r = report({ line_flows: {} });
     expect(r.checked.lines).toBe(0);
     expect(r.unratedLines).toBe(0);
-  });
-});
-
-describe('generatorNodeId', () => {
-  const gens: TopologyEntry[] = LIMITS_TOPOLOGY.generators;
-
-  it('lights the machine that prints the generator row, as the diagram does', () => {
-    // GENROU_1 names PV 1 in `gen`, so it prints that row.
-    expect(generatorNodeId(gens, '1')).toBe('generator-GENROU_1');
-  });
-
-  it('lights the static generator itself when no machine names it', () => {
-    expect(generatorNodeId(gens, '2')).toBe('generator-2');
   });
 });
 

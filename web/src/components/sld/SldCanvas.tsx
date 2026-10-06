@@ -30,7 +30,12 @@ import { subKindForControllerClass } from '@/lib/controllers';
 import type { ControllerSubKind } from '@/lib/controllers';
 import { useSessionStore } from '@/store/session';
 import { useConnectivityStore } from '@/store/connectivity';
-import { useSldStore, __requestOpenSldSearch, subscribeSldCommand } from '@/store/sld';
+import {
+  useSldStore,
+  __requestOpenSldSearch,
+  subscribeSldCommand,
+  subscribeUnitExpanded,
+} from '@/store/sld';
 import { useHotkeys } from '@/lib/useHotkeys';
 import { SHORTCUTS } from '@/lib/shortcuts';
 import { toast } from '@/lib/toast';
@@ -80,17 +85,31 @@ import {
   hasSavedPositions,
   mergeWithDrift,
   resolveDeviceCoords,
+  unitStatesOf,
   type CoordsByIdx,
 } from './sidecar';
 import { curatedLayoutFor } from './curated';
-import { buildGraph, readoutPlaces, DEVICE_PORT, SOURCE_HANDLE, TARGET_HANDLE } from './graph';
+import {
+  buildGraph,
+  chooseChainSide,
+  readoutPlaces,
+  unitChainPlaces,
+  unitChainSize,
+  DEVICE_PORT,
+  NODE_FOOTPRINT,
+  SOURCE_HANDLE,
+  TARGET_HANDLE,
+  type UnitNodeData,
+} from './graph';
 import {
   DEFAULT_CONNECTOR_STYLE,
   layoutConnections,
   routesThrough,
+  type ConnectionLayout,
   type ConnectorRoute,
   type ConnectorStyle,
   type NodeSize,
+  type Rect,
 } from './connections';
 import { FULL_ZOOM, locateZoom } from './zoom';
 import { cn } from '@/lib/cn';
@@ -405,6 +424,16 @@ function SldCanvasInner({
   // The bars a layout gives a length of their own; the rest are sized by
   // what connects to them.
   const barLengths = useMemo(() => barLengthsOf(savedLayout ?? curated), [savedLayout, curated]);
+  // The generating units whose control chain is drawn out: what was chosen
+  // in this visit, over what the saved layout says.
+  const chosenUnits = useCaseStore((s) => s.unitExpansion);
+  const unitStates = useMemo(() => {
+    const states = unitStatesOf(savedLayout);
+    for (const [idx, expanded] of Object.entries(chosenUnits)) {
+      states.set(idx, { expanded, bus: null });
+    }
+    return states;
+  }, [savedLayout, chosenUnits]);
   const baseGraph = useMemo(() => {
     if (!coords) return null;
     const bendPoints = usingAutoLayout ? (autoBendPoints ?? undefined) : storedBends;
@@ -413,6 +442,7 @@ function SldCanvasInner({
       barLengths,
       nonBusCoords: nonBusCoordsMap,
       controllerCoords,
+      unitStates,
       // Drag overrides flow into buildGraph so the push-out pass
       // treats user-placed nodes as stationary obstacles. The override
       // is also re-applied below as a defensive cosmetic — the
@@ -485,10 +515,31 @@ function SldCanvasInner({
     usingAutoLayout,
     storedBends,
     controllerCoords,
+    unitStates,
     dragOverrides,
     nonBusCoordsMap,
     barLengths,
   ]);
+
+  // The node an id that was picked is drawn on. The models of a generating
+  // unit are one node, and each is still picked by an id of its own
+  // (`generator-<idx>` for a machine, `controller-<class>-<idx>` for a
+  // controller: a row of a table, the search, the Inspector), so such an id
+  // leads to the node of the unit. An id that is a node's own is that node.
+  const drawnNodeIdOf = useMemo(() => {
+    const own = new Set<string>();
+    const ofUnit = new Map<string, string>();
+    for (const n of baseGraph?.nodes ?? []) {
+      own.add(n.id);
+      const unit = (n.data as { unit?: UnitNodeData }).unit;
+      for (const member of unit?.members ?? []) {
+        if (!ofUnit.has(member.nodeId)) ofUnit.set(member.nodeId, n.id);
+      }
+    }
+    return (id: string | null): string | null =>
+      id === null || own.has(id) ? id : (ofUnit.get(id) ?? id);
+  }, [baseGraph]);
+  const selectedDrawnId = drawnNodeIdOf(selectedNodeId);
 
   // Prune drag overrides for nodes that no longer exist (user reloaded,
   // or removed an element via a future delete API). Keeps the override
@@ -545,9 +596,9 @@ function SldCanvasInner({
   const [draggedIds, setDraggedIds] = useState<readonly string[]>(NO_IDS);
   const activeDeviceIds = useMemo(() => {
     const ids = new Set(draggedIds);
-    if (selectedNodeId !== null) ids.add(selectedNodeId);
+    if (selectedDrawnId !== null) ids.add(selectedDrawnId);
     return ids;
-  }, [draggedIds, selectedNodeId]);
+  }, [draggedIds, selectedDrawnId]);
   // The edges with their routes. An edge whose route did not change keeps its
   // object, so React Flow redraws only the connectors that moved.
   const routedEdgesRef = useRef<Map<string, RoutedEdgeEntry>>(new Map());
@@ -626,8 +677,8 @@ function SldCanvasInner({
       // Capture the current position of every node that can be dragged
       // into the override map. The map keys by React Flow node id (bus
       // idx for buses, `${kind}-${idx}` for non-bus nodes). A controller
-      // badge cannot be dragged: its place follows from its device's, and
-      // an override would pin it where the device used to be.
+      // badge cannot be dragged: its place follows from what it is docked
+      // to, and an override would pin it where that used to be.
       const overrides: Record<string, { x: number; y: number }> = {};
       for (const n of next) {
         if (n.draggable === false) continue;
@@ -704,7 +755,13 @@ function SldCanvasInner({
         return;
       }
       const kind = rawKind as 'bus' | 'line' | 'generator' | 'load' | 'shunt';
-      setSelectedElement({ kind, idx: String(idx) });
+      // A generator names its model: the symbol stands for a whole unit, whose
+      // static generator and machine can have the same idx.
+      setSelectedElement(
+        kind === 'generator' && typeof data.kind === 'string'
+          ? { kind, idx: String(idx), modelClass: data.kind }
+          : { kind, idx: String(idx) },
+      );
       // Unit 11: also write the SLD store's selectedNodeId so the
       // canvas + bus-node visual highlight follow the click. The
       // inspector-row → SLD-pan path goes through the same slot, without
@@ -739,6 +796,14 @@ function SldCanvasInner({
   const connectivityResult = useConnectivityStore((s) => s.result);
   const energisedBusIdxes = useConnectivityStore((s) => s.energisedBusIdxes);
 
+  // What stands on the diagram, as boxes: worked out when a unit has its
+  // control chain drawn out and the chain needs a place, not otherwise.
+  const standingAround = useMemo(() => {
+    let standing: { id: string; box: Rect }[] | null = null;
+    return (): { id: string; box: Rect }[] =>
+      (standing ??= nodes.map((n) => ({ id: n.id, box: boxOnDiagram(n, sizes, connections) })));
+  }, [nodes, sizes, connections]);
+
   // Sync React Flow's `selected` state with the case store so a
   // selection driven from the results table (Unit 9) reflects on the
   // canvas without needing a callback round-trip. Also threads the
@@ -759,7 +824,7 @@ function SldCanvasInner({
         //     11). Either one alone is enough; we union them so the
         //     visual stays consistent regardless of which channel
         //     wrote.
-        const selected = isSelectedNode(n, selectedElement, selectedNodeId);
+        const selected = isSelectedNode(n, selectedElement, selectedDrawnId);
         // Greying only applies to bus nodes — non-bus device nodes are
         // children of buses for the purposes of energisation, but
         // their own grey-out cascade is handled by the connectivity
@@ -811,6 +876,30 @@ function SldCanvasInner({
               connectorsThrough(places.leftRoom, own) === 0;
           }
         }
+        // The control chain of a unit is drawn out on the side away from its
+        // bus. Where a bar, another symbol or a line is in the way there and
+        // not beside the symbol, it goes beside the symbol.
+        const unit = (n.data as { unit?: UnitNodeData }).unit;
+        let drawnOut: { unit: UnitNodeData } | undefined;
+        if (n.type === 'generator' && unit?.expanded) {
+          const away = unit.side === 'below' ? 'below' : 'above';
+          const places = unitChainPlaces(
+            {
+              ...n.position,
+              width: measured?.width ?? n.initialWidth ?? 0,
+              height: measured?.height ?? n.initialHeight ?? 0,
+            },
+            unitChainSize(unit.members),
+          );
+          const side = chooseChainSide(
+            away,
+            places,
+            (place) =>
+              standingAround().filter(({ id, box }) => id !== n.id && overlaps(box, place)).length +
+              connectorsThrough(place, `stub-${n.id}`),
+          );
+          if (side !== unit.side) drawnOut = { unit: { ...unit, side } };
+        }
         return {
           ...n,
           ...(measured !== undefined ? { measured } : {}),
@@ -822,6 +911,7 @@ function SldCanvasInner({
             ...(connectorFace !== undefined ? { connectorFace } : {}),
             ...(connectorLean !== 0 ? { connectorLean } : {}),
             ...(readoutLeft ? { readoutLeft } : {}),
+            ...drawnOut,
             // Attribute echoed onto BusNode's wrapper via the spread
             // pattern in the React Flow node mapping; tests assert on
             // this exact attribute rather than the className so the
@@ -834,18 +924,19 @@ function SldCanvasInner({
             // selection semantics; this dedicated flag lets the node
             // component branch on the search-driven channel without
             // re-deriving the union.
-            sldSelected: selectedNodeId === n.id,
+            sldSelected: selectedDrawnId === n.id,
           },
         };
       }),
     [
       nodes,
       selectedElement,
-      selectedNodeId,
+      selectedDrawnId,
       connectivityResult,
       energisedBusIdxes,
       connections,
       connectorsThrough,
+      standingAround,
       sizes,
     ],
   );
@@ -863,8 +954,8 @@ function SldCanvasInner({
   // is negligible. Skipped when the selected id doesn't match a
   // mounted node (e.g., topology changed since the id was set).
   useEffect(() => {
-    if (selectedNodeId === null) return;
-    const node = nodes.find((n) => n.id === selectedNodeId);
+    if (selectedDrawnId === null) return;
+    const node = nodes.find((n) => n.id === selectedDrawnId);
     if (!node) return;
     const currentZoom = rf.getZoom();
     const centre = centreOf(node, sizes.get(node.id));
@@ -940,17 +1031,17 @@ function SldCanvasInner({
   // full size, on the selected bus or device when there is one, and about
   // the middle of the view otherwise.
   const selectedName = useMemo(() => {
-    const node = baseGraph?.nodes.find((n) => isSelectedNode(n, selectedElement, selectedNodeId));
+    const node = baseGraph?.nodes.find((n) => isSelectedNode(n, selectedElement, selectedDrawnId));
     if (!node) return null;
     const data = node.data as { name?: string; idx?: string };
     return data.name || data.idx || node.id;
-  }, [baseGraph, selectedElement, selectedNodeId]);
+  }, [baseGraph, selectedElement, selectedDrawnId]);
   const zoomToFullSize = useCallback(() => {
     const node = nodesRef.current.find((n) =>
       isSelectedNode(
         n,
         useCaseStore.getState().selectedElement,
-        useSldStore.getState().selectedNodeId,
+        drawnNodeIdOf(useSldStore.getState().selectedNodeId),
       ),
     );
     if (!node) {
@@ -959,30 +1050,47 @@ function SldCanvasInner({
     }
     const centre = centreOf(node, sizes.get(node.id));
     void rf.setCenter(centre.x, centre.y, { zoom: FULL_ZOOM, duration: 250 });
-  }, [rf, sizes]);
+  }, [rf, sizes, drawnNodeIdOf]);
 
-  // Forget where things were put: the drags of this visit (``dragOverrides``)
-  // and the layout saved beside the case. The diagram is then laid out as when
-  // the case first opened, with the case's own curated layout if it has one and
-  // ELK otherwise. The server has no way to delete a sidecar, so it is replaced by
-  // one with no placement in it, which the canvas reads as none
-  // (``hasSavedPositions``); the figure settings are not placement and stay. A
-  // layout placed by hand is work, so the toast offers Undo, which puts both back.
+  // Forget where things were put: the drags of this visit (``dragOverrides``),
+  // the control chains drawn out in it, and the layout saved beside the case.
+  // The diagram is then laid out as when the case first opened, with the case's
+  // own curated layout if it has one and ELK otherwise. The server has no way to
+  // delete a sidecar, so it is replaced by one with no placement in it, which the
+  // canvas reads as none (``hasSavedPositions``); the figure settings are not
+  // placement and stay. A layout placed by hand is work, so the toast offers
+  // Undo, which puts all of it back.
   const resetLayout = useCallback(() => {
     const previousOverrides = useCaseStore.getState().dragOverrides;
-    const previousSaved = storedSidecar;
-    if (Object.keys(previousOverrides).length === 0 && previousSaved === null) {
+    const previousUnits = useCaseStore.getState().unitExpansion;
+    // What the file holds that a reset takes back: positions, or the chains
+    // it says are drawn out.
+    const previousSaved =
+      storedSidecar ??
+      (savedLayout !== null && Object.keys(savedLayout.units ?? {}).length > 0
+        ? savedLayout
+        : null);
+    if (
+      Object.keys(previousOverrides).length === 0 &&
+      Object.keys(previousUnits).length === 0 &&
+      previousSaved === null
+    ) {
       toast.info('The diagram is already in its automatic layout.');
       return;
     }
     if (primaryPath) cancelPendingSidecarPut(primaryPath);
     setDragOverrides({});
+    // A chain that is drawn out is part of how the diagram was arranged: the
+    // units go back to their symbols, in this visit and in the file.
+    const setUnitExpansion = useCaseStore.getState().setUnitExpansion;
+    setUnitExpansion({});
     const reported = () =>
       toast.success('Layout reset to auto-layout', {
         action: {
           label: 'Undo',
           onClick: () => {
             setDragOverrides(previousOverrides);
+            setUnitExpansion(previousUnits);
             if (previousSaved !== null) putSidecar(previousSaved);
           },
         },
@@ -1003,10 +1111,11 @@ function SldCanvasInner({
       onSuccess: reported,
       onError: (err) => {
         setDragOverrides(previousOverrides);
+        setUnitExpansion(previousUnits);
         toast.error(`Could not reset the saved layout: ${err.message}`);
       },
     });
-  }, [primaryPath, storedSidecar, putSidecar, setDragOverrides]);
+  }, [primaryPath, storedSidecar, savedLayout, putSidecar, setDragOverrides]);
 
   // Draw the device connectors straight, or with a right angle. The choice is
   // a setting of the diagram and is kept like a drag: in the store for this
@@ -1041,6 +1150,17 @@ function SldCanvasInner({
       }),
     [fitView, resetLayout, chooseConnectorStyle],
   );
+
+  // Draw the control chain of a generating unit out, or fold it away: asked
+  // for by the control on the unit's symbol and by its right-click menu.
+  // Kept like a drag and the connector style: in the store for this visit,
+  // in the layout every save sends, and in the file beside the case.
+  const setUnitExpanded = useCallback((unitIdx: string, expanded: boolean) => {
+    const held = useCaseStore.getState().unitExpansion;
+    useCaseStore.getState().setUnitExpansion({ ...held, [unitIdx]: expanded });
+    persistRequestedRef.current = true;
+  }, []);
+  useEffect(() => subscribeUnitExpanded(setUnitExpanded), [setUnitExpanded]);
 
   // ---- Right-click menu ----------------------------------------------------
   //
@@ -1299,6 +1419,39 @@ function centreOf(node: Node, size: NodeSize | undefined): { x: number; y: numbe
   const width = size?.width ?? node.initialWidth ?? 0;
   const height = size?.height ?? node.initialHeight ?? 0;
   return { x: node.position.x + width / 2, y: node.position.y + height / 2 };
+}
+
+/**
+ * The room `node` takes on the diagram: the box it is drawn in, and for a
+ * bus its bar, as long as it is drawn, with the label under it.
+ */
+function boxOnDiagram(
+  node: Node,
+  sizes: ReadonlyMap<string, NodeSize>,
+  connections: ConnectionLayout,
+): Rect {
+  const { x, y } = node.position;
+  if ((node.type ?? 'bus') === 'bus') {
+    const bar = connections.bars.get(node.id);
+    return {
+      left: x + (bar?.start ?? 0),
+      right: x + (bar?.end ?? NODE_FOOTPRINT.bus.width),
+      top: y,
+      bottom: y + NODE_FOOTPRINT.bus.height,
+    };
+  }
+  const size = sizes.get(node.id);
+  return {
+    left: x,
+    right: x + (size?.width ?? node.initialWidth ?? 0),
+    top: y,
+    bottom: y + (size?.height ?? node.initialHeight ?? 0),
+  };
+}
+
+/** Whether two boxes share any room. */
+function overlaps(a: Rect, b: Rect): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 }
 
 /** An edge as the canvas last handed it to React Flow, and what it was made from. */

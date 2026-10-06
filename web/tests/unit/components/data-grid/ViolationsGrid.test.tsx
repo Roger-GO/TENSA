@@ -267,10 +267,23 @@ describe('<ViolationsGrid />', () => {
     await user.click(screen.getByTestId('violations-grid-row-transformer-T1'));
     expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'transformer', idx: 'T1' });
 
-    // PV 1 is named by the machine GENROU_1, which is the node that prints its row.
+    // PV 1 is named by the machine GENROU_1: the two are one symbol on the
+    // diagram, under the idx of the generator.
     await user.click(screen.getByTestId('violations-grid-row-generator-1'));
-    expect(useSldStore.getState().selectedNodeId).toBe('generator-GENROU_1');
+    expect(useSldStore.getState().selectedNodeId).toBe('generator-1');
     expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'generator', idx: '1' });
+  });
+
+  it('highlights the row of a generator whose symbol is selected on the diagram', () => {
+    mockTopology = LIMITS_TOPOLOGY;
+    solve(limitsPflow());
+    // What a click on the symbol of the unit of PV 1 and GENROU_1 writes.
+    useSldStore.setState({ selectedNodeId: 'generator-1' });
+    render(<ViolationsGrid />);
+    expect(screen.getByTestId('violations-grid-row-generator-1')).toHaveAttribute(
+      'data-selected',
+      'true',
+    );
   });
 
   it('highlights the row of the element selected on the diagram', () => {

@@ -22,6 +22,7 @@ import {
   controllerCoordsAsMap,
   dragOverridesFromLayout,
   samePlacement,
+  unitStatesOf,
   debouncedPutSidecar,
   cancelPendingSidecarPut,
   flushPendingSidecarPut,
@@ -76,7 +77,7 @@ function fullLayout(): FullSidecarLayout {
       generator: { G1: { x: 0, y: -70, bus: '1' } },
     },
     controller_coordinates: { EXST1: { E1: { x: 90, y: -120 } } },
-    units: { G1: { expanded: true } },
+    units: { G1: { expanded: true, bus: '1' } },
     busbars: { '2': { length: 180, orientation: 'vertical' } },
     branches: {
       line: {
@@ -132,7 +133,8 @@ describe('parseSidecar', () => {
       branches: { line: { L1: {} } },
       connections: { load: { PQ_1: {} } },
     });
-    expect(parsed.units).toEqual({ G1: { expanded: false } });
+    // A unit written without its bus is trusted on its idx.
+    expect(parsed.units).toEqual({ G1: { expanded: false, bus: null } });
     expect(parsed.busbars).toEqual({ '2': { length: null, orientation: 'horizontal' } });
     expect(parsed.branches).toEqual({
       line: {
@@ -205,6 +207,7 @@ describe('parseSidecar', () => {
       { controller_coordinates: { EXST1: { E1: { x: 0, y: Number.NaN } } } },
     ],
     ['a unit whose state is not a boolean', { units: { G1: { expanded: 'yes' } } }],
+    ['a unit on a bus that is not text', { units: { G1: { expanded: true, bus: 1 } } }],
     ['a busbar with no length to speak of', { busbars: { '1': { length: 0 } } }],
     ['a busbar that stands at an angle', { busbars: { '1': { orientation: 'diagonal' } } }],
     ['a route of an unknown kind', { branches: { line: { L1: { routing: 'wavy' } } } }],
@@ -720,6 +723,25 @@ describe('buildSidecarLayout', () => {
   });
 });
 
+describe('unitStatesOf', () => {
+  it('gives what the layout says of each unit, with the bus it was on', () => {
+    const layout: SidecarLayout = {
+      ...fullLayout(),
+      units: { G1: { expanded: true, bus: '1' }, G2: { expanded: false }, G3: { expanded: true } },
+    };
+    expect([...unitStatesOf(layout)]).toEqual([
+      ['G1', { expanded: true, bus: '1' }],
+      ['G2', { expanded: false, bus: null }],
+      ['G3', { expanded: true, bus: null }],
+    ]);
+  });
+
+  it('is empty without a layout, and for one that says nothing of its units', () => {
+    expect(unitStatesOf(null).size).toBe(0);
+    expect(unitStatesOf({ ...fullLayout(), units: undefined }).size).toBe(0);
+  });
+});
+
 describe('captureLayout', () => {
   const topology: TopologySummary = {
     state: 'pre-setup',
@@ -884,6 +906,30 @@ describe('captureLayout', () => {
     expect(layout.branches).toEqual({});
   });
 
+  it('records the units whose control chain is drawn out, each with the bus it is on', () => {
+    const drawnOut = nodes.map((n) =>
+      n.id === 'generator-G1' ? { ...n, data: { ...n.data, unit: { expanded: true } } } : n,
+    );
+    const layout = captureLayout({ nodes: drawnOut, edges }, topology, null);
+    expect(layout.units).toEqual({ G1: { expanded: true, bus: '1' } });
+    // Read back, it is what the graph builder takes.
+    expect([...unitStatesOf(layout)]).toEqual([['G1', { expanded: true, bus: '1' }]]);
+  });
+
+  it('keeps no entry for a unit that is folded, whatever the layout it was drawn from says', () => {
+    // Folded is how a unit is drawn without an entry, and a unit that is
+    // gone (G9) has nothing to describe.
+    const base: SidecarLayout = {
+      ...fullLayout(),
+      units: { G1: { expanded: true, bus: '1' }, G9: { expanded: true, bus: '2' } },
+    };
+    const folded = nodes.map((n) =>
+      n.id === 'generator-G1' ? { ...n, data: { ...n.data, unit: { expanded: false } } } : n,
+    );
+    expect(captureLayout({ nodes: folded, edges }, topology, base).units).toEqual({});
+    expect(captureLayout({ nodes, edges }, topology, base).units).toEqual({});
+  });
+
   it('carries over the sections the canvas does not draw from', () => {
     const base: SidecarLayout = {
       ...fullLayout(),
@@ -899,7 +945,6 @@ describe('captureLayout', () => {
       },
     };
     const layout = captureLayout({ nodes, edges }, topology, base);
-    expect(layout.units).toEqual(base.units);
     expect(layout.busbars).toEqual(base.busbars);
     expect(layout.label_offsets).toEqual(base.label_offsets);
     expect(layout.connections).toEqual(base.connections);
@@ -910,7 +955,6 @@ describe('captureLayout', () => {
   it('leaves behind what described an element the case no longer has', () => {
     const base: SidecarLayout = {
       ...fullLayout(),
-      units: { G1: { expanded: true }, G9: { expanded: true } },
       busbars: {
         '2': { length: 180, orientation: 'vertical' },
         '99': { length: 50, orientation: 'horizontal' },
@@ -927,7 +971,6 @@ describe('captureLayout', () => {
       },
     };
     const layout = captureLayout({ nodes, edges: [] }, topology, base);
-    expect(layout.units).toEqual({ G1: { expanded: true } });
     expect(layout.busbars).toEqual({ '2': { length: 180, orientation: 'vertical' } });
     expect(layout.label_offsets).toEqual({ bus: { '1': { dx: 4, dy: -12 } } });
     expect(layout.connections).toEqual({

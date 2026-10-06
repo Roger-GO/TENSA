@@ -528,7 +528,7 @@ def _layout_v2_body() -> dict[str, object]:
         "coordinates": {"1": {"x": 0.0, "y": 0.0}, "2": {"x": 100.0, "y": 50.0}},
         "non_bus_coordinates": {"generator": {"1": {"x": 0.0, "y": -70.0, "bus": "1"}}},
         "controller_coordinates": {"EXST1": {"1": {"x": 64.0, "y": -88.0}}},
-        "units": {"1": {"expanded": True}},
+        "units": {"1": {"expanded": True, "bus": "1"}},
         "busbars": {"2": {"length": 180.0, "orientation": "vertical"}},
         "branches": {
             "line": {

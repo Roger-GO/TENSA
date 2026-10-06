@@ -9,7 +9,9 @@ the same picture:
   every generator, load and shunt, each device with the bus it hangs off.
 - ``controller_coordinates``: a controller that was placed on its own. One with
   no entry is drawn docked beside the device it acts on.
-- ``units``: per generating unit, whether its control chain is shown expanded.
+- ``units``: per generating unit (a generator with its machine and their
+  controllers, drawn as one symbol), whether its control chain is drawn out, and
+  the bus the unit was on when that was chosen.
 - ``busbars``: the length and the orientation of a bus's bar. A bar with no
   length set is as long as what connects to it needs.
 - ``branches``: how a line or a transformer is drawn (``routing``), the points it
@@ -28,10 +30,11 @@ it, so the server only ever hands out and stores the current version.
 Entries are keyed by ANDES idx, and an idx does not always keep its meaning. A
 PSS/E ``.raw`` file holds none, so a system saved as one comes back with its
 devices and branches numbered afresh by the parser, and an element that is
-deleted can give its idx to the next one added. A device's position and a
-branch's route therefore carry what they are anchored to (``bus``, and ``bus1`` /
-``bus2``): a reader uses an entry only for an element on those buses, and can
-match an entry whose idx no longer fits to the element that is there now.
+deleted can give its idx to the next one added. A device's position, the state
+of a generating unit and a branch's route therefore carry what they are anchored
+to (``bus``, and ``bus1`` / ``bus2``): a reader uses an entry only for an element
+on those buses, and can match a position or a route whose idx no longer fits to
+the element that is there now.
 :func:`for_renumbered_copy` is what a copy written in such a format keeps.
 
 The web client is what places things; the server validates the document and
@@ -157,6 +160,15 @@ class LayoutUnit(BaseModel):
             "``true`` when the unit's control chain (exciter, governor, "
             "stabiliser) is drawn out; ``false`` when the unit is collapsed "
             "to its machine symbol."
+        ),
+    )
+    bus: str | None = Field(
+        None,
+        description=(
+            "idx of the bus the unit was on when this was chosen. A reader "
+            "uses the entry only for a unit on that bus, so an idx that has "
+            "come to name another generator does not draw the chain of that "
+            "one out. ``null``: not recorded; the idx alone is trusted."
         ),
     )
 

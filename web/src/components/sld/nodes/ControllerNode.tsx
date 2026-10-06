@@ -9,12 +9,15 @@ import type { SldNodeData } from './BusNode';
 /**
  * Controller node (v3.1 Unit 19).
  *
- * Renders a small docked badge beside the device a dynamic controller
- * references (exciter / governor / PSS / renewable / measurement / profile).
- * `graph.ts` anchors it at a fixed offset off the parent device and stamps a
- * `connectorDx/Dy` vector (controller origin → parent origin) onto the node
- * data so this component can draw an exact tether back to the device — valid
- * for any stack row, unlike a fixed CSS nub.
+ * Renders the badge of a controller that is not named on the symbol of a
+ * generating unit: one that acts on a bus (a PMU), one a saved layout places
+ * on its own, and one whose reference names nothing in the case. (The
+ * exciter, governor and stabiliser of a machine are chips on the symbol of
+ * their unit, `GeneratingUnit.tsx`.) `graph.ts` anchors a docked badge at a
+ * fixed offset off what it is docked to and stamps a `connectorDx/Dy` vector
+ * (controller origin → parent origin) onto the node data so this component
+ * can draw an exact tether back to the parent — valid for any stack row,
+ * unlike a fixed CSS nub.
  *
  * The glyph is discriminated by `subKind` (an inline IEC-flavoured line
  * symbol; per-class IEC 60617 art is deferred). Click to inspect — the

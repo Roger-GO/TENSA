@@ -26,7 +26,7 @@ import type { ReactNode } from 'react';
 let mockNodes: Array<{
   id: string;
   type: string;
-  data: { idx: string; name: string };
+  data: { idx: string; name: string; unit?: unknown };
   position: { x: number; y: number };
   measured?: { width: number; height: number };
 }> = [];
@@ -285,5 +285,61 @@ describe('SldNodeSearch — non-bus device nodes', () => {
     await user.click(screen.getByTestId('sld-node-search-row-G1'));
     expect(useSldStore.getState().selectedNodeId).toBe('generator-G1');
     expect(mockSetCenter).toHaveBeenCalledWith(50, 50, expect.objectContaining({ zoom: 1.5 }));
+  });
+
+  it('lists the models of a generating unit, and shows the symbol of the unit for each', async () => {
+    // Slack 1 with a machine numbered like it and a governor: one node.
+    mockNodes = [
+      ...makeBusNodes(1),
+      {
+        id: 'generator-1',
+        type: 'generator',
+        data: {
+          idx: '1',
+          name: 'Slack',
+          unit: {
+            expanded: false,
+            members: [
+              { kind: 'Slack', idx: '1', name: 'Slack', role: 'generator', depth: 0 },
+              {
+                kind: 'GENROU',
+                idx: '1',
+                name: 'GENROU_1',
+                role: 'machine',
+                nodeId: 'generator-1',
+                depth: 1,
+              },
+              {
+                kind: 'TGOV1',
+                idx: 'TGOV1_1',
+                name: 'TGOV1_1',
+                role: 'governor',
+                nodeId: 'controller-TGOV1-TGOV1_1',
+                depth: 2,
+              },
+            ],
+          },
+        },
+        position: { x: 50, y: 60 },
+        measured: { width: 80, height: 40 },
+      },
+    ];
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    // The bus, the unit, its machine and its governor: no two rows the same to React.
+    const rows = screen.getByTestId('sld-node-search-list').querySelectorAll('[role="option"]');
+    expect([...rows].map((row) => row.getAttribute('data-node-type'))).toEqual([
+      'bus',
+      'generator',
+      'machine',
+      'controller',
+    ]);
+
+    await user.type(screen.getByTestId('sld-node-search-input'), 'tgov');
+    await user.click(screen.getByTestId('sld-node-search-row-TGOV1_1'));
+    // The governor is picked by its own id, and found where its unit is drawn.
+    expect(useSldStore.getState().selectedNodeId).toBe('controller-TGOV1-TGOV1_1');
+    expect(mockSetCenter).toHaveBeenCalledWith(90, 80, expect.objectContaining({ zoom: 1.5 }));
   });
 });

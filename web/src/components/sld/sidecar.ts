@@ -21,18 +21,21 @@
  * 1: controllers placed on their own, the expanded state of generating
  * units, busbar length and orientation, branch routes, label offsets,
  * chosen connection faces and figure settings. The canvas draws from the
- * sections it knows (a bar's length among them, and the connector style
- * among the figure settings) and carries the rest through unchanged, so a
- * section another part of the diagram writes is never lost by a drag.
+ * sections it knows (the units whose control chain is drawn out, a bar's
+ * length, and the connector style among the figure settings) and carries
+ * the rest through unchanged, so a section another part of the diagram
+ * writes is never lost by a drag.
  *
  * Entries are keyed by ANDES idx, and an idx does not always keep its
  * meaning: a PSS/E `.raw` file holds none, so a system saved as one comes
  * back with its devices and branches numbered afresh, and a deleted
- * element can give its idx to the next one added. A device position and a
- * branch route therefore say what they are anchored to (the device's bus,
- * the branch's two buses). `resolveDeviceCoords` and `branchPolylines` use
- * an entry only for an element on those buses, and match an entry whose
- * idx no longer fits to the element that is there now.
+ * element can give its idx to the next one added. A device position, the
+ * state of a generating unit and a branch route therefore say what they
+ * are anchored to (the bus of the device or the unit, the branch's two
+ * buses). `resolveDeviceCoords` and `branchPolylines` use an entry only for
+ * an element on those buses, and match an entry whose idx no longer fits to
+ * the element that is there now; the state of a unit (`unitStatesOf`) is
+ * used only for a unit on its bus.
  *
  * No external dep on Zod; the validator is a hand-written shape check,
  * which keeps the bundle smaller and the failure paths easier to read.
@@ -291,11 +294,12 @@ export function parseSidecar(input: unknown): FullSidecarLayout {
       coordAt,
     ),
     units: mapAt(obj.units, 'sidecar.units', (value, path) => {
-      const expanded = objectAt(value, path).expanded ?? false;
+      const unit = objectAt(value, path);
+      const expanded = unit.expanded ?? false;
       if (typeof expanded !== 'boolean') {
         throw new TypeError(`${path}.expanded: expected boolean`);
       }
-      return { expanded };
+      return { expanded, bus: anchorAt(unit.bus, `${path}.bus`) };
     }),
     busbars: mapAt(obj.busbars, 'sidecar.busbars', (value, path) => {
       const bar = objectAt(value, path);
@@ -668,6 +672,22 @@ export function connectorStyleOf(layout: SidecarLayout | null): ConnectorStyle |
 }
 
 /**
+ * How `layout` draws each generating unit it says something of, by the idx
+ * of the unit, as the graph builder takes it: whether the control chain is
+ * drawn out, and the bus the unit was on when that was chosen. The builder
+ * uses an entry that names a bus only for a unit on that bus.
+ */
+export function unitStatesOf(
+  layout: SidecarLayout | null,
+): Map<string, { expanded: boolean; bus: string | null }> {
+  const out = new Map<string, { expanded: boolean; bus: string | null }>();
+  for (const [idx, unit] of Object.entries(layout?.units ?? {})) {
+    out.set(idx, { expanded: unit.expanded === true, bus: unit.bus ?? null });
+  }
+  return out;
+}
+
+/**
  * The length `layout` sets for the bar of each bus that has one set, by bus
  * idx. A bar with no length set is sized by the diagram to what connects to
  * it.
@@ -682,14 +702,15 @@ export function barLengthsOf(layout: SidecarLayout | null): Map<string, number> 
 
 /**
  * The layout of the diagram as it is drawn: the position of every bus and
- * device, the controllers that were placed on their own, and the route of
- * every branch drawn through fixed points. This is what goes with a saved
- * system, so a reload draws the same picture whatever placed the nodes
- * (a drag, the curated layout of the case, or auto-layout).
+ * device, the controllers that were placed on their own, the generating
+ * units whose control chain is drawn out, and the route of every branch
+ * drawn through fixed points. This is what goes with a saved system, so a
+ * reload draws the same picture whatever placed the nodes (a drag, the
+ * curated layout of the case, or auto-layout).
  *
  * `base` is the layout the diagram was drawn from. The sections the canvas
- * does not write (unit state, busbars, label offsets, connection faces,
- * figure settings) and a branch's chosen faces are carried over from it,
+ * does not write (busbars, label offsets, connection faces, figure
+ * settings) and a branch's chosen faces are carried over from it,
  * minus the entries of elements `topology` no longer has, so a drag never
  * loses what another editor of the layout wrote. `chosen` is what was
  * chosen for the diagram since: a connector style goes into the figure
@@ -704,6 +725,7 @@ export function captureLayout(
   const coordinates: CoordsByIdx = {};
   const nonBus: NonBusOverride[] = [];
   const controllers: NonBusCoordsByModel = {};
+  const units: FullSidecarLayout['units'] = {};
   for (const n of diagram.nodes) {
     const coord = { x: n.position.x, y: n.position.y };
     if (n.type === 'bus') {
@@ -713,8 +735,13 @@ export function captureLayout(
       const modelClass = typeof n.data.kind === 'string' ? n.data.kind : null;
       const bus = typeof n.data.parentBus === 'string' ? n.data.parentBus : null;
       nonBus.push({ uiCategory: n.type, idx, modelClass, coord, bus });
+      // A unit is drawn collapsed unless the layout says otherwise, so only
+      // one whose chain is drawn out needs an entry.
+      const unit = n.data.unit as { expanded?: unknown } | undefined;
+      if (n.type === 'generator' && unit?.expanded === true) units[idx] = { expanded: true, bus };
     } else if (n.type === 'controller' && n.data.placed === true) {
-      // A docked controller follows its device and needs no entry.
+      // A controller that is not placed on its own needs no entry: it is
+      // named on the symbol of its unit, or docked beside what it acts on.
       const { kind, idx } = n.data;
       if (typeof kind === 'string' && typeof idx === 'string') {
         (controllers[kind] ??= {})[idx] = coord;
@@ -748,15 +775,12 @@ export function captureLayout(
 
   const living = elementKeys(topology);
   const drawnBuses = new Set(Object.keys(coordinates));
-  const drawnUnits = new Set(nonBus.filter((o) => o.uiCategory === 'generator').map((o) => o.idx));
   return buildSidecarLayout(coordinates, {
     andesVersion: base?.andes_version,
     nonBusCoords: buildNonBusCoordinates(nonBus),
     sections: {
       controller_coordinates: controllers,
-      units: Object.fromEntries(
-        Object.entries(base?.units ?? {}).filter(([idx]) => drawnUnits.has(idx)),
-      ),
+      units,
       busbars: Object.fromEntries(
         Object.entries(base?.busbars ?? {}).filter(([idx]) => drawnBuses.has(idx)),
       ),

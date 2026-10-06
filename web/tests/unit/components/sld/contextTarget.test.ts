@@ -32,18 +32,50 @@ describe('contextTargetFromNode', () => {
     });
   });
 
-  it.each(['generator', 'load', 'shunt'] as const)(
-    'reads a %s node as a device to inspect',
-    (kind) => {
-      expect(
-        contextTargetFromNode({
-          id: `${kind}-2`,
-          type: kind,
-          data: { idx: '2', name: 'X', kind: 'PV' },
-        }),
-      ).toEqual({ kind: 'device', element: { kind, idx: '2' }, name: 'X', nodeId: `${kind}-2` });
-    },
-  );
+  it.each(['load', 'shunt'] as const)('reads a %s node as a device to inspect', (kind) => {
+    expect(
+      contextTargetFromNode({
+        id: `${kind}-2`,
+        type: kind,
+        data: { idx: '2', name: 'X', kind: 'PQ' },
+      }),
+    ).toEqual({ kind: 'device', element: { kind, idx: '2' }, name: 'X', nodeId: `${kind}-2` });
+  });
+
+  it('reads a generator node as a device to inspect, by its idx and its model', () => {
+    // A static generator and its machine can have the same idx, and are one
+    // node: the model says which of the two the node itself stands for.
+    expect(
+      contextTargetFromNode({
+        id: 'generator-2',
+        type: 'generator',
+        data: { idx: '2', name: 'X', kind: 'PV' },
+      }),
+    ).toEqual({
+      kind: 'device',
+      element: { kind: 'generator', idx: '2', modelClass: 'PV' },
+      name: 'X',
+      nodeId: 'generator-2',
+    });
+    expect(contextTargetFromNode({ id: 'generator-2', type: 'generator', data: {} })).toEqual({
+      kind: 'device',
+      element: { kind: 'generator', idx: 'generator-2' },
+      name: 'generator-2',
+      nodeId: 'generator-2',
+    });
+  });
+
+  it('says of a generator that stands for a unit whether its control chain is drawn out', () => {
+    const node = (expanded: boolean) => ({
+      id: 'generator-2',
+      type: 'generator',
+      data: { idx: '2', name: 'X', kind: 'PV', unit: { members: [], expanded } },
+    });
+    expect(contextTargetFromNode(node(false))).toMatchObject({
+      unit: { idx: '2', expanded: false },
+    });
+    expect(contextTargetFromNode(node(true))).toMatchObject({ unit: { idx: '2', expanded: true } });
+  });
 
   it('reads a controller node with its sub-kind and model class', () => {
     const target = contextTargetFromNode({

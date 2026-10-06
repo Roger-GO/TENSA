@@ -240,6 +240,48 @@ describe('a bus or device picked away from the diagram', () => {
     );
   });
 
+  it('shows the symbol of its unit for a machine or a controller, which has no node of its own', async () => {
+    // A generator with its machine and a governor: one symbol, placed at
+    // (150, -90) and measured at 80 by 41.
+    mockTopology = {
+      ...pair(),
+      generators: [entry(1, 'PV', { bus: 1 }), entry('GENROU_1', 'GENROU', { bus: 1, gen: 1 })],
+      controllers: [entry('TGOV1_1', 'TGOV1', { syn: 'GENROU_1' })],
+    };
+    mockSidecar = buildSidecarLayout(
+      { '1': { x: 0, y: 0 }, '2': { x: 0, y: 200 } },
+      {
+        nonBusCoords: {
+          load: { PQ: { x: 150, y: 120, bus: '2' } },
+          generator: { '1': { x: 150, y: -90, bus: '1' } },
+        },
+      },
+    );
+    await drawAt(FITTED_TO_A_SHORT_PANE);
+    act(() =>
+      drawn.onNodesChange?.([
+        { id: 'generator-1', type: 'dimensions', dimensions: { width: 80, height: 41 } },
+      ]),
+    );
+    expect(drawn.nodes.map((n) => n.id)).not.toContain('generator-GENROU_1');
+    // What a row of the Machines table writes, then a row of the governors.
+    for (const picked of ['generator-GENROU_1', 'controller-TGOV1-TGOV1_1']) {
+      setCenterSpy.mockClear();
+      act(() => useSldStore.getState().setSelectedNodeId(picked));
+      expect(setCenterSpy).toHaveBeenCalledTimes(1);
+      expect(setCenterSpy).toHaveBeenCalledWith(
+        190,
+        -69.5,
+        expect.objectContaining({ zoom: FULL_ZOOM }),
+      );
+      expect((node('generator-1') as { selected?: boolean }).selected).toBe(true);
+    }
+    // And the button above the diagram zooms to the same symbol.
+    setCenterSpy.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom to 1' }));
+    expect(setCenterSpy).toHaveBeenCalledWith(190, -69.5, expect.objectContaining({ zoom: 1 }));
+  });
+
   it('keeps the zoom when it is clicked on the diagram itself, however small', async () => {
     await drawAt(FITTED_TO_A_SHORT_PANE);
     act(() => drawn.onNodeClick?.({}, node('load-PQ')));

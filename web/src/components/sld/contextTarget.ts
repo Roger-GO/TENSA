@@ -15,7 +15,17 @@ export type SldContextTarget =
   | { kind: 'canvas' }
   | { kind: 'bus'; idx: string; name: string; nodeId: string }
   | { kind: 'branch'; idx: string; name: string; transformer: boolean }
-  | { kind: 'device'; element: SelectedElement; name: string; nodeId: string };
+  | {
+      kind: 'device';
+      element: SelectedElement;
+      name: string;
+      nodeId: string;
+      /**
+       * Set for a generator that stands for a unit of several models: the idx
+       * the unit goes by, and whether its control chain is drawn out now.
+       */
+      unit?: { idx: string; expanded: boolean };
+    };
 
 /** The shape of a node's `data` that a menu needs. */
 interface NodeData {
@@ -23,6 +33,7 @@ interface NodeData {
   name?: string;
   kind?: string;
   subKind?: ControllerSubKind;
+  unit?: { expanded?: boolean };
 }
 
 /** The target for a right-click on a React Flow node. */
@@ -34,6 +45,20 @@ export function contextTargetFromNode(node: Pick<Node, 'id' | 'type' | 'data'>):
     case 'bus':
       return { kind: 'bus', idx, name, nodeId: node.id };
     case 'generator':
+      // The symbol stands for a whole unit, whose static generator and
+      // machine can have the same idx, so the element names its model.
+      return {
+        kind: 'device',
+        element:
+          data.kind === undefined
+            ? { kind: 'generator', idx }
+            : { kind: 'generator', idx, modelClass: data.kind },
+        name,
+        nodeId: node.id,
+        ...(data.unit === undefined
+          ? {}
+          : { unit: { idx, expanded: data.unit.expanded === true } }),
+      };
     case 'load':
     case 'shunt':
       return { kind: 'device', element: { kind: node.type, idx }, name, nodeId: node.id };

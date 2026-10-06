@@ -25,13 +25,13 @@ export interface DeviceValueLabelProps {
  * through the values, or when another connector would run through them on
  * the right and the left is free (`data.readoutLeft`: a line that lands on
  * the bar just right of the device). The far side of a device is where the
- * neighbouring buses, devices and controller badges crowd in; this strip is
- * clear of them in the default layout (`DEVICE_VALUE_LABEL`,
- * `CONTROLLER_DOCK` in `graph.ts`). The one device that gets its readout on
- * the far side is one that hangs close under its bus, where the strip holds
- * the label of the bus. Shown only after a converged PF that has a row for
- * the device, never under "Hide labels", and, on a case with many devices,
- * only while the canvas is zoomed in far enough to read it
+ * neighbouring buses and devices crowd in, and where the control chain of a
+ * generating unit is drawn out; this strip is clear of them in the default
+ * layout (`DEVICE_VALUE_LABEL` in `graph.ts`). The one device that gets its
+ * readout on the far side is one that hangs close under its bus, where the
+ * strip holds the label of the bus. Shown only after a converged PF that has
+ * a row for the device, never under "Hide labels", and, on a case with many
+ * devices, only while the canvas is zoomed in far enough to read it
  * (`labelDensity.ts`).
  *
  * The values are the steady-state PF reading, like the bus voltage
