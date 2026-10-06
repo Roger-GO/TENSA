@@ -1,13 +1,16 @@
 /**
  * Every connector of the diagram attaches where it should.
  *
- *   open WSCC 9 and Kundur, drawn in their automatic layout -> each device
- *   connector leaves from the middle of a face of its device and lands on a
- *   tap of its bus's bar, each line and transformer runs at right angles
- *   from a tap to a tap, and every tap has its dot -> drag a load round its
- *   bus -> the connector follows while the pointer is still down -> ask for
- *   right angles from the right-click menu -> the connector turns once ->
- *   reload the page -> the placement and the style are still there
+ *   open WSCC 9, Kundur and IEEE 14, drawn in their automatic layout -> each
+ *   device connector leaves from the middle of a face of its device and
+ *   lands on a tap of its bus's bar without running through another symbol,
+ *   each line and transformer runs at right angles from a tap to a tap, and
+ *   every tap has a dot that stands clear of the next -> ask for right
+ *   angles on IEEE 14, where more devices stand in a row than its bars are
+ *   long -> still no connector runs through a symbol -> drag a load round
+ *   its bus -> the connector follows while the pointer is still down -> ask
+ *   for right angles from the right-click menu -> the connector turns once
+ *   -> reload the page -> the placement and the style are still there
  *
  * It drives the real UI against a real `tensa serve` (see `playwright.config.ts`)
  * in a real browser, and reads what React Flow drew: the box of each node as
@@ -16,8 +19,9 @@
  * connection pass works out; this one checks them where the size of a device
  * is the one the browser measured and the drag a real pointer drag.
  *
- * The drag is made in a copy saved under a name of this run's own, so the
- * example cases the other specs open keep their automatic layout.
+ * The drag is made, and the style chosen, in a copy saved under a name of
+ * this run's own, so the example cases the other specs open keep their
+ * automatic layout.
  */
 import { test, expect, type Page } from './fixtures';
 
@@ -127,6 +131,26 @@ async function drawing(page: Page): Promise<Drawing> {
 /** Half a pixel: the browser lays a node out on whole pixels, the routes are worked out in halves. */
 const NEAR = 0.6;
 
+/** The least distance between two taps of a bar (`TAP_SPACING` in `connections.ts`). */
+const TAP_SPACING = 14;
+
+/** The kinds of node a connector must not run through: the symbols, and the controller badges. */
+const SYMBOLS = new Set(['generator', 'load', 'shunt', 'controller']);
+
+/** Whether the run from `a` to `b` passes through `box`, a pixel or more inside its edge. */
+function passesThrough(a: [number, number], b: [number, number], box: DrawnNode): boolean {
+  const steps = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]));
+  for (let i = 0; i <= steps; i += 1) {
+    const t = steps === 0 ? 0 : i / steps;
+    const x = a[0] + t * (b[0] - a[0]);
+    const y = a[1] + t * (b[1] - a[1]);
+    const inside =
+      x > box.x + 1 && x < box.x + box.width - 1 && y > box.y + 1 && y < box.y + box.height - 1;
+    if (inside) return true;
+  }
+  return false;
+}
+
 /** Whether `point` is on the centre line of the bar of `bus`, at one of its tap dots. */
 function onATap(point: [number, number], bus: DrawnNode): boolean {
   const onLine = Math.abs(point[1] - (bus.y + 3)) < NEAR;
@@ -165,6 +189,14 @@ function problems({ nodes, edges }: Drawing): string[] {
       if (!onAFaceMiddle(first, device)) found.push(`${id}: leaves ${first} off a face middle`);
       if (!onATap(last, bus)) found.push(`${id}: lands at ${last}, not on a tap of its bar`);
       if (edge.points.length > 3) found.push(`${id}: more than one bend`);
+      // It reaches the bar without running through anything else that is drawn there.
+      for (const [otherId, other] of Object.entries(nodes)) {
+        if (other === device || !SYMBOLS.has(other.type)) continue;
+        const through = edge.points.some(
+          (point, i) => i > 0 && passesThrough(edge.points[i - 1]!, point, other),
+        );
+        if (through) found.push(`${id}: runs through ${otherId}`);
+      }
       continue;
     }
     const ends = /bus (.+) to bus (.+)$/.exec(edge.label);
@@ -192,6 +224,15 @@ function problems({ nodes, edges }: Drawing): string[] {
     for (const tap of node.taps ?? []) {
       if (tap < start || tap > end) found.push(`bus ${id}: a tap at ${tap} off the bar`);
     }
+    // Two dots are a spacing apart, whichever face each tap is on: nearer,
+    // they would run into each other (taps in one place share a dot).
+    const dots = [...(node.taps ?? [])].sort((a, b) => a - b);
+    for (let i = 1; i < dots.length; i += 1) {
+      const apart = dots[i]! - dots[i - 1]!;
+      if (apart > NEAR && apart < TAP_SPACING - NEAR) {
+        found.push(`bus ${id}: taps at ${dots[i - 1]} and ${dots[i]} run into each other`);
+      }
+    }
   }
   return found;
 }
@@ -217,7 +258,7 @@ const layoutWritten = (page: Page) =>
       new URL(response.url()).pathname === '/api/workspace/layout',
   );
 
-for (const caseFile of ['wscc9.xlsx', 'kundur_full.xlsx']) {
+for (const caseFile of ['wscc9.xlsx', 'kundur_full.xlsx', 'ieee14_full.xlsx']) {
   test(`${caseFile}: connectors leave the middle of a face and land on a tap of the bar`, async ({
     page,
   }) => {
@@ -231,6 +272,60 @@ for (const caseFile of ['wscc9.xlsx', 'kundur_full.xlsx']) {
     expect(problems(drawn)).toEqual([]);
   });
 }
+
+test('no connector of IEEE 14 runs through another symbol, drawn straight or at a right angle', async ({
+  page,
+}) => {
+  const stem = `connections-row-e2e-${Date.now()}`;
+
+  // IEEE 14 has buses with three and four devices in a row, more than stand
+  // over a bar of the default length: the outer ones are beyond its tips,
+  // with a neighbour between them and their tap.
+  await page.goto('/');
+  await openCase(page, 'ieee14_full.xlsx');
+  const first = await settled(page);
+  const devices = Object.values(first.nodes).filter((node) => SYMBOLS.has(node.type));
+  expect(devices.length).toBeGreaterThan(20);
+  expect(problems(first)).toEqual([]);
+
+  // The style is chosen in a copy, which takes the placement with it.
+  await page.getByTestId('topbar-menu-workspace-trigger').click();
+  await page.getByTestId('topbar-menu-workspace-save-system').click();
+  await page.getByTestId('save-filename').fill(stem);
+  await Promise.all([layoutWritten(page), page.getByTestId('save-confirm').click()]);
+  await openCase(page, `${stem}.xlsx`);
+  const straight = await settled(page);
+  expect(straight.nodes).toEqual(first.nodes);
+  expect(problems(straight)).toEqual([]);
+  const stubs = Object.keys(straight.edges).filter((id) => id.startsWith('stub-'));
+  // Drawn straight, a connector has no bend: square onto the bar, or a diagonal.
+  expect(stubs.filter((id) => straight.edges[id]!.points.length !== 2)).toEqual([]);
+  const diagonal = stubs.filter(
+    (id) => Math.abs(straight.edges[id]!.points[0]![0] - straight.edges[id]!.points[1]![0]) > NEAR,
+  );
+  expect(diagonal.length).toBeGreaterThan(0);
+
+  await page.locator('.react-flow__pane').click({ button: 'right', position: { x: 24, y: 320 } });
+  await Promise.all([
+    layoutWritten(page),
+    page.getByTestId('sld-context-connectors-elbow').click(),
+  ]);
+  const turned = await settled(page);
+  expect(problems(turned)).toEqual([]);
+  // Every connector that was a diagonal now turns once, and every run of
+  // every connector is level or upright.
+  expect(diagonal.filter((id) => turned.edges[id]!.points.length !== 3)).toEqual([]);
+  for (const id of stubs) {
+    const points = turned.edges[id]!.points;
+    for (let i = 1; i < points.length; i += 1) {
+      const [a, b] = [points[i - 1]!, points[i]!];
+      expect(
+        Math.abs(a[0] - b[0]) < NEAR || Math.abs(a[1] - b[1]) < NEAR,
+        `${id}: a run at an angle from ${a} to ${b}`,
+      ).toBe(true);
+    }
+  }
+});
 
 test('a connector follows its device through a drag, turns at a right angle when asked, and comes back so', async ({
   page,
