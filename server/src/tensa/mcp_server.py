@@ -24,9 +24,6 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-# What POST /response-metrics takes in one request.
-from tensa.api.schemas import MAX_METRIC_SAMPLES, MAX_METRIC_SERIES
-
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError as exc:  # pragma: no cover - exercised only without the extra
@@ -283,6 +280,11 @@ def get_response_metrics(
     variables. A run with more samples than the metrics take is read at every
     second or third sample, and the answer says so ("every_nth_sample").
     """
+    # What POST /response-metrics takes in one request. Read here and not at the
+    # top of the module: this is a client of the HTTP API, and the module that
+    # holds the limits brings the server with it (the wrapper, numpy, pyarrow).
+    from tensa.api.schemas import MAX_METRIC_SAMPLES, MAX_METRIC_SERIES
+
     # What the metrics would refuse is refused here, before the run is made for it.
     named = len(dict.fromkeys(dae_vars))
     if named == 0:

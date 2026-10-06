@@ -15,6 +15,9 @@ from __future__ import annotations
 import http.server
 import json
 import re
+import subprocess
+import sys
+import textwrap
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -474,6 +477,32 @@ def test_thinning_keeps_the_first_sample_and_the_last(
     from tensa import mcp_server
 
     assert list(mcp_server._thinned(samples, every)) == kept
+
+
+def test_importing_the_mcp_server_imports_nothing_else_of_the_package() -> None:
+    """It is a client of the HTTP API. The limits its metrics tool reads are the
+    server's, in a module that brings the wrapper, numpy and pyarrow with it, so
+    the tool reads them when it is called. In a fresh interpreter, where nothing
+    has imported them yet."""
+    pytest.importorskip("mcp.server.fastmcp")
+    script = textwrap.dedent(
+        """
+        import json, sys
+        import tensa.mcp_server
+
+        print(json.dumps(sorted(m for m in sys.modules if m.startswith("tensa."))))
+        """
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout.strip().splitlines()[-1]) == ["tensa.mcp_server"]
 
 
 def _curl_commands(script: Path) -> list[str]:
