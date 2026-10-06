@@ -1,21 +1,16 @@
 /**
- * StubEdge — render-smoke + stride-offset honored + dot-render smoke.
+ * StubEdge: the connector of a device to its bus, drawn through the points
+ * of the route `connections.ts` gave the edge.
  *
  * Edge components are inherently visual (they emit paths inside SVG);
  * these tests stub the @xyflow/react `BaseEdge` to a thin pass-through
  * that exposes the path string + style as DOM attributes so we can
  * assert against them without a real React Flow graph.
- *
- * Per the v0.1.y plan, this file is rendering smoke only — no
- * pixel-level assertions.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import type { ComponentProps, ReactNode } from 'react';
 
-// Stub BaseEdge to expose the path string for assertion. We keep
-// `getStraightPath` deterministic (returns the same shape the real
-// implementation does) so the StubEdge logic still runs.
 vi.mock('@xyflow/react', async () => {
   const React = await import('react');
   return {
@@ -34,21 +29,12 @@ vi.mock('@xyflow/react', async () => {
         'data-stroke-dasharray': style?.strokeDasharray,
         'data-stroke-width': style?.strokeWidth,
       }),
-    getStraightPath: ({
-      sourceX,
-      sourceY,
-      targetX,
-      targetY,
-    }: {
-      sourceX: number;
-      sourceY: number;
-      targetX: number;
-      targetY: number;
-    }) => [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, 0, 0],
   };
 });
 
 import { StubEdge } from '@/components/sld/edges/StubEdge';
+import type { ConnectorRoute } from '@/components/sld/connections';
+import { lineStrokeStyle } from '@/components/sld/overlay';
 
 interface RenderEdgeProps {
   sourceX?: number;
@@ -56,8 +42,7 @@ interface RenderEdgeProps {
   targetX?: number;
   targetY?: number;
   data?: {
-    busSide?: 'north' | 'east' | 'south' | 'west';
-    targetStride?: number;
+    route?: ConnectorRoute;
     bucket?: 'generator' | 'load' | 'shunt';
     kind?: string;
   };
@@ -65,9 +50,8 @@ interface RenderEdgeProps {
 
 function renderEdge(props: RenderEdgeProps = {}) {
   // EdgeProps is wide (Position is a string-literal union from
-  // @xyflow/react); the runtime stub of the React Flow primitives
-  // doesn't actually look at sourcePosition/targetPosition for StubEdge,
-  // so we cast through `unknown` rather than reconstruct the full type.
+  // @xyflow/react); StubEdge reads none of it, so we cast through
+  // `unknown` rather than reconstruct the full type.
   const allProps = {
     id: 'stub-edge-1',
     source: 'gen-1',
@@ -88,88 +72,55 @@ function renderEdge(props: RenderEdgeProps = {}) {
 }
 
 describe('<StubEdge />', () => {
-  it('renders a BaseEdge path connecting source to target', () => {
-    const { getByTestId } = renderEdge();
-    const base = getByTestId('stub-edge-base');
-    expect(base).toBeInTheDocument();
-    expect(base.getAttribute('data-path')).toBe('M 0 0 L 100 0');
+  it('draws a straight connector from the port of the device to the tap', () => {
+    const { getByTestId } = renderEdge({
+      data: {
+        route: {
+          points: [
+            [46, 70],
+            [46, 103],
+          ],
+          sourceSide: 'south',
+          targetSide: 'north',
+        },
+      },
+    });
+    expect(getByTestId('stub-edge-base').getAttribute('data-path')).toBe('M46,70 L46,103');
   });
 
-  it('renders the connection-dot circle at the target end', () => {
+  it('draws a connector with a right angle through its corner', () => {
+    const { getByTestId } = renderEdge({
+      data: {
+        route: {
+          points: [
+            [130, 50],
+            [89, 50],
+            [89, 103],
+          ],
+          sourceSide: 'west',
+          targetSide: 'north',
+        },
+      },
+    });
+    expect(getByTestId('stub-edge-base').getAttribute('data-path')).toBe('M130,50 L89,50 L89,103');
+  });
+
+  it('falls back to a line between the two handles when it has no route', () => {
+    const { getByTestId } = renderEdge({ sourceX: 5, sourceY: 6, targetX: 70, targetY: 80 });
+    expect(getByTestId('stub-edge-base').getAttribute('data-path')).toBe('M5,6 L70,80');
+  });
+
+  it('is drawn solid, with the stroke of a branch that has no flow to show', () => {
+    const { getByTestId } = renderEdge();
+    const base = getByTestId('stub-edge-base');
+    const branch = lineStrokeStyle(null);
+    expect(base.getAttribute('data-stroke')).toBe(branch.stroke);
+    expect(base.getAttribute('data-stroke-width')).toBe(String(branch.strokeWidth));
+    expect(base.getAttribute('data-stroke-dasharray')).toBeNull();
+  });
+
+  it('draws no dot of its own: the bar marks every tap', () => {
     const { container } = renderEdge();
-    // The component emits one foreground circle at the bus end.
-    const circles = container.querySelectorAll('circle');
-    expect(circles.length).toBe(1);
-    // No stride / no shift → the dot lands at (targetX, targetY).
-    expect(circles[0]?.getAttribute('cx')).toBe('100');
-    expect(circles[0]?.getAttribute('cy')).toBe('0');
-  });
-
-  it('uses a dashed muted-foreground stroke for the stub line', () => {
-    const { getByTestId } = renderEdge();
-    const base = getByTestId('stub-edge-base');
-    expect(base.getAttribute('data-stroke')).toBe('var(--color-muted-foreground)');
-    expect(base.getAttribute('data-stroke-dasharray')).toBe('4 3');
-  });
-
-  it('applies a horizontal stride offset on north/south sides', () => {
-    // stride=1, side=north → +14 px on x; the circle should land at
-    // (114, 0) not (100, 0).
-    const { container } = renderEdge({
-      data: { busSide: 'north', targetStride: 1 },
-    });
-    const circle = container.querySelector('circle');
-    expect(circle?.getAttribute('cx')).toBe('114');
-    expect(circle?.getAttribute('cy')).toBe('0');
-  });
-
-  it('fans east/west stubs INWARD along the bar (keeps the tap on the thin busbar)', () => {
-    // stride=1, side=east → the tap fans inward along the bar (toward
-    // centre): cx shifts −14 (leftward, inward from the right end), cy
-    // stays on the bar. The old behaviour offset cy and floated the dot
-    // off a 7px-tall busbar.
-    const { container } = renderEdge({
-      data: { busSide: 'east', targetStride: 1 },
-    });
-    const circle = container.querySelector('circle');
-    expect(circle?.getAttribute('cx')).toBe('86');
-    expect(circle?.getAttribute('cy')).toBe('0');
-  });
-
-  it('fans a west stub inward (rightward) and stays on the bar y', () => {
-    // stride=1, side=west → inward is +14 (rightward from the left end).
-    const { container } = renderEdge({
-      data: { busSide: 'west', targetStride: 1 },
-    });
-    const circle = container.querySelector('circle');
-    expect(circle?.getAttribute('cx')).toBe('114');
-    expect(circle?.getAttribute('cy')).toBe('0');
-  });
-
-  it('alternates stride direction (even stride flips sign)', () => {
-    // stride=2 → magnitude=ceil(2/2)=1, sign=-1 → -14 px
-    const { container } = renderEdge({
-      data: { busSide: 'north', targetStride: 2 },
-    });
-    const circle = container.querySelector('circle');
-    expect(circle?.getAttribute('cx')).toBe('86');
-  });
-
-  it('skips stride when busSide is undefined', () => {
-    // No busSide → no shift even if stride is set.
-    const { container } = renderEdge({
-      data: { targetStride: 5 },
-    });
-    const circle = container.querySelector('circle');
-    expect(circle?.getAttribute('cx')).toBe('100');
-    expect(circle?.getAttribute('cy')).toBe('0');
-  });
-
-  it('skips stride when stride is 0 (no shift)', () => {
-    const { container } = renderEdge({
-      data: { busSide: 'north', targetStride: 0 },
-    });
-    const circle = container.querySelector('circle');
-    expect(circle?.getAttribute('cx')).toBe('100');
+    expect(container.querySelectorAll('circle')).toHaveLength(0);
   });
 });

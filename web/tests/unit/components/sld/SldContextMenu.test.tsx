@@ -51,13 +51,20 @@ vi.mock('@/api/queries', async () => {
 
 const onFitView = vi.fn();
 const onResetLayout = vi.fn();
+const onConnectorStyle = vi.fn();
 
 /**
  * Opens the menu for `target`. The surface holds a stand-in for the node React
  * Flow draws for bus 1 and for generator 3: a focusable wrapper with the node's
  * id, which is what Move with arrow keys looks for.
  */
-function openMenu(target: SldContextTarget, { locked = false }: { locked?: boolean } = {}) {
+function openMenu(
+  target: SldContextTarget,
+  {
+    locked = false,
+    connectorStyle,
+  }: { locked?: boolean; connectorStyle?: 'straight' | 'elbow' } = {},
+) {
   const client = new QueryClient();
   render(
     <QueryClientProvider client={client}>
@@ -79,6 +86,8 @@ function openMenu(target: SldContextTarget, { locked = false }: { locked?: boole
           locked={locked}
           onFitView={onFitView}
           onResetLayout={onResetLayout}
+          connectorStyle={connectorStyle}
+          onConnectorStyle={onConnectorStyle}
         />
       </ContextMenu>
     </QueryClientProvider>,
@@ -93,6 +102,7 @@ const BRANCH: SldContextTarget = { kind: 'branch', idx: '5', name: 'Line 5', tra
 beforeEach(() => {
   onFitView.mockReset();
   onResetLayout.mockReset();
+  onConnectorStyle.mockReset();
   currentTopology = TOPOLOGY;
   useSessionStore.setState({ sessionId: parseSessionId('s') });
   useCaseStore.setState({ selectedElement: null, topology: TOPOLOGY });
@@ -412,6 +422,37 @@ describe('menu for the canvas', () => {
     expect(within(menu).queryByTestId('sld-context-fault')).toBeNull();
     expect(within(menu).queryByTestId('sld-context-move')).toBeNull();
     expect(within(menu).getAllByRole('menuitem')).toHaveLength(4);
+  });
+
+  it('says how the connectors of devices are drawn, and lets the other way be chosen', async () => {
+    const menu = await openMenu({ kind: 'canvas' });
+    const straight = within(menu).getByTestId('sld-context-connectors-straight');
+    const elbow = within(menu).getByTestId('sld-context-connectors-elbow');
+    expect(straight).toHaveTextContent('Straight');
+    expect(elbow).toHaveTextContent('Right angle');
+    // Straight until something says otherwise.
+    expect(straight).toHaveAttribute('aria-checked', 'true');
+    expect(elbow).toHaveAttribute('aria-checked', 'false');
+    expect(within(menu).getAllByRole('menuitemradio')).toHaveLength(2);
+
+    await userEvent.click(elbow);
+    expect(onConnectorStyle).toHaveBeenCalledTimes(1);
+    expect(onConnectorStyle).toHaveBeenCalledWith('elbow');
+  });
+
+  it('marks the right angle as chosen when that is how the diagram is drawn', async () => {
+    const menu = await openMenu({ kind: 'canvas' }, { connectorStyle: 'elbow' });
+    expect(within(menu).getByTestId('sld-context-connectors-elbow')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await userEvent.click(within(menu).getByTestId('sld-context-connectors-straight'));
+    expect(onConnectorStyle).toHaveBeenCalledWith('straight');
+  });
+
+  it('keeps the connector style off the menu of a single element', async () => {
+    const menu = await openMenu(BUS);
+    expect(within(menu).queryByTestId('sld-context-connectors-elbow')).toBeNull();
   });
 
   it('offers Save snapshot, which opens the Save snapshot dialog', async () => {

@@ -10,13 +10,16 @@ the same picture:
 - ``controller_coordinates``: a controller that was placed on its own. One with
   no entry is drawn docked beside the device it acts on.
 - ``units``: per generating unit, whether its control chain is shown expanded.
-- ``busbars``: the length and the orientation of a bus's bar.
+- ``busbars``: the length and the orientation of a bus's bar. A bar with no
+  length set is as long as what connects to it needs.
 - ``branches``: how a line or a transformer is drawn (``routing``), the points it
   bends at, and the face of each bus it leaves from.
 - ``label_offsets``: how far a label was moved from where it is drawn by default.
 - ``connections``: the faces a device's connector leaves the device and reaches
   the bus on, where they were chosen and not worked out.
-- ``figure``: the display settings of a figure made from the diagram.
+- ``figure``: the display settings of the diagram and of a figure made from
+  it. ``connector_style`` is the one the diagram itself reads: ``straight``, or
+  ``elbow`` for device connectors drawn with one right angle.
 
 Version 1 of the schema held only the first two. :func:`upgrade_layout` brings a
 version 1 document to the current one, and every read and write here goes through
@@ -167,7 +170,9 @@ class LayoutBusbar(BaseModel):
         None,
         description=(
             "Length of the bar in canvas units. ``null`` leaves it to the "
-            "renderer, which sizes the bar to what connects to it."
+            "renderer, which sizes the bar to what connects to it. A bar "
+            "with a length set is still drawn longer when its connections "
+            "need more room than that."
         ),
         gt=0,
         allow_inf_nan=False,
@@ -362,10 +367,13 @@ class SidecarLayout(BaseModel):
     figure: dict[str, bool | int | float | str] = Field(
         default_factory=dict,
         description=(
-            "Display settings of a figure made from this diagram (for "
-            "example a monochrome style, a line width, which labels are "
-            "shown), by name. Values are booleans, finite numbers or short "
-            f"text; at most {MAX_FIGURE_SETTINGS} settings."
+            "Display settings of this diagram and of a figure made from it "
+            "(for example a monochrome style, a line width, which labels are "
+            "shown), by name. The diagram reads ``connector_style``: "
+            "``straight`` (the default) draws the connector of a generator, "
+            "load or shunt to its bus as one line, ``elbow`` with one right "
+            "angle. Values are booleans, finite numbers or short text; at "
+            f"most {MAX_FIGURE_SETTINGS} settings."
         ),
     )
     last_modified: str = Field(

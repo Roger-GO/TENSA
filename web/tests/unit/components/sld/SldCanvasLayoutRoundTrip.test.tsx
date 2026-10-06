@@ -80,7 +80,6 @@ vi.mock('@xyflow/react', () => ({
   BackgroundVariant: { Lines: 'lines', Dots: 'dots', Cross: 'cross' },
   Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
   SelectionMode: { Partial: 'partial', Full: 'full' },
-  getSmoothStepPath: () => ['M0,0 L1,1', 0, 0, 0, 0],
   useStore: (selector: (s: { transform: [number, number, number] }) => unknown) =>
     selector({ transform: [0, 0, 1] }),
   useReactFlow: () => ({

@@ -226,6 +226,59 @@ describe('GeneratorNode P / Q label', () => {
     expect(getByTestId('generator-values-2').className).toContain('top-full');
   });
 
+  it('is centred on the node while the connector leaves by another face', () => {
+    setPflow(makePflow());
+    for (const connectorFace of [undefined, 'east', 'north'] as const) {
+      const { getByTestId } = render(
+        <GeneratorNode
+          {...props<typeof GeneratorNode>({
+            idx: '2',
+            kind: 'PV',
+            valueSide: 'below',
+            connectorFace,
+          })}
+        />,
+      );
+      const label = getByTestId('generator-values-2');
+      expect(label).not.toHaveAttribute('data-beside-connector');
+      expect(label.className).toContain('-translate-x-1/2');
+      cleanup();
+    }
+  });
+
+  it('starts beside the connector when the connector leaves by the face it hangs off', () => {
+    // The connector runs from the middle of that face: a readout centred on
+    // the node would sit on it.
+    setPflow(makePflow());
+    const below = render(
+      <GeneratorNode
+        {...props<typeof GeneratorNode>({
+          idx: '2',
+          kind: 'PV',
+          valueSide: 'below',
+          connectorFace: 'south',
+        })}
+      />,
+    );
+    const label = below.getByTestId('generator-values-2');
+    expect(label).toHaveAttribute('data-beside-connector', 'true');
+    expect(label.className).toContain('left-1/2');
+    expect(label.className).toContain('ml-1');
+    expect(label.className).not.toContain('-translate-x-1/2');
+    cleanup();
+    const above = render(
+      <LoadNode
+        {...props<typeof LoadNode>({
+          idx: 'PQ_1',
+          kind: 'PQ',
+          valueSide: 'above',
+          connectorFace: 'north',
+        })}
+      />,
+    );
+    expect(above.getByTestId('load-values-PQ_1')).toHaveAttribute('data-beside-connector', 'true');
+  });
+
   it('keeps the label outside the normal flow so the node box does not grow', () => {
     setPflow(makePflow());
     const { getByTestId } = render(

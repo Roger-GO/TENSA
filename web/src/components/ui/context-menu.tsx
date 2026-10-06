@@ -56,6 +56,36 @@ export const ContextMenuItem = forwardRef<
   );
 });
 
+/**
+ * One choice of a `ContextMenuRadioGroup`. The one that is chosen carries a
+ * dot in the gutter the others leave empty.
+ */
+export const ContextMenuRadioItem = forwardRef<
+  ElementRef<typeof ContextMenuPrimitive.RadioItem>,
+  ComponentPropsWithoutRef<typeof ContextMenuPrimitive.RadioItem>
+>(function ContextMenuRadioItem({ className, children, ...props }, ref) {
+  return (
+    <ContextMenuPrimitive.RadioItem
+      ref={ref}
+      className={cn(
+        'relative flex cursor-default items-center gap-2 rounded-[var(--radius-sm)]',
+        'py-1.5 pr-2 pl-6 text-sm outline-none select-none',
+        'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        'data-[highlighted]:bg-muted data-[highlighted]:text-foreground',
+        className,
+      )}
+      {...props}
+    >
+      <span className="absolute left-2 flex h-3 w-3 items-center justify-center">
+        <ContextMenuPrimitive.ItemIndicator>
+          <span className="bg-foreground block h-1.5 w-1.5 rounded-full" />
+        </ContextMenuPrimitive.ItemIndicator>
+      </span>
+      {children}
+    </ContextMenuPrimitive.RadioItem>
+  );
+});
+
 export const ContextMenuLabel = forwardRef<
   ElementRef<typeof ContextMenuPrimitive.Label>,
   ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Label>

@@ -21,8 +21,9 @@
  * 1: controllers placed on their own, the expanded state of generating
  * units, busbar length and orientation, branch routes, label offsets,
  * chosen connection faces and figure settings. The canvas draws from the
- * sections it knows and carries the rest through unchanged, so a section
- * another part of the diagram writes is never lost by a drag.
+ * sections it knows (a bar's length among them, and the connector style
+ * among the figure settings) and carries the rest through unchanged, so a
+ * section another part of the diagram writes is never lost by a drag.
  *
  * Entries are keyed by ANDES idx, and an idx does not always keep its
  * meaning: a PSS/E `.raw` file holds none, so a system saved as one comes
@@ -45,6 +46,7 @@ import type {
   TopologyEntry,
   TopologySummary,
 } from '@/api/types';
+import type { ConnectorStyle } from './connections';
 
 /** Current sidecar schema version. Bumped on incompatible shape changes. */
 export const SIDECAR_SCHEMA_VERSION = '2';
@@ -652,6 +654,33 @@ function keepLiving<T>(
 }
 
 /**
+ * The name the connector style goes by among a layout's `figure` settings:
+ * `straight`, or `elbow` for a connector with one right angle. It is a
+ * setting of the whole diagram, so it sits with the display settings, which
+ * every save path carries and a reset of the placement leaves alone.
+ */
+export const CONNECTOR_STYLE_SETTING = 'connector_style';
+
+/** How `layout` draws the connector of a device to its bus, or `null` when it does not say. */
+export function connectorStyleOf(layout: SidecarLayout | null): ConnectorStyle | null {
+  const value = layout?.figure?.[CONNECTOR_STYLE_SETTING];
+  return value === 'straight' || value === 'elbow' ? value : null;
+}
+
+/**
+ * The length `layout` sets for the bar of each bus that has one set, by bus
+ * idx. A bar with no length set is sized by the diagram to what connects to
+ * it.
+ */
+export function barLengthsOf(layout: SidecarLayout | null): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [idx, bar] of Object.entries(layout?.busbars ?? {})) {
+    if (typeof bar.length === 'number') out.set(idx, bar.length);
+  }
+  return out;
+}
+
+/**
  * The layout of the diagram as it is drawn: the position of every bus and
  * device, the controllers that were placed on their own, and the route of
  * every branch drawn through fixed points. This is what goes with a saved
@@ -659,15 +688,18 @@ function keepLiving<T>(
  * (a drag, the curated layout of the case, or auto-layout).
  *
  * `base` is the layout the diagram was drawn from. The sections the canvas
- * does not draw from yet (unit state, busbars, label offsets, connection
- * faces, figure settings) and a branch's chosen faces are carried over from
- * it, minus the entries of elements `topology` no longer has, so a drag never
- * loses what another editor of the layout wrote.
+ * does not write (unit state, busbars, label offsets, connection faces,
+ * figure settings) and a branch's chosen faces are carried over from it,
+ * minus the entries of elements `topology` no longer has, so a drag never
+ * loses what another editor of the layout wrote. `chosen` is what was
+ * chosen for the diagram since: a connector style goes into the figure
+ * settings (`CONNECTOR_STYLE_SETTING`), over the one `base` has.
  */
 export function captureLayout(
   diagram: { nodes: ReadonlyArray<DiagramNode>; edges: ReadonlyArray<DiagramEdge> },
   topology: TopologySummary,
   base: SidecarLayout | null,
+  chosen: { connectorStyle?: ConnectorStyle | null } = {},
 ): FullSidecarLayout {
   const coordinates: CoordsByIdx = {};
   const nonBus: NonBusOverride[] = [];
@@ -731,7 +763,10 @@ export function captureLayout(
       branches,
       label_offsets: keepLiving(base?.label_offsets, living),
       connections: keepLiving(base?.connections, living),
-      figure: { ...(base?.figure ?? {}) },
+      figure: {
+        ...(base?.figure ?? {}),
+        ...(chosen.connectorStyle ? { [CONNECTOR_STYLE_SETTING]: chosen.connectorStyle } : {}),
+      },
     },
   });
 }

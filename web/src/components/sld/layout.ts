@@ -12,8 +12,8 @@
  * per bus with `'elk.portConstraints': 'FIXED_SIDE'` and points each
  * edge at a specific port chosen via `assignHandles(fromCoord,
  * toCoord)`; ELK's ORTHOGONAL routing then produces per-edge bend
- * points exiting the declared cardinal sides. The bend points feed the
- * `RoutedEdge` component so each line traces a unique corridor.
+ * points exiting the declared cardinal sides. The bend points become the
+ * route each line is drawn through, so each traces a corridor of its own.
  *
  * Design choices:
  *
@@ -38,7 +38,7 @@
 import type { ElkNode, LayoutOptions } from 'elkjs/lib/elk-api';
 import type { TopologySummary } from '@/api/types';
 import type { CoordsByIdx } from './sidecar';
-import { computeHandleAssignments, type Side } from './graph';
+import { NODE_FOOTPRINT, computeHandleAssignments, type Side } from './graph';
 import { elkLayout } from './elkClient';
 
 /**
@@ -55,8 +55,13 @@ export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
   'elk.edgeRouting': 'ORTHOGONAL',
 };
 
-/** Default node footprint passed to ELK (icon + label). */
-const NODE_WIDTH = 60;
+/**
+ * The box ELK lays a bus out as: as wide as the bar the bus is drawn as, so
+ * two buses of one layer never touch, and high enough for the bar and the
+ * label under it. Routes end on the boundary of this box; the diagram
+ * brings them onto the bar (`connections.ts`).
+ */
+const NODE_WIDTH = NODE_FOOTPRINT.bus.width;
 const NODE_HEIGHT = 40;
 
 /** Grid fallback constants. */

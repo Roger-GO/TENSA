@@ -3329,7 +3329,7 @@ export interface components {
         LayoutBusbar: {
             /**
              * Length
-             * @description Length of the bar in canvas units. ``null`` leaves it to the renderer, which sizes the bar to what connects to it.
+             * @description Length of the bar in canvas units. ``null`` leaves it to the renderer, which sizes the bar to what connects to it. A bar with a length set is still drawn longer when its connections need more room than that.
              */
             length?: number | null;
             /**
@@ -4446,7 +4446,7 @@ export interface components {
             };
             /**
              * Figure
-             * @description Display settings of a figure made from this diagram (for example a monochrome style, a line width, which labels are shown), by name. Values are booleans, finite numbers or short text; at most 64 settings.
+             * @description Display settings of this diagram and of a figure made from it (for example a monochrome style, a line width, which labels are shown), by name. The diagram reads ``connector_style``: ``straight`` (the default) draws the connector of a generator, load or shunt to its bus as one line, ``elbow`` with one right angle. Values are booleans, finite numbers or short text; at most 64 settings.
              */
             figure?: {
                 [key: string]: boolean | number | string;

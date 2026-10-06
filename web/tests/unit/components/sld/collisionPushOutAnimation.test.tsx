@@ -64,7 +64,6 @@ vi.mock('@xyflow/react', async () => {
     Controls: () => null,
     MiniMap: () => null,
     BaseEdge: () => null,
-    getSmoothStepPath: () => ['M0,0 L1,1', 0, 0, 0, 0],
     Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
     SelectionMode: { Partial: 'partial', Full: 'full' },
     // Unit 11 — `useReactFlow` is consumed by SldCanvas and the search
@@ -202,7 +201,7 @@ describe('SldCanvas — push-out animation gating', () => {
     expect(genNode.style?.transition).toBeUndefined();
   });
 
-  it('applies transition: transform 200ms when push-out relocates a node between renders', async () => {
+  it('applies transition: transform 200ms when a node is relocated between renders', async () => {
     // First render: bus-1 alone with one generator.
     mockTopology = makeTopology({
       buses: [bus(1)],
@@ -230,10 +229,10 @@ describe('SldCanvas — push-out animation gating', () => {
     const genY = firstRenderGen.position.y;
 
     // Second render: add a load on the same bus and drag-override it
-    // to the generator's natural position. Push-out pre-applies the
-    // override (the load is locked) and shifts the generator off,
-    // registering a position change vs. the prior render → the
-    // animation flag fires on the generator.
+    // to the generator's natural position. The load stands where it was
+    // dropped, so the generator, which nothing has placed, moves to the
+    // free place beside it, registering a position change vs. the prior
+    // render → the animation flag fires on the generator.
     const renderCountBeforeUpdate = rfRenders.length;
     act(() => {
       mockTopology = makeTopology({
@@ -261,7 +260,7 @@ describe('SldCanvas — push-out animation gating', () => {
       const lastFrame = rfRenders.at(-1)!;
       const g = lastFrame.find((n) => n.type === 'generator');
       expect(g).toBeDefined();
-      expect(g!.position.y).not.toBe(genY);
+      expect(g!.position).not.toEqual({ x: genX, y: genY });
     });
     // The transition style is sticky across renders once a node has
     // been relocated by push-out — see SldCanvas's `relocatedIdsRef`.

@@ -416,11 +416,10 @@ describe('buildGraph — push-out integration', () => {
     warnSpy.mockRestore();
   });
 
-  it('shunt push direction is south-west (kind-specific direction)', () => {
-    // Two shunts on the same bus stacked perfectly: the saved layout has S1
-    // where the fan-stack puts S2, which it does not place. The default kind
-    // direction for shunts is left-and-down; after push-out S2 has moved
-    // toward smaller-x and larger-y from S1.
+  it('puts a device the layout does not place beside the one that has its place', () => {
+    // Two shunts on the same bus: the saved layout has S1 where S2 would go
+    // by default, and does not place S2. S2 takes the next free place on
+    // that side of the bar, in the same row, and S1 stays.
     const topology = makeTopology({
       buses: [bus(1)],
       shunts: [shunt('S1', 1), shunt('S2', 1)],
@@ -432,30 +431,19 @@ describe('buildGraph — push-out integration', () => {
     const { nodes } = buildGraph(topology, coords, { nonBusCoords });
     const shunts = nodes.filter((n) => n.type === 'shunt');
     expect(shunts).toHaveLength(2);
-    // After push-out the boxes don't overlap.
-    const s1: PushOutNode = {
-      id: shunts[0]!.id,
+    const box = (n: (typeof shunts)[number]): PushOutNode => ({
+      id: n.id,
       kind: 'shunt',
-      x: shunts[0]!.position.x,
-      y: shunts[0]!.position.y,
-      width: NODE_FOOTPRINT.shunt.width,
-      height: NODE_FOOTPRINT.shunt.height,
+      x: n.position.x + n.initialWidth! / 2,
+      y: n.position.y + n.initialHeight! / 2,
+      width: n.initialWidth!,
+      height: n.initialHeight!,
       locked: false,
       parentBusId: null,
-    };
-    const s2: PushOutNode = {
-      id: shunts[1]!.id,
-      kind: 'shunt',
-      x: shunts[1]!.position.x,
-      y: shunts[1]!.position.y,
-      width: NODE_FOOTPRINT.shunt.width,
-      height: NODE_FOOTPRINT.shunt.height,
-      locked: false,
-      parentBusId: null,
-    };
-    expect(overlaps(s1, s2)).toBe(false);
+    });
+    expect(overlaps(box(shunts[0]!), box(shunts[1]!))).toBe(false);
     expect(shunts[0]!.position).toEqual(s2Default);
-    expect(shunts[1]!.position.x).toBeLessThan(s2Default.x);
-    expect(shunts[1]!.position.y).toBeGreaterThan(s2Default.y);
+    expect(shunts[1]!.position.y).toBe(s2Default.y);
+    expect(shunts[1]!.position.x).not.toBe(s2Default.x);
   });
 });

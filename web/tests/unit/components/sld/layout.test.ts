@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ElkNode } from 'elkjs/lib/elk-api';
 import { autoLayout, gridLayout, layoutSignature } from '@/components/sld/layout';
 import { elkLayout } from '@/components/sld/elkClient';
+import { BAR_LENGTH } from '@/components/sld/connections';
 import type { TopologySummary, TopologyEntry } from '@/api/types';
 
 vi.mock('@/components/sld/elkClient', async () => {
@@ -149,6 +150,50 @@ describe('autoLayout', () => {
       expect(warnSpy).toHaveBeenCalled();
     } finally {
       warnSpy.mockRestore();
+    }
+  });
+
+  it('lays a bus out as wide as its bar, so two buses of one layer never touch', async () => {
+    // A fan: bus 1 on top, its three neighbours side by side in the layer below.
+    const topology = makeTopology(
+      [bus(1, 'b1'), bus(2, 'b2'), bus(3, 'b3'), bus(4, 'b4')],
+      [line(1, 1, 2), line(2, 1, 3), line(3, 1, 4)],
+    );
+    const { coords } = await autoLayout(topology);
+    // Every pass gives ELK the bar's length as the width of the box.
+    for (const [graph] of vi.mocked(elkLayout).mock.calls) {
+      for (const child of (graph as ElkNode).children ?? []) {
+        expect(child.width).toBe(BAR_LENGTH);
+      }
+    }
+    const row = ['2', '3', '4'].map((id) => coords[id]!);
+    expect(new Set(row.map((c) => c.y)).size).toBe(1);
+    const xs = row.map((c) => c.x).sort((a, b) => a - b);
+    // A bar drawn at each x reaches BAR_LENGTH to the right of it.
+    expect(xs[1]! - xs[0]!).toBeGreaterThan(BAR_LENGTH);
+    expect(xs[2]! - xs[1]!).toBeGreaterThan(BAR_LENGTH);
+  });
+
+  it('routes each branch out of a face of the bar when its buses stand one above the other', async () => {
+    const topology = makeTopology(
+      [bus(1, 'b1'), bus(2, 'b2'), bus(3, 'b3')],
+      [line(1, 1, 2), line(2, 1, 3)],
+    );
+    const { coords, bendPoints } = await autoLayout(topology);
+    for (const [id, target] of [
+      ['line-1', '2'],
+      ['line-2', '3'],
+    ] as const) {
+      const route = bendPoints.get(id)!;
+      const [start, end] = [route[0]!, route[route.length - 1]!];
+      // Out of the bottom of the box of bus 1, within the bar's length...
+      expect(start[0]).toBeGreaterThanOrEqual(coords['1']!.x);
+      expect(start[0]).toBeLessThanOrEqual(coords['1']!.x + BAR_LENGTH);
+      expect(start[1]).toBeGreaterThan(coords['1']!.y);
+      // ...and in at the top of the box of the other bus, which is the bar itself.
+      expect(end[1]).toBe(coords[target]!.y);
+      expect(end[0]).toBeGreaterThanOrEqual(coords[target]!.x);
+      expect(end[0]).toBeLessThanOrEqual(coords[target]!.x + BAR_LENGTH);
     }
   });
 

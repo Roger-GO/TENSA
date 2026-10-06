@@ -208,7 +208,6 @@ vi.mock('@xyflow/react', async () => {
       }),
     BackgroundVariant: { Lines: 'lines', Dots: 'dots', Cross: 'cross' },
     BaseEdge: () => null,
-    getSmoothStepPath: () => ['M0,0 L1,1', 0, 0, 0, 0],
     Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
     SelectionMode: { Partial: 'partial', Full: 'full' },
     // The generator / load nodes read the zoom to decide whether to draw
@@ -1497,5 +1496,33 @@ describe('SldCanvas', () => {
     fireEvent.contextMenu(screen.getByTestId('sld-canvas-surface'));
     fireEvent.click(await screen.findByTestId('sld-context-fit-view'));
     await waitFor(() => expect(fitViewSpy).toHaveBeenCalledTimes(1));
+  });
+
+  it('the canvas menu sets how device connectors are drawn, and shows the choice', async () => {
+    const info = vi.spyOn(toast, 'info').mockReturnValue('id');
+    try {
+      loadSavedCase();
+      await renderLoaded();
+      fireEvent.contextMenu(screen.getByTestId('sld-canvas-surface'));
+      const elbow = await screen.findByTestId('sld-context-connectors-elbow');
+      expect(elbow).toHaveAttribute('aria-checked', 'false');
+      fireEvent.click(elbow);
+      await waitFor(() => expect(useCaseStore.getState().connectorStyle).toBe('elbow'));
+      // It says what changed: on a diagram whose devices all stand square
+      // over their taps nothing moves.
+      expect(info).toHaveBeenCalledWith(
+        'Device connectors turn at a right angle',
+        expect.objectContaining({ description: expect.stringContaining('Saved with the layout') }),
+      );
+
+      fireEvent.contextMenu(screen.getByTestId('sld-canvas-surface'));
+      expect(await screen.findByTestId('sld-context-connectors-elbow')).toHaveAttribute(
+        'aria-checked',
+        'true',
+      );
+    } finally {
+      info.mockRestore();
+      act(() => useCaseStore.setState({ connectorStyle: null }));
+    }
   });
 });

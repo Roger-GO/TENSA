@@ -96,4 +96,13 @@ describe('canvas command bridge', () => {
   it('reaches nobody, without an error, when no canvas is mounted', () => {
     expect(() => __requestSldCommand('fit-view')).not.toThrow();
   });
+
+  it('carries the choice of how device connectors are drawn', () => {
+    const seen = vi.fn();
+    const unsubscribe = subscribeSldCommand(seen);
+    __requestSldCommand('connectors-elbow');
+    __requestSldCommand('connectors-straight');
+    unsubscribe();
+    expect(seen.mock.calls).toEqual([['connectors-elbow'], ['connectors-straight']]);
+  });
 });

@@ -19,6 +19,7 @@ import type {
   OnNodesChange,
   OnNodeDrag,
   NodeChange,
+  NodeDimensionChange,
   NodePositionChange,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -56,7 +57,6 @@ import { LoadNode } from './nodes/LoadNode';
 import { ShuntNode } from './nodes/ShuntNode';
 import { ControllerNode } from './nodes/ControllerNode';
 import { TopologyEdge } from './edges/TopologyEdge';
-import { RoutedEdge } from './edges/RoutedEdge';
 import { TransformerEdge } from './edges/TransformerEdge';
 import { StubEdge } from './edges/StubEdge';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
@@ -65,10 +65,13 @@ import { SldVoltageLegend } from './SldVoltageLegend';
 import { SldLimitsLegend } from './SldLimitsLegend';
 import { useAutoLayout } from './useAutoLayout';
 import {
+  CONNECTOR_STYLE_SETTING,
+  barLengthsOf,
   branchPolylines,
   buildSidecarLayout,
   cancelPendingSidecarPut,
   captureLayout,
+  connectorStyleOf,
   controllerCoordsAsMap,
   debouncedPutSidecar,
   flushPendingSidecarPut,
@@ -78,7 +81,14 @@ import {
   type CoordsByIdx,
 } from './sidecar';
 import { curatedLayoutFor } from './curated';
-import { buildGraph, computeHandleAssignments } from './graph';
+import { buildGraph, DEVICE_PORT, SOURCE_HANDLE, TARGET_HANDLE } from './graph';
+import {
+  DEFAULT_CONNECTOR_STYLE,
+  layoutConnections,
+  type ConnectorRoute,
+  type ConnectorStyle,
+  type NodeSize,
+} from './connections';
 import { cn } from '@/lib/cn';
 
 const NODE_TYPES: NodeTypes = {
@@ -90,9 +100,12 @@ const NODE_TYPES: NodeTypes = {
   controller: ControllerNode,
 };
 
+// A line that keeps a stored route (`routed`) is drawn like one that is routed
+// from where its buses sit (`topology`): either reaches its component as the
+// points to draw through.
 const EDGE_TYPES: EdgeTypes = {
   topology: TopologyEdge,
-  routed: RoutedEdge,
+  routed: TopologyEdge,
   transformer: TransformerEdge,
   stub: StubEdge,
 };
@@ -356,9 +369,7 @@ function SldCanvasInner({
   // curated/sidecar coords React Flow renders, and the polyline would
   // hang in mid-air. A saved layout brings its own routes instead: the
   // ones that were on screen when it was written, so a diagram saved from
-  // auto-layout comes back with the same lines. The handle assignments
-  // still flow through both paths so co-handle stride works for curated
-  // cases too.
+  // auto-layout comes back with the same lines.
   const usingAutoLayout = curated === null && storedSidecar === null;
   const storedBends = useMemo(
     () => branchPolylines(storedSidecar, topology),
@@ -394,28 +405,15 @@ function SldCanvasInner({
     () => resolveDeviceCoords(storedSidecar?.non_bus_coordinates, topology),
     [storedSidecar, topology],
   );
+  // The bars a layout gives a length of their own; the rest are sized by
+  // what connects to them.
+  const barLengths = useMemo(() => barLengthsOf(savedLayout ?? curated), [savedLayout, curated]);
   const baseGraph = useMemo(() => {
     if (!coords) return null;
-    // Effective coords = the layout coords with user drag-overrides folded
-    // in for buses. The handle assignment (which side of each bus an edge
-    // leaves from) must be computed against where the bus ACTUALLY sits, or
-    // a moved bus's edges leave from the wrong side and look disconnected.
-    const effectiveCoords =
-      Object.keys(dragOverrides).length === 0
-        ? coords
-        : (() => {
-            const merged: typeof coords = { ...coords };
-            for (const [id, pos] of Object.entries(dragOverrides)) {
-              if (merged[id] !== undefined) merged[id] = pos; // bus coords only
-            }
-            return merged;
-          })();
-    const { branches, stubs } = computeHandleAssignments(topology, effectiveCoords);
     const bendPoints = usingAutoLayout ? (autoBendPoints ?? undefined) : storedBends;
     const built = buildGraph(topology, coords, {
-      handleAssignments: branches,
-      stubAssignments: stubs,
       bendPoints,
+      barLengths,
       nonBusCoords: nonBusCoordsMap,
       controllerCoords,
       // Drag overrides flow into buildGraph so the push-out pass
@@ -492,6 +490,7 @@ function SldCanvasInner({
     controllerCoords,
     dragOverrides,
     nonBusCoordsMap,
+    barLengths,
   ]);
 
   // Prune drag overrides for nodes that no longer exist (user reloaded,
@@ -516,6 +515,10 @@ function SldCanvasInner({
   // besides moving nodes (recording the overrides) happens in the handler and
   // not inside a state updater, which React runs while rendering.
   const nodesRef = useRef<Node[]>([]);
+  // The size React Flow measured each node at. A device's box is as wide as
+  // its name, and its connector leaves from the middle of a face, so the
+  // connection pass below needs the real box and not the size hint.
+  const [sizes, setSizes] = useState<ReadonlyMap<string, NodeSize>>(NO_SIZES);
 
   useEffect(() => {
     if (!baseGraph) return;
@@ -523,6 +526,40 @@ function SldCanvasInner({
     setNodes(baseGraph.nodes);
     setEdges(baseGraph.edges);
   }, [baseGraph]);
+
+  // How device connectors are drawn: what was chosen in this visit, else what
+  // the saved layout says, else straight.
+  const chosenConnectorStyle = useCaseStore((s) => s.connectorStyle);
+  const connectorStyle: ConnectorStyle =
+    chosenConnectorStyle ?? connectorStyleOf(savedLayout) ?? DEFAULT_CONNECTOR_STYLE;
+
+  // Where every connector attaches and runs, and how long every bar is, from
+  // where the nodes are now. `nodes` changes on every move of a drag, so the
+  // taps, the faces and the routes follow the pointer.
+  const connections = useMemo(
+    () => layoutConnections(nodes, edges, { sizes, connectorStyle, barLengths }),
+    [nodes, edges, sizes, connectorStyle, barLengths],
+  );
+  // The edges with their routes. An edge whose route did not change keeps its
+  // object, so React Flow redraws only the connectors that moved.
+  const routedEdgesRef = useRef<Map<string, RoutedEdgeEntry>>(new Map());
+  const routedEdges = useMemo(() => {
+    const next = new Map<string, RoutedEdgeEntry>();
+    const out = edges.map((edge) => {
+      const route = connections.routes.get(edge.id);
+      if (!route) return edge;
+      const signature = JSON.stringify(route);
+      const held = routedEdgesRef.current.get(edge.id);
+      const entry =
+        held !== undefined && held.base === edge && held.signature === signature
+          ? held
+          : { base: edge, signature, edge: withRoute(edge, route) };
+      next.set(edge.id, entry);
+      return entry.edge;
+    });
+    routedEdgesRef.current = next;
+    return out;
+  }, [edges, connections]);
 
   // On drag stop, persist the updated coords. Two channels:
   //
@@ -556,6 +593,7 @@ function SldCanvasInner({
   }, []);
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
+      setSizes((held) => withMeasuredSizes(held, changes));
       let next = applyPositionChanges(nodesRef.current, changes);
       const dragEnded = changes.some(
         (c): c is NodePositionChange =>
@@ -600,7 +638,9 @@ function SldCanvasInner({
     // A graph whose coords belong to the topology of a render ago is redrawn
     // at once; a write asked for meanwhile waits for the graph that follows.
     if (!baseGraph || !coordsAreCurrent) return;
-    const layout = captureLayout(baseGraph, topology, savedLayout);
+    const layout = captureLayout(baseGraph, topology, savedLayout, {
+      connectorStyle: chosenConnectorStyle,
+    });
     setDiagramLayout(layout);
     if (!persistRequestedRef.current) return;
     persistRequestedRef.current = false;
@@ -612,6 +652,7 @@ function SldCanvasInner({
     coordsAreCurrent,
     topology,
     savedLayout,
+    chosenConnectorStyle,
     primaryPath,
     putSidecar,
     setDiagramLayout,
@@ -722,12 +763,25 @@ function SldCanvasInner({
         const className = isDeEnergised
           ? `${baseClassName} sld-bus-de-energised opacity-40 grayscale`.trim()
           : baseClassName || undefined;
+        // What the connection pass worked out for this node: the bar of a
+        // bus with its taps, and the face a device's connector leaves by.
+        const bar = isBus ? connections.bars.get(n.id) : undefined;
+        const connectorFace = isBus
+          ? undefined
+          : connections.routes.get(`stub-${n.id}`)?.sourceSide;
+        // A node object without its measured size makes React Flow measure
+        // the node again, and report the size again, each time the object is
+        // replaced. Handing the size back keeps one measurement per node.
+        const measured = sizes.get(n.id);
         return {
           ...n,
+          ...(measured !== undefined ? { measured } : {}),
           selected,
           className,
           data: {
             ...(n.data as Record<string, unknown>),
+            ...(bar !== undefined ? { bar } : {}),
+            ...(connectorFace !== undefined ? { connectorFace } : {}),
             // Attribute echoed onto BusNode's wrapper via the spread
             // pattern in the React Flow node mapping; tests assert on
             // this exact attribute rather than the className so the
@@ -744,7 +798,15 @@ function SldCanvasInner({
           },
         };
       }),
-    [nodes, selectedElement, selectedNodeId, connectivityResult, energisedBusIdxes],
+    [
+      nodes,
+      selectedElement,
+      selectedNodeId,
+      connectivityResult,
+      energisedBusIdxes,
+      connections,
+      sizes,
+    ],
   );
 
   // Pan-on-selection effect (Unit 11). When `selectedNodeId` flips,
@@ -858,7 +920,14 @@ function SldCanvasInner({
       reported();
       return;
     }
-    putSidecar(buildSidecarLayout({}, { sections: { figure: previousSaved.figure } }), {
+    // The connector style is a figure setting too; one chosen in this visit
+    // may not have reached the file yet.
+    const chosen = useCaseStore.getState().connectorStyle;
+    const figure = {
+      ...(previousSaved.figure ?? {}),
+      ...(chosen !== null ? { [CONNECTOR_STYLE_SETTING]: chosen } : {}),
+    };
+    putSidecar(buildSidecarLayout({}, { sections: { figure } }), {
       onSuccess: reported,
       onError: (err) => {
         setDragOverrides(previousOverrides);
@@ -867,13 +936,38 @@ function SldCanvasInner({
     });
   }, [primaryPath, storedSidecar, putSidecar, setDragOverrides]);
 
+  // Draw the device connectors straight, or with a right angle. The choice is
+  // a setting of the diagram and is kept like a drag: in the store for this
+  // visit, in the layout every save sends, and in the file beside the case.
+  const setConnectorStyle = useCaseStore((s) => s.setConnectorStyle);
+  const chooseConnectorStyle = useCallback(
+    (style: ConnectorStyle) => {
+      if (style === connectorStyle) return;
+      setConnectorStyle(style);
+      persistRequestedRef.current = true;
+      toast.info(
+        style === 'elbow'
+          ? 'Device connectors turn at a right angle'
+          : 'Device connectors are drawn straight',
+        {
+          description:
+            style === 'elbow'
+              ? 'A connector turns once where its device does not sit square to the bar. Saved with the layout.'
+              : 'A connector runs in one line from the device to the bar. Saved with the layout.',
+        },
+      );
+    },
+    [connectorStyle, setConnectorStyle],
+  );
+
   useEffect(
     () =>
       subscribeSldCommand((command) => {
         if (command === 'fit-view') fitView();
-        else resetLayout();
+        else if (command === 'reset-layout') resetLayout();
+        else chooseConnectorStyle(command === 'connectors-elbow' ? 'elbow' : 'straight');
       }),
-    [fitView, resetLayout],
+    [fitView, resetLayout, chooseConnectorStyle],
   );
 
   // ---- Right-click menu ----------------------------------------------------
@@ -907,10 +1001,10 @@ function SldCanvasInner({
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (e.pointerType === 'mouse' || contextMenuOpenRef.current) return;
       if (!(e.target instanceof Element) || !e.currentTarget.contains(e.target)) return;
-      const next = contextTargetAt(e.target, nodesWithSelection, edges);
+      const next = contextTargetAt(e.target, nodesWithSelection, routedEdges);
       setContextTarget((held) => (sameContextTarget(held, next) ? held : next));
     },
-    [nodesWithSelection, edges],
+    [nodesWithSelection, routedEdges],
   );
   const onNodeContextMenu: NodeMouseHandler = useCallback((_e, node) => {
     setContextTarget(contextTargetFromNode(node));
@@ -993,7 +1087,7 @@ function SldCanvasInner({
           >
             <ReactFlow
               nodes={nodesWithSelection}
-              edges={edges}
+              edges={routedEdges}
               onNodesChange={onNodesChange}
               onNodeDragStart={onNodeDragStart}
               onNodeDragStop={onNodeDragStop}
@@ -1061,6 +1155,8 @@ function SldCanvasInner({
           locked={locked}
           onFitView={fitView}
           onResetLayout={resetLayout}
+          connectorStyle={connectorStyle}
+          onConnectorStyle={chooseConnectorStyle}
         />
       </ContextMenu>
     </div>
@@ -1121,6 +1217,52 @@ function ConnectivityRecomputeButton() {
           : 'Recompute connectivity'}
     </button>
   );
+}
+
+const NO_SIZES: ReadonlyMap<string, NodeSize> = new Map();
+
+/** An edge as the canvas last handed it to React Flow, and what it was made from. */
+interface RoutedEdgeEntry {
+  base: Edge;
+  signature: string;
+  edge: Edge;
+}
+
+/**
+ * `edge` with its route, and attached to the handles on the sides the route
+ * leaves and lands by: the port of the device's face, the face or end of the
+ * bar. The components draw from the route; the handles keep what React Flow
+ * itself knows of the edge true to the picture.
+ */
+function withRoute(edge: Edge, route: ConnectorRoute): Edge {
+  return {
+    ...edge,
+    sourceHandle:
+      edge.type === 'stub' ? DEVICE_PORT[route.sourceSide] : SOURCE_HANDLE[route.sourceSide],
+    targetHandle: TARGET_HANDLE[route.targetSide],
+    data: { ...(edge.data as Record<string, unknown> | undefined), route },
+  };
+}
+
+/**
+ * `held` with the sizes React Flow reports in `changes`; `held` itself when
+ * none of them is new, so a measurement that changes nothing redraws nothing.
+ */
+function withMeasuredSizes(
+  held: ReadonlyMap<string, NodeSize>,
+  changes: NodeChange[],
+): ReadonlyMap<string, NodeSize> {
+  let next: Map<string, NodeSize> | null = null;
+  for (const c of changes) {
+    if (c.type !== 'dimensions') continue;
+    const measured = (c as NodeDimensionChange).dimensions;
+    if (!measured || !(measured.width > 0) || !(measured.height > 0)) continue;
+    const known = (next ?? held).get(c.id);
+    if (known && known.width === measured.width && known.height === measured.height) continue;
+    next ??= new Map(held);
+    next.set(c.id, { width: measured.width, height: measured.height });
+  }
+  return next ?? held;
 }
 
 /** Apply React Flow position changes to a node array. */

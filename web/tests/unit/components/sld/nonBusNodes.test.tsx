@@ -3,12 +3,23 @@
  *
  * Verifies that `buildGraph` produces React Flow nodes for generators,
  * loads, and shunts anchored to their parent bus, plus stub edges
- * connecting each non-bus node to the bus's appropriate cardinal
- * handle. Transformers stay as edges (TransformerEdge) — these tests
- * cover that they don't accidentally emit a node.
+ * connecting each non-bus node to its bus, and that a device the layout
+ * does not place is put over a free part of the bar. Transformers stay as
+ * edges (TransformerEdge) — these tests cover that they don't accidentally
+ * emit a node.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { buildGraph, DEVICE_VALUE_LABEL, NODE_FOOTPRINT } from '@/components/sld/graph';
+import {
+  buildGraph,
+  deviceBoxSize,
+  freeColumn,
+  DEVICE_COLUMN_GAP,
+  DEVICE_COLUMN_OFFSET,
+  DEVICE_ROW_OFFSET,
+  DEVICE_VALUE_LABEL,
+  NODE_FOOTPRINT,
+} from '@/components/sld/graph';
+import { layoutConnections } from '@/components/sld/connections';
 import type { TopologySummary, TopologyEntry } from '@/api/types';
 
 function bus(idx: number | string, name = `b${idx}`): TopologyEntry {
@@ -84,6 +95,8 @@ describe('buildGraph — non-bus nodes', () => {
     expect(stub?.type).toBe('stub');
     expect(stub?.source).toBe('generator-GEN_1');
     expect(stub?.target).toBe('1');
+    // From the port on the face of the device that looks at the bus.
+    expect(stub?.sourceHandle).toBe('port-south');
     expect(stub?.targetHandle).toBe('north-target');
   });
 
@@ -110,10 +123,11 @@ describe('buildGraph — non-bus nodes', () => {
     expect(loadNode).toBeDefined();
     expect(loadNode?.position.y).toBeGreaterThan(100); // south of bus
     const stub = edges.find((e) => e.id === 'stub-load-PQ_1');
+    expect(stub?.sourceHandle).toBe('port-north');
     expect(stub?.targetHandle).toBe('south-target');
   });
 
-  it('emits a shunt node south-west of the bus + stub to west handle', () => {
+  it('emits a shunt node south of the bus, under the bar like a load', () => {
     const topology = makeTopology({
       buses: [bus(1)],
       shunts: [shunt('SH1', 1)],
@@ -121,9 +135,9 @@ describe('buildGraph — non-bus nodes', () => {
     const { nodes, edges } = buildGraph(topology, { '1': { x: 100, y: 100 } });
     const shuntNode = nodes.find((n) => n.type === 'shunt');
     expect(shuntNode).toBeDefined();
-    expect(shuntNode?.position.x).toBeLessThan(100); // west of bus
+    expect(shuntNode?.position.y).toBe(100 + DEVICE_ROW_OFFSET);
     const stub = edges.find((e) => e.id === 'stub-shunt-SH1');
-    expect(stub?.targetHandle).toBe('west-target');
+    expect(stub?.targetHandle).toBe('south-target');
   });
 
   it('routes transformers as edges (not nodes) with type=transformer', () => {
@@ -513,7 +527,7 @@ describe('buildGraph — minimap size hints', () => {
     }
   });
 
-  it('uses the per-kind NODE_FOOTPRINT for bus and device nodes', () => {
+  it('uses NODE_FOOTPRINT for a bus, and the box its label gives for a device', () => {
     const topology = makeTopology({
       buses: [bus(1)],
       generators: [gen('GEN_1', 1)],
@@ -523,14 +537,15 @@ describe('buildGraph — minimap size hints', () => {
     const { nodes } = buildGraph(topology, { '1': { x: 0, y: 100 } });
     const sized = (type: string) => nodes.find((n) => n.type === type) as SizedNode | undefined;
 
-    expect(sized('bus')?.initialWidth).toBe(92);
-    expect(sized('bus')?.initialHeight).toBe(44);
-    expect(sized('generator')?.initialWidth).toBe(50);
-    expect(sized('generator')?.initialHeight).toBe(46);
-    expect(sized('load')?.initialWidth).toBe(50);
-    expect(sized('load')?.initialHeight).toBe(46);
-    expect(sized('shunt')?.initialWidth).toBe(50);
-    expect(sized('shunt')?.initialHeight).toBe(46);
+    expect(sized('bus')?.initialWidth).toBe(NODE_FOOTPRINT.bus.width);
+    expect(sized('bus')?.initialHeight).toBe(NODE_FOOTPRINT.bus.height);
+    // The helpers above name a device `<kind>-<idx>`.
+    expect(sized('generator')).toMatchObject({
+      initialWidth: deviceBoxSize('gen-GEN_1').width,
+      initialHeight: 41,
+    });
+    expect(sized('load')?.initialWidth).toBe(deviceBoxSize('load-PQ_1').width);
+    expect(sized('shunt')?.initialWidth).toBe(deviceBoxSize('shunt-SH1').width);
   });
 
   it('sizes controller badges with the 28×28 glyph footprint', () => {
@@ -544,5 +559,153 @@ describe('buildGraph — minimap size hints', () => {
     expect(ctrl).toBeDefined();
     expect(ctrl?.initialWidth).toBe(28);
     expect(ctrl?.initialHeight).toBe(28);
+  });
+});
+
+describe('deviceBoxSize', () => {
+  it('is as wide as the glyph for a short label and as the text for a long one', () => {
+    // What the nodes measure in the browser: 38 for "2", 41 for "PQ_10", 57 for "GENROU_3".
+    expect(deviceBoxSize('2')).toEqual({ width: 38, height: 41 });
+    expect(deviceBoxSize('PQ_10')).toEqual({ width: 41, height: 41 });
+    expect(deviceBoxSize('GENROU_3')).toEqual({ width: 57, height: 41 });
+  });
+});
+
+describe('freeColumn', () => {
+  const lo = 3;
+  const hi = 89;
+  const middle = 46;
+
+  it('takes the place it prefers when nothing is in the way', () => {
+    expect(freeColumn(79, 19, [], lo, hi, middle)).toBe(79);
+  });
+
+  it('stands a gap clear of a branch that lands there', () => {
+    // A branch at 60: a box 19 either side has its edge 8 from the line.
+    const x = freeColumn(60, 19, [{ x: 60, half: 0 }], lo, hi, middle);
+    expect(Math.abs(x - 60)).toBe(19 + DEVICE_COLUMN_GAP);
+    // Of the two sides, the one closer to the middle of the bar.
+    expect(x).toBe(33);
+  });
+
+  it('stands beside a device that is already there', () => {
+    const x = freeColumn(79, 19, [{ x: 79, half: 19 }], lo, hi, middle);
+    expect(x).toBe(79 - (19 + 19 + DEVICE_COLUMN_GAP));
+  });
+
+  it('prefers a place over the bar to a nearer one past its tip', () => {
+    // 84 is nearer (taken: 30..68 by a wide device), but past the tip; 3 is on the bar.
+    const taken = [{ x: 49, half: 19 }];
+    const x = freeColumn(60, 6, taken, lo, hi, middle);
+    expect(x).toBe(82);
+    // With the right side taken too, it goes to the left end of the bar
+    // though the place past the right tip is nearer.
+    const crowded = [...taken, { x: 82, half: 6 }];
+    expect(freeColumn(60, 6, crowded, lo, hi, middle)).toBe(49 - (19 + 6 + DEVICE_COLUMN_GAP));
+  });
+
+  it('goes past a tip when the bar is full', () => {
+    const taken = [
+      { x: 20, half: 19 },
+      { x: 66, half: 19 },
+    ];
+    const x = freeColumn(66, 19, taken, lo, hi, middle);
+    expect(x).toBe(66 + 19 + 19 + DEVICE_COLUMN_GAP);
+  });
+});
+
+describe('buildGraph: where a device the layout does not place is put', () => {
+  /** The middle of a device node's box along x. */
+  const middleOf = (n: { position: { x: number }; initialWidth?: number }): number =>
+    n.position.x + (n.initialWidth ?? 0) / 2;
+
+  it('puts a single device over a third of the bar, by the row its bus is in', () => {
+    const topology = makeTopology({ buses: [bus(1)], loads: [load('A', 1)] });
+    const inRow = (y: number) =>
+      buildGraph(topology, { '1': { x: 500, y } }).nodes.find((n) => n.id === 'load-A')!;
+    // Row 0 goes right of the middle of the bar (46), row 1 left of it.
+    expect(middleOf(inRow(0))).toBe(500 + 46 + DEVICE_COLUMN_OFFSET);
+    expect(middleOf(inRow(100))).toBe(500 + 46 - DEVICE_COLUMN_OFFSET);
+    expect(inRow(0).position.y).toBe(DEVICE_ROW_OFFSET);
+    expect(inRow(100).position.y).toBe(100 + DEVICE_ROW_OFFSET);
+  });
+
+  it('drops the connector of a device it placed square onto the bar', () => {
+    const topology = makeTopology({
+      buses: [bus(1)],
+      generators: [gen('G', 1)],
+      loads: [load('L', 1)],
+      shunts: [shunt('S', 1)],
+    });
+    const { nodes, edges } = buildGraph(topology, { '1': { x: 0, y: 0 } });
+    const { routes } = layoutConnections(nodes, edges);
+    for (const id of ['stub-generator-G', 'stub-load-L', 'stub-shunt-S']) {
+      const points = routes.get(id)!.points;
+      expect(points, id).toHaveLength(2);
+      expect(points[0]![0], id).toBe(points[1]![0]);
+    }
+  });
+
+  it('keeps two devices on one face of a bus clear of each other, and over the bar', () => {
+    const topology = makeTopology({
+      buses: [bus(1)],
+      loads: [
+        { ...load('A', 1), name: 'A' },
+        { ...load('B', 1), name: 'B' },
+      ],
+    });
+    const { nodes } = buildGraph(topology, { '1': { x: 0, y: 0 } });
+    const [a, b] = nodes.filter((n) => n.type === 'load');
+    const width = deviceBoxSize('A').width;
+    expect(Math.abs(middleOf(a!) - middleOf(b!))).toBeGreaterThanOrEqual(width + DEVICE_COLUMN_GAP);
+    for (const n of [a!, b!]) {
+      expect(middleOf(n)).toBeGreaterThanOrEqual(3);
+      expect(middleOf(n)).toBeLessThanOrEqual(89);
+    }
+    // Side by side: one row.
+    expect(a!.position.y).toBe(b!.position.y);
+  });
+
+  it('stands a device clear of a branch that lands on its side of the bar', () => {
+    // Bus 2 sits between its two neighbours, so its load keeps the south
+    // face, where the line down to bus 3 leaves from the middle of the bar.
+    const topology = makeTopology({
+      buses: [bus(1), bus(2), bus(3)],
+      lines: [trafo('L12', 1, 2), trafo('L23', 2, 3)],
+      loads: [{ ...load('WIDE', 2), name: 'a load with a long name' }],
+    });
+    const { nodes, edges } = buildGraph(topology, {
+      '1': { x: 0, y: 0 },
+      '2': { x: 0, y: 200 },
+      '3': { x: 0, y: 400 },
+    });
+    const wide = nodes.find((n) => n.id === 'load-WIDE')!;
+    expect(wide.position.y).toBe(200 + DEVICE_ROW_OFFSET);
+    const { bars } = layoutConnections(nodes, edges);
+    const line = bars.get('2')!.taps.find((tap) => tap.side === 'south' && tap.x === 46);
+    expect(line).toBeDefined();
+    // The box does not sit on the line: its near edge is a gap away from it.
+    const half = wide.initialWidth! / 2;
+    expect(Math.abs(middleOf(wide) - 46)).toBeCloseTo(half + DEVICE_COLUMN_GAP);
+  });
+
+  it('takes a device a drag has placed as standing where it was dropped', () => {
+    // The generator was dragged onto the column the load would take.
+    const topology = makeTopology({
+      buses: [bus(1)],
+      generators: [{ ...gen('G', 1), name: 'G' }],
+      loads: [{ ...load('L', 1), name: 'L' }],
+    });
+    const coords = { '1': { x: 0, y: 0 } };
+    const alone = buildGraph(topology, coords).nodes.find((n) => n.id === 'load-L')!;
+    const { nodes } = buildGraph(topology, coords, {
+      dragOverrides: { 'generator-G': { ...alone.position } },
+    });
+    const dragged = nodes.find((n) => n.id === 'generator-G')!;
+    const placed = nodes.find((n) => n.id === 'load-L')!;
+    expect(dragged.position).toEqual(alone.position);
+    expect(Math.abs(middleOf(placed) - middleOf(dragged))).toBeGreaterThanOrEqual(
+      deviceBoxSize('L').width + DEVICE_COLUMN_GAP,
+    );
   });
 });

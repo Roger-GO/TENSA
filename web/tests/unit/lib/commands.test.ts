@@ -1100,6 +1100,44 @@ describe('useCommandRegistry: Fit view and Reset to auto-layout', () => {
   });
 });
 
+describe('useCommandRegistry: how device connectors are drawn', () => {
+  it('offers both styles while a diagram is on screen, and neither without one', () => {
+    const empty = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(empty.result.current, 'view.connectors-straight')).toBeUndefined();
+    expect(find(empty.result.current, 'view.connectors-elbow')).toBeUndefined();
+    empty.unmount();
+
+    MOCK_TOPOLOGY = oneBusTopology();
+    const shown = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(shown.result.current, 'view.connectors-straight')).toMatchObject({
+      group: 'view',
+      label: 'Draw device connectors straight',
+    });
+    expect(find(shown.result.current, 'view.connectors-elbow')?.label).toBe(
+      'Draw device connectors with a right angle',
+    );
+    shown.unmount();
+
+    useLayoutStore.setState({ resultsViewActive: true });
+    const covered = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(covered.result.current, 'view.connectors-elbow')).toBeUndefined();
+  });
+
+  it('posts the style to the canvas bridge', () => {
+    MOCK_TOPOLOGY = oneBusTopology();
+    const seen: SldCommand[] = [];
+    const unsubscribe = subscribeSldCommand((c) => seen.push(c));
+    try {
+      const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+      act(() => find(result.current, 'view.connectors-elbow')?.action());
+      act(() => find(result.current, 'view.connectors-straight')?.action());
+    } finally {
+      unsubscribe();
+    }
+    expect(seen).toEqual(['connectors-elbow', 'connectors-straight']);
+  });
+});
+
 describe('palette dialog bridge', () => {
   it('subscribers fire when __requestPaletteDialog is invoked', () => {
     const listener = vi.fn();

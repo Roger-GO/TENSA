@@ -1,5 +1,4 @@
 import { memo } from 'react';
-import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { iconForModel } from '@/icons/iec60617/manifest';
 import { cn } from '@/lib/cn';
@@ -9,6 +8,7 @@ import { getGeneratorLimitState } from '../overlay';
 import { qLimitMarker, qLimitMarkerLabel } from '../qLimit';
 import { VoltageMarker } from '../VoltageMarker';
 import type { SldNodeData } from './BusNode';
+import { DevicePorts } from './DevicePorts';
 import { DeviceValueLabel } from './DeviceValueLabel';
 
 /**
@@ -17,9 +17,9 @@ import { DeviceValueLabel } from './DeviceValueLabel';
  * the icon manifest (`PV`/`Slack` → `generator.svg`; `GENROU`/`GENCLS`
  * → `generator-syngen.svg`).
  *
- * Anchored to its parent bus via a stub edge from the south handle
- * (id `bus-anchor`); the stub's other end terminates at the bus's
- * `north-target` handle. Click to inspect. After a converged PF it
+ * Connected to its bus by a stub edge that leaves from the port on the
+ * face that points at the bus (`DevicePorts`) and lands on a tap of the
+ * bar. Click to inspect. After a converged PF it
  * carries its P / Q readout (`DeviceValueLabel`), and a generator whose
  * reactive output is on or past a limit gets an amber or red outline and a
  * triangle on its corner (up at `qmax`, down at `qmin`; empty on the limit,
@@ -57,12 +57,7 @@ export const GeneratorNode = memo(function GeneratorNode({ data, selected }: Nod
         'cursor-pointer select-none',
       )}
     >
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        id="bus-anchor"
-        className="!h-0 !min-h-0 !w-0 !min-w-0 !border-0 !bg-transparent"
-      />
+      <DevicePorts />
       <img
         src={iconForModel(d.kind)}
         alt=""

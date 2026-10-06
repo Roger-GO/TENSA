@@ -17,6 +17,7 @@ import {
   type VoltageLimits,
 } from '../voltage';
 import { VoltageMarker } from '../VoltageMarker';
+import { BAR_LENGTH, BAR_THICKNESS, busLabelOffset, type BarGeometry } from '../connections';
 import { SOURCE_HANDLE, TARGET_HANDLE, type Side } from '../graph';
 
 /**
@@ -69,7 +70,25 @@ export interface SldNodeData extends Record<string, unknown> {
    * sits. Stamped by `buildGraph`.
    */
   valueSide?: 'above' | 'below';
+  /**
+   * Bus nodes: where the bar starts and ends and where its taps are, as
+   * `connections.ts` worked them out from what connects to the bus. Absent:
+   * a bar of the default length with no taps. Stamped by `SldCanvas`.
+   */
+  bar?: BarGeometry;
+  /**
+   * Generator / load / shunt nodes: the face the connector to the bus
+   * leaves by. The P / Q readout moves aside when it hangs off that face.
+   * Stamped by `SldCanvas`.
+   */
+  connectorFace?: Side;
 }
+
+/**
+ * Radius of the dot that marks a tap. A little more than half the bar's
+ * thickness, so the dot shows on either side of the bar.
+ */
+const TAP_DOT_RADIUS = 4;
 
 const SIDES: Array<{ side: Side; position: Position }> = [
   { side: 'north', position: Position.Top },
@@ -85,11 +104,15 @@ const SIDES: Array<{ side: Side; position: Position }> = [
  * itself is the electrical bus and the connection target for every
  * branch edge.
  *
- * Four cardinal Handle pairs (source + target) sit ON the bar so each
- * line can pick a unique side. Edges set `sourceHandle`/`targetHandle`
- * to one of `<side>-source` / `<side>-target` (see `graph.ts`'s
- * `SOURCE_HANDLE` / `TARGET_HANDLE`); strides fan multiple feeders out
- * along the bar so they don't stack on one point.
+ * Four cardinal Handle pairs (source + target) sit ON the bar. Edges set
+ * `sourceHandle`/`targetHandle` to one of `<side>-source` /
+ * `<side>-target` (see `graph.ts`'s `SOURCE_HANDLE` / `TARGET_HANDLE`).
+ * Where each feeder lands is a tap on the bar (`data.bar`, worked out in
+ * `connections.ts`): the bar draws a dot at every tap, and is as long as
+ * its taps need. A bar that outgrows the default length grows out of both
+ * sides of the node, whose own box and origin stay as they are. The label
+ * hangs under the middle of the bar, and moves along it to stay clear of a
+ * feeder that comes up from below (`busLabelOffset`).
  *
  * Unit 9: subscribes to `pflow.lastRun` + `ui.hideLabels` and consumes
  * `getBusOverlayState` to tint the bar on a limit violation + show a
@@ -145,6 +168,19 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
   const isSldSelected = d.sldSelected === true;
   const visuallySelected = selected || isSldSelected;
   const barBg = barClassForBand(effectiveBand);
+  const barStart = d.bar?.start ?? 0;
+  const barEnd = d.bar?.end ?? BAR_LENGTH;
+  // One dot per place: a feeder above the bar and one below it may share a tap.
+  const tapXs = [...new Set((d.bar?.taps ?? []).map((tap) => tap.x))];
+  // The label block is as wide as its longest line (10 px monospace, the
+  // block's padding, and the limit marker beside the name when it shows).
+  const marked = effectiveBand === 'warning' || effectiveBand === 'danger';
+  const labelChars = Math.max(
+    (d.name || d.idx).length + (marked ? 2 : 0),
+    pflowOverlay.voltage_label?.length ?? 0,
+    pflowOverlay.angle_label?.length ?? 0,
+  );
+  const labelShift = busLabelOffset(d.bar, 6 * labelChars + 8) - BAR_LENGTH / 2;
   // `effectiveColorClass` (border-success/...) is retained on the node so
   // existing band-colour assertions keep working AND assistive tooling can
   // read the band off the wrapper; it's visually inert (no border drawn).
@@ -166,7 +202,7 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
       {/* Busbar — a thick horizontal bar. Handles sit on it (it is a
           `position: relative` box so the cardinal handles land on the bar,
           not the wider wrapper that also holds the label). */}
-      <div className="relative w-full" style={{ height: 6 }}>
+      <div className="relative w-full" style={{ height: BAR_THICKNESS }}>
         {SIDES.map(({ side, position }) => (
           <Fragment key={side}>
             <Handle
@@ -185,8 +221,9 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
         ))}
         <div
           data-testid={`bus-bar-${d.idx}`}
+          data-bar-length={barEnd - barStart}
           className={cn(
-            'h-full w-full rounded-full',
+            'absolute top-0 h-full rounded-full',
             barBg,
             // Subtle depth so the bar reads as a physical busbar.
             'shadow-[0_1px_2px_rgba(0,0,0,0.18)]',
@@ -197,15 +234,35 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
           )}
           // Voltage-band colour transition on the bar fill (Unit 19).
           style={{
+            left: barStart,
+            width: barEnd - barStart,
             transition: 'background-color var(--duration-base) var(--ease-out-quart)',
           }}
         />
+        {/* One dot per tap, on top of the bar: where a feeder lands. */}
+        {tapXs.map((x) => (
+          <span
+            key={x}
+            data-testid={`bus-tap-${d.idx}`}
+            data-tap-x={x}
+            aria-hidden="true"
+            className="bg-foreground pointer-events-none absolute rounded-full"
+            style={{
+              left: x - TAP_DOT_RADIUS,
+              top: BAR_THICKNESS / 2 - TAP_DOT_RADIUS,
+              width: 2 * TAP_DOT_RADIUS,
+              height: 2 * TAP_DOT_RADIUS,
+            }}
+          />
+        ))}
       </div>
       {/* Label block, offset below the bar. A faint backing keeps the text
           legible where a feeder line passes behind it. */}
       <div
+        data-testid={`bus-label-${d.idx}`}
         title={`${d.name || d.idx}: voltage limits ${formatVoltageLimits(d.voltageLimits ?? DEFAULT_VOLTAGE_LIMITS)}`}
-        className="bg-background/70 mt-1 flex flex-col items-center gap-0 rounded px-1 leading-tight"
+        className="bg-background/70 relative mt-1 flex flex-col items-center gap-0 rounded px-1 leading-tight whitespace-nowrap"
+        style={labelShift === 0 ? undefined : { left: labelShift }}
       >
         <span className="flex items-center gap-0.5">
           <span className="text-foreground font-mono text-[10px] leading-tight font-medium">

@@ -1,19 +1,19 @@
 import { memo } from 'react';
-import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { iconForModel } from '@/icons/iec60617/manifest';
 import { cn } from '@/lib/cn';
 import { useIsPendingDependent } from '@/store/pendingDependents';
 import type { SldNodeData } from './BusNode';
+import { DevicePorts } from './DevicePorts';
 
 /**
  * Shunt node. Capacitive vs. inductive distinction is encoded in the
  * icon manifest (`Shunt`/`ShuntCap` → `shunt-cap.svg`; `ShuntL`/
  * `ShuntReactor` → `shunt-reactor.svg`).
  *
- * Anchored south-west of its parent bus per the kind-based offsets;
- * the stub edge connects the east handle (id `bus-anchor`) toward the
- * bus's `west-target` handle.
+ * Placed south-west of its bus by default; the stub edge leaves from the
+ * port on the face that points at the bus (`DevicePorts`) and lands on a
+ * tap of the bar.
  */
 export const ShuntNode = memo(function ShuntNode({ data, selected }: NodeProps) {
   const d = data as SldNodeData;
@@ -34,12 +34,7 @@ export const ShuntNode = memo(function ShuntNode({ data, selected }: NodeProps) 
         'cursor-pointer select-none',
       )}
     >
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="bus-anchor"
-        className="!h-0 !min-h-0 !w-0 !min-w-0 !border-0 !bg-transparent"
-      />
+      <DevicePorts />
       <img
         src={iconForModel(d.kind)}
         alt=""

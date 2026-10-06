@@ -8,6 +8,8 @@ import path from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   parseSidecar,
+  barLengthsOf,
+  connectorStyleOf,
   mergeWithDrift,
   sidecarCoversBuses,
   hasSavedPositions,
@@ -27,6 +29,7 @@ import {
   MAX_BEND_POINTS,
   MAX_FIGURE_SETTINGS,
   MAX_FIGURE_TEXT,
+  CONNECTOR_STYLE_SETTING,
   SIDECAR_SCHEMA_VERSION,
   type DiagramEdge,
   type DiagramNode,
@@ -935,9 +938,75 @@ describe('captureLayout', () => {
     expect(layout.figure).toEqual(base.figure);
   });
 
+  it('writes the connector style that was chosen among the figure settings', () => {
+    const base = fullLayout();
+    const chosen = captureLayout({ nodes, edges }, topology, base, { connectorStyle: 'elbow' });
+    expect(chosen.figure).toEqual({ ...base.figure, [CONNECTOR_STYLE_SETTING]: 'elbow' });
+    expect(connectorStyleOf(chosen)).toBe('elbow');
+    // With nothing drawn from before, too: a system built from scratch.
+    expect(
+      captureLayout({ nodes, edges }, topology, null, { connectorStyle: 'elbow' }).figure,
+    ).toEqual({ [CONNECTOR_STYLE_SETTING]: 'elbow' });
+  });
+
+  it('keeps the connector style the layout already had while none is chosen', () => {
+    const base: SidecarLayout = {
+      ...fullLayout(),
+      figure: { monochrome: true, [CONNECTOR_STYLE_SETTING]: 'elbow' },
+    };
+    expect(captureLayout({ nodes, edges }, topology, base).figure).toEqual(base.figure);
+    expect(
+      captureLayout({ nodes, edges }, topology, base, { connectorStyle: null }).figure,
+    ).toEqual(base.figure);
+    // A choice made since goes over it.
+    expect(
+      connectorStyleOf(
+        captureLayout({ nodes, edges }, topology, base, { connectorStyle: 'straight' }),
+      ),
+    ).toBe('straight');
+  });
+
   it('survives its own validator, and the server schema it mirrors', () => {
     const layout = captureLayout({ nodes, edges }, topology, fullLayout());
     expect(parseSidecar(JSON.parse(JSON.stringify(layout)))).toEqual(layout);
+    const styled = captureLayout({ nodes, edges }, topology, fullLayout(), {
+      connectorStyle: 'elbow',
+    });
+    expect(parseSidecar(JSON.parse(JSON.stringify(styled)))).toEqual(styled);
+  });
+});
+
+describe('connectorStyleOf and barLengthsOf', () => {
+  it('reads the connector style from the figure settings, and nothing else as one', () => {
+    const withFigure = (figure: SidecarLayout['figure']): SidecarLayout => ({
+      ...buildSidecarLayout({}),
+      figure,
+    });
+    expect(connectorStyleOf(null)).toBeNull();
+    expect(connectorStyleOf(withFigure({}))).toBeNull();
+    expect(connectorStyleOf(withFigure({ [CONNECTOR_STYLE_SETTING]: 'elbow' }))).toBe('elbow');
+    expect(connectorStyleOf(withFigure({ [CONNECTOR_STYLE_SETTING]: 'straight' }))).toBe(
+      'straight',
+    );
+    // A value this version does not know is no choice: the default applies.
+    expect(connectorStyleOf(withFigure({ [CONNECTOR_STYLE_SETTING]: 'curved' }))).toBeNull();
+    expect(connectorStyleOf(withFigure({ [CONNECTOR_STYLE_SETTING]: true }))).toBeNull();
+    // A version 1 document has no figure settings at all.
+    const { figure: _figure, ...versionOne } = buildSidecarLayout({});
+    expect(connectorStyleOf(versionOne)).toBeNull();
+  });
+
+  it('gives the length of each bar a layout sets one for', () => {
+    expect(barLengthsOf(null).size).toBe(0);
+    const layout: SidecarLayout = {
+      ...buildSidecarLayout({}),
+      busbars: {
+        '2': { length: 180, orientation: 'vertical' },
+        // Left to the diagram, which sizes it to what connects to it.
+        '7': { length: null, orientation: 'horizontal' },
+      },
+    };
+    expect([...barLengthsOf(layout)]).toEqual([['2', 180]]);
   });
 });
 
@@ -1231,6 +1300,11 @@ describe('the fixture the server tests read too', () => {
     const copy = layoutForRenumberedCopy(parseSidecar(shared.document));
     expect(set(copy)).toEqual(set(shared.renumbered_copy));
     expect(samePlacement(copy, shared.renumbered_copy)).toBe(true);
+  });
+
+  it('says how the connectors are drawn, in the copy too: the style names no element', () => {
+    expect(connectorStyleOf(parseSidecar(shared.document))).toBe('elbow');
+    expect(connectorStyleOf(layoutForRenumberedCopy(parseSidecar(shared.document)))).toBe('elbow');
   });
 });
 

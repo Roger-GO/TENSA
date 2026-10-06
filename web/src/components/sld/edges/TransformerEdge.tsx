@@ -1,20 +1,20 @@
 import { memo } from 'react';
-import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath } from '@xyflow/react';
+import { BaseEdge, EdgeLabelRenderer } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
 import { iconForModel } from '@/icons/iec60617/manifest';
 import { cn } from '@/lib/cn';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
-import { type Side, strideShift } from '../graph';
+import { routeMidpoint, routePath, type ConnectorRoute, type Point } from '../connections';
 import { getLineOverlayState, lineStrokeStyle } from '../overlay';
 
 /**
- * Transformer edge — bus-to-bus polyline (or smooth-step path) with the
- * IEC 60617 2W or 3W glyph rendered at the path midpoint.
+ * Transformer edge: a branch between two buses with the IEC 60617 2W or
+ * 3W glyph half way along.
  *
- * Mirrors `TopologyEdge`/`RoutedEdge`'s stride + bend-point handling so
- * the path itself reads identically to a regular line; the difference
- * is purely the midpoint icon plus a transformer-specific click target.
+ * The path is drawn as a line's is (`TopologyEdge`): through the points
+ * `connections.ts` works out, its two ends on the bars. The difference is
+ * the icon at the midpoint, which is also the transformer's click target.
  *
  * Click on the icon sets `selectedElement.kind = 'transformer'` so the
  * inspector shows transformer params (Unit 5b populated `_PARAMS_BY_MODEL`
@@ -25,46 +25,11 @@ interface EdgeData {
   name?: string;
   kind?: string;
   bucket?: 'line' | 'transformer';
-  sourceSide?: Side;
-  targetSide?: Side;
-  sourceStride?: number;
-  targetStride?: number;
-  bendPoints?: [number, number][];
+  route?: ConnectorRoute;
   winding?: '2w' | '3w';
 }
 
 const ICON_SIZE = 24;
-
-function buildPolyline(points: [number, number][]): string {
-  if (points.length < 2) return '';
-  const [first, ...rest] = points as [[number, number], ...[number, number][]];
-  return `M${first[0]},${first[1]} ` + rest.map(([x, y]) => `L${x},${y}`).join(' ');
-}
-
-function midpointOfPolyline(points: [number, number][]): { x: number; y: number } | null {
-  if (points.length < 2) return null;
-  let total = 0;
-  const segments: { ax: number; ay: number; bx: number; by: number; len: number }[] = [];
-  for (let i = 0; i < points.length - 1; i++) {
-    const a = points[i] as [number, number];
-    const b = points[i + 1] as [number, number];
-    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    total += len;
-    segments.push({ ax: a[0], ay: a[1], bx: b[0], by: b[1], len });
-  }
-  if (total === 0) return { x: points[0]![0], y: points[0]![1] };
-  let traveled = 0;
-  const target = total / 2;
-  for (const s of segments) {
-    if (traveled + s.len >= target) {
-      const t = s.len > 0 ? (target - traveled) / s.len : 0;
-      return { x: s.ax + t * (s.bx - s.ax), y: s.ay + t * (s.by - s.ay) };
-    }
-    traveled += s.len;
-  }
-  const last = segments[segments.length - 1]!;
-  return { x: last.bx, y: last.by };
-}
 
 export const TransformerEdge = memo(function TransformerEdge({
   id,
@@ -72,39 +37,20 @@ export const TransformerEdge = memo(function TransformerEdge({
   sourceY,
   targetX,
   targetY,
-  sourcePosition,
-  targetPosition,
   markerEnd,
   data,
 }: EdgeProps) {
   const pflowResult = usePflowStore((s) => s.lastRun);
   const hideLabels = useUiStore((s) => s.hideLabels);
   const edgeData = (data ?? {}) as EdgeData;
-  const sourceShift = strideShift(edgeData.sourceSide, edgeData.sourceStride ?? 0);
-  const targetShift = strideShift(edgeData.targetSide, edgeData.targetStride ?? 0);
-  const polyline = edgeData.bendPoints ?? [];
-
-  let path: string;
-  let mid: { x: number; y: number };
-  if (polyline.length >= 2) {
-    path = buildPolyline(polyline);
-    mid = midpointOfPolyline(polyline) ?? {
-      x: (sourceX + targetX) / 2,
-      y: (sourceY + targetY) / 2,
-    };
-  } else {
-    const [smoothPath, labelX, labelY] = getSmoothStepPath({
-      sourceX: sourceX + sourceShift.dx,
-      sourceY: sourceY + sourceShift.dy,
-      sourcePosition,
-      targetX: targetX + targetShift.dx,
-      targetY: targetY + targetShift.dy,
-      targetPosition,
-      borderRadius: 4,
-    });
-    path = smoothPath;
-    mid = { x: labelX, y: labelY };
-  }
+  // Without a route (the pass has not placed this branch) fall back to the
+  // two handles React Flow resolved.
+  const points: Point[] = edgeData.route?.points ?? [
+    [sourceX, sourceY],
+    [targetX, targetY],
+  ];
+  const path = routePath(points);
+  const mid = routeMidpoint(points);
 
   // Transformers ARE lines on the substrate side; the line-flow
   // computation runs over every Line device regardless of which bucket
@@ -116,20 +62,13 @@ export const TransformerEdge = memo(function TransformerEdge({
   // A transformer is rated like a line: its icon takes the same outline when it
   // is near or past its rating, and says so to assistive tooling.
   const loadingBand = overlay?.loading_band ?? 'neutral';
-  const dotRadius = 3.5;
-  const dotFill = 'var(--color-foreground)';
 
   const winding = edgeData.winding ?? '2w';
   const iconSrc = iconForModel(winding === '3w' ? 'Transformer3W' : 'Transformer');
 
-  const sourcePoint = { x: sourceX + sourceShift.dx, y: sourceY + sourceShift.dy };
-  const targetPoint = { x: targetX + targetShift.dx, y: targetY + targetShift.dy };
-
   return (
     <>
       <BaseEdge path={path} markerEnd={markerEnd} style={{ stroke, strokeWidth }} />
-      <circle cx={sourcePoint.x} cy={sourcePoint.y} r={dotRadius} fill={dotFill} />
-      <circle cx={targetPoint.x} cy={targetPoint.y} r={dotRadius} fill={dotFill} />
       <EdgeLabelRenderer>
         <div
           data-testid={`transformer-edge-icon-${id}`}

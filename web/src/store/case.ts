@@ -13,6 +13,7 @@
 import { create } from 'zustand';
 import type { TopologyEntry, TopologySummary, SidecarLayout, WorkspacePath } from '@/api/types';
 import type { ControllerSubKind } from '@/lib/controllers';
+import type { ConnectorStyle } from '@/components/sld/connections';
 
 export interface CaseSelection {
   /**
@@ -147,6 +148,15 @@ export interface CaseState {
   /** Per-node coord overrides captured from user drags (Unit 13a). */
   dragOverrides: DragOverrides;
   /**
+   * How the diagram draws the connector of a generator, load or shunt to its
+   * bus, as chosen in this visit: a straight line, or one with a right
+   * angle. `null` until it is chosen, which leaves it to the saved layout
+   * (its `connector_style` figure setting) and to straight without one. Kept
+   * here like the drags, so the choice outlives the canvas and reaches the
+   * layout every save sends.
+   */
+  connectorStyle: ConnectorStyle | null;
+  /**
    * Topology entries flagged as dependents of an in-flight delete attempt
    * (v0.1.y Unit 2). Populated when a ``DELETE`` returns 422 with the
    * ``DeleteBlockedResponse`` body and the user clicks one of the
@@ -178,6 +188,7 @@ export interface CaseState {
   setLoadingPath: (path: string | null) => void;
   setDragOverrides: (next: DragOverrides) => void;
   clearDragOverrides: () => void;
+  setConnectorStyle: (style: ConnectorStyle | null) => void;
   setTopology: (topology: TopologySummary | null) => void;
   setLayoutSidecar: (sidecar: SidecarLayout | null) => void;
   setDiagramLayout: (layout: SidecarLayout | null) => void;
@@ -234,6 +245,7 @@ export const useCaseStore = create<CaseState>((set) => ({
   addPanelDropCoord: null,
   addPanelBus: null,
   dragOverrides: {},
+  connectorStyle: null,
   pendingDependents: [],
   editMode: 'run',
   cloneInitialized: false,
@@ -255,6 +267,7 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelDropCoord: null,
       addPanelBus: null,
       dragOverrides: {},
+      connectorStyle: null,
       pendingDependents: [],
       editMode: 'run',
       cloneInitialized: false,
@@ -264,6 +277,7 @@ export const useCaseStore = create<CaseState>((set) => ({
   setLoadingPath: (path: string | null) => set({ loadingPath: path }),
   setDragOverrides: (next: DragOverrides) => set({ dragOverrides: next }),
   clearDragOverrides: () => set({ dragOverrides: {} }),
+  setConnectorStyle: (style: ConnectorStyle | null) => set({ connectorStyle: style }),
   setTopology: (topology: TopologySummary | null) => set({ topology }),
   setLayoutSidecar: (sidecar: SidecarLayout | null) => set({ layoutSidecar: sidecar }),
   setDiagramLayout: (layout: SidecarLayout | null) => set({ diagramLayout: layout }),
@@ -319,6 +333,7 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelDropCoord: null,
       addPanelBus: null,
       dragOverrides: {},
+      connectorStyle: null,
       pendingDependents: [],
       editMode: 'run',
       cloneInitialized: false,

@@ -1,12 +1,13 @@
 /**
- * Unit 19 — TopologyEdge tests, focused on the LineFlowArrow integration.
+ * TopologyEdge tests: the line it draws, and the flow arrow and label it
+ * carries after a power flow.
  *
- * The repo previously didn't have a TopologyEdge test (smoke for the
- * stride / dot logic ran via SldCanvas integration). For Unit 19 we
- * add focused coverage of:
- *
+ *  - The path runs through the points of the route `connections.ts` gave
+ *    the edge, with square corners, and falls back to the two handles when
+ *    the edge has no route. The same component draws a line that keeps a
+ *    stored route (edge type `routed`).
  *  - Arrow only renders when the line has converged PF flow data.
- *  - Arrow direction follows the sign of P.
+ *  - Arrow direction follows the sign of P, and lies along the run it is on.
  *  - Arrow size scales with |P|.
  *
  * @xyflow/react primitives are stubbed in the same shape as the
@@ -42,28 +43,11 @@ vi.mock('@xyflow/react', async () => {
       }),
     EdgeLabelRenderer: ({ children }: { children: ReactNode }) =>
       React.createElement('foreignObject', { 'data-testid': 'edge-label-portal' }, children),
-    getSmoothStepPath: ({
-      sourceX,
-      sourceY,
-      targetX,
-      targetY,
-    }: {
-      sourceX: number;
-      sourceY: number;
-      targetX: number;
-      targetY: number;
-      sourcePosition?: string;
-      targetPosition?: string;
-      borderRadius?: number;
-    }) => [
-      `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`,
-      (sourceX + targetX) / 2,
-      (sourceY + targetY) / 2,
-    ],
   };
 });
 
 import { TopologyEdge } from '@/components/sld/edges/TopologyEdge';
+import type { ConnectorRoute } from '@/components/sld/connections';
 import {
   ARROW_MAX_SIZE,
   ARROW_MIN_SIZE,
@@ -79,10 +63,7 @@ interface RenderEdgeProps {
   data?: {
     idx?: string;
     bucket?: 'line' | 'transformer';
-    sourceSide?: 'north' | 'east' | 'south' | 'west';
-    targetSide?: 'north' | 'east' | 'south' | 'west';
-    sourceStride?: number;
-    targetStride?: number;
+    route?: ConnectorRoute;
   };
 }
 
@@ -140,6 +121,70 @@ function reset(): void {
   useUiStore.setState({ hideLabels: false });
   cleanup();
 }
+
+/** A route down from one bar, across, and down onto another. */
+const STEPPED: ConnectorRoute = {
+  points: [
+    [89, 3],
+    [89, 103],
+    [153, 103],
+    [153, 203],
+  ],
+  sourceSide: 'south',
+  targetSide: 'north',
+};
+
+describe('<TopologyEdge /> the line', () => {
+  beforeEach(reset);
+
+  it('draws through the points of its route, with square corners', () => {
+    const { getByTestId } = renderEdge({ data: { bucket: 'line', idx: 'l-1', route: STEPPED } });
+    expect(getByTestId('topology-edge-base').getAttribute('data-path')).toBe(
+      'M89,3 L89,103 L153,103 L153,203',
+    );
+  });
+
+  it('falls back to a line between the two handles when it has no route', () => {
+    const { getByTestId } = renderEdge({ sourceX: 5, sourceY: 6, targetX: 70, targetY: 80 });
+    expect(getByTestId('topology-edge-base').getAttribute('data-path')).toBe('M5,6 L70,80');
+  });
+
+  it('draws no dot of its own: the bar marks every tap', () => {
+    const { container } = renderEdge({ data: { bucket: 'line', idx: 'l-1', route: STEPPED } });
+    expect(container.querySelectorAll('circle')).toHaveLength(0);
+  });
+
+  it('puts the flow label half way along the route', () => {
+    setPflow(120);
+    const { getByTestId } = renderEdge({ data: { bucket: 'line', idx: 'l-1', route: STEPPED } });
+    // 100 down, 64 across, 100 down: half way is the middle of the run across.
+    expect(getByTestId('line-flow-label-edge-1').style.transform).toContain(
+      'translate(121px, 103px)',
+    );
+  });
+
+  it('lays the arrow along the run it sits on, pointing the way the power flows', () => {
+    const down: ConnectorRoute = {
+      points: [
+        [46, 3],
+        [46, 203],
+      ],
+      sourceSide: 'south',
+      targetSide: 'north',
+    };
+    setPflow(120);
+    const forward = renderEdge({ data: { bucket: 'line', idx: 'l-1', route: down } });
+    expect(forward.getByTestId('line-flow-arrow-edge-1').style.transform).toContain(
+      'translate(46px, 103px) rotate(90deg)',
+    );
+    cleanup();
+    setPflow(-120);
+    const reverse = renderEdge({ data: { bucket: 'line', idx: 'l-1', route: down } });
+    expect(reverse.getByTestId('line-flow-arrow-edge-1').style.transform).toContain(
+      'rotate(270deg)',
+    );
+  });
+});
 
 describe('<TopologyEdge /> — Unit 19 line-flow arrow integration', () => {
   beforeEach(reset);

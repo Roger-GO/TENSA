@@ -1,18 +1,18 @@
 import { memo } from 'react';
-import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { iconForModel } from '@/icons/iec60617/manifest';
 import { cn } from '@/lib/cn';
 import { useIsPendingDependent } from '@/store/pendingDependents';
 import type { SldNodeData } from './BusNode';
+import { DevicePorts } from './DevicePorts';
 import { DeviceValueLabel } from './DeviceValueLabel';
 
 /**
  * Load node. Renders the IEC 60617 load glyph; covers PQ and ZIP load
- * models per the icon manifest. Anchored south of its parent bus; the
- * stub edge connects the north handle (id `bus-anchor`) up to the bus's
- * `south-target` handle. After a converged PF it carries its P / Q
- * readout (`DeviceValueLabel`).
+ * models per the icon manifest. Placed south of its bus by default; the
+ * stub edge leaves from the port on the face that points at the bus
+ * (`DevicePorts`) and lands on a tap of the bar. After a converged PF it
+ * carries its P / Q readout (`DeviceValueLabel`).
  */
 export const LoadNode = memo(function LoadNode({ data, selected }: NodeProps) {
   const d = data as SldNodeData;
@@ -33,12 +33,7 @@ export const LoadNode = memo(function LoadNode({ data, selected }: NodeProps) {
         'cursor-pointer select-none',
       )}
     >
-      <Handle
-        type="source"
-        position={Position.Top}
-        id="bus-anchor"
-        className="!h-0 !min-h-0 !w-0 !min-w-0 !border-0 !bg-transparent"
-      />
+      <DevicePorts />
       <img
         src={iconForModel(d.kind)}
         alt=""

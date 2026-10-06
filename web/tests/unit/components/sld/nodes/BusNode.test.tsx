@@ -591,3 +591,108 @@ describe('BusNode — edge cases', () => {
     expect(node).not.toHaveAttribute('data-streaming');
   });
 });
+
+describe('BusNode, the bar and its taps', () => {
+  beforeEach(resetStores);
+  afterEach(() => {
+    cleanup();
+    resetStores();
+  });
+
+  /** The node's props with the bar the connection pass worked out for it. */
+  function withBar(bar: {
+    start: number;
+    end: number;
+    taps: { x: number; side: 'north' | 'east' | 'south' | 'west' }[];
+  }): Parameters<typeof BusNode>[0] {
+    const props = nodeProps('1', 'BUS1');
+    return { ...props, data: { ...props.data, bar } } as Parameters<typeof BusNode>[0];
+  }
+
+  it('draws a bar of the default length, with no taps, when it is given none', () => {
+    const { getByTestId, queryAllByTestId } = render(<BusNode {...nodeProps('1')} />);
+    const bar = getByTestId('bus-bar-1');
+    expect(bar.style.left).toBe('0px');
+    expect(bar.style.width).toBe('92px');
+    expect(bar).toHaveAttribute('data-bar-length', '92');
+    expect(queryAllByTestId('bus-tap-1')).toHaveLength(0);
+  });
+
+  it('draws the bar as long as its taps need, out of both sides of the node', () => {
+    const { getByTestId } = render(<BusNode {...withBar({ start: -6, end: 98, taps: [] })} />);
+    const bar = getByTestId('bus-bar-1');
+    expect(bar.style.left).toBe('-6px');
+    expect(bar.style.width).toBe('104px');
+    // The node's own box stays the width the layout knows.
+    expect(getByTestId('bus-node-1').className).toContain('w-[92px]');
+  });
+
+  it('draws a dot on the bar at every tap, centred on its line', () => {
+    const { getAllByTestId } = render(
+      <BusNode
+        {...withBar({
+          start: 0,
+          end: 92,
+          taps: [
+            { x: 13, side: 'north' },
+            { x: 46, side: 'south' },
+            { x: 89, side: 'east' },
+          ],
+        })}
+      />,
+    );
+    const dots = getAllByTestId('bus-tap-1');
+    expect(dots.map((dot) => dot.getAttribute('data-tap-x'))).toEqual(['13', '46', '89']);
+    // 8 across, on the 6 thick bar: one pixel shows either side of it.
+    const first = dots[0]!;
+    expect(first.style.left).toBe('9px');
+    expect(first.style.top).toBe('-1px');
+    expect(first.style.width).toBe('8px');
+    expect(first.style.height).toBe('8px');
+  });
+
+  it('draws one dot where a feeder above the bar and one below it share a tap', () => {
+    const { getAllByTestId } = render(
+      <BusNode
+        {...withBar({
+          start: 0,
+          end: 92,
+          taps: [
+            { x: 46, side: 'north' },
+            { x: 46, side: 'south' },
+          ],
+        })}
+      />,
+    );
+    expect(getAllByTestId('bus-tap-1')).toHaveLength(1);
+  });
+
+  it('hangs the label under the middle of the bar while no feeder comes up through it', () => {
+    const { getByTestId } = render(
+      <BusNode {...withBar({ start: 0, end: 92, taps: [{ x: 46, side: 'north' }] })} />,
+    );
+    expect(getByTestId('bus-label-1').style.left).toBe('');
+  });
+
+  it('moves the label beside a feeder that lands under the middle of the bar', () => {
+    const { getByTestId } = render(
+      <BusNode {...withBar({ start: 0, end: 92, taps: [{ x: 46, side: 'south' }] })} />,
+    );
+    // "BUS1" is 4 characters: 32 wide, so its middle keeps 20 from the feeder.
+    expect(getByTestId('bus-label-1').style.left).toBe('-20px');
+  });
+
+  it('makes room for the values a power flow adds to the label', () => {
+    usePflowStore.setState({
+      lastRun: makePflow({ bus_voltages: { '1': 1.0 }, bus_angles: { '1': 0 } }),
+      isRunning: false,
+      error: null,
+    });
+    const { getByTestId } = render(
+      <BusNode {...withBar({ start: 0, end: 92, taps: [{ x: 46, side: 'south' }] })} />,
+    );
+    // "1.000 pu" is 8 characters: 56 wide, so its middle keeps 32 from the feeder.
+    expect(getByTestId('bus-voltage-1').textContent).toBe('1.000 pu');
+    expect(getByTestId('bus-label-1').style.left).toBe('-32px');
+  });
+});

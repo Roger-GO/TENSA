@@ -1,26 +1,28 @@
 import { memo } from 'react';
-import { BaseEdge, getStraightPath } from '@xyflow/react';
+import { BaseEdge } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
-import { type Side, strideShift } from '../graph';
+import { routePath, type ConnectorRoute, type Point } from '../connections';
+import { lineStrokeStyle } from '../overlay';
 
 /**
- * Stub edge — short straight line connecting a non-bus device
- * (generator / load / shunt) to its parent bus's cardinal handle.
+ * Stub edge: the connector of a generator, load or shunt to its bus.
  *
- * No flow overlay, no arrow, no label. Stride lateral-offsets the
- * bus-end endpoint so two stubs (or a stub and a branch) connecting
- * to the same cardinal side don't collide on the bus boundary.
+ * It is drawn through the points `connections.ts` works out: from the
+ * middle of the face of the device that points at the bus to the tap on the
+ * bar, straight or with one right angle. The stroke is the one a branch
+ * has while it carries no flow to show, solid, so a connector and a line
+ * read as the same kind of conductor. The dot where it lands is the bar's
+ * (`BusNode` draws every tap), which keeps it on top of the bar.
  *
- * Connection-dot match: an explicit foreground dot at the bus end
- * mirrors the dots on regular edges so the user sees a consistent
- * "this is a real connection" marker at every device anchor.
+ * No flow overlay, no arrow, no label.
  */
 interface StubData {
   kind?: string;
   bucket?: 'generator' | 'load' | 'shunt';
-  busSide?: Side;
-  targetStride?: number;
+  route?: ConnectorRoute;
 }
+
+const STROKE = lineStrokeStyle(null);
 
 export const StubEdge = memo(function StubEdge({
   sourceX,
@@ -29,22 +31,12 @@ export const StubEdge = memo(function StubEdge({
   targetY,
   data,
 }: EdgeProps) {
-  const d = (data ?? {}) as StubData;
-  const targetShift = strideShift(d.busSide, d.targetStride ?? 0);
-  const tx = targetX + targetShift.dx;
-  const ty = targetY + targetShift.dy;
-  const [path] = getStraightPath({ sourceX, sourceY, targetX: tx, targetY: ty });
-  return (
-    <>
-      <BaseEdge
-        path={path}
-        style={{
-          stroke: 'var(--color-muted-foreground)',
-          strokeWidth: 1,
-          strokeDasharray: '4 3',
-        }}
-      />
-      <circle cx={tx} cy={ty} r={2.5} fill="var(--color-foreground)" />
-    </>
-  );
+  const route = (data as StubData | undefined)?.route;
+  // Without a route (the pass has not placed this connector) fall back to
+  // the two handles React Flow resolved.
+  const points: Point[] = route?.points ?? [
+    [sourceX, sourceY],
+    [targetX, targetY],
+  ];
+  return <BaseEdge path={routePath(points)} style={STROKE} />;
 });

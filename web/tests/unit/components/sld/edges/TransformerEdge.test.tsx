@@ -1,11 +1,10 @@
 /**
- * TransformerEdge — render-smoke + stride-offset honored + dot-render
- * smoke + flow-overlay smoke.
+ * TransformerEdge: the path through the points of its route, the icon half
+ * way along it, and the loading outline.
  *
  * Per the v0.1.y plan, this file is rendering smoke only — no
- * pixel-level assertions. We stub `BaseEdge` + `EdgeLabelRenderer` +
- * `getSmoothStepPath` so the component logic still runs without a
- * React Flow root context.
+ * pixel-level assertions. We stub `BaseEdge` + `EdgeLabelRenderer` so the
+ * component logic still runs without a React Flow root context.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
@@ -35,24 +34,6 @@ vi.mock('@xyflow/react', async () => {
       }),
     EdgeLabelRenderer: ({ children }: { children: ReactNode }) =>
       React.createElement('foreignObject', { 'data-testid': 'edge-label-portal' }, children),
-    getSmoothStepPath: ({
-      sourceX,
-      sourceY,
-      targetX,
-      targetY,
-    }: {
-      sourceX: number;
-      sourceY: number;
-      targetX: number;
-      targetY: number;
-      sourcePosition?: string;
-      targetPosition?: string;
-      borderRadius?: number;
-    }) => [
-      `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`,
-      (sourceX + targetX) / 2,
-      (sourceY + targetY) / 2,
-    ],
   };
 });
 
@@ -62,6 +43,7 @@ vi.mock('@/icons/iec60617/manifest', () => ({
 }));
 
 import { TransformerEdge } from '@/components/sld/edges/TransformerEdge';
+import type { ConnectorRoute } from '@/components/sld/connections';
 
 interface RenderEdgeProps {
   id?: string;
@@ -72,11 +54,7 @@ interface RenderEdgeProps {
   data?: {
     idx?: string;
     name?: string;
-    sourceSide?: 'north' | 'east' | 'south' | 'west';
-    targetSide?: 'north' | 'east' | 'south' | 'west';
-    sourceStride?: number;
-    targetStride?: number;
-    bendPoints?: [number, number][];
+    route?: ConnectorRoute;
     winding?: '2w' | '3w';
   };
 }
@@ -106,24 +84,34 @@ function renderEdge(props: RenderEdgeProps = {}) {
   );
 }
 
+/** A route out of the end of one bar, down, and into the end of another. */
+const STEPPED: ConnectorRoute = {
+  points: [
+    [0, 3],
+    [50, 3],
+    [50, 53],
+    [100, 53],
+  ],
+  sourceSide: 'east',
+  targetSide: 'west',
+};
+
 beforeEach(() => {
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
   useUiStore.setState({ hideLabels: false });
 });
 
 describe('<TransformerEdge />', () => {
-  it('renders a BaseEdge path between source and target', () => {
+  it('falls back to a line between the two handles when it has no route', () => {
     const { getByTestId } = renderEdge();
     const base = getByTestId('transformer-edge-base');
     expect(base).toBeInTheDocument();
-    expect(base.getAttribute('data-path')).toBe('M 0 0 L 100 0');
+    expect(base.getAttribute('data-path')).toBe('M0,0 L100,0');
   });
 
-  it('renders connection-dot circles at both endpoints', () => {
-    const { container } = renderEdge();
-    const circles = container.querySelectorAll('circle');
-    // One dot per terminal = 2 circles.
-    expect(circles.length).toBe(2);
+  it('draws no dot of its own: the bar marks every tap', () => {
+    const { container } = renderEdge({ data: { route: STEPPED } });
+    expect(container.querySelectorAll('circle')).toHaveLength(0);
   });
 
   it('renders the icon midpoint container with the 2w default winding', () => {
@@ -143,64 +131,19 @@ describe('<TransformerEdge />', () => {
     expect(getByText('3w')).toBeInTheDocument();
   });
 
-  it('honors source/target stride offsets on north/south sides', () => {
-    // Both ends shift +14 px on x with stride=1 / north side.
-    const { getByTestId, container } = renderEdge({
-      data: {
-        sourceSide: 'north',
-        sourceStride: 1,
-        targetSide: 'north',
-        targetStride: 1,
-      },
-    });
-    const base = getByTestId('transformer-edge-base');
-    // The path passes through the smoothStepPath stub which builds
-    // `M sourceX sourceY L targetX targetY` from the shifted endpoints.
-    expect(base.getAttribute('data-path')).toBe('M 14 0 L 114 0');
-    // Connection-dot circles also land at the shifted positions.
-    const circles = container.querySelectorAll('circle');
-    expect(circles[0]?.getAttribute('cx')).toBe('14');
-    expect(circles[1]?.getAttribute('cx')).toBe('114');
+  it('draws through the points of its route, with square corners', () => {
+    const { getByTestId } = renderEdge({ data: { route: STEPPED } });
+    expect(getByTestId('transformer-edge-base').getAttribute('data-path')).toBe(
+      'M0,3 L50,3 L50,53 L100,53',
+    );
   });
 
-  it('fans east/west stride offsets INWARD along the bar (keeps taps on the busbar)', () => {
-    const { container } = renderEdge({
-      data: {
-        sourceSide: 'east',
-        sourceStride: 1,
-        targetSide: 'east',
-        targetStride: 1,
-      },
-    });
-    const circles = container.querySelectorAll('circle');
-    // east side fans inward (−14 px on x); y stays on the bar so the
-    // endpoint doesn't float off a 7px-tall busbar.
-    expect(circles[0]?.getAttribute('cx')).toBe('-14');
-    expect(circles[0]?.getAttribute('cy')).toBe('0');
-    expect(circles[1]?.getAttribute('cx')).toBe('86');
-    expect(circles[1]?.getAttribute('cy')).toBe('0');
-  });
-
-  it('builds a polyline path when bendPoints are supplied', () => {
-    const { getByTestId } = renderEdge({
-      data: {
-        bendPoints: [
-          [0, 0],
-          [50, 0],
-          [50, 50],
-          [100, 50],
-        ],
-      },
-    });
-    const base = getByTestId('transformer-edge-base');
-    // The polyline string assembles M / L commands per the runtime
-    // implementation. Asserting on a substring keeps this loosely
-    // coupled to the exact spacing.
-    const path = base.getAttribute('data-path') ?? '';
-    expect(path).toContain('M0,0');
-    expect(path).toContain('L50,0');
-    expect(path).toContain('L50,50');
-    expect(path).toContain('L100,50');
+  it('puts the icon half way along the route', () => {
+    // 50 across, 50 down, 50 across: half way is the middle of the run down.
+    const { getByTestId } = renderEdge({ id: 'tfm-1', data: { route: STEPPED } });
+    expect(getByTestId('transformer-edge-icon-tfm-1').style.transform).toContain(
+      'translate(50px, 28px)',
+    );
   });
 
   it('uses the muted border stroke when no PF data exists', () => {

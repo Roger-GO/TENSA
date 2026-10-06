@@ -12,87 +12,26 @@ import { DYNAMIC_GENERATOR_KINDS, generatorRowKey } from '@/lib/topology';
 import { entryBaseKv, unratedBusIdx } from '@/lib/units';
 import { busVoltageLimits } from './voltage';
 import type { CoordsByIdx } from './sidecar';
+import { BAR_LENGTH, BAR_THICKNESS, TAP_INSET, faceSpan, layoutConnections } from './connections';
+import {
+  DEVICE_PORT,
+  TARGET_HANDLE,
+  assignBranchSides,
+  type BranchEnds,
+  type HandleAssignment,
+  type Side,
+} from './sides';
 
-/** Cardinal handle sides exposed by every Bus node. */
-export type Side = 'north' | 'east' | 'south' | 'west';
-
-/**
- * Handle id convention. Each Bus exposes a `<side>-source` and a
- * `<side>-target` Handle so an edge can specify exactly which corner to
- * enter / exit. The id is `<side>-<role>`.
- */
-export const SOURCE_HANDLE: Record<Side, string> = {
-  north: 'north-source',
-  east: 'east-source',
-  south: 'south-source',
-  west: 'west-source',
-};
-export const TARGET_HANDLE: Record<Side, string> = {
-  north: 'north-target',
-  east: 'east-target',
-  south: 'south-target',
-  west: 'west-target',
-};
-
-/** Pixels per stride step. Tuned to be clearly perceptible at default zoom. */
-export const STRIDE_PIXELS = 14;
-
-/**
- * Largest inward inset (px) an east/west feeder is fanned along the bar.
- * The busbar is ~100px wide; capping below the half-width keeps every
- * tap clearly ON the bar rather than overshooting its centre.
- */
-const MAX_BAR_INSET = 38;
-
-/**
- * Lateral offset (canvas px) applied to a branch / stub endpoint so
- * multiple feeders sharing one bus side don't stack on a single point.
- *
- * The bus is drawn as a thin horizontal **busbar**, so the fan direction
- * is side-dependent:
- *
- * - **north / south** feeders tap the bar's long face → fan horizontally
- *   ALONG the bar (`dx`), symmetric about the tap column.
- * - **east / west** feeders tap the bar's short END. Offsetting them
- *   perpendicular (`dy`) — the old behaviour — floated the endpoint off
- *   the 7px-tall bar (a line read as "not connected"). Instead fan them
- *   INWARD along the bar (`dx` toward centre), monotonic + clamped so the
- *   tap always lands on the bar and never runs past its midpoint.
- */
-export function strideShift(side: Side | undefined, stride: number): { dx: number; dy: number } {
-  if (!side || stride === 0) return { dx: 0, dy: 0 };
-  if (side === 'north' || side === 'south') {
-    // Symmetric fan: stride 1 → +1, stride 2 → -1, stride 3 → +2, ...
-    const sign = stride % 2 === 1 ? 1 : -1;
-    const magnitude = Math.ceil(stride / 2);
-    return { dx: sign * magnitude * STRIDE_PIXELS, dy: 0 };
-  }
-  // east / west: keep the tap on the thin bar by fanning inward (toward
-  // the bar centre) rather than off its edge.
-  const inward = side === 'west' ? 1 : -1;
-  const offset = Math.min(stride * STRIDE_PIXELS, MAX_BAR_INSET);
-  return { dx: inward * offset, dy: 0 };
-}
-
-export interface HandleAssignment {
-  sourceSide: Side;
-  targetSide: Side;
-  /**
-   * Lateral-offset index within the `(sourceBus, sourceSide)` cluster.
-   * Counts BOTH outgoing edges (this bus is the source) AND incoming
-   * edges (this bus is the target arriving on this side) — otherwise
-   * an edge entering bus B on its west face shares the y-row near the
-   * handle with another edge leaving bus B on its west face, and the
-   * corridor reads visually as a single continuous line.
-   */
-  sourceStride: number;
-  /**
-   * Lateral-offset index within the `(targetBus, targetSide)` cluster.
-   * Same dual-counting rule as `sourceStride` — applied at the target
-   * endpoint by `TopologyEdge`.
-   */
-  targetStride: number;
-}
+export {
+  DEVICE_PORT,
+  SOURCE_HANDLE,
+  TARGET_HANDLE,
+  assignBranchSides,
+  assignHandles,
+  type BranchEnds,
+  type HandleAssignment,
+  type Side,
+} from './sides';
 
 /** Pull bus1/bus2 idxs (as strings) off a Line/Transformer entry. */
 export function entryTerminals(entry: TopologyEntry): { from: string; to: string } | null {
@@ -106,113 +45,6 @@ export function entryTerminals(entry: TopologyEntry): { from: string; to: string
 }
 
 /**
- * Pick cardinal handle sides for a single edge based on the geometry
- * of its terminal-bus pair. The dominant axis of the (to - from) vector
- * picks the source side; the target side is the opposite cardinal.
- *
- * - Horizontal-dominant: source = 'east', target = 'west' (or reversed).
- * - Vertical-dominant: source = 'south', target = 'north' (or reversed).
- *
- * Degenerate (same coord): falls back to a reasonable default and emits
- * a single console warning (not per-edge — buses overlapping is itself
- * a bug worth surfacing once).
- *
- * Pure function — no I/O, no React Flow, no React.
- */
-export function assignHandles(
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-): { sourceSide: Side; targetSide: Side } {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  if (dx === 0 && dy === 0) {
-    return { sourceSide: 'east', targetSide: 'east' };
-  }
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    return dx > 0
-      ? { sourceSide: 'east', targetSide: 'west' }
-      : { sourceSide: 'west', targetSide: 'east' };
-  }
-  return dy > 0
-    ? { sourceSide: 'south', targetSide: 'north' }
-    : { sourceSide: 'north', targetSide: 'south' };
-}
-
-/**
- * Like `assignHandles` but on the OTHER axis — when the natural pick
- * conflicts with another edge already using that handle, the alternate
- * pick routes the edge through the perpendicular cardinal sides
- * instead. Used by `computeHandleAssignments` to disambiguate hub
- * buses (e.g., bus 2 with both 1→2 entering on west and 2→5 leaving on
- * west) by routing one of them through south/north instead.
- *
- * For a perfectly axis-aligned pair (only one axis has movement), the
- * alternate isn't well-defined — we fall back to the natural pick,
- * caller relies on stride to separate the corridor.
- */
-export function assignHandlesAlternate(
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-): { sourceSide: Side; targetSide: Side } {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  if (dx === 0 && dy === 0) {
-    return { sourceSide: 'east', targetSide: 'east' };
-  }
-  // Pick the NON-dominant axis. Falls back to the dominant pick when
-  // one axis has zero movement.
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    if (dy === 0) {
-      return dx > 0
-        ? { sourceSide: 'east', targetSide: 'west' }
-        : { sourceSide: 'west', targetSide: 'east' };
-    }
-    return dy > 0
-      ? { sourceSide: 'south', targetSide: 'north' }
-      : { sourceSide: 'north', targetSide: 'south' };
-  }
-  if (dx === 0) {
-    return dy > 0
-      ? { sourceSide: 'south', targetSide: 'north' }
-      : { sourceSide: 'north', targetSide: 'south' };
-  }
-  return dx > 0
-    ? { sourceSide: 'east', targetSide: 'west' }
-    : { sourceSide: 'west', targetSide: 'east' };
-}
-
-/**
- * Stub-edge stride record. Stubs (non-bus → bus connectors) participate
- * in the same `(busId, side)` cluster as branch edges so a stub doesn't
- * connect at the SAME point on the bus boundary as a line entering on
- * the same cardinal side — the user couldn't tell which was which.
- */
-export interface StubAssignment {
-  /** Bus side the stub connects to (matches BUS_SIDE_FOR_KIND). */
-  busSide: Side;
-  /** Stride within the (busId, busSide) cluster (counted alongside branches). */
-  stride: number;
-}
-
-/**
- * For every edge in `topology`, compute the handle assignment + the
- * stride indices for both endpoints.
- *
- * Stride accounting groups every edge that touches `(busId, side)` —
- * regardless of whether this bus is the source or the target on that
- * side, AND including non-bus stub edges (generator/load/shunt → bus).
- * Without this, two devices with stubs landing on the same cardinal
- * side as a real branch all share the bus's connection dot, making the
- * topology unreadable. Bidirectional stride teases each connection
- * onto its own offset along the perpendicular axis.
- *
- * The edge ids match `buildGraph`'s `<bucket>-<idx>` convention.
- *
- * Defensive against missing terminals or missing coords: skips with no
- * entry in the resulting map. Caller treats absence as "fall back to
- * default React Flow handle pick".
- */
-/**
  * Choose the vertical face (`north` / `south`) each bus's generators and
  * loads hang off. The face points AWAY from the bus's branch neighbours:
  * a bus that sits below its neighbours (e.g. the slack bus at the bottom
@@ -223,9 +55,9 @@ export interface StubAssignment {
  * the device points into the more open half of the canvas rather than
  * colliding with whatever is stacked directly beneath it.
  *
- * Used by BOTH `computeHandleAssignments` (to pick the stub's bus face)
- * and `buildGraph` (to place the device node) — fed the same effective
- * coords so the device and its stub always agree on the face.
+ * Used by `buildGraph` to place a device that the layout does not place.
+ * Where its connector then attaches follows from where the device and its
+ * bus sit (`connections.ts`), not from this face.
  *
  * Only buses with a CLEAR signal get an entry; a bus with no branches
  * sitting at the diagram centroid (e.g. a lone bus, or any case with no
@@ -274,161 +106,54 @@ export function computeDeviceVerticalSides(
   return sides;
 }
 
-export function computeHandleAssignments(
-  topology: TopologySummary,
-  coords: CoordsByIdx,
-): {
-  branches: Map<string, HandleAssignment>;
-  stubs: Map<string, StubAssignment>;
-} {
-  let warnedDegenerate = false;
-
-  // First pass: each edge gets a primary side pick (dominant axis) and
-  // an alternate (perpendicular axis). When the primary causes a hub
-  // conflict (both directions through the same handle), the second
-  // pass reassigns to the alternate so the corridors visually
-  // disambiguate.
-  interface Candidate {
-    edgeId: string;
-    sourceBus: string;
-    targetBus: string;
-    primary: { sourceSide: Side; targetSide: Side };
-    alternate: { sourceSide: Side; targetSide: Side };
-  }
-  const candidates: Candidate[] = [];
+/** The lines and transformers of `topology` as `assignBranchSides` takes them. */
+export function branchEndsOf(topology: TopologySummary): BranchEnds[] {
+  const out: BranchEnds[] = [];
   const collect = (entry: TopologyEntry, bucket: 'line' | 'transformer') => {
     const t = entryTerminals(entry);
-    if (!t) return;
-    const fromCoord = coords[t.from];
-    const toCoord = coords[t.to];
-    if (!fromCoord || !toCoord) return;
-    if (!warnedDegenerate && fromCoord.x === toCoord.x && fromCoord.y === toCoord.y) {
-      console.warn(
-        `SLD: bus ${t.from} and ${t.to} share the same coordinate; falling back to default handles`,
-      );
-      warnedDegenerate = true;
-    }
-    candidates.push({
-      edgeId: `${bucket}-${String(entry.idx)}`,
-      sourceBus: t.from,
-      targetBus: t.to,
-      primary: assignHandles(fromCoord, toCoord),
-      alternate: assignHandlesAlternate(fromCoord, toCoord),
-    });
+    if (t) out.push({ id: `${bucket}-${String(entry.idx)}`, source: t.from, target: t.to });
   };
   for (const line of topology.lines) collect(line, 'line');
   for (const trafo of topology.transformers) collect(trafo, 'transformer');
-
-  // Second pass: greedy assignment with primary→alternate fallback.
-  // The picker prefers any unused cluster, then falls back to whichever
-  // axis has the smaller existing cluster. This guarantees an edge
-  // never shares a corridor with another edge it could have avoided
-  // through axis swap — the visual property the polish loop demanded.
-  //
-  // Iteration order is the topology iteration order — deterministic.
-  const counts = new Map<string, number>();
-  const branches = new Map<string, HandleAssignment>();
-  const stubs = new Map<string, StubAssignment>();
-  const clusterSize = (busId: string, side: Side) => counts.get(`${busId}|${side}`) ?? 0;
-  for (const c of candidates) {
-    const primaryLoad =
-      clusterSize(c.sourceBus, c.primary.sourceSide) +
-      clusterSize(c.targetBus, c.primary.targetSide);
-    const alt = c.alternate;
-    const altDifferent =
-      alt.sourceSide !== c.primary.sourceSide || alt.targetSide !== c.primary.targetSide;
-    let chosen = c.primary;
-    if (altDifferent && primaryLoad > 0) {
-      const altLoad =
-        clusterSize(c.sourceBus, alt.sourceSide) + clusterSize(c.targetBus, alt.targetSide);
-      // Prefer the alternate axis whenever it carries equal-or-less
-      // load — equal-load ties pick the alternate so the second edge
-      // through a hub bus splits onto a new axis instead of stacking
-      // up stride alongside the first.
-      if (altLoad <= primaryLoad) chosen = alt;
-    }
-    const sourceKey = `${c.sourceBus}|${chosen.sourceSide}`;
-    const targetKey = `${c.targetBus}|${chosen.targetSide}`;
-    const sourceStride = counts.get(sourceKey) ?? 0;
-    counts.set(sourceKey, sourceStride + 1);
-    const targetStride = counts.get(targetKey) ?? 0;
-    counts.set(targetKey, targetStride + 1);
-    branches.set(c.edgeId, {
-      sourceSide: chosen.sourceSide,
-      targetSide: chosen.targetSide,
-      sourceStride,
-      targetStride,
-    });
-  }
-
-  // Third pass: register stub edges into the same cluster counters.
-  // Each non-bus device gets one stub touching `(parentBus, kindSide)`
-  // — the side is fixed by the kind (generator → north, load → south,
-  // shunt → west). Stubs share the cluster with branches, so the stub
-  // gets a stride that DOES NOT collide with branch endpoints already
-  // counted in pass 2.
-  const nonBusBucketsForStub: Array<{
-    entries: readonly TopologyEntry[];
-    parentKey: string;
-    kindSide: Side;
-    kind: 'generator' | 'load' | 'shunt';
-  }> = [
-    {
-      entries: dedupeGeneratorsByIdx(topology.generators ?? []),
-      parentKey: 'bus',
-      kindSide: 'north',
-      kind: 'generator',
-    },
-    {
-      entries: topology.loads ?? [],
-      parentKey: 'bus',
-      kindSide: 'south',
-      kind: 'load',
-    },
-    {
-      entries: topology.shunts ?? [],
-      parentKey: 'bus',
-      kindSide: 'west',
-      kind: 'shunt',
-    },
-  ];
-  // Generators/loads use the away-facing vertical side (so a bottom bus's
-  // machine hangs below it); shunts keep their fixed west tap.
-  const deviceSides = computeDeviceVerticalSides(topology, coords);
-  for (const bucket of nonBusBucketsForStub) {
-    for (const entry of bucket.entries) {
-      const parentIdx = _busFromParam(entry, bucket.parentKey);
-      if (parentIdx === null || !coords[parentIdx]) continue;
-      const busSide =
-        bucket.kind === 'shunt' ? bucket.kindSide : (deviceSides.get(parentIdx) ?? bucket.kindSide);
-      const stubId = `stub-${bucket.kind}-${String(entry.idx)}`;
-      const clusterKey = `${parentIdx}|${busSide}`;
-      const stride = counts.get(clusterKey) ?? 0;
-      counts.set(clusterKey, stride + 1);
-      stubs.set(stubId, { busSide, stride });
-    }
-  }
-  return { branches, stubs };
+  return out;
 }
 
 /**
- * Optional inputs for `buildGraph`. Both fields are derived once per
- * layout pass — `handleAssignments` from `computeHandleAssignments`,
- * `bendPoints` from ELK's `result.edges[].sections[].bendPoints`. When
- * both are absent the canvas falls back to default React Flow handle
- * pick + smooth-step routing (the v0.1 behaviour).
+ * `assignBranchSides` for every line and transformer of `topology`, keyed by
+ * edge id (`buildGraph`'s `<bucket>-<idx>` convention). The auto-layout
+ * declares its ports from this, so the routes it computes leave each bus
+ * where the diagram will draw them leaving.
+ *
+ * Defensive against missing terminals or missing coords: such a branch has
+ * no entry in the resulting map.
+ */
+export function computeHandleAssignments(
+  topology: TopologySummary,
+  coords: CoordsByIdx,
+): { branches: Map<string, HandleAssignment> } {
+  return { branches: assignBranchSides(branchEndsOf(topology), coords) };
+}
+
+/**
+ * Optional inputs for `buildGraph`. `bendPoints` comes from ELK's
+ * `result.edges[].sections[].bendPoints` or from a saved layout; without
+ * it every branch is routed from where its two buses sit.
  */
 export interface BuildGraphOptions {
-  handleAssignments?: Map<string, HandleAssignment>;
-  stubAssignments?: Map<string, StubAssignment>;
   /**
    * Per-edge polyline coords: from ELK in the auto-layout case, or the
-   * routes a saved layout holds. Includes the start and end points; the
-   * edge component renders `M start L bend1 ... L end`. Edges absent from
-   * this map render via `TopologyEdge` (the smooth-step path), and so does
-   * an edge whose polyline no longer fits its buses (`routeFitsBuses`).
+   * routes a saved layout holds. Includes the start and end points. The
+   * diagram keeps the bends and lands the two ends on the bars
+   * (`connections.ts`). An edge absent from this map is routed from where
+   * its buses sit, and so is one whose polyline no longer fits its buses
+   * (`routeFitsBuses`).
    */
   bendPoints?: Map<string, [number, number][]>;
+  /**
+   * The length a layout sets for a bus's bar, by bus idx (`barLengthsOf`).
+   * A device that is placed here keeps to the bar as it will be drawn.
+   */
+  barLengths?: ReadonlyMap<string, number>;
   /**
    * Positions of controllers a saved layout places on their own, keyed
    * `${modelClass}|${idx}`. A controller absent from this map is docked
@@ -466,10 +191,10 @@ export interface BuildGraphOptions {
 /**
  * Bounding-box footprint per kind. Width × height in canvas pixels.
  *
- * Buses use a slightly wider box because the bus glyph is the longest
- * stroke + label. Non-bus elements share a 50×46 footprint matching the
- * post-Unit-13c device-node shrink. Exported so tests can assert
- * deterministic overlap math without re-deriving the constants.
+ * A bus is as wide as its bar. A non-bus element is drawn in a box as wide
+ * as its label (`deviceBoxSize`), and the 50×46 here is what it is taken
+ * to be where no box is known. Exported so tests can assert deterministic
+ * overlap math without re-deriving the constants.
  */
 export const NODE_FOOTPRINT: Record<
   'bus' | 'generator' | 'load' | 'shunt',
@@ -478,10 +203,10 @@ export const NODE_FOOTPRINT: Record<
     height: number;
   }
 > = {
-  // Busbar footprint: the bar is ~92px wide; height reserves room for the
-  // bar plus the name/voltage label that hangs below it so stacked buses
-  // don't collide labels.
-  bus: { width: 92, height: 44 },
+  // Busbar footprint: as wide as the bar at its default length; height
+  // reserves room for the bar plus the name/voltage label that hangs below
+  // it so stacked buses don't collide labels.
+  bus: { width: BAR_LENGTH, height: 44 },
   generator: { width: 50, height: 46 },
   load: { width: 50, height: 46 },
   shunt: { width: 50, height: 46 },
@@ -792,43 +517,81 @@ export function pushOutCollisions(
 }
 
 /**
- * Default offsets for non-bus elements relative to their parent bus.
+ * How far above or below its bus (origin to origin) a device is put when
+ * the layout does not place it.
  *
  * Tuned to keep two vertically-adjacent buses (e.g., IEEE 14's BUS5 at
- * y=250 and BUS6 at y=400 — only 150 px apart) from having their
- * non-bus children collide. With y_offset=70, BUS5's south child lands
- * at 320 and BUS6's north child at 330 — a 10-px gap that the
- * row-parity x-stagger below widens further.
- *
- * Stack indices grow on a mix of axes per kind so multiple devices on
- * one bus don't overlap each other. Tunable; the user can drag to
- * override (Unit 9).
+ * y=250 and BUS6 at y=400, only 150 px apart) from having their devices
+ * collide: BUS5's south child lands at 320 and BUS6's north child at 330,
+ * and the row-parity column offset below puts the two side by side.
  */
-export const NON_BUS_OFFSETS = {
-  // stackDx > footprint width (50) so two devices on one bus fan along the
-  // bar with a real gap — they don't overlap, so the push-out never has to
-  // separate them perpendicular (which would lengthen one machine's stub).
-  generator: { x: 0, y: -70, stackDx: 62, stackDy: -45 },
-  load: { x: 0, y: 70, stackDx: 62, stackDy: 45 },
-  shunt: { x: -75, y: 55, stackDx: -50, stackDy: 30 },
-} as const satisfies Record<
-  'generator' | 'load' | 'shunt',
-  { x: number; y: number; stackDx: number; stackDy: number }
->;
-
-/** Stack-row width: 4 devices per row before wrapping vertically. */
-const STACK_ROW_LIMIT = 4;
+export const DEVICE_ROW_OFFSET = 70;
 
 /**
- * Vertical-neighbor stagger. When two buses are stacked vertically
- * (same column, different y row), their north / south children land
- * at the same default position. We stagger the children laterally
- * based on the parent-bus row parity so the lower bus's north child
- * sits a few px to one side of the upper bus's south child. The
- * parity is derived from `Math.round(busY / 100)` — for IEEE 14's
- * curated layout this produces alternating offsets per row.
+ * How far from the middle of its bar the first device of a face stands by
+ * default: over one third of the bar or the other, by the parity of the
+ * bus's row (`Math.round(busY / 100)`). That leaves the middle of the bar,
+ * where a single branch lands, free, and puts the devices of two buses that
+ * sit one above the other in different columns.
  */
-const ROW_STAGGER_PIXELS = 28;
+export const DEVICE_COLUMN_OFFSET = 33;
+
+/** The gap a device keeps to a branch that lands on its side of the bar, and to the next device. */
+export const DEVICE_COLUMN_GAP = 8;
+
+/**
+ * The box a device node is drawn in, worked out from the label under its
+ * glyph (9 px monospace, a 24 px glyph, the node's padding and border). It
+ * is what places a device over its column before React Flow has measured
+ * it, and the size hint the node carries until then.
+ */
+export function deviceBoxSize(label: string): { width: number; height: number } {
+  return { width: Math.round(Math.max(24, 5.4 * label.length) + 14), height: 41 };
+}
+
+/** How many pixels of distance from its column a device gives up to stand one pixel less past a tip. */
+const PAST_TIP_COST = 4;
+
+/** Something that stands on a face of a bar: `half` either side of `x`. */
+export interface Column {
+  x: number;
+  half: number;
+}
+
+/**
+ * The x nearest to `preferred` at which a box `half` wide either side
+ * stands `DEVICE_COLUMN_GAP` clear of everything in `taken`. A place over
+ * the bar (`[lo, hi]`) is one the connector drops square onto the bar from,
+ * so each pixel past a tip counts as several of distance, and of two places
+ * that come out equal the one closer to `middle` is taken.
+ */
+export function freeColumn(
+  preferred: number,
+  half: number,
+  taken: readonly Column[],
+  lo: number,
+  hi: number,
+  middle: number,
+): number {
+  const reach = (c: Column): number => c.half + half + DEVICE_COLUMN_GAP;
+  const fits = (x: number): boolean => taken.every((c) => Math.abs(x - c.x) >= reach(c) - 1e-6);
+  // Beside each thing in the way is the nearest free place on that side of it.
+  const candidates = [preferred, ...taken.flatMap((c) => [c.x - reach(c), c.x + reach(c)])];
+  const cost = (x: number): number =>
+    Math.abs(x - preferred) + PAST_TIP_COST * Math.max(0, lo - x, x - hi);
+  let best = preferred;
+  let bestCost = Infinity;
+  for (const x of candidates) {
+    if (!fits(x)) continue;
+    const c = cost(x);
+    const tie = Math.abs(c - bestCost) < 1e-6;
+    if (c < bestCost - 1e-6 || (tie && Math.abs(x - middle) < Math.abs(best - middle))) {
+      best = x;
+      bestCost = c;
+    }
+  }
+  return best;
+}
 
 /** React Flow node-type strings for the non-bus kinds. Mirrors `NODE_TYPES`. */
 const NON_BUS_NODE_TYPE = {
@@ -837,14 +600,19 @@ const NON_BUS_NODE_TYPE = {
   shunt: 'shunt',
 } as const;
 
-/** Stub-edge handle picks: every non-bus node has a single `bus-anchor` handle. */
-const NON_BUS_HANDLE_ID = 'bus-anchor';
+/** The face of a device that looks at the given face of its bus. */
+const FACING: Record<Side, Side> = {
+  north: 'south',
+  east: 'west',
+  south: 'north',
+  west: 'east',
+};
 
-/** Bus-side handle each non-bus kind connects to. */
-const BUS_SIDE_FOR_KIND: Record<'generator' | 'load' | 'shunt', Side> = {
+/** The face of its bus each kind hangs off when nothing says otherwise. */
+const BUS_SIDE_FOR_KIND: Record<'generator' | 'load' | 'shunt', 'north' | 'south'> = {
   generator: 'north',
   load: 'south',
-  shunt: 'west',
+  shunt: 'south',
 };
 
 interface NonBusBucket {
@@ -970,8 +738,6 @@ export function buildGraph(
     } satisfies Node;
   });
 
-  const handles = opts.handleAssignments ?? new Map<string, HandleAssignment>();
-  const stubAssignments = opts.stubAssignments ?? new Map<string, StubAssignment>();
   const bends = opts.bendPoints ?? new Map<string, [number, number][]>();
   const nonBusCoords = opts.nonBusCoords ?? new Map<string, BusCoord>();
   const branchDragOverrides = opts.dragOverrides ?? {};
@@ -983,14 +749,13 @@ export function buildGraph(
     const id = `${kindLabel}-${String(entry.idx)}`;
     if (seen.has(id)) return;
     seen.add(id);
-    const handleAssignment = handles.get(id);
     // A polyline was computed for where its two buses sat. If the user has
     // since moved either one (a drag override that differs from the layout
     // coord; the canvas records an override for every node at the end of any
     // drag, so the mere presence of one says nothing), or its ends are not at
     // these buses at all, it would render disconnected, floating in space.
-    // Drop it so the edge falls back to dynamic routing that follows the
-    // live node positions (and reaches the moved bus's handle).
+    // Drop it so the branch is routed from tap to tap, which follows the
+    // live node positions.
     const movedByDrag = (busId: string): boolean => {
       const override = branchDragOverrides[busId];
       const laidOut = coords[busId];
@@ -1010,8 +775,8 @@ export function buildGraph(
         ? candidate
         : undefined;
     // Transformers always render via TransformerEdge (which carries the
-    // 2W/3W icon at the midpoint); routed-or-smooth-step is decided
-    // inside that component based on whether bend points are present.
+    // 2W/3W icon at the midpoint), with a stored route or without one. A
+    // line says by its type whether it keeps one.
     let edgeType: 'topology' | 'routed' | 'transformer';
     if (kindLabel === 'transformer') {
       edgeType = 'transformer';
@@ -1027,19 +792,20 @@ export function buildGraph(
         String(entry.idx),
         entry.name,
       )}, bus ${t.from} to bus ${t.to}`,
-      sourceHandle: handleAssignment ? SOURCE_HANDLE[handleAssignment.sourceSide] : undefined,
-      targetHandle: handleAssignment ? TARGET_HANDLE[handleAssignment.targetSide] : undefined,
       type: edgeType,
       data: {
         idx: String(entry.idx),
         name: entry.name,
         kind: entry.kind,
         bucket: kindLabel,
-        sourceSide: handleAssignment?.sourceSide,
-        targetSide: handleAssignment?.targetSide,
-        sourceStride: handleAssignment?.sourceStride ?? 0,
-        targetStride: handleAssignment?.targetStride ?? 0,
         bendPoints: polyline,
+        // Where the two buses sat when the polyline was found to fit them.
+        // The diagram draws it only while they are still there, so a bus
+        // that is being dragged takes its branches along at once.
+        bendAnchors:
+          polyline === undefined
+            ? undefined
+            : { source: { ...coords[t.from]! }, target: { ...coords[t.to]! } },
         // Transformer-specific: 3-winding fallback gets a "3w" badge
         // overlaid on the 2-winding glyph (per Scope Boundaries).
         winding: detectWinding(entry),
@@ -1049,9 +815,9 @@ export function buildGraph(
   for (const line of topology.lines) pushBranchEdge(line, 'line');
   for (const trafo of topology.transformers) pushBranchEdge(trafo, 'transformer');
 
-  // Non-bus nodes (generators, loads, shunts). Anchor each to its parent
-  // bus's coordinate plus a kind-specific offset; multiple devices on
-  // one bus stack along the offset axis.
+  // Non-bus nodes (generators, loads, shunts). Each hangs off a face of
+  // its parent bus: where the saved layout or a drag put it, or else over a
+  // free part of the bar.
   const generatorEntries = dedupeGeneratorsByIdx(topology.generators ?? []);
   const generatorRows = assignGeneratorRows(generatorEntries);
   const nonBusBuckets: NonBusBucket[] = [
@@ -1072,12 +838,11 @@ export function buildGraph(
     },
   ];
 
-  // Device placement side (see `computeDeviceVerticalSides`). A generator
-  // / load hangs off the bus on the vertical face pointing AWAY from the
-  // bus's branch neighbours — so the slack machine on a bottom bus sits
-  // BELOW it (not shooting up through the network). Computed against the
-  // SAME effective coords the stub-side pass uses (drag overrides folded
-  // in) so the device and its stub always pick the same face.
+  // Device placement side (see `computeDeviceVerticalSides`). A device
+  // hangs off the bus on the vertical face pointing AWAY from the bus's
+  // branch neighbours, so the slack machine on a bottom bus sits BELOW it
+  // (not shooting up through the network). Computed against the effective
+  // coords (drag overrides folded in), which is where the bars are.
   const effCoords: CoordsByIdx =
     Object.keys(branchDragOverrides).length === 0
       ? coords
@@ -1090,14 +855,47 @@ export function buildGraph(
         })();
   const deviceSides = computeDeviceVerticalSides(topology, effCoords);
 
-  // Per-(parentBus, kind) stack counter so two generators on the same bus
-  // don't render at the same coord.
-  const stackCounts = new Map<string, number>();
+  // Where the branches land on each bar, from a pass over the buses and the
+  // branches alone: a device that is placed here stands clear of them.
+  const branchBars = layoutConnections(
+    nodes.map((n) => ({ ...n, position: effCoords[n.id] ?? n.position })),
+    edges,
+    { barLengths: opts.barLengths },
+  ).bars;
+
+  // What stands on each face of each bar (`<bus>|<face>`): the branches
+  // that land there, the devices the layout or a drag put there, and the
+  // devices placed here so far.
+  const columns = new Map<string, Column[]>();
+  const columnsOf = (busIdx: string, face: 'north' | 'south', busX: number): Column[] => {
+    const key = `${busIdx}|${face}`;
+    let list = columns.get(key);
+    if (list === undefined) {
+      list = (branchBars.get(busIdx)?.taps ?? [])
+        .filter((tap) => tap.side === face)
+        .map((tap) => ({ x: busX + tap.x, half: 0 }));
+      columns.set(key, list);
+    }
+    return list;
+  };
+
+  interface PendingDevice {
+    entry: TopologyEntry;
+    kind: 'generator' | 'load' | 'shunt';
+    nodeId: string;
+    parentIdx: string;
+    /** Where the bus sits now: its drag override, or its layout coord. */
+    parentCoord: { x: number; y: number };
+    size: { width: number; height: number };
+    /** Set once the device has its place. */
+    position?: { x: number; y: number };
+    face?: 'north' | 'south';
+  }
+  const pending: PendingDevice[] = [];
   // Devices whose position comes from the saved layout. That is where they
   // were when the layout was written, so the push-out pass leaves them there.
   const placedByLayout = new Set<string>();
   for (const bucket of nonBusBuckets) {
-    const offset = NON_BUS_OFFSETS[bucket.kind];
     for (const entry of bucket.entries) {
       const parentIdx = bucket.parentBus(entry);
       if (parentIdx === null) {
@@ -1109,42 +907,28 @@ export function buildGraph(
         console.warn(`SLD: ${bucket.kind} ${String(entry.idx)} has no parent bus; skipping`);
         continue;
       }
-      const baseParentCoord = coords[parentIdx];
-      if (!baseParentCoord) {
+      // Anchor devices to the bus's *effective* position: when the user
+      // drags a bus, its drag override (not the stale auto-layout coord)
+      // is where the bar now sits, so its generators/loads/shunts must
+      // follow it. Without this, moving a bus strands its devices at the
+      // old grid position, and they scatter off-canvas.
+      const parentCoord = effCoords[parentIdx];
+      if (!parentCoord) {
         console.warn(
           `SLD: ${bucket.kind} ${String(entry.idx)} references missing bus ${parentIdx}; skipping`,
         );
         continue;
       }
-      // Anchor devices to the bus's *effective* position: when the user
-      // drags a bus, its drag override (not the stale auto-layout coord)
-      // is where the bar now sits, so its generators/loads/shunts must
-      // follow it. Without this, moving a bus strands its devices at the
-      // old grid position — they scatter off-canvas (the device's own
-      // drag override, if any, still wins later in the push-out pass).
-      const parentCoord = branchDragOverrides[parentIdx] ?? baseParentCoord;
-      const stackKey = `${parentIdx}|${bucket.kind}`;
-      const stackIndex = stackCounts.get(stackKey) ?? 0;
-      stackCounts.set(stackKey, stackIndex + 1);
-      // Stacks wrap onto a new row every STACK_ROW_LIMIT devices: the
-      // first 4 fan horizontally on one row, devices 5+ jump to a
-      // second row. Centering on the bus uses an alternating sign so
-      // the cluster stays visually balanced without a pre-pass to
-      // count total devices on the parent.
-      const col = stackIndex % STACK_ROW_LIMIT;
-      const row = Math.floor(stackIndex / STACK_ROW_LIMIT);
-      // Alternate left/right around the bus center: indices 0,1,2,3
-      // map to columns 0, 1, -1, 2 → roughly centered fan.
-      const COL_SCHEDULE = [0, 1, -1, 2, -2, 3, -3];
-      const colSigned = COL_SCHEDULE[col] ?? col;
-      // Vertical-neighbor stagger: bus rows alternating ±ROW_STAGGER so
-      // two stacked buses' children land on different x columns. Applied to
-      // the WHOLE fan (every column), not just col 0 — staggering only col
-      // 0 narrowed the gap to the col-1 device and made the push-out shove
-      // one machine out perpendicular (a long stub). Shifting the whole fan
-      // preserves the inter-device gap while still offsetting solo devices.
-      const rowParity = Math.round(parentCoord.y / 100) % 2 === 0 ? 1 : -1;
-      const rowStagger = rowParity * ROW_STAGGER_PIXELS;
+      const nodeId = `${bucket.kind}-${String(entry.idx)}`;
+      const size = deviceBoxSize(entry.name || String(entry.idx));
+      const device: PendingDevice = {
+        entry,
+        kind: bucket.kind,
+        nodeId,
+        parentIdx,
+        parentCoord,
+        size,
+      };
       // Prefer the exact model-class match (`PV|1`); fall back to the
       // UI-category key (`generator|1`) so a sidecar that was saved
       // before a kind-edit still resolves the dragged coord. The dual-
@@ -1152,67 +936,97 @@ export function buildGraph(
       const modelKey = `${entry.kind}|${String(entry.idx)}`;
       const categoryKey = `${bucket.kind}|${String(entry.idx)}`;
       const sidecar = nonBusCoords.get(modelKey) ?? nonBusCoords.get(categoryKey);
-      // Generators / loads hang off the bus's away-facing side; shunts keep
-      // their fixed west offset. When the smart side flips the device to the
-      // opposite vertical face, mirror the y offset + stack direction so it
-      // (and its stub) stay on that face.
-      const vSide = bucket.kind === 'shunt' ? null : deviceSides.get(parentIdx);
-      const flipY = vSide === 'north' ? -1 : vSide === 'south' ? 1 : null;
-      const offsetY = flipY === null ? offset.y : Math.abs(offset.y) * flipY;
-      const stackDy = flipY === null ? offset.stackDy : Math.abs(offset.stackDy) * flipY;
-      const busSideForDevice = vSide ?? BUS_SIDE_FOR_KIND[bucket.kind];
-      const x = sidecar?.x ?? parentCoord.x + offset.x + offset.stackDx * colSigned + rowStagger;
-      const y = sidecar?.y ?? parentCoord.y + offsetY + stackDy * row;
-      const nodeId = `${bucket.kind}-${String(entry.idx)}`;
       if (sidecar !== undefined) placedByLayout.add(nodeId);
-      const deviceLabel = elementAriaLabel(
-        bucket.kind.charAt(0).toUpperCase() + bucket.kind.slice(1),
-        String(entry.idx),
-        entry.name,
-      );
-      // The row of the PF result this node prints, or null when another
-      // node prints it (see `assignGeneratorRows`).
-      const pflowIdx =
-        bucket.kind === 'generator' ? (generatorRows.get(entry) ?? null) : String(entry.idx);
-      nodes.push({
-        id: nodeId,
-        type: NON_BUS_NODE_TYPE[bucket.kind],
-        ariaLabel: deviceLabel,
-        position: { x, y },
-        // Pre-measure size hint so RF v12 draws a MiniMap rect; see the
-        // bus-node note above. Dropped once the device glyph is measured.
-        initialWidth: NODE_FOOTPRINT[bucket.kind].width,
-        initialHeight: NODE_FOOTPRINT[bucket.kind].height,
-        data: {
-          idx: String(entry.idx),
-          name: entry.name,
-          kind: entry.kind,
-          parentBus: parentIdx,
-          pflowIdx,
-        },
-      } satisfies Node);
-      // Stub edge from the non-bus node to the bus's appropriate side.
-      // Pull the stride for this stub so StubEdge can lateral-offset
-      // the bus-end endpoint and avoid sharing a connection point with
-      // any branch entering on the same cardinal side.
-      const stubId = `stub-${nodeId}`;
-      const stubAssignment = stubAssignments.get(stubId);
-      edges.push({
-        id: stubId,
-        ariaLabel: `${deviceLabel}, connection to bus ${parentIdx}`,
-        source: nodeId,
-        sourceHandle: NON_BUS_HANDLE_ID,
-        target: parentIdx,
-        targetHandle: TARGET_HANDLE[busSideForDevice],
-        type: 'stub',
-        data: {
-          kind: entry.kind,
-          bucket: bucket.kind,
-          busSide: stubAssignment?.busSide ?? busSideForDevice,
-          targetStride: stubAssignment?.stride ?? 0,
-        },
-      });
+      // A device that already has a place, from the layout or from a drag
+      // (the canvas puts the override on top of whatever is built here),
+      // stands where it is, and the ones placed below keep clear of it.
+      const fixed = branchDragOverrides[nodeId] ?? sidecar;
+      if (fixed !== undefined) {
+        const built = sidecar ?? fixed;
+        device.position = { x: built.x, y: built.y };
+        const above = fixed.y + size.height / 2 <= parentCoord.y + BAR_THICKNESS / 2;
+        device.face = above ? 'north' : 'south';
+        columnsOf(parentIdx, device.face, parentCoord.x).push({
+          x: fixed.x + size.width / 2,
+          half: size.width / 2,
+        });
+      }
+      pending.push(device);
     }
+  }
+
+  // The rest take the free place nearest their column: over the bar where
+  // there is room, so the connector drops square onto it, and beside what
+  // is already there otherwise.
+  for (const device of pending) {
+    if (device.position !== undefined) continue;
+    const { parentIdx, parentCoord, size } = device;
+    const face = deviceSides.get(parentIdx) ?? BUS_SIDE_FOR_KIND[device.kind];
+    const bar = branchBars.get(parentIdx);
+    const middle = parentCoord.x + BAR_LENGTH / 2;
+    // Where a connector can land on this face of the bar.
+    const span = bar ? faceSpan(bar) : { lo: TAP_INSET, hi: BAR_LENGTH - TAP_INSET };
+    const lo = parentCoord.x + span.lo;
+    const hi = parentCoord.x + span.hi;
+    // Two buses one above the other put their devices in different columns.
+    const rowParity = Math.round(parentCoord.y / 100) % 2 === 0 ? 1 : -1;
+    const taken = columnsOf(parentIdx, face, parentCoord.x);
+    const preferred = Math.min(hi, Math.max(lo, middle + rowParity * DEVICE_COLUMN_OFFSET));
+    const x = freeColumn(preferred, size.width / 2, taken, lo, hi, middle);
+    taken.push({ x, half: size.width / 2 });
+    device.face = face;
+    device.position = {
+      x: x - size.width / 2,
+      y: parentCoord.y + (face === 'north' ? -DEVICE_ROW_OFFSET : DEVICE_ROW_OFFSET),
+    };
+  }
+
+  for (const device of pending) {
+    const { entry, kind, nodeId, parentIdx, size } = device;
+    const face = device.face!;
+    const deviceLabel = elementAriaLabel(
+      kind.charAt(0).toUpperCase() + kind.slice(1),
+      String(entry.idx),
+      entry.name,
+    );
+    // The row of the PF result this node prints, or null when another
+    // node prints it (see `assignGeneratorRows`).
+    const pflowIdx = kind === 'generator' ? (generatorRows.get(entry) ?? null) : String(entry.idx);
+    nodes.push({
+      id: nodeId,
+      type: NON_BUS_NODE_TYPE[kind],
+      ariaLabel: deviceLabel,
+      position: device.position!,
+      // Pre-measure size hint so RF v12 draws a MiniMap rect; see the
+      // bus-node note above. Dropped once the device glyph is measured.
+      initialWidth: size.width,
+      initialHeight: size.height,
+      data: {
+        idx: String(entry.idx),
+        name: entry.name,
+        kind: entry.kind,
+        parentBus: parentIdx,
+        pflowIdx,
+      },
+    } satisfies Node);
+    // Stub edge from the non-bus node to its bus. The handles are the ones
+    // of where the device was built (beside a face of its bus); where the
+    // connector really leaves the device and lands on the bar is worked out
+    // from where the two sit (`connections.ts`), and follows a drag.
+    const stubId = `stub-${nodeId}`;
+    edges.push({
+      id: stubId,
+      ariaLabel: `${deviceLabel}, connection to bus ${parentIdx}`,
+      source: nodeId,
+      sourceHandle: DEVICE_PORT[FACING[face]],
+      target: parentIdx,
+      targetHandle: TARGET_HANDLE[face],
+      type: 'stub',
+      data: {
+        kind: entry.kind,
+        bucket: kind,
+      },
+    });
   }
 
   // Collision push-out (Unit 3, v0.1.y). Runs after the kind-based
@@ -1230,16 +1044,27 @@ export function buildGraph(
     const lockedIds = new Set([...Object.keys(dragOverrides), ...placedByLayout]);
     // Build the push-out input. Each non-bus node carries its parent
     // bus id so the push-out skips the parent collision (a generator
-    // touching the north face of its bus is the design, not a bug).
+    // touching the north face of its bus is the design, not a bug). The
+    // push-out works on boxes about their middle, and a node's position is
+    // its top-left corner, so each goes in by the middle of its box: the
+    // bar with its label for a bus, the box the device is drawn in for a
+    // device.
+    const boxOf = (n: Node): { width: number; height: number } =>
+      n.type === 'bus'
+        ? NODE_FOOTPRINT.bus
+        : {
+            width: n.initialWidth ?? NODE_FOOTPRINT.generator.width,
+            height: n.initialHeight ?? NODE_FOOTPRINT.generator.height,
+          };
     const pushInputs = nodes.map((n) => {
       const override = dragOverrides[n.id];
-      const x = override?.x ?? n.position.x;
-      const y = override?.y ?? n.position.y;
+      const footprint = boxOf(n);
+      const x = (override?.x ?? n.position.x) + footprint.width / 2;
+      const y = (override?.y ?? n.position.y) + footprint.height / 2;
       const kind: 'bus' | 'generator' | 'load' | 'shunt' =
         n.type === 'bus' || n.type === 'generator' || n.type === 'load' || n.type === 'shunt'
           ? n.type
           : 'bus';
-      const footprint = NODE_FOOTPRINT[kind];
       const parentBusId =
         n.type !== 'bus' && typeof (n.data as { parentBus?: unknown })?.parentBus === 'string'
           ? (n.data as { parentBus: string }).parentBus
@@ -1268,8 +1093,16 @@ export function buildGraph(
     // signal — the canvas owns the prior-render comparison.
     for (let i = 0; i < nodes.length; i += 1) {
       const n = nodes[i]!;
-      const next = resolved.get(n.id);
-      if (!next) continue;
+      const middle = resolved.get(n.id);
+      const input = pushInputs[i]!;
+      if (!middle) continue;
+      // A node the pass left alone keeps its position to the last bit: a
+      // round trip through the middle of its box would not give it back.
+      const stayed = middle.x === input.x && middle.y === input.y;
+      const override = dragOverrides[n.id];
+      const next = stayed
+        ? (override ?? n.position)
+        : { x: middle.x - input.width / 2, y: middle.y - input.height / 2 };
       if (next.x === n.position.x && next.y === n.position.y) continue;
       nodes[i] = { ...n, position: { x: next.x, y: next.y } };
     }
@@ -1311,9 +1144,9 @@ export function buildGraph(
  * Box (px) of the P / Q readout a generator or load carries after a power
  * flow (`DeviceValueLabel`): two 10 px lines and the 2 px gap to the node, as
  * wide as the longest value the diagram shows ("-1575.0 MVAr": 12 characters
- * of 9 px mono plus padding). It is centred on its node and hangs on the side
- * facing the bus, in the strip between the two (`NON_BUS_OFFSETS` leaves 24 px
- * of it beyond the footprint), where only the stub runs. The node's far side
+ * of 9 px mono plus padding). It hangs on the side of its node facing the
+ * bus, in the strip between the two (`DEVICE_ROW_OFFSET` leaves 24 px of it
+ * beyond the footprint), where only the stub runs. The node's far side
  * is where the controller badges and the neighbouring buses and devices crowd
  * in.
  */

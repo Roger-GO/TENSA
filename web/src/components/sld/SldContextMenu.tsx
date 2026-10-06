@@ -13,8 +13,9 @@
  *  - **A controller**: Inspect. Its badge is placed from its machine and cannot be
  *    moved on its own.
  *  - **The canvas**: Add element, Fit view and Reset to auto-layout (the same two
- *    commands the palette has), and Save snapshot, which keeps the diagram as it
- *    is placed with the operating point.
+ *    commands the palette has), how the connectors of generators, loads and
+ *    shunts are drawn (straight, or with a right angle), and Save snapshot, which
+ *    keeps the diagram as it is placed with the operating point.
  *
  * Move with arrow keys is the way to place something without a drag: it selects
  * the element and gives it the keyboard focus, where React Flow moves a selected
@@ -45,6 +46,8 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuLabel,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
   ContextMenuSeparator,
 } from '@/components/ui/context-menu';
 import { toast } from '@/lib/toast';
@@ -58,6 +61,7 @@ import { usePlotStore } from '@/store/plot';
 import { useRunsStore } from '@/store/runs';
 import { useSldStore } from '@/store/sld';
 import { useSnapshotStore } from '@/store/snapshot';
+import type { ConnectorStyle } from './connections';
 import type { SldContextTarget } from './contextTarget';
 
 /**
@@ -222,6 +226,9 @@ export interface SldContextMenuBodyProps {
   locked?: boolean;
   onFitView: () => void;
   onResetLayout: () => void;
+  /** How the connectors of devices are drawn now, and the way to change it. */
+  connectorStyle?: ConnectorStyle;
+  onConnectorStyle?: (style: ConnectorStyle) => void;
 }
 
 /**
@@ -233,6 +240,8 @@ export function SldContextMenuBody({
   locked = false,
   onFitView,
   onResetLayout,
+  connectorStyle = 'straight',
+  onConnectorStyle,
 }: SldContextMenuBodyProps) {
   const addDisturbance = useDisturbanceStore((s) => s.addDisturbance);
   // The spec the Add disturbance dialog opens with, or null while it is closed.
@@ -344,6 +353,21 @@ export function SldContextMenuBody({
             <ContextMenuItem data-testid="sld-context-reset-layout" onSelect={onResetLayout}>
               Reset to auto-layout
             </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuLabel>Device connectors</ContextMenuLabel>
+            <ContextMenuRadioGroup
+              value={connectorStyle}
+              onValueChange={(value) =>
+                onConnectorStyle?.(value === 'elbow' ? 'elbow' : 'straight')
+              }
+            >
+              <ContextMenuRadioItem data-testid="sld-context-connectors-straight" value="straight">
+                Straight
+              </ContextMenuRadioItem>
+              <ContextMenuRadioItem data-testid="sld-context-connectors-elbow" value="elbow">
+                Right angle
+              </ContextMenuRadioItem>
+            </ContextMenuRadioGroup>
             <ContextMenuSeparator />
             <ContextMenuItem
               data-testid="sld-context-save-snapshot"

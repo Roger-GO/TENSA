@@ -92,6 +92,7 @@ describe('the layout travels with what is saved', () => {
     useCaseStore.setState({
       selection: { primaryPath: CASE, addfiles: [] },
       dragOverrides: {},
+      connectorStyle: null,
       diagramLayout: null,
     });
     useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
@@ -101,7 +102,12 @@ describe('the layout travels with what is saved', () => {
     vi.restoreAllMocks();
     vi.useRealTimers();
     __clearAllPendingForTests();
-    useCaseStore.setState({ selection: null, dragOverrides: {}, diagramLayout: null });
+    useCaseStore.setState({
+      selection: null,
+      dragOverrides: {},
+      connectorStyle: null,
+      diagramLayout: null,
+    });
   });
 
   describe('a drag', () => {
@@ -221,6 +227,34 @@ describe('the layout travels with what is saved', () => {
       });
     });
 
+    it('restored into an opened case lets the connector style of its layout show', async () => {
+      // A style chosen in this visit sits on top of the saved layout's, as
+      // the drags do, and would hide the one the snapshot was saved with.
+      const layout = { ...carried(), figure: { connector_style: 'elbow' } };
+      useCaseStore.setState({ connectorStyle: 'straight' });
+      fetchSpy.mockResolvedValue(restoreResponse(layout));
+      const { client, Wrapper } = makeWrapper();
+      const restore = renderHook(() => useRestoreSnapshot(), { wrapper: Wrapper });
+
+      await restore.result.current.mutateAsync({ sessionId: SESSION, name: 'a' });
+
+      expect(useCaseStore.getState().connectorStyle).toBeNull();
+      expect(client.getQueryData(queryKeys.sidecar(CASE))).toEqual(layout);
+    });
+
+    it('restored into a system built from scratch applies its connector style as the one chosen', async () => {
+      useCaseStore.setState({ selection: { primaryPath: null, addfiles: [], blank: true } });
+      fetchSpy.mockResolvedValue(
+        restoreResponse({ ...carried(), figure: { connector_style: 'elbow' } }),
+      );
+      const { Wrapper } = makeWrapper();
+      const restore = renderHook(() => useRestoreSnapshot(), { wrapper: Wrapper });
+
+      await restore.result.current.mutateAsync({ sessionId: SESSION, name: 'a' });
+
+      expect(useCaseStore.getState().connectorStyle).toBe('elbow');
+    });
+
     describe('that rearranges the diagram on screen', () => {
       /** The diagram as the user had arranged it since the snapshot was saved. */
       const arranged = () => buildSidecarLayout({ '1': { x: 9, y: 9 }, '2': { x: 300, y: 9 } });
@@ -286,6 +320,30 @@ describe('the layout travels with what is saved', () => {
 
         expect(useCaseStore.getState().dragOverrides).toEqual(dragged);
         expect(fetchSpy).toHaveBeenCalledTimes(1); // the restore itself, nothing since
+      });
+
+      it('gives back the connector style that was chosen with the arrangement', async () => {
+        const drawnBefore = { ...arranged(), figure: { connector_style: 'elbow' } };
+        useCaseStore.setState({
+          diagramLayout: drawnBefore,
+          dragOverrides: dragged,
+          connectorStyle: 'elbow',
+        });
+        const { Wrapper } = makeWrapper();
+        fetchSpy.mockResolvedValueOnce(restoreResponse(carried()));
+        const info = await restoreAndGetOffer(Wrapper);
+        // The snapshot's layout names no style: its connectors are straight.
+        expect(useCaseStore.getState().connectorStyle).toBeNull();
+
+        fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+        info.mock.calls[0]![1]!.action!.onClick();
+
+        expect(useCaseStore.getState().connectorStyle).toBe('elbow');
+        expect(JSON.parse(String((fetchSpy.mock.calls[1]![1] as RequestInit).body)).figure).toEqual(
+          {
+            connector_style: 'elbow',
+          },
+        );
       });
 
       it('taken up after another case was opened, leaves that case alone', async () => {

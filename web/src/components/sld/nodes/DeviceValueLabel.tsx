@@ -16,8 +16,10 @@ export interface DeviceValueLabelProps {
  *
  * Positioned absolutely on the side of the node that faces its bus
  * (`data.valueSide`), in the strip the stub crosses, so it adds nothing to
- * the node's measured box: the stub anchor, the layout footprint and the
- * push-out math are the same with or without values. The far side of a
+ * the node's measured box: the ports, the layout footprint and the
+ * push-out math are the same with or without values. It is centred on the
+ * node unless the connector leaves by that same face (`data.connectorFace`),
+ * in which case it starts beside the connector. The far side of a
  * device is where the neighbouring buses, devices and controller badges
  * crowd in; this strip is clear of them in the default layout
  * (`DEVICE_VALUE_LABEL`, `CONTROLLER_DOCK` in `graph.ts`). Shown only after a converged PF that has
@@ -45,12 +47,18 @@ export const DeviceValueLabel = memo(function DeviceValueLabel({
   if (!zoomedIn || (overlay.p_label === null && overlay.q_label === null)) return null;
   // Default: the generator sits above its bus, the load below it.
   const side = data.valueSide ?? (kind === 'generator' ? 'below' : 'above');
+  // The connector leaves from the middle of a face. When that is the face
+  // the readout hangs off, the readout starts just right of the connector
+  // and does not sit on it.
+  const besideConnector = data.connectorFace === (side === 'below' ? 'south' : 'north');
   return (
     <span
       data-testid={`${kind}-values-${data.idx}`}
+      data-beside-connector={besideConnector ? 'true' : undefined}
       className={cn(
-        'bg-background/80 pointer-events-none absolute left-1/2 -translate-x-1/2 rounded px-1',
-        'text-center font-mono text-[9px] leading-[10px] whitespace-nowrap',
+        'bg-background/80 pointer-events-none absolute left-1/2 rounded px-1',
+        besideConnector ? 'ml-1 text-left' : '-translate-x-1/2 text-center',
+        'font-mono text-[9px] leading-[10px] whitespace-nowrap',
         side === 'below' ? 'top-full mt-0.5' : 'bottom-full mb-0.5',
       )}
     >

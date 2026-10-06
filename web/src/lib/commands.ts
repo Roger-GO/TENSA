@@ -856,6 +856,33 @@ function useCommandSets(): CommandSets {
         action: () => __requestSldCommand('reset-layout'),
         when: () => diagramVisible,
       },
+      // How the connector of a generator, load or shunt to its bus is drawn.
+      // The canvas keeps the choice with the layout.
+      {
+        id: 'view.connectors-straight',
+        label: 'Draw device connectors straight',
+        group: 'view',
+        keywords: ['connector', 'stub', 'straight', 'diagonal', 'line', 'diagram', 'sld'],
+        action: () => __requestSldCommand('connectors-straight'),
+        when: () => diagramVisible,
+      },
+      {
+        id: 'view.connectors-elbow',
+        label: 'Draw device connectors with a right angle',
+        group: 'view',
+        keywords: [
+          'connector',
+          'stub',
+          'elbow',
+          'right angle',
+          'orthogonal',
+          'bend',
+          'diagram',
+          'sld',
+        ],
+        action: () => __requestSldCommand('connectors-elbow'),
+        when: () => diagramVisible,
+      },
 
       // ---- navigation ----------------------------------------------------
       // Sequence shortcut "g h" — opens the run-history drawer.
