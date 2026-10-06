@@ -35,6 +35,7 @@ import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { useUploadNoticeStore } from '@/store/uploadNotice';
+import { describeError } from '@/lib/describeError';
 
 /** How long a toast that asks for a decision stays up. */
 const DECISION_TOAST_MS = 15_000;
@@ -61,11 +62,6 @@ function listNames(names: readonly string[]): string {
       : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
   }
   return `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
-}
-
-function describeError(err: unknown): string {
-  if (err instanceof ProblemDetailsError) return err.detail ?? err.title ?? `HTTP ${err.status}`;
-  return err instanceof Error ? err.message : String(err);
 }
 
 /** The workspace files the open case was loaded from; none when no case is open. */

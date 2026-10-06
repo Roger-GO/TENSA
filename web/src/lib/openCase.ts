@@ -6,11 +6,11 @@
  */
 import { useCallback } from 'react';
 import { useLoadCase } from '@/api/queries';
-import { ProblemDetailsError } from '@/api/client';
 import { parseWorkspacePath } from '@/api/types';
 import type { WorkspaceFile, WorkspacePath } from '@/api/types';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
+import { describeError } from '@/lib/describeError';
 import { toast } from '@/lib/toast';
 
 type PrimaryFormat = 'xlsx' | 'raw' | 'json' | 'm';
@@ -91,13 +91,7 @@ export function useOpenCase(): OpenCase {
             setCase({ primaryPath: primary, addfiles });
           },
           (err: unknown) => {
-            const detail =
-              err instanceof ProblemDetailsError
-                ? (err.detail ?? err.title ?? `HTTP ${err.status}`)
-                : err instanceof Error
-                  ? err.message
-                  : String(err);
-            toast.error(`Load failed: ${detail}`);
+            toast.error(`Load failed: ${describeError(err)}`);
           },
         );
     },

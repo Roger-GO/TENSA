@@ -44,7 +44,8 @@ import {
   busVoltageLimits,
   voltageStatusText,
 } from '@/components/sld/voltage';
-import type { ParamValue, PflowResult, TopologyEntry } from '@/api/types';
+import type { ParamValue, PflowResult } from '@/api/types';
+import { paramNumber, paramString } from './entryParams';
 
 interface BusRow {
   idx: string;
@@ -66,24 +67,6 @@ interface BusRow {
   q_inj: number | null;
   area: string | null;
   zone: string | null;
-}
-
-function paramOf(entry: TopologyEntry, key: string): string | number | null {
-  const v = entry.params?.[key];
-  if (v === undefined || v === null) return null;
-  if (typeof v === 'number' || typeof v === 'string') return v;
-  return null;
-}
-
-function paramString(entry: TopologyEntry, key: string): string | null {
-  const v = paramOf(entry, key);
-  if (v === null) return null;
-  return String(v);
-}
-
-function paramNumber(entry: TopologyEntry, key: string): number | null {
-  const v = paramOf(entry, key);
-  return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
 interface BusInjection {

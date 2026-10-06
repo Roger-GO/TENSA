@@ -37,7 +37,8 @@ import { useSldStore } from '@/store/sld';
 import { useCaseStore } from '@/store/case';
 import { generatorRowKey } from '@/lib/topology';
 import { assessQLimit, qLimitText } from '@/components/sld/qLimit';
-import type { TopologyEntry } from '@/api/types';
+import { paramNumber, paramString } from './entryParams';
+import { finiteOrNull } from '@/lib/finite';
 
 interface GeneratorRow {
   rowId: string;
@@ -53,21 +54,6 @@ interface GeneratorRow {
   q_max: number | null;
   q_check: string | null;
   status: string;
-}
-
-function paramString(entry: TopologyEntry, key: string): string | null {
-  const v = entry.params?.[key];
-  if (v === undefined || v === null) return null;
-  return String(v);
-}
-
-function paramNumber(entry: TopologyEntry, key: string): number | null {
-  const v = entry.params?.[key];
-  return typeof v === 'number' && Number.isFinite(v) ? v : null;
-}
-
-function finiteOrNull(v: number | undefined): number | null {
-  return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
 const OUTPUT_TITLE = 'Output from the last power flow run. Shows a dash until power flow has run.';

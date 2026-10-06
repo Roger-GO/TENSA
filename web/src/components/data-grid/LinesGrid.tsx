@@ -33,6 +33,8 @@ import { useSldStore } from '@/store/sld';
 import { useCaseStore } from '@/store/case';
 import { loadingCheckText } from '@/components/sld/loading';
 import type { TopologyEntry } from '@/api/types';
+import { paramNumber, paramString } from './entryParams';
+import { finiteOrNull } from '@/lib/finite';
 
 interface LineRow {
   rowId: string;
@@ -51,21 +53,6 @@ interface LineRow {
   rate_a: number | null;
   loading: number | null;
   loading_check: string | null;
-}
-
-function paramString(entry: TopologyEntry, key: string): string | null {
-  const v = entry.params?.[key];
-  if (v === undefined || v === null) return null;
-  return String(v);
-}
-
-function paramNumber(entry: TopologyEntry, key: string): number | null {
-  const v = entry.params?.[key];
-  return typeof v === 'number' && Number.isFinite(v) ? v : null;
-}
-
-function finiteOrNull(v: number | null | undefined): number | null {
-  return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
 /** The rating the case sets for a line (`rate_a`, MVA); `null` for a rating of 0, which means none. */

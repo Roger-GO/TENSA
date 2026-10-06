@@ -18,6 +18,7 @@ import type {
   TopologyEntry,
   TopologySummary,
 } from '@/api/types';
+import { finiteOrNull } from '@/lib/finite';
 
 export type { CpfDirection } from '@/api/types';
 
@@ -171,10 +172,6 @@ export interface DirectionGeneratorRow {
 function busOf(entry: TopologyEntry): string | null {
   const bus = entry.params?.bus;
   return bus === undefined || bus === null ? null : String(bus);
-}
-
-function finiteOrNull(value: number | null | undefined): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 /**

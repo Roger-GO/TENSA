@@ -35,6 +35,7 @@
  */
 import type { PflowHistoryPayload, PflowSnapshot } from '@/store/pflowHistory';
 import type { RunRecord, RunState } from '@/store/runs';
+import { isFiniteNumber } from '@/lib/finite';
 
 export const RESULTS_DB_NAME = 'tensa-results';
 export const RESULTS_DB_VERSION = 1;
@@ -103,10 +104,6 @@ const FINISHED: ReadonlySet<RunState> = new Set(['done', 'error', 'aborted']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
 }
 
 /**

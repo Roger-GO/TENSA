@@ -33,6 +33,7 @@ import { lossShare, summaryRows } from '@/lib/pflowSummary';
 import { formatSignificant } from '@/lib/series';
 import { radToDeg } from '@/lib/units';
 import { summarizeViolations, type ViolationKind, type ViolationReport } from '@/lib/violations';
+import { pad2 } from '@/lib/pad2';
 
 // ---- what a report is made from ------------------------------------------------
 
@@ -140,10 +141,6 @@ function fixed(value: number | null | undefined, digits: number): string {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '';
 }
 
-function pad(n: number): string {
-  return String(n).padStart(2, '0');
-}
-
 /** ``3 rated lines``, ``1 rated line``. */
 function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
@@ -151,7 +148,7 @@ function count(n: number, noun: string): string {
 
 /** A local date and time to the minute: ``2026-10-05 14:02``. */
 export function formatReportTime(d: Date): string {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 // ---- tables ----------------------------------------------------------------------

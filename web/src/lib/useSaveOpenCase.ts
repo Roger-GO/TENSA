@@ -12,7 +12,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 
-import { ProblemDetailsError } from '@/api/client';
 import {
   SAVE_CASE_MUTATION_KEY,
   useCurrentTopology,
@@ -26,6 +25,7 @@ import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
 import { hasEditsNotInFile, useEditJournalStore } from '@/store/editJournal';
 import { useSessionStore } from '@/store/session';
+import { describeError } from '@/lib/describeError';
 
 /**
  * Returns a function that writes the layout sidecar of a case file just saved, from
@@ -64,11 +64,6 @@ export interface SaveOpenCase {
    * a toast saying so) when the file already holds every edit.
    */
   save: () => void;
-}
-
-function describeError(err: unknown): string {
-  if (err instanceof ProblemDetailsError) return err.detail ?? err.title ?? `HTTP ${err.status}`;
-  return err instanceof Error ? err.message : 'unknown error';
 }
 
 export function useSaveOpenCase(): SaveOpenCase {

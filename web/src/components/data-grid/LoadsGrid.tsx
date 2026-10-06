@@ -30,7 +30,8 @@ import { useCurrentTopology } from '@/api/queries';
 import { usePflowStore } from '@/store/pflow';
 import { useSldStore } from '@/store/sld';
 import { useCaseStore } from '@/store/case';
-import type { TopologyEntry } from '@/api/types';
+import { paramNumber, paramString } from './entryParams';
+import { finiteOrNull } from '@/lib/finite';
 
 interface LoadRow {
   rowId: string;
@@ -44,21 +45,6 @@ interface LoadRow {
   p: number | null;
   q: number | null;
   status: string;
-}
-
-function paramString(entry: TopologyEntry, key: string): string | null {
-  const v = entry.params?.[key];
-  if (v === undefined || v === null) return null;
-  return String(v);
-}
-
-function paramNumber(entry: TopologyEntry, key: string): number | null {
-  const v = entry.params?.[key];
-  return typeof v === 'number' && Number.isFinite(v) ? v : null;
-}
-
-function finiteOrNull(v: number | undefined): number | null {
-  return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
 const CONSUMPTION_TITLE =

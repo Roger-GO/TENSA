@@ -12,6 +12,7 @@
  * against.
  */
 import type { VoltageBand, VoltageSide } from './voltage';
+import { isFiniteNumber } from '@/lib/finite';
 
 /** Reactive power, in MVAr, either side of a limit that still counts as on it. */
 export const Q_LIMIT_TOLERANCE_MVAR = 0.01;
@@ -26,10 +27,6 @@ export type QLimitState =
   /** Nothing to judge: no output, or no limits. */
   | 'none';
 
-function finite(value: number | null | undefined): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
-}
-
 /**
  * Judge a generator's reactive output `q` (MVAr) against its limits. Either
  * limit may be missing, and is then not checked. Past a limit wins over on
@@ -41,9 +38,9 @@ export function assessQLimit(
   qMin: number | null | undefined,
   qMax: number | null | undefined,
 ): QLimitState {
-  if (!finite(q)) return 'none';
-  const hasMax = finite(qMax);
-  const hasMin = finite(qMin);
+  if (!isFiniteNumber(q)) return 'none';
+  const hasMax = isFiniteNumber(qMax);
+  const hasMin = isFiniteNumber(qMin);
   if (!hasMax && !hasMin) return 'none';
   if (hasMax && q > qMax + Q_LIMIT_TOLERANCE_MVAR) return 'above-max';
   if (hasMin && q < qMin - Q_LIMIT_TOLERANCE_MVAR) return 'below-min';

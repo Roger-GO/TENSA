@@ -8,6 +8,7 @@
  */
 import type { MessageLevel, PflowSettings, SessionMessage } from '@/api/types';
 import type { ViolationReport } from '@/lib/violations';
+import { pad2 } from '@/lib/pad2';
 
 /** Lowest first, the order the server ranks them in. */
 export const MESSAGE_LEVELS: readonly MessageLevel[] = ['info', 'warning', 'error'];
@@ -51,8 +52,6 @@ export function sourceLabel(source: string): string {
   if (source === '') return '';
   return SOURCE_LABELS[source] ?? source.replace(/_/g, ' ');
 }
-
-const pad2 = (n: number): string => String(n).padStart(2, '0');
 
 /** The time of day a message was logged, as `HH:MM:SS` in the viewer's time zone. */
 export function formatMessageTime(unixSeconds: number): string {

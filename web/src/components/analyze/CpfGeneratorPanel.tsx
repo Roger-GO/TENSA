@@ -17,6 +17,7 @@ import {
   releaseCaution,
 } from '@/lib/cpfOptions';
 import type { CpfGeneratorTrace, CpfLimitEvent, CpfResult } from '@/api/types';
+import { isFiniteNumber } from '@/lib/finite';
 
 /**
  * CpfGeneratorPanel: what the generators did along a CPF path.
@@ -92,10 +93,6 @@ export function pickDefaultGenerators(result: CpfResult, max: number): string[] 
     picked.push(generatorKey(g));
   }
   return picked;
-}
-
-function finite(value: number | null | undefined): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
 }
 
 export function CpfGeneratorPanel({
@@ -302,7 +299,7 @@ export function CpfGeneratorPanel({
         {hoveredGenerator !== null
           ? (['qmax', 'qmin'] as const).map((which) => {
               const limit = which === 'qmax' ? hoveredGenerator.q_max : hoveredGenerator.q_min;
-              if (!finite(limit) || limit < yMin || limit > yMax) return null;
+              if (!isFiniteNumber(limit) || limit < yMin || limit > yMax) return null;
               return (
                 <g key={which} data-testid={`cpf-generators-limit-${which}`}>
                   <line
@@ -420,7 +417,7 @@ export function CpfGeneratorPanel({
 }
 
 function formatLimit(value: number | null | undefined): string {
-  return finite(value) ? value.toFixed(1) : 'none';
+  return isFiniteNumber(value) ? value.toFixed(1) : 'none';
 }
 
 /** The generators held at a limit, with where each got there. */

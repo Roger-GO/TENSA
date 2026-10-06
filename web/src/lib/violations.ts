@@ -16,6 +16,7 @@ import { assessQLimit, qLimitText } from '@/components/sld/qLimit';
 import { assessVoltage, busVoltageLimits, voltageStatusText } from '@/components/sld/voltage';
 import type { StaticElementKind } from '@/store/case';
 import { DYNAMIC_GENERATOR_KINDS, generatorRowKey } from '@/lib/topology';
+import { isFiniteNumber } from '@/lib/finite';
 
 export type ViolationKind = 'bus-voltage' | 'line-loading' | 'generator-q';
 
@@ -63,10 +64,6 @@ const KIND_ORDER: Record<ViolationKind, number> = {
   'generator-q': 2,
 };
 
-function finiteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
-}
-
 /**
  * The id of the diagram node that prints a generator's row of the PF result.
  * A dynamic machine prints the row of the static generator it names, so it,
@@ -105,7 +102,7 @@ export function collectViolations(
   for (const bus of topology.buses) {
     const idx = String(bus.idx);
     const v = pflow.bus_voltages[idx];
-    if (!finiteNumber(v)) continue;
+    if (!isFiniteNumber(v)) continue;
     checked.buses += 1;
     const limits = busVoltageLimits(bus);
     const status = assessVoltage(v, limits);
@@ -138,7 +135,7 @@ export function collectViolations(
     const flow = pflow.line_flows?.[idx];
     if (flow === undefined) continue;
     const loading = flow.loading_pct;
-    if (!finiteNumber(loading)) {
+    if (!isFiniteNumber(loading)) {
       unratedLines += 1;
       continue;
     }
@@ -174,7 +171,7 @@ export function collectViolations(
     if (finding === null || state === 'within') continue;
     const atMax = state === 'above-max' || state === 'at-max';
     const limit = atMax ? out.q_max : out.q_min;
-    if (!finiteNumber(limit)) continue;
+    if (!isFiniteNumber(limit)) continue;
     items.push({
       id: `generator-${key}`,
       kind: 'generator-q',

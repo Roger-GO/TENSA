@@ -19,6 +19,7 @@ import type { PflowResult } from '@/api/types';
 import type { ElementNames } from '@/lib/elementNames';
 import { summaryRows } from '@/lib/pflowSummary';
 import { radToDeg } from '@/lib/units';
+import { finiteOrNull } from '@/lib/finite';
 
 /** One side of a comparison: a converged result and the names of its elements. */
 export interface PflowSide {
@@ -120,10 +121,6 @@ export interface PflowComparison {
 /** A change below this is rounding, not a difference. */
 export const SAME_TOLERANCE = 1e-9;
 
-function finite(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
 function delta(a: number | null, b: number | null): number | null {
   return a === null || b === null ? null : b - a;
 }
@@ -193,10 +190,10 @@ function nameOf(key: string, b: Record<string, string>, a: Record<string, string
 
 function compareBuses(a: PflowSide, b: PflowSide): BusDelta[] {
   const rows = unionKeys(a.result.bus_voltages, b.result.bus_voltages).map((idx): BusDelta => {
-    const vA = finite(a.result.bus_voltages[idx]);
-    const vB = finite(b.result.bus_voltages[idx]);
-    const radA = finite(a.result.bus_angles[idx]);
-    const radB = finite(b.result.bus_angles[idx]);
+    const vA = finiteOrNull(a.result.bus_voltages[idx]);
+    const vB = finiteOrNull(b.result.bus_voltages[idx]);
+    const radA = finiteOrNull(a.result.bus_angles[idx]);
+    const radB = finiteOrNull(b.result.bus_angles[idx]);
     const angleA = radA === null ? null : radToDeg(radA);
     const angleB = radB === null ? null : radToDeg(radB);
     const dAngle = delta(angleA, angleB);
@@ -226,12 +223,12 @@ function compareLines(a: PflowSide, b: PflowSide): LineDelta[] {
     const fa = flowsA[idx];
     const fb = flowsB[idx];
     const ends = fb ?? fa;
-    const pA = finite(fa?.p);
-    const pB = finite(fb?.p);
-    const qA = finite(fa?.q);
-    const qB = finite(fb?.q);
-    const loadingA = finite(fa?.loading_pct);
-    const loadingB = finite(fb?.loading_pct);
+    const pA = finiteOrNull(fa?.p);
+    const pB = finiteOrNull(fb?.p);
+    const qA = finiteOrNull(fa?.q);
+    const qB = finiteOrNull(fb?.q);
+    const loadingA = finiteOrNull(fa?.loading_pct);
+    const loadingB = finiteOrNull(fb?.loading_pct);
     return {
       idx,
       name: nameOf(idx, b.names.lines, a.names.lines),
@@ -244,9 +241,9 @@ function compareLines(a: PflowSide, b: PflowSide): LineDelta[] {
       qA,
       qB,
       dQ: delta(qA, qB),
-      dPTo: delta(finite(fa?.p_to), finite(fb?.p_to)),
-      dQTo: delta(finite(fa?.q_to), finite(fb?.q_to)),
-      dLoss: delta(finite(fa?.loss), finite(fb?.loss)),
+      dPTo: delta(finiteOrNull(fa?.p_to), finiteOrNull(fb?.p_to)),
+      dQTo: delta(finiteOrNull(fa?.q_to), finiteOrNull(fb?.q_to)),
+      dLoss: delta(finiteOrNull(fa?.loss), finiteOrNull(fb?.loss)),
       loadingA,
       loadingB,
       dLoading: delta(loadingA, loadingB),
@@ -276,10 +273,10 @@ function compareInjections(
   const rows = unionKeys(inA, inB).map((idx): InjectionDelta => {
     const ra = inA[idx];
     const rb = inB[idx];
-    const pA = finite(ra?.p);
-    const pB = finite(rb?.p);
-    const qA = finite(ra?.q);
-    const qB = finite(rb?.q);
+    const pA = finiteOrNull(ra?.p);
+    const pB = finiteOrNull(rb?.p);
+    const qA = finiteOrNull(ra?.q);
+    const qB = finiteOrNull(rb?.q);
     const bus = (rb ?? ra)?.bus;
     return {
       idx,

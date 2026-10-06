@@ -22,6 +22,7 @@ import { useCurrentTopology } from '@/api/queries';
 import { useSldStore } from '@/store/sld';
 import { useCaseStore } from '@/store/case';
 import type { TopologyEntry } from '@/api/types';
+import { paramString } from './entryParams';
 
 interface ShuntRow {
   rowId: string;
@@ -31,13 +32,8 @@ interface ShuntRow {
   g: number | null;
 }
 
-function paramString(entry: TopologyEntry, key: string): string | null {
-  const v = entry.params?.[key];
-  if (v === undefined || v === null) return null;
-  return String(v);
-}
-
-function paramNumber(entry: TopologyEntry, key: string): number | null {
+/** A shunt's `b` or `g`, which unlike the other tables' numbers may come as text. */
+function numberOrNumeral(entry: TopologyEntry, key: string): number | null {
   const v = entry.params?.[key];
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v === 'string') {
@@ -92,8 +88,8 @@ export function ShuntsGrid({ className }: ShuntsGridProps) {
         rowId: `shunt-${idx}`,
         idx,
         bus: paramString(sh, 'bus'),
-        b: paramNumber(sh, 'b'),
-        g: paramNumber(sh, 'g'),
+        b: numberOrNumeral(sh, 'b'),
+        g: numberOrNumeral(sh, 'g'),
       };
     });
   }, [topology]);
