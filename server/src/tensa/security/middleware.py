@@ -1,14 +1,19 @@
-"""Pure ASGI middleware: Host/Origin validation.
+"""Pure ASGI middleware: Host/Origin validation and security response headers.
 
-This runs BEFORE FastAPI's routing layer and BEFORE any logging or exception
-handler can see the request. It is pure ASGI (not ``BaseHTTPMiddleware``)
-so it applies uniformly to HTTP and WebSocket-upgrade scopes — important
+These run BEFORE FastAPI's routing layer and BEFORE any logging or exception
+handler can see the request. They are pure ASGI (not ``BaseHTTPMiddleware``)
+so they apply uniformly to HTTP and WebSocket-upgrade scopes — important
 because the Host check must hold for the WS upgrade itself, not just for
 HTTP requests.
 
 Host/Origin validation defeats DNS rebinding from random browser tabs: a
 hostile page can make the browser send requests to 127.0.0.1, but it cannot
 forge the Host/Origin headers to match the allow-list.
+
+The response headers (``SECURITY_HEADERS``) tell a browser not to put the app in
+a frame, not to guess a response's content type, and not to send a referrer. A
+hostile page that frames the UI at the loopback address could otherwise get a
+click or a keystroke into it.
 """
 
 from __future__ import annotations
@@ -26,6 +31,47 @@ ASGIApp = cabc.Callable[
 ]
 ASGIReceive = cabc.Callable[[], cabc.Awaitable[ASGIMessage]]
 ASGISend = cabc.Callable[[ASGIMessage], cabc.Awaitable[None]]
+
+# Sent with every HTTP response. ``frame-ancestors`` is the modern form of
+# ``X-Frame-Options`` and is sent beside it for browsers that only know the old
+# one. The policy lists no other directive, so scripts, styles and connections
+# are not restricted.
+SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
+    (b"x-frame-options", b"DENY"),
+    (b"content-security-policy", b"frame-ancestors 'none'"),
+    (b"x-content-type-options", b"nosniff"),
+    (b"referrer-policy", b"no-referrer"),
+)
+
+
+def make_security_headers_middleware(app: ASGIApp) -> ASGIApp:
+    """Add ``SECURITY_HEADERS`` to every HTTP response.
+
+    A header the response already carries is left as it is, so a route that needs
+    a different policy can set its own. WebSocket scopes pass through untouched:
+    the headers describe a document, and a handshake has none.
+
+    Wrap the Host/Origin middleware with this one, so that a request it rejects
+    carries the headers too.
+    """
+
+    async def _app(scope: ASGIScope, receive: ASGIReceive, send: ASGISend) -> None:
+        if scope.get("type") != "http":
+            await app(scope, receive, send)
+            return
+
+        async def _send(message: ASGIMessage) -> None:
+            if message["type"] == "http.response.start":
+                headers: list[tuple[bytes, bytes]] = list(message.get("headers", []))
+                present = {name.lower() for name, _ in headers}
+                missing = [pair for pair in SECURITY_HEADERS if pair[0] not in present]
+                if missing:
+                    message = {**message, "headers": [*headers, *missing]}
+            await send(message)
+
+        await app(scope, receive, _send)
+
+    return _app
 
 
 def make_host_origin_middleware(

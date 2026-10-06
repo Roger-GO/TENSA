@@ -4,13 +4,15 @@ Middleware ordering is load-bearing — the Host/Origin check is pure ASGI
 (not BaseHTTPMiddleware), so it applies uniformly to HTTP and
 WebSocket-upgrade scopes. The execution order (outermost → innermost) is:
 
-    1. Host/Origin check (rejects bad-host before any FastAPI code runs)
-    2. CORS (FastAPI's middleware — allows preflights and validates origins)
-    3. GZip (compresses a response only when the client sent
+    1. Security headers (stamps every HTTP response, so the 400 that step 2
+       sends carries them too)
+    2. Host/Origin check (rejects bad-host before any FastAPI code runs)
+    3. CORS (FastAPI's middleware — allows preflights and validates origins)
+    4. GZip (compresses a response only when the client sent
        ``Accept-Encoding: gzip``; it sits inside CORS so a rejected preflight is
        never compressed, and outside the router so every route, the error
        envelopes and the SPA files share it)
-    4. FastAPI router
+    5. FastAPI router
 
 There is no authentication: the server is a local-first tool that binds to
 loopback by default. uvicorn's default access log is disabled at startup;
@@ -61,7 +63,10 @@ from tensa.api.routes.ws import router as ws_router
 from tensa.api.schemas import JobRecordSchema, ProblemDetails
 from tensa.core.errors import SessionBusyError, WorkerDiedError
 from tensa.core.session import SessionManager, SweepInProgressError
-from tensa.security.middleware import make_host_origin_middleware
+from tensa.security.middleware import (
+    make_host_origin_middleware,
+    make_security_headers_middleware,
+)
 
 log = logging.getLogger(__name__)
 
@@ -327,6 +332,8 @@ def make_app(
             allowed_origins=allowed_origins,
         ),
     )
+    # Added after it, so it is outermost and stamps the Host/Origin rejections too.
+    app.add_middleware(_PureASGIWrapper, wrap=make_security_headers_middleware)
 
     # Routers — all substrate routes are namespaced under ``/api`` so the
     # SPA mount at ``/`` (added below) doesn't shadow them. ``/openapi.json``
