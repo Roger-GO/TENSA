@@ -26,6 +26,7 @@ import {
   layoutConnections,
   routeMidpoint,
   routePath,
+  routesThrough,
   simplifyRoute,
   spreadTaps,
   stepRoute,
@@ -2163,6 +2164,66 @@ describe('layoutConnections: the two faces of a bar', () => {
         }
       }
     }
+  });
+});
+
+describe('routesThrough', () => {
+  const routes = new Map<string, { points: Point[] }>([
+    // Straight down at 50, a route with a bend at (120, 40), and a diagonal.
+    [
+      'line-A',
+      {
+        points: [
+          [50, 0],
+          [50, 400],
+        ],
+      },
+    ],
+    [
+      'line-B',
+      {
+        points: [
+          [120, 0],
+          [120, 40],
+          [300, 40],
+        ],
+      },
+    ],
+    [
+      'stub-load-PQ',
+      {
+        points: [
+          [200, 100],
+          [260, 160],
+        ],
+      },
+    ],
+  ]);
+  const through = routesThrough(routes);
+
+  it('counts the routes that pass through a box', () => {
+    expect(through({ left: 40, right: 60, top: 100, bottom: 122 })).toBe(1);
+    expect(through({ left: 40, right: 130, top: 10, bottom: 32 })).toBe(2);
+    // The diagonal passes through this one, between its ends.
+    expect(through({ left: 220, right: 240, top: 120, bottom: 142 })).toBe(1);
+    expect(through({ left: 400, right: 472, top: 100, bottom: 122 })).toBe(0);
+    // Far down a long run, in another band of height.
+    expect(through({ left: 0, right: 72, top: 380, bottom: 402 })).toBe(1);
+  });
+
+  it('counts a route once, whichever of its runs pass through, and not the one named', () => {
+    // Both runs of line B pass through the box around its bend.
+    expect(through({ left: 100, right: 172, top: 20, bottom: 60 })).toBe(1);
+    expect(through({ left: 100, right: 172, top: 20, bottom: 60 }, 'line-B')).toBe(0);
+    expect(through({ left: 40, right: 130, top: 10, bottom: 32 }, 'line-A')).toBe(1);
+  });
+
+  it('does not count a route that runs along an edge of the box, or stops short of it', () => {
+    expect(through({ left: 50, right: 122, top: 100, bottom: 122 })).toBe(0);
+    expect(through({ left: -22, right: 50, top: 100, bottom: 122 })).toBe(0);
+    // Line B ends at 300, and the diagonal at (260, 160).
+    expect(through({ left: 300, right: 372, top: 30, bottom: 52 })).toBe(0);
+    expect(through({ left: 262, right: 334, top: 150, bottom: 172 })).toBe(0);
   });
 });
 

@@ -1460,6 +1460,61 @@ export function busLabelOffset(bar: BarGeometry | undefined, width: number): num
   });
 }
 
+/** A box on the canvas, by its edges. */
+export interface Rect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** The height of the bands `routesThrough` sorts the runs into. */
+const ROUTE_BAND = 64;
+
+/**
+ * How many of `routes` pass through a box, for a label that is to stand
+ * where no connector runs through it. The answer is a lookup by the box,
+ * and by the id of a route that does not count (the connector the label
+ * belongs to). A route counts once, however many of its runs pass through
+ * the box, and not for running along an edge of it.
+ */
+export function routesThrough(
+  routes: ReadonlyMap<string, { points: readonly Point[] }>,
+): (box: Rect, own?: string) => number {
+  // The runs by the bands of height they reach into.
+  const bands = new Map<number, { id: string; a: Point; b: Point }[]>();
+  for (const [id, { points }] of routes) {
+    for (let i = 1; i < points.length; i += 1) {
+      const run = { id, a: points[i - 1]!, b: points[i]! };
+      const first = Math.floor(Math.min(run.a[1], run.b[1]) / ROUTE_BAND);
+      const last = Math.floor(Math.max(run.a[1], run.b[1]) / ROUTE_BAND);
+      for (let band = first; band <= last; band += 1) {
+        const list = bands.get(band);
+        if (list) list.push(run);
+        else bands.set(band, [run]);
+      }
+    }
+  }
+  return (box, own) => {
+    const middle: Box = {
+      cx: (box.left + box.right) / 2,
+      cy: (box.top + box.bottom) / 2,
+      hw: (box.right - box.left) / 2,
+      hh: (box.bottom - box.top) / 2,
+    };
+    const found = new Set<string>();
+    const first = Math.floor(box.top / ROUTE_BAND);
+    const last = Math.floor(box.bottom / ROUTE_BAND);
+    for (let band = first; band <= last; band += 1) {
+      for (const run of bands.get(band) ?? []) {
+        if (run.id === own || found.has(run.id)) continue;
+        if (runsThrough(run.a, run.b, middle)) found.add(run.id);
+      }
+    }
+    return found.size;
+  };
+}
+
 /**
  * The point half way along `points`, and the direction of the run it is on
  * (degrees, clockwise from +x).

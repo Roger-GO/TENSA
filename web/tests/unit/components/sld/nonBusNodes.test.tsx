@@ -14,6 +14,7 @@ import {
   buildGraph,
   deviceBoxSize,
   freeColumn,
+  readoutPlaces,
   DEVICE_COLUMN_GAP,
   DEVICE_COLUMN_OFFSET,
   DEVICE_DETOUR_LIMIT,
@@ -652,6 +653,23 @@ describe('freeColumn', () => {
     expect(freeColumn(66, 19, taken, lo, 96, middle, [105])).toBe(112);
     // ...as it does on a bar long enough for that place to be over it.
     expect(freeColumn(66, 19, taken, lo, 120, middle, [105])).toBe(105 + TAP_SPACING);
+  });
+});
+
+describe('readoutPlaces', () => {
+  it('gives the place left of the connector and the one right of it, in the strip the readout hangs in', () => {
+    // A device 38 by 41 at (100, 200): its connector leaves at 119.
+    const box = { x: 100, y: 200, width: 38, height: 41 };
+    const { width, height } = DEVICE_VALUE_LABEL;
+    const below = readoutPlaces(box, 'below');
+    expect(below.right).toEqual({ left: 123, right: 123 + width, top: 243, bottom: 243 + height });
+    expect(below.left).toEqual({ left: 115 - width, right: 115, top: 243, bottom: 243 + height });
+    const above = readoutPlaces(box, 'above');
+    expect(above.right).toEqual({ left: 123, right: 123 + width, top: 198 - height, bottom: 198 });
+    expect(above.left).toEqual({ left: 115 - width, right: 115, top: 198 - height, bottom: 198 });
+    // The room it needs on the left: its place, and one more beyond it.
+    expect(below.leftRoom).toEqual({ ...below.left, left: 115 - 2 * width });
+    expect(above.leftRoom).toEqual({ ...above.left, left: 115 - 2 * width });
   });
 });
 

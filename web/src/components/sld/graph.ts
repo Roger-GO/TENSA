@@ -19,6 +19,7 @@ import {
   TAP_SPACING,
   faceSpan,
   layoutConnections,
+  type Rect,
 } from './connections';
 import {
   DEVICE_PORT,
@@ -1291,6 +1292,32 @@ export function buildGraph(
  * in.
  */
 export const DEVICE_VALUE_LABEL = { width: 72, height: 22 } as const;
+
+/**
+ * The two places the P / Q readout of a generator or load can stand when it
+ * hangs off the face its connector leaves by: beside the connector on its
+ * `right`, and on its `left`. `box` is the device node, and `side` the side
+ * of it the readout hangs off. The readout stands 4 px from the connector
+ * and 2 px from the node (`DeviceValueLabel`), and is taken at its widest.
+ *
+ * `leftRoom` is what has to be free for it to stand on the left: its place
+ * there and as much again beyond it, where the readout of a device further
+ * left stands on the right of that one's connector.
+ */
+export function readoutPlaces(
+  box: { x: number; y: number; width: number; height: number },
+  side: 'above' | 'below',
+): { left: Rect; right: Rect; leftRoom: Rect } {
+  const connector = box.x + box.width / 2;
+  const { width, height } = DEVICE_VALUE_LABEL;
+  const top = side === 'below' ? box.y + box.height + 2 : box.y - 2 - height;
+  const bottom = top + height;
+  return {
+    left: { left: connector - 4 - width, right: connector - 4, top, bottom },
+    right: { left: connector + 4, right: connector + 4 + width, top, bottom },
+    leftRoom: { left: connector - 4 - 2 * width, right: connector - 4, top, bottom },
+  };
+}
 
 /**
  * Docked offset of a controller badge from its parent device's origin. The

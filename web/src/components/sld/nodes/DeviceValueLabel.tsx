@@ -22,14 +22,17 @@ export interface DeviceValueLabelProps {
  * in which case it stands beside the connector: to its right, or to its
  * left when the connector itself goes off to the right
  * (`data.connectorLean`), so a connector drawn at an angle does not run
- * through the values. The far side of a device is where the neighbouring
- * buses, devices and controller badges crowd in; this strip is clear of
- * them in the default layout (`DEVICE_VALUE_LABEL`, `CONTROLLER_DOCK` in
- * `graph.ts`). The one device that gets its readout on the far side is one
- * that hangs close under its bus, where the strip holds the label of the
- * bus. Shown only after a converged PF that has a row for the device, never
- * under "Hide labels", and, on a case with many devices, only while the
- * canvas is zoomed in far enough to read it (`labelDensity.ts`).
+ * through the values, or when another connector would run through them on
+ * the right and the left is free (`data.readoutLeft`: a line that lands on
+ * the bar just right of the device). The far side of a device is where the
+ * neighbouring buses, devices and controller badges crowd in; this strip is
+ * clear of them in the default layout (`DEVICE_VALUE_LABEL`,
+ * `CONTROLLER_DOCK` in `graph.ts`). The one device that gets its readout on
+ * the far side is one that hangs close under its bus, where the strip holds
+ * the label of the bus. Shown only after a converged PF that has a row for
+ * the device, never under "Hide labels", and, on a case with many devices,
+ * only while the canvas is zoomed in far enough to read it
+ * (`labelDensity.ts`).
  *
  * The values are the steady-state PF reading, like the bus voltage
  * labels: they stay put while a TDS run streams.
@@ -53,9 +56,11 @@ export const DeviceValueLabel = memo(function DeviceValueLabel({
   const side = data.valueSide ?? (kind === 'generator' ? 'below' : 'above');
   // The connector leaves from the middle of a face. When that is the face
   // the readout hangs off, the readout stands just beside the connector and
-  // not on it: on the right, unless that is the way the connector goes.
+  // not on it: on the right, unless that is the way the connector goes or
+  // the canvas found the left clearer of other connectors.
   const besideConnector = data.connectorFace === (side === 'below' ? 'south' : 'north');
-  const leftOfConnector = besideConnector && data.connectorLean === 1;
+  const leftOfConnector =
+    besideConnector && (data.connectorLean === 1 || data.readoutLeft === true);
   return (
     <span
       data-testid={`${kind}-values-${data.idx}`}

@@ -311,6 +311,42 @@ describe('GeneratorNode P / Q label', () => {
     }
   });
 
+  it('stands left of a connector that drops straight when the canvas found the left clearer', () => {
+    // A line lands on the bar just right of the device: on the right the
+    // readout would have it running through the values.
+    setPflow(makePflow());
+    const label = render(
+      <LoadNode
+        {...props<typeof LoadNode>({
+          idx: 'PQ_1',
+          kind: 'PQ',
+          valueSide: 'above',
+          connectorFace: 'north',
+          readoutLeft: true,
+        })}
+      />,
+    ).getByTestId('load-values-PQ_1');
+    expect(label).toHaveAttribute('data-beside-connector', 'left');
+    expect(label.className).toContain('right-1/2');
+    expect(label.className).not.toContain('left-1/2');
+    cleanup();
+    // It is a choice between the two sides of the connector: a readout that
+    // hangs off another face stays in the middle of it.
+    const centred = render(
+      <LoadNode
+        {...props<typeof LoadNode>({
+          idx: 'PQ_1',
+          kind: 'PQ',
+          valueSide: 'above',
+          connectorFace: 'east',
+          readoutLeft: true,
+        })}
+      />,
+    ).getByTestId('load-values-PQ_1');
+    expect(centred).not.toHaveAttribute('data-beside-connector');
+    expect(centred.className).toContain('-translate-x-1/2');
+  });
+
   it('takes no notice of which way the connector goes when it leaves by another face', () => {
     setPflow(makePflow());
     const { getByTestId } = render(

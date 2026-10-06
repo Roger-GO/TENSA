@@ -90,6 +90,13 @@ export interface SldNodeData extends Record<string, unknown> {
    * Stamped by `SldCanvas`.
    */
   connectorLean?: number;
+  /**
+   * Generator / load nodes: set when the P / Q readout, which would stand
+   * right of a connector that runs straight out of the face it hangs off,
+   * stands left of it: another connector runs through it on the right, and
+   * the left is free. Stamped by `SldCanvas`.
+   */
+  readoutLeft?: boolean;
 }
 
 /**

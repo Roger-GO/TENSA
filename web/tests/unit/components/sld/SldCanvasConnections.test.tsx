@@ -320,6 +320,52 @@ describe('while a node is dragged', () => {
     expect(useCaseStore.getState().dragOverrides).toEqual({});
   });
 
+  it('tells a device to show its readout left of its connector when a line runs through it on the right', async () => {
+    open('pair.xlsx');
+    await draw();
+
+    // Over the left half of bar 2, between the two bars: the connector
+    // drops straight at 19, and the line comes down at 46, through where
+    // the readout would stand on the right of it. The left is free.
+    dragTo('load-PQ', { x: 0, y: 120 });
+    expect(routeOf('stub-load-PQ').points).toEqual([
+      [19, 161],
+      [19, 203],
+    ]);
+    expect(node('load-PQ').data.connectorLean).toBeUndefined();
+    expect(node('load-PQ').data.readoutLeft).toBe(true);
+
+    // Over the right half: the line is on its left now, and nothing on its right.
+    dragTo('load-PQ', { x: 60, y: 120 });
+    expect(routeOf('stub-load-PQ').points[0]).toEqual([79, 161]);
+    expect(node('load-PQ').data.readoutLeft).toBeUndefined();
+  });
+
+  it('leaves the readout on the right when the left has no room for it and for a neighbour', async () => {
+    // A second load of bus 2, placed 100 left of where the first is
+    // dragged to: its connector comes down through the room the readout of
+    // the first would need on the left.
+    mockTopology = { ...pair(), loads: [...pair().loads, entry('PQ2', 'PQ', { bus: 2 })] };
+    mockSidecar = {
+      ...buildSidecarLayout(
+        { '1': { x: 0, y: 0 }, '2': { x: 0, y: 200 } },
+        {
+          nonBusCoords: {
+            load: { PQ: { x: 150, y: 120, bus: '2' }, PQ2: { x: -100, y: 120, bus: '2' } },
+          },
+        },
+      ),
+    };
+    open('pair.xlsx');
+    await draw();
+    dragTo('load-PQ', { x: 0, y: 120 });
+    expect(routeOf('stub-load-PQ').points[0]).toEqual([19, 161]);
+    const neighbour = routeOf('stub-load-PQ2').points;
+    expect(neighbour[0]![0]).toBeLessThan(19 - 4);
+    expect(neighbour[0]![0]).toBeGreaterThan(19 - 4 - 144);
+    expect(node('load-PQ').data.readoutLeft).toBeUndefined();
+  });
+
   it('takes the branches of a bus along with it', async () => {
     open('pair.xlsx');
     await draw();

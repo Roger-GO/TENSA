@@ -81,10 +81,11 @@ import {
   type CoordsByIdx,
 } from './sidecar';
 import { curatedLayoutFor } from './curated';
-import { buildGraph, DEVICE_PORT, SOURCE_HANDLE, TARGET_HANDLE } from './graph';
+import { buildGraph, readoutPlaces, DEVICE_PORT, SOURCE_HANDLE, TARGET_HANDLE } from './graph';
 import {
   DEFAULT_CONNECTOR_STYLE,
   layoutConnections,
+  routesThrough,
   type ConnectorRoute,
   type ConnectorStyle,
   type NodeSize,
@@ -540,6 +541,8 @@ function SldCanvasInner({
     () => layoutConnections(nodes, edges, { sizes, connectorStyle, barLengths }),
     [nodes, edges, sizes, connectorStyle, barLengths],
   );
+  // How many connectors pass through a box, for the readouts below.
+  const connectorsThrough = useMemo(() => routesThrough(connections.routes), [connections]);
   // The edges with their routes. An edge whose route did not change keeps its
   // object, so React Flow redraws only the connectors that moved.
   const routedEdgesRef = useRef<Map<string, RoutedEdgeEntry>>(new Map());
@@ -778,6 +781,31 @@ function SldCanvasInner({
         // the node again, and report the size again, each time the object is
         // replaced. Handing the size back keeps one measurement per node.
         const measured = sizes.get(n.id);
+        // The P / Q readout of a generator or load stands right of a
+        // connector that runs straight out of the face it hangs off. Where
+        // another connector runs through it there (a line lands on the bar
+        // just right of the device) and the left is free, for it and for
+        // the readout of a neighbour, it stands on the left.
+        let readoutLeft = false;
+        if ((n.type === 'generator' || n.type === 'load') && connector && connectorLean === 0) {
+          const valueSide =
+            (n.data as { valueSide?: 'above' | 'below' }).valueSide ??
+            (n.type === 'generator' ? 'below' : 'above');
+          if (connectorFace === (valueSide === 'below' ? 'south' : 'north')) {
+            const places = readoutPlaces(
+              {
+                ...n.position,
+                width: measured?.width ?? n.initialWidth ?? 0,
+                height: measured?.height ?? n.initialHeight ?? 0,
+              },
+              valueSide,
+            );
+            const own = `stub-${n.id}`;
+            readoutLeft =
+              connectorsThrough(places.right, own) > 0 &&
+              connectorsThrough(places.leftRoom, own) === 0;
+          }
+        }
         return {
           ...n,
           ...(measured !== undefined ? { measured } : {}),
@@ -788,6 +816,7 @@ function SldCanvasInner({
             ...(bar !== undefined ? { bar } : {}),
             ...(connectorFace !== undefined ? { connectorFace } : {}),
             ...(connectorLean !== 0 ? { connectorLean } : {}),
+            ...(readoutLeft ? { readoutLeft } : {}),
             // Attribute echoed onto BusNode's wrapper via the spread
             // pattern in the React Flow node mapping; tests assert on
             // this exact attribute rather than the className so the
@@ -811,6 +840,7 @@ function SldCanvasInner({
       connectivityResult,
       energisedBusIdxes,
       connections,
+      connectorsThrough,
       sizes,
     ],
   );
