@@ -51,7 +51,10 @@
  * the user has pinned for multi-run plot overlay. The active run is the
  * "anchor" for SLD animation (``activeRunId``), independent of the
  * overlay set. The overlay set is purely a plot-side concern; selectors
- * elsewhere keep using ``activeRunId``.
+ * elsewhere keep using ``activeRunId``. The plot draws the pinned runs and
+ * the active run with them, pinned or not
+ * (``components/plots/overlayRuns.ts``): a pin is what keeps a run on the
+ * plot once it is no longer the active one.
  *
  * Lifecycle: cleared when the session is discarded (cross-slice cascade in
  * ``store/index.ts``). A session that is lost and recovered keeps the finished

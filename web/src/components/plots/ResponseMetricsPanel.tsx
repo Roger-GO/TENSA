@@ -16,7 +16,7 @@ import {
 } from '@/lib/responseMetrics';
 import { runLabel } from '@/lib/runLabel';
 import { cn } from '@/lib/cn';
-import { resolveOverlayRuns, usePlotRunId } from './overlayRuns';
+import { primaryRunOf, resolveOverlayRuns, usePlotRunId } from './overlayRuns';
 
 /**
  * ResponseMetricsPanel: how each plotted signal of the run responded, in a table:
@@ -131,12 +131,15 @@ function MetricsRow({ result, unit }: { result: SeriesMetrics; unit: string }) {
 export function ResponseMetricsPanel({ className }: { className?: string }) {
   // The run the plot keys its selection and cursors on.
   const plotRun = usePlotRunId();
-  // The run the plot draws first, as ``TimeSeriesPlot`` picks it.
-  const primaryRunId = useRunsStore((s) => resolveOverlayRuns(s)[0]?.runId ?? null);
+  // The run the metrics are of, the one ``TimeSeriesPlot`` exports: the active
+  // run while there is one, whose cursors the window above is read from.
+  const primaryRunId = useRunsStore(
+    (s) => primaryRunOf(resolveOverlayRuns(s), plotRun)?.runId ?? null,
+  );
   const overlayCount = useRunsStore((s) => resolveOverlayRuns(s).length);
   const primaryLabel = useRunsStore(
     useShallow((s) => {
-      const run = resolveOverlayRuns(s)[0];
+      const run = primaryRunOf(resolveOverlayRuns(s), plotRun);
       return run === undefined ? '' : runLabel(run);
     }),
   );

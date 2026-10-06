@@ -266,7 +266,7 @@ describe('<ResponseMetricsPanel />: what it asks', () => {
     expect(requests[1]!.series[1]!.y[0]).toBe(60);
   });
 
-  it('describes the run the plot draws first, and says so when runs are overlaid', async () => {
+  it('describes the active run, the one whose cursors it reads, and says so when runs are overlaid', async () => {
     seed('r1', { Bus_1_v: [1, 1, 1, 1] });
     seed('r2', { Bus_1_v: [0.5, 0.5, 0.5, 0.5] });
     useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
@@ -275,8 +275,37 @@ describe('<ResponseMetricsPanel />: what it asks', () => {
     renderPanel();
     await screen.findByTestId('response-metrics-table');
 
+    expect(requests[0]!.series[0]!.y).toEqual([0.5, 0.5, 0.5, 0.5]);
+    expect(screen.getByTestId('response-metrics-overlay-note')).toHaveTextContent(
+      'With runs overlaid, the metrics describe TDS #2 only.',
+    );
+  });
+
+  it('describes the active run when it is drawn with a pinned one without being pinned', async () => {
+    seed('r1', { Bus_1_v: [1, 1, 1, 1] });
+    useRunsStore.getState().setOverlayRuns(['r1']);
+    seed('r2', { Bus_1_v: [0.5, 0.5, 0.5, 0.5] });
+    usePlotStore.getState().setSelection('r2', new Set(['Bus_1_v']));
+
+    renderPanel();
+    await screen.findByTestId('response-metrics-table');
+
+    expect(requests[0]!.series[0]!.y).toEqual([0.5, 0.5, 0.5, 0.5]);
+    expect(screen.getByTestId('response-metrics-overlay-note')).toHaveTextContent('TDS #2 only');
+  });
+
+  it('describes the oldest pinned run when runs are overlaid and none is active', async () => {
+    seed('r1', { Bus_1_v: [1, 1, 1, 1] });
+    seed('r2', { Bus_1_v: [0.5, 0.5, 0.5, 0.5] });
+    useRunsStore.getState().clearActiveRun();
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v']));
+
+    renderPanel();
+    await screen.findByTestId('response-metrics-table');
+
     expect(requests[0]!.series[0]!.y).toEqual([1, 1, 1, 1]);
-    expect(screen.getByTestId('response-metrics-overlay-note')).toHaveTextContent('only');
+    expect(screen.getByTestId('response-metrics-overlay-note')).toHaveTextContent('TDS #1 only');
   });
 
   it('names no overlay when one run is drawn', async () => {

@@ -6,7 +6,7 @@
  * swatch-picker scenarios.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, cleanup, within } from '@testing-library/react';
+import { render, screen, cleanup, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { RunLegendChip } from '@/components/plots/RunLegendChip';
@@ -97,6 +97,60 @@ describe('RunLegendChip', () => {
     render(<RunLegendChip runId="r1" />);
     await user.click(screen.getByTestId('run-legend-name-r1'));
     expect(useRunsStore.getState().overlayRunIds.has('r1')).toBe(false);
+  });
+
+  it('marks the chip of the active run, and of no other', () => {
+    seedRun('earlier');
+    seedRun('latest');
+    render(
+      <>
+        <RunLegendChip runId="earlier" />
+        <RunLegendChip runId="latest" />
+      </>,
+    );
+    expect(screen.getByTestId('run-legend-active-latest')).toHaveTextContent('active');
+    expect(screen.queryByTestId('run-legend-active-earlier')).toBeNull();
+  });
+
+  it('drops the mark once the run is released, as by Reset run', () => {
+    seedRun('r1');
+    render(<RunLegendChip runId="r1" />);
+    expect(screen.getByTestId('run-legend-active-r1')).toBeInTheDocument();
+    act(() => useRunsStore.getState().clearActiveRun());
+    expect(screen.queryByTestId('run-legend-active-r1')).toBeNull();
+  });
+
+  it('says what a pin does for the active run, which is plotted without one', async () => {
+    const user = userEvent.setup();
+    seedRun('r1');
+    render(<RunLegendChip runId="r1" />);
+    const name = screen.getByTestId('run-legend-name-r1');
+    expect(name).toHaveAttribute('title', expect.stringContaining('Click to pin this run'));
+    expect(name).toHaveAttribute('title', expect.stringContaining('after Reset run'));
+
+    await user.click(name);
+
+    expect(useRunsStore.getState().overlayRunIds.has('r1')).toBe(true);
+    expect(name).toHaveAttribute(
+      'title',
+      expect.stringContaining('It stays on the plot while it is the active run'),
+    );
+  });
+
+  it('says what a click does for an earlier run: on or off the overlay', () => {
+    seedRun('r1');
+    seedRun('r2');
+    useRunsStore.getState().addOverlayRun('r1');
+    render(<RunLegendChip runId="r1" />);
+    expect(screen.getByTestId('run-legend-name-r1')).toHaveAttribute(
+      'title',
+      expect.stringContaining('take this run out of the overlay'),
+    );
+    act(() => useRunsStore.getState().removeOverlayRun('r1'));
+    expect(screen.getByTestId('run-legend-name-r1')).toHaveAttribute(
+      'title',
+      expect.stringContaining('add this run to the overlay'),
+    );
   });
 
   it('forwards click to onToggle override + does NOT touch the store', async () => {

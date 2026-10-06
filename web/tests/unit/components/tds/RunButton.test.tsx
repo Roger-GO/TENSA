@@ -2309,7 +2309,9 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
     await waitFor(() => {
       expect(toastInfoMock).toHaveBeenCalledWith(
         'run-done stays in History',
-        expect.objectContaining({ description: expect.stringMatching(/pin both runs/i) }),
+        expect.objectContaining({
+          description: expect.stringMatching(/pin it there.*next run is drawn beside it/i),
+        }),
       );
     });
     // The button is ready to run again.

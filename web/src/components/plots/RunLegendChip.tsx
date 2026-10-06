@@ -1,10 +1,13 @@
 /**
  * RunLegendChip (Unit 9 of the v2.0 plan, extended in Unit 20).
  *
- * One chip per overlay run, surfaced above the TimeSeriesPlot. Shows
+ * One chip per plotted run, surfaced above the TimeSeriesPlot. Shows
  * the runId-stable colour swatch, a short human-facing label (the run's
  * number and what it did to the system, plus tf), and a click target that
- * toggles the run in/out of the overlay set.
+ * toggles the run in/out of the overlay set. The active run's chip says
+ * "active": it is on the plot whether it is pinned or not, and with earlier
+ * runs pinned beside it the label alone did not say which chip was the run
+ * just made.
  *
  * Lives next to the plot rather than inside ``<TimeSeriesPlot />`` so
  * the chips can be wrapped/styled by the surrounding layout (the v2.0
@@ -235,6 +238,9 @@ export function RunLegendChip({ runId, label, pinned, onToggle, className }: Run
   const setRunDisplayName = useRunsStore((s) => s.setRunDisplayName);
   const setRunColorOverride = useRunsStore((s) => s.setRunColorOverride);
 
+  // The active run is plotted with the pinned ones, pinned or not.
+  const isActive = useRunsStore((s) => s.activeRunId === runId);
+
   const [isRenaming, setIsRenaming] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -295,9 +301,13 @@ export function RunLegendChip({ runId, label, pinned, onToggle, className }: Run
         'inline-flex items-center gap-1.5',
         'rounded-[var(--radius-sm)] border px-2 py-1 text-xs',
         'transition-colors',
+        // The active run is on the plot without a pin, so its chip is not
+        // greyed out like that of a run that is off it.
         isPinned
           ? 'border-border bg-muted text-foreground'
-          : 'border-border bg-background text-muted-foreground',
+          : isActive
+            ? 'border-border bg-background text-foreground'
+            : 'border-border bg-background text-muted-foreground',
         className,
       )}
     >
@@ -356,9 +366,13 @@ export function RunLegendChip({ runId, label, pinned, onToggle, className }: Run
                 : `Pin ${displayLabel} to overlay (double-click to rename)`
             }
             title={
-              isPinned
-                ? 'Click to take this run out of the overlay. Double-click to rename it.'
-                : 'Click to add this run to the overlay. Double-click to rename it.'
+              isActive
+                ? isPinned
+                  ? 'Click to unpin this run. It stays on the plot while it is the active run. Double-click to rename it.'
+                  : 'Click to pin this run, so it stays on the plot after Reset run or the next run. Double-click to rename it.'
+                : isPinned
+                  ? 'Click to take this run out of the overlay. Double-click to rename it.'
+                  : 'Click to add this run to the overlay. Double-click to rename it.'
             }
             className={cn(
               'font-mono',
@@ -376,6 +390,15 @@ export function RunLegendChip({ runId, label, pinned, onToggle, className }: Run
           />
         </>
       )}
+      {isActive ? (
+        <span
+          data-testid={`run-legend-active-${runId}`}
+          title="The run that was just made. It is on the plot until Reset run or the next run, pinned or not."
+          className="text-primary text-[10px] font-medium"
+        >
+          active
+        </span>
+      ) : null}
     </span>
   );
 }

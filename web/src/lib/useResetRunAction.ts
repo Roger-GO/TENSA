@@ -68,7 +68,9 @@ export function useResetRunAction({
         }
         if (kept !== null) {
           toast.info(`${kept} stays in History`, {
-            description: 'Run again, then pin both runs in History to overlay them.',
+            // The next run is drawn whatever is pinned, so one pin makes the pair.
+            description:
+              'Pin it there to keep it on the plot: the next run is drawn beside it. Pin that one too to keep comparing them.',
           });
         } else if (confirm && !discarded) {
           toast.info('Run reset', {

@@ -18,7 +18,7 @@ import { UPlot } from './UPlot';
 import { RunLegendChip } from './RunLegendChip';
 import { alignRuns, resampleOnto } from './multiRunAlign';
 import type { AlignedRuns } from './multiRunAlign';
-import { resolveOverlayRuns, usePlotRunId } from './overlayRuns';
+import { primaryRunOf, resolveOverlayRuns, usePlotRunId } from './overlayRuns';
 import { SECONDARY_SCALE, planGroupAxes, scaleColumn } from './axes';
 import type { AxisPlan, GroupAxes, PlannedSeries } from './axes';
 import { deltaCursorPlugin } from './cursorPlugin';
@@ -49,8 +49,10 @@ const PLOT_FORMATS = ['csv', 'png', 'comtrade'] as const;
  * ``usePlotStore`` (selected series + group expand state). When no run
  * is active OR no series selected, renders the empty-state copy.
  *
- * **Multi-run overlay (Unit 9, v2.0):** when ``overlayRunIds.size > 1``
- * the plot renders one series family per overlay run, each coloured by
+ * **Multi-run overlay (Unit 9, v2.0):** when more than one run is plotted
+ * (the pinned runs of ``overlayRunIds`` and the active run, which is drawn
+ * with them whether it is pinned or not; see ``resolveOverlayRuns``) the
+ * plot renders one series family per run, each coloured by
  * a runId-stable hash (see ``runIdToStrokeStyle``). All overlay runs
  * share the variable selection (the picker shows a per-run filter
  * row above the tree when overlay > 1 — see ``VariableTreePicker``).
@@ -634,9 +636,8 @@ export function TimeSeriesPlot({
   // shared across all overlay runs.
   //
   // Selecting the resolved runs with shallow equality, not the whole runs
-  // map, keeps the plot (and every chart it would rebuild) out of frames
-  // that belong to some other run: with two runs pinned, a third that
-  // streams without being pinned must not redraw them 30 times a second.
+  // map, keeps the plot (and every chart it would rebuild) out of changes
+  // to a run that is not on it.
   const overlayRuns = useRunsStore(useShallow((s) => resolveOverlayRuns(s, runId)));
   // The runs' column-name lists, which do not change while a run streams
   // (``overlayRuns`` is a new array on every frame of a displayed run,
@@ -646,7 +647,9 @@ export function TimeSeriesPlot({
   );
 
   const isMultiRun = overlayRuns.length > 1;
-  const primaryRun = overlayRuns[0];
+  // The one run the single-run parts follow (the CSV and COMTRADE exports, the
+  // scrub cursor): the active run while there is one, see ``primaryRunOf``.
+  const primaryRun = primaryRunOf(overlayRuns, effectiveRunId);
   // Runs kept after Reset run, a case change or a reload of the page, which
   // nothing plots until one is started or pinned: the empty plot says how many
   // there are and has a button that opens the run history.
@@ -734,9 +737,9 @@ export function TimeSeriesPlot({
   // slice does not currently track the dropped count — Unit 2
   // plan-divergence: per-run dropped-row tracking deferred).
   //
-  // CSV export is single-run only — it exports the primary (first
-  // overlay) run. Multi-run CSV would need to combine timelines and
-  // is deferred to Unit 18.
+  // CSV export is single-run only — it exports the primary run (the
+  // active one, or the first pinned when none is active). Multi-run CSV
+  // would need to combine timelines and is deferred to Unit 18.
   const onExportCsv = useCallback(() => {
     const run = primaryRun;
     if (!run || !selected || selected.size === 0) return null;
@@ -923,8 +926,9 @@ export function TimeSeriesPlot({
               data-testid="time-series-plot-legend"
               className="flex flex-wrap items-center gap-1"
             >
+              {/* A chip reads its own pin: the active run is here without one. */}
               {overlayRuns.map((r) => (
-                <RunLegendChip key={r.runId} runId={r.runId} pinned />
+                <RunLegendChip key={r.runId} runId={r.runId} />
               ))}
             </div>
           ) : null}

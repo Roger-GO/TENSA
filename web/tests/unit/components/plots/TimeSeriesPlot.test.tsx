@@ -467,6 +467,70 @@ describe('TimeSeriesPlot — multi-run overlay (Unit 9 v2.0)', () => {
     expect(screen.getByTestId('run-legend-chip-r2')).toBeInTheDocument();
   });
 
+  it('plots the run just started with the pinned runs, and says which chip is which', () => {
+    // Two runs pinned earlier (a reload of the page brings pins back), then a new run.
+    seedRun('r1', ['Bus_1_v']);
+    appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.0] });
+    seedRun('r2', ['Bus_1_v']);
+    appendRows('r2', [0, 1], { Bus_1_v: [0.99, 0.98] });
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+    seedRun('r3', ['Bus_1_v'], 2);
+    appendRows('r3', [0, 1], { Bus_1_v: [0.9, 0.8] });
+    usePlotStore.getState().setSelection('r3', new Set(['Bus_1_v']));
+    render(<TimeSeriesPlot />);
+
+    expect(screen.getByTestId('time-series-plot')).toHaveAttribute('data-overlay-count', '3');
+    const opts = constructSpy.mock.calls[0]?.[0] as { series: { label: string }[] };
+    expect(opts.series.slice(1).map((s) => s.label)).toEqual([
+      'TDS #1 · Bus_1_v',
+      'TDS #2 · Bus_1_v',
+      'TDS #3 · Bus_1_v',
+    ]);
+    // Its chip carries its own end time, reads as not pinned, and is marked as the active run.
+    expect(screen.getByTestId('run-legend-name-r3')).toHaveTextContent('TDS #3 · tf=2s');
+    expect(screen.getByTestId('run-legend-chip-r3')).toHaveAttribute('data-pinned', 'false');
+    expect(screen.getByTestId('run-legend-chip-r1')).toHaveAttribute('data-pinned', 'true');
+    expect(screen.getByTestId('run-legend-active-r3')).toHaveTextContent('active');
+    expect(screen.queryByTestId('run-legend-active-r1')).toBeNull();
+    expect(screen.queryByTestId('run-legend-active-r2')).toBeNull();
+  });
+
+  it('plots one pinned run and the active run together, so neither is taken for the other', () => {
+    seedRun('r1', ['Bus_1_v']);
+    appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.0] });
+    useRunsStore.getState().setOverlayRuns(['r1']);
+    seedRun('r2', ['Bus_1_v'], 2);
+    appendRows('r2', [0, 1], { Bus_1_v: [0.9, 0.8] });
+    usePlotStore.getState().setSelection('r2', new Set(['Bus_1_v']));
+    render(<TimeSeriesPlot />);
+
+    expect(screen.getByTestId('time-series-plot')).toHaveAttribute('data-overlay-count', '2');
+    expect(screen.getByTestId('run-legend-chip-r1')).toBeInTheDocument();
+    expect(screen.getByTestId('run-legend-chip-r2')).toBeInTheDocument();
+  });
+
+  it('goes back to the pinned runs once the active run is released, as by Reset run', () => {
+    seedRun('r1', ['Bus_1_v']);
+    appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.0] });
+    seedRun('r2', ['Bus_1_v']);
+    appendRows('r2', [0, 1], { Bus_1_v: [0.99, 0.98] });
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+    seedRun('r3', ['Bus_1_v']);
+    appendRows('r3', [0, 1], { Bus_1_v: [0.9, 0.8] });
+    usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v']));
+    usePlotStore.getState().setSelection('r3', new Set(['Bus_1_v']));
+    render(<TimeSeriesPlot />);
+    expect(screen.getByTestId('time-series-plot')).toHaveAttribute('data-overlay-count', '3');
+
+    act(() => {
+      useRunsStore.getState().markRunDone('r3', 1);
+      useRunsStore.getState().clearActiveRun();
+    });
+
+    expect(screen.getByTestId('time-series-plot')).toHaveAttribute('data-overlay-count', '2');
+    expect(screen.queryByTestId('run-legend-chip-r3')).toBeNull();
+  });
+
   it('does NOT render the legend chip strip in single-run mode', () => {
     seedRun('r1', ['Bus_1_v']);
     appendRows('r1', [0, 1], { Bus_1_v: [1.0, 1.0] });
@@ -671,28 +735,51 @@ describe('TimeSeriesPlot — streaming frames do not rebuild the charts', () => 
     align.mockRestore();
   });
 
-  it('leaves the pinned runs alone while another run streams', () => {
+  it('leaves the plotted runs alone while a run that is not plotted takes frames', () => {
     seedRun('r1', ['Bus_1_v']);
     appendRows('r1', [0, 1, 2], { Bus_1_v: [1, 1, 1] });
     seedRun('r2', ['Bus_1_v']);
     appendRows('r2', [0, 1, 2], { Bus_1_v: [0.9, 0.9, 0.9] });
     useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
-    // A third run starts and becomes the active run, but is not pinned.
+    // A third run that is neither pinned nor the active one: a fourth started after it.
     seedRun('r3', ['Bus_1_v']);
-    usePlotStore.getState().setSelection('r3', new Set(['Bus_1_v']));
+    seedRun('r4', ['Bus_1_v']);
+    usePlotStore.getState().setSelection('r4', new Set(['Bus_1_v']));
     const align = vi.spyOn(alignModule, 'alignRuns');
     render(<TimeSeriesPlot />);
-    expect(screen.getByTestId('time-series-plot')).toHaveAttribute('data-overlay-count', '2');
+    expect(screen.getByTestId('time-series-plot')).toHaveAttribute('data-overlay-count', '3');
     expect(align).toHaveBeenCalledTimes(1);
     const pushes = setDataSpy.mock.calls.length;
 
     streamFrames('r3', 0, 15, ['Bus_1_v']);
 
-    // The two pinned runs did not change, so nothing was merged or pushed again.
+    // The runs on the plot did not change, so nothing was merged or pushed again.
     expect(align).toHaveBeenCalledTimes(1);
     expect(setDataSpy.mock.calls.length).toBe(pushes);
     expect(constructSpy).toHaveBeenCalledTimes(1);
     align.mockRestore();
+  });
+
+  it('draws the frames of the active run over the pinned ones, though it is not pinned', () => {
+    seedRun('r1', ['Bus_1_v']);
+    appendRows('r1', [0, 1, 2], { Bus_1_v: [1, 1, 1] });
+    seedRun('r2', ['Bus_1_v']);
+    appendRows('r2', [0, 1, 2], { Bus_1_v: [0.9, 0.9, 0.9] });
+    useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+    seedRun('r3', ['Bus_1_v']);
+    usePlotStore.getState().setSelection('r3', new Set(['Bus_1_v']));
+    render(<TimeSeriesPlot />);
+    const pushes = setDataSpy.mock.calls.length;
+
+    streamFrames('r3', 0, 4, ['Bus_1_v']);
+
+    expect(setDataSpy.mock.calls.length).toBe(pushes + 4);
+    // The pinned runs' three times and the new run's (t = 0 is shared).
+    const merged = (setDataSpy.mock.calls.at(-1)?.[0] as Float64Array[])[0];
+    expect(merged?.length).toBe(6);
+    // One chart all along: it had a series for each of the three runs from the start.
+    expect(constructSpy).toHaveBeenCalledTimes(1);
+    expect(seriesLabels(0)).toHaveLength(3);
   });
 
   it('rebuilds only the group whose series set changed', () => {
@@ -1050,6 +1137,63 @@ describe('TimeSeriesPlot axes and units', () => {
       await exportAs(userEvent.setup(), 'csv');
 
       expect(downloads.filenames[0]).toMatch(/^kundur_full_r1_time-series_/);
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  it('exports the active run, the one the file is named for, when earlier runs are drawn with it', async () => {
+    const downloads = captureDownloads();
+    try {
+      useRunsStore.getState().startRun({
+        runId: 'r1',
+        tf: 10,
+        columnNames: ['Bus_1_v'],
+        caseName: 'ieee14',
+      });
+      appendRows('r1', [0, 5, 10], { Bus_1_v: [1.0, 1.0, 1.0] });
+      useRunsStore.getState().setOverlayRuns(['r1']);
+      useRunsStore.getState().startRun({
+        runId: 'r2',
+        tf: 2,
+        columnNames: ['Bus_1_v'],
+        caseName: 'kundur_full',
+      });
+      appendRows('r2', [0, 2], { Bus_1_v: [0.9, 0.8] });
+      usePlotStore.getState().setSelection('r2', new Set(['Bus_1_v']));
+      render(<TimeSeriesPlot />);
+
+      await exportAs(userEvent.setup(), 'csv');
+
+      expect(downloads.filenames[0]).toMatch(/^kundur_full_r2_time-series_/);
+      const lines = (await readBlob(downloads.blobs[0]!)).trim().split(/\r?\n/);
+      expect(lines.slice(2)).toEqual(['0,Bus_1_v,0.9', '2,Bus_1_v,0.8']);
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  it('exports the oldest pinned run when no run is active, under its own name', async () => {
+    const downloads = captureDownloads();
+    try {
+      for (const [runId, v] of [
+        ['r1', 1.0],
+        ['r2', 0.9],
+      ] as const) {
+        useRunsStore.getState().startRun({ runId, tf: 10, columnNames: ['Bus_1_v'] });
+        appendRows(runId, [0, 1], { Bus_1_v: [v, v] });
+        useRunsStore.getState().markRunDone(runId, 1);
+      }
+      useRunsStore.getState().clearActiveRun();
+      useRunsStore.getState().setOverlayRuns(['r1', 'r2']);
+      usePlotStore.getState().setSelection('r1', new Set(['Bus_1_v']));
+      render(<TimeSeriesPlot />);
+
+      await exportAs(userEvent.setup(), 'csv');
+
+      expect(downloads.filenames[0]).toMatch(/_r1_time-series_/);
+      const lines = (await readBlob(downloads.blobs[0]!)).trim().split(/\r?\n/);
+      expect(lines.slice(2)).toEqual(['0,Bus_1_v,1', '1,Bus_1_v,1']);
     } finally {
       downloads.restore();
     }

@@ -529,4 +529,20 @@ describe('VariableTreePicker — streaming frames', () => {
     expect(screen.queryByTestId('variable-tree-picker-leaf-Bus_5_v')).toBeNull();
     expect(screen.getByTestId('variable-tree-picker-leaf-Bus_9_v')).toBeInTheDocument();
   });
+
+  it('lists the active run with a pinned one, though it is not pinned itself', () => {
+    seedRun('r1', ['Bus_1_v', 'Bus_5_v']);
+    useRunsStore.getState().setOverlayRuns(['r1']);
+    useRunsStore.getState().startRun({ runId: 'r2', tf: 10, columnNames: ['Bus_1_v', 'Bus_9_v'] });
+    usePlotStore.getState().toggleExpanded('r2', 'bus_v');
+    render(<VariableTreePicker />);
+
+    // Both runs' columns, and a chip for each that says which is pinned.
+    expect(screen.getByTestId('variable-tree-picker-leaf-Bus_5_v')).toBeInTheDocument();
+    expect(screen.getByTestId('variable-tree-picker-leaf-Bus_9_v')).toBeInTheDocument();
+    const row = screen.getByTestId('variable-tree-picker-runs-row');
+    expect(within(row).getByTestId('run-legend-chip-r1')).toHaveAttribute('data-pinned', 'true');
+    expect(within(row).getByTestId('run-legend-chip-r2')).toHaveAttribute('data-pinned', 'false');
+    expect(within(row).getByTestId('run-legend-active-r2')).toBeInTheDocument();
+  });
 });

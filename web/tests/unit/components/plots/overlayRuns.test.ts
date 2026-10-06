@@ -1,9 +1,10 @@
 /**
- * Which runs a plot-side component draws (`resolveOverlayRuns`) and which run
- * it keys its own state on (`plotRunId`).
+ * Which runs a plot-side component draws (`resolveOverlayRuns`), which run
+ * it keys its own state on (`plotRunId`) and which of the drawn runs its
+ * single-run parts follow (`primaryRunOf`).
  */
 import { describe, expect, it } from 'vitest';
-import { plotRunId, resolveOverlayRuns } from '@/components/plots/overlayRuns';
+import { plotRunId, primaryRunOf, resolveOverlayRuns } from '@/components/plots/overlayRuns';
 import type { RunRecord } from '@/store/runs';
 import { finishedRun } from '../../helpers/runs';
 
@@ -25,8 +26,53 @@ describe('resolveOverlayRuns', () => {
     expect(resolveOverlayRuns(state(['a', 'b'], 'b')).map((r) => r.runId)).toEqual(['b']);
   });
 
+  it('draws the active run with the pinned ones, though it is not pinned itself', () => {
+    expect(resolveOverlayRuns(state(['a', 'b', 'c'], 'c', ['a', 'b'])).map((r) => r.runId)).toEqual(
+      ['a', 'b', 'c'],
+    );
+    // In the order the runs were made, wherever the active one falls in it.
+    expect(resolveOverlayRuns(state(['a', 'b', 'c'], 'a', ['c'])).map((r) => r.runId)).toEqual([
+      'a',
+      'c',
+    ]);
+  });
+
+  it('draws the pinned runs alone once no run is active, as after Reset run or a reload', () => {
+    expect(
+      resolveOverlayRuns(state(['a', 'b', 'c'], null, ['a', 'b'])).map((r) => r.runId),
+    ).toEqual(['a', 'b']);
+  });
+
+  it('draws the active run when every pin is of a run that is gone', () => {
+    expect(resolveOverlayRuns(state(['a'], 'a', ['gone'])).map((r) => r.runId)).toEqual(['a']);
+  });
+
+  it('draws the run asked for and no other, whatever is pinned or active', () => {
+    expect(resolveOverlayRuns(state(['a', 'b', 'c'], 'c', ['a']), 'b').map((r) => r.runId)).toEqual(
+      ['b'],
+    );
+  });
+
   it('draws nothing with no active run and no pin', () => {
     expect(resolveOverlayRuns(state(['a', 'b'], null))).toEqual([]);
+  });
+});
+
+describe('primaryRunOf', () => {
+  const drawn = (ids: string[]) => ids.map((id) => finishedRun(id));
+
+  it('is the run the plot keys its state on when that run is drawn', () => {
+    expect(primaryRunOf(drawn(['a', 'b', 'c']), 'c')?.runId).toBe('c');
+    expect(primaryRunOf(drawn(['a', 'b', 'c']), 'a')?.runId).toBe('a');
+  });
+
+  it('is the first run drawn when the plot has no run of its own among them', () => {
+    expect(primaryRunOf(drawn(['a', 'b']), null)?.runId).toBe('a');
+    expect(primaryRunOf(drawn(['a', 'b']), 'gone')?.runId).toBe('a');
+  });
+
+  it('is none when nothing is drawn', () => {
+    expect(primaryRunOf([], 'a')).toBeUndefined();
   });
 });
 

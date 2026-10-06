@@ -9,7 +9,8 @@
  * - The pencil beside the label (or a double-click on the label) — renames the
  *   run. The name shows in the plot legend too; an empty name puts the default
  *   label back.
- * - "Pin to overlay" / "Unpin" — toggles ``overlayRunIds`` membership.
+ * - "Pin to overlay" / "Unpin" — toggles ``overlayRunIds`` membership. The
+ *   active run is plotted without it, so its button says what the pin keeps.
  * - "Delete" — drops the run from the runs slice (frees its buffers). Reset run
  *   in the top bar does not: it keeps the run, which then reads "earlier".
  *
@@ -209,10 +210,15 @@ export function HistoryRunRow({
         onClick={handleTogglePin}
         data-testid={`history-run-row-pin-${run.runId}`}
         aria-pressed={isOverlayPinned}
+        // The active run is on the plot either way: its pin is what keeps it there.
         title={
-          isOverlayPinned
-            ? 'Take this run off the plot'
-            : 'Plot this run. Pin more than one to compare them on the same plot.'
+          isActive
+            ? isOverlayPinned
+              ? 'Unpin this run. It stays on the plot while it is the active run.'
+              : 'Keep this run on the plot after Reset run or the next run. The active run is plotted without a pin, beside the pinned runs.'
+            : isOverlayPinned
+              ? 'Take this run off the plot'
+              : 'Plot this run. Pin more than one to compare them on the same plot.'
         }
       >
         {isOverlayPinned ? 'Unpin' : 'Pin'}

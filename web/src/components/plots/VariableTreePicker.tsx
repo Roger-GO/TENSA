@@ -190,7 +190,7 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
   );
 
   // The runs the picker reflects. Mirrors TimeSeriesPlot's priority:
-  // explicit prop > overlay set > active run.
+  // explicit prop > overlay set with the active run > active run.
   const pickerRunIds = useRunsStore(
     useShallow((s) => resolveOverlayRuns(s, runId).map((r) => r.runId)),
   );
@@ -334,7 +334,7 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
         >
           <span className="text-muted-foreground pr-1 text-[10px] uppercase">Overlay</span>
           {pickerRunIds.map((id) => (
-            <RunLegendChip key={id} runId={id} pinned />
+            <RunLegendChip key={id} runId={id} />
           ))}
         </div>
       ) : null}
