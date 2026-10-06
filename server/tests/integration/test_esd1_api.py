@@ -265,7 +265,10 @@ async def test_the_state_of_charge_follows_the_delivered_megawatts_over_en(
     assert added.status_code == 201, added.text
     run = await _run(client, sid, tf=1.5)
 
-    assert run["soc"][0] == pytest.approx(0.6, abs=1e-6)
+    # The run's first row is the first step ANDES solves, which it stores at
+    # t = 0: a step's worth of discharge below what the battery was given.
+    assert run["t"][0] == 0.0
+    assert 0.6 - 2e-5 < run["soc"][0] < 0.6
     # It starts at the static generator's power-flow output and stays there.
     assert run["p"][0] == pytest.approx(0.2, abs=2e-3)
     power, rate = _settled(run, 0.3, 1.4)

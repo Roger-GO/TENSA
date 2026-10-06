@@ -57,10 +57,11 @@ applies from that instant on (a zero-order hold, with no extra delay). A step
 ANDES has to retry with a smaller size calls the hook again with the same solved
 instant; the sample is already taken, so nothing is computed twice. The rate of
 change of frequency an FFR triggers on is the difference of two consecutive
-samples over the time between them. (The run's own record of its variables,
-``tensa.core.stream``, labels each row with the time the hook was called with,
-one step after the instant the row holds. A controller's samples carry the
-instant itself.)
+samples over the time between them. The run's own record of its variables
+(``tensa.core.stream``) keeps the same clock, so a controller's sample and the
+row of the step it read carry one time (``tensa.core.tds_steps``). The first
+sample of a run from zero is the exception: it reads the initial values, which
+are a step of no run, while the row at zero is the first step ANDES solves.
 
 **What a run leaves behind.** Nothing: when the run ends, however it ends, each
 device's input is put back to what it held. A later run on the same System that
@@ -95,6 +96,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError,
 from tensa.core.dae_vars import dae_var_name
 from tensa.core.errors import TdsRequestError, short_repr
 from tensa.core.messages import NOTICE_LOGGER
+from tensa.core.tds_steps import solved_instant
 
 if TYPE_CHECKING:
     from andes.system import System
@@ -829,7 +831,7 @@ class ControllerBank:
         devices = self._devices
         if devices is None:  # the run has ended; a stray call changes nothing
             return
-        now = max(float(t) - float(getattr(system.TDS, "h", 0.0) or 0.0), 0.0)
+        now = max(solved_instant(t, system), 0.0)
         coi: float | None = None
         coi_read = False
         for loop, device in zip(self._loops, devices, strict=True):

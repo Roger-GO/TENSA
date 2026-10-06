@@ -61,8 +61,16 @@ The ``StreamCollector`` reads the selected groups' values off the System at
 each callpert step: it resolves where every value lives once, when the run
 starts, and reads them with numpy after that. The ``StreamAggregator`` owns
 the buffering decision; the worker just calls ``push(t, collector.collect())``
-per callpert step and ``flush()`` at run end, and emits whatever rows the
+per solved step and ``flush()`` at run end, and emits whatever rows the
 aggregator returns as one Arrow batch.
+
+A row's ``t`` is the time ANDES solved the row's values at, the one it stores
+them under itself (``dae.ts``). ANDES calls the hook before it solves the step
+the call names, so the values at a call are the step before; the worker pairs
+them with that step's time and takes the run's last step, which no call sees,
+once the run has returned (``tensa.core.tds_steps``). A run therefore sends one
+row per step it solved, the last one at ``tf`` when it got there, and none for
+the state it started from.
 """
 
 from __future__ import annotations
@@ -687,8 +695,8 @@ class TraceRecorder:
         self._rows: list[NDArray[np.float64]] = []
         self.truncated = False
 
-    def record(self, t: float, system: object) -> None:
-        """Take the collector's row for the step at time ``t``."""
+    def record(self, t: float, system: object = None) -> None:
+        """Take the collector's row as the step solved at time ``t``."""
         if len(self._t) >= self._max_rows:
             self.truncated = True
             return

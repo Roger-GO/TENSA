@@ -109,6 +109,7 @@ from tensa.core.rated_voltage import (
 )
 from tensa.core.se_result import MeasurementsGenerated, SeResult
 from tensa.core.tds_controllers import ControllerBank, ControllerSpec, controller_catalogue
+from tensa.core.tds_steps import land_on_time
 
 # JSON-friendly scalar union surfaced through topology / line-flow APIs.
 # Mirrored on the API layer (``schemas.TopologyEntry.params``); see schemas.py.
@@ -2380,8 +2381,13 @@ class Wrapper:
         def _callpert(t: float, system: System) -> None:
             nonlocal callpert_count
             callpert_count += 1
+            land_on_time(system)
             if abort_flag is not None and abort_flag.is_set():
                 system.TDS.busted = True
+                # The step before this call is solved whatever becomes of the
+                # run, and ANDES still solves this one: both belong to a record.
+                if on_step is not None:
+                    on_step(t, system)
                 return
             if controllers is not None:
                 controllers.step(t, system)

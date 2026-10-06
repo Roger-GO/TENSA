@@ -90,10 +90,15 @@ def test_a_streamed_run_sends_its_events_on_the_frames_that_follow_them() -> Non
     assert entry["level"] == "info"
     assert entry["source"] == "run_tds"
     assert entry["logger"] == "andes.models.timer"
-    # Nothing is sent twice: the run's closing message is the only one left for
-    # the final reply, and the frames after the fault carry nothing of it.
+    # Nothing is sent twice: the frames after the fault carry nothing of it, and
+    # neither does the final reply. The run's closing message comes with the
+    # frame of the last step, which is sent once the run has returned.
     assert [t for t in _texts(final) if "Applying fault" in t] == []
-    assert any(t.startswith("Simulation to t=1.00 sec completed") for t in _texts(final))
+    last_times, _last_values = decode_batch(frames[-1]["payload"])
+    assert float(last_times[-1]) == 1.0
+    closing = "Simulation to t=1.00 sec completed"
+    assert any(t.startswith(closing) for t in _texts(frames[-1]))
+    assert sum(t.startswith(closing) for m in [*frames, final] for t in _texts(m)) == 1
 
 
 def test_the_command_loop_attaches_the_log_to_the_reply_and_names_the_command() -> None:

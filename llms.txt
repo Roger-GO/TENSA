@@ -46,7 +46,8 @@ Case+topology:   POST /sessions/{id}/case · POST /sessions/{id}/reload · GET /
 Power flow:      POST /sessions/{id}/pflow · GET /sessions/{id}/operating-point
 TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrator, tds_config_overrides, dae_vars, controllers)
                  dae_vars: ANDES variables to record, named as ANDES names them ("omega GENROU 1", "vf GENROU 2");
-                 their values at every step come back under "traces" ({t, variables:[{name, values}], truncated}).
+                 their values at every step come back under "traces" ({t, variables:[{name, values}], truncated}):
+                 one row per step ANDES solved, at the time it solved it, the last at tf when the run reached it.
                  GET /sessions/{id}/dae-variables[?q=&kind=&model=&limit=&offset=]  (the names a run can record: q is
                  words that must all appear, kind x=state or y=algebraic; needs no run, does not close the case to disturbances)
                  controllers: frequency loops the run closes on batteries and other distributed generation devices
@@ -143,6 +144,8 @@ WS /api/ws/{session_id}            — TDS live stream. Send {"type":"start_tds"
                                      names the columns once) then BINARY Apache Arrow IPC chunks, one
                                      per frame, each with a "t" column and a "v" list column holding
                                      the row's values in var_columns order, then {"type":"done",...}.
+                                     A row is a step ANDES solved, at the time it solved it (the rows are
+                                     ANDES's own dae.ts); the last is at tf when the run reached it.
                                      Reconnect+resume: {"type":"resume","run_id":"...","last_seq":N}.
                                      A client that falls too far behind the run, or resumes past the
                                      ~30 s buffer, gets {"type":"resync",...} and the socket closes;

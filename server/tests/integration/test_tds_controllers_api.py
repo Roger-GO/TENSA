@@ -220,6 +220,41 @@ async def test_a_batch_run_returns_what_each_controller_did(client: httpx.AsyncC
     ), said
 
 
+async def test_a_controllers_samples_and_the_run_s_traces_are_on_one_clock(
+    client: httpx.AsyncClient,
+) -> None:
+    """A controller reads its frequency at the instant ANDES solved, and the
+    run records the battery's own frequency variable. At every sample the two
+    are one number under one time: the traces used to carry it a step later."""
+    sid = await _session(client)
+    await _trip(client, sid)
+    run = await client.post(
+        f"/api/sessions/{sid}/tds",
+        json={
+            "tf": 2.45,
+            "dae_vars": ["fHz ESD1 1"],
+            "controllers": [{**DROOP, "frequency": "bus"}],
+            "tds_config_overrides": {"criteria": 0},
+        },
+    )
+    assert run.status_code == 200, run.text
+    body = run.json()
+    trace = body["controllers"][0]["trace"]
+    t = body["traces"]["t"]
+    recorded = body["traces"]["variables"][0]["values"]
+    assert body["traces"]["t"][-1] == 2.45 == body["final_t"]
+
+    moved = 0
+    # The first sample reads the initial values; each one after it reads a step.
+    for at, frequency in list(zip(trace["t"], trace["frequency"], strict=True))[1:]:
+        row = min(range(len(t)), key=lambda k: abs(t[k] - at))
+        assert abs(t[row] - at) < 1e-9, f"no row at the sample time {at}"
+        assert recorded[row] == frequency
+        moved += recorded[row] != recorded[row - 1]
+    # The frequency was moving at most of them, so a row a step off would show.
+    assert moved > len(trace["t"]) // 2
+
+
 async def test_a_run_without_controllers_reports_none(client: httpx.AsyncClient) -> None:
     sid = await _session(client)
     run = await client.post(f"/api/sessions/{sid}/tds", json={"tf": 0.2})

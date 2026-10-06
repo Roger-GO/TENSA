@@ -109,6 +109,7 @@ from tensa.core.stream import (
 )
 from tensa.core.tds_controllers import log_notices as log_controller_notices
 from tensa.core.tds_controllers import parse_controllers
+from tensa.core.tds_steps import StepClock, stored_step
 from tensa.core.wrapper import Wrapper, tds_fixed_step, validate_step_size
 
 
@@ -1301,6 +1302,8 @@ def _handle_run_tds(
 
     stream = bool(args.get("stream"))
     on_step: Callable[[float, Any], None] | None = None
+    # Takes the System's values as the row of the step solved at the time given.
+    record_step: Callable[[float], None] | None = None
     aggregator: StreamAggregator | None = None
 
     if stream:
@@ -1439,23 +1442,42 @@ def _handle_run_tds(
             except (BrokenPipeError, OSError):
                 abort_flag.set()
 
-        def _emit(t: float, system: Any) -> None:
+        def _emit(t: float) -> None:
             assert aggregator is not None
-            rows = aggregator.push(t, collector.collect())
+            # As ANDES solved the step, not as an event at its time left it.
+            with stored_step(ss, t):
+                row = collector.collect()
+            rows = aggregator.push(t, row)
             if rows:
                 _emit_rows(rows)
 
-        on_step = _emit
+        record_step = _emit
 
     # A batch run has no frames to carry the values it was asked to record, so it
     # keeps them and returns them with its summary.
     recorder: TraceRecorder | None = None
     if not stream and dae_names:
-        recorder = TraceRecorder(
-            StreamCollector(wrapper._require_loaded(), [], dae_names),  # noqa: SLF001
-            dae_names,
-        )
-        on_step = recorder.record
+        loaded = wrapper._require_loaded()  # noqa: SLF001
+        recorder = TraceRecorder(StreamCollector(loaded, [], dae_names), dae_names)
+        kept = recorder
+
+        def _keep(t: float) -> None:
+            with stored_step(loaded, t):
+                kept.record(t)
+
+        record_step = _keep
+
+    # The hook is called before the step it names is solved, so a row is the
+    # step before, under that step's time (``tensa.core.tds_steps``).
+    clock = StepClock()
+    if record_step is not None:
+
+        def _on_step(t: float, system: Any) -> None:
+            solved = clock.hook(t, system)
+            if solved is not None:
+                record_step(solved)
+
+        on_step = _on_step
 
     # Started last, once nothing ahead of the run can refuse: only the run's
     # ``finally`` below sets ``abort_flag``, so a bridge started any earlier
@@ -1481,6 +1503,13 @@ def _handle_run_tds(
         )
     finally:
         abort_flag.set()
+
+    # The step the run ended on, which no call of the hook saw: at ``tf`` when
+    # the run got there.
+    if record_step is not None:
+        last = clock.end(wrapper._require_loaded())  # noqa: SLF001
+        if last is not None:
+            record_step(last)
 
     # Drain any buffered rows that didn't reach an emit boundary before run end.
     if stream and aggregator is not None:
