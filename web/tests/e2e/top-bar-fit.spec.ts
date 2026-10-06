@@ -10,6 +10,10 @@
  * CSS, so this is the one place the widths are checked. It drives the real UI
  * against a real `tensa serve`, like the flagship spec; `playwright.config.ts` says
  * how to start the substrate.
+ *
+ * The last test is about what is drawn over the bar: the toasts come up in the
+ * corner its right-hand menus open into, and must leave both the bar and an open
+ * menu in reach.
  */
 import { test, expect, type Page } from './fixtures';
 
@@ -151,4 +155,59 @@ test('top bar: at 1280 px the More menu opens Search, History and Theme, and its
     'data-state',
     'on',
   );
+});
+
+test('top bar: a toast leaves the bar and an open menu in reach', async ({ page }) => {
+  await loadCaseAndRunPf(page); // leaves its toasts up
+  const toast = page.locator('[data-sonner-toast]').first();
+
+  // Rest the pointer on the toast. A toast under the pointer does not time out, so
+  // the toasts are there for everything that follows, however long it takes.
+  await toast.hover();
+  await expect(toast).toHaveAttribute('data-expanded', 'true');
+
+  // None lies over the bar.
+  const bar = await page.getByTestId('top-bar').boundingBox();
+  if (bar === null) throw new Error('the top bar is not laid out');
+  await expect
+    .poll(async () => (await toast.boundingBox())?.y ?? 0, {
+      message: 'a toast lies over the top bar',
+    })
+    .toBeGreaterThanOrEqual(bar.y + bar.height);
+
+  // Move the pointer to the right end of the toast, where no menu reaches, and open
+  // the Export menu from the keyboard, so the pointer stays on the toast. The menu
+  // opens into the corner the toasts are in.
+  const box = await toast.boundingBox();
+  if (box === null) throw new Error('the toast is gone from under the pointer');
+  await toast.hover({ position: { x: box.width - 12, y: box.height / 2 } });
+  await page.getByTestId('topbar-menu-export-trigger').focus();
+  await page.keyboard.press('Enter');
+  const entries = page.getByTestId('topbar-menu-export-content').getByRole('menuitem');
+  await expect(entries.first()).toBeVisible();
+  const places = await entries.evaluateAll((items) => {
+    const toasts = Array.from(document.querySelectorAll('[data-sonner-toast]')).map((el) =>
+      el.getBoundingClientRect(),
+    );
+    return items.map((item) => {
+      const rect = item.getBoundingClientRect();
+      const x = rect.x + rect.width / 2;
+      const y = rect.y + rect.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      return {
+        entry: item.getAttribute('data-testid'),
+        sharesItsPlaceWithAToast: toasts.some(
+          (t) => x >= t.left && x <= t.right && y >= t.top && y <= t.bottom,
+        ),
+        inReach: hit !== null && item.contains(hit),
+      };
+    });
+  });
+  // The test needs a toast where an entry is, or it shows nothing.
+  expect(places.filter((place) => place.sharesItsPlaceWithAToast)).not.toEqual([]);
+  expect(places.filter((place) => !place.inReach)).toEqual([]);
+
+  // And a click on an entry lands on it.
+  await page.getByTestId('topbar-menu-export-reports').click();
+  await expect(page.getByTestId('report-dialog')).toBeVisible();
 });

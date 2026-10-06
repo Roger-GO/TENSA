@@ -17,6 +17,7 @@
  *   gives it to assistive technology as the item's description.
  * - An item with an `unavailableReason` stays in the menu and in the arrow-key order,
  *   shows the reason, and does nothing when activated.
+ * - The open menu and an item's tooltip are drawn above the toasts.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
@@ -29,6 +30,7 @@ import {
   TopBarMenuLink,
   TopBarMenuSeparator,
 } from '@/components/shell/TopBarMenu';
+import { TOAST_Z_INDEX, TOP_BAR_MENU_Z_INDEX } from '@/components/ui/layers';
 
 afterEach(() => {
   cleanup();
@@ -323,6 +325,29 @@ describe('<TopBarMenu /> — link items', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('topbar-menu-sample-content')).not.toBeInTheDocument(),
     );
+  });
+});
+
+describe('<TopBarMenu /> — over the toasts', () => {
+  it("draws the open menu and an item's tooltip above the toasts", async () => {
+    // The toasts appear where the menus on the right open, and one lying over a
+    // menu would hide its entries for as long as the pointer rested on it.
+    const user = userEvent.setup();
+    render(
+      <TopBarMenu label="Sample" testId="topbar-menu-sample">
+        <TopBarMenuItem testId="item-a" title="What A does, in a sentence.">
+          Item A
+        </TopBarMenuItem>
+      </TopBarMenu>,
+    );
+    await user.click(screen.getByTestId('topbar-menu-sample-trigger'));
+    const content = await screen.findByTestId('topbar-menu-sample-content');
+    expect(Number(content.style.zIndex)).toBe(TOP_BAR_MENU_Z_INDEX);
+    expect(Number(content.style.zIndex)).toBeGreaterThan(TOAST_Z_INDEX);
+
+    await user.hover(screen.getByTestId('item-a'));
+    const tooltip = (await screen.findByRole('tooltip')).parentElement;
+    expect(Number(tooltip?.style.zIndex)).toBe(TOP_BAR_MENU_Z_INDEX);
   });
 });
 

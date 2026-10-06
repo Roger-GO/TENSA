@@ -47,6 +47,8 @@ toast.error('Snapshot save failed: disk full', {
 
 `<Toaster />` is mounted once at AppShell root. The lib (`sonner`) is lazy — DOM only renders after first toast fires.
 
+The toasts come up in the top right corner, below the top bar, and are drawn above a dialog and under an open top bar menu (`src/components/ui/layers.ts` holds the numbers and the reason). A toast under the pointer does not time out, so a surface that opens into that corner and has to stay in reach goes above the toasts the way `TopBarMenu` does.
+
 ## Keyboard shortcuts (Unit 6)
 
 **Use `useHotkeys` from `@/lib/useHotkeys`** for any window-level keyboard binding. Defaults: `enableOnFormTags: false` + `enableOnContentEditable: false`, so shortcuts auto-skip when an editable element has focus.

@@ -59,6 +59,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { TOP_BAR_MENU_Z_INDEX } from '@/components/ui/layers';
 import { cn } from '@/lib/cn';
 
 /**
@@ -243,6 +244,8 @@ export function TopBarMenu({
         onKeyDown={handleKeyDown}
         data-testid={`${testId}-content`}
         className="w-60 p-1"
+        // Over the toasts, which appear where the menus on the right open.
+        style={{ zIndex: TOP_BAR_MENU_Z_INDEX }}
       >
         {/* One provider for the item hints, so moving from one item to the next
             shows the next hint without waiting for the delay again. */}
@@ -391,7 +394,12 @@ const TopBarMenuItemImpl = forwardRef<HTMLButtonElement, TopBarMenuItemProps>(
       <Tooltip open={hintOpen} onOpenChange={(next) => setHintOpen(next && pointerInside.current)}>
         <TooltipTrigger asChild>{button}</TooltipTrigger>
         <TooltipPortal>
-          <TooltipContent side="right" align="start" sideOffset={8}>
+          <TooltipContent
+            side="right"
+            align="start"
+            sideOffset={8}
+            style={{ zIndex: TOP_BAR_MENU_Z_INDEX }}
+          >
             {title}
           </TooltipContent>
         </TooltipPortal>

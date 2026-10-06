@@ -18,6 +18,7 @@
  * assertions).
  */
 import { Toaster as SonnerToaster } from 'sonner';
+import { TOAST_TOP_OFFSET_PX, TOAST_Z_INDEX } from './layers';
 
 export interface ToasterProps {
   /**
@@ -32,6 +33,10 @@ export function Toaster({ theme = 'light' }: ToasterProps = {}) {
     <SonnerToaster
       theme={theme}
       position="top-right"
+      // Below the top bar, and under an open top bar menu: see `./layers`.
+      offset={{ top: TOAST_TOP_OFFSET_PX }}
+      mobileOffset={{ top: TOAST_TOP_OFFSET_PX }}
+      style={{ zIndex: TOAST_Z_INDEX }}
       richColors
       closeButton
       // Sonner's defaults: 4000ms auto-dismiss, newest on top, max 3
