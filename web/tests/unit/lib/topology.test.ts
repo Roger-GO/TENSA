@@ -4,7 +4,7 @@
  * resolve a dynamic machine through it.
  */
 import { describe, expect, it } from 'vitest';
-import { findTopologyEntry, generatorRowKey } from '@/lib/topology';
+import { elementsGone, findTopologyEntry, generatorRowKey } from '@/lib/topology';
 import type { TopologyEntry, TopologySummary } from '@/api/types';
 
 const entry = (
@@ -71,5 +71,53 @@ describe('findTopologyEntry', () => {
 
   it('finds nothing for an idx that is not there', () => {
     expect(findTopologyEntry(topology(generators), { kind: 'generator', idx: '9' })).toBeNull();
+  });
+});
+
+describe('elementsGone', () => {
+  const topology = (parts: Partial<TopologySummary>): TopologySummary => ({
+    state: 'pre-setup',
+    buses: [],
+    lines: [],
+    transformers: [],
+    generators: [],
+    loads: [],
+    ...parts,
+  });
+
+  it('names what the first topology lists and the second does not, by model and idx', () => {
+    const before = topology({
+      buses: [entry(3, 'Bus'), entry(4, 'Bus')],
+      lines: [entry('L1', 'Line')],
+      transformers: [entry('T1', 'Line')],
+      generators: [entry(3, 'PV'), entry('G3', 'GENROU')],
+      loads: [entry('PQ_3', 'PQ')],
+      shunts: [entry('Sh_3', 'Shunt')],
+      controllers: [entry(1, 'EXST1'), entry(1, 'TGOV1')],
+    });
+    const after = topology({
+      buses: [entry(4, 'Bus')],
+      transformers: [entry('T1', 'Line')],
+      controllers: [entry(1, 'TGOV1')],
+    });
+
+    expect(elementsGone(before, after)).toEqual([
+      { model: 'Bus', idx: 3 },
+      { model: 'Line', idx: 'L1' },
+      { model: 'PV', idx: 3 },
+      { model: 'GENROU', idx: 'G3' },
+      { model: 'PQ', idx: 'PQ_3' },
+      { model: 'Shunt', idx: 'Sh_3' },
+      // The governor with the same idx stays, so only the exciter is named.
+      { model: 'EXST1', idx: 1 },
+    ]);
+  });
+
+  it('names nothing when the second lists everything the first did, or more', () => {
+    const before = topology({ buses: [entry(3, 'Bus')] });
+    expect(elementsGone(before, before)).toEqual([]);
+    expect(elementsGone(before, topology({ buses: [entry('3', 'Bus'), entry(9, 'Bus')] }))).toEqual(
+      [],
+    );
   });
 });

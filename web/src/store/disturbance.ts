@@ -31,7 +31,8 @@
  *   (``removeWith``): committed, they would name a device that is gone, and
  *   the run would fail on it. They are remembered by the element deleted, so
  *   undoing the delete puts them back (``restoreWith``) and redoing it takes
- *   them off again (``removeAgainWith``).
+ *   them off again (``removeAgainWith``), with any put on the list in between
+ *   that act on what the delete takes.
  *
  * NO commit happens in this slice. Unit 7 wires the actual
  * ``POST /sessions/{id}/disturbances`` call when "Run TDS" fires; this
@@ -220,7 +221,8 @@ export interface DisturbanceState {
 
   /**
    * Take the disturbances with these ``ids`` off the list because the element
-   * ``key`` names was deleted, and remember them under it.
+   * ``key`` names was deleted, and remember them under it, in place of what an
+   * earlier delete of that element was remembered to have taken.
    */
   removeWith: (key: string, ids: readonly string[]) => void;
 
@@ -232,9 +234,12 @@ export interface DisturbanceState {
 
   /**
    * Take off again what ``restoreWith`` put back for ``key`` (the delete was
-   * redone). Returns how many went.
+   * redone), and with them the disturbances with the ids in ``also``: the ones
+   * put on the list since the undo that act on what the delete takes. What
+   * goes is what is remembered from then on, so the next undo puts back those
+   * and no other. Returns how many went.
    */
-  removeAgainWith: (key: string) => number;
+  removeAgainWith: (key: string, also?: readonly string[]) => number;
 
   /** Mark the current list as committed (called from Unit 7 on commit success). */
   markCommitted: () => void;
@@ -320,7 +325,15 @@ export const useDisturbanceStore = create<DisturbanceState>((set, get) => ({
     const removed = list
       .map((disturbance, index) => ({ index, disturbance }))
       .filter(({ disturbance }) => wanted.has(disturbance.id));
-    if (removed.length === 0) return;
+    if (removed.length === 0) {
+      // What an earlier delete of the same element took is not this one's to
+      // put back: the list has held the element again since, without them.
+      if (key in get().removedWith) {
+        const { [key]: _earlier, ...others } = get().removedWith;
+        set({ removedWith: others });
+      }
+      return;
+    }
     set({
       disturbances: list.filter((d) => !wanted.has(d.id)),
       removedWith: { ...get().removedWith, [key]: removed },
@@ -345,15 +358,13 @@ export const useDisturbanceStore = create<DisturbanceState>((set, get) => ({
     return restored;
   },
 
-  removeAgainWith: (key) => {
-    const remembered = get().removedWith[key];
-    if (remembered === undefined) return 0;
-    const ids = new Set(remembered.map((r) => r.disturbance.id));
-    const list = get().disturbances;
-    const next = list.filter((d) => !ids.has(d.id));
-    if (next.length === list.length) return 0;
-    set({ disturbances: next, dirty: true, committed: false });
-    return list.length - next.length;
+  removeAgainWith: (key, also = []) => {
+    const remembered = (get().removedWith[key] ?? []).map((r) => r.disturbance.id);
+    const before = get().disturbances.length;
+    // Remembered afresh, as the list stands now: one of them taken off by hand
+    // since the undo is not the next undo's to put back.
+    get().removeWith(key, [...remembered, ...also]);
+    return before - get().disturbances.length;
   },
 
   markCommitted: () => {

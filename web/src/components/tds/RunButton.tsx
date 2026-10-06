@@ -120,6 +120,10 @@ export interface RunButtonProps {
   defaultH?: number;
 }
 
+/** What a reload of a case file costs a session that has edited it, and the way round it. */
+const EDITS_DISCARDED =
+  'The reload reads the case from its file again, so the elements you added, changed or deleted since it was opened are gone. To keep such edits, save the system first.';
+
 function Spinner() {
   return (
     <svg
@@ -159,6 +163,14 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   const activeRunId = useRunsStore((s) => s.activeRunId);
   const activeRun = useRunsStore((s) =>
     activeRunId === null ? null : (s.runs[activeRunId] ?? null),
+  );
+
+  // Whether a reload now loses edits. A case file's reload is the file again,
+  // so what was added, changed or deleted since it was opened goes with it
+  // (the topology names the newest such edit as `undo`). A system built from
+  // scratch has no file and keeps its edits through a reload.
+  const reloadDiscardsEdits = useCaseStore(
+    (s) => s.topology?.undo != null && s.selection?.blank !== true,
   );
 
   const commitDisturbances = useCommitDisturbances();
@@ -279,9 +291,17 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       // which drops the committed System). Do it for the user. Without
       // this, the natural "run PF → add fault → run TDS" flow dead-ends.
       const reloadThenCommit = async () => {
-        toast.info('Reloading case', {
-          description: 'A previous run locked the system — reloading to apply the disturbances.',
-        });
+        const why = 'A previous run locked the system — reloading to apply the disturbances.';
+        if (reloadDiscardsEdits) {
+          // This run is of the case as its file has it, which is not what the
+          // user was looking at: say so, and how to keep the edits next time.
+          toast.warning('Reloading case', {
+            description: `${why} ${EDITS_DISCARDED}`,
+            duration: 10000,
+          });
+        } else {
+          toast.info('Reloading case', { description: why });
+        }
         await reloadCase.mutateAsync(sessionId);
         await commit();
       };
@@ -488,8 +508,13 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     if (!sessionId) return;
     // "Reset" reads as a delete, so say where the run it releases went.
     const kept = activeRun === null ? null : runLabel(activeRun);
+    // As the topology says before the reload answers with a new one.
+    const discarded = reloadDiscardsEdits;
     resetRun.mutate(sessionId, {
       onSuccess: () => {
+        if (discarded) {
+          toast.warning('Edits discarded', { description: EDITS_DISCARDED, duration: 10000 });
+        }
         if (kept === null) return;
         toast.info(`${kept} stays in History`, {
           description: 'Run again, then pin both runs in History to overlay them.',
@@ -552,7 +577,10 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       primaryLabel = 'Reset run';
       primaryVariant = 'outline';
       primaryTitle =
-        "Reload the case so it can be run again. This run's results stay in History, where you can compare them with the next run or delete them. The disturbances stay in the list.";
+        "Reload the case so it can be run again. This run's results stay in History, where you can compare them with the next run or delete them. The disturbances stay in the list." +
+        (reloadDiscardsEdits
+          ? ' The elements you added, changed or deleted since the case was opened do not: the reload reads the case from its file again. Save the system first to keep them.'
+          : '');
       primaryDisabled = resetRun.isPending;
     } else if (
       aborting ||

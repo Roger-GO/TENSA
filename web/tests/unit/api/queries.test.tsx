@@ -34,6 +34,7 @@ import {
   useLoadCase,
   useRestoreSnapshot,
   useRunPflow,
+  useSaveCase,
   useSaveSnapshot,
   useTdsControllers,
   useTopology,
@@ -1345,6 +1346,86 @@ describe('queries hooks', () => {
     const { result } = renderHook(() => useTopologyRefetching(), { wrapper: Wrapper });
     expect(result.current).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  describe('useSaveCase and the edits the topology names to undo and redo', () => {
+    const session = parseSessionId('sess-save');
+    const topology = {
+      state: 'pre-setup',
+      buses: [],
+      lines: [],
+      transformers: [],
+      generators: [],
+      loads: [],
+    };
+    const step = { op: 'add', model: 'Bus', idx: '100' };
+    let topologyReads: number;
+
+    // The substrate's side of a save: over the open file it empties both
+    // histories, under another name it keeps them.
+    function substrate(openFile: string) {
+      let history: { undo: unknown; redo: unknown } = { undo: step, redo: step };
+      topologyReads = 0;
+      fetchSpy.mockImplementation(async (...args: unknown[]) => {
+        const url = String(args[0]);
+        if (url.endsWith('/save')) {
+          const init = args[1] as RequestInit;
+          const body = JSON.parse(String(init.body)) as { filename: string };
+          if (body.filename === openFile) history = { undo: null, redo: null };
+          return jsonResponse({ filename: body.filename, bytes_written: 10, job_id: 'j' }, 201);
+        }
+        if (url.endsWith('/topology')) {
+          topologyReads += 1;
+          return jsonResponse({ ...topology, ...history });
+        }
+        return jsonResponse({});
+      });
+    }
+
+    function open() {
+      useSessionStore.setState({ sessionId: session });
+      useCaseStore.setState({
+        selection: { primaryPath: 'ieee14.xlsx' as WorkspacePath, addfiles: [] },
+      });
+      substrate('ieee14.xlsx');
+      const { Wrapper } = makeWrapper();
+      return renderHook(() => ({ topology: useCurrentTopology(), save: useSaveCase() }), {
+        wrapper: Wrapper,
+      });
+    }
+
+    it('reads the topology again after a save over the open case, which leaves neither', async () => {
+      const { result } = open();
+      await waitFor(() => expect(result.current.topology?.undo).toEqual(step));
+
+      await act(async () => {
+        await result.current.save.mutateAsync({
+          sessionId: session,
+          body: { filename: 'ieee14.xlsx', format: 'xlsx', overwrite: true },
+        });
+      });
+
+      // Without the read, Undo would go on offering an edit the substrate
+      // refuses to take back.
+      await waitFor(() => expect(result.current.topology?.undo).toBeNull());
+      expect(result.current.topology?.redo).toBeNull();
+      expect(topologyReads).toBe(2);
+    });
+
+    it('does not read it again after a save under another name, which keeps both', async () => {
+      const { result } = open();
+      await waitFor(() => expect(result.current.topology?.undo).toEqual(step));
+
+      await act(async () => {
+        await result.current.save.mutateAsync({
+          sessionId: session,
+          body: { filename: 'backup.xlsx', format: 'xlsx', overwrite: false },
+        });
+      });
+
+      expect(result.current.topology?.undo).toEqual(step);
+      expect(topologyReads).toBe(1);
+    });
   });
 
   it('the landing-state list queries stay disabled when selection is null (no 409 noise)', () => {

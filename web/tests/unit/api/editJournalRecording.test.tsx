@@ -10,6 +10,7 @@ import type { UseMutationResult } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import {
   makeQueryClient,
+  queryKeys,
   useAddElement,
   useAddPmu,
   useAddProfile,
@@ -234,6 +235,68 @@ describe('edit journal recording', () => {
     );
     await run(useUndoLastEdit, SESSION);
     expect(list()).toEqual([elsewhere]);
+    useDisturbanceStore.getState().clearDisturbances();
+  });
+
+  it('a redone delete takes the timeline disturbances put on what it takes since the undo', async () => {
+    // The substrate hears of a timeline disturbance only when it is committed,
+    // so it redoes the delete; committed later, these two would name a line
+    // and a bus that are gone.
+    const timeline = useDisturbanceStore.getState();
+    timeline.clearDisturbances();
+    const elsewhere = timeline.addDisturbance({
+      kind: 'fault',
+      bus_idx: '5',
+      tf: 1,
+      tc: 1.1,
+      xf: 0.05,
+      rf: 0,
+    });
+    const onItsLine = timeline.addDisturbance({
+      kind: 'toggle',
+      model: 'Line',
+      dev_idx: 'L1',
+      t: 3,
+    });
+    const onTheBus = timeline.addDisturbance({
+      kind: 'fault',
+      bus_idx: '3',
+      tf: 2,
+      tc: 2.1,
+      xf: 0.05,
+      rf: 0,
+    });
+    const list = () => useDisturbanceStore.getState().disturbances;
+    const step = { op: 'delete', model: 'Bus', idx: 3, params: [], also: 1 };
+    const bus5 = { idx: 5, name: 'B5', kind: 'Bus' };
+    // The topology as the undo left it: the bus and the line on it are back.
+    const client = makeQueryClient();
+    client.setQueryData(queryKeys.topology(SESSION), {
+      ...TOPOLOGY,
+      buses: [{ idx: 3, name: 'B3', kind: 'Bus' }, bus5],
+      lines: [{ idx: 'L1', name: 'L1', kind: 'Line' }],
+      redo: step,
+    });
+    fetchSpy.mockImplementation(async () =>
+      jsonResponse({ ...TOPOLOGY, buses: [bus5], undo: step }),
+    );
+
+    const redo = renderHook(() => useRedoEdit(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    await act(async () => {
+      await redo.result.current.mutateAsync(SESSION);
+    });
+
+    expect(list()).toEqual([elsewhere]);
+    expect(useDisturbanceStore.getState().committed).toBe(false);
+
+    // They went with the element, so an undo brings them back with it.
+    fetchSpy.mockImplementation(async () => jsonResponse({ ...TOPOLOGY, redo: step }));
+    await run(useUndoLastEdit, SESSION);
+    expect(list()).toEqual([elsewhere, onItsLine, onTheBus]);
     useDisturbanceStore.getState().clearDisturbances();
   });
 

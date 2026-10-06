@@ -62,6 +62,34 @@ export function findTopologyEntry(
   return bucket.find((e) => String(e.idx) === selected.idx) ?? null;
 }
 
+/** Every element a topology lists, whatever its bucket. */
+function entriesOf(topology: TopologySummary): TopologyEntry[] {
+  return [
+    ...topology.buses,
+    ...topology.lines,
+    ...topology.transformers,
+    ...topology.generators,
+    ...topology.loads,
+    ...(topology.shunts ?? []),
+    ...(topology.controllers ?? []),
+  ];
+}
+
+/**
+ * The elements `before` lists and `after` does not, each as its ANDES model and
+ * idx: what the edit between the two took off the system.
+ */
+export function elementsGone(
+  before: TopologySummary,
+  after: TopologySummary,
+): { model: string; idx: string | number }[] {
+  const key = (entry: TopologyEntry) => `${entry.kind} ${String(entry.idx)}`;
+  const left = new Set(entriesOf(after).map(key));
+  return entriesOf(before)
+    .filter((entry) => !left.has(key(entry)))
+    .map((entry) => ({ model: entry.kind, idx: entry.idx }));
+}
+
 /** ANDES SynGen (rotor) model classes: the dynamic half of a machine. */
 export const DYNAMIC_GENERATOR_KINDS: ReadonlySet<string> = new Set(['GENROU', 'GENCLS']);
 

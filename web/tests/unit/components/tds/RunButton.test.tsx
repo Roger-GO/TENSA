@@ -126,10 +126,16 @@ function seedReady(
     withDisturbances?: boolean;
     topologyState?: 'pre-setup' | 'committed';
     events?: CaseEvent[];
+    /** The session has edited its elements: the topology names the newest edit. */
+    edited?: boolean;
+    /** The system was built from scratch and has no case file. */
+    blank?: boolean;
   } = {},
 ) {
   useCaseStore.setState({
-    selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
+    selection: opts.blank
+      ? { primaryPath: null, addfiles: [], blank: true }
+      : { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
     topology: {
       state: opts.topologyState ?? 'pre-setup',
       buses: [],
@@ -139,6 +145,7 @@ function seedReady(
       loads: [],
       controllers: [DYNAMIC_CONTROLLER],
       events: opts.events ?? [],
+      undo: opts.edited ? { op: 'delete', model: 'Line', idx: 'Line_3', also: 0 } : null,
     },
     layoutSidecar: null,
     selectedElement: null,
@@ -1312,6 +1319,48 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     expect(useCaseStore.getState().topology?.state).toBe('pre-setup');
   });
 
+  it('says that the reload discards the element edits of a case opened from a file', async () => {
+    seedReady({ withDisturbances: true, topologyState: 'committed', edited: true });
+    const calls: string[] = [];
+    fakeCommittedSubstrate(fetchSpy, calls);
+    serveShortRun(server, 'run-after-edit');
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-after-edit']?.state).toBe('done');
+    });
+    // The run is of the case as its file has it, without the line the user deleted.
+    expect(toastWarningMock).toHaveBeenCalledWith(
+      'Reloading case',
+      expect.objectContaining({
+        description: expect.stringMatching(
+          /apply the disturbances.*added, changed or deleted.*are gone.*save the system first/i,
+        ),
+      }),
+    );
+    expect(toastInfoMock).not.toHaveBeenCalledWith('Reloading case', expect.anything());
+  });
+
+  it('does not say so for a system built from scratch, whose reload keeps its edits', async () => {
+    seedReady({ withDisturbances: true, topologyState: 'committed', edited: true, blank: true });
+    const calls: string[] = [];
+    fakeCommittedSubstrate(fetchSpy, calls);
+    serveShortRun(server, 'run-blank');
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-blank']?.state).toBe('done');
+    });
+    expect(toastInfoMock).toHaveBeenCalledWith('Reloading case', expect.anything());
+    expect(toastWarningMock).not.toHaveBeenCalled();
+  });
+
   it('a pre-setup topology commits straight away, with no reload', async () => {
     seedReady({ withDisturbances: true, topologyState: 'pre-setup' });
     const calls: string[] = [];
@@ -2174,19 +2223,8 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
     expect(button).toBeDisabled();
   });
 
-  it('reset: click Reset run after done → POST /reload + releases the run and keeps its results', async () => {
-    seedReady();
-    useDisturbanceStore.setState({
-      disturbances: [
-        {
-          id: 'd-keep',
-          spec: { kind: 'fault', bus_idx: '4', tf: 1, tc: 1.1, xf: 0.0001, rf: 0 },
-        },
-      ],
-      dirty: false,
-      committed: true,
-    });
-    // Pre-seed a completed run to put the button into "Reset run" mode.
+  /** A completed run, which puts the button into "Reset run" mode. */
+  function seedDoneRun() {
     useRunsStore.setState({
       runs: {
         'run-done': {
@@ -2207,6 +2245,21 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
       activeRunId: 'run-done',
       memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
     });
+  }
+
+  it('reset: click Reset run after done → POST /reload + releases the run and keeps its results', async () => {
+    seedReady();
+    useDisturbanceStore.setState({
+      disturbances: [
+        {
+          id: 'd-keep',
+          spec: { kind: 'fault', bus_idx: '4', tf: 1, tc: 1.1, xf: 0.0001, rf: 0 },
+        },
+      ],
+      dirty: false,
+      committed: true,
+    });
+    seedDoneRun();
 
     let reloadPosted = false;
     fetchSpy.mockImplementation((input) => {
@@ -2239,6 +2292,10 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
       'title',
       expect.stringMatching(/results stay in history/i),
     );
+    expect(screen.getByTestId('run-tds-button')).not.toHaveAttribute(
+      'title',
+      expect.stringMatching(/added, changed or deleted/i),
+    );
     await userEvent.click(screen.getByTestId('run-tds-button'));
 
     await waitFor(() => expect(reloadPosted).toBe(true));
@@ -2262,5 +2319,63 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
     // Disturbance timeline preserved; only the committed flag flipped.
     expect(useDisturbanceStore.getState().disturbances).toHaveLength(1);
     expect(useDisturbanceStore.getState().committed).toBe(false);
+    // Nothing was edited, so there was nothing to warn about.
+    expect(toastWarningMock).not.toHaveBeenCalled();
+  });
+
+  it('reset: says before and after that the element edits of a case file go with it', async () => {
+    seedReady({ topologyState: 'committed', edited: true });
+    seedDoneRun();
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      return Promise.resolve(
+        jsonResponse(url.includes('/reload') ? topologyBody('pre-setup') : {}),
+      );
+    });
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    expect(screen.getByTestId('run-tds-button')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/added, changed or deleted.*do not.*save the system first/i),
+    );
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+
+    await waitFor(() => {
+      expect(toastWarningMock).toHaveBeenCalledWith(
+        'Edits discarded',
+        expect.objectContaining({
+          description: expect.stringMatching(/added, changed or deleted.*are gone/i),
+        }),
+      );
+    });
+    // The run's own note is still left.
+    expect(toastInfoMock).toHaveBeenCalledWith('run-done stays in History', expect.anything());
+  });
+
+  it('reset: a system built from scratch keeps its edits, and nothing says otherwise', async () => {
+    seedReady({ topologyState: 'committed', edited: true, blank: true });
+    seedDoneRun();
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      return Promise.resolve(
+        jsonResponse(url.includes('/reload') ? topologyBody('pre-setup') : {}),
+      );
+    });
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    expect(screen.getByTestId('run-tds-button')).not.toHaveAttribute(
+      'title',
+      expect.stringMatching(/added, changed or deleted/i),
+    );
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+
+    await waitFor(() => {
+      expect(toastInfoMock).toHaveBeenCalledWith('run-done stays in History', expect.anything());
+    });
+    expect(toastWarningMock).not.toHaveBeenCalled();
   });
 });

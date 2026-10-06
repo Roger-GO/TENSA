@@ -98,7 +98,7 @@ import type { JobKind, JobRecord } from '@/store/jobs';
 import { toast } from '@/lib/toast';
 import { announceViolations } from '@/lib/announceViolations';
 import { elementNamesOf } from '@/lib/elementNames';
-import { findTopologyEntry } from '@/lib/topology';
+import { elementsGone, findTopologyEntry } from '@/lib/topology';
 import { stemOf } from '@/lib/paths';
 import { caseSettingsFromRun, pflowRequestBody } from '@/lib/pflowOptions';
 import { cpfRequestBody, type CpfRunOptions } from '@/lib/cpfOptions';
@@ -1284,7 +1284,9 @@ export const SAVE_CASE_MUTATION_KEY = ['save-case'] as const;
  * read-only on this substrate. On success the workspace lister query is
  * invalidated so the new file shows up immediately in the picker. A write over
  * the open case's own file also moves the edit journal's base to that file, as
- * the substrate moves its own (`Wrapper.save_case`).
+ * the substrate moves its own (`Wrapper.save_case`): the substrate then has no
+ * edit left to undo or redo, so the topology is read again for what it says of
+ * the two.
  */
 export function useSaveCase(): UseMutationResult<SaveCaseResponse, Error, SaveCaseVars> {
   const queryClient = useQueryClient();
@@ -1297,10 +1299,13 @@ export function useSaveCase(): UseMutationResult<SaveCaseResponse, Error, SaveCa
       );
     },
     onMutate: () => ({ jobId: registerJob('case-save') }),
-    onSuccess: (data, { body }, ctx) => {
+    onSuccess: (data, { sessionId, body }, ctx) => {
       const journal = useEditJournalStore.getState();
       if (body.filename === useCaseStore.getState().selection?.primaryPath) {
         journal.markSavedInPlace();
+        // Until this read is back the cached `undo` and `redo` name edits the
+        // substrate no longer holds, and Undo and Redo wait for it.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
       } else {
         journal.markSaved();
       }
@@ -1350,7 +1355,10 @@ export function useUndoLastEdit(): UseMutationResult<TopologySummary, Error, Ses
 /**
  * `POST /sessions/{id}/redo-edit`. Puts back the edit the last undo took back.
  * The returned topology's `undo` names it. A delete that is redone takes the
- * timeline's disturbances on the element off again.
+ * timeline's disturbances on the element off again, and with them the ones put
+ * on the timeline since the undo that act on anything the redo took: the
+ * substrate hears of a timeline disturbance only when it is committed, and by
+ * then it would name a device that is gone.
  */
 export function useRedoEdit(): UseMutationResult<TopologySummary, Error, SessionId> {
   const queryClient = useQueryClient();
@@ -1364,11 +1372,22 @@ export function useRedoEdit(): UseMutationResult<TopologySummary, Error, Session
     onMutate: () => ({ jobId: registerJob('element-redo') }),
     onSuccess: (data, sessionId, ctx) => {
       useEditJournalStore.getState().record({ op: 'redo' });
+      // Read before it is replaced: what the topology listed and no longer
+      // lists is what a redone delete took, the cascade included.
+      const before = queryClient.getQueryData<TopologySummary>(queryKeys.topology(sessionId));
       queryClient.setQueryData(queryKeys.topology(sessionId), data);
       useCaseStore.getState().setTopology(data);
       const redone = data.undo;
       if (redone?.op === 'delete' && redone.idx != null) {
-        useDisturbanceStore.getState().removeAgainWith(deletedElementKey(redone.model, redone.idx));
+        const timeline = useDisturbanceStore.getState();
+        const acting = disturbancesActingOn(timeline.disturbances, [
+          { model: redone.model, idx: redone.idx },
+          ...(before === undefined ? [] : elementsGone(before, data)),
+        ]);
+        timeline.removeAgainWith(
+          deletedElementKey(redone.model, redone.idx),
+          acting.map((d) => d.id),
+        );
       }
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
     },

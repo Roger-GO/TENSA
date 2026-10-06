@@ -295,6 +295,24 @@ describe('disturbances and a deleted element', () => {
     expect(store().removedWith).toEqual({});
   });
 
+  it('a later delete of the same element that takes nothing forgets what the first took', () => {
+    const a = store().addDisturbance(fault('3'));
+    const key = deletedElementKey('Bus', 3);
+    store().removeWith(key, [a.id]);
+    store().restoreWith(key);
+    // The element is back, and the user takes the fault off the list by hand.
+    store().removeDisturbance(a.id);
+    store().markCommitted();
+
+    store().removeWith(key, []);
+
+    // An undo of the second delete has nothing of the first to bring back.
+    expect(store().removedWith).toEqual({});
+    expect(store().restoreWith(key)).toBe(0);
+    expect(store().disturbances).toEqual([]);
+    expect(store().committed).toBe(true);
+  });
+
   it('restoreWith puts them back where they stood, and removeAgainWith takes them off again', () => {
     const a = store().addDisturbance(fault('3'));
     const b = store().addDisturbance(fault('5'));
@@ -313,6 +331,53 @@ describe('disturbances and a deleted element', () => {
     expect(store().removeAgainWith(key)).toBe(2);
     expect(store().disturbances).toEqual([b, d]);
     expect(store().removeAgainWith(key)).toBe(0);
+  });
+
+  it('removeAgainWith also takes the ones named to it, and remembers them for the next undo', () => {
+    const a = store().addDisturbance(fault('3'));
+    const b = store().addDisturbance(fault('5'));
+    const key = deletedElementKey('Bus', 3);
+    store().removeWith(key, [a.id]);
+    store().restoreWith(key);
+    // Put on the timeline after the undo, on the element that is back.
+    const late = store().addDisturbance(trip('Bus', '3'));
+    store().markCommitted();
+
+    expect(store().removeAgainWith(key, [late.id])).toBe(2);
+
+    expect(store().disturbances).toEqual([b]);
+    expect(store().committed).toBe(false);
+    expect(store().removedWith[key]?.map((r) => r.disturbance.id)).toEqual([a.id, late.id]);
+    // The undo after it brings both back, each where it stood.
+    expect(store().restoreWith(key)).toBe(2);
+    expect(store().disturbances).toEqual([a, b, late]);
+  });
+
+  it('removeAgainWith forgets one taken off by hand while the element was back', () => {
+    const a = store().addDisturbance(fault('3'));
+    const b = store().addDisturbance(trip('Bus', '3'));
+    const key = deletedElementKey('Bus', 3);
+    store().removeWith(key, [a.id, b.id]);
+    store().restoreWith(key);
+    store().removeDisturbance(a.id);
+
+    expect(store().removeAgainWith(key)).toBe(1);
+
+    // The undo after the redo brings back what the redo took, not the first delete's.
+    expect(store().restoreWith(key)).toBe(1);
+    expect(store().disturbances).toEqual([b]);
+  });
+
+  it('removeAgainWith remembers the ones named to it for an element nothing went with before', () => {
+    const b = store().addDisturbance(fault('5'));
+    const key = deletedElementKey('Bus', 3);
+    const late = store().addDisturbance(fault('3'));
+
+    expect(store().removeAgainWith(key, [late.id, 'not-on-the-list'])).toBe(1);
+
+    expect(store().disturbances).toEqual([b]);
+    expect(store().restoreWith(key)).toBe(1);
+    expect(store().disturbances).toEqual([b, late]);
   });
 
   it('an element nothing was removed with restores nothing', () => {
