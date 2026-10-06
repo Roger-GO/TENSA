@@ -288,6 +288,23 @@ def test_every_e2e_spec_ends_the_sessions_its_pages_open() -> None:
         )
 
 
+def test_the_e2e_job_says_which_closed_page_keeps_its_session() -> None:
+    """A tab that a person closes gives its session back as it goes
+    (``useSessionRelease.ts``); only a page the test runner closes leaves one behind,
+    which is why the fixtures end them. The comment on the job has to say that, and
+    not that a closed tab keeps its session, which was true before the UI released it."""
+    release = _read_required(REPO_ROOT / "web" / "src" / "api" / "useSessionRelease.ts")
+    assert "pagehide" in release and "keepalive" in release
+    text = _read_required(_WORKFLOWS / "web.yml")
+    comments = " ".join(
+        line.strip().lstrip("#").strip()
+        for line in text.splitlines()
+        if line.strip().startswith("#")
+    )
+    assert "a closed tab does not end it" not in comments
+    assert "a page the test runner closes does not" in comments
+
+
 def test_the_test_workflows_can_be_called_from_the_release_workflow() -> None:
     for name in ("server.yml", "web.yml"):
         assert "workflow_call" in _triggers(_load(_WORKFLOWS / name)), name

@@ -132,9 +132,10 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       # A fresh workspace, which the server seeds with the example cases the
-      # tests open. Every page load opens a session and a closed tab does not
-      # end it. Each test ends the ones its pages opened (tests/e2e/fixtures.ts);
-      # the cap is raised above the default of 4 for a test that holds several.
+      # tests open. Every page load opens a session. A tab that a person closes
+      # ends its session as it goes, but a page the test runner closes does not,
+      # so each test ends the ones its pages opened (tests/e2e/fixtures.ts); the
+      # cap is raised above the default of 4 for a test that holds several.
       - name: Start the substrate
         run: |
           workspace="$RUNNER_TEMP/tensa-e2e-workspace"
