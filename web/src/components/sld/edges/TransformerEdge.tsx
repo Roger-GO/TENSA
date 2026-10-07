@@ -13,6 +13,7 @@ import {
   type Point,
 } from '../connections';
 import { getLineOverlayState, lineStrokeStyle } from '../overlay';
+import { EdgePickBox } from './EdgePickBox';
 
 /**
  * Transformer edge: a branch between two buses with the IEC 60617 2W or
@@ -79,6 +80,8 @@ export const TransformerEdge = memo(function TransformerEdge({
   return (
     <>
       <BaseEdge path={path} markerEnd={markerEnd} style={{ stroke, strokeWidth }} />
+      {/* Off the icon, which is drawn over the line and takes its own clicks. */}
+      <EdgePickBox id={id} points={points} fromBar avoid={mid} />
       <EdgeLabelRenderer>
         <div
           data-testid={`transformer-edge-icon-${id}`}

@@ -2,6 +2,7 @@ import { useCaseStore } from '@/store/case';
 import { cn } from '@/lib/cn';
 import { ElementFormFields } from './ElementFormFields';
 import { GeneratingUnitSection } from './GeneratingUnitSection';
+import { RouteSection } from './RouteSection';
 
 /**
  * PropertiesAccordion (v3 Unit 8).
@@ -31,6 +32,10 @@ export function PropertiesAccordion({ className }: PropertiesAccordionProps) {
               its machine and their controllers, each one press away. */}
           {selectedElement.kind === 'generator' || selectedElement.kind === 'controller' ? (
             <GeneratingUnitSection />
+          ) : null}
+          {/* How the line is drawn on the diagram, and its route moved by hand or reset. */}
+          {selectedElement.kind === 'line' || selectedElement.kind === 'transformer' ? (
+            <RouteSection />
           ) : null}
         </>
       ) : (

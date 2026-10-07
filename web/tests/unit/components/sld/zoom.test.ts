@@ -15,6 +15,7 @@ import {
   fitPadding,
   isTooSmallToRead,
   locateZoom,
+  withinPane,
 } from '@/components/sld/zoom';
 
 describe('isTooSmallToRead', () => {
@@ -116,5 +117,58 @@ describe('fitPadding', () => {
     expect(fitPadding({ width: 0, height: 0 }, { width: 800, height: 400 }).left).toMatch(
       /^\d+px$/,
     );
+  });
+});
+
+describe('withinPane', () => {
+  const pane = { left: 300, right: 1300, top: 100, bottom: 700 };
+
+  it('takes a line that shows whole, with room to spare, as in view', () => {
+    expect(
+      withinPane(
+        [
+          { x: 400, y: 200 },
+          { x: 400, y: 500 },
+          { x: 900, y: 500 },
+        ],
+        pane,
+      ),
+    ).toBe(true);
+  });
+
+  it('does not take one that runs out of the pane, or up to its edge', () => {
+    expect(
+      withinPane(
+        [
+          { x: 400, y: 200 },
+          { x: 1400, y: 200 },
+        ],
+        pane,
+      ),
+    ).toBe(false);
+    expect(
+      withinPane(
+        [
+          { x: 400, y: 200 },
+          { x: 400, y: 695 },
+        ],
+        pane,
+      ),
+    ).toBe(false);
+    // With no margin asked for, the edge itself is in view.
+    expect(
+      withinPane(
+        [
+          { x: 400, y: 200 },
+          { x: 400, y: 695 },
+        ],
+        pane,
+        0,
+      ),
+    ).toBe(true);
+  });
+
+  it('takes nothing as in view of a pane that has no size yet', () => {
+    expect(withinPane([{ x: 0, y: 0 }], { left: 0, right: 0, top: 0, bottom: 0 })).toBe(false);
   });
 });

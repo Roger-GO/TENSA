@@ -131,6 +131,26 @@ describe('the handles', () => {
     expect(screen.getByTestId('sld-route-run-0').style.cursor).toBe('ew-resize');
   });
 
+  it('give every run a box of its own, with the run through the middle of it', () => {
+    // A line that is level or upright has a box with no width, which a tool
+    // that clicks the middle of an element takes for one that is not shown.
+    draw();
+    for (const [k, run] of screen.getAllByTestId(/^sld-route-run-/).entries()) {
+      const [a, b] = [STEPPED[k]!, STEPPED[k + 1]!];
+      expect(run.tagName.toLowerCase()).toBe('rect');
+      const [x, y, width, height] = ['x', 'y', 'width', 'height'].map((name) =>
+        Number(run.getAttribute(name)),
+      );
+      expect(width).toBeGreaterThan(Math.hypot(b[0] - a[0], b[1] - a[1]));
+      expect(height).toBeGreaterThan(0);
+      // About the middle of the run, and turned to lie along it.
+      expect([x! + width! / 2, y! + height! / 2]).toEqual([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+      expect(run.getAttribute('transform')).toMatch(
+        new RegExp(`^rotate\\((0|90|-90|180) ${(a[0] + b[0]) / 2} ${(a[1] + b[1]) / 2}\\)$`),
+      );
+    }
+  });
+
   it('leave a run too short for it without a plus, and stay out of a picture of the diagram', () => {
     draw({
       points: [

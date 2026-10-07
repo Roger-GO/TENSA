@@ -159,7 +159,12 @@ import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { useLayoutHistoryStore } from '@/store/layoutHistory';
 import { usePflowStore } from '@/store/pflow';
 import { useSessionStore } from '@/store/session';
-import { __requestRouteEdit, __requestSldCommand, useSldStore } from '@/store/sld';
+import {
+  __requestRouteEdit,
+  __requestRouteReset,
+  __requestSldCommand,
+  useSldStore,
+} from '@/store/sld';
 import type { SldCommand } from '@/store/sld';
 import { toast } from '@/lib/toast';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
@@ -409,6 +414,12 @@ describe('picking a line', () => {
 
     pick('line-L14');
     press('sld-route-run-0', 'Escape');
+    gone();
+
+    // With the focus anywhere else on the diagram as well: a line that was
+    // clicked has it on the line itself, not on one of its handles.
+    pick('line-L14');
+    fireEvent.keyDown(screen.getByTestId('sld-canvas-surface'), { key: 'Escape' });
     gone();
 
     pick('line-L14');
@@ -771,6 +782,24 @@ describe('a route drawn by hand', () => {
     post('undo-layout');
     await waitFor(() => expect(byHand('line-L14')).toBe(true));
     expect(routeOf('line-L14')).toEqual(drawnByHand);
+  });
+
+  it('is named to the Inspector of its line, and reset when the Inspector asks', async () => {
+    open('square.xlsx');
+    await draw();
+    const opened = routeOf('line-L14');
+    expect(useSldStore.getState().manualBranchIdxes).toEqual([]);
+    pick('line-L14');
+    slideDown('line-L14');
+    await waitFor(() => expect(useSldStore.getState().manualBranchIdxes).toEqual(['L14']));
+
+    // Reset route in the Inspector: the same as on the bar of the line.
+    act(() => __requestRouteReset('L14'));
+    await waitFor(() => expect(byHand('line-L14')).toBe(false));
+    expect(routeOf('line-L14')).toEqual(opened);
+    expect(useSldStore.getState().manualBranchIdxes).toEqual([]);
+    post('undo-layout');
+    await waitFor(() => expect(byHand('line-L14')).toBe(true));
   });
 
   it('is reset with all the others by Reset manual routes, which says when there is none', async () => {

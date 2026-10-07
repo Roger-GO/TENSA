@@ -138,7 +138,7 @@ import {
   type NodeSize,
   type Point,
 } from './connections';
-import { FULL_ZOOM, fitPadding, locateZoom } from './zoom';
+import { FULL_ZOOM, fitPadding, isTooSmallToRead, locateZoom, withinPane } from './zoom';
 import { cn } from '@/lib/cn';
 
 const NODE_TYPES: NodeTypes = {
@@ -1179,6 +1179,16 @@ function SldCanvasInner({
     setManualRouteCount(manualRoutes);
   }, [manualRoutes, setManualRouteCount]);
   useEffect(() => () => setManualRouteCount(0), [setManualRouteCount]);
+  // The lines and transformers among them, which the Inspector of one reads.
+  const setManualBranchIdxes = useSldStore((s) => s.setManualBranchIdxes);
+  useEffect(() => {
+    setManualBranchIdxes(
+      edges
+        .filter((edge) => edge.type !== 'stub' && edge.data?.bendManual === true)
+        .map((edge) => String((edge.data as { idx?: unknown }).idx)),
+    );
+  }, [edges, setManualBranchIdxes]);
+  useEffect(() => () => setManualBranchIdxes([]), [setManualBranchIdxes]);
 
   // A write still waiting out its delay when the canvas goes away (another
   // view, another case) is sent then, not dropped: the drag stays on screen
@@ -1265,8 +1275,14 @@ function SldCanvasInner({
   const focusRouteRef = useRef(false);
   // Enter or Space on a line that has the keyboard focus picks it, as a
   // click on it does. React Flow only marks it selected for those keys.
+  // Escape lets go of the line that is picked, wherever on the diagram the
+  // focus is: a line that was clicked has it on the line, not on a handle.
   const onSurfaceKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === 'Escape') {
+        setRouteEditId(null);
+        return;
+      }
       if (e.key !== 'Enter' && e.key !== ' ') return;
       if (!(e.target instanceof Element) || !e.target.classList.contains('react-flow__edge')) {
         return;
@@ -1957,9 +1973,11 @@ function SldCanvasInner({
     },
     [locked],
   );
-  // A line picked away from the diagram (its row in the Lines table): its
-  // handles show as after a click on it, and the view goes to it, at a size
-  // the handles can be used at. A locked diagram picks none, and says
+  // A line picked away from the diagram (its row in the Lines table, its
+  // Inspector): its handles show as after a click on it, and the view goes
+  // to it, at a size the handles can be used at, unless the whole line
+  // shows at such a size already: a row that was clicked to read a value
+  // leaves the view where it is. A locked diagram picks none, and says
   // nothing: the row was picked to look at the line.
   const pickRouteOf = useCallback(
     (branchIdx: string) => {
@@ -1972,12 +1990,39 @@ function SldCanvasInner({
       setRouteEditId(edge.id);
       const points = pictureRef.current.connections.routes.get(edge.id)?.points;
       if (points === undefined || points.length < 2) return;
+      const zoom = rf.getZoom();
+      const pane = canvasRef.current?.querySelector('.react-flow')?.getBoundingClientRect();
+      const shown =
+        pane !== undefined &&
+        !isTooSmallToRead(zoom) &&
+        withinPane(
+          points.map(([x, y]) => rf.flowToScreenPosition({ x, y })),
+          pane,
+        );
+      if (shown) return;
       const middle = routeMidpoint(points);
-      void rf.setCenter(middle.x, middle.y, { zoom: locateZoom(rf.getZoom()), duration: 250 });
+      void rf.setCenter(middle.x, middle.y, { zoom: locateZoom(zoom), duration: 250 });
     },
     [locked, tidying, rf],
   );
-  useEffect(() => subscribeRouteEdit(pickRouteOf), [pickRouteOf]);
+  // The same line given back to the automatic routing, as Reset route on its bar does.
+  const resetRouteOf = useCallback(
+    (branchIdx: string) => {
+      const edge = baseGraphRef.current?.edges.find(
+        (held) =>
+          held.type !== 'stub' && String((held.data as { idx?: unknown }).idx) === branchIdx,
+      );
+      if (edge !== undefined) resetRoutes(edge.id);
+    },
+    [resetRoutes],
+  );
+  useEffect(
+    () =>
+      subscribeRouteEdit((branchIdx, what) =>
+        what === 'reset' ? resetRouteOf(branchIdx) : pickRouteOf(branchIdx),
+      ),
+    [pickRouteOf, resetRouteOf],
+  );
   // The line that was picked with the keys takes the focus on its longest
   // run, once its handles are drawn.
   useEffect(() => {

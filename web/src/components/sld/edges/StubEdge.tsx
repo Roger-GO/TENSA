@@ -3,6 +3,7 @@ import { BaseEdge } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
 import { routePath, type ConnectorRoute, type Point } from '../connections';
 import { lineStrokeStyle } from '../overlay';
+import { EdgePickBox } from './EdgePickBox';
 
 /**
  * Stub edge: the connector of a generator, load or shunt to its bus.
@@ -20,7 +21,9 @@ import { lineStrokeStyle } from '../overlay';
  * a crowded bus that shows which one is the device's, and during a drag
  * that it follows the device and where on the bar it lands.
  *
- * No flow overlay, no arrow, no label.
+ * No flow overlay, no arrow, no label. Its box is centred on a point of
+ * the connector (`EdgePickBox`), so a click on the middle of the element is
+ * a click on the connector.
  */
 interface StubData {
   kind?: string;
@@ -33,6 +36,7 @@ const STROKE = lineStrokeStyle(null);
 const ACTIVE_STROKE = { stroke: 'var(--color-primary)', strokeWidth: 2.5 };
 
 export const StubEdge = memo(function StubEdge({
+  id,
   sourceX,
   sourceY,
   targetX,
@@ -47,5 +51,10 @@ export const StubEdge = memo(function StubEdge({
     [sourceX, sourceY],
     [targetX, targetY],
   ];
-  return <BaseEdge path={routePath(points)} style={stub?.active ? ACTIVE_STROKE : STROKE} />;
+  return (
+    <>
+      <BaseEdge path={routePath(points)} style={stub?.active ? ACTIVE_STROKE : STROKE} />
+      <EdgePickBox id={id} points={points} fromBar={false} />
+    </>
+  );
 });

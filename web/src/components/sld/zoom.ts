@@ -53,6 +53,27 @@ export function useTooSmallZoomPercent(): number | null {
   });
 }
 
+/**
+ * Whether every one of `points`, as places on screen, is inside `pane` with
+ * `margin` to spare: what is asked of a line that was picked away from the
+ * diagram before the view is moved to it. One that shows whole already is
+ * left where the user has it.
+ */
+export function withinPane(
+  points: readonly { x: number; y: number }[],
+  pane: { left: number; right: number; top: number; bottom: number },
+  margin = FIT_MARGIN,
+): boolean {
+  if (pane.right - pane.left <= 2 * margin || pane.bottom - pane.top <= 2 * margin) return false;
+  return points.every(
+    ({ x, y }) =>
+      x >= pane.left + margin &&
+      x <= pane.right - margin &&
+      y >= pane.top + margin &&
+      y <= pane.bottom - margin,
+  );
+}
+
 /** The room a fitted diagram keeps to the edge of its pane, in pixels on screen. */
 const FIT_MARGIN = 24;
 

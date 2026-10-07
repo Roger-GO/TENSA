@@ -11,6 +11,7 @@ import {
   type Point,
 } from '../connections';
 import { getLineOverlayState, lineStrokeStyle } from '../overlay';
+import { EdgePickBox } from './EdgePickBox';
 import { LineFlowArrow } from './LineFlowArrow';
 import { LineFlowLabel } from './LineFlowLabel';
 import { maxAbsFlowMw } from './lineFlowArrowMath';
@@ -36,6 +37,10 @@ import { maxAbsFlowMw } from './lineFlowArrowMath';
  * or another line). The arrow lies along the run it sits on and points the
  * way the active power flows; the stroke turns amber or red, and heavier, as
  * the line nears or passes its rating.
+ *
+ * The box of the edge is centred on a point of the line (`EdgePickBox`), so
+ * a click on the middle of the element is a click on the line, however the
+ * line turns.
  */
 interface EdgeData {
   idx?: string;
@@ -87,6 +92,7 @@ export const TopologyEdge = memo(function TopologyEdge({
   return (
     <>
       <BaseEdge path={routePath(points)} markerEnd={markerEnd} style={{ stroke, strokeWidth }} />
+      <EdgePickBox id={id} points={points} fromBar />
       {overlay && overlay.has_data && overlay.direction !== 'neutral' ? (
         <LineFlowArrow
           x={mid.x}

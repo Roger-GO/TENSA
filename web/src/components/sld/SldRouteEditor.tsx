@@ -16,7 +16,8 @@
  *   (beside the run and not on it, so that the run can be grabbed anywhere);
  * - the runs themselves, which are dragged to slide them sideways and
  *   double-clicked to put a bend in where they are, so that either half
- *   can then be slid on its own.
+ *   can then be slid on its own. Each is a band along its run, so that it
+ *   has a box of its own and the middle of that box is on the run.
  *
  * Every one of them takes the keyboard focus (Tab goes from one to the
  * next) and has a name that says what it is and what the keys do: the
@@ -195,6 +196,24 @@ function arrowMove(key: string, step: number): [number, number] | null {
     default:
       return null;
   }
+}
+
+/**
+ * The band of a run from `a` to `b`, `width` across with round ends: a
+ * rectangle about the middle of the run, turned to lie along it.
+ */
+function runBand(a: Point, b: Point, width: number) {
+  const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const [mx, my] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const turn = (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
+  return {
+    x: mx - (length + width) / 2,
+    y: my - width / 2,
+    width: length + width,
+    height: width,
+    rx: width / 2,
+    transform: `rotate(${turn} ${mx} ${my})`,
+  };
 }
 
 function capital(text: string): string {
@@ -638,7 +657,11 @@ export function SldRouteEditor({
           />
           {/* The runs: dragged to slide, double-clicked for a bend. */}
           {runs.map(({ a, b, kind }, k) => (
-            <line
+            // A band along the run, as wide as the pointer needs: a shape with
+            // a box of its own, which a line that is level or upright has not,
+            // so that what clicks the middle of an element (an assistive tool,
+            // a test) finds the run and clicks it.
+            <rect
               key={`run-${k}`}
               ref={holdRef({ kind: 'run', index: k })}
               data-testid={`sld-route-run-${k}`}
@@ -648,17 +671,13 @@ export function SldRouteEditor({
               role="button"
               tabIndex={0}
               aria-label={`Run ${k + 1} of ${total} of ${name}, ${KIND_NAME[kind]}: drag it to slide it, or the ${RUN_KEYS[kind]}. Enter adds a bend in its middle.`}
-              x1={a[0]}
-              y1={a[1]}
-              x2={b[0]}
-              y2={b[1]}
-              stroke={pickedRun === k && !dragging ? 'var(--color-primary)' : 'transparent'}
-              strokeOpacity={0.3}
-              strokeWidth={HIT_WIDTH_PX * px}
-              strokeLinecap="round"
+              {...runBand(a, b, HIT_WIDTH_PX * px)}
+              fill={pickedRun === k && !dragging ? 'var(--color-primary)' : 'transparent'}
+              fillOpacity={0.3}
+              strokeWidth={1.5 * px}
               className="nodrag nopan focus:outline-none focus-visible:[stroke:var(--color-ring)]"
               style={{
-                pointerEvents: 'stroke',
+                pointerEvents: 'all',
                 cursor: kind === 'level' ? 'ns-resize' : kind === 'upright' ? 'ew-resize' : 'move',
               }}
               onPointerDown={(event) => begin(event, { kind: 'run', index: k })}
@@ -676,7 +695,7 @@ export function SldRouteEditor({
               <title>
                 {`Drag to slide this run ${kind === 'level' ? 'up or down' : kind === 'upright' ? 'left or right' : ''}. Double-click to add a bend here.`}
               </title>
-            </line>
+            </rect>
           ))}
           {/* A new bend: beside the middle of each run, so that the run
               itself is free to be grabbed anywhere and slid. Dragged, it

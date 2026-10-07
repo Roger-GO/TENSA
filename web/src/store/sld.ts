@@ -86,6 +86,13 @@ export interface SldState {
    */
   manualRouteCount: number;
   setManualRouteCount: (count: number) => void;
+  /**
+   * The lines and transformers among them, by idx: what the Inspector reads
+   * to say whether the route of the one it shows is the user's. Written by
+   * the mounted canvas, and empty with none mounted.
+   */
+  manualBranchIdxes: string[];
+  setManualBranchIdxes: (idxes: string[]) => void;
 }
 
 export const useSldStore = create<SldState>((set) => ({
@@ -111,6 +118,14 @@ export const useSldStore = create<SldState>((set) => ({
   setDiagramLocked: (locked: boolean) => set({ diagramLocked: locked }),
   manualRouteCount: 0,
   setManualRouteCount: (count: number) => set({ manualRouteCount: count }),
+  manualBranchIdxes: [],
+  setManualBranchIdxes: (idxes: string[]) =>
+    set((s) =>
+      s.manualBranchIdxes.length === idxes.length &&
+      s.manualBranchIdxes.every((idx, i) => idx === idxes[i])
+        ? s
+        : { manualBranchIdxes: idxes },
+    ),
 }));
 
 // The nodes picked together are those of one diagram. A bus goes by its idx,
@@ -252,20 +267,29 @@ export function subscribeUnitExpanded(listener: UnitListener): () => void {
 // on it. A line is a pixel or two wide, which not every pointer can be aimed
 // at, and a row of the Lines table names the same line: picking the row posts
 // the intent here, and the canvas shows the handles of that line and brings it
-// into view, as a click on the line does.
+// into view, as a click on the line does. The Inspector of a line asks the
+// same way, and asks for the route to be given back to the automatic routing.
 // ---------------------------------------------------------------------------
 
-type RouteListener = (branchIdx: string) => void;
+/** What is asked of the route of a line: its handles, or the automatic routing again. */
+export type RouteRequest = 'edit' | 'reset';
+
+type RouteListener = (branchIdx: string, what: RouteRequest) => void;
 const routeListeners: Set<RouteListener> = new Set();
 
 /** Ask the mounted canvas to pick the line or transformer `branchIdx`, so that its route can be moved by hand. */
 export function __requestRouteEdit(branchIdx: string): void {
-  for (const l of routeListeners) l(branchIdx);
+  for (const l of routeListeners) l(branchIdx, 'edit');
+}
+
+/** Ask the mounted canvas to give the route of the line or transformer `branchIdx` back to the automatic routing. */
+export function __requestRouteReset(branchIdx: string): void {
+  for (const l of routeListeners) l(branchIdx, 'reset');
 }
 
 /**
- * Subscribe to requests to pick a line. Returns an unsubscribe function.
- * `SldCanvas` subscribes once on mount.
+ * Subscribe to requests about the route of a line. Returns an unsubscribe
+ * function. `SldCanvas` subscribes once on mount.
  */
 export function subscribeRouteEdit(listener: RouteListener): () => void {
   routeListeners.add(listener);

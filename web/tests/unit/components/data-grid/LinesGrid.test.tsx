@@ -77,7 +77,7 @@ describe('<LinesGrid />', () => {
     mockTopology = TOPOLOGY;
     render(<LinesGrid />);
     await user.click(screen.getByTestId('lines-grid-row-line-L1'));
-    expect(picked).toHaveBeenCalledWith('L1');
+    expect(picked).toHaveBeenCalledWith('L1', 'edit');
     // The row that is selected already asks again: the line may have been let go of.
     await user.click(screen.getByTestId('lines-grid-row-line-L1'));
     expect(picked).toHaveBeenCalledTimes(2);
