@@ -9,7 +9,7 @@ The picture shows IEEE 14 after a power flow. Five areas make up the window, num
 ![TENSA with the IEEE 14-bus case after a power flow, with five areas numbered](img/ui-overview.jpg)
 
 1. **Top bar.** The menus, the run button and the display toggles.
-2. **Left rail.** The case, its disturbances, the saved cases, the snapshots and the component library.
+2. **Left rail.** Two tabs: **Project**, with the case, its disturbances, the saved cases and the snapshots, and **Components**, with the palette of what a system is built from.
 3. **Diagram.** The one-line diagram of the loaded case.
 4. **Inspector.** The properties of whatever element you select.
 5. **Bottom drawer.** The tables of the case, the analyses and their plots, the activity list and the ANDES messages.
@@ -42,11 +42,16 @@ Below about 1800 px of window width, the search button, the theme switch and His
 
 ## Left rail
 
+The left rail has two tabs, **Project** and **Components**, and opens on the one you used last.
+
+**Project** is the work in hand:
+
 - **Case** shows the loaded case and its state: `pre-setup` before a run, `committed` after one. A second badge says whether the case has dynamic models (`Dynamic`) or not (`Static-only`). **Change case** loads another, and **Add element** opens the element builder.
 - **Disturbances** lists what the next time-domain run will do to the system: the faults, trips and parameter changes you added, plus any the case file itself holds. **Add fault** (or **Add disturbance**) opens a form for a fault on a bus, a line or device trip (a toggle), or a scheduled parameter change (an alter).
 - **Saved cases** lists the case files of the workspace, and the ones you opened recently. **Add files** copies files into the workspace, and so does dropping them anywhere on the window: `.raw`, `.dyr`, `.m`, `.xlsx` and `.json` files. A `.raw` dropped together with its `.dyr` opens as the pair.
 - **Snapshots** lists the snapshots you saved for this case, under a **Save snapshot** button that saves one. A snapshot records the case, its disturbances and the diagram as it was placed. Click a snapshot to restore it: that reloads the case, adds the disturbances again, solves the power flow and puts the diagram back.
-- **Component library** has a tile for each kind of element: bus, generator, load, shunt, line, transformer and battery. Click a tile, or drag it onto the diagram, to open the element form with that kind selected.
+
+**Components** is the palette a system is built from. It lists every kind of element the element builder can add, grouped as the builder's **Kind** list is (network, transformers, generators, exciters, governors, storage, loads and shunts), each with a line that says what it is and what it needs first: a `GENROU` machine needs a PV or Slack generator on its bus, an exciter regulates a machine. Type in **Search components** to narrow the list by name, model or category (`exciter`, `GENROU`, `storage`, `avr`). Click a row, or drag it onto the diagram, to open the element form on that kind; with no case open, that starts a blank system. From the keyboard, the arrow keys move between the rows and `Enter` adds. While nothing can be added, because a run has locked the system, the rows are greyed out and a note above them says what unlocks it.
 
 ## Diagram
 
