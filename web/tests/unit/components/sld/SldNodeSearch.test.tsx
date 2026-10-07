@@ -14,6 +14,10 @@
  *    by `getNodes()` only; we assert that closing + reopening the
  *    popover re-snapshots, so a topology change between opens is
  *    reflected.
+ *  - Kinds: a row is found by what it is ("exciter", "avr",
+ *    "controller") and by its model class as well as by its name, says
+ *    what it is, and the list can be narrowed to a kind by a button. A
+ *    look for a kind the diagram has none of is told so.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
@@ -26,7 +30,7 @@ import type { ReactNode } from 'react';
 let mockNodes: Array<{
   id: string;
   type: string;
-  data: { idx: string; name: string; unit?: unknown };
+  data: { idx: string; name: string; kind?: string; unit?: unknown };
   position: { x: number; y: number };
   measured?: { width: number; height: number };
 }> = [];
@@ -341,5 +345,351 @@ describe('SldNodeSearch — non-bus device nodes', () => {
     // The governor is picked by its own id, and found where its unit is drawn.
     expect(useSldStore.getState().selectedNodeId).toBe('controller-TGOV1-TGOV1_1');
     expect(mockSetCenter).toHaveBeenCalledWith(90, 80, expect.objectContaining({ zoom: 1.5 }));
+  });
+});
+
+/**
+ * Two buses, each with a load, and two generating units: Slack 1 with a
+ * machine, an exciter and a governor, PV 2 with a machine and a governor. The
+ * models of a unit are named the way the example cases name them, which says
+ * nothing of what they are (two governors called `TGOV1_1`).
+ */
+function makeDynamicDiagram(): typeof mockNodes {
+  const unit = (idx: string, kind: string, exciter: boolean) => ({
+    id: `generator-${idx}`,
+    type: 'generator',
+    data: {
+      idx,
+      name: idx,
+      kind,
+      unit: {
+        expanded: false,
+        members: [
+          { kind, idx, name: idx, role: 'generator', nodeId: `generator-${idx}`, depth: 0 },
+          {
+            kind: 'GENROU',
+            idx,
+            name: `GENROU_${idx}`,
+            role: 'machine',
+            nodeId: `generator-${idx}`,
+            depth: 1,
+          },
+          ...(exciter
+            ? [
+                {
+                  kind: 'EXST1',
+                  idx,
+                  name: `EXST1_${idx}`,
+                  role: 'exciter',
+                  nodeId: `controller-EXST1-${idx}`,
+                  depth: 2,
+                },
+              ]
+            : []),
+          {
+            kind: 'TGOV1',
+            idx,
+            name: 'TGOV1_1',
+            role: 'governor',
+            nodeId: `controller-TGOV1-${idx}`,
+            depth: 2,
+          },
+        ],
+      },
+    },
+    position: { x: 40 * Number(idx), y: 10 },
+  });
+  const load = (idx: string) => ({
+    id: `load-${idx}`,
+    type: 'load',
+    data: { idx, name: idx, kind: 'PQ' },
+    position: { x: 0, y: 0 },
+  });
+  return [
+    ...makeBusNodes(2).map((n) => ({ ...n, data: { ...n.data, kind: 'Bus' } })),
+    unit('1', 'Slack', true),
+    unit('2', 'PV', false),
+    load('PQ_0'),
+    load('PQ_1'),
+  ];
+}
+
+/** Two buses, a generator and a load: a case with no dynamic models. */
+function makeStaticDiagram(): typeof mockNodes {
+  return [
+    ...makeBusNodes(2).map((n) => ({ ...n, data: { ...n.data, kind: 'Bus' } })),
+    {
+      id: 'generator-1',
+      type: 'generator',
+      data: { idx: '1', name: '1', kind: 'Slack' },
+      position: { x: 0, y: 0 },
+    },
+    {
+      id: 'load-PQ_0',
+      type: 'load',
+      data: { idx: 'PQ_0', name: 'PQ_0', kind: 'PQ' },
+      position: { x: 0, y: 0 },
+    },
+  ];
+}
+
+/** What each listed row says it is, in the order listed. */
+function rowTags(): string[] {
+  return screen.getAllByTestId('sld-node-search-tag').map((tag) => tag.textContent ?? '');
+}
+
+/** The text of each filter button, in the order shown. */
+function filterTexts(): string[] {
+  return [...screen.getByTestId('sld-node-search-filters').querySelectorAll('button')].map(
+    (button) => button.textContent ?? '',
+  );
+}
+
+describe('SldNodeSearch — by kind', () => {
+  beforeEach(() => {
+    mockNodes = makeDynamicDiagram();
+  });
+
+  it('says what each row is, and lists the rows of a kind together', async () => {
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    expect(rowTags()).toEqual([
+      'Bus',
+      'Bus',
+      'GeneratorSlack',
+      'GeneratorPV',
+      'LoadPQ',
+      'LoadPQ',
+      'MachineGENROU',
+      'MachineGENROU',
+      'ExciterEXST1',
+      'GovernorTGOV1',
+      'GovernorTGOV1',
+    ]);
+  });
+
+  it('finds the controllers by what they are, whatever they are called', async () => {
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    const input = screen.getByTestId('sld-node-search-input');
+
+    // No name has the word in it: two governors are both `TGOV1_1`.
+    await user.type(input, 'governor');
+    expect(rowTags()).toEqual(['GovernorTGOV1', 'GovernorTGOV1']);
+
+    await user.clear(input);
+    await user.type(input, 'Exciters');
+    expect(rowTags()).toEqual(['ExciterEXST1']);
+
+    // The letters its chip has on the symbol of the unit.
+    await user.clear(input);
+    await user.type(input, 'avr');
+    expect(rowTags()).toEqual(['ExciterEXST1']);
+
+    await user.clear(input);
+    await user.type(input, 'controller');
+    expect(rowTags()).toEqual(['ExciterEXST1', 'GovernorTGOV1', 'GovernorTGOV1']);
+
+    // A generator is its static generator and its machine.
+    await user.clear(input);
+    await user.type(input, 'generator');
+    expect(rowTags()).toEqual(['GeneratorSlack', 'GeneratorPV', 'MachineGENROU', 'MachineGENROU']);
+  });
+
+  it('finds a row by its model class, and by several words at once', async () => {
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    const input = screen.getByTestId('sld-node-search-input');
+
+    await user.type(input, 'slack');
+    expect(rowTags()).toEqual(['GeneratorSlack']);
+
+    // Every word has to be found: the governor of unit 2, not of unit 1.
+    await user.clear(input);
+    await user.type(input, 'gov 2');
+    expect(rowTags()).toEqual(['GovernorTGOV1']);
+    await user.keyboard('{Enter}');
+    expect(useSldStore.getState().selectedNodeId).toBe('controller-TGOV1-2');
+  });
+
+  it('counts what the diagram has of each kind, and narrows the list to one at a press', async () => {
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    expect(screen.getByRole('group', { name: 'Show only' })).toBeInTheDocument();
+    expect(filterTexts()).toEqual([
+      'All 11',
+      'Buses 2',
+      'Generators 2',
+      'Loads 2',
+      'Machines 2',
+      'Exciters 1',
+      'Governors 2',
+    ]);
+    const all = screen.getByTestId('sld-node-search-filter-all');
+    const governors = screen.getByTestId('sld-node-search-filter-governor');
+    expect(all).toHaveAttribute('aria-pressed', 'true');
+    expect(governors).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(governors);
+    expect(governors).toHaveAttribute('aria-pressed', 'true');
+    expect(all).toHaveAttribute('aria-pressed', 'false');
+    expect(rowTags()).toEqual(['GovernorTGOV1', 'GovernorTGOV1']);
+    expect(screen.getByTestId('sld-node-search-count')).toHaveTextContent('2 matches');
+
+    // A second press shows every row again, and so does All.
+    await user.click(governors);
+    expect(rowTags()).toHaveLength(11);
+    await user.click(governors);
+    await user.click(all);
+    expect(rowTags()).toHaveLength(11);
+  });
+
+  it('counts on the buttons what the words typed find', async () => {
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    await user.type(screen.getByTestId('sld-node-search-input'), 'controller');
+    expect(filterTexts()).toEqual([
+      'All 3',
+      'Buses 0',
+      'Generators 0',
+      'Loads 0',
+      'Machines 0',
+      'Exciters 1',
+      'Governors 2',
+    ]);
+  });
+
+  it('offers the rows of other kinds when the words typed find none of the kind picked', async () => {
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    await user.click(screen.getByTestId('sld-node-search-filter-governor'));
+    await user.type(screen.getByTestId('sld-node-search-input'), 'genrou');
+    expect(screen.getByTestId('sld-node-search-empty')).toHaveTextContent('No governors match');
+    // No list without rows: the sentence and its button are not options.
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Show the 2 matches of other kinds' }));
+    expect(rowTags()).toEqual(['MachineGENROU', 'MachineGENROU']);
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+  });
+
+  it('starts from every row again after a pick', async () => {
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    await user.click(screen.getByTestId('sld-node-search-filter-exciter'));
+    await user.click(screen.getByTestId('sld-node-search-row-1'));
+    expect(useSldStore.getState().selectedNodeId).toBe('controller-EXST1-1');
+
+    await openPopover(user);
+    expect(screen.getByTestId('sld-node-search-filter-all')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(rowTags()).toHaveLength(11);
+  });
+
+  it('says which dynamic models the diagram has when it has none of the kind looked for', async () => {
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    await user.type(screen.getByTestId('sld-node-search-input'), 'pss');
+    expect(screen.getByTestId('sld-node-search-none-in-case')).toHaveTextContent(
+      'The diagram has no PSS. Its dynamic models: 2 machines, 1 exciter and 2 governors.',
+    );
+  });
+
+  it('says that a line is not in the list', async () => {
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    await user.type(screen.getByTestId('sld-node-search-input'), 'transformer');
+    expect(screen.getByTestId('sld-node-search-none-in-case')).toHaveTextContent(
+      'Lines and transformers are not in this list: click one on the diagram to select it.',
+    );
+  });
+
+  it('says what can be typed when the words name nothing', async () => {
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    await user.type(screen.getByTestId('sld-node-search-input'), 'zzz');
+    const empty = screen.getByTestId('sld-node-search-empty');
+    expect(empty).toHaveTextContent('No nodes match');
+    expect(empty).toHaveTextContent(
+      'Type part of a name, an idx or a model, or a kind such as bus, generator or load.',
+    );
+    expect(screen.queryByTestId('sld-node-search-none-in-case')).not.toBeInTheDocument();
+  });
+});
+
+describe('SldNodeSearch — a case with no dynamic models', () => {
+  beforeEach(() => {
+    mockNodes = makeStaticDiagram();
+  });
+
+  it('has a button for each kind it has, and none for a controller', async () => {
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    expect(filterTexts()).toEqual(['All 4', 'Buses 2', 'Generators 1', 'Loads 1']);
+  });
+
+  it.each(['exciter', 'governors', 'controller', 'machine', 'avr'])(
+    'says that the case is static-only to a look for "%s"',
+    async (query) => {
+      const user = userEvent.setup();
+      render(<SldNodeSearch />);
+      await openPopover(user);
+      await user.type(screen.getByTestId('sld-node-search-input'), query);
+      expect(screen.getByTestId('sld-node-search-none-in-case')).toHaveTextContent(
+        'This case is static-only: it has no machines, exciters, governors or other dynamic models.',
+      );
+    },
+  );
+
+  it('says of a static kind only that the diagram has none', async () => {
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    await user.type(screen.getByTestId('sld-node-search-input'), 'shunt');
+    expect(screen.getByTestId('sld-node-search-none-in-case')).toHaveTextContent(
+      /^The diagram has no shunts\.$/,
+    );
+  });
+});
+
+describe('SldNodeSearch — filter buttons', () => {
+  it('has none when every row is of one kind', async () => {
+    mockNodes = makeBusNodes(3);
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    expect(screen.queryByTestId('sld-node-search-filters')).not.toBeInTheDocument();
+  });
+
+  it('shows every row when the kind it was narrowed to is gone from the diagram', async () => {
+    mockNodes = makeDynamicDiagram();
+    const user = userEvent.setup();
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    await user.click(screen.getByTestId('sld-node-search-filter-exciter'));
+    await user.keyboard('{Escape}');
+    expect(screen.queryByTestId('sld-node-search-input')).not.toBeInTheDocument();
+
+    // Another case is opened, one with no exciter.
+    mockNodes = makeStaticDiagram();
+    await openPopover(user);
+    expect(rowTags()).toHaveLength(4);
+    expect(screen.getByTestId('sld-node-search-filter-all')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 });

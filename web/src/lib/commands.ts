@@ -924,7 +924,20 @@ function useCommandSets(): CommandSets {
         id: 'navigation.focusSearch',
         label: 'Search nodes…',
         group: 'navigation',
-        keywords: ['search', 'find', 'node', 'bus', 'jump', 'pan'],
+        // The search finds an element by what it is, so the words for that
+        // lead here too: "exciter" in the palette offers the search.
+        keywords: [
+          'search',
+          'find',
+          'node',
+          'bus',
+          'jump',
+          'pan',
+          'machine',
+          'controller',
+          'exciter',
+          'governor',
+        ],
         action: () => __requestOpenSldSearch(),
         shortcut: SHORTCUTS.searchNodes,
       },

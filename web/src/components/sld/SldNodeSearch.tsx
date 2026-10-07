@@ -14,12 +14,16 @@
  * the exciter, the governor): they have no node of their own, and a pick
  * shows the symbol of their unit.
  *
- * Once open, the user types a substring; the list narrows to matching
- * `idx` or `name` (case-insensitive). Selecting a row pans the React
- * Flow viewport to centre that node and writes the node's id to the SLD
- * store so the bus-node visual highlight follows. The zoom stays as it
- * is, unless the diagram is too small to read, in which case the node
- * is shown at full size (`locateZoom`).
+ * Once open, the user types; the list narrows to the rows every word
+ * typed is found in (case-insensitive): in the `idx`, the `name` or the
+ * ANDES model class, or as what the row is (`exciter`, `load`, `bus`; see
+ * `searchCategories.ts`). The buttons under the input narrow the list to
+ * one of those categories without typing, which is how the controllers of
+ * a case are browsed by someone who does not know their names. Selecting
+ * a row pans the React Flow viewport to centre that node and writes the
+ * node's id to the SLD store so the bus-node visual highlight follows.
+ * The zoom stays as it is, unless the diagram is too small to read, in
+ * which case the node is shown at full size (`locateZoom`).
  *
  * The popover does NOT scroll the inspector or write to
  * `case.selectedElement`. The inspector follows the node-click event
@@ -43,6 +47,19 @@ import { SHORTCUTS } from '@/lib/shortcuts';
 import { withShortcut } from '@/lib/shortcutFormatter';
 import { cn } from '@/lib/cn';
 import type { UnitNodeData } from './graph';
+import {
+  SEARCH_CATEGORIES,
+  SEARCH_CATEGORY_ORDER,
+  categoriesAsked,
+  categoryCount,
+  categoryFilterLabel,
+  categoryHasWord,
+  categoryOfNode,
+  categoryOfRole,
+  joinWords,
+  searchTokens,
+  type SearchCategory,
+} from './searchCategories';
 import { locateZoom } from './zoom';
 
 /** Per-row payload surfaced in the list. Mirrors React Flow node shape. */
@@ -61,6 +78,12 @@ export interface SldSearchEntry {
   idx: string;
   /** Node type (`bus`, `generator`, `load`, `shunt`, `line`), or `machine` / `controller` for a model of a unit. */
   type: string;
+  /** ANDES model class (`Bus`, `PV`, `GENROU`, `EXST1`); empty when the node names none. */
+  model: string;
+  /** What the row is: its tag, the words it is found by and what the list is narrowed to. */
+  category: SearchCategory;
+  /** Where the words of a query are looked for, lower case: the idx, the name and the model class. */
+  text: string;
   /** The middle of the node's box, which is what the view is centred on. */
   x: number;
   y: number;
@@ -74,14 +97,61 @@ export interface SldNodeSearchHandle {
 /** Cap on rendered rows. The full filter still runs over the whole list. */
 const MAX_VISIBLE_ROWS = 50;
 
+/** How many of `entries` are of each category; one that has none is left out. */
+function countByCategory(entries: readonly SldSearchEntry[]): Map<SearchCategory, number> {
+  const out = new Map<SearchCategory, number>();
+  for (const entry of entries) out.set(entry.category, (out.get(entry.category) ?? 0) + 1);
+  return out;
+}
+
+/** The text of an entry that a word of a query is looked for in. */
+function searchText(idx: string, name: string, model: string): string {
+  return `${idx} ${name} ${model}`.toLowerCase();
+}
+
 /**
- * Substring filter on idx + name. Case-insensitive; whitespace trimmed.
- * Returns the entries unchanged when the query is empty.
+ * Whether every word of a query finds `entry`: anywhere in its idx, name or
+ * model class, or as a word for what it is. No words find every entry.
  */
-function filterEntries(entries: readonly SldSearchEntry[], query: string): SldSearchEntry[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return entries.slice();
-  return entries.filter((e) => e.idx.toLowerCase().includes(q) || e.name.toLowerCase().includes(q));
+function matches(entry: SldSearchEntry, tokens: readonly string[]): boolean {
+  return tokens.every(
+    (token) => entry.text.includes(token) || categoryHasWord(entry.category, token),
+  );
+}
+
+/**
+ * Why nothing is listed, when the words typed say what was looked for: a
+ * kind of element the diagram has none of (`totals` counts what it has). A
+ * case with no dynamic models at all is said to be static-only, as its badge
+ * in the sidebar says; one that has some is told which, so a look for the
+ * exciters of a case that has only governors ends at the governors. A look
+ * for a line is told that the list has none. `null` when the words name no
+ * kind, or one the diagram has.
+ */
+function noneOfKind(
+  tokens: readonly string[],
+  totals: ReadonlyMap<SearchCategory, number>,
+): string | null {
+  // An empty diagram has no case to speak of.
+  if (totals.size === 0) return null;
+  const asked = categoriesAsked(tokens);
+  if (asked.length === 0 || asked.some((category) => totals.has(category))) return null;
+  // A line is drawn as an edge between two buses, and the search lists nodes.
+  if (asked.includes('line')) {
+    return 'Lines and transformers are not in this list: click one on the diagram to select it.';
+  }
+  const isDynamic = (category: SearchCategory) => SEARCH_CATEGORIES[category].dynamic;
+  const dynamic = SEARCH_CATEGORY_ORDER.filter((c) => isDynamic(c) && totals.has(c));
+  if (dynamic.length === 0 && asked.every(isDynamic)) {
+    return 'This case is static-only: it has no machines, exciters, governors or other dynamic models.';
+  }
+  const none = `The diagram has no ${joinWords(
+    asked.map((category) => SEARCH_CATEGORIES[category].plural),
+    'or',
+  )}.`;
+  if (dynamic.length === 0 || !asked.some(isDynamic)) return none;
+  const has = dynamic.map((category) => categoryCount(category, totals.get(category) ?? 0));
+  return `${none} Its dynamic models: ${joinWords(has, 'and')}.`;
 }
 
 export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSearch(_props, ref) {
@@ -94,6 +164,8 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
   const setSelectedNodeId = useSldStore((s) => s.setSelectedNodeId);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  // The category the list is narrowed to, or null for every row.
+  const [category, setCategory] = useState<SearchCategory | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Snapshot the live node list each time the popover opens. Recomputing
@@ -105,12 +177,26 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
     const nodes = rf.getNodes();
     const out: SldSearchEntry[] = [];
     for (const n of nodes) {
-      const data = n.data as { idx?: string; name?: string; unit?: UnitNodeData } | undefined;
-      const idx = data?.idx ?? n.id;
+      const data = n.data as
+        | { idx?: string; name?: string; kind?: string; unit?: UnitNodeData }
+        | undefined;
+      const idx = String(data?.idx ?? n.id);
       const name = data?.name ?? '';
+      const model = data?.kind ?? '';
       const x = n.position.x + (n.measured?.width ?? 0) / 2;
       const y = n.position.y + (n.measured?.height ?? 0) / 2;
-      out.push({ id: n.id, key: n.id, idx: String(idx), name, type: n.type ?? 'bus', x, y });
+      out.push({
+        id: n.id,
+        key: n.id,
+        idx,
+        name,
+        type: n.type ?? 'bus',
+        model,
+        category: categoryOfNode(n.type, data?.kind),
+        text: searchText(idx, name, model),
+        x,
+        y,
+      });
       // The models a unit's symbol names, after its own: found where the unit is.
       for (const member of data?.unit?.members.slice(1) ?? []) {
         out.push({
@@ -119,24 +205,48 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
           idx: member.idx,
           name: member.name,
           type: member.role === 'machine' ? 'machine' : 'controller',
+          model: member.kind,
+          category: categoryOfRole(member.role),
+          text: searchText(member.idx, member.name, member.kind),
           x,
           y,
         });
       }
     }
-    // Stable display order: buses first, then by idx ascending. The
-    // user's mental model is "list of buses with devices below" — match
-    // it here so the visible 50-row cap is predictable.
-    out.sort((a, b) => {
-      if (a.type === 'bus' && b.type !== 'bus') return -1;
-      if (a.type !== 'bus' && b.type === 'bus') return 1;
-      return a.idx.localeCompare(b.idx, undefined, { numeric: true });
-    });
+    // Stable display order: one category after another (buses first, the
+    // controllers last), each by idx ascending. The rows of a kind stand
+    // together, so the list reads like the tables of the bottom drawer and
+    // the visible 50-row cap is predictable.
+    const rank = (entry: SldSearchEntry) => SEARCH_CATEGORY_ORDER.indexOf(entry.category);
+    out.sort(
+      (a, b) => rank(a) - rank(b) || a.idx.localeCompare(b.idx, undefined, { numeric: true }),
+    );
     return out;
   }, [open, rf]);
 
-  const filtered = useMemo(() => filterEntries(entries, query), [entries, query]);
+  // How many rows the diagram has of each category, and the categories it
+  // has any of: one filter button each.
+  const totals = useMemo(() => countByCategory(entries), [entries]);
+  const present = useMemo(() => SEARCH_CATEGORY_ORDER.filter((c) => totals.has(c)), [totals]);
+  // A category kept from an earlier look at another case narrows nothing.
+  const active = category !== null && present.includes(category) ? category : null;
+
+  const tokens = useMemo(() => searchTokens(query), [query]);
+  const matched = useMemo(
+    () => entries.filter((entry) => matches(entry, tokens)),
+    [entries, tokens],
+  );
+  // How many rows the words typed find in each category: the count on its button.
+  const counts = useMemo(() => countByCategory(matched), [matched]);
+  const filtered = useMemo(
+    () => (active === null ? matched : matched.filter((entry) => entry.category === active)),
+    [matched, active],
+  );
   const visible = filtered.slice(0, MAX_VISIBLE_ROWS);
+  const noneInCase = useMemo(
+    () => (filtered.length === 0 ? noneOfKind(tokens, totals) : null),
+    [filtered.length, tokens, totals],
+  );
 
   const onPick = useCallback(
     (entry: SldSearchEntry) => {
@@ -152,6 +262,7 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
       setSelectedNodeId(entry.id);
       setOpen(false);
       setQuery('');
+      setCategory(null);
     },
     [rf, setSelectedNodeId],
   );
@@ -235,24 +346,86 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
             value={query}
             onChange={(next) => setQuery(next)}
             onKeyDown={onInputKeyDown}
-            placeholder="Search by idx or name…"
-            aria-label="Search SLD nodes by idx or name"
+            placeholder="Name, idx or kind, e.g. exciter…"
+            aria-label="Search SLD nodes by name, idx or kind"
             data-testid="sld-node-search-input"
             className="h-8 font-mono text-xs"
           />
+          {/* What the diagram has, by kind: a press narrows the list to it. */}
+          {present.length > 1 ? (
+            <div
+              role="group"
+              aria-label="Show only"
+              data-testid="sld-node-search-filters"
+              className="flex flex-wrap gap-1"
+            >
+              <FilterButton
+                id="all"
+                label="All"
+                count={matched.length}
+                pressed={active === null}
+                onPress={() => setCategory(null)}
+              />
+              {present.map((c) => (
+                <FilterButton
+                  key={c}
+                  id={c}
+                  label={categoryFilterLabel(c)}
+                  count={counts.get(c) ?? 0}
+                  pressed={active === c}
+                  onPress={() => setCategory(active === c ? null : c)}
+                />
+              ))}
+            </div>
+          ) : null}
+          <p role="status" className="sr-only" data-testid="sld-node-search-count">
+            {filtered.length === 1 ? '1 match' : `${filtered.length} matches`}
+          </p>
           <div
             className="max-h-72 min-h-0 overflow-auto"
             data-testid="sld-node-search-list"
-            role="listbox"
-            aria-label="SLD node search results"
+            // A list only while it has rows: without any it holds a sentence.
+            role={visible.length === 0 ? undefined : 'listbox'}
+            aria-label={visible.length === 0 ? undefined : 'SLD node search results'}
           >
             {visible.length === 0 ? (
-              <p
+              <div
                 data-testid="sld-node-search-empty"
-                className="text-muted-foreground px-2 py-4 text-center text-xs"
+                className="text-muted-foreground flex flex-col items-center gap-1.5 px-2 py-4 text-center text-xs"
               >
-                No nodes match
-              </p>
+                <p>
+                  {active === null
+                    ? 'No nodes match'
+                    : `No ${SEARCH_CATEGORIES[active].plural} match`}
+                </p>
+                {noneInCase !== null ? (
+                  <p data-testid="sld-node-search-none-in-case">{noneInCase}</p>
+                ) : active !== null && matched.length > 0 ? (
+                  // The words typed find rows of another kind: one press shows them.
+                  <button
+                    type="button"
+                    data-testid="sld-node-search-show-all"
+                    onClick={() => setCategory(null)}
+                    className={cn(
+                      'text-foreground rounded underline underline-offset-2',
+                      'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+                    )}
+                  >
+                    {matched.length === 1
+                      ? 'Show the 1 match of another kind'
+                      : `Show the ${matched.length} matches of other kinds`}
+                  </button>
+                ) : entries.length > 0 ? (
+                  <p>
+                    Type part of a name, an idx or a model, or a kind such as{' '}
+                    {joinWords(
+                      present.slice(0, 3).map((c) => SEARCH_CATEGORIES[c].label.toLowerCase()),
+                      'or',
+                    )}
+                    .
+                  </p>
+                ) : null}
+              </div>
             ) : (
               <ul className="flex flex-col">
                 {visible.map((entry) => (
@@ -276,7 +449,7 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
                       </span>
                       <span className="text-muted-foreground flex shrink-0 items-center gap-2 font-mono">
                         <span>{entry.idx}</span>
-                        <span className="text-[10px] tracking-wider uppercase">{entry.type}</span>
+                        <RowTag entry={entry} />
                       </span>
                     </button>
                   </li>
@@ -288,7 +461,8 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
                 className="text-muted-foreground px-2 py-1 text-center text-[10px]"
                 data-testid="sld-node-search-truncated"
               >
-                Showing {visible.length} of {filtered.length} matches — refine the query to narrow.
+                Showing {visible.length} of {filtered.length} matches. Type more, or pick a kind
+                above, to narrow.
               </p>
             ) : null}
           </div>
@@ -297,3 +471,53 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
     </Popover>
   );
 });
+
+/**
+ * What a row is, in the word it is also found by, and its ANDES model class
+ * where that says more (`EXCITER EXDC2`, `LOAD PQ`, but `BUS`).
+ */
+function RowTag({ entry }: { entry: SldSearchEntry }) {
+  const { label } = SEARCH_CATEGORIES[entry.category];
+  const showModel = entry.model !== '' && entry.model.toLowerCase() !== label.toLowerCase();
+  return (
+    <span className="flex items-center gap-1 text-[10px]" data-testid="sld-node-search-tag">
+      <span className="tracking-wider uppercase">{label}</span>
+      {showModel ? <span>{entry.model}</span> : null}
+    </span>
+  );
+}
+
+/** One button of the filter: a kind of row and how many of them are found. */
+function FilterButton({
+  id,
+  label,
+  count,
+  pressed,
+  onPress,
+}: {
+  id: string;
+  label: string;
+  count: number;
+  pressed: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      data-testid={`sld-node-search-filter-${id}`}
+      onClick={onPress}
+      className={cn(
+        'rounded-[var(--radius-sm)] border px-1.5 py-0.5 text-[11px]',
+        'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+        pressed
+          ? 'border-primary bg-primary/10 text-foreground'
+          : 'border-border text-muted-foreground hover:text-foreground',
+        // Nothing to show under it for the words typed.
+        count === 0 && !pressed ? 'opacity-60' : '',
+      )}
+    >
+      {label} <span className="text-muted-foreground tabular-nums">{count}</span>
+    </button>
+  );
+}
