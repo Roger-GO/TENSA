@@ -23,7 +23,12 @@
  *   its bar: where the name with the voltage and the angle under it has no
  *   such place, the name alone is looked for one (`compact`; the values
  *   are in the tables and in the tooltip of the label), and only a name
- *   that has none either stands further off (`placeBusLabels`).
+ *   that has none either stands further off (`placeBusLabels`), where
+ *   nothing that belongs to another bus stands or runs between it and its
+ *   bar: a name with the connector of another bus's load in between reads
+ *   as the name of that bus. For the same reason no label stands right
+ *   under the bar of another bus (`UNDER_ANOTHER_BAR`), where the label of
+ *   that bus would hang.
  * - The readout of a device hangs off the face its connector leaves by,
  *   beside the connector: on its right, or on its left, whichever no
  *   connector runs through and nothing stands in. With neither it goes to
@@ -34,13 +39,20 @@
  *   second.
  * - The flow label of a line stands on a straight run of its route, or
  *   beside one, where it covers least (`placeBranchLabels`, over
- *   `branchLabelPlaces` in `connections.ts`). One that has no place clear
- *   of everything else is left off as well; the arrow of the flow stays on
- *   the line.
+ *   `branchLabelPlaces` in `connections.ts`), and a little way off the
+ *   symbol of every device (`LABEL_ROOM`): flush against one, it reads as
+ *   part of it. One that has no place clear of everything else is left off
+ *   as well; the arrow of the flow stays on the line.
  *
  * `readoutReserve` is what Tidy diagram asks for before it routes: the
  * places each readout would take with no branch drawn, of which a tidied
  * route leaves each device one where it can (`TidyOptions.keepFree`).
+ *
+ * A generator carries a mark on its top right corner when its reactive
+ * output is on or past a limit, which hangs out of its box
+ * (`limitMarkerBox`). Every label keeps off the room of that mark as it
+ * keeps off the symbol, on every generator, so a power flow that puts a
+ * mark there puts it on nothing.
  *
  * The sizes are the ones the diagram takes a label to have, not the ones a
  * browser gives it: `BusNode` places the label of a bus by the same width
@@ -163,6 +175,44 @@ function barBox(node: LabelNode, bars: ReadonlyMap<string, BarGeometry>): Rect {
   };
 }
 
+/**
+ * The mark of a generator at a reactive limit (`GeneratorNode`): a triangle
+ * `size` across on the top right corner of the symbol, which reaches `out`
+ * past the corner both ways (drawn in a square of 10 set 3 out, with a
+ * margin of 1 round it).
+ */
+export const LIMIT_MARKER = { size: 8, out: 2 };
+
+/**
+ * The room the limit mark of the generator `node` takes, whether a power
+ * flow has put one there or not; `null` for a node that is no generator.
+ * It is the triangle as it is drawn, which ends where a readout that hangs
+ * off the top of the symbol begins.
+ */
+export function limitMarkerBox(node: LabelNode, sizes: ReadonlyMap<string, NodeSize>): Rect | null {
+  if (node.type !== 'generator') return null;
+  const width = sizes.get(node.id)?.width ?? node.initialWidth ?? 0;
+  const right = node.position.x + width + LIMIT_MARKER.out;
+  const top = node.position.y - LIMIT_MARKER.out;
+  return { left: right - LIMIT_MARKER.size, right, top, bottom: top + LIMIT_MARKER.size };
+}
+
+/** What the limit mark of a generator goes by among the boxes of a diagram. */
+export const markerId = (nodeId: string): string => `marker:${nodeId}`;
+
+/** The room of the limit mark of every generator among `nodes`. */
+function markerBoxes(
+  nodes: readonly LabelNode[],
+  sizes: ReadonlyMap<string, NodeSize>,
+): { id: string; box: Rect }[] {
+  const out: { id: string; box: Rect }[] = [];
+  for (const node of nodes) {
+    const box = limitMarkerBox(node, sizes);
+    if (box !== null) out.push({ id: markerId(node.id), box });
+  }
+  return out;
+}
+
 /** The side of the squares the boxes are sorted into, to find the ones near a place. */
 const BOX_CELL = 128;
 
@@ -255,6 +305,14 @@ const BUS_LABEL_HEIGHT = { values: 40, name: 18 };
 /** The gap between a bar and a label that stands over it. */
 const BUS_LABEL_OVER_GAP = 4;
 
+/**
+ * How far under the bar of another bus a label stands at the least that
+ * does not hang under its own bar: twice as far as from its own. A label
+ * hangs under its bar, so one that stands over its own bar with another
+ * bar right over it (two bars a row apart) reads as the label of that bus.
+ */
+const UNDER_ANOTHER_BAR = 2 * BUS_LABEL_OVER_GAP;
+
 /** What is shut to the label of a bus, in the strip under its bar and in the one over it. */
 export interface BusLabelClear {
   below: [number, number][];
@@ -281,6 +339,8 @@ export interface BusLabel {
    * no place next to its bar.
    */
   compact?: true;
+  /** Set where it had no place next to its bar at all, and stands further off. */
+  far?: true;
 }
 
 /** The gap between a tip of a bar and a label that stands beside it. */
@@ -290,7 +350,8 @@ export const BUS_LABEL_BESIDE_GAP = 6;
  * Place the label of every bus, one after the other in the order of the
  * nodes, each as `BusNode` draws it (with `values`, as large as it is with
  * a voltage and an angle in it). The answer has where each stands and what
- * each has to stand clear of in the strips under and over its bar.
+ * each has to stand clear of in the strips under and over its bar. The
+ * buses named in `first` are placed before the others.
  */
 function walkBusLabels(
   nodes: readonly LabelNode[],
@@ -299,6 +360,7 @@ function walkBusLabels(
   values: boolean,
   chains: ReadonlyMap<string, Rect>,
   symbols: ReadonlyMap<string, Rect>,
+  first: ReadonlySet<string> = new Set(),
 ): { clears: Map<string, BusLabelClear>; labels: Map<string, BusLabel> } {
   const runsThrough = runsIn(connections.routes);
   const standing = boxIndex(
@@ -310,11 +372,24 @@ function walkBusLabels(
           : boxOnDiagram(n, sizes, connections.bars),
     })),
   );
+  const bars = new Set(nodes.filter((n) => (n.type ?? 'bus') === 'bus').map((n) => n.id));
+  for (const marker of markerBoxes(nodes, sizes)) standing.add(marker);
   for (const [id, box] of chains) standing.add({ id: `chain:${id}`, box });
   for (const [id, box] of symbols) standing.add({ id: `symbol:${id}`, box });
+  // The devices of each bus, by node id: what may stand between a bus and
+  // its name without the name reading as another's.
+  const busOf = new Map<string, string>();
+  for (const n of nodes) {
+    const parent = n.data?.parentBus;
+    if (typeof parent === 'string') busOf.set(n.id, parent);
+  }
   const clears = new Map<string, BusLabelClear>();
   const labels = new Map<string, BusLabel>();
-  for (const node of nodes) {
+  const inOrder =
+    first.size === 0
+      ? nodes
+      : [...nodes.filter((n) => first.has(n.id)), ...nodes.filter((n) => !first.has(n.id))];
+  for (const node of inOrder) {
     if ((node.type ?? 'bus') !== 'bus') continue;
     const bar = connections.bars.get(node.id);
     if (bar === undefined) continue;
@@ -349,9 +424,15 @@ function walkBusLabels(
     clears.set(node.id, clear);
 
     const name = String(node.data?.name || node.data?.idx || node.id);
-    // Nothing runs through it and nothing stands in it.
+    // Nothing runs through it, nothing stands in it, and where it does not
+    // hang under its own bar, the bar of no other bus stands right over it.
     const free = (box: Rect): boolean =>
-      runsThrough(box).length === 0 && standing.near(box).every(({ id }) => id === node.id);
+      runsThrough(box).length === 0 &&
+      standing.near(box).every(({ id }) => id === node.id) &&
+      (box.top >= origin.y ||
+        standing
+          .near({ ...box, top: box.top - UNDER_ANOTHER_BAR, bottom: box.top })
+          .every(({ id }) => id === node.id || !bars.has(id)));
     /**
      * A place next to the bar for the label, with the values of a power
      * flow in it (`full`) or the name alone: under the bar or over it,
@@ -399,21 +480,56 @@ function walkBusLabels(
     if (label === null) {
       // No place next to the bar at all: the nearest clear place there is,
       // for the name alone, so that it is drawn on nothing; and with none,
-      // under the bar whatever is there.
-      const found = awayFrom(
-        origin,
-        bar,
-        busLabelWidth(name, false),
-        BUS_LABEL_HEIGHT.name,
-        free,
-        false,
-      );
+      // under the bar whatever is there. Of the clear places, the nearest
+      // with nothing of another bus between it and the bar comes first: a
+      // line, the connector of a device, a symbol or a label in between
+      // makes the name read as theirs.
+      const [left, right] = [origin.x + bar.start, origin.x + bar.end];
+      const level = origin.y + BAR_THICKNESS / 2;
+      // A connector or a line that ends on this bar is the bus's own.
+      const ownRun = (id: string): boolean => {
+        const points = connections.routes.get(id)?.points ?? [];
+        return [points[0], points[points.length - 1]].some(
+          (end) =>
+            end !== undefined &&
+            Math.abs(end[1] - level) <= BAR_THICKNESS &&
+            end[0] >= left - 1 &&
+            end[0] <= right + 1,
+        );
+      };
+      // And so is the bus itself, a device of it with its limit mark and
+      // its chain, and the symbol of a transformer of it. The label of
+      // another bus never is.
+      const own = (id: string): boolean => {
+        if (id.startsWith('label:')) return false;
+        if (id.startsWith('symbol:')) return ownRun(id.slice('symbol:'.length));
+        const of = id.replace(/^(marker|chain):/, '');
+        return of === node.id || busOf.get(of) === node.id;
+      };
+      const inSight = (box: Rect): boolean => {
+        // From the label to the nearest stretch of the bar.
+        const between: Rect = {
+          left: Math.min(box.left, Math.max(left, Math.min(right, box.left))),
+          right: Math.max(box.right, Math.min(right, Math.max(left, box.right))),
+          top: Math.min(box.top, level),
+          bottom: Math.max(box.bottom, level),
+        };
+        return (
+          runsThrough(between).every(({ id }) => ownRun(id)) &&
+          standing.near(between).every(({ id }) => own(id))
+        );
+      };
+      const [width, height] = [busLabelWidth(name, false), BUS_LABEL_HEIGHT.name];
+      const found =
+        awayFrom(origin, bar, width, height, (box) => free(box) && inSight(box), false) ??
+        awayFrom(origin, bar, width, height, free, false);
       if (found !== undefined) {
         label = {
           offset: (found[1].left + found[1].right) / 2 - origin.x,
           side: found[0],
           box: found[1],
           ...(values ? { compact: true as const } : {}),
+          far: true,
         };
       } else {
         const place = busLabelPlace(bar, busLabelWidth(name, values), clear.below, clear.above);
@@ -516,6 +632,12 @@ export function busLabelClear(
  * else. `chains` is where the control chains that are drawn out stand, and
  * `symbols` where the symbols of the transformers do; a label keeps off
  * those as well.
+ *
+ * A label that is placed takes its room from the ones after it. Where one
+ * is left with the name alone, or with no place by its bar, the labels are
+ * placed once more with those first (`BUS_LABEL_ROUNDS`), and that is kept
+ * where it leaves the labels better off: the label of the bus beside it
+ * mostly has another place as good as the one it took.
  */
 export function placeBusLabels(
   nodes: readonly LabelNode[],
@@ -525,7 +647,32 @@ export function placeBusLabels(
   chains: ReadonlyMap<string, Rect> = new Map(),
   symbols: ReadonlyMap<string, Rect> = new Map(),
 ): Map<string, BusLabel> {
-  return walkBusLabels(nodes, connections, sizes, values, chains, symbols).labels;
+  const place = (first?: ReadonlySet<string>): Map<string, BusLabel> =>
+    walkBusLabels(nodes, connections, sizes, values, chains, symbols, first).labels;
+  const lacking = (labels: ReadonlyMap<string, BusLabel>): number =>
+    [...labels.values()].reduce((sum, label) => sum + busLabelLack(label), 0);
+  let best = place();
+  const first = new Set<string>();
+  for (let round = 0; round < BUS_LABEL_ROUNDS; round += 1) {
+    const short = [...best].filter(([id, label]) => busLabelLack(label) > 0 && !first.has(id));
+    if (short.length === 0) break;
+    for (const [id] of short) first.add(id);
+    const again = place(first);
+    if (lacking(again) >= lacking(best)) break;
+    best = again;
+  }
+  return best;
+}
+
+/** How many more times the labels of the buses are placed, with the ones that came off badly first. */
+const BUS_LABEL_ROUNDS = 2;
+
+/**
+ * What the label of a bus is short of, as a number to compare two places
+ * by: nothing (0), its values (1), a place by its bar (2), or both (3).
+ */
+export function busLabelLack(label: BusLabel): number {
+  return (label.far ? 2 : 0) + (label.compact ? 1 : 0);
 }
 
 /**
@@ -714,7 +861,10 @@ function readoutSpots(
   };
 }
 
-/** What stands on the diagram that a readout keeps out of: every node, and what `surroundings` adds. */
+/**
+ * What stands on the diagram that a readout keeps out of: every node, the
+ * limit mark of every generator, and what `surroundings` adds.
+ */
 function standingFor(
   nodes: readonly LabelNode[],
   connections: ConnectionLayout,
@@ -728,6 +878,7 @@ function standingFor(
         ? barBox(n, connections.bars)
         : boxOnDiagram(n, sizes, connections.bars),
   }));
+  standing.push(...markerBoxes(nodes, sizes));
   for (const [id, box] of surroundings.chains ?? []) standing.push({ id: `chain:${id}`, box });
   for (const [id, box] of surroundings.busLabels ?? []) standing.push({ id: `label:${id}`, box });
   for (const [id, box] of surroundings.symbols ?? []) standing.push({ id: `symbol:${id}`, box });
@@ -878,17 +1029,23 @@ export function readoutReserve(
 
 // ---- the label of a branch ----------------------------------------------------
 
-/** The bars and the symbols of the devices, as the boxes a label of a branch keeps off. */
+/**
+ * What a label of a branch keeps off, as boxes: the bars, and the symbols
+ * of the devices with the limit marks of the generators.
+ */
 function standingBoxes(
   nodes: readonly LabelNode[],
   connections: ConnectionLayout,
   sizes: ReadonlyMap<string, NodeSize>,
-): Rect[] {
-  return nodes.map((n) =>
-    (n.type ?? 'bus') === 'bus'
-      ? barBox(n, connections.bars)
-      : boxOnDiagram(n, sizes, connections.bars),
-  );
+): { bars: Rect[]; symbols: Rect[] } {
+  const bars: Rect[] = [];
+  const symbols: Rect[] = [];
+  for (const n of nodes) {
+    if ((n.type ?? 'bus') === 'bus') bars.push(barBox(n, connections.bars));
+    else symbols.push(boxOnDiagram(n, sizes, connections.bars));
+  }
+  for (const { box } of markerBoxes(nodes, sizes)) symbols.push(box);
+  return { bars, symbols };
 }
 
 /**
@@ -908,10 +1065,11 @@ export function placeTransformerSymbols(
 ): Map<string, LabelPlace> {
   const transformers = edges.filter((edge) => edge.type === 'transformer');
   if (transformers.length === 0) return new Map();
+  const { bars, symbols } = standingBoxes(nodes, connections, sizes);
   return branchLabelPlaces(
     connections.routes,
     transformers.map((edge) => ({ id: edge.id, ...TRANSFORMER_LABEL_BOX, symbol: true })),
-    [...standingBoxes(nodes, connections, sizes), ...chains],
+    [...bars, ...symbols, ...chains],
   );
 }
 
@@ -961,6 +1119,7 @@ export function placeBranchLabels(
   const out = new Map(symbols);
   if (labels.values === false) return out;
   const lines = edges.filter((edge) => edge.type !== 'stub' && edge.type !== 'transformer');
+  const standing = standingBoxes(nodes, connections, sizes);
   const places = branchLabelPlaces(
     connections.routes,
     lines.map((edge) => ({
@@ -972,13 +1131,14 @@ export function placeBranchLabels(
       mayHide: true,
     })),
     [
-      ...standingBoxes(nodes, connections, sizes),
+      ...standing.bars,
       ...labels.busLabels.values(),
       ...labels.readouts,
-      ...chains,
       ...symbolBoxes(symbols).values(),
     ],
-    { quick: labels.quick },
+    // A flow label keeps a little way off the symbol of a device, its limit
+    // mark and a chain that is drawn out.
+    { quick: labels.quick, apart: [...standing.symbols, ...chains] },
   );
   for (const [id, place] of places) out.set(id, place);
   return out;

@@ -2151,7 +2151,9 @@ const LABEL_TURNED = 2;
  * would be on something, however long the route is and in a drag as well.
  *
  * `labels` lists the branches in the order they are placed, each with the
- * box its label takes; `boxes` is what stands on the diagram. A label that
+ * box its label takes; `boxes` is what stands on the diagram, and `apart`
+ * what stands on it that a label which may be left off also keeps
+ * `LABEL_ROOM` from (the symbols of the devices). A label that
  * is placed takes its room from the ones after it, so where one is left
  * without a place the labels are placed once more with those first: the
  * ones with the least room choose before the ones that have plenty.
@@ -2160,11 +2162,12 @@ export function branchLabelPlaces(
   routes: ReadonlyMap<string, { points: readonly Point[] }>,
   labels: readonly BranchLabel[],
   boxes: readonly Rect[],
-  { quick = false }: { quick?: boolean } = {},
+  { quick = false, apart = [] }: { quick?: boolean; apart?: readonly Rect[] } = {},
 ): Map<string, LabelPlace> {
   const hiddenIn = (places: ReadonlyMap<string, LabelPlace>): string[] =>
     [...places].filter(([, place]) => place.hidden === true).map(([id]) => id);
-  let best = placeInOrder(routes, labels, boxes, quick);
+  const standing = { boxes, apart };
+  let best = placeInOrder(routes, labels, standing, quick);
   // `quick`: the labels are placed once and no further. The last places a
   // crowded diagram has are found by going over the labels again, which is
   // most of the work on a large one; while a node is dragged the places are
@@ -2175,7 +2178,7 @@ export function branchLabelPlaces(
     const again = placeInOrder(
       routes,
       [...labels.filter(({ id }) => hidden.has(id)), ...labels.filter(({ id }) => !hidden.has(id))],
-      boxes,
+      standing,
       quick,
     );
     if (hiddenIn(again).length >= hidden.size) break;
@@ -2212,17 +2215,27 @@ const LABEL_ROUNDS = 2;
  */
 const LABEL_LINE_MARGIN = 3;
 
+/**
+ * How far the flow label of a line keeps from the symbol of a device
+ * (`branchLabelPlaces`, `apart`): as far as from a line that is not its
+ * own. Nearer than this it counts as on it: a label that stands flush
+ * against a symbol reads as part of it.
+ */
+export const LABEL_ROOM = 3;
+
 /** `branchLabelPlaces` for the labels in the order given. */
 function placeInOrder(
   routes: ReadonlyMap<string, { points: readonly Point[] }>,
   labels: readonly BranchLabel[],
-  boxes: readonly Rect[],
+  { boxes, apart }: { boxes: readonly Rect[]; apart: readonly Rect[] },
   quick: boolean,
 ): Map<string, LabelPlace> {
   interface Standing {
     box: Rect;
     /** Whether it is the label of a branch placed before. */
     label: boolean;
+    /** Whether a label keeps `LABEL_ROOM` from it. */
+    apart: boolean;
   }
   const cells = new Map<string, Standing[]>();
   const cellsOf = (box: Rect): string[] => {
@@ -2241,25 +2254,37 @@ function placeInOrder(
   };
   /**
    * What a label in `box` costs for what stands there: the area it covers,
-   * the gap it keeps counted in, and what it reaches into.
+   * the gap it keeps counted in, and what it reaches into, or of what it
+   * keeps apart from (`Standing.apart`) comes nearer than `room` to.
    */
-  const covered = (box: Rect): number => {
+  const covered = (box: Rect, room: number): number => {
     const seen = new Set<Standing>();
     let cost = 0;
-    for (const key of cellsOf(box)) {
+    const reach = Math.max(LABEL_GAP, room);
+    const around: Rect = {
+      left: box.left - reach,
+      right: box.right + reach,
+      top: box.top - reach,
+      bottom: box.bottom + reach,
+    };
+    for (const key of cellsOf(around)) {
       for (const other of cells.get(key) ?? []) {
         if (seen.has(other)) continue;
         seen.add(other);
         const across = Math.min(box.right, other.box.right) - Math.max(box.left, other.box.left);
         const down = Math.min(box.bottom, other.box.bottom) - Math.max(box.top, other.box.top);
-        if (across + LABEL_GAP <= 0 || down + LABEL_GAP <= 0) continue;
-        cost += (across + LABEL_GAP) * (down + LABEL_GAP);
-        if (across > 0 && down > 0) cost += other.label ? LABEL_OVER_LABEL : LABEL_OVER_BOX;
+        if (across + reach <= 0 || down + reach <= 0) continue;
+        if (across + LABEL_GAP > 0 && down + LABEL_GAP > 0) {
+          cost += (across + LABEL_GAP) * (down + LABEL_GAP);
+        }
+        const near = other.apart ? room : 0;
+        if (across > -near && down > -near) cost += other.label ? LABEL_OVER_LABEL : LABEL_OVER_BOX;
       }
     }
     return cost;
   };
-  for (const box of boxes) stand({ box, label: false });
+  for (const box of boxes) stand({ box, label: false, apart: false });
+  for (const box of apart) stand({ box, label: false, apart: true });
   const routesIn = routesThrough(routes);
   /**
    * How many routes a label in `box` would be on or right up against: the
@@ -2317,6 +2342,9 @@ function placeInOrder(
       const on = routesIn(box, id);
       return LABEL_OVER_LINE * on + LABEL_NEAR_LINE * Math.max(0, near - on);
     };
+    // The symbol of a transformer is part of its line and stands where the
+    // route has room for it; a label keeps a little way off a symbol.
+    const room = symbol === true ? 0 : LABEL_ROOM;
     /** Whether a place beside the line, clear of everything, has been found: one that will do. */
     const willDo = (): boolean => best.at !== null && best.at.cost <= LABEL_BESIDE;
     const weigh = (along: number): void => {
@@ -2340,7 +2368,11 @@ function placeInOrder(
         (run !== runs[runs.length - 1] && run.from + run.length - along < reach);
       const angleDeg = (Math.atan2(run.b[1] - run.a[1], run.b[0] - run.a[0]) * 180) / Math.PI;
       const on = boxAt(x, y);
-      offer({ x, y, angleDeg }, on, covered(on) + (onBend ? LABEL_ON_BEND : 0) + overLines(on));
+      offer(
+        { x, y, angleDeg },
+        on,
+        covered(on, room) + (onBend ? LABEL_ON_BEND : 0) + overLines(on),
+      );
       if (beside !== true || settled()) return;
       // Beside the line: its own route counts among the ones that may run
       // through the label there, where it turns close by.
@@ -2354,7 +2386,7 @@ function placeInOrder(
           { x, y, angleDeg, label },
           box,
           LABEL_BESIDE +
-            covered(box) +
+            covered(box, room) +
             LABEL_OVER_LINE * (through(box, id) + routesIn(box) - routesIn(box, id)),
         );
       }
@@ -2373,7 +2405,7 @@ function placeInOrder(
         { x, y, angleDeg, turned: true },
         turned,
         LABEL_TURNED +
-          covered(turned) +
+          covered(turned, room) +
           (nearBend ? LABEL_ON_BEND : 0) +
           LABEL_OVER_LINE * through(turned, id),
       );
@@ -2418,7 +2450,7 @@ function placeInOrder(
       continue;
     }
     out.set(id, best.at.place);
-    stand({ box: best.at.box, label: true });
+    stand({ box: best.at.box, label: true, apart: false });
   }
   return out;
 }

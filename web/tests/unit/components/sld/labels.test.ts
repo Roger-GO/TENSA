@@ -12,6 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  LABEL_ROOM,
   labelBoxAt,
   type BarGeometry,
   type ConnectionEdge,
@@ -31,6 +32,7 @@ import {
   busLabelWidth,
   chainBoxes,
   flowLabelWidth,
+  limitMarkerBox,
   overlaps,
   placeBranchLabels,
   placeBusLabels,
@@ -615,6 +617,52 @@ describe('placeBranchLabels', () => {
     }
   });
 
+  it('keeps the flow of a line a little way off the symbol of a device, and off the limit mark of a generator', () => {
+    // A load all along the right of the line, and two devices on its left,
+    // one over the other: the only room for the label is beside the line in
+    // the gap between those two.
+    const tall = { ...device('load-PQ', 50, 12), initialHeight: 280 };
+    const upper = { ...device('generator-A', -16, 12, {}, 60), initialHeight: 131 };
+    const lowerAt = (top: number, id = 'generator-B'): LabelNode => ({
+      ...device(id, -16, top, {}, 60),
+      initialHeight: 292 - top,
+    });
+    const drawn = layout({ '1': bar(), '2': bar() }, { 'line-l': down });
+    const placeWith = (lower: LabelNode): LabelPlace =>
+      placeBranchLabels([...nodes, tall, upper, lower], [line('line-l')], drawn, NO_SIZES, {
+        busLabels: new Map(),
+        readouts: [],
+      }).get('line-l')!;
+    const gapTo = (place: LabelPlace, other: Rect): number => {
+      const box = boxOf(place);
+      return Math.max(
+        other.left - box.right,
+        box.left - other.right,
+        other.top - box.bottom,
+        box.top - other.bottom,
+      );
+    };
+    // A gap the label fits flush against both: it is left off.
+    expect(placeWith(lowerAt(164)).hidden).toBe(true);
+    // A gap that leaves it its distance from two symbols.
+    const load = lowerAt(169, 'load-B');
+    const between = placeWith(load);
+    expect(between.hidden).toBeUndefined();
+    for (const other of [upper, load]) {
+      expect(gapTo(between, boxOnDiagram(other, NO_SIZES, drawn.bars))).toBeGreaterThanOrEqual(
+        LABEL_ROOM,
+      );
+    }
+    // Not from the mark on the corner of a generator, which reaches out of
+    // its box: the same gap under a generator has no place for the label,
+    // and one that much wider has.
+    expect(placeWith(lowerAt(169)).hidden).toBe(true);
+    const generator = lowerAt(171);
+    const clear = placeWith(generator);
+    expect(clear.hidden).toBeUndefined();
+    expect(gapTo(clear, limitMarkerBox(generator, NO_SIZES)!)).toBeGreaterThanOrEqual(LABEL_ROOM);
+  });
+
   it('keeps the symbol of a transformer on its line', () => {
     const load = { ...device('load-PQ', 54, 20), initialHeight: 260 };
     const drawn = layout({ '1': bar(), '2': bar() }, { 'transformer-t': down });
@@ -959,6 +1007,138 @@ describe('placeBusLabels', () => {
       new Map([['generator-1', chain]]),
     ).get('BUS1')!;
     expect(overlaps(moved.box, chain)).toBe(false);
+  });
+});
+
+describe('placeBusLabels: a name that has no place by its bar', () => {
+  const node = bus('BUS1', 100, 200);
+  // The devices of the bus fill the rows right under and over its bar, from
+  // 70 west of it to 108 east of it, and the connector of the load of
+  // another bus comes down 20 west of the bar.
+  const under = device('load-PQ', 30, 210, { parentBus: 'BUS1' }, 270);
+  const over = device('generator-G', 30, 150, { parentBus: 'BUS1' }, 270);
+  const foreign = route([
+    [80, 100],
+    [80, 300],
+  ]);
+
+  it('stands where nothing of another bus is between it and the bar, though a place nearer is clear', () => {
+    // Without the connector the nearest clear place is west of the devices.
+    const alone = placeBusLabels([node, under, over], layout({ BUS1: bar() }), NO_SIZES, false).get(
+      'BUS1',
+    )!;
+    expect(alone.side).toBe('away');
+    expect(alone.box.right).toBeLessThanOrEqual(30);
+    // With it, a name there would read as that of the load the connector
+    // belongs to: it stands east of the devices, which are its own bus's.
+    const drawn = layout({ BUS1: bar() }, { 'stub-load-other': foreign });
+    const label = placeBusLabels([node, under, over], drawn, NO_SIZES, false).get('BUS1')!;
+    expect(label.side).toBe('away');
+    expect(label.box.left).toBeGreaterThanOrEqual(300);
+    // The fence of connectors in the test above leaves no place with a clear
+    // way to the bar, and the nearest clear place is taken all the same.
+  });
+});
+
+describe('placeBusLabels: a label that stands over its bar', () => {
+  // A symbol all along under the bar of the bus: its label stands over the
+  // bar, 4 from it.
+  const node = bus('BUS2', 100, 200);
+  const below = device('load-PQ', 0, 210, {}, 300);
+
+  it('does not stand right under the bar of another bus, where the label of that bus would hang', () => {
+    // The bar of bus 1 a row over it: the label would stand 2 under it.
+    const upper = bus('BUS1', 60, 148);
+    const drawn = layout({ BUS1: bar(), BUS2: bar() });
+    const label = placeBusLabels([upper, node, below], drawn, NO_SIZES, true).get('BUS2')!;
+    const underUpper =
+      label.box.top < 200 &&
+      label.box.top - 154 < 8 &&
+      label.box.left < 152 &&
+      label.box.right > 60;
+    expect(underUpper).toBe(false);
+    expect(overlaps(label.box, boxOnDiagram(below, NO_SIZES, drawn.bars))).toBe(false);
+    // The label of bus 1 hangs under its own bar, where it is.
+    expect(placeBusLabels([upper, node, below], drawn, NO_SIZES, true).get('BUS1')!.side).toBe(
+      'below',
+    );
+  });
+
+  it('stands over its bar where the bar of the other bus is further up', () => {
+    const upper = bus('BUS1', 60, 100);
+    const drawn = layout({ BUS1: bar(), BUS2: bar() });
+    const label = placeBusLabels([upper, node, below], drawn, NO_SIZES, false).get('BUS2')!;
+    expect(label.side).toBe('above');
+    expect(label.box.bottom).toBe(196);
+  });
+});
+
+describe('the limit mark of a generator', () => {
+  it('takes the top right corner of the symbol, and reaches a little out of it', () => {
+    const generator = device('generator-G', 100, 200, {}, 85);
+    expect(limitMarkerBox(generator, NO_SIZES)).toEqual({
+      left: 185 - 6,
+      right: 185 + 2,
+      top: 200 - 2,
+      bottom: 200 + 6,
+    });
+    // By the size the browser measured, where there is one.
+    const sizes = new Map([['generator-G', { width: 100, height: 41 }]]);
+    expect(limitMarkerBox(generator, sizes)!.right).toBe(202);
+    expect(limitMarkerBox(device('load-PQ', 100, 200), NO_SIZES)).toBeNull();
+    expect(limitMarkerBox(bus('BUS1', 0, 0), NO_SIZES)).toBeNull();
+  });
+
+  it('is kept clear of by the label of a bus', () => {
+    // A generator of another bus under the bar, clear of where the label
+    // hangs by a pixel either way: only its mark reaches into it.
+    const node = bus('BUS1', 100, 200);
+    const generator = device('generator-G', 76, 247);
+    const drawn = layout({ BUS1: bar() });
+    const alone = placeBusLabels([node], drawn, NO_SIZES, true).get('BUS1')!;
+    const marker = limitMarkerBox(generator, NO_SIZES)!;
+    expect(overlaps(alone.box, boxOnDiagram(generator, NO_SIZES, drawn.bars))).toBe(false);
+    expect(overlaps(alone.box, marker)).toBe(true);
+    const label = placeBusLabels([node, generator], drawn, NO_SIZES, true).get('BUS1')!;
+    expect(overlaps(label.box, marker)).toBe(false);
+  });
+
+  it('is kept clear of by the readout of the device beside it', () => {
+    // A load right of a generator, both under their bar: the readout of
+    // the load stands left of its connector only while that keeps it off
+    // the mark on the corner of the generator.
+    const node = bus('BUS1', 0, 0);
+    const generator = device('generator-G', 0, 73, { valueSide: 'above' });
+    const load = device('load-PQ', 110, 50, { valueSide: 'above' });
+    const drawn = layout(
+      { BUS1: bar([], 0, 200) },
+      {
+        'stub-generator-G': route(
+          [
+            [20, 73],
+            [20, 3],
+          ],
+          'north',
+        ),
+        'stub-load-PQ': route(
+          [
+            [130, 50],
+            [130, 3],
+          ],
+          'north',
+        ),
+        // A line that takes the place right of the connector of the load.
+        'line-x': route([
+          [160, 3],
+          [160, 300],
+        ]),
+      },
+    );
+    const marker = limitMarkerBox(generator, NO_SIZES)!;
+    const readouts = placeReadouts([node, generator, load], drawn, NO_SIZES);
+    for (const { spot, box } of readouts.values()) {
+      if (spot !== 'none') expect(overlaps(box, marker)).toBe(false);
+    }
   });
 });
 

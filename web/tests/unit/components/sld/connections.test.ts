@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BAR_LENGTH,
   BAR_THICKNESS,
+  LABEL_ROOM,
   MIN_BAR_LENGTH,
   SLIDE_CLEARANCE,
   TAP_HOLD,
@@ -2813,6 +2814,39 @@ describe('branchLabelPlaces', () => {
     // In the gap between the two, where it covers the least of either.
     expect(place.y).toBeGreaterThanOrEqual(88);
     expect(place.y).toBeLessThanOrEqual(104);
+  });
+
+  it('keeps a label that may be left off a little way from what it is to keep apart from', () => {
+    // A symbol over the route and one under it, with a gap between the two
+    // that the label fits with a pixel to spare either side.
+    const symbols = [
+      { left: 20, right: 180, top: -40, bottom: 91 },
+      { left: 20, right: 180, top: 109, bottom: 240 },
+    ];
+    const asked = { id: 'l', ...label, beside: true, mayTurn: true, mayHide: true };
+    const routes = new Map([['l', down(100)]]);
+    // Among the boxes it only keeps off, it stands in the gap, flush
+    // against both.
+    const flush = branchLabelPlaces(routes, [asked], symbols).get('l')!;
+    expect(flush.hidden).toBeUndefined();
+    expect(labelBoxAt(flush, 40, 16)).toMatchObject({ top: 92, bottom: 108 });
+    // Kept apart from them it has no place there, and is left off.
+    const apart = branchLabelPlaces(routes, [asked], [], { apart: symbols }).get('l')!;
+    expect(apart.hidden).toBe(true);
+    // With room to keep its distance, it stands in the gap again.
+    const wider = [symbols[0]!, { ...symbols[1]!, top: 109 + 2 * LABEL_ROOM }];
+    const place = branchLabelPlaces(routes, [asked], [], { apart: wider }).get('l')!;
+    expect(place.hidden).toBeUndefined();
+    const box = labelBoxAt(place, 40, 16);
+    expect(box.top - 91).toBeGreaterThanOrEqual(LABEL_ROOM);
+    expect(109 + 2 * LABEL_ROOM - box.bottom).toBeGreaterThanOrEqual(LABEL_ROOM);
+    // The symbol of a transformer is part of its line, and is always drawn:
+    // it stands in the gap whatever it is told to keep apart from.
+    const symbol = branchLabelPlaces(routes, [{ id: 'l', ...label, symbol: true }], [], {
+      apart: symbols,
+    }).get('l')!;
+    expect(symbol.hidden).toBeUndefined();
+    expect(symbol.y).toBe(100);
   });
 
   it('keeps a label off the line of another branch where its own route has room elsewhere', () => {

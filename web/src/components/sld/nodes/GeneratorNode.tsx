@@ -34,7 +34,11 @@ const NO_MEMBERS: readonly UnitMemberInfo[] = [];
  * filled past it) so the state does not rest on colour alone. The triangle
  * hangs off the corner and the outline is doubled inside the border, so
  * neither adds to the node's box: a power flow leaves the connector, and
- * the lines that were routed around the symbol, where they were.
+ * the lines that were routed around the symbol, where they were. The room
+ * the triangle takes past the corner is kept free of labels all the same
+ * (`limitMarkerBox` in `labels.ts`), and it is drawn over the readout of
+ * its own generator, whose empty edge it touches when that hangs off the
+ * top of the symbol.
  *
  * A unit of more than one model (`data.unit`) names the others in chips on
  * either side of the glyph, has a control at the end of its name that draws
@@ -133,7 +137,7 @@ export const GeneratorNode = memo(function GeneratorNode({ data, selected }: Nod
           side={side}
           label={qLimitMarkerLabel(limitState)}
           data-testid={`generator-q-marker-${d.idx}`}
-          className="absolute -top-1 -right-1 h-[10px] w-[10px]"
+          className="absolute -top-1 -right-1 z-10 h-[10px] w-[10px]"
         />
       ) : null}
       {d.unit?.expanded ? (
