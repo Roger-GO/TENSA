@@ -36,12 +36,26 @@
  * - A bus with more branches on a face than its bar has room for gets a
  *   tap past the tip, up to `MAX_OVERHANG`, where nothing stands in the
  *   way; the bar is drawn out to it.
+ * - It leaves every generator and load a place for its values where it can
+ *   (`TidyOptions.keepFree`): the P / Q readout a power flow adds stands
+ *   beside the connector of its device, on one side or the other, or on
+ *   the far side of the device, and a route that would run through the last
+ *   of those places goes a long way round first (`LAST_PLACE_COST`).
  *
  * The branches are routed one after the other, the shortest first, each
  * around the ones before it (A* over the grid, with the direction of travel
  * as part of the state so a bend can be priced). Then each is taken out and
  * routed again around all the others, twice, which lets an early one give
- * way to those that came later. The same input gives the same routes.
+ * way to those that came later; two routes that cross are routed again
+ * together, in both orders; and the routes around a device that was left
+ * without a place for its values are routed again together with one of its
+ * places shut. The same input gives the same routes.
+ *
+ * The work is bounded. It is counted in steps of the search (`TIDY_STEPS`),
+ * so a large diagram is routed as well as the steps allow and no longer,
+ * and the grid has a most points (`GRID_POINTS`), so one that spreads over
+ * a great deal of room is routed on a coarser grid or not at all
+ * (`TidyResult.tooLarge`).
  *
  * Nothing is moved here. `alignToGrid` is the part of "Tidy and re-layout"
  * that does move the buses: onto the grid, and into line with the ones they
@@ -81,14 +95,29 @@ export const BEND_COST = 30;
 /** What crossing another route or a device connector costs, as a length of route. */
 export const CROSS_COST = 120;
 
-/** How far past the tip of its bar a tap may stand; the bar is drawn out to it. */
-export const MAX_OVERHANG = 3 * GRID_STEP;
+/**
+ * How far past the tip of its bar a tap may stand; the bar is drawn out to
+ * it. Room for four taps on the grid: a bar that has a load and a generator
+ * on a face often has its lines leave beside them, past the tip.
+ */
+export const MAX_OVERHANG = 4 * GRID_STEP;
 
 /** The gap a route keeps to a generator, load or shunt (`DEVICE_COLUMN_GAP` in `graph.ts`). */
 export const DEVICE_CLEARANCE = 8;
 
 /** Two runs side by side nearer than this would read as one line. */
 export const NEAR_LINE = 10;
+
+/**
+ * What running through a place that is kept for the values of a device
+ * costs, as a length of route (`TidyOptions.keepFree`). While the device has
+ * another place that no route runs through, next to nothing: of two ways
+ * alike the one that leaves it free is taken. Through the last one, as much
+ * as crossing two lines: a route goes a long way round before it takes the
+ * only place a device has left for its values.
+ */
+export const KEEP_FREE_COST = 2;
+export const LAST_PLACE_COST = 2 * CROSS_COST;
 
 /** The gap a route keeps to a controller badge and to a control chain that is drawn out. */
 const BADGE_CLEARANCE = 4;
@@ -127,23 +156,62 @@ const MIN_RUN = 12;
 /** How many grid steps around its two buses a route is first looked for in. */
 const SEARCH_WINDOW = 12;
 
-/**
- * How many times each branch is routed again around the others: twice on a
- * diagram of up to `REFINE_TWICE` branches, once up to `REFINE_LIMIT`, and
- * not at all past that, where the second look costs more than it finds.
- */
+/** How many times each branch is routed again around the others, while there are steps left. */
 const REFINE_PASSES = 2;
-const REFINE_TWICE = 150;
-const REFINE_LIMIT = 400;
 
 /** The most pairs of routes that cross that are routed again together. */
 const PAIR_LIMIT = 200;
 
 /**
- * The most grid points the lines that just clear a device are added for.
- * A diagram past it is routed on the grid and the lines of the bars alone.
+ * The most routes that are routed again together to leave a device a place
+ * for its values, and how far around its places the routes that go with
+ * the ones through them are looked for.
  */
-const FINE_GRID_LIMIT = 1_500_000;
+const GROUP_LIMIT = 5;
+const GROUP_REACH = 3 * GRID_STEP;
+
+/**
+ * How much work one call does, counted in steps of the search (a state taken
+ * off the frontier, about a microsecond of a desktop's time): a search that
+ * has to cross other routes looks at every way round them first, which on a
+ * diagram of a hundred buses is tens of thousands of steps for one branch.
+ * Counted in steps and not in time, the same diagram is routed the same on
+ * any machine.
+ *
+ * The first routing of the branches shares half of it, each search getting
+ * an even part of what is left (`SEARCH_STEPS` at the least). A search that
+ * runs out before it has a way makes for the goal (`HURRY`) and takes the
+ * first way it finds (within `HURRY_STEPS`, and as many again as cross the
+ * stretch it looks in). Routing each branch again, the pairs that cross and
+ * the routes around a device go on while there are steps left, and a search
+ * that runs out there leaves the route as it was. Past twice the budget
+ * nothing more is routed, and the branches that have no route by then are
+ * left to the connection pass (`TidyResult.outOfSteps`). A diagram of the
+ * size of the example cases uses a few hundredths of it, and one of a
+ * hundred buses all of it, which is about a second.
+ */
+export const TIDY_STEPS = 750_000;
+const SEARCH_STEPS = 1_000;
+const HURRY = 32;
+const HURRY_STEPS = 4_000;
+
+/**
+ * The most points the grid has. A diagram past it is routed without the
+ * lines that just clear a device, on the grid and the lines of the bars
+ * alone; past it still, on a grid twice or four times as wide; and one that
+ * is too large even so is not routed (`TidyResult.tooLarge`). The search
+ * keeps some fifty bytes for each point.
+ */
+export const GRID_POINTS = 1_000_000;
+
+/**
+ * How far from everything that stands on the diagram the lines of the grid
+ * go on. A stretch further than that from any bus or device, along either
+ * axis, has no lines in it: a route crosses it in one run, on a line that
+ * has something at one of its ends, so a bus that stands far off does not
+ * make the grid as large as the room in between.
+ */
+const GRID_REACH = (SEARCH_WINDOW + 6) * GRID_STEP;
 
 /** The box a device is taken to have when it carries no size hint. */
 const DEVICE_SIZE = { width: 40, height: 41 };
@@ -159,6 +227,16 @@ export interface TidyNode extends ConnectionNode {
 export interface TidyOptions extends ConnectionOptions {
   /** What else stands on the diagram and is no node: a control chain that is drawn out. */
   obstacles?: readonly Rect[];
+  /**
+   * The places to keep free of routes, device by device: where the P / Q
+   * readout of each generator and load can stand once a power flow has run
+   * (beside its connector, on one side or the other, or on the far side of
+   * the device). The routes leave each device one of its places where they
+   * can (`LAST_PLACE_COST`).
+   */
+  keepFree?: readonly (readonly Rect[])[];
+  /** How many steps the search may take; default `TIDY_STEPS`. */
+  steps?: number;
 }
 
 export interface TidyResult {
@@ -168,8 +246,18 @@ export interface TidyResult {
    * target.
    */
   routes: Map<string, Point[]>;
-  /** The branches no way was found for; they are left to the connection pass. */
+  /**
+   * The branches that have no route: no way was found for them, or the work
+   * ran out before their turn came (`outOfSteps`, `tooLarge`). They are left
+   * to the connection pass.
+   */
   unrouted: string[];
+  /** How many steps the search took (`TIDY_STEPS`). */
+  steps: number;
+  /** Set when some branch was not routed because the steps ran out. */
+  outOfSteps?: true;
+  /** Set when the diagram is too large to route at all (`GRID_POINTS`). */
+  tooLarge?: true;
 }
 
 /** Direction of travel: along a row, or along a column. */
@@ -302,74 +390,135 @@ interface Branch {
   found: Found | null;
 }
 
-/** A binary heap of search states by their estimated cost, the first pushed first among equals. */
-class Frontier {
-  private keys: number[] = [];
-  private states: number[] = [];
-  private order: number[] = [];
-  private pushed = 0;
+/** The estimated cost of a state to a sixteenth, which is what two states are told apart by. */
+const KEY_STEPS = 16;
 
-  get size(): number {
-    return this.keys.length;
-  }
+/** What is ahead of a state, to a quarter, in the bits of its key under the estimated cost. */
+const AHEAD_STEPS = 4;
+const AHEAD_RANGE = 1 << 20;
+
+/**
+ * A binary heap of search states: the one with the least estimated cost
+ * first, of those that cost the same the one with the least still ahead of
+ * it, and of those the first pushed. So of the many ways that are equally
+ * good across open ground the search follows one to its end and does not
+ * widen them all a step at a time.
+ *
+ * What is pushed is kept in the order it came (`keys`, `states`, `costs`),
+ * and the heap holds the places of the ones still in it, so moving one up or
+ * down the heap moves a single number.
+ */
+class Frontier {
+  /** The estimated cost and what is ahead, as one number in that order. */
+  private keys = new Float64Array(1024);
+  private states = new Int32Array(1024);
+  /** What the state had cost when it was pushed. */
+  private costs = new Float64Array(1024);
+  private pushed = 0;
+  private heap = new Int32Array(1024);
+  /** How many times over what is ahead of a state counts in its estimate (`hurry`). */
+  private weight = 1;
+  /** How many states are in it. */
+  size = 0;
+  /** What the state last taken out had cost when it was pushed. */
+  cost = 0;
 
   clear(): void {
-    this.keys.length = 0;
-    this.states.length = 0;
-    this.order.length = 0;
     this.pushed = 0;
+    this.size = 0;
+    this.weight = 1;
   }
 
-  private before(i: number, j: number): boolean {
+  /** `estimate` as the heap tells two estimates apart. */
+  static rounded(estimate: number): number {
+    return Math.round(estimate * KEY_STEPS) / KEY_STEPS;
+  }
+
+  private keyOf(cost: number, ahead: number): number {
     return (
-      this.keys[i]! < this.keys[j]! ||
-      (this.keys[i]! === this.keys[j]! && this.order[i]! < this.order[j]!)
+      Math.round((cost + this.weight * ahead) * KEY_STEPS) * AHEAD_RANGE +
+      Math.min(AHEAD_RANGE - 1, Math.round(ahead * AHEAD_STEPS))
     );
   }
 
-  private swap(i: number, j: number): void {
-    [this.keys[i], this.keys[j]] = [this.keys[j]!, this.keys[i]!];
-    [this.states[i], this.states[j]] = [this.states[j]!, this.states[i]!];
-    [this.order[i], this.order[j]] = [this.order[j]!, this.order[i]!];
+  /** Whether the entry `p` is taken out before the entry `q`. */
+  private before(p: number, q: number): boolean {
+    return this.keys[p]! < this.keys[q]! || (this.keys[p]! === this.keys[q]! && p < q);
   }
 
-  push(key: number, state: number): void {
-    let i = this.keys.length;
-    this.keys.push(key);
-    this.states.push(state);
-    this.order.push(this.pushed);
-    this.pushed += 1;
+  /** Put `entry` in the heap at `i` or above it, where it belongs. */
+  private rise(i: number, entry: number): void {
+    const heap = this.heap;
     while (i > 0) {
       const parent = (i - 1) >> 1;
-      if (!this.before(i, parent)) break;
-      this.swap(i, parent);
+      if (!this.before(entry, heap[parent]!)) break;
+      heap[i] = heap[parent]!;
       i = parent;
     }
+    heap[i] = entry;
   }
 
-  /** The least key, without taking it out. */
+  /** Put `entry` in the heap at `i` or below it, where it belongs. */
+  private sink(i: number, entry: number): void {
+    const heap = this.heap;
+    for (;;) {
+      let child = 2 * i + 1;
+      if (child >= this.size) break;
+      if (child + 1 < this.size && this.before(heap[child + 1]!, heap[child]!)) child += 1;
+      if (!this.before(heap[child]!, entry)) break;
+      heap[i] = heap[child]!;
+      i = child;
+    }
+    heap[i] = entry;
+  }
+
+  /** Push `state`, reached at `cost` with at least `ahead` still to go. */
+  push(cost: number, ahead: number, state: number): void {
+    if (this.pushed === this.keys.length) {
+      const room = 2 * this.keys.length;
+      const grown = <T extends Float64Array | Int32Array>(held: T, made: T): T => {
+        made.set(held);
+        return made;
+      };
+      this.keys = grown(this.keys, new Float64Array(room));
+      this.states = grown(this.states, new Int32Array(room));
+      this.costs = grown(this.costs, new Float64Array(room));
+      this.heap = grown(this.heap, new Int32Array(room));
+    }
+    const entry = this.pushed;
+    this.pushed += 1;
+    this.keys[entry] = this.keyOf(cost, ahead);
+    this.states[entry] = state;
+    this.costs[entry] = cost;
+    this.size += 1;
+    this.rise(this.size - 1, entry);
+  }
+
+  /**
+   * Make for the goal: from here on what is ahead of a state counts `weight`
+   * times over, so the states nearest the goal are taken up first whatever
+   * they cost. `aheadOf` gives what is ahead of a state already here.
+   */
+  hurry(weight: number, aheadOf: (state: number) => number): void {
+    this.weight = weight;
+    for (let i = 0; i < this.size; i += 1) {
+      const entry = this.heap[i]!;
+      this.keys[entry] = this.keyOf(this.costs[entry]!, aheadOf(this.states[entry]!));
+    }
+    for (let i = (this.size >> 1) - 1; i >= 0; i -= 1) this.sink(i, this.heap[i]!);
+  }
+
+  /** The least estimated cost, without taking its state out. */
   peek(): number {
-    return this.keys[0]!;
+    return Math.floor(this.keys[this.heap[0]!]! / AHEAD_RANGE) / KEY_STEPS;
   }
 
   pop(): number {
-    const top = this.states[0]!;
-    const last = this.keys.length - 1;
-    this.swap(0, last);
-    this.keys.pop();
-    this.states.pop();
-    this.order.pop();
-    for (let i = 0; ; ) {
-      const left = 2 * i + 1;
-      const right = left + 1;
-      let least = i;
-      if (left < last && this.before(left, least)) least = left;
-      if (right < last && this.before(right, least)) least = right;
-      if (least === i) break;
-      this.swap(i, least);
-      i = least;
-    }
-    return top;
+    const top = this.heap[0]!;
+    this.cost = this.costs[top]!;
+    this.size -= 1;
+    if (this.size > 0) this.sink(0, this.heap[this.size]!);
+    return this.states[top]!;
   }
 }
 
@@ -482,64 +631,93 @@ export function tidyRoutes(
     const b = busById.get(edge.target);
     if (a && b && a !== b) branches.push({ edge, a, b, found: null });
   }
-  const result: TidyResult = { routes: new Map(), unrouted: [] };
+  const result: TidyResult = { routes: new Map(), unrouted: [], steps: 0 };
   if (branches.length === 0) return result;
 
   // ---- the grid ----
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  const reach = (rect: Rect): void => {
-    minX = Math.min(minX, rect.left);
-    maxX = Math.max(maxX, rect.right);
-    minY = Math.min(minY, rect.top);
-    maxY = Math.max(maxY, rect.bottom);
-  };
+  // Its lines go on as far as `GRID_REACH` from what stands on the diagram,
+  // and no further out than a route goes round the outermost of it.
+  const across: [number, number][] = [];
+  const down: [number, number][] = [];
   for (const bus of buses) {
-    reach({ left: bus.start, right: bus.end, top: bus.y, bottom: bus.y + LABEL_BOTTOM });
+    across.push([bus.start, bus.end]);
+    down.push([bus.y, bus.y + LABEL_BOTTOM]);
   }
-  for (const { box } of boxes) reach(box);
+  for (const { box } of boxes) {
+    across.push([box.left, box.right]);
+    down.push([box.top, box.bottom]);
+  }
   const margin = MAX_OVERHANG + 3 * GRID_STEP;
-  const gridLines = (low: number, high: number): { at: number; kind: LineKind }[] => {
+  const gridLines = (spans: [number, number][], step: number): { at: number; kind: LineKind }[] => {
+    const sorted = [...spans].sort((p, q) => p[0] - q[0]);
+    const low = sorted[0]![0] - margin;
+    const high = sorted.reduce((most, span) => Math.max(most, span[1]), -Infinity) + margin;
     const lines: { at: number; kind: LineKind }[] = [];
-    const last = Math.ceil((high + margin) / GRID_STEP);
-    for (let k = Math.floor((low - margin) / GRID_STEP); k <= last; k += 1) {
-      lines.push({ at: k * GRID_STEP, kind: 'grid' });
+    let next = -Infinity;
+    for (let i = 0; i < sorted.length; ) {
+      // The stretch this span and the ones that follow it closely make up.
+      const from = Math.max(low, sorted[i]![0] - GRID_REACH);
+      let to = sorted[i]![1] + GRID_REACH;
+      for (i += 1; i < sorted.length && sorted[i]![0] - GRID_REACH <= to; i += 1) {
+        to = Math.max(to, sorted[i]![1] + GRID_REACH);
+      }
+      const last = Math.ceil(Math.min(high, to) / step);
+      for (let k = Math.max(next, Math.floor(from / step)); k <= last; k += 1) {
+        lines.push({ at: k * step, kind: 'grid' });
+      }
+      next = last + 1;
     }
     return lines;
   };
-  const columns = gridLines(minX, maxX);
-  const rows = gridLines(minY, maxY);
-  // The line of every bar, which the branches of that bus run along from
-  // its tips, and the lines that just clear a bar: over and under it, where
-  // a branch that leaves by a face first turns, and past its tips.
-  for (const bus of buses) {
-    rows.push({ at: bus.cy, kind: 'bar' });
-    rows.push({ at: bus.cy - RUN_CLEARANCE, kind: 'aux' });
-    rows.push({ at: bus.cy + RUN_CLEARANCE, kind: 'aux' });
-    rows.push({ at: bus.y + LABEL_BOTTOM, kind: 'aux' });
-    columns.push({ at: bus.start - SLIDE_CLEARANCE, kind: 'aux' });
-    columns.push({ at: bus.end + SLIDE_CLEARANCE, kind: 'aux' });
-    // Where a device lands on one face a branch may land on the other, on
-    // the same dot: any nearer place on that face would crowd it.
-    for (const x of [...bus.deviceTaps.north, ...bus.deviceTaps.south]) {
-      columns.push({ at: x, kind: 'aux' });
+  const linesOf = (fine: boolean, step: number): { cols: Axis; rws: Axis } => {
+    const columns = gridLines(across, step);
+    const rows = gridLines(down, step);
+    // The line of every bar, which the branches of that bus run along from
+    // its tips, and the lines that just clear a bar: over and under it, where
+    // a branch that leaves by a face first turns, and past its tips.
+    for (const bus of buses) {
+      rows.push({ at: bus.cy, kind: 'bar' });
+      rows.push({ at: bus.cy - RUN_CLEARANCE, kind: 'aux' });
+      rows.push({ at: bus.cy + RUN_CLEARANCE, kind: 'aux' });
+      rows.push({ at: bus.y + LABEL_BOTTOM, kind: 'aux' });
+      columns.push({ at: bus.start - SLIDE_CLEARANCE, kind: 'aux' });
+      columns.push({ at: bus.end + SLIDE_CLEARANCE, kind: 'aux' });
+      // Where a device lands on one face a branch may land on the other, on
+      // the same dot: any nearer place on that face would crowd it.
+      for (const x of [...bus.deviceTaps.north, ...bus.deviceTaps.south]) {
+        columns.push({ at: x, kind: 'aux' });
+      }
     }
-  }
-  // The lines that just clear a device: the way between two that stand side
-  // by side over a bar is often no wider than that, and no line of the grid
-  // need fall in it.
-  if ((columns.length + 2 * boxes.length) * (rows.length + 2 * boxes.length) <= FINE_GRID_LIMIT) {
-    for (const { box, clearance } of boxes) {
-      columns.push({ at: box.left - clearance, kind: 'aux' });
-      columns.push({ at: box.right + clearance, kind: 'aux' });
-      rows.push({ at: box.top - clearance, kind: 'aux' });
-      rows.push({ at: box.bottom + clearance, kind: 'aux' });
+    // The lines that just clear a device: the way between two that stand
+    // side by side over a bar is often no wider than that, and no line of
+    // the grid need fall in it.
+    if (fine) {
+      for (const { box, clearance } of boxes) {
+        columns.push({ at: box.left - clearance, kind: 'aux' });
+        columns.push({ at: box.right + clearance, kind: 'aux' });
+        rows.push({ at: box.top - clearance, kind: 'aux' });
+        rows.push({ at: box.bottom + clearance, kind: 'aux' });
+      }
     }
+    return { cols: axisOf(columns), rws: axisOf(rows) };
+  };
+  // The finest grid that is not too large (`GRID_POINTS`).
+  let grid: { cols: Axis; rws: Axis } | null = null;
+  for (const [fine, wider] of [
+    [true, 1],
+    [false, 1],
+    [false, 2],
+    [false, 4],
+  ] as const) {
+    const tried = linesOf(fine, wider * GRID_STEP);
+    if (tried.cols.at.length * tried.rws.at.length > GRID_POINTS) continue;
+    grid = tried;
+    break;
   }
-  const cols = axisOf(columns);
-  const rws = axisOf(rows);
+  if (grid === null) {
+    return { ...result, unrouted: branches.map((branch) => branch.edge.id), tooLarge: true };
+  }
+  const { cols, rws } = grid;
   const xs = cols.at;
   const ys = rws.at;
   const nC = xs.length;
@@ -588,6 +766,66 @@ export function tidyRoutes(
     inside(barRect(bus), (n) => claim(barZone, n, bus.index));
     inside(labels[i]!, (n) => claim(labelZone, n, bus.index));
   });
+  // The places kept for the values of the devices (`TidyOptions.keepFree`):
+  // which grid points each takes, how many routes run through it now, and
+  // which other places its device has.
+  /** In one of those places. */
+  const kept = new Uint8Array(size);
+  /** The places a grid point is in, for the points that are in one. */
+  const placesAt = new Map<number, number[]>();
+  const placeBox: Rect[] = [];
+  const placeMates: number[][] = [];
+  const placeCrossed: number[] = [];
+  /** The places of each device that has any. */
+  const devicePlaces: number[][] = [];
+  for (const boxes of options.keepFree ?? []) {
+    const first = placeBox.length;
+    const places = boxes.map((_, k) => first + k);
+    devicePlaces.push(places);
+    boxes.forEach((box, k) => {
+      const place = first + k;
+      placeBox.push(box);
+      placeMates.push(places.filter((mate) => mate !== place));
+      placeCrossed.push(0);
+      inside(box, (n) => {
+        kept[n] = 1;
+        const list = placesAt.get(n);
+        if (list) list.push(place);
+        else placesAt.set(n, [place]);
+      });
+    });
+  }
+  /** The place no route may run through, while the routes around a device are routed again to leave it one. */
+  let barred = -1;
+  /**
+   * What stepping from one grid point to the next costs for the places
+   * kept free: for each it goes into, more when that is the last one its
+   * device has left. A place counts as left while no route runs through it
+   * and the run that is being made is not heading through it as well: a
+   * line that passes close beside a device runs through the place beside
+   * the connector and the one on the far side in one go.
+   */
+  const into = (from: number, to: number): number => {
+    if (kept[to] === 0) return 0;
+    const before = kept[from] === 0 ? undefined : placesAt.get(from);
+    const level = Math.abs(to - from) === 1;
+    const at = level ? ys[(to / nC) | 0]! : xs[to % nC]!;
+    let cost = 0;
+    for (const place of placesAt.get(to)!) {
+      if (before?.includes(place)) continue;
+      if (place === barred) return Infinity;
+      const left = placeMates[place]!.some((mate) => {
+        const box = placeBox[mate]!;
+        const ahead = level ? at > box.top && at < box.bottom : at > box.left && at < box.right;
+        return placeCrossed[mate] === 0 && !ahead;
+      });
+      cost += left ? KEEP_FREE_COST : LAST_PLACE_COST;
+    }
+    return cost;
+  };
+  /** How many devices have a route through every place kept for them. */
+  const withoutAPlace = (): number =>
+    devicePlaces.filter((places) => places.every((place) => placeCrossed[place]! > 0)).length;
 
   /** On a device connector, or right beside one. */
   const wireNode = new Uint8Array(size);
@@ -717,6 +955,7 @@ export function tidyRoutes(
         // The run from the bar to the first grid point clear of it: nothing
         // of another bus in it, and no other route.
         let clear = true;
+        let avoided = 0;
         for (let r = bus.row + step; clear && r !== row + step; r += step) {
           const n = r * nC + c;
           const own = (zone: Int32Array): boolean => zone[n] === -1 || zone[n] === bus.index;
@@ -728,10 +967,11 @@ export function tidyRoutes(
             occV[n] === 0 &&
             occBend[n] === 0 &&
             (r === row || occH[n] === 0);
+          avoided += into(n - step * nC, n);
         }
         const node = row * nC + c;
         if (!clear || barZone[node] !== -1 || !besideClearV(c, row)) continue;
-        if (over > 0 && growth(bus, x) === null) continue;
+        if (avoided === Infinity || (over > 0 && growth(bus, x) === null)) continue;
         out.push({
           node,
           dir: V,
@@ -741,7 +981,8 @@ export function tidyRoutes(
             Math.abs(ys[row]! - bus.cy) * cols.cost[c]! +
             TAP_BIAS * Math.abs(x - bus.cx) +
             (over > 0 ? OVERHANG_COST + over : 0) +
-            CROSS_COST * occH[node]!,
+            CROSS_COST * occH[node]! +
+            avoided,
           over,
         });
       }
@@ -761,13 +1002,14 @@ export function tidyRoutes(
         occH[node] === 0 &&
         occBend[node] === 0 &&
         besideClearH(c, bus.row);
-      if (!free) continue;
+      const avoided = into(side === 'east' ? node - 1 : node + 1, node);
+      if (!free || avoided === Infinity) continue;
       out.push({
         node,
         dir: H,
         tap: tip,
         side,
-        cost: Math.abs(xs[c]! - tip[0]) + CROSS_COST * occV[node]!,
+        cost: Math.abs(xs[c]! - tip[0]) + CROSS_COST * occV[node]! + avoided,
         over: 0,
       });
     }
@@ -775,12 +1017,33 @@ export function tidyRoutes(
   };
 
   // ---- the search ----
+  /** The step from one grid point to the next away from a bar, by the side a route leaves it by. */
+  const AHEAD: Record<Side, number> = { north: -nC, south: nC, east: 1, west: -1 };
   const best = new Float64Array(2 * size);
   const seen = new Uint32Array(2 * size);
   /** The state a state was reached from; `-1 - i` for the `i`th way out of the source. */
   const cameFrom = new Int32Array(2 * size);
   const frontier = new Frontier();
   let search = 0;
+  /**
+   * What is at the least still ahead of a state, for each face of the bus a
+   * search is heading for (`aheadOf` in `routeBetween`): by the column the
+   * state is in, for one that travels along a row and for one that travels
+   * along a column.
+   */
+  const aheadAlongRow = [new Float64Array(nC), new Float64Array(nC)];
+  const aheadAlongColumn = [new Float64Array(nC), new Float64Array(nC)];
+  /** How many states the searches have taken off the frontier so far: the work done. */
+  let steps = 0;
+  const budget = options.steps ?? TIDY_STEPS;
+  /** How many steps the search in hand may take. */
+  let allowed = Infinity;
+  /** Whether a search that runs out of them goes on for the first way it finds (`HURRY`). */
+  let anyWay = false;
+  /** Whether the last search ran out of steps before it had looked at every way that could be better. */
+  let ranOut = false;
+  /** Whether the last search looked at every way it could go, where it was told to look, and found none. */
+  let noWay = false;
 
   /** The points a route is drawn through. */
   const pointsOf = (source: Terminal, path: readonly number[], target: Terminal): Point[] => {
@@ -839,10 +1102,10 @@ export function tidyRoutes(
             occV[n] === 0 &&
             occBend[n] === 0 &&
             besideClearV(c, r);
-          cost += CROSS_COST * occH[n]!;
+          cost += CROSS_COST * occH[n]! + into(n - nC, n);
           path.push(n);
         }
-        if (!clear) continue;
+        if (!clear || cost === Infinity) continue;
         const down = upper === a;
         if (!down) path.reverse();
         const source = direct(V, down ? 'south' : 'north', [x, a.cy]);
@@ -872,10 +1135,10 @@ export function tidyRoutes(
           occH[n] === 0 &&
           occBend[n] === 0 &&
           besideClearH(c, a.row);
-        cost += CROSS_COST * occV[n]!;
+        cost += CROSS_COST * occV[n]! + into(n - 1, n);
         path.push(n);
       }
-      if (clear) {
+      if (clear && cost !== Infinity) {
         const along = left === a;
         if (!along) path.reverse();
         const source = direct(H, along ? 'east' : 'west', tipOf(a, along ? 'east' : 'west'));
@@ -887,7 +1150,11 @@ export function tidyRoutes(
     // Around everything else: A* over the grid.
     const sources = terminalsOf(a);
     const targets = terminalsOf(b);
-    if (sources.length === 0 || targets.length === 0) return least.route;
+    if (sources.length === 0 || targets.length === 0) {
+      ranOut = false;
+      noWay = least.route === null;
+      return least.route;
+    }
     const passable = (n: number): boolean =>
       hard[n] === 0 && barZone[n] === -1 && own(labelZone, n);
     // A label a route may pass is that of one of its own two buses, and it
@@ -905,26 +1172,11 @@ export function tidyRoutes(
     const rowOpen = (r: number): boolean => rws.kind[r] !== 'bar' || r === a.row || r === b.row;
 
     const targetsAt = new Map<number, Terminal[]>();
-    let tc0 = nC;
-    let tc1 = -1;
-    let tr0 = nR;
-    let tr1 = -1;
     for (const target of targets) {
       const list = targetsAt.get(target.node);
       if (list) list.push(target);
       else targetsAt.set(target.node, [target]);
-      const c = target.node % nC;
-      const r = (target.node / nC) | 0;
-      tc0 = Math.min(tc0, c);
-      tc1 = Math.max(tc1, c);
-      tr0 = Math.min(tr0, r);
-      tr1 = Math.max(tr1, r);
     }
-    const ahead = (n: number): number => {
-      const x = xs[n % nC]!;
-      const y = ys[(n / nC) | 0]!;
-      return Math.max(0, xs[tc0]! - x, x - xs[tc1]!) + Math.max(0, ys[tr0]! - y, y - ys[tr1]!);
-    };
     // Where to look: around the two buses first.
     let wc0 = 0;
     let wc1 = nC - 1;
@@ -937,6 +1189,69 @@ export function tidyRoutes(
       wr0 = Math.max(wr0, rowFrom(Math.min(a.cy, b.cy) - far));
       wr1 = Math.min(wr1, rowTo(Math.max(a.cy, b.cy) + far));
     }
+    // What is still ahead of a state, at the least: the way to one of the
+    // ways into `b`, what that way in costs, and the bends it takes to
+    // arrive there in its direction. The ways in on a face are in one row,
+    // so the least over them is looked up by the column of the state: with
+    // one bend for a state that travels along a row, and for one that
+    // travels along a column with none in the column of a way in and two in
+    // any other. An end of the bar is one way in. The nearer this is to
+    // what the rest of the route does cost, the fewer states the search
+    // takes up, and across open ground it is exact.
+    const faceRows: number[] = [];
+    for (const side of ['north', 'south'] as const) {
+      const onFace = targets.filter((target) => target.side === side);
+      if (onFace.length === 0) continue;
+      const alongRow = aheadAlongRow[faceRows.length]!;
+      const alongColumn = aheadAlongColumn[faceRows.length]!;
+      faceRows.push(ys[(onFace[0]!.node / nC) | 0]!);
+      alongRow.fill(Infinity, wc0, wc1 + 1);
+      alongColumn.fill(Infinity, wc0, wc1 + 1);
+      for (const target of onFace) {
+        const c = target.node % nC;
+        if (c < wc0 || c > wc1) continue;
+        alongRow[c] = Math.min(alongRow[c]!, target.cost);
+        alongColumn[c] = alongRow[c]!;
+      }
+      for (let c = wc0 + 1; c <= wc1; c += 1) {
+        alongRow[c] = Math.min(alongRow[c]!, alongRow[c - 1]! + xs[c]! - xs[c - 1]!);
+      }
+      for (let c = wc1 - 1; c >= wc0; c -= 1) {
+        alongRow[c] = Math.min(alongRow[c]!, alongRow[c + 1]! + xs[c + 1]! - xs[c]!);
+      }
+      for (let c = wc0; c <= wc1; c += 1) {
+        alongColumn[c] = Math.min(alongColumn[c]!, alongRow[c]! + 2 * BEND_COST);
+        alongRow[c] = alongRow[c]! + BEND_COST;
+      }
+    }
+    const ends = targets
+      .filter((target) => target.dir === H)
+      .map((target) => ({
+        x: xs[target.node % nC]!,
+        row: (target.node / nC) | 0,
+        cost: target.cost,
+      }));
+    const aheadOf = (state: number): number => {
+      const n = state >> 1;
+      const along = state & 1;
+      const c = n % nC;
+      const r = (n / nC) | 0;
+      const y = ys[r]!;
+      let least = Infinity;
+      for (let face = 0; face < faceRows.length; face += 1) {
+        const rest =
+          Math.abs(y - faceRows[face]!) +
+          (along === H ? aheadAlongRow[face]![c]! : aheadAlongColumn[face]![c]!);
+        if (rest < least) least = rest;
+      }
+      for (const end of ends) {
+        const bends = r === end.row ? (along === H ? 0 : 1) : along === H ? 2 : 1;
+        const rest =
+          Math.abs(xs[c]! - end.x) + Math.abs(y - ys[end.row]!) + end.cost + BEND_COST * bends;
+        if (rest < least) least = rest;
+      }
+      return least;
+    };
 
     search += 1;
     frontier.clear();
@@ -945,7 +1260,7 @@ export function tidyRoutes(
       seen[state] = search;
       best[state] = cost;
       cameFrom[state] = from;
-      frontier.push(cost + ahead(state >> 1), state);
+      frontier.push(cost, aheadOf(state), state);
     };
     sources.forEach((source, i) => reachState(2 * source.node + source.dir, source.cost, -1 - i));
     /**
@@ -970,14 +1285,32 @@ export function tidyRoutes(
       return false;
     };
     let goal: { cost: number; state: number; target: Terminal } | null = null;
+    let stopAt = steps + allowed;
+    let hurried = false;
+    ranOut = false;
     while (frontier.size > 0) {
+      if (steps >= stopAt) {
+        // Out of steps. With no way found yet, and one wanted whatever it
+        // costs, the search makes for the goal and takes the first.
+        ranOut = true;
+        if (hurried || !anyWay || goal !== null || least.route !== null) break;
+        hurried = true;
+        frontier.hurry(HURRY, aheadOf);
+        // As many steps as find a way round a thing or two, and as it takes
+        // to cross the stretch that is searched.
+        stopAt = steps + HURRY_STEPS + 4 * (wc1 - wc0 + wr1 - wr0);
+        continue;
+      }
+      if (hurried && goal !== null) break;
       const limit = Math.min(goal?.cost ?? Infinity, least.route?.cost ?? Infinity);
-      if (frontier.peek() >= limit) break;
+      if (!hurried && frontier.peek() >= Frontier.rounded(limit)) break;
       const state = frontier.pop();
+      // Reached again since, by a way that costs less: that one is taken up.
+      if (frontier.cost > best[state]!) continue;
+      steps += 1;
       const n = state >> 1;
       const d = state & 1;
       const cost = best[state]!;
-      if (cost + ahead(n) >= limit) continue;
       for (const target of targetsAt.get(n) ?? []) {
         const turns = target.dir !== d;
         if (turns && (!mayBend(n) || kinks(state))) continue;
@@ -986,6 +1319,10 @@ export function tidyRoutes(
       }
       const c = n % nC;
       const r = (n / nC) | 0;
+      // Where it came from: a route does not turn back on itself, nor back
+      // into the bar it has just left.
+      const from = cameFrom[state]!;
+      const back = from >= 0 ? from >> 1 : n - AHEAD[sources[-1 - from]!.side];
       for (let k = 0; k < 4; k += 1) {
         const md = k < 2 ? H : V;
         const sign = k % 2 === 0 ? -1 : 1;
@@ -993,7 +1330,7 @@ export function tidyRoutes(
         const r2 = md === V ? r + sign : r;
         if (c2 < wc0 || c2 > wc1 || r2 < wr0 || r2 > wr1) continue;
         const n2 = r2 * nC + c2;
-        if (!passable(n2)) continue;
+        if (n2 === back || !passable(n2)) continue;
         const edge = sign > 0 ? n : n2;
         let step: number;
         if (md === H) {
@@ -1020,9 +1357,11 @@ export function tidyRoutes(
           if (!mayBend(n) || kinks(state)) continue;
           step += BEND_COST;
         }
-        reachState(2 * n2 + md, cost + step, state);
+        step += into(n, n2);
+        if (step !== Infinity) reachState(2 * n2 + md, cost + step, state);
       }
     }
+    noWay = goal === null && least.route === null && !ranOut;
     if (goal !== null) {
       const path: number[] = [];
       let state = goal.state;
@@ -1051,6 +1390,8 @@ export function tidyRoutes(
   };
   const mark = (route: Found, by: number): void => {
     const path = route.nodes;
+    /** The places kept free that it runs through. */
+    let through: Set<number> | null = null;
     for (let i = 0; i < path.length; i += 1) {
       const n = path[i]!;
       const before = i === 0 ? route.source.dir : along(path[i - 1]!, n);
@@ -1059,7 +1400,9 @@ export function tidyRoutes(
       if (before === H || after === H) bump(occH, n, by);
       if (before === V || after === V) bump(occV, n, by);
       if (i > 0) bump(before === H ? edgeH : edgeV, Math.min(n, path[i - 1]!), by);
+      if (kept[n] !== 0) for (const place of placesAt.get(n)!) (through ??= new Set()).add(place);
     }
+    for (const place of through ?? []) placeCrossed[place] = placeCrossed[place]! + by;
   };
   const land = (bus: Bus, terminal: Terminal, id: string, on: boolean): void => {
     if (terminal.side === 'east' || terminal.side === 'west') {
@@ -1103,8 +1446,16 @@ export function tidyRoutes(
     branch.found = null;
     return route;
   };
-  const routeOf = (branch: Branch): Found | null =>
-    routeBetween(branch.a, branch.b, SEARCH_WINDOW) ?? routeBetween(branch.a, branch.b, null);
+  /**
+   * The route of `branch` around everything that is there now: looked for
+   * around its two buses first, and across the whole diagram when there is
+   * none there (and not when the steps ran out with more to look at there:
+   * a wider look takes more).
+   */
+  const routeOf = (branch: Branch): Found | null => {
+    const near = routeBetween(branch.a, branch.b, SEARCH_WINDOW);
+    return near !== null || !noWay ? near : routeBetween(branch.a, branch.b, null);
+  };
 
   // The shortest first: a line between two buses side by side has one good
   // way, and a long one has many.
@@ -1127,6 +1478,11 @@ export function tidyRoutes(
       take(branch, route);
       return;
     }
+    // No way within the steps it had is not a bar with no place left.
+    if (ranOut) {
+      result.outOfSteps = true;
+      return;
+    }
     const evicted: Branch[] = [];
     for (const bus of [branch.a, branch.b]) {
       if (bus.endsBarred) continue;
@@ -1144,52 +1500,74 @@ export function tidyRoutes(
       if (found !== null) take(again, found);
     }
   };
-  for (const branch of order) settle(branch);
-  const passes = order.length > REFINE_LIMIT ? 0 : order.length > REFINE_TWICE ? 1 : REFINE_PASSES;
-  for (let pass = 0; pass < passes; pass += 1) {
-    for (const branch of order) {
+  // The first routing: every branch gets a way, the best one there is while
+  // the steps last and the first one found after that (`TIDY_STEPS`).
+  anyWay = true;
+  order.forEach((branch, i) => {
+    if (steps >= 2 * budget) {
+      result.outOfSteps = true;
+      return;
+    }
+    allowed = Math.max(SEARCH_STEPS, (budget / 2 - steps) / (order.length - i));
+    settle(branch);
+  });
+  // Then each is taken out and routed again around all the others, which
+  // lets an early one give way to those that came later. A search that runs
+  // out of steps here may have found a way no better than the one the branch
+  // had, so that one stays.
+  anyWay = false;
+  for (let pass = 0; pass < REFINE_PASSES; pass += 1) {
+    for (let i = 0; i < order.length && steps < budget; i += 1) {
+      const branch = order[i]!;
+      allowed = Math.max(SEARCH_STEPS, (budget - steps) / (order.length - i));
       const held = drop(branch);
-      const route = routeOf(branch) ?? held;
+      const again = routeOf(branch);
+      const route = again !== null && (!ranOut || held === null) ? again : held;
       if (route !== null) take(branch, route);
-      else settle(branch);
     }
   }
+
+  const wires: Point[][] = stubs.map((stub) => base.routes.get(stub.id)?.points ?? []);
+  /** How often two routes cross. */
+  const crossings = (p: readonly Point[], q: readonly Point[]): number => {
+    let count = 0;
+    for (let i = 1; i < p.length; i += 1) {
+      for (let k = 1; k < q.length; k += 1) {
+        if (runsCross(p[i - 1]!, p[i]!, q[k - 1]!, q[k]!)) count += 1;
+      }
+    }
+    return count;
+  };
+  /**
+   * What the routes of `group` cost as they are drawn: their lengths, their
+   * bends and what they cross, and each device that is left without a place
+   * for its values.
+   */
+  const priceOf = (group: readonly Branch[]): number => {
+    let length = 0;
+    let bends = 0;
+    let crossed = 0;
+    group.forEach((branch, i) => {
+      const points = branch.found!.points;
+      bends += points.length - 2;
+      for (let k = 1; k < points.length; k += 1) {
+        length += Math.abs(points[k]![0] - points[k - 1]![0]);
+        length += Math.abs(points[k]![1] - points[k - 1]![1]);
+      }
+      for (const wire of wires) crossed += crossings(points, wire);
+      for (const other of order) {
+        // Two of the group that cross each other are counted once.
+        if (other === branch || other.found === null || group.indexOf(other) > i) continue;
+        crossed += crossings(points, other.found.points);
+      }
+    });
+    return length + BEND_COST * bends + CROSS_COST * crossed + LAST_PLACE_COST * withoutAPlace();
+  };
 
   // Two routes that cross are then taken out together and routed again, one
   // first and then the other: routed one at a time, neither can take the
   // way the other is on, and often they only need to change places.
-  if (passes > 0) {
-    const wires: Point[][] = stubs.map((stub) => base.routes.get(stub.id)?.points ?? []);
-    /** How often two routes cross. */
-    const crossings = (p: readonly Point[], q: readonly Point[]): number => {
-      let count = 0;
-      for (let i = 1; i < p.length; i += 1) {
-        for (let k = 1; k < q.length; k += 1) {
-          if (runsCross(p[i - 1]!, p[i]!, q[k - 1]!, q[k]!)) count += 1;
-        }
-      }
-      return count;
-    };
-    /** What a pair of routes costs as they are drawn: their lengths, their bends, and what they cross. */
-    const priceOf = (first: Branch, second: Branch): number => {
-      const [p, q] = [first.found!.points, second.found!.points];
-      let crossed = crossings(p, q);
-      for (const points of [p, q]) {
-        for (const wire of wires) crossed += crossings(points, wire);
-        for (const other of order) {
-          if (other === first || other === second || other.found === null) continue;
-          crossed += crossings(points, other.found.points);
-        }
-      }
-      let length = 0;
-      for (const points of [p, q]) {
-        for (let i = 1; i < points.length; i += 1) {
-          length += Math.abs(points[i]![0] - points[i - 1]![0]);
-          length += Math.abs(points[i]![1] - points[i - 1]![1]);
-        }
-      }
-      return length + BEND_COST * (p.length + q.length - 4) + CROSS_COST * crossed;
-    };
+  if (steps < budget) {
     const routed = order.filter((branch) => branch.found !== null);
     const pairs: [Branch, Branch][] = [];
     for (let i = 0; i < routed.length && pairs.length < PAIR_LIMIT; i += 1) {
@@ -1199,10 +1577,13 @@ export function tidyRoutes(
         }
       }
     }
-    for (const [first, second] of pairs) {
+    for (let i = 0; i < pairs.length && steps < budget; i += 1) {
+      const [first, second] = pairs[i]!;
       if (first.found === null || second.found === null) continue;
-      let kept: { price: number; routes: [Found, Found] } = {
-        price: priceOf(first, second),
+      // Four searches to a pair: each of the two, in both orders.
+      allowed = Math.max(SEARCH_STEPS, (budget - steps) / (4 * (pairs.length - i)));
+      let best: { price: number; routes: [Found, Found] } = {
+        price: priceOf([first, second]),
         routes: [first.found, second.found],
       };
       drop(first);
@@ -1216,21 +1597,101 @@ export function tidyRoutes(
         const late = early === null ? null : routeOf(other);
         if (late !== null) take(other, late);
         if (early !== null && late !== null) {
-          const price = priceOf(first, second);
-          if (price < kept.price - 1e-9) kept = { price, routes: [first.found!, second.found!] };
+          const price = priceOf([first, second]);
+          if (price < best.price - 1e-9) best = { price, routes: [first.found!, second.found!] };
         }
         drop(one);
         drop(other);
       }
-      take(first, kept.routes[0]);
-      take(second, kept.routes[1]);
+      take(first, best.routes[0]);
+      take(second, best.routes[1]);
     }
+  }
+
+  // A device that is left without a place for its values has a route
+  // through every one that was kept for it. Routed one at a time, none of
+  // those routes gives way: each finds the other places taken. So they are
+  // taken out together and routed again with one of the places shut, each
+  // place in turn, and the drawing that costs least is kept. Each is tried
+  // with the ends of their bars shut as well: a line that squeezes between
+  // a load and the generator beside it can land on the other side of the
+  // load, on the bar drawn out, and the lines that left by that end of the
+  // bar then leave by its face beside it, which an end taken first rules out.
+  for (const places of devicePlaces) {
+    if (steps >= budget) break;
+    if (!places.every((place) => placeCrossed[place]! > 0)) continue;
+    const through = order.filter(
+      (branch) =>
+        branch.found !== null &&
+        branch.found.nodes.some(
+          (n) => kept[n] !== 0 && placesAt.get(n)!.some((place) => places.includes(place)),
+        ),
+    );
+    if (through.length === 0 || through.length > GROUP_LIMIT) continue;
+    // With them go the other routes of their buses that pass close by: one
+    // that has the end of a bar, or the way beside the device, is what the
+    // ones through the places would have to get round.
+    const boxes = places.map((place) => placeBox[place]!);
+    const around: Rect = grown(
+      {
+        left: Math.min(...boxes.map((box) => box.left)),
+        right: Math.max(...boxes.map((box) => box.right)),
+        top: Math.min(...boxes.map((box) => box.top)),
+        bottom: Math.max(...boxes.map((box) => box.bottom)),
+      },
+      GROUP_REACH,
+    );
+    const near = new Set<number>();
+    inside(around, (n) => near.add(n));
+    const theirBuses = new Set(through.flatMap((branch) => [branch.a, branch.b]));
+    const beside = order.filter(
+      (branch) =>
+        branch.found !== null &&
+        !through.includes(branch) &&
+        (theirBuses.has(branch.a) || theirBuses.has(branch.b)) &&
+        branch.found.nodes.some((n) => near.has(n)),
+    );
+    const group =
+      through.length + beside.length > GROUP_LIMIT
+        ? through
+        : order.filter((branch) => through.includes(branch) || beside.includes(branch));
+    allowed = Math.max(SEARCH_STEPS, (budget - steps) / (2 * group.length * places.length));
+    const bars = [...new Set(group.flatMap((branch) => [branch.a, branch.b]))];
+    const shut = bars.map((bus) => bus.endsBarred);
+    let best = { price: priceOf(group), routes: group.map((branch) => branch.found!) };
+    for (const branch of group) drop(branch);
+    for (const place of places) {
+      for (const noEnds of [false, true]) {
+        barred = place;
+        bars.forEach((bus, i) => {
+          bus.endsBarred = noEnds || shut[i]!;
+        });
+        const whole = group.every((branch) => {
+          const found = routeOf(branch);
+          if (found !== null) take(branch, found);
+          return found !== null;
+        });
+        if (whole) {
+          const price = priceOf(group);
+          if (price < best.price - 1e-9) {
+            best = { price, routes: group.map((branch) => branch.found!) };
+          }
+        }
+        for (const branch of group) drop(branch);
+      }
+    }
+    barred = -1;
+    bars.forEach((bus, i) => {
+      bus.endsBarred = shut[i]!;
+    });
+    group.forEach((branch, i) => take(branch, best.routes[i]!));
   }
 
   for (const branch of branches) {
     if (branch.found === null) result.unrouted.push(branch.edge.id);
     else result.routes.set(branch.edge.id, branch.found.points);
   }
+  result.steps = steps;
   return result;
 }
 

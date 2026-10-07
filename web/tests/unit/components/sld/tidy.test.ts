@@ -31,6 +31,7 @@ import {
   DEVICE_CLEARANCE,
   GRID_STEP,
   NEAR_LINE,
+  TIDY_STEPS,
   alignToGrid,
   tidyRoutes,
   type TidyNode,
@@ -245,8 +246,35 @@ describe('tidyRoutes: one branch', () => {
 
   it('routes nothing where there is no branch, and no branch from a bus to itself', () => {
     const nodes = [bus('1', 0, 0), device('load-x', 20, 70)];
-    expect(tidyRoutes(nodes, [stub('load-x', '1')])).toEqual({ routes: new Map(), unrouted: [] });
+    expect(tidyRoutes(nodes, [stub('load-x', '1')])).toEqual({
+      routes: new Map(),
+      unrouted: [],
+      steps: 0,
+    });
     expect(tidyRoutes(nodes, [line('loop', '1', '1')]).routes.size).toBe(0);
+  });
+  it('never turns a route back into the bar it has just left', () => {
+    // The generator lands a few pixels from the east tip of bus 1, which
+    // shuts that end, so the line to the bus level with it leaves by a face.
+    // A route that went up from a tap past the tip and straight back down
+    // onto the line of the bar would be drawn as running out of the tip.
+    const nodes = [
+      bus('1', 0, 0),
+      bus('2', 300, 0),
+      device('generator-g', 59, -70, 'generator'),
+      device('load-x', 20, 70),
+    ];
+    const edges = [stub('generator-g', '1'), stub('load-x', '1'), line('l', '1', '2')];
+    const { routes, unrouted } = tidyRoutes(nodes, edges);
+    expect(unrouted).toEqual([]);
+    const points = routes.get('l')!;
+    for (const [a, b] of runsOf(points)) {
+      expect(Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1])).toBeGreaterThan(0);
+    }
+    // It leaves the bar square, and what it answers is what is drawn.
+    expect(points[0]![0]).toBe(points[1]![0]);
+    const drawn = layoutConnections(nodes, tidied(nodes, edges, routes));
+    expect(drawn.routes.get('l')!.points).toEqual(points);
   });
 });
 
@@ -351,6 +379,182 @@ describe('tidyRoutes: several branches', () => {
     const first = tidyRoutes(nodes, edges);
     const second = tidyRoutes(nodes, edges);
     expect([...second.routes]).toEqual([...first.routes]);
+  });
+});
+
+/** Whether the level or upright run from `a` to `b` passes through the inside of `box`. */
+function through(a: Point, b: Point, box: Rect): boolean {
+  return (
+    Math.max(a[0], b[0]) > box.left &&
+    Math.min(a[0], b[0]) < box.right &&
+    Math.max(a[1], b[1]) > box.top &&
+    Math.min(a[1], b[1]) < box.bottom
+  );
+}
+
+describe('tidyRoutes: the places kept for the values of a device', () => {
+  // A load over the left of bar 2, and a line that comes straight down from
+  // bar 1 beside it. `right` is where the values of the load stand, between
+  // the load and the bar, right of its connector; `left` is the other side.
+  const nodes = [bus('1', 0, 0), bus('2', 0, 200), device('load-x', 0, 130)];
+  const edges = [stub('load-x', '2'), line('l', '1', '2')];
+  const right: Rect = { left: 24, right: 96, top: 172, bottom: 194 };
+  const left: Rect = { left: -56, right: 16, top: 172, bottom: 194 };
+  const crosses = (points: readonly Point[], place: Rect): boolean =>
+    runsOf(points).some(([a, b]) => through(a, b, place));
+
+  it('runs a line through one of two places as if neither were kept', () => {
+    const plain = tidyRoutes(nodes, edges).routes.get('l')!;
+    expect(plain).toHaveLength(2);
+    expect(crosses(plain, right)).toBe(true);
+    // The load still has the other side of its connector.
+    const kept = tidyRoutes(nodes, edges, { keepFree: [[right, left]] }).routes.get('l')!;
+    expect(kept).toEqual(plain);
+    expect(crosses(kept, left)).toBe(false);
+  });
+
+  it('takes a line round the last place a device has', () => {
+    const { routes, unrouted } = tidyRoutes(nodes, edges, { keepFree: [[right]] });
+    expect(unrouted).toEqual([]);
+    const points = routes.get('l')!;
+    expect(crosses(points, right)).toBe(false);
+    // It still lands on both bars, clear of the load.
+    const box: Rect = { left: 0, right: 40, top: 130, bottom: 170 };
+    for (const [a, b] of runsOf(points)) {
+      expect(distance(a, b, box)).toBeGreaterThanOrEqual(DEVICE_CLEARANCE);
+    }
+    const drawn = layoutConnections(nodes, tidied(nodes, edges, routes));
+    expect(drawn.routes.get('l')!.points).toEqual(points);
+  });
+
+  it('runs through the last place where there is no other way', () => {
+    // Walls either side of the two bars, and a place kept from wall to wall:
+    // every way from one bar to the other runs through it.
+    const walls: Rect[] = [
+      { left: -80, right: -20, top: -60, bottom: 280 },
+      { left: 112, right: 170, top: -60, bottom: 280 },
+    ];
+    const across: Rect = { left: -20, right: 112, top: 172, bottom: 194 };
+    const { routes, unrouted } = tidyRoutes(nodes, edges, {
+      keepFree: [[across]],
+      obstacles: walls,
+    });
+    expect(unrouted).toEqual([]);
+    expect(crosses(routes.get('l')!, across)).toBe(true);
+  });
+});
+
+/**
+ * A mesh of buses in rows, a load under every other one: each bus joined to
+ * the next in its row, every other one to the bus below, and `links` more
+ * to buses a few rows and columns off, by a fixed rule (the same mesh every
+ * time). The links that reach far have to cross what lies between.
+ */
+function mesh(
+  columns: number,
+  rows: number,
+  links: number,
+): { nodes: TidyNode[]; edges: ConnectionEdge[] } {
+  const nodes: TidyNode[] = [];
+  const edges: ConnectionEdge[] = [];
+  const id = (c: number, r: number): string => `${r}-${c}`;
+  let seed = 12345;
+  const next = (below: number): number => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed % below;
+  };
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < columns; c += 1) {
+      const [x, y] = [c * 176 + next(5) * GRID_STEP, r * 160 + next(3) * GRID_STEP];
+      nodes.push(bus(id(c, r), x, y));
+      if ((r + c) % 2 === 0) {
+        nodes.push(device(`load-${id(c, r)}`, x + 6, y + 70));
+        edges.push(stub(`load-${id(c, r)}`, id(c, r)));
+      }
+      if (c + 1 < columns) edges.push(line(`across-${id(c, r)}`, id(c, r), id(c + 1, r)));
+      if (r + 1 < rows && (r + c) % 2 === 1) {
+        edges.push(line(`down-${id(c, r)}`, id(c, r), id(c, r + 1)));
+      }
+    }
+  }
+  for (let k = 0; k < links; k += 1) {
+    const [c, r] = [next(columns), next(rows)];
+    const [c2, r2] = [Math.min(columns - 1, c + 1 + next(4)), Math.min(rows - 1, r + 1 + next(3))];
+    if (c2 !== c || r2 !== r) edges.push(line(`far-${k}`, id(c, r), id(c2, r2)));
+  }
+  return { nodes, edges };
+}
+
+describe('tidyRoutes: how much work it does', () => {
+  it('routes a diagram of over 200 branches within its steps, in about a second', () => {
+    const { nodes, edges } = mesh(12, 10, 70);
+    const branches = edges.filter((edge) => edge.type !== 'stub');
+    expect(nodes.filter((node) => node.type === 'bus')).toHaveLength(120);
+    expect(branches.length).toBeGreaterThan(200);
+    const started = performance.now();
+    const { routes, unrouted, steps } = tidyRoutes(nodes, edges);
+    const took = performance.now() - started;
+    // The steps are what bounds the work, on any machine, and this diagram
+    // takes all it is given: routed until nothing could be bettered it
+    // takes several times as many. The time is about a second; the bound
+    // here is loose enough for a slow machine that is doing other things.
+    expect(steps).toBeGreaterThanOrEqual(TIDY_STEPS);
+    expect(steps).toBeLessThanOrEqual(TIDY_STEPS + 20_000);
+    expect(took).toBeLessThan(20_000);
+    expect(unrouted).toEqual([]);
+    expect(routes.size).toBe(branches.length);
+    expect(meetings(routes).shared).toEqual([]);
+  });
+
+  it('stops when the steps it is given run out, and says so', () => {
+    const { nodes, edges } = mesh(8, 6, 30);
+    const branches = edges.filter((edge) => edge.type !== 'stub').length;
+    const few = tidyRoutes(nodes, edges, { steps: 2_000 });
+    // Past twice the steps nothing more is routed.
+    expect(few.steps).toBeLessThanOrEqual(2 * 2_000 + 20_000);
+    expect(few.routes.size + few.unrouted.length).toBe(branches);
+    expect(few.unrouted.length).toBeGreaterThan(0);
+    expect(few.outOfSteps).toBe(true);
+    // With enough of them none is left for want of steps.
+    const enough = tidyRoutes(nodes, edges);
+    expect(enough.outOfSteps).toBeUndefined();
+    expect(enough.routes.size).toBeGreaterThan(few.routes.size);
+  });
+
+  it('answers the same routes for the same diagram when the steps run out as well', () => {
+    const { nodes, edges } = mesh(8, 6, 30);
+    const first = tidyRoutes(nodes, edges, { steps: 30_000 });
+    const second = tidyRoutes(nodes, edges, { steps: 30_000 });
+    expect([...second.routes]).toEqual([...first.routes]);
+    expect(second.steps).toBe(first.steps);
+  });
+
+  it('routes a diagram that has a bus standing far off without a grid over the room in between', () => {
+    // Half a million pixels of nothing between bus 3 and the rest: a grid
+    // over all of it would have a billion points.
+    const nodes = [bus('1', 0, 0), bus('2', 0, 160), bus('3', -500_000, -300_000)];
+    const edges = [line('near', '1', '2'), line('far', '1', '3')];
+    const started = performance.now();
+    const { routes, unrouted, tooLarge } = tidyRoutes(nodes, edges);
+    expect(performance.now() - started).toBeLessThan(5_000);
+    expect(tooLarge).toBeUndefined();
+    expect(unrouted).toEqual([]);
+    expect(routes.get('near')).toHaveLength(2);
+    const far = routes.get('far')!;
+    expect(far[far.length - 1]![1]).toBe(-299_997);
+    for (const [a, b] of runsOf(far)) expect(a[0] === b[0] || a[1] === b[1]).toBe(true);
+  });
+
+  it('does not route a diagram that is too large for any grid, and says so', () => {
+    // A hundred and fifty buses down a diagonal, each far from the next.
+    const nodes = Array.from({ length: 150 }, (_, i) => bus(`b${i}`, i * 2_500, i * 2_500));
+    const edges = nodes.slice(1).map((node, i) => line(`l${i}`, `b${i}`, node.id));
+    const started = performance.now();
+    const result = tidyRoutes(nodes, edges);
+    expect(performance.now() - started).toBeLessThan(5_000);
+    expect(result.tooLarge).toBe(true);
+    expect(result.routes.size).toBe(0);
+    expect(result.unrouted).toHaveLength(149);
   });
 });
 
