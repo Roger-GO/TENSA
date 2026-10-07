@@ -12,8 +12,9 @@
  *
  *   in a copy of each: move a bus, put a load beside its bar and another
  *   across it -> the lines are routed round them as each is dropped, and
- *   the rule still holds -> Tidy and re-layout -> it holds, and every bus is
- *   on the grid
+ *   the rule still holds -> drop a load on a generator -> it is put in the
+ *   nearest free place, a notice says so, and the rule still holds -> Tidy
+ *   and re-layout -> it holds, and every bus is on the grid
  *
  * What is on screen is read off the page (`drawnOnScreen` in
  * `sldDrawing.ts`) and handed to the checker the diagram itself routes by
@@ -30,6 +31,7 @@ import {
   NEAR,
   branchesIntoDevices,
   dragInDiagram,
+  drawing,
   labelProblems,
   layoutWritten,
   openCase,
@@ -120,9 +122,11 @@ for (const { file, moves } of EXAMPLES) {
       expect(edge.points, id).toHaveLength(2);
       expect(Math.abs(edge.points[0]![0] - edge.points[1]![0]), id).toBeLessThan(NEAR);
     }
-    // It is arranged already: neither tidy finds anything to change.
+    // It is arranged already: neither tidy finds anything to change, and
+    // the button keeps saying so after the notice has gone.
     await page.getByTestId('sld-tidy').click();
     await expect(page.getByText('The diagram is already tidy.').last()).toBeVisible();
+    await expect(page.getByTestId('sld-tidy-note')).toHaveText('Already tidy: nothing was changed');
     await page.getByTestId('sld-arrange-trigger').click();
     await page.getByTestId('sld-arrange-tidy-relayout').click();
     await expect(
@@ -152,6 +156,32 @@ for (const { file, moves } of EXAMPLES) {
       // No line was left drawn through a symbol or a bar for a tidy to put right.
       await expect(page.getByTestId('sld-tidy-count')).toHaveCount(0);
     }
+
+    // ---- Dropped on a symbol ---------------------------------------------------
+    // A load let go on a generator does not stay on it: it stands in the
+    // nearest free place, and the diagram says that it was moved there.
+    const before = await drawing(page);
+    const idOf = (type: string): string =>
+      Object.entries(before.nodes).find(([, node]) => node.type === type)![0];
+    const [load, generator] = [idOf('load'), idOf('generator')];
+    const onto = before.nodes[generator]!;
+    await dragInDiagram(
+      page,
+      load,
+      onto.x + 10 - before.nodes[load]!.x,
+      onto.y + 6 - before.nodes[load]!.y,
+    );
+    await expect(page.getByText('Moved to the nearest free place').last()).toBeVisible();
+    const put = await settled(page);
+    const [a, b] = [put.nodes[load]!, put.nodes[generator]!];
+    const apart =
+      a.x >= b.x + b.width ||
+      b.x >= a.x + a.width ||
+      a.y >= b.y + b.height ||
+      b.y >= a.y + a.height;
+    expect(apart, `${load} and ${generator}`).toBe(true);
+    expect(await overlapsOnScreen(page), `after ${load} was dropped on ${generator}`).toEqual([]);
+    expect(branchesIntoDevices(put), `after ${load} was dropped on ${generator}`).toEqual([]);
 
     // ---- Laid out again -------------------------------------------------------
     await page.getByTestId('sld-arrange-trigger').click();

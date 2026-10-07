@@ -12,6 +12,7 @@
 import type { Edge, Node } from '@xyflow/react';
 import type { TopologySummary } from '@/api/types';
 import type { ConnectionEdge } from '@/components/sld/connections';
+import { clearDrop } from '@/components/sld/dropPlace';
 import { buildGraph, defaultBarLengths, type BuildGraphOptions } from '@/components/sld/graph';
 import { autoLayout } from '@/components/sld/layout';
 import { describeOverlaps, findOverlaps } from '@/components/sld/overlapCheck';
@@ -88,18 +89,51 @@ export function tidied(diagram: Diagram, relayout: boolean): Diagram {
   return { ...diagram, nodes: plan.nodes, edges };
 }
 
+/** The nodes that go along when the node `id` is dragged: itself, and for a bus its devices. */
+export function draggedWith(diagram: Diagram, id: string): Set<string> {
+  return new Set(
+    diagram.nodes
+      .filter((n) => n.id === id || (n.data as { parentBus?: string }).parentBus === id)
+      .map((n) => n.id),
+  );
+}
+
+/** `diagram` with the nodes `ids` moved by `dx`, `dy`, as while they are dragged: nothing routed again. */
+export function moved(diagram: Diagram, ids: ReadonlySet<string>, dx: number, dy: number): Diagram {
+  const nodes = diagram.nodes.map((n) =>
+    ids.has(n.id) ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } } : n,
+  );
+  return { ...diagram, nodes };
+}
+
+/**
+ * How far the canvas shifts the nodes `ids` of `diagram` when they are
+ * dropped where they stand (`clearDrop`): `null` where they are clear.
+ * `before` is the diagram as it stood before they were moved.
+ */
+export function dropShift(
+  diagram: Diagram,
+  ids: ReadonlySet<string>,
+  before: Diagram = diagram,
+): { dx: number; dy: number } | null {
+  const { connections } = drawn(diagram, { values: false, dragging: true });
+  return clearDrop(diagram.nodes, diagram.edges as ConnectionEdge[], ids, connections, {
+    atRest: drawn(before).connections,
+  });
+}
+
 /**
  * `diagram` after the node `id` was dragged by `dx`, `dy` and dropped: a bus
- * takes its generators, loads and shunts along, and the routes are the ones
- * the canvas makes for the diagram at rest.
+ * takes its generators, loads and shunts along, what was dropped on
+ * something stands in the nearest free place, as the canvas puts it there,
+ * and the routes are the ones the canvas makes for the diagram at rest.
  */
 export function dragged(diagram: Diagram, id: string, dx: number, dy: number): Diagram {
-  const nodes = diagram.nodes.map((n) =>
-    n.id === id || (n.data as { parentBus?: string }).parentBus === id
-      ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } }
-      : n,
-  );
-  return settled({ ...diagram, nodes });
+  const ids = draggedWith(diagram, id);
+  let dropped = moved(diagram, ids, dx, dy);
+  const shift = dropShift(dropped, ids, diagram);
+  if (shift !== null) dropped = moved(dropped, ids, shift.dx, shift.dy);
+  return settled(dropped);
 }
 
 /** Every place where two things of `diagram` are drawn on each other, as text. */
