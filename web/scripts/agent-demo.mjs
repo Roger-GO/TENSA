@@ -191,7 +191,8 @@ async function dragComponentToCanvas(page, kind, x, y) {
  */
 async function addElement(page, kind, submitModel, fields, advFields = null) {
   await page.locator('[data-testid="add-element-kind"]').selectOption(kind);
-  await page.locator(`[data-testid="element-form-${submitModel}"]`).waitFor();
+  const form = page.locator(`[data-testid="element-form-${submitModel}"]`);
+  await form.waitFor();
   for (const [name, value] of Object.entries(fields)) {
     await fillField(page, name, value);
   }
@@ -203,7 +204,9 @@ async function addElement(page, kind, submitModel, fields, advFields = null) {
   }
   const [resp] = await Promise.all([
     page.waitForResponse((r) => r.url().includes('/elements') && r.request().method() === 'POST'),
-    page.getByRole('button', { name: `Add ${submitModel}`, exact: true }).click(),
+    // Inside the form: the Bus and Line rows of the Components tab are
+    // buttons of the same name.
+    form.getByRole('button', { name: `Add ${submitModel}`, exact: true }).click(),
   ]);
   if (!resp.ok()) {
     const body = await resp.text();
@@ -583,8 +586,8 @@ async function main() {
   await page.locator('[data-testid="add-event-dialog"]').waitFor();
   // Bus 7 is pre-selected from context; tweak the clearing time (5 cycles).
   await page
-    .getByLabel(/tc — fault cleared/)
-    .fill('1.083')
+    .getByLabel(/Fault cleared at/)
+    .fill('1.083', { timeout: 2500 })
     .catch(() => {});
   await sleep(900);
   await page.locator('[data-testid="add-event-save"]').click();
@@ -606,7 +609,16 @@ async function main() {
     'Bus voltages auto-selected — fault dip and recovery at a glance',
     'top',
   );
-  await page.locator('button[aria-label*="Maximize results"]').click();
+  // The toggle stands in the top bar on a wide window; on a narrower one,
+  // this one included, it is in the bar's More menu.
+  const resultsToggle = page.locator('[data-testid="top-bar-toggle-results-view"]');
+  if (await resultsToggle.isVisible()) {
+    await resultsToggle.click();
+  } else {
+    await page.locator('[data-testid="topbar-menu-more-trigger"]').click();
+    await sleep(400);
+    await page.locator('[data-testid="topbar-menu-more-view.toggle-results-view"]').click();
+  }
   await sleep(4500);
 
   // -- reset + PF + EIG -----------------------------------------------------
