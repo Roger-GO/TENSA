@@ -201,6 +201,7 @@ describe('menu for a bus', () => {
   });
 
   it('Fault here opens the Add disturbance dialog on a fault at this bus, and Add schedules it', async () => {
+    const success = vi.spyOn(toast, 'success');
     await openMenu(BUS);
     await userEvent.click(screen.getByTestId('sld-context-fault'));
     const dialog = await screen.findByTestId('add-event-dialog');
@@ -212,6 +213,13 @@ describe('menu for a bus', () => {
     await userEvent.click(within(dialog).getByTestId('add-event-save'));
     const [added] = useDisturbanceStore.getState().disturbances;
     expect(added?.spec).toMatchObject({ kind: 'fault', bus_idx: 1, tf: 1, tc: 1.1 });
+    // It says where the fault went: the sidebar may be on its other tab.
+    expect(success).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        description: expect.stringContaining('Disturbances in the left sidebar (Project tab)'),
+      }),
+    );
     await waitFor(() => expect(screen.queryByTestId('add-event-dialog')).toBeNull());
   });
 

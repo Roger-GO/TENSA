@@ -368,7 +368,7 @@ export function SldContextMenuBody({
     addDisturbance(spec);
     toast.success(disturbanceSummary(spec), {
       description:
-        'Added to Disturbances in the left sidebar. It applies the next time you run TDS.',
+        'Added to Disturbances in the left sidebar (Project tab). It applies the next time you run TDS.',
     });
   };
 
