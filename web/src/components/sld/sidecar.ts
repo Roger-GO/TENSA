@@ -737,6 +737,14 @@ export function barLengthsOf(layout: SidecarLayout | null): Map<string, number> 
  * saved system, so a reload draws the same picture whatever placed the
  * nodes (a drag, the curated layout of the case, or auto-layout).
  *
+ * A route that was drawn by hand is written with the places its two ends
+ * stand at, which is what a reader takes it to have been drawn for
+ * (`storedBranchRoutes`, `storedConnectorRoutes`). So one that is still
+ * held for where an end stood before a move (`data.bendAnchors`; the
+ * diagram brings it along, or gives it up, a moment after the move is
+ * kept) is not written as it is held: read back, it would be drawn through
+ * points that were made for a device somewhere else.
+ *
  * `base` is the layout the diagram was drawn from. The sections the canvas
  * does not write (busbars, label offsets, figure settings) and the chosen
  * faces of a branch or a connector are carried over from it,
@@ -778,6 +786,23 @@ export function captureLayout(
     }
   }
 
+  // Whether a route that was drawn by hand is held for where its two ends
+  // stand in this diagram.
+  const stands = new Map(diagram.nodes.map((n) => [n.id, n.position]));
+  const drawnForHere = (e: DiagramEdge): boolean => {
+    const anchors = e.data?.bendAnchors as Partial<RouteAnchors> | undefined;
+    const here = (anchor: BusCoord | undefined, id: string | undefined): boolean => {
+      const at = id === undefined ? undefined : stands.get(id);
+      return (
+        anchor !== undefined &&
+        at !== undefined &&
+        Math.abs(anchor.x - at.x) < 0.01 &&
+        Math.abs(anchor.y - at.y) < 0.01
+      );
+    };
+    return here(anchors?.source, e.source) && here(anchors?.target, e.target);
+  };
+
   const branches: FullSidecarLayout['branches'] = {};
   for (const e of diagram.edges) {
     const bucket = e.data?.bucket;
@@ -790,7 +815,10 @@ export function captureLayout(
     const targetFace = chosen?.target_face ?? null;
     const polyline = e.data?.bendPoints as [number, number][] | undefined;
     const drawnThroughPoints =
-      Array.isArray(polyline) && polyline.length >= 2 && polyline.length <= MAX_BEND_POINTS;
+      Array.isArray(polyline) &&
+      polyline.length >= 2 &&
+      polyline.length <= MAX_BEND_POINTS &&
+      (e.data?.bendManual !== true || drawnForHere(e));
     if (!drawnThroughPoints && sourceFace === null && targetFace === null) continue;
     (branches[bucket] ??= {})[idx] = {
       routing: !drawnThroughPoints ? 'auto' : e.data?.bendManual === true ? 'manual' : 'polyline',
@@ -828,6 +856,7 @@ export function captureLayout(
     if (!Array.isArray(polyline) || polyline.length < 2 || polyline.length > MAX_BEND_POINTS) {
       continue;
     }
+    if (!drawnForHere(e)) continue;
     const idx =
       typeof device.data.idx === 'string'
         ? device.data.idx

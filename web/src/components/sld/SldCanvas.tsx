@@ -1096,7 +1096,17 @@ function SldCanvasInner({
   useEffect(() => {
     if (dragging || !coordsAreCurrent) return;
     if (baseGraph === null || edges !== baseGraph.edges) return;
-    if (picture.changed.size === 0) {
+    // The routes that were drawn by hand and are no longer: what they are
+    // attached to was moved to where they do not fit.
+    const drawnByHand = new Set(
+      edges.filter((edge) => edge.data?.bendManual === true).map((edge) => edge.id),
+    );
+    // One of them that is worked out again and has no route of its own now
+    // (the connector of a device, a line no way was found for) has none to
+    // keep: `null` says so over whatever the saved layout holds, so that the
+    // diagram that is written is the one that is drawn.
+    const letGo = picture.released.filter((id) => drawnByHand.has(id) && !picture.changed.has(id));
+    if (picture.changed.size === 0 && letGo.length === 0) {
       settlingRef.current = 0;
       routesToFollowRef.current = false;
       return;
@@ -1105,12 +1115,7 @@ function SldCanvasInner({
     const held = useCaseStore.getState().routeOverrides;
     const next: RouteOverrides = { ...held };
     let changed = false;
-    // The routes that were drawn by hand and are no longer: what they are
-    // attached to was moved to where they do not fit.
     const givenUp: string[] = [];
-    const drawnByHand = new Set(
-      edges.filter((edge) => edge.data?.bendManual === true).map((edge) => edge.id),
-    );
     for (const [id, route] of picture.changed) {
       if (
         JSON.stringify(held[id]?.points ?? null) === JSON.stringify(route.points) &&
@@ -1122,10 +1127,7 @@ function SldCanvasInner({
       changed = true;
       if (drawnByHand.has(id) && route.manual !== true) givenUp.push(id);
     }
-    // A connector that was drawn by hand and is worked out again has no
-    // route to keep: `null` says so over whatever the saved layout holds.
-    for (const id of picture.released) {
-      if (!id.startsWith('stub-') || !drawnByHand.has(id)) continue;
+    for (const id of letGo) {
       next[id] = null;
       changed = true;
       givenUp.push(id);
@@ -1141,7 +1143,7 @@ function SldCanvasInner({
           : `${givenUp.length} routes you drew no longer fit`,
         {
           description:
-            'What it is attached to was moved to where the route would run over something, so it is routed automatically again. Undo takes the move back, and the route with it.',
+            'Where its ends stand now it would run over something, fold back on itself or run along its own symbol, so it is routed automatically again. If a move led to this, Undo takes the move back and the route with it.',
           duration: 8_000,
         },
       );
@@ -1930,11 +1932,34 @@ function SldCanvasInner({
     (plan: TidyPlan, relayout: boolean) => {
       const { nodes: placedNodes, edges: placedEdges, tidied, refused } = plan;
       // The routes that were drawn by hand: the ones that stay as they are,
-      // and the ones a re-layout left no room for.
+      // the connectors that go along with their devices, and the ones a
+      // re-layout left no room for.
       const byHand = plan.byHand ?? new Map<string, Point[]>();
+      const connectorsByHand = plan.connectorsByHand ?? new Map<string, Point[]>();
       const released = plan.released ?? [];
       const graph = baseGraphRef.current;
       if (graph === null) return;
+      // How many routes drawn by hand the plan leaves the user's: the lines
+      // and transformers, and the connectors of devices with them.
+      const keptByHand =
+        byHand.size +
+        graph.edges.filter(
+          (edge) =>
+            edge.type === 'stub' && edge.data?.bendManual === true && !released.includes(edge.id),
+        ).length;
+      /** The lines `ids` by name, the first few of them: `line Line_4 and the connector of PQ_3`. */
+      const named = (ids: readonly string[]): string => {
+        const names = ids
+          .map((id) => graph.edges.find((edge) => edge.id === id))
+          .filter((edge): edge is Edge => edge !== undefined)
+          .map(routeNameOf);
+        const shown = names.slice(0, 3);
+        const more = names.length - shown.length;
+        if (more > 0) return `${shown.join(', ')} and ${more} more`;
+        return shown.length <= 1
+          ? (shown[0] ?? '')
+          : `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}`;
+      };
       const branches = placedEdges.filter((e) => e.type !== 'stub');
       if (branches.length === 0 && !relayout) {
         toast.info('Nothing to tidy: the diagram has no lines or transformers.');
@@ -1949,12 +1974,19 @@ function SldCanvasInner({
       }
       if (refused !== undefined) {
         // The plan would have drawn something over something else that the
-        // diagram keeps clear of as it stands (`planTidy`).
+        // diagram keeps clear of as it stands (`planTidy`): it says which
+        // lines, and what the user can do about the ones that are theirs.
+        const blamed = named(plan.blamed ?? []);
+        const what = blamed === '' ? 'something on the diagram' : blamed;
+        const reset =
+          keptByHand === 0
+            ? ''
+            : ` ${keptByHand} ${keptByHand === 1 ? 'line is' : 'lines are'} routed by hand and left as ${keptByHand === 1 ? 'it is' : 'they are'}: Reset manual routes, in the Arrange menu, lets the tidy route ${keptByHand === 1 ? 'it' : 'them'} as well.`;
         setTidyNote('Not tidied: nothing was changed');
         toast.info('Nothing was changed', {
           description: relayout
-            ? 'Laid out again, something on the diagram would have been drawn over something else, so it keeps the arrangement it has.'
-            : 'With the lines routed afresh, something would have been drawn over something else: mostly the connector of a device that stands away from its bus, which would have run through a symbol. The diagram keeps the routes it has. Tidy and re-layout puts every device back beside its bus.',
+            ? `Laid out again, ${what} would have been drawn over something else, so the diagram keeps the arrangement it has.${reset}`
+            : `With the lines routed afresh, ${what} would have been drawn over something else: mostly the connector of a device that stands away from its bus, which would have run through a symbol. The diagram keeps the routes it has. Tidy and re-layout puts every device back beside its bus.${reset}`,
           duration: 10_000,
         });
         return;
@@ -1982,16 +2014,30 @@ function SldCanvasInner({
               };
       }
       // The connector of a device that was drawn by hand stays with its
-      // device: the diagram brings it along from where it was drawn.
+      // device: as it is drawn where a re-layout has put the two, and as it
+      // was where nothing has moved. One the plan gave up has no route of
+      // its own any more.
       for (const edge of placedEdges) {
-        if (edge.type === 'stub') chosen[edge.id] = before.routes[edge.id] ?? null;
+        if (edge.type !== 'stub') continue;
+        const kept = connectorsByHand.get(edge.id);
+        const source = at.get(edge.source);
+        const target = at.get(edge.target);
+        chosen[edge.id] = released.includes(edge.id)
+          ? null
+          : kept !== undefined && source !== undefined && target !== undefined
+            ? {
+                points: kept.map(([x, y]): [number, number] => [x, y]),
+                anchors: { source: { ...source }, target: { ...target } },
+                manual: true,
+              }
+            : (before.routes[edge.id] ?? null);
       }
       const positions = positionsOf(placedNodes);
       if (sameArrangement(before, { positions, routes: chosen })) {
         const handNote =
-          byHand.size === 0
+          keptByHand === 0
             ? ''
-            : ` ${byHand.size} routed by hand ${byHand.size === 1 ? 'is' : 'are'} left as ${byHand.size === 1 ? 'it is' : 'they are'}: Reset manual routes, in the Arrange menu, gives ${byHand.size === 1 ? 'it' : 'them'} back to the tidy.`;
+            : ` ${keptByHand} routed by hand ${keptByHand === 1 ? 'is' : 'are'} left as ${keptByHand === 1 ? 'it is' : 'they are'}: Reset manual routes, in the Arrange menu, gives ${keptByHand === 1 ? 'it' : 'them'} back to the tidy.`;
         setTidyNote('Already tidy: nothing was changed');
         toast.info('The diagram is already tidy.', {
           description: relayout
@@ -2006,12 +2052,12 @@ function SldCanvasInner({
       const lines = `${rerouted} ${rerouted === 1 ? 'line or transformer' : 'lines and transformers'} re-routed`;
       // What became of the routes that were drawn by hand.
       const hand =
-        (byHand.size === 0
+        (keptByHand === 0
           ? ''
-          : ` ${byHand.size} routed by hand ${byHand.size === 1 ? 'was left as it is' : 'were left as they are'}: Reset manual routes, in the Arrange menu, gives ${byHand.size === 1 ? 'it' : 'them'} back to the tidy.`) +
+          : ` ${keptByHand} routed by hand ${keptByHand === 1 ? 'was left as it is' : 'were left as they are'}: Reset manual routes, in the Arrange menu, gives ${keptByHand === 1 ? 'it' : 'them'} back to the tidy.`) +
         (released.length === 0
           ? ''
-          : ` ${released.length} routed by hand no longer fitted where ${released.length === 1 ? 'its' : 'their'} buses now stand and ${released.length === 1 ? 'was' : 'were'} routed afresh.`);
+          : ` The ${released.length === 1 ? 'route' : 'routes'} you drew for ${named(released)} no longer fitted where ${released.length === 1 ? 'its ends' : 'their ends'} now stand, and ${released.length === 1 ? 'is' : 'are'} routed automatically again.`);
       const one = unrouted.length === 1;
       const why = tidied.outOfSteps
         ? `${unrouted.length} could not be routed in the time a tidy takes`
@@ -2023,7 +2069,7 @@ function SldCanvasInner({
           : 'they keep the routes they had';
       const left = unrouted.length === 0 ? '' : ` ${why}: ${then}.`;
       setTidyNote(
-        byHand.size === 0 ? `Tidied: ${lines}` : `Tidied: ${lines}, ${byHand.size} by hand kept`,
+        keptByHand === 0 ? `Tidied: ${lines}` : `Tidied: ${lines}, ${keptByHand} by hand kept`,
       );
       toast.success(relayout ? 'Diagram tidied and laid out again' : 'Diagram tidied', {
         description: relayout

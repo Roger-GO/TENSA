@@ -39,7 +39,14 @@
  * other lines are routed around it. After a re-layout it is brought along
  * with its buses, and one that is then on something is routed with the rest
  * (`TidyPlan.released`). The connector of a device that was drawn by hand
- * stays with its device the same way (`connections.ts`).
+ * goes with its device the same way (`TidyPlan.connectorsByHand`), and is
+ * worked out like any other where the place a re-layout puts its device in
+ * leaves it through something, folded back on itself or along its own
+ * symbol (`connections.ts`). A re-layout whose picture would still draw
+ * something over something else is planned again without the routes drawn
+ * by hand that have a part in that, and then without any of them, before
+ * it is refused: what the user drew by hand does not keep the diagram from
+ * being laid out again, and the plan says which of it was given up.
  *
  * Pure: no React, nothing read but the arguments. The canvas (`tidy` in
  * `SldCanvas.tsx`) puts the plan in place as one step for Undo.
@@ -107,8 +114,17 @@ export interface TidyPlan {
    */
   byHand?: Map<string, Point[]>;
   /**
+   * The connectors of devices that were drawn by hand and go along with
+   * their devices to where a re-layout puts them, by edge id: each as it is
+   * drawn there. Absent for a tidy that moves nothing, which leaves every
+   * connector as it is.
+   */
+  connectorsByHand?: Map<string, Point[]>;
+  /**
    * The routes that were drawn by hand and no longer fit where a re-layout
-   * puts their buses, by edge id: routed afresh with the rest.
+   * puts what they are attached to, by edge id: a line or a transformer is
+   * routed afresh with the rest, and the connector of a device is worked
+   * out like any other.
    */
   released?: string[];
   /**
@@ -117,6 +133,8 @@ export interface TidyPlan {
    * stands.
    */
   refused?: string[];
+  /** For a plan that is refused: the lines and connectors that would be drawn over something, by edge id. */
+  blamed?: string[];
 }
 
 /** What an overlap goes by when two pictures are compared. */
@@ -175,6 +193,36 @@ export function planTidy(
   topology: TopologySummary,
   options: TidyPlanOptions,
 ): TidyPlan {
+  // A re-layout moves what the routes drawn by hand are attached to. Where
+  // the picture it gives would have something on something else, it is
+  // planned again without the ones that have a part in that, and after two
+  // such rounds without any that are left.
+  const letGo = new Set<string>();
+  for (let round = 0; ; round += 1) {
+    const plan = planOnce(graph, topology, options, letGo);
+    if (plan.refused === undefined || !options.relayout) return plan;
+    const kept = [...(plan.byHand?.keys() ?? []), ...(plan.connectorsByHand?.keys() ?? [])];
+    if (kept.length === 0) return plan;
+    const blamed = kept.filter((id) => plan.blamed?.includes(id) === true);
+    for (const id of round < 2 && blamed.length > 0 ? blamed : kept) letGo.add(id);
+  }
+}
+
+/** `edge` without a route of its own. */
+function withoutRoute<E extends Edge>(edge: E): E {
+  return {
+    ...edge,
+    data: { ...edge.data, bendPoints: undefined, bendAnchors: undefined, bendManual: undefined },
+  };
+}
+
+/** One plan of `planTidy`, without the routes drawn by hand that are named in `letGo`. */
+function planOnce(
+  graph: { nodes: Node[]; edges: Edge[] },
+  topology: TopologySummary,
+  options: TidyPlanOptions,
+  letGo: ReadonlySet<string>,
+): TidyPlan {
   const { relayout, barLengths, steps } = options;
   const sizes = options.sizes ?? new Map<string, NodeSize>();
   const connectionOptions = { sizes, connectorStyle: options.connectorStyle, barLengths };
@@ -227,7 +275,9 @@ export function planTidy(
     // drawn by hand go back on their edges, as they were drawn and for
     // where their ends stood then, to be brought along from there.
     const drawnByHand = new Map(
-      graph.edges.filter((edge) => edge.data?.bendManual === true).map((edge) => [edge.id, edge]),
+      graph.edges
+        .filter((edge) => edge.data?.bendManual === true && !letGo.has(edge.id))
+        .map((edge) => [edge.id, edge]),
     );
     edges = placed.edges.map((edge) => {
       const held = drawnByHand.get(edge.id)?.data;
@@ -253,6 +303,42 @@ export function planTidy(
     (edges as ConnectionEdge[]).filter((edge) => edge.type === 'stub'),
     connectionOptions,
   );
+  // The routes that were drawn by hand and are no longer drawn that way.
+  const released: string[] = graph.edges
+    .filter((edge) => letGo.has(edge.id))
+    .map((edge) => edge.id);
+  // The connectors that were drawn by hand, where a re-layout has put their
+  // devices: each as it is drawn there, and one that does not hold there
+  // like any other connector from now on.
+  const connectorsByHand = new Map<string, Point[]>();
+  if (relayout) {
+    const at = new Map(nodes.map((n) => [n.id, n.position]));
+    edges = edges.map((edge) => {
+      if (edge.type !== 'stub' || edge.data?.bendManual !== true) return edge;
+      const points = connectors.routes.get(edge.id)?.points;
+      const [source, target] = [at.get(edge.source), at.get(edge.target)];
+      if (
+        !connectors.byHand.has(edge.id) ||
+        points === undefined ||
+        source === undefined ||
+        target === undefined
+      ) {
+        released.push(edge.id);
+        return withoutRoute(edge);
+      }
+      connectorsByHand.set(edge.id, points);
+      // As the canvas holds it once the plan is in place: drawn for where
+      // its device and its bus stand now.
+      return {
+        ...edge,
+        data: {
+          ...edge.data,
+          bendPoints: points.map(([x, y]): [number, number] => [x, y]),
+          bendAnchors: { source: { ...source }, target: { ...target } },
+        },
+      };
+    });
+  }
   // The diagram as it is drawn now, where the plan is for one on screen and
   // moves nothing: the label of each bus keeps the place it has there.
   const shown: PictureOptions | null =
@@ -265,7 +351,6 @@ export function planTidy(
   // a re-layout has moved is brought along, and one that is then on
   // something is routed with the rest.
   const byHand = new Map<string, Point[]>();
-  const released: string[] = [];
   const handDrawn = (edges as ConnectionEdge[]).filter(
     (edge) => edge.type !== 'stub' && edge.data?.bendManual === true,
   );
@@ -283,7 +368,10 @@ export function planTidy(
       else byHand.set(edge.id, points);
     }
   }
-  const kept = byHand.size > 0 ? { byHand } : {};
+  const kept = {
+    ...(byHand.size > 0 ? { byHand } : {}),
+    ...(connectorsByHand.size > 0 ? { connectorsByHand } : {}),
+  };
   const given = released.length > 0 ? { released } : {};
   /**
    * The routes, made afresh: all of them but the ones drawn by hand, or
@@ -393,6 +481,18 @@ export function planTidy(
   if (best.found.overlaps.length === 0) {
     return { nodes, edges, tidied: best.tidied, ...kept, ...given };
   }
+  // The lines and connectors that have a part in what is left, each once: a
+  // box that is drawn on a line (its flow label, the symbol of a
+  // transformer) goes by that line.
+  const lines = new Set(edges.map((edge) => edge.id));
+  const blamed = new Set<string>();
+  for (const { a, b } of best.found.overlaps) {
+    for (const id of [a, b]) {
+      const line = id.slice(id.indexOf(':') + 1);
+      if (lines.has(id)) blamed.add(id);
+      else if (lines.has(line)) blamed.add(line);
+    }
+  }
   return {
     nodes,
     edges,
@@ -400,6 +500,7 @@ export function planTidy(
     ...kept,
     ...given,
     refused: describeOverlaps(best.found.overlaps),
+    blamed: [...blamed],
   };
 }
 
