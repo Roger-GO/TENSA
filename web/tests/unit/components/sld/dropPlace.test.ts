@@ -17,6 +17,8 @@ import {
 import {
   DROP_CLEARANCE,
   DROP_OWN_TIP_ROOM,
+  DROP_PICTURES,
+  DROP_PICTURE_APART,
   DROP_REACH,
   DROP_ROW,
   DROP_ROW_GAP,
@@ -218,5 +220,116 @@ describe('clearDrop', () => {
     const all = [...wall, lone];
     expect(44 * 20).toBeGreaterThan(DROP_REACH);
     expect(clearDrop(all, [], new Set(['load-X']), layoutConnections(all, []))).toBeNull();
+  });
+});
+
+describe('clearDrop, with a place held to the picture of the diagram', () => {
+  const nodes = [
+    bus('1', 0, 100),
+    device('load-A', 26, 30),
+    bus('2', 300, 100),
+    device('load-B', 326, 30),
+  ];
+  const edges = [stub('load-A', '1'), stub('load-B', '2')];
+  const moved = new Set(['load-A']);
+  /** Load A dropped `dx`, `dy` from where it stood, and what `clearDrop` is asked with. */
+  function dropped(dx: number, dy: number) {
+    const there = nodes.map((n) =>
+      n.id === 'load-A' ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } } : n,
+    );
+    const options = { atRest: layoutConnections(nodes, edges), back: { dx: -dx, dy: -dy } };
+    return { there, connections: layoutConnections(there, edges), options };
+  }
+  const placeOf = (asked: readonly ConnectionNode[]) =>
+    asked.find((n) => n.id === 'load-A')!.position;
+
+  it('asks the picture about the place the nodes were dropped in, and leaves them there where it passes', () => {
+    const { there, connections, options } = dropped(-60, -20);
+    const asked: { x: number; y: number }[] = [];
+    const shift = clearDrop(there, edges, moved, connections, {
+      ...options,
+      clear: (now) => {
+        asked.push(placeOf(now));
+        return true;
+      },
+    });
+    expect(shift).toBeNull();
+    expect(asked).toEqual([{ x: -34, y: 10 }]);
+  });
+
+  it('takes the nearest place that the rules and the picture both pass, and says the picture had no way', () => {
+    // Free ground by the rules; the picture passes nothing east of x = -58.
+    const { there, connections, options } = dropped(-60, -20);
+    const asked: { x: number; y: number }[] = [];
+    const shift = clearDrop(there, edges, moved, connections, {
+      ...options,
+      clear: (now) => {
+        asked.push(placeOf(now));
+        return placeOf(now).x <= -58;
+      },
+    });
+    expect(shift).toEqual({ dx: -DROP_PICTURE_APART, dy: 0, onto: 'no-way' });
+    // No place right next to one the picture refused was asked about.
+    for (const [i, a] of asked.entries()) {
+      for (const b of asked.slice(0, i)) {
+        const refused = b.x > -58;
+        const apart = Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+        if (refused) expect(apart).toBeGreaterThanOrEqual(DROP_PICTURE_APART);
+      }
+    }
+    expect(asked.length).toBeLessThanOrEqual(DROP_PICTURES);
+  });
+
+  it('asks the picture only about a place the rules pass', () => {
+    // On load B: the places beside it are asked about, the one on it is not.
+    const { there, connections, options } = dropped(310, 5);
+    const asked: { x: number; y: number }[] = [];
+    const shift = clearDrop(there, edges, moved, connections, {
+      ...options,
+      clear: (now) => {
+        asked.push(placeOf(now));
+        return true;
+      },
+    });
+    expect(shift).toMatchObject({ onto: 'symbol-symbol' });
+    expect(asked).toEqual([{ x: 336 + shift!.dx, y: 35 + shift!.dy }]);
+  });
+
+  it('puts the nodes back where they stood when the picture passes no place it is asked about', () => {
+    const { there, connections, options } = dropped(-60, -20);
+    let asked = 0;
+    const shift = clearDrop(there, edges, moved, connections, {
+      ...options,
+      clear: () => {
+        asked += 1;
+        return false;
+      },
+    });
+    expect(shift).toEqual({ dx: 60, dy: 20, onto: 'no-way', back: true });
+    expect(asked).toBe(DROP_PICTURES);
+    // With fewer pictures to ask, sooner.
+    asked = 0;
+    const sooner = clearDrop(there, edges, moved, connections, {
+      ...options,
+      pictures: 3,
+      clear: () => {
+        asked += 1;
+        return false;
+      },
+    });
+    expect(sooner).toMatchObject({ back: true });
+    expect(asked).toBe(3);
+  });
+
+  it('falls back on the rules where there is nowhere to go back to', () => {
+    // On load B, and the picture passes nothing: beside load B, as the
+    // rules alone would have it.
+    const { there, connections, options } = dropped(310, 5);
+    const byRules = clearDrop(there, edges, moved, connections, { atRest: options.atRest });
+    const shift = clearDrop(there, edges, moved, connections, {
+      atRest: options.atRest,
+      clear: () => false,
+    });
+    expect(shift).toEqual(byRules);
   });
 });

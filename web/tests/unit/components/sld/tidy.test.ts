@@ -262,6 +262,24 @@ describe('tidyRoutes: one branch', () => {
     for (const [a, b] of runsOf(points)) expect(distance(a, b, chain)).toBeGreaterThan(0);
   });
 
+  it('runs through no place where it is told the label of a bus stands, its own bus among them', () => {
+    // Two buses one over the other: the line runs straight down from the
+    // middle of one bar to the middle of the other, through where the label
+    // of the upper bus hangs unless it is told the label stands there.
+    const nodes = [bus('1', 0, 0), bus('2', 0, 240)];
+    const edges = [line('l', '1', '2')];
+    const label: Rect = { left: 15, right: 77, top: 6, bottom: 46 };
+    const straight = tidyRoutes(nodes, edges).routes.get('l')!;
+    expect(runsOf(straight).some(([a, b]) => distance(a, b, label) === 0)).toBe(true);
+    const round = tidyRoutes(nodes, edges, { labels: [label] }).routes.get('l')!;
+    for (const [a, b] of runsOf(round)) expect(distance(a, b, label)).toBeGreaterThan(0);
+    expect([round[0]![1], round[round.length - 1]![1]]).toEqual([3, 243]);
+    // A label that is in the way of nothing changes nothing: it adds no
+    // line to the grid for a route to take.
+    const aside: Rect = { left: 200, right: 262, top: 100, bottom: 140 };
+    expect(tidyRoutes(nodes, edges, { labels: [aside] }).routes.get('l')).toEqual(straight);
+  });
+
   it('makes no run between two bends shorter than a step of the grid allows', () => {
     // The device leaves a way past it a pixel off a line of the grid.
     const nodes = [bus('1', 0, 0), bus('2', 0, 240), device('load-x', 31, 100)];

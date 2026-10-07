@@ -11,7 +11,7 @@ import type { ConnectionEdge } from '@/components/sld/connections';
 import { buildGraph, defaultBarLengths, type BuildGraphOptions } from '@/components/sld/graph';
 import { LINE_LABEL_BOX, TRANSFORMER_LABEL_BOX, overlaps } from '@/components/sld/labels';
 import { findOverlaps } from '@/components/sld/overlapCheck';
-import { drawnDiagram, pictureOf, type PictureOptions } from '@/components/sld/picture';
+import { drawnDiagram, drawsClear, pictureOf, type PictureOptions } from '@/components/sld/picture';
 
 function entry(idx: string | number, kind: string, params: TopologyEntry['params']): TopologyEntry {
   return { idx, name: `${kind} ${idx}`, kind, params };
@@ -189,9 +189,22 @@ describe('drawnDiagram', () => {
         'label label:4',
         'symbol generator-G1',
         'symbol load-PQ_1',
+        'symbol marker:generator-G1',
         'symbol symbol:transformer-T24',
       ].sort(),
     );
+    // The mark a generator at a reactive limit carries on its top right
+    // corner hangs out of its box: its room is a box of its own, which only
+    // its generator may touch.
+    const generator = drawn.boxes.find((b) => b.id === 'generator-G1')!.box;
+    const marker = drawn.boxes.find((b) => b.id === 'marker:generator-G1')!;
+    expect(marker.of).toEqual(['generator-G1']);
+    expect(marker.box).toEqual({
+      left: generator.right - 6,
+      right: generator.right + 2,
+      top: generator.top - 2,
+      bottom: generator.top + 6,
+    });
     // The symbol of a transformer sits on its own line, which is no overlap.
     const symbol = drawn.boxes.find((b) => b.id === 'symbol:transformer-T24')!;
     expect(symbol.of).toEqual(['transformer-T24']);
@@ -256,6 +269,63 @@ describe('drawnDiagram', () => {
     );
     expect(findOverlaps(drawn).map((o) => `${o.kind} ${o.a} ${o.b}`)).toContain(
       'line-box line-L13 load-PQ_1',
+    );
+  });
+});
+
+describe('drawsClear', () => {
+  /** `nodes` with the node `id` at `to`. */
+  const withNodeAt = <N extends { id: string; position: { x: number; y: number } }>(
+    nodes: readonly N[],
+    id: string,
+    to: { x: number; y: number },
+  ): N[] => nodes.map((n) => (n.id === id ? { ...n, position: to } : n));
+
+  it('passes the diagram as it stands, and a device moved to free ground', () => {
+    const { nodes, edges } = diagram();
+    const barLengths = defaultBarLengths(square());
+    const clear = drawsClear(nodes, edges as ConnectionEdge[], { barLengths, values: false });
+    expect(clear(nodes)).toBe(true);
+    const load = nodes.find((n) => n.id === 'load-PQ_1')!;
+    expect(
+      clear(withNodeAt(nodes, 'load-PQ_1', { x: load.position.x + 60, y: load.position.y })),
+    ).toBe(true);
+  });
+
+  it('refuses a place from where the connector of a device would run through the bar of another bus', () => {
+    // The load of bus 4, set down west of bus 3 and level with its bar: its
+    // connector runs east to bar 4, along bar 3 and through it.
+    const { nodes, edges } = diagram();
+    const barLengths = defaultBarLengths(square());
+    const clear = drawsClear(nodes, edges as ConnectionEdge[], { barLengths, values: false });
+    const there = withNodeAt(nodes, 'load-PQ_1', { x: COORDS['3'].x - 200, y: COORDS['3'].y - 20 });
+    const picture = pictureOf(there, edges as ConnectionEdge[], { barLengths, values: false });
+    const found = findOverlaps(drawnDiagram(there, picture, { values: false }));
+    expect(found.map((o) => `${o.kind} ${o.a} ${o.b}`)).toEqual(['line-bar stub-load-PQ_1 3']);
+    expect(clear(there)).toBe(false);
+  });
+
+  it('does not hold against a move what the diagram had on each other before it', () => {
+    // The diagram comes with the load on the generator: two symbols on each
+    // other, which no move of something else put there.
+    const { nodes, edges } = diagram();
+    const barLengths = defaultBarLengths(square());
+    const generator = nodes.find((n) => n.id === 'generator-G1')!;
+    const came = withNodeAt(nodes, 'load-PQ_1', {
+      x: generator.position.x + 10,
+      y: generator.position.y + 4,
+    });
+    const options = { barLengths, values: false };
+    const before = findOverlaps(
+      drawnDiagram(came, pictureOf(came, edges as ConnectionEdge[], options), options),
+    );
+    expect(before).not.toEqual([]);
+    const clear = drawsClear(came, edges as ConnectionEdge[], options);
+    expect(clear(came)).toBe(true);
+    // Bus 3 moved a little way along its row changes nothing about that.
+    const bus3 = came.find((n) => n.id === '3')!;
+    expect(clear(withNodeAt(came, '3', { x: bus3.position.x - 16, y: bus3.position.y }))).toBe(
+      true,
     );
   });
 });

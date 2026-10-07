@@ -86,8 +86,8 @@ import {
 import { GRID_STEP } from './tidy';
 import { branchesThroughSymbols, type TidyPlan } from './tidyPlan';
 import { startTidy, type TidyJob } from './tidyClient';
-import { pictureOf } from './picture';
-import { clearDrop, type DropObstacle } from './dropPlace';
+import { drawsClear, pictureOf, type PictureOptions } from './picture';
+import { DROP_PICTURES, clearDrop, type DropObstacle } from './dropPlace';
 import { flowLabelWidth, readoutWidth } from './labels';
 import { getDeviceOverlayState, getLineOverlayState } from './overlay';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
@@ -189,7 +189,18 @@ const DROPPED_ON: Record<DropObstacle, string> = {
   'bar-bar': 'Two bars were too close to each other for a label or a line to fit between them.',
   connector: 'It was dropped on the connector of a device.',
   'bar-between': 'The bar of another bus stood between the device and its own bus.',
+  'no-way':
+    'Where it was dropped, its connector or a line beside it had no way that is clear of the symbols and the bars.',
 };
+
+/**
+ * The most edges a diagram has for which every place a dropped node could
+ * stand in is asked of the picture as often as `DROP_PICTURES`. A picture
+ * of a larger diagram takes long enough to count, so fewer places are
+ * asked about, and a node with no clear place among them goes back sooner.
+ */
+const DROP_PICTURES_UP_TO = 120;
+const DROP_PICTURES_LARGE = 3;
 
 /** What a command that arranges the diagram says, and does not do, while the lock is on. */
 const LOCKED_NOTICE =
@@ -777,15 +788,22 @@ function SldCanvasInner({
   const connections = picture.connections;
   // The diagram as it was last drawn, for the handler that ends a move: where
   // a node may be dropped depends on the bars and the connectors around it.
-  const drawnRef = useRef({ connections, sizes, atRest: connections });
+  const drawnRef = useRef<{
+    connections: typeof connections;
+    sizes: typeof sizes;
+    atRest: typeof connections;
+    /** What the picture is made with, for asking it about a place. */
+    options: PictureOptions;
+  }>({ connections, sizes, atRest: connections, options: { values: false } });
   useEffect(() => {
     drawnRef.current = {
       connections,
       sizes,
       // As it stood before the drag in hand, while there is one.
       atRest: dragging ? drawnRef.current.atRest : connections,
+      options: { sizes, connectorStyle, barLengths, values: valuesShown, labelWidths },
     };
-  }, [connections, sizes, dragging]);
+  }, [connections, sizes, dragging, connectorStyle, barLengths, valuesShown, labelWidths]);
   // The lines and transformers that are drawn through a symbol or a bar:
   // the Tidy diagram button counts them. Not while a node is being dragged,
   // when a line passes through things on its way to where the node is
@@ -893,34 +911,54 @@ function SldCanvasInner({
       // A press that slipped puts everything back, the devices its bus took
       // along as well.
       if (slipped) next = withPositions(next, new Map(start.nodes.map((n) => [n.id, n.position])));
+      // Whether what was dropped went back where it stood, with no place
+      // near where it was dropped that the diagram can be drawn with.
+      let putBack = false;
       // What was dropped on a symbol, on a bar or on a connector, or with
       // its bar right under another, goes to the nearest place where it is
       // on nothing (`clearDrop`): the lines and the labels go round what
       // stands on the diagram, and two symbols on each other they cannot.
+      // A place is also asked of the picture of the diagram (`drawsClear`):
+      // one where a connector or a line would be drawn through something is
+      // not taken, and with no clear place near, the nodes go back.
       if (dragEnded && !slipped && baseGraphRef.current !== null) {
-        const dropped = new Set(movedNodes(start.nodes, next).map((n) => n.id));
+        const letGo = movedNodes(start.nodes, next);
+        const dropped = new Set(letGo.map((n) => n.id));
         // A badge that is docked follows its node when the graph is built
         // again: where it stands now is where that node was.
-        const standing = next.filter((n) => {
+        const stands = (n: Node): boolean => {
           const data = n.data as { parentNodeId?: string; placed?: boolean };
           return !(
             n.type === 'controller' &&
             data.placed !== true &&
             dropped.has(data.parentNodeId ?? '')
           );
+        };
+        const standing = next.filter(stands);
+        const stood = new Map(start.nodes.map((n) => [n.id, n.position]));
+        const from = letGo[0] === undefined ? undefined : stood.get(letGo[0].id);
+        const graphEdges = baseGraphRef.current.edges as ConnectionEdge[];
+        const shift = clearDrop(standing, graphEdges, dropped, drawnRef.current.connections, {
+          sizes: drawnRef.current.sizes,
+          step: useLayoutStore.getState().sldSnapToGrid ? GRID_STEP : undefined,
+          atRest: drawnRef.current.atRest,
+          clear: drawsClear(start.nodes.filter(stands), graphEdges, drawnRef.current.options),
+          pictures: graphEdges.length > DROP_PICTURES_UP_TO ? DROP_PICTURES_LARGE : DROP_PICTURES,
+          back:
+            from === undefined
+              ? undefined
+              : { dx: from.x - letGo[0]!.position.x, dy: from.y - letGo[0]!.position.y },
         });
-        const shift = clearDrop(
-          standing,
-          baseGraphRef.current.edges as ConnectionEdge[],
-          dropped,
-          drawnRef.current.connections,
-          {
-            sizes: drawnRef.current.sizes,
-            step: useLayoutStore.getState().sldSnapToGrid ? GRID_STEP : undefined,
-            atRest: drawnRef.current.atRest,
-          },
-        );
-        if (shift !== null) {
+        if (shift?.back === true) {
+          // Each to where it stood: the nodes of one move need not all have
+          // gone the same way (a grid they snap to).
+          next = withPositions(next, stood);
+          putBack = true;
+          toast.info('Put back where it was', {
+            description: `${DROPPED_ON[shift.onto]} No place near there is clear either, and nothing on the diagram is drawn over anything else, so the move was not made.`,
+            duration: 8_000,
+          });
+        } else if (shift !== null) {
           next = withPositions(
             next,
             new Map(
@@ -941,7 +979,8 @@ function SldCanvasInner({
       }
       if (!dragEnded) return;
       moveStartRef.current = null;
-      if (slipped) return;
+      // A move that was not made is no step for Undo, and nothing to write.
+      if (slipped || putBack) return;
       // The move can be taken back: keep the arrangement it started from.
       const moved = movedNodes(start.nodes, next);
       if (moved.length > 0 && baseGraphRef.current !== null) {
@@ -1618,7 +1657,7 @@ function SldCanvasInner({
   // load and shunt is put back beside its bus, where the diagram places one
   // that was never moved. `applyTidy` puts a plan in place (`planTidy`).
   const applyTidy = useCallback(
-    ({ nodes: placedNodes, edges: placedEdges, tidied }: TidyPlan, relayout: boolean) => {
+    ({ nodes: placedNodes, edges: placedEdges, tidied, refused }: TidyPlan, relayout: boolean) => {
       const graph = baseGraphRef.current;
       if (graph === null) return;
       const branches = placedEdges.filter((e) => e.type !== 'stub');
@@ -1630,6 +1669,18 @@ function SldCanvasInner({
         toast.info('This diagram is too large to tidy', {
           description:
             'It spreads over more room than Tidy diagram routes lines across. Nothing was changed.',
+        });
+        return;
+      }
+      if (refused !== undefined) {
+        // The plan would have drawn something over something else that the
+        // diagram keeps clear of as it stands (`planTidy`).
+        setTidyNote('Not tidied: nothing was changed');
+        toast.info('Nothing was changed', {
+          description: relayout
+            ? 'Laid out again, something on the diagram would have been drawn over something else, so it keeps the arrangement it has.'
+            : 'With the lines routed afresh, something would have been drawn over something else: mostly the connector of a device that stands away from its bus, which would have run through a symbol. The diagram keeps the routes it has. Tidy and re-layout puts every device back beside its bus.',
+          duration: 10_000,
         });
         return;
       }
@@ -1718,6 +1769,7 @@ function SldCanvasInner({
         controllerCoords,
         unitStates,
         drawn: drawnNodesRef.current,
+        shown: { values: valuesShown, labelWidths },
       });
       if (job.plan !== undefined) {
         applyTidy(job.plan, relayout);
@@ -1743,7 +1795,18 @@ function SldCanvasInner({
         },
       );
     },
-    [topology, barLengths, controllerCoords, unitStates, sizes, connectorStyle, locked, applyTidy],
+    [
+      topology,
+      barLengths,
+      controllerCoords,
+      unitStates,
+      sizes,
+      connectorStyle,
+      locked,
+      applyTidy,
+      valuesShown,
+      labelWidths,
+    ],
   );
   const cancelTidy = useCallback(() => {
     const job = tidyJobRef.current;

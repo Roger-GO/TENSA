@@ -21,10 +21,10 @@ import type { TopologySummary } from '@/api/types';
 import type { ConnectionEdge, ConnectionLayout } from '@/components/sld/connections';
 import { autoLayout } from '@/components/sld/layout';
 import { buildGraph, defaultBarLengths } from '@/components/sld/graph';
-import { countCrossings } from '@/components/sld/overlapCheck';
+import { countCrossings, type DrawnDiagram, type Overlap } from '@/components/sld/overlapCheck';
 import { drawnDiagram } from '@/components/sld/picture';
 import { GRID_STEP } from '@/components/sld/tidy';
-import { branchesThroughSymbols, planTidy } from '@/components/sld/tidyPlan';
+import { branchesThroughSymbols, planTidy, type TidyPlan } from '@/components/sld/tidyPlan';
 import {
   dragged,
   drawn,
@@ -39,6 +39,26 @@ vi.mock('@/components/sld/elkClient', async () => {
   const { default: ELK } = await import('elkjs/lib/elk.bundled.js');
   const elk = new ELK();
   return { elkLayout: vi.fn((graph: ElkNode) => elk.layout(graph)) };
+});
+
+/**
+ * What the overlap checker is made to find on top of what is there, for
+ * the one test that needs a plan the picture finds fault with: none of the
+ * diagrams here has one that Tidy diagram cannot mend.
+ */
+const checker = vi.hoisted(() => ({
+  also: null as ((drawn: DrawnDiagram) => Overlap[]) | null,
+}));
+
+vi.mock('@/components/sld/overlapCheck', async () => {
+  const actual = await vi.importActual<typeof import('@/components/sld/overlapCheck')>(
+    '@/components/sld/overlapCheck',
+  );
+  const findOverlaps: typeof actual.findOverlaps = (drawn, options) => [
+    ...actual.findOverlaps(drawn, options),
+    ...(checker.also?.(drawn) ?? []),
+  ];
+  return { ...actual, findOverlaps };
 });
 
 /** `topology` drawn along the routes ELK makes, as a layout saved by an earlier version has it. */
@@ -150,6 +170,127 @@ describe('Tidy and re-layout on the example cases', () => {
         .filter((e) => e.type !== 'stub')
         .map((e) => [e.id, (e.data as { bendPoints: unknown }).bendPoints]),
     );
+  });
+});
+
+describe('a plan for a diagram that is on screen, held to the picture it gives', () => {
+  /** `diagram` with the routes of `plan` put in place, whatever the plan says of itself. */
+  const withRoutes = (diagram: Diagram, plan: TidyPlan): Diagram => {
+    const at = new Map(plan.nodes.map((n) => [n.id, n.position]));
+    return {
+      ...diagram,
+      edges: plan.edges.map((edge) => {
+        const points = plan.tidied.routes.get(edge.id);
+        if (points === undefined) return edge;
+        const anchors = {
+          source: { ...at.get(edge.source)! },
+          target: { ...at.get(edge.target)! },
+        };
+        return { ...edge, data: { ...edge.data, bendPoints: points, bendAnchors: anchors } };
+      }),
+    };
+  };
+  const planOf = (diagram: Diagram, shown?: { values: boolean }): TidyPlan =>
+    planTidy({ nodes: diagram.nodes, edges: diagram.edges }, diagram.topology, {
+      relayout: false,
+      barLengths: diagram.barLengths,
+      shown,
+    });
+  const routeOf = (diagram: Diagram, id: string): unknown =>
+    (diagram.edges.find((e) => e.id === id)!.data as { bendPoints?: unknown }).bendPoints;
+
+  it('keeps the lines of a bus as they are where routing them afresh would send the connector of its device through a symbol', async () => {
+    // The load of bus 11, set down far to the east of its bus: its
+    // connector runs to the tip of the bar, which the lines that land on
+    // the bar have drawn out. Routed afresh, they leave the bar shorter,
+    // and the connector runs through the load of bus 10 to reach it.
+    const first = await opened(IEEE14);
+    const dropped = dragged(first, 'load-PQ_8', 320, -140);
+    expect(overlapsOf(dropped)).toEqual([]);
+    const routesAlone = withRoutes(dropped, planOf(dropped));
+    expect(overlapsOf(routesAlone)).toEqual([
+      'line-box: stub-load-PQ_8 / load-PQ_7: runs through the symbol',
+    ]);
+    // Held to its picture, the plan leaves the lines of bus 11 where they
+    // are and routes the others around them.
+    const plan = planOf(dropped, { values: false });
+    expect(plan.refused).toBeUndefined();
+    const after = withRoutes(dropped, plan);
+    expect(overlapsOf(after)).toEqual([]);
+    expect(overlapsOf(after, { values: true })).toEqual([]);
+    for (const edge of dropped.edges) {
+      if (edge.type === 'stub' || (edge.source !== '11' && edge.target !== '11')) continue;
+      expect(routeOf(after, edge.id), edge.id).toEqual(routeOf(dropped, edge.id));
+    }
+    // Which is what the canvas puts in place.
+    const put = tidied(dropped, false);
+    expect(put.edges.map((e) => routeOf(put, e.id))).toEqual(
+      after.edges.map((e) => routeOf(after, e.id)),
+    );
+  });
+
+  it('does not draw a bar out under a device that stood past its tip, where that puts its connector beside a line', async () => {
+    // The load of bus 12, set down east of bus 13 and below it. A line
+    // routed afresh to a place past the tip of bar 12 draws the bar out to
+    // under the load, whose connector then drops square, 11 from a line.
+    const first = await opened(IEEE14);
+    const dropped = dragged(first, 'load-PQ_9', 200, 70);
+    expect(overlapsOf(dropped)).toEqual([]);
+    expect(overlapsOf(withRoutes(dropped, planOf(dropped)))).not.toEqual([]);
+    const plan = planOf(dropped, { values: false });
+    expect(plan.refused).toBeUndefined();
+    expect(overlapsOf(withRoutes(dropped, plan))).toEqual([]);
+  });
+
+  it('routes no line through the place where the label of a bus stands', async () => {
+    // Bus 3 is put east of bus 4, a little higher. Routed afresh, a line
+    // comes down where the label of bus 4 hangs, with its voltage and its
+    // angle in it, and leaves it room for the name alone.
+    const first = await opened(IEEE14);
+    const before = dragged(first, '3', 160, -40);
+    const shown = { values: true };
+    const was = drawn(before, shown).busLabels.get('4')!;
+    expect(was).toMatchObject({ side: 'below' });
+    expect(was.compact).toBeUndefined();
+    const blind = withRoutes(before, planOf(before));
+    expect(drawn(blind, shown).busLabels.get('4')!.compact).toBe(true);
+    // Held to its picture, the plan is made again with the places of the
+    // labels shut to the routes, and leaves that one where it stands.
+    const after = tidied(before, false, shown);
+    expect(after.edges).not.toEqual(before.edges);
+    expect(drawn(after, shown).busLabels.get('4')).toEqual(was);
+    expect(overlapsOf(after, shown)).toEqual([]);
+  });
+
+  it('is refused where it would still leave something drawn over something else, with what that is', async () => {
+    // The checker is made to find the connector of the load of bus 9 on a
+    // symbol wherever the line from bus 1 to bus 2 runs another way than it
+    // does now: a fault the plan has no way round, as that line is no line
+    // of bus 9 and is routed afresh whatever is kept.
+    const before = await alongElkRoutes(IEEE14);
+    const line = before.edges.find((e) => e.source === '1' && e.target === '2')!;
+    const runs = (picture: DrawnDiagram): string =>
+      JSON.stringify(picture.lines.find((l) => l.id === line.id)?.points);
+    const asDrawn = runs(drawnDiagram(before.nodes, drawn(before), { values: false }));
+    const fault: Overlap = {
+      kind: 'line-box',
+      a: 'stub-load-PQ_6',
+      b: 'shunt-Shunt_1',
+      detail: 'runs through the symbol',
+    };
+    checker.also = (picture) => (runs(picture) === asDrawn ? [] : [fault]);
+    try {
+      const plan = planOf(before, { values: false });
+      expect(plan.refused).toEqual([
+        'line-box: stub-load-PQ_6 / shunt-Shunt_1: runs through the symbol',
+      ]);
+      // The diagram is left as it is.
+      expect(tidied(before, false)).toBe(before);
+      // A plan that is not held to a picture is not refused.
+      expect(planOf(before).refused).toBeUndefined();
+    } finally {
+      checker.also = null;
+    }
   });
 });
 

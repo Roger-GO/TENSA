@@ -143,7 +143,27 @@ const forced = vi.hoisted(() => ({
    * none of.
    */
   job: null as { done: Promise<unknown>; cancel: () => void } | null,
+  /**
+   * What the next plan is refused for (`TidyPlan.refused`): what it would
+   * draw over what, on a diagram where a tidy cannot be mended.
+   */
+  refused: null as string[] | null,
+  /**
+   * The picture passes no place a node is dropped in while this is set
+   * (`drawsClear`), as where the connector of a device has no way to its
+   * bar from anywhere near.
+   */
+  noClearPlace: false,
 }));
+
+vi.mock('@/components/sld/picture', async () => {
+  const actual = await vi.importActual<typeof import('@/components/sld/picture')>(
+    '@/components/sld/picture',
+  );
+  const drawsClear: typeof actual.drawsClear = (...args) =>
+    forced.noClearPlace ? () => false : actual.drawsClear(...args);
+  return { ...actual, drawsClear };
+});
 
 vi.mock('@/components/sld/tidyPlan', async () => {
   const actual = await vi.importActual<typeof import('@/components/sld/tidyPlan')>(
@@ -168,6 +188,7 @@ vi.mock('@/components/sld/tidyPlan', async () => {
           unrouted: [...plan.tidied.unrouted, ...forced.unrouted],
           ...(forced.outOfSteps ? { outOfSteps: true as const } : {}),
         },
+        ...(forced.refused !== null ? { refused: forced.refused } : {}),
       };
     },
   };
@@ -425,6 +446,8 @@ beforeEach(() => {
   forced.outOfSteps = false;
   forced.tooLarge = false;
   forced.noRouting = false;
+  forced.refused = null;
+  forced.noClearPlace = false;
   forced.job = null;
   vi.mocked(startTidy).mockClear();
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
@@ -529,6 +552,65 @@ describe('a bus or device that is dropped on something', () => {
     dragTo('3', { x: at.x + 16, y: at.y + 8 });
     expect(positionOf('3')).toEqual({ x: at.x + 16, y: at.y + 8 });
     expect(info).not.toHaveBeenCalledWith('Moved to the nearest free place', expect.anything());
+  });
+
+  it('is put beside a line that has no way round it, where it was dropped on the line', async () => {
+    const info = vi.spyOn(toast, 'info');
+    open('square.xlsx');
+    await draw();
+    // The machine on the line that leaves bus 1 downwards, on a diagram
+    // where no way round it is found: by the boxes it is on free ground,
+    // and the picture has the line through it.
+    forced.noRouting = true;
+    dragTo('generator-G1', { x: 20, y: 60 });
+    expect(positionOf('generator-G1')).not.toEqual({ x: 20, y: 60 });
+    expect(info).toHaveBeenCalledWith(
+      'Moved to the nearest free place',
+      expect.objectContaining({
+        description: expect.stringContaining('had no way that is clear') as string,
+      }),
+    );
+    // No line is left through it for a tidy to put right.
+    await waitFor(() => expect(labels()).toHaveLength(1));
+    expect(screen.queryByTestId('sld-tidy-count')).not.toBeInTheDocument();
+    const machine = boxOf('generator-G1');
+    for (const [id, points] of Object.entries(routes())) {
+      for (const [i, b] of points.entries()) {
+        const a = points[i - 1];
+        if (a === undefined) continue;
+        const through =
+          Math.max(a[0], b[0]) > machine.left &&
+          Math.min(a[0], b[0]) < machine.right &&
+          Math.max(a[1], b[1]) > machine.top &&
+          Math.min(a[1], b[1]) < machine.bottom;
+        expect(through, id).toBe(false);
+      }
+    }
+  });
+
+  it('goes back where it stood, and says so, where no place near can be drawn', async () => {
+    const info = vi.spyOn(toast, 'info');
+    open('square.xlsx');
+    await draw();
+    const before = picture();
+    forced.noClearPlace = true;
+    const at = positionOf('3');
+    dragTo('3', { x: at.x + 16, y: at.y + 8 });
+    expect(info).toHaveBeenCalledWith(
+      'Put back where it was',
+      expect.objectContaining({
+        description: expect.stringContaining('the move was not made') as string,
+      }),
+    );
+    expect(info).not.toHaveBeenCalledWith('Moved to the nearest free place', expect.anything());
+    expect(picture().positions).toEqual(before.positions);
+    // A move that was not made is no step for Undo, and is not written.
+    expect(labels()).toEqual([]);
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+    // A press of an arrow key is held to the same.
+    nudgeTo('3', { x: at.x + 8, y: at.y });
+    expect(positionOf('3')).toEqual(at);
+    expect(labels()).toEqual([]);
   });
 });
 
@@ -882,6 +964,40 @@ describe('Tidy diagram that cannot route every branch', () => {
   });
 });
 
+describe('a tidy that would leave something drawn over something else', () => {
+  it('changes nothing, and says why', async () => {
+    const info = vi.spyOn(toast, 'info');
+    const success = vi.spyOn(toast, 'success');
+    await openUntidy();
+    const before = { picture: picture(), routes: routes() };
+    forced.refused = ['line-box: stub-load-PQ_1 / generator-G1: runs through the symbol'];
+
+    run('tidy');
+    expect(info).toHaveBeenCalledWith(
+      'Nothing was changed',
+      expect.objectContaining({
+        description: expect.stringContaining('The diagram keeps the routes it has.') as string,
+      }),
+    );
+    expect(screen.getByTestId('sld-tidy-note')).toHaveTextContent(
+      'Not tidied: nothing was changed',
+    );
+    info.mockClear();
+    run('tidy-relayout');
+    expect(info).toHaveBeenCalledWith(
+      'Nothing was changed',
+      expect.objectContaining({
+        description: expect.stringContaining('keeps the arrangement it has') as string,
+      }),
+    );
+    expect(success).not.toHaveBeenCalled();
+    expect(picture()).toEqual(before.picture);
+    expect(routes()).toEqual(before.routes);
+    expect(labels()).toEqual([]);
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe('lines that are drawn through a symbol or a bar', () => {
   it('are counted on the Tidy diagram button until a tidy routes them clear', async () => {
     open('square.xlsx');
@@ -890,10 +1006,28 @@ describe('lines that are drawn through a symbol or a bar', () => {
     expect(screen.queryByTestId('sld-tidy-count')).not.toBeInTheDocument();
     expect(screen.getByTestId('sld-tidy')).toHaveAccessibleName('Tidy diagram');
 
-    // The generator is dropped on the line that leaves bus 1 downwards, on a
-    // diagram where no way round it is found: the line is drawn through it.
+    // A layout saved by an earlier version has the generator on the line
+    // that leaves bus 1 downwards (a drop does not leave it there any
+    // more), on a diagram where no way round it is found: the line is drawn
+    // through it.
+    const layout = captureLayout(
+      {
+        nodes: drawn.nodes.map((n) =>
+          n.id === 'generator-G1' ? { ...n, position: { x: 20, y: 60 } } : n,
+        ),
+        edges: drawn.edges,
+      },
+      mockTopology!,
+      null,
+    );
+    cleanup();
+    drawn.nodes = [];
+    useCaseStore.getState().clearCase();
+    history().clear();
+    mockSidecar = parseSidecar(JSON.parse(JSON.stringify(layout)));
     forced.noRouting = true;
-    dragTo('generator-G1', { x: 20, y: 60 });
+    open('square.xlsx');
+    await draw();
     const count = await screen.findByTestId('sld-tidy-count');
     expect(Number(count.textContent)).toBeGreaterThan(0);
     const button = screen.getByTestId('sld-tidy');

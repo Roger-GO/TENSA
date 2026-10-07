@@ -12,6 +12,28 @@
  * is tidied before a power flow shows its values clear of the lines after
  * one.
  *
+ * A plan made for a diagram that is on screen (`TidyPlanOptions.shown`) is
+ * held to the picture it would give (`pictureOf`, `findOverlaps`), so a tidy
+ * leaves nothing drawn over anything else that was not so before it:
+ *
+ * - No label of a bus is worse off for it. Where the routes made afresh
+ *   would leave one with its name alone, or without a place by its bar (a
+ *   line came down where it stood), they are made again with every place
+ *   where a label stands shut to them (`TidyOptions.labels`): the routes
+ *   the diagram has run through none, so there is a way that does not, and
+ *   a branch that finds no other keeps the route it had. Where a label is
+ *   worse off all the same (the symbol of a transformer came to stand
+ *   where it stood), the lines of its bus keep the routes they have, as
+ *   below.
+ * - The connector of a device that stands away from its bus runs to where
+ *   the bar ends, and a bar is as long as the lines that land on it draw it
+ *   out. Routes made afresh can leave the bar shorter or longer, and the
+ *   connector then runs another way, which may be through a symbol. Where
+ *   the plan would draw something over something else, the lines of the
+ *   buses that have a part in it keep the routes they have, and the rest
+ *   are routed again around those. A plan that would still draw something
+ *   over something else is not put in place (`TidyPlan.refused`).
+ *
  * Pure: no React, nothing read but the arguments. The canvas (`tidy` in
  * `SldCanvas.tsx`) puts the plan in place as one step for Undo.
  */
@@ -28,9 +50,12 @@ import {
   type ConnectorRoute,
   type ConnectorStyle,
   type NodeSize,
+  type Point,
 } from './connections';
 import { buildGraph, type BuildGraphOptions } from './graph';
-import { busLabelReserve, chainBoxes, readoutReserve } from './labels';
+import { busLabelLack, busLabelReserve, chainBoxes, readoutReserve } from './labels';
+import { describeOverlaps, findOverlaps, type Overlap } from './overlapCheck';
+import { drawnDiagram, pictureOf, type Picture, type PictureOptions } from './picture';
 import { TIDY_STEPS, alignToGrid, tidyRoutes, type TidyResult } from './tidy';
 
 export interface TidyPlanOptions {
@@ -51,6 +76,14 @@ export interface TidyPlanOptions {
   drawn?: readonly Node[];
   /** How many steps the search may take (`TIDY_STEPS`). */
   steps?: number;
+  /**
+   * How the diagram is drawn on screen: whether the values of a power flow
+   * show, and how wide each of them is (`PictureOptions`). With it the plan
+   * is held to the picture it gives: the labels of the buses keep their
+   * places, and a plan that would draw something over something else is
+   * mended or refused. Without it the routes are all the plan is.
+   */
+  shown?: Pick<PictureOptions, 'values' | 'labelWidths'>;
 }
 
 export interface TidyPlan {
@@ -59,6 +92,47 @@ export interface TidyPlan {
   edges: Edge[];
   /** The routes of its branches. */
   tidied: TidyResult;
+  /**
+   * Set where the plan is not to be put in place: what it would draw over
+   * what, as text (`describeOverlaps`), none of which the diagram has as it
+   * stands.
+   */
+  refused?: string[];
+}
+
+/** What an overlap goes by when two pictures are compared. */
+const nameOf = ({ kind, a, b }: Overlap): string => `${kind}|${a}|${b}`;
+
+/**
+ * `edges` as the canvas has them once `routes` are put in place for the
+ * nodes `nodes`: each branch along its new route, and one that got none
+ * along the route it had, or after a re-layout along none.
+ */
+function alongRoutes(
+  nodes: readonly Node[],
+  edges: readonly Edge[],
+  routes: TidyResult['routes'],
+  relayout: boolean,
+): ConnectionEdge[] {
+  const at = new Map(nodes.map((n) => [n.id, n.position]));
+  return (edges as ConnectionEdge[]).map((edge) => {
+    if (edge.type === 'stub') return edge;
+    const points = routes.get(edge.id);
+    const [source, target] = [at.get(edge.source), at.get(edge.target)];
+    if (points === undefined || source === undefined || target === undefined) {
+      return relayout
+        ? { ...edge, data: { ...edge.data, bendPoints: undefined, bendAnchors: undefined } }
+        : edge;
+    }
+    return {
+      ...edge,
+      data: {
+        ...edge.data,
+        bendPoints: points.map(([x, y]): [number, number] => [x, y]),
+        bendAnchors: { source: { ...source }, target: { ...target } },
+      },
+    };
+  });
 }
 
 /**
@@ -129,14 +203,118 @@ export function planTidy(
     (edges as ConnectionEdge[]).filter((edge) => edge.type === 'stub'),
     connectionOptions,
   );
-  const tidied = tidyRoutes(nodes, edges as ConnectionEdge[], {
-    ...connectionOptions,
-    obstacles: [...chains.values()],
-    keepFree: readoutReserve(nodes, connectors, sizes, { chains }),
-    preferFree: busLabelReserve(nodes, connectors, sizes, { chains }),
-    steps,
-  });
-  return { nodes, edges, tidied };
+  // The diagram as it is drawn now, where the plan is for one on screen and
+  // moves nothing: the label of each bus keeps the place it has there.
+  const shown: PictureOptions | null =
+    options.shown === undefined ? null : { ...connectionOptions, ...options.shown };
+  const drawnNow =
+    shown === null || relayout ? null : pictureOf(nodes, edges as ConnectionEdge[], shown);
+  const labels = [...(drawnNow?.busLabels.values() ?? [])].map(({ box }) => box);
+  /**
+   * The routes, made afresh: all of them, or all but the ones in `keep`,
+   * and with `shut` through no place where the label of a bus stands.
+   */
+  const route = (keep?: ReadonlyMap<string, readonly Point[]>, shut = false): TidyResult =>
+    tidyRoutes(nodes, edges as ConnectionEdge[], {
+      ...connectionOptions,
+      obstacles: [...chains.values()],
+      labels: shut ? labels : undefined,
+      keepFree: readoutReserve(nodes, connectors, sizes, { chains }),
+      preferFree: busLabelReserve(nodes, connectors, sizes, { chains }),
+      steps,
+      keep,
+    });
+  const tidied = route();
+  if (shown === null) return { nodes, edges, tidied };
+
+  // ---- held to the picture it gives ----
+  const overlapsOf = (picture: Picture<ConnectionEdge>, drawnNodes: readonly Node[]): Overlap[] =>
+    findOverlaps(drawnDiagram(drawnNodes, picture, shown));
+  /**
+   * What is wrong with the picture the diagram gives with `routes` in
+   * place: what it has drawn over what that it has not now (nothing, for a
+   * plan that leaves no more on each other than there is: a layout that
+   * came with two symbols on each other is tidied all the same), and the
+   * buses whose label is worse off than it is now (left with its name
+   * alone, or without a place by its bar).
+   */
+  let known: Set<string> | null = null;
+  const faults = (routes: TidyResult['routes']): { overlaps: Overlap[]; labels: string[] } => {
+    const picture = pictureOf(nodes, alongRoutes(nodes, edges, routes, relayout), shown);
+    const found = overlapsOf(picture, nodes);
+    let overlaps: Overlap[] = [];
+    if (found.length > 0) {
+      known ??= new Set(
+        overlapsOf(
+          drawnNow ?? pictureOf(graph.nodes, graph.edges as ConnectionEdge[], shown),
+          graph.nodes,
+        ).map(nameOf),
+      );
+      if (found.length > known.size) overlaps = found.filter((o) => !known!.has(nameOf(o)));
+    }
+    const labels: string[] = [];
+    for (const [bus, now] of drawnNow?.busLabels ?? []) {
+      const label = picture.busLabels.get(bus);
+      if (label !== undefined && busLabelLack(label) > busLabelLack(now)) labels.push(bus);
+    }
+    return { overlaps, labels };
+  };
+  type Faults = ReturnType<typeof faults>;
+  const none = (found: Faults): boolean => found.overlaps.length === 0 && found.labels.length === 0;
+  const first = faults(tidied.routes);
+  if (none(first)) return { nodes, edges, tidied };
+  // The plan that leaves least wrong, of the ones tried: nothing drawn over
+  // anything comes before a label that is as well off as it was.
+  let best = { tidied, found: first };
+  const offer = (candidate: TidyResult): boolean => {
+    const found = faults(candidate.routes);
+    const fewer =
+      found.overlaps.length < best.found.overlaps.length ||
+      (found.overlaps.length === best.found.overlaps.length &&
+        found.labels.length < best.found.labels.length);
+    if (fewer) best = { tidied: candidate, found };
+    return none(found);
+  };
+  if (drawnNow !== null) {
+    // With no route through a place where a label stands.
+    if (first.labels.length > 0 && offer(route(undefined, true))) {
+      return { nodes, edges, tidied: best.tidied };
+    }
+    // With the lines of the buses that have a part in it kept as they are
+    // drawn now, and with them the bars their length and the symbols of the
+    // transformers their places; the others are routed again around those.
+    const busesOf = new Map<string, string[]>();
+    for (const edge of edges) {
+      busesOf.set(edge.id, edge.type === 'stub' ? [edge.target] : [edge.source, edge.target]);
+      if (edge.type === 'stub') busesOf.set(edge.source, [edge.target]);
+    }
+    const buses = new Set(
+      [first, best.found].flatMap((found) => [
+        ...found.overlaps.flatMap(({ a, b }) => [a, b]).flatMap((id) => busesOf.get(id) ?? [id]),
+        ...found.labels,
+      ]),
+    );
+    const keep = new Map<string, Point[]>();
+    for (const edge of edges) {
+      if (edge.type === 'stub' || (!buses.has(edge.source) && !buses.has(edge.target))) continue;
+      const points = drawnNow.connections.routes.get(edge.id)?.points;
+      if (points !== undefined && !drawnNow.unrouted.includes(edge.id)) {
+        keep.set(
+          edge.id,
+          points.map(([x, y]): Point => [x, y]),
+        );
+      }
+    }
+    if (keep.size > 0) {
+      const around = route(keep, true);
+      if (offer({ ...around, routes: new Map([...around.routes, ...keep]) })) {
+        return { nodes, edges, tidied: best.tidied };
+      }
+    }
+  }
+  // A label that is worse off is no reason to leave the lines untidied.
+  if (best.found.overlaps.length === 0) return { nodes, edges, tidied: best.tidied };
+  return { nodes, edges, tidied, refused: describeOverlaps(best.found.overlaps) };
 }
 
 /**

@@ -26,9 +26,23 @@
  *   bar it has nothing to do with. (It does go round a symbol that stands
  *   there: `connections.ts`.)
  *
+ * Those are rules about the boxes of the nodes, which are cheap to hold a
+ * place to. What they do not say is whether the diagram can be drawn with
+ * the nodes there: whether the connector of a device that was dropped far
+ * from its bus has a way to its bar that runs through no symbol and no bar
+ * (it steps round what stands next to the device, and runs straight from
+ * there), and whether every line has a way round what was dropped. So a
+ * place the rules pass is also asked of the picture of the diagram
+ * (`DropOptions.clear`, which is `drawsClear` in `picture.ts`), and one
+ * where something would be drawn over something else is not taken.
+ *
  * The shift is the shortest there is, on a grid of `step` (the grid the
  * nodes snap to, while they do), and `null` when the nodes are clear where
- * they were dropped or no such place is near.
+ * they were dropped. The picture is asked of a few places only, each a
+ * little way from the ones it said no to (`DROP_PICTURES`,
+ * `DROP_PICTURE_APART`); with none of them clear the nodes go back to where
+ * they stood before the move (`DropOptions.back`), where the diagram was
+ * drawn with nothing on anything else.
  *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
@@ -88,7 +102,16 @@ const BETWEEN_CLEARANCE = 16;
 export const DROP_REACH = 256;
 const DROP_STEP = 4;
 
-export interface DropOptions {
+/**
+ * How many places the picture of the diagram is asked about, the one the
+ * nodes were dropped in among them, and how far from a place it said no to
+ * the next one asked about is: what is in the way of a connector there is
+ * mostly in its way a few pixels on as well.
+ */
+export const DROP_PICTURES = 12;
+export const DROP_PICTURE_APART = 24;
+
+export interface DropOptions<N extends ConnectionNode = ConnectionNode> {
   /** The measured size of each node, by id. A node without one is taken at its size hint. */
   sizes?: ReadonlyMap<string, NodeSize>;
   /** How far apart the places tried are: the grid the nodes snap to. Default 4. */
@@ -101,15 +124,47 @@ export interface DropOptions {
    * round what is being dropped on it.
    */
   atRest?: ConnectionLayout;
+  /**
+   * Whether the diagram is drawn with nothing on anything else when its
+   * nodes stand as given: the nodes that were dropped, shifted to a place
+   * the rules pass, and the others where they are (`drawsClear`). Without
+   * it the rules alone decide.
+   */
+  clear?: (nodes: readonly N[]) => boolean;
+  /** How many places `clear` is asked about at the most; default `DROP_PICTURES`. */
+  pictures?: number;
+  /**
+   * The shift that takes the nodes back to where they stood before the
+   * move: where they go when `clear` passes no place near where they were
+   * dropped.
+   */
+  back?: { dx: number; dy: number };
 }
 
 /**
  * What a node was dropped on: a symbol on or right beside another symbol, a
  * symbol and a bar on each other, two bars too close to each other, a
- * symbol or a bar on a connector, or a device beyond the bar of another bus
- * from its own.
+ * symbol or a bar on a connector, a device beyond the bar of another bus
+ * from its own, or a place where a connector or a line would have no way
+ * that is clear of everything else (`no-way`).
  */
-export type DropObstacle = 'symbol-symbol' | 'symbol-bar' | 'bar-bar' | 'connector' | 'bar-between';
+export type DropObstacle =
+  | 'symbol-symbol'
+  | 'symbol-bar'
+  | 'bar-bar'
+  | 'connector'
+  | 'bar-between'
+  | 'no-way';
+
+/** Where what was dropped comes to stand, as a shift from where it was dropped. */
+export interface DropShift {
+  dx: number;
+  dy: number;
+  /** What it was dropped on. */
+  onto: DropObstacle;
+  /** Set where the shift takes the nodes back to where they stood before the move. */
+  back?: true;
+}
 
 interface Shape {
   id: string;
@@ -170,13 +225,13 @@ function near(a: Rect, b: Rect, across: number, down: number = across): boolean 
  * connectors of the devices, with `edges` saying which device and bus each
  * joins. The answer also says what the nodes were dropped on (`onto`).
  */
-export function clearDrop(
-  nodes: readonly ConnectionNode[],
+export function clearDrop<N extends ConnectionNode>(
+  nodes: readonly N[],
   edges: readonly ConnectionEdge[],
   movedIds: ReadonlySet<string>,
   connections: ConnectionLayout,
-  options: DropOptions = {},
-): { dx: number; dy: number; onto: DropObstacle } | null {
+  options: DropOptions<N> = {},
+): DropShift | null {
   if (movedIds.size === 0) return null;
   const step = options.step ?? DROP_STEP;
   const devicesOf = new Map<string, Set<string>>();
@@ -306,8 +361,31 @@ export function clearDrop(
     }
     return null;
   };
-  const onto = inTheWayAt(0, 0);
-  if (onto === null) return null;
+  // Whether the diagram can be drawn with the nodes shifted by `dx`, `dy`:
+  // asked of a few places only, and of none right next to one that failed.
+  const { clear } = options;
+  let pictures = options.pictures ?? DROP_PICTURES;
+  const refused: { dx: number; dy: number }[] = [];
+  const drawn = (dx: number, dy: number): boolean | null => {
+    if (clear === undefined) return true;
+    const near = refused.some(
+      (at) => Math.max(Math.abs(at.dx - dx), Math.abs(at.dy - dy)) < DROP_PICTURE_APART,
+    );
+    if (near) return false;
+    if (pictures <= 0) return null;
+    pictures -= 1;
+    const there = nodes.map((node) =>
+      movedIds.has(node.id)
+        ? { ...node, position: { x: node.position.x + dx, y: node.position.y + dy } }
+        : node,
+    );
+    if (clear(there)) return true;
+    refused.push({ dx, dy });
+    return false;
+  };
+  const rules = inTheWayAt(0, 0);
+  if (rules === null && drawn(0, 0) !== false) return null;
+  const onto = rules ?? 'no-way';
   // The nearest place first; of two as near, the one that is level with
   // where the nodes were dropped, then the one to the left or above.
   const reach = Math.floor(DROP_REACH / step);
@@ -321,6 +399,18 @@ export function clearDrop(
   tried.sort(
     (p, q) => p.far - q.far || Math.abs(p.dy) - Math.abs(q.dy) || p.dy - q.dy || p.dx - q.dx,
   );
-  for (const { dx, dy } of tried) if (inTheWayAt(dx, dy) === null) return { dx, dy, onto };
-  return null;
+  // The nearest place the rules pass, should the picture pass none.
+  let byRules: { dx: number; dy: number } | null = null;
+  for (const { dx, dy } of tried) {
+    if (inTheWayAt(dx, dy) !== null) continue;
+    byRules ??= { dx, dy };
+    const passed = drawn(dx, dy);
+    if (passed === true) return { dx, dy, onto };
+    if (passed === null) break;
+  }
+  if (clear === undefined) return null;
+  // No place near where the nodes were dropped can be drawn: back to where
+  // they stood, or with nowhere to go back to, where the rules have them.
+  if (options.back !== undefined) return { ...options.back, onto, back: true };
+  return byRules === null ? null : { ...byRules, onto };
 }

@@ -21,6 +21,10 @@
  * (`findOverlaps`): the tests hold the example cases to it in every state,
  * and the picture they check is the one the canvas draws.
  *
+ * `drawsClear` is the same check asked before a node comes to stand where
+ * it was dropped (`clearDrop`): whether the diagram, drawn with the nodes
+ * there, has anything on anything else that was not so before the move.
+ *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
 import {
@@ -47,6 +51,8 @@ import {
   TRANSFORMER_LABEL_BOX,
   boxOnDiagram,
   busLabelReserve,
+  limitMarkerBox,
+  markerId,
   overlaps,
   placeBranchLabels,
   placeBusLabels,
@@ -57,7 +63,13 @@ import {
   type LabelNode,
   type ReadoutPlace,
 } from './labels';
-import type { DrawnBar, DrawnBox, DrawnDiagram, DrawnLine } from './overlapCheck';
+import {
+  findOverlaps,
+  type DrawnBar,
+  type DrawnBox,
+  type DrawnDiagram,
+  type DrawnLine,
+} from './overlapCheck';
 import { routeDiagram, type RoutedDiagram, type RoutingOptions } from './routing';
 
 export interface PictureOptions extends Omit<
@@ -90,13 +102,19 @@ export interface Picture<E extends ConnectionEdge> extends RoutedDiagram<E> {
 
 const NO_SIZES: ReadonlyMap<string, NodeSize> = new Map();
 
-/** The picture of the diagram whose nodes are `nodes` and whose edges are `edges`. */
-export function pictureOf<E extends ConnectionEdge>(
+/**
+ * The first four parts of a picture (the connectors of the devices, the
+ * chains, the routes with the symbols of the transformers, and the labels
+ * of the buses): everything on it that is drawn whatever is in the way.
+ * The readouts and the flow labels come after, and are left off where they
+ * have no place.
+ */
+function drawnAlways<E extends ConnectionEdge>(
   nodes: readonly LabelNode[],
   edges: readonly E[],
   options: PictureOptions,
-): Picture<E> {
-  const { values, labelWidths, ...routing } = options;
+) {
+  const { values, labelWidths: _labelWidths, ...routing } = options;
   const sizes = routing.sizes ?? NO_SIZES;
   const {
     steps: _steps,
@@ -120,12 +138,26 @@ export function pictureOf<E extends ConnectionEdge>(
     keepFree: readoutReserve(nodes, stubs, sizes, { chains: chainBoxes }),
     preferFree: busLabelReserve(nodes, stubs, sizes, { chains: chainBoxes }),
   });
-  const { connections } = routed;
   // The symbols of the transformers stand where the routing has them: every
   // label keeps off them.
   const symbols = symbolBoxes(routed.symbols);
+  const busLabels = placeBusLabels(nodes, routed.connections, sizes, values, chainBoxes, symbols);
+  return { routed, chains, chainBoxes, symbols, busLabels, sizes };
+}
 
-  const busLabels = placeBusLabels(nodes, connections, sizes, values, chainBoxes, symbols);
+/** The picture of the diagram whose nodes are `nodes` and whose edges are `edges`. */
+export function pictureOf<E extends ConnectionEdge>(
+  nodes: readonly LabelNode[],
+  edges: readonly E[],
+  options: PictureOptions,
+): Picture<E> {
+  const { values, labelWidths } = options;
+  const { routed, chains, chainBoxes, symbols, busLabels, sizes } = drawnAlways(
+    nodes,
+    edges,
+    options,
+  );
+  const { connections } = routed;
   // The readouts show with the values, and stand clear of the labels of the
   // buses as those are then.
   const labelBoxes = new Map([...busLabels].map(([id, { box }]) => [id, box]));
@@ -144,7 +176,7 @@ export function pictureOf<E extends ConnectionEdge>(
     symbols: routed.symbols,
     values,
     widths: labelWidths?.flows,
-    quick: routing.dragging === true,
+    quick: options.dragging === true,
   });
   return { ...routed, chains, busLabels, readouts, labelPlaces };
 }
@@ -205,9 +237,10 @@ interface DrawnEdge extends ConnectionEdge {
 /**
  * `picture` as the overlap checker reads it: every connector as a line,
  * every bar, and every box: the symbols of the devices and the badges, the
- * chains that are drawn out, the symbols of the transformers, the labels of
- * the buses, and with `values` the readouts of the devices and the flow
- * labels of the lines.
+ * room of the limit mark on the corner of each generator, the chains that
+ * are drawn out, the symbols of the transformers, the labels of the buses,
+ * and with `values` the readouts of the devices and the flow labels of the
+ * lines.
  */
 export function drawnDiagram(
   nodes: readonly LabelNode[],
@@ -275,6 +308,10 @@ export function drawnDiagram(
         bottom: y + (size?.height ?? node.initialHeight ?? 0),
       },
     });
+    const marker = limitMarkerBox(node, sizes);
+    if (marker !== null) {
+      boxes.push({ id: markerId(node.id), kind: 'symbol', box: marker, of: [node.id] });
+    }
     const chain = picture.chains.get(node.id);
     if (chain !== undefined) {
       boxes.push({ id: `chain:${node.id}`, kind: 'block', box: chain.box, of: [node.id] });
@@ -285,4 +322,49 @@ export function drawnDiagram(
     }
   }
   return { lines, bars, boxes };
+}
+
+/**
+ * Whether a diagram can be drawn with its nodes where a move has put them,
+ * as `clearDrop` asks of a place before it lets what was dropped stand
+ * there (`DropOptions.clear`). The rules of `clearDrop` are about the boxes
+ * of the nodes; whether the connector of a device that was dropped far from
+ * its bus finds a way there that runs through no symbol and no bar, and
+ * whether every line still has one round it, only the picture says.
+ *
+ * `before` are the nodes as they stood before the move, and `edges` the
+ * edges with the routes kept for them then. The answer says, of the same
+ * nodes somewhere else, whether their picture has nothing on anything else
+ * (`findOverlaps`) that the picture before the move did not have: what a
+ * diagram came with (a layout saved with two symbols on each other) is not
+ * held against the move.
+ */
+export function drawsClear<E extends DrawnEdge>(
+  before: readonly LabelNode[],
+  edges: readonly E[],
+  options: PictureOptions,
+): (nodes: readonly LabelNode[]) => boolean {
+  const found = (nodes: readonly LabelNode[]): string[] => {
+    // What is drawn whatever is in the way. A readout or a flow label that
+    // has no place is left off, so neither is ever on anything, and placing
+    // them is most of the work of a picture with values on it.
+    const { routed, chains, busLabels } = drawnAlways(nodes, edges, options);
+    const picture = {
+      ...routed,
+      chains,
+      busLabels,
+      readouts: new Map<string, ReadoutPlace>(),
+      labelPlaces: routed.symbols,
+    };
+    return findOverlaps(drawnDiagram(nodes, picture, { sizes: options.sizes, values: false })).map(
+      ({ kind, a, b }) => `${kind}|${a}|${b}`,
+    );
+  };
+  let known: Set<string> | null = null;
+  return (nodes) => {
+    const now = found(nodes);
+    if (now.length === 0) return true;
+    known ??= new Set(found(before));
+    return now.every((overlap) => known!.has(overlap));
+  };
 }

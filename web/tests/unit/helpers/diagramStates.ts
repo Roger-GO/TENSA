@@ -18,6 +18,7 @@ import { autoLayout } from '@/components/sld/layout';
 import { describeOverlaps, findOverlaps } from '@/components/sld/overlapCheck';
 import {
   drawnDiagram,
+  drawsClear,
   pictureOf,
   type Picture,
   type PictureOptions,
@@ -67,12 +68,23 @@ export function settled(diagram: Diagram): Diagram {
   return { ...diagram, edges: drawn(diagram).edges as Edge[] };
 }
 
-/** `diagram` after Tidy diagram, or after Tidy and re-layout: the plan, put in place. */
-export function tidied(diagram: Diagram, relayout: boolean): Diagram {
+/**
+ * `diagram` after Tidy diagram, or after Tidy and re-layout: the plan, put
+ * in place, and `diagram` itself where the plan is refused for what it
+ * would draw over what. `shown` is how the diagram is drawn when the tidy
+ * is asked for: without the values of a power flow, unless it says so.
+ */
+export function tidied(
+  diagram: Diagram,
+  relayout: boolean,
+  shown: Pick<PictureOptions, 'values' | 'labelWidths'> = { values: false },
+): Diagram {
   const plan = planTidy({ nodes: diagram.nodes, edges: diagram.edges }, diagram.topology, {
     relayout,
     barLengths: diagram.barLengths,
+    shown,
   });
+  if (plan.refused !== undefined) return diagram;
   const at = new Map(plan.nodes.map((n) => [n.id, n.position]));
   const edges = plan.edges.map((edge) => {
     const points = plan.tidied.routes.get(edge.id);
@@ -109,30 +121,51 @@ export function moved(diagram: Diagram, ids: ReadonlySet<string>, dx: number, dy
 /**
  * How far the canvas shifts the nodes `ids` of `diagram` when they are
  * dropped where they stand (`clearDrop`): `null` where they are clear.
- * `before` is the diagram as it stood before they were moved.
+ * `before` is the diagram as it stood before they were moved: a place is
+ * held to its picture as well (`drawsClear`), and with no clear place near
+ * the nodes go back to where they stood in it.
  */
 export function dropShift(
   diagram: Diagram,
   ids: ReadonlySet<string>,
   before: Diagram = diagram,
-): { dx: number; dy: number } | null {
+): { dx: number; dy: number; back?: true } | null {
   const { connections } = drawn(diagram, { values: false, dragging: true });
+  const one = diagram.nodes.find((n) => ids.has(n.id));
+  const stood = before.nodes.find((n) => n.id === one?.id);
   return clearDrop(diagram.nodes, diagram.edges as ConnectionEdge[], ids, connections, {
     atRest: drawn(before).connections,
+    clear: drawsClear(before.nodes, before.edges as ConnectionEdge[], {
+      barLengths: diagram.barLengths,
+      values: false,
+    }),
+    back:
+      one === undefined || stood === undefined
+        ? undefined
+        : { dx: stood.position.x - one.position.x, dy: stood.position.y - one.position.y },
   });
 }
 
 /**
  * `diagram` after the node `id` was dragged by `dx`, `dy` and dropped: a bus
  * takes its generators, loads and shunts along, what was dropped on
- * something stands in the nearest free place, as the canvas puts it there,
- * and the routes are the ones the canvas makes for the diagram at rest.
+ * something stands in the nearest free place, as the canvas puts it there
+ * (or back where it stood, with no free place near), and the routes are the
+ * ones the canvas makes for the diagram at rest. `shift` is how far the
+ * canvas shifts what was dropped, where the caller has asked already
+ * (`dropShift`).
  */
-export function dragged(diagram: Diagram, id: string, dx: number, dy: number): Diagram {
+export function dragged(
+  diagram: Diagram,
+  id: string,
+  dx: number,
+  dy: number,
+  shift?: { dx: number; dy: number } | null,
+): Diagram {
   const ids = draggedWith(diagram, id);
   let dropped = moved(diagram, ids, dx, dy);
-  const shift = dropShift(dropped, ids, diagram);
-  if (shift !== null) dropped = moved(dropped, ids, shift.dx, shift.dy);
+  const by = shift === undefined ? dropShift(dropped, ids, diagram) : shift;
+  if (by !== null) dropped = moved(dropped, ids, by.dx, by.dy);
   return settled(dropped);
 }
 
@@ -143,4 +176,99 @@ export function overlapsOf(
 ): string[] {
   const picture = drawn(diagram, options);
   return describeOverlaps(findOverlaps(drawnDiagram(diagram.nodes, picture, options)));
+}
+
+/**
+ * The widths the values of a solved case have on screen: a readout of two
+ * lines such as `-21.6 MVAr`, a flow such as `-25.97 MW` after its arrow.
+ */
+export function typicalWidths(diagram: Diagram) {
+  return {
+    readouts: new Map(diagram.nodes.map((n) => [n.id, 62])),
+    flows: new Map(diagram.edges.map((e) => [e.id, 78])),
+  };
+}
+
+/** Both ways a state is looked at: as it is, and with the values of a power flow on it. */
+export function bothWays(diagram: Diagram): string[] {
+  return [
+    ...overlapsOf(diagram, { values: false }).map((found) => `plain: ${found}`),
+    ...overlapsOf(diagram, { values: true }).map((found) => `values: ${found}`),
+    ...overlapsOf(diagram, { values: true, labelWidths: typicalWidths(diagram) }).map(
+      (found) => `values as wide as they are: ${found}`,
+    ),
+  ];
+}
+
+/**
+ * Every place where two things are on each other while the nodes `ids` of
+ * `diagram` are dragged to where they stand: the picture of a move, made
+ * from the routes the diagram had before it.
+ */
+export function whileDragged(diagram: Diagram, before: Diagram, values: boolean): string[] {
+  const picture = pictureOf(diagram.nodes, before.edges as ConnectionEdge[], {
+    barLengths: diagram.barLengths,
+    values,
+    dragging: true,
+  });
+  return [
+    ...picture.unrouted.map((id) => `no route for ${id}`),
+    ...describeOverlaps(findOverlaps(drawnDiagram(diagram.nodes, picture, { values }))),
+  ];
+}
+
+/**
+ * Every place where two things are on each other at each move of a drag of
+ * the node `id` by `dx`, `dy`, a move every `step`: each move is drawn from
+ * the routes the moves before it made, the way the canvas carries them
+ * through a drag (`dragRoutesRef` in `SldCanvas.tsx`). Only the moves count
+ * that do not put what is dragged on something.
+ */
+export function alongDrag(
+  first: Diagram,
+  id: string,
+  dx: number,
+  dy: number,
+  step: number,
+): string[] {
+  const ids = draggedWith(first, id);
+  const moves = Math.round(Math.max(Math.abs(dx), Math.abs(dy)) / step);
+  const carried = new Map<string, { points: [number, number][]; anchors: unknown }>();
+  const found: string[] = [];
+  for (let k = 1; k <= moves; k += 1) {
+    const there = moved(first, ids, (dx * k) / moves, (dy * k) / moves);
+    const at = new Map(there.nodes.map((n) => [n.id, n.position]));
+    const sits = (node: string, then: { x: number; y: number } | undefined): boolean =>
+      then !== undefined && at.get(node)!.x === then.x && at.get(node)!.y === then.y;
+    const edges = first.edges.map((edge) => {
+      const route = carried.get(edge.id);
+      const kept = (
+        edge.data as { bendAnchors?: Record<'source' | 'target', { x: number; y: number }> }
+      ).bendAnchors;
+      // Back where the route it keeps was made for, a branch is drawn along that one.
+      if (
+        route === undefined ||
+        (sits(edge.source, kept?.source) && sits(edge.target, kept?.target))
+      ) {
+        return edge;
+      }
+      return {
+        ...edge,
+        data: { ...edge.data, bendPoints: route.points, bendAnchors: route.anchors },
+      };
+    });
+    const picture = pictureOf(there.nodes, edges as ConnectionEdge[], {
+      barLengths: there.barLengths,
+      values: false,
+      dragging: true,
+    });
+    for (const [edge, route] of picture.changed) carried.set(edge, route);
+    const here = describeOverlaps(
+      findOverlaps(drawnDiagram(there.nodes, picture, { values: false })),
+    );
+    // What a drag passes through and a drop does not stay on is not held to the rule.
+    if (here.length === 0 || dropShift(there, ids, first) !== null) continue;
+    found.push(...here.map((text) => `bus ${id} by ${dx}, ${dy}, move ${k} of ${moves}: ${text}`));
+  }
+  return found;
 }

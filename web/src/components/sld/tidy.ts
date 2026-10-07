@@ -31,7 +31,9 @@
  * - It keeps clear of every generator, load and shunt, of the line of a bar
  *   it is not connected to, of the label of every bus but its own two
  *   (which it only passes on its way out of the south face), and of the
- *   badges and the control chains that are drawn out.
+ *   badges and the control chains that are drawn out. Where it is told
+ *   where the labels of the buses stand (`TidyOptions.labels`), it runs
+ *   through none of them, its own two included.
  * - No two routes share a run or run closer than `NEAR_LINE` side by side,
  *   none turns on another, and none passes through the corner of another:
  *   where two meet, they cross at a right angle. A crossing costs as much
@@ -162,6 +164,13 @@ export const PREFER_FREE_COST = BEND_COST;
 const BADGE_CLEARANCE = 4;
 
 /**
+ * The gap a route keeps to the label of a bus that stands on the diagram
+ * (`TidyOptions.labels`): less than half the thickness of a bar, so the
+ * label that hangs under a bar shuts none of the taps on its other face.
+ */
+const LABEL_CLEARANCE = 2;
+
+/**
  * The room the symbol of a transformer keeps to everything that is not its
  * own line: a line on the next line of the grid passes it, and nothing
  * nearer does.
@@ -282,6 +291,13 @@ export interface TidyNode extends ConnectionNode {
 export interface TidyOptions extends ConnectionOptions {
   /** What else stands on the diagram and is no node: a control chain that is drawn out. */
   obstacles?: readonly Rect[];
+  /**
+   * The labels of the buses where they stand on the diagram that is being
+   * tidied. No route runs through one: a label that has a place keeps it
+   * (`planTidy`), which the routes of the diagram as it is drawn show to
+   * be possible.
+   */
+  labels?: readonly Rect[];
   /**
    * The places to keep free of routes, device by device: where the P / Q
    * readout of each generator and load can stand once a power flow has run
@@ -1017,6 +1033,14 @@ export function tidyRoutes(
       hard[n] = 1;
     });
   }
+  // The labels of the buses where they stand: shut to every route, and no
+  // more than that. Unlike a device, a label adds no line to the grid for a
+  // route to run along.
+  for (const box of options.labels ?? []) {
+    inside(grown(box, LABEL_CLEARANCE), (n) => {
+      hard[n] = 1;
+    });
+  }
   const barRect = (bus: Bus): Rect => ({
     left: bus.start - SLIDE_CLEARANCE,
     right: bus.end + SLIDE_CLEARANCE,
@@ -1172,9 +1196,9 @@ export function tidyRoutes(
       symbolZone[n] = -2;
     });
   }
-  /** The devices, the badges and the chains by the squares they reach into, and the buses by the squares of their rows. */
+  /** The devices, the badges, the chains and the labels by the squares they reach into, and the buses by the squares of their rows. */
   const boxesBySquare = new Map<number, Rect[]>();
-  for (const { box } of boxes) {
+  for (const box of [...boxes.map((entry) => entry.box), ...(options.labels ?? [])]) {
     for (const key of cellsOf(box)) {
       const list = boxesBySquare.get(key);
       if (list) list.push(box);
