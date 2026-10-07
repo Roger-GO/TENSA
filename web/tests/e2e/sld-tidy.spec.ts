@@ -15,6 +15,10 @@
  *   beside its bus, every connector where it should be -> one Undo takes all
  *   of that back -> reload the page -> the diagram as it was left
  *
+ *   open each example case -> Tidy and re-layout -> run a power flow -> the
+ *   values of every device, the flow of every line and the label of every
+ *   bus can be read: none is on a symbol, on another label or under a line
+ *
  * It drives the real UI against a real `tensa serve` (see `playwright.config.ts`)
  * in a real browser, and reads what React Flow drew (`sldDrawing.ts`). The
  * unit tests check the routes `tidy.ts` works out; this one checks them where
@@ -29,9 +33,11 @@ import {
   NEAR,
   branchesIntoDevices,
   drawing,
+  labelProblems,
   layoutWritten,
   openCase,
   problems,
+  runPowerFlow,
   settled,
   type Drawing,
 } from './sldDrawing';
@@ -161,6 +167,8 @@ test('Tidy diagram parts the lines of IEEE 14, keeps them through a reload, and 
   // Asked again, there is nothing left to tidy.
   await page.getByTestId('sld-tidy').click();
   await expect(page.getByText('The diagram is already tidy.')).toBeVisible();
+  // No line runs through a symbol or a bar, so the button has none to count.
+  await expect(page.getByTestId('sld-tidy-count')).toHaveCount(0);
 
   // ---- One Undo, one Redo ---------------------------------------------------
   await Promise.all([layoutWritten(page), page.keyboard.press('Control+z')]);
@@ -183,6 +191,15 @@ test('Tidy diagram parts the lines of IEEE 14, keeps them through a reload, and 
   expect(branchPaths(reopened)).toEqual(branchPaths(tidied));
   expect(placement(reopened)).toEqual(placement(tidied));
   expect(sharedRuns(reopened)).toEqual([]);
+
+  // ---- The values of a power flow have room on a tidied diagram --------------
+  // As the automatic layout routes them, lines run through the P and Q of
+  // several loads. A tidy leaves every device a place for them, so they
+  // can be read when a power flow is run afterwards: no line runs through
+  // the values of a device, and no label stands on a symbol or on another.
+  await runPowerFlow(page);
+  await settled(page);
+  expect(await labelProblems(page)).toEqual([]);
 });
 
 test('a bus takes its devices along, moves are taken back, picked buses are lined up, and a re-layout tidies it all', async ({
@@ -290,4 +307,39 @@ test('a bus takes its devices along, moves are taken back, picked buses are line
   const reopened = await settled(page);
   expect(placement(reopened)).toEqual(placement(final));
   expect(branchPaths(reopened)).toEqual(branchPaths(final));
+});
+
+test('after Tidy and re-layout the values of a power flow can be read on every example case', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  await page.goto('/');
+  for (const example of ['ieee14_full.xlsx', 'kundur_full.xlsx', 'wscc9.xlsx']) {
+    const stem = `relayout-${example.replace(/[_.].*$/, '')}-${Date.now()}`;
+    await openCase(page, example);
+    await settled(page);
+    await openCopy(page, stem);
+    await settled(page);
+
+    await page.getByTestId('sld-arrange-trigger').click();
+    await Promise.all([layoutWritten(page), page.getByTestId('sld-arrange-tidy-relayout').click()]);
+    await expect(
+      page.getByText('Diagram tidied and laid out again', { exact: true }).last(),
+    ).toBeVisible();
+    const laidOut = await settled(page);
+    // Every device stands over or under its bar, and no line is in a symbol.
+    for (const [id, edge] of Object.entries(laidOut.edges)) {
+      if (!id.startsWith('stub-')) continue;
+      expect(edge.points, `${example} ${id}`).toHaveLength(2);
+      expect(Math.abs(edge.points[0]![0] - edge.points[1]![0]), `${example} ${id}`).toBeLessThan(
+        NEAR,
+      );
+    }
+    expect(problems(laidOut), example).toEqual([]);
+    expect(branchesIntoDevices(laidOut), example).toEqual([]);
+
+    await runPowerFlow(page);
+    await settled(page);
+    expect(await labelProblems(page), example).toEqual([]);
+  }
 });

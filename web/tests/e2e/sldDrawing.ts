@@ -1,8 +1,8 @@
 /**
  * What the diagram specs share: opening a case, reading what React Flow drew
  * (the box of each node as the browser laid it out, the bar and the tap dots
- * of each bus, the path of each edge), and the rules every connector of a
- * drawn diagram keeps.
+ * of each bus, the path of each edge), the rules every connector of a drawn
+ * diagram keeps, and the rules the values of a power flow keep on it.
  *
  * Not a spec itself: `sld-connections.spec.ts` and `sld-tidy.spec.ts` import
  * from it.
@@ -265,6 +265,151 @@ export function branchesIntoDevices({ nodes, edges }: Drawing): string[] {
     }
   }
   return found;
+}
+
+/** Run a power flow and wait for its values to show on the diagram. */
+export async function runPowerFlow(page: Page): Promise<void> {
+  await page.getByTestId('run-pflow-button').click();
+  await expect(page.locator('[data-testid^="bus-voltage-"]').first()).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(page.locator('[data-testid^="line-flow-label-"]').first()).toBeVisible();
+}
+
+/**
+ * Every way the values a power flow puts on the diagram are in the way of
+ * something, as text; empty when each can be read. It is read off the
+ * screen: the boxes the browser gave the P / Q readouts of the devices, the
+ * flow labels of the lines, the labels of the buses and the symbols, and the
+ * paths of the connectors as they are drawn.
+ *
+ * - no line, transformer or other connector runs through the readout of a
+ *   device;
+ * - no readout stands on a symbol, on the label of a bus or on another
+ *   readout;
+ * - no flow label stands on a device, a readout, the label of a bus or
+ *   another flow label;
+ * - no label of a bus stands on a device or on the label of another bus.
+ *
+ * Two boxes count as on each other from `SLACK` pixels of overlap either
+ * way: the browser lays text out on whole pixels, the diagram places it in
+ * halves.
+ */
+export async function labelProblems(page: Page): Promise<string[]> {
+  return await page.evaluate(() => {
+    const SLACK = 2;
+    interface Box {
+      id: string;
+      left: number;
+      right: number;
+      top: number;
+      bottom: number;
+    }
+    const boxes = (selector: string, idOf: (el: HTMLElement) => string): Box[] =>
+      [...document.querySelectorAll<HTMLElement>(selector)].map((el) => {
+        const r = el.getBoundingClientRect();
+        return { id: idOf(el), left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+      });
+    const on = (a: Box, b: Box): boolean =>
+      Math.min(a.right, b.right) - Math.max(a.left, b.left) > SLACK &&
+      Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > SLACK;
+    const testId = (el: HTMLElement): string => el.dataset.testid ?? '';
+    const readouts = boxes(
+      '[data-testid^="generator-values-"], [data-testid^="load-values-"]',
+      (el) => el.closest<HTMLElement>('.react-flow__node')?.dataset.id ?? testId(el),
+    );
+    const flows = boxes('[data-testid^="line-flow-label-"]', (el) =>
+      testId(el).replace('line-flow-label-', ''),
+    );
+    const busLabels = boxes('[data-testid^="bus-label-"]', (el) =>
+      testId(el).replace('bus-label-', 'bus '),
+    );
+    const devices = boxes(
+      '.react-flow__node-generator, .react-flow__node-load, .react-flow__node-shunt',
+      (el) => el.dataset.id ?? '',
+    );
+    // Each connector as points a pixel apart along its path, on screen.
+    const connectors = [...document.querySelectorAll<HTMLElement>('.react-flow__edge')].map(
+      (el) => {
+        const path = el.querySelector<SVGPathElement>('path.react-flow__edge-path');
+        const points: [number, number][] = [];
+        const matrix = path?.getScreenCTM();
+        if (path && matrix) {
+          const length = path.getTotalLength();
+          for (let at = 0; at <= length; at += 1) {
+            const p = path.getPointAtLength(at);
+            points.push([
+              p.x * matrix.a + p.y * matrix.c + matrix.e,
+              p.x * matrix.b + p.y * matrix.d + matrix.f,
+            ]);
+          }
+        }
+        return { id: el.dataset.id ?? '', points };
+      },
+    );
+    const through = (box: Box): string[] =>
+      connectors
+        .filter(({ points }) =>
+          points.some(
+            ([x, y]) =>
+              x > box.left + SLACK &&
+              x < box.right - SLACK &&
+              y > box.top + SLACK &&
+              y < box.bottom - SLACK,
+          ),
+        )
+        .map(({ id }) => id);
+
+    const found: string[] = [];
+    for (const readout of readouts) {
+      for (const id of through(readout)) {
+        if (id !== `stub-${readout.id}`)
+          found.push(`${id} runs through the values of ${readout.id}`);
+      }
+      for (const device of devices) {
+        if (device.id !== readout.id && on(device, readout)) {
+          found.push(`the values of ${readout.id} are on ${device.id}`);
+        }
+      }
+      for (const label of busLabels) {
+        if (on(label, readout))
+          found.push(`the values of ${readout.id} are on the label of ${label.id}`);
+      }
+      for (const other of readouts) {
+        if (other.id < readout.id && on(other, readout)) {
+          found.push(`the values of ${readout.id} and of ${other.id} overlap`);
+        }
+      }
+    }
+    for (const flow of flows) {
+      for (const device of devices) {
+        if (on(device, flow)) found.push(`the flow of ${flow.id} is on ${device.id}`);
+      }
+      for (const readout of readouts) {
+        if (on(readout, flow))
+          found.push(`the flow of ${flow.id} is on the values of ${readout.id}`);
+      }
+      for (const label of busLabels) {
+        if (on(label, flow)) found.push(`the flow of ${flow.id} is on the label of ${label.id}`);
+      }
+      for (const other of flows) {
+        if (other.id < flow.id && on(other, flow)) {
+          found.push(`the flows of ${flow.id} and ${other.id} overlap`);
+        }
+      }
+    }
+    for (const label of busLabels) {
+      for (const device of devices) {
+        if (on(device, label)) found.push(`the label of ${label.id} is on ${device.id}`);
+      }
+      for (const other of busLabels) {
+        if (other.id < label.id && on(other, label)) {
+          found.push(`the labels of ${label.id} and ${other.id} overlap`);
+        }
+      }
+    }
+    return found;
+  });
 }
 
 /** The diagram once it has nodes, every node is measured, and it has stopped changing. */
