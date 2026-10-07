@@ -27,6 +27,15 @@
  *   and the arrow keys make the line turn there -> pick another line with
  *   Enter while it has the keyboard focus: one of its runs takes the keys
  *
+ *   open IEEE 14 -> click the middle of the element of every line,
+ *   transformer and connector: each is picked -> slide the connector of a
+ *   load along its bar and try to take the bend by its tap out: refused,
+ *   since the connector would run along its bar over the end beside its own
+ *   -> the Inspector of a line says how it is routed, and its Reset route
+ *   gives a route drawn by hand back -> drag the bottom drawer down to its
+ *   tab strip: a click on the Lines tab opens it again, and a row picks
+ *   its line
+ *
  * It drives the real UI against a real `tensa serve` (see `playwright.config.ts`)
  * in a real browser, and reads what React Flow drew (`sldDrawing.ts`). The
  * unit tests hold the moves and the check that goes with them; this one
@@ -445,4 +454,101 @@ test('WSCC 9: a line is picked by its row in the Lines table and with the keys, 
   await expect(page.locator('[data-testid^="sld-route-run-"]:focus')).toHaveCount(1);
   await page.keyboard.press('Escape');
   await expect(editor).toHaveCount(0);
+});
+
+test('IEEE 14: every line is picked by a click on the middle of its element, a connector is not left along its bar, and the Inspector and a reopened drawer reach a route', async ({
+  page,
+}) => {
+  const stem = `route-e2e-reach-${Date.now()}`;
+
+  await page.goto('/');
+  await openCase(page, 'ieee14_full.xlsx');
+  await settled(page);
+  await openCopy(page, stem);
+  const opened = await settled(page);
+  const editor = page.getByTestId('sld-route-editor');
+
+  // ---- a click on the middle of the element is a click on the line ----
+  // What an assistive tool, or anything else that does not aim, clicks: the
+  // middle of the box of the element. Straight or with bends, each line has
+  // a box, and the middle of it is on the line.
+  for (const id of Object.keys(opened.edges)) {
+    await page.locator(`.react-flow__edge[data-id="${id}"]`).click();
+    await expect(editor).toHaveAttribute('data-edge-id', id);
+    await page.keyboard.press('Escape');
+    await expect(editor).toHaveCount(0);
+  }
+
+  // ---- a bend that holds a connector off its bar is not taken out ----
+  const id = 'stub-load-PQ_3';
+  const before = opened.edges[id]!.points;
+  await clickLine(page, id);
+  const middle: [number, number] = [before[0]![0], (before[0]![1] + before[1]![1]) / 2];
+  await Promise.all([layoutWritten(page), dragFrom(page, middle, [96, 0])]);
+  const stepped = (await settled(page)).edges[id]!.points;
+  expect(stepped).toHaveLength(4);
+  // Without the bend over its tap it would run from under the symbol
+  // straight to the tap, along the bar and over the end beside its own.
+  const bend = await onScreen(page, stepped[2]!);
+  await page.mouse.dblclick(bend.x, bend.y);
+  await expect(page.getByTestId('sld-route-note')).toContainText('Not removed');
+  await expect(page.getByTestId('sld-route-note')).toHaveAttribute('data-tone', 'refused');
+  expect((await settled(page)).edges[id]!.points).toEqual(stepped);
+  // Moved alone towards the bar the same: it stays where it is on nothing.
+  await page.keyboard.down('Shift');
+  await dragFrom(page, stepped[2]!, [-90, 12]);
+  await page.keyboard.up('Shift');
+  const kept = (await settled(page)).edges[id]!.points;
+  const [outer, tap] = [kept[kept.length - 2]!, kept[kept.length - 1]!];
+  const slope = Math.abs(tap[1] - outer[1]) / Math.max(1, Math.abs(tap[0] - outer[0]));
+  expect(slope).toBeGreaterThanOrEqual(Math.tan((29.5 * Math.PI) / 180));
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  await page.getByTestId('sld-route-done').click();
+
+  // ---- the Inspector of a line reaches its route ----
+  const line = Object.keys(opened.edges).find(
+    (edge) => edge.startsWith('line-') && levelRun(opened.edges[edge]!.points) > 0,
+  )!;
+  const points = opened.edges[line]!.points;
+  const run = levelRun(points);
+  await page.locator(`.react-flow__edge[data-id="${line}"]`).click();
+  const section = page.getByTestId('route-section');
+  await expect(section).toBeVisible();
+  await expect(page.getByTestId('route-section-status')).toHaveText('Routed automatically');
+  await expect(page.getByTestId('route-section-reset')).toBeDisabled();
+  await expect(page.getByTestId('route-section-note')).toContainText('nothing to reset');
+  const grab: [number, number] = [
+    points[run]![0] + (points[run + 1]![0] - points[run]![0]) / 4,
+    points[run]![1],
+  ];
+  await Promise.all([layoutWritten(page), dragFrom(page, grab, [0, 40])]);
+  await expect(page.getByTestId('route-section-status')).toHaveText('Routed by hand');
+  await page.getByTestId('sld-route-done').click();
+  await expect(editor).toHaveCount(0);
+  // Move route by hand shows the handles again; Reset route gives the route back.
+  await page.getByTestId('route-section-edit').click();
+  await expect(editor).toHaveAttribute('data-edge-id', line);
+  await Promise.all([layoutWritten(page), page.getByTestId('route-section-reset').click()]);
+  await expect(page.getByTestId('route-section-status')).toHaveText('Routed automatically');
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  await page.keyboard.press('Escape');
+
+  // ---- a drawer dragged down to its tab strip opens again on a tab ----
+  const handle = (await page
+    .getByRole('separator', { name: 'Resize bottom drawer' })
+    .boundingBox())!;
+  const viewport = page.viewportSize()!;
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2, viewport.height - 2, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.getByTestId('bottom-drawer')).toHaveAttribute('data-collapsed', 'true');
+  await expect(page.getByTestId('lines-grid')).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Lines' }).click();
+  await expect(page.getByTestId('bottom-drawer')).toHaveAttribute('data-collapsed', 'false');
+  const row = page.getByTestId('lines-grid-row-line-Line_16');
+  await row.click();
+  await expect(editor).toHaveAttribute('data-edge-id', 'line-Line_16');
+  const drawer = (await page.getByTestId('bottom-drawer').boundingBox())!;
+  expect(drawer.height).toBeGreaterThan(150);
 });
