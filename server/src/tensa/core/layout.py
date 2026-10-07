@@ -15,10 +15,12 @@ the same picture:
 - ``busbars``: the length and the orientation of a bus's bar. A bar with no
   length set is as long as what connects to it needs.
 - ``branches``: how a line or a transformer is drawn (``routing``), the points it
-  bends at, and the face of each bus it leaves from.
+  bends at, and the face of each bus it leaves from. A route that was drawn by
+  hand says so (``manual``): tidying the diagram leaves it as it is.
 - ``label_offsets``: how far a label was moved from where it is drawn by default.
 - ``connections``: the faces a device's connector leaves the device and reaches
-  the bus on, where they were chosen and not worked out.
+  the bus on, where they were chosen and not worked out, and the points the
+  connector runs through where it was drawn by hand, with the bus it runs to.
 - ``figure``: the display settings of the diagram and of a figure made from
   it. ``connector_style`` is the one the diagram itself reads: ``straight``, or
   ``elbow`` for device connectors drawn with one right angle.
@@ -31,10 +33,10 @@ Entries are keyed by ANDES idx, and an idx does not always keep its meaning. A
 PSS/E ``.raw`` file holds none, so a system saved as one comes back with its
 devices and branches numbered afresh by the parser, and an element that is
 deleted can give its idx to the next one added. A device's position, the state
-of a generating unit and a branch's route therefore carry what they are anchored
-to (``bus``, and ``bus1`` / ``bus2``): a reader uses an entry only for an element
-on those buses, and can match a position or a route whose idx no longer fits to
-the element that is there now.
+of a generating unit, a branch's route and a connector drawn by hand therefore
+carry what they are anchored to (``bus``, and ``bus1`` / ``bus2``): a reader uses
+an entry only for an element on those buses, and can match a position or a route
+whose idx no longer fits to the element that is there now.
 :func:`for_renumbered_copy` is what a copy written in such a format keeps.
 
 The web client is what places things; the server validates the document and
@@ -200,21 +202,25 @@ class LayoutBranchRoute(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    routing: Literal["auto", "polyline"] = Field(
+    routing: Literal["auto", "polyline", "manual"] = Field(
         "auto",
         description=(
             "``auto``: the branch is drawn from where its two buses are now, "
             "and ``bend_points`` is not used. ``polyline``: it is drawn "
-            "through ``bend_points`` as they are stored."
+            "through ``bend_points`` as they are stored, a route the diagram "
+            "made. ``manual``: it is drawn through ``bend_points`` too, and "
+            "the route was drawn by hand: tidying the diagram leaves it as it "
+            "is, and it is brought along when one of its buses is moved."
         ),
     )
     bend_points: list[BusCoord] = Field(
         default_factory=list,
         description=(
-            "The points of a ``polyline`` route in order: where it leaves the "
-            "first bus, each bend, and where it reaches the second bus. A "
-            "route is only drawn while both ends still sit on their buses, so "
-            "moving a bus sends its branches back to ``auto``."
+            "The points of a ``polyline`` or ``manual`` route in order: where "
+            "it leaves the first bus, each bend, and where it reaches the "
+            "second bus. A ``polyline`` route is only drawn while both ends "
+            "still sit on their buses, so moving a bus sends its branches back "
+            "to ``auto``; a ``manual`` one follows its buses."
         ),
         max_length=MAX_BEND_POINTS,
     )
@@ -275,6 +281,26 @@ class LayoutConnection(BaseModel):
         description=(
             "Face of the bus the connector lands on, when it was chosen. "
             "``null`` lets the renderer pick."
+        ),
+    )
+    bend_points: list[BusCoord] = Field(
+        default_factory=list,
+        description=(
+            "The points of a connector that was drawn by hand, in order: where "
+            "it leaves the device, each bend, and where it lands on the bar of "
+            "the bus. They are for the device and the bus where this layout "
+            "has them, and the connector is brought along when either is "
+            "moved. Empty: the connector is worked out from where the two "
+            "stand."
+        ),
+        max_length=MAX_BEND_POINTS,
+    )
+    bus: str | None = Field(
+        None,
+        description=(
+            "idx of the bus the connector ran to when it was drawn. A reader "
+            "uses ``bend_points`` only for a device on that bus, as it uses "
+            "the position of a device. ``null``: not recorded."
         ),
     )
 
@@ -371,9 +397,10 @@ class SidecarLayout(BaseModel):
     connections: dict[str, dict[str, LayoutConnection]] = Field(
         default_factory=dict,
         description=(
-            "Where the connector of a generator, load or shunt attaches, "
-            "keyed like ``non_bus_coordinates``. A device with no entry has "
-            "both ends worked out from where it sits."
+            "Where the connector of a generator, load or shunt attaches and, "
+            "where it was drawn by hand, the points it runs through, keyed "
+            "like ``non_bus_coordinates``. A device with no entry has its "
+            "connector worked out from where it sits."
         ),
     )
     figure: dict[str, bool | int | float | str] = Field(
@@ -453,12 +480,13 @@ def for_renumbered_copy(layout: SidecarLayout) -> SidecarLayout:
 
     For the copy of a system written in a format that keeps no idx (PSS/E
     ``.raw``): reading it back numbers the devices and branches afresh. What is
-    keyed by bus stays, since a bus keeps its number. A device position and a
-    branch route stay when they say which buses they belong to, so a reader can
-    find them again; one that does not is dropped, as it would land on whatever
-    element now has its idx. The sections with nothing to be matched by go
-    (placed controllers, unit state, connection faces, the label offsets of
-    anything but a bus); a ``.raw`` file holds no dynamic models either.
+    keyed by bus stays, since a bus keeps its number. A device position, a
+    branch route and the connector of a device stay when they say which buses
+    they belong to, so a reader can find them again; one that does not is
+    dropped, as it would land on whatever element now has its idx. The sections
+    with nothing to be matched by go (placed controllers, unit state, the label
+    offsets of anything but a bus); a ``.raw`` file holds no dynamic models
+    either.
     """
     devices = {
         outer: {idx: coord for idx, coord in inner.items() if coord.bus is not None}
@@ -472,6 +500,10 @@ def for_renumbered_copy(layout: SidecarLayout) -> SidecarLayout:
         }
         for bucket, routes in layout.branches.items()
     }
+    connections = {
+        outer: {idx: connection for idx, connection in inner.items() if connection.bus is not None}
+        for outer, inner in layout.connections.items()
+    }
     bus_labels = layout.label_offsets.get("bus")
     return layout.model_copy(
         update={
@@ -480,7 +512,7 @@ def for_renumbered_copy(layout: SidecarLayout) -> SidecarLayout:
             "units": {},
             "branches": {k: v for k, v in branches.items() if v},
             "label_offsets": {"bus": bus_labels} if bus_labels else {},
-            "connections": {},
+            "connections": {k: v for k, v in connections.items() if v},
         }
     )
 

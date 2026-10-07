@@ -20,6 +20,7 @@ import {
   captureLayout,
   branchPolylines,
   storedBranchRoutes,
+  storedConnectorRoutes,
   routeOverridesFromLayout,
   controllerCoordsAsMap,
   dragOverridesFromLayout,
@@ -98,7 +99,11 @@ function fullLayout(): FullSidecarLayout {
       },
     },
     label_offsets: { bus: { '1': { dx: 4, dy: -12 } } },
-    connections: { generator: { G1: { device_face: 'south', bus_face: 'north' } } },
+    connections: {
+      generator: {
+        G1: { device_face: 'south', bus_face: 'north', bend_points: [], bus: null },
+      },
+    },
     figure: { monochrome: true, line_width: 1.5, font: 'serif' },
   };
 }
@@ -150,7 +155,9 @@ describe('parseSidecar', () => {
         },
       },
     });
-    expect(parsed.connections).toEqual({ load: { PQ_1: { device_face: null, bus_face: null } } });
+    expect(parsed.connections).toEqual({
+      load: { PQ_1: { device_face: null, bus_face: null, bend_points: [], bus: null } },
+    });
   });
 
   it('leaves out a top-level field the schema does not have', () => {
@@ -218,6 +225,15 @@ describe('parseSidecar', () => {
     ['a face that is not a side', { branches: { line: { L1: { source_face: 'up' } } } }],
     ['a label offset with no dy', { label_offsets: { bus: { '1': { dx: 1 } } } }],
     ['a connection face that is not a side', { connections: { load: { P: { bus_face: 'in' } } } }],
+    [
+      'a connector whose points are no list',
+      { connections: { load: { P: { bend_points: { x: 1, y: 2 } } } } },
+    ],
+    [
+      'a connector with a point that is no position',
+      { connections: { load: { P: { bend_points: [{ x: 1 }] } } } },
+    ],
+    ['a connector anchored to a number', { connections: { load: { P: { bus: 7 } } } }],
     ['a figure setting that is a list', { figure: { palette: ['black'] } }],
     ['a figure number that is not finite', { figure: { line_width: Number.POSITIVE_INFINITY } }],
     ['a section that is a list', { units: [] }],
@@ -855,6 +871,94 @@ describe('captureLayout', () => {
     expect(layout.branches).toEqual({ line: { L1: route }, transformer: { T1: route } });
   });
 
+  it('says which routes were drawn by hand, and keeps the connectors that were', () => {
+    const drawn: [number, number][] = [
+      [220, 70],
+      [220, 40],
+      [240, 40],
+      [240, 3],
+    ];
+    const byHand: DiagramEdge[] = [
+      {
+        id: 'line-L1',
+        ...ends,
+        data: { bucket: 'line', idx: 'L1', bendPoints: routed, bendManual: true },
+      },
+      { id: 'line-L2', ...ends, data: { bucket: 'line', idx: 'L2', bendPoints: routed } },
+      {
+        id: 'stub-load-PQ_1',
+        source: 'load-PQ_1',
+        target: '2',
+        data: { bucket: 'load', kind: 'PQ', bendPoints: drawn, bendManual: true },
+      },
+      // One that is worked out has nothing to keep.
+      {
+        id: 'stub-generator-G1',
+        source: 'generator-G1',
+        target: '1',
+        data: { bucket: 'generator', kind: 'GENROU' },
+      },
+    ];
+    const layout = captureLayout({ nodes, edges: byHand }, topology, null);
+    expect(layout.branches.line!.L1!.routing).toBe('manual');
+    expect(layout.branches.line!.L2!.routing).toBe('polyline');
+    expect(layout.connections).toEqual({
+      load: {
+        PQ_1: {
+          device_face: null,
+          bus_face: null,
+          bend_points: drawn.map(([x, y]) => ({ x, y })),
+          // The bus it runs to, which is what it is good for.
+          bus: '2',
+        },
+      },
+    });
+    // And reads them back as it wrote them.
+    const stored = storedBranchRoutes(layout, topology);
+    expect([...stored.manual]).toEqual(['line-L1']);
+    const connectors = storedConnectorRoutes(layout, topology);
+    expect([...connectors.polylines]).toEqual([['stub-load-PQ_1', drawn]]);
+    expect(connectors.anchors.get('stub-load-PQ_1')).toEqual({
+      source: { x: 200, y: 70 },
+      target: { x: 200, y: 0 },
+    });
+    expect(parseSidecar(JSON.parse(JSON.stringify(layout)))).toEqual(layout);
+  });
+
+  it('drops the points a layout held for a connector that is worked out again', () => {
+    const base: SidecarLayout = {
+      ...fullLayout(),
+      connections: {
+        generator: {
+          G1: {
+            device_face: 'south',
+            bus_face: null,
+            bend_points: [
+              { x: 20, y: -30 },
+              { x: 20, y: 3 },
+            ],
+            bus: '1',
+          },
+        },
+        load: {
+          PQ_1: {
+            bend_points: [
+              { x: 220, y: 70 },
+              { x: 220, y: 3 },
+            ],
+            bus: '2',
+          },
+        },
+      },
+    };
+    // No edge of the diagram is drawn by hand now: the face that was chosen
+    // stays, the points go, and an entry that held nothing else goes whole.
+    const layout = captureLayout({ nodes, edges }, topology, base);
+    expect(layout.connections).toEqual({
+      generator: { G1: { device_face: 'south', bus_face: null, bend_points: [], bus: null } },
+    });
+  });
+
   it('gives back the routes it read: a saved diagram reopens with the same lines', () => {
     const layout = captureLayout({ nodes, edges }, topology, null);
     const polylines = branchPolylines(layout, topology);
@@ -949,7 +1053,11 @@ describe('captureLayout', () => {
     const layout = captureLayout({ nodes, edges }, topology, base);
     expect(layout.busbars).toEqual(base.busbars);
     expect(layout.label_offsets).toEqual(base.label_offsets);
-    expect(layout.connections).toEqual(base.connections);
+    // The faces a layout chose, with no points: no connector is drawn by hand.
+    expect(layout.connections).toEqual({
+      generator: { G1: { device_face: 'south', bus_face: 'north', bend_points: [], bus: null } },
+      PQ: { PQ_1: { device_face: 'north', bus_face: null, bend_points: [], bus: null } },
+    });
     expect(layout.figure).toEqual(base.figure);
     expect(layout.andes_version).toBe('2.0.0');
   });
@@ -976,7 +1084,7 @@ describe('captureLayout', () => {
     expect(layout.busbars).toEqual({ '2': { length: 180, orientation: 'vertical' } });
     expect(layout.label_offsets).toEqual({ bus: { '1': { dx: 4, dy: -12 } } });
     expect(layout.connections).toEqual({
-      generator: { G1: { device_face: 'south', bus_face: 'north' } },
+      generator: { G1: { device_face: 'south', bus_face: 'north', bend_points: [], bus: null } },
     });
     expect(layout.branches).toEqual({});
     // The figure's settings describe no element and always stay.
@@ -1205,8 +1313,92 @@ describe('branchPolylines', () => {
       expect(storedBranchRoutes(null, grid([line('L1', 1, 2)]))).toEqual({
         polylines: new Map(),
         anchors: new Map(),
+        manual: new Set(),
       });
     });
+
+    it('names the routes that were drawn by hand, and only the ones that say their buses', () => {
+      const byHand = (anchor: { bus1?: string; bus2?: string }) => ({
+        ...route('polyline', 2, anchor),
+        routing: 'manual' as const,
+      });
+      const saved = withRoutes({
+        line: {
+          hand: byHand({ bus1: '1', bus2: '2' }),
+          made: route('polyline', 2, { bus1: '1', bus2: '2' }),
+          // Nothing to bring it along from: drawn like a route the diagram made.
+          loose: byHand({}),
+        },
+      });
+      const topology = grid([line('hand', 1, 2), line('made', 1, 2), line('loose', 1, 2)]);
+      const stored = storedBranchRoutes(saved, topology);
+      expect([...stored.polylines.keys()]).toEqual(['line-hand', 'line-made', 'line-loose']);
+      expect([...stored.manual]).toEqual(['line-hand']);
+    });
+  });
+});
+
+describe('storedConnectorRoutes', () => {
+  const load = (idx: string, busIdx: number): TopologyEntry => ({
+    idx,
+    name: idx,
+    kind: 'PQ',
+    params: { bus: busIdx },
+  });
+  const drawn = [
+    { x: 20, y: 70 },
+    { x: 20, y: 40 },
+    { x: 44, y: 40 },
+    { x: 44, y: 3 },
+  ];
+  const saved = (connections: FullSidecarLayout['connections']): SidecarLayout => ({
+    ...buildSidecarLayout({ '1': { x: 0, y: 0 }, '2': { x: 200, y: 0 } }),
+    non_bus_coordinates: {
+      PQ: { PQ_0: { x: 0, y: 70, bus: '1' } },
+      load: { PQ_0: { x: 0, y: 70, bus: '1' } },
+    },
+    connections,
+  });
+  const withLoads = (loads: TopologyEntry[]): TopologySummary => ({
+    ...makeTopology([bus(1), bus(2)]),
+    loads,
+  });
+
+  it('reads the connector of a device with where the layout has the device and its bus', () => {
+    const routes = storedConnectorRoutes(
+      saved({ load: { PQ_0: { bend_points: drawn, bus: '1' } } }),
+      withLoads([load('PQ_0', 1)]),
+    );
+    expect([...routes.polylines.keys()]).toEqual(['stub-load-PQ_0']);
+    expect(routes.polylines.get('stub-load-PQ_0')).toEqual(drawn.map(({ x, y }) => [x, y]));
+    expect(routes.anchors.get('stub-load-PQ_0')).toEqual({
+      source: { x: 0, y: 70 },
+      target: { x: 0, y: 0 },
+    });
+  });
+
+  it('reads none where no points were drawn, or the device is on another bus now', () => {
+    const none = (connections: FullSidecarLayout['connections'], loads: TopologyEntry[]) =>
+      storedConnectorRoutes(saved(connections), withLoads(loads)).polylines.size;
+    expect(
+      none({ load: { PQ_0: { device_face: 'north', bus_face: 'south' } } }, [load('PQ_0', 1)]),
+    ).toBe(0);
+    expect(
+      none({ load: { PQ_0: { bend_points: drawn.slice(0, 1), bus: '1' } } }, [load('PQ_0', 1)]),
+    ).toBe(0);
+    // The idx names a load on bus 2 now: neither its position nor its connector is this one's.
+    expect(none({ load: { PQ_0: { bend_points: drawn, bus: '1' } } }, [load('PQ_0', 2)])).toBe(0);
+    expect(storedConnectorRoutes(null, withLoads([load('PQ_0', 1)])).polylines.size).toBe(0);
+  });
+
+  it('finds the connector of a device again under the idx it has after renumbering', () => {
+    // Saved as PQ_0; read back from a .raw file as 1, on the same bus.
+    const routes = storedConnectorRoutes(
+      saved({ load: { PQ_0: { bend_points: drawn, bus: '1' } } }),
+      withLoads([load('1', 1)]),
+    );
+    expect([...routes.polylines.keys()]).toEqual(['stub-load-1']);
+    expect(routes.anchors.get('stub-load-1')!.source).toEqual({ x: 0, y: 70 });
   });
 });
 
@@ -1251,6 +1443,46 @@ describe('routeOverridesFromLayout', () => {
       },
     };
     expect(Object.keys(routeOverridesFromLayout(layout))).toEqual(['transformer-T1']);
+  });
+
+  it('marks the routes drawn by hand, and takes the connectors of devices that were', () => {
+    const layout: SidecarLayout = {
+      ...fullLayout(),
+      branches: {
+        line: { L1: { ...fullLayout().branches.line!.L1!, routing: 'manual' } },
+      },
+      connections: {
+        generator: {
+          G1: {
+            bend_points: [
+              { x: 25, y: -24 },
+              { x: 25, y: 3 },
+            ],
+            bus: '1',
+          },
+          // Its device has no place in the layout: nothing to bring it along from.
+          G9: {
+            bend_points: [
+              { x: 5, y: 5 },
+              { x: 5, y: 3 },
+            ],
+            bus: '1',
+          },
+        },
+        load: { PQ_1: { device_face: 'north', bus_face: 'south' } },
+      },
+    };
+    const overrides = routeOverridesFromLayout(layout);
+    expect(Object.keys(overrides)).toEqual(['line-L1', 'stub-generator-G1']);
+    expect(overrides['line-L1']!.manual).toBe(true);
+    expect(overrides['stub-generator-G1']).toEqual({
+      points: [
+        [25, -24],
+        [25, 3],
+      ],
+      anchors: { source: { x: 0, y: -70 }, target: { x: 0, y: 0 } },
+      manual: true,
+    });
   });
 
   it('reads nothing from a layout with no routes', () => {

@@ -81,9 +81,9 @@ def test_the_renumbered_copy_is_the_one_both_sides_are_held_to() -> None:
     assert copy.model_dump() == fixture["renumbered_copy"]
     # The cut drops something from every idx-keyed section, and keeps something.
     kept, whole = fixture["renumbered_copy"], fixture["document"]
-    for section in ("non_bus_coordinates", "branches", "label_offsets"):
+    for section in ("non_bus_coordinates", "branches", "label_offsets", "connections"):
         assert kept[section] and kept[section] != whole[section]
-    for section in ("controller_coordinates", "units", "connections"):
+    for section in ("controller_coordinates", "units"):
         assert whole[section] and kept[section] == {}
     for section in ("coordinates", "busbars", "figure"):
         assert kept[section] == whole[section]

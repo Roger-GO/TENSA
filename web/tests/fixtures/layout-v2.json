@@ -145,6 +145,31 @@
           "bus2": "7",
           "source_face": "east",
           "target_face": null
+        },
+        "Line_4": {
+          "routing": "manual",
+          "bend_points": [
+            {
+              "x": 60,
+              "y": 6
+            },
+            {
+              "x": 60,
+              "y": 20
+            },
+            {
+              "x": 180.5,
+              "y": 20
+            },
+            {
+              "x": 180.5,
+              "y": 40.25
+            }
+          ],
+          "bus1": "1",
+          "bus2": "2",
+          "source_face": null,
+          "target_face": null
         }
       },
       "transformer": {
@@ -191,13 +216,34 @@
       "generator": {
         "1": {
           "device_face": "south",
-          "bus_face": "north"
+          "bus_face": "north",
+          "bend_points": [],
+          "bus": null
         }
       },
       "load": {
         "PQ_0": {
           "device_face": null,
-          "bus_face": "south"
+          "bus_face": "south",
+          "bend_points": [
+            {
+              "x": 335,
+              "y": -10
+            },
+            {
+              "x": 335,
+              "y": -40
+            },
+            {
+              "x": 356,
+              "y": -40
+            },
+            {
+              "x": 356,
+              "y": -77
+            }
+          ],
+          "bus": "7"
         }
       }
     },
@@ -299,6 +345,31 @@
           "bus2": "7",
           "source_face": "east",
           "target_face": null
+        },
+        "Line_4": {
+          "routing": "manual",
+          "bend_points": [
+            {
+              "x": 60,
+              "y": 6
+            },
+            {
+              "x": 60,
+              "y": 20
+            },
+            {
+              "x": 180.5,
+              "y": 20
+            },
+            {
+              "x": 180.5,
+              "y": 40.25
+            }
+          ],
+          "bus1": "1",
+          "bus2": "2",
+          "source_face": null,
+          "target_face": null
         }
       }
     },
@@ -310,7 +381,33 @@
         }
       }
     },
-    "connections": {},
+    "connections": {
+      "load": {
+        "PQ_0": {
+          "device_face": null,
+          "bus_face": "south",
+          "bend_points": [
+            {
+              "x": 335,
+              "y": -10
+            },
+            {
+              "x": 335,
+              "y": -40
+            },
+            {
+              "x": 356,
+              "y": -40
+            },
+            {
+              "x": 356,
+              "y": -77
+            }
+          ],
+          "bus": "7"
+        }
+      }
+    },
     "figure": {
       "monochrome": true,
       "line_width": 1.5,

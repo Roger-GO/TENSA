@@ -93,15 +93,23 @@ export type DragOverrides = Record<string, { x: number; y: number }>;
 export interface RouteOverride {
   points: [number, number][];
   anchors: { source: { x: number; y: number }; target: { x: number; y: number } };
+  /**
+   * Set on a route that was drawn by hand. The diagram keeps it as it is (a
+   * tidy routes the other lines around it) and brings it along when one of
+   * its ends is moved, where a route the diagram made is made afresh.
+   */
+  manual?: true;
 }
 
 /**
- * The branch routes chosen in this visit, by edge id (`line-<idx>`,
- * `transformer-<idx>`): by Tidy diagram, or by an undo that put an earlier
+ * The routes chosen in this visit, by edge id (`line-<idx>`,
+ * `transformer-<idx>`, and `stub-<node id>` for the connector of a device
+ * that was drawn by hand, whose anchors are where the device and its bus
+ * stood): by Tidy diagram, by hand, or by an undo that put an earlier
  * arrangement back. They sit on top of the routes of the saved layout as the
  * drags sit on top of its positions. `null` for a branch says it has no fixed
  * route, whatever the saved layout holds for it: it is routed from where its
- * buses stand.
+ * buses stand, and a connector is worked out from where its device stands.
  */
 export type RouteOverrides = Record<string, RouteOverride | null>;
 

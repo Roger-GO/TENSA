@@ -22,9 +22,15 @@
  * units, busbar length and orientation, branch routes, label offsets,
  * chosen connection faces and figure settings. The canvas draws from the
  * sections it knows (the units whose control chain is drawn out, a bar's
- * length, and the connector style among the figure settings) and carries
- * the rest through unchanged, so a section another part of the diagram
- * writes is never lost by a drag.
+ * length, the routes of the branches, the connectors of devices that were
+ * drawn by hand, and the connector style among the figure settings) and
+ * carries the rest through unchanged, so a section another part of the
+ * diagram writes is never lost by a drag.
+ *
+ * A route that was drawn by hand is told from one the diagram made: a
+ * branch by `routing: 'manual'`, and the connector of a device by having
+ * points at all (`connections.<category>.<idx>.bend_points`). The diagram
+ * keeps the first kind as it is where it makes the second afresh.
  *
  * Entries are keyed by ANDES idx, and an idx does not always keep its
  * meaning: a PSS/E `.raw` file holds none, so a system saved as one comes
@@ -35,7 +41,9 @@
  * buses). `resolveDeviceCoords` and `branchPolylines` use an entry only for
  * an element on those buses, and match an entry whose idx no longer fits to
  * the element that is there now; the state of a unit (`unitStatesOf`) is
- * used only for a unit on its bus.
+ * used only for a unit on its bus. The connector of a device that was drawn
+ * by hand names its bus too, and goes with the position of its device
+ * (`storedConnectorRoutes`).
  *
  * No external dep on Zod; the validator is a hand-written shape check,
  * which keeps the bundle smaller and the failure paths easier to read.
@@ -186,25 +194,25 @@ function nestedMapAt<T>(
   return mapAt(value, path, (inner, innerPath) => mapAt(inner, innerPath, leaf));
 }
 
+/** The optional points of a route; absent reads as none. */
+function bendPointsAt(value: unknown, path: string): BusCoord[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new TypeError(`${path}: expected array`);
+  if (value.length > MAX_BEND_POINTS) {
+    throw new TypeError(`${path}: at most ${MAX_BEND_POINTS} points`);
+  }
+  return value.map((point, i) => coordAt(point, `${path}[${i}]`));
+}
+
 function routeAt(value: unknown, path: string): LayoutBranchRoute {
   const r = objectAt(value, path);
   const routing = r.routing ?? 'auto';
-  if (routing !== 'auto' && routing !== 'polyline') {
-    throw new TypeError(`${path}.routing: expected auto or polyline`);
-  }
-  let bendPoints: BusCoord[] = [];
-  if (r.bend_points !== undefined) {
-    if (!Array.isArray(r.bend_points)) {
-      throw new TypeError(`${path}.bend_points: expected array`);
-    }
-    if (r.bend_points.length > MAX_BEND_POINTS) {
-      throw new TypeError(`${path}.bend_points: at most ${MAX_BEND_POINTS} points`);
-    }
-    bendPoints = r.bend_points.map((point, i) => coordAt(point, `${path}.bend_points[${i}]`));
+  if (routing !== 'auto' && routing !== 'polyline' && routing !== 'manual') {
+    throw new TypeError(`${path}.routing: expected auto, polyline or manual`);
   }
   return {
     routing,
-    bend_points: bendPoints,
+    bend_points: bendPointsAt(r.bend_points, `${path}.bend_points`),
     bus1: anchorAt(r.bus1, `${path}.bus1`),
     bus2: anchorAt(r.bus2, `${path}.bus2`),
     source_face: sideAt(r.source_face, `${path}.source_face`),
@@ -326,6 +334,8 @@ export function parseSidecar(input: unknown): FullSidecarLayout {
       return {
         device_face: sideAt(connection.device_face, `${path}.device_face`),
         bus_face: sideAt(connection.bus_face, `${path}.bus_face`),
+        bend_points: bendPointsAt(connection.bend_points, `${path}.bend_points`),
+        bus: anchorAt(connection.bus, `${path}.bus`),
       };
     }),
     figure: figureAt(obj.figure, 'sidecar.figure'),
@@ -505,6 +515,21 @@ export function resolveDeviceCoords(
   topology: TopologySummary,
 ): Map<string, BusCoord> {
   const out = new Map<string, BusCoord>();
+  for (const [key, { coord }] of resolveDevicePlaces(nonBus, topology)) out.set(key, coord);
+  return out;
+}
+
+/**
+ * `resolveDeviceCoords`, with the idx each position was found under
+ * (`from`): the device's own, or the one it used to have when it was matched
+ * by its bus. What else a layout holds for a device goes by that idx (the
+ * connector that was drawn for it by hand: `storedConnectorRoutes`).
+ */
+function resolveDevicePlaces(
+  nonBus: NonBusCoordsByModel | undefined,
+  topology: TopologySummary,
+): Map<string, { coord: BusCoord; from: string; bus: string | null }> {
+  const out = new Map<string, { coord: BusCoord; from: string; bus: string | null }>();
   if (!nonBus) return out;
   const devices: { category: string; kind: string; idx: string; bus: string | null }[] = [];
   const collect = (entries: readonly TopologyEntry[] | null | undefined, category: string) => {
@@ -536,27 +561,30 @@ export function resolveDeviceCoords(
       unplaced.push(device);
       continue;
     }
-    out.set(key, { x: entry.x, y: entry.y });
+    out.set(key, { coord: { x: entry.x, y: entry.y }, from: device.idx, bus: device.bus });
     claimed.add(key);
   }
 
   // The entries nobody claimed, by category and bus, in the order the layout lists them.
-  const free = new Map<string, LayoutDeviceCoord[]>();
+  const free = new Map<string, { idx: string; entry: LayoutDeviceCoord }[]>();
   for (const category of UI_CATEGORIES) {
     for (const [idx, entry] of Object.entries(nonBus[category] ?? {})) {
       if (entry.bus === undefined || entry.bus === null) continue;
       if (claimed.has(`${category}|${idx}`)) continue;
       const slot = `${category}|${entry.bus}`;
       const list = free.get(slot);
-      if (list) list.push(entry);
-      else free.set(slot, [entry]);
+      if (list) list.push({ idx, entry });
+      else free.set(slot, [{ idx, entry }]);
     }
   }
   for (const device of unplaced) {
     const key = `${device.category}|${device.idx}`;
     if (device.bus === null || out.has(key)) continue;
-    const entry = free.get(`${device.category}|${device.bus}`)?.shift();
-    if (entry !== undefined) out.set(key, { x: entry.x, y: entry.y });
+    const found = free.get(`${device.category}|${device.bus}`)?.shift();
+    if (found !== undefined) {
+      const { idx, entry } = found;
+      out.set(key, { coord: { x: entry.x, y: entry.y }, from: idx, bus: device.bus });
+    }
   }
   return out;
 }
@@ -703,14 +731,15 @@ export function barLengthsOf(layout: SidecarLayout | null): Map<string, number> 
 /**
  * The layout of the diagram as it is drawn: the position of every bus and
  * device, the controllers that were placed on their own, the generating
- * units whose control chain is drawn out, and the route of every branch
- * drawn through fixed points. This is what goes with a saved system, so a
- * reload draws the same picture whatever placed the nodes (a drag, the
- * curated layout of the case, or auto-layout).
+ * units whose control chain is drawn out, the route of every branch
+ * drawn through fixed points (`manual` for one that was drawn by hand), and
+ * the points of every device connector that was. This is what goes with a
+ * saved system, so a reload draws the same picture whatever placed the
+ * nodes (a drag, the curated layout of the case, or auto-layout).
  *
  * `base` is the layout the diagram was drawn from. The sections the canvas
- * does not write (busbars, label offsets, connection faces, figure
- * settings) and a branch's chosen faces are carried over from it,
+ * does not write (busbars, label offsets, figure settings) and the chosen
+ * faces of a branch or a connector are carried over from it,
  * minus the entries of elements `topology` no longer has, so a drag never
  * loses what another editor of the layout wrote. `chosen` is what was
  * chosen for the diagram since: a connector style goes into the figure
@@ -764,7 +793,7 @@ export function captureLayout(
       Array.isArray(polyline) && polyline.length >= 2 && polyline.length <= MAX_BEND_POINTS;
     if (!drawnThroughPoints && sourceFace === null && targetFace === null) continue;
     (branches[bucket] ??= {})[idx] = {
-      routing: drawnThroughPoints ? 'polyline' : 'auto',
+      routing: !drawnThroughPoints ? 'auto' : e.data?.bendManual === true ? 'manual' : 'polyline',
       bend_points: drawnThroughPoints ? polyline.map(([x, y]) => ({ x, y })) : [],
       bus1: e.source ?? null,
       bus2: e.target ?? null,
@@ -774,6 +803,43 @@ export function captureLayout(
   }
 
   const living = elementKeys(topology);
+  // The connectors of the devices: the faces a layout chose are carried
+  // over, and the points are the ones the diagram draws by hand now. What
+  // the layout held for a connector that is worked out again goes.
+  const connections: FullSidecarLayout['connections'] = {};
+  for (const [outer, inner] of Object.entries(keepLiving(base?.connections, living))) {
+    for (const [idx, held] of Object.entries(inner)) {
+      const deviceFace = held.device_face ?? null;
+      const busFace = held.bus_face ?? null;
+      if (deviceFace === null && busFace === null) continue;
+      (connections[outer] ??= {})[idx] = {
+        device_face: deviceFace,
+        bus_face: busFace,
+        bend_points: [],
+        bus: null,
+      };
+    }
+  }
+  const devices = new Map(diagram.nodes.map((n) => [n.id, n]));
+  for (const e of diagram.edges) {
+    const polyline = e.data?.bendPoints as [number, number][] | undefined;
+    const device = e.source === undefined ? undefined : devices.get(e.source);
+    if (e.data?.bendManual !== true || device === undefined || !isUiCategory(device.type)) continue;
+    if (!Array.isArray(polyline) || polyline.length < 2 || polyline.length > MAX_BEND_POINTS) {
+      continue;
+    }
+    const idx =
+      typeof device.data.idx === 'string'
+        ? device.data.idx
+        : device.id.slice(device.type.length + 1);
+    const held = connections[device.type]?.[idx];
+    (connections[device.type] ??= {})[idx] = {
+      device_face: held?.device_face ?? null,
+      bus_face: held?.bus_face ?? null,
+      bend_points: polyline.map(([x, y]) => ({ x, y })),
+      bus: e.target ?? null,
+    };
+  }
   const drawnBuses = new Set(Object.keys(coordinates));
   return buildSidecarLayout(coordinates, {
     andesVersion: base?.andes_version,
@@ -786,7 +852,7 @@ export function captureLayout(
       ),
       branches,
       label_offsets: keepLiving(base?.label_offsets, living),
-      connections: keepLiving(base?.connections, living),
+      connections,
       figure: {
         ...(base?.figure ?? {}),
         ...(chosen.connectorStyle ? { [CONNECTOR_STYLE_SETTING]: chosen.connectorStyle } : {}),
@@ -819,16 +885,25 @@ export interface RouteAnchors {
  * bars it lands: a tidied route may land past the tip of a bar that was drawn
  * out for it. A route that names no bus has no anchors, and the graph builder
  * judges it by where its two ends lie (`routeFitsBuses`).
+ *
+ * `manual` names the routes that were drawn by hand, which the diagram keeps
+ * as they are and brings along with their buses. One that has no anchors is
+ * not among them: there is nothing to bring it along from.
  */
 export function storedBranchRoutes(
   layout: SidecarLayout | null,
   topology: TopologySummary,
-): { polylines: Map<string, [number, number][]>; anchors: Map<string, RouteAnchors> } {
+): {
+  polylines: Map<string, [number, number][]>;
+  anchors: Map<string, RouteAnchors>;
+  manual: Set<string>;
+} {
   const out = new Map<string, [number, number][]>();
   const anchors = new Map<string, RouteAnchors>();
-  if (!layout?.branches) return { polylines: out, anchors };
+  const manual = new Set<string>();
+  if (!layout?.branches) return { polylines: out, anchors, manual };
   const drawable = (route: LayoutBranchRoute | undefined): route is LayoutBranchRoute =>
-    route !== undefined && route.routing === 'polyline' && (route.bend_points ?? []).length >= 2;
+    route !== undefined && route.routing !== 'auto' && (route.bend_points ?? []).length >= 2;
   const polyline = (route: LayoutBranchRoute): [number, number][] =>
     (route.bend_points ?? []).map((point): [number, number] => [point.x, point.y]);
   const anchored = (route: LayoutBranchRoute) =>
@@ -842,6 +917,7 @@ export function storedBranchRoutes(
     const target = layout.coordinates[bus2];
     if (!anchored(route) || source === undefined || target === undefined) return;
     anchors.set(id, { source: { x: source.x, y: source.y }, target: { x: target.x, y: target.y } });
+    if (route.routing === 'manual') manual.add(id);
   };
 
   const claimed = new Set<string>();
@@ -884,7 +960,44 @@ export function storedBranchRoutes(
     out.set(id, polyline(route));
     anchor(id, route, bus1, bus2);
   }
-  return { polylines: out, anchors };
+  return { polylines: out, anchors, manual };
+}
+
+/**
+ * The connectors of devices that `layout` holds as drawn by hand, for the
+ * devices `topology` has, as the graph builder takes them: edge id
+ * (`stub-<category>-<idx>`) to the points, and to where the layout has the
+ * device and its bus, which is what the points were drawn for.
+ *
+ * A connector goes with the position of its device: it is looked up under
+ * the idx that position was found under (`resolveDeviceCoords`: the
+ * device's own, or the one it had before the system was numbered afresh),
+ * in the layer of its category. One that names a bus is used only for a
+ * device on that bus.
+ */
+export function storedConnectorRoutes(
+  layout: SidecarLayout | null,
+  topology: TopologySummary,
+): { polylines: Map<string, [number, number][]>; anchors: Map<string, RouteAnchors> } {
+  const polylines = new Map<string, [number, number][]>();
+  const anchors = new Map<string, RouteAnchors>();
+  if (!layout?.connections) return { polylines, anchors };
+  for (const [key, place] of resolveDevicePlaces(layout.non_bus_coordinates, topology)) {
+    const category = key.slice(0, key.indexOf('|'));
+    const idx = key.slice(category.length + 1);
+    const drawn = layout.connections[category]?.[place.from];
+    const points = drawn?.bend_points ?? [];
+    const bus = place.bus === null ? undefined : layout.coordinates[place.bus];
+    if (drawn === undefined || points.length < 2 || bus === undefined) continue;
+    if (drawn.bus !== undefined && drawn.bus !== null && drawn.bus !== place.bus) continue;
+    const id = `stub-${category}-${idx}`;
+    polylines.set(
+      id,
+      points.map((point): [number, number] => [point.x, point.y]),
+    );
+    anchors.set(id, { source: { ...place.coord }, target: { x: bus.x, y: bus.y } });
+  }
+  return { polylines, anchors };
 }
 
 /** The polylines of `storedBranchRoutes`: the route of each branch `layout` holds one for. */
@@ -896,26 +1009,43 @@ export function branchPolylines(
 }
 
 /**
- * The branch routes of `layout` as route overrides, by edge id
- * (`<bucket>-<idx>`): how the routes of a layout are applied to a system
+ * The routes of `layout` as route overrides, by edge id (`<bucket>-<idx>`
+ * for a branch, `stub-<category>-<idx>` for the connector of a device that
+ * was drawn by hand): how the routes of a layout are applied to a system
  * that has no case file to keep one beside, as `dragOverridesFromLayout`
  * applies its positions. Only a route that names its two buses is taken,
- * with the places the layout has them at as its anchors.
+ * with the places the layout has them at as its anchors, and only a
+ * connector whose device and bus the layout places.
  */
 export function routeOverridesFromLayout(
   layout: SidecarLayout,
-): Record<string, { points: [number, number][]; anchors: RouteAnchors }> {
-  const out: Record<string, { points: [number, number][]; anchors: RouteAnchors }> = {};
+): Record<string, { points: [number, number][]; anchors: RouteAnchors; manual?: true }> {
+  const out: Record<string, { points: [number, number][]; anchors: RouteAnchors; manual?: true }> =
+    {};
   for (const bucket of BRANCH_BUCKETS) {
     for (const [idx, route] of Object.entries(layout.branches?.[bucket] ?? {})) {
       const points = route.bend_points ?? [];
-      if (route.routing !== 'polyline' || points.length < 2) continue;
+      if (route.routing === 'auto' || points.length < 2) continue;
       const source = typeof route.bus1 === 'string' ? layout.coordinates[route.bus1] : undefined;
       const target = typeof route.bus2 === 'string' ? layout.coordinates[route.bus2] : undefined;
       if (source === undefined || target === undefined) continue;
       out[`${bucket}-${idx}`] = {
         points: points.map((point): [number, number] => [point.x, point.y]),
         anchors: { source: { x: source.x, y: source.y }, target: { x: target.x, y: target.y } },
+        ...(route.routing === 'manual' ? { manual: true as const } : {}),
+      };
+    }
+  }
+  for (const category of UI_CATEGORIES) {
+    for (const [idx, drawn] of Object.entries(layout.connections?.[category] ?? {})) {
+      const points = drawn.bend_points ?? [];
+      const device = layout.non_bus_coordinates?.[category]?.[idx];
+      const bus = typeof drawn.bus === 'string' ? layout.coordinates[drawn.bus] : undefined;
+      if (points.length < 2 || device === undefined || bus === undefined) continue;
+      out[`stub-${category}-${idx}`] = {
+        points: points.map((point): [number, number] => [point.x, point.y]),
+        anchors: { source: { x: device.x, y: device.y }, target: { x: bus.x, y: bus.y } },
+        manual: true,
       };
     }
   }
@@ -940,11 +1070,11 @@ export function controllerCoordsAsMap(layout: SidecarLayout | null): Map<string,
  * What of `layout` still means something once the idx values have changed:
  * the layout to write beside a copy saved in a format that keeps no idx (a
  * PSS/E `.raw`), which comes back with its devices and branches numbered
- * afresh. What is keyed by bus stays. A device position and a branch route
- * stay when they say which buses they belong to, since the readers above
- * can then find them again; the rest would land on whatever element has
- * their idx by then, and is left out. (The server cuts the layout it copies
- * to such a file down the same way.)
+ * afresh. What is keyed by bus stays. A device position, a branch route and
+ * the connector of a device stay when they say which buses they belong to,
+ * since the readers above can then find them again; the rest would land on
+ * whatever element has their idx by then, and is left out. (The server cuts
+ * the layout it copies to such a file down the same way.)
  */
 export function layoutForRenumberedCopy(layout: SidecarLayout): FullSidecarLayout {
   const kept = <T>(
@@ -970,6 +1100,7 @@ export function layoutForRenumberedCopy(layout: SidecarLayout): FullSidecarLayou
           (r) => r.bus1 !== undefined && r.bus1 !== null && r.bus2 !== undefined && r.bus2 !== null,
         ),
         label_offsets: busLabels && Object.keys(busLabels).length > 0 ? { bus: busLabels } : {},
+        connections: kept(layout.connections, (c) => c.bus !== undefined && c.bus !== null),
         figure: layout.figure ?? {},
       },
     }),

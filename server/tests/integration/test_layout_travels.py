@@ -103,7 +103,8 @@ def _placement(shift: float = 0.0) -> dict[str, Any]:
         "branches": {
             "line": {
                 "Line_1": {
-                    "routing": "polyline",
+                    # Drawn by hand: it goes where the system goes like any other route.
+                    "routing": "manual",
                     "bend_points": [
                         {"x": 130.0, "y": 56.0},
                         {"x": 130.0, "y": 80.0},
@@ -117,7 +118,24 @@ def _placement(shift: float = 0.0) -> dict[str, Any]:
             }
         },
         "label_offsets": {"bus": {"2": {"dx": 6.0, "dy": -14.0}}},
-        "connections": {"load": {"PQ_1": {"device_face": "north", "bus_face": "south"}}},
+        "connections": {
+            "load": {
+                "PQ_1": {
+                    "device_face": "north",
+                    "bus_face": "south",
+                    "bend_points": [
+                        {"x": 240.0, "y": 170.0},
+                        {"x": 240.0, "y": 140.0},
+                        {"x": 262.0, "y": 140.0},
+                        {"x": 262.0, "y": 103.0},
+                    ],
+                    "bus": "2",
+                }
+            },
+            "generator": {
+                "1": {"device_face": "south", "bus_face": None, "bend_points": [], "bus": None}
+            },
+        },
         "figure": {"monochrome": True, "line_width": 1.5},
         "last_modified": "2026-10-06T08:00:00+00:00",
     }
@@ -186,10 +204,12 @@ async def test_a_case_saved_as_raw_keeps_only_the_placement_that_survives_renumb
         "load": placed["non_bus_coordinates"]["load"],
     }
     assert carried["branches"] == placed["branches"]
-    # The generator's position names no bus, and these have nothing to go by.
+    # So does the connector drawn by hand for the load.
+    assert carried["connections"] == {"load": placed["connections"]["load"]}
+    # The generator's position and its connector name no bus, and these have
+    # nothing to go by.
     assert carried["controller_coordinates"] == {}
     assert carried["units"] == {}
-    assert carried["connections"] == {}
     # The case the layout was made for keeps all of it.
     assert await _get_layout(client, "ieee14.raw") == placed
 

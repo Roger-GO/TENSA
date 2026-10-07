@@ -81,7 +81,21 @@ def _v2() -> dict[str, Any]:
             }
         },
         "label_offsets": {"bus": {"1": {"dx": 4.0, "dy": -12.0}}},
-        "connections": {"generator": {"1": {"device_face": "south", "bus_face": "north"}}},
+        "connections": {
+            "generator": {
+                "1": {
+                    "device_face": "south",
+                    "bus_face": "north",
+                    "bend_points": [
+                        {"x": 25.0, "y": -24.0},
+                        {"x": 25.0, "y": -12.0},
+                        {"x": 40.0, "y": -12.0},
+                        {"x": 40.0, "y": 3.0},
+                    ],
+                    "bus": "1",
+                }
+            }
+        },
         "figure": {"monochrome": True, "line_width": 1.5, "font": "serif", "dpi": 300},
         "last_modified": "2026-10-06T08:00:00+00:00",
     }
@@ -127,6 +141,9 @@ def test_a_record_reads_with_its_defaults() -> None:
     assert (route.routing, route.bend_points, route.source_face) == ("auto", [], None)
     assert (route.bus1, route.bus2) == (None, None)
     assert layout.connections["load"]["PQ_1"].bus_face is None
+    # A connector with no points is worked out from where the device and the bus stand.
+    assert layout.connections["load"]["PQ_1"].bend_points == []
+    assert layout.connections["load"]["PQ_1"].bus is None
     # A device position written without its bus (version 1 had none) reads as unanchored.
     doc["non_bus_coordinates"] = {"load": {"PQ_1": {"x": 1.0, "y": 2.0}}}
     assert parse_layout(doc).non_bus_coordinates["load"]["PQ_1"].bus is None
@@ -156,6 +173,8 @@ def test_a_record_reads_with_its_defaults() -> None:
         ("label_offsets", {"bus": {"1": {"dx": 1.0}}}),
         ("label_offsets", {"bus": {"1": {"dx": float("nan"), "dy": 0.0}}}),
         ("connections", {"load": {"1": {"bus_face": "inside"}}}),
+        ("connections", {"load": {"1": {"bend_points": [{"x": float("inf"), "y": 0.0}]}}}),
+        ("connections", {"load": {"1": {"bus": 7}}}),
         ("figure", {"line_width": float("nan")}),
         ("figure", {"font": "x" * (MAX_FIGURE_TEXT + 1)}),
         ("figure", {"palette": ["black", "white"]}),
@@ -177,6 +196,27 @@ def test_a_branch_cannot_bend_at_more_points_than_the_cap() -> None:
         parse_layout(doc)
     doc["branches"]["line"]["1"]["bend_points"] = points[:-1]
     assert len(parse_layout(doc).branches["line"]["1"].bend_points) == MAX_BEND_POINTS
+
+
+def test_a_connector_cannot_bend_at_more_points_than_the_cap() -> None:
+    doc = _v2()
+    points = [{"x": float(i), "y": 0.0} for i in range(MAX_BEND_POINTS + 1)]
+    doc["connections"] = {"load": {"1": {"bend_points": points, "bus": "2"}}}
+    with pytest.raises(LayoutError):
+        parse_layout(doc)
+    doc["connections"]["load"]["1"]["bend_points"] = points[:-1]
+    assert len(parse_layout(doc).connections["load"]["1"].bend_points) == MAX_BEND_POINTS
+
+
+def test_a_route_drawn_by_hand_says_so_and_keeps_its_points() -> None:
+    """``manual`` is what tells a route the user drew from one the diagram made:
+    a tidy leaves the first alone and makes the second afresh."""
+    doc = _v2()
+    doc["branches"]["line"]["Line_1"]["routing"] = "manual"
+    route = parse_layout(doc).branches["line"]["Line_1"]
+    assert route.routing == "manual"
+    assert [(p.x, p.y) for p in route.bend_points] == [(30.0, 6.0), (30.0, 40.0), (150.0, 40.0)]
+    assert parse_layout(doc).model_dump() == doc
 
 
 def test_an_unknown_section_is_refused() -> None:
@@ -262,6 +302,14 @@ def _renumbering_source() -> dict[str, Any]:
         "bus": {"1": {"dx": 4.0, "dy": -12.0}},
         "load": {"PQ_0": {"dx": 1.0, "dy": 1.0}},
     }
+    drawn = [{"x": 30.0, "y": 70.0}, {"x": 30.0, "y": 43.0}]
+    doc["connections"] = {
+        "generator": {"1": {"device_face": "south", "bus_face": "north"}},
+        "load": {
+            "PQ_0": {"bend_points": drawn, "bus": "7"},
+            "PQ_9": {"bend_points": drawn},
+        },
+    }
     return doc
 
 
@@ -276,10 +324,20 @@ def test_a_renumbered_copy_keeps_what_is_keyed_by_bus_or_says_its_buses() -> Non
     assert kept["non_bus_coordinates"] == {"PQ": {"PQ_0": anchored}, "load": {"PQ_0": anchored}}
     assert list(kept["branches"]) == ["line"]
     assert list(kept["branches"]["line"]) == ["Line_1"]
+    # So can the connector that was drawn by hand for it, which names the same bus.
+    assert kept["connections"] == {
+        "load": {
+            "PQ_0": {
+                "device_face": None,
+                "bus_face": None,
+                "bend_points": [{"x": 30.0, "y": 70.0}, {"x": 30.0, "y": 43.0}],
+                "bus": "7",
+            }
+        }
+    }
     # Nothing ties these to an element once the idx values have moved on.
     assert kept["controller_coordinates"] == {}
     assert kept["units"] == {}
-    assert kept["connections"] == {}
 
 
 def test_a_renumbered_copy_of_a_layout_with_nothing_to_drop_is_that_layout() -> None:

@@ -543,7 +543,16 @@ def _layout_v2_body() -> dict[str, object]:
             }
         },
         "label_offsets": {"bus": {"1": {"dx": 4.0, "dy": -12.0}}},
-        "connections": {"generator": {"1": {"device_face": "south", "bus_face": "north"}}},
+        "connections": {
+            "generator": {
+                "1": {
+                    "device_face": "south",
+                    "bus_face": "north",
+                    "bend_points": [{"x": 25.0, "y": -24.0}, {"x": 25.0, "y": 3.0}],
+                    "bus": "1",
+                }
+            }
+        },
         "figure": {"monochrome": True, "line_width": 1.5, "font": "serif"},
         "last_modified": "2026-10-06T08:00:00+00:00",
     }

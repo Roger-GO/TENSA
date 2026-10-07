@@ -3291,14 +3291,14 @@ export interface components {
         LayoutBranchRoute: {
             /**
              * Routing
-             * @description ``auto``: the branch is drawn from where its two buses are now, and ``bend_points`` is not used. ``polyline``: it is drawn through ``bend_points`` as they are stored.
+             * @description ``auto``: the branch is drawn from where its two buses are now, and ``bend_points`` is not used. ``polyline``: it is drawn through ``bend_points`` as they are stored, a route the diagram made. ``manual``: it is drawn through ``bend_points`` too, and the route was drawn by hand: tidying the diagram leaves it as it is, and it is brought along when one of its buses is moved.
              * @default auto
              * @enum {string}
              */
-            routing: "auto" | "polyline";
+            routing: "auto" | "polyline" | "manual";
             /**
              * Bend Points
-             * @description The points of a ``polyline`` route in order: where it leaves the first bus, each bend, and where it reaches the second bus. A route is only drawn while both ends still sit on their buses, so moving a bus sends its branches back to ``auto``.
+             * @description The points of a ``polyline`` or ``manual`` route in order: where it leaves the first bus, each bend, and where it reaches the second bus. A ``polyline`` route is only drawn while both ends still sit on their buses, so moving a bus sends its branches back to ``auto``; a ``manual`` one follows its buses.
              */
             bend_points?: components["schemas"]["BusCoord"][];
             /**
@@ -3355,6 +3355,16 @@ export interface components {
              * @description Face of the bus the connector lands on, when it was chosen. ``null`` lets the renderer pick.
              */
             bus_face?: ("north" | "east" | "south" | "west") | null;
+            /**
+             * Bend Points
+             * @description The points of a connector that was drawn by hand, in order: where it leaves the device, each bend, and where it lands on the bar of the bus. They are for the device and the bus where this layout has them, and the connector is brought along when either is moved. Empty: the connector is worked out from where the two stand.
+             */
+            bend_points?: components["schemas"]["BusCoord"][];
+            /**
+             * Bus
+             * @description idx of the bus the connector ran to when it was drawn. A reader uses ``bend_points`` only for a device on that bus, as it uses the position of a device. ``null``: not recorded.
+             */
+            bus?: string | null;
         };
         /**
          * LayoutDeviceCoord
@@ -4442,7 +4452,7 @@ export interface components {
             };
             /**
              * Connections
-             * @description Where the connector of a generator, load or shunt attaches, keyed like ``non_bus_coordinates``. A device with no entry has both ends worked out from where it sits.
+             * @description Where the connector of a generator, load or shunt attaches and, where it was drawn by hand, the points it runs through, keyed like ``non_bus_coordinates``. A device with no entry has its connector worked out from where it sits.
              */
             connections?: {
                 [key: string]: {
