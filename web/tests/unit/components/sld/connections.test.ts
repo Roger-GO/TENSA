@@ -21,12 +21,14 @@ import {
   TAP_INSET,
   TAP_SPACING,
   barLengthFor,
+  branchLabelPlaces,
   busLabelOffset,
   faceSpan,
   layoutConnections,
   routeMidpoint,
   routePath,
   routesThrough,
+  runsIn,
   simplifyRoute,
   spreadTaps,
   stepRoute,
@@ -2295,5 +2297,240 @@ describe('faceSpan and busLabelOffset', () => {
       ],
     };
     expect(busLabelOffset(bar, 22)).toBe(17);
+  });
+});
+
+describe('busLabelOffset: connectors that pass under the bar', () => {
+  const bare = { start: 0, end: 92, taps: [] };
+
+  it('moves the label beside a connector that passes under the middle of the bar', () => {
+    // An upright run at 46: a label 40 wide keeps its middle 24 from it, and
+    // of the two places as near the one to the left is taken.
+    expect(busLabelOffset(bare, 40, [[46, 46]])).toBe(22);
+    expect(busLabelOffset(bare, 40, [[40, 40]])).toBe(64);
+  });
+
+  it('stands clear of the whole stretch a level run covers', () => {
+    // A run from 30 to 70 under the bar: the nearest place clear of it is
+    // 24 past the end nearer the middle.
+    expect(busLabelOffset(bare, 40, [[30, 70]])).toBe(6);
+    expect(busLabelOffset(bare, 40, [[20, 60]])).toBe(84);
+  });
+
+  it('stands clear of its own connectors and of the ones that pass, together', () => {
+    const bar = { start: 0, end: 92, taps: [{ x: 46, side: 'south' as const }] };
+    // Left of its own connector (22) a line passes at 20: the label goes right.
+    expect(busLabelOffset(bar, 40, [[20, 20]])).toBe(70);
+  });
+
+  it('goes no further than half a bar past a tip, and then minds its own connectors alone', () => {
+    // A run under the whole bar and well past both tips: no place near enough.
+    expect(busLabelOffset(bare, 40, [[-200, 300]])).toBe(46);
+    const bar = { start: 0, end: 92, taps: [{ x: 46, side: 'south' as const }] };
+    expect(busLabelOffset(bar, 40, [[-200, 300]])).toBe(22);
+    // Past the tip by less than that is taken.
+    expect(busLabelOffset(bare, 40, [[10, 90]])).toBe(-14);
+  });
+
+  it('is where it was with nothing passing', () => {
+    const bar = { start: 0, end: 92, taps: [{ x: 46, side: 'south' as const }] };
+    expect(busLabelOffset(bar, 40, [])).toBe(busLabelOffset(bar, 40));
+  });
+});
+
+describe('runsIn', () => {
+  const routes = new Map<string, { points: Point[] }>([
+    [
+      'a',
+      {
+        points: [
+          [0, 0],
+          [0, 100],
+          [200, 100],
+        ],
+      },
+    ],
+    [
+      'b',
+      {
+        points: [
+          [50, -50],
+          [50, 300],
+        ],
+      },
+    ],
+  ]);
+  const runs = runsIn(routes);
+
+  it('lists the runs that pass through a box, each once, with the route each is of', () => {
+    const found = runs({ left: 40, right: 120, top: 80, bottom: 120 });
+    expect(found.map((run) => run.id).sort()).toEqual(['a', 'b']);
+    expect(found.find((run) => run.id === 'a')).toMatchObject({ a: [0, 100], b: [200, 100] });
+  });
+
+  it('leaves out a run that only runs along an edge of the box, and one that misses it', () => {
+    expect(runs({ left: 50, right: 120, top: 120, bottom: 200 })).toEqual([]);
+    expect(runs({ left: 300, right: 400, top: 0, bottom: 50 })).toEqual([]);
+  });
+
+  it('is what routesThrough counts the routes of', () => {
+    const through = routesThrough(routes);
+    expect(through({ left: 40, right: 120, top: 80, bottom: 120 })).toBe(2);
+    expect(through({ left: 40, right: 120, top: 80, bottom: 120 }, 'a')).toBe(1);
+  });
+});
+
+describe('branchLabelPlaces', () => {
+  const label = { width: 40, height: 16 };
+  /** A route straight down from `(x, 0)` to `(x, 200)`. */
+  const down = (x: number): { points: Point[] } => ({
+    points: [
+      [x, 0],
+      [x, 200],
+    ],
+  });
+
+  it('puts a label half way along a route that has room there', () => {
+    const places = branchLabelPlaces(new Map([['l', down(100)]]), [{ id: 'l', ...label }], []);
+    expect(places.get('l')).toEqual({ x: 100, y: 100, angleDeg: 90 });
+  });
+
+  it('moves a label along its route, off a symbol that stands at the middle', () => {
+    const device = { left: 90, right: 150, top: 80, bottom: 120 };
+    const place = branchLabelPlaces(
+      new Map([['l', down(100)]]),
+      [{ id: 'l', ...label }],
+      [device],
+    ).get('l')!;
+    expect(place.x).toBe(100);
+    // Clear of the symbol, the gap it keeps counted in, and as near the
+    // middle as that allows.
+    const clear = place.y + 8 <= 80 - 2 || place.y - 8 >= 120 + 2;
+    expect(clear).toBe(true);
+    expect(Math.abs(place.y - 100)).toBeLessThanOrEqual(40);
+  });
+
+  it('keeps the labels of two lines that run side by side off each other', () => {
+    const routes = new Map([
+      ['a', down(100)],
+      ['b', down(116)],
+    ]);
+    const places = branchLabelPlaces(
+      routes,
+      [
+        { id: 'a', ...label },
+        { id: 'b', ...label },
+      ],
+      [],
+    );
+    const [a, b] = [places.get('a')!, places.get('b')!];
+    // The first has the middle; the second stands a label's height away.
+    expect(a.y).toBe(100);
+    expect(Math.abs(b.y - a.y)).toBeGreaterThanOrEqual(16 + 2);
+  });
+
+  it('puts a label on a straight run, not on a bend', () => {
+    // Half way along this route is its corner.
+    const route = {
+      points: [
+        [0, 0],
+        [0, 100],
+        [100, 100],
+      ] as Point[],
+    };
+    const place = branchLabelPlaces(new Map([['l', route]]), [{ id: 'l', ...label }], []).get('l')!;
+    const onUpright = place.x === 0 && place.y <= 100 - 8;
+    const onLevel = place.y === 100 && place.x >= 20;
+    expect(onUpright || onLevel).toBe(true);
+    expect(place.angleDeg).toBe(onUpright ? 90 : 0);
+  });
+
+  it('takes the place that covers least where there is no place clear of everything', () => {
+    // Symbols all along the route but for a stretch too short for the label.
+    const boxes = [
+      { left: 80, right: 120, top: 0, bottom: 90 },
+      { left: 80, right: 120, top: 100, bottom: 200 },
+    ];
+    const place = branchLabelPlaces(
+      new Map([['l', down(100)]]),
+      [{ id: 'l', ...label }],
+      boxes,
+    ).get('l')!;
+    // In the gap between the two, where it covers the least of either.
+    expect(place.y).toBeGreaterThanOrEqual(88);
+    expect(place.y).toBeLessThanOrEqual(104);
+  });
+
+  it('keeps a label off the line of another branch where its own route has room elsewhere', () => {
+    const routes = new Map<string, { points: Point[] }>([
+      ['l', down(100)],
+      [
+        'across',
+        {
+          points: [
+            [0, 100],
+            [300, 100],
+          ],
+        },
+      ],
+    ]);
+    const place = branchLabelPlaces(routes, [{ id: 'l', ...label }], []).get('l')!;
+    expect(Math.abs(place.y - 100)).toBeGreaterThanOrEqual(8);
+  });
+
+  it('places only the branches it is asked for, and none without a route', () => {
+    const places = branchLabelPlaces(
+      new Map([['l', down(100)]]),
+      [
+        { id: 'l', ...label },
+        { id: 'gone', ...label },
+      ],
+      [],
+    );
+    expect([...places.keys()]).toEqual(['l']);
+  });
+});
+
+describe('layoutConnections: a device connector and the bars of other buses', () => {
+  it('turns the other way where its right angle would come down through the bar of another bus', () => {
+    // The load stands right of bus 1 and lands on its tip. Turned at a right
+    // angle it runs across to over the tip and comes down at 89.
+    const own = [bus('1', 0, 200), device('load-x', 300, 100)];
+    const edges = [stub('load-x', '1')];
+    const alone = layoutConnections(own, edges, { connectorStyle: 'elbow' }).routes.get(
+      'stub-load-x',
+    )!;
+    expect(alone.points).toEqual([
+      [280, 100],
+      [89, 100],
+      [89, 203],
+    ]);
+    // With the bar of bus 2 (40 to 132) under that run, it comes down beside
+    // its own bar and runs along its line into the tip.
+    const route = layoutConnections([...own, bus('2', 40, 150)], edges, {
+      connectorStyle: 'elbow',
+    }).routes.get('stub-load-x')!;
+    expect(route.points).toEqual([
+      [300, 120],
+      [300, 203],
+      [89, 203],
+    ]);
+  });
+
+  it('keeps its straight line where that runs through the bar of another bus and no other way is clear', () => {
+    // Bus 2 lies across every way from the load to the tip of bus 1.
+    const nodes = [bus('1', 0, 200), bus('2', 150, 120), device('load-x', 300, 40)];
+    const route = layoutConnections(nodes, [stub('load-x', '1')]).routes.get('stub-load-x')!;
+    expect(route.points).toHaveLength(2);
+    expect(route.points[1]).toEqual([89, 203]);
+  });
+
+  it('is not kept off the bar it lands on', () => {
+    const nodes = [bus('1', 0, 200), device('load-x', 26, 100)];
+    const route = layoutConnections(nodes, [stub('load-x', '1')]).routes.get('stub-load-x')!;
+    expect(route.points).toEqual([
+      [26, 120],
+      [26, 203],
+    ]);
   });
 });

@@ -682,6 +682,17 @@ describe('BusNode, the bar and its taps', () => {
     expect(getByTestId('bus-label-1').style.left).toBe('-20px');
   });
 
+  it('moves the label clear of a line that passes under the bar', () => {
+    const { getByTestId } = render(
+      <BusNode
+        {...withBar({ start: 0, end: 92, taps: [] })}
+        data={{ ...withBar({ start: 0, end: 92, taps: [] }).data, labelClear: [[46, 46]] }}
+      />,
+    );
+    // As beside a feeder of its own: 20 from where the line passes.
+    expect(getByTestId('bus-label-1').style.left).toBe('-20px');
+  });
+
   it('makes room for the values a power flow adds to the label', () => {
     usePflowStore.setState({
       lastRun: makePflow({ bus_voltages: { '1': 1.0 }, bus_angles: { '1': 0 } }),

@@ -5,7 +5,13 @@ import { iconForModel } from '@/icons/iec60617/manifest';
 import { cn } from '@/lib/cn';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
-import { routeMidpoint, routePath, type ConnectorRoute, type Point } from '../connections';
+import {
+  routeMidpoint,
+  routePath,
+  type ConnectorRoute,
+  type LabelPlace,
+  type Point,
+} from '../connections';
 import { getLineOverlayState, lineStrokeStyle } from '../overlay';
 
 /**
@@ -14,7 +20,9 @@ import { getLineOverlayState, lineStrokeStyle } from '../overlay';
  *
  * The path is drawn as a line's is (`TopologyEdge`): through the points
  * `connections.ts` works out, its two ends on the bars. The difference is
- * the icon at the midpoint, which is also the transformer's click target.
+ * the icon, which is also the transformer's click target. It stands where
+ * the canvas found room for it on a straight run of the route
+ * (`data.labelAt`), and half way along without one.
  *
  * Click on the icon sets `selectedElement.kind = 'transformer'` so the
  * inspector shows transformer params (Unit 5b populated `_PARAMS_BY_MODEL`
@@ -26,6 +34,8 @@ interface EdgeData {
   kind?: string;
   bucket?: 'line' | 'transformer';
   route?: ConnectorRoute;
+  /** Where the symbol stands on the route; absent: half way along. */
+  labelAt?: LabelPlace;
   winding?: '2w' | '3w';
 }
 
@@ -50,7 +60,7 @@ export const TransformerEdge = memo(function TransformerEdge({
     [targetX, targetY],
   ];
   const path = routePath(points);
-  const mid = routeMidpoint(points);
+  const mid = edgeData.labelAt ?? routeMidpoint(points);
 
   // Transformers ARE lines on the substrate side; the line-flow
   // computation runs over every Line device regardless of which bucket

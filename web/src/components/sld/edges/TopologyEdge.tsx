@@ -3,7 +3,13 @@ import { BaseEdge } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
-import { routeMidpoint, routePath, type ConnectorRoute, type Point } from '../connections';
+import {
+  routeMidpoint,
+  routePath,
+  type ConnectorRoute,
+  type LabelPlace,
+  type Point,
+} from '../connections';
 import { getLineOverlayState, lineStrokeStyle } from '../overlay';
 import { LineFlowArrow } from './LineFlowArrow';
 import { LineFlowLabel } from './LineFlowLabel';
@@ -20,8 +26,9 @@ import { maxAbsFlowMw } from './lineFlowArrowMath';
  * `routed`) are drawn by this one component.
  *
  * After a power flow a line (`data.bucket === 'line'`) carries an arrow and
- * a magnitude label half way along. The arrow lies along the run it sits
- * on and points the way the active power flows; the stroke turns amber or
+ * a magnitude label, at the place the canvas found for them on a straight run
+ * of the route (`data.labelAt`; half way along without one). The arrow lies
+ * along the run it sits on and points the way the active power flows; the stroke turns amber or
  * red, and heavier, as the line nears or passes its rating.
  */
 interface EdgeData {
@@ -30,6 +37,8 @@ interface EdgeData {
   kind?: string;
   bucket?: 'line' | 'transformer';
   route?: ConnectorRoute;
+  /** Where the flow label stands on the route; absent: half way along. */
+  labelAt?: LabelPlace;
 }
 
 export const TopologyEdge = memo(function TopologyEdge({
@@ -50,7 +59,7 @@ export const TopologyEdge = memo(function TopologyEdge({
     [sourceX, sourceY],
     [targetX, targetY],
   ];
-  const mid = routeMidpoint(points);
+  const mid = edgeData.labelAt ?? routeMidpoint(points);
   const isLine = edgeData.bucket === 'line';
   const lineIdx = edgeData.idx;
   const overlay = isLine && lineIdx ? getLineOverlayState(lineIdx, pflowResult, hideLabels) : null;

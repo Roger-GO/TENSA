@@ -79,6 +79,13 @@ export interface SldNodeData extends Record<string, unknown> {
    */
   bar?: BarGeometry;
   /**
+   * Bus nodes: the stretches of the strip under the bar that the runs of
+   * connectors cover, as x offsets from the origin of the node, for the
+   * label to stand clear of. Absent: nothing passes there. Stamped by
+   * `SldCanvas`.
+   */
+  labelClear?: [number, number][];
+  /**
    * Generator / load / shunt nodes: the face the connector to the bus
    * leaves by. The P / Q readout moves aside when it hangs off that face.
    * Stamped by `SldCanvas`.
@@ -141,7 +148,8 @@ const SIDES: Array<{ side: Side; position: Position }> = [
  * its taps need. A bar that outgrows the default length grows out of both
  * sides of the node, whose own box and origin stay as they are. The label
  * hangs under the middle of the bar, and moves along it to stay clear of a
- * feeder that comes up from below (`busLabelOffset`).
+ * feeder that comes up from below and of a line that passes under the bar
+ * (`busLabelOffset`, with `data.labelClear`).
  *
  * Unit 9: subscribes to `pflow.lastRun` + `ui.hideLabels` and consumes
  * `getBusOverlayState` to tint the bar on a limit violation + show a
@@ -209,7 +217,7 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
     pflowOverlay.voltage_label?.length ?? 0,
     pflowOverlay.angle_label?.length ?? 0,
   );
-  const labelShift = busLabelOffset(d.bar, 6 * labelChars + 8) - BAR_LENGTH / 2;
+  const labelShift = busLabelOffset(d.bar, 6 * labelChars + 8, d.labelClear) - BAR_LENGTH / 2;
   // `effectiveColorClass` (border-success/...) is retained on the node so
   // existing band-colour assertions keep working AND assistive tooling can
   // read the band off the wrapper; it's visually inert (no border drawn).

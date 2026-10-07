@@ -55,6 +55,7 @@ interface RenderEdgeProps {
     idx?: string;
     name?: string;
     route?: ConnectorRoute;
+    labelAt?: { x: number; y: number; angleDeg: number };
     winding?: '2w' | '3w';
   };
 }
@@ -143,6 +144,16 @@ describe('<TransformerEdge />', () => {
     const { getByTestId } = renderEdge({ id: 'tfm-1', data: { route: STEPPED } });
     expect(getByTestId('transformer-edge-icon-tfm-1').style.transform).toContain(
       'translate(50px, 28px)',
+    );
+  });
+
+  it('puts the icon where the canvas found room for it, when it says where', () => {
+    const { getByTestId } = renderEdge({
+      id: 'tfm-1',
+      data: { route: STEPPED, labelAt: { x: 20, y: 3, angleDeg: 0 } },
+    });
+    expect(getByTestId('transformer-edge-icon-tfm-1').style.transform).toContain(
+      'translate(20px, 3px)',
     );
   });
 

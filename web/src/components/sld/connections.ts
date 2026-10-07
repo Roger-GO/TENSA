@@ -50,8 +50,9 @@
  * - A device connector is a straight line (`straight`), which is a diagonal
  *   when the device does not sit square to its tap, or one horizontal and
  *   one vertical run with a right angle between them (`elbow`). Neither
- *   runs through another device or a controller badge where there is a way
- *   round: the connector then leaves by the face that looks at the bar.
+ *   runs through another device, a controller badge or the bar of another
+ *   bus where there is a way round: the connector then leaves by the face
+ *   that looks at the bar.
  * - A branch is drawn with right angles. One with a stored route (from the
  *   auto-layout, or a saved layout) keeps its bends, and its two ends are
  *   brought onto the bars: the route was computed for a box around the bus,
@@ -1337,14 +1338,25 @@ export function layoutConnections(
     routes.set(edge.id, { points, sourceSide: source.side, targetSide: target.side });
   }
   // What a device connector keeps out of: every device and controller badge
-  // but its own. They are kept in the order of their middles, so that a
-  // connector is held against the ones along its way and not against every
-  // box of the diagram.
-  const inTheWay = [...boxes.values()].sort((a, b) => a.cx - b.cx);
+  // but its own, and the bar of every bus but its own, which it would
+  // otherwise seem to land on. They are kept in the order of their middles,
+  // so that a connector is held against the ones along its way and not
+  // against every box of the diagram.
+  const barBoxes = new Map<Bar, Box>();
+  for (const bar of bars.values()) {
+    barBoxes.set(bar, {
+      cx: (bar.start + bar.end) / 2,
+      cy: bar.cy,
+      hw: (bar.end - bar.start) / 2,
+      hh: BAR_THICKNESS / 2,
+    });
+  }
+  const inTheWay = [...boxes.values(), ...barBoxes.values()].sort((a, b) => a.cx - b.cx);
   const widest = inTheWay.reduce((most, box) => Math.max(most, box.hw), 0);
   const blockedFor =
-    (own: Box) =>
+    (own: Box, ownBar: Bar) =>
     (points: Point[]): boolean => {
+      const ownBarBox = barBoxes.get(ownBar);
       const xs = points.map((p) => p[0]);
       const ys = points.map((p) => p[1]);
       const [left, right] = [Math.min(...xs), Math.max(...xs)];
@@ -1360,6 +1372,7 @@ export function layoutConnections(
         const box = inTheWay[i]!;
         const apart =
           box === own ||
+          box === ownBarBox ||
           box.cx + box.hw <= left ||
           box.cx - box.hw >= right ||
           box.cy + box.hh <= top ||
@@ -1390,7 +1403,7 @@ export function layoutConnections(
       asked.tap,
       style,
       atTip,
-      blockedFor(box),
+      blockedFor(box, asked.bar),
     );
     routes.set(edge.id, { points, sourceSide: face, targetSide: asked.side });
   }
@@ -1431,6 +1444,13 @@ export function faceSpan(bar: BarGeometry): { lo: number; hi: number } {
 const LABEL_CLEARANCE = 4;
 
 /**
+ * How far past a tip of its bar the middle of a label may be put to stand
+ * clear of a connector that passes under the bar. Further out it would no
+ * longer read as the label of that bus.
+ */
+const LABEL_REACH = BAR_LENGTH / 2;
+
+/**
  * Where the label of a bus hangs under its bar: the x of its middle, as an
  * offset from the origin of the bus node, for a label `width` wide.
  *
@@ -1438,26 +1458,59 @@ const LABEL_CLEARANCE = 4;
  * there. Otherwise in the gap between two connectors of the south face
  * that is nearest the middle and wide enough, or beside the outermost one,
  * so a line never runs through the name and the values of a bus.
+ *
+ * `passing` is what else runs through the strip the label hangs in: the
+ * runs of other connectors, each as the stretch of the strip it covers
+ * (offsets from the origin of the bus node, like the taps). The label stands
+ * clear of those as well, where there is a place for it no further than
+ * `LABEL_REACH` past a tip of the bar; with none it stands clear of its own
+ * bus's connectors, as it does without `passing`.
  */
-export function busLabelOffset(bar: BarGeometry | undefined, width: number): number {
+export function busLabelOffset(
+  bar: BarGeometry | undefined,
+  width: number,
+  passing: readonly (readonly [number, number])[] = [],
+): number {
   const middle = BAR_LENGTH / 2;
   if (!bar) return middle;
-  const lines = bar.taps.filter((tap) => tap.side === 'south').map((tap) => tap.x);
   const reach = width / 2 + LABEL_CLEARANCE;
-  if (lines.every((x) => Math.abs(x - middle) >= reach)) return middle;
-  const first = lines[0]!;
-  const last = lines[lines.length - 1]!;
-  const spots = [first - reach, last + reach];
-  for (let i = 1; i < lines.length; i += 1) {
-    const from = lines[i - 1]! + reach;
-    const to = lines[i]! - reach;
-    if (from <= to) spots.push(clamp(middle, from, to));
+  const taps = bar.taps
+    .filter((tap) => tap.side === 'south')
+    .map((tap): [number, number] => [tap.x, tap.x]);
+  // The place nearest the middle that is `reach` clear of every stretch;
+  // of two equally near, the one to the left.
+  const nearest = (stretches: readonly (readonly [number, number])[]): number => {
+    // Where the middle of the label cannot be, as stretches in ascending order.
+    const shut = stretches
+      .map(([from, to]): [number, number] => [from - reach, to + reach])
+      .sort((p, q) => p[0] - q[0]);
+    let best = middle;
+    let found = shut.every(([from, to]) => middle <= from + EPS || middle >= to - EPS);
+    if (found) return middle;
+    let far = Infinity;
+    const offer = (x: number): void => {
+      if (shut.some(([from, to]) => x > from + EPS && x < to - EPS)) return;
+      const apart = Math.abs(x - middle);
+      if (apart < far - EPS || (Math.abs(apart - far) <= EPS && x < best)) {
+        best = x;
+        far = apart;
+        found = true;
+      }
+    };
+    for (const [from, to] of shut) {
+      offer(from);
+      offer(to);
+    }
+    return found ? best : middle;
+  };
+  if (passing.length > 0) {
+    const clear = nearest([...taps, ...passing]);
+    const shut = [...taps, ...passing].some(
+      ([from, to]) => clear > from - reach + EPS && clear < to + reach - EPS,
+    );
+    if (!shut && clear >= bar.start - LABEL_REACH && clear <= bar.end + LABEL_REACH) return clear;
   }
-  // Nearest the middle; of two equally near, the one to the left.
-  return spots.reduce((best, x) => {
-    const nearer = Math.abs(x - middle) - Math.abs(best - middle);
-    return nearer < -EPS || (Math.abs(nearer) <= EPS && x < best) ? x : best;
-  });
+  return nearest(taps);
 }
 
 /** A box on the canvas, by its edges. */
@@ -1481,8 +1534,31 @@ const ROUTE_BAND = 64;
 export function routesThrough(
   routes: ReadonlyMap<string, { points: readonly Point[] }>,
 ): (box: Rect, own?: string) => number {
+  const runs = runsIn(routes);
+  return (box, own) => {
+    const found = new Set<string>();
+    for (const run of runs(box)) if (run.id !== own) found.add(run.id);
+    return found.size;
+  };
+}
+
+/** One straight run of a route. */
+export interface RouteRun {
+  /** The id of the route it is a run of. */
+  id: string;
+  a: Point;
+  b: Point;
+}
+
+/**
+ * The runs of `routes` that pass through a box, as a lookup by the box: each
+ * run once, and not one that only runs along an edge of the box.
+ */
+export function runsIn(
+  routes: ReadonlyMap<string, { points: readonly Point[] }>,
+): (box: Rect) => RouteRun[] {
   // The runs by the bands of height they reach into.
-  const bands = new Map<number, { id: string; a: Point; b: Point }[]>();
+  const bands = new Map<number, RouteRun[]>();
   for (const [id, { points }] of routes) {
     for (let i = 1; i < points.length; i += 1) {
       const run = { id, a: points[i - 1]!, b: points[i]! };
@@ -1495,23 +1571,22 @@ export function routesThrough(
       }
     }
   }
-  return (box, own) => {
+  return (box) => {
     const middle: Box = {
       cx: (box.left + box.right) / 2,
       cy: (box.top + box.bottom) / 2,
       hw: (box.right - box.left) / 2,
       hh: (box.bottom - box.top) / 2,
     };
-    const found = new Set<string>();
+    const found = new Set<RouteRun>();
     const first = Math.floor(box.top / ROUTE_BAND);
     const last = Math.floor(box.bottom / ROUTE_BAND);
     for (let band = first; band <= last; band += 1) {
       for (const run of bands.get(band) ?? []) {
-        if (run.id === own || found.has(run.id)) continue;
-        if (runsThrough(run.a, run.b, middle)) found.add(run.id);
+        if (!found.has(run) && runsThrough(run.a, run.b, middle)) found.add(run);
       }
     }
-    return found.size;
+    return [...found];
   };
 }
 
@@ -1548,6 +1623,139 @@ export function routeMidpoint(points: readonly Point[]): {
   }
   const last = points[points.length - 1]!;
   return { x: last[0], y: last[1], angleDeg: 0 };
+}
+
+/** Where the label of a branch stands: a point on its route, and the direction of the run there. */
+export interface LabelPlace {
+  x: number;
+  y: number;
+  angleDeg: number;
+}
+
+/** How far apart the places tried for a label are, along the route. */
+const LABEL_STEP = 8;
+
+/** The room a label keeps to a symbol and to the label of another branch. */
+const LABEL_GAP = 2;
+
+/** The side of the squares the boxes are sorted into, to find the ones near a place. */
+const LABEL_CELL = 96;
+
+/**
+ * What a label costs where it stands on a bend of its route, and for each
+ * other connector that runs through it, as an area of symbol covered: a
+ * label on a bend, or over the line beside its own, is worse than one that
+ * clips the corner of a symbol.
+ */
+const LABEL_ON_BEND = 400;
+const LABEL_OVER_LINE = 300;
+
+/**
+ * Where each branch carries its label (the flow of a line, the symbol of a
+ * transformer): the point of its route at which the label is least in the
+ * way. Half way along is where a route most often turns, or crosses the one
+ * beside it, and two lines that run side by side have their middles side by
+ * side as well. So the places along the route are weighed, a step apart:
+ * by how much of a bus, a device, a badge or a label placed before it the
+ * label would cover there, whether it would sit on a bend, and how many
+ * other connectors would run through it. The place that costs least is
+ * taken, and of two that cost the same the one nearer the middle. A label
+ * with room on a straight run, clear of everything, costs nothing.
+ *
+ * `labels` lists the branches in the order they are placed, each with the
+ * box its label takes; `boxes` is what stands on the diagram.
+ */
+export function branchLabelPlaces(
+  routes: ReadonlyMap<string, { points: readonly Point[] }>,
+  labels: readonly { id: string; width: number; height: number }[],
+  boxes: readonly Rect[],
+): Map<string, LabelPlace> {
+  const cells = new Map<string, Rect[]>();
+  const cellsOf = (box: Rect): string[] => {
+    const keys: string[] = [];
+    const [c0, c1] = [Math.floor(box.left / LABEL_CELL), Math.floor(box.right / LABEL_CELL)];
+    const [r0, r1] = [Math.floor(box.top / LABEL_CELL), Math.floor(box.bottom / LABEL_CELL)];
+    for (let c = c0; c <= c1; c += 1) for (let r = r0; r <= r1; r += 1) keys.push(`${c}|${r}`);
+    return keys;
+  };
+  const stand = (box: Rect): void => {
+    for (const key of cellsOf(box)) {
+      const list = cells.get(key);
+      if (list) list.push(box);
+      else cells.set(key, [box]);
+    }
+  };
+  /** How much of what stands there a label in `box` would cover, the gap it keeps counted in. */
+  const covered = (box: Rect): number => {
+    const seen = new Set<Rect>();
+    let area = 0;
+    for (const key of cellsOf(box)) {
+      for (const other of cells.get(key) ?? []) {
+        if (seen.has(other)) continue;
+        seen.add(other);
+        const across =
+          Math.min(box.right, other.right) - Math.max(box.left, other.left) + LABEL_GAP;
+        const down = Math.min(box.bottom, other.bottom) - Math.max(box.top, other.top) + LABEL_GAP;
+        if (across > 0 && down > 0) area += across * down;
+      }
+    }
+    return area;
+  };
+  for (const box of boxes) stand(box);
+  const through = routesThrough(routes);
+
+  const out = new Map<string, LabelPlace>();
+  for (const { id, width, height } of labels) {
+    const points = routes.get(id)?.points;
+    if (points === undefined || points.length < 2) continue;
+    // The runs of the route, with how far along it each starts.
+    const runs: { a: Point; b: Point; from: number; length: number }[] = [];
+    let total = 0;
+    for (let i = 1; i < points.length; i += 1) {
+      const [a, b] = [points[i - 1]!, points[i]!];
+      const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (length > 0) runs.push({ a, b, from: total, length });
+      total += length;
+    }
+    if (runs.length === 0) {
+      out.set(id, routeMidpoint(points));
+      continue;
+    }
+    const best: { at: { place: LabelPlace; box: Rect; cost: number } | null } = { at: null };
+    const weigh = (along: number): void => {
+      const run = runs.find((r) => along <= r.from + r.length) ?? runs[runs.length - 1]!;
+      const t = (along - run.from) / run.length;
+      const x = run.a[0] + t * (run.b[0] - run.a[0]);
+      const y = run.a[1] + t * (run.b[1] - run.a[1]);
+      const box: Rect = {
+        left: x - width / 2,
+        right: x + width / 2,
+        top: y - height / 2,
+        bottom: y + height / 2,
+      };
+      // On a bend: less of the run either side than the label covers of it.
+      // The two ends of the route are on bars, which the boxes keep it off.
+      const level = Math.abs(run.b[1] - run.a[1]) < Math.abs(run.b[0] - run.a[0]);
+      const reach = (level ? width : height) / 2;
+      const onBend =
+        (run !== runs[0] && along - run.from < reach) ||
+        (run !== runs[runs.length - 1] && run.from + run.length - along < reach);
+      const cost = covered(box) + (onBend ? LABEL_ON_BEND : 0) + LABEL_OVER_LINE * through(box, id);
+      // Tried from the middle outwards, so the first of two alike is the nearer.
+      if (best.at !== null && cost >= best.at.cost - 1e-9) return;
+      const angleDeg = (Math.atan2(run.b[1] - run.a[1], run.b[0] - run.a[0]) * 180) / Math.PI;
+      best.at = { place: { x, y, angleDeg }, box, cost };
+    };
+    const settled = (): boolean => best.at !== null && best.at.cost <= 0;
+    for (let k = 0; k * LABEL_STEP <= total / 2 && !settled(); k += 1) {
+      weigh(total / 2 + k * LABEL_STEP);
+      if (k > 0 && !settled()) weigh(total / 2 - k * LABEL_STEP);
+    }
+    if (best.at === null) continue;
+    out.set(id, best.at.place);
+    stand(best.at.box);
+  }
+  return out;
 }
 
 /** The SVG path through `points`: straight runs, square corners. */

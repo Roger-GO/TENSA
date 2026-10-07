@@ -64,6 +64,7 @@ interface RenderEdgeProps {
     idx?: string;
     bucket?: 'line' | 'transformer';
     route?: ConnectorRoute;
+    labelAt?: { x: number; y: number; angleDeg: number };
   };
 }
 
@@ -160,6 +161,25 @@ describe('<TopologyEdge /> the line', () => {
     // 100 down, 64 across, 100 down: half way is the middle of the run across.
     expect(getByTestId('line-flow-label-edge-1').style.transform).toContain(
       'translate(121px, 103px)',
+    );
+  });
+
+  it('puts the flow label and the arrow where the canvas found room for them, when it says where', () => {
+    setPflow(120);
+    const { getByTestId } = renderEdge({
+      data: {
+        bucket: 'line',
+        idx: 'l-1',
+        route: STEPPED,
+        // On the first run down, clear of the bend half way along.
+        labelAt: { x: 89, y: 40, angleDeg: 90 },
+      },
+    });
+    expect(getByTestId('line-flow-label-edge-1').style.transform).toContain(
+      'translate(89px, 40px)',
+    );
+    expect(getByTestId('line-flow-arrow-edge-1').style.transform).toBe(
+      'translate(89px, 40px) rotate(90deg)',
     );
   });
 
